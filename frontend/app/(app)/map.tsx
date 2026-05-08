@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -9,7 +9,24 @@ import { COLORS } from "../../src/theme";
 import { useRouter } from "expo-router";
 import Glass from "../../src/Glass";
 import VoiceFAB from "../../src/VoiceFAB";
-import ConvoyMap, { Hazard, Peer } from "../../src/ConvoyMap";
+import ConvoyMap, { Hazard, Peer, LatLng } from "../../src/ConvoyMap";
+import DestinationSearch from "../../src/DestinationSearch";
+
+type RouteInfo = {
+  distance_text: string;
+  duration_text: string;
+  steps: { html: string; distance_text: string; maneuver?: string }[];
+};
+
+const maneuverIcon = (m?: string): any => {
+  if (!m) return "arrow-up";
+  if (m.includes("left")) return "arrow-back";
+  if (m.includes("right")) return "arrow-forward";
+  if (m.includes("uturn")) return "refresh";
+  if (m.includes("merge")) return "git-merge";
+  if (m.includes("ramp")) return "swap-horizontal";
+  return "arrow-up";
+};
 
 export default function MapScreen() {
   const { user, token } = useAuth();
@@ -19,6 +36,9 @@ export default function MapScreen() {
   const [peers, setPeers] = useState<Record<string, Peer>>({});
   const [showReport, setShowReport] = useState(false);
   const [selected, setSelected] = useState<Hazard | null>(null);
+  const [destination, setDestination] = useState<{ lat: number; lng: number; label: string } | null>(null);
+  const [route, setRoute] = useState<RouteInfo | null>(null);
+  const [showSteps, setShowSteps] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -109,12 +129,14 @@ export default function MapScreen() {
         user={{ ...coords, heading: 0 }}
         peers={peerList}
         hazards={hazards}
+        destination={destination}
         onHazardPress={(h) => setSelected(h)}
+        onRoute={setRoute}
       />
 
-      {/* Top header */}
+      {/* Top header + destination search */}
       <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
-        <Glass radius={20} style={{ marginHorizontal: 12 }}>
+        <Glass radius={20} style={{ marginHorizontal: 12, marginBottom: 8 }}>
           <View style={styles.topRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.title}>Map</Text>
@@ -125,10 +147,55 @@ export default function MapScreen() {
             </TouchableOpacity>
           </View>
         </Glass>
+
+        {Platform.OS === "web" && (
+          <View style={{ marginHorizontal: 12 }}>
+            <DestinationSearch
+              origin={coords}
+              onSelect={(loc) => { setDestination(loc); setShowSteps(true); }}
+              onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); }}
+            />
+          </View>
+        )}
       </SafeAreaView>
 
+      {/* Route summary card */}
+      {destination && route && (
+        <Glass radius={20} style={styles.routeCard}>
+          <TouchableOpacity testID="route-toggle" onPress={() => setShowSteps((s) => !s)} activeOpacity={0.85}>
+            <View style={styles.routeRow}>
+              <View style={styles.routeIcon}>
+                <Ionicons name="navigate" size={22} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.routeTo} numberOfLines={1}>To {destination.label}</Text>
+                <Text style={styles.routeMeta}>{route.duration_text} · {route.distance_text}</Text>
+              </View>
+              <Ionicons name={showSteps ? "chevron-down" : "chevron-up"} size={20} color={COLORS.textDim} />
+              <TouchableOpacity testID="route-clear" onPress={() => { setDestination(null); setRoute(null); setShowSteps(false); }} style={{ marginLeft: 6 }}>
+                <Ionicons name="close-circle" size={22} color={COLORS.textDim} />
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+
+          {showSteps && (
+            <ScrollView style={styles.stepsList} contentContainerStyle={{ paddingBottom: 12 }} testID="route-steps">
+              {route.steps.map((s, i) => (
+                <View key={i} style={styles.stepRow}>
+                  <View style={styles.stepIcon}>
+                    <Ionicons name={maneuverIcon(s.maneuver)} size={16} color={COLORS.primary} />
+                  </View>
+                  <Text style={styles.stepText} numberOfLines={2}>{s.html}</Text>
+                  <Text style={styles.stepDist}>{s.distance_text}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+        </Glass>
+      )}
+
       {/* Selected hazard card */}
-      {selected && (
+      {selected && !destination && (
         <Glass radius={20} style={styles.selectedCard}>
           <View style={{ padding: 14, flexDirection: "row", alignItems: "center", gap: 12 }}>
             <View style={[styles.hazardBubble, { backgroundColor: hazardColor(selected.kind) }]}>
@@ -184,6 +251,17 @@ const styles = StyleSheet.create({
   iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(118,118,128,0.32)", alignItems: "center", justifyContent: "center" },
 
   hazardBubble: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.85)" },
+
+  routeCard: { position: "absolute", left: 12, right: 12, bottom: 110, maxHeight: 360 },
+  routeRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
+  routeIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center" },
+  routeTo: { color: COLORS.text, fontWeight: "600", fontSize: 15 },
+  routeMeta: { color: COLORS.success, fontSize: 13, marginTop: 2, fontWeight: "500" },
+  stepsList: { maxHeight: 260, paddingHorizontal: 14, paddingTop: 0 },
+  stepRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.hairline },
+  stepIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: COLORS.primary + "22", alignItems: "center", justifyContent: "center" },
+  stepText: { color: COLORS.text, flex: 1, fontSize: 13, lineHeight: 18 },
+  stepDist: { color: COLORS.textDim, fontSize: 12 },
 
   selectedCard: { position: "absolute", left: 12, right: 12, bottom: 200 },
   selTitle: { color: COLORS.text, fontWeight: "600", fontSize: 16 },

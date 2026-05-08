@@ -1,30 +1,31 @@
-// Web implementation using @vis.gl/react-google-maps (classic Markers, no Map ID required)
-import React from "react";
+// Web implementation using @vis.gl/react-google-maps with Directions support
+import React, { useEffect, useRef } from "react";
 import { View, Text, StyleSheet } from "react-native";
-import { APIProvider, Map, Marker, useMap } from "@vis.gl/react-google-maps";
+import { APIProvider, Map, Marker, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
 import { COLORS } from "./theme";
 
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
 
 export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number };
 export type Peer = { user_id: string; handle?: string; lat: number; lng: number };
+export type LatLng = { lat: number; lng: number };
 
 type Props = {
-  center: { lat: number; lng: number };
+  center: LatLng;
   user: { lat: number; lng: number; heading?: number };
   peers: Peer[];
   hazards: Hazard[];
+  destination?: LatLng | null;
   onHazardPress: (h: Hazard) => void;
+  onRoute?: (info: { distance_text: string; duration_text: string; steps: { html: string; distance_text: string; maneuver?: string }[] } | null) => void;
 };
 
 const hazardColor = (k: string) =>
   k === "police" ? "#3478F6" : k === "accident" ? "#FF453A" : k === "traffic" ? "#FF9F0A" : "#FF9F0A";
 
-// Build a Waze-style pin SVG as a data URI for the classic Marker icon
 function pinIcon(color: string, glyph: string) {
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='52' height='62' viewBox='0 0 52 62'>
-    <defs><filter id='s' x='-50%' y='-50%' width='200%' height='200%'>
-      <feDropShadow dx='0' dy='3' stdDeviation='3' flood-opacity='0.5'/></filter></defs>
+    <defs><filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feDropShadow dx='0' dy='3' stdDeviation='3' flood-opacity='0.5'/></filter></defs>
     <g filter='url(#s)'>
       <circle cx='26' cy='24' r='22' fill='${color}' stroke='white' stroke-width='3'/>
       <polygon points='20,44 32,44 26,58' fill='${color}' stroke='white' stroke-width='2'/>
@@ -39,20 +40,13 @@ function dotIcon(color: string, glyph: string, size = 32) {
   </svg>`;
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
-
 const HAZARD_GLYPHS: Record<string, string> = { police: "🛡", accident: "✕", road: "!", traffic: "▲" };
 
-export default function ConvoyMap({ center, user, peers, hazards, onHazardPress }: Props) {
-  if (!KEY) {
-    return (
-      <View style={styles.fb}>
-        <Text style={{ color: "#fff" }}>Google Maps key missing</Text>
-      </View>
-    );
-  }
+export default function ConvoyMap({ center, user, peers, hazards, destination, onHazardPress, onRoute }: Props) {
+  if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
     <View style={StyleSheet.absoluteFill}>
-      <APIProvider apiKey={KEY}>
+      <APIProvider apiKey={KEY} libraries={["places", "routes"]}>
         <Map
           style={{ width: "100%", height: "100%" }}
           defaultCenter={center}
@@ -62,28 +56,17 @@ export default function ConvoyMap({ center, user, peers, hazards, onHazardPress 
           disableDefaultUI={true}
           zoomControl={true}
         >
-          <Marker
-            position={user}
-            icon={dotIcon(COLORS.primary, "▲", 36)}
-            zIndex={1000}
-          />
+          <Marker position={user} icon={dotIcon(COLORS.primary, "▲", 36)} zIndex={1000} />
           {peers.map((p) => (
-            <Marker
-              key={p.user_id}
-              position={p}
-              icon={dotIcon(COLORS.success, "🚗", 30)}
-              title={p.handle || "driver"}
-            />
+            <Marker key={p.user_id} position={p} icon={dotIcon(COLORS.success, "🚗", 30)} title={p.handle || "driver"} />
           ))}
           {hazards.map((h) => (
-            <Marker
-              key={h.id}
-              position={h}
-              icon={pinIcon(hazardColor(h.kind), HAZARD_GLYPHS[h.kind] || "!")}
-              onClick={() => onHazardPress(h)}
-              title={`${h.kind} · by ${h.reporter_handle || "anon"}`}
-            />
+            <Marker key={h.id} position={h} icon={pinIcon(hazardColor(h.kind), HAZARD_GLYPHS[h.kind] || "!")} onClick={() => onHazardPress(h)} title={`${h.kind} · by ${h.reporter_handle || "anon"}`} />
           ))}
+          {destination && (
+            <Marker position={destination} icon={dotIcon("#FF453A", "★", 34)} title="Destination" />
+          )}
+          {destination && <Directions origin={user} destination={destination} onRoute={onRoute} />}
           <Recenter target={center} />
         </Map>
       </APIProvider>
@@ -91,14 +74,61 @@ export default function ConvoyMap({ center, user, peers, hazards, onHazardPress 
   );
 }
 
-function Recenter({ target }: { target: { lat: number; lng: number } }) {
+function Directions({ origin, destination, onRoute }: { origin: LatLng; destination: LatLng; onRoute?: Props["onRoute"] }) {
   const map = useMap();
-  React.useEffect(() => {
-    if (map && target) map.panTo(target);
-  }, [map, target.lat, target.lng]);
+  const routesLib = useMapsLibrary("routes");
+  const renderer = useRef<any>(null);
+  const service = useRef<any>(null);
+
+  useEffect(() => {
+    if (!map || !routesLib) return;
+    if (!service.current) service.current = new routesLib.DirectionsService();
+    if (!renderer.current) {
+      renderer.current = new routesLib.DirectionsRenderer({
+        map,
+        suppressMarkers: true,
+        polylineOptions: { strokeColor: "#0A84FF", strokeOpacity: 0.95, strokeWeight: 6 },
+      });
+    } else {
+      renderer.current.setMap(map);
+    }
+    service.current.route(
+      {
+        origin,
+        destination,
+        travelMode: "DRIVING",
+        provideRouteAlternatives: false,
+      },
+      (res: any, status: string) => {
+        if (status !== "OK" || !res) {
+          if (onRoute) onRoute(null);
+          return;
+        }
+        renderer.current.setDirections(res);
+        const leg = res.routes[0]?.legs[0];
+        if (leg && onRoute) {
+          onRoute({
+            distance_text: leg.distance?.text || "",
+            duration_text: leg.duration?.text || "",
+            steps: (leg.steps || []).map((s: any) => ({
+              html: (s.instructions || "").replace(/<[^>]+>/g, ""),
+              distance_text: s.distance?.text || "",
+              maneuver: s.maneuver,
+            })),
+          });
+        }
+      }
+    );
+    return () => { if (renderer.current) renderer.current.setMap(null); };
+  }, [map, routesLib, origin.lat, origin.lng, destination.lat, destination.lng]);
+
   return null;
 }
 
-const styles = StyleSheet.create({
-  fb: { flex: 1, backgroundColor: "#0A1410", alignItems: "center", justifyContent: "center" },
-});
+function Recenter({ target }: { target: LatLng }) {
+  const map = useMap();
+  useEffect(() => { if (map && target) map.panTo(target); }, [map, target.lat, target.lng]);
+  return null;
+}
+
+const styles = StyleSheet.create({ fb: { flex: 1, backgroundColor: "#0A1410", alignItems: "center", justifyContent: "center" } });

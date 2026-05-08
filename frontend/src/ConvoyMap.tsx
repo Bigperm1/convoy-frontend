@@ -16,13 +16,16 @@ try {
 
 export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number };
 export type Peer = { user_id: string; handle?: string; lat: number; lng: number };
+export type LatLng = { lat: number; lng: number };
 
 type Props = {
   center: { lat: number; lng: number };
   user: { lat: number; lng: number; heading?: number };
   peers: Peer[];
   hazards: Hazard[];
+  destination?: { lat: number; lng: number } | null;
   onHazardPress: (h: Hazard) => void;
+  onRoute?: (info: any) => void;
 };
 
 const hazardColor = (k: string) =>

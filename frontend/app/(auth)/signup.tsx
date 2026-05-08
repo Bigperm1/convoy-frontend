@@ -3,9 +3,11 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert,
 } from "react-native";
 import { useRouter, Link } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
 import { formatErr } from "../../src/api";
+import Glass from "../../src/Glass";
 
 export default function Signup() {
   const [email, setEmail] = useState("");
@@ -20,7 +22,7 @@ export default function Signup() {
   const router = useRouter();
 
   const submit = async () => {
-    if (!email || !password || !handle) return Alert.alert("Email, password and handle required");
+    if (!email || !password || !handle) return Alert.alert("Email, password and handle are required");
     try {
       setBusy(true);
       await register({
@@ -42,31 +44,35 @@ export default function Signup() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: COLORS.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={{ padding: 24 }} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>JOIN THE CONVOY</Text>
+      <ScrollView contentContainerStyle={{ padding: 24, paddingTop: 60 }} keyboardShouldPersistTaps="handled">
+        <Text style={styles.title}>Join Convoy</Text>
         <Text style={styles.tag}>Set up your driver profile</Text>
 
-        <View style={styles.card}>
-          <Field label="HANDLE" testID="signup-handle" value={handle} onChange={setHandle} placeholder="ApexHunter" />
-          <Field label="EMAIL" testID="signup-email" value={email} onChange={setEmail} placeholder="you@revradar.app" auto />
-          <Field label="PASSWORD" testID="signup-password" value={password} onChange={setPassword} placeholder="••••••" secure />
+        <Glass radius={28} style={{ marginTop: 22 }}>
+          <View style={{ padding: 20 }}>
+            <Field label="Handle" testID="signup-handle" value={handle} onChange={setHandle} placeholder="ApexHunter" />
+            <Field label="Email" testID="signup-email" value={email} onChange={setEmail} placeholder="you@convoy.app" auto />
+            <Field label="Password" testID="signup-password" value={password} onChange={setPassword} placeholder="••••••" secure />
 
-          <Text style={styles.section}>YOUR CAR</Text>
-          <Field label="MAKE" testID="signup-make" value={make} onChange={setMake} placeholder="Nissan" />
-          <Field label="MODEL" testID="signup-model" value={model} onChange={setModel} placeholder="Skyline GT-R" />
-          <Field label="YEAR" testID="signup-year" value={year} onChange={setYear} placeholder="1999" keyboard="number-pad" />
-          <Field label="COLOR" testID="signup-color" value={color} onChange={setColor} placeholder="Bayside Blue" />
+            <Text style={styles.section}>Your car</Text>
+            <Field label="Make" testID="signup-make" value={make} onChange={setMake} placeholder="Nissan" />
+            <Field label="Model" testID="signup-model" value={model} onChange={setModel} placeholder="Skyline GT-R" />
+            <Field label="Year" testID="signup-year" value={year} onChange={setYear} placeholder="1999" keyboard="number-pad" />
+            <Field label="Color" testID="signup-color" value={color} onChange={setColor} placeholder="Bayside Blue" />
 
-          <TouchableOpacity testID="signup-submit" style={styles.btn} onPress={submit} disabled={busy}>
-            <Text style={styles.btnText}>{busy ? "CREATING…" : "CREATE ACCOUNT"}</Text>
-          </TouchableOpacity>
-
-          <Link href="/(auth)/login" asChild>
-            <TouchableOpacity testID="link-login" style={{ marginTop: 14, alignItems: "center" }}>
-              <Text style={{ color: COLORS.textDim }}>Have an account? <Text style={{ color: COLORS.primary }}>Sign in</Text></Text>
+            <TouchableOpacity testID="signup-submit" onPress={submit} disabled={busy} style={styles.btn} activeOpacity={0.85}>
+              <LinearGradient colors={[COLORS.primary, COLORS.primaryDim]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
+                <Text style={styles.btnText}>{busy ? "Creating…" : "Create account"}</Text>
+              </LinearGradient>
             </TouchableOpacity>
-          </Link>
-        </View>
+
+            <Link href="/(auth)/login" asChild>
+              <TouchableOpacity testID="link-login" style={{ marginTop: 14, alignItems: "center" }}>
+                <Text style={{ color: COLORS.textDim }}>Already a member? <Text style={{ color: COLORS.primary, fontWeight: "600" }}>Sign in</Text></Text>
+              </TouchableOpacity>
+            </Link>
+          </View>
+        </Glass>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -85,22 +91,19 @@ function Field({ label, value, onChange, placeholder, secure, auto, keyboard, te
         autoCapitalize={auto ? "none" : "words"}
         keyboardType={keyboard || "default"}
         placeholder={placeholder}
-        placeholderTextColor={COLORS.textDim}
+        placeholderTextColor={COLORS.textMute}
       />
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  title: { color: COLORS.text, fontSize: 28, fontWeight: "900", letterSpacing: 3, marginTop: 24 },
-  tag: { color: COLORS.textDim, marginTop: 4, letterSpacing: 1, marginBottom: 18 },
-  card: { backgroundColor: COLORS.surface, borderRadius: 20, padding: 18, borderWidth: 1, borderColor: COLORS.border },
-  label: { color: COLORS.textDim, fontSize: 11, letterSpacing: 2, marginTop: 12, marginBottom: 6 },
-  section: { color: COLORS.primary, fontSize: 12, letterSpacing: 3, marginTop: 22 },
-  input: {
-    backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.border,
-    color: COLORS.text, padding: 13, borderRadius: 12, fontSize: 15,
-  },
-  btn: { backgroundColor: COLORS.primary, padding: 15, borderRadius: 12, marginTop: 22, alignItems: "center" },
-  btnText: { color: "#000", fontWeight: "900", letterSpacing: 2 },
+  title: { color: COLORS.text, fontSize: 32, fontWeight: "700", letterSpacing: -0.8 },
+  tag: { color: COLORS.textDim, marginTop: 4, fontSize: 15 },
+  label: { color: COLORS.textDim, fontSize: 13, marginTop: 12, marginBottom: 6, fontWeight: "500" },
+  section: { color: COLORS.text, fontSize: 17, fontWeight: "600", marginTop: 22, letterSpacing: -0.3 },
+  input: { backgroundColor: "rgba(118,118,128,0.18)", color: COLORS.text, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12, fontSize: 16 },
+  btn: { marginTop: 22, borderRadius: 14, overflow: "hidden" },
+  btnGrad: { paddingVertical: 16, alignItems: "center" },
+  btnText: { color: "#fff", fontWeight: "600", fontSize: 16 },
 });

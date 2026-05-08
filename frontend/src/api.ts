@@ -1,46 +1,19 @@
 import axios from "axios";
-import { Platform } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL as string;
 export const API_BASE = `${BACKEND_URL}/api`;
 
-const TOKEN_KEY = "rev_radar_token";
-const isWeb = Platform.OS === "web" || typeof window !== "undefined";
-
-// Lazy-load SecureStore only on native to avoid web bundling issues
-let _SecureStore: any = null;
-function getSecureStore() {
-  if (isWeb) return null;
-  if (!_SecureStore) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    _SecureStore = require("expo-secure-store");
-  }
-  return _SecureStore;
-}
+const TOKEN_KEY = "convoy_token";
 
 export async function saveToken(token: string) {
-  if (isWeb) {
-    try { localStorage.setItem(TOKEN_KEY, token); } catch {}
-    return;
-  }
-  const SS = getSecureStore();
-  if (SS?.setItemAsync) await SS.setItemAsync(TOKEN_KEY, token);
+  try { await AsyncStorage.setItem(TOKEN_KEY, token); } catch {}
 }
 export async function getToken() {
-  if (isWeb) {
-    try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
-  }
-  const SS = getSecureStore();
-  if (SS?.getItemAsync) return await SS.getItemAsync(TOKEN_KEY);
-  return null;
+  try { return await AsyncStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 export async function clearToken() {
-  if (isWeb) {
-    try { localStorage.removeItem(TOKEN_KEY); } catch {}
-    return;
-  }
-  const SS = getSecureStore();
-  if (SS?.deleteItemAsync) await SS.deleteItemAsync(TOKEN_KEY);
+  try { await AsyncStorage.removeItem(TOKEN_KEY); } catch {}
 }
 
 export const api = axios.create({ baseURL: API_BASE, timeout: 20000 });

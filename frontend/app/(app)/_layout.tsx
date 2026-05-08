@@ -3,7 +3,8 @@ import { Tabs, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
-import { View, ActivityIndicator } from "react-native";
+import { View, ActivityIndicator, Platform, StyleSheet } from "react-native";
+import { BlurView } from "expo-blur";
 
 export default function AppLayout() {
   const { user } = useAuth();
@@ -27,38 +28,28 @@ export default function AppLayout() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: "#0A0A0A",
-          borderTopColor: "#1a1a1c",
-          borderTopWidth: 1,
-          height: 78,
-          paddingBottom: 18,
+          backgroundColor: Platform.OS === "web" ? "rgba(20,20,22,0.85)" : "transparent",
+          borderTopColor: COLORS.hairline,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          height: 84,
+          paddingBottom: 22,
           paddingTop: 10,
+          position: "absolute",
         },
+        tabBarBackground: () =>
+          Platform.OS === "web" ? null : (
+            <BlurView tint="dark" intensity={70} style={StyleSheet.absoluteFill} />
+          ),
         tabBarActiveTintColor: COLORS.primary,
         tabBarInactiveTintColor: COLORS.textDim,
-        tabBarLabelStyle: { fontSize: 10, letterSpacing: 1.5, fontWeight: "700" },
+        tabBarLabelStyle: { fontSize: 10, fontWeight: "600", letterSpacing: -0.1 },
       }}
     >
-      <Tabs.Screen
-        name="map"
-        options={{ tabBarLabel: "MAP", tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} /> }}
-      />
-      <Tabs.Screen
-        name="talk"
-        options={{ tabBarLabel: "TALK", tabBarIcon: ({ color, size }) => <Ionicons name="mic" size={size} color={color} /> }}
-      />
-      <Tabs.Screen
-        name="drive"
-        options={{ tabBarLabel: "DRIVE", tabBarIcon: ({ color, size }) => <Ionicons name="car-sport" size={size} color={color} /> }}
-      />
-      <Tabs.Screen
-        name="music"
-        options={{ tabBarLabel: "MUSIC", tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" size={size} color={color} /> }}
-      />
-      <Tabs.Screen
-        name="garage"
-        options={{ tabBarLabel: "GARAGE", tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} /> }}
-      />
+      <Tabs.Screen name="map" options={{ tabBarLabel: "Map", tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size - 2} color={color} /> }} />
+      <Tabs.Screen name="talk" options={{ tabBarLabel: "Talk", tabBarIcon: ({ color, size }) => <Ionicons name="mic" size={size - 2} color={color} /> }} />
+      <Tabs.Screen name="drive" options={{ tabBarLabel: "Drive", tabBarIcon: ({ color, size }) => <Ionicons name="navigate-circle" size={size - 1} color={color} /> }} />
+      <Tabs.Screen name="music" options={{ tabBarLabel: "Music", tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" size={size - 2} color={color} /> }} />
+      <Tabs.Screen name="garage" options={{ tabBarLabel: "Garage", tabBarIcon: ({ color, size }) => <Ionicons name="person-circle" size={size - 1} color={color} /> }} />
     </Tabs>
   );
 }

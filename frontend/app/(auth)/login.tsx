@@ -1,13 +1,14 @@
 import React, { useState } from "react";
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert, Image,
 } from "react-native";
 import { useRouter, Link } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
 import { formatErr } from "../../src/api";
-import { LinearGradient } from "expo-linear-gradient";
+import Glass from "../../src/Glass";
 
 export default function Login() {
   const [email, setEmail] = useState("demo@revradar.app");
@@ -23,58 +24,66 @@ export default function Login() {
       await login(email.trim(), password);
       router.replace("/(app)/map");
     } catch (e) {
-      Alert.alert("Login failed", formatErr(e));
+      Alert.alert("Sign in failed", formatErr(e));
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: COLORS.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <LinearGradient colors={["#0A0A0A", "#0D1A0A", "#0A0A0A"]} style={StyleSheet.absoluteFill} />
+        {/* Ambient gradient blobs */}
+        <View style={styles.blobBlue} />
+        <View style={styles.blobIndigo} />
+        <LinearGradient colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.6)", "#000"]} style={StyleSheet.absoluteFill} pointerEvents="none" />
+
         <View style={styles.brand}>
           <View style={styles.logoBox} testID="logo">
-            <Ionicons name="speedometer" size={48} color={COLORS.primary} />
+            <Ionicons name="navigate" size={42} color={COLORS.text} />
           </View>
-          <Text style={styles.title}>REV RADAR</Text>
+          <Text style={styles.title}>Convoy</Text>
           <Text style={styles.tag}>Drive together. See everything.</Text>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.label}>EMAIL</Text>
-          <TextInput
-            testID="login-email"
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            placeholder="you@revradar.app"
-            placeholderTextColor={COLORS.textDim}
-          />
-          <Text style={styles.label}>PASSWORD</Text>
-          <TextInput
-            testID="login-password"
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            placeholder="••••••••"
-            placeholderTextColor={COLORS.textDim}
-          />
-          <TouchableOpacity testID="login-submit" style={styles.btn} onPress={onSubmit} disabled={busy}>
-            <Text style={styles.btnText}>{busy ? "SIGNING IN…" : "ENTER GARAGE"}</Text>
-          </TouchableOpacity>
-
-          <Link href="/(auth)/signup" asChild>
-            <TouchableOpacity testID="link-signup" style={styles.linkBtn}>
-              <Text style={styles.linkText}>New here? <Text style={{ color: COLORS.primary }}>Create account</Text></Text>
+        <Glass radius={28} style={styles.card}>
+          <View style={{ padding: 22 }}>
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              testID="login-email"
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              placeholder="you@convoy.app"
+              placeholderTextColor={COLORS.textMute}
+            />
+            <Text style={styles.label}>Password</Text>
+            <TextInput
+              testID="login-password"
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              placeholder="••••••••"
+              placeholderTextColor={COLORS.textMute}
+            />
+            <TouchableOpacity testID="login-submit" style={styles.btn} onPress={onSubmit} disabled={busy} activeOpacity={0.85}>
+              <LinearGradient colors={[COLORS.primary, COLORS.primaryDim]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
+                <Text style={styles.btnText}>{busy ? "Signing in…" : "Sign in"}</Text>
+              </LinearGradient>
             </TouchableOpacity>
-          </Link>
-        </View>
 
-        <Text style={styles.footer}>Demo: demo@revradar.app / demo1234</Text>
+            <Link href="/(auth)/signup" asChild>
+              <TouchableOpacity testID="link-signup" style={styles.linkBtn}>
+                <Text style={styles.linkText}>New here? <Text style={{ color: COLORS.primary, fontWeight: "600" }}>Create account</Text></Text>
+              </TouchableOpacity>
+            </Link>
+          </View>
+        </Glass>
+
+        <Text style={styles.footer}>Demo: demo@revradar.app · demo1234</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -82,25 +91,25 @@ export default function Login() {
 
 const styles = StyleSheet.create({
   scroll: { flexGrow: 1, padding: 24, justifyContent: "center", backgroundColor: COLORS.bg },
-  brand: { alignItems: "center", marginBottom: 36 },
+  blobBlue: { position: "absolute", top: -120, right: -80, width: 360, height: 360, borderRadius: 999, backgroundColor: COLORS.primary, opacity: 0.18, filter: "blur(80px)" as any },
+  blobIndigo: { position: "absolute", bottom: -120, left: -100, width: 320, height: 320, borderRadius: 999, backgroundColor: COLORS.accent, opacity: 0.16 },
+  brand: { alignItems: "center", marginBottom: 32 },
   logoBox: {
-    width: 96, height: 96, borderRadius: 24, backgroundColor: COLORS.surface,
-    alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#2a4a1a", marginBottom: 16,
+    width: 84, height: 84, borderRadius: 24, alignItems: "center", justifyContent: "center", marginBottom: 18,
+    backgroundColor: COLORS.surfaceSolid, borderWidth: 1, borderColor: COLORS.hairlineStrong,
   },
-  title: { color: COLORS.text, fontSize: 36, fontWeight: "900", letterSpacing: 4 },
-  tag: { color: COLORS.textDim, marginTop: 6, letterSpacing: 2, fontSize: 12 },
-  card: { backgroundColor: COLORS.surface, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: COLORS.border },
-  label: { color: COLORS.textDim, fontSize: 11, letterSpacing: 2, marginBottom: 8, marginTop: 12 },
+  title: { color: COLORS.text, fontSize: 38, fontWeight: "700", letterSpacing: -1 },
+  tag: { color: COLORS.textDim, marginTop: 4, fontSize: 15, letterSpacing: -0.2 },
+  card: { },
+  label: { color: COLORS.textDim, fontSize: 13, marginTop: 14, marginBottom: 8, fontWeight: "500" },
   input: {
-    backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.border,
-    color: COLORS.text, padding: 14, borderRadius: 12, fontSize: 16,
+    backgroundColor: "rgba(118,118,128,0.18)",
+    color: COLORS.text, paddingVertical: 14, paddingHorizontal: 14, borderRadius: 14, fontSize: 16,
   },
-  btn: {
-    backgroundColor: COLORS.primary, paddingVertical: 16, borderRadius: 12,
-    marginTop: 22, alignItems: "center",
-  },
-  btnText: { color: "#000", fontWeight: "900", letterSpacing: 2, fontSize: 15 },
-  linkBtn: { marginTop: 14, alignItems: "center" },
-  linkText: { color: COLORS.textDim },
-  footer: { color: COLORS.textDim, textAlign: "center", marginTop: 18, fontSize: 12 },
+  btn: { marginTop: 22, borderRadius: 14, overflow: "hidden" },
+  btnGrad: { paddingVertical: 16, alignItems: "center" },
+  btnText: { color: "#fff", fontWeight: "600", fontSize: 16, letterSpacing: -0.2 },
+  linkBtn: { marginTop: 16, alignItems: "center" },
+  linkText: { color: COLORS.textDim, fontSize: 14 },
+  footer: { color: COLORS.textMute, textAlign: "center", marginTop: 22, fontSize: 12 },
 });

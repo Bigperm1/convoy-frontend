@@ -1,0 +1,84 @@
+{
+  "theme": "dark",
+  "archetype": "Archetype 2 (Performance Pro) + Tactical Neon",
+  "colors": {
+    "background": "#0A0A0A",
+    "surface": "#1A1A1C",
+    "surface_glass": "rgba(26, 26, 28, 0.7)",
+    "primary": "#39FF14", 
+    "primary_active": "#2DE010",
+    "secondary": "#00F0FF",
+    "danger": "#FF2A2A",
+    "warning": "#FF9900",
+    "text_primary": "#FFFFFF",
+    "text_secondary": "#A1A1AA",
+    "border": "#27272A"
+  },
+  "typography": {
+    "heading_font": "Rajdhani, sans-serif", 
+    "body_font": "Inter, sans-serif",
+    "scales": {
+      "h1": "text-4xl sm:text-5xl tracking-tighter uppercase font-bold text-white",
+      "h2": "text-2xl sm:text-3xl tracking-tight uppercase font-bold text-white",
+      "h3": "text-xl font-bold text-white",
+      "body": "text-base text-[#A1A1AA]",
+      "small": "text-sm text-[#A1A1AA] tracking-[0.2em] uppercase"
+    }
+  },
+  "components": {
+    "push_to_talk_button": {
+      "default_state": "w-40 h-40 rounded-full bg-[#1A1A1C] border-4 border-[#39FF14]/30 shadow-[0_0_20px_rgba(57,255,20,0.1)] flex items-center justify-center transition-all",
+      "active_state": "bg-[#39FF14] scale-95 shadow-[0_0_40px_rgba(57,255,20,0.6)] border-[#39FF14]",
+      "icon_default": "text-[#39FF14] size-16",
+      "icon_active": "text-[#0A0A0A] size-16"
+    },
+    "map_markers": {
+      "user": "Neon Cyan (#00F0FF) glow dot with directional arrowhead",
+      "ally": "Radar Green (#39FF14) pulse dot",
+      "hazard_road": "Warning Orange (#FF9900) triangle with exclamation",
+      "hazard_police": "Danger Red (#FF2A2A) flashing shield/star icon",
+      "hazard_accident": "Danger Red (#FF2A2A) crash icon"
+    },
+    "drive_mode_card": {
+      "style": "bg-[rgba(26,26,28,0.7)] backdrop-blur-xl border border-white/10 rounded-3xl p-6",
+      "layout": "Large touch targets, minimal text, high contrast icons, designed for peripheral vision (CarPlay friendly)"
+    },
+    "tab_bar": {
+      "style": "bg-[#0A0A0A]/90 backdrop-blur-lg border-t border-white/5 h-20 pb-4 pt-2 flex justify-around",
+      "active_tab": "text-[#39FF14] scale-110 drop-shadow-[0_0_8px_rgba(57,255,20,0.5)]",
+      "inactive_tab": "text-[#A1A1AA]"
+    },
+    "media_player": {
+      "container": "bg-[#1A1A1C] rounded-2xl p-4 flex items-center gap-4",
+      "artwork": "w-16 h-16 rounded-lg",
+      "progress_bar": "h-1 bg-white/20 rounded-full overflow-hidden, fill-[#00F0FF]"
+    }
+  },
+  "layout": {
+    "spacing": {
+      "screen_padding": "p-6",
+      "widget_gap": "gap-4",
+      "section_gap": "gap-8"
+    },
+    "navigation": [
+      {"name": "Map", "icon": "Map", "purpose": "Live map with hazards and peers"},
+      {"name": "Talk", "icon": "Mic", "purpose": "Walkie-talkie PTT interface"},
+      {"name": "Drive", "icon": "Car", "purpose": "CarPlay optimized simplified dashboard"},
+      {"name": "Music", "icon": "Music", "purpose": "Audio interface integration"},
+      {"name": "Garage", "icon": "User", "purpose": "Profile and car specs"}
+    ]
+  },
+  "media": {
+    "onboarding_bg": "https://images.unsplash.com/photo-1762781458398-0946510262f2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODl8MHwxfHNlYXJjaHwyfHx0dW5lZCUyMHNwb3J0cyUyMGNhciUyMG5pZ2h0fGVufDB8fHx8MTc3ODIxMDk2N3ww&ixlib=rb-4.1.0&q=85",
+    "drive_mode_bg": "https://images.pexels.com/photos/28794445/pexels-photo-28794445.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "garage_placeholder": "https://images.unsplash.com/photo-1758354973079-f976fa933990?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODl8MHwxfHNlYXJjaHwxfHx0dW5lZCUyMHNwb3J0cyUyMGNhciUyMG5pZ2h0fGVufDB8fHx8MTc3ODIxMDk2N3ww&ixlib=rb-4.1.0&q=85"
+  },
+  "instructions_to_main_agent": [
+    "This is a React Native app. Apply Tailwind utility styling concepts (e.g., via NativeWind) or translate them to React Native StyleSheet.",
+    "Ensure the Walkie-Talkie (Talk) tab has a massive, highly tactile PTT (Push-To-Talk) button that dominates the screen. Use React Native's Pressable with scale animations on press.",
+    "Drive Mode MUST have extremely large touch targets to ensure safety and CarPlay readiness. Minimize reading, maximize iconography.",
+    "Map UI should use a dark style URL or standard dark mode configuration. The markers must visually pop like neon lights (use SVGs or highly saturated custom view markers).",
+    "For the audio interface, mock a sleek, glassmorphic player bridging Spotify/Apple Music aesthetics with the tactical car theme.",
+    "CRITICAL: All interactive elements (buttons, inputs, tabs) MUST include data-testid attributes for testing (e.g., data-testid='ptt-button', data-testid='tab-map')."
+  ]
+}

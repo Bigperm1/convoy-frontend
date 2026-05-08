@@ -1,27 +1,44 @@
 # Convoy - PRD
 
-A community app for car enthusiasts that combines Zello-style walkie-talkie + Waze/Apple Maps-style live navigation + in-car music + voice activation, in an Apple liquid-glass design and CarPlay-ready Drive Mode.
+A community app for car enthusiasts that combines Zello-style walkie-talkie + Waze/Google Maps-style live navigation + in-car music + voice activation, in an Apple liquid-glass design.
 
 ## Tech Stack
-- **Frontend**: Expo SDK 54 React Native, expo-router, expo-av (audio), expo-location, expo-blur (glass), react-native-svg (route + radar), AsyncStorage (token)
-- **Backend**: FastAPI + MongoDB (motor), JWT (bcrypt), WebSocket realtime, Whisper-1 STT via Emergent LLM Key
-- **Design**: Apple liquid-glass dark theme (system blue `#0A84FF`, indigo accent `#5E5CE6`, frosted BlurView surfaces, SF system font)
+- **Frontend**: Expo SDK 54 React Native, expo-router, expo-av, expo-location, expo-blur, react-native-svg, AsyncStorage
+- **Backend**: FastAPI + MongoDB (motor), JWT (bcrypt), WebSocket realtime, Whisper-1 STT
+- **Design**: Apple liquid-glass dark theme
 
-## Tabs
-1. **Map** — radar-style SVG canvas with concentric rings, your driver chevron in center, peers and hazards as glowing dots, real-time WebSocket updates, hazard list with +1 confirms, report FAB
-2. **Talk** — 5 channels (General/JDM/Muscle/Euro/Trucks), large hold-to-transmit PTT button with pulse animation, recent transmissions list with playback
-3. **Drive** — Live navigation preview (Waze/Apple Maps inspired): SVG route polyline, animated user pulse, glass status bar (time + alert pill), next-turn instruction card ("In 320 m turn right onto Market St"), hazard alert toasts, bottom HUD (ETA min · arrival · distance · speed mph), action row (Police/Hazard/Accident/Traffic), tool row (Sound/Talk/Music/Radar/End). Designed for CarPlay handoff.
-4. **Music** — Mock player with Spotify / Apple Music / SoundCloud tabs, large artwork, play/skip controls, animated progress, up-next list
-5. **Garage** — Profile (handle, make, model, year, color), save, sign-out
+## Tabs (5)
+1. **Map** — Full-screen stylized satellite map (dark green terrain, blue water, gray roads, building footprints). Waze-style hazard pins (police, accident, road, traffic) shown at user-reported lat/lng. Tap a pin to see reporter & confirms. Floating glass header. Voice + Report FABs.
+2. **Talk** — Walkie-talkie. Channels = communities the user belongs to. Empty state with "Open Hub" CTA when none. Hold-to-talk PTT button.
+3. **Drive** — Live navigation preview (Waze/Apple Maps style): SVG route, animated user pulse, glass status bar, next-turn instruction, hazard alert toasts, ETA HUD, action & tool rows.
+4. **Music** — Mock player with Spotify / Apple Music / SoundCloud tabs.
+5. **Hub** (formerly Garage) — Communities feature:
+   - Profile button → modal with car details
+   - **Create** community (name, description, public/private)
+   - **Discover** modal: search public communities by name, request to join (admin must approve), or join immediately via invite code
+   - **My communities** list with admin badge
+   - Tap a community → detail modal: admins see invite code (with native Share), pending requests with Approve/Reject, Delete community; non-admin members can Leave
 
-## Realtime
-WebSocket `/api/ws?token=<jwt>` broadcasts `location`, `hazard`, `ptt_live` events to all connected clients.
+## Communities backend
+- POST /api/communities — create (creator becomes admin)
+- GET /api/communities/mine — user's communities
+- GET /api/communities/search?q= — public search
+- GET /api/communities/{id} — detail (admin sees pending users)
+- POST /api/communities/{id}/request — request join (added to pending_requests)
+- POST /api/communities/{id}/approve/{uid} — admin approves (pending → members)
+- POST /api/communities/{id}/reject/{uid} — admin rejects
+- POST /api/communities/join?code= — instant join via invite code
+- POST /api/communities/{id}/leave — non-admin leaves
+- DELETE /api/communities/{id} — admin deletes (cascades PTT)
 
-## Voice
-Hold the indigo mic FAB → record → Whisper transcribes → intent classifier maps text to actions: report_police / report_accident / report_road / report_traffic / open_talk / open_music / open_drive / open_map.
+## PTT
+PTT messages are scoped to a community. Membership is enforced server-side on POST /api/ptt and GET /api/ptt/{community_id}.
+
+## Voice intents
+"police/cop", "accident/crash", "hazard/pothole", "traffic/jam", "talk/walkie", "music/play/song", "drive/carplay", "map".
 
 ## CarPlay
-True CarPlay needs Apple entitlement + native EAS build. Drive Mode tab provides the layout. Wire to a CarPlay scene via Expo config plugin in production build.
+True CarPlay needs Apple entitlement + EAS native build. Drive Mode tab provides the layout, ready to wire into a CPMapTemplate scene.
 
 ## Smart business enhancement
-**Convoy Score** — every PTT message + every hazard +1 confirm grows the user's score, surfaced on Garage. Future paid tier unlocks premium channels & custom badges.
+**Premium communities** — paid tier unlocks unlimited members, custom badges, scheduled cruise events, and exclusive premium-only channels (revenue stream).

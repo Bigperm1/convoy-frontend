@@ -233,7 +233,7 @@ export default function DriveScreen() {
             <ToolBtn testID="drive-talk" icon="mic" label="Talk" onPress={() => router.push("/(app)/talk")} />
             <ToolBtn testID="drive-music" icon="musical-notes" label="Music" onPress={() => router.push("/(app)/music")} />
             <ToolBtn testID="drive-map" icon="map" label="Radar" onPress={() => router.push("/(app)/map")} />
-            <ToolBtn testID="drive-end" icon="close-circle" label="End" tone="danger" onPress={() => router.push("/(app)/garage")} />
+            <ToolBtn testID="drive-end" icon="close-circle" label="End" tone="danger" onPress={() => router.push("/(app)/hub")} />
           </View>
         </Glass>
       </SafeAreaView>

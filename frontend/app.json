@@ -11,6 +11,9 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.convoy.driver",
+      "config": {
+        "googleMapsApiKey": "AIzaSyDLysQuU6tOcmbdlsHJPYUqviq4TrwEUx0"
+      },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Show nearby drivers and hazards on the map",
         "NSMicrophoneUsageDescription": "Push-to-talk and voice commands",
@@ -20,6 +23,11 @@
     },
     "android": {
       "package": "app.convoy.driver",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDLysQuU6tOcmbdlsHJPYUqviq4TrwEUx0"
+        }
+      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"

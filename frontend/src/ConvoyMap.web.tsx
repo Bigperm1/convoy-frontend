@@ -1,7 +1,7 @@
-// Web implementation using @vis.gl/react-google-maps
+// Web implementation using @vis.gl/react-google-maps (classic Markers, no Map ID required)
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
-import { APIProvider, Map, AdvancedMarker, useMap } from "@vis.gl/react-google-maps";
+import { APIProvider, Map, Marker, useMap } from "@vis.gl/react-google-maps";
 import { COLORS } from "./theme";
 
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
@@ -19,8 +19,28 @@ type Props = {
 
 const hazardColor = (k: string) =>
   k === "police" ? "#3478F6" : k === "accident" ? "#FF453A" : k === "traffic" ? "#FF9F0A" : "#FF9F0A";
-const hazardSymbol = (k: string) =>
-  k === "police" ? "🛡" : k === "accident" ? "✕" : k === "traffic" ? "🚗" : "⚠";
+
+// Build a Waze-style pin SVG as a data URI for the classic Marker icon
+function pinIcon(color: string, glyph: string) {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='52' height='62' viewBox='0 0 52 62'>
+    <defs><filter id='s' x='-50%' y='-50%' width='200%' height='200%'>
+      <feDropShadow dx='0' dy='3' stdDeviation='3' flood-opacity='0.5'/></filter></defs>
+    <g filter='url(#s)'>
+      <circle cx='26' cy='24' r='22' fill='${color}' stroke='white' stroke-width='3'/>
+      <polygon points='20,44 32,44 26,58' fill='${color}' stroke='white' stroke-width='2'/>
+      <text x='26' y='32' font-family='Arial,sans-serif' font-size='22' font-weight='bold' text-anchor='middle' fill='white'>${glyph}</text>
+    </g></svg>`;
+  return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+}
+function dotIcon(color: string, glyph: string, size = 32) {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 ${size} ${size}'>
+    <circle cx='${size / 2}' cy='${size / 2}' r='${size / 2 - 2}' fill='${color}' stroke='white' stroke-width='2'/>
+    <text x='${size / 2}' y='${size / 2 + 5}' font-family='Arial' font-size='14' font-weight='bold' text-anchor='middle' fill='white'>${glyph}</text>
+  </svg>`;
+  return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+}
+
+const HAZARD_GLYPHS: Record<string, string> = { police: "🛡", accident: "✕", road: "!", traffic: "▲" };
 
 export default function ConvoyMap({ center, user, peers, hazards, onHazardPress }: Props) {
   if (!KEY) {
@@ -37,64 +57,33 @@ export default function ConvoyMap({ center, user, peers, hazards, onHazardPress 
           style={{ width: "100%", height: "100%" }}
           defaultCenter={center}
           defaultZoom={15}
-          mapId="convoy-driver-map"
           mapTypeId="hybrid"
           gestureHandling="greedy"
           disableDefaultUI={true}
           zoomControl={true}
-          tilt={45}
-          colorScheme="DARK"
         >
-          {/* User pin */}
-          <AdvancedMarker position={user} zIndex={10}>
-            <div style={{
-              width: 36, height: 36, borderRadius: 18,
-              background: COLORS.primary, border: "3px solid #fff",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              boxShadow: "0 0 0 8px rgba(10,132,255,0.25)",
-              transform: `rotate(${user.heading || 0}deg)`,
-            }}>
-              <span style={{ color: "#fff", fontSize: 16, transform: "translateY(-1px)" }}>▲</span>
-            </div>
-          </AdvancedMarker>
-
-          {/* Peers */}
+          <Marker
+            position={user}
+            icon={dotIcon(COLORS.primary, "▲", 36)}
+            zIndex={1000}
+          />
           {peers.map((p) => (
-            <AdvancedMarker key={p.user_id} position={p}>
-              <div style={{
-                width: 30, height: 30, borderRadius: 15,
-                background: COLORS.success, border: "2px solid rgba(0,0,0,0.4)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <span style={{ color: "#fff", fontSize: 14 }}>🚙</span>
-              </div>
-            </AdvancedMarker>
+            <Marker
+              key={p.user_id}
+              position={p}
+              icon={dotIcon(COLORS.success, "🚗", 30)}
+              title={p.handle || "driver"}
+            />
           ))}
-
-          {/* Hazards (Waze-style) */}
           {hazards.map((h) => (
-            <AdvancedMarker key={h.id} position={h} onClick={() => onHazardPress(h)}>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer" }}>
-                <div style={{
-                  width: 44, height: 44, borderRadius: 22,
-                  background: hazardColor(h.kind),
-                  border: "2.5px solid rgba(255,255,255,0.9)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-                }}>
-                  <span style={{ color: "#fff", fontSize: 20, fontWeight: 700 }}>{hazardSymbol(h.kind)}</span>
-                </div>
-                <div style={{
-                  width: 0, height: 0,
-                  borderLeft: "6px solid transparent",
-                  borderRight: "6px solid transparent",
-                  borderTop: `9px solid ${hazardColor(h.kind)}`,
-                  marginTop: -2,
-                }} />
-              </div>
-            </AdvancedMarker>
+            <Marker
+              key={h.id}
+              position={h}
+              icon={pinIcon(hazardColor(h.kind), HAZARD_GLYPHS[h.kind] || "!")}
+              onClick={() => onHazardPress(h)}
+              title={`${h.kind} · by ${h.reporter_handle || "anon"}`}
+            />
           ))}
-
           <Recenter target={center} />
         </Map>
       </APIProvider>

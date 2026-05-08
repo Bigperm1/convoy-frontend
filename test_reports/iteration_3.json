@@ -1,0 +1,45 @@
+{
+  "summary": "Convoy v3 restructure verified end-to-end. Backend: 26/26 pytest cases pass covering all new community endpoints (mine, search, create, request/approve/reject, join via invite code, leave, admin delete), PTT membership gating (member 200, non-member 403, unknown channel 403/404), removal of /api/channels (now 404 as required), seeded communities (Bay Area Drivers admin=demo, Mountain Pass Crew admin=sara, alex member of Bay Area), hazards CRUD. Frontend (mobile 375x667 viewport): demo login redirects to /map; Map renders full-screen stylized satellite (dark green terrain, blue water, gray roads, building footprints) with floating Map header glass card + refresh, voice FAB bottom-left and report FAB bottom-right; hazard pins (Waze-style) render on the map. Talk shows ONLY Bay Area Drivers chip and PTT button (no defaults). 5th tab is labelled 'Hub' with people-circle icon. Hub: greeting+profile, Create + Discover cards, My communities list with ADMIN badge, sign out. Create modal opens with name/desc/public toggle. Discover modal: search 'Mountain' returns Mountain Pass Crew, invite code field present. Tapping own community opens detail modal with invite code (TqWYV90F shown), Share button, pending requests (0), Delete community button. Drive and Music screens still functional.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "drive.tsx End button (testID drive-end)", "issue": "Routes to '/(app)/garage' but garage screen was deleted in v3. Tapping End during Drive will navigate to a non-existent route. Should route to '/(app)/hub'.", "testID": "drive-end", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "(app)/_layout.tsx", "issue": "Tabs.Screen name='garage' with href:null still declared; Expo Router emits warning '[Layout children]: Too many screens defined. Route \"garage\" is extraneous.' Remove that line since garage.tsx no longer exists."},
+      {"component": "expo-av", "issue": "Deprecation warning (non-blocking, pre-existing): 'Expo AV has been deprecated and will be removed in SDK 54.' Migrate to expo-audio/expo-video before SDK 54."},
+      {"component": "pointerEvents prop", "issue": "Deprecation warning (pre-existing): 'props.pointerEvents is deprecated. Use style.pointerEvents' in drive.tsx."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_convoy_v3.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Update drive.tsx line 236: change router.push('/(app)/garage') to router.push('/(app)/hub') for the 'End' tool button.",
+    "Remove the orphan <Tabs.Screen name='garage' href:null /> line in /app/frontend/app/(app)/_layout.tsx to silence the 'Route garage is extraneous' Expo Router warning.",
+    "(Optional, non-blocking) Migrate expo-av to expo-audio/expo-video before SDK 54.",
+    "(Optional, non-blocking) Move pointerEvents='box-none' from JSX prop to style.pointerEvents in drive.tsx."
+  ],
+  "critical_code_review_comments": [
+    "Backend community endpoints are clean and consistent: viewer-aware public_community() helper correctly sets is_admin/is_member/is_pending; admin checks on approve/reject/delete return 403; admin cannot leave (must delete) — good guardrail.",
+    "PTT membership gating on both POST /api/ptt and GET /api/ptt/{channel} is enforced; verified non-member receives 403.",
+    "Search uses case-insensitive regex on 'name'; works as expected. Consider adding $or with description for richer discovery later.",
+    "hub.tsx (455 lines) is approaching the 700 line guideline; if you add more flows, consider extracting CreateModal, DiscoverModal, CommunityDetailModal, ProfileModal into /app/frontend/src/components/hub/* modules.",
+    "Drive.tsx still imports/uses the term 'Radar' label and routes End → garage (stale). Aligns with rename to Hub.",
+    "Backend CORS is allow_origins=['*'] with allow_credentials=False; acceptable for JWT-bearer model. No cookies in use.",
+    "All MongoDB queries exclude _id via projection {'_id': 0} — good. UUIDs used as primary id field consistently."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_convoy_v3.py (new)",
+    "/app/backend/tests/test_rev_radar.py (deleted — superseded by v3 test; old file referenced removed /api/channels endpoint)"
+  ],
+  "success_rate": {"backend": "100% (26/26)", "frontend": "100% on tested flows (login, map, talk, hub create/discover/detail, drive, music)"},
+  "seed_data_creation": "Tests created and tore down a TEST_Community_<rand> public community owned by demo. Sara was approved/added then community deleted; Alex requested then was rejected then joined via invite then left. All test_-prefixed data removed via DELETE.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Regression suite: /app/backend/tests/test_convoy_v3.py (pytest, 26 tests, ~10s). Frontend Playwright flow: login as demo@revradar.app/demo1234 (375x667 mobile viewport) → land on /map (verify report-fab + refresh-btn) → click 'Talk' tab text → verify 'Bay Area Drivers' chip + ptt-button → click 'Hub' tab → verify create-community/search-community/profile-btn/logout-btn + community-{id} card with ADMIN badge → tap card via [data-testid^='community-'] selector to open detail modal (invite-code, share-invite, delete-community testIDs) → click Drive/Music tabs to verify they still load (drive-police, now-playing testIDs).",
+  "rca_of_issue": "Two pre-existing minor stale references to 'garage' remain after the Garage→Hub rename: (1) drive.tsx 'End' button still router.push('/(app)/garage') which will 404 after garage.tsx deletion; (2) (app)/_layout.tsx still declares a hidden Tabs.Screen name='garage' generating an Expo Router warning. Both are simple string changes for the main agent to fix."
+}

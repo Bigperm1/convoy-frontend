@@ -7,23 +7,22 @@ import os
 import uuid
 import logging
 import asyncio
+import secrets as _secrets
 import tempfile
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict
 
 import jwt
 import bcrypt
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, UploadFile, File, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
 
-# Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("rev_radar")
+logger = logging.getLogger("convoy")
 
-# Mongo
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
@@ -31,7 +30,7 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALG = "HS256"
 
-app = FastAPI(title="Rev Radar API")
+app = FastAPI(title="Convoy API")
 api = APIRouter(prefix="/api")
 bearer = HTTPBearer(auto_error=False)
 
@@ -64,7 +63,7 @@ class LocationIn(BaseModel):
     heading: Optional[float] = 0.0
 
 class HazardIn(BaseModel):
-    kind: str  # police | road | accident | traffic
+    kind: str
     lat: float
     lng: float
     note: Optional[str] = ""
@@ -74,48 +73,60 @@ class TranscribeIn(BaseModel):
     mime: Optional[str] = "audio/m4a"
 
 class PTTIn(BaseModel):
-    channel: str
+    channel: str  # community id
     audio_b64: str
     duration_ms: int = 0
 
+class CommunityIn(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    is_public: bool = True
+
+class CommunityUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_public: Optional[bool] = None
+
 
 # ---------- Helpers ----------
-def hash_pw(pw: str) -> str:
-    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
-
+def hash_pw(pw: str) -> str: return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
 def verify_pw(pw: str, hashed: str) -> bool:
-    try:
-        return bcrypt.checkpw(pw.encode(), hashed.encode())
-    except Exception:
-        return False
+    try: return bcrypt.checkpw(pw.encode(), hashed.encode())
+    except Exception: return False
 
 def make_token(user_id: str, email: str) -> str:
-    payload = {
-        "sub": user_id,
-        "email": email,
-        "exp": datetime.now(timezone.utc) + timedelta(days=7),
-        "type": "access",
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+    return jwt.encode({"sub": user_id, "email": email,
+                       "exp": datetime.now(timezone.utc) + timedelta(days=7), "type": "access"},
+                      JWT_SECRET, algorithm=JWT_ALG)
 
 def public_user(u: dict) -> dict:
     return {
-        "id": u["id"],
-        "email": u["email"],
-        "handle": u.get("handle", ""),
-        "car_make": u.get("car_make", ""),
-        "car_model": u.get("car_model", ""),
-        "car_year": u.get("car_year"),
-        "car_color": u.get("car_color", ""),
-        "lat": u.get("lat"),
-        "lng": u.get("lng"),
-        "heading": u.get("heading", 0),
-        "speed": u.get("speed", 0),
+        "id": u["id"], "email": u["email"], "handle": u.get("handle", ""),
+        "car_make": u.get("car_make", ""), "car_model": u.get("car_model", ""),
+        "car_year": u.get("car_year"), "car_color": u.get("car_color", ""),
+        "lat": u.get("lat"), "lng": u.get("lng"),
+        "heading": u.get("heading", 0), "speed": u.get("speed", 0),
+    }
+
+def public_community(c: dict, viewer_id: Optional[str] = None) -> dict:
+    members = c.get("members", [])
+    pending = c.get("pending_requests", [])
+    return {
+        "id": c["id"], "name": c["name"], "description": c.get("description", ""),
+        "is_public": c.get("is_public", True),
+        "admin_id": c.get("admin_id"),
+        "admin_handle": c.get("admin_handle", ""),
+        "member_count": len(members),
+        "pending_count": len(pending),
+        "is_admin": viewer_id == c.get("admin_id"),
+        "is_member": viewer_id in members if viewer_id else False,
+        "is_pending": viewer_id in pending if viewer_id else False,
+        "invite_code": c.get("invite_code"),
+        "created_at": c.get("created_at"),
     }
 
 async def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer)) -> dict:
-    if not creds:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not creds: raise HTTPException(status_code=401, detail="Not authenticated")
     try:
         payload = jwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALG])
     except jwt.ExpiredSignatureError:
@@ -123,35 +134,26 @@ async def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depen
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
     user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
+    if not user: raise HTTPException(status_code=401, detail="User not found")
     return user
 
 
-# ---------- Auth routes ----------
+# ---------- Auth ----------
 @api.post("/auth/register")
 async def register(body: RegisterIn):
     email = body.email.lower()
-    existing = await db.users.find_one({"email": email})
-    if existing:
+    if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already registered")
     user_id = str(uuid.uuid4())
     doc = {
-        "id": user_id,
-        "email": email,
-        "password_hash": hash_pw(body.password),
-        "handle": body.handle,
-        "car_make": body.car_make or "",
-        "car_model": body.car_model or "",
-        "car_year": body.car_year,
-        "car_color": body.car_color or "",
+        "id": user_id, "email": email, "password_hash": hash_pw(body.password),
+        "handle": body.handle, "car_make": body.car_make or "", "car_model": body.car_model or "",
+        "car_year": body.car_year, "car_color": body.car_color or "",
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "lat": None, "lng": None, "heading": 0, "speed": 0,
-        "last_seen": None,
+        "lat": None, "lng": None, "heading": 0, "speed": 0, "last_seen": None,
     }
     await db.users.insert_one(doc)
-    token = make_token(user_id, email)
-    return {"token": token, "user": public_user(doc)}
+    return {"token": make_token(user_id, email), "user": public_user(doc)}
 
 @api.post("/auth/login")
 async def login(body: LoginIn):
@@ -159,18 +161,15 @@ async def login(body: LoginIn):
     user = await db.users.find_one({"email": email})
     if not user or not verify_pw(body.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = make_token(user["id"], email)
-    return {"token": token, "user": public_user(user)}
+    return {"token": make_token(user["id"], email), "user": public_user(user)}
 
 @api.get("/auth/me")
-async def me(user=Depends(get_current_user)):
-    return public_user(user)
+async def me(user=Depends(get_current_user)): return public_user(user)
 
 @api.put("/auth/profile")
 async def update_profile(body: CarUpdate, user=Depends(get_current_user)):
     update = {k: v for k, v in body.dict().items() if v is not None}
-    if update:
-        await db.users.update_one({"id": user["id"]}, {"$set": update})
+    if update: await db.users.update_one({"id": user["id"]}, {"$set": update})
     fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     return public_user(fresh)
 
@@ -178,33 +177,20 @@ async def update_profile(body: CarUpdate, user=Depends(get_current_user)):
 # ---------- Location ----------
 @api.post("/location")
 async def update_location(body: LocationIn, user=Depends(get_current_user)):
-    await db.users.update_one(
-        {"id": user["id"]},
-        {"$set": {
-            "lat": body.lat, "lng": body.lng,
-            "speed": body.speed, "heading": body.heading,
-            "last_seen": datetime.now(timezone.utc).isoformat(),
-        }},
-    )
-    # Broadcast via websocket pool
-    await ws_manager.broadcast({
-        "type": "location",
-        "user_id": user["id"],
-        "handle": user.get("handle", ""),
-        "lat": body.lat, "lng": body.lng,
-        "speed": body.speed, "heading": body.heading,
-    })
+    await db.users.update_one({"id": user["id"]}, {"$set": {
+        "lat": body.lat, "lng": body.lng, "speed": body.speed, "heading": body.heading,
+        "last_seen": datetime.now(timezone.utc).isoformat(),
+    }})
+    await ws_manager.broadcast({"type": "location", "user_id": user["id"], "handle": user.get("handle", ""),
+                                "lat": body.lat, "lng": body.lng, "speed": body.speed, "heading": body.heading})
     return {"ok": True}
 
 @api.get("/users/nearby")
 async def nearby_users(user=Depends(get_current_user)):
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
-    cursor = db.users.find(
-        {"lat": {"$ne": None}, "last_seen": {"$gte": cutoff}, "id": {"$ne": user["id"]}},
-        {"_id": 0, "password_hash": 0},
-    )
-    users = await cursor.to_list(200)
-    return [public_user(u) for u in users]
+    cursor = db.users.find({"lat": {"$ne": None}, "last_seen": {"$gte": cutoff}, "id": {"$ne": user["id"]}},
+                           {"_id": 0, "password_hash": 0})
+    return [public_user(u) for u in await cursor.to_list(200)]
 
 
 # ---------- Hazards ----------
@@ -213,12 +199,8 @@ async def create_hazard(body: HazardIn, user=Depends(get_current_user)):
     if body.kind not in ("police", "road", "accident", "traffic"):
         raise HTTPException(status_code=400, detail="Invalid hazard kind")
     h = {
-        "id": str(uuid.uuid4()),
-        "kind": body.kind,
-        "lat": body.lat, "lng": body.lng,
-        "note": body.note or "",
-        "reporter_id": user["id"],
-        "reporter_handle": user.get("handle", ""),
+        "id": str(uuid.uuid4()), "kind": body.kind, "lat": body.lat, "lng": body.lng,
+        "note": body.note or "", "reporter_id": user["id"], "reporter_handle": user.get("handle", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
         "confirms": 1,
@@ -232,68 +214,155 @@ async def create_hazard(body: HazardIn, user=Depends(get_current_user)):
 async def list_hazards(user=Depends(get_current_user)):
     now = datetime.now(timezone.utc).isoformat()
     cursor = db.hazards.find({"expires_at": {"$gte": now}}, {"_id": 0})
-    items = await cursor.to_list(500)
-    return items
+    return await cursor.to_list(500)
 
 @api.post("/hazards/{hid}/confirm")
 async def confirm_hazard(hid: str, user=Depends(get_current_user)):
     res = await db.hazards.update_one({"id": hid}, {"$inc": {"confirms": 1}})
-    if not res.matched_count:
-        raise HTTPException(status_code=404, detail="Not found")
-    h = await db.hazards.find_one({"id": hid}, {"_id": 0})
-    return h
+    if not res.matched_count: raise HTTPException(status_code=404, detail="Not found")
+    return await db.hazards.find_one({"id": hid}, {"_id": 0})
 
 
-# ---------- Walkie-talkie channels & PTT ----------
-DEFAULT_CHANNELS = [
-    {"id": "general", "name": "General", "desc": "All car enthusiasts"},
-    {"id": "jdm", "name": "JDM Lounge", "desc": "Japanese imports"},
-    {"id": "muscle", "name": "Muscle Garage", "desc": "American muscle cars"},
-    {"id": "euro", "name": "Euro Drive", "desc": "European exotics & sport"},
-    {"id": "trucks", "name": "Trucks & Off-road", "desc": "4x4 and trucks"},
-]
+# ---------- Communities ----------
+@api.post("/communities")
+async def create_community(body: CommunityIn, user=Depends(get_current_user)):
+    cid = str(uuid.uuid4())
+    code = _secrets.token_urlsafe(6)
+    doc = {
+        "id": cid, "name": body.name, "description": body.description or "",
+        "is_public": body.is_public, "admin_id": user["id"], "admin_handle": user.get("handle", ""),
+        "members": [user["id"]], "pending_requests": [], "invite_code": code,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.communities.insert_one(doc)
+    return public_community(doc, viewer_id=user["id"])
 
-@api.get("/channels")
-async def list_channels(user=Depends(get_current_user)):
-    return DEFAULT_CHANNELS
+@api.get("/communities/mine")
+async def my_communities(user=Depends(get_current_user)):
+    cursor = db.communities.find({"members": user["id"]}, {"_id": 0}).sort("created_at", -1)
+    items = await cursor.to_list(200)
+    return [public_community(c, viewer_id=user["id"]) for c in items]
 
+@api.get("/communities/search")
+async def search_communities(q: str = "", user=Depends(get_current_user)):
+    f = {"is_public": True}
+    if q:
+        f["name"] = {"$regex": q, "$options": "i"}
+    cursor = db.communities.find(f, {"_id": 0}).sort("created_at", -1).limit(50)
+    items = await cursor.to_list(50)
+    return [public_community(c, viewer_id=user["id"]) for c in items]
+
+@api.get("/communities/{cid}")
+async def get_community(cid: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"id": cid}, {"_id": 0})
+    if not c: raise HTTPException(status_code=404, detail="Not found")
+    out = public_community(c, viewer_id=user["id"])
+    if user["id"] == c.get("admin_id"):
+        # Return pending request user details for admin
+        pending = c.get("pending_requests", [])
+        users = await db.users.find({"id": {"$in": pending}}, {"_id": 0, "password_hash": 0}).to_list(200) if pending else []
+        out["pending_users"] = [{"id": u["id"], "handle": u.get("handle", ""), "email": u.get("email", "")} for u in users]
+    return out
+
+@api.post("/communities/{cid}/request")
+async def request_join(cid: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"id": cid})
+    if not c: raise HTTPException(status_code=404, detail="Not found")
+    if user["id"] in c.get("members", []):
+        return public_community(c, viewer_id=user["id"])
+    await db.communities.update_one({"id": cid}, {"$addToSet": {"pending_requests": user["id"]}})
+    fresh = await db.communities.find_one({"id": cid}, {"_id": 0})
+    return public_community(fresh, viewer_id=user["id"])
+
+@api.post("/communities/{cid}/approve/{uid}")
+async def approve_request(cid: str, uid: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"id": cid})
+    if not c: raise HTTPException(status_code=404, detail="Not found")
+    if user["id"] != c.get("admin_id"): raise HTTPException(status_code=403, detail="Admin only")
+    await db.communities.update_one({"id": cid}, {
+        "$pull": {"pending_requests": uid},
+        "$addToSet": {"members": uid},
+    })
+    fresh = await db.communities.find_one({"id": cid}, {"_id": 0})
+    return public_community(fresh, viewer_id=user["id"])
+
+@api.post("/communities/{cid}/reject/{uid}")
+async def reject_request(cid: str, uid: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"id": cid})
+    if not c: raise HTTPException(status_code=404, detail="Not found")
+    if user["id"] != c.get("admin_id"): raise HTTPException(status_code=403, detail="Admin only")
+    await db.communities.update_one({"id": cid}, {"$pull": {"pending_requests": uid}})
+    fresh = await db.communities.find_one({"id": cid}, {"_id": 0})
+    return public_community(fresh, viewer_id=user["id"])
+
+@api.post("/communities/join")
+async def join_via_code(code: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"invite_code": code})
+    if not c: raise HTTPException(status_code=404, detail="Invalid code")
+    await db.communities.update_one({"id": c["id"]}, {
+        "$addToSet": {"members": user["id"]},
+        "$pull": {"pending_requests": user["id"]},
+    })
+    fresh = await db.communities.find_one({"id": c["id"]}, {"_id": 0})
+    return public_community(fresh, viewer_id=user["id"])
+
+@api.post("/communities/{cid}/leave")
+async def leave_community(cid: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"id": cid})
+    if not c: raise HTTPException(status_code=404, detail="Not found")
+    if user["id"] == c.get("admin_id"):
+        raise HTTPException(status_code=400, detail="Admin cannot leave; delete instead")
+    await db.communities.update_one({"id": cid}, {"$pull": {"members": user["id"]}})
+    return {"ok": True}
+
+@api.delete("/communities/{cid}")
+async def delete_community(cid: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"id": cid})
+    if not c: raise HTTPException(status_code=404, detail="Not found")
+    if user["id"] != c.get("admin_id"): raise HTTPException(status_code=403, detail="Admin only")
+    await db.communities.delete_one({"id": cid})
+    await db.ptt.delete_many({"channel": cid})
+    return {"ok": True}
+
+
+# ---------- PTT (channel = community id) ----------
 @api.post("/ptt")
 async def post_ptt(body: PTTIn, user=Depends(get_current_user)):
+    # Verify membership
+    c = await db.communities.find_one({"id": body.channel})
+    if not c or user["id"] not in c.get("members", []):
+        raise HTTPException(status_code=403, detail="Not a member of this community")
     msg = {
-        "id": str(uuid.uuid4()),
-        "channel": body.channel,
-        "user_id": user["id"],
-        "handle": user.get("handle", ""),
-        "audio_b64": body.audio_b64,
-        "duration_ms": body.duration_ms,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "id": str(uuid.uuid4()), "channel": body.channel, "user_id": user["id"],
+        "handle": user.get("handle", ""), "audio_b64": body.audio_b64,
+        "duration_ms": body.duration_ms, "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.ptt.insert_one(msg)
     msg.pop("_id", None)
-    # Broadcast metadata; clients fetch audio individually if needed (audio is in payload).
-    await ws_manager.broadcast({"type": "ptt", "message": msg})
+    await ws_manager.broadcast({"type": "ptt", "message": {**msg, "audio_b64": ""}})
     return {"ok": True, "id": msg["id"]}
 
 @api.get("/ptt/{channel}")
 async def list_ptt(channel: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"id": channel})
+    if not c or user["id"] not in c.get("members", []):
+        raise HTTPException(status_code=403, detail="Not a member")
     cursor = db.ptt.find({"channel": channel}, {"_id": 0}).sort("created_at", -1).limit(20)
     items = await cursor.to_list(20)
     return list(reversed(items))
 
 
-# ---------- Voice Whisper transcribe ----------
+# ---------- Voice transcribe ----------
 @api.post("/voice/transcribe")
 async def transcribe(body: TranscribeIn, user=Depends(get_current_user)):
     import base64
-    try:
-        audio_bytes = base64.b64decode(body.audio_b64)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid audio")
+    try: audio_bytes = base64.b64decode(body.audio_b64)
+    except Exception: raise HTTPException(status_code=400, detail="Invalid audio")
+    if len(audio_bytes) < 1000:
+        raise HTTPException(status_code=400, detail="Audio too short")
     suffix = ".m4a" if "m4a" in (body.mime or "") else ".wav"
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-    tmp.write(audio_bytes)
-    tmp.flush()
-    tmp.close()
+    tmp.write(audio_bytes); tmp.flush(); tmp.close()
     try:
         from emergentintegrations.llm.openai import OpenAISpeechToText
         stt = OpenAISpeechToText(api_key=os.environ["EMERGENT_LLM_KEY"])
@@ -304,35 +373,23 @@ async def transcribe(body: TranscribeIn, user=Depends(get_current_user)):
         logger.exception("Whisper failed")
         raise HTTPException(status_code=500, detail=f"Transcribe failed: {e}")
     finally:
-        try:
-            os.unlink(tmp.name)
-        except Exception:
-            pass
+        try: os.unlink(tmp.name)
+        except Exception: pass
 
-    # Parse simple commands
     lt = text.lower()
     intent = None
-    if "police" in lt or "cop" in lt:
-        intent = "report_police"
-    elif "accident" in lt or "crash" in lt:
-        intent = "report_accident"
-    elif "hazard" in lt or "debris" in lt or "pothole" in lt:
-        intent = "report_road"
-    elif "traffic" in lt or "jam" in lt:
-        intent = "report_traffic"
-    elif "talk" in lt or "channel" in lt or "walkie" in lt:
-        intent = "open_talk"
-    elif "music" in lt or "play" in lt or "song" in lt:
-        intent = "open_music"
-    elif "drive" in lt or "carplay" in lt:
-        intent = "open_drive"
-    elif "map" in lt:
-        intent = "open_map"
-
+    if "police" in lt or "cop" in lt: intent = "report_police"
+    elif "accident" in lt or "crash" in lt: intent = "report_accident"
+    elif "hazard" in lt or "debris" in lt or "pothole" in lt: intent = "report_road"
+    elif "traffic" in lt or "jam" in lt: intent = "report_traffic"
+    elif "talk" in lt or "walkie" in lt: intent = "open_talk"
+    elif "music" in lt or "play" in lt or "song" in lt: intent = "open_music"
+    elif "drive" in lt or "carplay" in lt: intent = "open_drive"
+    elif "map" in lt: intent = "open_map"
     return {"text": text, "intent": intent}
 
 
-# ---------- WebSocket manager ----------
+# ---------- WebSocket ----------
 class WSManager:
     def __init__(self):
         self.active: Dict[str, WebSocket] = {}
@@ -344,24 +401,18 @@ class WSManager:
             old = self.active.get(user_id)
             self.active[user_id] = ws
         if old:
-            try:
-                await old.close()
-            except Exception:
-                pass
+            try: await old.close()
+            except Exception: pass
 
     async def disconnect(self, user_id: str):
-        async with self.lock:
-            self.active.pop(user_id, None)
+        async with self.lock: self.active.pop(user_id, None)
 
     async def broadcast(self, message: dict):
         dead = []
         for uid, ws in list(self.active.items()):
-            try:
-                await ws.send_json(message)
-            except Exception:
-                dead.append(uid)
-        for uid in dead:
-            await self.disconnect(uid)
+            try: await ws.send_json(message)
+            except Exception: dead.append(uid)
+        for uid in dead: await self.disconnect(uid)
 
 ws_manager = WSManager()
 
@@ -369,14 +420,12 @@ ws_manager = WSManager()
 @app.websocket("/api/ws")
 async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
     if not token:
-        await websocket.close(code=4401)
-        return
+        await websocket.close(code=4401); return
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
         user_id = payload["sub"]
     except Exception:
-        await websocket.close(code=4401)
-        return
+        await websocket.close(code=4401); return
     await ws_manager.connect(user_id, websocket)
     try:
         while True:
@@ -385,25 +434,9 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
             if mtype == "ping":
                 await websocket.send_json({"type": "pong"})
             elif mtype == "location":
-                # passthrough broadcast
-                await ws_manager.broadcast({
-                    "type": "location",
-                    "user_id": user_id,
-                    "lat": data.get("lat"),
-                    "lng": data.get("lng"),
-                    "heading": data.get("heading", 0),
-                    "speed": data.get("speed", 0),
-                })
-            elif mtype == "ptt":
-                # broadcast audio chunks live
-                await ws_manager.broadcast({
-                    "type": "ptt_live",
-                    "user_id": user_id,
-                    "channel": data.get("channel", "general"),
-                    "audio_b64": data.get("audio_b64", ""),
-                    "duration_ms": data.get("duration_ms", 0),
-                    "handle": data.get("handle", ""),
-                })
+                await ws_manager.broadcast({"type": "location", "user_id": user_id,
+                                            "lat": data.get("lat"), "lng": data.get("lng"),
+                                            "heading": data.get("heading", 0), "speed": data.get("speed", 0)})
     except WebSocketDisconnect:
         await ws_manager.disconnect(user_id)
     except Exception as e:
@@ -412,20 +445,11 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
 
 
 @api.get("/")
-async def root():
-    return {"service": "Rev Radar", "ok": True}
+async def root(): return {"service": "Convoy", "ok": True}
 
 
-# Mount router
 app.include_router(api)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
 
 
 @app.on_event("startup")
@@ -434,32 +458,66 @@ async def startup():
     await db.users.create_index("id", unique=True)
     await db.hazards.create_index("expires_at")
     await db.ptt.create_index([("channel", 1), ("created_at", -1)])
-    # Seed demo users with locations
+    await db.communities.create_index("id", unique=True)
+    await db.communities.create_index("invite_code")
+    await db.communities.create_index("name")
+
+    # Seed demo users
     seeds = [
         {"email": "demo@revradar.app", "password": "demo1234", "handle": "DemoDriver", "car": ("Toyota", "Supra", 1998, "Red")},
         {"email": "alex@revradar.app", "password": "demo1234", "handle": "AlexGT", "car": ("BMW", "M3", 2022, "Blue")},
         {"email": "sara@revradar.app", "password": "demo1234", "handle": "SaraS2K", "car": ("Honda", "S2000", 2005, "Yellow")},
     ]
+    user_ids = {}
     for s in seeds:
         existing = await db.users.find_one({"email": s["email"]})
         if not existing:
             uid = str(uuid.uuid4())
             await db.users.insert_one({
-                "id": uid,
-                "email": s["email"],
-                "password_hash": hash_pw(s["password"]),
-                "handle": s["handle"],
-                "car_make": s["car"][0],
-                "car_model": s["car"][1],
-                "car_year": s["car"][2],
-                "car_color": s["car"][3],
+                "id": uid, "email": s["email"], "password_hash": hash_pw(s["password"]),
+                "handle": s["handle"], "car_make": s["car"][0], "car_model": s["car"][1],
+                "car_year": s["car"][2], "car_color": s["car"][3],
                 "created_at": datetime.now(timezone.utc).isoformat(),
-                "lat": None, "lng": None, "heading": 0, "speed": 0,
-                "last_seen": None,
+                "lat": None, "lng": None, "heading": 0, "speed": 0, "last_seen": None,
             })
-    logger.info("Rev Radar started.")
+            user_ids[s["email"]] = uid
+        else:
+            user_ids[s["email"]] = existing["id"]
+
+    # Seed a sample public community owned by Demo
+    if not await db.communities.find_one({"name": "Bay Area Drivers"}):
+        demo_id = user_ids.get("demo@revradar.app")
+        if demo_id:
+            await db.communities.insert_one({
+                "id": str(uuid.uuid4()),
+                "name": "Bay Area Drivers",
+                "description": "Weekend cruises around the Bay. JDM friendly.",
+                "is_public": True,
+                "admin_id": demo_id,
+                "admin_handle": "DemoDriver",
+                "members": [demo_id, user_ids.get("alex@revradar.app", "")],
+                "pending_requests": [],
+                "invite_code": _secrets.token_urlsafe(6),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+    if not await db.communities.find_one({"name": "Mountain Pass Crew"}):
+        demo_id = user_ids.get("sara@revradar.app")
+        if demo_id:
+            await db.communities.insert_one({
+                "id": str(uuid.uuid4()),
+                "name": "Mountain Pass Crew",
+                "description": "Touge runs and canyon meets",
+                "is_public": True,
+                "admin_id": demo_id,
+                "admin_handle": "SaraS2K",
+                "members": [demo_id],
+                "pending_requests": [],
+                "invite_code": _secrets.token_urlsafe(6),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+    logger.info("Convoy started.")
 
 
 @app.on_event("shutdown")
-async def shutdown():
-    client.close()
+async def shutdown(): client.close()

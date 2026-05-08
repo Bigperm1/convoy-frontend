@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Dimensions } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Dimensions, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
-import Svg, { Circle, Line, Polygon, G, Defs, RadialGradient, Stop } from "react-native-svg";
-import { LinearGradient } from "expo-linear-gradient";
+import Svg, { Path, Circle, G, Defs, LinearGradient as SvgGrad, Stop, Rect, Line } from "react-native-svg";
 import { api, formatErr, wsUrl } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
@@ -12,8 +11,9 @@ import { useRouter } from "expo-router";
 import Glass from "../../src/Glass";
 import VoiceFAB from "../../src/VoiceFAB";
 
-const { width } = Dimensions.get("window");
-const RADAR = Math.min(width - 40, 360);
+const { width, height } = Dimensions.get("window");
+const MAP_W = width;
+const MAP_H = height;
 
 type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; created_at: string; confirms?: number };
 type Peer = { user_id: string; handle?: string; lat: number; lng: number; heading?: number; speed?: number };
@@ -25,6 +25,7 @@ export default function MapScreen() {
   const [hazards, setHazards] = useState<Hazard[]>([]);
   const [peers, setPeers] = useState<Record<string, Peer>>({});
   const [showReport, setShowReport] = useState(false);
+  const [selected, setSelected] = useState<Hazard | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -77,21 +78,20 @@ export default function MapScreen() {
     } catch (e) { Alert.alert("Report failed", formatErr(e)); }
   };
 
-  const projected = useMemo(() => {
-    if (!coords) return { hazards: [], peers: [] };
-    const toXY = (la: number, ln: number) => {
-      const dx = (ln - coords.lng) * Math.cos((coords.lat * Math.PI) / 180) * 111000;
-      const dy = -(la - coords.lat) * 111000;
-      const scale = 0.04;
-      return { x: dx * scale, y: dy * scale };
-    };
-    return {
-      hazards: hazards.map((h) => ({ ...h, ...toXY(h.lat, h.lng) })),
-      peers: Object.values(peers).map((p) => ({ ...p, ...toXY(p.lat, p.lng) })),
-    };
-  }, [coords, hazards, peers]);
+  const project = (la: number, ln: number) => {
+    if (!coords) return { x: MAP_W / 2, y: MAP_H / 2 };
+    const dx = (ln - coords.lng) * Math.cos((coords.lat * Math.PI) / 180) * 111000;
+    const dy = -(la - coords.lat) * 111000;
+    const scale = 0.06;
+    return { x: MAP_W / 2 + dx * scale, y: MAP_H / 2 + dy * scale };
+  };
 
-  const hazardColor = (k: string) => k === "police" ? COLORS.danger : k === "accident" ? COLORS.danger : k === "traffic" ? COLORS.warning : COLORS.warning;
+  const projected = useMemo(() => ({
+    hazards: hazards.map((h) => ({ ...h, ...project(h.lat, h.lng) })),
+    peers: Object.values(peers).map((p) => ({ ...p, ...project(p.lat, p.lng) })),
+  }), [coords, hazards, peers]);
+
+  const hazardColor = (k: string) => k === "police" ? "#3478F6" : k === "accident" ? COLORS.danger : k === "traffic" ? COLORS.warning : COLORS.warning;
   const hazardIcon = (k: string): any => k === "police" ? "shield-checkmark" : k === "accident" ? "alert-circle" : k === "traffic" ? "car" : "warning";
 
   const onIntent = (intent: string | null) => {
@@ -105,126 +105,196 @@ export default function MapScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.c} edges={["top"]}>
-      <LinearGradient colors={["#020308", "#04060E", "#000"]} style={StyleSheet.absoluteFill} pointerEvents="none" />
+    <View style={styles.c}>
+      {/* Stylized "satellite" map background */}
+      <SatelliteMap />
 
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Radar</Text>
-          <Text style={styles.sub}>{user?.handle} · {Object.keys(peers).length} drivers nearby</Text>
-        </View>
-        <TouchableOpacity testID="refresh-btn" onPress={load} style={styles.iconBtn}>
-          <Ionicons name="refresh" size={20} color={COLORS.text} />
-        </TouchableOpacity>
+      {/* Driver pin (center) */}
+      <View style={[styles.youPulse, { left: MAP_W / 2 - 32, top: MAP_H / 2 - 32 }]} />
+      <View style={[styles.youDot, { left: MAP_W / 2 - 14, top: MAP_H / 2 - 14 }]}>
+        <Ionicons name="navigate" size={16} color="#fff" style={{ transform: [{ rotate: "30deg" }] }} />
       </View>
 
-      <View style={styles.radarWrap}>
-        <Svg width={RADAR} height={RADAR}>
-          <Defs>
-            <RadialGradient id="rg" cx="50%" cy="50%" r="50%">
-              <Stop offset="0" stopColor={COLORS.primary} stopOpacity="0.15" />
-              <Stop offset="0.6" stopColor={COLORS.primary} stopOpacity="0.04" />
-              <Stop offset="1" stopColor="#000" stopOpacity="0" />
-            </RadialGradient>
-          </Defs>
-          <Circle cx={RADAR / 2} cy={RADAR / 2} r={RADAR / 2 - 2} fill="url(#rg)" stroke={COLORS.hairlineStrong} strokeWidth={1} />
-          <Circle cx={RADAR / 2} cy={RADAR / 2} r={(RADAR / 2) * 0.66} fill="none" stroke={COLORS.hairline} />
-          <Circle cx={RADAR / 2} cy={RADAR / 2} r={(RADAR / 2) * 0.33} fill="none" stroke={COLORS.hairline} />
-          <Line x1={0} y1={RADAR / 2} x2={RADAR} y2={RADAR / 2} stroke={COLORS.hairline} />
-          <Line x1={RADAR / 2} y1={0} x2={RADAR / 2} y2={RADAR} stroke={COLORS.hairline} />
+      {/* Peer drivers */}
+      {projected.peers.map((p: any) => {
+        if (p.x < 30 || p.x > MAP_W - 30 || p.y < 80 || p.y > MAP_H - 120) return null;
+        return (
+          <View key={p.user_id} style={[styles.peerDot, { left: p.x - 12, top: p.y - 12 }]} testID={`peer-${p.user_id}`}>
+            <Ionicons name="car-sport" size={14} color="#fff" />
+          </View>
+        );
+      })}
 
-          <G>
-            <Circle cx={RADAR / 2} cy={RADAR / 2} r={16} fill={COLORS.primary} fillOpacity={0.18} />
-            <Polygon points={`${RADAR / 2},${RADAR / 2 - 11} ${RADAR / 2 - 8},${RADAR / 2 + 7} ${RADAR / 2 + 8},${RADAR / 2 + 7}`} fill={COLORS.primary} />
-          </G>
-
-          {projected.peers.map((p: any) => {
-            const cx = RADAR / 2 + p.x; const cy = RADAR / 2 + p.y;
-            if (cx < 8 || cx > RADAR - 8 || cy < 8 || cy > RADAR - 8) return null;
-            return (
-              <G key={p.user_id}>
-                <Circle cx={cx} cy={cy} r={11} fill={COLORS.success} fillOpacity={0.2} />
-                <Circle cx={cx} cy={cy} r={5} fill={COLORS.success} />
-              </G>
-            );
-          })}
-          {projected.hazards.map((h: any) => {
-            const cx = RADAR / 2 + h.x; const cy = RADAR / 2 + h.y;
-            if (cx < 8 || cx > RADAR - 8 || cy < 8 || cy > RADAR - 8) return null;
-            const c = hazardColor(h.kind);
-            return (
-              <G key={h.id}>
-                <Circle cx={cx} cy={cy} r={12} fill={c} fillOpacity={0.25} />
-                <Circle cx={cx} cy={cy} r={6} fill={c} />
-              </G>
-            );
-          })}
-        </Svg>
-        <Text style={styles.scaleText}>1.2 km radius · live</Text>
-      </View>
-
-      <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 110 }} testID="hazards-list">
-        <Text style={styles.sectionTitle}>Active alerts</Text>
-        {hazards.length === 0 && <Text style={styles.empty}>No alerts in your area. Drive safe.</Text>}
-        {hazards.map((h) => (
-          <Glass key={h.id} radius={16} style={{ marginBottom: 8 }}>
-            <View style={styles.hazardRow} testID={`hazard-${h.id}`}>
-              <View style={[styles.hazardIcon, { backgroundColor: hazardColor(h.kind) + "22", borderColor: hazardColor(h.kind) + "55" }]}>
-                <Ionicons name={hazardIcon(h.kind)} size={20} color={hazardColor(h.kind)} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.hazardTitle}>{h.kind.charAt(0).toUpperCase() + h.kind.slice(1)}</Text>
-                <Text style={styles.hazardSub}>{h.reporter_handle || "anon"} · {h.confirms || 1} confirms</Text>
-              </View>
-              <TouchableOpacity testID={`confirm-${h.id}`} onPress={async () => { try { await api.post(`/hazards/${h.id}/confirm`); load(); } catch {} }} style={styles.confirmBtn}>
-                <Text style={styles.confirmText}>+1</Text>
-              </TouchableOpacity>
+      {/* Hazard pins (Waze style) */}
+      {projected.hazards.map((h: any) => {
+        if (h.x < 24 || h.x > MAP_W - 24 || h.y < 80 || h.y > MAP_H - 120) return null;
+        const c = hazardColor(h.kind);
+        return (
+          <TouchableOpacity
+            key={h.id}
+            testID={`hazard-${h.id}`}
+            onPress={() => setSelected(h)}
+            style={[styles.hazardPin, { left: h.x - 22, top: h.y - 44 }]}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.hazardBubble, { backgroundColor: c }]}>
+              <Ionicons name={hazardIcon(h.kind)} size={22} color="#fff" />
             </View>
-          </Glass>
-        ))}
-      </ScrollView>
+            <View style={[styles.hazardTail, { borderTopColor: c }]} />
+          </TouchableOpacity>
+        );
+      })}
 
+      {/* Top header */}
+      <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
+        <Glass radius={20} style={{ marginHorizontal: 12 }}>
+          <View style={styles.topRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.title}>Map</Text>
+              <Text style={styles.sub}>{user?.handle} · {Object.keys(peers).length} drivers · {hazards.length} alerts</Text>
+            </View>
+            <TouchableOpacity testID="refresh-btn" onPress={load} style={styles.iconBtn}>
+              <Ionicons name="refresh" size={18} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+        </Glass>
+      </SafeAreaView>
+
+      {/* Selected hazard card */}
+      {selected && (
+        <Glass radius={20} style={styles.selectedCard}>
+          <View style={{ padding: 14, flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <View style={[styles.hazardBubble, { backgroundColor: hazardColor(selected.kind), width: 48, height: 48, borderRadius: 24 }]}>
+              <Ionicons name={hazardIcon(selected.kind)} size={22} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.selTitle}>{selected.kind.charAt(0).toUpperCase() + selected.kind.slice(1)}</Text>
+              <Text style={styles.selSub}>by {selected.reporter_handle || "anon"} · {selected.confirms || 1} confirms</Text>
+            </View>
+            <TouchableOpacity testID={`confirm-${selected.id}`} onPress={async () => { try { await api.post(`/hazards/${selected.id}/confirm`); load(); } catch {} }} style={styles.confirmBtn}>
+              <Text style={styles.confirmText}>+1</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setSelected(null)} style={{ padding: 6 }}>
+              <Ionicons name="close" size={20} color={COLORS.textDim} />
+            </TouchableOpacity>
+          </View>
+        </Glass>
+      )}
+
+      {/* Report panel */}
       {showReport && (
         <Glass radius={20} style={styles.reportPanel} testID="report-panel">
           {([["police", "shield-checkmark", "Police"], ["accident", "alert-circle", "Accident"], ["road", "warning", "Hazard"], ["traffic", "car", "Traffic"]] as const).map(([k, ico, lbl]) => (
             <TouchableOpacity key={k} testID={`report-${k}`} style={styles.reportBtn} onPress={() => reportHazard(k)}>
-              <Ionicons name={ico as any} size={22} color={hazardColor(k)} />
+              <View style={[styles.reportIco, { backgroundColor: hazardColor(k) + "33" }]}>
+                <Ionicons name={ico as any} size={18} color={hazardColor(k)} />
+              </View>
               <Text style={styles.reportText}>{lbl}</Text>
             </TouchableOpacity>
           ))}
         </Glass>
       )}
+
       <TouchableOpacity testID="report-fab" style={styles.fab} onPress={() => setShowReport((s) => !s)} activeOpacity={0.85}>
-        <LinearGradient colors={[COLORS.primary, COLORS.primaryDim]} style={styles.fabGrad}>
+        <View style={styles.fabInner}>
           <Ionicons name={showReport ? "close" : "add"} size={28} color="#fff" />
-        </LinearGradient>
+        </View>
       </TouchableOpacity>
 
       <VoiceFAB onIntent={onIntent} />
-    </SafeAreaView>
+    </View>
+  );
+}
+
+// Stylized satellite-look map (Google Maps satellite vibe via SVG)
+function SatelliteMap() {
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <Svg width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
+        <Defs>
+          <SvgGrad id="terrain" x1="0" y1="0" x2="1" y2="1">
+            <Stop offset="0" stopColor="#1B2A1A" />
+            <Stop offset="0.5" stopColor="#0F1A15" />
+            <Stop offset="1" stopColor="#0A1410" />
+          </SvgGrad>
+          <SvgGrad id="water" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor="#0E2240" />
+            <Stop offset="1" stopColor="#091628" />
+          </SvgGrad>
+        </Defs>
+        <Rect x="0" y="0" width={MAP_W} height={MAP_H} fill="url(#terrain)" />
+
+        {/* terrain green blobs */}
+        <Path d={`M -50 ${MAP_H * 0.15} Q ${MAP_W * 0.3} ${MAP_H * 0.05}, ${MAP_W * 0.6} ${MAP_H * 0.18} T ${MAP_W + 50} ${MAP_H * 0.22} L ${MAP_W + 50} ${MAP_H * 0.4} L -50 ${MAP_H * 0.38} Z`} fill="#1F3322" opacity={0.7} />
+        <Path d={`M -50 ${MAP_H * 0.7} Q ${MAP_W * 0.4} ${MAP_H * 0.62}, ${MAP_W * 0.7} ${MAP_H * 0.78} T ${MAP_W + 50} ${MAP_H * 0.85} L ${MAP_W + 50} ${MAP_H + 50} L -50 ${MAP_H + 50} Z`} fill="#162A1A" opacity={0.8} />
+
+        {/* water */}
+        <Path d={`M ${MAP_W * 0.55} ${MAP_H * 0.35} Q ${MAP_W * 0.7} ${MAP_H * 0.4}, ${MAP_W * 0.85} ${MAP_H * 0.5} T ${MAP_W + 100} ${MAP_H * 0.7} L ${MAP_W + 100} ${MAP_H * 0.42} L ${MAP_W * 0.6} ${MAP_H * 0.3} Z`} fill="url(#water)" />
+
+        {/* major roads */}
+        {[
+          { d: `M -20 ${MAP_H * 0.32} Q ${MAP_W * 0.4} ${MAP_H * 0.36}, ${MAP_W * 0.7} ${MAP_H * 0.42} T ${MAP_W + 20} ${MAP_H * 0.5}` },
+          { d: `M ${MAP_W * 0.18} -20 Q ${MAP_W * 0.22} ${MAP_H * 0.3}, ${MAP_W * 0.18} ${MAP_H * 0.55} T ${MAP_W * 0.25} ${MAP_H + 20}` },
+          { d: `M -20 ${MAP_H * 0.62} Q ${MAP_W * 0.3} ${MAP_H * 0.66}, ${MAP_W * 0.65} ${MAP_H * 0.7} T ${MAP_W + 20} ${MAP_H * 0.75}` },
+          { d: `M ${MAP_W * 0.7} -20 Q ${MAP_W * 0.65} ${MAP_H * 0.25}, ${MAP_W * 0.6} ${MAP_H * 0.55} T ${MAP_W * 0.55} ${MAP_H + 20}` },
+        ].map((r, i) => (
+          <G key={i}>
+            <Path d={r.d} stroke="#3D4A55" strokeWidth={9} fill="none" strokeLinecap="round" />
+            <Path d={r.d} stroke="#5B6878" strokeWidth={3} fill="none" strokeLinecap="round" />
+            <Path d={r.d} stroke="#FFE08A" strokeWidth={1} fill="none" strokeDasharray="2 14" opacity={0.4} />
+          </G>
+        ))}
+
+        {/* small streets grid blocks */}
+        {[...Array(10)].map((_, i) => (
+          <Line key={`gh${i}`} x1={0} y1={(i * MAP_H) / 10 + 30} x2={MAP_W} y2={(i * MAP_H) / 10 + 24} stroke="rgba(120,130,140,0.15)" strokeWidth={1} />
+        ))}
+        {[...Array(8)].map((_, i) => (
+          <Line key={`gv${i}`} x1={(i * MAP_W) / 8 + 10} y1={0} x2={(i * MAP_W) / 8 + 14} y2={MAP_H} stroke="rgba(120,130,140,0.12)" strokeWidth={1} />
+        ))}
+
+        {/* building footprints */}
+        {[...Array(40)].map((_, i) => {
+          const x = ((i * 137) % (MAP_W - 30)) + 15;
+          const y = ((i * 211) % (MAP_H - 200)) + 100;
+          const w = 14 + (i % 3) * 6;
+          const h = 12 + (i % 4) * 4;
+          return <Rect key={`b${i}`} x={x} y={y} width={w} height={h} rx={2} fill={i % 2 ? "#1A2230" : "#202830"} opacity={0.7} />;
+        })}
+      </Svg>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  c: { flex: 1, backgroundColor: COLORS.bg },
-  header: { flexDirection: "row", alignItems: "center", padding: 18, paddingBottom: 6 },
-  title: { color: COLORS.text, fontSize: 34, fontWeight: "700", letterSpacing: -1 },
-  sub: { color: COLORS.textDim, fontSize: 13, marginTop: 2 },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(118,118,128,0.24)", alignItems: "center", justifyContent: "center" },
-  radarWrap: { alignItems: "center", paddingVertical: 10 },
-  scaleText: { color: COLORS.textDim, fontSize: 11, marginTop: 4 },
-  list: { flex: 1, paddingHorizontal: 18, marginTop: 8 },
-  sectionTitle: { color: COLORS.textDim, fontSize: 13, marginBottom: 10, fontWeight: "500" },
-  empty: { color: COLORS.textMute, fontSize: 13 },
-  hazardRow: { flexDirection: "row", alignItems: "center", padding: 12 },
-  hazardIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1, marginRight: 12 },
-  hazardTitle: { color: COLORS.text, fontWeight: "600", fontSize: 15 },
-  hazardSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
-  confirmBtn: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: COLORS.primary + "22", borderRadius: 10 },
+  c: { flex: 1, backgroundColor: "#0A1410" },
+
+  topBar: { position: "absolute", top: 0, left: 0, right: 0 },
+  topRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
+  title: { color: COLORS.text, fontSize: 26, fontWeight: "700", letterSpacing: -0.6 },
+  sub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
+  iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(118,118,128,0.32)", alignItems: "center", justifyContent: "center" },
+
+  youPulse: { position: "absolute", width: 64, height: 64, borderRadius: 32, backgroundColor: COLORS.primary, opacity: 0.18 },
+  youDot: { position: "absolute", width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: "#fff" },
+
+  peerDot: { position: "absolute", width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.success, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(0,0,0,0.4)" },
+
+  hazardPin: { position: "absolute", alignItems: "center" },
+  hazardBubble: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.85)" },
+  hazardTail: { width: 0, height: 0, borderLeftWidth: 6, borderRightWidth: 6, borderTopWidth: 9, borderLeftColor: "transparent", borderRightColor: "transparent", marginTop: -1 },
+
+  selectedCard: { position: "absolute", left: 12, right: 12, bottom: Platform.OS === "ios" ? 200 : 190 },
+  selTitle: { color: COLORS.text, fontWeight: "600", fontSize: 16 },
+  selSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
+  confirmBtn: { paddingHorizontal: 14, paddingVertical: 10, backgroundColor: COLORS.primary + "33", borderRadius: 12, borderWidth: 1, borderColor: COLORS.primary + "55" },
   confirmText: { color: COLORS.primary, fontWeight: "700" },
-  fab: { position: "absolute", bottom: 110, right: 18, width: 60, height: 60, borderRadius: 30, overflow: "hidden" },
-  fabGrad: { flex: 1, alignItems: "center", justifyContent: "center" },
-  reportPanel: { position: "absolute", bottom: 180, right: 18, padding: 6 },
-  reportBtn: { flexDirection: "row", alignItems: "center", padding: 12, gap: 12 },
+
+  fab: { position: "absolute", bottom: 120, right: 18, width: 60, height: 60, borderRadius: 30, overflow: "hidden" },
+  fabInner: { flex: 1, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center" },
+
+  reportPanel: { position: "absolute", bottom: 190, right: 18, padding: 4, minWidth: 170 },
+  reportBtn: { flexDirection: "row", alignItems: "center", padding: 10, gap: 12 },
+  reportIco: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   reportText: { color: COLORS.text, fontWeight: "500", fontSize: 14 },
 });

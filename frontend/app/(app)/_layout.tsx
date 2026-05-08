@@ -28,7 +28,7 @@ export default function AppLayout() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: Platform.OS === "web" ? "rgba(20,20,22,0.85)" : "transparent",
+          backgroundColor: Platform.OS === "web" ? "rgba(20,20,22,0.92)" : "transparent",
           borderTopColor: COLORS.hairline,
           borderTopWidth: StyleSheet.hairlineWidth,
           height: 84,
@@ -49,7 +49,8 @@ export default function AppLayout() {
       <Tabs.Screen name="talk" options={{ tabBarLabel: "Talk", tabBarIcon: ({ color, size }) => <Ionicons name="mic" size={size - 2} color={color} /> }} />
       <Tabs.Screen name="drive" options={{ tabBarLabel: "Drive", tabBarIcon: ({ color, size }) => <Ionicons name="navigate-circle" size={size - 1} color={color} /> }} />
       <Tabs.Screen name="music" options={{ tabBarLabel: "Music", tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" size={size - 2} color={color} /> }} />
-      <Tabs.Screen name="garage" options={{ tabBarLabel: "Garage", tabBarIcon: ({ color, size }) => <Ionicons name="person-circle" size={size - 1} color={color} /> }} />
+      <Tabs.Screen name="hub" options={{ tabBarLabel: "Hub", tabBarIcon: ({ color, size }) => <Ionicons name="people-circle" size={size - 1} color={color} /> }} />
+      <Tabs.Screen name="garage" options={{ href: null }} />
     </Tabs>
   );
 }

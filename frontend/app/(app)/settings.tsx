@@ -65,6 +65,26 @@ export default function SettingsScreen() {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Profile */}
+        <Text style={styles.sectionLabel}>PROFILE</Text>
+        <Glass radius={16} style={styles.card}>
+          <TouchableOpacity
+            testID="settings-garage"
+            onPress={() => router.push("/(app)/garage")}
+            activeOpacity={0.85}
+            style={{ flexDirection: "row", alignItems: "center", padding: 14, gap: 12 }}
+          >
+            <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: "rgba(255,199,0,0.18)", alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="car-sport" size={18} color="#FFC700" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: COLORS.text, fontWeight: "600", fontSize: 15 }}>Garage</Text>
+              <Text style={{ color: COLORS.textDim, fontSize: 12, marginTop: 2 }}>Year, make, model, color, and car icon</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textDim} />
+          </TouchableOpacity>
+        </Glass>
+
         {/* Live Feeds */}
         <Text style={styles.sectionLabel}>LIVE TRAFFIC FEEDS</Text>
         <Glass radius={16} style={styles.card}>

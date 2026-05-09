@@ -49,6 +49,9 @@ class RegisterIn(BaseModel):
     car_model: Optional[str] = ""
     car_year: Optional[int] = None
     car_color: Optional[str] = ""
+    # Silhouette body type — sedan / coupe / suv / sports / truck / hatch / motorcycle / van.
+    # Drives which top-down icon shows on the map.
+    car_type: Optional[str] = "sedan"
 
 class LoginIn(BaseModel):
     email: EmailStr
@@ -60,6 +63,7 @@ class CarUpdate(BaseModel):
     car_model: Optional[str] = None
     car_year: Optional[int] = None
     car_color: Optional[str] = None
+    car_type: Optional[str] = None
 
 class LocationIn(BaseModel):
     lat: float
@@ -134,6 +138,7 @@ def public_user(u: dict) -> dict:
         "id": u["id"], "email": u["email"], "handle": u.get("handle", ""),
         "car_make": u.get("car_make", ""), "car_model": u.get("car_model", ""),
         "car_year": u.get("car_year"), "car_color": u.get("car_color", ""),
+        "car_type": u.get("car_type", "sedan"),
         "lat": u.get("lat"), "lng": u.get("lng"),
         "heading": u.get("heading", 0), "speed": u.get("speed", 0),
     }
@@ -184,6 +189,7 @@ async def register(body: RegisterIn):
         "id": user_id, "email": email, "password_hash": hash_pw(body.password),
         "handle": body.handle, "car_make": body.car_make or "", "car_model": body.car_model or "",
         "car_year": body.car_year, "car_color": body.car_color or "",
+        "car_type": body.car_type or "sedan",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "lat": None, "lng": None, "heading": 0, "speed": 0, "last_seen": None,
     }

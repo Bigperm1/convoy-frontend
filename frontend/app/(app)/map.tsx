@@ -42,7 +42,7 @@ const maneuverIcon = (m?: string): any => {
 export default function MapScreen() {
   const { user, token } = useAuth();
   const router = useRouter();
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number } | null>(null);
   const [hazards, setHazards] = useState<Hazard[]>([]);
   const [peers, setPeers] = useState<Record<string, Peer>>({});
   const [showReport, setShowReport] = useState(false);
@@ -215,6 +215,33 @@ export default function MapScreen() {
       try { await api.post("/location", { lat, lng, speed: 0, heading: 0 }); } catch {}
       loadPeers();
     })();
+  }, []);
+
+  // ----- Continuous heading + position watcher -----
+  // Updates `coords.heading` as the user drives so the car silhouette on the
+  // map rotates the right way. Uses moderate frequency to keep battery sane.
+  useEffect(() => {
+    let sub: any = null;
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") return;
+        sub = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.Balanced, timeInterval: 4000, distanceInterval: 8 },
+          (pos) => {
+            const h = pos.coords.heading;
+            // expo-location reports -1 when heading is unknown (stationary).
+            const heading = typeof h === "number" && h >= 0 ? h : undefined;
+            setCoords((cur) => ({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              heading: heading ?? cur?.heading,
+            }));
+          }
+        );
+      } catch {}
+    })();
+    return () => { try { sub?.remove?.(); } catch {} };
   }, []);
 
   // ----- Hazards: Supabase Realtime subscription (with REST fallback) -----
@@ -403,8 +430,11 @@ export default function MapScreen() {
       handle: user.handle,
       // Combine make + model for a friendly pin label, e.g. "Porsche 911 GT3 RS"
       carType: [user.car_make, user.car_model].filter(Boolean).join(" ").trim() || undefined,
+      // Pass car body silhouette + color so other drivers see the right top-down icon.
+      carBody: (user as any).car_type || "sedan",
+      carColor: user.car_color || undefined,
     } : null,
-    coords ? { lat: coords.lat, lng: coords.lng, heading: 0 } : null
+    coords ? { lat: coords.lat, lng: coords.lng, heading: coords.heading || 0 } : null
   );
   const [selectedPeer, setSelectedPeer] = useState<ConvoyPresencePeer | null>(null);
 

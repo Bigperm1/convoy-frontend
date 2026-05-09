@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Svg, { Path, Circle, G, Defs, LinearGradient as SvgGrad, Stop, Rect, Text as SvgText } from "react-native-svg";
 import { COLORS } from "./theme";
 import type { ExternalAlert, ExternalAlertType } from "./externalFeed";
+import CarMarker from "./CarMarker";
 
 let MapView: any = null;
 let Marker: any = null;
@@ -23,7 +24,7 @@ try {
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
 export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number; disputes?: number };
-export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string };
+export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string; carBody?: string; carColor?: string; heading?: number };
 export type LatLng = { lat: number; lng: number };
 
 type Props = {
@@ -113,9 +114,23 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
           <View style={styles.youDot}><Ionicons name="navigate" size={16} color="#fff" /></View>
         </Marker>
         {peers.map((p) => (
-          <Marker key={p.user_id} coordinate={{ latitude: p.lat, longitude: p.lng }} anchor={{ x: 0.5, y: 0.5 }} onPress={() => onPeerPress?.(p)}>
+          <Marker
+            key={p.user_id}
+            coordinate={{ latitude: p.lat, longitude: p.lng }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            // `flat: true` keeps the marker laid down on the map (rather than
+            // billboarded), which is the right behaviour for a top-down car icon.
+            // Marker rotation is also baked into our SVG so this is belt-and-braces.
+            flat
+            onPress={() => onPeerPress?.(p)}
+          >
             <View style={styles.peerWrap}>
-              <View style={styles.peerDot}><Ionicons name="car-sport" size={14} color="#fff" /></View>
+              <CarMarker
+                body={(p.carBody as any) || "sedan"}
+                color={p.carColor}
+                heading={p.heading || 0}
+                size={48}
+              />
               {!!p.carType && (
                 <View style={styles.carPill}>
                   <Text numberOfLines={1} style={styles.carPillText}>{p.carType}</Text>

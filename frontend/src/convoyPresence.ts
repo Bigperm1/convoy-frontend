@@ -21,6 +21,8 @@ export type ConvoyPresencePeer = {
   lat: number;
   lng: number;
   carType?: string;
+  carBody?: string;     // sedan / coupe / suv / sports / truck / hatch / motorcycle / van
+  carColor?: string;
   heading?: number;
   online_at?: string;
 };
@@ -29,6 +31,8 @@ export type ConvoyMe = {
   user_id: string;
   handle?: string;
   carType?: string;
+  carBody?: string;
+  carColor?: string;
 };
 
 type Status = "idle" | "joining" | "subscribed" | "error" | "disabled";
@@ -80,6 +84,8 @@ export function useConvoyPresence(
             lat: p.lat,
             lng: p.lng,
             carType: p.carType,
+            carBody: p.carBody,
+            carColor: p.carColor,
             heading: p.heading,
             online_at: p.online_at,
           });
@@ -95,6 +101,8 @@ export function useConvoyPresence(
               user_id: me.user_id,
               handle: me.handle,
               carType: me.carType,
+              carBody: me.carBody,
+              carColor: me.carColor,
               lat: coords.lat,
               lng: coords.lng,
               heading: coords.heading,
@@ -128,12 +136,14 @@ export function useConvoyPresence(
       user_id: me.user_id,
       handle: me.handle,
       carType: me.carType,
+      carBody: me.carBody,
+      carColor: me.carColor,
       lat: coords.lat,
       lng: coords.lng,
       heading: coords.heading,
       online_at: new Date().toISOString(),
     }).catch(() => {});
-  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType]);
+  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor]);
 
   return { peers, status };
 }

@@ -8,7 +8,7 @@ import type { ExternalAlert, ExternalAlertType } from "./externalFeed";
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
 
 export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number };
-export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string };
+export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string; carBody?: string; carColor?: string; heading?: number };
 export type LatLng = { lat: number; lng: number };
 
 type Props = {
@@ -68,6 +68,61 @@ function dotIcon(color: string, glyph: string, size = 32) {
     <circle cx='${size / 2}' cy='${size / 2}' r='${size / 2 - 2}' fill='${color}' stroke='white' stroke-width='2'/>
     <text x='${size / 2}' y='${size / 2 + 5}' font-family='Arial' font-size='14' font-weight='bold' text-anchor='middle' fill='white'>${glyph}</text>
   </svg>`;
+  return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+}
+
+// Top-down car icon for peers — colored by their car_color and rotated to match
+// the heading from expo-location. Mirrors the path data in `src/CarMarker.tsx`
+// so the look is identical on web and native.
+const CAR_BODY_PATHS_WEB: Record<string, string> = {
+  sedan:      "M50 10 L70 24 L72 78 L66 92 L34 92 L28 78 L30 24 Z",
+  coupe:      "M50 10 L70 24 L74 60 L70 84 L58 92 L42 92 L30 84 L26 60 L30 24 Z",
+  sports:     "M50 8 L74 26 L78 64 L72 86 L60 92 L40 92 L28 86 L22 64 L26 26 Z",
+  suv:        "M50 8 L72 22 L74 78 L70 92 L30 92 L26 78 L28 22 Z",
+  truck:      "M50 8 L70 18 L72 44 L74 92 L26 92 L28 44 L30 18 Z",
+  hatch:      "M50 12 L72 26 L74 80 L68 92 L32 92 L26 80 L28 26 Z",
+  van:        "M50 10 L74 22 L76 90 L70 94 L30 94 L24 90 L26 22 Z",
+  motorcycle: "M50 10 L60 30 L62 70 L56 90 L44 90 L38 70 L40 30 Z",
+};
+const CAR_WINDSHIELD_WEB: Record<string, string> = {
+  motorcycle: "M44 30 L56 30 L56 42 L44 42 Z",
+  truck:      "M36 22 L64 22 L66 38 L34 38 Z",
+  van:        "M34 22 L66 22 L66 36 L34 36 Z",
+};
+const DEFAULT_WINDSHIELD_WEB = "M38 26 L62 26 L65 44 L35 44 Z";
+
+function resolveCarColorWeb(input?: string | null): string {
+  if (!input) return "#0A84FF";
+  const t = String(input).trim();
+  if (!t) return "#0A84FF";
+  if (t.startsWith("#") || t.startsWith("rgb")) return t;
+  // Tiny inline lookup for the named palette used in Garage. Keep this in sync
+  // with CAR_COLORS in src/CarMarker.tsx — duplicated to avoid web/native cross-import issues.
+  const named: Record<string, string> = {
+    "bayside blue": "#0A84FF", "nardo gray": "#8E8E93", "guards red": "#FF453A",
+    "yellow": "#FFD60A", "pearl white": "#F2F2F7", "jet black": "#1A1A1A",
+    "forest green": "#30D158", "dawn orange": "#FF9F0A", "plum purple": "#BF5AF2",
+    "carbon": "#3A3A3C", "midnight silver": "#AEAEB2", "cyber brown": "#A2845E",
+  };
+  return named[t.toLowerCase()] || "#0A84FF";
+}
+
+function carIconDataUrl(body: string | undefined | null, color: string | undefined | null, heading: number | undefined | null, size = 44): string {
+  const fill = resolveCarColorWeb(color);
+  const safeBody = body && CAR_BODY_PATHS_WEB[body] ? body : "sedan";
+  const path = CAR_BODY_PATHS_WEB[safeBody];
+  const wind = CAR_WINDSHIELD_WEB[safeBody] || DEFAULT_WINDSHIELD_WEB;
+  const angle = Number.isFinite(heading as number) ? Math.round((heading as number) % 360) : 0;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 100 100'>
+    <defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0' stop-color='${fill}' stop-opacity='1'/><stop offset='1' stop-color='${fill}' stop-opacity='0.78'/>
+    </linearGradient></defs>
+    <g transform='rotate(${angle} 50 50)'>
+      <path d='${path}' fill='rgba(0,0,0,0.45)' transform='translate(0 2)'/>
+      <path d='${path}' fill='url(#g)' stroke='white' stroke-width='2' stroke-linejoin='round'/>
+      <path d='${wind}' fill='rgba(255,255,255,0.55)'/>
+      <rect x='48' y='50' width='4' height='26' rx='1' fill='rgba(0,0,0,0.18)'/>
+    </g></svg>`;
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
 // Peer pin with car make/model pill underneath. Width adapts to label length.
@@ -130,16 +185,16 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
         >
           <Marker position={user} icon={dotIcon(COLORS.primary, "▲", 36)} zIndex={1000} />
           {peers.map((p) => {
-            const pin = peerPinWithLabel(COLORS.success, p.carType || "");
+            const url = carIconDataUrl(p.carBody, p.carColor, p.heading, 44);
             return (
               <Marker
                 key={p.user_id}
                 position={p}
                 icon={{
-                  url: pin.url,
-                  scaledSize: pin.size,
-                  size: pin.size,
-                  anchor: { x: pin.size.width / 2, y: pin.anchorY } as any,
+                  url,
+                  scaledSize: { width: 44, height: 44 } as any,
+                  size: { width: 44, height: 44 } as any,
+                  anchor: { x: 22, y: 22 } as any,
                 } as any}
                 title={`${p.handle || "driver"}${p.carType ? " · " + p.carType : ""}`}
                 onClick={() => onPeerPress?.(p)}

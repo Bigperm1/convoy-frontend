@@ -9,6 +9,7 @@ export type User = {
   car_model?: string;
   car_year?: number | null;
   car_color?: string;
+  car_type?: string;
   lat?: number | null;
   lng?: number | null;
 };

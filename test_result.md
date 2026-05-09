@@ -181,6 +181,24 @@ backend:
           comment: "All 6 feed/external test cases PASS via public URL https://motorist-hub.preview.emergentagent.com/api. (1) Auth gate: GET without Authorization → HTTP 401 {'detail':'Not authenticated'}. (2) Authenticated GET → HTTP 200 with full required shape {alerts, count, fetched_at, source, upstream_status, upstream_error}; types validated (alerts is list, count is int and matches len(alerts), upstream_status ∈ {ok,http_error,network_error,parse_error}, fetched_at is iso8601). Upstream rtproxy-na.waze.com returned 403 from container egress as expected — endpoint gracefully returned alerts=[], upstream_status='http_error', upstream_error='403' WITHOUT 5xx-ing. Backend log confirms: 'GET https://rtproxy-na.waze.com/ HTTP/1.1 403 Forbidden' followed by 200 to client. (3) Two consecutive authed calls within ~1s returned identical fetched_at timestamp ('2026-05-09T02:47:22.626842+00:00') confirming the 25s in-memory cache works. (4) bbox query params (top=37.8&bottom=37.7&left=-122.5&right=-122.4) → HTTP 200 with same shape. Cache hit means params didn't trigger a new upstream call (acceptable since cache is process-wide and shape is identical). Endpoint robust against upstream failure as designed."
 
 frontend:
+  - task: "Community Routes — frontend share/chip/toast UX"
+    implemented: true
+    working: false
+    file: "frontend/app/(app)/map.tsx, frontend/src/communityRoutes.ts, frontend/src/DestinationSearch.tsx"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Implemented Share-to-Convoy admin button on route preview card (testID save-to-convoy), horizontal chip strip of community routes (testID community-routes-strip with community-route-<id> chips), and toast banner on Realtime INSERT (testID route-toast-load) wired to useCommunityRoutes Supabase Realtime hook."
+        - working: false
+          agent: "testing"
+          comment: "PARTIAL TEST — UI flows could NOT be exercised end-to-end due to a TEST-ENV blocker, NOT a code bug. Code review confirms all selectors/wiring are correctly implemented: (a) save-to-convoy is gated on isAdminOfActive && settings.activeCommunityId at map.tsx:672 inside the action row between Steps and Start, (b) community-routes-strip is rendered when communityRoutes.length>0 && navMode==preview && !destination at map.tsx:570-600, (c) route-toast-load is rendered inside SafeAreaView when routeToast is set, with auto-dismiss after 5s and seenRouteIdsRef seeding to skip first hydration (map.tsx:434-448, 603-625), (d) useCommunityRoutes hook subscribes to postgres_changes INSERT/UPDATE/DELETE on the routes table filtered by community_id and broadcasts to all connected clients (communityRoutes.ts:83-113). Verified runtime: login → /talk auto-selects first community 'Bay Area Drivers' → activeCommunityId persisted; backend logs confirm GET /api/communities/{cid} returns is_admin=true so Share button SHOULD render. BLOCKER: DestinationSearch dropdown suggestions never appeared when typing 'Half Moon Bay' in headless Chromium. Console confirms Google Places JS lib loaded (gmp-internal-* warnings + AutocompleteService deprecation notice from places.js), but getPlacePredictions did not return predictions in the test environment. There is NO onSubmitEditing/Enter fallback in DestinationSearch.tsx, so without a clickable suggestion the destination cannot be selected and the route preview card never appears — blocking Flow A's Share click, Flow B's Realtime trigger, and Flow C's chip tap. RECOMMENDATION TO MAIN AGENT: add an onSubmitEditing handler to the destination TextInput that geocodes the typed text via the existing geocodeQuery helper (or auto-picks the first prediction) and calls onSelect — this both improves UX and unblocks automated testing. Do NOT consider the underlying feature broken; once a destination can be set, the rendered overlays match the spec exactly. Suggest re-test after that small UX patch, OR re-test on a non-headless browser where Places autocomplete reliably renders."
+        - working: "NA"
+          agent: "main"
+          comment: "Backend POST/GET/DELETE /api/communities/{cid}/routes verified PASS by testing agent (15/15 assertions) — the data layer for this feature is fully functional. Frontend overlays implemented per spec but UI test blocked by DestinationSearch dependency on Google Places dropdown."
+
   - task: "Global voice activation - VoiceController + voiceBus + geocoding"
     implemented: true
     working: "NA"
@@ -201,8 +219,9 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Community Routes endpoints — POST/GET/DELETE /api/communities/{cid}/routes (Supabase-backed)"
-  stuck_tasks: []
+    - "Community Routes — frontend share/chip/toast UX"
+  stuck_tasks:
+    - "Community Routes — frontend share/chip/toast UX"
   test_all: false
   test_priority: "high_first"
 

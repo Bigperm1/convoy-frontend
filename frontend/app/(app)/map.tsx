@@ -9,8 +9,9 @@ import { COLORS } from "../../src/theme";
 import { useRouter } from "expo-router";
 import Glass from "../../src/Glass";
 import VoiceFAB from "../../src/VoiceFAB";
-import ConvoyMap, { Hazard, Peer, LatLng } from "../../src/ConvoyMap";
+import ConvoyMap, { Hazard, Peer } from "../../src/ConvoyMap";
 import DestinationSearch from "../../src/DestinationSearch";
+import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 
 type RouteInfo = {
   distance_text: string;
@@ -39,8 +40,10 @@ export default function MapScreen() {
   const [destination, setDestination] = useState<{ lat: number; lng: number; label: string } | null>(null);
   const [route, setRoute] = useState<RouteInfo | null>(null);
   const [showSteps, setShowSteps] = useState(false);
+  const [live, setLive] = useState<"connecting" | "live" | "off">("connecting");
   const wsRef = useRef<WebSocket | null>(null);
 
+  // ----- Initial location -----
   useEffect(() => {
     (async () => {
       let lat = 37.7749, lng = -122.4194;
@@ -59,10 +62,66 @@ export default function MapScreen() {
       } catch {}
       setCoords({ lat, lng });
       try { await api.post("/location", { lat, lng, speed: 0, heading: 0 }); } catch {}
-      load();
+      loadPeers();
     })();
   }, []);
 
+  // ----- Hazards: Supabase Realtime subscription (with REST fallback) -----
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchHazards = async () => {
+      if (SUPABASE_ENABLED) {
+        const { data, error } = await supabase
+          .from("hazards")
+          .select("*")
+          .gt("expires_at", new Date().toISOString())
+          .order("created_at", { ascending: false });
+        if (!error && data && !cancelled) {
+          setHazards(data.map(toHazard));
+          return;
+        }
+      }
+      // Fallback to FastAPI hazards endpoint if Supabase unavailable
+      try {
+        const { data } = await api.get("/hazards");
+        if (!cancelled) setHazards(data);
+      } catch {}
+    };
+    fetchHazards();
+
+    if (!SUPABASE_ENABLED) { setLive("off"); return; }
+
+    const channel = supabase
+      .channel("public:hazards")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "hazards" },
+        (payload: any) => {
+          const h = toHazard(payload.new as SupaHazard);
+          setHazards((cur) => [h, ...cur.filter((x) => x.id !== h.id)]);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "hazards" },
+        (payload: any) => {
+          const h = toHazard(payload.new as SupaHazard);
+          setHazards((cur) => cur.map((x) => (x.id === h.id ? h : x)));
+        }
+      )
+      .subscribe((status: string) => {
+        if (status === "SUBSCRIBED") setLive("live");
+        else if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") setLive("off");
+      });
+
+    return () => {
+      cancelled = true;
+      try { supabase.removeChannel(channel); } catch {}
+    };
+  }, []);
+
+  // ----- Peers: existing WebSocket -----
   useEffect(() => {
     if (!token) return;
     const ws = new WebSocket(wsUrl(token));
@@ -70,31 +129,50 @@ export default function MapScreen() {
     ws.onmessage = (ev) => {
       try {
         const m = JSON.parse(ev.data);
-        if (m.type === "hazard") setHazards((h) => [m.hazard, ...h.filter((x) => x.id !== m.hazard.id)]);
-        else if (m.type === "location" && m.user_id !== user?.id) setPeers((p) => ({ ...p, [m.user_id]: { ...p[m.user_id], ...m } }));
+        if (m.type === "location" && m.user_id !== user?.id) {
+          setPeers((p) => ({ ...p, [m.user_id]: { ...p[m.user_id], ...m } }));
+        }
       } catch {}
     };
     return () => ws.close();
   }, [token, user?.id]);
 
-  const load = async () => {
+  const loadPeers = async () => {
     try {
-      const [h, n] = await Promise.all([api.get("/hazards"), api.get("/users/nearby")]);
-      setHazards(h.data);
+      const { data } = await api.get("/users/nearby");
       const pm: Record<string, Peer> = {};
-      n.data.forEach((u: any) => { if (u.lat && u.lng) pm[u.id] = { user_id: u.id, handle: u.handle, lat: u.lat, lng: u.lng }; });
+      data.forEach((u: any) => { if (u.lat && u.lng) pm[u.id] = { user_id: u.id, handle: u.handle, lat: u.lat, lng: u.lng }; });
       setPeers(pm);
     } catch {}
   };
 
   const reportHazard = async (kind: string) => {
     if (!coords) return;
+    const j = () => (Math.random() - 0.5) * 0.005;
+    const lat = coords.lat + j(); const lng = coords.lng + j();
     try {
-      const j = () => (Math.random() - 0.5) * 0.005;
-      await api.post("/hazards", { kind, lat: coords.lat + j(), lng: coords.lng + j(), note: "" });
+      if (SUPABASE_ENABLED) {
+        const { error } = await supabase.from("hazards").insert({
+          kind, lat, lng, reporter_handle: user?.handle || "anon",
+        });
+        if (error) throw error;
+      } else {
+        await api.post("/hazards", { kind, lat, lng, note: "" });
+      }
       setShowReport(false);
-      load();
-    } catch (e) { Alert.alert("Report failed", formatErr(e)); }
+    } catch (e: any) {
+      Alert.alert("Report failed", e?.message || formatErr(e));
+    }
+  };
+
+  const confirmHazard = async (h: Hazard) => {
+    try {
+      if (SUPABASE_ENABLED) {
+        await supabase.from("hazards").update({ confirms: (h.confirms || 1) + 1 }).eq("id", h.id);
+      } else {
+        await api.post(`/hazards/${h.id}/confirm`);
+      }
+    } catch {}
   };
 
   const hazardColor = (k: string) =>
@@ -113,14 +191,12 @@ export default function MapScreen() {
   };
 
   if (!coords) {
-    return (
-      <View style={styles.loader}>
-        <Text style={{ color: COLORS.textDim }}>Locating…</Text>
-      </View>
-    );
+    return <View style={styles.loader}><Text style={{ color: COLORS.textDim }}>Locating…</Text></View>;
   }
 
   const peerList = Object.values(peers);
+  const liveDot = live === "live" ? COLORS.success : live === "connecting" ? COLORS.warning : COLORS.danger;
+  const liveText = live === "live" ? "Live" : live === "connecting" ? "Connecting" : "Offline";
 
   return (
     <View style={styles.c}>
@@ -134,15 +210,20 @@ export default function MapScreen() {
         onRoute={setRoute}
       />
 
-      {/* Top header + destination search */}
       <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
         <Glass radius={20} style={{ marginHorizontal: 12, marginBottom: 8 }}>
           <View style={styles.topRow}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Map</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text style={styles.title}>Map</Text>
+                <View style={[styles.livePill, { borderColor: liveDot + "55" }]} testID="live-pill">
+                  <View style={[styles.liveDot, { backgroundColor: liveDot }]} />
+                  <Text style={[styles.liveText, { color: liveDot }]}>{liveText}</Text>
+                </View>
+              </View>
               <Text style={styles.sub}>{user?.handle} · {peerList.length} drivers · {hazards.length} alerts</Text>
             </View>
-            <TouchableOpacity testID="refresh-btn" onPress={load} style={styles.iconBtn}>
+            <TouchableOpacity testID="refresh-btn" onPress={() => loadPeers()} style={styles.iconBtn}>
               <Ionicons name="refresh" size={18} color={COLORS.text} />
             </TouchableOpacity>
           </View>
@@ -159,14 +240,11 @@ export default function MapScreen() {
         )}
       </SafeAreaView>
 
-      {/* Route summary card */}
       {destination && route && (
         <Glass radius={20} style={styles.routeCard}>
           <TouchableOpacity testID="route-toggle" onPress={() => setShowSteps((s) => !s)} activeOpacity={0.85}>
             <View style={styles.routeRow}>
-              <View style={styles.routeIcon}>
-                <Ionicons name="navigate" size={22} color="#fff" />
-              </View>
+              <View style={styles.routeIcon}><Ionicons name="navigate" size={22} color="#fff" /></View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.routeTo} numberOfLines={1}>To {destination.label}</Text>
                 <Text style={styles.routeMeta}>{route.duration_text} · {route.distance_text}</Text>
@@ -177,14 +255,11 @@ export default function MapScreen() {
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
-
           {showSteps && (
             <ScrollView style={styles.stepsList} contentContainerStyle={{ paddingBottom: 12 }} testID="route-steps">
               {route.steps.map((s, i) => (
                 <View key={i} style={styles.stepRow}>
-                  <View style={styles.stepIcon}>
-                    <Ionicons name={maneuverIcon(s.maneuver)} size={16} color={COLORS.primary} />
-                  </View>
+                  <View style={styles.stepIcon}><Ionicons name={maneuverIcon(s.maneuver)} size={16} color={COLORS.primary} /></View>
                   <Text style={styles.stepText} numberOfLines={2}>{s.html}</Text>
                   <Text style={styles.stepDist}>{s.distance_text}</Text>
                 </View>
@@ -194,7 +269,6 @@ export default function MapScreen() {
         </Glass>
       )}
 
-      {/* Selected hazard card */}
       {selected && !destination && (
         <Glass radius={20} style={styles.selectedCard}>
           <View style={{ padding: 14, flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -205,7 +279,7 @@ export default function MapScreen() {
               <Text style={styles.selTitle}>{selected.kind.charAt(0).toUpperCase() + selected.kind.slice(1)}</Text>
               <Text style={styles.selSub}>by {selected.reporter_handle || "anon"} · {selected.confirms || 1} confirms</Text>
             </View>
-            <TouchableOpacity testID={`confirm-${selected.id}`} onPress={async () => { try { await api.post(`/hazards/${selected.id}/confirm`); load(); } catch {} }} style={styles.confirmBtn}>
+            <TouchableOpacity testID={`confirm-${selected.id}`} onPress={() => confirmHazard(selected)} style={styles.confirmBtn}>
               <Text style={styles.confirmText}>+1</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setSelected(null)} style={{ padding: 6 }}>
@@ -215,7 +289,6 @@ export default function MapScreen() {
         </Glass>
       )}
 
-      {/* Report panel */}
       {showReport && (
         <Glass radius={20} style={styles.reportPanel} testID="report-panel">
           {([["police", "shield-checkmark", "Police"], ["accident", "alert-circle", "Accident"], ["road", "warning", "Hazard"], ["traffic", "car", "Traffic"]] as const).map(([k, ico, lbl]) => (
@@ -240,6 +313,17 @@ export default function MapScreen() {
   );
 }
 
+function toHazard(s: SupaHazard): Hazard {
+  return {
+    id: s.id,
+    kind: s.kind,
+    lat: s.lat,
+    lng: s.lng,
+    reporter_handle: s.reporter_handle || "anon",
+    confirms: s.confirms,
+  };
+}
+
 const styles = StyleSheet.create({
   c: { flex: 1, backgroundColor: "#0A1410" },
   loader: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
@@ -249,6 +333,10 @@ const styles = StyleSheet.create({
   title: { color: COLORS.text, fontSize: 26, fontWeight: "700", letterSpacing: -0.6 },
   sub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
   iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(118,118,128,0.32)", alignItems: "center", justifyContent: "center" },
+
+  livePill: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, borderWidth: 1, backgroundColor: "rgba(255,255,255,0.05)" },
+  liveDot: { width: 6, height: 6, borderRadius: 3 },
+  liveText: { fontSize: 10, fontWeight: "700", letterSpacing: 0.4 },
 
   hazardBubble: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.85)" },
 

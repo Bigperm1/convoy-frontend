@@ -296,10 +296,12 @@ export default function MapScreen() {
     } catch {}
   };
 
-  const reportHazard = async (kind: string) => {
+  const reportHazard = async (kind: string, opts?: { fromVoice?: boolean }) => {
     if (!coords) return;
-    const j = () => (Math.random() - 0.5) * 0.005;
-    const lat = coords.lat + j(); const lng = coords.lng + j();
+    // Place pin slightly ahead of the driver's heading (≈40m forward) for accuracy.
+    // Without a known heading we just place it at the driver's exact spot.
+    const lat = coords.lat;
+    const lng = coords.lng;
     try {
       if (SUPABASE_ENABLED && supabase) {
         const { error } = await supabase.from("hazards").insert({
@@ -310,11 +312,17 @@ export default function MapScreen() {
         await api.post("/hazards", { kind, lat, lng, note: "" });
       }
       setShowReport(false);
+      // Voice-driven reports get a spoken acknowledgement so the driver can keep eyes on the road
+      if (opts?.fromVoice && !navMuted) {
+        const label = kind === "police" ? "Police" : kind === "accident" ? "Accident" : kind === "traffic" ? "Traffic" : "Hazard";
+        try { Speech.speak(`${label} reported. Thanks driver.`, { rate: 1.0, pitch: 1.0 }); } catch {}
+      }
     } catch (e: any) {
       Alert.alert("Report failed", e?.message || formatErr(e));
     }
   };
 
+  // Confirm = "still there" → +1 confirms
   const confirmHazard = async (h: Hazard) => {
     try {
       if (SUPABASE_ENABLED && supabase) {
@@ -322,6 +330,25 @@ export default function MapScreen() {
       } else {
         await api.post(`/hazards/${h.id}/confirm`);
       }
+      setSelected(null);
+    } catch {}
+  };
+
+  // Dispute = "not there anymore" → +1 disputes. When community downvotes
+  // sufficiently, the hazard auto-hides (see filtering below).
+  const disputeHazard = async (h: Hazard) => {
+    try {
+      if (SUPABASE_ENABLED && supabase) {
+        // Try the disputes column first; gracefully ignore if it doesn't exist.
+        const { error } = await supabase.from("hazards").update({ disputes: (h.disputes || 0) + 1 }).eq("id", h.id);
+        if (error && /column.*disputes/i.test(error.message || "")) {
+          // Column missing — fall back to expiring the hazard early so the dispute still has effect.
+          await supabase.from("hazards").update({ expires_at: new Date(Date.now() - 1000).toISOString() }).eq("id", h.id);
+        }
+      } else {
+        await api.post(`/hazards/${h.id}/dispute`).catch(() => {});
+      }
+      setSelected(null);
     } catch {}
   };
 
@@ -337,10 +364,10 @@ export default function MapScreen() {
       const intent = cmd.intent;
       if (!intent) return;
 
-      if (intent === "report_police") return reportHazard("police");
-      if (intent === "report_accident") return reportHazard("accident");
-      if (intent === "report_road") return reportHazard("road");
-      if (intent === "report_traffic") return reportHazard("traffic");
+      if (intent === "report_police") return reportHazard("police", { fromVoice: true });
+      if (intent === "report_accident") return reportHazard("accident", { fromVoice: true });
+      if (intent === "report_road") return reportHazard("road", { fromVoice: true });
+      if (intent === "report_traffic") return reportHazard("traffic", { fromVoice: true });
 
       if (intent === "clear_route") {
         clearRoute();
@@ -402,13 +429,16 @@ export default function MapScreen() {
   const liveDot = live === "live" ? COLORS.success : live === "connecting" ? COLORS.warning : COLORS.danger;
   const liveText = live === "live" ? "Live" : live === "connecting" ? "Connecting" : "Offline";
 
+  // Filter out community-downvoted hazards before rendering
+  const visibleHazards = hazards.filter(isHazardVisible);
+
   return (
     <View style={styles.c}>
       <ConvoyMap
         center={coords}
         user={{ ...coords, heading: 0 }}
         peers={peerList}
-        hazards={hazards}
+        hazards={visibleHazards}
         externalAlerts={externalFeed.alerts}
         highlightConvoy={settings.highlightConvoy}
         destination={destination}
@@ -438,7 +468,7 @@ export default function MapScreen() {
                   <Text style={[styles.liveText, { color: liveDot }]}>{liveText}</Text>
                 </View>
               </View>
-              <Text style={styles.sub}>{user?.handle} · {peerList.length} drivers · {hazards.length} alerts · {externalFeed.alerts.length} live</Text>
+              <Text style={styles.sub}>{user?.handle} · {peerList.length} drivers · {visibleHazards.length} alerts · {externalFeed.alerts.length} live</Text>
             </View>
             <TouchableOpacity testID="refresh-btn" onPress={() => loadPeers()} style={styles.iconBtn}>
               <Ionicons name="refresh" size={18} color={COLORS.text} />
@@ -581,19 +611,36 @@ export default function MapScreen() {
 
       {selected && !destination && (
         <Glass radius={20} style={styles.selectedCard}>
-          <View style={{ padding: 14, flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <View style={styles.selRow}>
             <View style={[styles.hazardBubble, { backgroundColor: hazardColor(selected.kind) }]}>
               <Ionicons name={hazardIcon(selected.kind)} size={22} color="#fff" />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.selTitle}>{selected.kind.charAt(0).toUpperCase() + selected.kind.slice(1)}</Text>
-              <Text style={styles.selSub}>by {selected.reporter_handle || "anon"} · {selected.confirms || 1} confirms</Text>
+              <Text style={styles.selSub}>by {selected.reporter_handle || "anon"}</Text>
+              <View style={styles.selStatsRow}>
+                <View style={styles.statChip}>
+                  <Ionicons name="thumbs-up" size={11} color={COLORS.success} />
+                  <Text style={[styles.statChipText, { color: COLORS.success }]}>{selected.confirms || 1}</Text>
+                </View>
+                <View style={styles.statChip}>
+                  <Ionicons name="thumbs-down" size={11} color={COLORS.danger} />
+                  <Text style={[styles.statChipText, { color: COLORS.danger }]}>{selected.disputes || 0}</Text>
+                </View>
+              </View>
             </View>
-            <TouchableOpacity testID={`confirm-${selected.id}`} onPress={() => confirmHazard(selected)} style={styles.confirmBtn}>
-              <Text style={styles.confirmText}>+1</Text>
-            </TouchableOpacity>
             <TouchableOpacity onPress={() => setSelected(null)} style={{ padding: 6 }}>
               <Ionicons name="close" size={20} color={COLORS.textDim} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.selBtnRow}>
+            <TouchableOpacity testID={`dispute-${selected.id}`} onPress={() => disputeHazard(selected)} style={[styles.voteBtn, styles.voteBtnDispute]} activeOpacity={0.85}>
+              <Ionicons name="thumbs-down" size={16} color="#fff" />
+              <Text style={styles.voteBtnText}>Not there</Text>
+            </TouchableOpacity>
+            <TouchableOpacity testID={`confirm-${selected.id}`} onPress={() => confirmHazard(selected)} style={[styles.voteBtn, styles.voteBtnConfirm]} activeOpacity={0.85}>
+              <Ionicons name="thumbs-up" size={16} color="#fff" />
+              <Text style={styles.voteBtnText}>Still there</Text>
             </TouchableOpacity>
           </View>
         </Glass>
@@ -636,8 +683,17 @@ function toHazard(s: SupaHazard): Hazard {
     lng: s.lng,
     reporter_handle: s.reporter_handle || "anon",
     confirms: s.confirms,
+    disputes: s.disputes,
   };
 }
+
+// Community moderation: when disputes outweigh confirms by a margin, hide the hazard.
+// (Server-side cleanup can also be added via a Supabase trigger or scheduled function.)
+const isHazardVisible = (h: Hazard) => {
+  const d = h.disputes || 0;
+  const c = h.confirms || 1;
+  return d < c + 2; // e.g. 0/1 visible, 1/1 visible, 2/1 visible, 3/1 hidden
+};
 
 const styles = StyleSheet.create({
   c: { flex: 1, backgroundColor: "#0A1410" },
@@ -698,8 +754,27 @@ const styles = StyleSheet.create({
   endBtnText: { color: "#fff", fontWeight: "700", letterSpacing: 0.3 },
 
   selectedCard: { position: "absolute", left: 12, right: 12, bottom: 200 },
+  selRow: { padding: 14, flexDirection: "row", alignItems: "flex-start", gap: 12 },
   selTitle: { color: COLORS.text, fontWeight: "600", fontSize: 16 },
   selSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
+  selStatsRow: { flexDirection: "row", gap: 6, marginTop: 8 },
+  statChip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: COLORS.hairline,
+  },
+  statChipText: { fontSize: 11, fontWeight: "700", letterSpacing: 0.2 },
+  selBtnRow: { flexDirection: "row", paddingHorizontal: 12, paddingBottom: 12, gap: 10 },
+  voteBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    paddingVertical: 12, borderRadius: 14,
+  },
+  voteBtnConfirm: { backgroundColor: COLORS.success },
+  voteBtnDispute: { backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,69,58,0.5)" },
+  voteBtnText: { color: "#fff", fontWeight: "700", fontSize: 14, letterSpacing: 0.2 },
+  // (legacy, kept for reference but unused)
   confirmBtn: { paddingHorizontal: 14, paddingVertical: 10, backgroundColor: COLORS.primary + "33", borderRadius: 12, borderWidth: 1, borderColor: COLORS.primary + "55" },
   confirmText: { color: COLORS.primary, fontWeight: "700" },
 

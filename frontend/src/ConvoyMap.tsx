@@ -22,7 +22,7 @@ try {
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number };
+export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number; disputes?: number };
 export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string };
 export type LatLng = { lat: number; lng: number };
 

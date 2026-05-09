@@ -25,6 +25,9 @@ export type SupaHazard = {
   lng: number;
   reporter_handle: string | null;
   confirms: number;
+  // `disputes` is optional — older tables created without this column will
+  // simply omit it. The UI treats undefined as 0.
+  disputes?: number;
   created_at: string;
   expires_at: string;
 };

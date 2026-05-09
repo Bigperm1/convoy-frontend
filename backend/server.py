@@ -226,6 +226,19 @@ async def confirm_hazard(hid: str, user=Depends(get_current_user)):
     return await db.hazards.find_one({"id": hid}, {"_id": 0})
 
 
+@api.post("/hazards/{hid}/dispute")
+async def dispute_hazard(hid: str, user=Depends(get_current_user)):
+    """Community downvote — increments dispute counter so other clients can hide
+    heavily-disputed hazards."""
+    res = await db.hazards.update_one({"id": hid}, {"$inc": {"disputes": 1}})
+    if not res.matched_count: raise HTTPException(status_code=404, detail="Not found")
+    h = await db.hazards.find_one({"id": hid}, {"_id": 0})
+    # If the community has voted it down significantly, expire it immediately.
+    if h and (h.get("disputes", 0) >= (h.get("confirms", 1) + 2)):
+        await db.hazards.update_one({"id": hid}, {"$set": {"expires_at": datetime.now(timezone.utc).isoformat()}})
+    return h
+
+
 # ---------- Communities ----------
 @api.post("/communities")
 async def create_community(body: CommunityIn, user=Depends(get_current_user)):

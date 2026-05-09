@@ -7,7 +7,7 @@ import { COLORS } from "./theme";
 import type { Peer } from "./ConvoyMap";
 
 type Props = {
-  peer: (Peer & { online_at?: string; heading?: number }) | null;
+  peer: (Peer & { online_at?: string; heading?: number; topSpeed?: number }) | null;
   visible: boolean;
   onClose: () => void;
   myCoords?: { lat: number; lng: number } | null;
@@ -81,6 +81,14 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
                     <Text style={styles.metaText}>{lastSeen(peer.online_at)}</Text>
                   </View>
                 )}
+                {typeof peer.topSpeed === "number" && peer.topSpeed > 0 && (
+                  <View testID="peer-top-speed" style={[styles.metaCell, styles.metaCellAccent]}>
+                    <Ionicons name="speedometer" size={14} color="#FFC700" />
+                    <Text style={[styles.metaText, { color: "#FFC700" }]}>
+                      PB {Math.round(peer.topSpeed)} km/h
+                    </Text>
+                  </View>
+                )}
               </View>
 
               <TouchableOpacity testID="peer-hail" onPress={hail} style={styles.hailBtn} activeOpacity={0.85}>
@@ -110,6 +118,7 @@ const styles = StyleSheet.create({
   closeBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.10)" },
   metaRow: { flexDirection: "row", gap: 8, marginTop: 14, marginBottom: 14, flexWrap: "wrap" },
   metaCell: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)" },
+  metaCellAccent: { backgroundColor: "rgba(255,199,0,0.12)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,199,0,0.45)" },
   metaText: { color: COLORS.text, fontSize: 12, fontWeight: "600" },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: COLORS.success },
   hailBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: 14 },

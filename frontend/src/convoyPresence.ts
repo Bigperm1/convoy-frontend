@@ -25,6 +25,8 @@ export type ConvoyPresencePeer = {
   carColor?: string;
   heading?: number;
   online_at?: string;
+  // Personal best top cruise speed (km/h) — broadcast so peers can see each other's record.
+  topSpeed?: number;
 };
 
 export type ConvoyMe = {
@@ -33,6 +35,8 @@ export type ConvoyMe = {
   carType?: string;
   carBody?: string;
   carColor?: string;
+  // Personal best top cruise speed (km/h). Sent every time we re-track the channel.
+  topSpeed?: number;
 };
 
 type Status = "idle" | "joining" | "subscribed" | "error" | "disabled";
@@ -88,6 +92,7 @@ export function useConvoyPresence(
             carColor: p.carColor,
             heading: p.heading,
             online_at: p.online_at,
+            topSpeed: typeof p.topSpeed === "number" ? p.topSpeed : undefined,
           });
         });
         setPeers(list);
@@ -103,6 +108,7 @@ export function useConvoyPresence(
               carType: me.carType,
               carBody: me.carBody,
               carColor: me.carColor,
+              topSpeed: me.topSpeed,
               lat: coords.lat,
               lng: coords.lng,
               heading: coords.heading,
@@ -138,12 +144,13 @@ export function useConvoyPresence(
       carType: me.carType,
       carBody: me.carBody,
       carColor: me.carColor,
+      topSpeed: me.topSpeed,
       lat: coords.lat,
       lng: coords.lng,
       heading: coords.heading,
       online_at: new Date().toISOString(),
     }).catch(() => {});
-  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor]);
+  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.topSpeed]);
 
   return { peers, status };
 }

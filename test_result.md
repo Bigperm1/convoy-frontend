@@ -105,6 +105,21 @@
 user_problem_statement: "Build me an app for car enthusiasts. This app would have a walkie talkie feature in it like Zello and use a navigation program like Waze where you could see the other car enthusiasts live on the map, with the ability to tag police and road hazards like waze. Make it Apple car play compatible. Make it have audio interface for apple music/spotify/soundcloud. voice activation aswell."
 
 backend:
+  - task: "PUT /api/auth/profile accepts top_speed_record and persists it through public_user"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "CarUpdate model already exposes top_speed_record: Optional[float]; public_user emits float(top_speed_record or 0); register seeds 0.0. Need to verify end-to-end: (1) login as demo@revradar.app/demo1234 → 200 + JWT, (2) PUT /api/auth/profile with body {top_speed_record: 142.5} and bearer → 200 with public_user shape, response.top_speed_record == 142.5, (3) GET /api/auth/me with bearer → 200 with response.top_speed_record == 142.5 (persisted in mongo), (4) PUT again with smaller value e.g. 99.0 → response.top_speed_record == 99.0 (NOTE: the API stores whatever is sent — client is responsible for only sending if it beats the previous record), (5) PUT with no top_speed_record key (e.g. only car_color) → previous top_speed_record is preserved (not zeroed), (6) Auth gate: PUT without bearer → 401. Don't waste time on race-condition / throttle checks — those are client-side."
+        - working: true
+          agent: "testing"
+          comment: "All 18 assertions PASS via public URL https://motorist-hub.preview.emergentagent.com/api (see /app/backend_test_top_speed.py). Detailed verdicts: (1) PASS — POST /api/auth/login {email:'demo@revradar.app', password:'demo1234'} → HTTP 200 with JWT token (len=224, 3-part HS256) and user object (email matches). (2) PASS — PUT /api/auth/profile {top_speed_record:142.5} with NO Authorization header → HTTP 401 {'detail':'Not authenticated'}. (3) PASS — PUT /api/auth/profile {top_speed_record:142.5} with bearer → HTTP 200, response shape is exactly public_user (all required keys present: id, email, handle, car_make, car_model, car_year, car_color, car_type, top_speed_record, lat, lng, heading, speed — no extras like password_hash leaked); response.top_speed_record == 142.5. (4) PASS — GET /api/auth/me with bearer → HTTP 200, response.top_speed_record == 142.5 (Mongo persistence confirmed). (5) PASS — PUT /api/auth/profile {top_speed_record:99.0} with bearer → HTTP 200, response.top_speed_record == 99.0 (API blindly stores whatever is sent, as designed — throttling is client-side per spec; this contract is now documented). (6) PASS — PUT /api/auth/profile {car_color:'Midnight Purple'} with bearer (NO top_speed_record key) → HTTP 200, response.car_color == 'Midnight Purple' AND response.top_speed_record == 99.0 (preserved from step 5, NOT zeroed by the partial-update payload). Subsequent GET /api/auth/me → 200 with top_speed_record==99.0 and car_color=='Midnight Purple' confirming both fields persisted. The Optional-None-skip pattern in update_profile (`{k:v for k,v in body.dict().items() if v is not None}`) correctly preserves untouched fields. No critical or minor issues — endpoint working as specified."
+
   - task: "Voice transcribe endpoint with improved intent classifier"
     implemented: true
     working: true
@@ -246,7 +261,8 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "PUT /api/auth/profile accepts top_speed_record"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

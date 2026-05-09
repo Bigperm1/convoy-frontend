@@ -81,6 +81,31 @@ export default function GarageScreen() {
             </View>
           </Glass>
 
+          {/* Personal best — Top Cruise Speed from Map sessions. Auto-tracked, read-only. */}
+          <Glass radius={22} style={{ marginBottom: 18 }}>
+            <View style={styles.pbBox} testID="garage-personal-best">
+              <View style={styles.pbIconWrap}>
+                <Ionicons name="speedometer" size={26} color="#FFC700" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.pbLabel}>Top Cruise Speed</Text>
+                <Text style={styles.pbHint}>
+                  {user?.top_speed_record && user.top_speed_record > 0
+                    ? "Personal best — beat it on your next drive."
+                    : "Drive with the Map open to set your first record."}
+                </Text>
+              </View>
+              <View style={styles.pbValueWrap}>
+                <Text style={styles.pbValue} testID="garage-personal-best-value">
+                  {user?.top_speed_record && user.top_speed_record > 0
+                    ? Math.round(user.top_speed_record)
+                    : "—"}
+                </Text>
+                <Text style={styles.pbUnit}>km/h</Text>
+              </View>
+            </View>
+          </Glass>
+
           {/* Year / Make / Model / Color */}
           <Field label="Year" value={year} onChange={setYear} placeholder="1999" keyboard="number-pad" testID="garage-year" />
           <Field label="Make" value={make} onChange={setMake} placeholder="Nissan" testID="garage-make" />
@@ -166,6 +191,19 @@ const styles = StyleSheet.create({
   previewBox: { padding: 16, alignItems: "center" },
   previewLabel: { color: COLORS.text, fontSize: 16, fontWeight: "700", marginTop: 8 },
   previewSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2, textTransform: "capitalize" },
+  // Personal best tile
+  pbBox: { flexDirection: "row", alignItems: "center", gap: 14, padding: 16 },
+  pbIconWrap: {
+    width: 48, height: 48, borderRadius: 14,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(255,199,0,0.14)",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,199,0,0.45)",
+  },
+  pbLabel: { color: COLORS.text, fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
+  pbHint: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
+  pbValueWrap: { alignItems: "flex-end" },
+  pbValue: { color: "#FFC700", fontSize: 28, fontWeight: "800", letterSpacing: -0.5, lineHeight: 30 },
+  pbUnit: { color: COLORS.textDim, fontSize: 11, fontWeight: "600", marginTop: 2 },
   // Color swatches
   swatchRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 4 },
   swatch: {

@@ -4,14 +4,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { useRouter, usePathname } from "expo-router";
 import { COLORS } from "./theme";
-import VoiceFAB from "./VoiceFAB";
 import { voiceBus, VoiceCommand } from "./voiceBus";
 
 // Maps intent → tab route. Used for global "open_*" voice intents.
+// Note: "open_drive" intentionally omitted — the Drive tab was replaced by the elevated voice CTA.
 const ROUTE_MAP: Record<string, string> = {
   open_map: "/(app)/map",
   open_talk: "/(app)/talk",
-  open_drive: "/(app)/drive",
   open_music: "/(app)/music",
   open_hub: "/(app)/hub",
 };
@@ -82,10 +81,7 @@ export default function VoiceController() {
 
   return (
     <>
-      {/* Floating mic — anchored bottom-left, above tab bar */}
-      <VoiceFAB bottom={Platform.OS === "ios" ? 110 : 100} left={18} />
-
-      {/* Non-blocking transcript banner */}
+      {/* Non-blocking transcript banner — the elevated mic CTA in the tab bar is the input */}
       {showBanner && (
         <Animated.View
           pointerEvents="none"

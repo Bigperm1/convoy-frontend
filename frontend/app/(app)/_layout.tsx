@@ -6,6 +6,7 @@ import { COLORS } from "../../src/theme";
 import { View, ActivityIndicator, Platform, StyleSheet } from "react-native";
 import { BlurView } from "expo-blur";
 import VoiceController from "../../src/VoiceController";
+import VoiceTabButton from "../../src/VoiceTabButton";
 
 export default function AppLayout() {
   const { user } = useAuth();
@@ -37,6 +38,8 @@ export default function AppLayout() {
             paddingBottom: 22,
             paddingTop: 10,
             position: "absolute",
+            // allow the elevated mic to overflow upward
+            overflow: "visible",
           },
           tabBarBackground: () =>
             Platform.OS === "web" ? null : (
@@ -49,13 +52,21 @@ export default function AppLayout() {
       >
         <Tabs.Screen name="map" options={{ tabBarLabel: "Map", tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size - 2} color={color} /> }} />
         <Tabs.Screen name="talk" options={{ tabBarLabel: "Talk", tabBarIcon: ({ color, size }) => <Ionicons name="mic" size={size - 2} color={color} /> }} />
-        <Tabs.Screen name="drive" options={{ tabBarLabel: "Drive", tabBarIcon: ({ color, size }) => <Ionicons name="navigate-circle" size={size - 1} color={color} /> }} />
+        {/* Center elevated mic CTA — replaces the old "Drive" tab. Press-and-hold to record. */}
+        <Tabs.Screen
+          name="voice"
+          options={{
+            tabBarLabel: () => null,
+            tabBarIcon: () => null,
+            tabBarButton: () => <VoiceTabButton />,
+          }}
+        />
         <Tabs.Screen name="music" options={{ tabBarLabel: "Music", tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" size={size - 2} color={color} /> }} />
         <Tabs.Screen name="hub" options={{ tabBarLabel: "Hub", tabBarIcon: ({ color, size }) => <Ionicons name="people-circle" size={size - 1} color={color} /> }} />
         <Tabs.Screen name="settings" options={{ href: null }} />
       </Tabs>
 
-      {/* Global voice activation: floating mic + transcript banner, available on every tab */}
+      {/* Global voice transcript banner (FAB removed — the elevated mic in the tab bar is the new CTA) */}
       <VoiceController />
     </View>
   );

@@ -3,7 +3,9 @@ import { View, Text, StyleSheet, TouchableOpacity, Pressable, ScrollView, Animat
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Audio } from "expo-av";
+import * as FileSystem from "expo-file-system/legacy";
 import { LinearGradient } from "expo-linear-gradient";
+import { BlurView } from "expo-blur";
 import { useRouter } from "expo-router";
 import { COLORS } from "../../src/theme";
 import { api, formatErr } from "../../src/api";
@@ -11,6 +13,11 @@ import Glass from "../../src/Glass";
 
 type Community = { id: string; name: string; description: string; member_count: number; is_admin: boolean };
 type PTT = { id: string; channel: string; user_id: string; handle: string; audio_b64: string; duration_ms: number; created_at: string };
+
+// Visual constants — keep PTT cleanly centered. Stage = ripple/tick area; button sits in middle.
+const BTN_SIZE = 232;        // main glass core
+const RING_GAP = 22;         // gap between core and tick ring
+const STAGE = BTN_SIZE + RING_GAP * 2 + 28;  // total layered-stage size (ripples extend a bit further)
 
 export default function ComsScreen() {
   const router = useRouter();
@@ -20,14 +27,15 @@ export default function ComsScreen() {
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<PTT[]>([]);
   const [loading, setLoading] = useState(true);
+  const [playingId, setPlayingId] = useState<string | null>(null);
   const recRef = useRef<Audio.Recording | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
 
-  // Layered animations for a richer PTT button
-  const pulse = useRef(new Animated.Value(1)).current;       // scale of inner core
-  const ring1 = useRef(new Animated.Value(0)).current;       // outer expanding ring 1
-  const ring2 = useRef(new Animated.Value(0)).current;       // outer expanding ring 2
-  const press = useRef(new Animated.Value(1)).current;       // tactile press feedback
+  // Animations
+  const pulse = useRef(new Animated.Value(1)).current;
+  const ring1 = useRef(new Animated.Value(0)).current;
+  const ring2 = useRef(new Animated.Value(0)).current;
+  const press = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     (async () => {
@@ -42,6 +50,7 @@ export default function ComsScreen() {
         await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       } catch {}
     })();
+    return () => { if (soundRef.current) { soundRef.current.unloadAsync().catch(() => {}); soundRef.current = null; } };
   }, []);
 
   useEffect(() => { if (active) loadHistory(); }, [active]);
@@ -52,26 +61,23 @@ export default function ComsScreen() {
       loops.push(
         Animated.loop(
           Animated.sequence([
-            Animated.timing(pulse, { toValue: 1.06, duration: 600, useNativeDriver: true, easing: Easing.inOut(Easing.quad) }),
-            Animated.timing(pulse, { toValue: 1.0, duration: 600, useNativeDriver: true, easing: Easing.inOut(Easing.quad) }),
+            Animated.timing(pulse, { toValue: 1.05, duration: 700, useNativeDriver: true, easing: Easing.inOut(Easing.quad) }),
+            Animated.timing(pulse, { toValue: 1.0, duration: 700, useNativeDriver: true, easing: Easing.inOut(Easing.quad) }),
           ])
         )
       );
-      // Two staggered ripples (radio-wave feel)
       const ripple = (v: Animated.Value, delay: number) => Animated.loop(
         Animated.sequence([
           Animated.delay(delay),
-          Animated.timing(v, { toValue: 1, duration: 1600, useNativeDriver: true, easing: Easing.out(Easing.cubic) }),
+          Animated.timing(v, { toValue: 1, duration: 1800, useNativeDriver: true, easing: Easing.out(Easing.cubic) }),
           Animated.timing(v, { toValue: 0, duration: 0, useNativeDriver: true }),
         ])
       );
       loops.push(ripple(ring1, 0));
-      loops.push(ripple(ring2, 800));
+      loops.push(ripple(ring2, 900));
       loops.forEach((l) => l.start());
     } else {
-      pulse.setValue(1);
-      ring1.setValue(0);
-      ring2.setValue(0);
+      pulse.setValue(1); ring1.setValue(0); ring2.setValue(0);
     }
     return () => loops.forEach((l) => l.stop());
   }, [recording, pulse, ring1, ring2]);
@@ -83,7 +89,7 @@ export default function ComsScreen() {
 
   const startRec = async () => {
     if (recording || busy || !active) return;
-    Animated.spring(press, { toValue: 0.96, useNativeDriver: true, speed: 30, bounciness: 8 }).start();
+    Animated.spring(press, { toValue: 0.96, useNativeDriver: true, speed: 30, bounciness: 6 }).start();
     try {
       const rec = new Audio.Recording();
       await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
@@ -119,12 +125,49 @@ export default function ComsScreen() {
     finally { setBusy(false); }
   };
 
+  // Reliable playback: write the base64 audio to a cache file (.m4a) and play from file://.
+  // Direct base64 data URIs trip AVFoundation error 11828 ("This media format is not supported")
+  // on iOS for AAC-in-MP4 streams; a real file path resolves it.
   const playMessage = async (m: PTT) => {
     try {
-      if (soundRef.current) { await soundRef.current.unloadAsync(); soundRef.current = null; }
-      const { sound } = await Audio.Sound.createAsync({ uri: `data:audio/m4a;base64,${m.audio_b64}` }, { shouldPlay: true });
+      // Stop any currently playing sound
+      if (soundRef.current) {
+        try { await soundRef.current.unloadAsync(); } catch {}
+        soundRef.current = null;
+      }
+
+      let uri: string;
+      if (Platform.OS === "web") {
+        // Web's HTML5 audio handles base64 data URIs fine; mp4 mime is the safest container alias.
+        uri = `data:audio/mp4;base64,${m.audio_b64}`;
+      } else {
+        // Native: write to cache and play from file path
+        const dir = FileSystem.cacheDirectory + "convoy-ptt/";
+        try { await FileSystem.makeDirectoryAsync(dir, { intermediates: true }); } catch {}
+        const path = `${dir}${m.id}.m4a`;
+        const info = await FileSystem.getInfoAsync(path);
+        if (!info.exists) {
+          await FileSystem.writeAsStringAsync(path, m.audio_b64, { encoding: FileSystem.EncodingType.Base64 });
+        }
+        uri = path;
+      }
+
+      const { sound } = await Audio.Sound.createAsync(
+        { uri },
+        { shouldPlay: true },
+        (status: any) => {
+          if (status?.didJustFinish) {
+            setPlayingId(null);
+            sound.unloadAsync().catch(() => {});
+          }
+        }
+      );
       soundRef.current = sound;
-    } catch (e) { Alert.alert("Playback failed", String(e)); }
+      setPlayingId(m.id);
+    } catch (e: any) {
+      setPlayingId(null);
+      Alert.alert("Playback failed", e?.message || String(e));
+    }
   };
 
   const activeCommunity = communities.find((c) => c.id === active);
@@ -162,60 +205,96 @@ export default function ComsScreen() {
           <Text style={styles.sub}>{activeCommunity ? `Broadcasting on ${activeCommunity.name}` : "Select a channel"}</Text>
         </View>
 
-        {/* ===== Big PTT button ===== */}
-        <View style={styles.pttWrap}>
-          {/* Outer expanding ripples (only while recording) */}
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.ripple,
-              {
-                opacity: ring1.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
-                transform: [{ scale: ring1.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.55] }) }],
-              },
-            ]}
-          />
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.ripple,
-              {
-                opacity: ring2.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
-                transform: [{ scale: ring2.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.55] }) }],
-              },
-            ]}
-          />
+        {/* ===== PTT button — Apple liquid-glass design, perfectly centered ===== */}
+        <View style={styles.pttSection}>
+          <View style={styles.stage}>
+            {/* Layer 1: expanding ripples (only while recording) */}
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.ripple,
+                {
+                  opacity: ring1.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] }),
+                  transform: [{ scale: ring1.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.55] }) }],
+                },
+              ]}
+            />
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.ripple,
+                {
+                  opacity: ring2.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] }),
+                  transform: [{ scale: ring2.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.55] }) }],
+                },
+              ]}
+            />
 
-          {/* Decorative tick marks around the dial */}
-          <DialTicks active={recording} />
+            {/* Layer 2: subtle outer ring */}
+            <View style={styles.outerRing} pointerEvents="none" />
 
-          <Animated.View style={{ transform: [{ scale: pulse }, { scale: press }] }}>
-            <Pressable
-              testID="ptt-button"
-              onPressIn={startRec}
-              onPressOut={stopRec}
-              style={styles.ptt}
-            >
-              {/* Soft outer halo */}
-              <View style={[styles.haloRing, recording && { borderColor: COLORS.primary + "55" }]} />
-              {/* Main core with gradient */}
-              <View style={styles.coreShadow}>
-                <View style={styles.core}>
-                  <LinearGradient
-                    colors={recording ? ["#FF6B6B", "#E0271E"] : ["#7C7AED", "#5E5CE6", "#3D3BC2"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={StyleSheet.absoluteFill}
-                  />
-                  {/* glassy highlight */}
-                  <View style={styles.coreGloss} />
-                  <Ionicons name={recording ? "radio" : "mic"} size={86} color="#fff" />
-                  <Text style={styles.pttLabel}>{recording ? "TRANSMITTING" : "HOLD TO TALK"}</Text>
-                  {recording && <View style={styles.recDot} />}
+            {/* Layer 3: tick dial — minimal, evenly spaced, very subtle */}
+            <DialTicks active={recording} />
+
+            {/* Layer 4: the button itself */}
+            <Animated.View style={[styles.btnAnim, { transform: [{ scale: pulse }, { scale: press }] }]}>
+              <Pressable
+                testID="ptt-button"
+                onPressIn={startRec}
+                onPressOut={stopRec}
+                style={styles.pressZone}
+              >
+                {/* Apple liquid-glass core */}
+                <View style={styles.coreShadow}>
+                  <View style={styles.coreClip}>
+                    {/* Soft blurred backdrop */}
+                    {Platform.OS !== "web" ? (
+                      <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
+                    ) : (
+                      <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(28,28,32,0.78)" }]} />
+                    )}
+                    {/* Subtle purple tint underlay */}
+                    <LinearGradient
+                      colors={
+                        recording
+                          ? ["rgba(255,69,58,0.55)", "rgba(170,30,28,0.30)"]
+                          : ["rgba(94,92,230,0.45)", "rgba(94,92,230,0.10)"]
+                      }
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    {/* Glassy top highlight */}
+                    <LinearGradient
+                      colors={["rgba(255,255,255,0.28)", "rgba(255,255,255,0.0)"]}
+                      style={styles.coreGloss}
+                    />
+                    {/* Hairline inner border */}
+                    <View style={styles.innerHairline} pointerEvents="none" />
+
+                    {/* Centered content */}
+                    <View style={styles.coreContent}>
+                      <Ionicons
+                        name={recording ? "radio" : "mic"}
+                        size={72}
+                        color="#fff"
+                        style={Platform.OS === "ios" ? { textShadowColor: "rgba(0,0,0,0.25)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 } : undefined}
+                      />
+                      <Text style={styles.pttLabel}>{recording ? "TRANSMITTING" : "HOLD TO TALK"}</Text>
+                    </View>
+
+                    {/* Tiny REC indicator */}
+                    {recording && (
+                      <View style={styles.recIndicator}>
+                        <View style={styles.recDot} />
+                        <Text style={styles.recText}>REC</Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
-              </View>
-            </Pressable>
-          </Animated.View>
+              </Pressable>
+            </Animated.View>
+          </View>
 
           <Text style={styles.hint}>
             {busy ? "Sending…" : recording ? "Release to broadcast" : `Press & hold to broadcast to ${activeCommunity?.name || "channel"}`}
@@ -237,18 +316,23 @@ export default function ComsScreen() {
         {history.length > 0 && (
           <>
             <Text style={styles.section}>Recent transmissions</Text>
-            {history.slice().reverse().map((m) => (
-              <Glass key={m.id} radius={16} style={{ marginBottom: 8, marginHorizontal: 18 }}>
-                <TouchableOpacity testID={`play-${m.id}`} style={styles.msg} onPress={() => playMessage(m)}>
-                  <View style={styles.playIcon}><Ionicons name="play" size={16} color={COLORS.primary} /></View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.msgUser}>{m.handle || "driver"}</Text>
-                    <Text style={styles.msgMeta}>{Math.round((m.duration_ms || 0) / 1000)}s · {new Date(m.created_at).toLocaleTimeString()}</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={COLORS.textDim} />
-                </TouchableOpacity>
-              </Glass>
-            ))}
+            {history.slice().reverse().map((m) => {
+              const isPlaying = playingId === m.id;
+              return (
+                <Glass key={m.id} radius={16} style={{ marginBottom: 8, marginHorizontal: 18 }}>
+                  <TouchableOpacity testID={`play-${m.id}`} style={styles.msg} onPress={() => playMessage(m)}>
+                    <View style={[styles.playIcon, isPlaying && { backgroundColor: COLORS.primary }]}>
+                      <Ionicons name={isPlaying ? "volume-high" : "play"} size={16} color={isPlaying ? "#fff" : COLORS.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.msgUser}>{m.handle || "driver"}</Text>
+                      <Text style={styles.msgMeta}>{Math.round((m.duration_ms || 0) / 1000)}s · {new Date(m.created_at).toLocaleTimeString()}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={COLORS.textDim} />
+                  </TouchableOpacity>
+                </Glass>
+              );
+            })}
           </>
         )}
       </ScrollView>
@@ -256,7 +340,6 @@ export default function ComsScreen() {
   );
 }
 
-// Hub-style card for channel selection (matches CommunityCard styling)
 function ChannelCard({ c, isActive, onPress }: { c: Community; isActive: boolean; onPress: () => void }) {
   return (
     <TouchableOpacity testID={`channel-${c.id}`} onPress={onPress} activeOpacity={0.85} style={{ marginHorizontal: 18, marginBottom: 8 }}>
@@ -284,27 +367,30 @@ function ChannelCard({ c, isActive, onPress }: { c: Community; isActive: boolean
   );
 }
 
-// Tick marks ring around the PTT button — purely decorative, animates color while recording
+// Minimal Apple-style tick dial — 24 evenly spaced ticks. Centered via parent stage.
 function DialTicks({ active }: { active: boolean }) {
-  const ticks = 36;
-  const radius = 154;
+  const ticks = 24;
+  const ringRadius = (BTN_SIZE / 2) + RING_GAP - 2;
   return (
-    <View pointerEvents="none" style={[styles.ticksRing, { width: radius * 2, height: radius * 2 }]}>
+    <View pointerEvents="none" style={styles.tickContainer}>
       {Array.from({ length: ticks }).map((_, i) => {
         const angle = (i / ticks) * 360;
-        const isMajor = i % 3 === 0;
+        const isMajor = i % 6 === 0;
         return (
           <View
             key={i}
             style={[
               styles.tick,
-              isMajor && styles.tickMajor,
               {
                 transform: [
                   { rotate: `${angle}deg` },
-                  { translateY: -radius + 4 },
+                  { translateY: -ringRadius },
                 ],
-                backgroundColor: active ? COLORS.primary + (isMajor ? "" : "88") : isMajor ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.15)",
+                backgroundColor: active
+                  ? (isMajor ? "rgba(255,255,255,0.9)" : COLORS.primary + "AA")
+                  : (isMajor ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.16)"),
+                width: isMajor ? 2 : 1.2,
+                height: isMajor ? 9 : 5,
               },
             ]}
           />
@@ -313,10 +399,6 @@ function DialTicks({ active }: { active: boolean }) {
     </View>
   );
 }
-
-const PTT_SIZE = 240;
-const HALO_SIZE = 270;
-const RIPPLE_SIZE = 290;
 
 const styles = StyleSheet.create({
   c: { flex: 1, backgroundColor: COLORS.bg },
@@ -333,50 +415,81 @@ const styles = StyleSheet.create({
   ctaGrad: { paddingVertical: 14, alignItems: "center" },
   ctaText: { color: "#fff", fontWeight: "600", fontSize: 16 },
 
-  // PTT
-  pttWrap: { alignItems: "center", justifyContent: "center", paddingVertical: 28, marginTop: 8 },
-  ticksRing: { position: "absolute", alignItems: "center", justifyContent: "center" },
-  tick: { position: "absolute", width: 2, height: 8, borderRadius: 1, backgroundColor: "rgba(255,255,255,0.15)" },
-  tickMajor: { width: 3, height: 12 },
-  ripple: {
-    position: "absolute", width: RIPPLE_SIZE, height: RIPPLE_SIZE, borderRadius: RIPPLE_SIZE / 2,
-    borderWidth: 2, borderColor: COLORS.primary,
+  // ----- PTT stage (everything centered using a fixed-size stage) -----
+  pttSection: { alignItems: "center", justifyContent: "center", paddingTop: 24, paddingBottom: 12 },
+  stage: {
+    width: STAGE, height: STAGE,
+    alignItems: "center", justifyContent: "center",
+    position: "relative",
   },
-  ptt: {
-    width: HALO_SIZE, height: HALO_SIZE, borderRadius: HALO_SIZE / 2,
+  ripple: {
+    position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+    width: STAGE, height: STAGE,
+    borderRadius: STAGE / 2,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.55)",
+  },
+  outerRing: {
+    position: "absolute",
+    width: BTN_SIZE + RING_GAP * 2, height: BTN_SIZE + RING_GAP * 2,
+    borderRadius: (BTN_SIZE + RING_GAP * 2) / 2,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
+  },
+  tickContainer: {
+    position: "absolute",
+    width: BTN_SIZE + RING_GAP * 2, height: BTN_SIZE + RING_GAP * 2,
     alignItems: "center", justifyContent: "center",
   },
-  haloRing: {
-    position: "absolute", width: HALO_SIZE, height: HALO_SIZE, borderRadius: HALO_SIZE / 2,
-    borderWidth: 1.5, borderColor: "rgba(255,255,255,0.10)",
+  tick: { position: "absolute", borderRadius: 1 },
+
+  btnAnim: {
+    width: BTN_SIZE, height: BTN_SIZE, borderRadius: BTN_SIZE / 2,
+    alignItems: "center", justifyContent: "center",
   },
+  pressZone: { width: BTN_SIZE, height: BTN_SIZE, borderRadius: BTN_SIZE / 2 },
   coreShadow: {
-    width: PTT_SIZE, height: PTT_SIZE, borderRadius: PTT_SIZE / 2,
+    width: BTN_SIZE, height: BTN_SIZE, borderRadius: BTN_SIZE / 2,
     ...Platform.select({
-      ios: { shadowColor: "#5E5CE6", shadowOpacity: 0.55, shadowRadius: 22, shadowOffset: { width: 0, height: 10 } },
-      android: { elevation: 18 },
-      web: { boxShadow: "0 12px 40px rgba(94,92,230,0.55)" } as any,
+      ios: { shadowColor: "#5E5CE6", shadowOpacity: 0.45, shadowRadius: 28, shadowOffset: { width: 0, height: 12 } },
+      android: { elevation: 16 },
+      web: { boxShadow: "0 16px 44px rgba(94,92,230,0.45), 0 4px 12px rgba(0,0,0,0.4)" } as any,
     }),
   },
-  core: {
-    flex: 1, borderRadius: PTT_SIZE / 2, overflow: "hidden",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 3, borderColor: "rgba(255,255,255,0.18)",
+  coreClip: {
+    flex: 1, borderRadius: BTN_SIZE / 2, overflow: "hidden",
+    backgroundColor: "rgba(20,20,24,0.65)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
   },
   coreGloss: {
-    position: "absolute", top: 8, left: 8, right: 8, height: PTT_SIZE * 0.42,
-    borderRadius: PTT_SIZE / 2, backgroundColor: "rgba(255,255,255,0.10)",
+    position: "absolute", top: 0, left: 0, right: 0, height: BTN_SIZE * 0.55,
+    borderTopLeftRadius: BTN_SIZE / 2, borderTopRightRadius: BTN_SIZE / 2,
+  },
+  innerHairline: {
+    position: "absolute", top: 4, left: 4, right: 4, bottom: 4,
+    borderRadius: (BTN_SIZE - 8) / 2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  coreContent: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center", justifyContent: "center", gap: 8,
   },
   pttLabel: {
-    marginTop: 10, color: "#fff", fontWeight: "800", fontSize: 14,
-    letterSpacing: 2.2,
-    ...Platform.select({ ios: { textShadowColor: "rgba(0,0,0,0.35)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 }, default: {} }),
+    color: "#fff", fontWeight: "700", fontSize: 13,
+    letterSpacing: 2.4,
+    ...Platform.select({ ios: { textShadowColor: "rgba(0,0,0,0.35)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 }, default: {} }),
   },
-  recDot: {
-    position: "absolute", top: 24, width: 10, height: 10, borderRadius: 5, backgroundColor: "#fff",
-    ...Platform.select({ ios: { shadowColor: "#fff", shadowOpacity: 0.9, shadowRadius: 6 }, default: {} }),
+  recIndicator: {
+    position: "absolute", top: 22, alignSelf: "center",
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.25)",
   },
-  hint: { color: COLORS.textDim, marginTop: 22, fontSize: 13, textAlign: "center", paddingHorizontal: 24 },
+  recDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#FF453A" },
+  recText: { color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 0.8 },
+
+  hint: { color: COLORS.textDim, marginTop: 24, fontSize: 13, textAlign: "center", paddingHorizontal: 24 },
 
   // Hub-style channel cards
   section: { color: COLORS.textDim, marginHorizontal: 18, marginTop: 22, marginBottom: 10, fontSize: 13, fontWeight: "600", letterSpacing: 0.3 },

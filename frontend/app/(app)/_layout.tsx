@@ -53,11 +53,13 @@ export default function AppLayout() {
         <Tabs.Screen name="map" options={{
           tabBarLabel: "Map",
           tabBarActiveTintColor: "#0A84FF",
+          tabBarButtonTestID: "tab-map",
           tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size - 2} color={color} />,
         }} />
         <Tabs.Screen name="talk" options={{
           tabBarLabel: "Comms",
           tabBarActiveTintColor: "#FFD60A",
+          tabBarButtonTestID: "tab-talk",
           tabBarIcon: ({ color, size }) => <Ionicons name="flash" size={size - 1} color={color} />,
         }} />
         {/* Center elevated mic CTA — replaces the old "Drive" tab. Press-and-hold to record. */}
@@ -72,11 +74,13 @@ export default function AppLayout() {
         <Tabs.Screen name="music" options={{
           tabBarLabel: "Music",
           tabBarActiveTintColor: "#FF453A",
+          tabBarButtonTestID: "tab-music",
           tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" size={size - 2} color={color} />,
         }} />
         <Tabs.Screen name="hub" options={{
           tabBarLabel: "Hub",
           tabBarActiveTintColor: "#FF9F0A",
+          tabBarButtonTestID: "tab-hub",
           tabBarIcon: ({ color, size }) => <Ionicons name="people-circle" size={size - 1} color={color} />,
         }} />
         <Tabs.Screen name="settings" options={{ href: null }} />

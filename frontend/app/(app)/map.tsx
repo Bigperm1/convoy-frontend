@@ -43,7 +43,7 @@ const maneuverIcon = (m?: string): any => {
 export default function MapScreen() {
   const { user, token } = useAuth();
   const router = useRouter();
-  const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number } | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number; speed?: number } | null>(null);
   const [hazards, setHazards] = useState<Hazard[]>([]);
   const [peers, setPeers] = useState<Record<string, Peer>>({});
   const [showReport, setShowReport] = useState(false);
@@ -231,12 +231,15 @@ export default function MapScreen() {
           { accuracy: Location.Accuracy.Balanced, timeInterval: 4000, distanceInterval: 8 },
           (pos) => {
             const h = pos.coords.heading;
-            // expo-location reports -1 when heading is unknown (stationary).
             const heading = typeof h === "number" && h >= 0 ? h : undefined;
+            // expo-location reports speed in m/s; -1 when unknown.
+            const sRaw = pos.coords.speed;
+            const speed = typeof sRaw === "number" && sRaw >= 0 ? sRaw : undefined;
             setCoords((cur) => ({
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,
               heading: heading ?? cur?.heading,
+              speed: speed ?? cur?.speed,
             }));
           }
         );
@@ -843,6 +846,11 @@ export default function MapScreen() {
         </Glass>
       )}
 
+      {/* ===== Speedometer HUD (bottom-left glass overlay) =====
+          Pulls live speed from coords.speed (m/s) → km/h. Floors small values
+          to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
+      <SpeedometerHUD speedMs={coords?.speed} />
+
       {/*
         Right-edge "peek tab" for the hazard reporter.
         - Anchored to the right edge of the screen.
@@ -884,6 +892,27 @@ function toHazard(s: SupaHazard): Hazard {
 const PEEK_W = 56;          // square edge length
 const PEEK_VISIBLE_RATIO = 0.33;
 const PEEK_HIDDEN_TX = PEEK_W * (1 - PEEK_VISIBLE_RATIO); // 67% off-screen
+
+// Speedometer HUD — bottom-left glass overlay.
+// Pulls speed (m/s) from the location watcher, converts to km/h (×3.6),
+// and floors to 0 below 1 km/h so a stationary GPS doesn't read "1".
+function SpeedometerHUD({ speedMs }: { speedMs?: number }) {
+  const kmh = (() => {
+    if (typeof speedMs !== "number" || !Number.isFinite(speedMs) || speedMs < 0) return 0;
+    const v = speedMs * 3.6;
+    return v < 1 ? 0 : Math.round(v);
+  })();
+  return (
+    <View style={styles.speedHudWrap} pointerEvents="none">
+      <Glass radius={14} style={styles.speedHud}>
+        <View style={styles.speedHudInner}>
+          <Text style={styles.speedHudValue}>{kmh}</Text>
+          <Text style={styles.speedHudUnit}>KM/H</Text>
+        </View>
+      </Glass>
+    </View>
+  );
+}
 function ReportPeekTab({ active, onPress }: { active: boolean; onPress: () => void }) {
   const tx = useRef(new Animated.Value(active ? 0 : PEEK_HIDDEN_TX)).current;
   useEffect(() => {
@@ -1013,6 +1042,41 @@ const styles = StyleSheet.create({
   // tucks 67% of the square off-screen when inactive (33% peeking) and lands at
   // x=0 when active. Square corners on the right edge, rounded on the left edge
   // so it reads as a drawer pull rather than a button.
+  // Speedometer HUD (bottom-left glass). Sits above the bottom nav so it never
+  // gets covered by the safe-area band. Uses a tabular monospaced font so the
+  // 1-3 digit number doesn't shift the layout as it ticks up/down while driving.
+  speedHudWrap: { position: "absolute", left: 12, bottom: 130, zIndex: 6 },
+  speedHud: { },
+  speedHudInner: {
+    minWidth: 92,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  speedHudValue: {
+    color: "#FFC700",
+    fontSize: 30,
+    fontWeight: "800",
+    letterSpacing: 1,
+    lineHeight: 32,
+    fontVariant: ["tabular-nums"],
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      web: "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
+      default: "monospace",
+    }) as any,
+    textShadowColor: "rgba(255,199,0,0.45)",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+  },
+  speedHudUnit: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 1.6,
+    marginTop: 2,
+  },
   peekWrap: { position: "absolute", right: 0, bottom: 130, width: 56, height: 56 },
   peekBtn: {
     width: 56, height: 56,

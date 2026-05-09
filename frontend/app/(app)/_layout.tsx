@@ -51,7 +51,7 @@ export default function AppLayout() {
         }}
       >
         <Tabs.Screen name="map" options={{ tabBarLabel: "Map", tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size - 2} color={color} /> }} />
-        <Tabs.Screen name="talk" options={{ tabBarLabel: "Talk", tabBarIcon: ({ color, size }) => <Ionicons name="mic" size={size - 2} color={color} /> }} />
+        <Tabs.Screen name="talk" options={{ tabBarLabel: "Coms", tabBarIcon: ({ color, size }) => <Ionicons name="mic" size={size - 2} color={color} /> }} />
         {/* Center elevated mic CTA — replaces the old "Drive" tab. Press-and-hold to record. */}
         <Tabs.Screen
           name="voice"

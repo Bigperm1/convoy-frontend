@@ -634,6 +634,45 @@ async def _fetch_one_feed(client: httpx.AsyncClient, key: str, url: str, params:
     except Exception as e:
         return {"key": key, "url": url, "status": "parse_error", "error": str(e)[:120], "alerts": []}
 
+@api.get("/directions")
+async def directions_proxy(
+    origin_lat: float, origin_lng: float,
+    dest_lat: float, dest_lng: float,
+    avoid_tolls: bool = False,
+    avoid_highways: bool = False,
+    avoid_ferries: bool = False,
+    user=Depends(get_current_user),
+):
+    """Proxy for the Google Directions API.
+
+    The browser cannot call the Directions REST endpoint directly because Google
+    doesn't return CORS headers on it. This route lets the web client fetch a
+    multi-route response (with alternates) the same way native does.
+    """
+    key = os.environ.get("GOOGLE_MAPS_KEY") or os.environ.get("EXPO_PUBLIC_GOOGLE_MAPS_KEY")
+    if not key:
+        raise HTTPException(status_code=503, detail="Google Maps key not configured")
+    avoid_parts = []
+    if avoid_tolls: avoid_parts.append("tolls")
+    if avoid_highways: avoid_parts.append("highways")
+    if avoid_ferries: avoid_parts.append("ferries")
+    params = {
+        "origin": f"{origin_lat},{origin_lng}",
+        "destination": f"{dest_lat},{dest_lng}",
+        "mode": "driving",
+        "alternatives": "true",
+        "key": key,
+    }
+    if avoid_parts:
+        params["avoid"] = "|".join(avoid_parts)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            r = await c.get("https://maps.googleapis.com/maps/api/directions/json", params=params)
+            return r.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"directions upstream error: {e}")
+
+
 @api.get("/feed/external")
 async def external_feed(
     user=Depends(get_current_user),

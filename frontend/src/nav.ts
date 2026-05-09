@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 import * as Speech from "expo-speech";
+import { api } from "./api";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -77,50 +78,67 @@ export async function fetchDirections(
   destination: LatLng,
   avoid?: AvoidPrefs
 ): Promise<NavRoute[]> {
-  const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
-  if (!KEY) return [];
-  const url = new URL("https://maps.googleapis.com/maps/api/directions/json");
-  url.searchParams.set("origin", `${origin.lat},${origin.lng}`);
-  url.searchParams.set("destination", `${destination.lat},${destination.lng}`);
-  url.searchParams.set("mode", "driving");
-  url.searchParams.set("alternatives", "true");
-  // Google expects a pipe-separated list of features to avoid, e.g. "tolls|highways"
-  const avoidParts: string[] = [];
-  if (avoid?.tolls) avoidParts.push("tolls");
-  if (avoid?.highways) avoidParts.push("highways");
-  if (avoid?.ferries) avoidParts.push("ferries");
-  if (avoidParts.length) url.searchParams.set("avoid", avoidParts.join("|"));
-  url.searchParams.set("key", KEY);
+  // On WEB the Google Directions REST endpoint blocks browser fetches via CORS,
+  // so we round-trip through the FastAPI proxy at /api/directions which has the
+  // same query surface. Native (iOS/Android) hits Google directly for low latency.
+  let data: any = null;
   try {
-    const res = await fetch(url.toString());
-    const data = await res.json();
-    if (data.status !== "OK" || !Array.isArray(data.routes)) return [];
-    return data.routes
-      .map((r: any): NavRoute | null => {
-        const leg = r?.legs?.[0];
-        if (!leg) return null;
-        return {
-          polyline: r.overview_polyline?.points || "",
-          summary: r.summary || "",
-          distance_text: leg.distance?.text || "",
-          duration_text: leg.duration?.text || "",
-          distance_m: leg.distance?.value || 0,
-          duration_s: leg.duration?.value || 0,
-          steps: (leg.steps || []).map((s: any): NavStep => ({
-            html: (s.html_instructions || "").replace(/<[^>]+>/g, ""),
-            distance_text: s.distance?.text || "",
-            distance_m: s.distance?.value || 0,
-            duration_text: s.duration?.text || "",
-            maneuver: s.maneuver,
-            start: { lat: s.start_location?.lat, lng: s.start_location?.lng },
-            end: { lat: s.end_location?.lat, lng: s.end_location?.lng },
-          })),
-        };
-      })
-      .filter(Boolean) as NavRoute[];
+    if (Platform.OS === "web") {
+      const params = {
+        origin_lat: origin.lat,
+        origin_lng: origin.lng,
+        dest_lat: destination.lat,
+        dest_lng: destination.lng,
+        avoid_tolls: !!avoid?.tolls,
+        avoid_highways: !!avoid?.highways,
+        avoid_ferries: !!avoid?.ferries,
+      };
+      const res = await api.get("/directions", { params });
+      data = res.data;
+    } else {
+      const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
+      if (!KEY) return [];
+      const url = new URL("https://maps.googleapis.com/maps/api/directions/json");
+      url.searchParams.set("origin", `${origin.lat},${origin.lng}`);
+      url.searchParams.set("destination", `${destination.lat},${destination.lng}`);
+      url.searchParams.set("mode", "driving");
+      url.searchParams.set("alternatives", "true");
+      const avoidParts: string[] = [];
+      if (avoid?.tolls) avoidParts.push("tolls");
+      if (avoid?.highways) avoidParts.push("highways");
+      if (avoid?.ferries) avoidParts.push("ferries");
+      if (avoidParts.length) url.searchParams.set("avoid", avoidParts.join("|"));
+      url.searchParams.set("key", KEY);
+      const res = await fetch(url.toString());
+      data = await res.json();
+    }
   } catch {
     return [];
   }
+  if (!data || data.status !== "OK" || !Array.isArray(data.routes)) return [];
+  return data.routes
+    .map((r: any): NavRoute | null => {
+      const leg = r?.legs?.[0];
+      if (!leg) return null;
+      return {
+        polyline: r.overview_polyline?.points || "",
+        summary: r.summary || "",
+        distance_text: leg.distance?.text || "",
+        duration_text: leg.duration?.text || "",
+        distance_m: leg.distance?.value || 0,
+        duration_s: leg.duration?.value || 0,
+        steps: (leg.steps || []).map((s: any): NavStep => ({
+          html: (s.html_instructions || "").replace(/<[^>]+>/g, ""),
+          distance_text: s.distance?.text || "",
+          distance_m: s.distance?.value || 0,
+          duration_text: s.duration?.text || "",
+          maneuver: s.maneuver,
+          start: { lat: s.start_location?.lat, lng: s.start_location?.lng },
+          end: { lat: s.end_location?.lat, lng: s.end_location?.lng },
+        })),
+      };
+    })
+    .filter(Boolean) as NavRoute[];
 }
 
 // ---- Turn-by-turn engine ----

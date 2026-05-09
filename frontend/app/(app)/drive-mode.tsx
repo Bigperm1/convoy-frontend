@@ -3,7 +3,7 @@
 // This screen mirrors the layout that will be projected to the head unit so users can preview it on phone.
 
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Platform, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -27,6 +27,7 @@ export default function DriveMode() {
   return (
     <SafeAreaView style={styles.c} edges={["top", "bottom"]}>
       <View style={styles.header}>
+        <Image source={require("../../assets/images/brand-mark.png")} style={styles.driveMark} resizeMode="contain" />
         <Text style={styles.title}>Drive Mode</Text>
         <TouchableOpacity testID="drive-mode-exit" onPress={() => router.back()} style={styles.exitBtn}>
           <Ionicons name="close" size={28} color={COLORS.text} />
@@ -55,6 +56,7 @@ const styles = StyleSheet.create({
   c: { flex: 1, backgroundColor: COLORS.bg, padding: 16 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
   title: { color: COLORS.text, fontSize: 30, fontWeight: "800", letterSpacing: -0.6 },
+  driveMark: { width: 36, height: 36, marginRight: 10 },
   exitBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.10)", alignItems: "center", justifyContent: "center" },
   grid: { flex: 1, gap: 14 },
   row: { flex: 1, flexDirection: "row", gap: 14 },

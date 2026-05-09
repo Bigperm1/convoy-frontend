@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput,
-  KeyboardAvoidingView, Platform, Alert, Modal, RefreshControl, Share,
+  KeyboardAvoidingView, Platform, Alert, Modal, RefreshControl, Share, Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -56,9 +56,9 @@ export default function HubScreen() {
         {mine.length === 0 && (
           <Glass radius={20}>
             <View style={{ padding: 22, alignItems: "center" }}>
-              <Ionicons name="people-outline" size={36} color={COLORS.textDim} />
+              <Image source={require("../../assets/images/brand-mark.png")} style={{ width: 64, height: 64, marginBottom: 4, opacity: 0.85 }} resizeMode="contain" />
               <Text style={styles.emptyTitle}>No communities yet</Text>
-              <Text style={styles.emptyText}>Create your own group or search public communities to join.</Text>
+              <Text style={styles.emptyText}>Create your own crew or search public communities to join the convoy.</Text>
             </View>
           </Glass>
         )}

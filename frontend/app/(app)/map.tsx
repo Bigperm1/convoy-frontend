@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -528,6 +528,7 @@ export default function MapScreen() {
       <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
         <Glass radius={20} style={{ marginHorizontal: 12, marginBottom: 8 }}>
           <View style={styles.topRow}>
+            <Image source={require("../../assets/images/brand-mark.png")} style={styles.headerMark} resizeMode="contain" />
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 <Text style={styles.title}>Map</Text>
@@ -840,6 +841,7 @@ const styles = StyleSheet.create({
 
   topBar: { position: "absolute", top: 0, left: 0, right: 0 },
   topRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
+  headerMark: { width: 36, height: 36 },
   title: { color: COLORS.text, fontSize: 26, fontWeight: "700", letterSpacing: -0.6 },
   sub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
   iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(118,118,128,0.32)", alignItems: "center", justifyContent: "center" },

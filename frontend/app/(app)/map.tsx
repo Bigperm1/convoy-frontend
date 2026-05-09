@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import * as Speech from "expo-speech";
+import { LinearGradient } from "expo-linear-gradient";
 import { api, formatErr, wsUrl } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
@@ -837,11 +838,18 @@ export default function MapScreen() {
         </Glass>
       )}
 
-      <TouchableOpacity testID="report-fab" style={styles.fab} onPress={() => setShowReport((s) => !s)} activeOpacity={0.85}>
-        <View style={styles.fabInner}>
-          <Ionicons name={showReport ? "close" : "add"} size={28} color="#fff" />
-        </View>
-      </TouchableOpacity>
+      {/*
+        Right-edge "peek tab" for the hazard reporter.
+        - Anchored to the right edge of the screen.
+        - INACTIVE: slides 67% off-screen, leaving ~33% of the square visible
+          like a drawer pull. Tap once to slide it fully out + open the panel.
+        - ACTIVE: fully on-screen at translateX = 0.
+        We animate translateX with Animated.spring for a tactile feel.
+      */}
+      <ReportPeekTab
+        active={showReport}
+        onPress={() => setShowReport((s) => !s)}
+      />
 
       <PeerModal
         peer={selectedPeer ? { ...selectedPeer } as any : null}
@@ -863,6 +871,45 @@ function toHazard(s: SupaHazard): Hazard {
     confirms: s.confirms,
     disputes: s.disputes,
   };
+}
+
+// Right-edge "peek tab" for hazard reporting.
+// Inactive: tucked off-screen with ~33% peeking out (drawer-pull affordance).
+// Active: animated slide to fully-visible at the right edge of the screen.
+const PEEK_W = 56;          // square edge length
+const PEEK_VISIBLE_RATIO = 0.33;
+const PEEK_HIDDEN_TX = PEEK_W * (1 - PEEK_VISIBLE_RATIO); // 67% off-screen
+function ReportPeekTab({ active, onPress }: { active: boolean; onPress: () => void }) {
+  const tx = useRef(new Animated.Value(active ? 0 : PEEK_HIDDEN_TX)).current;
+  useEffect(() => {
+    Animated.spring(tx, {
+      toValue: active ? 0 : PEEK_HIDDEN_TX,
+      useNativeDriver: true,
+      friction: 9,
+      tension: 90,
+    }).start();
+  }, [active, tx]);
+  return (
+    <Animated.View
+      pointerEvents="box-none"
+      style={[styles.peekWrap, { transform: [{ translateX: tx }] }]}
+    >
+      <TouchableOpacity
+        testID="report-fab"
+        onPress={onPress}
+        activeOpacity={0.85}
+        style={styles.peekBtn}
+      >
+        <LinearGradient
+          colors={active ? ["#FF453A", "#A6201E"] : [COLORS.primary, COLORS.primaryDim]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+        <Ionicons name={active ? "close" : "warning"} size={26} color="#fff" />
+      </TouchableOpacity>
+    </Animated.View>
+  );
 }
 
 // Community moderation: when disputes outweigh confirms by a margin, hide the hazard.
@@ -957,6 +1004,24 @@ const styles = StyleSheet.create({
   confirmBtn: { paddingHorizontal: 14, paddingVertical: 10, backgroundColor: COLORS.primary + "33", borderRadius: 12, borderWidth: 1, borderColor: COLORS.primary + "55" },
   confirmText: { color: COLORS.primary, fontWeight: "700" },
 
+  // Right-edge "peek tab" wrapper. Anchored to right=0 so the slide-out animation
+  // tucks 67% of the square off-screen when inactive (33% peeking) and lands at
+  // x=0 when active. Square corners on the right edge, rounded on the left edge
+  // so it reads as a drawer pull rather than a button.
+  peekWrap: { position: "absolute", right: 0, bottom: 130, width: 56, height: 56 },
+  peekBtn: {
+    width: 56, height: 56,
+    borderTopLeftRadius: 14, borderBottomLeftRadius: 14,
+    borderTopRightRadius: 0, borderBottomRightRadius: 0,
+    overflow: "hidden",
+    alignItems: "center", justifyContent: "center",
+    ...Platform.select({
+      ios: { shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 14, shadowOffset: { width: -2, height: 6 } },
+      android: { elevation: 8 },
+      web: { boxShadow: "-4px 6px 18px rgba(0,0,0,0.4)" } as any,
+    }),
+  },
+  // Legacy circular FAB styles kept for reference (now unused).
   fab: { position: "absolute", bottom: 120, right: 18, width: 60, height: 60, borderRadius: 30, overflow: "hidden" },
   fabInner: { flex: 1, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center" },
 

@@ -71,7 +71,7 @@ export default function MapScreen() {
     let cancelled = false;
 
     const fetchHazards = async () => {
-      if (SUPABASE_ENABLED) {
+      if (SUPABASE_ENABLED && supabase) {
         const { data, error } = await supabase
           .from("hazards")
           .select("*")
@@ -90,7 +90,7 @@ export default function MapScreen() {
     };
     fetchHazards();
 
-    if (!SUPABASE_ENABLED) { setLive("off"); return; }
+    if (!SUPABASE_ENABLED || !supabase) { setLive("off"); return; }
 
     const channel = supabase
       .channel("public:hazards")
@@ -117,7 +117,7 @@ export default function MapScreen() {
 
     return () => {
       cancelled = true;
-      try { supabase.removeChannel(channel); } catch {}
+      try { if (supabase) supabase.removeChannel(channel); } catch {}
     };
   }, []);
 
@@ -151,7 +151,7 @@ export default function MapScreen() {
     const j = () => (Math.random() - 0.5) * 0.005;
     const lat = coords.lat + j(); const lng = coords.lng + j();
     try {
-      if (SUPABASE_ENABLED) {
+      if (SUPABASE_ENABLED && supabase) {
         const { error } = await supabase.from("hazards").insert({
           kind, lat, lng, reporter_handle: user?.handle || "anon",
         });
@@ -167,7 +167,7 @@ export default function MapScreen() {
 
   const confirmHazard = async (h: Hazard) => {
     try {
-      if (SUPABASE_ENABLED) {
+      if (SUPABASE_ENABLED && supabase) {
         await supabase.from("hazards").update({ confirms: (h.confirms || 1) + 1 }).eq("id", h.id);
       } else {
         await api.post(`/hazards/${h.id}/confirm`);

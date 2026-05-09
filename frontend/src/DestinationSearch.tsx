@@ -175,15 +175,20 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           onSubmitEditing={submit}
           blurOnSubmit={false}
         />
+        {/* Always-visible Go button so users (and headless tests) can submit reliably.
+            No-ops on empty input. */}
+        <TouchableOpacity
+          testID="destination-go"
+          onPress={submit}
+          style={[styles.goBtn, !text.trim() && styles.goBtnDisabled]}
+          disabled={!text.trim()}
+        >
+          <Ionicons name="arrow-forward" size={18} color="#fff" />
+        </TouchableOpacity>
         {!!text && (
-          <>
-            <TouchableOpacity testID="destination-go" onPress={submit} style={styles.goBtn}>
-              <Ionicons name="arrow-forward" size={18} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity testID="destination-clear" onPress={clear}>
-              <Ionicons name="close-circle" size={20} color={COLORS.textDim} />
-            </TouchableOpacity>
-          </>
+          <TouchableOpacity testID="destination-clear" onPress={clear}>
+            <Ionicons name="close-circle" size={20} color={COLORS.textDim} />
+          </TouchableOpacity>
         )}
       </View>
       {open && suggestions.length > 0 && (
@@ -213,6 +218,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
     alignItems: "center", justifyContent: "center",
   },
+  goBtnDisabled: { opacity: 0.35 },
   list: { backgroundColor: "rgba(28,28,30,0.96)", borderRadius: 12, marginTop: 8, borderWidth: 1, borderColor: COLORS.hairline, overflow: "hidden" },
   row: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12 },
   rowText: { color: COLORS.text, flex: 1, fontSize: 14 },

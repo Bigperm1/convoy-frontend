@@ -46,11 +46,17 @@ export default function Signup() {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: COLORS.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={{ padding: 24, paddingTop: 60 }} keyboardShouldPersistTaps="handled">
-        <View style={{ alignItems: "center", marginBottom: 8 }}>
-          <Image source={require("../../assets/images/brand-mark.png")} style={{ width: 76, height: 76, marginBottom: 8 }} resizeMode="contain" />
+        {/* Centered header — logo, title, and tagline share a single column,
+            evenly spaced vertically and centered horizontally. */}
+        <View style={styles.header}>
+          <Image
+            source={require("../../assets/images/brand-mark.png")}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <Text style={styles.title}>Join Convoy</Text>
+          <Text style={styles.tag}>Set up your driver profile</Text>
         </View>
-        <Text style={styles.title}>Join Convoy</Text>
-        <Text style={styles.tag}>Set up your driver profile</Text>
 
         <Glass radius={28} style={{ marginTop: 22 }}>
           <View style={{ padding: 20 }}>
@@ -72,14 +78,15 @@ export default function Signup() {
             <Field label="Color" testID="signup-color" value={color} onChange={setColor} placeholder="Bayside Blue" />
 
             <TouchableOpacity testID="signup-submit" onPress={submit} disabled={busy} style={styles.btn} activeOpacity={0.85}>
-              <LinearGradient colors={[COLORS.primary, COLORS.primaryDim]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
+              {/* Convoy yellow CTA — dark text for contrast. */}
+              <LinearGradient colors={["#FFE45C", "#FFC700", "#FF9F0A"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
                 <Text style={styles.btnText}>{busy ? "Creating…" : "Create account"}</Text>
               </LinearGradient>
             </TouchableOpacity>
 
             <Link href="/(auth)/login" asChild>
               <TouchableOpacity testID="link-login" style={{ marginTop: 14, alignItems: "center" }}>
-                <Text style={{ color: COLORS.textDim }}>Already a member? <Text style={{ color: COLORS.primary, fontWeight: "600" }}>Sign in</Text></Text>
+                <Text style={{ color: COLORS.textDim }}>Already a member? <Text style={styles.signInLink}>Sign in</Text></Text>
               </TouchableOpacity>
             </Link>
           </View>
@@ -109,12 +116,17 @@ function Field({ label, value, onChange, placeholder, secure, auto, keyboard, te
 }
 
 const styles = StyleSheet.create({
-  title: { color: COLORS.text, fontSize: 32, fontWeight: "700", letterSpacing: -0.8 },
-  tag: { color: COLORS.textDim, marginTop: 4, fontSize: 15 },
+  // Header block — logo + title + tag, all centered as one column
+  header: { alignItems: "center", justifyContent: "center", marginBottom: 4 },
+  logo: { width: 96, height: 96, marginBottom: 12 },
+  title: { color: COLORS.text, fontSize: 32, fontWeight: "700", letterSpacing: -0.8, textAlign: "center" },
+  tag: { color: COLORS.textDim, marginTop: 4, fontSize: 15, textAlign: "center" },
   label: { color: COLORS.textDim, fontSize: 13, marginTop: 12, marginBottom: 6, fontWeight: "500" },
   section: { color: COLORS.text, fontSize: 17, fontWeight: "600", marginTop: 22, letterSpacing: -0.3 },
   input: { backgroundColor: "rgba(118,118,128,0.18)", color: COLORS.text, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12, fontSize: 16 },
   btn: { marginTop: 22, borderRadius: 14, overflow: "hidden" },
   btnGrad: { paddingVertical: 16, alignItems: "center" },
-  btnText: { color: "#fff", fontWeight: "600", fontSize: 16 },
+  // Dark, high-contrast text for the yellow CTA — matches the brand-mark glyph color.
+  btnText: { color: "#1a1a1a", fontWeight: "700", fontSize: 16, letterSpacing: 0.2 },
+  signInLink: { color: "#FFC700", fontWeight: "600" },
 });

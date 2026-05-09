@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert, Image,
 } from "react-native";
 import { useRouter, Link } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -46,6 +46,9 @@ export default function Signup() {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: COLORS.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={{ padding: 24, paddingTop: 60 }} keyboardShouldPersistTaps="handled">
+        <View style={{ alignItems: "center", marginBottom: 8 }}>
+          <Image source={require("../../assets/images/brand-mark.png")} style={{ width: 76, height: 76, marginBottom: 8 }} resizeMode="contain" />
+        </View>
         <Text style={styles.title}>Join Convoy</Text>
         <Text style={styles.tag}>Set up your driver profile</Text>
 

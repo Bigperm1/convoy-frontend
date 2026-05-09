@@ -39,9 +39,12 @@ export default function Login() {
         <LinearGradient colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.6)", "#000"]} style={StyleSheet.absoluteFill} pointerEvents="none" />
 
         <View style={styles.brand}>
-          <View style={styles.logoBox} testID="logo">
-            <Ionicons name="navigate" size={42} color={COLORS.text} />
-          </View>
+          <Image
+            source={require("../../assets/images/brand-mark.png")}
+            style={styles.brandLogo}
+            resizeMode="contain"
+            testID="logo"
+          />
           <Text style={styles.title}>Convoy</Text>
           <Text style={styles.tag}>Drive together. See everything.</Text>
         </View>
@@ -94,6 +97,7 @@ const styles = StyleSheet.create({
   blobBlue: { position: "absolute", top: -120, right: -80, width: 360, height: 360, borderRadius: 999, backgroundColor: COLORS.primary, opacity: 0.18, filter: "blur(80px)" as any },
   blobIndigo: { position: "absolute", bottom: -120, left: -100, width: 320, height: 320, borderRadius: 999, backgroundColor: COLORS.accent, opacity: 0.16 },
   brand: { alignItems: "center", marginBottom: 32 },
+  brandLogo: { width: 110, height: 110, marginBottom: 14 },
   logoBox: {
     width: 84, height: 84, borderRadius: 24, alignItems: "center", justifyContent: "center", marginBottom: 18,
     backgroundColor: COLORS.surfaceSolid, borderWidth: 1, borderColor: COLORS.hairlineStrong,

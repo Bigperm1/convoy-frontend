@@ -64,6 +64,9 @@ class CarUpdate(BaseModel):
     car_year: Optional[int] = None
     car_color: Optional[str] = None
     car_type: Optional[str] = None
+    # Personal best top cruise speed in km/h. Sent from the map screen whenever
+    # the user beats their own record (throttled client-side to ≤ 1/min).
+    top_speed_record: Optional[float] = None
 
 class LocationIn(BaseModel):
     lat: float
@@ -139,6 +142,7 @@ def public_user(u: dict) -> dict:
         "car_make": u.get("car_make", ""), "car_model": u.get("car_model", ""),
         "car_year": u.get("car_year"), "car_color": u.get("car_color", ""),
         "car_type": u.get("car_type", "sedan"),
+        "top_speed_record": float(u.get("top_speed_record") or 0),
         "lat": u.get("lat"), "lng": u.get("lng"),
         "heading": u.get("heading", 0), "speed": u.get("speed", 0),
     }
@@ -190,6 +194,7 @@ async def register(body: RegisterIn):
         "handle": body.handle, "car_make": body.car_make or "", "car_model": body.car_model or "",
         "car_year": body.car_year, "car_color": body.car_color or "",
         "car_type": body.car_type or "sedan",
+        "top_speed_record": 0.0,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "lat": None, "lng": None, "heading": 0, "speed": 0, "last_seen": None,
     }

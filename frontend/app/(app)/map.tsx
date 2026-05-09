@@ -44,6 +44,14 @@ export default function MapScreen() {
   const { user, token } = useAuth();
   const router = useRouter();
   const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number; speed?: number } | null>(null);
+
+  // ---- Personal Best speed tracking ----
+  // sessionMaxSpeed: highest km/h seen since the screen mounted (in-memory only).
+  // We compare it against the user's persisted top_speed_record on each tick;
+  // once we beat the persisted record we PUT it to the backend, throttled to
+  // at most once every 60s to keep battery + network use low while driving.
+  const [sessionMaxSpeed, setSessionMaxSpeed] = useState(0);
+  const lastTopSyncAtRef = useRef(0);
   const [hazards, setHazards] = useState<Hazard[]>([]);
   const [peers, setPeers] = useState<Record<string, Peer>>({});
   const [showReport, setShowReport] = useState(false);
@@ -232,7 +240,6 @@ export default function MapScreen() {
           (pos) => {
             const h = pos.coords.heading;
             const heading = typeof h === "number" && h >= 0 ? h : undefined;
-            // expo-location reports speed in m/s; -1 when unknown.
             const sRaw = pos.coords.speed;
             const speed = typeof sRaw === "number" && sRaw >= 0 ? sRaw : undefined;
             setCoords((cur) => ({
@@ -241,6 +248,13 @@ export default function MapScreen() {
               heading: heading ?? cur?.heading,
               speed: speed ?? cur?.speed,
             }));
+            // Personal-best tracking: convert m/s → km/h, ignore stationary jitter (<1 km/h)
+            if (typeof speed === "number") {
+              const kmh = speed * 3.6;
+              if (kmh >= 1) {
+                setSessionMaxSpeed((m) => (kmh > m ? kmh : m));
+              }
+            }
           }
         );
       } catch {}
@@ -427,6 +441,25 @@ export default function MapScreen() {
     ? `convoy:community:${settings.activeCommunityId}`
     : "convoy:global";
 
+  // ----- Throttled top_speed_record sync -----
+  // Run whenever sessionMaxSpeed advances. If the new max beats the persisted
+  // top_speed_record AND we haven't synced in the last 60s, PUT the new record
+  // to /auth/profile and refresh the auth user. Battery-friendly cadence.
+  useEffect(() => {
+    if (!user) return;
+    const persisted = user.top_speed_record || 0;
+    if (sessionMaxSpeed <= persisted) return;
+    const now = Date.now();
+    if (now - lastTopSyncAtRef.current < 60_000) return;
+    lastTopSyncAtRef.current = now;
+    (async () => {
+      try {
+        await api.put("/auth/profile", { top_speed_record: Math.round(sessionMaxSpeed * 10) / 10 });
+        await refresh();
+      } catch {}
+    })();
+  }, [sessionMaxSpeed, user?.top_speed_record]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const presence = useConvoyPresence(
     presenceChannel,
     user ? {
@@ -437,6 +470,9 @@ export default function MapScreen() {
       // Pass car body silhouette + color so other drivers see the right top-down icon.
       carBody: (user as any).car_type || "sedan",
       carColor: user.car_color || undefined,
+      // Personal best — live max-of(sessionMaxSpeed, persisted) so peers see
+      // an up-to-date number even before the throttled sync fires.
+      topSpeed: Math.max(user.top_speed_record || 0, sessionMaxSpeed),
     } : null,
     coords ? { lat: coords.lat, lng: coords.lng, heading: coords.heading || 0 } : null
   );

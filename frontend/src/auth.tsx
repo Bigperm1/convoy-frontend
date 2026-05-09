@@ -10,6 +10,7 @@ export type User = {
   car_year?: number | null;
   car_color?: string;
   car_type?: string;
+  top_speed_record?: number;
   lat?: number | null;
   lng?: number | null;
 };

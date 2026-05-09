@@ -15,6 +15,7 @@ import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 import { voiceBus, geocodeQuery } from "../../src/voiceBus";
 import { useExternalAlerts, registerExternalFeedBackgroundTask } from "../../src/externalFeed";
 import { useSettings } from "../../src/settings";
+import { useConvoyPresence } from "../../src/convoyPresence";
 import {
   fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtEtaSec,
@@ -358,11 +359,33 @@ export default function MapScreen() {
     return unsub;
   }, [coords]);
 
+  // ----- Convoy Realtime Presence (Supabase) -----
+  // Live peer broadcast/track via Supabase Realtime. Replaces stale REST polling for online cars.
+  // (Must be declared BEFORE any early returns to keep React hook order stable.)
+  const presence = useConvoyPresence(
+    "convoy:global",
+    user ? { user_id: user.id, handle: user.handle, carType: user?.car?.model || user?.car?.make } : null,
+    coords ? { lat: coords.lat, lng: coords.lng, heading: 0 } : null
+  );
+
   if (!coords) {
     return <View style={styles.loader}><Text style={{ color: COLORS.textDim }}>Locating…</Text></View>;
   }
 
-  const peerList = Object.values(peers);
+  // Merge Supabase-presence peers with the legacy REST/WS peers map.
+  // Presence wins (live & most recent) when the same user_id appears in both.
+  const peerList = (() => {
+    const byId: Record<string, Peer> = { ...peers };
+    presence.peers.forEach((p) => {
+      byId[p.user_id] = {
+        user_id: p.user_id,
+        handle: p.handle,
+        lat: p.lat,
+        lng: p.lng,
+      } as Peer;
+    });
+    return Object.values(byId);
+  })();
   const liveDot = live === "live" ? COLORS.success : live === "connecting" ? COLORS.warning : COLORS.danger;
   const liveText = live === "live" ? "Live" : live === "connecting" ? "Connecting" : "Offline";
 

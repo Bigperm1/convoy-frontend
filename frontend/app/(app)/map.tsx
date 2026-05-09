@@ -417,15 +417,22 @@ export default function MapScreen() {
   const seenRouteIdsRef = useRef<Set<string>>(new Set());
 
   // Resolve admin status of the active community (refresh when activeCommunityId changes)
+  const [activeMapEnabled, setActiveMapEnabled] = useState(true);
   useEffect(() => {
     let cancelled = false;
     const cid = settings.activeCommunityId;
-    if (!cid) { setIsAdminOfActive(false); return; }
+    if (!cid) { setIsAdminOfActive(false); setActiveMapEnabled(true); return; }
     (async () => {
       try {
         const { data } = await api.get(`/communities/${cid}`);
-        if (!cancelled) setIsAdminOfActive(!!data?.is_admin);
-      } catch { if (!cancelled) setIsAdminOfActive(false); }
+        if (!cancelled) {
+          setIsAdminOfActive(!!data?.is_admin);
+          // Default to true if the field is missing on legacy communities
+          setActiveMapEnabled(data?.map_enabled !== false);
+        }
+      } catch {
+        if (!cancelled) { setIsAdminOfActive(false); setActiveMapEnabled(true); }
+      }
     })();
     return () => { cancelled = true; };
   }, [settings.activeCommunityId]);
@@ -669,8 +676,9 @@ export default function MapScreen() {
               <Ionicons name={showSteps ? "chevron-down" : "list"} size={18} color={COLORS.text} />
               <Text style={styles.secBtnText}>{showSteps ? "Hide" : "Steps"}</Text>
             </TouchableOpacity>
-            {/* Admin-only: share this destination with the active community */}
-            {isAdminOfActive && settings.activeCommunityId && (
+            {/* Admin-only: share this destination with the active community.
+                Hidden if the active community has Map Connect disabled. */}
+            {isAdminOfActive && settings.activeCommunityId && activeMapEnabled && (
               <TouchableOpacity
                 testID="save-to-convoy"
                 onPress={saveCurrentDestinationToConvoy}

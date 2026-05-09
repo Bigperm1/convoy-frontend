@@ -12,7 +12,10 @@ import { api, formatErr } from "../../src/api";
 import Glass from "../../src/Glass";
 import { useSettings } from "../../src/settings";
 
-type Community = { id: string; name: string; description: string; member_count: number; is_admin: boolean };
+type Community = {
+  id: string; name: string; description: string; member_count: number; is_admin: boolean;
+  walkie_enabled?: boolean;
+};
 type PTT = { id: string; channel: string; user_id: string; handle: string; audio_b64: string; duration_ms: number; created_at: string };
 
 // Visual constants — keep PTT cleanly centered. Stage = ripple/tick area; button sits in middle.
@@ -305,16 +308,31 @@ export default function ComsScreen() {
           </Text>
         </View>
 
-        {/* ===== Channels (Hub-style cards) ===== */}
+        {/* ===== Channels (Hub-style cards) =====
+            Communities with `walkie_enabled === false` are hidden — admins use that
+            toggle to opt their crew out of PTT entirely. Membership is unchanged. */}
         <Text style={styles.section}>Channels</Text>
-        {communities.map((c) => (
-          <ChannelCard
-            key={c.id}
-            c={c}
-            isActive={active === c.id}
-            onPress={() => setActiveAndPersist(c.id)}
-          />
-        ))}
+        {communities
+          .filter((c) => c.walkie_enabled !== false)
+          .map((c) => (
+            <ChannelCard
+              key={c.id}
+              c={c}
+              isActive={active === c.id}
+              onPress={() => setActiveAndPersist(c.id)}
+            />
+          ))}
+        {communities.length > 0 && communities.every((c) => c.walkie_enabled === false) && (
+          <Glass radius={16} style={{ marginHorizontal: 18, marginTop: 6 }}>
+            <View style={{ padding: 16, alignItems: "center" }}>
+              <Ionicons name="flash-off" size={22} color={COLORS.textDim} />
+              <Text style={[styles.emptyTitle, { marginTop: 8 }]}>Walkie disabled</Text>
+              <Text style={styles.emptyText}>
+                None of your communities have Walkie-Talkie Connect enabled. An admin can turn it on from Hub → community → settings.
+              </Text>
+            </View>
+          </Glass>
+        )}
 
         {/* ===== Recent transmissions ===== */}
         {history.length > 0 && (

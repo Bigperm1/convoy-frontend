@@ -257,12 +257,12 @@ export default function ComsScreen() {
                     ) : (
                       <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(28,28,32,0.78)" }]} />
                     )}
-                    {/* Subtle yellow tint underlay (red while transmitting for emphasis) */}
+                    {/* Bright orange tint underlay (red while transmitting for emphasis) */}
                     <LinearGradient
                       colors={
                         recording
-                          ? ["rgba(255,69,58,0.55)", "rgba(170,30,28,0.30)"]
-                          : ["rgba(255,214,10,0.55)", "rgba(255,159,10,0.18)"]
+                          ? ["rgba(255,69,58,0.65)", "rgba(170,30,28,0.30)"]
+                          : ["rgba(255,122,0,0.78)", "rgba(255,87,0,0.30)"]
                       }
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
@@ -454,9 +454,9 @@ const styles = StyleSheet.create({
   coreShadow: {
     width: BTN_SIZE, height: BTN_SIZE, borderRadius: BTN_SIZE / 2,
     ...Platform.select({
-      ios: { shadowColor: "#FFD60A", shadowOpacity: 0.55, shadowRadius: 28, shadowOffset: { width: 0, height: 12 } },
+      ios: { shadowColor: "#FF6A00", shadowOpacity: 0.65, shadowRadius: 28, shadowOffset: { width: 0, height: 12 } },
       android: { elevation: 16 },
-      web: { boxShadow: "0 16px 44px rgba(255,214,10,0.55), 0 4px 12px rgba(0,0,0,0.4)" } as any,
+      web: { boxShadow: "0 16px 44px rgba(255,106,0,0.6), 0 4px 12px rgba(0,0,0,0.4)" } as any,
     }),
   },
   coreClip: {

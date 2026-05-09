@@ -58,7 +58,7 @@ export default function AppLayout() {
         }} />
         <Tabs.Screen name="talk" options={{
           tabBarLabel: "Comms",
-          tabBarActiveTintColor: "#FFD60A",
+          tabBarActiveTintColor: "#FF6A00",
           tabBarButtonTestID: "tab-talk",
           tabBarIcon: ({ color, size }) => <Ionicons name="flash" size={size - 1} color={color} />,
         }} />

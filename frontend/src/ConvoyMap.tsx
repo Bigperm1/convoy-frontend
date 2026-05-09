@@ -1,29 +1,37 @@
-// Native implementation using react-native-maps (works in EAS dev build / production)
-import React from "react";
-import { View, Text, StyleSheet, Platform } from "react-native";
+// Native (Expo Go) ConvoyMap fallback with route preview.
+// Until the user runs an EAS dev build, react-native-maps native module isn't available.
+// This component renders a stylized SVG canvas with: peer dots, hazard pins, user position,
+// and (when a destination + encoded polyline are passed) the decoded route as an animated path.
+
+import React, { useMemo } from "react";
+import { View, Text, StyleSheet, Dimensions, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import Svg, { Path, Circle, G, Defs, LinearGradient as SvgGrad, Stop, Rect } from "react-native-svg";
 import { COLORS } from "./theme";
 
 let MapView: any = null;
 let Marker: any = null;
+let Polyline: any = null;
 try {
-  // Lazy require — react-native-maps requires native config that's only present in EAS builds.
-  // Falls back to a placeholder gracefully in Expo Go.
   const m = require("react-native-maps");
   MapView = m.default;
   Marker = m.Marker;
+  Polyline = m.Polyline;
 } catch {}
+
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
 export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number };
 export type Peer = { user_id: string; handle?: string; lat: number; lng: number };
 export type LatLng = { lat: number; lng: number };
 
 type Props = {
-  center: { lat: number; lng: number };
+  center: LatLng;
   user: { lat: number; lng: number; heading?: number };
   peers: Peer[];
   hazards: Hazard[];
-  destination?: { lat: number; lng: number } | null;
+  destination?: LatLng | null;
+  encodedPolyline?: string | null;
   onHazardPress: (h: Hazard) => void;
   onRoute?: (info: any) => void;
 };
@@ -33,77 +41,177 @@ const hazardColor = (k: string) =>
 const hazardIcon = (k: string): any =>
   k === "police" ? "shield-checkmark" : k === "accident" ? "alert-circle" : k === "traffic" ? "car" : "warning";
 
-export default function ConvoyMap({ center, user, peers, hazards, onHazardPress }: Props) {
-  if (!MapView) {
+// Google Maps polyline decoder
+function decodePolyline(encoded: string): LatLng[] {
+  const points: LatLng[] = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    let b: number, shift = 0, result = 0;
+    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    const dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+    lat += dlat;
+    shift = 0; result = 0;
+    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    const dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+    lng += dlng;
+    points.push({ lat: lat * 1e-5, lng: lng * 1e-5 });
+  }
+  return points;
+}
+
+export default function ConvoyMap({ center, user, peers, hazards, destination, encodedPolyline, onHazardPress }: Props) {
+  // ---- Real Google Maps (EAS dev build) ----
+  if (MapView) {
+    const region = { latitude: center.lat, longitude: center.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 };
+    const polyCoords = encodedPolyline
+      ? decodePolyline(encodedPolyline).map((p) => ({ latitude: p.lat, longitude: p.lng }))
+      : [];
     return (
-      <View style={styles.fb}>
-        <Ionicons name="map" size={48} color={COLORS.primary} />
-        <Text style={styles.fbTitle}>Google Maps</Text>
-        <Text style={styles.fbText}>
-          Native Google Maps requires an EAS development build. Use the web preview to interact with the live map.
-        </Text>
-      </View>
+      <MapView provider="google" mapType="hybrid" style={StyleSheet.absoluteFill} initialRegion={region} region={region}>
+        <Marker coordinate={{ latitude: user.lat, longitude: user.lng }} anchor={{ x: 0.5, y: 0.5 }} zIndex={10}>
+          <View style={styles.youDot}><Ionicons name="navigate" size={16} color="#fff" /></View>
+        </Marker>
+        {peers.map((p) => (
+          <Marker key={p.user_id} coordinate={{ latitude: p.lat, longitude: p.lng }} anchor={{ x: 0.5, y: 0.5 }}>
+            <View style={styles.peerDot}><Ionicons name="car-sport" size={14} color="#fff" /></View>
+          </Marker>
+        ))}
+        {hazards.map((h) => (
+          <Marker key={h.id} coordinate={{ latitude: h.lat, longitude: h.lng }} anchor={{ x: 0.5, y: 1 }} onPress={() => onHazardPress(h)}>
+            <View style={styles.hazardWrap}>
+              <View style={[styles.hazardBubble, { backgroundColor: hazardColor(h.kind) }]}>
+                <Ionicons name={hazardIcon(h.kind)} size={22} color="#fff" />
+              </View>
+              <View style={[styles.hazardTail, { borderTopColor: hazardColor(h.kind) }]} />
+            </View>
+          </Marker>
+        ))}
+        {destination && (
+          <Marker coordinate={{ latitude: destination.lat, longitude: destination.lng }} anchor={{ x: 0.5, y: 1 }}>
+            <View style={[styles.hazardBubble, { backgroundColor: COLORS.danger }]}>
+              <Ionicons name="flag" size={22} color="#fff" />
+            </View>
+          </Marker>
+        )}
+        {polyCoords.length > 1 && Polyline && (
+          <Polyline coordinates={polyCoords} strokeColor={COLORS.primary} strokeWidth={6} />
+        )}
+      </MapView>
     );
   }
 
-  const region = {
-    latitude: center.lat, longitude: center.lng,
-    latitudeDelta: 0.02, longitudeDelta: 0.02,
-  };
+  // ---- Expo Go fallback: stylized SVG route preview ----
+  return <RoutePreviewFallback {...{ center, user, peers, hazards, destination, encodedPolyline, onHazardPress }} />;
+}
+
+function RoutePreviewFallback({ center, user, peers, hazards, destination, encodedPolyline, onHazardPress }: Props) {
+  const points = useMemo(() => (encodedPolyline ? decodePolyline(encodedPolyline) : []), [encodedPolyline]);
+
+  // Build bounding box across user + destination + route points
+  const allLats: number[] = [user.lat, ...peers.map((p) => p.lat), ...hazards.map((h) => h.lat), ...points.map((p) => p.lat)];
+  const allLngs: number[] = [user.lng, ...peers.map((p) => p.lng), ...hazards.map((h) => h.lng), ...points.map((p) => p.lng)];
+  if (destination) { allLats.push(destination.lat); allLngs.push(destination.lng); }
+  const minLat = Math.min(...allLats), maxLat = Math.max(...allLats);
+  const minLng = Math.min(...allLngs), maxLng = Math.max(...allLngs);
+  const padLat = Math.max(0.005, (maxLat - minLat) * 0.15);
+  const padLng = Math.max(0.005, (maxLng - minLng) * 0.15);
+
+  const W = SCREEN_W;
+  const H = SCREEN_H;
+  const project = (lat: number, lng: number) => ({
+    x: ((lng - (minLng - padLng)) / ((maxLng + padLng) - (minLng - padLng))) * W,
+    y: H - ((lat - (minLat - padLat)) / ((maxLat + padLat) - (minLat - padLat))) * H,
+  });
+
+  const userXY = project(user.lat, user.lng);
+  const destXY = destination ? project(destination.lat, destination.lng) : null;
+  const polyD = points.length > 1
+    ? "M " + points.map((p) => { const xy = project(p.lat, p.lng); return `${xy.x.toFixed(1)} ${xy.y.toFixed(1)}`; }).join(" L ")
+    : null;
 
   return (
-    <MapView
-      provider="google"
-      mapType="hybrid"
-      style={StyleSheet.absoluteFill}
-      initialRegion={region}
-      region={region}
-      showsCompass={false}
-      showsMyLocationButton={false}
-      showsUserLocation={false}
-      pitchEnabled={true}
-      rotateEnabled={true}
-    >
-      <Marker coordinate={{ latitude: user.lat, longitude: user.lng }} anchor={{ x: 0.5, y: 0.5 }} zIndex={10}>
-        <View style={styles.youDot}>
-          <Ionicons name="navigate" size={16} color="#fff" style={{ transform: [{ rotate: `${user.heading || 0}deg` }] }} />
+    <View style={StyleSheet.absoluteFill}>
+      <Svg width={W} height={H}>
+        <Defs>
+          <SvgGrad id="bg" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor="#0E1A2D" />
+            <Stop offset="1" stopColor="#070D18" />
+          </SvgGrad>
+        </Defs>
+        <Rect x="0" y="0" width={W} height={H} fill="url(#bg)" />
+
+        {/* faint terrain blobs */}
+        <Path d={`M -50 ${H * 0.18} Q ${W * 0.35} ${H * 0.08}, ${W * 0.65} ${H * 0.2} T ${W + 50} ${H * 0.24} L ${W + 50} ${H * 0.42} L -50 ${H * 0.4} Z`} fill="#1F3322" opacity={0.5} />
+        <Path d={`M -50 ${H * 0.72} Q ${W * 0.4} ${H * 0.62}, ${W * 0.7} ${H * 0.78} T ${W + 50} ${H * 0.85} L ${W + 50} ${H + 50} L -50 ${H + 50} Z`} fill="#162A1A" opacity={0.6} />
+
+        {/* grid */}
+        {[...Array(8)].map((_, i) => (
+          <Path key={`g${i}`} d={`M 0 ${(i * H) / 8} H ${W}`} stroke="rgba(120,130,140,0.08)" strokeWidth={1} />
+        ))}
+
+        {/* route polyline */}
+        {polyD && (
+          <G>
+            <Path d={polyD} stroke="#0A84FF" strokeWidth={9} fill="none" strokeLinecap="round" strokeLinejoin="round" opacity={0.95} />
+            <Path d={polyD} stroke="#FFFFFF" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="2 10" opacity={0.5} />
+          </G>
+        )}
+
+        {/* peers */}
+        {peers.map((p) => {
+          const xy = project(p.lat, p.lng);
+          return (
+            <G key={p.user_id}>
+              <Circle cx={xy.x} cy={xy.y} r={11} fill={COLORS.success} fillOpacity={0.2} />
+              <Circle cx={xy.x} cy={xy.y} r={6} fill={COLORS.success} stroke="#fff" strokeWidth={2} />
+            </G>
+          );
+        })}
+
+        {/* hazards */}
+        {hazards.map((h) => {
+          const xy = project(h.lat, h.lng);
+          const c = hazardColor(h.kind);
+          return (
+            <G key={h.id}>
+              <Circle cx={xy.x} cy={xy.y} r={14} fill={c} fillOpacity={0.25} />
+              <Circle cx={xy.x} cy={xy.y} r={9} fill={c} stroke="#fff" strokeWidth={2} />
+            </G>
+          );
+        })}
+
+        {/* destination */}
+        {destXY && (
+          <G>
+            <Circle cx={destXY.x} cy={destXY.y} r={14} fill={COLORS.danger} fillOpacity={0.3} />
+            <Circle cx={destXY.x} cy={destXY.y} r={9} fill={COLORS.danger} stroke="#fff" strokeWidth={2} />
+          </G>
+        )}
+
+        {/* user */}
+        <G>
+          <Circle cx={userXY.x} cy={userXY.y} r={18} fill={COLORS.primary} fillOpacity={0.2} />
+          <Circle cx={userXY.x} cy={userXY.y} r={10} fill={COLORS.primary} stroke="#fff" strokeWidth={3} />
+        </G>
+      </Svg>
+
+      {!encodedPolyline && (
+        <View style={styles.notice} pointerEvents="none">
+          <Text style={styles.noticeTitle}>Route preview</Text>
+          <Text style={styles.noticeText}>Search a destination to see your route. Full satellite tiles unlock with an EAS dev build.</Text>
         </View>
-      </Marker>
-
-      {peers.map((p) => (
-        <Marker key={p.user_id} coordinate={{ latitude: p.lat, longitude: p.lng }} anchor={{ x: 0.5, y: 0.5 }}>
-          <View style={styles.peerDot}>
-            <Ionicons name="car-sport" size={14} color="#fff" />
-          </View>
-        </Marker>
-      ))}
-
-      {hazards.map((h) => (
-        <Marker
-          key={h.id}
-          coordinate={{ latitude: h.lat, longitude: h.lng }}
-          anchor={{ x: 0.5, y: 1 }}
-          onPress={() => onHazardPress(h)}
-        >
-          <View style={styles.hazardWrap}>
-            <View style={[styles.hazardBubble, { backgroundColor: hazardColor(h.kind) }]}>
-              <Ionicons name={hazardIcon(h.kind)} size={22} color="#fff" />
-            </View>
-            <View style={[styles.hazardTail, { borderTopColor: hazardColor(h.kind) }]} />
-          </View>
-        </Marker>
-      ))}
-    </MapView>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  fb: { flex: 1, backgroundColor: "#0A1410", alignItems: "center", justifyContent: "center", padding: 32 },
-  fbTitle: { color: COLORS.text, fontSize: 22, fontWeight: "700", marginTop: 14, letterSpacing: -0.4 },
-  fbText: { color: COLORS.textDim, textAlign: "center", marginTop: 8, fontSize: 13, lineHeight: 19 },
   youDot: { width: 32, height: 32, borderRadius: 16, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: "#fff" },
   peerDot: { width: 26, height: 26, borderRadius: 13, backgroundColor: COLORS.success, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(0,0,0,0.4)" },
   hazardWrap: { alignItems: "center" },
   hazardBubble: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.9)" },
   hazardTail: { width: 0, height: 0, borderLeftWidth: 6, borderRightWidth: 6, borderTopWidth: 9, borderLeftColor: "transparent", borderRightColor: "transparent", marginTop: -1 },
+  notice: { position: "absolute", left: 24, right: 24, bottom: 220, alignItems: "center" },
+  noticeTitle: { color: COLORS.text, fontSize: 14, fontWeight: "600", marginBottom: 4 },
+  noticeText: { color: COLORS.textDim, textAlign: "center", fontSize: 12, lineHeight: 17 },
 });

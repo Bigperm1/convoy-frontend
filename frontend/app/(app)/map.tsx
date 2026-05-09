@@ -8,10 +8,10 @@ import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
 import { useRouter } from "expo-router";
 import Glass from "../../src/Glass";
-import VoiceFAB from "../../src/VoiceFAB";
 import ConvoyMap, { Hazard, Peer } from "../../src/ConvoyMap";
 import DestinationSearch from "../../src/DestinationSearch";
 import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
+import { voiceBus, geocodeQuery } from "../../src/voiceBus";
 
 type RouteInfo = {
   distance_text: string;
@@ -41,12 +41,13 @@ export default function MapScreen() {
   const [route, setRoute] = useState<RouteInfo | null>(null);
   const [showSteps, setShowSteps] = useState(false);
   const [live, setLive] = useState<"connecting" | "live" | "off">("connecting");
+  const [encodedPolyline, setEncodedPolyline] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   // Native directions via REST (web uses the JS DirectionsService inside ConvoyMap)
   useEffect(() => {
     if (Platform.OS === "web") return;
-    if (!destination) { setRoute(null); return; }
+    if (!destination) { setRoute(null); setEncodedPolyline(null); return; }
     const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
     if (!KEY || !coords) return;
     let cancelled = false;
@@ -60,8 +61,11 @@ export default function MapScreen() {
         const res = await fetch(url.toString());
         const data = await res.json();
         if (cancelled) return;
-        if (data.status !== "OK" || !data.routes?.[0]?.legs?.[0]) { setRoute(null); return; }
+        if (data.status !== "OK" || !data.routes?.[0]?.legs?.[0]) {
+          setRoute(null); setEncodedPolyline(null); return;
+        }
         const leg = data.routes[0].legs[0];
+        setEncodedPolyline(data.routes[0].overview_polyline?.points || null);
         setRoute({
           distance_text: leg.distance?.text || "",
           duration_text: leg.duration?.text || "",
@@ -71,7 +75,7 @@ export default function MapScreen() {
             maneuver: s.maneuver,
           })),
         });
-      } catch { if (!cancelled) setRoute(null); }
+      } catch { if (!cancelled) { setRoute(null); setEncodedPolyline(null); } }
     })();
     return () => { cancelled = true; };
   }, [destination, coords]);
@@ -213,15 +217,38 @@ export default function MapScreen() {
   const hazardIcon = (k: string): any =>
     k === "police" ? "shield-checkmark" : k === "accident" ? "alert-circle" : k === "traffic" ? "car" : "warning";
 
-  const onIntent = (intent: string | null) => {
-    if (intent === "report_police") reportHazard("police");
-    else if (intent === "report_accident") reportHazard("accident");
-    else if (intent === "report_road") reportHazard("road");
-    else if (intent === "report_traffic") reportHazard("traffic");
-    else if (intent === "open_talk") router.push("/(app)/talk");
-    else if (intent === "open_music") router.push("/(app)/music");
-    else if (intent === "open_drive") router.push("/(app)/drive");
-  };
+  // ----- Voice command subscription -----
+  // Listens for hazard / navigation intents and acts on them while the map is active.
+  useEffect(() => {
+    const unsub = voiceBus.subscribe(async (cmd) => {
+      const intent = cmd.intent;
+      if (!intent) return;
+
+      if (intent === "report_police") return reportHazard("police");
+      if (intent === "report_accident") return reportHazard("accident");
+      if (intent === "report_road") return reportHazard("road");
+      if (intent === "report_traffic") return reportHazard("traffic");
+
+      if (intent === "clear_route") {
+        setDestination(null);
+        setRoute(null);
+        setShowSteps(false);
+        setEncodedPolyline(null);
+        return;
+      }
+
+      if (intent === "navigate_to" && cmd.query) {
+        const loc = await geocodeQuery(cmd.query, coords || undefined);
+        if (loc) {
+          setDestination(loc);
+          setShowSteps(true);
+        } else {
+          Alert.alert("Couldn't find that place", `"${cmd.query}"`);
+        }
+      }
+    });
+    return unsub;
+  }, [coords]);
 
   if (!coords) {
     return <View style={styles.loader}><Text style={{ color: COLORS.textDim }}>Locating…</Text></View>;
@@ -239,6 +266,7 @@ export default function MapScreen() {
         peers={peerList}
         hazards={hazards}
         destination={destination}
+        encodedPolyline={encodedPolyline}
         onHazardPress={(h) => setSelected(h)}
         onRoute={setRoute}
       />
@@ -348,8 +376,6 @@ export default function MapScreen() {
           <Ionicons name={showReport ? "close" : "add"} size={28} color="#fff" />
         </View>
       </TouchableOpacity>
-
-      <VoiceFAB onIntent={onIntent} />
     </View>
   );
 }

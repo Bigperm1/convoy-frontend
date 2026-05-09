@@ -42,7 +42,7 @@ function dotIcon(color: string, glyph: string, size = 32) {
 }
 const HAZARD_GLYPHS: Record<string, string> = { police: "🛡", accident: "✕", road: "!", traffic: "▲" };
 
-export default function ConvoyMap({ center, user, peers, hazards, destination, onHazardPress, onRoute }: Props) {
+export default function ConvoyMap({ center, user, peers, hazards, destination, encodedPolyline, onHazardPress, onRoute }: Props) {
   if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -66,7 +66,7 @@ export default function ConvoyMap({ center, user, peers, hazards, destination, o
           {destination && (
             <Marker position={destination} icon={dotIcon("#FF453A", "★", 34)} title="Destination" />
           )}
-          {destination && <Directions origin={user} destination={destination} onRoute={onRoute} />}
+          {destination && <Directions origin={user} destination={destination} onRoute={onRoute} encodedPolyline={encodedPolyline} />}
           <Recenter target={center} />
         </Map>
       </APIProvider>
@@ -74,7 +74,7 @@ export default function ConvoyMap({ center, user, peers, hazards, destination, o
   );
 }
 
-function Directions({ origin, destination, onRoute }: { origin: LatLng; destination: LatLng; onRoute?: Props["onRoute"] }) {
+function Directions({ origin, destination, onRoute, encodedPolyline }: { origin: LatLng; destination: LatLng; onRoute?: Props["onRoute"]; encodedPolyline?: string | null }) {
   const map = useMap();
   const routesLib = useMapsLibrary("routes");
   const renderer = useRef<any>(null);

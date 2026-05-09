@@ -376,17 +376,49 @@ async def transcribe(body: TranscribeIn, user=Depends(get_current_user)):
         try: os.unlink(tmp.name)
         except Exception: pass
 
-    lt = text.lower()
+    return _classify_intent(text)
+
+
+def _classify_intent(text: str) -> dict:
+    """Return {text, intent, query?} for a transcript. Order matters - more specific first."""
+    import re
+    lt = (text or "").lower().strip().rstrip(".!?,")
     intent = None
-    if "police" in lt or "cop" in lt: intent = "report_police"
+    query = None
+
+    # 1. Stop / clear navigation
+    if any(p in lt for p in ["stop navigation", "cancel route", "clear route", "stop route",
+                              "end navigation", "cancel navigation", "stop directions"]):
+        intent = "clear_route"
+    # 2. Navigate-to commands → extract destination
+    elif any(lt.startswith(p) for p in ["navigate to ", "drive to ", "take me to ",
+                                          "directions to ", "go to ", "route to ",
+                                          "directions for ", "navigate me to "]):
+        m = re.match(r"^(?:navigate(?: me)? to|drive to|take me to|directions to|go to|route to|directions for)\s+(.+)$", lt)
+        if m:
+            query = m.group(1).strip()
+            intent = "navigate_to"
+    elif " navigate to " in lt or " drive to " in lt or " take me to " in lt:
+        m = re.search(r"(?:navigate(?: me)? to|drive to|take me to|directions to|go to|route to)\s+(.+)$", lt)
+        if m:
+            query = m.group(1).strip()
+            intent = "navigate_to"
+    # 3. Hazard reports
+    elif "police" in lt or "cop" in lt: intent = "report_police"
     elif "accident" in lt or "crash" in lt: intent = "report_accident"
     elif "hazard" in lt or "debris" in lt or "pothole" in lt: intent = "report_road"
     elif "traffic" in lt or "jam" in lt: intent = "report_traffic"
-    elif "talk" in lt or "walkie" in lt: intent = "open_talk"
-    elif "music" in lt or "play" in lt or "song" in lt: intent = "open_music"
-    elif "drive" in lt or "carplay" in lt: intent = "open_drive"
-    elif "map" in lt: intent = "open_map"
-    return {"text": text, "intent": intent}
+    # 4. Screen navigation
+    elif "talk" in lt or "walkie" in lt or "push to talk" in lt or "ptt" in lt: intent = "open_talk"
+    elif "music" in lt or "play song" in lt or "play music" in lt or "spotify" in lt: intent = "open_music"
+    elif "carplay" in lt or "drive mode" in lt or "drive screen" in lt: intent = "open_drive"
+    elif "hub" in lt or "garage" in lt or "community" in lt or "communities" in lt: intent = "open_hub"
+    elif lt == "map" or "open map" in lt or "show map" in lt or "back to map" in lt: intent = "open_map"
+
+    out = {"text": text, "intent": intent}
+    if query:
+        out["query"] = query
+    return out
 
 
 # ---------- WebSocket ----------

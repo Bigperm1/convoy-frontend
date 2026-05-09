@@ -3,8 +3,9 @@ import { Audio } from "expo-av";
 import * as SecureStore from "expo-secure-store";
 import { Alert } from "react-native";
 import { api, formatErr } from "./api";
+import { voiceBus } from "./voiceBus";
 
-export type VoiceResult = { text: string; intent: string | null };
+export type VoiceResult = { text: string; intent: string | null; query?: string };
 
 export function useVoice() {
   const recRef = useRef<Audio.Recording | null>(null);
@@ -66,7 +67,10 @@ export function useVoice() {
         reader.readAsDataURL(blob);
       });
       const { data } = await api.post("/voice/transcribe", { audio_b64: b64, mime: "audio/m4a" });
-      return data as VoiceResult;
+      const result = data as VoiceResult;
+      // Broadcast to any subscribed screens
+      voiceBus.emit({ text: result.text || "", intent: result.intent ?? null, query: result.query, ts: Date.now() });
+      return result;
     } catch (e) {
       Alert.alert("Voice", formatErr(e));
       return null;

@@ -101,3 +101,48 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Build me an app for car enthusiasts. This app would have a walkie talkie feature in it like Zello and use a navigation program like Waze where you could see the other car enthusiasts live on the map, with the ability to tag police and road hazards like waze. Make it Apple car play compatible. Make it have audio interface for apple music/spotify/soundcloud. voice activation aswell."
+
+backend:
+  - task: "Voice transcribe endpoint with improved intent classifier"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Refactored /api/voice/transcribe to use a new _classify_intent helper. Added intents: navigate_to (with extracted query: 'navigate to/drive to/take me to/go to/route to ___'), clear_route ('stop navigation', 'cancel route'), open_hub. Returns optional 'query' field for navigate_to intent."
+
+frontend:
+  - task: "Global voice activation - VoiceController + voiceBus + geocoding"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/VoiceController.tsx, frontend/src/voiceBus.ts, frontend/src/useVoice.ts, frontend/src/VoiceFAB.tsx, frontend/app/(app)/_layout.tsx, frontend/app/(app)/map.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Mounted VoiceController globally in (app)/_layout.tsx so the mic FAB and transcript banner appear on every tab (Map/Talk/Drive/Music/Hub). useVoice now broadcasts to voiceBus so any screen can subscribe. VoiceFAB removed from map.tsx (now only the global one). Added geocodeQuery in voiceBus.ts using Google Find Place + Geocoding API to resolve spoken destinations. Map screen subscribes to bus to: report hazards (police/accident/road/traffic), navigate_to (with geocoding fallback), and clear_route. Replaced disruptive Alert.alert with a non-blocking glass banner that shows transcript + recognized action and auto-dismisses after 3.2s. VoiceFAB now pulses while recording. Also fixed pre-existing syntax error in ConvoyMap.web.tsx (leftover stray text on line 135) that was blocking metro bundling."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 0
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Voice transcribe endpoint with improved intent classifier"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "Wired up global voice activation. Backend has new intent classifier (navigate_to with query, clear_route, open_hub). Frontend VoiceFAB now lives in the (app) layout so it floats over every tab; useVoice publishes to a voiceBus, VoiceController shows a non-blocking transcript banner and routes 'open_*' intents. Map subscribes to the bus and acts on report_*, navigate_to (Google geocoding), clear_route. Please test ONLY backend /api/voice/transcribe shape — frontend voice testing requires real audio + mic permission and is best done by the user in Expo Go."

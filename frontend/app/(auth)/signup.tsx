@@ -8,6 +8,7 @@ import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
 import { formatErr } from "../../src/api";
 import Glass from "../../src/Glass";
+import CarPresetPicker from "../../src/CarPresetPicker";
 
 export default function Signup() {
   const [email, setEmail] = useState("");
@@ -57,6 +58,13 @@ export default function Signup() {
             <Text style={styles.section}>Your car</Text>
             <Field label="Make" testID="signup-make" value={make} onChange={setMake} placeholder="Nissan" />
             <Field label="Model" testID="signup-model" value={model} onChange={setModel} placeholder="Skyline GT-R" />
+            <View style={{ marginTop: 6 }}>
+              <CarPresetPicker
+                selectedMake={make}
+                selectedModel={model}
+                onSelect={(p) => { setMake(p.make); setModel(p.model); }}
+              />
+            </View>
             <Field label="Year" testID="signup-year" value={year} onChange={setYear} placeholder="1999" keyboard="number-pad" />
             <Field label="Color" testID="signup-color" value={color} onChange={setColor} placeholder="Bayside Blue" />
 

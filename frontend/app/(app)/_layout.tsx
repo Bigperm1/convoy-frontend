@@ -64,6 +64,7 @@ export default function AppLayout() {
         <Tabs.Screen name="music" options={{ tabBarLabel: "Music", tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" size={size - 2} color={color} /> }} />
         <Tabs.Screen name="hub" options={{ tabBarLabel: "Hub", tabBarIcon: ({ color, size }) => <Ionicons name="people-circle" size={size - 1} color={color} /> }} />
         <Tabs.Screen name="settings" options={{ href: null }} />
+        <Tabs.Screen name="drive-mode" options={{ href: null }} />
       </Tabs>
 
       {/* Global voice transcript banner (FAB removed — the elevated mic in the tab bar is the new CTA) */}

@@ -16,9 +16,15 @@
       },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Show nearby drivers and hazards on the map",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Keep the convoy live in the background",
         "NSMicrophoneUsageDescription": "Push-to-talk and voice commands",
         "NSCameraUsageDescription": "Add photos of your car to your garage",
-        "UIBackgroundModes": ["audio", "location"]
+        "NSSpeechRecognitionUsageDescription": "Voice activation for hands-free driving",
+        "UIBackgroundModes": ["audio", "location", "fetch"]
+      },
+      "entitlements": {
+        "com.apple.developer.carplay-audio": true,
+        "com.apple.developer.carplay-communication": true
       }
     },
     "android": {

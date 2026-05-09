@@ -40,6 +40,7 @@ type Props = {
   onSelectRoute?: (index: number) => void;
   followUser?: boolean;
   onHazardPress: (h: Hazard) => void;
+  onPeerPress?: (p: Peer) => void;
   onExternalAlertPress?: (a: ExternalAlert) => void;
   onRoute?: (info: any) => void;
 };
@@ -87,7 +88,7 @@ function decodePolyline(encoded: string): LatLng[] {
   return points;
 }
 
-export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onHazardPress, onExternalAlertPress }: Props) {
+export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onHazardPress, onPeerPress, onExternalAlertPress }: Props) {
   // ---- Real Google Maps (EAS dev build) ----
   if (MapView) {
     // When following user (turn-by-turn), zoom in tighter; otherwise wider preview
@@ -112,7 +113,7 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
           <View style={styles.youDot}><Ionicons name="navigate" size={16} color="#fff" /></View>
         </Marker>
         {peers.map((p) => (
-          <Marker key={p.user_id} coordinate={{ latitude: p.lat, longitude: p.lng }} anchor={{ x: 0.5, y: 0.5 }}>
+          <Marker key={p.user_id} coordinate={{ latitude: p.lat, longitude: p.lng }} anchor={{ x: 0.5, y: 0.5 }} onPress={() => onPeerPress?.(p)}>
             <View style={styles.peerWrap}>
               <View style={styles.peerDot}><Ionicons name="car-sport" size={14} color="#fff" /></View>
               {!!p.carType && (

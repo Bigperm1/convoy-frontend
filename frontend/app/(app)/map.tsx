@@ -15,7 +15,8 @@ import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 import { voiceBus, geocodeQuery } from "../../src/voiceBus";
 import { useExternalAlerts, registerExternalFeedBackgroundTask } from "../../src/externalFeed";
 import { useSettings } from "../../src/settings";
-import { useConvoyPresence } from "../../src/convoyPresence";
+import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
+import PeerModal from "../../src/PeerModal";
 import {
   fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtEtaSec,
@@ -362,8 +363,13 @@ export default function MapScreen() {
   // ----- Convoy Realtime Presence (Supabase) -----
   // Live peer broadcast/track via Supabase Realtime. Replaces stale REST polling for online cars.
   // (Must be declared BEFORE any early returns to keep React hook order stable.)
+  // Channel name follows the active community in Coms. Falls back to global.
+  const presenceChannel = settings.activeCommunityId
+    ? `convoy:community:${settings.activeCommunityId}`
+    : "convoy:global";
+
   const presence = useConvoyPresence(
-    "convoy:global",
+    presenceChannel,
     user ? {
       user_id: user.id,
       handle: user.handle,
@@ -372,6 +378,7 @@ export default function MapScreen() {
     } : null,
     coords ? { lat: coords.lat, lng: coords.lng, heading: 0 } : null
   );
+  const [selectedPeer, setSelectedPeer] = useState<ConvoyPresencePeer | null>(null);
 
   if (!coords) {
     return <View style={styles.loader}><Text style={{ color: COLORS.textDim }}>Locating…</Text></View>;
@@ -411,6 +418,11 @@ export default function MapScreen() {
         onSelectRoute={(i) => setSelectedRouteIndex(i)}
         followUser={navMode === "turn-by-turn"}
         onHazardPress={(h) => setSelected(h)}
+        onPeerPress={(p) => {
+          // Find the matching presence record (has online_at, etc.) — fallback to bare peer
+          const full = presence.peers.find((pp) => pp.user_id === p.user_id);
+          setSelectedPeer(full || { user_id: p.user_id, handle: p.handle, lat: p.lat, lng: p.lng, carType: p.carType });
+        }}
         onExternalAlertPress={(a) => Alert.alert(`${a.type}${a.subtype ? " · " + a.subtype : ""}`, "Live alert from Convoy feed.")}
         onRoute={setRoute}
       />
@@ -605,6 +617,13 @@ export default function MapScreen() {
           <Ionicons name={showReport ? "close" : "add"} size={28} color="#fff" />
         </View>
       </TouchableOpacity>
+
+      <PeerModal
+        peer={selectedPeer ? { ...selectedPeer } as any : null}
+        visible={!!selectedPeer}
+        onClose={() => setSelectedPeer(null)}
+        myCoords={coords}
+      />
     </View>
   );
 }

@@ -42,6 +42,11 @@ export default function MusicScreen() {
 }
 
 function ComingSoon({ name, reason }: { name: string; reason: string }) {
+  const linkMap: Record<string, string> = {
+    "Apple Music": "https://music.apple.com",
+    "SoundCloud": "https://soundcloud.com",
+  };
+  const url = linkMap[name];
   return (
     <View style={styles.comingWrap}>
       <Glass radius={24}>
@@ -49,8 +54,19 @@ function ComingSoon({ name, reason }: { name: string; reason: string }) {
           <View style={styles.comingIcon}>
             <Ionicons name="time" size={40} color={COLORS.warning} />
           </View>
-          <Text style={styles.comingTitle}>{name} · Coming soon</Text>
-          <Text style={styles.comingText}>{reason}</Text>
+          <Text style={styles.comingTitle}>{name}</Text>
+          <Text style={styles.comingSub}>{reason}</Text>
+          {url && (
+            <TouchableOpacity
+              testID={`open-${name.toLowerCase().replace(/\s/g, '-')}`}
+              onPress={async () => { try { await Linking.openURL(url); } catch {} }}
+              style={styles.openBtn}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="open-outline" size={16} color="#fff" />
+              <Text style={styles.openBtnText}>Open {name}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </Glass>
     </View>
@@ -201,6 +217,8 @@ const styles = StyleSheet.create({
   comingWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   comingIcon: { width: 76, height: 76, borderRadius: 38, backgroundColor: COLORS.warning + "22", alignItems: "center", justifyContent: "center", marginBottom: 14 },
   comingTitle: { color: COLORS.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.4 },
+  openBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 14, backgroundColor: COLORS.primary, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 12 },
+  openBtnText: { color: "#fff", fontWeight: "600", fontSize: 14 },
   comingText: { color: COLORS.textDim, textAlign: "center", marginTop: 8, fontSize: 14, lineHeight: 20 },
 
   profileRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },

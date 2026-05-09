@@ -21,6 +21,7 @@ type Props = {
   destination?: LatLng | null;
   encodedPolyline?: string | null;
   onHazardPress: (h: Hazard) => void;
+  onPeerPress?: (p: Peer) => void;
   onExternalAlertPress?: (a: ExternalAlert) => void;
   onRoute?: (info: { distance_text: string; duration_text: string; steps: { html: string; distance_text: string; maneuver?: string }[] } | null) => void;
 };
@@ -113,7 +114,7 @@ function communityPin(color: string, glyph: string, gold: boolean) {
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
 
-export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onHazardPress, onExternalAlertPress, onRoute }: Props) {
+export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
   if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -141,6 +142,7 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
                   anchor: { x: pin.size.width / 2, y: pin.anchorY } as any,
                 } as any}
                 title={`${p.handle || "driver"}${p.carType ? " · " + p.carType : ""}`}
+                onClick={() => onPeerPress?.(p)}
               />
             );
           })}

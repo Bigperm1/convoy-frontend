@@ -15,6 +15,8 @@ export type Settings = {
   avoidTolls: boolean;
   avoidHighways: boolean;
   avoidFerries: boolean;
+  // Per-community presence — when set, peer presence channel becomes `convoy:community:<id>`
+  activeCommunityId?: string | null;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -25,6 +27,7 @@ export const DEFAULT_SETTINGS: Settings = {
   avoidTolls: false,
   avoidHighways: false,
   avoidFerries: false,
+  activeCommunityId: null,
 };
 
 let cached: Settings = { ...DEFAULT_SETTINGS };

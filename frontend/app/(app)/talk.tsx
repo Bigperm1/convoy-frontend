@@ -10,6 +10,7 @@ import { useRouter } from "expo-router";
 import { COLORS } from "../../src/theme";
 import { api, formatErr } from "../../src/api";
 import Glass from "../../src/Glass";
+import { useSettings } from "../../src/settings";
 
 type Community = { id: string; name: string; description: string; member_count: number; is_admin: boolean };
 type PTT = { id: string; channel: string; user_id: string; handle: string; audio_b64: string; duration_ms: number; created_at: string };
@@ -23,6 +24,9 @@ export default function ComsScreen() {
   const router = useRouter();
   const [communities, setCommunities] = useState<Community[]>([]);
   const [active, setActive] = useState<string | null>(null);
+  const [, setSettings] = useSettings();
+  // Persist active community to settings — map.tsx reads this to scope the presence channel.
+  const setActiveAndPersist = (id: string) => { setActive(id); setSettings({ activeCommunityId: id }); };
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<PTT[]>([]);
@@ -42,7 +46,7 @@ export default function ComsScreen() {
       try {
         const { data } = await api.get("/communities/mine");
         setCommunities(data);
-        if (data.length > 0) setActive(data[0].id);
+        if (data.length > 0) setActiveAndPersist(data[0].id);
       } catch {}
       setLoading(false);
       try {
@@ -308,7 +312,7 @@ export default function ComsScreen() {
             key={c.id}
             c={c}
             isActive={active === c.id}
-            onPress={() => setActive(c.id)}
+            onPress={() => setActiveAndPersist(c.id)}
           />
         ))}
 

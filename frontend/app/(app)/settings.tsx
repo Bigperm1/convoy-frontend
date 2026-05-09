@@ -7,6 +7,9 @@ import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
 import { useSettings, DEFAULT_SETTINGS } from "../../src/settings";
 
+// Re-export for navigation
+const _DRIVE_MODE_ROUTE = "/(app)/drive-mode";
+
 type RowProps = {
   icon: any;
   iconColor: string;
@@ -146,6 +149,26 @@ export default function SettingsScreen() {
         <Text style={styles.helpText}>
           Applied to every directions request — including auto-reroute when you go off-route. Routes refresh automatically when you toggle a preference.
         </Text>
+
+        {/* Drive Mode */}
+        <Text style={styles.sectionLabel}>DRIVE MODE</Text>
+        <Glass radius={16} style={styles.card}>
+          <TouchableOpacity testID="open-drive-mode" onPress={() => router.push("/(app)/drive-mode" as any)} style={styles.row} activeOpacity={0.85}>
+            <View style={[styles.iconWrap, { backgroundColor: "#0A84FF22" }]}>
+              <Ionicons name="car-sport" size={20} color="#0A84FF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={styles.title}>Open Drive Mode</Text>
+                <View style={[styles.badge, { backgroundColor: "#0A84FF22", borderColor: "#0A84FF88" }]}>
+                  <Text style={[styles.badgeText, { color: "#0A84FF" }]}>CARPLAY</Text>
+                </View>
+              </View>
+              <Text style={styles.subtitle}>Large-button fullscreen UI optimized for the head unit. Coming to Apple CarPlay in an EAS dev build.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textDim} />
+          </TouchableOpacity>
+        </Glass>
 
         <View style={{ height: 120 }} />
       </ScrollView>

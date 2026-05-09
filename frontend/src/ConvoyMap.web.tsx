@@ -80,9 +80,16 @@ const CAR_BODY_PATHS_WEB: Record<string, string> = {
   sports:     "M50 8 L74 26 L78 64 L72 86 L60 92 L40 92 L28 86 L22 64 L26 26 Z",
   suv:        "M50 8 L72 22 L74 78 L70 92 L30 92 L26 78 L28 22 Z",
   truck:      "M50 8 L70 18 L72 44 L74 92 L26 92 L28 44 L30 18 Z",
-  hatch:      "M50 12 L72 26 L74 80 L68 92 L32 92 L26 80 L28 26 Z",
+  // Aggressive hot-hatch: pointed nose, pronounced front + rear fender flares,
+  // mid-body waist, squared-off rear deck. Spoiler is layered separately below.
+  hatch:      "M50 6 L60 12 L78 24 L80 32 L72 50 L80 68 L82 80 L78 90 L22 90 L18 80 L20 68 L28 50 L20 32 L22 24 L40 12 Z",
   van:        "M50 10 L74 22 L76 90 L70 94 L30 94 L24 90 L26 22 Z",
   motorcycle: "M50 10 L60 30 L62 70 L56 90 L44 90 L38 70 L40 30 Z",
+};
+// Optional rear-wing/spoiler overlay drawn AFTER the body. Only the hot-hatch
+// gets one (per design — wide rear wing + endplates).
+const CAR_SPOILER_PATHS_WEB: Record<string, string | undefined> = {
+  hatch: "M14 84 L86 84 L88 92 L12 92 Z M12 80 L18 80 L18 92 L12 92 Z M82 80 L88 80 L88 92 L82 92 Z",
 };
 const CAR_WINDSHIELD_WEB: Record<string, string> = {
   motorcycle: "M44 30 L56 30 L56 42 L44 42 Z",
@@ -112,7 +119,12 @@ function carIconDataUrl(body: string | undefined | null, color: string | undefin
   const safeBody = body && CAR_BODY_PATHS_WEB[body] ? body : "sedan";
   const path = CAR_BODY_PATHS_WEB[safeBody];
   const wind = CAR_WINDSHIELD_WEB[safeBody] || DEFAULT_WINDSHIELD_WEB;
+  const spoiler = CAR_SPOILER_PATHS_WEB[safeBody];
   const angle = Number.isFinite(heading as number) ? Math.round((heading as number) % 360) : 0;
+  const spoilerEls = spoiler
+    ? `<path d='${spoiler}' fill='rgba(0,0,0,0.55)' transform='translate(0 1)'/>
+       <path d='${spoiler}' fill='url(#g)' stroke='white' stroke-width='1.5' stroke-linejoin='round'/>`
+    : "";
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 100 100'>
     <defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'>
       <stop offset='0' stop-color='${fill}' stop-opacity='1'/><stop offset='1' stop-color='${fill}' stop-opacity='0.78'/>
@@ -120,6 +132,7 @@ function carIconDataUrl(body: string | undefined | null, color: string | undefin
     <g transform='rotate(${angle} 50 50)'>
       <path d='${path}' fill='rgba(0,0,0,0.45)' transform='translate(0 2)'/>
       <path d='${path}' fill='url(#g)' stroke='white' stroke-width='2' stroke-linejoin='round'/>
+      ${spoilerEls}
       <path d='${wind}' fill='rgba(255,255,255,0.55)'/>
       <rect x='48' y='50' width='4' height='26' rx='1' fill='rgba(0,0,0,0.18)'/>
     </g></svg>`;

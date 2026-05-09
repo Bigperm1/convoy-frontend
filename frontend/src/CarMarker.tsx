@@ -80,7 +80,10 @@ function bodyPath(body: CarBody) {
       // Cab + bed (taller rectangle with cab notch)
       return "M50 8 L70 18 L72 44 L74 92 L26 92 L28 44 L30 18 Z";
     case "hatch":
-      return "M50 12 L72 26 L74 80 L68 92 L32 92 L26 80 L28 26 Z";
+      // Aggressive hot-hatch: pointed nose, pronounced front + rear fender flares,
+      // mid-body waist, squared-off rear deck. (Roof spoiler is rendered as a
+      // separate path overlaying the rear so it visually sits above the body.)
+      return "M50 6 L60 12 L78 24 L80 32 L72 50 L80 68 L82 80 L78 90 L22 90 L18 80 L20 68 L28 50 L20 32 L22 24 L40 12 Z";
     case "van":
       return "M50 10 L74 22 L76 90 L70 94 L30 94 L24 90 L26 22 Z";
     case "motorcycle":
@@ -90,6 +93,17 @@ function bodyPath(body: CarBody) {
     default:
       return "M50 10 L70 24 L72 78 L66 92 L34 92 L28 78 L30 24 Z";
   }
+}
+
+// Optional rear-wing/spoiler overlay. Only the hot-hatch gets one — extends
+// slightly wider than the body at the back so the wing reads from above.
+// Returns `null` for bodies that don't have a spoiler.
+function spoilerPath(body: CarBody): string | null {
+  if (body === "hatch") {
+    // A wide rear wing with two small endplates — wider than the rear fenders.
+    return "M14 84 L86 84 L88 92 L12 92 Z M12 80 L18 80 L18 92 L12 92 Z M82 80 L88 80 L88 92 L82 92 Z";
+  }
+  return null;
 }
 
 function windshieldPath(body: CarBody) {
@@ -124,6 +138,17 @@ export default function CarMarker({ body = "sedan", color, heading, size = 40, t
         <Path d={bodyPath(safeBody)} fill="rgba(0,0,0,0.45)" transform="translate(0,2)" />
         {/* Body */}
         <Path d={bodyPath(safeBody)} fill="url(#bodyGrad)" stroke="#ffffff" strokeWidth={2} strokeLinejoin="round" />
+        {/* Optional roof spoiler / rear wing — currently only the hot-hatch */}
+        {(() => {
+          const sp = spoilerPath(safeBody);
+          if (!sp) return null;
+          return (
+            <>
+              <Path d={sp} fill="rgba(0,0,0,0.55)" transform="translate(0,1)" />
+              <Path d={sp} fill="url(#bodyGrad)" stroke="#ffffff" strokeWidth={1.5} strokeLinejoin="round" />
+            </>
+          );
+        })()}
         {/* Windshield (subtle highlight, helps show heading) */}
         <Path d={windshieldPath(safeBody)} fill="rgba(255,255,255,0.55)" />
         {/* Roof centerline accent */}

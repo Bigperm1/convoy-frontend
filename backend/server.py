@@ -23,6 +23,8 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
 
+import supabase_admin as supa
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("convoy")
 
@@ -89,6 +91,19 @@ class CommunityUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     is_public: Optional[bool] = None
+
+class RouteIn(BaseModel):
+    community_id: str
+    name: str
+    description: Optional[str] = None
+    dest_label: Optional[str] = None
+    dest_lat: float
+    dest_lng: float
+    origin_label: Optional[str] = None
+    origin_lat: Optional[float] = None
+    origin_lng: Optional[float] = None
+    polyline: Optional[str] = None
+    scheduled_at: Optional[str] = None  # ISO timestamp
 
 
 # ---------- Helpers ----------
@@ -251,6 +266,13 @@ async def create_community(body: CommunityIn, user=Depends(get_current_user)):
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.communities.insert_one(doc)
+    # Mirror into Supabase so the routes table has a valid FK target and Realtime
+    # subscribers can pick up community metadata. Best-effort — Mongo remains source of truth.
+    asyncio.create_task(supa.upsert_row("communities", {
+        "id": cid,
+        "name": doc["name"],
+        "description": doc["description"],
+    }))
     return public_community(doc, viewer_id=user["id"])
 
 @api.get("/communities/mine")
@@ -338,6 +360,82 @@ async def delete_community(cid: str, user=Depends(get_current_user)):
     if user["id"] != c.get("admin_id"): raise HTTPException(status_code=403, detail="Admin only")
     await db.communities.delete_one({"id": cid})
     await db.ptt.delete_many({"channel": cid})
+    # Cascade delete in Supabase mirror (routes auto-delete via ON DELETE CASCADE)
+    asyncio.create_task(supa.delete_row("communities", cid))
+    return {"ok": True}
+
+
+# ---------- Community Routes (Supabase-backed) ----------
+# Admin-only writes via the FastAPI backend (uses service role to bypass RLS).
+# Reads are done client-side directly against Supabase (anon key) since that
+# enables Realtime subscriptions; this endpoint is also provided as a
+# server-side alternative for clients without the JS SDK.
+
+async def _require_admin(cid: str, user) -> dict:
+    c = await db.communities.find_one({"id": cid}, {"_id": 0})
+    if not c: raise HTTPException(status_code=404, detail="Community not found")
+    if user["id"] != c.get("admin_id"):
+        raise HTTPException(status_code=403, detail="Only the community admin can manage routes")
+    # Ensure community exists in Supabase mirror (lazy upsert covers communities created
+    # before the mirror was wired up).
+    asyncio.create_task(supa.upsert_row("communities", {
+        "id": c["id"], "name": c["name"], "description": c.get("description", "") or "",
+    }))
+    return c
+
+
+@api.post("/communities/{cid}/routes")
+async def create_community_route(cid: str, body: RouteIn, user=Depends(get_current_user)):
+    """Admin-only — saves a destination/cruise visible to every community member."""
+    if body.community_id != cid:
+        raise HTTPException(status_code=400, detail="Path/body community_id mismatch")
+    await _require_admin(cid, user)
+    if not supa.SUPABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Supabase is not configured")
+    row = {
+        "community_id": cid,
+        "created_by": user.get("handle", "") or "admin",
+        "name": body.name,
+        "description": body.description,
+        "dest_label": body.dest_label,
+        "dest_lat": body.dest_lat,
+        "dest_lng": body.dest_lng,
+        "origin_label": body.origin_label,
+        "origin_lat": body.origin_lat,
+        "origin_lng": body.origin_lng,
+        "polyline": body.polyline,
+        "scheduled_at": body.scheduled_at,
+        "is_active": True,
+    }
+    saved = await supa.insert_row("routes", row)
+    if not saved:
+        raise HTTPException(status_code=502, detail="Could not save route to Supabase")
+    return saved
+
+
+@api.get("/communities/{cid}/routes")
+async def list_community_routes(cid: str, user=Depends(get_current_user)):
+    """Members-only — list active routes for a community."""
+    c = await db.communities.find_one({"id": cid}, {"_id": 0})
+    if not c: raise HTTPException(status_code=404, detail="Community not found")
+    if user["id"] not in c.get("members", []):
+        raise HTTPException(status_code=403, detail="Not a member of this community")
+    rows = await supa.select_rows(
+        "routes",
+        f"community_id=eq.{cid}&is_active=eq.true&order=created_at.desc&limit=100",
+    )
+    return rows
+
+
+@api.delete("/communities/{cid}/routes/{rid}")
+async def delete_community_route(cid: str, rid: str, user=Depends(get_current_user)):
+    """Admin-only — soft-deactivate a route. We set is_active=false (rather than
+    a hard delete) so members get a Realtime UPDATE event and any in-flight
+    navigation can show a 'route removed' notice."""
+    await _require_admin(cid, user)
+    updated = await supa.update_row("routes", rid, {"is_active": False})
+    if updated is None:
+        raise HTTPException(status_code=502, detail="Could not deactivate route")
     return {"ok": True}
 
 

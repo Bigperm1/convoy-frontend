@@ -120,6 +120,21 @@ backend:
           agent: "testing"
           comment: "Sanity check: POST /api/voice/transcribe with empty audio_b64 returns HTTP 400 ('Audio too short') as expected — no regression from classifier refactor. Authenticated (JWT bearer for demo@revradar.app) and unauthenticated paths exercised via shared test harness."
 
+  - task: "Community Routes endpoints — POST/GET/DELETE /api/communities/{cid}/routes (Supabase-backed)"
+    implemented: true
+    working: true
+    file: "backend/server.py, backend/supabase_admin.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added admin-gated community route management. New supabase_admin.py module wraps PostgREST using SUPABASE_SERVICE_ROLE_KEY. Endpoints: (1) POST /api/communities/{cid}/routes — admin-only insert into Supabase routes table. Body schema: {community_id, name, description?, dest_label?, dest_lat, dest_lng, origin_label?, origin_lat?, origin_lng?, polyline?, scheduled_at?}. Returns the created row from Supabase. (2) GET /api/communities/{cid}/routes — members-only list of active routes (is_active=true) ordered by created_at desc, limit 100. (3) DELETE /api/communities/{cid}/routes/{rid} — admin-only soft-delete (sets is_active=false). Also wired POST /api/communities to upsert into Supabase communities mirror, and DELETE /api/communities/{cid} to cascade-delete the mirror row (which removes routes via FK ON DELETE CASCADE)."
+        - working: true
+          agent: "testing"
+          comment: "All 15 assertions PASS via public URL https://motorist-hub.preview.emergentagent.com/api (see /app/backend_test_routes.py). Detailed verdicts: (A) Auth gate — A1 PASS POST /api/communities/<uuid>/routes without bearer → 401 {'detail':'Not authenticated'}; A2 PASS GET → 401; A3 PASS DELETE → 401. (B) Setup — B0 PASS demo@revradar.app/demo1234 login → 200 + JWT; B1 PASS POST /api/communities {name:'E2E Routes Test',description:'backend test',is_public:true} with bearer → 200 + cid + is_admin=true. (C) Happy path — C1 PASS POST /api/communities/{cid}/routes body {community_id:cid, name:'Sunday cruise to Half Moon Bay', description:'Coastal run', dest_label:'Half Moon Bay, CA', dest_lat:37.4636, dest_lng:-122.4286, polyline:'abc_test_polyline'} → HTTP 200 with Supabase row {id:<uuid>, community_id==cid, is_active==true, dest_lat==37.4636, dest_lng==-122.4286, created_at:'2026-05-09T06:12:17.903387+00:00'}. Captured rid. (D) Body/path mismatch — D1 PASS POST with body community_id set to a DIFFERENT random uuid → 400 {'detail':'Path/body community_id mismatch'}. (E) List — E1 PASS GET /api/communities/{cid}/routes → 200 list (count=1) containing rid with is_active=true. (F) Soft-delete — F1 PASS DELETE /api/communities/{cid}/routes/{rid} → 200 {'ok':true}; F2 PASS subsequent GET returns 200 with count=0 (rid filtered out by is_active=eq.true). (G) 404 paths — G1 PASS POST to bogus cid 00000000-0000-0000-0000-000000000000 (with matching body community_id) → 404 {'detail':'Community not found'} (admin check fails first); G2 PASS GET on bogus cid → 404 {'detail':'Community not found'}. (H) Non-admin path — H0 PASS registered 2nd user via POST /api/auth/register (random email, random password, handle); H1 PASS GET as non-member → 403 {'detail':'Not a member of this community'}; H2 PASS POST as non-admin → 403 {'detail':'Only the community admin can manage routes'}. Cleanup PASS DELETE /api/communities/{cid} → 200. SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY work end-to-end against pgtbjiszjglznjagolse.supabase.co — Supabase writes returned full rows including server-generated id and created_at. POST /api/communities also successfully mirrored the new community row (best-effort) since the subsequent insert into routes succeeded against the FK constraint. No critical or minor issues found. Endpoints working as designed."
+
   - task: "Hazard dispute endpoint (POST /api/hazards/{hid}/dispute) — community moderation"
     implemented: true
     working: true
@@ -186,7 +201,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Hazard dispute endpoint (POST /api/hazards/{hid}/dispute) — community moderation"
+    - "Community Routes endpoints — POST/GET/DELETE /api/communities/{cid}/routes (Supabase-backed)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

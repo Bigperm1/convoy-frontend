@@ -21,6 +21,7 @@ import {
   fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtEtaSec,
 } from "../../src/nav";
+import { useCommunityRoutes, createCommunityRoute, CommunityRoute } from "../../src/communityRoutes";
 
 type RouteInfo = {
   distance_text: string;
@@ -407,6 +408,73 @@ export default function MapScreen() {
   );
   const [selectedPeer, setSelectedPeer] = useState<ConvoyPresencePeer | null>(null);
 
+  // ---- Community Routes (admin-shared destinations / cruises) ----
+  const { routes: communityRoutes } = useCommunityRoutes(settings.activeCommunityId || null);
+  const [isAdminOfActive, setIsAdminOfActive] = useState(false);
+  const [savingRoute, setSavingRoute] = useState(false);
+  const [routeToast, setRouteToast] = useState<CommunityRoute | null>(null);
+  // Track which route ids we've already seen so we only toast on truly new ones
+  const seenRouteIdsRef = useRef<Set<string>>(new Set());
+
+  // Resolve admin status of the active community (refresh when activeCommunityId changes)
+  useEffect(() => {
+    let cancelled = false;
+    const cid = settings.activeCommunityId;
+    if (!cid) { setIsAdminOfActive(false); return; }
+    (async () => {
+      try {
+        const { data } = await api.get(`/communities/${cid}`);
+        if (!cancelled) setIsAdminOfActive(!!data?.is_admin);
+      } catch { if (!cancelled) setIsAdminOfActive(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [settings.activeCommunityId]);
+
+  // Toast banner when the admin shares a NEW route (skip on first hydration)
+  useEffect(() => {
+    if (communityRoutes.length === 0) { return; }
+    // First load — seed seen ids without toasting
+    if (seenRouteIdsRef.current.size === 0) {
+      communityRoutes.forEach((r) => seenRouteIdsRef.current.add(r.id));
+      return;
+    }
+    const fresh = communityRoutes.find((r) => !seenRouteIdsRef.current.has(r.id));
+    if (fresh) {
+      seenRouteIdsRef.current.add(fresh.id);
+      setRouteToast(fresh);
+      // Auto-dismiss after 5s
+      setTimeout(() => setRouteToast((t) => (t?.id === fresh.id ? null : t)), 5000);
+    }
+  }, [communityRoutes]);
+
+  // Load a community route into the active navigation flow
+  const loadCommunityRoute = (r: CommunityRoute) => {
+    setDestination({ lat: r.dest_lat, lng: r.dest_lng, label: r.dest_label || r.name });
+    setShowSteps(true);
+    setRouteToast(null);
+  };
+
+  // Admin saves the current destination as a shared route for the community
+  const saveCurrentDestinationToConvoy = async () => {
+    if (!destination || !settings.activeCommunityId) return;
+    setSavingRoute(true);
+    try {
+      await createCommunityRoute({
+        community_id: settings.activeCommunityId,
+        name: destination.label || "Convoy cruise",
+        dest_label: destination.label,
+        dest_lat: destination.lat,
+        dest_lng: destination.lng,
+        // Save the currently-selected polyline so members can preview the same path instantly
+        polyline: activeRoute?.polyline || undefined,
+      });
+    } catch (e: any) {
+      Alert.alert("Couldn't share route", e?.response?.data?.detail || e?.message || "Try again");
+    } finally {
+      setSavingRoute(false);
+    }
+  };
+
   if (!coords) {
     return <View style={styles.loader}><Text style={{ color: COLORS.textDim }}>Locating…</Text></View>;
   }
@@ -498,6 +566,64 @@ export default function MapScreen() {
         )}
       </SafeAreaView>
 
+      {/* ===== Community Routes — horizontal chip strip (visible when there are shared cruises) ===== */}
+      {communityRoutes.length > 0 && navMode === "preview" && !destination && (
+        <View style={styles.routesStripWrap}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.routesStrip}
+            testID="community-routes-strip"
+          >
+            {communityRoutes.map((r) => (
+              <TouchableOpacity
+                key={r.id}
+                testID={`community-route-${r.id}`}
+                onPress={() => loadCommunityRoute(r)}
+                activeOpacity={0.85}
+              >
+                <Glass radius={14} style={styles.routeChip}>
+                  <View style={styles.routeChipInner}>
+                    <View style={styles.routeChipIcon}>
+                      <Ionicons name="flag" size={14} color={COLORS.warning} />
+                    </View>
+                    <View style={{ maxWidth: 180 }}>
+                      <Text style={styles.routeChipName} numberOfLines={1}>{r.name}</Text>
+                      {!!r.created_by && <Text style={styles.routeChipMeta} numberOfLines={1}>by {r.created_by}</Text>}
+                    </View>
+                  </View>
+                </Glass>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* ===== "Admin shared a route" toast (auto-dismiss after 5s) ===== */}
+      {routeToast && (
+        <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.routeToastWrap}>
+          <Glass radius={16} style={styles.routeToast}>
+            <View style={styles.routeToastRow}>
+              <View style={styles.routeToastIcon}>
+                <Ionicons name="megaphone" size={20} color={COLORS.warning} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.routeToastTitle}>Convoy route shared</Text>
+                <Text style={styles.routeToastSub} numberOfLines={1}>
+                  {routeToast.created_by ? `${routeToast.created_by}: ` : ""}{routeToast.name}
+                </Text>
+              </View>
+              <TouchableOpacity testID="route-toast-load" onPress={() => loadCommunityRoute(routeToast)} style={styles.routeToastBtn}>
+                <Text style={styles.routeToastBtnText}>Load</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setRouteToast(null)} style={{ padding: 6 }}>
+                <Ionicons name="close" size={18} color={COLORS.textDim} />
+              </TouchableOpacity>
+            </View>
+          </Glass>
+        </SafeAreaView>
+      )}
+
       {/* ===== Route preview card (shown only when NOT actively navigating) ===== */}
       {destination && route && navMode === "preview" && (
         <Glass radius={20} style={styles.routeCard}>
@@ -542,6 +668,19 @@ export default function MapScreen() {
               <Ionicons name={showSteps ? "chevron-down" : "list"} size={18} color={COLORS.text} />
               <Text style={styles.secBtnText}>{showSteps ? "Hide" : "Steps"}</Text>
             </TouchableOpacity>
+            {/* Admin-only: share this destination with the active community */}
+            {isAdminOfActive && settings.activeCommunityId && (
+              <TouchableOpacity
+                testID="save-to-convoy"
+                onPress={saveCurrentDestinationToConvoy}
+                style={[styles.secBtn, savingRoute && { opacity: 0.6 }]}
+                disabled={savingRoute}
+                activeOpacity={0.85}
+              >
+                <Ionicons name={savingRoute ? "hourglass" : "share-social"} size={18} color={COLORS.warning} />
+                <Text style={[styles.secBtnText, { color: COLORS.warning }]}>{savingRoute ? "Sharing…" : "Share"}</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity testID="start-nav" onPress={startNav} style={styles.startBtn} activeOpacity={0.85}>
               <Ionicons name="navigate-circle" size={20} color="#fff" />
               <Text style={styles.startBtnText}>Start</Text>
@@ -785,4 +924,30 @@ const styles = StyleSheet.create({
   reportBtn: { flexDirection: "row", alignItems: "center", padding: 10, gap: 12 },
   reportIco: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   reportText: { color: COLORS.text, fontWeight: "500", fontSize: 14 },
+
+  // ---- Community Routes (admin-shared cruises) ----
+  routesStripWrap: { position: "absolute", left: 0, right: 0, top: 150, zIndex: 5 },
+  routesStrip: { paddingHorizontal: 12, gap: 8 },
+  routeChip: { },
+  routeChipInner: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 8 },
+  routeChipIcon: {
+    width: 26, height: 26, borderRadius: 8,
+    backgroundColor: COLORS.warning + "22",
+    alignItems: "center", justifyContent: "center",
+  },
+  routeChipName: { color: COLORS.text, fontSize: 13, fontWeight: "600", letterSpacing: -0.1 },
+  routeChipMeta: { color: COLORS.textDim, fontSize: 11, marginTop: 1 },
+  // Toast banner when a new community route is shared
+  routeToastWrap: { position: "absolute", top: 0, left: 0, right: 0, alignItems: "center", zIndex: 9999 },
+  routeToast: { marginTop: 4, marginHorizontal: 12, alignSelf: "stretch" },
+  routeToastRow: { flexDirection: "row", alignItems: "center", padding: 10, gap: 10 },
+  routeToastIcon: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: COLORS.warning + "22",
+    alignItems: "center", justifyContent: "center",
+  },
+  routeToastTitle: { color: COLORS.text, fontWeight: "700", fontSize: 13, letterSpacing: 0.1 },
+  routeToastSub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
+  routeToastBtn: { backgroundColor: COLORS.warning, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10 },
+  routeToastBtnText: { color: "#000", fontWeight: "700", fontSize: 12, letterSpacing: 0.3 },
 });

@@ -73,14 +73,15 @@ export default function Login() {
               placeholderTextColor={COLORS.textMute}
             />
             <TouchableOpacity testID="login-submit" style={styles.btn} onPress={onSubmit} disabled={busy} activeOpacity={0.85}>
-              <LinearGradient colors={[COLORS.primary, COLORS.primaryDim]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
+              {/* Convoy yellow CTA — matches Sign-up + brand mark */}
+              <LinearGradient colors={["#FFE45C", "#FFC700", "#FF9F0A"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
                 <Text style={styles.btnText}>{busy ? "Signing in…" : "Sign in"}</Text>
               </LinearGradient>
             </TouchableOpacity>
 
             <Link href="/(auth)/signup" asChild>
               <TouchableOpacity testID="link-signup" style={styles.linkBtn}>
-                <Text style={styles.linkText}>New here? <Text style={{ color: COLORS.primary, fontWeight: "600" }}>Create account</Text></Text>
+                <Text style={styles.linkText}>New here? <Text style={styles.linkAction}>Create account</Text></Text>
               </TouchableOpacity>
             </Link>
           </View>
@@ -112,7 +113,9 @@ const styles = StyleSheet.create({
   },
   btn: { marginTop: 22, borderRadius: 14, overflow: "hidden" },
   btnGrad: { paddingVertical: 16, alignItems: "center" },
-  btnText: { color: "#fff", fontWeight: "600", fontSize: 16, letterSpacing: -0.2 },
+  // Dark glyph on the bright yellow CTA — high contrast, matches brand mark color.
+  btnText: { color: "#1a1a1a", fontWeight: "700", fontSize: 16, letterSpacing: 0.2 },
+  linkAction: { color: "#FFC700", fontWeight: "600" },
   linkBtn: { marginTop: 16, alignItems: "center" },
   linkText: { color: COLORS.textDim, fontSize: 14 },
   footer: { color: COLORS.textMute, textAlign: "center", marginTop: 22, fontSize: 12 },

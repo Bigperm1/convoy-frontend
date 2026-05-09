@@ -8,6 +8,7 @@ import { View, Text, StyleSheet, Dimensions, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Path, Circle, G, Defs, LinearGradient as SvgGrad, Stop, Rect } from "react-native-svg";
 import { COLORS } from "./theme";
+import type { ExternalAlert, ExternalAlertType } from "./externalFeed";
 
 let MapView: any = null;
 let Marker: any = null;
@@ -30,9 +31,11 @@ type Props = {
   user: { lat: number; lng: number; heading?: number };
   peers: Peer[];
   hazards: Hazard[];
+  externalAlerts?: ExternalAlert[];
   destination?: LatLng | null;
   encodedPolyline?: string | null;
   onHazardPress: (h: Hazard) => void;
+  onExternalAlertPress?: (a: ExternalAlert) => void;
   onRoute?: (info: any) => void;
 };
 
@@ -40,6 +43,24 @@ const hazardColor = (k: string) =>
   k === "police" ? "#3478F6" : k === "accident" ? "#FF453A" : k === "traffic" ? "#FF9F0A" : "#FF9F0A";
 const hazardIcon = (k: string): any =>
   k === "police" ? "shield-checkmark" : k === "accident" ? "alert-circle" : k === "traffic" ? "car" : "warning";
+
+// External (Waze-style) alert visuals — map normalized type → color/icon
+const extColor = (t: ExternalAlertType) =>
+  t === "POLICE" ? "#3478F6"
+    : t === "ACCIDENT" ? "#FF453A"
+    : t === "JAM" ? "#FF9F0A"
+    : t === "HAZARD" ? "#FFD60A"
+    : t === "CONSTRUCTION" ? "#FF9500"
+    : t === "WEATHER" ? "#5AC8FA"
+    : "#8E8E93";
+const extIcon = (t: ExternalAlertType): any =>
+  t === "POLICE" ? "shield"
+    : t === "ACCIDENT" ? "warning"
+    : t === "JAM" ? "swap-vertical"
+    : t === "HAZARD" ? "alert"
+    : t === "CONSTRUCTION" ? "construct"
+    : t === "WEATHER" ? "cloudy"
+    : "ellipse";
 
 // Google Maps polyline decoder
 function decodePolyline(encoded: string): LatLng[] {
@@ -59,7 +80,7 @@ function decodePolyline(encoded: string): LatLng[] {
   return points;
 }
 
-export default function ConvoyMap({ center, user, peers, hazards, destination, encodedPolyline, onHazardPress }: Props) {
+export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], destination, encodedPolyline, onHazardPress, onExternalAlertPress }: Props) {
   // ---- Real Google Maps (EAS dev build) ----
   if (MapView) {
     const region = { latitude: center.lat, longitude: center.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 };
@@ -77,12 +98,28 @@ export default function ConvoyMap({ center, user, peers, hazards, destination, e
           </Marker>
         ))}
         {hazards.map((h) => (
-          <Marker key={h.id} coordinate={{ latitude: h.lat, longitude: h.lng }} anchor={{ x: 0.5, y: 1 }} onPress={() => onHazardPress(h)}>
+          <Marker key={`u-${h.id}`} coordinate={{ latitude: h.lat, longitude: h.lng }} anchor={{ x: 0.5, y: 1 }} onPress={() => onHazardPress(h)}>
             <View style={styles.hazardWrap}>
               <View style={[styles.hazardBubble, { backgroundColor: hazardColor(h.kind) }]}>
                 <Ionicons name={hazardIcon(h.kind)} size={22} color="#fff" />
               </View>
               <View style={[styles.hazardTail, { borderTopColor: hazardColor(h.kind) }]} />
+            </View>
+          </Marker>
+        ))}
+        {externalAlerts.map((a) => (
+          <Marker
+            key={`x-${a.id}`}
+            coordinate={{ latitude: a.lat, longitude: a.lng }}
+            anchor={{ x: 0.5, y: 1 }}
+            onPress={() => onExternalAlertPress?.(a)}
+            tracksViewChanges={false}
+          >
+            <View style={styles.extWrap}>
+              <View style={[styles.extBubble, { backgroundColor: extColor(a.type) }]}>
+                <Ionicons name={extIcon(a.type)} size={16} color="#fff" />
+              </View>
+              <View style={[styles.extTail, { borderTopColor: extColor(a.type) }]} />
             </View>
           </Marker>
         ))}
@@ -101,15 +138,15 @@ export default function ConvoyMap({ center, user, peers, hazards, destination, e
   }
 
   // ---- Expo Go fallback: stylized SVG route preview ----
-  return <RoutePreviewFallback {...{ center, user, peers, hazards, destination, encodedPolyline, onHazardPress }} />;
+  return <RoutePreviewFallback {...{ center, user, peers, hazards, externalAlerts, destination, encodedPolyline, onHazardPress, onExternalAlertPress }} />;
 }
 
-function RoutePreviewFallback({ center, user, peers, hazards, destination, encodedPolyline, onHazardPress }: Props) {
+function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [], destination, encodedPolyline, onHazardPress }: Props) {
   const points = useMemo(() => (encodedPolyline ? decodePolyline(encodedPolyline) : []), [encodedPolyline]);
 
   // Build bounding box across user + destination + route points
-  const allLats: number[] = [user.lat, ...peers.map((p) => p.lat), ...hazards.map((h) => h.lat), ...points.map((p) => p.lat)];
-  const allLngs: number[] = [user.lng, ...peers.map((p) => p.lng), ...hazards.map((h) => h.lng), ...points.map((p) => p.lng)];
+  const allLats: number[] = [user.lat, ...peers.map((p) => p.lat), ...hazards.map((h) => h.lat), ...externalAlerts.map((a) => a.lat), ...points.map((p) => p.lat)];
+  const allLngs: number[] = [user.lng, ...peers.map((p) => p.lng), ...hazards.map((h) => h.lng), ...externalAlerts.map((a) => a.lng), ...points.map((p) => p.lng)];
   if (destination) { allLats.push(destination.lat); allLngs.push(destination.lng); }
   const minLat = Math.min(...allLats), maxLat = Math.max(...allLats);
   const minLng = Math.min(...allLngs), maxLng = Math.max(...allLngs);
@@ -173,9 +210,22 @@ function RoutePreviewFallback({ center, user, peers, hazards, destination, encod
           const xy = project(h.lat, h.lng);
           const c = hazardColor(h.kind);
           return (
-            <G key={h.id}>
+            <G key={`u-${h.id}`}>
               <Circle cx={xy.x} cy={xy.y} r={14} fill={c} fillOpacity={0.25} />
               <Circle cx={xy.x} cy={xy.y} r={9} fill={c} stroke="#fff" strokeWidth={2} />
+            </G>
+          );
+        })}
+
+        {/* external (Waze) alerts — slightly smaller diamond shape to distinguish from user reports */}
+        {externalAlerts.map((a) => {
+          const xy = project(a.lat, a.lng);
+          const c = extColor(a.type);
+          const s = 7;
+          return (
+            <G key={`x-${a.id}`}>
+              <Circle cx={xy.x} cy={xy.y} r={11} fill={c} fillOpacity={0.22} />
+              <Path d={`M ${xy.x} ${xy.y - s} L ${xy.x + s} ${xy.y} L ${xy.x} ${xy.y + s} L ${xy.x - s} ${xy.y} Z`} fill={c} stroke="#fff" strokeWidth={1.5} />
             </G>
           );
         })}
@@ -211,6 +261,14 @@ const styles = StyleSheet.create({
   hazardWrap: { alignItems: "center" },
   hazardBubble: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.9)" },
   hazardTail: { width: 0, height: 0, borderLeftWidth: 6, borderRightWidth: 6, borderTopWidth: 9, borderLeftColor: "transparent", borderRightColor: "transparent", marginTop: -1 },
+  // Smaller diamond-bubble for external (Waze-style) alerts so they're visually distinct from user-reported pins
+  extWrap: { alignItems: "center" },
+  extBubble: {
+    width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "rgba(255,255,255,0.85)",
+    transform: [{ rotate: "45deg" }],
+  },
+  extTail: { width: 0, height: 0, borderLeftWidth: 4, borderRightWidth: 4, borderTopWidth: 6, borderLeftColor: "transparent", borderRightColor: "transparent", marginTop: -1 },
   notice: { position: "absolute", left: 24, right: 24, bottom: 220, alignItems: "center" },
   noticeTitle: { color: COLORS.text, fontSize: 14, fontWeight: "600", marginBottom: 4 },
   noticeText: { color: COLORS.textDim, textAlign: "center", fontSize: 12, lineHeight: 17 },

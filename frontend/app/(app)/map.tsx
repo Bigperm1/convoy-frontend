@@ -12,6 +12,7 @@ import ConvoyMap, { Hazard, Peer } from "../../src/ConvoyMap";
 import DestinationSearch from "../../src/DestinationSearch";
 import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 import { voiceBus, geocodeQuery } from "../../src/voiceBus";
+import { useExternalAlerts, registerExternalFeedBackgroundTask } from "../../src/externalFeed";
 
 type RouteInfo = {
   distance_text: string;
@@ -43,6 +44,13 @@ export default function MapScreen() {
   const [live, setLive] = useState<"connecting" | "live" | "off">("connecting");
   const [encodedPolyline, setEncodedPolyline] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+
+  // ----- External alerts feed (Waze-style polling, dedup + auto-clear) -----
+  const externalFeed = useExternalAlerts(60_000);
+  useEffect(() => {
+    // Best-effort iOS/Android background fetch (≥15min cadence). Foreground polling above is the primary path.
+    registerExternalFeedBackgroundTask().catch(() => {});
+  }, []);
 
   // Native directions via REST (web uses the JS DirectionsService inside ConvoyMap)
   useEffect(() => {
@@ -265,9 +273,11 @@ export default function MapScreen() {
         user={{ ...coords, heading: 0 }}
         peers={peerList}
         hazards={hazards}
+        externalAlerts={externalFeed.alerts}
         destination={destination}
         encodedPolyline={encodedPolyline}
         onHazardPress={(h) => setSelected(h)}
+        onExternalAlertPress={(a) => Alert.alert(`${a.type}${a.subtype ? " · " + a.subtype : ""}`, "Live alert from Convoy feed.")}
         onRoute={setRoute}
       />
 
@@ -282,7 +292,7 @@ export default function MapScreen() {
                   <Text style={[styles.liveText, { color: liveDot }]}>{liveText}</Text>
                 </View>
               </View>
-              <Text style={styles.sub}>{user?.handle} · {peerList.length} drivers · {hazards.length} alerts</Text>
+              <Text style={styles.sub}>{user?.handle} · {peerList.length} drivers · {hazards.length} alerts · {externalFeed.alerts.length} live</Text>
             </View>
             <TouchableOpacity testID="refresh-btn" onPress={() => loadPeers()} style={styles.iconBtn}>
               <Ionicons name="refresh" size={18} color={COLORS.text} />

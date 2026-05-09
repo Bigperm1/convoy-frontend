@@ -9,11 +9,14 @@ import logging
 import asyncio
 import secrets as _secrets
 import tempfile
+import hashlib
+import time
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict
 
 import jwt
 import bcrypt
+import httpx
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
@@ -418,6 +421,137 @@ def _classify_intent(text: str) -> dict:
     out = {"text": text, "intent": intent}
     if query:
         out["query"] = query
+    return out
+
+
+# ---------- External Alerts Feed (Waze-style proxy) ----------
+# Polls a JSON feed and normalizes to {id, type, lat, lng, ts, raw_type, subtype}.
+# The proxy URL is configurable via env: EXTERNAL_FEED_URL (default below).
+# Includes a tiny in-memory cache so 60s frontend polls don't hammer upstream.
+
+EXTERNAL_FEED_URL = os.environ.get("EXTERNAL_FEED_URL", "https://rtproxy-na.waze.com/")
+_feed_cache: Dict[str, dict] = {"data": None, "ts": 0.0}
+_FEED_CACHE_TTL = 25.0  # seconds — backend caches a bit shorter than client poll cadence
+
+def _normalize_alert_type(raw: str) -> str:
+    if not raw: return "OTHER"
+    r = str(raw).upper()
+    if "POLICE" in r: return "POLICE"
+    if "ACCIDENT" in r or "CRASH" in r: return "ACCIDENT"
+    if "JAM" in r or "TRAFFIC" in r: return "JAM"
+    if "HAZARD" in r or "OBJECT" in r or "POTHOLE" in r or "ROAD" in r or "DEBRIS" in r: return "HAZARD"
+    if "CONSTRUCTION" in r: return "CONSTRUCTION"
+    if "WEATHER" in r: return "WEATHER"
+    return "OTHER"
+
+def _alert_id(item: dict, lat: float, lng: float, raw_type: str) -> str:
+    # Prefer feed-provided stable id (uuid / id), otherwise hash type+rounded coords
+    for k in ("uuid", "id", "alertId", "alert_id"):
+        v = item.get(k)
+        if v: return str(v)
+    h = hashlib.sha1(f"{raw_type}|{round(lat, 5)}|{round(lng, 5)}".encode()).hexdigest()
+    return h[:16]
+
+def _extract_alerts(payload) -> List[dict]:
+    """Accept multiple feed shapes: {alerts:[...]}, [...], {data:{alerts:[...]}}."""
+    if payload is None: return []
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = (
+            payload.get("alerts")
+            or payload.get("data", {}).get("alerts") if isinstance(payload.get("data"), dict) else None
+        ) or payload.get("items") or []
+    else:
+        items = []
+
+    out: List[dict] = []
+    for it in items:
+        if not isinstance(it, dict): continue
+        # Coords: {lat,lng} | {latitude,longitude} | {location:{x,y}} (Waze: y=lat,x=lng)
+        lat = it.get("lat") or it.get("latitude")
+        lng = it.get("lng") or it.get("lon") or it.get("longitude")
+        if lat is None or lng is None:
+            loc = it.get("location") or {}
+            if isinstance(loc, dict):
+                lat = loc.get("y") if "y" in loc else loc.get("lat")
+                lng = loc.get("x") if "x" in loc else loc.get("lng")
+        try:
+            lat = float(lat); lng = float(lng)
+        except (TypeError, ValueError):
+            continue
+        raw_type = str(it.get("type") or it.get("alertType") or "OTHER")
+        subtype = it.get("subtype") or it.get("subType") or ""
+        ts_val = it.get("pubMillis") or it.get("ts") or it.get("timestamp")
+        try:
+            ts = float(ts_val) / (1000.0 if ts_val and ts_val > 1e12 else 1.0) if ts_val else time.time()
+        except (TypeError, ValueError):
+            ts = time.time()
+        out.append({
+            "id": _alert_id(it, lat, lng, raw_type),
+            "type": _normalize_alert_type(raw_type),
+            "raw_type": raw_type,
+            "subtype": subtype,
+            "lat": lat, "lng": lng,
+            "ts": ts,
+        })
+    return out
+
+@api.get("/feed/external")
+async def external_feed(
+    user=Depends(get_current_user),
+    top: Optional[float] = None,
+    bottom: Optional[float] = None,
+    left: Optional[float] = None,
+    right: Optional[float] = None,
+):
+    """Proxy + normalize an external alerts feed (Waze-style).
+    Frontend polls this every ~60s; backend caches 25s to soften upstream load."""
+    now = time.time()
+    if _feed_cache["data"] is not None and (now - _feed_cache["ts"]) < _FEED_CACHE_TTL:
+        return _feed_cache["data"]
+
+    params = {}
+    if top is not None: params["top"] = top
+    if bottom is not None: params["bottom"] = bottom
+    if left is not None: params["left"] = left
+    if right is not None: params["right"] = right
+
+    payload = None
+    upstream_status = "ok"
+    upstream_error: Optional[str] = None
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            resp = await client.get(EXTERNAL_FEED_URL, params=params or None,
+                                    headers={"User-Agent": "Convoy/1.0", "Accept": "application/json"})
+            resp.raise_for_status()
+            try:
+                payload = resp.json()
+            except Exception:
+                # Some Waze proxies return text/plain JSON without proper content-type
+                import json as _json
+                payload = _json.loads(resp.text)
+    except httpx.HTTPStatusError as e:
+        upstream_status = "http_error"
+        upstream_error = f"{e.response.status_code}"
+    except httpx.RequestError as e:
+        upstream_status = "network_error"
+        upstream_error = str(e)[:120]
+    except Exception as e:
+        upstream_status = "parse_error"
+        upstream_error = str(e)[:120]
+
+    alerts = _extract_alerts(payload) if payload is not None else []
+    out = {
+        "alerts": alerts,
+        "count": len(alerts),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "source": EXTERNAL_FEED_URL,
+        "upstream_status": upstream_status,
+        "upstream_error": upstream_error,
+    }
+    _feed_cache["data"] = out
+    _feed_cache["ts"] = now
     return out
 
 

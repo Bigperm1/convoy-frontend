@@ -497,6 +497,45 @@ async def list_ptt(channel: str, user=Depends(get_current_user)):
 
 
 # ---------- Voice transcribe ----------
+async def _transcribe_audio(file_path: str) -> str:
+    """
+    Run Whisper on a local audio file.
+
+    Provider preference:
+      1. OPENAI_API_KEY (direct OpenAI SDK) — works on any host (Railway, Render, Fly, etc.).
+      2. EMERGENT_LLM_KEY (Emergent universal key via emergentintegrations) — works inside Emergent.
+
+    Set OPENAI_API_KEY in your deployment env to use a portable, host-agnostic path.
+    Either env var is sufficient; if both are present OPENAI_API_KEY wins.
+    """
+    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if openai_key:
+        # Direct OpenAI SDK — async client, works on any cloud.
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=openai_key)
+        with open(file_path, "rb") as f:
+            resp = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=f,
+                response_format="json",
+                language="en",
+            )
+        return getattr(resp, "text", "") or ""
+
+    emergent_key = os.environ.get("EMERGENT_LLM_KEY", "").strip()
+    if emergent_key:
+        from emergentintegrations.llm.openai import OpenAISpeechToText
+        stt = OpenAISpeechToText(api_key=emergent_key)
+        with open(file_path, "rb") as f:
+            resp = await stt.transcribe(file=f, model="whisper-1", response_format="json", language="en")
+        return getattr(resp, "text", "") or ""
+
+    raise HTTPException(
+        status_code=500,
+        detail="No LLM key configured. Set OPENAI_API_KEY (recommended) or EMERGENT_LLM_KEY.",
+    )
+
+
 @api.post("/voice/transcribe")
 async def transcribe(body: TranscribeIn, user=Depends(get_current_user)):
     import base64
@@ -508,11 +547,9 @@ async def transcribe(body: TranscribeIn, user=Depends(get_current_user)):
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
     tmp.write(audio_bytes); tmp.flush(); tmp.close()
     try:
-        from emergentintegrations.llm.openai import OpenAISpeechToText
-        stt = OpenAISpeechToText(api_key=os.environ["EMERGENT_LLM_KEY"])
-        with open(tmp.name, "rb") as f:
-            resp = await stt.transcribe(file=f, model="whisper-1", response_format="json", language="en")
-        text = getattr(resp, "text", "") or ""
+        text = await _transcribe_audio(tmp.name)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Whisper failed")
         raise HTTPException(status_code=500, detail=f"Transcribe failed: {e}")

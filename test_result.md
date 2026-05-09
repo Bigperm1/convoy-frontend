@@ -120,6 +120,21 @@ backend:
           agent: "testing"
           comment: "Sanity check: POST /api/voice/transcribe with empty audio_b64 returns HTTP 400 ('Audio too short') as expected — no regression from classifier refactor. Authenticated (JWT bearer for demo@revradar.app) and unauthenticated paths exercised via shared test harness."
 
+  - task: "Hazard dispute endpoint (POST /api/hazards/{hid}/dispute) — community moderation"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added POST /api/hazards/{hid}/dispute as a non-Supabase fallback. Auth-gated. Increments 'disputes' counter via Mongo $inc. After increment, if disputes >= confirms + 2 the hazard's expires_at is set to now() so it disappears from /api/hazards listings (which filter by expires_at). Returns the updated hazard doc. 404 if id not found. Test plan: 1) Auth gate — POST without bearer → 401. 2) POST /api/hazards (kind=police, lat/lng) with bearer → 201/200, capture id. 3) POST /api/hazards/{id}/dispute → 200, response.disputes==1. 4) Repeat dispute calls until disputes>=confirms+2 (default confirms=1, so after the 3rd dispute), then GET /api/hazards → hazard should NOT appear (expired). 5) POST /api/hazards/{nonexistent-id}/dispute → 404 'Not found'. 6) No regression on existing POST /api/hazards/{id}/confirm endpoint."
+        - working: true
+          agent: "testing"
+          comment: "All 12 test assertions PASS via public URL https://motorist-hub.preview.emergentagent.com/api (see /app/backend_test.py). Detailed verdicts: (1) PASS — POST /api/hazards/<uuid>/dispute without Authorization header → HTTP 401 {'detail':'Not authenticated'}. (2) PASS — POST /api/auth/login (demo@revradar.app/demo1234) → 200 + token; POST /api/hazards {kind:'police', lat:37.7749, lng:-122.4194, note:''} with bearer → HTTP 200 with full hazard doc {id, kind:'police', confirms:1, expires_at:+30min, reporter_id, reporter_handle:'DemoDriver'}; initial state confirms=1, disputes field absent (defaults to 0). (3) PASS — 1st POST /api/hazards/{id}/dispute → HTTP 200, response disputes==1, confirms==1, expires_at unchanged (still +30min); GET /api/hazards still includes hazard. (4a) PASS — 2nd dispute → 200, disputes==2, hazard still listed (2 < confirms+2=3). (4c) PASS — 3rd dispute → 200, disputes==3 (NOTE: response body is the pre-expiry doc per code's read-then-update ordering, which is fine since the API contract only requires the dispute count is reflected). (4d) PASS — Critically, after the 3rd dispute GET /api/hazards (auth) NO LONGER includes this hazard id, confirming the auto-expire path (expires_at set to now()) and list_hazards filter (expires_at >= now) work together as designed. (5) PASS — POST /api/hazards/00000000-0000-0000-0000-000000000000/dispute with bearer → HTTP 404 {'detail':'Not found'}. (6) PASS — Fresh hazard created (kind='accident', NYC coords), POST /api/hazards/{id}/confirm with bearer → HTTP 200, confirms==2 (incremented from default 1) — no regression on confirm endpoint. Login response uses 'token' key (not 'access_token') per existing implementation; test harness accepts both. Endpoint working as specified."
+
   - task: "External alerts feed proxy (GET /api/feed/external) — multi-feed (na/row) support"
     implemented: true
     working: true
@@ -171,7 +186,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "External alerts feed proxy (GET /api/feed/external) — multi-feed (na/row) support"
+    - "Hazard dispute endpoint (POST /api/hazards/{hid}/dispute) — community moderation"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -190,3 +205,5 @@ agent_communication:
 
     - agent: "main"
       message: "Community-driven hazards (Supabase Source-of-Truth) implemented. Added dispute counter + 'Not there' button in hazard detail card, voice TTS feedback on voice-tagged reports ('Police reported. Thanks driver.'), client-side filter that hides hazards where disputes >= confirms+2, and POST /api/hazards/{id}/dispute backend endpoint as a non-Supabase fallback. Schema migration documented in /app/HAZARDS_SUPABASE_SETUP.md. Verified end-to-end on web: Live pill is GREEN, clicking Police FAB inserts a hazard which propagates back to UI via Supabase Realtime ('0 alerts' → '1 alerts'). Files touched: frontend/src/supabase.ts, frontend/src/ConvoyMap.tsx, frontend/app/(app)/map.tsx, backend/server.py."
+    - agent: "testing"
+      message: "Hazard dispute endpoint testing complete via public URL — ALL 12 assertions PASS, 0 failures (see /app/backend_test.py). Verified: (1) Auth gate 401 without bearer. (2) Hazard creation 200 with default confirms=1. (3) 1st dispute → 200 disputes=1, hazard still listed. (4a) 2nd dispute → 200 disputes=2, hazard still listed (under threshold). (4c-d) 3rd dispute → 200 disputes=3, threshold disputes>=confirms+2 met, hazard auto-expired (expires_at set to now()) and CONFIRMED gone from GET /api/hazards. (5) 404 'Not found' on bogus uuid. (6) No regression on POST /api/hazards/{id}/confirm — fresh hazard confirmed → 200 confirms=2. Note: dispute response body returns the pre-expiry doc since the code reads then conditionally updates expires_at after; this does not affect the contract (caller can verify via GET /api/hazards). Endpoint working as designed; task marked working:true and needs_retesting:false."

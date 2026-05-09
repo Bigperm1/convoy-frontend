@@ -65,17 +65,20 @@ export default function Signup() {
             <Field label="Password" testID="signup-password" value={password} onChange={setPassword} placeholder="••••••" secure />
 
             <Text style={styles.section}>Your car</Text>
+            {/* Year → Make → Model → Color, then the visual icon/color preset picker.
+                The picker doubles as the "car icon" selector and quick-fills make+model. */}
+            <Field label="Year" testID="signup-year" value={year} onChange={setYear} placeholder="1999" keyboard="number-pad" />
             <Field label="Make" testID="signup-make" value={make} onChange={setMake} placeholder="Nissan" />
             <Field label="Model" testID="signup-model" value={model} onChange={setModel} placeholder="Skyline GT-R" />
-            <View style={{ marginTop: 6 }}>
+            <Field label="Color" testID="signup-color" value={color} onChange={setColor} placeholder="Bayside Blue" />
+            <View style={{ marginTop: 12 }}>
+              <Text style={styles.label}>Car icon / preset</Text>
               <CarPresetPicker
                 selectedMake={make}
                 selectedModel={model}
                 onSelect={(p) => { setMake(p.make); setModel(p.model); }}
               />
             </View>
-            <Field label="Year" testID="signup-year" value={year} onChange={setYear} placeholder="1999" keyboard="number-pad" />
-            <Field label="Color" testID="signup-color" value={color} onChange={setColor} placeholder="Bayside Blue" />
 
             <TouchableOpacity testID="signup-submit" onPress={submit} disabled={busy} style={styles.btn} activeOpacity={0.85}>
               {/* Convoy yellow CTA — dark text for contrast. */}

@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput,
-  KeyboardAvoidingView, Platform, Alert, Modal, RefreshControl, Share, Image,
+  KeyboardAvoidingView, Platform, Alert, Modal, RefreshControl, Share, Image, Switch,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import * as ImagePicker from "expo-image-picker";
 import { useAuth } from "../../src/auth";
 import { api, formatErr } from "../../src/api";
 import { COLORS } from "../../src/theme";
@@ -15,6 +16,10 @@ type Community = {
   id: string; name: string; description: string; member_count: number;
   pending_count: number; is_admin: boolean; is_member: boolean; is_pending: boolean;
   is_public: boolean; admin_handle?: string; invite_code?: string;
+  logo_b64?: string | null;
+  walkie_enabled?: boolean;
+  music_enabled?: boolean;
+  map_enabled?: boolean;
 };
 
 export default function HubScreen() {
@@ -98,19 +103,37 @@ function ActionCard({ icon, label, onPress, testID }: any) {
 }
 
 function CommunityCard({ c, onPress }: { c: Community; onPress: () => void }) {
+  // Tiny on-row indicators showing which sub-systems this community has enabled.
+  const features = [
+    { on: c.walkie_enabled !== false, icon: "flash", color: "#FF6A00" },
+    { on: c.music_enabled !== false, icon: "musical-notes", color: "#FF453A" },
+    { on: c.map_enabled !== false, icon: "map", color: "#0A84FF" },
+  ];
   return (
     <TouchableOpacity testID={`community-${c.id}`} onPress={onPress} activeOpacity={0.85} style={{ marginBottom: 8 }}>
       <Glass radius={18}>
         <View style={styles.commCard}>
-          <View style={styles.commIcon}>
-            <Ionicons name="people" size={22} color={COLORS.primary} />
-          </View>
+          {c.logo_b64 ? (
+            <Image source={{ uri: c.logo_b64 }} style={styles.commLogo} />
+          ) : (
+            <View style={styles.commIcon}>
+              <Ionicons name="people" size={22} color={COLORS.primary} />
+            </View>
+          )}
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <Text style={styles.commName}>{c.name}</Text>
               {c.is_admin && <View style={styles.adminBadge}><Text style={styles.adminBadgeText}>ADMIN</Text></View>}
             </View>
             <Text style={styles.commMeta}>{c.member_count} members{c.pending_count > 0 && c.is_admin ? ` · ${c.pending_count} pending` : ""}</Text>
+            {/* Feature pills — show only the ones that are ON to keep the row uncluttered */}
+            <View style={styles.featurePills}>
+              {features.filter((f) => f.on).map((f) => (
+                <View key={f.icon} style={[styles.featurePill, { backgroundColor: f.color + "1F" }]}>
+                  <Ionicons name={f.icon as any} size={11} color={f.color} />
+                </View>
+              ))}
+            </View>
           </View>
           <Ionicons name="chevron-forward" size={20} color={COLORS.textDim} />
         </View>
@@ -123,46 +146,148 @@ function CreateModal({ visible, onClose, onCreated }: any) {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [isPublic, setIsPublic] = useState(true);
+  // Per-community feature toggles. Default ON so existing behaviour is unchanged.
+  const [walkie, setWalkie] = useState(true);
+  const [music, setMusic] = useState(true);
+  const [mapEnabled, setMapEnabled] = useState(true);
+  // Optional logo as a base64 data URL (kept tiny — we resize on import).
+  const [logo, setLogo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const pickLogo = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== "granted") {
+        return Alert.alert("Permission needed", "We need photo access to set a community logo.");
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.6,
+        base64: true,
+      });
+      if (res.canceled) return;
+      const a = res.assets?.[0];
+      if (!a?.base64) return;
+      const mime = a.mimeType || "image/jpeg";
+      setLogo(`data:${mime};base64,${a.base64}`);
+    } catch (e) { Alert.alert("Pick failed", formatErr(e)); }
+  };
+
   const submit = async () => {
     if (!name.trim()) return Alert.alert("Name required");
     try {
       setBusy(true);
-      await api.post("/communities", { name: name.trim(), description: desc, is_public: isPublic });
-      setName(""); setDesc("");
+      await api.post("/communities", {
+        name: name.trim(),
+        description: desc,
+        is_public: isPublic,
+        logo_b64: logo,
+        walkie_enabled: walkie,
+        music_enabled: music,
+        map_enabled: mapEnabled,
+      });
+      setName(""); setDesc(""); setLogo(null);
+      setWalkie(true); setMusic(true); setMapEnabled(true);
       onCreated();
     } catch (e) { Alert.alert("Create failed", formatErr(e)); }
     finally { setBusy(false); }
   };
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.sheet}>
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>Create community</Text>
-            <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={COLORS.textDim} /></TouchableOpacity>
-          </View>
-          <Text style={styles.label}>Name</Text>
-          <TextInput testID="cc-name" value={name} onChangeText={setName} style={styles.input} placeholder="Sunday Drivers" placeholderTextColor={COLORS.textMute} />
-          <Text style={styles.label}>Description</Text>
-          <TextInput testID="cc-desc" value={desc} onChangeText={setDesc} style={[styles.input, { height: 80 }]} multiline placeholder="What's this community about?" placeholderTextColor={COLORS.textMute} />
-          <TouchableOpacity testID="cc-public" onPress={() => setIsPublic((v) => !v)} style={styles.toggleRow}>
-            <View style={[styles.toggleBox, isPublic && { backgroundColor: COLORS.primary, borderColor: COLORS.primary }]}>
-              {isPublic && <Ionicons name="checkmark" size={14} color="#fff" />}
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>Create community</Text>
+              <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={COLORS.textDim} /></TouchableOpacity>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.toggleTitle}>Public</Text>
-              <Text style={styles.toggleSub}>Anyone can find this community and request to join</Text>
+
+            {/* Logo picker — large round avatar at the top, tappable. */}
+            <View style={{ alignItems: "center", marginVertical: 6 }}>
+              <TouchableOpacity testID="cc-logo" onPress={pickLogo} activeOpacity={0.85} style={styles.logoPicker}>
+                {logo ? (
+                  <Image source={{ uri: logo }} style={styles.logoImg} />
+                ) : (
+                  <View style={styles.logoPlaceholder}>
+                    <Ionicons name="image-outline" size={28} color={COLORS.textDim} />
+                    <Text style={styles.logoHint}>Add logo</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
             </View>
-          </TouchableOpacity>
-          <TouchableOpacity testID="cc-submit" onPress={submit} disabled={busy} style={styles.btn} activeOpacity={0.85}>
-            <LinearGradient colors={[COLORS.primary, COLORS.primaryDim]} style={styles.btnGrad}>
-              <Text style={styles.btnText}>{busy ? "Creating…" : "Create"}</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+
+            <Text style={styles.label}>Name</Text>
+            <TextInput testID="cc-name" value={name} onChangeText={setName} style={styles.input} placeholder="Sunday Drivers" placeholderTextColor={COLORS.textMute} />
+            <Text style={styles.label}>Description</Text>
+            <TextInput testID="cc-desc" value={desc} onChangeText={setDesc} style={[styles.input, { height: 80 }]} multiline placeholder="What's this community about?" placeholderTextColor={COLORS.textMute} />
+
+            <TouchableOpacity testID="cc-public" onPress={() => setIsPublic((v) => !v)} style={styles.toggleRow}>
+              <View style={[styles.toggleBox, isPublic && { backgroundColor: COLORS.primary, borderColor: COLORS.primary }]}>
+                {isPublic && <Ionicons name="checkmark" size={14} color="#fff" />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.toggleTitle}>Public</Text>
+                <Text style={styles.toggleSub}>Anyone can find this community and request to join</Text>
+              </View>
+            </TouchableOpacity>
+
+            <Text style={[styles.label, { marginTop: 18 }]}>Connect features</Text>
+            <FeatureToggle
+              testID="cc-walkie"
+              icon="flash" iconColor="#FF6A00"
+              title="Walkie-Talkie Connect"
+              sub="Enable push-to-talk channel for this community"
+              value={walkie} onChange={setWalkie}
+            />
+            <FeatureToggle
+              testID="cc-music"
+              icon="musical-notes" iconColor="#FF453A"
+              title="Music Connect"
+              sub="Members can sync to the admin's Spotify session"
+              value={music} onChange={setMusic}
+            />
+            <FeatureToggle
+              testID="cc-map"
+              icon="map" iconColor="#0A84FF"
+              title="Map Connect"
+              sub="Share live location and admin-curated routes on the map"
+              value={mapEnabled} onChange={setMapEnabled}
+            />
+
+            <TouchableOpacity testID="cc-submit" onPress={submit} disabled={busy} style={styles.btn} activeOpacity={0.85}>
+              <LinearGradient colors={["#FFE45C", "#FFC700", "#FF9F0A"]} style={styles.btnGrad}>
+                <Text style={[styles.btnText, { color: "#1a1a1a" }]}>{busy ? "Creating…" : "Create community"}</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>
+  );
+}
+
+// Reusable iOS-style switch row used inside CreateModal.
+function FeatureToggle({ testID, icon, iconColor, title, sub, value, onChange }: any) {
+  return (
+    <View style={styles.featureRow}>
+      <View style={[styles.featureIco, { backgroundColor: iconColor + "22" }]}>
+        <Ionicons name={icon} size={18} color={iconColor} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.featureTitle}>{title}</Text>
+        <Text style={styles.featureSub}>{sub}</Text>
+      </View>
+      <Switch
+        testID={testID}
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ false: "rgba(255,255,255,0.12)", true: "#FFC700" }}
+        thumbColor={value ? "#1a1a1a" : "#999"}
+      />
+    </View>
   );
 }
 
@@ -410,8 +535,15 @@ const styles = StyleSheet.create({
 
   commCard: { flexDirection: "row", alignItems: "center", padding: 12, gap: 12 },
   commIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: COLORS.primary + "22", alignItems: "center", justifyContent: "center" },
+  commLogo: { width: 44, height: 44, borderRadius: 14 },
   commName: { color: COLORS.text, fontWeight: "600", fontSize: 16 },
   commMeta: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
+  // Feature pills row inside the community card
+  featurePills: { flexDirection: "row", gap: 4, marginTop: 6 },
+  featurePill: {
+    width: 22, height: 22, borderRadius: 7,
+    alignItems: "center", justifyContent: "center",
+  },
   adminBadge: { backgroundColor: COLORS.warning + "33", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   adminBadgeText: { color: COLORS.warning, fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
 
@@ -428,6 +560,28 @@ const styles = StyleSheet.create({
 
   toggleRow: { flexDirection: "row", alignItems: "center", marginTop: 18, gap: 12 },
   toggleBox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: COLORS.hairlineStrong, alignItems: "center", justifyContent: "center" },
+  // Logo picker (community avatar)
+  logoPicker: { width: 96, height: 96, borderRadius: 48, overflow: "hidden", marginTop: 4, marginBottom: 6 },
+  logoImg: { width: "100%", height: "100%" },
+  logoPlaceholder: {
+    width: "100%", height: "100%",
+    backgroundColor: "rgba(118,118,128,0.18)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: COLORS.hairline, borderStyle: "dashed",
+  },
+  logoHint: { color: COLORS.textDim, fontSize: 11, marginTop: 4, fontWeight: "500" },
+  // Feature toggle row (walkie / music / map)
+  featureRow: {
+    flexDirection: "row", alignItems: "center",
+    paddingVertical: 12, gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.hairline,
+  },
+  featureIco: {
+    width: 36, height: 36, borderRadius: 10,
+    alignItems: "center", justifyContent: "center",
+  },
+  featureTitle: { color: COLORS.text, fontSize: 15, fontWeight: "600", letterSpacing: -0.1 },
+  featureSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2, lineHeight: 16 },
   toggleTitle: { color: COLORS.text, fontWeight: "500", fontSize: 14 },
   toggleSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
 

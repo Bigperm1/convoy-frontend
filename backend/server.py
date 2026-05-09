@@ -86,11 +86,23 @@ class CommunityIn(BaseModel):
     name: str
     description: Optional[str] = ""
     is_public: bool = True
+    # Optional base64-encoded logo (data URL or raw base64 — frontend stores as data URL).
+    # Stored on the community doc so it can be returned via public_community.
+    logo_b64: Optional[str] = None
+    # Feature toggles — admin decides which sub-systems this community participates in.
+    # Defaults are True for full backwards-compat with communities created earlier.
+    walkie_enabled: bool = True
+    music_enabled: bool = True
+    map_enabled: bool = True
 
 class CommunityUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     is_public: Optional[bool] = None
+    logo_b64: Optional[str] = None
+    walkie_enabled: Optional[bool] = None
+    music_enabled: Optional[bool] = None
+    map_enabled: Optional[bool] = None
 
 class RouteIn(BaseModel):
     community_id: str
@@ -132,6 +144,11 @@ def public_community(c: dict, viewer_id: Optional[str] = None) -> dict:
     return {
         "id": c["id"], "name": c["name"], "description": c.get("description", ""),
         "is_public": c.get("is_public", True),
+        "logo_b64": c.get("logo_b64"),
+        # Feature toggles default to True for legacy docs that pre-date these flags.
+        "walkie_enabled": c.get("walkie_enabled", True),
+        "music_enabled": c.get("music_enabled", True),
+        "map_enabled": c.get("map_enabled", True),
         "admin_id": c.get("admin_id"),
         "admin_handle": c.get("admin_handle", ""),
         "member_count": len(members),
@@ -263,11 +280,13 @@ async def create_community(body: CommunityIn, user=Depends(get_current_user)):
         "id": cid, "name": body.name, "description": body.description or "",
         "is_public": body.is_public, "admin_id": user["id"], "admin_handle": user.get("handle", ""),
         "members": [user["id"]], "pending_requests": [], "invite_code": code,
+        "logo_b64": body.logo_b64,
+        "walkie_enabled": body.walkie_enabled,
+        "music_enabled": body.music_enabled,
+        "map_enabled": body.map_enabled,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.communities.insert_one(doc)
-    # Mirror into Supabase so the routes table has a valid FK target and Realtime
-    # subscribers can pick up community metadata. Best-effort — Mongo remains source of truth.
     asyncio.create_task(supa.upsert_row("communities", {
         "id": cid,
         "name": doc["name"],

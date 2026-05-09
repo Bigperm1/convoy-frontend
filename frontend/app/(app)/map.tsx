@@ -364,7 +364,12 @@ export default function MapScreen() {
   // (Must be declared BEFORE any early returns to keep React hook order stable.)
   const presence = useConvoyPresence(
     "convoy:global",
-    user ? { user_id: user.id, handle: user.handle, carType: user?.car?.model || user?.car?.make } : null,
+    user ? {
+      user_id: user.id,
+      handle: user.handle,
+      // Combine make + model for a friendly pin label, e.g. "Porsche 911 GT3 RS"
+      carType: [user.car_make, user.car_model].filter(Boolean).join(" ").trim() || undefined,
+    } : null,
     coords ? { lat: coords.lat, lng: coords.lng, heading: 0 } : null
   );
 
@@ -382,6 +387,7 @@ export default function MapScreen() {
         handle: p.handle,
         lat: p.lat,
         lng: p.lng,
+        carType: p.carType,
       } as Peer;
     });
     return Object.values(byId);

@@ -6,7 +6,7 @@
 import React, { useMemo } from "react";
 import { View, Text, StyleSheet, Dimensions, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import Svg, { Path, Circle, G, Defs, LinearGradient as SvgGrad, Stop, Rect } from "react-native-svg";
+import Svg, { Path, Circle, G, Defs, LinearGradient as SvgGrad, Stop, Rect, Text as SvgText } from "react-native-svg";
 import { COLORS } from "./theme";
 import type { ExternalAlert, ExternalAlertType } from "./externalFeed";
 
@@ -23,7 +23,7 @@ try {
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
 export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number };
-export type Peer = { user_id: string; handle?: string; lat: number; lng: number };
+export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string };
 export type LatLng = { lat: number; lng: number };
 
 type Props = {
@@ -113,7 +113,14 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
         </Marker>
         {peers.map((p) => (
           <Marker key={p.user_id} coordinate={{ latitude: p.lat, longitude: p.lng }} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={styles.peerDot}><Ionicons name="car-sport" size={14} color="#fff" /></View>
+            <View style={styles.peerWrap}>
+              <View style={styles.peerDot}><Ionicons name="car-sport" size={14} color="#fff" /></View>
+              {!!p.carType && (
+                <View style={styles.carPill}>
+                  <Text numberOfLines={1} style={styles.carPillText}>{p.carType}</Text>
+                </View>
+              )}
+            </View>
           </Marker>
         ))}
         {hazards.map((h) => (
@@ -267,6 +274,21 @@ function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [
             <G key={p.user_id}>
               <Circle cx={xy.x} cy={xy.y} r={11} fill={COLORS.success} fillOpacity={0.2} />
               <Circle cx={xy.x} cy={xy.y} r={6} fill={COLORS.success} stroke="#fff" strokeWidth={2} />
+              {!!p.carType && (
+                <SvgText
+                  x={xy.x}
+                  y={xy.y + 22}
+                  fontSize="10"
+                  fontWeight="600"
+                  fill="#fff"
+                  textAnchor="middle"
+                  stroke="rgba(0,0,0,0.65)"
+                  strokeWidth="2.5"
+                  paintOrder="stroke"
+                >
+                  {p.carType.length > 22 ? p.carType.slice(0, 20) + "…" : p.carType}
+                </SvgText>
+              )}
             </G>
           );
         })}
@@ -324,7 +346,24 @@ function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [
 
 const styles = StyleSheet.create({
   youDot: { width: 32, height: 32, borderRadius: 16, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: "#fff" },
+  // Peer marker — car icon + tiny make/model pill underneath
+  peerWrap: { alignItems: "center" },
   peerDot: { width: 26, height: 26, borderRadius: 13, backgroundColor: COLORS.success, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(0,0,0,0.4)" },
+  carPill: {
+    marginTop: 3,
+    backgroundColor: "rgba(20,20,24,0.82)",
+    borderColor: "rgba(255,255,255,0.20)",
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+    maxWidth: 160,
+    ...Platform.select({
+      ios: { shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+      android: { elevation: 3 },
+    }),
+  },
+  carPillText: { color: "#fff", fontSize: 10, fontWeight: "600", letterSpacing: 0.2 },
   hazardWrap: { alignItems: "center" },
   hazardBubble: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.9)" },
   hazardTail: { width: 0, height: 0, borderLeftWidth: 6, borderRightWidth: 6, borderTopWidth: 9, borderLeftColor: "transparent", borderRightColor: "transparent", marginTop: -1 },

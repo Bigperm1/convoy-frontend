@@ -8,7 +8,7 @@ import type { ExternalAlert, ExternalAlertType } from "./externalFeed";
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
 
 export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number };
-export type Peer = { user_id: string; handle?: string; lat: number; lng: number };
+export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string };
 export type LatLng = { lat: number; lng: number };
 
 type Props = {
@@ -69,6 +69,33 @@ function dotIcon(color: string, glyph: string, size = 32) {
   </svg>`;
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
+// Peer pin with car make/model pill underneath. Width adapts to label length.
+function peerPinWithLabel(color: string, label: string) {
+  // sanitize for SVG embed
+  const txt = (label || "").replace(/[<>&"']/g, "").slice(0, 28);
+  const charW = 6;     // approx px per char @ 11pt
+  const padX = 10;
+  const pillW = Math.max(36, txt.length * charW + padX * 2);
+  const W = Math.max(40, pillW + 6);
+  const H = 60;
+  const dotR = 14;
+  const pillH = 18;
+  const pillY = 36;
+  const pillX = (W - pillW) / 2;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${W}' height='${H}' viewBox='0 0 ${W} ${H}'>
+    <defs><filter id='ps' x='-50%' y='-50%' width='200%' height='200%'><feDropShadow dx='0' dy='2' stdDeviation='2' flood-opacity='0.45'/></filter></defs>
+    <g filter='url(#ps)'>
+      <circle cx='${W / 2}' cy='${dotR + 2}' r='${dotR}' fill='${color}' stroke='white' stroke-width='2'/>
+      <text x='${W / 2}' y='${dotR + 6}' font-family='Arial' font-size='14' font-weight='bold' text-anchor='middle' fill='white'>🚗</text>
+      ${txt ? `<rect x='${pillX}' y='${pillY}' width='${pillW}' height='${pillH}' rx='6' ry='6' fill='rgba(20,20,24,0.85)' stroke='rgba(255,255,255,0.25)' stroke-width='1'/>
+      <text x='${W / 2}' y='${pillY + 12}' font-family='Arial' font-size='10' font-weight='600' text-anchor='middle' fill='white'>${txt}</text>` : ''}
+    </g></svg>`;
+  return {
+    url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
+    size: { width: W, height: H } as any,
+    anchorY: dotR + 2, // anchor at the dot center
+  };
+}
 const HAZARD_GLYPHS: Record<string, string> = { police: "🛡", accident: "✕", road: "!", traffic: "▲" };
 
 // Build a community pin with optional gold border (Convoy users)
@@ -101,9 +128,22 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
           zoomControl={true}
         >
           <Marker position={user} icon={dotIcon(COLORS.primary, "▲", 36)} zIndex={1000} />
-          {peers.map((p) => (
-            <Marker key={p.user_id} position={p} icon={dotIcon(COLORS.success, "🚗", 30)} title={p.handle || "driver"} />
-          ))}
+          {peers.map((p) => {
+            const pin = peerPinWithLabel(COLORS.success, p.carType || "");
+            return (
+              <Marker
+                key={p.user_id}
+                position={p}
+                icon={{
+                  url: pin.url,
+                  scaledSize: pin.size,
+                  size: pin.size,
+                  anchor: { x: pin.size.width / 2, y: pin.anchorY } as any,
+                } as any}
+                title={`${p.handle || "driver"}${p.carType ? " · " + p.carType : ""}`}
+              />
+            );
+          })}
           {hazards.map((h) => (
             <Marker key={`u-${h.id}`} position={h} icon={communityPin(hazardColor(h.kind), HAZARD_GLYPHS[h.kind] || "!", highlightConvoy)} onClick={() => onHazardPress(h)} title={`${h.kind} · by ${h.reporter_handle || "anon"}${highlightConvoy ? " · CONVOY" : ""}`} />
           ))}

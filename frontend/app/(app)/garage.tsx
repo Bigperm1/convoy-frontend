@@ -67,7 +67,7 @@ export default function GarageScreen() {
         </View>
 
         <ScrollView
-          contentContainerStyle={{ padding: 18, paddingBottom: 40 }}
+          contentContainerStyle={{ padding: 18, paddingBottom: 120 }}
           keyboardShouldPersistTaps="handled"
         >
           {/* Live preview — what other drivers see on the map */}

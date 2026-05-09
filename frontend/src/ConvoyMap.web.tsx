@@ -15,6 +15,7 @@ type Props = {
   center: LatLng;
   user: { lat: number; lng: number; heading?: number };
   peers: Peer[];
+  leaderUserId?: string | null;
   hazards: Hazard[];
   externalAlerts?: ExternalAlert[];
   highlightConvoy?: boolean;
@@ -182,7 +183,7 @@ function communityPin(color: string, glyph: string, gold: boolean) {
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
 
-export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
+export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
   if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -198,18 +199,23 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
         >
           <Marker position={user} icon={dotIcon(COLORS.primary, "▲", 36)} zIndex={1000} />
           {peers.map((p) => {
-            const url = carIconDataUrl(p.carBody, p.carColor, p.heading, 44);
+            const isLeader = !!leaderUserId && p.user_id === leaderUserId;
+            // Leader marker is slightly larger AND given a high zIndex so it
+            // floats above teammates whenever the convoy stacks up at a stop.
+            const sz = isLeader ? 56 : 44;
+            const url = carIconDataUrl(p.carBody, p.carColor, p.heading, sz);
             return (
               <Marker
                 key={p.user_id}
                 position={p}
                 icon={{
                   url,
-                  scaledSize: { width: 44, height: 44 } as any,
-                  size: { width: 44, height: 44 } as any,
-                  anchor: { x: 22, y: 22 } as any,
+                  scaledSize: { width: sz, height: sz } as any,
+                  size: { width: sz, height: sz } as any,
+                  anchor: { x: sz / 2, y: sz / 2 } as any,
                 } as any}
-                title={`${p.handle || "driver"}${p.carType ? " · " + p.carType : ""}`}
+                title={`${isLeader ? "★ " : ""}${p.handle || "driver"}${p.carType ? " · " + p.carType : ""}`}
+                zIndex={isLeader ? 1000 : 1}
                 onClick={() => onPeerPress?.(p)}
               />
             );

@@ -449,20 +449,24 @@ export default function MapScreen() {
 
   // Resolve admin status of the active community (refresh when activeCommunityId changes)
   const [activeMapEnabled, setActiveMapEnabled] = useState(true);
+  // user_id of the community's admin (= convoy leader). When set, that peer's
+  // marker is rendered with a higher zIndex so it never gets buried under
+  // teammates when everyone bunches up at a stoplight.
+  const [leaderUserId, setLeaderUserId] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     const cid = settings.activeCommunityId;
-    if (!cid) { setIsAdminOfActive(false); setActiveMapEnabled(true); return; }
+    if (!cid) { setIsAdminOfActive(false); setActiveMapEnabled(true); setLeaderUserId(null); return; }
     (async () => {
       try {
         const { data } = await api.get(`/communities/${cid}`);
         if (!cancelled) {
           setIsAdminOfActive(!!data?.is_admin);
-          // Default to true if the field is missing on legacy communities
           setActiveMapEnabled(data?.map_enabled !== false);
+          setLeaderUserId(data?.admin_id || null);
         }
       } catch {
-        if (!cancelled) { setIsAdminOfActive(false); setActiveMapEnabled(true); }
+        if (!cancelled) { setIsAdminOfActive(false); setActiveMapEnabled(true); setLeaderUserId(null); }
       }
     })();
     return () => { cancelled = true; };
@@ -544,6 +548,7 @@ export default function MapScreen() {
         center={coords}
         user={{ ...coords, heading: 0 }}
         peers={peerList}
+        leaderUserId={leaderUserId}
         hazards={visibleHazards}
         externalAlerts={externalFeed.alerts}
         highlightConvoy={settings.highlightConvoy}

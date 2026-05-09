@@ -31,6 +31,9 @@ type Props = {
   center: LatLng;
   user: { lat: number; lng: number; heading?: number };
   peers: Peer[];
+  // user_id of the convoy leader (community admin). Their marker is rendered
+  // with a higher zIndex so it stays on top when the convoy bunches up at a stop.
+  leaderUserId?: string | null;
   hazards: Hazard[];
   externalAlerts?: ExternalAlert[];
   highlightConvoy?: boolean;
@@ -89,7 +92,7 @@ function decodePolyline(encoded: string): LatLng[] {
   return points;
 }
 
-export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onHazardPress, onPeerPress, onExternalAlertPress }: Props) {
+export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onHazardPress, onPeerPress, onExternalAlertPress }: Props) {
   // ---- Real Google Maps (EAS dev build) ----
   if (MapView) {
     // When following user (turn-by-turn), zoom in tighter; otherwise wider preview
@@ -113,32 +116,35 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
         <Marker coordinate={{ latitude: user.lat, longitude: user.lng }} anchor={{ x: 0.5, y: 0.5 }} zIndex={10}>
           <View style={styles.youDot}><Ionicons name="navigate" size={16} color="#fff" /></View>
         </Marker>
-        {peers.map((p) => (
-          <Marker
-            key={p.user_id}
-            coordinate={{ latitude: p.lat, longitude: p.lng }}
-            anchor={{ x: 0.5, y: 0.5 }}
-            // `flat: true` keeps the marker laid down on the map (rather than
-            // billboarded), which is the right behaviour for a top-down car icon.
-            // Marker rotation is also baked into our SVG so this is belt-and-braces.
-            flat
-            onPress={() => onPeerPress?.(p)}
-          >
-            <View style={styles.peerWrap}>
-              <CarMarker
-                body={(p.carBody as any) || "sedan"}
-                color={p.carColor}
-                heading={p.heading || 0}
-                size={48}
-              />
-              {!!p.carType && (
-                <View style={styles.carPill}>
-                  <Text numberOfLines={1} style={styles.carPillText}>{p.carType}</Text>
-                </View>
-              )}
-            </View>
-          </Marker>
-        ))}
+        {peers.map((p) => {
+          const isLeader = !!leaderUserId && p.user_id === leaderUserId;
+          return (
+            <Marker
+              key={p.user_id}
+              coordinate={{ latitude: p.lat, longitude: p.lng }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              flat
+              // Convoy leaders sit on top so they remain visible when teammates
+              // bunch up at red lights / parking lots / starting line.
+              zIndex={isLeader ? 1000 : 1}
+              onPress={() => onPeerPress?.(p)}
+            >
+              <View style={styles.peerWrap}>
+                <CarMarker
+                  body={(p.carBody as any) || "sedan"}
+                  color={p.carColor}
+                  heading={p.heading || 0}
+                  size={isLeader ? 56 : 48}
+                />
+                {!!p.carType && (
+                  <View style={[styles.carPill, isLeader && styles.carPillLeader]}>
+                    <Text numberOfLines={1} style={[styles.carPillText, isLeader && styles.carPillTextLeader]}>{isLeader ? "★ " : ""}{p.carType}</Text>
+                  </View>
+                )}
+              </View>
+            </Marker>
+          );
+        })}
         {hazards.map((h) => (
           <Marker key={`u-${h.id}`} coordinate={{ latitude: h.lat, longitude: h.lng }} anchor={{ x: 0.5, y: 1 }} onPress={() => onHazardPress(h)}>
             <View style={styles.hazardWrap}>
@@ -379,7 +385,14 @@ const styles = StyleSheet.create({
       android: { elevation: 3 },
     }),
   },
+  // Pill style for the convoy leader — Convoy yellow background with dark text
+  // and a slightly heavier shadow so the leader stays glanceable in any pile-up.
+  carPillLeader: {
+    backgroundColor: "rgba(255,199,0,0.95)",
+    borderColor: "#1a1a1a",
+  },
   carPillText: { color: "#fff", fontSize: 10, fontWeight: "600", letterSpacing: 0.2 },
+  carPillTextLeader: { color: "#1a1a1a", fontWeight: "700" },
   hazardWrap: { alignItems: "center" },
   hazardBubble: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.9)" },
   hazardTail: { width: 0, height: 0, borderLeftWidth: 6, borderRightWidth: 6, borderTopWidth: 9, borderLeftColor: "transparent", borderRightColor: "transparent", marginTop: -1 },

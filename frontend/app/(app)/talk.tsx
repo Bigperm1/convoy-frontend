@@ -180,7 +180,7 @@ export default function ComsScreen() {
   if (!loading && communities.length === 0) {
     return (
       <SafeAreaView style={styles.c} edges={["top"]}>
-        <View style={styles.header}><Text style={styles.title}>Coms</Text><Text style={styles.sub}>No communities yet</Text></View>
+        <View style={styles.header}><Text style={styles.title}>Comms</Text><Text style={styles.sub}>No communities yet</Text></View>
         <View style={styles.empty}>
           <Glass radius={24} style={{ width: "100%", maxWidth: 360 }}>
             <View style={{ padding: 24, alignItems: "center" }}>
@@ -205,7 +205,7 @@ export default function ComsScreen() {
     <SafeAreaView style={styles.c} edges={["top"]}>
       <ScrollView contentContainerStyle={{ paddingBottom: 110 }} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={styles.title}>Coms</Text>
+          <Text style={styles.title}>Comms</Text>
           <Text style={styles.sub}>{activeCommunity ? `Broadcasting on ${activeCommunity.name}` : "Select a channel"}</Text>
         </View>
 
@@ -257,12 +257,12 @@ export default function ComsScreen() {
                     ) : (
                       <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(28,28,32,0.78)" }]} />
                     )}
-                    {/* Subtle purple tint underlay */}
+                    {/* Subtle yellow tint underlay (red while transmitting for emphasis) */}
                     <LinearGradient
                       colors={
                         recording
                           ? ["rgba(255,69,58,0.55)", "rgba(170,30,28,0.30)"]
-                          : ["rgba(94,92,230,0.45)", "rgba(94,92,230,0.10)"]
+                          : ["rgba(255,214,10,0.55)", "rgba(255,159,10,0.18)"]
                       }
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
@@ -270,7 +270,7 @@ export default function ComsScreen() {
                     />
                     {/* Glassy top highlight */}
                     <LinearGradient
-                      colors={["rgba(255,255,255,0.28)", "rgba(255,255,255,0.0)"]}
+                      colors={["rgba(255,255,255,0.32)", "rgba(255,255,255,0.0)"]}
                       style={styles.coreGloss}
                     />
                     {/* Hairline inner border */}
@@ -279,10 +279,10 @@ export default function ComsScreen() {
                     {/* Centered content */}
                     <View style={styles.coreContent}>
                       <Ionicons
-                        name={recording ? "radio" : "mic"}
-                        size={72}
+                        name={recording ? "flash" : "flash"}
+                        size={78}
                         color="#fff"
-                        style={Platform.OS === "ios" ? { textShadowColor: "rgba(0,0,0,0.25)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 } : undefined}
+                        style={Platform.OS === "ios" ? { textShadowColor: "rgba(0,0,0,0.30)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 5 } : undefined}
                       />
                       <Text style={styles.pttLabel}>{recording ? "TRANSMITTING" : "HOLD TO TALK"}</Text>
                     </View>
@@ -350,7 +350,7 @@ function ChannelCard({ c, isActive, onPress }: { c: Community; isActive: boolean
       <Glass radius={18} style={isActive ? { borderColor: COLORS.primary, borderWidth: 1.5 } : undefined}>
         <View style={styles.channelCard}>
           <View style={[styles.channelIcon, isActive && { backgroundColor: COLORS.primary + "55" }]}>
-            <Ionicons name={isActive ? "radio" : "people"} size={22} color={COLORS.primary} />
+            <Ionicons name={isActive ? "flash" : "people"} size={22} color={COLORS.primary} />
           </View>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -454,9 +454,9 @@ const styles = StyleSheet.create({
   coreShadow: {
     width: BTN_SIZE, height: BTN_SIZE, borderRadius: BTN_SIZE / 2,
     ...Platform.select({
-      ios: { shadowColor: "#5E5CE6", shadowOpacity: 0.45, shadowRadius: 28, shadowOffset: { width: 0, height: 12 } },
+      ios: { shadowColor: "#FFD60A", shadowOpacity: 0.55, shadowRadius: 28, shadowOffset: { width: 0, height: 12 } },
       android: { elevation: 16 },
-      web: { boxShadow: "0 16px 44px rgba(94,92,230,0.45), 0 4px 12px rgba(0,0,0,0.4)" } as any,
+      web: { boxShadow: "0 16px 44px rgba(255,214,10,0.55), 0 4px 12px rgba(0,0,0,0.4)" } as any,
     }),
   },
   coreClip: {

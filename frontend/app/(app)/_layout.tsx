@@ -50,8 +50,16 @@ export default function AppLayout() {
           tabBarLabelStyle: { fontSize: 10, fontWeight: "600", letterSpacing: -0.1 },
         }}
       >
-        <Tabs.Screen name="map" options={{ tabBarLabel: "Map", tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size - 2} color={color} /> }} />
-        <Tabs.Screen name="talk" options={{ tabBarLabel: "Coms", tabBarIcon: ({ color, size }) => <Ionicons name="mic" size={size - 2} color={color} /> }} />
+        <Tabs.Screen name="map" options={{
+          tabBarLabel: "Map",
+          tabBarActiveTintColor: "#0A84FF",
+          tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size - 2} color={color} />,
+        }} />
+        <Tabs.Screen name="talk" options={{
+          tabBarLabel: "Comms",
+          tabBarActiveTintColor: "#FFD60A",
+          tabBarIcon: ({ color, size }) => <Ionicons name="flash" size={size - 1} color={color} />,
+        }} />
         {/* Center elevated mic CTA — replaces the old "Drive" tab. Press-and-hold to record. */}
         <Tabs.Screen
           name="voice"
@@ -61,8 +69,16 @@ export default function AppLayout() {
             tabBarButton: () => <VoiceTabButton />,
           }}
         />
-        <Tabs.Screen name="music" options={{ tabBarLabel: "Music", tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" size={size - 2} color={color} /> }} />
-        <Tabs.Screen name="hub" options={{ tabBarLabel: "Hub", tabBarIcon: ({ color, size }) => <Ionicons name="people-circle" size={size - 1} color={color} /> }} />
+        <Tabs.Screen name="music" options={{
+          tabBarLabel: "Music",
+          tabBarActiveTintColor: "#FF453A",
+          tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" size={size - 2} color={color} />,
+        }} />
+        <Tabs.Screen name="hub" options={{
+          tabBarLabel: "Hub",
+          tabBarActiveTintColor: "#FF9F0A",
+          tabBarIcon: ({ color, size }) => <Ionicons name="people-circle" size={size - 1} color={color} />,
+        }} />
         <Tabs.Screen name="settings" options={{ href: null }} />
         <Tabs.Screen name="drive-mode" options={{ href: null }} />
       </Tabs>

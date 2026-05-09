@@ -36,7 +36,7 @@ export default function DriveMode() {
       <View style={styles.grid}>
         <View style={styles.row}>
           <Tile testID="dm-map" icon="map" label="Map" color="#0A84FF" onPress={() => router.replace("/(app)/map")} />
-          <Tile testID="dm-coms" icon="radio" label="Coms" color="#5E5CE6" onPress={() => router.replace("/(app)/talk")} />
+          <Tile testID="dm-coms" icon="flash" label="Comms" color="#FFD60A" onPress={() => router.replace("/(app)/talk")} />
         </View>
         <View style={styles.row}>
           <Tile testID="dm-music" icon="musical-notes" label="Music" color="#FF9F0A" onPress={() => router.replace("/(app)/music")} />

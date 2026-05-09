@@ -1,13 +1,13 @@
-// Places Autocomplete search box for web (Google Places JS API)
+// Cross-platform Places Autocomplete using the Places (New) REST endpoint on native,
+// and the JS Maps lib (already loaded by ConvoyMap) on web.
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, Platform } from "react-native";
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
 
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
 
 type Suggestion = { place_id: string; description: string };
-
 type Props = {
   origin?: { lat: number; lng: number };
   onSelect: (loc: { lat: number; lng: number; label: string }) => void;
@@ -20,7 +20,7 @@ let _autocompleteService: any = null;
 let _sessionToken: any = null;
 let _googleReadyPromise: Promise<void> | null = null;
 
-function ensureGoogle(): Promise<void> {
+function ensureGoogleWeb(): Promise<void> {
   if (typeof window === "undefined") return Promise.reject("No window");
   if ((window as any).google?.maps?.places) return Promise.resolve();
   if (_googleReadyPromise) return _googleReadyPromise;
@@ -44,6 +44,41 @@ function ensureGoogle(): Promise<void> {
   return _googleReadyPromise;
 }
 
+// REST-based autocomplete (works on iOS/Android/Expo Go)
+async function autocompleteRest(input: string, origin?: { lat: number; lng: number }): Promise<Suggestion[]> {
+  const url = new URL("https://maps.googleapis.com/maps/api/place/autocomplete/json");
+  url.searchParams.set("input", input);
+  url.searchParams.set("key", KEY);
+  if (origin) {
+    url.searchParams.set("location", `${origin.lat},${origin.lng}`);
+    url.searchParams.set("radius", "50000");
+  }
+  try {
+    const res = await fetch(url.toString());
+    const data = await res.json();
+    if (data.status !== "OK") return [];
+    return (data.predictions || []).slice(0, 5).map((p: any) => ({ place_id: p.place_id, description: p.description }));
+  } catch { return []; }
+}
+
+async function placeDetailsRest(place_id: string): Promise<{ lat: number; lng: number; label: string } | null> {
+  const url = new URL("https://maps.googleapis.com/maps/api/place/details/json");
+  url.searchParams.set("place_id", place_id);
+  url.searchParams.set("fields", "geometry/location,name,formatted_address");
+  url.searchParams.set("key", KEY);
+  try {
+    const res = await fetch(url.toString());
+    const data = await res.json();
+    if (data.status !== "OK") return null;
+    const r = data.result;
+    return {
+      lat: r.geometry.location.lat,
+      lng: r.geometry.location.lng,
+      label: r.name || r.formatted_address,
+    };
+  } catch { return null; }
+}
+
 export default function DestinationSearch({ origin, onSelect, onClear, initialValue }: Props) {
   const [text, setText] = useState(initialValue || "");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -52,7 +87,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
 
   useEffect(() => {
     if (Platform.OS !== "web") return;
-    ensureGoogle().then(() => {
+    ensureGoogleWeb().then(() => {
       const g = (window as any).google;
       if (!g?.maps?.places) return;
       _autocompleteService = new g.maps.places.AutocompleteService();
@@ -61,19 +96,25 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
     }).catch(() => {});
   }, []);
 
-  const queryAutocomplete = (q: string) => {
-    if (!q || !_autocompleteService) { setSuggestions([]); return; }
-    _autocompleteService.getPlacePredictions(
-      {
-        input: q,
-        sessionToken: _sessionToken,
-        ...(origin ? { location: new (window as any).google.maps.LatLng(origin.lat, origin.lng), radius: 50000 } : {}),
-      },
-      (preds: any[]) => {
-        if (!preds) { setSuggestions([]); return; }
-        setSuggestions(preds.slice(0, 5).map((p) => ({ place_id: p.place_id, description: p.description })));
-      }
-    );
+  const queryAutocomplete = async (q: string) => {
+    if (!q) { setSuggestions([]); return; }
+    if (Platform.OS === "web") {
+      if (!_autocompleteService) return;
+      _autocompleteService.getPlacePredictions(
+        {
+          input: q,
+          sessionToken: _sessionToken,
+          ...(origin ? { location: new (window as any).google.maps.LatLng(origin.lat, origin.lng), radius: 50000 } : {}),
+        },
+        (preds: any[]) => {
+          if (!preds) { setSuggestions([]); return; }
+          setSuggestions(preds.slice(0, 5).map((p) => ({ place_id: p.place_id, description: p.description })));
+        }
+      );
+    } else {
+      const list = await autocompleteRest(q, origin);
+      setSuggestions(list);
+    }
   };
 
   const onChangeText = (q: string) => {
@@ -82,24 +123,27 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
     tRef.current = setTimeout(() => queryAutocomplete(q), 220);
   };
 
-  const pick = (s: Suggestion) => {
-    if (!_placesService) return;
-    _placesService.getDetails({ placeId: s.place_id, fields: ["geometry", "name", "formatted_address"], sessionToken: _sessionToken }, (place: any, status: string) => {
-      if (status !== "OK" || !place?.geometry) return;
-      const lat = place.geometry.location.lat();
-      const lng = place.geometry.location.lng();
-      const label = place.name ? `${place.name}` : (place.formatted_address || s.description);
-      setText(label); setOpen(false); setSuggestions([]);
-      _sessionToken = new (window as any).google.maps.places.AutocompleteSessionToken();
-      onSelect({ lat, lng, label });
-    });
+  const pick = async (s: Suggestion) => {
+    if (Platform.OS === "web") {
+      if (!_placesService) return;
+      _placesService.getDetails({ placeId: s.place_id, fields: ["geometry", "name", "formatted_address"], sessionToken: _sessionToken }, (place: any, status: string) => {
+        if (status !== "OK" || !place?.geometry) return;
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
+        const label = place.name ? `${place.name}` : (place.formatted_address || s.description);
+        setText(label); setOpen(false); setSuggestions([]);
+        _sessionToken = new (window as any).google.maps.places.AutocompleteSessionToken();
+        onSelect({ lat, lng, label });
+      });
+    } else {
+      const detail = await placeDetailsRest(s.place_id);
+      if (!detail) return;
+      setText(detail.label); setOpen(false); setSuggestions([]);
+      onSelect(detail);
+    }
   };
 
   const clear = () => { setText(""); setSuggestions([]); setOpen(false); onClear?.(); };
-
-  if (Platform.OS !== "web") {
-    return null;
-  }
 
   return (
     <View style={styles.wrap} pointerEvents="box-none">

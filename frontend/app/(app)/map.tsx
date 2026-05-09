@@ -43,6 +43,39 @@ export default function MapScreen() {
   const [live, setLive] = useState<"connecting" | "live" | "off">("connecting");
   const wsRef = useRef<WebSocket | null>(null);
 
+  // Native directions via REST (web uses the JS DirectionsService inside ConvoyMap)
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    if (!destination) { setRoute(null); return; }
+    const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
+    if (!KEY || !coords) return;
+    let cancelled = false;
+    (async () => {
+      const url = new URL("https://maps.googleapis.com/maps/api/directions/json");
+      url.searchParams.set("origin", `${coords.lat},${coords.lng}`);
+      url.searchParams.set("destination", `${destination.lat},${destination.lng}`);
+      url.searchParams.set("mode", "driving");
+      url.searchParams.set("key", KEY);
+      try {
+        const res = await fetch(url.toString());
+        const data = await res.json();
+        if (cancelled) return;
+        if (data.status !== "OK" || !data.routes?.[0]?.legs?.[0]) { setRoute(null); return; }
+        const leg = data.routes[0].legs[0];
+        setRoute({
+          distance_text: leg.distance?.text || "",
+          duration_text: leg.duration?.text || "",
+          steps: (leg.steps || []).map((s: any) => ({
+            html: (s.html_instructions || "").replace(/<[^>]+>/g, ""),
+            distance_text: s.distance?.text || "",
+            maneuver: s.maneuver,
+          })),
+        });
+      } catch { if (!cancelled) setRoute(null); }
+    })();
+    return () => { cancelled = true; };
+  }, [destination, coords]);
+
   // ----- Initial location -----
   useEffect(() => {
     (async () => {
@@ -229,7 +262,15 @@ export default function MapScreen() {
           </View>
         </Glass>
 
-        {Platform.OS === "web" && (
+        {Platform.OS === "web" ? (
+          <View style={{ marginHorizontal: 12 }}>
+            <DestinationSearch
+              origin={coords}
+              onSelect={(loc) => { setDestination(loc); setShowSteps(true); }}
+              onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); }}
+            />
+          </View>
+        ) : (
           <View style={{ marginHorizontal: 12 }}>
             <DestinationSearch
               origin={coords}

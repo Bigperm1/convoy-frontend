@@ -86,15 +86,15 @@ function communityPin(color: string, glyph: string, gold: boolean) {
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
 
-export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, onHazardPress, onExternalAlertPress, onRoute }: Props) {
+export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onHazardPress, onExternalAlertPress, onRoute }: Props) {
   if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
     <View style={StyleSheet.absoluteFill}>
-      <APIProvider apiKey={KEY} libraries={["places", "routes"]}>
+      <APIProvider apiKey={KEY} libraries={["places", "routes", "geometry"]}>
         <Map
           style={{ width: "100%", height: "100%" }}
           defaultCenter={center}
-          defaultZoom={15}
+          defaultZoom={followUser ? 17 : 15}
           mapTypeId="hybrid"
           gestureHandling="greedy"
           disableDefaultUI={true}
@@ -120,12 +120,59 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
           {destination && (
             <Marker position={destination} icon={dotIcon("#FF453A", "★", 34)} title="Destination" />
           )}
-          {destination && <Directions origin={user} destination={destination} onRoute={onRoute} encodedPolyline={encodedPolyline} />}
-          <Recenter target={center} />
+          {/* Multi-route layer: gray alternates + blue selected, all from pre-decoded polylines */}
+          {destination && routes.length > 0 && (
+            <RoutesLayer routes={routes} selectedIndex={selectedRouteIndex} onSelect={onSelectRoute} />
+          )}
+          {/* Legacy fallback when no routes[] given */}
+          {destination && routes.length === 0 && (
+            <Directions origin={user} destination={destination} onRoute={onRoute} encodedPolyline={encodedPolyline} />
+          )}
+          <Recenter target={followUser ? user : center} />
         </Map>
       </APIProvider>
     </View>
   );
+}
+
+// Renders pre-decoded route polylines as native google.maps.Polyline objects.
+// Alternates are rendered first (gray, lower zIndex) so the selected route (blue) sits on top.
+function RoutesLayer({ routes, selectedIndex, onSelect }: {
+  routes: { polyline: string }[];
+  selectedIndex: number;
+  onSelect?: (index: number) => void;
+}) {
+  const map = useMap();
+  const polysRef = useRef<any[]>([]);
+
+  useEffect(() => {
+    if (!map || !(window as any).google?.maps) return;
+    const G = (window as any).google.maps;
+
+    // Tear down previous polylines
+    polysRef.current.forEach((pl) => pl.setMap(null));
+    polysRef.current = [];
+
+    routes.forEach((r, i) => {
+      const path = G.geometry.encoding.decodePath(r.polyline);
+      const isSelected = i === selectedIndex;
+      const pl = new G.Polyline({
+        path,
+        map,
+        strokeColor: isSelected ? "#0A84FF" : "#8E8E93",
+        strokeOpacity: isSelected ? 0.95 : 0.7,
+        strokeWeight: isSelected ? 6 : 4,
+        zIndex: isSelected ? 500 : 100,
+        clickable: true,
+      });
+      pl.addListener("click", () => onSelect?.(i));
+      polysRef.current.push(pl);
+    });
+
+    return () => { polysRef.current.forEach((pl) => pl.setMap(null)); polysRef.current = []; };
+  }, [map, routes, selectedIndex, onSelect]);
+
+  return null;
 }
 
 function Directions({ origin, destination, onRoute, encodedPolyline }: { origin: LatLng; destination: LatLng; onRoute?: Props["onRoute"]; encodedPolyline?: string | null }) {

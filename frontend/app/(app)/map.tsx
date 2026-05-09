@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
+import * as Speech from "expo-speech";
 import { api, formatErr, wsUrl } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
@@ -14,6 +15,10 @@ import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 import { voiceBus, geocodeQuery } from "../../src/voiceBus";
 import { useExternalAlerts, registerExternalFeedBackgroundTask } from "../../src/externalFeed";
 import { useSettings } from "../../src/settings";
+import {
+  fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
+  fmtDistanceM, fmtEtaSec,
+} from "../../src/nav";
 
 type RouteInfo = {
   distance_text: string;
@@ -43,8 +48,16 @@ export default function MapScreen() {
   const [route, setRoute] = useState<RouteInfo | null>(null);
   const [showSteps, setShowSteps] = useState(false);
   const [live, setLive] = useState<"connecting" | "live" | "off">("connecting");
-  const [encodedPolyline, setEncodedPolyline] = useState<string | null>(null);
+  // Multi-route state — primary "Route Line" (blue) + alternates (gray)
+  const [routes, setRoutes] = useState<NavRoute[]>([]);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
+  // Turn-by-turn navigation state
+  const [navMode, setNavMode] = useState<"preview" | "turn-by-turn">("preview");
+  const [navMuted, setNavMuted] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+
+  const activeRoute: NavRoute | null = routes[selectedRouteIndex] || null;
+  const encodedPolyline = activeRoute?.polyline || null;
 
   // ----- External alerts feed (Waze-style polling, dedup + auto-clear) -----
   const externalFeed = useExternalAlerts(60_000);
@@ -83,41 +96,91 @@ export default function MapScreen() {
     prevHazardIdsRef.current = ids;
   }, [hazards, settings.alertSound]);
 
-  // Native directions via REST (web uses the JS DirectionsService inside ConvoyMap)
+  // Unified multi-route directions (web + native). Fetches up to 3 alternates with `alternatives=true`.
+  // The "Route Line" = blue selected route; alternates render gray and are tappable to swap.
   useEffect(() => {
-    if (Platform.OS === "web") return;
-    if (!destination) { setRoute(null); setEncodedPolyline(null); return; }
-    const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
-    if (!KEY || !coords) return;
+    if (!destination || !coords) {
+      setRoutes([]); setSelectedRouteIndex(0); setRoute(null);
+      return;
+    }
     let cancelled = false;
     (async () => {
-      const url = new URL("https://maps.googleapis.com/maps/api/directions/json");
-      url.searchParams.set("origin", `${coords.lat},${coords.lng}`);
-      url.searchParams.set("destination", `${destination.lat},${destination.lng}`);
-      url.searchParams.set("mode", "driving");
-      url.searchParams.set("key", KEY);
-      try {
-        const res = await fetch(url.toString());
-        const data = await res.json();
-        if (cancelled) return;
-        if (data.status !== "OK" || !data.routes?.[0]?.legs?.[0]) {
-          setRoute(null); setEncodedPolyline(null); return;
-        }
-        const leg = data.routes[0].legs[0];
-        setEncodedPolyline(data.routes[0].overview_polyline?.points || null);
-        setRoute({
-          distance_text: leg.distance?.text || "",
-          duration_text: leg.duration?.text || "",
-          steps: (leg.steps || []).map((s: any) => ({
-            html: (s.html_instructions || "").replace(/<[^>]+>/g, ""),
-            distance_text: s.distance?.text || "",
-            maneuver: s.maneuver,
-          })),
-        });
-      } catch { if (!cancelled) { setRoute(null); setEncodedPolyline(null); } }
+      const results = await fetchDirections(coords, destination);
+      if (cancelled) return;
+      setRoutes(results);
+      setSelectedRouteIndex(0);
+      const r0 = results[0];
+      setRoute(r0 ? {
+        distance_text: r0.distance_text,
+        duration_text: r0.duration_text,
+        steps: r0.steps.map((s) => ({ html: s.html, distance_text: s.distance_text, maneuver: s.maneuver })),
+      } : null);
     })();
     return () => { cancelled = true; };
   }, [destination, coords]);
+
+  // Mirror RouteInfo whenever the user picks a different alternate
+  useEffect(() => {
+    const r = routes[selectedRouteIndex];
+    if (!r) return;
+    setRoute({
+      distance_text: r.distance_text,
+      duration_text: r.duration_text,
+      steps: r.steps.map((s) => ({ html: s.html, distance_text: s.distance_text, maneuver: s.maneuver })),
+    });
+  }, [routes, selectedRouteIndex]);
+
+  // Turn-by-turn engine — speaks instructions, advances steps, computes ETA / distance remaining
+  const tbt = useTurnByTurn(activeRoute, coords, navMode === "turn-by-turn", {
+    mute: navMuted,
+    onArrive: () => { setNavMode("preview"); },
+    onOffRoute: () => {
+      // Auto-reroute: refetch directions from the current GPS position
+      if (!coords || !destination) return;
+      fetchDirections(coords, destination).then((res) => {
+        if (res.length > 0) {
+          setRoutes(res);
+          setSelectedRouteIndex(0);
+          if (!navMuted) Speech.speak("Recalculating route.", { rate: 1.0 });
+        }
+      });
+    },
+  });
+
+  const startNav = () => {
+    if (!activeRoute) return;
+    setShowSteps(false);
+    setNavMode("turn-by-turn");
+  };
+  const endNav = () => {
+    Speech.stop();
+    setNavMode("preview");
+  };
+  const clearRoute = () => {
+    Speech.stop();
+    setDestination(null);
+    setRoutes([]);
+    setRoute(null);
+    setShowSteps(false);
+    setNavMode("preview");
+  };
+
+  // Continuous GPS watch while in turn-by-turn mode (updates user position for the engine + camera follow)
+  useEffect(() => {
+    if (navMode !== "turn-by-turn") return;
+    let sub: Location.LocationSubscription | null = null;
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") return;
+        sub = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1500, distanceInterval: 5 },
+          (pos) => setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        );
+      } catch {}
+    })();
+    return () => { if (sub) sub.remove(); };
+  }, [navMode]);
 
   // ----- Initial location -----
   useEffect(() => {
@@ -269,10 +332,7 @@ export default function MapScreen() {
       if (intent === "report_traffic") return reportHazard("traffic");
 
       if (intent === "clear_route") {
-        setDestination(null);
-        setRoute(null);
-        setShowSteps(false);
-        setEncodedPolyline(null);
+        clearRoute();
         return;
       }
 
@@ -308,6 +368,10 @@ export default function MapScreen() {
         highlightConvoy={settings.highlightConvoy}
         destination={destination}
         encodedPolyline={encodedPolyline}
+        routes={routes}
+        selectedRouteIndex={selectedRouteIndex}
+        onSelectRoute={(i) => setSelectedRouteIndex(i)}
+        followUser={navMode === "turn-by-turn"}
         onHazardPress={(h) => setSelected(h)}
         onExternalAlertPress={(a) => Alert.alert(`${a.type}${a.subtype ? " · " + a.subtype : ""}`, "Live alert from Convoy feed.")}
         onRoute={setRoute}
@@ -354,21 +418,56 @@ export default function MapScreen() {
         )}
       </SafeAreaView>
 
-      {destination && route && (
+      {/* ===== Route preview card (shown only when NOT actively navigating) ===== */}
+      {destination && route && navMode === "preview" && (
         <Glass radius={20} style={styles.routeCard}>
-          <TouchableOpacity testID="route-toggle" onPress={() => setShowSteps((s) => !s)} activeOpacity={0.85}>
-            <View style={styles.routeRow}>
-              <View style={styles.routeIcon}><Ionicons name="navigate" size={22} color="#fff" /></View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.routeTo} numberOfLines={1}>To {destination.label}</Text>
-                <Text style={styles.routeMeta}>{route.duration_text} · {route.distance_text}</Text>
-              </View>
-              <Ionicons name={showSteps ? "chevron-down" : "chevron-up"} size={20} color={COLORS.textDim} />
-              <TouchableOpacity testID="route-clear" onPress={() => { setDestination(null); setRoute(null); setShowSteps(false); }} style={{ marginLeft: 6 }}>
-                <Ionicons name="close-circle" size={22} color={COLORS.textDim} />
-              </TouchableOpacity>
+          <View style={styles.routeRow}>
+            <View style={styles.routeIcon}><Ionicons name="navigate" size={22} color="#fff" /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.routeTo} numberOfLines={1}>To {destination.label}</Text>
+              <Text style={styles.routeMeta}>{route.duration_text} · {route.distance_text}{routes[selectedRouteIndex]?.summary ? ` · via ${routes[selectedRouteIndex].summary}` : ""}</Text>
             </View>
-          </TouchableOpacity>
+            <TouchableOpacity testID="route-clear" onPress={clearRoute} style={{ padding: 4 }}>
+              <Ionicons name="close-circle" size={24} color={COLORS.textDim} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Alternates picker — tappable chips when there are >1 routes */}
+          {routes.length > 1 && (
+            <View style={styles.altsRow}>
+              {routes.map((r, i) => {
+                const sel = i === selectedRouteIndex;
+                return (
+                  <TouchableOpacity
+                    key={i}
+                    testID={`alt-${i}`}
+                    onPress={() => setSelectedRouteIndex(i)}
+                    activeOpacity={0.85}
+                    style={[styles.altChip, sel && styles.altChipActive]}
+                  >
+                    <View style={[styles.altDot, { backgroundColor: sel ? "#0A84FF" : "#8E8E93" }]} />
+                    <View>
+                      <Text style={[styles.altDur, sel && { color: COLORS.text }]}>{r.duration_text}</Text>
+                      <Text style={styles.altSum} numberOfLines={1}>{r.summary || (i === 0 ? "Fastest" : `Alt ${i}`)}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Action row */}
+          <View style={styles.actionRow}>
+            <TouchableOpacity testID="route-toggle" onPress={() => setShowSteps((s) => !s)} style={styles.secBtn}>
+              <Ionicons name={showSteps ? "chevron-down" : "list"} size={18} color={COLORS.text} />
+              <Text style={styles.secBtnText}>{showSteps ? "Hide" : "Steps"}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity testID="start-nav" onPress={startNav} style={styles.startBtn} activeOpacity={0.85}>
+              <Ionicons name="navigate-circle" size={20} color="#fff" />
+              <Text style={styles.startBtnText}>Start</Text>
+            </TouchableOpacity>
+          </View>
+
           {showSteps && (
             <ScrollView style={styles.stepsList} contentContainerStyle={{ paddingBottom: 12 }} testID="route-steps">
               {route.steps.map((s, i) => (
@@ -382,6 +481,53 @@ export default function MapScreen() {
           )}
         </Glass>
       )}
+
+      {/* ===== Turn-by-turn navigation overlays ===== */}
+      {navMode === "turn-by-turn" && activeRoute && tbt.active && (() => {
+        const stepIdx = Math.min(tbt.stepIndex + 1, activeRoute.steps.length - 1); // upcoming step
+        const upcoming = activeRoute.steps[stepIdx];
+        const verb = maneuverVerb(upcoming?.maneuver);
+        return (
+          <>
+            {/* Top maneuver banner */}
+            <SafeAreaView edges={["top"]} style={styles.navTopWrap} pointerEvents="box-none">
+              <Glass radius={20} style={styles.navTopCard}>
+                <View style={styles.navTopRow}>
+                  <View style={styles.maneuverBig}>
+                    <Ionicons name={maneuverIcon(upcoming?.maneuver)} size={36} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.navDist}>{fmtDistanceM(tbt.distanceToManeuverM)}</Text>
+                    <Text style={styles.navInst} numberOfLines={2}>{verb}{upcoming?.html ? " · " + upcoming.html : ""}</Text>
+                  </View>
+                  <TouchableOpacity testID="nav-mute" onPress={() => setNavMuted((m) => !m)} style={styles.navIconBtn}>
+                    <Ionicons name={navMuted ? "volume-mute" : "volume-high"} size={20} color={COLORS.text} />
+                  </TouchableOpacity>
+                </View>
+              </Glass>
+            </SafeAreaView>
+
+            {/* Bottom ETA + End bar */}
+            <Glass radius={20} style={styles.navBottomCard}>
+              <View style={styles.navBottomRow}>
+                <View style={styles.etaBlock}>
+                  <Text style={styles.etaBig}>{fmtEtaSec(tbt.etaSeconds)}</Text>
+                  <Text style={styles.etaLabel}>ETA</Text>
+                </View>
+                <View style={styles.etaDivider} />
+                <View style={styles.etaBlock}>
+                  <Text style={styles.etaBig}>{fmtDistanceM(tbt.distanceRemainingM)}</Text>
+                  <Text style={styles.etaLabel}>Remaining</Text>
+                </View>
+                <TouchableOpacity testID="end-nav" onPress={endNav} style={styles.endBtn} activeOpacity={0.85}>
+                  <Ionicons name="close" size={20} color="#fff" />
+                  <Text style={styles.endBtnText}>End</Text>
+                </TouchableOpacity>
+              </View>
+            </Glass>
+          </>
+        );
+      })()}
 
       {selected && !destination && (
         <Glass radius={20} style={styles.selectedCard}>
@@ -452,16 +598,47 @@ const styles = StyleSheet.create({
 
   hazardBubble: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.85)" },
 
-  routeCard: { position: "absolute", left: 12, right: 12, bottom: 110, maxHeight: 360 },
+  routeCard: { position: "absolute", left: 12, right: 12, bottom: 110, maxHeight: 460 },
   routeRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
   routeIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center" },
   routeTo: { color: COLORS.text, fontWeight: "600", fontSize: 15 },
   routeMeta: { color: COLORS.success, fontSize: 13, marginTop: 2, fontWeight: "500" },
-  stepsList: { maxHeight: 260, paddingHorizontal: 14, paddingTop: 0 },
+  // Alternates row
+  altsRow: { flexDirection: "row", paddingHorizontal: 10, paddingBottom: 8, gap: 8, flexWrap: "wrap" },
+  altChip: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1, borderColor: COLORS.hairline, backgroundColor: "rgba(255,255,255,0.04)" },
+  altChipActive: { borderColor: "#0A84FF", backgroundColor: "rgba(10,132,255,0.18)" },
+  altDot: { width: 8, height: 8, borderRadius: 4 },
+  altDur: { color: COLORS.textDim, fontWeight: "600", fontSize: 13 },
+  altSum: { color: COLORS.textDim, fontSize: 11, maxWidth: 130 },
+  // Action row (Steps + Start)
+  actionRow: { flexDirection: "row", paddingHorizontal: 12, paddingBottom: 12, gap: 10 },
+  secBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: COLORS.hairline, backgroundColor: "rgba(255,255,255,0.04)" },
+  secBtnText: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
+  startBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 14, backgroundColor: "#0A84FF" },
+  startBtnText: { color: "#fff", fontWeight: "700", fontSize: 15, letterSpacing: 0.3 },
+  // Steps
+  stepsList: { maxHeight: 220, paddingHorizontal: 14, paddingTop: 0 },
   stepRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.hairline },
   stepIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: COLORS.primary + "22", alignItems: "center", justifyContent: "center" },
   stepText: { color: COLORS.text, flex: 1, fontSize: 13, lineHeight: 18 },
   stepDist: { color: COLORS.textDim, fontSize: 12 },
+
+  // ---- Turn-by-turn nav overlays ----
+  navTopWrap: { position: "absolute", top: 0, left: 0, right: 0 },
+  navTopCard: { marginHorizontal: 12, marginTop: 4 },
+  navTopRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
+  maneuverBig: { width: 64, height: 64, borderRadius: 16, backgroundColor: "#0A84FF", alignItems: "center", justifyContent: "center" },
+  navDist: { color: COLORS.text, fontSize: 26, fontWeight: "700", letterSpacing: -0.5 },
+  navInst: { color: COLORS.textDim, fontSize: 13, marginTop: 2 },
+  navIconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(118,118,128,0.32)", alignItems: "center", justifyContent: "center" },
+  navBottomCard: { position: "absolute", left: 12, right: 12, bottom: 110 },
+  navBottomRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 14 },
+  etaBlock: { alignItems: "flex-start" },
+  etaBig: { color: COLORS.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.4 },
+  etaLabel: { color: COLORS.textDim, fontSize: 11, marginTop: 2, letterSpacing: 0.4 },
+  etaDivider: { width: StyleSheet.hairlineWidth, height: 36, backgroundColor: COLORS.hairline },
+  endBtn: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#FF3B30", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 14 },
+  endBtnText: { color: "#fff", fontWeight: "700", letterSpacing: 0.3 },
 
   selectedCard: { position: "absolute", left: 12, right: 12, bottom: 200 },
   selTitle: { color: COLORS.text, fontWeight: "600", fontSize: 16 },

@@ -35,6 +35,10 @@ type Props = {
   highlightConvoy?: boolean;
   destination?: LatLng | null;
   encodedPolyline?: string | null;
+  routes?: { polyline: string }[];
+  selectedRouteIndex?: number;
+  onSelectRoute?: (index: number) => void;
+  followUser?: boolean;
   onHazardPress: (h: Hazard) => void;
   onExternalAlertPress?: (a: ExternalAlert) => void;
   onRoute?: (info: any) => void;
@@ -83,13 +87,25 @@ function decodePolyline(encoded: string): LatLng[] {
   return points;
 }
 
-export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, onHazardPress, onExternalAlertPress }: Props) {
+export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onHazardPress, onExternalAlertPress }: Props) {
   // ---- Real Google Maps (EAS dev build) ----
   if (MapView) {
-    const region = { latitude: center.lat, longitude: center.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 };
-    const polyCoords = encodedPolyline
-      ? decodePolyline(encodedPolyline).map((p) => ({ latitude: p.lat, longitude: p.lng }))
-      : [];
+    // When following user (turn-by-turn), zoom in tighter; otherwise wider preview
+    const region = followUser
+      ? { latitude: user.lat, longitude: user.lng, latitudeDelta: 0.008, longitudeDelta: 0.008 }
+      : { latitude: center.lat, longitude: center.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 };
+
+    // Build all route polylines: alternates (gray) first, then selected (blue) on top
+    const routePolylines = routes.length > 0
+      ? routes.map((r, i) => ({
+          coords: decodePolyline(r.polyline).map((p) => ({ latitude: p.lat, longitude: p.lng })),
+          isSelected: i === selectedRouteIndex,
+          index: i,
+        }))
+      : encodedPolyline
+        ? [{ coords: decodePolyline(encodedPolyline).map((p) => ({ latitude: p.lat, longitude: p.lng })), isSelected: true, index: 0 }]
+        : [];
+
     return (
       <MapView provider="google" mapType="hybrid" style={StyleSheet.absoluteFill} initialRegion={region} region={region}>
         <Marker coordinate={{ latitude: user.lat, longitude: user.lng }} anchor={{ x: 0.5, y: 0.5 }} zIndex={10}>
@@ -137,23 +153,45 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
             </View>
           </Marker>
         )}
-        {polyCoords.length > 1 && Polyline && (
-          <Polyline coordinates={polyCoords} strokeColor={COLORS.primary} strokeWidth={6} />
-        )}
+        {/* Render alternates first (gray), then the selected route on top (blue). Tappable. */}
+        {Polyline && routePolylines.filter(r => !r.isSelected).map((r) => (
+          <Polyline
+            key={`alt-${r.index}`}
+            coordinates={r.coords}
+            strokeColor="#8E8E93"
+            strokeWidth={4}
+            tappable
+            onPress={() => onSelectRoute?.(r.index)}
+          />
+        ))}
+        {Polyline && routePolylines.filter(r => r.isSelected).map((r) => (
+          <Polyline
+            key={`sel-${r.index}`}
+            coordinates={r.coords}
+            strokeColor="#0A84FF"
+            strokeWidth={6}
+          />
+        ))}
       </MapView>
     );
   }
 
   // ---- Expo Go fallback: stylized SVG route preview ----
-  return <RoutePreviewFallback {...{ center, user, peers, hazards, externalAlerts, highlightConvoy, destination, encodedPolyline, onHazardPress, onExternalAlertPress }} />;
+  return <RoutePreviewFallback {...{ center, user, peers, hazards, externalAlerts, highlightConvoy, destination, encodedPolyline, routes, selectedRouteIndex, onSelectRoute, onHazardPress, onExternalAlertPress }} />;
 }
 
-function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, onHazardPress }: Props) {
-  const points = useMemo(() => (encodedPolyline ? decodePolyline(encodedPolyline) : []), [encodedPolyline]);
+function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, onHazardPress }: Props) {
+  // Decode all routes (or the legacy single polyline)
+  const decodedRoutes = useMemo(() => {
+    if (routes.length > 0) return routes.map((r) => decodePolyline(r.polyline));
+    if (encodedPolyline) return [decodePolyline(encodedPolyline)];
+    return [];
+  }, [routes, encodedPolyline]);
+  const allRoutePoints = decodedRoutes.flat();
 
-  // Build bounding box across user + destination + route points
-  const allLats: number[] = [user.lat, ...peers.map((p) => p.lat), ...hazards.map((h) => h.lat), ...externalAlerts.map((a) => a.lat), ...points.map((p) => p.lat)];
-  const allLngs: number[] = [user.lng, ...peers.map((p) => p.lng), ...hazards.map((h) => h.lng), ...externalAlerts.map((a) => a.lng), ...points.map((p) => p.lng)];
+  // Build bounding box across user + destination + ALL route points (incl. alternates)
+  const allLats: number[] = [user.lat, ...peers.map((p) => p.lat), ...hazards.map((h) => h.lat), ...externalAlerts.map((a) => a.lat), ...allRoutePoints.map((p) => p.lat)];
+  const allLngs: number[] = [user.lng, ...peers.map((p) => p.lng), ...hazards.map((h) => h.lng), ...externalAlerts.map((a) => a.lng), ...allRoutePoints.map((p) => p.lng)];
   if (destination) { allLats.push(destination.lat); allLngs.push(destination.lng); }
   const minLat = Math.min(...allLats), maxLat = Math.max(...allLats);
   const minLng = Math.min(...allLngs), maxLng = Math.max(...allLngs);
@@ -169,9 +207,12 @@ function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [
 
   const userXY = project(user.lat, user.lng);
   const destXY = destination ? project(destination.lat, destination.lng) : null;
-  const polyD = points.length > 1
-    ? "M " + points.map((p) => { const xy = project(p.lat, p.lng); return `${xy.x.toFixed(1)} ${xy.y.toFixed(1)}`; }).join(" L ")
-    : null;
+
+  // Build SVG path strings for each route
+  const routePaths = decodedRoutes.map((pts) => {
+    if (pts.length < 2) return null;
+    return "M " + pts.map((p) => { const xy = project(p.lat, p.lng); return `${xy.x.toFixed(1)} ${xy.y.toFixed(1)}`; }).join(" L ");
+  });
 
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -193,11 +234,29 @@ function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [
           <Path key={`g${i}`} d={`M 0 ${(i * H) / 8} H ${W}`} stroke="rgba(120,130,140,0.08)" strokeWidth={1} />
         ))}
 
-        {/* route polyline */}
-        {polyD && (
+        {/* Alternate routes (gray, drawn first/below the active one) */}
+        {routePaths.map((d, i) => {
+          if (!d || i === selectedRouteIndex) return null;
+          return (
+            <Path
+              key={`alt-${i}`}
+              d={d}
+              stroke="#8E8E93"
+              strokeWidth={5}
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.7}
+              onPress={onSelectRoute ? () => onSelectRoute(i) : undefined}
+            />
+          );
+        })}
+
+        {/* Active "Route Line" — Google Maps blue */}
+        {routePaths[selectedRouteIndex] && (
           <G>
-            <Path d={polyD} stroke="#0A84FF" strokeWidth={9} fill="none" strokeLinecap="round" strokeLinejoin="round" opacity={0.95} />
-            <Path d={polyD} stroke="#FFFFFF" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="2 10" opacity={0.5} />
+            <Path d={routePaths[selectedRouteIndex] as string} stroke="#0A84FF" strokeWidth={9} fill="none" strokeLinecap="round" strokeLinejoin="round" opacity={0.95} />
+            <Path d={routePaths[selectedRouteIndex] as string} stroke="#FFFFFF" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="2 10" opacity={0.5} />
           </G>
         )}
 
@@ -253,7 +312,7 @@ function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [
         </G>
       </Svg>
 
-      {!encodedPolyline && (
+      {routes.length === 0 && !encodedPolyline && (
         <View style={styles.notice} pointerEvents="none">
           <Text style={styles.noticeTitle}>Route preview</Text>
           <Text style={styles.noticeText}>Search a destination to see your route. Full satellite tiles unlock with an EAS dev build.</Text>

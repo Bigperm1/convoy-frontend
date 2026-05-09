@@ -17,6 +17,7 @@ type Props = {
   peers: Peer[];
   hazards: Hazard[];
   externalAlerts?: ExternalAlert[];
+  highlightConvoy?: boolean;
   destination?: LatLng | null;
   encodedPolyline?: string | null;
   onHazardPress: (h: Hazard) => void;
@@ -70,7 +71,22 @@ function dotIcon(color: string, glyph: string, size = 32) {
 }
 const HAZARD_GLYPHS: Record<string, string> = { police: "🛡", accident: "✕", road: "!", traffic: "▲" };
 
-export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], destination, encodedPolyline, onHazardPress, onExternalAlertPress, onRoute }: Props) {
+// Build a community pin with optional gold border (Convoy users)
+function communityPin(color: string, glyph: string, gold: boolean) {
+  const ringStroke = gold ? `<circle cx='26' cy='24' r='25' fill='none' stroke='#FFD60A' stroke-width='3'/>` : "";
+  const innerBorder = gold ? "#FFD60A" : "white";
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='56' height='66' viewBox='-2 -2 56 66'>
+    <defs><filter id='cs' x='-50%' y='-50%' width='200%' height='200%'><feDropShadow dx='0' dy='3' stdDeviation='3' flood-opacity='0.55'/></filter></defs>
+    <g filter='url(#cs)'>
+      ${ringStroke}
+      <circle cx='26' cy='24' r='22' fill='${color}' stroke='${innerBorder}' stroke-width='3'/>
+      <polygon points='20,44 32,44 26,58' fill='${color}' stroke='${innerBorder}' stroke-width='2'/>
+      <text x='26' y='32' font-family='Arial,sans-serif' font-size='22' font-weight='bold' text-anchor='middle' fill='white'>${glyph}</text>
+    </g></svg>`;
+  return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+}
+
+export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, onHazardPress, onExternalAlertPress, onRoute }: Props) {
   if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -89,7 +105,7 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
             <Marker key={p.user_id} position={p} icon={dotIcon(COLORS.success, "🚗", 30)} title={p.handle || "driver"} />
           ))}
           {hazards.map((h) => (
-            <Marker key={`u-${h.id}`} position={h} icon={pinIcon(hazardColor(h.kind), HAZARD_GLYPHS[h.kind] || "!")} onClick={() => onHazardPress(h)} title={`${h.kind} · by ${h.reporter_handle || "anon"}`} />
+            <Marker key={`u-${h.id}`} position={h} icon={communityPin(hazardColor(h.kind), HAZARD_GLYPHS[h.kind] || "!", highlightConvoy)} onClick={() => onHazardPress(h)} title={`${h.kind} · by ${h.reporter_handle || "anon"}${highlightConvoy ? " · CONVOY" : ""}`} />
           ))}
           {externalAlerts.map((a) => (
             <Marker

@@ -32,12 +32,15 @@ type Props = {
   peers: Peer[];
   hazards: Hazard[];
   externalAlerts?: ExternalAlert[];
+  highlightConvoy?: boolean;
   destination?: LatLng | null;
   encodedPolyline?: string | null;
   onHazardPress: (h: Hazard) => void;
   onExternalAlertPress?: (a: ExternalAlert) => void;
   onRoute?: (info: any) => void;
 };
+
+const CONVOY_GOLD = "#FFD60A";
 
 const hazardColor = (k: string) =>
   k === "police" ? "#3478F6" : k === "accident" ? "#FF453A" : k === "traffic" ? "#FF9F0A" : "#FF9F0A";
@@ -80,7 +83,7 @@ function decodePolyline(encoded: string): LatLng[] {
   return points;
 }
 
-export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], destination, encodedPolyline, onHazardPress, onExternalAlertPress }: Props) {
+export default function ConvoyMap({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, onHazardPress, onExternalAlertPress }: Props) {
   // ---- Real Google Maps (EAS dev build) ----
   if (MapView) {
     const region = { latitude: center.lat, longitude: center.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 };
@@ -100,10 +103,14 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
         {hazards.map((h) => (
           <Marker key={`u-${h.id}`} coordinate={{ latitude: h.lat, longitude: h.lng }} anchor={{ x: 0.5, y: 1 }} onPress={() => onHazardPress(h)}>
             <View style={styles.hazardWrap}>
-              <View style={[styles.hazardBubble, { backgroundColor: hazardColor(h.kind) }]}>
+              <View style={[
+                styles.hazardBubble,
+                { backgroundColor: hazardColor(h.kind) },
+                highlightConvoy && { borderColor: CONVOY_GOLD, borderWidth: 3, shadowColor: CONVOY_GOLD, shadowOpacity: 0.6, shadowRadius: 6 },
+              ]}>
                 <Ionicons name={hazardIcon(h.kind)} size={22} color="#fff" />
               </View>
-              <View style={[styles.hazardTail, { borderTopColor: hazardColor(h.kind) }]} />
+              <View style={[styles.hazardTail, { borderTopColor: highlightConvoy ? CONVOY_GOLD : hazardColor(h.kind) }]} />
             </View>
           </Marker>
         ))}
@@ -138,10 +145,10 @@ export default function ConvoyMap({ center, user, peers, hazards, externalAlerts
   }
 
   // ---- Expo Go fallback: stylized SVG route preview ----
-  return <RoutePreviewFallback {...{ center, user, peers, hazards, externalAlerts, destination, encodedPolyline, onHazardPress, onExternalAlertPress }} />;
+  return <RoutePreviewFallback {...{ center, user, peers, hazards, externalAlerts, highlightConvoy, destination, encodedPolyline, onHazardPress, onExternalAlertPress }} />;
 }
 
-function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [], destination, encodedPolyline, onHazardPress }: Props) {
+function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, onHazardPress }: Props) {
   const points = useMemo(() => (encodedPolyline ? decodePolyline(encodedPolyline) : []), [encodedPolyline]);
 
   // Build bounding box across user + destination + route points
@@ -211,8 +218,9 @@ function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [
           const c = hazardColor(h.kind);
           return (
             <G key={`u-${h.id}`}>
+              {highlightConvoy && <Circle cx={xy.x} cy={xy.y} r={13} fill="none" stroke={CONVOY_GOLD} strokeWidth={2} />}
               <Circle cx={xy.x} cy={xy.y} r={14} fill={c} fillOpacity={0.25} />
-              <Circle cx={xy.x} cy={xy.y} r={9} fill={c} stroke="#fff" strokeWidth={2} />
+              <Circle cx={xy.x} cy={xy.y} r={9} fill={c} stroke={highlightConvoy ? CONVOY_GOLD : "#fff"} strokeWidth={highlightConvoy ? 2.5 : 2} />
             </G>
           );
         })}

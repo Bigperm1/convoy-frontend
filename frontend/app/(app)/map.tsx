@@ -13,6 +13,7 @@ import DestinationSearch from "../../src/DestinationSearch";
 import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 import { voiceBus, geocodeQuery } from "../../src/voiceBus";
 import { useExternalAlerts, registerExternalFeedBackgroundTask } from "../../src/externalFeed";
+import { useSettings } from "../../src/settings";
 
 type RouteInfo = {
   distance_text: string;
@@ -47,10 +48,40 @@ export default function MapScreen() {
 
   // ----- External alerts feed (Waze-style polling, dedup + auto-clear) -----
   const externalFeed = useExternalAlerts(60_000);
+  const [settings] = useSettings();
   useEffect(() => {
     // Best-effort iOS/Android background fetch (≥15min cadence). Foreground polling above is the primary path.
     registerExternalFeedBackgroundTask().catch(() => {});
   }, []);
+
+  // Optional Convoy alert sound — chime when a NEW community hazard appears
+  const prevHazardIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const ids = new Set(hazards.map((h) => h.id));
+    if (settings.alertSound && prevHazardIdsRef.current.size > 0) {
+      const newOnes = [...ids].filter((id) => !prevHazardIdsRef.current.has(id));
+      if (newOnes.length > 0) {
+        // Soft platform chime — best-effort, silent if unavailable
+        try {
+          if (Platform.OS === "web" && typeof window !== "undefined") {
+            // Tiny 880Hz beep via WebAudio
+            const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+            if (Ctx) {
+              const ctx = new Ctx();
+              const o = ctx.createOscillator(); const g = ctx.createGain();
+              o.connect(g); g.connect(ctx.destination);
+              o.frequency.value = 880; o.type = "sine";
+              g.gain.setValueAtTime(0.0001, ctx.currentTime);
+              g.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.02);
+              g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.45);
+              o.start(); o.stop(ctx.currentTime + 0.5);
+            }
+          }
+        } catch { /* ignore */ }
+      }
+    }
+    prevHazardIdsRef.current = ids;
+  }, [hazards, settings.alertSound]);
 
   // Native directions via REST (web uses the JS DirectionsService inside ConvoyMap)
   useEffect(() => {
@@ -274,6 +305,7 @@ export default function MapScreen() {
         peers={peerList}
         hazards={hazards}
         externalAlerts={externalFeed.alerts}
+        highlightConvoy={settings.highlightConvoy}
         destination={destination}
         encodedPolyline={encodedPolyline}
         onHazardPress={(h) => setSelected(h)}
@@ -296,6 +328,9 @@ export default function MapScreen() {
             </View>
             <TouchableOpacity testID="refresh-btn" onPress={() => loadPeers()} style={styles.iconBtn}>
               <Ionicons name="refresh" size={18} color={COLORS.text} />
+            </TouchableOpacity>
+            <TouchableOpacity testID="settings-btn" onPress={() => router.push("/(app)/settings" as any)} style={styles.iconBtn}>
+              <Ionicons name="options-outline" size={18} color={COLORS.text} />
             </TouchableOpacity>
           </View>
         </Glass>

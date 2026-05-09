@@ -120,6 +120,21 @@ backend:
           agent: "testing"
           comment: "Sanity check: POST /api/voice/transcribe with empty audio_b64 returns HTTP 400 ('Audio too short') as expected — no regression from classifier refactor. Authenticated (JWT bearer for demo@revradar.app) and unauthenticated paths exercised via shared test harness."
 
+  - task: "External alerts feed proxy (GET /api/feed/external) — multi-feed (na/row) support"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Extended endpoint to accept ?feeds=na, ?feeds=row, or ?feeds=na,row. Two named feeds with env override (EXTERNAL_FEED_NA_URL, EXTERNAL_FEED_ROW_URL). Fetched in parallel via asyncio.gather. Merged with id-based dedup. New 'feeds' field in response with per-feed status. Cache key includes the feed-set."
+        - working: true
+          agent: "testing"
+          comment: "All 9 multi-feed test cases PASS via public URL https://motorist-hub.preview.emergentagent.com/api (21 total assertions in /app/backend_test.py, 0 failures). (1) ?feeds=na → 200, feeds=[{key:'na',url:rtproxy-na...,status:'http_error',error:'403',count:0}] len=1. (2) ?feeds=row → 200, feeds[0].key=='row' url=rtproxy-row.waze.com/, len=1. (3) ?feeds=na,row → 200, feeds len=2 with keys exactly {'na','row'}, overall upstream_status='http_error' (allowed; not 5xx). (4) ?feeds=invalid → 200, feeds len=1 with feeds[0].key=='na' (default fallback). (5) Bare GET /api/feed/external → 200, feeds[0].key=='na' (default). (6) Cache: two consecutive ?feeds=na,row within ~1s returned identical fetched_at='2026-05-09T02:59:26.521733+00:00'. (7) Separate cache keys: ?feeds=na response has feed-set {'na'} while ?feeds=na,row has {'na','row'} confirming independent cache entries. (8) Auth gate: GET ?feeds=na without Authorization → HTTP 401 {'detail':'Not authenticated'}. (9) No regression: POST /api/auth/login with demo creds → 200 + JWT (token len=224). Per-feed shape validated: every feeds[] entry has {key,url,status,error,count} and status ∈ {ok,http_error,network_error,parse_error}. Both rtproxy-na.waze.com and rtproxy-row.waze.com returned 403 from container egress as expected; endpoint stayed 200 with graceful per-feed status='http_error', error='403'. Endpoint robust against upstream failure, multi-feed support working as designed."
+
   - task: "External alerts feed proxy (GET /api/feed/external)"
     implemented: true
     working: true
@@ -155,10 +170,17 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "External alerts feed proxy (GET /api/feed/external) — multi-feed (na/row) support"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "Extended /api/feed/external with multi-feed support: ?feeds=na, ?feeds=row, ?feeds=na,row. Two configurable upstream URLs (env EXTERNAL_FEED_NA_URL / EXTERNAL_FEED_ROW_URL, defaults rtproxy-na.waze.com / rtproxy-row.waze.com). Fetched in parallel via asyncio.gather, merged with id-based dedup. Response now also has 'feeds:[{key,url,status,error,count}]' per-feed status. Cache key includes feed-set so different combinations cache independently. Test: 1) GET ?feeds=na with auth → 200 + feeds[0].key=='na'. 2) GET ?feeds=row with auth → 200 + feeds[0].key=='row'. 3) GET ?feeds=na,row with auth → 200 + feeds.length==2 + alerts merged dedup. 4) GET ?feeds=invalid with auth → 200 (defaults to 'na'). 5) Cache: two consecutive ?feeds=na,row return same fetched_at. 6) No regression on bare GET (defaults to 'na'). DO NOT validate alert content (upstream returns 403)."
+    - agent: "testing"
+      message: "Multi-feed /api/feed/external testing complete via public URL — ALL 21 assertions PASS, 0 failures (see /app/backend_test.py). Verified: ?feeds=na (1 entry, key=na), ?feeds=row (1 entry, key=row), ?feeds=na,row (2 entries, keys={na,row}, overall upstream_status='http_error' not 5xx), ?feeds=invalid (defaults to na, len=1), bare GET (defaults to na). Cache identity confirmed: two consecutive ?feeds=na,row within ~1s returned identical fetched_at. Cache separation confirmed: ?feeds=na cached independently from ?feeds=na,row (distinct feed-sets). Auth gate enforced (401 without bearer). No regression: /api/auth/login returns 200 + JWT for demo creds, /api/voice/transcribe with empty audio_b64 still returns 400. Both rtproxy-na.waze.com and rtproxy-row.waze.com returned 403 from container egress as expected; endpoint stayed 200 with graceful per-feed status='http_error', error='403'. Per-feed shape (key,url,status,error,count) validated on every response. Multi-feed task marked working:true and needs_retesting:false."
 
 agent_communication:
     - agent: "main"

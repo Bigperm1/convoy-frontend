@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform } from "react-native";
 import { api } from "./api";
+import { useSettings, feedsQuery } from "./settings";
 
 export type ExternalAlertType =
   | "POLICE" | "ACCIDENT" | "JAM" | "HAZARD" | "CONSTRUCTION" | "WEATHER" | "OTHER";
@@ -38,6 +39,7 @@ type FeedResponse = {
 const DEFAULT_INTERVAL_MS = 60_000;
 
 export function useExternalAlerts(intervalMs: number = DEFAULT_INTERVAL_MS) {
+  const [settings] = useSettings();
   // Map keyed by stable alert id. Polling replaces this map → React reconciliation removes
   // markers that disappeared from the feed (auto-clear behavior).
   const [alertsById, setAlertsById] = useState<Record<string, ExternalAlert>>({});
@@ -49,14 +51,21 @@ export function useExternalAlerts(intervalMs: number = DEFAULT_INTERVAL_MS) {
   const inFlightRef = useRef(false);
   const mountedRef = useRef(true);
 
+  const feedsParam = feedsQuery(settings);
+
   const fetchOnce = useCallback(async () => {
     if (inFlightRef.current) return;
+    // No feeds enabled → clear and bail
+    if (!feedsParam) {
+      setAlertsById({});
+      setStatus("idle");
+      return;
+    }
     inFlightRef.current = true;
     setStatus((s) => (s === "ok" ? s : "polling"));
     try {
-      const { data } = await api.get<FeedResponse>("/feed/external");
+      const { data } = await api.get<FeedResponse>(`/feed/external?feeds=${encodeURIComponent(feedsParam)}`);
       if (!mountedRef.current) return;
-      // Build new id map; React diffs on keys → removed ids unmount automatically.
       const next: Record<string, ExternalAlert> = {};
       for (const a of data.alerts || []) next[a.id] = a;
       setAlertsById(next);
@@ -72,7 +81,7 @@ export function useExternalAlerts(intervalMs: number = DEFAULT_INTERVAL_MS) {
     } finally {
       inFlightRef.current = false;
     }
-  }, []);
+  }, [feedsParam]);
 
   // Polling lifecycle — pauses while backgrounded, resumes on foreground.
   useEffect(() => {

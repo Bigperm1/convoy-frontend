@@ -425,13 +425,22 @@ def _classify_intent(text: str) -> dict:
 
 
 # ---------- External Alerts Feed (Waze-style proxy) ----------
-# Polls a JSON feed and normalizes to {id, type, lat, lng, ts, raw_type, subtype}.
-# The proxy URL is configurable via env: EXTERNAL_FEED_URL (default below).
-# Includes a tiny in-memory cache so 60s frontend polls don't hammer upstream.
+# Polls one or more JSON feeds and normalizes to {id, type, lat, lng, ts, raw_type, subtype, source}.
+# Two named feeds (matches Waze rtproxy convention enthusiast apps use):
+#   - "na"  → North America   (EXTERNAL_FEED_NA_URL, default https://rtproxy-na.waze.com/)
+#   - "row" → Rest of World   (EXTERNAL_FEED_ROW_URL, default https://rtproxy-row.waze.com/)
+# Frontend can pass ?feeds=na,row to enable any combination. Backend caches per-feed-set 25s.
 
-EXTERNAL_FEED_URL = os.environ.get("EXTERNAL_FEED_URL", "https://rtproxy-na.waze.com/")
-_feed_cache: Dict[str, dict] = {"data": None, "ts": 0.0}
-_FEED_CACHE_TTL = 25.0  # seconds — backend caches a bit shorter than client poll cadence
+EXTERNAL_FEEDS = {
+    "na": os.environ.get("EXTERNAL_FEED_NA_URL", "https://rtproxy-na.waze.com/"),
+    "row": os.environ.get("EXTERNAL_FEED_ROW_URL", "https://rtproxy-row.waze.com/"),
+}
+# Legacy single-URL var still honored as default for "na" if set
+if os.environ.get("EXTERNAL_FEED_URL"):
+    EXTERNAL_FEEDS["na"] = os.environ["EXTERNAL_FEED_URL"]
+
+_feed_cache: Dict[str, dict] = {}  # keyed by sorted feed-set, e.g. "na,row"
+_FEED_CACHE_TTL = 25.0
 
 def _normalize_alert_type(raw: str) -> str:
     if not raw: return "OTHER"
@@ -445,22 +454,20 @@ def _normalize_alert_type(raw: str) -> str:
     return "OTHER"
 
 def _alert_id(item: dict, lat: float, lng: float, raw_type: str) -> str:
-    # Prefer feed-provided stable id (uuid / id), otherwise hash type+rounded coords
     for k in ("uuid", "id", "alertId", "alert_id"):
         v = item.get(k)
         if v: return str(v)
     h = hashlib.sha1(f"{raw_type}|{round(lat, 5)}|{round(lng, 5)}".encode()).hexdigest()
     return h[:16]
 
-def _extract_alerts(payload) -> List[dict]:
-    """Accept multiple feed shapes: {alerts:[...]}, [...], {data:{alerts:[...]}}."""
+def _extract_alerts(payload, source_key: str = "") -> List[dict]:
     if payload is None: return []
     if isinstance(payload, list):
         items = payload
     elif isinstance(payload, dict):
         items = (
             payload.get("alerts")
-            or payload.get("data", {}).get("alerts") if isinstance(payload.get("data"), dict) else None
+            or (payload.get("data", {}).get("alerts") if isinstance(payload.get("data"), dict) else None)
         ) or payload.get("items") or []
     else:
         items = []
@@ -468,7 +475,6 @@ def _extract_alerts(payload) -> List[dict]:
     out: List[dict] = []
     for it in items:
         if not isinstance(it, dict): continue
-        # Coords: {lat,lng} | {latitude,longitude} | {location:{x,y}} (Waze: y=lat,x=lng)
         lat = it.get("lat") or it.get("latitude")
         lng = it.get("lng") or it.get("lon") or it.get("longitude")
         if lat is None or lng is None:
@@ -494,22 +500,49 @@ def _extract_alerts(payload) -> List[dict]:
             "subtype": subtype,
             "lat": lat, "lng": lng,
             "ts": ts,
+            "source": source_key,  # "na" | "row"
         })
     return out
+
+async def _fetch_one_feed(client: httpx.AsyncClient, key: str, url: str, params: dict) -> dict:
+    """Fetch a single named feed; never raises — returns status info even on failure."""
+    try:
+        resp = await client.get(url, params=params or None,
+                                headers={"User-Agent": "Convoy/1.0", "Accept": "application/json"})
+        resp.raise_for_status()
+        try:
+            payload = resp.json()
+        except Exception:
+            import json as _json
+            payload = _json.loads(resp.text)
+        return {"key": key, "url": url, "status": "ok", "error": None, "alerts": _extract_alerts(payload, key)}
+    except httpx.HTTPStatusError as e:
+        return {"key": key, "url": url, "status": "http_error", "error": f"{e.response.status_code}", "alerts": []}
+    except httpx.RequestError as e:
+        return {"key": key, "url": url, "status": "network_error", "error": str(e)[:120], "alerts": []}
+    except Exception as e:
+        return {"key": key, "url": url, "status": "parse_error", "error": str(e)[:120], "alerts": []}
 
 @api.get("/feed/external")
 async def external_feed(
     user=Depends(get_current_user),
+    feeds: str = "na",
     top: Optional[float] = None,
     bottom: Optional[float] = None,
     left: Optional[float] = None,
     right: Optional[float] = None,
 ):
-    """Proxy + normalize an external alerts feed (Waze-style).
-    Frontend polls this every ~60s; backend caches 25s to soften upstream load."""
+    """Proxy + normalize one or more external alert feeds. ?feeds=na,row to combine.
+    Per-feed-set cache (25s) keeps the hop light against 60s frontend polling."""
+    keys = [k.strip().lower() for k in (feeds or "").split(",") if k.strip()]
+    keys = [k for k in keys if k in EXTERNAL_FEEDS]
+    if not keys:
+        keys = ["na"]
+    cache_key = ",".join(sorted(set(keys)))
     now = time.time()
-    if _feed_cache["data"] is not None and (now - _feed_cache["ts"]) < _FEED_CACHE_TTL:
-        return _feed_cache["data"]
+    cached = _feed_cache.get(cache_key)
+    if cached and (now - cached["ts"]) < _FEED_CACHE_TTL:
+        return cached["data"]
 
     params = {}
     if top is not None: params["top"] = top
@@ -517,41 +550,34 @@ async def external_feed(
     if left is not None: params["left"] = left
     if right is not None: params["right"] = right
 
-    payload = None
-    upstream_status = "ok"
-    upstream_error: Optional[str] = None
-    try:
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-            resp = await client.get(EXTERNAL_FEED_URL, params=params or None,
-                                    headers={"User-Agent": "Convoy/1.0", "Accept": "application/json"})
-            resp.raise_for_status()
-            try:
-                payload = resp.json()
-            except Exception:
-                # Some Waze proxies return text/plain JSON without proper content-type
-                import json as _json
-                payload = _json.loads(resp.text)
-    except httpx.HTTPStatusError as e:
-        upstream_status = "http_error"
-        upstream_error = f"{e.response.status_code}"
-    except httpx.RequestError as e:
-        upstream_status = "network_error"
-        upstream_error = str(e)[:120]
-    except Exception as e:
-        upstream_status = "parse_error"
-        upstream_error = str(e)[:120]
+    async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+        results = await asyncio.gather(*[
+            _fetch_one_feed(client, k, EXTERNAL_FEEDS[k], params) for k in keys
+        ])
 
-    alerts = _extract_alerts(payload) if payload is not None else []
+    # Merge + dedup across feeds (same id wins → first encountered)
+    merged: Dict[str, dict] = {}
+    for r in results:
+        for a in r["alerts"]:
+            if a["id"] not in merged:
+                merged[a["id"]] = a
+
+    feeds_info = [{"key": r["key"], "url": r["url"], "status": r["status"], "error": r["error"], "count": len(r["alerts"])} for r in results]
+    overall_status = "ok" if all(r["status"] == "ok" for r in results) else (
+        "partial" if any(r["status"] == "ok" for r in results) else results[0]["status"] if results else "error"
+    )
+
     out = {
-        "alerts": alerts,
-        "count": len(alerts),
+        "alerts": list(merged.values()),
+        "count": len(merged),
         "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "source": EXTERNAL_FEED_URL,
-        "upstream_status": upstream_status,
-        "upstream_error": upstream_error,
+        "feeds": feeds_info,
+        # Back-compat fields:
+        "source": ", ".join(EXTERNAL_FEEDS[k] for k in keys),
+        "upstream_status": overall_status,
+        "upstream_error": next((r["error"] for r in results if r["error"]), None),
     }
-    _feed_cache["data"] = out
-    _feed_cache["ts"] = now
+    _feed_cache[cache_key] = {"data": out, "ts": now}
     return out
 
 

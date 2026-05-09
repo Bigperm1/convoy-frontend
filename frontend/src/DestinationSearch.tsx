@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
+import { geocodeQuery } from "./voiceBus";
 
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
 
@@ -145,6 +146,19 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
 
   const clear = () => { setText(""); setSuggestions([]); setOpen(false); onClear?.(); };
 
+  // Enter-to-go fallback: if there's an autocomplete suggestion, pick the first;
+  // otherwise free-form geocode the typed text. Also gives the destination
+  // search a "press Enter / Go" affordance which works in headless tests.
+  const submit = async () => {
+    const q = text.trim();
+    if (!q) return;
+    if (suggestions.length > 0) { pick(suggestions[0]); return; }
+    const loc = await geocodeQuery(q, origin);
+    if (!loc) return;
+    setText(loc.label); setOpen(false); setSuggestions([]);
+    onSelect(loc);
+  };
+
   return (
     <View style={styles.wrap} pointerEvents="box-none">
       <View style={styles.bar}>
@@ -157,11 +171,19 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           placeholderTextColor={COLORS.textMute}
           style={styles.input}
           onFocus={() => setOpen(true)}
+          returnKeyType="go"
+          onSubmitEditing={submit}
+          blurOnSubmit={false}
         />
         {!!text && (
-          <TouchableOpacity testID="destination-clear" onPress={clear}>
-            <Ionicons name="close-circle" size={20} color={COLORS.textDim} />
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity testID="destination-go" onPress={submit} style={styles.goBtn}>
+              <Ionicons name="arrow-forward" size={18} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity testID="destination-clear" onPress={clear}>
+              <Ionicons name="close-circle" size={20} color={COLORS.textDim} />
+            </TouchableOpacity>
+          </>
         )}
       </View>
       {open && suggestions.length > 0 && (
@@ -186,6 +208,11 @@ const styles = StyleSheet.create({
     borderRadius: 14, borderWidth: 1, borderColor: COLORS.hairlineStrong,
   },
   input: { flex: 1, color: COLORS.text, fontSize: 15, padding: 0 },
+  goBtn: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: COLORS.primary,
+    alignItems: "center", justifyContent: "center",
+  },
   list: { backgroundColor: "rgba(28,28,30,0.96)", borderRadius: 12, marginTop: 8, borderWidth: 1, borderColor: COLORS.hairline, overflow: "hidden" },
   row: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12 },
   rowText: { color: COLORS.text, flex: 1, fontSize: 14 },

@@ -98,6 +98,7 @@ export default function MapScreen() {
 
   // Unified multi-route directions (web + native). Fetches up to 3 alternates with `alternatives=true`.
   // The "Route Line" = blue selected route; alternates render gray and are tappable to swap.
+  // Honors avoid-tolls/highways/ferries route preferences from settings.
   useEffect(() => {
     if (!destination || !coords) {
       setRoutes([]); setSelectedRouteIndex(0); setRoute(null);
@@ -105,7 +106,11 @@ export default function MapScreen() {
     }
     let cancelled = false;
     (async () => {
-      const results = await fetchDirections(coords, destination);
+      const results = await fetchDirections(coords, destination, {
+        tolls: settings.avoidTolls,
+        highways: settings.avoidHighways,
+        ferries: settings.avoidFerries,
+      });
       if (cancelled) return;
       setRoutes(results);
       setSelectedRouteIndex(0);
@@ -117,7 +122,7 @@ export default function MapScreen() {
       } : null);
     })();
     return () => { cancelled = true; };
-  }, [destination, coords]);
+  }, [destination, coords, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
 
   // Mirror RouteInfo whenever the user picks a different alternate
   useEffect(() => {
@@ -135,9 +140,13 @@ export default function MapScreen() {
     mute: navMuted,
     onArrive: () => { setNavMode("preview"); },
     onOffRoute: () => {
-      // Auto-reroute: refetch directions from the current GPS position
+      // Auto-reroute: refetch directions from the current GPS position (honoring user's avoid prefs)
       if (!coords || !destination) return;
-      fetchDirections(coords, destination).then((res) => {
+      fetchDirections(coords, destination, {
+        tolls: settings.avoidTolls,
+        highways: settings.avoidHighways,
+        ferries: settings.avoidFerries,
+      }).then((res) => {
         if (res.length > 0) {
           setRoutes(res);
           setSelectedRouteIndex(0);

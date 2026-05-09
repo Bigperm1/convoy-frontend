@@ -65,10 +65,17 @@ export function maneuverVerb(m?: string): string {
   return map[m] || "Continue";
 }
 
-// ---- Directions API: multi-route fetch with alternatives ----
+// ---- Directions API: multi-route fetch with alternatives + avoid prefs ----
+export type AvoidPrefs = {
+  tolls?: boolean;
+  highways?: boolean;
+  ferries?: boolean;
+};
+
 export async function fetchDirections(
   origin: LatLng,
-  destination: LatLng
+  destination: LatLng,
+  avoid?: AvoidPrefs
 ): Promise<NavRoute[]> {
   const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
   if (!KEY) return [];
@@ -77,6 +84,12 @@ export async function fetchDirections(
   url.searchParams.set("destination", `${destination.lat},${destination.lng}`);
   url.searchParams.set("mode", "driving");
   url.searchParams.set("alternatives", "true");
+  // Google expects a pipe-separated list of features to avoid, e.g. "tolls|highways"
+  const avoidParts: string[] = [];
+  if (avoid?.tolls) avoidParts.push("tolls");
+  if (avoid?.highways) avoidParts.push("highways");
+  if (avoid?.ferries) avoidParts.push("ferries");
+  if (avoidParts.length) url.searchParams.set("avoid", avoidParts.join("|"));
   url.searchParams.set("key", KEY);
   try {
     const res = await fetch(url.toString());

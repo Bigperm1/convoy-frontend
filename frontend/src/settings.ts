@@ -11,6 +11,10 @@ export type Settings = {
   feedROW: boolean;         // International (Rest-of-World) Waze feed
   highlightConvoy: boolean; // Gold border around Convoy community reports
   alertSound: boolean;      // Chime when a new Convoy hazard appears
+  // Route preferences (passed to Google Directions API as `avoid=...`)
+  avoidTolls: boolean;
+  avoidHighways: boolean;
+  avoidFerries: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -18,6 +22,9 @@ export const DEFAULT_SETTINGS: Settings = {
   feedROW: false,
   highlightConvoy: true,
   alertSound: false,
+  avoidTolls: false,
+  avoidHighways: false,
+  avoidFerries: false,
 };
 
 let cached: Settings = { ...DEFAULT_SETTINGS };

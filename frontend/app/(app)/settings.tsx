@@ -113,6 +113,40 @@ export default function SettingsScreen() {
           Convoy-originated reports are prioritized: they appear with a distinct gold border so you can tell at a glance which alerts came from your crew vs. the general feed.
         </Text>
 
+        {/* Route Preferences */}
+        <Text style={styles.sectionLabel}>ROUTE PREFERENCES</Text>
+        <Glass radius={16} style={styles.card}>
+          <ToggleRow
+            icon="cash-outline"
+            iconColor="#30D158"
+            title="Avoid tolls"
+            subtitle="Skip toll roads when possible"
+            value={settings.avoidTolls}
+            onChange={(v) => setSettings({ avoidTolls: v })}
+          />
+          <View style={styles.divider} />
+          <ToggleRow
+            icon="speedometer-outline"
+            iconColor="#FF9F0A"
+            title="Avoid highways"
+            subtitle="Prefer surface streets over freeways"
+            value={settings.avoidHighways}
+            onChange={(v) => setSettings({ avoidHighways: v })}
+          />
+          <View style={styles.divider} />
+          <ToggleRow
+            icon="boat-outline"
+            iconColor="#5AC8FA"
+            title="Avoid ferries"
+            subtitle="Don't route over water crossings"
+            value={settings.avoidFerries}
+            onChange={(v) => setSettings({ avoidFerries: v })}
+          />
+        </Glass>
+        <Text style={styles.helpText}>
+          Applied to every directions request — including auto-reroute when you go off-route. Routes refresh automatically when you toggle a preference.
+        </Text>
+
         <View style={{ height: 120 }} />
       </ScrollView>
     </View>

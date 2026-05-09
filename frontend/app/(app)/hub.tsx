@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
+import { useRouter } from "expo-router";
 import { useAuth } from "../../src/auth";
 import { api, formatErr } from "../../src/api";
 import { COLORS } from "../../src/theme";
@@ -24,6 +25,7 @@ type Community = {
 
 export default function HubScreen() {
   const { user, logout, refresh } = useAuth();
+  const router = useRouter();
   const [mine, setMine] = useState<Community[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -45,14 +47,19 @@ export default function HubScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={COLORS.primary} />}>
         <View style={styles.headerRow}>
           <Text style={styles.title}>Hub</Text>
-          <TouchableOpacity testID="profile-btn" onPress={() => setShowProfile(true)} style={styles.iconBtn}>
-            <Ionicons name="person" size={18} color={COLORS.text} />
+          <TouchableOpacity
+            testID="profile-btn"
+            onPress={() => router.push("/(app)/garage")}
+            style={styles.iconBtn}
+          >
+            <Ionicons name="car-sport" size={18} color="#FFC700" />
           </TouchableOpacity>
         </View>
-        <Text style={styles.sub}>{user?.handle} · {[user?.car_year, user?.car_make, user?.car_model].filter(Boolean).join(" ") || "Add your car in profile"}</Text>
+        <Text style={styles.sub}>{user?.handle} · {[user?.car_year, user?.car_make, user?.car_model].filter(Boolean).join(" ") || "Tap the car icon to set up your Garage"}</Text>
 
         {/* Action cards */}
         <View style={styles.actionGrid}>
+          <ActionCard testID="open-garage" icon="car-sport" label="Garage" onPress={() => router.push("/(app)/garage")} />
           <ActionCard testID="create-community" icon="add-circle" label="Create" onPress={() => setShowCreate(true)} />
           <ActionCard testID="search-community" icon="search" label="Discover" onPress={() => setShowSearch(true)} />
         </View>

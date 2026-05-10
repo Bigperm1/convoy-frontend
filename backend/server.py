@@ -857,8 +857,34 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
 async def root(): return {"service": "Convoy", "ok": True}
 
 
+@api.get("/health")
+async def api_health(): return {"ok": True, "service": "convoy-api"}
+
+
 app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
+
+
+# ---------- Liveness / Readiness probes (NO /api prefix) ----------
+# Emergent's Kubernetes ingress / nginx harness probes the root path BEFORE
+# routing any /api/* traffic. Without a 200 here the deployment is marked
+# unhealthy and the public DNS record is never published, even though the
+# uvicorn server itself starts cleanly. Both endpoints below are DB-free
+# so they pass even before Mongo is fully warm.
+@app.get("/")
+async def app_root():
+    return {"service": "Convoy", "status": "ok"}
+
+
+@app.get("/health")
+async def app_health():
+    return {"ok": True}
+
+
+@app.get("/healthz")
+async def app_healthz():
+    # Common K8s convention — some probes use /healthz instead of /health.
+    return {"ok": True}
 
 
 @app.on_event("startup")

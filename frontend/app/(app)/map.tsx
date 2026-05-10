@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import * as Speech from "expo-speech";
+import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { api, formatErr, wsUrl } from "../../src/api";
 import { useAuth } from "../../src/auth";
@@ -969,18 +970,14 @@ export default function MapScreen() {
         </Glass>
       )}
 
-      {showReport && (
-        <Glass radius={20} style={styles.reportPanel} testID="report-panel">
-          {([["police", "shield-checkmark", "Police"], ["accident", "alert-circle", "Accident"], ["road", "warning", "Hazard"], ["traffic", "car", "Traffic"]] as const).map(([k, ico, lbl]) => (
-            <TouchableOpacity key={k} testID={`report-${k}`} style={styles.reportBtn} onPress={() => reportHazard(k)}>
-              <View style={[styles.reportIco, { backgroundColor: hazardColor(k) + "33" }]}>
-                <Ionicons name={ico as any} size={18} color={hazardColor(k)} />
-              </View>
-              <Text style={styles.reportText}>{lbl}</Text>
-            </TouchableOpacity>
-          ))}
-        </Glass>
-      )}
+      {/* ---- Slim slide-out hazard drawer ----
+           Anchored to the right edge of the map. Animated.View slides
+           in from off-screen via translateX when `showReport` flips.
+           Two HIGH-PRIORITY-ONLY buttons: Police (blue) + Hazard (orange).
+           Tapping either fires `reportHazard()` (which auto-closes the
+           drawer via `setShowReport(false)`), pinging Supabase realtime
+           so other drivers see the report instantly. */}
+      <HazardDrawer visible={showReport} onReport={(kind) => reportHazard(kind)} />
 
       {/* ===== Speedometer HUD (bottom-left glass overlay) =====
           Pulls live speed from coords.speed (m/s) → km/h. Floors small values
@@ -1103,6 +1100,75 @@ function SpeedometerHUD({ speedMs }: { speedMs?: number }) {
     </View>
   );
 }
+/**
+ * Slim slide-out hazard drawer.
+ *
+ * Anchored to the right edge of the map, just inside the existing peek-tab
+ * trigger. When `visible` flips true → translateX animates from off-screen
+ * (DRAWER_HIDDEN_TX) to 0; when false it slides back out. Two HIGH-PRIORITY-
+ * ONLY buttons stacked vertically: Police (blue) and Hazard (orange). Tapping
+ * either fires `onReport(kind)` (parent calls reportHazard which inserts into
+ * Supabase + sets showReport=false, auto-closing the drawer).
+ *
+ * Accident + Traffic deliberately removed — community feedback was that those
+ * categories are noisier and lower-priority for actual driving decisions.
+ */
+const DRAWER_HIDDEN_TX = 110;
+function HazardDrawer({ visible, onReport }: { visible: boolean; onReport: (kind: string) => void }) {
+  const tx = useRef(new Animated.Value(visible ? 0 : DRAWER_HIDDEN_TX)).current;
+  useEffect(() => {
+    Animated.spring(tx, {
+      toValue: visible ? 0 : DRAWER_HIDDEN_TX,
+      useNativeDriver: true,
+      friction: 9,
+      tension: 80,
+    }).start();
+  }, [visible, tx]);
+
+  const fire = (kind: string) => {
+    // Fire-and-forget haptic so the driver feels the report was acknowledged
+    // without having to glance at the screen. Native only — web is a no-op.
+    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
+    onReport(kind);
+  };
+
+  return (
+    <Animated.View
+      pointerEvents={visible ? "auto" : "none"}
+      style={[styles.drawerWrap, { transform: [{ translateX: tx }] }]}
+      testID="report-panel"
+    >
+      <Glass radius={20}>
+        <View style={styles.drawerInner}>
+          {/* Police (blue) — primary high-priority report */}
+          <TouchableOpacity
+            testID="report-police"
+            onPress={() => fire("police")}
+            activeOpacity={0.85}
+            style={[styles.drawerBtn, { backgroundColor: "rgba(10,132,255,0.18)", borderColor: "rgba(10,132,255,0.55)" }]}
+          >
+            <Ionicons name="shield-checkmark" size={26} color="#0A84FF" />
+            <Text style={[styles.drawerBtnText, { color: "#0A84FF" }]}>Police</Text>
+          </TouchableOpacity>
+
+          {/* Hazard (orange) — generic road hazard (debris, blockage, etc.).
+              Wire schema kind = 'road' so it persists alongside other hazards
+              already in the Supabase `hazards` table (see HAZARDS_SUPABASE_SETUP.md). */}
+          <TouchableOpacity
+            testID="report-road"
+            onPress={() => fire("road")}
+            activeOpacity={0.85}
+            style={[styles.drawerBtn, { backgroundColor: "rgba(255,159,10,0.18)", borderColor: "rgba(255,159,10,0.55)" }]}
+          >
+            <Ionicons name="warning" size={26} color="#FF9F0A" />
+            <Text style={[styles.drawerBtnText, { color: "#FF9F0A" }]}>Hazard</Text>
+          </TouchableOpacity>
+        </View>
+      </Glass>
+    </Animated.View>
+  );
+}
+
 function ReportPeekTab({ active, onPress }: { active: boolean; onPress: () => void }) {
   const tx = useRef(new Animated.Value(active ? 0 : PEEK_HIDDEN_TX)).current;
   useEffect(() => {
@@ -1349,6 +1415,31 @@ const styles = StyleSheet.create({
   fabInner: { flex: 1, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center" },
 
   reportPanel: { position: "absolute", bottom: 190, right: 18, padding: 4, minWidth: 170 },
+
+  // Slim slide-out hazard drawer — anchored right edge, just inboard of the
+  // peek-tab trigger. Width matches the 2 large icon buttons inside.
+  drawerWrap: {
+    position: "absolute",
+    right: 76,           // peek-tab is ~64px wide; this sits just left of it
+    bottom: 200,         // visually aligns with the peek tab vertical center
+    zIndex: 8,
+  },
+  drawerInner: {
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 10,
+    flexDirection: "column",
+  },
+  drawerBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 2,
+  },
+  drawerBtnText: { fontSize: 11, fontWeight: "700", letterSpacing: 0.4, marginTop: 2 },
   reportBtn: { flexDirection: "row", alignItems: "center", padding: 10, gap: 12 },
   reportIco: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   reportText: { color: COLORS.text, fontWeight: "500", fontSize: 14 },

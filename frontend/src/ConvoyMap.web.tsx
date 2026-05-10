@@ -9,7 +9,7 @@ import type { ExternalAlert, ExternalAlertType } from "./externalFeed";
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
 
 export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number };
-export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string; carBody?: string; carColor?: string; heading?: number; topSpeed?: number };
+export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string; carBody?: string; carColor?: string; activeColor?: string; heading?: number; topSpeed?: number };
 export type LatLng = { lat: number; lng: number };
 
 type Props = {
@@ -264,9 +264,10 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
             // Leader marker is slightly larger AND given a high zIndex so it
             // floats above teammates whenever the convoy stacks up at a stop.
             const sz = isLeader ? 56 : 48;
-            // Peers also get the GRC PNG if their saved color matches a paint.
+            // Peers also get the GRC PNG if their broadcast activeColor slug
+            // (or, as fallback, free-form carColor label) matches a paint.
             const url =
-              grcCarIconDataUrl(p.carColor, p.heading, sz) ||
+              grcCarIconDataUrl(p.activeColor || p.carColor, p.heading, sz) ||
               carIconDataUrl(p.carBody, p.carColor, p.heading, sz);
             return (
               <Marker

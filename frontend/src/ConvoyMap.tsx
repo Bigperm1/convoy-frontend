@@ -60,7 +60,7 @@ function chaseZoomForSpeed(kmh: number): number {
 }
 
 export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number; disputes?: number };
-export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string; carBody?: string; carColor?: string; heading?: number; topSpeed?: number };
+export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string; carBody?: string; carColor?: string; activeColor?: string; heading?: number; topSpeed?: number };
 export type LatLng = { lat: number; lng: number };
 
 type Props = {
@@ -277,6 +277,7 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
                 <CarMarker
                   body={(p.carBody as any) || "sedan"}
                   color={p.carColor}
+                  activeColor={p.activeColor}
                   heading={p.heading || 0}
                   size={isLeader ? 56 : 48}
                 />

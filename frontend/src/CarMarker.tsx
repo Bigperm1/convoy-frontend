@@ -74,6 +74,13 @@ export function resolveCarColor(input?: string | null): string {
 type Props = {
   body?: CarBody | string | null;
   color?: string | null;
+  /**
+   * Canonical GR Corolla slug broadcast over Supabase presence
+   * (e.g. "grc_heavy_metal"). When provided, takes precedence over `color`
+   * for asset lookup. Falls through to the SVG silhouette if it doesn't
+   * resolve to one of the 5 known paints.
+   */
+  activeColor?: string | null;
   heading?: number | null;     // degrees, 0 = north
   size?: number;               // overall icon size in px
   testID?: string;
@@ -134,7 +141,7 @@ function windshieldPath(body: CarBody) {
   }
 }
 
-export default function CarMarker({ body = "sedan", color, heading, size = 40, testID }: Props) {
+export default function CarMarker({ body = "sedan", color, activeColor, heading, size = 40, testID }: Props) {
   const fill = resolveCarColor(color);
   const safeBody: CarBody = (CAR_BODIES.find((b) => b.id === body) ? (body as CarBody) : "sedan");
   // Heading from expo-location is degrees clockwise from true north — exactly
@@ -142,13 +149,13 @@ export default function CarMarker({ body = "sedan", color, heading, size = 40, t
   const angle = Number.isFinite(heading as number) ? Math.round((heading as number) % 360) : 0;
 
   // ===== GR Corolla PNG override =====
-  // If the user picked one of the 5 official GRC paint colors, render the
-  // high-res top-down PNG instead of the generic SVG silhouette. The PNG is
-  // rotated using a CSS transform so it tracks GPS heading exactly like the
-  // SVG path-rotate path does. We force a tiny aspect-ratio safe square so
-  // 128x128 source assets always render crisp at the requested `size`.
-  const grcAsset = getVehiclePng(color);
-  if (grcAsset && isGRCColor(color)) {
+  // Resolution priority: `activeColor` broadcast slug → free-form `color`.
+  // Either path lands on the same canonical paint key via vehicleAssets.ts
+  // alias map (handles "grc_heavy_metal", "heavy_metal", "Heavy Metal", etc).
+  // If neither resolves to one of the 5 official paints, fall through to the
+  // generic SVG silhouette so we never render a broken image.
+  const grcAsset = getVehiclePng(activeColor) || getVehiclePng(color);
+  if (grcAsset && (isGRCColor(activeColor) || isGRCColor(color))) {
     return (
       <View
         testID={testID}

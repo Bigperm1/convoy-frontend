@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase, SUPABASE_ENABLED } from "./supabase";
+import { toGRCSlug } from "./vehicleAssets";
 
 export type ConvoyPresencePeer = {
   user_id: string;
@@ -23,6 +24,10 @@ export type ConvoyPresencePeer = {
   carType?: string;
   carBody?: string;     // sedan / coupe / suv / sports / truck / hatch / motorcycle / van
   carColor?: string;
+  // Canonical GR Corolla broadcast slug (e.g. "grc_heavy_metal"). Empty/undefined
+  // when the user hasn't picked one of the official GRC paints — peer marker
+  // falls back to the SVG silhouette so we never render a broken image.
+  activeColor?: string;
   heading?: number;
   online_at?: string;
   // Personal best top cruise speed (km/h) — broadcast so peers can see each other's record.
@@ -35,6 +40,8 @@ export type ConvoyMe = {
   carType?: string;
   carBody?: string;
   carColor?: string;
+  // Optional pre-resolved slug — if omitted we compute it from carColor below.
+  activeColor?: string;
   // Personal best top cruise speed (km/h). Sent every time we re-track the channel.
   topSpeed?: number;
 };
@@ -90,6 +97,7 @@ export function useConvoyPresence(
             carType: p.carType,
             carBody: p.carBody,
             carColor: p.carColor,
+            activeColor: typeof p.activeColor === "string" ? p.activeColor : undefined,
             heading: p.heading,
             online_at: p.online_at,
             topSpeed: typeof p.topSpeed === "number" ? p.topSpeed : undefined,
@@ -108,6 +116,8 @@ export function useConvoyPresence(
               carType: me.carType,
               carBody: me.carBody,
               carColor: me.carColor,
+              // Canonical GRC slug — auto-derived if caller didn't pre-resolve.
+              activeColor: me.activeColor || toGRCSlug(me.carColor) || undefined,
               topSpeed: me.topSpeed,
               lat: coords.lat,
               lng: coords.lng,
@@ -144,13 +154,14 @@ export function useConvoyPresence(
       carType: me.carType,
       carBody: me.carBody,
       carColor: me.carColor,
+      activeColor: me.activeColor || toGRCSlug(me.carColor) || undefined,
       topSpeed: me.topSpeed,
       lat: coords.lat,
       lng: coords.lng,
       heading: coords.heading,
       online_at: new Date().toISOString(),
     }).catch(() => {});
-  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.topSpeed]);
+  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed]);
 
   return { peers, status };
 }

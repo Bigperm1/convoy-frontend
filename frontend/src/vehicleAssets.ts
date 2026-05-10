@@ -29,21 +29,59 @@ export const VEHICLE_PNG: Record<GRCColorKey, number | { uri: string }> = {
 };
 
 // Color name aliases — maps free-form user input to a canonical key.
+// Accepts:
+//   - Human label:   "Heavy Metal", "Supersonic Red", "Stratosphere Blue" (legacy)
+//   - Snake_case:    "heavy_metal", "supersonic_red"
+//   - GRC slug:      "grc_heavy_metal", "grc_heavymetal", "grc_supersonic_red"
 // "Stratosphere Blue" is a legacy alias for "Blue Flame" so users who saved
 // their profile under the old palette keep their PNG.
 const ALIASES: Record<string, GRCColorKey> = {
+  // Human labels
   "supersonic red":       "supersonic_red",
   "blue flame":           "blue_flame",
   "stratosphere blue":    "blue_flame", // legacy alias
   "ice cap white":        "ice_cap_white",
   "heavy metal":          "heavy_metal",
   "precious black pearl": "precious_black_pearl",
+  // Snake_case keys
+  "supersonic_red":       "supersonic_red",
+  "blue_flame":           "blue_flame",
+  "ice_cap_white":        "ice_cap_white",
+  "heavy_metal":          "heavy_metal",
+  "precious_black_pearl": "precious_black_pearl",
+  // GRC slug prefix (user-spec format: e.g. "grc_heavymetal")
+  "grc_supersonic_red":   "supersonic_red",
+  "grc_supersonicred":    "supersonic_red",
+  "grc_blue_flame":       "blue_flame",
+  "grc_blueflame":        "blue_flame",
+  "grc_ice_cap_white":    "ice_cap_white",
+  "grc_icecapwhite":      "ice_cap_white",
+  "grc_heavy_metal":      "heavy_metal",
+  "grc_heavymetal":       "heavy_metal",
+  "grc_precious_black_pearl": "precious_black_pearl",
+  "grc_preciousblackpearl":   "precious_black_pearl",
 };
 
 export function resolveGRCKey(color?: string | null): GRCColorKey | null {
   if (!color) return null;
-  const k = String(color).trim().toLowerCase();
-  return ALIASES[k] || null;
+  const raw = String(color).trim().toLowerCase();
+  if (!raw) return null;
+  // direct hit
+  if (ALIASES[raw]) return ALIASES[raw];
+  // Strip non-alphanum then retry — handles "Heavy-Metal", "heavy.metal", etc.
+  const norm = raw.replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_");
+  if (ALIASES[norm]) return ALIASES[norm];
+  const tight = raw.replace(/[^a-z0-9]/g, "");
+  for (const [k, v] of Object.entries(ALIASES)) {
+    if (k.replace(/[^a-z0-9]/g, "") === tight) return v;
+  }
+  return null;
+}
+
+/** Compute the canonical "grc_*" broadcast slug from any color input. */
+export function toGRCSlug(color?: string | null): string | null {
+  const key = resolveGRCKey(color);
+  return key ? `grc_${key}` : null;
 }
 
 /** Returns the bundled asset (require() result) or null if color isn't a GRC. */

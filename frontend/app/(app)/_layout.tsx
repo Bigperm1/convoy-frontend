@@ -7,10 +7,20 @@ import { View, ActivityIndicator, Platform, StyleSheet } from "react-native";
 import { BlurView } from "expo-blur";
 import VoiceController from "../../src/VoiceController";
 import VoiceTabButton from "../../src/VoiceTabButton";
+import { useLiveWalkieListener } from "../../src/livePtt";
+import { useSettings } from "../../src/settings";
 
 export default function AppLayout() {
   const { user } = useAuth();
   const router = useRouter();
+  const [settings] = useSettings();
+
+  // Mount the live walkie-talkie WebSocket listener once for the entire
+  // (app) shell — incoming PTT transmissions auto-play even when the user is
+  // on the Map, Music, Hub or Settings tab. The getter is read on every
+  // incoming frame, so switching active community in Comms is reflected
+  // immediately without reopening the socket.
+  useLiveWalkieListener(() => settings.activeCommunityId);
 
   useEffect(() => {
     if (user === null) router.replace("/(auth)/login");

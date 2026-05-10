@@ -502,7 +502,13 @@ async def post_ptt(body: PTTIn, user=Depends(get_current_user)):
     }
     await db.ptt.insert_one(msg)
     msg.pop("_id", None)
-    await ws_manager.broadcast({"type": "ptt", "message": {**msg, "audio_b64": ""}})
+    # Live walkie-talkie fan-out — push the FULL audio payload to every other
+    # member of this community that's currently connected. We scope to the
+    # `members` list (not a global broadcast) so each community's voice traffic
+    # stays inside that community. The sender is skipped to avoid hearing their
+    # own transmission echo on release.
+    members = [uid for uid in c.get("members", []) if uid != user["id"]]
+    await ws_manager.broadcast_to_users(members, {"type": "ptt", "message": msg})
     return {"ok": True, "id": msg["id"]}
 
 @api.get("/ptt/{channel}")
@@ -843,6 +849,23 @@ class WSManager:
     async def broadcast(self, message: dict):
         dead = []
         for uid, ws in list(self.active.items()):
+            try: await ws.send_json(message)
+            except Exception: dead.append(uid)
+        for uid in dead: await self.disconnect(uid)
+
+    async def broadcast_to_users(self, user_ids, message: dict):
+        """
+        Targeted broadcast — only sends to the given list of user ids.
+        Used by PTT so a community's voice traffic stays inside that community
+        and doesn't waste bandwidth fanning out to the entire server.
+        """
+        if not user_ids:
+            return
+        target = set(user_ids)
+        dead = []
+        for uid, ws in list(self.active.items()):
+            if uid not in target:
+                continue
             try: await ws.send_json(message)
             except Exception: dead.append(uid)
         for uid in dead: await self.disconnect(uid)

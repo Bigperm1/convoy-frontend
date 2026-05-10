@@ -11,6 +11,7 @@ import { COLORS } from "../../src/theme";
 import { api, formatErr } from "../../src/api";
 import Glass from "../../src/Glass";
 import { useSettings } from "../../src/settings";
+import { livePttBus } from "../../src/livePtt";
 
 type Community = {
   id: string; name: string; description: string; member_count: number; is_admin: boolean;
@@ -37,6 +38,9 @@ export default function ComsScreen() {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const recRef = useRef<Audio.Recording | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
+  // Track the active channel id in a ref so the live PTT bus subscription
+  // always sees the latest selection without needing to resubscribe per change.
+  const activeRef = useRef<string | null>(null);
 
   // Animations
   const pulse = useRef(new Animated.Value(1)).current;
@@ -60,7 +64,23 @@ export default function ComsScreen() {
     return () => { if (soundRef.current) { soundRef.current.unloadAsync().catch(() => {}); soundRef.current = null; } };
   }, []);
 
-  useEffect(() => { if (active) loadHistory(); }, [active]);
+  useEffect(() => { if (active) loadHistory(); activeRef.current = active; }, [active]);
+
+  // ===== Live walkie-talkie subscription =====
+  // The actual WebSocket + audio playback lives in the global hook mounted in
+  // /(app)/_layout.tsx — so PTT plays on every tab (map, music, hub, etc).
+  // Here we just listen to the in-process bus so the Comms screen's history
+  // list updates in real time when a peer keys up on the active channel.
+  useEffect(() => {
+    const off = livePttBus.on((m) => {
+      if (m.channel !== activeRef.current) return;
+      setHistory((prev) => {
+        if (prev.find((x) => x.id === m.id)) return prev;
+        return [...prev, m].slice(-50);
+      });
+    });
+    return off;
+  }, []);
 
   useEffect(() => {
     let loops: Animated.CompositeAnimation[] = [];

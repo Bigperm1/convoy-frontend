@@ -4,7 +4,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useState } from "react";
 
-const KEY = "convoy.settings.v1";
+// Storage key. We intentionally bump the version suffix when the schema or
+// defaults change in a way that requires the device to start fresh — e.g.
+// after the v1 mapView/orientation persistence was implicated in a Google
+// Maps init crash, bumping to v2 dropped the stale "heading_up" preference
+// and let the new Ready-State architecture warm up cleanly on first paint.
+const KEY = "convoy.settings.v2";
 
 export type Settings = {
   feedNA: boolean;          // North America Waze feed

@@ -1,7 +1,7 @@
 // Web implementation using @vis.gl/react-google-maps with Directions support
 import React, { useEffect, useRef } from "react";
-import { View, Text, StyleSheet } from "react-native";
-import { APIProvider, Map, Marker, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
+import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
+import { APIProvider, Map, Marker, useMap, useMapsLibrary, useApiIsLoaded } from "@vis.gl/react-google-maps";
 import { COLORS } from "./theme";
 import { getVehiclePngDataUri, getVehiclePngDataUriOrDefault, isGRCColor } from "./vehicleAssets";
 import type { ExternalAlert, ExternalAlertType } from "./externalFeed";
@@ -236,29 +236,66 @@ function communityPin(color: string, glyph: string, gold: boolean) {
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
 
-export default function ConvoyMap({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", onMapPress, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
+export default function ConvoyMap(props: Props) {
+  // Two-layer mount strategy:
+  //   1. The outer wrapper mounts <APIProvider> immediately so the SDK <script>
+  //      starts downloading right away — no waiting.
+  //   2. The inner <MapBody> only renders once useApiIsLoaded() flips true,
+  //      i.e. window.google.maps is fully authenticated AND ready. This
+  //      eliminates the entire class of "p.gK / a.pK" minified errors that
+  //      happen when child components (Markers, ChaseCam, Recenter) try to
+  //      mutate a not-yet-initialized map.
   if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
-    // Explicit 100% dimensions on the container — react-native-web translates
-    // `absoluteFill` into `position: absolute; top/left/right/bottom: 0`, which
-    // requires a positioned ancestor. Adding explicit width/height guarantees
-    // the Google Maps div mounts with real pixel dimensions on the very first
-    // render, avoiding the "0×0 canvas" path that triggers minified `a.pK`
-    // type errors deep in the SDK.
+    // Explicit dimensions on the container — react-native-web translates
+    // `absoluteFill` into `position: absolute; top/left/right/bottom: 0`,
+    // which requires a positioned ancestor. Adding explicit width/height
+    // guarantees the map div mounts with real pixel dimensions on the very
+    // first render, avoiding the "0×0 canvas" path that also triggers the
+    // SDK's internal projection errors.
     <View style={[StyleSheet.absoluteFill, { width: "100%", height: "100%", minHeight: 300 }]}>
       <APIProvider apiKey={KEY} libraries={["places", "routes", "geometry"]}>
-        <Map
-          style={{ width: "100%", height: "100%", minHeight: 300 }}
-          defaultCenter={center}
-          defaultZoom={followUser ? 17 : 15}
-          mapTypeId="hybrid"
-          gestureHandling="greedy"
-          disableDefaultUI={true}
-          zoomControl={true}
-          // Empty-map click → bubble up to parent (close search etc).
-          // @vis.gl/react-google-maps fires onClick only for the basemap, not POIs.
-          onClick={onMapPress ? (() => onMapPress()) : undefined}
-        >
+        <MapBody {...props} />
+      </APIProvider>
+    </View>
+  );
+}
+
+// MapSkeleton — renders while the Google Maps SDK is still authenticating.
+// Same dark background as the bird's-eye map so the swap is visually seamless
+// (no flash of white), with a subtle spinner + "Loading Map…" label. Stays
+// mounted for ~50-500ms typically; without it the map mounting raced its own
+// init code on slow connections and threw `p.gK`.
+function MapSkeleton() {
+  return (
+    <View style={[StyleSheet.absoluteFill, styles.skeleton]}>
+      <ActivityIndicator size="large" color={COLORS.warning} />
+      <Text style={styles.skeletonText}>Loading Map…</Text>
+    </View>
+  );
+}
+
+function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", onMapPress, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
+  // Authoritative "is the SDK ready to touch?" flag — flips to true ONLY after
+  // window.google.maps has been imported, authenticated, and exposed on the
+  // window. We refuse to mount <Map /> at all until then, which is the
+  // architectural fix the user asked for.
+  const isLoaded = useApiIsLoaded();
+  if (!isLoaded) return <MapSkeleton />;
+
+  return (
+    <Map
+      style={{ width: "100%", height: "100%", minHeight: 300 }}
+      defaultCenter={center}
+      defaultZoom={followUser ? 17 : 15}
+      mapTypeId="hybrid"
+      gestureHandling="greedy"
+      disableDefaultUI={true}
+      zoomControl={true}
+      // Empty-map click → bubble up to parent (close search etc).
+      // @vis.gl/react-google-maps fires onClick only for the basemap, not POIs.
+      onClick={onMapPress ? (() => onMapPress()) : undefined}
+    >
           {/* "You" marker — always renders the GR Corolla PNG (default Heavy
               Metal when no color is picked) at fixed 48×48 px. Suppressed when
               Avatar Live privacy toggle is off. */}
@@ -327,8 +364,6 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
             <ChaseCam user={user} userSpeedMs={userSpeedMs} mapView={mapView} />
           )}
         </Map>
-      </APIProvider>
-    </View>
   );
 }
 
@@ -533,4 +568,11 @@ function ChaseCam({ user, userSpeedMs, mapView = "heading_up" }: { user: LatLng 
   return null;
 }
 
-const styles = StyleSheet.create({ fb: { flex: 1, backgroundColor: "#0A1410", alignItems: "center", justifyContent: "center" } });
+const styles = StyleSheet.create({
+  fb: { flex: 1, backgroundColor: "#0A1410", alignItems: "center", justifyContent: "center" },
+  // Skeleton — shown until useApiIsLoaded() flips true. Same dark backdrop as
+  // the satellite/hybrid map so the swap is visually seamless when the SDK
+  // finishes authenticating.
+  skeleton: { backgroundColor: "#0A1410", alignItems: "center", justifyContent: "center" },
+  skeletonText: { color: COLORS.textDim, marginTop: 14, fontSize: 13, letterSpacing: 0.5 },
+});

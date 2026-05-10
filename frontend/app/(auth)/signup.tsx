@@ -8,16 +8,11 @@ import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
 import { formatErr } from "../../src/api";
 import Glass from "../../src/Glass";
-import CarPresetPicker from "../../src/CarPresetPicker";
 
 export default function Signup() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [handle, setHandle] = useState("");
-  const [make, setMake] = useState("");
-  const [model, setModel] = useState("");
-  const [year, setYear] = useState("");
-  const [color, setColor] = useState("");
   const [busy, setBusy] = useState(false);
   const { register } = useAuth();
   const router = useRouter();
@@ -26,14 +21,12 @@ export default function Signup() {
     if (!email || !password || !handle) return Alert.alert("Email, password and handle are required");
     try {
       setBusy(true);
+      // Car details are filled in later via the Garage screen — keeping signup
+      // lean so new drivers can get on the map in seconds.
       await register({
         email: email.trim().toLowerCase(),
         password,
         handle,
-        car_make: make,
-        car_model: model,
-        car_year: year ? parseInt(year, 10) : null,
-        car_color: color,
       });
       router.replace("/(app)/map");
     } catch (e) {
@@ -64,21 +57,7 @@ export default function Signup() {
             <Field label="Email" testID="signup-email" value={email} onChange={setEmail} placeholder="you@convoy.app" auto />
             <Field label="Password" testID="signup-password" value={password} onChange={setPassword} placeholder="••••••" secure />
 
-            <Text style={styles.section}>Your car</Text>
-            {/* Year → Make → Model → Color, then the visual icon/color preset picker.
-                The picker doubles as the "car icon" selector and quick-fills make+model. */}
-            <Field label="Year" testID="signup-year" value={year} onChange={setYear} placeholder="1999" keyboard="number-pad" />
-            <Field label="Make" testID="signup-make" value={make} onChange={setMake} placeholder="Nissan" />
-            <Field label="Model" testID="signup-model" value={model} onChange={setModel} placeholder="Skyline GT-R" />
-            <Field label="Color" testID="signup-color" value={color} onChange={setColor} placeholder="Bayside Blue" />
-            <View style={{ marginTop: 12 }}>
-              <Text style={styles.label}>Car icon / preset</Text>
-              <CarPresetPicker
-                selectedMake={make}
-                selectedModel={model}
-                onSelect={(p) => { setMake(p.make); setModel(p.model); }}
-              />
-            </View>
+            <Text style={styles.hint}>You'll pick your car and paint in the Garage after signing in.</Text>
 
             <TouchableOpacity testID="signup-submit" onPress={submit} disabled={busy} style={styles.btn} activeOpacity={0.85}>
               {/* Convoy yellow CTA — dark text for contrast. */}
@@ -125,7 +104,8 @@ const styles = StyleSheet.create({
   title: { color: COLORS.text, fontSize: 32, fontWeight: "700", letterSpacing: -0.8, textAlign: "center" },
   tag: { color: COLORS.textDim, marginTop: 4, fontSize: 15, textAlign: "center" },
   label: { color: COLORS.textDim, fontSize: 13, marginTop: 12, marginBottom: 6, fontWeight: "500" },
-  section: { color: COLORS.text, fontSize: 17, fontWeight: "600", marginTop: 22, letterSpacing: -0.3 },
+  // Friendly hint that car selection lives in Garage, not signup.
+  hint: { color: COLORS.textDim, fontSize: 12, marginTop: 18, lineHeight: 16, fontStyle: "italic" },
   input: { backgroundColor: "rgba(118,118,128,0.18)", color: COLORS.text, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12, fontSize: 16 },
   btn: { marginTop: 22, borderRadius: 14, overflow: "hidden" },
   btnGrad: { paddingVertical: 16, alignItems: "center" },

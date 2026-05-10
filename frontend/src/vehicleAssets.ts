@@ -90,6 +90,28 @@ export function getVehiclePng(color?: string | null) {
   return key ? VEHICLE_PNG[key] : null;
 }
 
+/**
+ * Default GRC PNG used when a user hasn't picked a custom paint yet.
+ * Heavy Metal is the most neutral / least-flashy option in the lineup so it
+ * blends cleanly on satellite tiles without misrepresenting anyone's car.
+ */
+export const DEFAULT_GRC_KEY: GRCColorKey = "heavy_metal";
+export function getDefaultVehiclePng() {
+  return VEHICLE_PNG[DEFAULT_GRC_KEY];
+}
+export function getDefaultVehiclePngDataUri(): string {
+  const b64 = GRC_PNG_B64[DEFAULT_GRC_KEY];
+  return `data:image/png;base64,${b64}`;
+}
+
+/** Resolves to a GRC asset always — never null. Falls back to the default GRC. */
+export function getVehiclePngOrDefault(color?: string | null) {
+  return getVehiclePng(color) || getDefaultVehiclePng();
+}
+export function getVehiclePngDataUriOrDefault(color?: string | null): string {
+  return getVehiclePngDataUri(color) || getDefaultVehiclePngDataUri();
+}
+
 /** Returns a base64 data URL for the GRC PNG — used by web SVG marker embed. */
 export function getVehiclePngDataUri(color?: string | null): string | null {
   const key = resolveGRCKey(color);

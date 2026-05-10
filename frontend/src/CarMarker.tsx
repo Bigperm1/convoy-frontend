@@ -14,8 +14,7 @@
 
 import React from "react";
 import { Image, View } from "react-native";
-import Svg, { G, Path, Rect, Defs, LinearGradient, Stop } from "react-native-svg";
-import { getVehiclePng, isGRCColor } from "./vehicleAssets";
+import { getVehiclePngOrDefault } from "./vehicleAssets";
 
 export type CarBody = "sedan" | "coupe" | "suv" | "sports" | "truck" | "hatch" | "motorcycle" | "van";
 
@@ -77,8 +76,9 @@ type Props = {
   /**
    * Canonical GR Corolla slug broadcast over Supabase presence
    * (e.g. "grc_heavy_metal"). When provided, takes precedence over `color`
-   * for asset lookup. Falls through to the SVG silhouette if it doesn't
-   * resolve to one of the 5 known paints.
+   * for asset lookup. Defaults to the Heavy Metal GRC PNG if neither
+   * `activeColor` nor `color` resolves to one of the 5 known paints — we
+   * never render a generic silhouette.
    */
   activeColor?: string | null;
   heading?: number | null;     // degrees, 0 = north
@@ -88,122 +88,34 @@ type Props = {
 
 // Path data is drawn as if the vehicle is pointing UP (heading 0°). We then
 // rotate the entire <G> by `heading`. All paths are sized to a 100×100 viewBox.
+// NOTE: The legacy SVG silhouette paths below are retained only as historical
+// reference. Live rendering always uses the GR Corolla PNG assets (see render
+// body in CarMarker default export).
 
-function bodyPath(body: CarBody) {
-  switch (body) {
-    case "sports":
-      // Wide, low, aggressive nose
-      return "M50 8 L74 26 L78 64 L72 86 L60 92 L40 92 L28 86 L22 64 L26 26 Z";
-    case "coupe":
-      return "M50 10 L70 24 L74 60 L70 84 L58 92 L42 92 L30 84 L26 60 L30 24 Z";
-    case "suv":
-      return "M50 8 L72 22 L74 78 L70 92 L30 92 L26 78 L28 22 Z";
-    case "truck":
-      // Cab + bed (taller rectangle with cab notch)
-      return "M50 8 L70 18 L72 44 L74 92 L26 92 L28 44 L30 18 Z";
-    case "hatch":
-      // Aggressive hot-hatch: pointed nose, pronounced front + rear fender flares,
-      // mid-body waist, squared-off rear deck. (Roof spoiler is rendered as a
-      // separate path overlaying the rear so it visually sits above the body.)
-      return "M50 6 L60 12 L78 24 L80 32 L72 50 L80 68 L82 80 L78 90 L22 90 L18 80 L20 68 L28 50 L20 32 L22 24 L40 12 Z";
-    case "van":
-      return "M50 10 L74 22 L76 90 L70 94 L30 94 L24 90 L26 22 Z";
-    case "motorcycle":
-      // Slim narrow oval-ish with a bigger front
-      return "M50 10 L60 30 L62 70 L56 90 L44 90 L38 70 L40 30 Z";
-    case "sedan":
-    default:
-      return "M50 10 L70 24 L72 78 L66 92 L34 92 L28 78 L30 24 Z";
-  }
-}
-
-// Optional rear-wing/spoiler overlay. Only the hot-hatch gets one — extends
-// slightly wider than the body at the back so the wing reads from above.
-// Returns `null` for bodies that don't have a spoiler.
-function spoilerPath(body: CarBody): string | null {
-  if (body === "hatch") {
-    // A wide rear wing with two small endplates — wider than the rear fenders.
-    return "M14 84 L86 84 L88 92 L12 92 Z M12 80 L18 80 L18 92 L12 92 Z M82 80 L88 80 L88 92 L82 92 Z";
-  }
-  return null;
-}
-
-function windshieldPath(body: CarBody) {
-  switch (body) {
-    case "motorcycle":
-      return "M44 30 L56 30 L56 42 L44 42 Z";
-    case "truck":
-      return "M36 22 L64 22 L66 38 L34 38 Z";
-    case "van":
-      return "M34 22 L66 22 L66 36 L34 36 Z";
-    default:
-      return "M38 26 L62 26 L65 44 L35 44 Z";
-  }
-}
-
-export default function CarMarker({ body = "sedan", color, activeColor, heading, size = 40, testID }: Props) {
-  const fill = resolveCarColor(color);
-  const safeBody: CarBody = (CAR_BODIES.find((b) => b.id === body) ? (body as CarBody) : "sedan");
-  // Heading from expo-location is degrees clockwise from true north — exactly
-  // what SVG `rotate()` expects, so no conversion needed.
+export default function CarMarker({ color, activeColor, heading, size = 40, testID }: Props) {
+  // Heading from expo-location is degrees clockwise from true north — used as
+  // a CSS rotate degree directly.
   const angle = Number.isFinite(heading as number) ? Math.round((heading as number) % 360) : 0;
-
-  // ===== GR Corolla PNG override =====
-  // Resolution priority: `activeColor` broadcast slug → free-form `color`.
-  // Either path lands on the same canonical paint key via vehicleAssets.ts
-  // alias map (handles "grc_heavy_metal", "heavy_metal", "Heavy Metal", etc).
-  // If neither resolves to one of the 5 official paints, fall through to the
-  // generic SVG silhouette so we never render a broken image.
-  const grcAsset = getVehiclePng(activeColor) || getVehiclePng(color);
-  if (grcAsset && (isGRCColor(activeColor) || isGRCColor(color))) {
-    return (
-      <View
-        testID={testID}
-        style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}
-        pointerEvents="none"
-      >
-        <Image
-          source={grcAsset as any}
-          style={{
-            width: size,
-            height: size,
-            transform: [{ rotate: `${angle}deg` }],
-          }}
-          resizeMode="contain"
-        />
-      </View>
-    );
-  }
-
+  // Resolve to a GR Corolla PNG. If color/activeColor don't match one of the
+  // 5 official paints, we fall back to the DEFAULT_GRC PNG ("Heavy Metal") so
+  // every driver always shows up as a recognisable top-down car — never a
+  // generic SVG silhouette or a broken image.
+  const asset = getVehiclePngOrDefault(activeColor || color);
   return (
-    <Svg testID={testID} width={size} height={size} viewBox="0 0 100 100" pointerEvents="none">
-      <Defs>
-        <LinearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor={fill} stopOpacity={1} />
-          <Stop offset="1" stopColor={fill} stopOpacity={0.78} />
-        </LinearGradient>
-      </Defs>
-      <G origin="50, 50" rotation={angle}>
-        {/* Soft drop shadow */}
-        <Path d={bodyPath(safeBody)} fill="rgba(0,0,0,0.45)" transform="translate(0,2)" />
-        {/* Body */}
-        <Path d={bodyPath(safeBody)} fill="url(#bodyGrad)" stroke="#ffffff" strokeWidth={2} strokeLinejoin="round" />
-        {/* Optional roof spoiler / rear wing — currently only the hot-hatch */}
-        {(() => {
-          const sp = spoilerPath(safeBody);
-          if (!sp) return null;
-          return (
-            <>
-              <Path d={sp} fill="rgba(0,0,0,0.55)" transform="translate(0,1)" />
-              <Path d={sp} fill="url(#bodyGrad)" stroke="#ffffff" strokeWidth={1.5} strokeLinejoin="round" />
-            </>
-          );
-        })()}
-        {/* Windshield (subtle highlight, helps show heading) */}
-        <Path d={windshieldPath(safeBody)} fill="rgba(255,255,255,0.55)" />
-        {/* Roof centerline accent */}
-        <Rect x={48} y={50} width={4} height={26} rx={1} fill="rgba(0,0,0,0.18)" />
-      </G>
-    </Svg>
+    <View
+      testID={testID}
+      style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}
+      pointerEvents="none"
+    >
+      <Image
+        source={asset as any}
+        style={{
+          width: size,
+          height: size,
+          transform: [{ rotate: `${angle}deg` }],
+        }}
+        resizeMode="contain"
+      />
+    </View>
   );
 }

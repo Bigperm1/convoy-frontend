@@ -699,32 +699,56 @@ export default function MapScreen() {
       {/* Header card + search bar — both hidden in full-screen map mode
           (i.e. when searchVisible=false). The 🔍 FAB below is the only
           way back to them, keeping the entire screen for the map. */}
-      {searchVisible && (
-        <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
-        <Glass radius={20} style={{ marginHorizontal: 12, marginBottom: 8 }}>
-          <View style={styles.topRow}>
-            <Image source={require("../../assets/images/brand-mark.png")} style={styles.headerMark} resizeMode="contain" />
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Text style={styles.title}>Map</Text>
-                <View style={[styles.livePill, { borderColor: liveDot + "55" }]} testID="live-pill">
-                  <View style={[styles.liveDot, { backgroundColor: liveDot }]} />
-                  <Text style={[styles.liveText, { color: liveDot }]}>{liveText}</Text>
+      {/* ===== Top header row — Map bar + square Search/X button =====
+          Layout: the Glass card (logo + title + live pill + buttons) takes
+          flex:1 on the LEFT, and a SQUARE search/X button sits on the RIGHT
+          at the same height. Together they span the full screen width as a
+          single visual band so the toggle no longer covers the settings icon.
+          When `searchVisible` is false (full-screen map) we only render the
+          square button on the right — the Glass card collapses out of view. */}
+      <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
+        <View style={styles.topBarRow} pointerEvents="box-none">
+          {searchVisible && (
+            <Glass radius={20} style={{ flex: 1, marginLeft: 12 }}>
+              <View style={styles.topRow}>
+                <Image source={require("../../assets/images/brand-mark.png")} style={styles.headerMark} resizeMode="contain" />
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Text style={styles.title}>Map</Text>
+                    <View style={[styles.livePill, { borderColor: liveDot + "55" }]} testID="live-pill">
+                      <View style={[styles.liveDot, { backgroundColor: liveDot }]} />
+                      <Text style={[styles.liveText, { color: liveDot }]}>{liveText}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.sub}>{user?.handle} · {peerList.length} drivers · {visibleHazards.length} alerts · {externalFeed.alerts.length} live</Text>
                 </View>
+                <TouchableOpacity testID="refresh-btn" onPress={() => loadPeers()} style={styles.iconBtn}>
+                  <Ionicons name="refresh" size={18} color={COLORS.text} />
+                </TouchableOpacity>
+                <TouchableOpacity testID="settings-btn" onPress={() => router.push("/(app)/settings" as any)} style={styles.iconBtn}>
+                  <Ionicons name="options-outline" size={18} color={COLORS.text} />
+                </TouchableOpacity>
               </View>
-              <Text style={styles.sub}>{user?.handle} · {peerList.length} drivers · {visibleHazards.length} alerts · {externalFeed.alerts.length} live</Text>
-            </View>
-            <TouchableOpacity testID="refresh-btn" onPress={() => loadPeers()} style={styles.iconBtn}>
-              <Ionicons name="refresh" size={18} color={COLORS.text} />
-            </TouchableOpacity>
-            <TouchableOpacity testID="settings-btn" onPress={() => router.push("/(app)/settings" as any)} style={styles.iconBtn}>
-              <Ionicons name="options-outline" size={18} color={COLORS.text} />
-            </TouchableOpacity>
-          </View>
-        </Glass>
+            </Glass>
+          )}
+          {/* Spacer so the square button stays right-anchored even when the
+              Glass card is hidden in fullscreen-map mode. */}
+          {!searchVisible && <View style={{ flex: 1 }} />}
+          {/* Square Search/X — same vertical height as the Map bar so the two
+              read as one continuous toolbar. Rounded just enough to match
+              the Glass card's corner radius. */}
+          <TouchableOpacity
+            testID="show-search-fab"
+            onPress={() => setSearchVisible((v) => !v)}
+            activeOpacity={0.85}
+            style={styles.searchSquare}
+          >
+            <Ionicons name={searchVisible ? "close" : "search"} size={22} color="#fff" />
+          </TouchableOpacity>
+        </View>
 
         {searchVisible && (Platform.OS === "web" ? (
-          <View style={{ marginHorizontal: 12 }}>
+          <View style={{ marginHorizontal: 12, marginTop: 8 }}>
             <DestinationSearch
               origin={coords}
               onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
@@ -732,7 +756,7 @@ export default function MapScreen() {
             />
           </View>
         ) : (
-          <View style={{ marginHorizontal: 12 }}>
+          <View style={{ marginHorizontal: 12, marginTop: 8 }}>
             <DestinationSearch
               origin={coords}
               onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
@@ -740,23 +764,6 @@ export default function MapScreen() {
             />
           </View>
         ))}
-      </SafeAreaView>
-      )}
-
-      {/* Magnifier ⇄ Close toggle FAB.
-          - When search is hidden → 🔍 (tap to reveal header + search)
-          - When search is shown  → ✕ (tap to dismiss)
-          Always rendered so the driver always has a one-tap way to flip
-          between fullscreen-map and search modes. */}
-      <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.searchFabWrap}>
-        <TouchableOpacity
-          testID="show-search-fab"
-          onPress={() => setSearchVisible((v) => !v)}
-          activeOpacity={0.85}
-          style={styles.searchFab}
-        >
-          <Ionicons name={searchVisible ? "close" : "search"} size={20} color="#fff" />
-        </TouchableOpacity>
       </SafeAreaView>
 
       {/* ===== Community Routes — horizontal chip strip (visible when there are shared cruises) ===== */}
@@ -1376,6 +1383,10 @@ const styles = StyleSheet.create({
   loader: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
 
   topBar: { position: "absolute", top: 0, left: 0, right: 0 },
+  // Header row container — lays out the Glass card and the Search/X square
+  // button side-by-side. Right padding gives the square button breathing room
+  // from the screen edge so it doesn't bleed into the Dynamic Island/notch.
+  topBarRow: { flexDirection: "row", alignItems: "stretch", gap: 8, paddingRight: 12 },
   topRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
   headerMark: { width: 36, height: 36 },
   title: { color: COLORS.text, fontSize: 26, fontWeight: "700", letterSpacing: -0.6 },
@@ -1472,13 +1483,18 @@ const styles = StyleSheet.create({
 
   selectedCard: { position: "absolute", left: 12, right: 12, bottom: 200 },
 
-  // Magnifier FAB — appears top-right when the search bar is hidden
-  // (e.g. once navigation has started). Tucked just below the header
-  // safe-area band so it doesn't clip with the title pill.
-  searchFabWrap: { position: "absolute", top: 0, right: 0, padding: 12, zIndex: 7 },
-  searchFab: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: "center", justifyContent: "center",
+  // Square Search/X button — sits to the right of the Map bar in a single
+  // horizontal row. Matches the Glass card's vertical footprint so the two
+  // read as one continuous toolbar across the screen. Slightly tighter radius
+  // than the Glass card (16 vs 20) so the silhouette reads as "button" not
+  // "second card".
+  searchSquare: {
+    width: 56,
+    alignSelf: "stretch",       // grow to fill the row's intrinsic height
+    minHeight: 56,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "rgba(10,132,255,0.92)", // matches Apple Maps blue
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
     elevation: 6,

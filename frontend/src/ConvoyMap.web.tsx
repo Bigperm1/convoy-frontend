@@ -239,10 +239,16 @@ function communityPin(color: string, glyph: string, gold: boolean) {
 export default function ConvoyMap({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", onMapPress, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
   if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
-    <View style={StyleSheet.absoluteFill}>
+    // Explicit 100% dimensions on the container — react-native-web translates
+    // `absoluteFill` into `position: absolute; top/left/right/bottom: 0`, which
+    // requires a positioned ancestor. Adding explicit width/height guarantees
+    // the Google Maps div mounts with real pixel dimensions on the very first
+    // render, avoiding the "0×0 canvas" path that triggers minified `a.pK`
+    // type errors deep in the SDK.
+    <View style={[StyleSheet.absoluteFill, { width: "100%", height: "100%", minHeight: 300 }]}>
       <APIProvider apiKey={KEY} libraries={["places", "routes", "geometry"]}>
         <Map
-          style={{ width: "100%", height: "100%" }}
+          style={{ width: "100%", height: "100%", minHeight: 300 }}
           defaultCenter={center}
           defaultZoom={followUser ? 17 : 15}
           mapTypeId="hybrid"
@@ -419,8 +425,31 @@ function Directions({ origin, destination, onRoute, encodedPolyline }: { origin:
 
 function Recenter({ target }: { target: LatLng }) {
   const map = useMap();
-  useEffect(() => { if (map && target) map.panTo(target); }, [map, target.lat, target.lng]);
+  useEffect(() => {
+    // Defensive: bail out unless the map instance is fully initialized AND the
+    // global google.maps SDK is on window. We hit `a.pK` style minified errors
+    // from the SDK whenever we mutate a half-initialized map (e.g. before the
+    // idle event has fired). Validating every entrypoint with isMapReady() is
+    // the cheapest way to bullet-proof this.
+    if (!isMapReady(map) || !target) return;
+    try { (map as any).panTo(target); } catch {}
+  }, [map, target?.lat, target?.lng]);
   return null;
+}
+
+// Centralized "is this map safe to mutate?" check. Returns true only when:
+//   1. The map instance exists,
+//   2. `window.google.maps` has finished loading (the SDK is on the window),
+//   3. The map instance exposes the expected mutation entrypoints.
+// Used by Recenter, ChaseCam, RoutesLayer to short-circuit on the first tick
+// where useMap() returns truthy but the underlying canvas isn't ready yet.
+function isMapReady(map: any): boolean {
+  if (!map) return false;
+  if (typeof window === "undefined") return false;
+  if (!(window as any).google?.maps) return false;
+  if (typeof map.panTo !== "function") return false;
+  if (typeof map.setZoom !== "function") return false;
+  return true;
 }
 
 /**
@@ -459,14 +488,27 @@ function TrafficLayer() {
  */
 function ChaseCam({ user, userSpeedMs, mapView = "heading_up" }: { user: LatLng & { heading?: number }; userSpeedMs?: number; mapView?: "heading_up" | "north_up" }) {
   const map = useMap();
+  // Track whether the map has emitted at least one `idle` event. Google Maps
+  // throws minified `a.pK` style errors if we mutate the map (panTo / setZoom /
+  // setHeading / setTilt) before the canvas is fully laid out and idle. Once
+  // we've seen one idle tick, subsequent mutations are safe.
+  const readyRef = useRef(false);
   useEffect(() => {
-    if (!map) return;
+    if (!isMapReady(map)) return;
+    if (readyRef.current) return;
+    const listener = (map as any).addListener?.("idle", () => { readyRef.current = true; });
+    return () => { try { (window as any).google?.maps?.event?.removeListener?.(listener); } catch {} };
+  }, [map]);
+
+  useEffect(() => {
+    if (!isMapReady(map)) return;
+    if (!readyRef.current) return;
     const heading = (typeof user.heading === "number" && Number.isFinite(user.heading)) ? user.heading : 0;
     const zoom = chaseZoomForSpeed(kmhFromMs(userSpeedMs));
     const isHeadingUp = mapView === "heading_up";
     try {
-      map.panTo({ lat: user.lat, lng: user.lng });
-      map.setZoom(zoom);
+      (map as any).panTo({ lat: user.lat, lng: user.lng });
+      (map as any).setZoom(zoom);
       // Vector-only — silent no-op on raster. North-up forces tilt=0 / bearing=0
       // so the user sees a classic flat top-down even mid-navigation.
       if (typeof (map as any).setHeading === "function") (map as any).setHeading(isHeadingUp ? heading : 0);
@@ -474,13 +516,13 @@ function ChaseCam({ user, userSpeedMs, mapView = "heading_up" }: { user: LatLng 
     } catch {
       // Defensive: never crash the map over a chase-cam tick.
     }
-  }, [map, user.lat, user.lng, user.heading, userSpeedMs, mapView]);
+  }, [map, user.lat, user.lng, user.heading, userSpeedMs, mapView, readyRef.current]);
 
   // When this component unmounts (navigation ended), reset tilt + heading to 0
   // so the bird's-eye preview view returns to a flat north-up orientation.
   useEffect(() => {
     return () => {
-      if (!map) return;
+      if (!isMapReady(map)) return;
       try {
         if (typeof (map as any).setTilt === "function") (map as any).setTilt(0);
         if (typeof (map as any).setHeading === "function") (map as any).setHeading(0);

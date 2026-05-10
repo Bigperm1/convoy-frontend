@@ -41,6 +41,9 @@ export default function ComsScreen() {
   // Track the active channel id in a ref so the live PTT bus subscription
   // always sees the latest selection without needing to resubscribe per change.
   const activeRef = useRef<string | null>(null);
+  // Roster of members in the currently-active community. Refreshed whenever
+  // the active channel changes so the user always sees the right crew.
+  const [members, setMembers] = useState<any[]>([]);
 
   // Animations
   const pulse = useRef(new Animated.Value(1)).current;
@@ -65,6 +68,19 @@ export default function ComsScreen() {
   }, []);
 
   useEffect(() => { if (active) loadHistory(); activeRef.current = active; }, [active]);
+
+  // Load the member roster for the active community so we can show "who's
+  // in this channel" right under the channel picker. The presence channel
+  // shows who's *live* on the map — the member list shows the full crew.
+  useEffect(() => {
+    if (!active) { setMembers([]); return; }
+    (async () => {
+      try {
+        const { data } = await api.get(`/communities/${active}`);
+        setMembers(Array.isArray(data?.members_users) ? data.members_users : []);
+      } catch { setMembers([]); }
+    })();
+  }, [active]);
 
   // ===== Live walkie-talkie subscription =====
   // The actual WebSocket + audio playback lives in the global hook mounted in
@@ -359,6 +375,38 @@ export default function ComsScreen() {
           </Glass>
         )}
 
+        {/* ===== Crew roster =====
+            Lists every member of the currently-active community. Helps drivers
+            quickly see who is on this channel before keying up. The admin gets
+            a small yellow "ADMIN" pill so it's clear who runs the crew. */}
+        {active && members.length > 0 && (
+          <>
+            <Text style={styles.section}>{activeCommunity?.name || "Crew"} · {members.length} member{members.length === 1 ? "" : "s"}</Text>
+            <Glass radius={16} style={{ marginHorizontal: 18 }}>
+              <View style={{ paddingVertical: 4 }}>
+                {members.map((m: any, idx: number) => (
+                  <View key={m.id} style={[styles.memberRow, idx < members.length - 1 && styles.memberRowDivider]}>
+                    <View style={styles.memberAvatar}><Ionicons name="person" size={14} color="#fff" /></View>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <Text style={styles.memberName}>{m.handle || "anon"}</Text>
+                        {m.is_admin && (
+                          <View style={styles.adminPill}><Text style={styles.adminPillText}>ADMIN</Text></View>
+                        )}
+                      </View>
+                      {(m.car_make || m.car_model || m.car_color) ? (
+                        <Text style={styles.memberMeta} numberOfLines={1}>
+                          {[m.car_color, m.car_make, m.car_model].filter(Boolean).join(" ")}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </Glass>
+          </>
+        )}
+
         {/* ===== Recent transmissions ===== */}
         {history.length > 0 && (
           <>
@@ -556,4 +604,13 @@ const styles = StyleSheet.create({
   playIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.primary + "22", alignItems: "center", justifyContent: "center" },
   msgUser: { color: COLORS.text, fontWeight: "600" },
   msgMeta: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
+  // Crew roster — slim member row that fits inside the Glass card. Avatar +
+  // handle + tiny car line, with a yellow ADMIN pill on the owner.
+  memberRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, paddingHorizontal: 14, gap: 10 },
+  memberRowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.hairline },
+  memberAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: "rgba(118,118,128,0.4)", alignItems: "center", justifyContent: "center" },
+  memberName: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
+  memberMeta: { color: COLORS.textDim, fontSize: 11, marginTop: 1 },
+  adminPill: { backgroundColor: "#FFC70033", paddingHorizontal: 6, paddingVertical: 1, borderRadius: 5 },
+  adminPillText: { color: "#FFC700", fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
 });

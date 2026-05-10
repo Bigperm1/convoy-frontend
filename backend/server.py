@@ -343,13 +343,63 @@ async def search_communities(q: str = "", user=Depends(get_current_user)):
 async def get_community(cid: str, user=Depends(get_current_user)):
     c = await db.communities.find_one({"id": cid}, {"_id": 0})
     if not c: raise HTTPException(status_code=404, detail="Not found")
+    # One-time admin backfill — pre-admin-aware communities may have no admin_id.
+    # We pick the first member as the de-facto owner so the community isn't
+    # left orphaned (no one can edit description / approve requests / etc).
+    if not c.get("admin_id") and c.get("members"):
+        first_uid = c["members"][0]
+        first_user = await db.users.find_one({"id": first_uid}, {"_id": 0, "handle": 1})
+        admin_handle = (first_user or {}).get("handle", "")
+        await db.communities.update_one({"id": cid}, {"$set": {"admin_id": first_uid, "admin_handle": admin_handle}})
+        c["admin_id"] = first_uid
+        c["admin_handle"] = admin_handle
     out = public_community(c, viewer_id=user["id"])
+    # Always return the full member roster so the Comms screen & Hub detail
+    # modal can show "who's in this community" without an extra round-trip.
+    # We strip sensitive fields (password_hash, raw email when not admin).
+    member_ids = c.get("members", [])
+    if member_ids:
+        members = await db.users.find({"id": {"$in": member_ids}}, {"_id": 0, "password_hash": 0}).to_list(500)
+        is_admin = user["id"] == c.get("admin_id")
+        out["members_users"] = [
+            {
+                "id": u["id"],
+                "handle": u.get("handle", ""),
+                "car_make": u.get("car_make", ""),
+                "car_model": u.get("car_model", ""),
+                "car_color": u.get("car_color", ""),
+                "car_type": u.get("car_type", ""),
+                # Email only visible to the admin (privacy-friendly default).
+                "email": u.get("email", "") if is_admin or u["id"] == user["id"] else None,
+                "is_admin": u["id"] == c.get("admin_id"),
+            }
+            for u in members
+        ]
+    else:
+        out["members_users"] = []
     if user["id"] == c.get("admin_id"):
         # Return pending request user details for admin
         pending = c.get("pending_requests", [])
         users = await db.users.find({"id": {"$in": pending}}, {"_id": 0, "password_hash": 0}).to_list(200) if pending else []
         out["pending_users"] = [{"id": u["id"], "handle": u.get("handle", ""), "email": u.get("email", "")} for u in users]
     return out
+
+@api.put("/communities/{cid}")
+async def update_community(cid: str, body: CommunityUpdate, user=Depends(get_current_user)):
+    """
+    Admin-only community edit — supports description, name, public flag, logo
+    and per-community feature toggles. Anything left as null on `body` is
+    untouched, so the client can ship partial updates (e.g. just description).
+    """
+    c = await db.communities.find_one({"id": cid})
+    if not c: raise HTTPException(status_code=404, detail="Not found")
+    if user["id"] != c.get("admin_id"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    update_doc = {k: v for k, v in body.dict(exclude_none=True).items()}
+    if update_doc:
+        await db.communities.update_one({"id": cid}, {"$set": update_doc})
+    fresh = await db.communities.find_one({"id": cid}, {"_id": 0})
+    return public_community(fresh, viewer_id=user["id"])
 
 @api.post("/communities/{cid}/request")
 async def request_join(cid: str, user=Depends(get_current_user)):

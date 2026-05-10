@@ -375,12 +375,33 @@ function SearchModal({ visible, onClose, onChanged }: any) {
 
 function CommunityDetailModal({ community, onClose, onChanged }: any) {
   const [c, setC] = useState<any>(null);
+  // Description-edit state (admin only). The save button only enables when the
+  // textarea has actually changed from the canonical server value.
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descDraft, setDescDraft] = useState("");
+  const [descSaving, setDescSaving] = useState(false);
   useEffect(() => {
-    if (!community) { setC(null); return; }
+    if (!community) { setC(null); setEditingDesc(false); return; }
     (async () => {
-      try { const { data } = await api.get(`/communities/${community.id}`); setC(data); } catch {}
+      try {
+        const { data } = await api.get(`/communities/${community.id}`);
+        setC(data);
+        setDescDraft(data?.description || "");
+      } catch {}
     })();
   }, [community]);
+
+  const saveDescription = async () => {
+    if (!c?.id) return;
+    try {
+      setDescSaving(true);
+      const { data } = await api.put(`/communities/${c.id}`, { description: descDraft });
+      setC({ ...c, ...data });
+      setEditingDesc(false);
+      onChanged();
+    } catch (e) { Alert.alert("Failed", formatErr(e)); }
+    finally { setDescSaving(false); }
+  };
 
   const approve = async (uid: string) => {
     try { const { data } = await api.post(`/communities/${community.id}/approve/${uid}`); setC({ ...c, ...data, pending_users: c.pending_users.filter((u: any) => u.id !== uid) }); onChanged(); } catch (e) { Alert.alert("Failed", formatErr(e)); }
@@ -416,8 +437,76 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
             <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={COLORS.textDim} /></TouchableOpacity>
           </View>
           <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-            <Text style={styles.detailDesc}>{c?.description || "No description"}</Text>
-            <Text style={styles.detailMeta}>{c?.member_count} members · Admin: {c?.admin_handle}</Text>
+            {/* Description — read-only for members, inline-edit for admin. */}
+            {c?.is_admin && editingDesc ? (
+              <View style={{ marginBottom: 6 }}>
+                <TextInput
+                  value={descDraft}
+                  onChangeText={setDescDraft}
+                  style={[styles.input, { height: 90, marginTop: 0 }]}
+                  multiline
+                  placeholder="What's this community about?"
+                  placeholderTextColor={COLORS.textMute}
+                />
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                  <TouchableOpacity
+                    onPress={saveDescription}
+                    disabled={descSaving || descDraft === (c?.description || "")}
+                    style={[styles.smallBtn, { backgroundColor: COLORS.success, opacity: descSaving || descDraft === (c?.description || "") ? 0.5 : 1 }]}
+                  >
+                    <Text style={styles.smallBtnText}>{descSaving ? "Saving…" : "Save"}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => { setDescDraft(c?.description || ""); setEditingDesc(false); }}
+                    style={[styles.smallBtn, { backgroundColor: "rgba(118,118,128,0.4)" }]}
+                  >
+                    <Text style={styles.smallBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                activeOpacity={c?.is_admin ? 0.7 : 1}
+                onPress={() => { if (c?.is_admin) setEditingDesc(true); }}
+              >
+                <Text style={styles.detailDesc}>
+                  {c?.description || "No description"}
+                  {c?.is_admin && <Text style={{ color: COLORS.warning, fontSize: 12 }}>  ✎ tap to edit</Text>}
+                </Text>
+              </TouchableOpacity>
+            )}
+            <Text style={styles.detailMeta}>{c?.member_count} members · Admin: {c?.admin_handle || "—"}</Text>
+
+            {/* Member roster — visible to every member. Shows handle + car
+                line + an ADMIN pill on the owner so it's clear who runs it. */}
+            <Text style={[styles.label, { marginTop: 18 }]}>Members ({c?.members_users?.length || 0})</Text>
+            {(!c?.members_users || c.members_users.length === 0) && (
+              <Text style={{ color: COLORS.textMute }}>No members yet</Text>
+            )}
+            {c?.members_users?.map((m: any) => (
+              <View key={m.id} style={styles.pendingRow}>
+                <View style={styles.pendingAvatar}><Ionicons name="person" size={16} color="#fff" /></View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={styles.pendingName}>{m.handle || "anon"}</Text>
+                    {m.is_admin && (
+                      <View style={styles.adminBadge}>
+                        <Text style={styles.adminBadgeText}>ADMIN</Text>
+                      </View>
+                    )}
+                  </View>
+                  {(m.car_make || m.car_model || m.car_color) ? (
+                    <Text style={[styles.commMeta, { fontSize: 11 }]} numberOfLines={1}>
+                      {[m.car_color, m.car_make, m.car_model].filter(Boolean).join(" ")}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            ))}
+
+            {c?.is_admin && (
+              <></>
+            )}
 
             {c?.is_admin && (
               <>

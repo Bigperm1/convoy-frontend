@@ -770,11 +770,21 @@ export default function MapScreen() {
                   </TouchableOpacity>
                 </View>
                 {/* Bottom row — single-line status footer pinned to the bottom
-                    edge of the card. numberOfLines=1 with ellipsis keeps the
-                    band visually slim on small phones. */}
-                <Text style={styles.statusFooter} numberOfLines={1}>
-                  {user?.handle || "—"} · {peerList.length} {peerList.length === 1 ? "driver" : "drivers"} · {visibleHazards.length} {visibleHazards.length === 1 ? "alert" : "alerts"} · {externalFeed.alerts.length} live
-                </Text>
+                    edge of the card. The "X live" count reflects YVRGRC (or
+                    whichever community is active) members currently present
+                    on the map — self if Avatar Live is on, plus every peer
+                    being broadcast over Supabase Realtime. */}
+                {(() => {
+                  // Self counts as live only when we're actively broadcasting
+                  // (avatar toggle on AND we've joined a community).
+                  const selfLive = settings.avatarLive !== false && !!settings.activeCommunityId ? 1 : 0;
+                  const liveCount = selfLive + peerList.length;
+                  return (
+                    <Text style={styles.statusFooter} numberOfLines={1}>
+                      {user?.handle || "—"} · {liveCount} live · {visibleHazards.length} {visibleHazards.length === 1 ? "alert" : "alerts"} · {externalFeed.alerts.length} Waze
+                    </Text>
+                  );
+                })()}
               </View>
             </Glass>
           )}

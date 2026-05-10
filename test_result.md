@@ -284,6 +284,21 @@ test_plan:
   test_all: false
   test_priority: "high_first"
 
+backend_community_admin:
+  - task: "Community admin/member endpoints — members_users array + email redaction + admin backfill + PUT /api/communities/{cid}"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "All 39/39 assertions PASS via public URL https://motorist-hub.preview.emergentagent.com/api (see /app/backend_test_community_admin.py). Verified all 3 recent changes: (1) GET /api/communities/{cid} always returns members_users array — verified as user A (creator, len=1, A flagged is_admin=true, email==demo@revradar.app present for self/admin) and as user B post-approval (len=2, A still is_admin=true with email==NULL since B is non-admin viewer and not self, B is_admin=false with email==self email). Required fields {id, handle, car_make, car_model, car_color, car_type, is_admin, email} all present on each row. (2) Admin backfill verified — directly inserted an orphan community doc into MongoDB with admin_id=None and members=[A.id, B.id]; first GET as user B returned 200 with admin_id backfilled to A.id and admin_handle='Jeff' (A's handle). Backfill also persisted in Mongo per a follow-up direct read. (3) NEW PUT /api/communities/{cid} verified — 403 'Admin only' for user B (non-admin) trying to change description; 200 + description updated for user A; subsequent GET confirms persistence; partial multi-field update {name, walkie_enabled} as A returned 200 with both updated AND prior description preserved (partial-update semantics correct via exclude_none). Setup steps: POST /communities by demo (A) returned is_admin=true and admin_id==A.id matching A.handle 'Jeff'; user B registered with random email bob-test-<hex>@convoy.app; B requested join (POST /communities/{cid}/request); A approved (POST /communities/{cid}/approve/{uid}) yielding member_count==2. Cleanup DELETE /communities/{cid} = 200. NOTE: The review request mentioned 'POST /api/communities/{id}/join' as an admin-approval flow — server.py actually uses /communities/{cid}/request → /approve/{uid}. I used the request+approve flow per existing code. Email redaction working as designed: viewer is admin OR viewer is the user themselves → email returned; otherwise None. No critical or minor issues."
+
+
+
 backend_extra:
   - task: "Walkie-talkie (PTT) realtime broadcast — full audio_b64 fan-out to community members only"
     implemented: true

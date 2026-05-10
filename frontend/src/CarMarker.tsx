@@ -30,19 +30,31 @@ export const CAR_BODIES: { id: CarBody; label: string; emoji: string }[] = [
 
 // 12 named car colors that map to good-looking hexes. Free-form `car_color`
 // strings are also accepted (CSS color syntax) — the silhouette will use them as-is.
+// Color palette. The first 5 are the "primary" garage colors (named per the
+// product spec — Supersonic Red, Stratosphere Blue, Ice Cap White, Heavy
+// Metal, Precious Black Pearl). The remainder are legacy/extra options kept
+// so existing user profiles ("Bayside Blue", "Guards Red", etc.) still
+// resolve correctly via the lookup in `resolveCarColor()`.
 export const CAR_COLORS: { name: string; hex: string }[] = [
-  { name: "Bayside Blue", hex: "#0A84FF" },
-  { name: "Nardo Gray",   hex: "#8E8E93" },
-  { name: "Guards Red",   hex: "#FF453A" },
-  { name: "Yellow",       hex: "#FFD60A" },
-  { name: "Pearl White",  hex: "#F2F2F7" },
-  { name: "Jet Black",    hex: "#1A1A1A" },
-  { name: "Forest Green", hex: "#30D158" },
-  { name: "Dawn Orange",  hex: "#FF9F0A" },
-  { name: "Plum Purple",  hex: "#BF5AF2" },
-  { name: "Carbon",       hex: "#3A3A3C" },
+  // ---- Primary palette ----
+  { name: "Supersonic Red",         hex: "#D60019" }, // bright performance red
+  { name: "Stratosphere Blue",      hex: "#1F4FB8" }, // deep aerospace blue
+  { name: "Ice Cap White",          hex: "#F4F6F8" }, // crisp pearl white
+  { name: "Heavy Metal",            hex: "#5C5F66" }, // metallic gunmetal gray
+  { name: "Precious Black Pearl",   hex: "#0E0F12" }, // deep pearlescent black
+  // ---- Legacy / extended ----
+  { name: "Bayside Blue",   hex: "#0A84FF" },
+  { name: "Nardo Gray",     hex: "#8E8E93" },
+  { name: "Guards Red",     hex: "#FF453A" },
+  { name: "Yellow",         hex: "#FFD60A" },
+  { name: "Pearl White",    hex: "#F2F2F7" },
+  { name: "Jet Black",      hex: "#1A1A1A" },
+  { name: "Forest Green",   hex: "#30D158" },
+  { name: "Dawn Orange",    hex: "#FF9F0A" },
+  { name: "Plum Purple",    hex: "#BF5AF2" },
+  { name: "Carbon",         hex: "#3A3A3C" },
   { name: "Midnight Silver", hex: "#AEAEB2" },
-  { name: "Cyber Brown",  hex: "#A2845E" },
+  { name: "Cyber Brown",    hex: "#A2845E" },
 ];
 
 // Resolve a free-form color string to a usable hex. If it already looks like

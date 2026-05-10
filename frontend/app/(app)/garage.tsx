@@ -70,16 +70,39 @@ export default function GarageScreen() {
           contentContainerStyle={{ padding: 18, paddingBottom: 120 }}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Live preview — what other drivers see on the map */}
-          <Glass radius={22} style={{ marginBottom: 18 }}>
-            <View style={styles.previewBox}>
-              <View style={{ alignItems: "center", marginBottom: 8 }}>
-                <CarMarker body={body} color={color} heading={0} size={140} />
+          {/* ===== Live Preview — virtual garage stage =====
+              Replaces the flat Glass card with a polished "showroom" look:
+              radial concrete-floor gradient + LED accent border. The car sits
+              on the stage and recolors live as the user picks a swatch below.
+              Inspired by the high-end virtual garage reference. */}
+          <View style={styles.stageOuter}>
+            <View style={styles.stageLed} testID="garage-stage" pointerEvents="none" />
+            <LinearGradient
+              colors={[
+                "rgba(40,40,46,0.92)",  // back wall — darker concrete
+                "rgba(28,28,32,0.92)",  // floor center
+                "rgba(18,18,22,0.95)",  // foreground edge
+              ]}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+              style={styles.stageBg}
+            >
+              {/* radial spotlight on the car (subtle) */}
+              <LinearGradient
+                colors={[ "rgba(255,255,255,0.10)", "rgba(255,255,255,0)" ]}
+                style={styles.stageSpot}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+              />
+              <View style={styles.stageCar}>
+                <CarMarker body={body} color={color} heading={0} size={170} />
               </View>
-              <Text style={styles.previewLabel}>{[year, make, model].filter(Boolean).join(" ") || "Your car"}</Text>
-              <Text style={styles.previewSub}>{color || "—"} · {body}</Text>
-            </View>
-          </Glass>
+              <View style={styles.stageCaption}>
+                <Text style={styles.previewLabel}>{[year, make, model].filter(Boolean).join(" ") || "Your car"}</Text>
+                <Text style={styles.previewSub}>{color || "—"} · {body}</Text>
+              </View>
+            </LinearGradient>
+          </View>
 
           {/* Personal best — Top Cruise Speed from Map sessions. Auto-tracked, read-only. */}
           <Glass radius={22} style={{ marginBottom: 18 }}>
@@ -112,23 +135,35 @@ export default function GarageScreen() {
           <Field label="Model" value={model} onChange={setModel} placeholder="Skyline GT-R" testID="garage-model" />
           <Field label="Color" value={color} onChange={setColor} placeholder="Bayside Blue" testID="garage-color" />
 
-          {/* Color swatches — tap-to-pick from a curated palette (also keeps free-form input) */}
+          {/* Color swatches — tap-to-pick. Each chip shows the named color
+              underneath so the driver can communicate "Stratosphere Blue" to
+              fellow community members instead of guessing the hex. */}
           <Text style={styles.section}>Quick colors</Text>
           <View style={styles.swatchRow}>
-            {CAR_COLORS.map((c) => (
-              <TouchableOpacity
-                key={c.name}
-                onPress={() => setColor(c.name)}
-                activeOpacity={0.85}
-                testID={`garage-color-${c.name}`}
-              >
-                <View style={[
-                  styles.swatch,
-                  { backgroundColor: c.hex },
-                  color.toLowerCase() === c.name.toLowerCase() && styles.swatchActive,
-                ]} />
-              </TouchableOpacity>
-            ))}
+            {CAR_COLORS.map((c) => {
+              const active = color.toLowerCase() === c.name.toLowerCase();
+              return (
+                <TouchableOpacity
+                  key={c.name}
+                  onPress={() => setColor(c.name)}
+                  activeOpacity={0.85}
+                  testID={`garage-color-${c.name}`}
+                  style={styles.swatchTile}
+                >
+                  <View style={[
+                    styles.swatch,
+                    { backgroundColor: c.hex },
+                    active && styles.swatchActive,
+                    // Lift Ice Cap White off the dark background so it doesn't
+                    // look like an empty chip.
+                    c.name === "Ice Cap White" && { borderColor: "rgba(255,255,255,0.28)" },
+                  ]} />
+                  <Text style={[styles.swatchLabel, active && styles.swatchLabelActive]} numberOfLines={1}>
+                    {c.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           {/* Body type / icon */}
@@ -187,8 +222,43 @@ const styles = StyleSheet.create({
   section: { color: COLORS.text, fontSize: 16, fontWeight: "600", marginTop: 22, marginBottom: 8, letterSpacing: -0.2 },
   label: { color: COLORS.textDim, fontSize: 12, marginBottom: 6, fontWeight: "500" },
   input: { backgroundColor: "rgba(118,118,128,0.18)", color: COLORS.text, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12, fontSize: 16 },
-  // Preview block
-  previewBox: { padding: 16, alignItems: "center" },
+  // Preview block — virtual-garage stage (concrete + LED frame)
+  stageOuter: {
+    marginBottom: 18,
+    borderRadius: 24,
+    overflow: "hidden",
+    position: "relative",
+  },
+  // Glowing LED border outline. Sits on top of the gradient; pointerEvents none.
+  stageLed: {
+    position: "absolute",
+    top: 0, left: 0, right: 0, bottom: 0,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,199,0,0.55)", // brand yellow LED accent
+    shadowColor: "#FFC700",
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 0 },
+    zIndex: 2,
+  },
+  stageBg: {
+    paddingHorizontal: 18,
+    paddingVertical: 22,
+    minHeight: 230,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 24,
+  },
+  stageSpot: {
+    position: "absolute",
+    top: 0, left: "10%", right: "10%",
+    height: "60%",
+    borderRadius: 200,
+  },
+  stageCar: { alignItems: "center", marginBottom: 10 },
+  stageCaption: { alignItems: "center" },
+  previewBox: { padding: 16, alignItems: "center" }, // legacy — kept in case
   previewLabel: { color: COLORS.text, fontSize: 16, fontWeight: "700", marginTop: 8 },
   previewSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2, textTransform: "capitalize" },
   // Personal best tile
@@ -204,13 +274,17 @@ const styles = StyleSheet.create({
   pbValueWrap: { alignItems: "flex-end" },
   pbValue: { color: "#FFC700", fontSize: 28, fontWeight: "800", letterSpacing: -0.5, lineHeight: 30 },
   pbUnit: { color: COLORS.textDim, fontSize: 11, fontWeight: "600", marginTop: 2 },
-  // Color swatches
-  swatchRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 4 },
+  // Color swatches — tiles with a label underneath each color circle.
+  swatchRow: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 6, marginBottom: 8 },
+  swatchTile: { alignItems: "center", width: 76 },
   swatch: {
-    width: 36, height: 36, borderRadius: 18,
-    borderWidth: 2, borderColor: "rgba(255,255,255,0.18)",
+    width: 38, height: 38, borderRadius: 19,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.10)",
   },
-  swatchActive: { borderColor: "#FFC700", transform: [{ scale: 1.08 }] },
+  swatchActive: { borderColor: "#FFC700", transform: [{ scale: 1.10 }] },
+  swatchLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: "600", marginTop: 6, textAlign: "center" },
+  swatchLabelActive: { color: COLORS.text, fontWeight: "700" },
   // Body grid
   bodyGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   bodyCard: {

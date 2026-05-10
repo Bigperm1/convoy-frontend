@@ -8,6 +8,20 @@ import type { ExternalAlert, ExternalAlertType } from "./externalFeed";
 
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
 
+// MODULE-LEVEL CONSTANT — must NOT be re-created per render.
+// The @vis.gl/react-google-maps APIProvider does identity-comparison on its
+// `libraries` prop. Passing a fresh array literal each render caused the SDK
+// to re-request the same modules, which Google rejects with:
+//   "Module 'routes' has been provided more than once."
+// Hoisting to module scope guarantees referential stability AND we strictly
+// deduplicate the list (de facto a Set) so even hand-edits can't introduce
+// duplicates. We also intentionally OMIT "routes" here — the only consumer
+// (the Directions component) requests it on-demand via useMapsLibrary("routes"),
+// which lazy-loads it exactly once. Listing it in both places is the literal
+// definition of "provided more than once."
+const GOOGLE_MAPS_LIBRARIES: ("places" | "routes" | "geometry" | "marker" | "drawing" | "visualization")[] =
+  Array.from(new Set(["places", "geometry"])) as any;
+
 export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number };
 export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string; carBody?: string; carColor?: string; activeColor?: string; heading?: number; topSpeed?: number };
 export type LatLng = { lat: number; lng: number };
@@ -254,7 +268,7 @@ export default function ConvoyMap(props: Props) {
     // first render, avoiding the "0×0 canvas" path that also triggers the
     // SDK's internal projection errors.
     <View style={[StyleSheet.absoluteFill, { width: "100%", height: "100%", minHeight: 300 }]}>
-      <APIProvider apiKey={KEY} libraries={["places", "routes", "geometry"]}>
+      <APIProvider apiKey={KEY} libraries={GOOGLE_MAPS_LIBRARIES}>
         <MapBody {...props} />
       </APIProvider>
     </View>

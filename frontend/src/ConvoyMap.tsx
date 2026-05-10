@@ -3,7 +3,7 @@
 // This component renders a stylized SVG canvas with: peer dots, hazard pins, user position,
 // and (when a destination + encoded polyline are passed) the decoded route as an animated path.
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { View, Text, StyleSheet, Dimensions, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Path, Circle, G, Defs, LinearGradient as SvgGrad, Stop, Rect, Text as SvgText } from "react-native-svg";
@@ -22,6 +22,42 @@ try {
 } catch {}
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+
+// ---- Chase-cam tuning (turn-by-turn 3D follow mode) ----
+// Pitch: how far the camera leans back. 45° gives depth without crushing the
+// upcoming road into the horizon. Apple Maps uses ~50°, Google Maps Drive ~60°.
+const CHASE_PITCH_DEG = 45;
+// Zoom levels: city = closer, highway = wider.
+// Google Maps zoom 18 ≈ 25m visible across the screen (perfect for tight turns);
+// zoom 16 ≈ 100m (better SA at highway speeds). We linearly interpolate by speed.
+const CHASE_ZOOM_CITY = 18;
+const CHASE_ZOOM_HIGHWAY = 16;
+const CHASE_KMH_CITY = 30;     // ≤ 30 km/h → max zoom in
+const CHASE_KMH_HIGHWAY = 100; // ≥ 100 km/h → max zoom out
+// Animation duration per camera tick (ms). Short enough to feel live, long enough
+// to be smooth when GPS heading jitters by a degree or two.
+const CHASE_ANIM_MS = 600;
+
+/** Linear interpolation, clamped at the endpoints. */
+function lerp(a: number, b: number, t: number): number {
+  const k = Math.max(0, Math.min(1, t));
+  return a + (b - a) * k;
+}
+
+/** Convert m/s GPS speed → km/h, clamping invalid readings to 0. */
+function kmhFromMs(speedMs: number | undefined | null): number {
+  if (typeof speedMs !== "number" || !Number.isFinite(speedMs) || speedMs < 0) return 0;
+  return speedMs * 3.6;
+}
+
+/** Map current km/h to the zoom level the chase cam should target. */
+function chaseZoomForSpeed(kmh: number): number {
+  if (kmh <= CHASE_KMH_CITY) return CHASE_ZOOM_CITY;
+  if (kmh >= CHASE_KMH_HIGHWAY) return CHASE_ZOOM_HIGHWAY;
+  // Normalize 0..1 across the city→highway band, then interpolate zoom DOWN.
+  const t = (kmh - CHASE_KMH_CITY) / (CHASE_KMH_HIGHWAY - CHASE_KMH_CITY);
+  return lerp(CHASE_ZOOM_CITY, CHASE_ZOOM_HIGHWAY, t);
+}
 
 export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number; disputes?: number };
 export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string; carBody?: string; carColor?: string; heading?: number; topSpeed?: number };
@@ -43,6 +79,12 @@ type Props = {
   selectedRouteIndex?: number;
   onSelectRoute?: (index: number) => void;
   followUser?: boolean;
+  // 3D chase-cam mode — when true the map switches to pitch=45°, rotates
+  // automatically to match the car's heading, and dynamically zooms based
+  // on userSpeedMs (city = closer, highway = wider).
+  navigationActive?: boolean;
+  // GPS speed in m/s (from expo-location). Drives chase-cam zoom interpolation.
+  userSpeedMs?: number;
   onHazardPress: (h: Hazard) => void;
   onPeerPress?: (p: Peer) => void;
   onExternalAlertPress?: (a: ExternalAlert) => void;
@@ -92,13 +134,54 @@ function decodePolyline(encoded: string): LatLng[] {
   return points;
 }
 
-export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onHazardPress, onPeerPress, onExternalAlertPress }: Props) {
+export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, onHazardPress, onPeerPress, onExternalAlertPress }: Props) {
+  // Ref to the underlying react-native-maps MapView so we can drive the camera
+  // (pitch + heading + zoom) directly during turn-by-turn navigation.
+  const mapRef = useRef<any>(null);
+
   // ---- Real Google Maps (EAS dev build) ----
   if (MapView) {
     // When following user (turn-by-turn), zoom in tighter; otherwise wider preview
     const region = followUser
       ? { latitude: user.lat, longitude: user.lng, latitudeDelta: 0.008, longitudeDelta: 0.008 }
       : { latitude: center.lat, longitude: center.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 };
+
+    // ---- Chase-cam: drive the camera every time user position / heading / speed changes ----
+    // We DON'T pass `region` to MapView when navigationActive; instead we own the
+    // camera via animateCamera() so pitch + bearing aren't reset on every render.
+    useEffect(() => {
+      if (!navigationActive) return;
+      if (!mapRef.current) return;
+      const heading = (typeof user.heading === "number" && Number.isFinite(user.heading)) ? user.heading : 0;
+      const zoom = chaseZoomForSpeed(kmhFromMs(userSpeedMs));
+      try {
+        mapRef.current.animateCamera(
+          {
+            center: { latitude: user.lat, longitude: user.lng },
+            pitch: CHASE_PITCH_DEG,
+            heading,
+            zoom,
+          },
+          { duration: CHASE_ANIM_MS }
+        );
+      } catch {
+        // On Expo Go the JS module is present but the native side isn't
+        // wired in — fall through silently and let the static region prop
+        // handle positioning.
+      }
+    }, [navigationActive, user.lat, user.lng, user.heading, userSpeedMs]);
+
+    // When chase cam DEactivates, snap the camera flat and back to a wide bird's-eye.
+    useEffect(() => {
+      if (navigationActive) return;
+      if (!mapRef.current) return;
+      try {
+        mapRef.current.animateCamera(
+          { center: { latitude: center.lat, longitude: center.lng }, pitch: 0, heading: 0, zoom: 15 },
+          { duration: 400 }
+        );
+      } catch {}
+    }, [navigationActive]);
 
     // Build all route polylines: alternates (gray) first, then selected (blue) on top
     const routePolylines = routes.length > 0
@@ -112,7 +195,21 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
         : [];
 
     return (
-      <MapView provider="google" mapType="hybrid" style={StyleSheet.absoluteFill} initialRegion={region} region={region}>
+      <MapView
+        ref={mapRef}
+        provider="google"
+        mapType="hybrid"
+        style={StyleSheet.absoluteFill}
+        // initialRegion always set so the very first frame is positioned correctly.
+        initialRegion={region}
+        // While chase cam owns the camera, we DON'T pass the static region — that
+        // would reset pitch/heading on every render. Outside of navigation we keep
+        // the old region-driven behavior so the map still recenters as before.
+        region={navigationActive ? undefined : region}
+        showsCompass={!navigationActive}
+        rotateEnabled
+        pitchEnabled
+      >
         <Marker coordinate={{ latitude: user.lat, longitude: user.lng }} anchor={{ x: 0.5, y: 0.5 }} zIndex={10}>
           <View style={styles.youDot}><Ionicons name="navigate" size={16} color="#fff" /></View>
         </Marker>

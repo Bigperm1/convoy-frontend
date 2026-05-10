@@ -585,7 +585,7 @@ export default function MapScreen() {
     <View style={styles.c}>
       <ConvoyMap
         center={coords}
-        user={{ ...coords, heading: 0 }}
+        user={{ ...coords, heading: coords.heading || 0 }}
         peers={peerList}
         leaderUserId={leaderUserId}
         hazards={visibleHazards}
@@ -597,6 +597,10 @@ export default function MapScreen() {
         selectedRouteIndex={selectedRouteIndex}
         onSelectRoute={(i) => setSelectedRouteIndex(i)}
         followUser={navMode === "turn-by-turn"}
+        // Chase-cam (3D, heading-rotated, dynamic-zoom) is on whenever turn-
+        // by-turn nav is actively running. Pitch defaults to 45° in ConvoyMap.
+        navigationActive={navMode === "turn-by-turn" && tbt.active}
+        userSpeedMs={coords?.speed}
         onHazardPress={(h) => setSelected(h)}
         onPeerPress={(p) => {
           // Find the matching presence record (has online_at, etc.) — fallback to bare peer

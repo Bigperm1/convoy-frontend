@@ -21,11 +21,33 @@ type Props = {
   highlightConvoy?: boolean;
   destination?: LatLng | null;
   encodedPolyline?: string | null;
+  routes?: { polyline: string }[];
+  selectedRouteIndex?: number;
+  onSelectRoute?: (index: number) => void;
+  followUser?: boolean;
+  // Mirrors ConvoyMap.tsx (native): when on, web map zooms in tight, sets
+  // tilt 45° (Vector mode only — no-op on Raster), and rotates to user.heading.
+  navigationActive?: boolean;
+  userSpeedMs?: number;
   onHazardPress: (h: Hazard) => void;
   onPeerPress?: (p: Peer) => void;
   onExternalAlertPress?: (a: ExternalAlert) => void;
   onRoute?: (info: { distance_text: string; duration_text: string; steps: { html: string; distance_text: string; maneuver?: string }[] } | null) => void;
 };
+
+// Chase-cam tuning — mirrors the native side (ConvoyMap.tsx).
+const CHASE_PITCH_DEG = 45;
+const CHASE_ZOOM_CITY = 18;
+const CHASE_ZOOM_HIGHWAY = 16;
+const CHASE_KMH_CITY = 30;
+const CHASE_KMH_HIGHWAY = 100;
+function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
+function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
+function chaseZoomForSpeed(kmh: number) {
+  if (kmh <= CHASE_KMH_CITY) return CHASE_ZOOM_CITY;
+  if (kmh >= CHASE_KMH_HIGHWAY) return CHASE_ZOOM_HIGHWAY;
+  return lerp(CHASE_ZOOM_CITY, CHASE_ZOOM_HIGHWAY, (kmh - CHASE_KMH_CITY) / (CHASE_KMH_HIGHWAY - CHASE_KMH_CITY));
+}
 
 const hazardColor = (k: string) =>
   k === "police" ? "#3478F6" : k === "accident" ? "#FF453A" : k === "traffic" ? "#FF9F0A" : "#FF9F0A";
@@ -183,7 +205,7 @@ function communityPin(color: string, glyph: string, gold: boolean) {
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
 
-export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
+export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
   if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -245,6 +267,10 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
             <Directions origin={user} destination={destination} onRoute={onRoute} encodedPolyline={encodedPolyline} />
           )}
           <Recenter target={followUser ? user : center} />
+          {/* Chase-cam: 3D pitch + heading rotation + dynamic zoom while turn-by-turn nav is active */}
+          {navigationActive && (
+            <ChaseCam user={user} userSpeedMs={userSpeedMs} />
+          )}
         </Map>
       </APIProvider>
     </View>
@@ -345,6 +371,51 @@ function Directions({ origin, destination, onRoute, encodedPolyline }: { origin:
 function Recenter({ target }: { target: LatLng }) {
   const map = useMap();
   useEffect(() => { if (map && target) map.panTo(target); }, [map, target.lat, target.lng]);
+  return null;
+}
+
+/**
+ * Chase-cam controller for the web Google Maps instance.
+ *
+ * Drives 4 things every time the user's lat/lng/heading or speed changes:
+ *   • zoom    — speed-based interpolation (city = 18, highway = 16)
+ *   • center  — pan to user position (smoother than re-anchoring on every render)
+ *   • heading — rotate map so the user's direction is "up" (Vector mode only)
+ *   • tilt    — 45° lean (Vector mode only — silently no-ops on Raster maps)
+ *
+ * Heading + tilt require a vector map (created with a `mapId`). On a raster
+ * Google Map the setHeading/setTilt calls are no-ops, but zoom + pan still
+ * work, so the chase-cam still feels closer-in than the bird's-eye baseline.
+ */
+function ChaseCam({ user, userSpeedMs }: { user: LatLng & { heading?: number }; userSpeedMs?: number }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map) return;
+    const heading = (typeof user.heading === "number" && Number.isFinite(user.heading)) ? user.heading : 0;
+    const zoom = chaseZoomForSpeed(kmhFromMs(userSpeedMs));
+    try {
+      map.panTo({ lat: user.lat, lng: user.lng });
+      map.setZoom(zoom);
+      // Vector-only — silent no-op on raster.
+      if (typeof (map as any).setHeading === "function") (map as any).setHeading(heading);
+      if (typeof (map as any).setTilt === "function") (map as any).setTilt(CHASE_PITCH_DEG);
+    } catch {
+      // Defensive: never crash the map over a chase-cam tick.
+    }
+  }, [map, user.lat, user.lng, user.heading, userSpeedMs]);
+
+  // When this component unmounts (navigation ended), reset tilt + heading to 0
+  // so the bird's-eye preview view returns to a flat north-up orientation.
+  useEffect(() => {
+    return () => {
+      if (!map) return;
+      try {
+        if (typeof (map as any).setTilt === "function") (map as any).setTilt(0);
+        if (typeof (map as any).setHeading === "function") (map as any).setHeading(0);
+      } catch {}
+    };
+  }, [map]);
+
   return null;
 }
 

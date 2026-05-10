@@ -3,6 +3,7 @@ import React, { useEffect, useRef } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { APIProvider, Map, Marker, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
 import { COLORS } from "./theme";
+import { getVehiclePngDataUri, isGRCColor } from "./vehicleAssets";
 import type { ExternalAlert, ExternalAlertType } from "./externalFeed";
 
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
@@ -165,7 +166,28 @@ function carIconDataUrl(body: string | undefined | null, color: string | undefin
     </g></svg>`;
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
-// Peer pin with car make/model pill underneath. Width adapts to label length.
+
+// ===== GR Corolla PNG marker icon (web) =====
+// When the user picks one of the 5 official GRC paint colors, render the
+// high-res top-down PNG instead of the generic SVG silhouette. The PNG is
+// embedded as a base64 data URI inside an SVG wrapper so we can apply heading
+// rotation around its center — Google Maps doesn't natively rotate marker
+// icons. Returns null if the color isn't a GRC paint, so callers can fall
+// back to the SVG silhouette generator.
+function grcCarIconDataUrl(color?: string | null, heading?: number | null, size = 48): string | null {
+  if (!isGRCColor(color)) return null;
+  const dataUri = getVehiclePngDataUri(color);
+  if (!dataUri) return null;
+  const angle = Number.isFinite(heading as number) ? Math.round((heading as number) % 360) : 0;
+  // 100×100 viewBox keeps math consistent with carIconDataUrl above. The
+  // image preserveAspectRatio is set to slice so the PNG fills the box.
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 100 100'>
+    <g transform='rotate(${angle} 50 50)'>
+      <image href='${dataUri}' x='0' y='0' width='100' height='100' preserveAspectRatio='xMidYMid meet'/>
+    </g>
+  </svg>`;
+  return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+}
 function peerPinWithLabel(color: string, label: string) {
   // sanitize for SVG embed
   const txt = (label || "").replace(/[<>&"']/g, "").slice(0, 28);
@@ -226,20 +248,26 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
           // @vis.gl/react-google-maps fires onClick only for the basemap, not POIs.
           onClick={onMapPress ? (() => onMapPress()) : undefined}
         >
-          {/* "You" marker — same SVG car silhouette generator that peers use,
-              colored from the Garage profile. Self-marker is slightly larger
-              (52 vs 44) and z-indexed above peers so it's never occluded. */}
+          {/* "You" marker — GR Corolla PNG override when color matches one of
+              the 5 official paints; otherwise falls back to the SVG silhouette
+              generator. Fixed 48×48 render size per spec. */}
           <Marker
             position={user}
-            icon={carIconDataUrl((user.carBody as any) || "sedan", user.carColor, user.heading || 0, 52)}
+            icon={
+              grcCarIconDataUrl(user.carColor, user.heading || 0, 48) ||
+              carIconDataUrl((user.carBody as any) || "sedan", user.carColor, user.heading || 0, 52)
+            }
             zIndex={1000}
           />
           {peers.map((p) => {
             const isLeader = !!leaderUserId && p.user_id === leaderUserId;
             // Leader marker is slightly larger AND given a high zIndex so it
             // floats above teammates whenever the convoy stacks up at a stop.
-            const sz = isLeader ? 56 : 44;
-            const url = carIconDataUrl(p.carBody, p.carColor, p.heading, sz);
+            const sz = isLeader ? 56 : 48;
+            // Peers also get the GRC PNG if their saved color matches a paint.
+            const url =
+              grcCarIconDataUrl(p.carColor, p.heading, sz) ||
+              carIconDataUrl(p.carBody, p.carColor, p.heading, sz);
             return (
               <Marker
                 key={p.user_id}

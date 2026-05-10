@@ -257,7 +257,7 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
             body={(user.carBody as any) || "sedan"}
             color={user.carColor}
             heading={user.heading || 0}
-            size={42}
+            size={48}
           />
         </Marker>
         {peers.map((p) => {

@@ -13,7 +13,9 @@
 // and native (`react-native-maps` Marker rotation prop).
 
 import React from "react";
+import { Image, View } from "react-native";
 import Svg, { G, Path, Rect, Defs, LinearGradient, Stop } from "react-native-svg";
+import { getVehiclePng, isGRCColor } from "./vehicleAssets";
 
 export type CarBody = "sedan" | "coupe" | "suv" | "sports" | "truck" | "hatch" | "motorcycle" | "van";
 
@@ -36,13 +38,14 @@ export const CAR_BODIES: { id: CarBody; label: string; emoji: string }[] = [
 // so existing user profiles ("Bayside Blue", "Guards Red", etc.) still
 // resolve correctly via the lookup in `resolveCarColor()`.
 export const CAR_COLORS: { name: string; hex: string }[] = [
-  // ---- Primary palette ----
+  // ---- Primary palette (GR Corolla high-res PNG assets) ----
   { name: "Supersonic Red",         hex: "#D60019" }, // bright performance red
-  { name: "Stratosphere Blue",      hex: "#1F4FB8" }, // deep aerospace blue
+  { name: "Blue Flame",             hex: "#1E9CFF" }, // electric azure blue
   { name: "Ice Cap White",          hex: "#F4F6F8" }, // crisp pearl white
   { name: "Heavy Metal",            hex: "#5C5F66" }, // metallic gunmetal gray
   { name: "Precious Black Pearl",   hex: "#0E0F12" }, // deep pearlescent black
   // ---- Legacy / extended ----
+  { name: "Stratosphere Blue", hex: "#1F4FB8" }, // legacy — aliased to Blue Flame PNG
   { name: "Bayside Blue",   hex: "#0A84FF" },
   { name: "Nardo Gray",     hex: "#8E8E93" },
   { name: "Guards Red",     hex: "#FF453A" },
@@ -137,6 +140,34 @@ export default function CarMarker({ body = "sedan", color, heading, size = 40, t
   // Heading from expo-location is degrees clockwise from true north — exactly
   // what SVG `rotate()` expects, so no conversion needed.
   const angle = Number.isFinite(heading as number) ? Math.round((heading as number) % 360) : 0;
+
+  // ===== GR Corolla PNG override =====
+  // If the user picked one of the 5 official GRC paint colors, render the
+  // high-res top-down PNG instead of the generic SVG silhouette. The PNG is
+  // rotated using a CSS transform so it tracks GPS heading exactly like the
+  // SVG path-rotate path does. We force a tiny aspect-ratio safe square so
+  // 128x128 source assets always render crisp at the requested `size`.
+  const grcAsset = getVehiclePng(color);
+  if (grcAsset && isGRCColor(color)) {
+    return (
+      <View
+        testID={testID}
+        style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}
+        pointerEvents="none"
+      >
+        <Image
+          source={grcAsset as any}
+          style={{
+            width: size,
+            height: size,
+            transform: [{ rotate: `${angle}deg` }],
+          }}
+          resizeMode="contain"
+        />
+      </View>
+    );
+  }
+
   return (
     <Svg testID={testID} width={size} height={size} viewBox="0 0 100 100" pointerEvents="none">
       <Defs>

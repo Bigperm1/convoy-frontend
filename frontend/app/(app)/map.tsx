@@ -72,6 +72,10 @@ export default function MapScreen() {
   // search field doesn't cover the map. A small magnifying-glass FAB appears in
   // its place to bring it back when the driver wants to change course.
   const [searchVisible, setSearchVisible] = useState(true);
+  // Right-edge Navigation Action Drawer — peeked 80% off-screen by default
+  // when turn-by-turn is engaged. Tap the visible 20% to expand and see the
+  // current maneuver + End. Auto-collapses on tap-out / route end.
+  const [navDrawerOpen, setNavDrawerOpen] = useState(false);
   // Preview-card collapse state — when the driver starts moving (or taps the
   // map) the big preview card collapses into a minimal "Trip Summary" pill at
   // the top so the 3D chase view has the whole screen.
@@ -891,35 +895,15 @@ export default function MapScreen() {
         </Glass>
       )}
 
-      {/* ===== Turn-by-turn navigation overlays ===== */}
+      {/* ===== Turn-by-turn overlays — ETA pill + right-edge nav drawer ===== */}
       {navMode === "turn-by-turn" && activeRoute && tbt.active && (() => {
-        const stepIdx = Math.min(tbt.stepIndex + 1, activeRoute.steps.length - 1); // upcoming step
+        const stepIdx = Math.min(tbt.stepIndex + 1, activeRoute.steps.length - 1);
         const upcoming = activeRoute.steps[stepIdx];
         const verb = maneuverVerb(upcoming?.maneuver);
         return (
           <>
-            {/* Top maneuver banner */}
-            <SafeAreaView edges={["top"]} style={styles.navTopWrap} pointerEvents="box-none">
-              <Glass radius={20} style={styles.navTopCard}>
-                <View style={styles.navTopRow}>
-                  <View style={styles.maneuverBig}>
-                    <Ionicons name={maneuverIcon(upcoming?.maneuver)} size={36} color="#fff" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.navDist}>{fmtDistanceM(tbt.distanceToManeuverM)}</Text>
-                    <Text style={styles.navInst} numberOfLines={2}>{verb}{upcoming?.html ? " · " + upcoming.html : ""}</Text>
-                  </View>
-                  <TouchableOpacity testID="nav-mute" onPress={() => setNavMuted((m) => !m)} style={styles.navIconBtn}>
-                    <Ionicons name={navMuted ? "volume-mute" : "volume-high"} size={20} color={COLORS.text} />
-                  </TouchableOpacity>
-                </View>
-              </Glass>
-            </SafeAreaView>
-
-            {/* Bottom-right Trip Data pill — ETA stacked over Remaining,
-                tucked above the right-most "Hub" footer tab so the chase-cam
-                stays clear in the center. The End-nav button sits separately
-                on the bottom-left so it's never accidentally tapped. */}
+            {/* Bottom-right ETA pill — bottom of the right-side stack.
+                Sits below the Hazard drawer and above the Hub tab icon. */}
             <Glass radius={16} style={styles.tripDataRight}>
               <View style={styles.tripDataInner}>
                 <Text style={styles.tripDataValue}>{fmtEtaSec(tbt.etaSeconds)}</Text>
@@ -930,13 +914,21 @@ export default function MapScreen() {
               </View>
             </Glass>
 
-            {/* End-nav button — small floating red pill bottom-LEFT, just
-                above the speedometer. Stays accessible without crowding the
-                trip data on the right. */}
-            <TouchableOpacity testID="end-nav" onPress={endNav} style={styles.endNavFab} activeOpacity={0.85}>
-              <Ionicons name="close" size={18} color="#fff" />
-              <Text style={styles.endNavFabText}>End</Text>
-            </TouchableOpacity>
+            {/* Right-edge Navigation Action Drawer — TOP of the right stack.
+                Peeked 80% off-screen by default; tap the visible 20% edge to
+                expand and see maneuver + End. Tap End → ends nav (which also
+                takes the drawer off-screen with the route). */}
+            <NavActionDrawer
+              visible={navDrawerOpen}
+              onExpand={() => setNavDrawerOpen(true)}
+              onCollapse={() => setNavDrawerOpen(false)}
+              maneuverIcon={maneuverIcon(upcoming?.maneuver)}
+              distance={fmtDistanceM(tbt.distanceToManeuverM)}
+              instruction={`${verb}${upcoming?.html ? " · " + upcoming.html : ""}`}
+              muted={navMuted}
+              onToggleMute={() => setNavMuted((m) => !m)}
+              onEnd={endNav}
+            />
           </>
         );
       })()}
@@ -1113,7 +1105,7 @@ function SpeedometerHUD({ speedMs }: { speedMs?: number }) {
  * Accident + Traffic deliberately removed — high-priority only.
  */
 const DRAWER_W = 84;                  // outer width of the drawer (icon + padding)
-const DRAWER_PEEK_TX = DRAWER_W * 0.75; // 75% off-screen when peeked
+const DRAWER_PEEK_TX = DRAWER_W * 0.80; // 80% off-screen when peeked (per spec)
 function HazardDrawer({
   visible,
   onExpand,
@@ -1179,6 +1171,103 @@ function HazardDrawer({
     </Animated.View>
   );
 }
+
+/**
+ * Navigation Action Drawer — peeked 80% off-screen on the right edge,
+ * positioned ABOVE the HazardDrawer in the right-side stack.
+ *
+ * Peeked state shows just the maneuver-icon glyph as a "drawer pull".
+ * Tap → expands fully and reveals:
+ *    - Big maneuver arrow + distance to next turn
+ *    - Truncated step instruction
+ *    - Mute toggle
+ *    - End-nav red button
+ *
+ * Replaces the previous full-width top maneuver banner and the bottom-LEFT
+ * red End pill — both are now nested in this single right-side drawer to
+ * keep the chase-cam center clear (per the "open the middle of the map"
+ * directive).
+ */
+function NavActionDrawer({
+  visible,
+  onExpand,
+  onCollapse,
+  maneuverIcon,
+  distance,
+  instruction,
+  muted,
+  onToggleMute,
+  onEnd,
+}: {
+  visible: boolean;
+  onExpand: () => void;
+  onCollapse: () => void;
+  maneuverIcon: any;
+  distance: string;
+  instruction: string;
+  muted: boolean;
+  onToggleMute: () => void;
+  onEnd: () => void;
+}) {
+  const tx = useRef(new Animated.Value(visible ? 0 : DRAWER_PEEK_TX)).current;
+  useEffect(() => {
+    Animated.spring(tx, {
+      toValue: visible ? 0 : DRAWER_PEEK_TX,
+      useNativeDriver: true,
+      friction: 9,
+      tension: 80,
+    }).start();
+  }, [visible, tx]);
+
+  // Peeked: tapping the leading edge expands.
+  // Open: tap on a button executes that action; tap on the bare maneuver
+  // glyph (where there's no nested button) collapses back to peek.
+  if (!visible) {
+    return (
+      <Animated.View
+        style={[styles.navDrawerWrap, { transform: [{ translateX: tx }] }]}
+        testID="nav-drawer"
+      >
+        <TouchableOpacity onPress={onExpand} activeOpacity={0.85}>
+          <Glass radius={20}>
+            <View style={styles.navDrawerPeek}>
+              <Ionicons name={maneuverIcon} size={26} color="#fff" />
+            </View>
+          </Glass>
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  }
+  return (
+    <Animated.View
+      style={[styles.navDrawerWrap, { transform: [{ translateX: tx }] }]}
+      testID="nav-drawer-open"
+    >
+      <Glass radius={20}>
+        <View style={styles.navDrawerOpen}>
+          {/* Maneuver glyph + distance — tappable to collapse back to peek */}
+          <TouchableOpacity onPress={onCollapse} activeOpacity={0.85} style={styles.navDrawerHeader}>
+            <Ionicons name={maneuverIcon} size={28} color="#fff" />
+            <Text style={styles.navDrawerDist}>{distance}</Text>
+          </TouchableOpacity>
+          {/* Step instruction (truncated) */}
+          <Text style={styles.navDrawerInst} numberOfLines={3}>{instruction}</Text>
+          {/* Mute toggle */}
+          <TouchableOpacity testID="nav-mute" onPress={onToggleMute} style={styles.navDrawerBtn} activeOpacity={0.85}>
+            <Ionicons name={muted ? "volume-mute" : "volume-high"} size={18} color="#fff" />
+            <Text style={styles.navDrawerBtnText}>{muted ? "Muted" : "Sound"}</Text>
+          </TouchableOpacity>
+          {/* End nav (red) */}
+          <TouchableOpacity testID="end-nav" onPress={onEnd} style={[styles.navDrawerBtn, styles.navDrawerEndBtn]} activeOpacity={0.85}>
+            <Ionicons name="close" size={18} color="#fff" />
+            <Text style={styles.navDrawerBtnText}>End</Text>
+          </TouchableOpacity>
+        </View>
+      </Glass>
+    </Animated.View>
+  );
+}
+
 
 function ReportPeekTab({ active, onPress }: { active: boolean; onPress: () => void }) {
   const tx = useRef(new Animated.Value(active ? 0 : PEEK_HIDDEN_TX)).current;
@@ -1427,12 +1516,12 @@ const styles = StyleSheet.create({
 
   reportPanel: { position: "absolute", bottom: 190, right: 18, padding: 4, minWidth: 170 },
 
-  // Slim slide-out hazard drawer — anchored right edge, just inboard of the
-  // peek-tab trigger. Width matches the 2 large icon buttons inside.
+  // Slim slide-out hazard drawer — anchored right edge, sits in the MIDDLE
+  // of the right-side stack: NavActionDrawer above, ETA pill below.
   drawerWrap: {
     position: "absolute",
-    right: 76,           // peek-tab is ~64px wide; this sits just left of it
-    bottom: 200,         // visually aligns with the peek tab vertical center
+    right: 0,            // flush to the edge — only 20% sticks out by default
+    bottom: 220,         // leaves room for ETA pill at bottom: 100
     zIndex: 8,
   },
   drawerInner: {
@@ -1451,6 +1540,53 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   drawerBtnText: { fontSize: 11, fontWeight: "700", letterSpacing: 0.4, marginTop: 2 },
+
+  // ---- Right-edge Navigation Action Drawer ----
+  // Sits ABOVE the HazardDrawer in the right-side stack. Same peek pattern.
+  // When peeked: only the maneuver glyph leading edge sticks out (20%).
+  // When open: full vertical column with maneuver, instruction, mute, End.
+  navDrawerWrap: {
+    position: "absolute",
+    right: 0,
+    bottom: 360,         // sits above HazardDrawer (which is at bottom: 220)
+    zIndex: 9,
+  },
+  navDrawerPeek: {
+    width: 64,
+    height: 64,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  navDrawerOpen: {
+    width: 180,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  navDrawerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  navDrawerDist: { color: "#fff", fontWeight: "800", fontSize: 18, letterSpacing: -0.3 },
+  navDrawerInst: { color: COLORS.text, fontSize: 13, lineHeight: 18 },
+  navDrawerBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  navDrawerEndBtn: {
+    backgroundColor: "#FF3B30",
+    borderColor: "rgba(255,255,255,0)",
+  },
+  navDrawerBtnText: { color: "#fff", fontSize: 12, fontWeight: "700", letterSpacing: 0.4 },
   reportBtn: { flexDirection: "row", alignItems: "center", padding: 10, gap: 12 },
   reportIco: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   reportText: { color: COLORS.text, fontWeight: "500", fontSize: 14 },

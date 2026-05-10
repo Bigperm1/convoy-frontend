@@ -392,6 +392,39 @@ export default function MapScreen() {
     } catch {}
   };
 
+  // Force a full state refresh — used by the ⟳ button in the header. Mirrors
+  // what a "pull to refresh" would do: requery GPS for a fresh lock, push the
+  // new fix to the backend so other drivers see us in real-time, then reload
+  // the peer list and external traffic feed. The presence channel's re-track
+  // fires automatically because `coords` changes here.
+  const forceRefresh = async () => {
+    try { Haptics.selectionAsync().catch(() => {}); } catch {}
+    try {
+      // 1. Fresh GPS fix (5s race so a stale device doesn't hang the UI).
+      const pos = await Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+      ]);
+      if (pos && (pos as any).coords) {
+        const lat = (pos as any).coords.latitude;
+        const lng = (pos as any).coords.longitude;
+        const heading = (pos as any).coords.heading;
+        const speed = (pos as any).coords.speed;
+        setCoords({
+          lat,
+          lng,
+          heading: typeof heading === "number" && heading >= 0 ? heading : (coords?.heading || 0),
+          speed: typeof speed === "number" && speed >= 0 ? speed : 0,
+        });
+        // 2. Push the new fix to the backend so /users/nearby returns us live.
+        try { await api.post("/location", { lat, lng, speed: speed || 0, heading: heading || 0 }); } catch {}
+      }
+    } catch {}
+    // 3. Reload peer list + community list + external alerts in parallel so
+    //    everything visible on the map snaps to the latest server state.
+    try { await Promise.all([loadPeers(), loadCommunities?.(), externalFeed?.refetch?.()]); } catch {}
+  };
+
   const reportHazard = async (kind: string, opts?: { fromVoice?: boolean }) => {
     if (!coords) return;
     // Place pin slightly ahead of the driver's heading (≈40m forward) for accuracy.
@@ -699,44 +732,51 @@ export default function MapScreen() {
       {/* Header card + search bar — both hidden in full-screen map mode
           (i.e. when searchVisible=false). The 🔍 FAB below is the only
           way back to them, keeping the entire screen for the map. */}
-      {/* ===== Top header row — Map bar + square Search/X button =====
-          Layout: the Glass card (logo + title + live pill + buttons) takes
-          flex:1 on the LEFT, and a SQUARE search/X button sits on the RIGHT
-          at the same height. Together they span the full screen width as a
-          single visual band so the toggle no longer covers the settings icon.
-          When `searchVisible` is false (full-screen map) we only render the
-          square button on the right — the Glass card collapses out of view. */}
+      {/* ===== Top Control Cluster — slim header + square X side-by-side =====
+          Both elements (Glass card + X square) share the search bar's vertical
+          height so they read as one continuous toolbar at the top of the screen.
+          Internal layout:
+            ┌───────────────────────────┬───────┐
+            │ 🔰 Map           ⟳   ⚙   │   ✕   │
+            │ handle · drivers · alerts │       │
+            └───────────────────────────┴───────┘
+          The status text is pinned to the bottom edge of the Glass card so the
+          band stays slim while still surfacing live status. The square X
+          matches the card's full vertical height; together they form the
+          "Control Cluster" with a tight 8px margin to the Search bar below. */}
       <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
         <View style={styles.topBarRow} pointerEvents="box-none">
           {searchVisible && (
-            <Glass radius={20} style={{ flex: 1, marginLeft: 12 }}>
-              <View style={styles.topRow}>
-                <Image source={require("../../assets/images/brand-mark.png")} style={styles.headerMark} resizeMode="contain" />
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <Text style={styles.title}>Map</Text>
-                    <View style={[styles.livePill, { borderColor: liveDot + "55" }]} testID="live-pill">
-                      <View style={[styles.liveDot, { backgroundColor: liveDot }]} />
-                      <Text style={[styles.liveText, { color: liveDot }]}>{liveText}</Text>
-                    </View>
+            <Glass radius={16} style={{ flex: 1, marginLeft: 12 }}>
+              <View style={styles.headerCard}>
+                {/* Top row — logo + Map title + icon stack */}
+                <View style={styles.headerTopRow}>
+                  <Image source={require("../../assets/images/brand-mark.png")} style={styles.headerMarkSm} resizeMode="contain" />
+                  <Text style={styles.titleSm}>Map</Text>
+                  <View style={[styles.livePillSm, { borderColor: liveDot + "55" }]} testID="live-pill">
+                    <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
+                    <Text style={[styles.liveTextSm, { color: liveDot }]}>{liveText}</Text>
                   </View>
-                  <Text style={styles.sub}>{user?.handle} · {peerList.length} drivers · {visibleHazards.length} alerts · {externalFeed.alerts.length} live</Text>
+                  <View style={{ flex: 1 }} />
+                  <TouchableOpacity testID="refresh-btn" onPress={forceRefresh} style={styles.iconBtnSm}>
+                    <Ionicons name="refresh" size={16} color={COLORS.text} />
+                  </TouchableOpacity>
+                  <TouchableOpacity testID="settings-btn" onPress={() => router.push("/(app)/settings" as any)} style={styles.iconBtnSm}>
+                    <Ionicons name="options-outline" size={16} color={COLORS.text} />
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity testID="refresh-btn" onPress={() => loadPeers()} style={styles.iconBtn}>
-                  <Ionicons name="refresh" size={18} color={COLORS.text} />
-                </TouchableOpacity>
-                <TouchableOpacity testID="settings-btn" onPress={() => router.push("/(app)/settings" as any)} style={styles.iconBtn}>
-                  <Ionicons name="options-outline" size={18} color={COLORS.text} />
-                </TouchableOpacity>
+                {/* Bottom row — single-line status footer pinned to the bottom
+                    edge of the card. numberOfLines=1 with ellipsis keeps the
+                    band visually slim on small phones. */}
+                <Text style={styles.statusFooter} numberOfLines={1}>
+                  {user?.handle || "—"} · {peerList.length} {peerList.length === 1 ? "driver" : "drivers"} · {visibleHazards.length} {visibleHazards.length === 1 ? "alert" : "alerts"} · {externalFeed.alerts.length} live
+                </Text>
               </View>
             </Glass>
           )}
-          {/* Spacer so the square button stays right-anchored even when the
-              Glass card is hidden in fullscreen-map mode. */}
           {!searchVisible && <View style={{ flex: 1 }} />}
-          {/* Square Search/X — same vertical height as the Map bar so the two
-              read as one continuous toolbar. Rounded just enough to match
-              the Glass card's corner radius. */}
+          {/* Square Search/X — alignSelf: "stretch" auto-matches the Glass
+              card's full height, so the two read as one continuous toolbar. */}
           <TouchableOpacity
             testID="show-search-fab"
             onPress={() => setSearchVisible((v) => !v)}
@@ -747,6 +787,8 @@ export default function MapScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Search destination bar — sits 8px below the Control Cluster so the
+            two stack as a tight "command band" at the top of the map. */}
         {searchVisible && (Platform.OS === "web" ? (
           <View style={{ marginHorizontal: 12, marginTop: 8 }}>
             <DestinationSearch
@@ -1387,6 +1429,43 @@ const styles = StyleSheet.create({
   // button side-by-side. Right padding gives the square button breathing room
   // from the screen edge so it doesn't bleed into the Dynamic Island/notch.
   topBarRow: { flexDirection: "row", alignItems: "stretch", gap: 8, paddingRight: 12 },
+  // ===== Compact "Control Cluster" header (slim, search-bar-height) =====
+  // Two stacked rows inside the Glass card: title strip on top, status line
+  // pinned to the bottom edge. Padding is intentionally tight so the card
+  // matches the search bar's vertical footprint and the X button to the right.
+  headerCard: { paddingVertical: 8, paddingHorizontal: 12 },
+  headerTopRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  headerMarkSm: { width: 22, height: 22 },
+  // Title shrinks to fit on small phones while keeping the "Convoy" identity
+  // anchor to the left. letterSpacing trimmed because the larger size already
+  // had personality; at 16px we don't need it.
+  titleSm: { color: COLORS.text, fontSize: 16, fontWeight: "700", letterSpacing: -0.2, marginLeft: 2 },
+  // Live status pill — same color logic as the old one, just smaller paddings
+  // so it nests cleanly inside the 22px title row.
+  livePillSm: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  liveDotSm: { width: 5, height: 5, borderRadius: 3 },
+  liveTextSm: { fontSize: 9, fontWeight: "700", letterSpacing: 0.4 },
+  // Refresh + Settings — a row of small icon buttons. 28×28 so the touch
+  // target stays usable while keeping the band slim. They sit immediately to
+  // the right of the title pill, just left of the X square.
+  iconBtnSm: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(118,118,128,0.18)",
+  },
+  // Status footer — single-line band along the bottom edge of the header card.
+  // numberOfLines=1 + ellipsis keeps the layout stable when peer/alert counts
+  // hit double digits or the handle is long.
+  statusFooter: {
+    color: COLORS.textDim,
+    fontSize: 11,
+    marginTop: 4,
+    letterSpacing: 0.1,
+  },
   topRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
   headerMark: { width: 36, height: 36 },
   title: { color: COLORS.text, fontSize: 26, fontWeight: "700", letterSpacing: -0.6 },

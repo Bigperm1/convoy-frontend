@@ -91,6 +91,11 @@ type Props = {
   navigationActive?: boolean;
   // GPS speed in m/s (from expo-location). Drives chase-cam zoom interpolation.
   userSpeedMs?: number;
+  // Map view mode — exclusive radio choice from settings.
+  //   "heading_up": pitch 45°, bearing locked to user.heading (drone chase cam)
+  //   "north_up":   pitch 0°, bearing 0° (classic flat top-down)
+  // Defaults to "heading_up" so the chase cam is on by default during nav.
+  mapView?: "heading_up" | "north_up";
   // Fired on a tap of the empty map area (NOT on a marker/peer/hazard).
   // Used by the parent to dismiss transient overlays like the search UI.
   onMapPress?: () => void;
@@ -143,7 +148,7 @@ function decodePolyline(encoded: string): LatLng[] {
   return points;
 }
 
-export default function ConvoyMap({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, onMapPress, onHazardPress, onPeerPress, onExternalAlertPress }: Props) {
+export default function ConvoyMap({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", onMapPress, onHazardPress, onPeerPress, onExternalAlertPress }: Props) {
   // Ref to the underlying react-native-maps MapView so we can drive the camera
   // (pitch + heading + zoom) directly during turn-by-turn navigation.
   const mapRef = useRef<any>(null);
@@ -181,12 +186,16 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
       }
       lastCamRef.current = { lat: user.lat, lng: user.lng, heading };
       const zoom = chaseZoomForSpeed(kmhFromMs(userSpeedMs));
+      // Camera params depend on the user's MAP VIEW preference:
+      //   heading_up → tilted 45° chase cam, map.bearing tracks user heading
+      //   north_up   → flat top-down with bearing locked to 0
+      const isHeadingUp = mapView === "heading_up";
       try {
         mapRef.current.animateCamera(
           {
             center: { latitude: user.lat, longitude: user.lng },
-            pitch: CHASE_PITCH_DEG,
-            heading,
+            pitch: isHeadingUp ? CHASE_PITCH_DEG : 0,
+            heading: isHeadingUp ? heading : 0,
             zoom,
           },
           { duration: CHASE_ANIM_MS }
@@ -196,7 +205,7 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
         // wired in — fall through silently and let the static region prop
         // handle positioning.
       }
-    }, [navigationActive, user.lat, user.lng, user.heading, userSpeedMs]);
+    }, [navigationActive, user.lat, user.lng, user.heading, userSpeedMs, mapView]);
 
     // When chase cam DEactivates, snap the camera flat and back to a wide bird's-eye.
     useEffect(() => {

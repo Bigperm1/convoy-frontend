@@ -701,6 +701,10 @@ export default function MapScreen() {
         // Privacy: when Avatar Live is OFF we suppress the local "you" marker.
         // Presence channel is also nulled out above so peers don't see us at all.
         hideSelfMarker={settings.avatarLive === false}
+        // Map view mode (radio choice from Settings → MAP VIEW). Drives the
+        // chase-cam tilt + bearing. Defaults to "heading_up" so nav feels like
+        // Waze/Google out of the box.
+        mapView={settings.mapView}
         peers={peerList}
         leaderUserId={leaderUserId}
         hazards={visibleHazards}

@@ -23,6 +23,12 @@ export type Settings = {
   //                themselves and every peer (we untrack from the presence channel)
   commsLive: boolean;
   avatarLive: boolean;
+  // Map camera mode — exclusive radio choice.
+  //   "heading_up": chase-cam (pitch 45°, map.bearing locked to user.heading,
+  //                 car icon always points up). Default during navigation.
+  //   "north_up":   classic flat top-down (pitch 0°, bearing 0°). Map stays
+  //                 fixed north; the car silhouette rotates with heading.
+  mapView: "heading_up" | "north_up";
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -36,6 +42,10 @@ export const DEFAULT_SETTINGS: Settings = {
   activeCommunityId: null,
   commsLive: true,
   avatarLive: true,
+  // Default to "heading_up" — most drivers expect a Waze/Google-style chase
+  // cam the moment they start driving. Users who prefer classic top-down can
+  // switch in Settings → MAP VIEW; the choice persists across launches.
+  mapView: "heading_up",
 };
 
 let cached: Settings = { ...DEFAULT_SETTINGS };

@@ -21,6 +21,10 @@ type Props = {
   // toggle. The caller also disables the presence channel so peers don't see
   // us either.
   hideSelfMarker?: boolean;
+  // Map view mode — exclusive radio choice from settings. Defaults to
+  // "heading_up" (chase cam, tilt+rotate). "north_up" forces tilt=0 and
+  // bearing=0 for a classic flat top-down feel.
+  mapView?: "heading_up" | "north_up";
   peers: Peer[];
   leaderUserId?: string | null;
   hazards: Hazard[];
@@ -232,7 +236,7 @@ function communityPin(color: string, glyph: string, gold: boolean) {
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
 
-export default function ConvoyMap({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, onMapPress, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
+export default function ConvoyMap({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", onMapPress, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
   if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -310,9 +314,11 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
           <Recenter target={followUser ? user : center} />
           {/* Always-on live Google traffic overlay (green/yellow/red flow lines) */}
           <TrafficLayer />
-          {/* Chase-cam: 3D pitch + heading rotation + dynamic zoom while turn-by-turn nav is active */}
+          {/* Chase-cam: 3D pitch + heading rotation + dynamic zoom while turn-by-turn nav is active.
+              When `mapView` is "north_up" the chase cam stays anchored to the
+              user but tilt and bearing are forced to 0 for a classic top-down feel. */}
           {navigationActive && (
-            <ChaseCam user={user} userSpeedMs={userSpeedMs} />
+            <ChaseCam user={user} userSpeedMs={userSpeedMs} mapView={mapView} />
           )}
         </Map>
       </APIProvider>
@@ -451,22 +457,24 @@ function TrafficLayer() {
  * Google Map the setHeading/setTilt calls are no-ops, but zoom + pan still
  * work, so the chase-cam still feels closer-in than the bird's-eye baseline.
  */
-function ChaseCam({ user, userSpeedMs }: { user: LatLng & { heading?: number }; userSpeedMs?: number }) {
+function ChaseCam({ user, userSpeedMs, mapView = "heading_up" }: { user: LatLng & { heading?: number }; userSpeedMs?: number; mapView?: "heading_up" | "north_up" }) {
   const map = useMap();
   useEffect(() => {
     if (!map) return;
     const heading = (typeof user.heading === "number" && Number.isFinite(user.heading)) ? user.heading : 0;
     const zoom = chaseZoomForSpeed(kmhFromMs(userSpeedMs));
+    const isHeadingUp = mapView === "heading_up";
     try {
       map.panTo({ lat: user.lat, lng: user.lng });
       map.setZoom(zoom);
-      // Vector-only — silent no-op on raster.
-      if (typeof (map as any).setHeading === "function") (map as any).setHeading(heading);
-      if (typeof (map as any).setTilt === "function") (map as any).setTilt(CHASE_PITCH_DEG);
+      // Vector-only — silent no-op on raster. North-up forces tilt=0 / bearing=0
+      // so the user sees a classic flat top-down even mid-navigation.
+      if (typeof (map as any).setHeading === "function") (map as any).setHeading(isHeadingUp ? heading : 0);
+      if (typeof (map as any).setTilt === "function") (map as any).setTilt(isHeadingUp ? CHASE_PITCH_DEG : 0);
     } catch {
       // Defensive: never crash the map over a chase-cam tick.
     }
-  }, [map, user.lat, user.lng, user.heading, userSpeedMs]);
+  }, [map, user.lat, user.lng, user.heading, userSpeedMs, mapView]);
 
   // When this component unmounts (navigation ended), reset tilt + heading to 0
   // so the bird's-eye preview view returns to a flat north-up orientation.

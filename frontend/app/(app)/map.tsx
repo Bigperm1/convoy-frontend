@@ -620,7 +620,15 @@ export default function MapScreen() {
     <View style={styles.c}>
       <ConvoyMap
         center={coords}
-        user={{ ...coords, heading: coords.heading || 0 }}
+        // user.car_type / user.car_color come from the Garage profile (Mongo,
+        // hydrated by useAuth). Pass them as carBody/carColor so the "you"
+        // marker uses the same SVG silhouette + paint other drivers see.
+        user={{
+          ...coords,
+          heading: coords.heading || 0,
+          carBody: ((user as any)?.car_type as string) || "sedan",
+          carColor: user?.car_color || undefined,
+        }}
         peers={peerList}
         leaderUserId={leaderUserId}
         hazards={visibleHazards}

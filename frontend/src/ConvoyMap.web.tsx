@@ -13,7 +13,9 @@ export type LatLng = { lat: number; lng: number };
 
 type Props = {
   center: LatLng;
-  user: { lat: number; lng: number; heading?: number };
+  // Same shape as the native map — carBody/carColor pulled from Garage profile
+  // so the user sees their own silhouette + paint, not a generic arrow dot.
+  user: { lat: number; lng: number; heading?: number; carBody?: string; carColor?: string };
   peers: Peer[];
   leaderUserId?: string | null;
   hazards: Hazard[];
@@ -224,7 +226,14 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
           // @vis.gl/react-google-maps fires onClick only for the basemap, not POIs.
           onClick={onMapPress ? (() => onMapPress()) : undefined}
         >
-          <Marker position={user} icon={dotIcon(COLORS.primary, "▲", 36)} zIndex={1000} />
+          {/* "You" marker — same SVG car silhouette generator that peers use,
+              colored from the Garage profile. Self-marker is slightly larger
+              (52 vs 44) and z-indexed above peers so it's never occluded. */}
+          <Marker
+            position={user}
+            icon={carIconDataUrl((user.carBody as any) || "sedan", user.carColor, user.heading || 0, 52)}
+            zIndex={1000}
+          />
           {peers.map((p) => {
             const isLeader = !!leaderUserId && p.user_id === leaderUserId;
             // Leader marker is slightly larger AND given a high zIndex so it

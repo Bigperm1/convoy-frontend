@@ -65,7 +65,9 @@ export type LatLng = { lat: number; lng: number };
 
 type Props = {
   center: LatLng;
-  user: { lat: number; lng: number; heading?: number };
+  // The "you" marker. carBody + carColor are pulled from the Garage profile
+  // so the map shows the user's chosen silhouette + paint, not a generic dot.
+  user: { lat: number; lng: number; heading?: number; carBody?: string; carColor?: string };
   peers: Peer[];
   // user_id of the convoy leader (community admin). Their marker is rendered
   // with a higher zIndex so it stays on top when the convoy bunches up at a stop.
@@ -220,8 +222,25 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
         // Marker / Polyline taps don't trigger onPress, so this is safe.
         onPress={onMapPress ? () => onMapPress() : undefined}
       >
-        <Marker coordinate={{ latitude: user.lat, longitude: user.lng }} anchor={{ x: 0.5, y: 0.5 }} zIndex={10}>
-          <View style={styles.youDot}><Ionicons name="navigate" size={16} color="#fff" /></View>
+        {/* "You" marker — pulls body + color straight from the Garage profile
+            via Props.user. anchor 0.5/0.5 keeps the silhouette centered on the
+            actual GPS coord (CarMarker draws roughly square, so center anchor
+            looks correct in the chase-cam). zIndex 10 keeps the user above
+            community peers when the convoy bunches up at a stop. */}
+        <Marker
+          coordinate={{ latitude: user.lat, longitude: user.lng }}
+          anchor={{ x: 0.5, y: 0.5 }}
+          zIndex={10}
+          // tracksViewChanges=false would freeze the icon on first render; we
+          // keep it on so the silhouette rotates with heading every tick.
+          flat
+        >
+          <CarMarker
+            body={(user.carBody as any) || "sedan"}
+            color={user.carColor}
+            heading={user.heading || 0}
+            size={42}
+          />
         </Marker>
         {peers.map((p) => {
           const isLeader = !!leaderUserId && p.user_id === leaderUserId;
@@ -456,12 +475,35 @@ function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [
           </G>
         )}
 
-        {/* user */}
+        {/* user — keep the soft halo for visibility, drop the inner dot.
+            The actual silhouette is rendered as an overlay View (below)
+            so the SVG canvas can still drive position projection. */}
         <G>
-          <Circle cx={userXY.x} cy={userXY.y} r={18} fill={COLORS.primary} fillOpacity={0.2} />
-          <Circle cx={userXY.x} cy={userXY.y} r={10} fill={COLORS.primary} stroke="#fff" strokeWidth={3} />
+          <Circle cx={userXY.x} cy={userXY.y} r={26} fill={COLORS.primary} fillOpacity={0.16} />
         </G>
       </Svg>
+
+      {/* "You" car silhouette — pulls body + color from Garage profile.
+          Positioned absolutely on top of the SVG canvas at the projected
+          (userXY.x, userXY.y) location, offset by half the icon size so
+          the silhouette sits centered on the GPS coord. */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          left: userXY.x - 22,
+          top: userXY.y - 22,
+          width: 44,
+          height: 44,
+        }}
+      >
+        <CarMarker
+          body={(user.carBody as any) || "sedan"}
+          color={user.carColor}
+          heading={user.heading || 0}
+          size={44}
+        />
+      </View>
 
       {routes.length === 0 && !encodedPolyline && (
         <View style={styles.notice} pointerEvents="none">

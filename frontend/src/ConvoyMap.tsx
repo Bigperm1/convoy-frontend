@@ -154,10 +154,28 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
     // ---- Chase-cam: drive the camera every time user position / heading / speed changes ----
     // We DON'T pass `region` to MapView when navigationActive; instead we own the
     // camera via animateCamera() so pitch + bearing aren't reset on every render.
+    //
+    // Recenter throttle — only re-issue animateCamera when the user has actually
+    // moved >5 m since the last camera update (or heading rotated >5°). Without
+    // this, GPS jitter at idle (±1-3 m) was causing 5+ animateCamera calls/sec
+    // and visible flicker.
+    const lastCamRef = useRef<{ lat: number; lng: number; heading: number } | null>(null);
     useEffect(() => {
       if (!navigationActive) return;
       if (!mapRef.current) return;
       const heading = (typeof user.heading === "number" && Number.isFinite(user.heading)) ? user.heading : 0;
+      // Distance vs last-camera position (Haversine, plain JS — no extra deps).
+      const last = lastCamRef.current;
+      if (last) {
+        const R = 6371000;
+        const dLat = (user.lat - last.lat) * Math.PI / 180;
+        const dLng = (user.lng - last.lng) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(last.lat * Math.PI / 180) * Math.cos(user.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+        const distM = 2 * R * Math.asin(Math.sqrt(a));
+        const headingDelta = Math.abs(heading - last.heading);
+        if (distM < 5 && headingDelta < 5) return; // not enough motion → skip
+      }
+      lastCamRef.current = { lat: user.lat, lng: user.lng, heading };
       const zoom = chaseZoomForSpeed(kmhFromMs(userSpeedMs));
       try {
         mapRef.current.animateCamera(

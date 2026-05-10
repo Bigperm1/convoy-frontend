@@ -188,34 +188,43 @@ export function useTurnByTurn(
   const announcedRef = useRef<Set<string>>(new Set());
   const lastSpokeRef = useRef<number>(0);
   const lastOffRouteAtRef = useRef<number>(0);
-  // Locks the "Starting navigation" announcement to ONCE per unique route polyline.
-  // Without this, any re-render that reruns the activate-effect (e.g. peer presence
-  // tick changing a parent prop) re-speaks the start-of-route greeting mid-drive.
-  // Holds the polyline string of the route we've already announced; null = none yet.
-  const startAnnouncedForRouteRef = useRef<string | null>(null);
+  // ===== Trip-state flag for the start-of-trip voice =====
+  // Once we've announced "Starting navigation…" for the current trip we lock
+  // it for the ENTIRE trip. Reset only happens on cancel (active → false) or
+  // arrival (onArrive fires). Previous version was keyed on `route.polyline`
+  // which re-armed every time the parent recomputed alternates with a new
+  // polyline string mid-trip — causing the prompt to loop endlessly.
+  const hasAnnouncedStartRef = useRef<boolean>(false);
+  // Hold the latest route in a ref so the start-effect can read it without
+  // re-running every time a different route object identity flows through.
+  const routeRef = useRef<NavRoute | null>(route);
+  useEffect(() => { routeRef.current = route; }, [route]);
 
-  // Reset when route changes or nav stops
+  // Trip lifecycle effect — runs ONLY on `active` toggle, never on polyline
+  // change. This is what kills the voice loop: a mid-trip alternate-route
+  // reshuffle no longer triggers the "Starting navigation" greeting again.
   useEffect(() => {
     if (!active) {
       Speech.stop();
       announcedRef.current.clear();
-      startAnnouncedForRouteRef.current = null; // re-arm for next route
+      hasAnnouncedStartRef.current = false; // re-arm for next trip
       setState({ active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0 });
       return;
     }
     announcedRef.current.clear();
     setState((s) => ({ ...s, active: true, stepIndex: 0 }));
-    // Initial announcement — guarded so it only speaks once per unique polyline.
-    const polyKey = route?.polyline ?? null;
-    const alreadyAnnounced = polyKey != null && startAnnouncedForRouteRef.current === polyKey;
-    if (route?.steps?.[0] && !options?.mute && !alreadyAnnounced) {
-      const verb = maneuverVerb(route.steps[0].maneuver);
-      const inst = route.steps[0].html;
-      speak(`Starting navigation. ${verb} ${inst.length > 80 ? "" : "to " + stripDirections(inst)}. Total ${route.duration_text}.`);
+    // Speak ONCE per trip — guarded by the boolean ref. Read route from
+    // routeRef so we get whatever route is current right now, without
+    // putting `route` in the dependency array.
+    const r = routeRef.current;
+    if (r?.steps?.[0] && !options?.mute && !hasAnnouncedStartRef.current) {
+      const verb = maneuverVerb(r.steps[0].maneuver);
+      const inst = r.steps[0].html;
+      speak(`Starting navigation. ${verb} ${inst.length > 80 ? "" : "to " + stripDirections(inst)}. Total ${r.duration_text}.`);
       lastSpokeRef.current = Date.now();
-      startAnnouncedForRouteRef.current = polyKey; // lock for this route
+      hasAnnouncedStartRef.current = true; // lock for the whole trip
     }
-  }, [active, route?.polyline]);
+  }, [active]);
 
   // Step machine
   useEffect(() => {

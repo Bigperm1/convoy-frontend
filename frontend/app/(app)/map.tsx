@@ -1053,16 +1053,21 @@ const PEEK_HIDDEN_TX = PEEK_W * (1 - PEEK_VISIBLE_RATIO); // 67% off-screen
 // HOLD_MS (2s) before allowing it to fall to 0. Any non-zero reading
 // resets the hold and updates immediately.
 const SPEEDO_HOLD_MS = 2000;
+// Exponential-moving-average smoothing factor for the displayed km/h.
+// alpha = 0.25 → ~4-sample window: each new reading contributes 25% to the
+// displayed value, prior smoothed value 75%. Result: 32 → 31 → 28 → 24 → 20
+// instead of the raw 32 → 0 → 20 jumps the user reported in field testing.
+const SPEEDO_EMA_ALPHA = 0.25;
 function SpeedometerHUD({ speedMs }: { speedMs?: number }) {
   // rawKmh: this tick's converted speed (>=1 km/h or 0)
   const rawKmh = (() => {
     if (typeof speedMs !== "number" || !Number.isFinite(speedMs) || speedMs < 0) return 0;
     const v = speedMs * 3.6;
-    return v < 1 ? 0 : Math.round(v);
+    return v < 1 ? 0 : v;
   })();
 
-  // displayKmh: what the UI actually shows. Starts at 0 and only falls to 0
-  // after we've held the last positive value for SPEEDO_HOLD_MS.
+  // displayKmh: what the UI actually shows. Smoothed via EMA so rapid GPS
+  // fluctuations look like gradual transitions rather than jumps.
   const [displayKmh, setDisplayKmh] = useState(0);
   // Last non-zero reading + timestamp — survives across renders.
   const lastNonZeroRef = useRef<{ value: number; ts: number }>({ value: 0, ts: 0 });
@@ -1070,34 +1075,36 @@ function SpeedometerHUD({ speedMs }: { speedMs?: number }) {
   const fallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // Always clear any in-flight fall-to-zero whenever a new reading arrives.
     if (fallTimerRef.current) {
       clearTimeout(fallTimerRef.current);
       fallTimerRef.current = null;
     }
 
     if (rawKmh > 0) {
-      // Live speed — show immediately, remember it.
+      // Live speed — apply EMA smoothing toward the new value.
       lastNonZeroRef.current = { value: rawKmh, ts: Date.now() };
-      setDisplayKmh(rawKmh);
+      setDisplayKmh((prev) =>
+        prev <= 0
+          ? rawKmh                                        // first reading after rest → snap
+          : prev * (1 - SPEEDO_EMA_ALPHA) + rawKmh * SPEEDO_EMA_ALPHA
+      );
       return;
     }
 
-    // rawKmh === 0. If we have a recent positive reading, hold it briefly.
+    // rawKmh === 0. If we have a recent positive reading, hold briefly,
+    // otherwise EMA-decay toward 0 (so we glide down rather than slamming).
     const last = lastNonZeroRef.current;
     const elapsed = Date.now() - last.ts;
     if (last.value > 0 && elapsed < SPEEDO_HOLD_MS) {
-      // Keep showing the last value — don't update state, just schedule fall.
       const remaining = SPEEDO_HOLD_MS - elapsed;
       fallTimerRef.current = setTimeout(() => {
-        // Only fall to 0 if we haven't seen a positive reading since.
         if (lastNonZeroRef.current.ts === last.ts) {
-          setDisplayKmh(0);
+          // Decay toward 0 with the same EMA so the final transition is smooth.
+          setDisplayKmh((prev) => prev * (1 - SPEEDO_EMA_ALPHA));
         }
       }, remaining);
     } else {
-      // No recent positive reading — drop to 0 immediately.
-      setDisplayKmh(0);
+      setDisplayKmh((prev) => prev * (1 - SPEEDO_EMA_ALPHA));
     }
   }, [rawKmh]);
 
@@ -1108,9 +1115,9 @@ function SpeedometerHUD({ speedMs }: { speedMs?: number }) {
 
   return (
     <View style={styles.speedHudWrap} pointerEvents="none">
-      <Glass radius={14} style={styles.speedHud}>
+      <Glass radius={12} style={styles.speedHud}>
         <View style={styles.speedHudInner}>
-          <Text style={styles.speedHudValue}>{displayKmh}</Text>
+          <Text style={styles.speedHudValue}>{Math.round(displayKmh)}</Text>
           <Text style={styles.speedHudUnit}>KM/H</Text>
         </View>
       </Glass>

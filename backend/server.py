@@ -272,7 +272,8 @@ async def confirm_hazard(hid: str, user=Depends(get_current_user)):
 @api.post("/hazards/{hid}/dispute")
 async def dispute_hazard(hid: str, user=Depends(get_current_user)):
     """Community downvote — increments dispute counter so other clients can hide
-    heavily-disputed hazards."""
+    heavily-disputed hazards. Kept for back-compat with older clients; new
+    clients call DELETE /hazards/{hid} directly to remove the marker."""
     res = await db.hazards.update_one({"id": hid}, {"$inc": {"disputes": 1}})
     if not res.matched_count: raise HTTPException(status_code=404, detail="Not found")
     h = await db.hazards.find_one({"id": hid}, {"_id": 0})
@@ -280,6 +281,24 @@ async def dispute_hazard(hid: str, user=Depends(get_current_user)):
     if h and (h.get("disputes", 0) >= (h.get("confirms", 1) + 2)):
         await db.hazards.update_one({"id": hid}, {"$set": {"expires_at": datetime.now(timezone.utc).isoformat()}})
     return h
+
+
+@api.delete("/hazards/{hid}")
+async def delete_hazard(hid: str, user=Depends(get_current_user)):
+    """Delete a hazard outright.
+
+    Triggered by clients when a driver taps "Not there" on the dispute modal.
+    The hazard is removed from MongoDB AND mirrored into Supabase so the
+    Realtime DELETE event fans out to every other driver's map within ~1.5s.
+
+    Idempotent: 404 → returns {ok: True} (the row is already gone, nothing
+    to do, no error to surface to the user).
+    """
+    # 1. Remove from Mongo (the legacy primary store).
+    await db.hazards.delete_one({"id": hid})
+    # 2. Mirror into Supabase so all peers' Realtime listeners fire.
+    asyncio.create_task(supa.delete_row("hazards", hid))
+    return {"ok": True, "id": hid}
 
 
 # ---------- Communities ----------

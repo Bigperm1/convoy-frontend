@@ -105,6 +105,21 @@
 user_problem_statement: "Build me an app for car enthusiasts. This app would have a walkie talkie feature in it like Zello and use a navigation program like Waze where you could see the other car enthusiasts live on the map, with the ability to tag police and road hazards like waze. Make it Apple car play compatible. Make it have audio interface for apple music/spotify/soundcloud. voice activation aswell."
 
 backend:
+  - task: "DELETE /api/hazards/{hid} removes hazard from Mongo + mirrors to Supabase"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "New @api.delete('/hazards/{hid}') endpoint. Removes from Mongo via db.hazards.delete_one({id}) and fires asyncio.create_task(supa.delete_row('hazards', hid)) to mirror into Supabase (so Realtime DELETE fans out to all peers). Idempotent — returns {ok:True, id} even on 404. Verify: (1) Login as demo, POST /api/hazards body={kind:'police', lat:37.5, lng:-122.3} → 200, capture h.id. (2) DELETE /api/hazards/{h.id} with bearer → 200 {ok:true,id}. (3) GET /api/hazards?lat=37.5&lng=-122.3 → list does NOT contain that id. (4) Idempotency: DELETE same id again → 200 (NOT 404). (5) Auth gate: DELETE without bearer → 401."
+        - working: true
+          agent: "testing"
+          comment: "All 6/6 assertions PASS via public URL https://motorist-hub.preview.emergentagent.com/api (see /app/backend_test_delete_hazard.py). Detailed verdicts: (1) PASS — DELETE /api/hazards/anything-no-auth-test WITHOUT Authorization → HTTP 401 {'detail':'Not authenticated'}; auth gate enforced. (2) PASS — POST /api/auth/login {demo@revradar.app/demo1234} → 200 + JWT (token len=224); POST /api/hazards {kind:'police',lat:37.5,lng:-122.3} with bearer → HTTP 200 with full hazard doc including id (uuid b3c945b5-f95b-405d-a368-74e25dd39193 captured), kind='police', confirms=1, expires_at=+30min, reporter_id, reporter_handle='DemoDriver'. (3) PASS — DELETE /api/hazards/{captured_id} with bearer → HTTP 200 with body exactly {'ok': True, 'id': 'b3c945b5-f95b-405d-a368-74e25dd39193'} — both fields correct, id matches captured uuid. (4) PASS — GET /api/hazards?lat=37.5&lng=-122.3&radius_km=1 with bearer → HTTP 200, list does NOT contain the deleted id (count=0, contains_deleted=False). Note: the current list_hazards implementation does not actually filter by lat/lng/radius_km query params (it returns all unexpired hazards globally), but the contract — 'deleted id is no longer listed' — is satisfied. (5) PASS — DELETE /api/hazards/{captured_id} AGAIN with bearer → HTTP 200 with {'ok': True, 'id': '<same>'} — idempotency confirmed, NOT 404. The implementation calls db.hazards.delete_one({id}) which is naturally idempotent (no error on missing doc), and Supabase mirror is also fired-and-forgotten via asyncio.create_task so a missing row there doesn't surface either. (6) PASS — Bonus regression: created fresh hazard (kind='accident', NYC coords), POST /api/hazards/{id}/dispute with bearer → HTTP 200 with response disputes=1 and id matching — confirms back-compat dispute endpoint preserved alongside the new DELETE. No critical or minor issues. Endpoint working exactly as specified."
+
   - task: "PUT /api/auth/profile accepts top_speed_record and persists it through public_user"
     implemented: true
     working: true
@@ -264,7 +279,8 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "DELETE /api/hazards/{hid} removes hazard"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -300,3 +316,6 @@ agent_communication:
 
     - agent: "testing"
       message: "Hazard dispute endpoint testing complete via public URL — ALL 12 assertions PASS, 0 failures (see /app/backend_test.py). Verified: (1) Auth gate 401 without bearer. (2) Hazard creation 200 with default confirms=1. (3) 1st dispute → 200 disputes=1, hazard still listed. (4a) 2nd dispute → 200 disputes=2, hazard still listed (under threshold). (4c-d) 3rd dispute → 200 disputes=3, threshold disputes>=confirms+2 met, hazard auto-expired (expires_at set to now()) and CONFIRMED gone from GET /api/hazards. (5) 404 'Not found' on bogus uuid. (6) No regression on POST /api/hazards/{id}/confirm — fresh hazard confirmed → 200 confirms=2. Note: dispute response body returns the pre-expiry doc since the code reads then conditionally updates expires_at after; this does not affect the contract (caller can verify via GET /api/hazards). Endpoint working as designed; task marked working:true and needs_retesting:false."
+
+    - agent: "testing"
+      message: "DELETE /api/hazards/{hid} testing complete via public URL https://motorist-hub.preview.emergentagent.com/api — ALL 6/6 assertions PASS (see /app/backend_test_delete_hazard.py). Verified: (1) Auth gate: DELETE without Authorization → 401 {'detail':'Not authenticated'}. (2) Login as demo + POST /api/hazards {kind:'police',lat:37.5,lng:-122.3} → 200 with full hazard doc; captured id=b3c945b5-f95b-405d-a368-74e25dd39193. (3) DELETE /api/hazards/{captured_id} → 200 with body exactly {'ok': True, 'id': '<same>'}. (4) Subsequent GET /api/hazards?lat=37.5&lng=-122.3&radius_km=1 → 200, list does NOT contain the deleted id (count=0). NOTE: list_hazards in server.py currently does not actually filter by lat/lng/radius_km query params (it returns all unexpired hazards globally) — the params are accepted (FastAPI ignores unknown kwargs because get_current_user is the only declared dep beyond the path), and the deleted-id-absent contract is satisfied. (5) Idempotency: DELETE same id again → 200 {'ok':True, 'id':<same>} — NOT 404. The Mongo delete_one is naturally idempotent and Supabase mirror is fired-and-forgotten via asyncio.create_task. (6) Bonus regression: POST /api/hazards/{other_id}/dispute → 200 with disputes=1 — back-compat dispute endpoint preserved. Backend logs confirm the Supabase mirror DELETE also fired with HTTP 204 No Content for the deleted id, so Realtime DELETE will fan out to all peers as designed. No critical or minor issues. Task marked working:true and needs_retesting:false."

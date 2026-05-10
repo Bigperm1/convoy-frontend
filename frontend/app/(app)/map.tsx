@@ -345,6 +345,17 @@ export default function MapScreen() {
           setHazards((cur) => cur.map((x) => (x.id === h.id ? h : x)));
         }
       )
+      // DELETE fan-out — when one driver disputes a hazard ("Not there") the
+      // row is removed from Supabase; this listener pulls the marker off every
+      // other driver's map within ~1.5s without needing a full refetch.
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "hazards" },
+        (payload: any) => {
+          const id = (payload.old as any)?.id;
+          if (id) setHazards((cur) => cur.filter((x) => x.id !== id));
+        }
+      )
       .subscribe((status: string) => {
         if (status === "SUBSCRIBED") setLive("live");
         else if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") setLive("off");
@@ -419,22 +430,37 @@ export default function MapScreen() {
     } catch {}
   };
 
-  // Dispute = "not there anymore" → +1 disputes. When community downvotes
-  // sufficiently, the hazard auto-hides (see filtering below).
+  // Dispute = "not there anymore" → DELETE the hazard outright.
+  // Two layers of safety:
+  //   1. Optimistic local removal so the marker disappears from the tapper's
+  //      map *immediately*, even before the network round-trip resolves.
+  //   2. Supabase DELETE → Realtime DELETE event fans out to every other
+  //      driver's map within ~1.5 s (see DELETE listener above).
+  // Backend fallback (FastAPI DELETE /api/hazards/{id}) handles non-Supabase
+  // environments. The previous "increment disputes counter" behavior was
+  // confusing — drivers tapped Not there and the marker stayed on the map.
   const disputeHazard = async (h: Hazard) => {
+    // Snapshot id so we don't double-fetch after `selected` clears below.
+    const id = h.id;
+    // 1) Optimistic local strip — tapper sees the marker vanish instantly.
+    setHazards((cur) => cur.filter((x) => x.id !== id));
+    setSelected(null);
+    // 2) Persist the deletion so other drivers' maps clear too.
     try {
       if (SUPABASE_ENABLED && supabase) {
-        // Try the disputes column first; gracefully ignore if it doesn't exist.
-        const { error } = await supabase.from("hazards").update({ disputes: (h.disputes || 0) + 1 }).eq("id", h.id);
-        if (error && /column.*disputes/i.test(error.message || "")) {
-          // Column missing — fall back to expiring the hazard early so the dispute still has effect.
-          await supabase.from("hazards").update({ expires_at: new Date(Date.now() - 1000).toISOString() }).eq("id", h.id);
+        const { error } = await supabase.from("hazards").delete().eq("id", id);
+        if (error) {
+          // RLS or column issue — fall through to backend
+          await api.delete(`/hazards/${id}`).catch(() => {});
         }
       } else {
-        await api.post(`/hazards/${h.id}/dispute`).catch(() => {});
+        await api.delete(`/hazards/${id}`).catch(() => {});
       }
-      setSelected(null);
-    } catch {}
+    } catch {
+      // Even if persistence fails, the optimistic local removal stands.
+      // Worst case: a stale row reappears on the next refetch — acceptable
+      // tradeoff for instant UI feedback.
+    }
   };
 
   const hazardColor = (k: string) =>
@@ -979,6 +1005,7 @@ export default function MapScreen() {
       <HazardDrawer
         visible={showReport}
         onExpand={() => setShowReport(true)}
+        onCollapse={() => setShowReport(false)}
         onReport={(kind) => reportHazard(kind)}
       />
 
@@ -1109,10 +1136,12 @@ const DRAWER_PEEK_TX = DRAWER_W * 0.80; // 80% off-screen when peeked (per spec)
 function HazardDrawer({
   visible,
   onExpand,
+  onCollapse,
   onReport,
 }: {
   visible: boolean;
   onExpand: () => void;
+  onCollapse: () => void;
   onReport: (kind: string) => void;
 }) {
   const tx = useRef(new Animated.Value(visible ? 0 : DRAWER_PEEK_TX)).current;
@@ -1125,14 +1154,21 @@ function HazardDrawer({
     }).start();
   }, [visible, tx]);
 
+  // Auto-collapse after 5 s of no interaction. Cleared/reset on tap (since the
+  // tap will either fire a report — which collapses anyway — or, when peeked,
+  // expand and start a fresh 5 s window). Without this the drawer stays open
+  // forever if the driver glances away mid-trip and forgets it.
+  useEffect(() => {
+    if (!visible) return;
+    const t = setTimeout(() => onCollapse(), 5000);
+    return () => clearTimeout(t);
+  }, [visible, onCollapse]);
+
   const handle = (kind: string) => {
     if (!visible) {
-      // Peek tap → expand. We don't fire the report on this tap; the user
-      // gets a clear two-step affordance (peek → open → tap to report).
       onExpand();
       return;
     }
-    // Already open: fire haptic + send report. Parent will collapse.
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
     onReport(kind);
   };
@@ -1218,6 +1254,15 @@ function NavActionDrawer({
       tension: 80,
     }).start();
   }, [visible, tx]);
+
+  // 5 s auto-collapse — same pattern as HazardDrawer. Cleared on unmount or
+  // visible→false. The driver shouldn't have to dig out of an open nav
+  // overlay if they bumped it accidentally; the chase-cam stays unobstructed.
+  useEffect(() => {
+    if (!visible) return;
+    const t = setTimeout(() => onCollapse(), 5000);
+    return () => clearTimeout(t);
+  }, [visible, onCollapse]);
 
   // Peeked: tapping the leading edge expands.
   // Open: tap on a button executes that action; tap on the bare maneuver

@@ -1,7 +1,7 @@
 // Cross-platform Places Autocomplete using the Places (New) REST endpoint on native,
 // and the JS Maps lib (already loaded by ConvoyMap) on web.
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform, ScrollView, Keyboard } from "react-native";
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform, ScrollView, Keyboard, PanResponder } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
 import { geocodeQuery } from "./voiceBus";
@@ -159,9 +159,22 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
     onSelect(loc);
   };
 
+  // Swipe-down-to-dismiss keyboard on the search bar itself.
+  // The suggestions ScrollView already uses keyboardDismissMode="on-drag",
+  // but a vertical swipe over the input/Go-button row needs its own handler
+  // since RN doesn't bubble pan events out of TextInput on iOS. Threshold:
+  // 12px downward dy = clear intent (avoid accidental dismiss on tap jitter).
+  const dismissPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_e, g) => g.dy > 12 && Math.abs(g.dy) > Math.abs(g.dx) * 1.2,
+      onPanResponderMove: () => { Keyboard.dismiss(); },
+    })
+  ).current;
+
   return (
     <View style={styles.wrap} pointerEvents="box-none">
-      <View style={styles.bar}>
+      <View style={styles.bar} {...dismissPan.panHandlers}>
         <Ionicons name="search" size={18} color={COLORS.textDim} />
         <TextInput
           testID="destination-input"

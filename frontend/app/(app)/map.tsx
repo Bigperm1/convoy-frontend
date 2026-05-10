@@ -978,32 +978,22 @@ export default function MapScreen() {
         </Glass>
       )}
 
-      {/* ---- Slim slide-out hazard drawer ----
-           Anchored to the right edge of the map. Animated.View slides
-           in from off-screen via translateX when `showReport` flips.
-           Two HIGH-PRIORITY-ONLY buttons: Police (blue) + Hazard (orange).
-           Tapping either fires `reportHazard()` (which auto-closes the
-           drawer via `setShowReport(false)`), pinging Supabase realtime
-           so other drivers see the report instantly. */}
-      <HazardDrawer visible={showReport} onReport={(kind) => reportHazard(kind)} />
+      {/* ---- Right-edge peek drawer ----
+           Sits 75% off-screen by default, leaving just the leading edge of
+           the Police + Hazard icons visible ("drawer pull" affordance).
+           Tap the peeking edge → animates fully out. Tap an icon (when
+           fully out) → reports to Supabase + auto-snaps back to peek.
+           Replaces the previous <ReportPeekTab> blue-tab entirely. */}
+      <HazardDrawer
+        visible={showReport}
+        onExpand={() => setShowReport(true)}
+        onReport={(kind) => reportHazard(kind)}
+      />
 
       {/* ===== Speedometer HUD (bottom-left glass overlay) =====
           Pulls live speed from coords.speed (m/s) → km/h. Floors small values
           to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
       <SpeedometerHUD speedMs={coords?.speed} />
-
-      {/*
-        Right-edge "peek tab" for the hazard reporter.
-        - Anchored to the right edge of the screen.
-        - INACTIVE: slides 67% off-screen, leaving ~33% of the square visible
-          like a drawer pull. Tap once to slide it fully out + open the panel.
-        - ACTIVE: fully on-screen at translateX = 0.
-        We animate translateX with Animated.spring for a tactile feel.
-      */}
-      <ReportPeekTab
-        active={showReport}
-        onPress={() => setShowReport((s) => !s)}
-      />
 
       <PeerModal
         peer={selectedPeer ? { ...selectedPeer } as any : null}
@@ -1109,49 +1099,63 @@ function SpeedometerHUD({ speedMs }: { speedMs?: number }) {
   );
 }
 /**
- * Slim slide-out hazard drawer.
+ * Right-edge peek drawer.
  *
- * Anchored to the right edge of the map, just inside the existing peek-tab
- * trigger. When `visible` flips true → translateX animates from off-screen
- * (DRAWER_HIDDEN_TX) to 0; when false it slides back out. Two HIGH-PRIORITY-
- * ONLY buttons stacked vertically: Police (blue) and Hazard (orange). Tapping
- * either fires `onReport(kind)` (parent calls reportHazard which inserts into
- * Supabase + sets showReport=false, auto-closing the drawer).
+ * Two states animated via translateX:
+ *   - peeked  (default, !visible) — 75% off-screen, only the leading edge of
+ *             the icons sticks out as a "drawer pull" affordance.
+ *   - open    (visible=true)      — translateX = 0, full icons visible.
  *
- * Accident + Traffic deliberately removed — community feedback was that those
- * categories are noisier and lower-priority for actual driving decisions.
+ * Tapping the peek edge fires `onExpand` (parent flips visible→true).
+ * Tapping an icon when OPEN fires `onReport(kind)` (parent inserts into
+ * Supabase + sets visible→false, auto-snapping back to peek).
+ *
+ * Accident + Traffic deliberately removed — high-priority only.
  */
-const DRAWER_HIDDEN_TX = 110;
-function HazardDrawer({ visible, onReport }: { visible: boolean; onReport: (kind: string) => void }) {
-  const tx = useRef(new Animated.Value(visible ? 0 : DRAWER_HIDDEN_TX)).current;
+const DRAWER_W = 84;                  // outer width of the drawer (icon + padding)
+const DRAWER_PEEK_TX = DRAWER_W * 0.75; // 75% off-screen when peeked
+function HazardDrawer({
+  visible,
+  onExpand,
+  onReport,
+}: {
+  visible: boolean;
+  onExpand: () => void;
+  onReport: (kind: string) => void;
+}) {
+  const tx = useRef(new Animated.Value(visible ? 0 : DRAWER_PEEK_TX)).current;
   useEffect(() => {
     Animated.spring(tx, {
-      toValue: visible ? 0 : DRAWER_HIDDEN_TX,
+      toValue: visible ? 0 : DRAWER_PEEK_TX,
       useNativeDriver: true,
       friction: 9,
       tension: 80,
     }).start();
   }, [visible, tx]);
 
-  const fire = (kind: string) => {
-    // Fire-and-forget haptic so the driver feels the report was acknowledged
-    // without having to glance at the screen. Native only — web is a no-op.
+  const handle = (kind: string) => {
+    if (!visible) {
+      // Peek tap → expand. We don't fire the report on this tap; the user
+      // gets a clear two-step affordance (peek → open → tap to report).
+      onExpand();
+      return;
+    }
+    // Already open: fire haptic + send report. Parent will collapse.
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
     onReport(kind);
   };
 
   return (
     <Animated.View
-      pointerEvents={visible ? "auto" : "none"}
       style={[styles.drawerWrap, { transform: [{ translateX: tx }] }]}
       testID="report-panel"
     >
       <Glass radius={20}>
         <View style={styles.drawerInner}>
-          {/* Police (blue) — primary high-priority report */}
+          {/* Police (blue) */}
           <TouchableOpacity
             testID="report-police"
-            onPress={() => fire("police")}
+            onPress={() => handle("police")}
             activeOpacity={0.85}
             style={[styles.drawerBtn, { backgroundColor: "rgba(10,132,255,0.18)", borderColor: "rgba(10,132,255,0.55)" }]}
           >
@@ -1159,12 +1163,11 @@ function HazardDrawer({ visible, onReport }: { visible: boolean; onReport: (kind
             <Text style={[styles.drawerBtnText, { color: "#0A84FF" }]}>Police</Text>
           </TouchableOpacity>
 
-          {/* Hazard (orange) — generic road hazard (debris, blockage, etc.).
-              Wire schema kind = 'road' so it persists alongside other hazards
-              already in the Supabase `hazards` table (see HAZARDS_SUPABASE_SETUP.md). */}
+          {/* Hazard (orange) — wire schema kind = 'road' to match
+              HAZARDS_SUPABASE_SETUP.md check constraint. */}
           <TouchableOpacity
             testID="report-road"
-            onPress={() => fire("road")}
+            onPress={() => handle("road")}
             activeOpacity={0.85}
             style={[styles.drawerBtn, { backgroundColor: "rgba(255,159,10,0.18)", borderColor: "rgba(255,159,10,0.55)" }]}
           >

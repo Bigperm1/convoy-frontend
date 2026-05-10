@@ -501,10 +501,16 @@ export default function MapScreen() {
   // ----- Convoy Realtime Presence (Supabase) -----
   // Live peer broadcast/track via Supabase Realtime. Replaces stale REST polling for online cars.
   // (Must be declared BEFORE any early returns to keep React hook order stable.)
-  // Channel name follows the active community in Coms. Falls back to global.
-  const presenceChannel = settings.activeCommunityId
+  // Community-scoped only — YVRGRC members see other YVRGRC members, period.
+  // When the user is not in / hasn't selected a community, we pass `null` so
+  // useConvoyPresence becomes a no-op (no global "everyone on the platform"
+  // fanout). This guarantees strangers from outside the crew never appear on
+  // the map. The "Avatar Live" privacy toggle also disables presence entirely
+  // — when off the user vanishes from every peer's map and the map shows no
+  // own marker either.
+  const presenceChannel = (settings.activeCommunityId && settings.avatarLive !== false)
     ? `convoy:community:${settings.activeCommunityId}`
-    : "convoy:global";
+    : null;
 
   // ----- Throttled top_speed_record sync -----
   // Run whenever sessionMaxSpeed advances. If the new max beats the persisted
@@ -659,6 +665,9 @@ export default function MapScreen() {
           carBody: ((user as any)?.car_type as string) || "sedan",
           carColor: user?.car_color || undefined,
         }}
+        // Privacy: when Avatar Live is OFF we suppress the local "you" marker.
+        // Presence channel is also nulled out above so peers don't see us at all.
+        hideSelfMarker={settings.avatarLive === false}
         peers={peerList}
         leaderUserId={leaderUserId}
         hazards={visibleHazards}

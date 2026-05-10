@@ -28,7 +28,7 @@ export default function ComsScreen() {
   const router = useRouter();
   const [communities, setCommunities] = useState<Community[]>([]);
   const [active, setActive] = useState<string | null>(null);
-  const [, setSettings] = useSettings();
+  const [settings, setSettings] = useSettings();
   // Persist active community to settings — map.tsx reads this to scope the presence channel.
   const setActiveAndPersist = (id: string) => { setActive(id); setSettings({ activeCommunityId: id }); };
   const [recording, setRecording] = useState(false);
@@ -116,6 +116,11 @@ export default function ComsScreen() {
 
   const startRec = async () => {
     if (recording || busy || !active) return;
+    // Comms Live OFF — radio silence, refuse to broadcast.
+    if (settings.commsLive === false) {
+      Alert.alert("Comms is OFF", "Turn Comms Live back on in Settings to broadcast.");
+      return;
+    }
     Animated.spring(press, { toValue: 0.96, useNativeDriver: true, speed: 30, bounciness: 6 }).start();
     try {
       const rec = new Audio.Recording();

@@ -68,6 +68,10 @@ type Props = {
   // The "you" marker. carBody + carColor are pulled from the Garage profile
   // so the map shows the user's chosen silhouette + paint, not a generic dot.
   user: { lat: number; lng: number; heading?: number; carBody?: string; carColor?: string };
+  // Privacy: when true the "you" marker is not drawn (Avatar Live OFF). Peers
+  // are also untracked at the presence layer by the caller, so the user is
+  // fully invisible — we just need to suppress the local marker here.
+  hideSelfMarker?: boolean;
   peers: Peer[];
   // user_id of the convoy leader (community admin). Their marker is rendered
   // with a higher zIndex so it stays on top when the convoy bunches up at a stop.
@@ -139,7 +143,7 @@ function decodePolyline(encoded: string): LatLng[] {
   return points;
 }
 
-export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, onMapPress, onHazardPress, onPeerPress, onExternalAlertPress }: Props) {
+export default function ConvoyMap({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, onMapPress, onHazardPress, onPeerPress, onExternalAlertPress }: Props) {
   // Ref to the underlying react-native-maps MapView so we can drive the camera
   // (pitch + heading + zoom) directly during turn-by-turn navigation.
   const mapRef = useRef<any>(null);
@@ -244,22 +248,25 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
             via Props.user. anchor 0.5/0.5 keeps the silhouette centered on the
             actual GPS coord (CarMarker draws roughly square, so center anchor
             looks correct in the chase-cam). zIndex 10 keeps the user above
-            community peers when the convoy bunches up at a stop. */}
-        <Marker
-          coordinate={{ latitude: user.lat, longitude: user.lng }}
-          anchor={{ x: 0.5, y: 0.5 }}
-          zIndex={10}
-          // tracksViewChanges=false would freeze the icon on first render; we
-          // keep it on so the silhouette rotates with heading every tick.
-          flat
-        >
-          <CarMarker
-            body={(user.carBody as any) || "sedan"}
-            color={user.carColor}
-            heading={user.heading || 0}
-            size={48}
-          />
-        </Marker>
+            community peers when the convoy bunches up at a stop. Suppressed
+            entirely when Avatar Live privacy toggle is off. */}
+        {!hideSelfMarker && (
+          <Marker
+            coordinate={{ latitude: user.lat, longitude: user.lng }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            zIndex={10}
+            // tracksViewChanges=false would freeze the icon on first render; we
+            // keep it on so the silhouette rotates with heading every tick.
+            flat
+          >
+            <CarMarker
+              body={(user.carBody as any) || "sedan"}
+              color={user.carColor}
+              heading={user.heading || 0}
+              size={48}
+            />
+          </Marker>
+        )}
         {peers.map((p) => {
           const isLeader = !!leaderUserId && p.user_id === leaderUserId;
           return (
@@ -505,24 +512,27 @@ function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [
       {/* "You" car silhouette — pulls body + color from Garage profile.
           Positioned absolutely on top of the SVG canvas at the projected
           (userXY.x, userXY.y) location, offset by half the icon size so
-          the silhouette sits centered on the GPS coord. */}
-      <View
-        pointerEvents="none"
-        style={{
-          position: "absolute",
-          left: userXY.x - 22,
-          top: userXY.y - 22,
-          width: 44,
-          height: 44,
-        }}
-      >
-        <CarMarker
-          body={(user.carBody as any) || "sedan"}
-          color={user.carColor}
-          heading={user.heading || 0}
-          size={44}
-        />
-      </View>
+          the silhouette sits centered on the GPS coord. Hidden entirely when
+          Avatar Live privacy toggle is off. */}
+      {!hideSelfMarker && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            left: userXY.x - 22,
+            top: userXY.y - 22,
+            width: 44,
+            height: 44,
+          }}
+        >
+          <CarMarker
+            body={(user.carBody as any) || "sedan"}
+            color={user.carColor}
+            heading={user.heading || 0}
+            size={44}
+          />
+        </View>
+      )}
 
       {routes.length === 0 && !encodedPolyline && (
         <View style={styles.notice} pointerEvents="none">

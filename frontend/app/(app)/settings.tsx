@@ -85,6 +85,31 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </Glass>
 
+        {/* Privacy */}
+        <Text style={styles.sectionLabel}>PRIVACY</Text>
+        <Glass radius={16} style={styles.card}>
+          <ToggleRow
+            icon="radio-outline"
+            iconColor="#FF6A00"
+            title="Comms Live"
+            subtitle="Hear & broadcast walkie-talkie on your communities. Off = radio silence."
+            value={settings.commsLive}
+            onChange={(v) => setSettings({ commsLive: v })}
+          />
+          <View style={styles.divider} />
+          <ToggleRow
+            icon="car-sport-outline"
+            iconColor="#FFC700"
+            title="Avatar Live"
+            subtitle="Show your car on the community map. Off = invisible to crew and yourself."
+            value={settings.avatarLive}
+            onChange={(v) => setSettings({ avatarLive: v })}
+          />
+        </Glass>
+        <Text style={styles.helpText}>
+          Your car only ever appears on maps inside communities you've joined — strangers from outside the crew can never see you. Toggle Avatar Live off to vanish from the map entirely.
+        </Text>
+
         {/* Live Feeds */}
         <Text style={styles.sectionLabel}>LIVE TRAFFIC FEEDS</Text>
         <Glass radius={16} style={styles.card}>

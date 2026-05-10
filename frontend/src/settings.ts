@@ -17,6 +17,12 @@ export type Settings = {
   avoidFerries: boolean;
   // Per-community presence — when set, peer presence channel becomes `convoy:community:<id>`
   activeCommunityId?: string | null;
+  // Privacy toggles
+  //   commsLive  — when false, push-to-talk is suspended (no transmit, no playback)
+  //   avatarLive — when false, the user's car disappears from the map for both
+  //                themselves and every peer (we untrack from the presence channel)
+  commsLive: boolean;
+  avatarLive: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -28,6 +34,8 @@ export const DEFAULT_SETTINGS: Settings = {
   avoidHighways: false,
   avoidFerries: false,
   activeCommunityId: null,
+  commsLive: true,
+  avatarLive: true,
 };
 
 let cached: Settings = { ...DEFAULT_SETTINGS };

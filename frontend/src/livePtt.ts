@@ -19,6 +19,7 @@ import { Platform } from "react-native";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
 import { getToken, wsUrl } from "./api";
+import { getSettings } from "./settings";
 
 export type PTTMessage = {
   id: string;
@@ -155,11 +156,12 @@ export function useLiveWalkieListener(getActiveChannelId: () => string | null | 
           if (data?.type !== "ptt" || !data?.message) return;
           const m: PTTMessage = data.message;
           const ch = getterRef.current?.();
-          // Notify any subscribed UI regardless of channel — Comms list shows
-          // history for the active channel only, but other screens may want
-          // a "X is talking" indicator anywhere.
+          // Always emit on the bus so screens that listen for the history list
+          // still update. Audio playback is gated by the Comms Live privacy
+          // toggle — when off the user wants total radio silence.
           livePttBus.emit(m);
-          if (m.channel === ch) {
+          const commsLive = getSettings().commsLive !== false;
+          if (commsLive && m.channel === ch) {
             enqueueLivePtt(m);
           }
         } catch {}

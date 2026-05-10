@@ -17,6 +17,10 @@ type Props = {
   // Same shape as the native map — carBody/carColor pulled from Garage profile
   // so the user sees their own silhouette + paint, not a generic arrow dot.
   user: { lat: number; lng: number; heading?: number; carBody?: string; carColor?: string };
+  // Privacy: when true the "you" marker is hidden — used by the Avatar Live
+  // toggle. The caller also disables the presence channel so peers don't see
+  // us either.
+  hideSelfMarker?: boolean;
   peers: Peer[];
   leaderUserId?: string | null;
   hazards: Hazard[];
@@ -228,7 +232,7 @@ function communityPin(color: string, glyph: string, gold: boolean) {
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
 
-export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, onMapPress, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
+export default function ConvoyMap({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, onMapPress, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
   if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -246,12 +250,15 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
           onClick={onMapPress ? (() => onMapPress()) : undefined}
         >
           {/* "You" marker — always renders the GR Corolla PNG (default Heavy
-              Metal when no color is picked) at fixed 48×48 px. */}
-          <Marker
-            position={user}
-            icon={grcCarIconDataUrl(user.carColor, user.heading || 0, 48)}
-            zIndex={1000}
-          />
+              Metal when no color is picked) at fixed 48×48 px. Suppressed when
+              Avatar Live privacy toggle is off. */}
+          {!hideSelfMarker && (
+            <Marker
+              position={user}
+              icon={grcCarIconDataUrl(user.carColor, user.heading || 0, 48)}
+              zIndex={1000}
+            />
+          )}
           {peers.map((p) => {
             const isLeader = !!leaderUserId && p.user_id === leaderUserId;
             // Leader marker is slightly larger AND given a high zIndex so it

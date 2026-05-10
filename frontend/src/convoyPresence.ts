@@ -56,7 +56,7 @@ type Status = "idle" | "joining" | "subscribed" | "error" | "disabled";
  *   const { peers, status } = useConvoyPresence("convoy:global", { user_id, handle, carType }, coords);
  */
 export function useConvoyPresence(
-  channelName: string,
+  channelName: string | null,
   me: ConvoyMe | null,
   coords: { lat: number; lng: number; heading?: number } | null
 ) {
@@ -67,7 +67,11 @@ export function useConvoyPresence(
 
   // Join / leave channel when channelName or me.user_id changes
   useEffect(() => {
-    if (!SUPABASE_ENABLED || !supabase || !me?.user_id) {
+    // No channel name = privacy-off / no active community → completely opt out
+    // of presence. We clear any stale peer list so the previous community's
+    // pins disappear instantly the moment Avatar Live is toggled off.
+    if (!channelName || !SUPABASE_ENABLED || !supabase || !me?.user_id) {
+      setPeers([]);
       setStatus(SUPABASE_ENABLED ? "idle" : "disabled");
       return;
     }

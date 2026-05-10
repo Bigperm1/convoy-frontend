@@ -66,10 +66,44 @@ export default function MapScreen() {
   // Turn-by-turn navigation state
   const [navMode, setNavMode] = useState<"preview" | "turn-by-turn">("preview");
   const [navMuted, setNavMuted] = useState(false);
+  // ---- UI refinement state (post-field-test) ----
+  // Search bar visibility — auto-hides when navigation starts so the destination
+  // search field doesn't cover the map. A small magnifying-glass FAB appears in
+  // its place to bring it back when the driver wants to change course.
+  const [searchVisible, setSearchVisible] = useState(true);
+  // Preview-card collapse state — when the driver starts moving (or taps the
+  // map) the big preview card collapses into a minimal "Trip Summary" pill at
+  // the top so the 3D chase view has the whole screen.
+  const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   const activeRoute: NavRoute | null = routes[selectedRouteIndex] || null;
   const encodedPolyline = activeRoute?.polyline || null;
+
+  // Auto-hide the search bar when actually navigating (turn-by-turn engaged).
+  // When nav stops, we don't auto-show — the driver explicitly taps the FAB
+  // or returns to preview. This mirrors Apple/Google Maps behavior.
+  useEffect(() => {
+    if (navMode === "turn-by-turn") setSearchVisible(false);
+  }, [navMode]);
+
+  // Auto-collapse the preview card once the driver starts moving (speed ≥ 5 km/h).
+  // Threshold chosen high enough to ignore GPS jitter at idle; low enough to
+  // collapse before the driver has merged onto the freeway.
+  useEffect(() => {
+    if (!destination || !route) return;          // nothing to collapse yet
+    if (navMode === "turn-by-turn") return;      // turn-by-turn UI takes over
+    const kmh = (coords?.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
+    if (kmh >= 5 && !previewCollapsed) setPreviewCollapsed(true);
+  }, [coords?.speed, destination, route, navMode]);
+
+  // When destination clears, reset both UI states so a fresh search restarts clean.
+  useEffect(() => {
+    if (!destination) {
+      setPreviewCollapsed(false);
+      setSearchVisible(true);
+    }
+  }, [destination]);
 
   // ----- External alerts feed (Waze-style polling, dedup + auto-clear) -----
   const externalFeed = useExternalAlerts(60_000);
@@ -634,24 +668,41 @@ export default function MapScreen() {
           </View>
         </Glass>
 
-        {Platform.OS === "web" ? (
+        {searchVisible && (Platform.OS === "web" ? (
           <View style={{ marginHorizontal: 12 }}>
             <DestinationSearch
               origin={coords}
-              onSelect={(loc) => { setDestination(loc); setShowSteps(true); }}
-              onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); }}
+              onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
+              onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
             />
           </View>
         ) : (
           <View style={{ marginHorizontal: 12 }}>
             <DestinationSearch
               origin={coords}
-              onSelect={(loc) => { setDestination(loc); setShowSteps(true); }}
-              onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); }}
+              onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
+              onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
             />
           </View>
-        )}
+        ))}
       </SafeAreaView>
+
+      {/* Floating magnifier FAB — only renders when the search bar is hidden.
+          Re-shows the destination search so the driver can change course
+          mid-trip without ending navigation. Tucked top-right under the
+          header buttons so it doesn't fight the chase-cam. */}
+      {!searchVisible && (
+        <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.searchFabWrap}>
+          <TouchableOpacity
+            testID="show-search-fab"
+            onPress={() => setSearchVisible(true)}
+            activeOpacity={0.85}
+            style={styles.searchFab}
+          >
+            <Ionicons name="search" size={20} color="#fff" />
+          </TouchableOpacity>
+        </SafeAreaView>
+      )}
 
       {/* ===== Community Routes — horizontal chip strip (visible when there are shared cruises) ===== */}
       {communityRoutes.length > 0 && navMode === "preview" && !destination && (
@@ -711,8 +762,32 @@ export default function MapScreen() {
         </SafeAreaView>
       )}
 
-      {/* ===== Route preview card (shown only when NOT actively navigating) ===== */}
-      {destination && route && navMode === "preview" && (
+      {/* ===== Route preview — collapses into Trip Summary pill once moving ===== */}
+      {destination && route && navMode === "preview" && previewCollapsed && (
+        <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.tripSummaryWrap}>
+          <TouchableOpacity
+            testID="trip-summary-pill"
+            onPress={() => setPreviewCollapsed(false)}
+            activeOpacity={0.85}
+          >
+            <Glass radius={16} style={styles.tripSummary}>
+              <View style={styles.tripSummaryRow}>
+                <Ionicons name="navigate" size={16} color="#0A84FF" />
+                <Text style={styles.tripSummaryEta} numberOfLines={1}>
+                  {(activeRoute?.duration_in_traffic_text || route.duration_text)} · {route.distance_text}
+                </Text>
+                <Text style={styles.tripSummaryDest} numberOfLines={1}>
+                  {destination.label}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color={COLORS.textDim} />
+              </View>
+            </Glass>
+          </TouchableOpacity>
+        </SafeAreaView>
+      )}
+
+      {/* ===== Route preview card (full) — shown when NOT collapsed AND NOT navigating ===== */}
+      {destination && route && navMode === "preview" && !previewCollapsed && (
         <Glass radius={20} style={styles.routeCard}>
           <View style={styles.routeRow}>
             <View style={styles.routeIcon}><Ionicons name="navigate" size={22} color="#fff" /></View>
@@ -720,6 +795,10 @@ export default function MapScreen() {
               <Text style={styles.routeTo} numberOfLines={1}>To {destination.label}</Text>
               <Text style={styles.routeMeta}>{route.duration_text} · {route.distance_text}{routes[selectedRouteIndex]?.summary ? ` · via ${routes[selectedRouteIndex].summary}` : ""}</Text>
             </View>
+            {/* Collapse-to-pill chevron (manual override of the auto-collapse-on-movement) */}
+            <TouchableOpacity testID="route-collapse" onPress={() => setPreviewCollapsed(true)} style={{ padding: 4, marginRight: 2 }}>
+              <Ionicons name="chevron-up" size={22} color={COLORS.textDim} />
+            </TouchableOpacity>
             <TouchableOpacity testID="route-clear" onPress={clearRoute} style={{ padding: 4 }}>
               <Ionicons name="close-circle" size={24} color={COLORS.textDim} />
             </TouchableOpacity>
@@ -1115,6 +1194,26 @@ const styles = StyleSheet.create({
   endBtnText: { color: "#fff", fontWeight: "700", letterSpacing: 0.3 },
 
   selectedCard: { position: "absolute", left: 12, right: 12, bottom: 200 },
+
+  // Magnifier FAB — appears top-right when the search bar is hidden
+  // (e.g. once navigation has started). Tucked just below the header
+  // safe-area band so it doesn't clip with the title pill.
+  searchFabWrap: { position: "absolute", top: 0, right: 0, padding: 12, zIndex: 7 },
+  searchFab: {
+    width: 44, height: 44, borderRadius: 22,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(10,132,255,0.92)", // matches Apple Maps blue
+    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+  },
+
+  // Trip Summary pill — collapsed view of the route preview card. Renders at
+  // the very top, single line, tappable to expand back into the full card.
+  tripSummaryWrap: { position: "absolute", top: 0, left: 60, right: 60, paddingTop: 4, zIndex: 8 },
+  tripSummary: {},
+  tripSummaryRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 10, paddingHorizontal: 14 },
+  tripSummaryEta: { color: COLORS.text, fontWeight: "700", fontSize: 13, letterSpacing: 0.2 },
+  tripSummaryDest: { color: COLORS.textDim, fontSize: 12, flex: 1 },
   selRow: { padding: 14, flexDirection: "row", alignItems: "flex-start", gap: 12 },
   selTitle: { color: COLORS.text, fontWeight: "600", fontSize: 16 },
   selSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
@@ -1143,10 +1242,19 @@ const styles = StyleSheet.create({
   // tucks 67% of the square off-screen when inactive (33% peeking) and lands at
   // x=0 when active. Square corners on the right edge, rounded on the left edge
   // so it reads as a drawer pull rather than a button.
-  // Speedometer HUD (bottom-left glass). Sits above the bottom nav so it never
-  // gets covered by the safe-area band. Uses a tabular monospaced font so the
-  // 1-3 digit number doesn't shift the layout as it ticks up/down while driving.
-  speedHudWrap: { position: "absolute", left: 12, bottom: 130, zIndex: 6 },
+  // Speedometer HUD — bottom-CENTER glass pill above the floating mic / tab bar.
+  // Previous layout (bottom-left at 130) covered the chase-cam's 3D depth cone;
+  // now it sits centered above the action buttons so the middle of the map is
+  // clear for the perspective view. `pointerEvents="none"` upstream means it
+  // never blocks the underlying map gestures.
+  speedHudWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 180,           // ~tab bar (60) + mic FAB (60) + safe-area + breathing room
+    alignItems: "center",  // centers the inner pill horizontally
+    zIndex: 6,
+  },
   speedHud: { },
   speedHudInner: {
     minWidth: 92,

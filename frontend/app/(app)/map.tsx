@@ -932,17 +932,71 @@ const PEEK_HIDDEN_TX = PEEK_W * (1 - PEEK_VISIBLE_RATIO); // 67% off-screen
 // Speedometer HUD — bottom-left glass overlay.
 // Pulls speed (m/s) from the location watcher, converts to km/h (×3.6),
 // and floors to 0 below 1 km/h so a stationary GPS doesn't read "1".
+//
+// Smoothing buffer: GPS speed momentarily drops to 0 mid-drive (tunnel,
+// urban canyon, brief signal stutter). Without smoothing the HUD flickers
+// 65 → 0 → 65 in under a second. We hold the previous reading for up to
+// HOLD_MS (2s) before allowing it to fall to 0. Any non-zero reading
+// resets the hold and updates immediately.
+const SPEEDO_HOLD_MS = 2000;
 function SpeedometerHUD({ speedMs }: { speedMs?: number }) {
-  const kmh = (() => {
+  // rawKmh: this tick's converted speed (>=1 km/h or 0)
+  const rawKmh = (() => {
     if (typeof speedMs !== "number" || !Number.isFinite(speedMs) || speedMs < 0) return 0;
     const v = speedMs * 3.6;
     return v < 1 ? 0 : Math.round(v);
   })();
+
+  // displayKmh: what the UI actually shows. Starts at 0 and only falls to 0
+  // after we've held the last positive value for SPEEDO_HOLD_MS.
+  const [displayKmh, setDisplayKmh] = useState(0);
+  // Last non-zero reading + timestamp — survives across renders.
+  const lastNonZeroRef = useRef<{ value: number; ts: number }>({ value: 0, ts: 0 });
+  // Pending fall-to-zero timer so we can cancel if speed comes back.
+  const fallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    // Always clear any in-flight fall-to-zero whenever a new reading arrives.
+    if (fallTimerRef.current) {
+      clearTimeout(fallTimerRef.current);
+      fallTimerRef.current = null;
+    }
+
+    if (rawKmh > 0) {
+      // Live speed — show immediately, remember it.
+      lastNonZeroRef.current = { value: rawKmh, ts: Date.now() };
+      setDisplayKmh(rawKmh);
+      return;
+    }
+
+    // rawKmh === 0. If we have a recent positive reading, hold it briefly.
+    const last = lastNonZeroRef.current;
+    const elapsed = Date.now() - last.ts;
+    if (last.value > 0 && elapsed < SPEEDO_HOLD_MS) {
+      // Keep showing the last value — don't update state, just schedule fall.
+      const remaining = SPEEDO_HOLD_MS - elapsed;
+      fallTimerRef.current = setTimeout(() => {
+        // Only fall to 0 if we haven't seen a positive reading since.
+        if (lastNonZeroRef.current.ts === last.ts) {
+          setDisplayKmh(0);
+        }
+      }, remaining);
+    } else {
+      // No recent positive reading — drop to 0 immediately.
+      setDisplayKmh(0);
+    }
+  }, [rawKmh]);
+
+  // Cleanup the timer on unmount.
+  useEffect(() => () => {
+    if (fallTimerRef.current) clearTimeout(fallTimerRef.current);
+  }, []);
+
   return (
     <View style={styles.speedHudWrap} pointerEvents="none">
       <Glass radius={14} style={styles.speedHud}>
         <View style={styles.speedHudInner}>
-          <Text style={styles.speedHudValue}>{kmh}</Text>
+          <Text style={styles.speedHudValue}>{displayKmh}</Text>
           <Text style={styles.speedHudUnit}>KM/H</Text>
         </View>
       </Glass>

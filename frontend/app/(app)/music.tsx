@@ -9,6 +9,53 @@ import { startLogin, getStoredToken, logout, spotify, isConfigured } from "../..
 
 type Source = "spotify" | "apple" | "soundcloud";
 
+/**
+ * Deep-link to a music app on the user's phone.
+ *
+ * Tries the native URL scheme first (which jumps straight to the installed app
+ * with no browser intermediary — fixing the "black Safari blink" the user was
+ * seeing in the field), then falls back to the public https URL if the scheme
+ * isn't registered (app not installed).
+ *
+ * Native schemes per platform:
+ *   Apple Music (iOS)   → music://             (Music app)
+ *   Apple Music (web)   → https://music.apple.com
+ *   Spotify  (iOS/Android) → spotify://         (Spotify app)
+ *   Spotify  (fallback) → https://open.spotify.com
+ *   SoundCloud          → soundcloud://         (SoundCloud app)
+ *   SoundCloud (fallback) → https://soundcloud.com
+ *
+ * Optional `path` param (e.g. a track URI) is appended to the scheme/URL.
+ */
+async function deepLinkToMusicApp(target: Source, path?: string): Promise<boolean> {
+  const candidates: Record<Source, string[]> = {
+    apple: Platform.OS === "ios"
+      ? [`music://${path ?? ""}`, `itms-music://${path ?? ""}`, `https://music.apple.com${path ? "/" + path : ""}`]
+      : [`https://music.apple.com${path ? "/" + path : ""}`],
+    spotify: [`spotify://${path ?? ""}`, `https://open.spotify.com${path ? "/" + path : ""}`],
+    soundcloud: [`soundcloud://${path ?? ""}`, `https://soundcloud.com${path ? "/" + path : ""}`],
+  };
+  for (const url of candidates[target]) {
+    try {
+      const ok = await Linking.canOpenURL(url);
+      if (ok) {
+        await Linking.openURL(url);
+        return true;
+      }
+    } catch {
+      // canOpenURL throws on iOS for unregistered schemes — try next candidate.
+    }
+  }
+  // Last-resort: just try the https fallback even if canOpenURL said no
+  // (some Android setups under-report support).
+  try {
+    await Linking.openURL(candidates[target][candidates[target].length - 1]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export default function MusicScreen() {
   const [source, setSource] = useState<Source>("spotify");
 
@@ -42,11 +89,18 @@ export default function MusicScreen() {
 }
 
 function ComingSoon({ name, reason }: { name: string; reason: string }) {
-  const linkMap: Record<string, string> = {
-    "Apple Music": "https://music.apple.com",
-    "SoundCloud": "https://soundcloud.com",
+  // Map the human label back to the Source key used by deepLinkToMusicApp.
+  // Deep-link directly to the installed app so the user lands inside Apple
+  // Music / SoundCloud immediately rather than a black Safari blink.
+  const target: Source | null =
+    name === "Apple Music" ? "apple" : name === "SoundCloud" ? "soundcloud" : null;
+  const handleOpen = async () => {
+    if (!target) return;
+    const opened = await deepLinkToMusicApp(target);
+    if (!opened) {
+      Alert.alert("Couldn't open", `${name} isn't available on this device. Install it from the App Store.`);
+    }
   };
-  const url = linkMap[name];
   return (
     <View style={styles.comingWrap}>
       <Glass radius={24}>
@@ -56,15 +110,15 @@ function ComingSoon({ name, reason }: { name: string; reason: string }) {
           </View>
           <Text style={styles.comingTitle}>{name}</Text>
           <Text style={styles.comingSub}>{reason}</Text>
-          {url && (
+          {target && (
             <TouchableOpacity
               testID={`open-${name.toLowerCase().replace(/\s/g, '-')}`}
-              onPress={async () => { try { await Linking.openURL(url); } catch {} }}
+              onPress={handleOpen}
               style={styles.openBtn}
               activeOpacity={0.85}
             >
               <Ionicons name="open-outline" size={16} color="#fff" />
-              <Text style={styles.openBtnText}>Open {name}</Text>
+              <Text style={styles.openBtnText}>Open in {name}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -168,7 +222,11 @@ function SpotifyPanel() {
       {tracks.length === 0 && !loading && <Text style={styles.empty}>No top tracks yet — listen to Spotify a bit to build this list.</Text>}
       {tracks.map((t) => (
         <Glass key={t.id} radius={14} style={{ marginBottom: 8 }}>
-          <TouchableOpacity testID={`track-${t.id}`} style={styles.row} onPress={() => Linking.openURL(t.external_urls?.spotify || "")}>
+          <TouchableOpacity
+            testID={`track-${t.id}`}
+            style={styles.row}
+            onPress={() => openSpotifyExternal(t.external_urls?.spotify, t.uri)}
+          >
             <Image source={{ uri: t.album?.images?.[2]?.url || t.album?.images?.[0]?.url }} style={styles.thumb} />
             <View style={{ flex: 1 }}>
               <Text style={styles.rowTitle} numberOfLines={1}>{t.name}</Text>
@@ -183,7 +241,11 @@ function SpotifyPanel() {
       {playlists.length === 0 && !loading && <Text style={styles.empty}>No playlists yet.</Text>}
       {playlists.map((p) => (
         <Glass key={p.id} radius={14} style={{ marginBottom: 8 }}>
-          <TouchableOpacity testID={`playlist-${p.id}`} style={styles.row} onPress={() => Linking.openURL(p.external_urls?.spotify || "")}>
+          <TouchableOpacity
+            testID={`playlist-${p.id}`}
+            style={styles.row}
+            onPress={() => openSpotifyExternal(p.external_urls?.spotify, p.uri)}
+          >
             <Image source={{ uri: p.images?.[0]?.url }} style={styles.thumb} />
             <View style={{ flex: 1 }}>
               <Text style={styles.rowTitle} numberOfLines={1}>{p.name}</Text>
@@ -195,6 +257,47 @@ function SpotifyPanel() {
       ))}
     </ScrollView>
   );
+}
+
+/**
+ * Open a Spotify entity (track / playlist) in the native Spotify app first,
+ * fall back to https://open.spotify.com.
+ *
+ * Spotify URIs look like  spotify:track:abc123  or  spotify:playlist:xyz789.
+ * Tapping a https://open.spotify.com URL on iOS shows a black Safari blink
+ * before the Universal Link kicks in (and sometimes never does on Expo Go).
+ * Calling spotify://<uri-tail> opens the app instantly when installed.
+ */
+async function openSpotifyExternal(httpsUrl?: string, uri?: string) {
+  // Convert "spotify:track:abc" → "track/abc" for both the deep-link path and
+  // the https fallback (open.spotify.com/track/abc).
+  let pathTail = "";
+  if (uri && uri.startsWith("spotify:")) {
+    const parts = uri.split(":"); // ["spotify", "track", "abc"]
+    if (parts.length >= 3) pathTail = `${parts[1]}/${parts.slice(2).join(":")}`;
+  } else if (httpsUrl) {
+    // Strip the https://open.spotify.com/ prefix to get the same tail shape.
+    pathTail = httpsUrl.replace(/^https?:\/\/open\.spotify\.com\//, "");
+  }
+
+  const candidates = [
+    pathTail ? `spotify://${pathTail}` : `spotify://`,
+    httpsUrl || (pathTail ? `https://open.spotify.com/${pathTail}` : "https://open.spotify.com"),
+  ];
+  for (const url of candidates) {
+    if (!url) continue;
+    try {
+      const ok = await Linking.canOpenURL(url);
+      if (ok) {
+        await Linking.openURL(url);
+        return;
+      }
+    } catch {
+      // ignore — try next
+    }
+  }
+  // Final fallback — best-effort https
+  try { await Linking.openURL(candidates[1] || "https://open.spotify.com"); } catch {}
 }
 
 const styles = StyleSheet.create({

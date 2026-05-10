@@ -174,23 +174,32 @@ export function useTurnByTurn(
   const announcedRef = useRef<Set<string>>(new Set());
   const lastSpokeRef = useRef<number>(0);
   const lastOffRouteAtRef = useRef<number>(0);
+  // Locks the "Starting navigation" announcement to ONCE per unique route polyline.
+  // Without this, any re-render that reruns the activate-effect (e.g. peer presence
+  // tick changing a parent prop) re-speaks the start-of-route greeting mid-drive.
+  // Holds the polyline string of the route we've already announced; null = none yet.
+  const startAnnouncedForRouteRef = useRef<string | null>(null);
 
   // Reset when route changes or nav stops
   useEffect(() => {
     if (!active) {
       Speech.stop();
       announcedRef.current.clear();
+      startAnnouncedForRouteRef.current = null; // re-arm for next route
       setState({ active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0 });
       return;
     }
     announcedRef.current.clear();
     setState((s) => ({ ...s, active: true, stepIndex: 0 }));
-    // Initial announcement
-    if (route?.steps?.[0] && !options?.mute) {
+    // Initial announcement — guarded so it only speaks once per unique polyline.
+    const polyKey = route?.polyline ?? null;
+    const alreadyAnnounced = polyKey != null && startAnnouncedForRouteRef.current === polyKey;
+    if (route?.steps?.[0] && !options?.mute && !alreadyAnnounced) {
       const verb = maneuverVerb(route.steps[0].maneuver);
       const inst = route.steps[0].html;
       speak(`Starting navigation. ${verb} ${inst.length > 80 ? "" : "to " + stripDirections(inst)}. Total ${route.duration_text}.`);
       lastSpokeRef.current = Date.now();
+      startAnnouncedForRouteRef.current = polyKey; // lock for this route
     }
   }, [active, route?.polyline]);
 

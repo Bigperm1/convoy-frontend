@@ -267,6 +267,8 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
             <Directions origin={user} destination={destination} onRoute={onRoute} encodedPolyline={encodedPolyline} />
           )}
           <Recenter target={followUser ? user : center} />
+          {/* Always-on live Google traffic overlay (green/yellow/red flow lines) */}
+          <TrafficLayer />
           {/* Chase-cam: 3D pitch + heading rotation + dynamic zoom while turn-by-turn nav is active */}
           {navigationActive && (
             <ChaseCam user={user} userSpeedMs={userSpeedMs} />
@@ -371,6 +373,27 @@ function Directions({ origin, destination, onRoute, encodedPolyline }: { origin:
 function Recenter({ target }: { target: LatLng }) {
   const map = useMap();
   useEffect(() => { if (map && target) map.panTo(target); }, [map, target.lat, target.lng]);
+  return null;
+}
+
+/**
+ * Always-on Google Live Traffic overlay for the web map.
+ *
+ * @vis.gl/react-google-maps doesn't ship a <TrafficLayer/> wrapper, so we
+ * imperatively instantiate `new google.maps.TrafficLayer()` once and bind it
+ * to the map. Cleanup detaches it. This shows real-time green/yellow/red
+ * speed-of-flow lines on roads with available traffic data.
+ */
+function TrafficLayer() {
+  const map = useMap();
+  useEffect(() => {
+    if (!map || !(window as any).google?.maps?.TrafficLayer) return;
+    const layer = new (window as any).google.maps.TrafficLayer();
+    layer.setMap(map);
+    return () => {
+      try { layer.setMap(null); } catch {}
+    };
+  }, [map]);
   return null;
 }
 

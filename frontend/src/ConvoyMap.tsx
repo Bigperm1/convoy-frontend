@@ -209,6 +209,10 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
         showsCompass={!navigationActive}
         rotateEnabled
         pitchEnabled
+        // Live Google traffic overlay — green/yellow/red speed-of-flow lines on
+        // the map at all times (not just during navigation). Uses Google's
+        // current traffic data directly via react-native-maps.
+        showsTraffic
       >
         <Marker coordinate={{ latitude: user.lat, longitude: user.lng }} anchor={{ x: 0.5, y: 0.5 }} zIndex={10}>
           <View style={styles.youDot}><Ionicons name="navigate" size={16} color="#fff" /></View>

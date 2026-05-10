@@ -24,6 +24,11 @@ export type NavRoute = {
   duration_text: string;
   distance_m: number;
   duration_s: number;
+  // Traffic-aware ETA fields, populated when the Directions request was made
+  // with `departure_time=now`. `_text` is the pretty human string ("23 mins").
+  // Falls back to undefined on routes where Google didn't return traffic data.
+  duration_in_traffic_text?: string;
+  duration_in_traffic_s?: number;
   steps: NavStep[];
 };
 
@@ -103,6 +108,11 @@ export async function fetchDirections(
       url.searchParams.set("destination", `${destination.lat},${destination.lng}`);
       url.searchParams.set("mode", "driving");
       url.searchParams.set("alternatives", "true");
+      // Traffic-aware ETAs: telling Directions API the trip starts NOW makes
+      // it return `duration_in_traffic` per route so we can rank alternates
+      // by current congestion (not free-flow time).
+      url.searchParams.set("departure_time", "now");
+      url.searchParams.set("traffic_model", "best_guess");
       const avoidParts: string[] = [];
       if (avoid?.tolls) avoidParts.push("tolls");
       if (avoid?.highways) avoidParts.push("highways");
@@ -127,6 +137,10 @@ export async function fetchDirections(
         duration_text: leg.duration?.text || "",
         distance_m: leg.distance?.value || 0,
         duration_s: leg.duration?.value || 0,
+        // duration_in_traffic comes back from Google when departure_time=now
+        // was sent. May be missing on routes Google can't traffic-estimate.
+        duration_in_traffic_text: leg.duration_in_traffic?.text,
+        duration_in_traffic_s: leg.duration_in_traffic?.value,
         steps: (leg.steps || []).map((s: any): NavStep => ({
           html: (s.html_instructions || "").replace(/<[^>]+>/g, ""),
           distance_text: s.distance?.text || "",

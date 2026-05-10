@@ -725,11 +725,15 @@ export default function MapScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Alternates picker — tappable chips when there are >1 routes */}
+          {/* Alternates picker — tappable chips when there are >1 routes.
+              Shows traffic-aware ETA (`duration_in_traffic_text`) when available
+              from Google's Directions API; falls back to free-flow time. */}
           {routes.length > 1 && (
             <View style={styles.altsRow}>
               {routes.map((r, i) => {
                 const sel = i === selectedRouteIndex;
+                const eta = r.duration_in_traffic_text || r.duration_text;
+                const inTraffic = !!r.duration_in_traffic_text && r.duration_in_traffic_s !== r.duration_s;
                 return (
                   <TouchableOpacity
                     key={i}
@@ -738,10 +742,13 @@ export default function MapScreen() {
                     activeOpacity={0.85}
                     style={[styles.altChip, sel && styles.altChipActive]}
                   >
-                    <View style={[styles.altDot, { backgroundColor: sel ? "#0A84FF" : "#8E8E93" }]} />
+                    <View style={[styles.altDot, { backgroundColor: sel ? "#0A84FF" : inTraffic ? "#FF9F0A" : "#8E8E93" }]} />
                     <View>
-                      <Text style={[styles.altDur, sel && { color: COLORS.text }]}>{r.duration_text}</Text>
-                      <Text style={styles.altSum} numberOfLines={1}>{r.summary || (i === 0 ? "Fastest" : `Alt ${i}`)}</Text>
+                      <Text style={[styles.altDur, sel && { color: COLORS.text }]}>{eta}</Text>
+                      <Text style={styles.altSum} numberOfLines={1}>
+                        {r.summary || (i === 0 ? "Fastest" : `Alt ${i}`)}
+                        {inTraffic ? " · in traffic" : ""}
+                      </Text>
                     </View>
                   </TouchableOpacity>
                 );

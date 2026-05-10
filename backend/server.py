@@ -728,6 +728,11 @@ async def directions_proxy(
         "destination": f"{dest_lat},{dest_lng}",
         "mode": "driving",
         "alternatives": "true",
+        # Traffic-aware ETAs — `departure_time=now` makes Google return
+        # `duration_in_traffic` per route so the client can rank alternatives
+        # by current congestion (not free-flow time).
+        "departure_time": "now",
+        "traffic_model": "best_guess",
         "key": key,
     }
     if avoid_parts:

@@ -85,6 +85,9 @@ type Props = {
   navigationActive?: boolean;
   // GPS speed in m/s (from expo-location). Drives chase-cam zoom interpolation.
   userSpeedMs?: number;
+  // Fired on a tap of the empty map area (NOT on a marker/peer/hazard).
+  // Used by the parent to dismiss transient overlays like the search UI.
+  onMapPress?: () => void;
   onHazardPress: (h: Hazard) => void;
   onPeerPress?: (p: Peer) => void;
   onExternalAlertPress?: (a: ExternalAlert) => void;
@@ -134,7 +137,7 @@ function decodePolyline(encoded: string): LatLng[] {
   return points;
 }
 
-export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, onHazardPress, onPeerPress, onExternalAlertPress }: Props) {
+export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, onMapPress, onHazardPress, onPeerPress, onExternalAlertPress }: Props) {
   // Ref to the underlying react-native-maps MapView so we can drive the camera
   // (pitch + heading + zoom) directly during turn-by-turn navigation.
   const mapRef = useRef<any>(null);
@@ -213,6 +216,9 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
         // the map at all times (not just during navigation). Uses Google's
         // current traffic data directly via react-native-maps.
         showsTraffic
+        // Empty-map tap → bubble up to parent (close search UI etc).
+        // Marker / Polyline taps don't trigger onPress, so this is safe.
+        onPress={onMapPress ? () => onMapPress() : undefined}
       >
         <Marker coordinate={{ latitude: user.lat, longitude: user.lng }} anchor={{ x: 0.5, y: 0.5 }} zIndex={10}>
           <View style={styles.youDot}><Ionicons name="navigate" size={16} color="#fff" /></View>

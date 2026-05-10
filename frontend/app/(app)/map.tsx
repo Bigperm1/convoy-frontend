@@ -635,6 +635,9 @@ export default function MapScreen() {
         // by-turn nav is actively running. Pitch defaults to 45° in ConvoyMap.
         navigationActive={navMode === "turn-by-turn" && tbt.active}
         userSpeedMs={coords?.speed}
+        // Tap on empty map → close any open search overlay so the driver can
+        // peek at the map fullscreen mid-trip without ending navigation.
+        onMapPress={() => { if (searchVisible) setSearchVisible(false); }}
         onHazardPress={(h) => setSelected(h)}
         onPeerPress={(p) => {
           // Find the matching presence record (has online_at, etc.) — fallback to bare peer
@@ -645,7 +648,11 @@ export default function MapScreen() {
         onRoute={setRoute}
       />
 
-      <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
+      {/* Header card + search bar — both hidden in full-screen map mode
+          (i.e. when searchVisible=false). The 🔍 FAB below is the only
+          way back to them, keeping the entire screen for the map. */}
+      {searchVisible && (
+        <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
         <Glass radius={20} style={{ marginHorizontal: 12, marginBottom: 8 }}>
           <View style={styles.topRow}>
             <Image source={require("../../assets/images/brand-mark.png")} style={styles.headerMark} resizeMode="contain" />
@@ -686,23 +693,23 @@ export default function MapScreen() {
           </View>
         ))}
       </SafeAreaView>
-
-      {/* Floating magnifier FAB — only renders when the search bar is hidden.
-          Re-shows the destination search so the driver can change course
-          mid-trip without ending navigation. Tucked top-right under the
-          header buttons so it doesn't fight the chase-cam. */}
-      {!searchVisible && (
-        <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.searchFabWrap}>
-          <TouchableOpacity
-            testID="show-search-fab"
-            onPress={() => setSearchVisible(true)}
-            activeOpacity={0.85}
-            style={styles.searchFab}
-          >
-            <Ionicons name="search" size={20} color="#fff" />
-          </TouchableOpacity>
-        </SafeAreaView>
       )}
+
+      {/* Magnifier ⇄ Close toggle FAB.
+          - When search is hidden → 🔍 (tap to reveal header + search)
+          - When search is shown  → ✕ (tap to dismiss)
+          Always rendered so the driver always has a one-tap way to flip
+          between fullscreen-map and search modes. */}
+      <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.searchFabWrap}>
+        <TouchableOpacity
+          testID="show-search-fab"
+          onPress={() => setSearchVisible((v) => !v)}
+          activeOpacity={0.85}
+          style={styles.searchFab}
+        >
+          <Ionicons name={searchVisible ? "close" : "search"} size={20} color="#fff" />
+        </TouchableOpacity>
+      </SafeAreaView>
 
       {/* ===== Community Routes — horizontal chip strip (visible when there are shared cruises) ===== */}
       {communityRoutes.length > 0 && navMode === "preview" && !destination && (
@@ -900,24 +907,27 @@ export default function MapScreen() {
               </Glass>
             </SafeAreaView>
 
-            {/* Bottom ETA + End bar */}
-            <Glass radius={20} style={styles.navBottomCard}>
-              <View style={styles.navBottomRow}>
-                <View style={styles.etaBlock}>
-                  <Text style={styles.etaBig}>{fmtEtaSec(tbt.etaSeconds)}</Text>
-                  <Text style={styles.etaLabel}>ETA</Text>
-                </View>
-                <View style={styles.etaDivider} />
-                <View style={styles.etaBlock}>
-                  <Text style={styles.etaBig}>{fmtDistanceM(tbt.distanceRemainingM)}</Text>
-                  <Text style={styles.etaLabel}>Remaining</Text>
-                </View>
-                <TouchableOpacity testID="end-nav" onPress={endNav} style={styles.endBtn} activeOpacity={0.85}>
-                  <Ionicons name="close" size={20} color="#fff" />
-                  <Text style={styles.endBtnText}>End</Text>
-                </TouchableOpacity>
+            {/* Bottom-right Trip Data pill — ETA stacked over Remaining,
+                tucked above the right-most "Hub" footer tab so the chase-cam
+                stays clear in the center. The End-nav button sits separately
+                on the bottom-left so it's never accidentally tapped. */}
+            <Glass radius={16} style={styles.tripDataRight}>
+              <View style={styles.tripDataInner}>
+                <Text style={styles.tripDataValue}>{fmtEtaSec(tbt.etaSeconds)}</Text>
+                <Text style={styles.tripDataLabel}>ETA</Text>
+                <View style={styles.tripDataDivider} />
+                <Text style={styles.tripDataValue}>{fmtDistanceM(tbt.distanceRemainingM)}</Text>
+                <Text style={styles.tripDataLabel}>Remaining</Text>
               </View>
             </Glass>
+
+            {/* End-nav button — small floating red pill bottom-LEFT, just
+                above the speedometer. Stays accessible without crowding the
+                trip data on the right. */}
+            <TouchableOpacity testID="end-nav" onPress={endNav} style={styles.endNavFab} activeOpacity={0.85}>
+              <Ionicons name="close" size={18} color="#fff" />
+              <Text style={styles.endNavFabText}>End</Text>
+            </TouchableOpacity>
           </>
         );
       })()}
@@ -1177,8 +1187,10 @@ const styles = StyleSheet.create({
   stepDist: { color: COLORS.textDim, fontSize: 12 },
 
   // ---- Turn-by-turn nav overlays ----
+  // Turn-by-turn top maneuver banner. `marginTop: 8` adds clearance below the
+  // status bar / Dynamic Island so the banner doesn't crowd the camera cutout.
   navTopWrap: { position: "absolute", top: 0, left: 0, right: 0 },
-  navTopCard: { marginHorizontal: 12, marginTop: 4 },
+  navTopCard: { marginHorizontal: 12, marginTop: 12 },
   navTopRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
   maneuverBig: { width: 64, height: 64, borderRadius: 16, backgroundColor: "#0A84FF", alignItems: "center", justifyContent: "center" },
   navDist: { color: COLORS.text, fontSize: 26, fontWeight: "700", letterSpacing: -0.5 },
@@ -1187,6 +1199,44 @@ const styles = StyleSheet.create({
   navBottomCard: { position: "absolute", left: 12, right: 12, bottom: 110 },
   navBottomRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 14 },
   etaBlock: { alignItems: "flex-start" },
+
+  // Bottom-RIGHT trip data pill (turn-by-turn). ETA stacked over Remaining,
+  // tucked just above the rightmost "Hub" footer tab. Compact width so it
+  // doesn't span the screen — center stays clear for the chase view.
+  tripDataRight: {
+    position: "absolute",
+    right: 12,
+    bottom: 100,
+    zIndex: 6,
+  },
+  tripDataInner: {
+    minWidth: 110,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: "flex-end",
+  },
+  tripDataValue: { color: COLORS.text, fontWeight: "800", fontSize: 18, letterSpacing: -0.3, lineHeight: 22 },
+  tripDataLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: "700", letterSpacing: 0.6, marginTop: -1 },
+  tripDataDivider: { height: 1, alignSelf: "stretch", backgroundColor: "rgba(255,255,255,0.08)", marginVertical: 6 },
+
+  // End-nav red pill — bottom-LEFT just above the speedometer. Small footprint
+  // so the speedometer + Map tab icon are still legible underneath.
+  endNavFab: {
+    position: "absolute",
+    left: 12,
+    bottom: 158,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    backgroundColor: "#FF3B30",
+    zIndex: 7,
+    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+  },
+  endNavFabText: { color: "#fff", fontWeight: "700", fontSize: 13, letterSpacing: 0.2 },
   etaBig: { color: COLORS.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.4 },
   etaLabel: { color: COLORS.textDim, fontSize: 11, marginTop: 2, letterSpacing: 0.4 },
   etaDivider: { width: StyleSheet.hairlineWidth, height: 36, backgroundColor: COLORS.hairline },
@@ -1242,17 +1292,12 @@ const styles = StyleSheet.create({
   // tucks 67% of the square off-screen when inactive (33% peeking) and lands at
   // x=0 when active. Square corners on the right edge, rounded on the left edge
   // so it reads as a drawer pull rather than a button.
-  // Speedometer HUD — bottom-CENTER glass pill above the floating mic / tab bar.
-  // Previous layout (bottom-left at 130) covered the chase-cam's 3D depth cone;
-  // now it sits centered above the action buttons so the middle of the map is
-  // clear for the perspective view. `pointerEvents="none"` upstream means it
-  // never blocks the underlying map gestures.
+  // Speedometer HUD — bottom-LEFT corner above the "Map" footer tab icon.
+  // Placed flush against the left edge so the chase-cam center is fully open.
   speedHudWrap: {
     position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 180,           // ~tab bar (60) + mic FAB (60) + safe-area + breathing room
-    alignItems: "center",  // centers the inner pill horizontally
+    left: 12,
+    bottom: 100,           // tab bar (~85) + small gap so it sits above the Map icon
     zIndex: 6,
   },
   speedHud: { },

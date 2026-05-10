@@ -29,6 +29,8 @@ type Props = {
   // tilt 45° (Vector mode only — no-op on Raster), and rotates to user.heading.
   navigationActive?: boolean;
   userSpeedMs?: number;
+  // Empty-map click → bubble up so the parent can dismiss search overlays etc.
+  onMapPress?: () => void;
   onHazardPress: (h: Hazard) => void;
   onPeerPress?: (p: Peer) => void;
   onExternalAlertPress?: (a: ExternalAlert) => void;
@@ -205,7 +207,7 @@ function communityPin(color: string, glyph: string, gold: boolean) {
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
 
-export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
+export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, onMapPress, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
   if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -218,6 +220,9 @@ export default function ConvoyMap({ center, user, peers, leaderUserId, hazards, 
           gestureHandling="greedy"
           disableDefaultUI={true}
           zoomControl={true}
+          // Empty-map click → bubble up to parent (close search etc).
+          // @vis.gl/react-google-maps fires onClick only for the basemap, not POIs.
+          onClick={onMapPress ? (() => onMapPress()) : undefined}
         >
           <Marker position={user} icon={dotIcon(COLORS.primary, "▲", 36)} zIndex={1000} />
           {peers.map((p) => {

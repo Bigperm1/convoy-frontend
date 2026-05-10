@@ -1,7 +1,7 @@
 // Cross-platform Places Autocomplete using the Places (New) REST endpoint on native,
 // and the JS Maps lib (already loaded by ConvoyMap) on web.
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform } from "react-native";
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform, ScrollView, Keyboard } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
 import { geocodeQuery } from "./voiceBus";
@@ -192,14 +192,21 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
         )}
       </View>
       {open && suggestions.length > 0 && (
-        <View style={styles.list}>
+        <ScrollView
+          // Swipe-to-dismiss-keyboard: a downward drag in the suggestions list
+          // tells RN to drop the keyboard. Native = "on-drag", web ignores.
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          style={styles.list}
+          // List can grow up to ~5 rows; ScrollView hands off scrolling cleanly.
+        >
           {suggestions.map((s) => (
-            <TouchableOpacity key={s.place_id} testID={`sug-${s.place_id}`} style={styles.row} onPress={() => pick(s)}>
+            <TouchableOpacity key={s.place_id} testID={`sug-${s.place_id}`} style={styles.row} onPress={() => { Keyboard.dismiss(); pick(s); }}>
               <Ionicons name="location" size={16} color={COLORS.primary} />
               <Text style={styles.rowText} numberOfLines={1}>{s.description}</Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
       )}
     </View>
   );

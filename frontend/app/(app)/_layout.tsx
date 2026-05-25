@@ -72,27 +72,21 @@ export default function AppLayout() {
           tabBarButtonTestID: "tab-talk",
           tabBarIcon: ({ color, size }) => <Ionicons name="flash" size={size - 1} color={color} />,
         }} />
-        {/* Center elevated mic CTA — replaces the old "Drive" tab. Press-and-hold to record. */}
-        <Tabs.Screen
-          name="voice"
-          options={{
-            tabBarLabel: () => null,
-            tabBarIcon: () => null,
-            tabBarButton: () => <VoiceTabButton />,
-          }}
-        />
+        {/* Voice screen is no longer represented in the bottom tab bar — the
+            press-and-hold mic now lives inside the map's search bar (Google
+            Maps-style). We keep the route file registered with href:null so
+            any deep links into /voice still resolve without crashing. */}
+        <Tabs.Screen name="voice" options={{ href: null }} />
         <Tabs.Screen name="music" options={{
           tabBarLabel: "Music",
           tabBarActiveTintColor: "#FF453A",
           tabBarButtonTestID: "tab-music",
           tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" size={size - 2} color={color} />,
         }} />
-        <Tabs.Screen name="hub" options={{
-          tabBarLabel: "Hub",
-          tabBarActiveTintColor: "#FF9F0A",
-          tabBarButtonTestID: "tab-hub",
-          tabBarIcon: ({ color, size }) => <Ionicons name="people-circle" size={size - 1} color={color} />,
-        }} />
+        {/* Hub is now reached via the circular profile avatar on the right
+            edge of the map search bar (mirrors Google Maps). Hidden from the
+            bottom bar but still navigable via router.push("/(app)/hub"). */}
+        <Tabs.Screen name="hub" options={{ href: null }} />
         <Tabs.Screen name="settings" options={{ href: null }} />
         <Tabs.Screen name="drive-mode" options={{ href: null }} />
         <Tabs.Screen name="garage" options={{ href: null }} />

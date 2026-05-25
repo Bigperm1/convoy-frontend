@@ -1,10 +1,12 @@
 // Cross-platform Places Autocomplete using the Places (New) REST endpoint on native,
 // and the JS Maps lib (already loaded by ConvoyMap) on web.
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform, ScrollView, Keyboard, PanResponder } from "react-native";
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform, ScrollView, Keyboard, PanResponder, Animated, Easing, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
 import { geocodeQuery } from "./voiceBus";
+import { useVoice } from "./useVoice";
+import { useAuth } from "./auth";
 
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
 
@@ -14,6 +16,9 @@ type Props = {
   onSelect: (loc: { lat: number; lng: number; label: string }) => void;
   onClear?: () => void;
   initialValue?: string;
+  // Tapping the round profile avatar on the right of the bar opens whatever
+  // the consumer wants (typically the Hub screen).
+  onProfilePress?: () => void;
 };
 
 let _placesService: any = null;
@@ -80,7 +85,7 @@ async function placeDetailsRest(place_id: string): Promise<{ lat: number; lng: n
   } catch { return null; }
 }
 
-export default function DestinationSearch({ origin, onSelect, onClear, initialValue }: Props) {
+export default function DestinationSearch({ origin, onSelect, onClear, initialValue, onProfilePress }: Props) {
   const [text, setText] = useState(initialValue || "");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -146,6 +151,41 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
 
   const clear = () => { setText(""); setSuggestions([]); setOpen(false); onClear?.(); };
 
+  // --- In-bar mic (PTT) + profile avatar ---
+  // Press-and-hold the yellow mic to record a voice command. Same pipeline the
+  // old elevated tab-bar mic used: useVoice() → transcribe → voiceBus broadcast.
+  // The mic lives inside the search bar (Google Maps-style) and the round
+  // profile avatar sits at the very right of the bar.
+  const voice = useVoice();
+  const { user } = useAuth();
+  const micPulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (voice.recording) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(micPulse, { toValue: 1.18, duration: 420, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+          Animated.timing(micPulse, { toValue: 1.04, duration: 420, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+        ])
+      ).start();
+    } else {
+      micPulse.stopAnimation();
+      micPulse.setValue(1);
+    }
+  }, [voice.recording, micPulse]);
+  const onMicPressIn = async () => { await voice.start(); };
+  const onMicPressOut = async () => {
+    const uri = await voice.stop();
+    if (uri) await voice.transcribe(uri); // result broadcast on voiceBus → VoiceController banner + routing
+  };
+
+  // Profile avatar — for now everyone falls back to the generic person icon
+  // (the user model doesn't yet ship a stored avatar field on the server).
+  // The component is structured so that the day a user uploads a profile
+  // picture, only the conditional `avatarUri` needs to point at the new field.
+  const avatarUri: string | null = (user as any)?.avatar_b64
+    ? `data:image/jpeg;base64,${(user as any).avatar_b64}`
+    : null;
+
   // Enter-to-go fallback: if there's an autocomplete suggestion, pick the first;
   // otherwise free-form geocode the typed text. Also gives the destination
   // search a "press Enter / Go" affordance which works in headless tests.
@@ -188,21 +228,54 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           onSubmitEditing={submit}
           blurOnSubmit={false}
         />
-        {/* Always-visible Go button so users (and headless tests) can submit reliably.
-            No-ops on empty input. */}
-        <TouchableOpacity
-          testID="destination-go"
-          onPress={submit}
-          style={[styles.goBtn, !text.trim() && styles.goBtnDisabled]}
-          disabled={!text.trim()}
-        >
-          <Ionicons name="arrow-forward" size={18} color="#fff" />
-        </TouchableOpacity>
+        {/* Submit / clear — only shown when there's text in the field, so the
+            mic + avatar can occupy a stable position on the right at all times. */}
+        {!!text.trim() && (
+          <TouchableOpacity
+            testID="destination-go"
+            onPress={submit}
+            style={styles.goBtn}
+          >
+            <Ionicons name="arrow-forward" size={18} color="#fff" />
+          </TouchableOpacity>
+        )}
         {!!text && (
           <TouchableOpacity testID="destination-clear" onPress={clear}>
             <Ionicons name="close-circle" size={20} color={COLORS.textDim} />
           </TouchableOpacity>
         )}
+        {/* PTT mic — yellow circle, press-and-hold like Google Maps' voice
+            search. Pulses while recording so users have a clear visual cue. */}
+        <Animated.View style={{ transform: [{ scale: micPulse }] }}>
+          <TouchableOpacity
+            testID="search-mic"
+            onPressIn={onMicPressIn}
+            onPressOut={onMicPressOut}
+            activeOpacity={0.85}
+            style={[styles.micBtn, voice.recording && styles.micBtnRec]}
+          >
+            <Ionicons
+              name={voice.recording ? "radio" : "mic"}
+              size={16}
+              color={voice.recording ? "#fff" : "#1a1a1a"}
+            />
+          </TouchableOpacity>
+        </Animated.View>
+        {/* Profile avatar — opens the Hub screen (community / profile drawer).
+            Shows the user's avatar when available, otherwise a generic person
+            icon. Anchored to the right edge of the bar like Google Maps. */}
+        <TouchableOpacity
+          testID="search-profile"
+          onPress={onProfilePress}
+          activeOpacity={0.8}
+          style={styles.avatarBtn}
+        >
+          {avatarUri ? (
+            <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
+          ) : (
+            <Ionicons name="person" size={16} color="#fff" />
+          )}
+        </TouchableOpacity>
       </View>
       {open && suggestions.length > 0 && (
         <ScrollView
@@ -239,6 +312,27 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   goBtnDisabled: { opacity: 0.35 },
+  // Yellow PTT mic — sits inside the bar on the right, identical Convoy
+  // gold accent to the brand. Press-and-hold to record (see useVoice).
+  micBtn: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: "#FFC700",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.35)",
+  },
+  // When actively recording the mic flips to a hot red to mirror the legacy
+  // tab-bar mic's "now broadcasting" affordance.
+  micBtnRec: { backgroundColor: "#FF3B30", borderColor: "rgba(255,255,255,0.7)" },
+  // Profile avatar — round 30px button anchored to the right edge of the bar.
+  // Falls back to a generic person icon when the user has no uploaded photo.
+  avatarBtn: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: "rgba(118,118,128,0.55)",
+    alignItems: "center", justifyContent: "center",
+    overflow: "hidden",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.25)",
+  },
+  avatarImg: { width: 30, height: 30 },
   list: { backgroundColor: "rgba(28,28,30,0.96)", borderRadius: 12, marginTop: 8, borderWidth: 1, borderColor: COLORS.hairline, overflow: "hidden" },
   row: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12 },
   rowText: { color: COLORS.text, flex: 1, fontSize: 14 },

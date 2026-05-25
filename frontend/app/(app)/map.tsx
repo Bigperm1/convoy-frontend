@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -72,6 +72,15 @@ export default function MapScreen() {
   // search field doesn't cover the map. A small magnifying-glass FAB appears in
   // its place to bring it back when the driver wants to change course.
   const [searchVisible, setSearchVisible] = useState(true);
+  // Layers control state — driven by the new bottom-right Layers FAB.
+  // mapType:    "hybrid" = satellite + labels (default), "roadmap" = flat road view.
+  // showTraffic / showTransit / showHazards toggle their respective overlays.
+  // layersOpen drives the layers bottom sheet modal.
+  const [mapType, setMapType] = useState<"hybrid" | "roadmap">("hybrid");
+  const [showTraffic, setShowTraffic] = useState(true);
+  const [showTransit, setShowTransit] = useState(false);
+  const [showHazards, setShowHazards] = useState(true);
+  const [layersOpen, setLayersOpen] = useState(false);
   // Right-edge Navigation Action Drawer — peeked 80% off-screen by default
   // when turn-by-turn is engaged. Tap the visible 20% to expand and see the
   // current maneuver + End. Auto-collapses on tap-out / route end.
@@ -705,6 +714,11 @@ export default function MapScreen() {
         // chase-cam tilt + bearing. Defaults to "heading_up" so nav feels like
         // Waze/Google out of the box.
         mapView={settings.mapView}
+        // Layer controls — driven by the bottom-right Layers FAB.
+        mapType={mapType}
+        showTraffic={showTraffic}
+        showTransit={showTransit}
+        showHazards={showHazards}
         peers={peerList}
         leaderUserId={leaderUserId}
         hazards={visibleHazards}
@@ -809,6 +823,7 @@ export default function MapScreen() {
               origin={coords}
               onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
               onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
+              onProfilePress={() => router.push("/(app)/hub" as any)}
             />
           </View>
         ) : (
@@ -817,6 +832,7 @@ export default function MapScreen() {
               origin={coords}
               onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
               onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
+              onProfilePress={() => router.push("/(app)/hub" as any)}
             />
           </View>
         ))}
@@ -1092,7 +1108,118 @@ export default function MapScreen() {
         onClose={() => setSelectedPeer(null)}
         myCoords={coords}
       />
+
+      {/* ===== Bottom-right floating cluster — Layers + Directions =====
+          Layers FAB (top) opens a bottom sheet with map type & overlay
+          toggles. Directions FAB (bottom) opens the search bar (mirrors
+          Google Maps' teal turn-arrow FAB). Both are anchored above the
+          tab bar with explicit bottom-right margins so they never collide
+          with the speedometer HUD on the left. */}
+      <View pointerEvents="box-none" style={styles.fabStack}>
+        <TouchableOpacity
+          testID="layers-fab"
+          onPress={() => setLayersOpen(true)}
+          activeOpacity={0.85}
+          style={styles.fab}
+        >
+          <Ionicons name="layers" size={22} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          testID="directions-fab"
+          onPress={() => { setSearchVisible(true); }}
+          activeOpacity={0.85}
+          style={[styles.fab, styles.fabPrimary]}
+        >
+          <Ionicons name="navigate" size={22} color="#fff" />
+        </TouchableOpacity>
+      </View>
+
+      {/* ===== Layers bottom sheet =====
+          Half-screen modal with toggle rows for Satellite, Traffic, Transit,
+          Hazards, and a Waze deep-link action. Backdrop tap to dismiss. */}
+      <Modal
+        visible={layersOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setLayersOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={styles.sheetBackdrop}
+          onPress={() => setLayersOpen(false)}
+        >
+          <TouchableOpacity activeOpacity={1} style={styles.sheetCard} onPress={() => {}}>
+            <View style={styles.sheetGrip} />
+            <Text style={styles.sheetTitle}>Map layers</Text>
+
+            <LayerRow
+              icon="globe-outline" iconColor="#34C759" label="Satellite"
+              value={mapType === "hybrid"}
+              onToggle={(v) => setMapType(v ? "hybrid" : "roadmap")}
+            />
+            <LayerRow
+              icon="speedometer-outline" iconColor="#FF9F0A" label="Traffic"
+              value={showTraffic}
+              onToggle={setShowTraffic}
+            />
+            <LayerRow
+              icon="train-outline" iconColor="#0A84FF" label="Transit"
+              value={showTransit}
+              onToggle={setShowTransit}
+            />
+            <LayerRow
+              icon="warning-outline" iconColor="#FFC700" label="Hazards"
+              value={showHazards}
+              onToggle={setShowHazards}
+            />
+            <TouchableOpacity
+              testID="waze-deeplink"
+              onPress={() => {
+                // Waze deep-link: try the app URL first, fall back to web on web/no-app.
+                const target = coords ? `waze://?ll=${coords.lat},${coords.lng}&navigate=yes` : "waze://";
+                const fallback = "https://waze.com/ul";
+                Linking.canOpenURL(target).then((ok) => {
+                  Linking.openURL(ok ? target : fallback).catch(() => Linking.openURL(fallback));
+                }).catch(() => Linking.openURL(fallback));
+                setLayersOpen(false);
+              }}
+              style={styles.layerRow}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.layerIcon, { backgroundColor: "#33CCFF22" }]}>
+                <Ionicons name="open-outline" size={18} color="#33CCFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.layerLabel}>Open in Waze</Text>
+                <Text style={styles.layerSub}>Launches the Waze app for live community alerts</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={COLORS.textDim} />
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={() => setLayersOpen(false)} style={styles.sheetClose}>
+              <Text style={styles.sheetCloseText}>Done</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
+  );
+}
+
+// LayerRow — a single switch row in the Layers bottom sheet. Colored icon
+// chip + label/subtitle + native Switch. Tapping the row also toggles for
+// fat-finger friendliness while driving.
+function LayerRow({ icon, iconColor, label, value, onToggle }: {
+  icon: any; iconColor: string; label: string; value: boolean; onToggle: (v: boolean) => void;
+}) {
+  return (
+    <TouchableOpacity activeOpacity={0.7} onPress={() => onToggle(!value)} style={styles.layerRow}>
+      <View style={[styles.layerIcon, { backgroundColor: iconColor + "22" }]}>
+        <Ionicons name={icon} size={18} color={iconColor} />
+      </View>
+      <Text style={[styles.layerLabel, { flex: 1 }]}>{label}</Text>
+      <Switch value={value} onValueChange={onToggle} trackColor={{ false: "#3A3A3C", true: iconColor + "88" }} thumbColor={value ? iconColor : "#f4f3f4"} />
+    </TouchableOpacity>
   );
 }
 
@@ -1786,4 +1913,42 @@ const styles = StyleSheet.create({
   routeToastSub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
   routeToastBtn: { backgroundColor: COLORS.warning, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10 },
   routeToastBtnText: { color: "#000", fontWeight: "700", fontSize: 12, letterSpacing: 0.3 },
+  // ===== Bottom-right floating FAB stack — Layers (top) + Directions (bottom).
+  // Mirrors Google Maps' rounded-square teal/dark layer buttons. Anchored
+  // with explicit bottom-right margins so they sit comfortably above the tab
+  // bar without colliding with the speedometer HUD on the bottom-left.
+  fabStack: {
+    position: "absolute",
+    right: 16,
+    bottom: 120,                 // above tab bar + speedometer HUD baseline
+    gap: 10,
+    alignItems: "center",
+  },
+  fab: {
+    width: 52, height: 52,
+    borderRadius: 14,
+    backgroundColor: "rgba(28,28,30,0.92)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
+    shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+  },
+  // Directions = primary action → Convoy blue/teal accent.
+  fabPrimary: { backgroundColor: "rgba(10,132,255,0.92)", borderColor: "rgba(255,255,255,0.28)" },
+  // ===== Layers bottom sheet =====
+  sheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  sheetCard: {
+    backgroundColor: "#15171A",
+    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28,
+    borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    borderTopWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)",
+  },
+  sheetGrip: { width: 38, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.25)", alignSelf: "center", marginBottom: 14 },
+  sheetTitle: { color: COLORS.text, fontSize: 18, fontWeight: "700", marginBottom: 12, letterSpacing: -0.2 },
+  layerRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 },
+  layerIcon: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  layerLabel: { color: COLORS.text, fontSize: 15, fontWeight: "600" },
+  layerSub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
+  sheetClose: { marginTop: 14, alignSelf: "center", paddingHorizontal: 22, paddingVertical: 10, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.10)" },
+  sheetCloseText: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
 });

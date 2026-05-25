@@ -45,6 +45,11 @@ type Props = {
   // "heading_up" (chase cam, tilt+rotate). "north_up" forces tilt=0 and
   // bearing=0 for a classic flat top-down feel.
   mapView?: "heading_up" | "north_up";
+  // Layer controls driven by the Layers FAB bottom sheet.
+  mapType?: "hybrid" | "roadmap";
+  showTraffic?: boolean;
+  showTransit?: boolean;
+  showHazards?: boolean;
   peers: Peer[];
   leaderUserId?: string | null;
   hazards: Hazard[];
@@ -295,7 +300,7 @@ function MapSkeleton() {
   );
 }
 
-function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", onMapPress, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
+function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", mapType = "hybrid", showTraffic = true, showTransit = false, showHazards = true, onMapPress, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
   // Authoritative "is the SDK ready to touch?" flag — flips to true ONLY after
   // window.google.maps has been imported, authenticated, and exposed on the
   // window. We refuse to mount <Map /> at all until then, which is the
@@ -308,7 +313,7 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
       style={{ width: "100%", height: "100%", minHeight: 300 }}
       defaultCenter={center}
       defaultZoom={followUser ? 17 : 15}
-      mapTypeId="hybrid"
+      mapTypeId={mapType}
       gestureHandling="greedy"
       disableDefaultUI={true}
       zoomControl={true}
@@ -350,7 +355,7 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
               />
             );
           })}
-          {hazards.map((h) => (
+          {showHazards && hazards.map((h) => (
             <Marker key={`u-${h.id}`} position={h} icon={communityPin(hazardColor(h.kind), HAZARD_GLYPHS[h.kind] || "!", highlightConvoy)} onClick={() => onHazardPress(h)} title={`${h.kind} · by ${h.reporter_handle || "anon"}${highlightConvoy ? " · CONVOY" : ""}`} />
           ))}
           {externalAlerts.map((a) => (
@@ -375,8 +380,10 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
             <Directions origin={user} destination={destination} onRoute={onRoute} encodedPolyline={encodedPolyline} />
           )}
           <Recenter target={followUser ? user : center} />
-          {/* Always-on live Google traffic overlay (green/yellow/red flow lines) */}
-          <TrafficLayer />
+          {/* Live traffic overlay (green/yellow/red flow lines) — togglable via Layers FAB */}
+          {showTraffic && <TrafficLayer />}
+          {/* Public transit overlay — togglable via Layers FAB */}
+          {showTransit && <TransitLayer />}
           {/* Chase-cam: 3D pitch + heading rotation + dynamic zoom while turn-by-turn nav is active.
               When `mapView` is "north_up" the chase cam stays anchored to the
               user but tilt and bearing are forced to 0 for a classic top-down feel. */}
@@ -524,6 +531,19 @@ function TrafficLayer() {
     return () => {
       try { layer.setMap(null); } catch {}
     };
+  }, [map]);
+  return null;
+}
+
+// Same imperative pattern as TrafficLayer — Google's TransitLayer overlays
+// subway / bus / rail lines on the basemap. Used by the Layers FAB toggle.
+function TransitLayer() {
+  const map = useMap();
+  useEffect(() => {
+    if (!map || !(window as any).google?.maps?.TransitLayer) return;
+    const layer = new (window as any).google.maps.TransitLayer();
+    layer.setMap(map);
+    return () => { try { layer.setMap(null); } catch {} };
   }, [map]);
   return null;
 }

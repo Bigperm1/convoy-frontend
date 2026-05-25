@@ -12,15 +12,21 @@ const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
 // The @vis.gl/react-google-maps APIProvider does identity-comparison on its
 // `libraries` prop. Passing a fresh array literal each render caused the SDK
 // to re-request the same modules, which Google rejects with:
-//   "Module 'routes' has been provided more than once."
-// Hoisting to module scope guarantees referential stability AND we strictly
-// deduplicate the list (de facto a Set) so even hand-edits can't introduce
-// duplicates. We also intentionally OMIT "routes" here — the only consumer
-// (the Directions component) requests it on-demand via useMapsLibrary("routes"),
-// which lazy-loads it exactly once. Listing it in both places is the literal
-// definition of "provided more than once."
-const GOOGLE_MAPS_LIBRARIES: ("places" | "routes" | "geometry" | "marker" | "drawing" | "visualization")[] =
-  Array.from(new Set(["places", "geometry"])) as any;
+//   "Module 'X' has been provided more than once."
+//
+// Rules of the road for this list:
+//   • Define it ONCE here at module scope (singleton — never inside the component).
+//   • Only put a library here if it's used by a component that mounts on every
+//     map render. Anything used by an optional/lazy child (e.g. Directions →
+//     routes) should be loaded on demand via useMapsLibrary("routes") INSTEAD
+//     of being listed here. Having BOTH triggers the "provided more than once"
+//     error.
+//   • "marker"   — AdvancedMarkerElement (future-proofing for vector renderer).
+//   • "geometry" — encoded-polyline decoding (RoutesLayer + Directions).
+//   • "places"   — AutocompleteService + PlacesService used by DestinationSearch.
+//   • "routes"   — INTENTIONALLY OMITTED. Loaded lazily by useMapsLibrary("routes")
+//                  in the Directions component.
+const MAPS_LIBRARIES: ("marker" | "geometry" | "places")[] = ["marker", "geometry", "places"];
 
 export type Hazard = { id: string; kind: string; lat: number; lng: number; reporter_handle?: string; confirms?: number };
 export type Peer = { user_id: string; handle?: string; lat: number; lng: number; carType?: string; carBody?: string; carColor?: string; activeColor?: string; heading?: number; topSpeed?: number };
@@ -268,7 +274,7 @@ export default function ConvoyMap(props: Props) {
     // first render, avoiding the "0×0 canvas" path that also triggers the
     // SDK's internal projection errors.
     <View style={[StyleSheet.absoluteFill, { width: "100%", height: "100%", minHeight: 300 }]}>
-      <APIProvider apiKey={KEY} libraries={GOOGLE_MAPS_LIBRARIES}>
+      <APIProvider apiKey={KEY} libraries={MAPS_LIBRARIES}>
         <MapBody {...props} />
       </APIProvider>
     </View>

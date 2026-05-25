@@ -287,7 +287,6 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           )}
         </TouchableOpacity>
       </View>
-      </View>
       {open && suggestions.length > 0 && (
         <ScrollView
           // Swipe-to-dismiss-keyboard: a downward drag in the suggestions list

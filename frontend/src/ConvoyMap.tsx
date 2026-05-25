@@ -155,10 +155,18 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
 
   // ---- Real Google Maps (EAS dev build) ----
   if (MapView) {
-    // When following user (turn-by-turn), zoom in tighter; otherwise wider preview
-    const region = followUser
-      ? { latitude: user.lat, longitude: user.lng, latitudeDelta: 0.008, longitudeDelta: 0.008 }
-      : { latitude: center.lat, longitude: center.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 };
+    // When following user (turn-by-turn), zoom in tighter; otherwise wider preview.
+    // useMemo stabilizes the object reference so `region` doesn't become a fresh
+    // object every render — passing a new {latitude,...} each time to
+    // <MapView region={...}> caused the map to fight animateCamera() and
+    // re-center in a flickering loop (same referential-equality class of bug
+    // as the libraries-array fix on web).
+    const region = useMemo(
+      () => followUser
+        ? { latitude: user.lat, longitude: user.lng, latitudeDelta: 0.008, longitudeDelta: 0.008 }
+        : { latitude: center.lat, longitude: center.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 },
+      [followUser, user.lat, user.lng, center.lat, center.lng]
+    );
 
     // ---- Chase-cam: drive the camera every time user position / heading / speed changes ----
     // We DON'T pass `region` to MapView when navigationActive; instead we own the
@@ -219,16 +227,24 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
       } catch {}
     }, [navigationActive]);
 
-    // Build all route polylines: alternates (gray) first, then selected (blue) on top
-    const routePolylines = routes.length > 0
-      ? routes.map((r, i) => ({
+    // Build all route polylines: alternates (gray) first, then selected (blue) on top.
+    // useMemo prevents decodePolyline() from running on every render — without it,
+    // each render produced brand new coordinate arrays which react-native-maps
+    // treats as "new polyline data" → unmount + remount → visible flicker loop.
+    // Recalculates only when the actual route data changes.
+    const routePolylines = useMemo(() => {
+      if (routes.length > 0) {
+        return routes.map((r, i) => ({
           coords: decodePolyline(r.polyline).map((p) => ({ latitude: p.lat, longitude: p.lng })),
           isSelected: i === selectedRouteIndex,
           index: i,
-        }))
-      : encodedPolyline
-        ? [{ coords: decodePolyline(encodedPolyline).map((p) => ({ latitude: p.lat, longitude: p.lng })), isSelected: true, index: 0 }]
-        : [];
+        }));
+      }
+      if (encodedPolyline) {
+        return [{ coords: decodePolyline(encodedPolyline).map((p) => ({ latitude: p.lat, longitude: p.lng })), isSelected: true, index: 0 }];
+      }
+      return [];
+    }, [routes, encodedPolyline, selectedRouteIndex]);
 
     return (
       <MapView

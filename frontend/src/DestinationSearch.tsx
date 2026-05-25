@@ -214,58 +214,66 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
 
   return (
     <View style={styles.wrap} pointerEvents="box-none">
-      <View style={styles.bar} {...dismissPan.panHandlers}>
-        {/* Charcoal search glyph on the left — Google Maps style anchor.
-            Dark color (#5F6368) works against the new white pill bar. */}
-        <Ionicons name="search" size={18} color="#5F6368" />
-        <TextInput
-          testID="destination-input"
-          value={text}
-          onChangeText={onChangeText}
-          placeholder="Search destination"
-          placeholderTextColor="#80868B"
-          style={styles.input}
-          onFocus={() => setOpen(true)}
-          returnKeyType="go"
-          onSubmitEditing={submit}
-          blurOnSubmit={false}
-        />
-        {/* Submit / clear — only shown when there's text in the field, so the
-            mic + avatar can occupy a stable position on the right at all times. */}
-        {!!text.trim() && (
-          <TouchableOpacity
-            testID="destination-go"
-            onPress={submit}
-            style={styles.goBtn}
-          >
-            <Ionicons name="arrow-forward" size={18} color="#fff" />
-          </TouchableOpacity>
-        )}
-        {!!text && (
-          <TouchableOpacity testID="destination-clear" onPress={clear}>
-            <Ionicons name="close-circle" size={20} color="#5F6368" />
-          </TouchableOpacity>
-        )}
-        {/* PTT mic — yellow circle, press-and-hold like Google Maps' voice
-            search. Pulses while recording so users have a clear visual cue. */}
-        <Animated.View style={{ transform: [{ scale: micPulse }] }}>
-          <TouchableOpacity
-            testID="search-mic"
-            onPressIn={onMicPressIn}
-            onPressOut={onMicPressOut}
-            activeOpacity={0.85}
-            style={[styles.micBtn, voice.recording && styles.micBtnRec]}
-          >
-            <Ionicons
-              name={voice.recording ? "radio" : "mic"}
-              size={16}
-              color={voice.recording ? "#fff" : "#1a1a1a"}
-            />
-          </TouchableOpacity>
-        </Animated.View>
-        {/* Profile avatar — opens the Hub screen (community / profile drawer).
-            Shows the user's avatar when available, otherwise a generic person
-            icon. Anchored to the right edge of the bar like Google Maps. */}
+      {/* Outer row — fixed 48px tall, vertically centers the white search pill
+          AND the profile avatar so they sit on the same baseline regardless
+          of which inner control is rendered. The avatar lives OUTSIDE the
+          white pill (Google Maps style) so the pill can collapse around its
+          own content without affecting avatar placement. */}
+      <View style={styles.searchRow} pointerEvents="box-none">
+        <View style={styles.bar} {...dismissPan.panHandlers}>
+          {/* Charcoal search glyph on the left — Google Maps style anchor.
+              Dark color (#5F6368) works against the new white pill bar. */}
+          <Ionicons name="search" size={18} color="#5F6368" />
+          <TextInput
+            testID="destination-input"
+            value={text}
+            onChangeText={onChangeText}
+            placeholder="Search destination"
+            placeholderTextColor="#80868B"
+            style={styles.input}
+            onFocus={() => setOpen(true)}
+            returnKeyType="go"
+            onSubmitEditing={submit}
+            blurOnSubmit={false}
+          />
+          {/* Submit / clear — only shown when there's text in the field, so the
+              mic occupies a stable position on the right at all times. */}
+          {!!text.trim() && (
+            <TouchableOpacity
+              testID="destination-go"
+              onPress={submit}
+              style={styles.goBtn}
+            >
+              <Ionicons name="arrow-forward" size={18} color="#fff" />
+            </TouchableOpacity>
+          )}
+          {!!text && (
+            <TouchableOpacity testID="destination-clear" onPress={clear}>
+              <Ionicons name="close-circle" size={20} color="#5F6368" />
+            </TouchableOpacity>
+          )}
+          {/* PTT mic — yellow circle, press-and-hold like Google Maps' voice
+              search. Pulses while recording so users have a clear visual cue. */}
+          <Animated.View style={{ transform: [{ scale: micPulse }] }}>
+            <TouchableOpacity
+              testID="search-mic"
+              onPressIn={onMicPressIn}
+              onPressOut={onMicPressOut}
+              activeOpacity={0.85}
+              style={[styles.micBtn, voice.recording && styles.micBtnRec]}
+            >
+              <Ionicons
+                name={voice.recording ? "radio" : "mic"}
+                size={16}
+                color={voice.recording ? "#fff" : "#1a1a1a"}
+              />
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+        {/* Profile avatar — opens the Hub screen. OUTSIDE the white pill, to
+            the right, with marginLeft 10 so it visually reads as a separate
+            element (mirrors Google Maps). alignSelf: "center" keeps it on
+            the row's vertical centerline alongside the pill. */}
         <TouchableOpacity
           testID="search-profile"
           onPress={onProfilePress}
@@ -275,9 +283,10 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           {avatarUri ? (
             <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
           ) : (
-            <Ionicons name="person" size={16} color="#fff" />
+            <Ionicons name="person" size={18} color="#fff" />
           )}
         </TouchableOpacity>
+      </View>
       </View>
       {open && suggestions.length > 0 && (
         <ScrollView
@@ -302,15 +311,37 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
 
 const styles = StyleSheet.create({
   wrap: {},
-  // Google-Maps-style white pill — light surface, dark text, generous corner
-  // radius, drop shadow lifts it off the map. Keeps the search bar feeling
-  // light and "above" the map rather than blocking it like the previous
-  // dark glass card did.
+  // Outer row — fixed 48px tall, vertically centers everything.
+  // Houses the white search pill (flex:1) PLUS the profile avatar (36×36)
+  // as sibling children. paddingHorizontal/marginHorizontal anchor it
+  // safely off the screen edges; marginTop gives breathing room from the
+  // safe-area inset.
+  searchRow: {
+    height: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    marginHorizontal: 0,
+    marginTop: 8,
+  },
+  // Google-Maps-style white pill — light surface, dark text, rounded 23
+  // (half of 46 = full pill). flex:1 lets it absorb all leftover horizontal
+  // space while the avatar holds its 36px footprint to the right.
   bar: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "#FFFFFF", paddingHorizontal: 14, paddingVertical: 9,
-    borderRadius: 28, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.06)",
-    shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+    flex: 1,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "#FFFFFF",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(0,0,0,0.06)",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
     elevation: 4,
   },
   // Dark charcoal text + dark placeholder on the white surface — high
@@ -324,31 +355,37 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   goBtnDisabled: { opacity: 0.35 },
-  // Yellow PTT mic — Convoy gold accent stays the same, just sits on a
-  // white surface now so the contrast pops harder.
+  // Yellow PTT mic — 32×32 circle, inline child of the bar (NOT absolute).
+  // marginLeft 8 keeps it visually separated from the input text.
   micBtn: {
     width: 32, height: 32, borderRadius: 16,
-    backgroundColor: "#FFC700",
+    backgroundColor: "#FFD60A",            // Convoy gold
     alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "rgba(0,0,0,0.08)",
+    marginLeft: 8,
   },
   // When actively recording the mic flips to a hot red to mirror the legacy
   // tab-bar mic's "now broadcasting" affordance.
-  micBtnRec: { backgroundColor: "#FF3B30", borderColor: "rgba(255,255,255,0.7)" },
-  // Profile avatar — round 32px button anchored to the right edge of the
-  // white bar. Thin gray border (Google-style) so the avatar reads as a
-  // distinct affordance. Falls back to a generic person icon when no photo.
+  micBtnRec: { backgroundColor: "#FF3B30" },
+  // Profile avatar — 36×36 circle to the RIGHT of the search pill (OUTSIDE
+  // the white surface). Sibling of `.bar` inside `.searchRow` so it stays
+  // vertically centered with no absolute positioning. White border per the
+  // Google-Maps spec — pops the avatar over the underlying map.
   avatarBtn: {
-    width: 32, height: 32, borderRadius: 16,
+    width: 36, height: 36, borderRadius: 18,
     backgroundColor: "#5F6368",
     alignItems: "center", justifyContent: "center",
     overflow: "hidden",
-    borderWidth: 1.5, borderColor: "rgba(0,0,0,0.10)",
+    marginLeft: 10,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    alignSelf: "center",
+    shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
-  avatarImg: { width: 32, height: 32 },
-  // Suggestion list — bumped to a white surface to harmonize with the new
-  // bar; rows use dark text.
-  list: { backgroundColor: "#FFFFFF", borderRadius: 14, marginTop: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.08)", overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
+  avatarImg: { width: 36, height: 36 },
+  // Suggestion list — white surface harmonizes with the new bar; dark text.
+  // Offset by the row's horizontal padding (12) so it visually aligns under
+  // the pill rather than under the avatar.
+  list: { backgroundColor: "#FFFFFF", borderRadius: 14, marginTop: 8, marginHorizontal: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.08)", overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
   row: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12 },
   rowText: { color: "#202124", flex: 1, fontSize: 14 },
 });

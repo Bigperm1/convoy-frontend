@@ -757,7 +757,7 @@ export default function MapScreen() {
           dark header card, no separate X button. */}
       <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
         {searchVisible && (Platform.OS === "web" ? (
-          <View style={{ marginHorizontal: 12, marginTop: 4 }}>
+          <View style={{ marginTop: 4 }}>
             {/* Subtle live pill overlay — small green dot + live count.
                 Anchors to the right above the search bar so it surfaces
                 presence at-a-glance without a heavy dark header. */}
@@ -779,7 +779,7 @@ export default function MapScreen() {
             />
           </View>
         ) : (
-          <View style={{ marginHorizontal: 12, marginTop: 4 }}>
+          <View style={{ marginTop: 4 }}>
             {(() => {
               const selfLive = settings.avatarLive !== false && !!settings.activeCommunityId ? 1 : 0;
               const liveCount = selfLive + peerList.length;

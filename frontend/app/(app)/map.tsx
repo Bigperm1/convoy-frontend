@@ -81,6 +81,10 @@ export default function MapScreen() {
   const [showTransit, setShowTransit] = useState(false);
   const [showHazards, setShowHazards] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
+  // Unified Alerts panel — replaces the separate police + hazard floating
+  // buttons. Lists police, hazards (Convoy) and external (Waze) alerts in
+  // one bottom sheet with type icon + distance from user.
+  const [alertsOpen, setAlertsOpen] = useState(false);
   // Right-edge Navigation Action Drawer — peeked 80% off-screen by default
   // when turn-by-turn is engaged. Tap the visible 20% to expand and see the
   // current maneuver + End. Auto-collapses on tap-out / route end.
@@ -747,78 +751,26 @@ export default function MapScreen() {
         onRoute={setRoute}
       />
 
-      {/* Header card + search bar — both hidden in full-screen map mode
-          (i.e. when searchVisible=false). The 🔍 FAB below is the only
-          way back to them, keeping the entire screen for the map. */}
-      {/* ===== Top Control Cluster — slim header + square X side-by-side =====
-          Both elements (Glass card + X square) share the search bar's vertical
-          height so they read as one continuous toolbar at the top of the screen.
-          Internal layout:
-            ┌───────────────────────────┬───────┐
-            │ 🔰 Map           ⟳   ⚙   │   ✕   │
-            │ handle · drivers · alerts │       │
-            └───────────────────────────┴───────┘
-          The status text is pinned to the bottom edge of the Glass card so the
-          band stays slim while still surfacing live status. The square X
-          matches the card's full vertical height; together they form the
-          "Control Cluster" with a tight 8px margin to the Search bar below. */}
+      {/* ===== Minimal top bar — Google Maps style =====
+          The map extends edge-to-edge behind this. We render JUST the floating
+          search-bar pill plus a tiny "live" badge anchored on top of it. No
+          dark header card, no separate X button. */}
       <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
-        <View style={styles.topBarRow} pointerEvents="box-none">
-          {searchVisible && (
-            <Glass radius={16} style={{ flex: 1, marginLeft: 12 }}>
-              <View style={styles.headerCard}>
-                {/* Top row — logo + Map title + icon stack */}
-                <View style={styles.headerTopRow}>
-                  <Image source={require("../../assets/images/brand-mark.png")} style={styles.headerMarkSm} resizeMode="contain" />
-                  <Text style={styles.titleSm}>Map</Text>
-                  <View style={[styles.livePillSm, { borderColor: liveDot + "55" }]} testID="live-pill">
-                    <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                    <Text style={[styles.liveTextSm, { color: liveDot }]}>{liveText}</Text>
-                  </View>
-                  <View style={{ flex: 1 }} />
-                  <TouchableOpacity testID="refresh-btn" onPress={forceRefresh} style={styles.iconBtnSm}>
-                    <Ionicons name="refresh" size={16} color={COLORS.text} />
-                  </TouchableOpacity>
-                  <TouchableOpacity testID="settings-btn" onPress={() => router.push("/(app)/settings" as any)} style={styles.iconBtnSm}>
-                    <Ionicons name="options-outline" size={16} color={COLORS.text} />
-                  </TouchableOpacity>
-                </View>
-                {/* Bottom row — single-line status footer pinned to the bottom
-                    edge of the card. The "X live" count reflects YVRGRC (or
-                    whichever community is active) members currently present
-                    on the map — self if Avatar Live is on, plus every peer
-                    being broadcast over Supabase Realtime. */}
-                {(() => {
-                  // Self counts as live only when we're actively broadcasting
-                  // (avatar toggle on AND we've joined a community).
-                  const selfLive = settings.avatarLive !== false && !!settings.activeCommunityId ? 1 : 0;
-                  const liveCount = selfLive + peerList.length;
-                  return (
-                    <Text style={styles.statusFooter} numberOfLines={1}>
-                      {user?.handle || "—"} · {liveCount} live · {visibleHazards.length} {visibleHazards.length === 1 ? "alert" : "alerts"} · {externalFeed.alerts.length} Waze
-                    </Text>
-                  );
-                })()}
-              </View>
-            </Glass>
-          )}
-          {!searchVisible && <View style={{ flex: 1 }} />}
-          {/* Square Search/X — alignSelf: "stretch" auto-matches the Glass
-              card's full height, so the two read as one continuous toolbar. */}
-          <TouchableOpacity
-            testID="show-search-fab"
-            onPress={() => setSearchVisible((v) => !v)}
-            activeOpacity={0.85}
-            style={styles.searchSquare}
-          >
-            <Ionicons name={searchVisible ? "close" : "search"} size={22} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Search destination bar — sits 8px below the Control Cluster so the
-            two stack as a tight "command band" at the top of the map. */}
         {searchVisible && (Platform.OS === "web" ? (
-          <View style={{ marginHorizontal: 12, marginTop: 8 }}>
+          <View style={{ marginHorizontal: 12, marginTop: 4 }}>
+            {/* Subtle live pill overlay — small green dot + live count.
+                Anchors to the right above the search bar so it surfaces
+                presence at-a-glance without a heavy dark header. */}
+            {(() => {
+              const selfLive = settings.avatarLive !== false && !!settings.activeCommunityId ? 1 : 0;
+              const liveCount = selfLive + peerList.length;
+              return (
+                <View style={styles.liveOverlay} pointerEvents="none">
+                  <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
+                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length + externalFeed.alerts.length} alerts</Text>
+                </View>
+              );
+            })()}
             <DestinationSearch
               origin={coords}
               onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
@@ -827,7 +779,17 @@ export default function MapScreen() {
             />
           </View>
         ) : (
-          <View style={{ marginHorizontal: 12, marginTop: 8 }}>
+          <View style={{ marginHorizontal: 12, marginTop: 4 }}>
+            {(() => {
+              const selfLive = settings.avatarLive !== false && !!settings.activeCommunityId ? 1 : 0;
+              const liveCount = selfLive + peerList.length;
+              return (
+                <View style={styles.liveOverlay} pointerEvents="none">
+                  <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
+                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length + externalFeed.alerts.length} alerts</Text>
+                </View>
+              );
+            })()}
             <DestinationSearch
               origin={coords}
               onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
@@ -1084,18 +1046,11 @@ export default function MapScreen() {
         </Glass>
       )}
 
-      {/* ---- Right-edge peek drawer ----
-           Sits 75% off-screen by default, leaving just the leading edge of
-           the Police + Hazard icons visible ("drawer pull" affordance).
-           Tap the peeking edge → animates fully out. Tap an icon (when
-           fully out) → reports to Supabase + auto-snaps back to peek.
-           Replaces the previous <ReportPeekTab> blue-tab entirely. */}
-      <HazardDrawer
-        visible={showReport}
-        onExpand={() => setShowReport(true)}
-        onCollapse={() => setShowReport(false)}
-        onReport={(kind) => reportHazard(kind)}
-      />
+      {/* ---- HazardDrawer removed in the Google-Maps-style cleanup ----
+          Active alerts (police, hazards, Waze) are now surfaced via the
+          unified Alerts FAB on the bottom-right. Reporting still works via
+          voice commands ("report police", "report accident", etc.); a Report
+          UI affordance can be added back to the Alerts sheet if needed. */}
 
       {/* ===== Speedometer HUD (bottom-left glass overlay) =====
           Pulls live speed from coords.speed (m/s) → km/h. Floors small values
@@ -1116,13 +1071,35 @@ export default function MapScreen() {
           tab bar with explicit bottom-right margins so they never collide
           with the speedometer HUD on the left. */}
       <View pointerEvents="box-none" style={styles.fabStack}>
+        {/* Unified Alerts FAB — replaces the legacy police + hazard floating
+            buttons. Shows a badge with the total count of active alerts
+            (Convoy hazards + external Waze feed). Tap → bottom sheet with
+            grouped list + distance from user. */}
+        {(() => {
+          const totalAlerts = visibleHazards.length + externalFeed.alerts.length;
+          return (
+            <TouchableOpacity
+              testID="alerts-fab"
+              onPress={() => setAlertsOpen(true)}
+              activeOpacity={0.85}
+              style={styles.fab}
+            >
+              <Ionicons name="notifications" size={20} color="#fff" />
+              {totalAlerts > 0 && (
+                <View style={styles.fabBadge}>
+                  <Text style={styles.fabBadgeText}>{totalAlerts > 99 ? "99+" : totalAlerts}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })()}
         <TouchableOpacity
           testID="layers-fab"
           onPress={() => setLayersOpen(true)}
           activeOpacity={0.85}
           style={styles.fab}
         >
-          <Ionicons name="layers" size={22} color="#fff" />
+          <Ionicons name="layers" size={20} color="#fff" />
         </TouchableOpacity>
         <TouchableOpacity
           testID="directions-fab"
@@ -1130,7 +1107,7 @@ export default function MapScreen() {
           activeOpacity={0.85}
           style={[styles.fab, styles.fabPrimary]}
         >
-          <Ionicons name="navigate" size={22} color="#fff" />
+          <Ionicons name="navigate" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
 
@@ -1202,8 +1179,108 @@ export default function MapScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* ===== Alerts bottom sheet =====
+          Unified panel that lists every active alert (police, hazards, Waze)
+          grouped by type, with the user's distance to each one. Replaces the
+          legacy two-icon report drawer for VIEWING. Reporting is still wired
+          via voice commands ("report police", "report accident", etc.). */}
+      <Modal visible={alertsOpen} transparent animationType="slide" onRequestClose={() => setAlertsOpen(false)}>
+        <TouchableOpacity activeOpacity={1} style={styles.sheetBackdrop} onPress={() => setAlertsOpen(false)}>
+          <TouchableOpacity activeOpacity={1} style={styles.sheetCard} onPress={() => {}}>
+            <View style={styles.sheetGrip} />
+            <Text style={styles.sheetTitle}>Active alerts · {visibleHazards.length + externalFeed.alerts.length}</Text>
+            <ScrollView style={{ maxHeight: 420 }}>
+              {/* Police — pulled from Convoy hazard markers with kind=="police" */}
+              {(() => {
+                const police = visibleHazards.filter((h: any) => h.kind === "police");
+                if (!police.length) return null;
+                return (
+                  <>
+                    <Text style={styles.alertsGroup}>Police</Text>
+                    {police.map((h: any) => (
+                      <AlertItem key={`p-${h.id}`} icon="shield-checkmark" iconColor="#3478F6"
+                        title="Police" subtitle={`by ${h.reporter_handle || "anon"}`}
+                        distanceKm={coords ? distanceKm(coords.lat, coords.lng, h.lat, h.lng) : null} />
+                    ))}
+                  </>
+                );
+              })()}
+              {/* All other Convoy hazards (accident / traffic / road) */}
+              {(() => {
+                const other = visibleHazards.filter((h: any) => h.kind !== "police");
+                if (!other.length) return null;
+                return (
+                  <>
+                    <Text style={styles.alertsGroup}>Hazards</Text>
+                    {other.map((h: any) => (
+                      <AlertItem key={`h-${h.id}`}
+                        icon={h.kind === "accident" ? "alert-circle" : h.kind === "traffic" ? "car" : "warning"}
+                        iconColor={h.kind === "accident" ? "#FF453A" : h.kind === "traffic" ? "#FFC700" : "#FFC700"}
+                        title={h.kind.charAt(0).toUpperCase() + h.kind.slice(1)}
+                        subtitle={`by ${h.reporter_handle || "anon"}`}
+                        distanceKm={coords ? distanceKm(coords.lat, coords.lng, h.lat, h.lng) : null} />
+                    ))}
+                  </>
+                );
+              })()}
+              {/* External Waze-style alerts */}
+              {externalFeed.alerts.length > 0 && (
+                <>
+                  <Text style={styles.alertsGroup}>Live · Waze</Text>
+                  {externalFeed.alerts.map((a: any, i: number) => (
+                    <AlertItem key={`e-${a.id || i}`} icon="open-outline" iconColor="#33CCFF"
+                      title={a.type || "Alert"} subtitle={a.subtype || a.description || "Live"}
+                      distanceKm={coords && a.lat && a.lng ? distanceKm(coords.lat, coords.lng, a.lat, a.lng) : null} />
+                  ))}
+                </>
+              )}
+              {visibleHazards.length === 0 && externalFeed.alerts.length === 0 && (
+                <Text style={styles.alertsEmpty}>No active alerts in your area. 🟢</Text>
+              )}
+            </ScrollView>
+            <TouchableOpacity onPress={() => setAlertsOpen(false)} style={styles.sheetClose}>
+              <Text style={styles.sheetCloseText}>Done</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
+}
+
+// AlertItem — single row inside the Alerts bottom sheet. Icon chip + title +
+// subtitle + (optional) distance pill. Reused for police, hazards, and Waze
+// alerts so the visual rhythm is identical across categories.
+function AlertItem({ icon, iconColor, title, subtitle, distanceKm: dk }: {
+  icon: any; iconColor: string; title: string; subtitle?: string; distanceKm: number | null;
+}) {
+  return (
+    <View style={styles.alertItem}>
+      <View style={[styles.layerIcon, { backgroundColor: iconColor + "22" }]}>
+        <Ionicons name={icon} size={18} color={iconColor} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.layerLabel}>{title}</Text>
+        {!!subtitle && <Text style={styles.layerSub} numberOfLines={1}>{subtitle}</Text>}
+      </View>
+      {dk !== null && (
+        <View style={styles.distPill}>
+          <Text style={styles.distPillText}>{dk < 1 ? `${Math.round(dk * 1000)} m` : `${dk.toFixed(1)} km`}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// Plain JS Haversine — meters between two lat/lng. Used by the Alerts sheet
+// to surface "how far away" without pulling in any geo library.
+function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
 }
 
 // LayerRow — a single switch row in the Layers bottom sheet. Colored icon
@@ -1913,10 +1990,11 @@ const styles = StyleSheet.create({
   routeToastSub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
   routeToastBtn: { backgroundColor: COLORS.warning, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10 },
   routeToastBtnText: { color: "#000", fontWeight: "700", fontSize: 12, letterSpacing: 0.3 },
-  // ===== Bottom-right floating FAB stack — Layers (top) + Directions (bottom).
-  // Mirrors Google Maps' rounded-square teal/dark layer buttons. Anchored
-  // with explicit bottom-right margins so they sit comfortably above the tab
-  // bar without colliding with the speedometer HUD on the bottom-left.
+  // ===== Bottom-right floating FAB stack — Alerts (top) + Layers + Directions (bottom).
+  // Consistent 48×48 rounded squares with semi-transparent dark fills and
+  // white icons. Anchored with explicit bottom-right margins so they sit
+  // above the tab bar without colliding with the speedometer HUD on the
+  // bottom-left.
   fabStack: {
     position: "absolute",
     right: 16,
@@ -1925,16 +2003,39 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   fab: {
-    width: 52, height: 52,
+    width: 48, height: 48,
     borderRadius: 14,
-    backgroundColor: "rgba(28,28,30,0.92)",
+    backgroundColor: "rgba(28,28,30,0.85)",
     alignItems: "center", justifyContent: "center",
     borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
-    shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+    shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
     elevation: 6,
   },
   // Directions = primary action → Convoy blue/teal accent.
   fabPrimary: { backgroundColor: "rgba(10,132,255,0.92)", borderColor: "rgba(255,255,255,0.28)" },
+  // Small badge with the active-alert count pinned to top-right of the Alerts FAB.
+  fabBadge: {
+    position: "absolute", top: -4, right: -4,
+    minWidth: 18, height: 18, borderRadius: 9,
+    backgroundColor: "#FF3B30",
+    alignItems: "center", justifyContent: "center",
+    paddingHorizontal: 5,
+    borderWidth: 2, borderColor: "rgba(28,28,30,0.85)",
+  },
+  fabBadgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
+  // Tiny live-status pill that overlays the top edge of the search bar
+  // (replaces the old dark header). Green dot + "X live · Y alerts" in a
+  // glassy rounded chip — subtle, glanceable, never blocks the map.
+  liveOverlay: {
+    position: "absolute", top: -22, alignSelf: "center",
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 9, paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: "rgba(28,28,30,0.78)",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
+    zIndex: 5,
+  },
+  liveOverlayText: { color: "#fff", fontSize: 10, fontWeight: "600", letterSpacing: 0.2 },
   // ===== Layers bottom sheet =====
   sheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   sheetCard: {
@@ -1951,4 +2052,10 @@ const styles = StyleSheet.create({
   layerSub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
   sheetClose: { marginTop: 14, alignSelf: "center", paddingHorizontal: 22, paddingVertical: 10, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.10)" },
   sheetCloseText: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
+  // Alerts sheet styles
+  alertsGroup: { color: COLORS.textDim, fontSize: 11, fontWeight: "700", letterSpacing: 0.7, marginTop: 14, marginBottom: 4, textTransform: "uppercase" },
+  alertsEmpty: { color: COLORS.textDim, fontSize: 13, textAlign: "center", marginTop: 22 },
+  alertItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
+  distPill: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, backgroundColor: "rgba(118,118,128,0.35)" },
+  distPillText: { color: "#fff", fontSize: 11, fontWeight: "600" },
 });

@@ -215,13 +215,15 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
   return (
     <View style={styles.wrap} pointerEvents="box-none">
       <View style={styles.bar} {...dismissPan.panHandlers}>
-        <Ionicons name="search" size={18} color={COLORS.textDim} />
+        {/* Charcoal search glyph on the left — Google Maps style anchor.
+            Dark color (#5F6368) works against the new white pill bar. */}
+        <Ionicons name="search" size={18} color="#5F6368" />
         <TextInput
           testID="destination-input"
           value={text}
           onChangeText={onChangeText}
           placeholder="Search destination"
-          placeholderTextColor={COLORS.textMute}
+          placeholderTextColor="#80868B"
           style={styles.input}
           onFocus={() => setOpen(true)}
           returnKeyType="go"
@@ -241,7 +243,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
         )}
         {!!text && (
           <TouchableOpacity testID="destination-clear" onPress={clear}>
-            <Ionicons name="close-circle" size={20} color={COLORS.textDim} />
+            <Ionicons name="close-circle" size={20} color="#5F6368" />
           </TouchableOpacity>
         )}
         {/* PTT mic — yellow circle, press-and-hold like Google Maps' voice
@@ -300,40 +302,53 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
 
 const styles = StyleSheet.create({
   wrap: {},
+  // Google-Maps-style white pill — light surface, dark text, generous corner
+  // radius, drop shadow lifts it off the map. Keeps the search bar feeling
+  // light and "above" the map rather than blocking it like the previous
+  // dark glass card did.
   bar: {
     flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "rgba(28,28,30,0.92)", paddingHorizontal: 14, paddingVertical: 10,
-    borderRadius: 14, borderWidth: 1, borderColor: COLORS.hairlineStrong,
+    backgroundColor: "#FFFFFF", paddingHorizontal: 14, paddingVertical: 9,
+    borderRadius: 28, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.06)",
+    shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
   },
-  input: { flex: 1, color: COLORS.text, fontSize: 15, padding: 0 },
+  // Dark charcoal text + dark placeholder on the white surface — high
+  // contrast for readability while driving.
+  input: { flex: 1, color: "#202124", fontSize: 15, padding: 0 },
+  // The Go arrow stays in Convoy blue accent so the submit affordance is
+  // unmistakable on the light bar.
   goBtn: {
     width: 28, height: 28, borderRadius: 14,
     backgroundColor: COLORS.primary,
     alignItems: "center", justifyContent: "center",
   },
   goBtnDisabled: { opacity: 0.35 },
-  // Yellow PTT mic — sits inside the bar on the right, identical Convoy
-  // gold accent to the brand. Press-and-hold to record (see useVoice).
+  // Yellow PTT mic — Convoy gold accent stays the same, just sits on a
+  // white surface now so the contrast pops harder.
   micBtn: {
-    width: 30, height: 30, borderRadius: 15,
+    width: 32, height: 32, borderRadius: 16,
     backgroundColor: "#FFC700",
     alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.35)",
+    borderWidth: 1, borderColor: "rgba(0,0,0,0.08)",
   },
   // When actively recording the mic flips to a hot red to mirror the legacy
   // tab-bar mic's "now broadcasting" affordance.
   micBtnRec: { backgroundColor: "#FF3B30", borderColor: "rgba(255,255,255,0.7)" },
-  // Profile avatar — round 30px button anchored to the right edge of the bar.
-  // Falls back to a generic person icon when the user has no uploaded photo.
+  // Profile avatar — round 32px button anchored to the right edge of the
+  // white bar. Thin gray border (Google-style) so the avatar reads as a
+  // distinct affordance. Falls back to a generic person icon when no photo.
   avatarBtn: {
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: "rgba(118,118,128,0.55)",
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: "#5F6368",
     alignItems: "center", justifyContent: "center",
     overflow: "hidden",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.25)",
+    borderWidth: 1.5, borderColor: "rgba(0,0,0,0.10)",
   },
-  avatarImg: { width: 30, height: 30 },
-  list: { backgroundColor: "rgba(28,28,30,0.96)", borderRadius: 12, marginTop: 8, borderWidth: 1, borderColor: COLORS.hairline, overflow: "hidden" },
+  avatarImg: { width: 32, height: 32 },
+  // Suggestion list — bumped to a white surface to harmonize with the new
+  // bar; rows use dark text.
+  list: { backgroundColor: "#FFFFFF", borderRadius: 14, marginTop: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.08)", overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
   row: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12 },
-  rowText: { color: COLORS.text, flex: 1, fontSize: 14 },
+  rowText: { color: "#202124", flex: 1, fontSize: 14 },
 });

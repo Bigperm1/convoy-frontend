@@ -254,6 +254,18 @@ async def create_hazard(body: HazardIn, user=Depends(get_current_user)):
     await db.hazards.insert_one(h)
     h.pop("_id", None)
     await ws_manager.broadcast({"type": "hazard", "hazard": h})
+    # Mirror into Supabase so clients using Realtime (not just our WebSocket)
+    # also pick up the hazard immediately. The fire-and-forget task keeps this
+    # endpoint snappy — Supabase latency never blocks the HTTP response.
+    asyncio.create_task(supa.upsert_row("hazards", {
+        "id": h["id"],
+        "kind": h["kind"],
+        "lat": h["lat"],
+        "lng": h["lng"],
+        "reporter_handle": h.get("reporter_handle", ""),
+        "created_at": h["created_at"],
+        "expires_at": h["expires_at"],
+    }))
     return h
 
 @api.get("/hazards")

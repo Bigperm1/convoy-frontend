@@ -373,7 +373,13 @@ export default function MapScreen() {
     };
     fetchHazards();
 
-    if (!SUPABASE_ENABLED || !supabase) { setLive("off"); return; }
+    // 30-second polling fallback — catches any hazards missed during a
+    // WebSocket reconnect or a Supabase Realtime drop. Cheap (~1KB/poll) and
+    // always community-agnostic, so even a driver with no active community
+    // still sees every Convoy-network hazard within 30s of it being reported.
+    const pollInterval = setInterval(fetchHazards, 30000);
+
+    if (!SUPABASE_ENABLED || !supabase) { setLive("off"); return () => { cancelled = true; clearInterval(pollInterval); }; }
 
     const channel = supabase
       .channel("public:hazards")
@@ -411,6 +417,7 @@ export default function MapScreen() {
 
     return () => {
       cancelled = true;
+      clearInterval(pollInterval);
       try { if (supabase) supabase.removeChannel(channel); } catch {}
     };
   }, []);
@@ -425,6 +432,16 @@ export default function MapScreen() {
         const m = JSON.parse(ev.data);
         if (m.type === "location" && m.user_id !== user?.id) {
           setPeers((p) => ({ ...p, [m.user_id]: { ...p[m.user_id], ...m } }));
+        }
+        // Global hazard fan-out — every Convoy user receives every hazard
+        // broadcast regardless of which community (or no community) they're
+        // currently in. Dedup by id so the Supabase Realtime INSERT and the
+        // WebSocket broadcast (both fire) don't double-render the marker.
+        if (m.type === "hazard" && m.hazard && m.hazard.id) {
+          setHazards((prev) => {
+            if (prev.some((h: any) => h.id === m.hazard.id)) return prev;
+            return [m.hazard, ...prev];
+          });
         }
       } catch {}
     };

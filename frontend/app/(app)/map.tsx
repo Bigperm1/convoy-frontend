@@ -81,10 +81,12 @@ export default function MapScreen() {
   const [showTransit, setShowTransit] = useState(false);
   const [showHazards, setShowHazards] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
-  // Unified Alerts panel — replaces the separate police + hazard floating
-  // buttons. Lists police, hazards (Convoy) and external (Waze) alerts in
-  // one bottom sheet with type icon + distance from user.
-  const [alertsOpen, setAlertsOpen] = useState(false);
+  // Position history buffer — keeps the last 30s of GPS samples so the user
+  // can report a hazard "5 seconds ago" (matches Waze-style flow where the
+  // driver passes the hazard before they react and tap the button).
+  const posHistoryRef = useRef<{ lat: number; lng: number; ts: number }[]>([]);
+  // Transient toast state for "Police reported" / "Hazard reported" feedback.
+  const [alertConfirm, setAlertConfirm] = useState<string | null>(null);
   // Right-edge Navigation Action Drawer — peeked 80% off-screen by default
   // when turn-by-turn is engaged. Tap the visible 20% to expand and see the
   // current maneuver + End. Auto-collapses on tap-out / route end.
@@ -294,6 +296,10 @@ export default function MapScreen() {
             const heading = typeof h === "number" && h >= 0 ? h : undefined;
             const sRaw = pos.coords.speed;
             const speed = typeof sRaw === "number" && sRaw >= 0 ? sRaw : undefined;
+            // Push to the position history buffer so we can recall where the
+            // driver was 5s ago (when they tap a hazard/police report button).
+            posHistoryRef.current.push({ lat: pos.coords.latitude, lng: pos.coords.longitude, ts: Date.now() });
+            posHistoryRef.current = posHistoryRef.current.filter(p => Date.now() - p.ts < 30000);
             setCoords((cur) => ({
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,
@@ -314,7 +320,36 @@ export default function MapScreen() {
     return () => { try { sub?.remove?.(); } catch {} };
   }, []);
 
-  // ----- Hazards: Supabase Realtime subscription (with REST fallback) -----
+  // ----- Hazard/Police reporting (Waze-style "5s ago" anchor) -----
+  // Drivers usually notice a hazard a beat after they pass it. Snapping the
+  // report to the GPS sample closest to (now - 5s) places the pin where the
+  // user actually saw the hazard, not where they are now (which could be a
+  // few hundred meters past it at highway speed).
+  const getPos5SecAgo = (): { lat: number; lng: number } => {
+    const target = Date.now() - 5000;
+    const h = posHistoryRef.current;
+    if (!h.length) return { lat: coords?.lat ?? 0, lng: coords?.lng ?? 0 };
+    return h.reduce((best, p) =>
+      Math.abs(p.ts - target) < Math.abs(best.ts - target) ? p : best
+    );
+  };
+
+  const reportAlert = async (kind: 'police' | 'road') => {
+    const pos = getPos5SecAgo();
+    try {
+      await api.post('/hazards', { kind, lat: pos.lat, lng: pos.lng, note: '' });
+      setAlertConfirm(kind);
+      setTimeout(() => setAlertConfirm(null), 2500);
+      if (Platform.OS !== 'web') {
+        try {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch {}
+      }
+    } catch (e) {
+      console.warn('reportAlert failed', e);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1071,28 +1106,26 @@ export default function MapScreen() {
           tab bar with explicit bottom-right margins so they never collide
           with the speedometer HUD on the left. */}
       <View pointerEvents="box-none" style={styles.fabStack}>
-        {/* Unified Alerts FAB — replaces the legacy police + hazard floating
-            buttons. Shows a badge with the total count of active alerts
-            (Convoy hazards + external Waze feed). Tap → bottom sheet with
-            grouped list + distance from user. */}
-        {(() => {
-          const totalAlerts = visibleHazards.length + externalFeed.alerts.length;
-          return (
-            <TouchableOpacity
-              testID="alerts-fab"
-              onPress={() => setAlertsOpen(true)}
-              activeOpacity={0.85}
-              style={styles.fab}
-            >
-              <Ionicons name="notifications" size={20} color="#fff" />
-              {totalAlerts > 0 && (
-                <View style={styles.fabBadge}>
-                  <Text style={styles.fabBadgeText}>{totalAlerts > 99 ? "99+" : totalAlerts}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })()}
+        {/* Police report button — top of stack. One-tap: posts a hazard with
+            kind='police' at the GPS sample closest to (now - 5s), shows a
+            success toast, and fires a haptic on native. */}
+        <TouchableOpacity
+          testID="report-police-fab"
+          style={styles.fab}
+          onPress={() => reportAlert('police')}
+          activeOpacity={0.75}
+        >
+          <Ionicons name="shield-checkmark" size={22} color="#3478F6" />
+        </TouchableOpacity>
+        {/* Road-hazard report button — same flow with kind='road'. */}
+        <TouchableOpacity
+          testID="report-hazard-fab"
+          style={styles.fab}
+          onPress={() => reportAlert('road')}
+          activeOpacity={0.75}
+        >
+          <Ionicons name="warning" size={22} color="#FFD60A" />
+        </TouchableOpacity>
         <TouchableOpacity
           testID="layers-fab"
           onPress={() => setLayersOpen(true)}
@@ -1180,71 +1213,16 @@ export default function MapScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ===== Alerts bottom sheet =====
-          Unified panel that lists every active alert (police, hazards, Waze)
-          grouped by type, with the user's distance to each one. Replaces the
-          legacy two-icon report drawer for VIEWING. Reporting is still wired
-          via voice commands ("report police", "report accident", etc.). */}
-      <Modal visible={alertsOpen} transparent animationType="slide" onRequestClose={() => setAlertsOpen(false)}>
-        <TouchableOpacity activeOpacity={1} style={styles.sheetBackdrop} onPress={() => setAlertsOpen(false)}>
-          <TouchableOpacity activeOpacity={1} style={styles.sheetCard} onPress={() => {}}>
-            <View style={styles.sheetGrip} />
-            <Text style={styles.sheetTitle}>Active alerts · {visibleHazards.length + externalFeed.alerts.length}</Text>
-            <ScrollView style={{ maxHeight: 420 }}>
-              {/* Police — pulled from Convoy hazard markers with kind=="police" */}
-              {(() => {
-                const police = visibleHazards.filter((h: any) => h.kind === "police");
-                if (!police.length) return null;
-                return (
-                  <>
-                    <Text style={styles.alertsGroup}>Police</Text>
-                    {police.map((h: any) => (
-                      <AlertItem key={`p-${h.id}`} icon="shield-checkmark" iconColor="#3478F6"
-                        title="Police" subtitle={`by ${h.reporter_handle || "anon"}`}
-                        distanceKm={coords ? distanceKm(coords.lat, coords.lng, h.lat, h.lng) : null} />
-                    ))}
-                  </>
-                );
-              })()}
-              {/* All other Convoy hazards (accident / traffic / road) */}
-              {(() => {
-                const other = visibleHazards.filter((h: any) => h.kind !== "police");
-                if (!other.length) return null;
-                return (
-                  <>
-                    <Text style={styles.alertsGroup}>Hazards</Text>
-                    {other.map((h: any) => (
-                      <AlertItem key={`h-${h.id}`}
-                        icon={h.kind === "accident" ? "alert-circle" : h.kind === "traffic" ? "car" : "warning"}
-                        iconColor={h.kind === "accident" ? "#FF453A" : h.kind === "traffic" ? "#FFC700" : "#FFC700"}
-                        title={h.kind.charAt(0).toUpperCase() + h.kind.slice(1)}
-                        subtitle={`by ${h.reporter_handle || "anon"}`}
-                        distanceKm={coords ? distanceKm(coords.lat, coords.lng, h.lat, h.lng) : null} />
-                    ))}
-                  </>
-                );
-              })()}
-              {/* External Waze-style alerts */}
-              {externalFeed.alerts.length > 0 && (
-                <>
-                  <Text style={styles.alertsGroup}>Live · Waze</Text>
-                  {externalFeed.alerts.map((a: any, i: number) => (
-                    <AlertItem key={`e-${a.id || i}`} icon="open-outline" iconColor="#33CCFF"
-                      title={a.type || "Alert"} subtitle={a.subtype || a.description || "Live"}
-                      distanceKm={coords && a.lat && a.lng ? distanceKm(coords.lat, coords.lng, a.lat, a.lng) : null} />
-                  ))}
-                </>
-              )}
-              {visibleHazards.length === 0 && externalFeed.alerts.length === 0 && (
-                <Text style={styles.alertsEmpty}>No active alerts in your area. 🟢</Text>
-              )}
-            </ScrollView>
-            <TouchableOpacity onPress={() => setAlertsOpen(false)} style={styles.sheetClose}>
-              <Text style={styles.sheetCloseText}>Done</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+      {/* ===== Report confirmation toast =====
+          Brief glassy pill at the bottom-center that confirms a Police or
+          Hazard report was sent. Auto-dismisses after 2.5s (set by reportAlert). */}
+      {!!alertConfirm && (
+        <View pointerEvents="none" style={styles.toast}>
+          <Text style={styles.toastText}>
+            {alertConfirm === 'police' ? '🛡 Police reported' : '⚠️ Hazard reported'}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -2023,6 +2001,16 @@ const styles = StyleSheet.create({
     borderWidth: 2, borderColor: "rgba(28,28,30,0.85)",
   },
   fabBadgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
+  // Report confirmation toast — appears bottom-center when a Police/Hazard
+  // report is sent. Sits above the tab bar (bottom: 160) and ignores touches
+  // so it never blocks the map underneath.
+  toast: {
+    position: 'absolute', bottom: 160, alignSelf: 'center',
+    backgroundColor: 'rgba(28,28,30,0.92)',
+    paddingHorizontal: 20, paddingVertical: 11,
+    borderRadius: 22, zIndex: 9999,
+  },
+  toastText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   // Tiny live-status pill that overlays the top edge of the search bar
   // (replaces the old dark header). Green dot + "X live · Y alerts" in a
   // glassy rounded chip — subtle, glanceable, never blocks the map.

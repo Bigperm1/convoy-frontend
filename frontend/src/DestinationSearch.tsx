@@ -309,31 +309,40 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
 }
 
 const styles = StyleSheet.create({
-  wrap: {},
-  // Outer row — fixed 48px tall, respects iOS/Android safe area via marginTop.
-  // Houses the white search pill (flex:1) PLUS the profile avatar (34×34) as
-  // sibling children. NO absolute positioning — pure flex row.
+  // Full-width wrapper — the parent `topBar` View in map.tsx now owns the
+  // safe-area paddingTop and horizontal gutters, so this just needs to
+  // stretch across the available space.
+  wrap: {
+    width: '100%',
+  },
+  // Outer row — flex-row containing the white pill (flex:1) AND the profile
+  // avatar (34×34) as siblings. marginTop/marginHorizontal are 0 because
+  // the parent `topBar` View in map.tsx now owns those spacings.
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 12,
-    marginTop: Platform.OS === 'ios' ? 56 : 36,
-    height: 48,
+    marginHorizontal: 0,
+    marginTop: 0,
   },
-  // Google-Maps-style white pill — flex:1 absorbs all leftover horizontal
-  // space while the avatar holds its 34px footprint to the right.
+  // Google-Maps-style white pill. Uses paddingVertical (7) instead of a fixed
+  // height so the pill stays a tad slimmer; borderRadius 28 keeps the round
+  // pill aesthetic. flex:1 lets the bar absorb all leftover horizontal space
+  // while the avatar holds its 34px footprint to the right.
   bar: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    height: 46,
-    borderRadius: 23,
+    gap: 8,
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 28,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.06)',
     shadowColor: '#000',
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.18,
     shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 3 },
     elevation: 5,
   },
   // Dark charcoal text on white surface — high contrast for readability.

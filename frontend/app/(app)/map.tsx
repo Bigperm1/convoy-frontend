@@ -863,10 +863,14 @@ export default function MapScreen() {
       {/* ===== Minimal top bar — Google Maps style =====
           The map extends edge-to-edge behind this. We render JUST the floating
           search-bar pill plus a tiny "live" badge anchored on top of it. No
-          dark header card, no separate X button. */}
-      <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
+          dark header card, no separate X button.
+          Uses an absolute-positioned View with explicit safe-area paddingTop
+          (instead of SafeAreaView) so the bar sits at a predictable distance
+          from the dynamic island / status bar across devices, and zIndex:100
+          guarantees it stays above the map's overlay markers/controls. */}
+      <View style={styles.topBar} pointerEvents="box-none">
         {searchVisible && (Platform.OS === "web" ? (
-          <View style={{ marginTop: 4 }}>
+          <View pointerEvents="box-none">
             {/* Subtle live pill overlay — small green dot + live count.
                 Anchors to the right above the search bar so it surfaces
                 presence at-a-glance without a heavy dark header. */}
@@ -888,7 +892,7 @@ export default function MapScreen() {
             />
           </View>
         ) : (
-          <View style={{ marginTop: 4 }}>
+          <View pointerEvents="box-none">
             {(() => {
               const selfLive = settings.avatarLive !== false && !!settings.activeCommunityId ? 1 : 0;
               const liveCount = selfLive + peerList.length;
@@ -907,7 +911,7 @@ export default function MapScreen() {
             />
           </View>
         ))}
-      </SafeAreaView>
+      </View>
 
       {/* ===== Community Routes — horizontal chip strip (visible when there are shared cruises) ===== */}
       {communityRoutes.length > 0 && navMode === "preview" && !destination && (
@@ -1719,7 +1723,18 @@ const styles = StyleSheet.create({
   c: { flex: 1, backgroundColor: "#0A1410" },
   loader: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
 
-  topBar: { position: "absolute", top: 0, left: 0, right: 0 },
+  topBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    // Explicit safe-area paddingTop (replaces SafeAreaView's auto inset) —
+    // 52 on iOS lands the bar just below the dynamic island/notch, 28 on
+    // Android clears the typical status-bar height with room to breathe.
+    paddingTop: Platform.OS === 'ios' ? 52 : 28,
+    paddingHorizontal: 12,
+  },
   // Header row container — lays out the Glass card and the Search/X square
   // button side-by-side. Right padding gives the square button breathing room
   // from the screen edge so it doesn't bleed into the Dynamic Island/notch.
@@ -1911,47 +1926,49 @@ const styles = StyleSheet.create({
   // so it reads as a drawer pull rather than a button.
   // Speedometer HUD — bottom-LEFT corner above the "Map" footer tab icon.
   // Placed flush against the left edge so the chase-cam center is fully open.
+  // ===== Speedometer HUD (bottom-left) =====
+  // Square 64×64 badge mirroring the right-side FAB stack — same edge gutter
+  // (12) and same bottom anchor (90) for visual symmetry. Inner Text nodes
+  // render the speed number + unit label. Background color is set inline on
+  // the View (dark / orange / red) by SpeedometerHUD based on speed vs limit.
   speedHudWrap: {
-    position: "absolute",
+    position: 'absolute',
     left: 12,
-    bottom: 100,           // tab bar (~85) + small gap so it sits above the Map icon
+    bottom: 90,
     zIndex: 6,
   },
   speedHud: {
-    borderRadius: 12,
+    width: 64,
+    height: 64,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
     overflow: 'hidden',
-    shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
-    elevation: 5,
   },
+  // Hairline inner wrapper — kept around so existing JSX (<View speedHudInner>)
+  // doesn't need to be touched. Just lays the number above the unit label.
   speedHudInner: {
-    minWidth: 92,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    alignItems: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   speedHudValue: {
-    color: "#FFC700",
-    fontSize: 30,
-    fontWeight: "800",
-    letterSpacing: 1,
-    lineHeight: 32,
-    fontVariant: ["tabular-nums"],
-    fontFamily: Platform.select({
-      ios: "Menlo",
-      android: "monospace",
-      web: "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
-      default: "monospace",
-    }) as any,
-    textShadowColor: "rgba(255,199,0,0.45)",
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 8,
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '700',
+    lineHeight: 24,
+    letterSpacing: -0.5,
   },
   speedHudUnit: {
-    color: "rgba(255,255,255,0.55)",
+    color: 'rgba(255,255,255,0.7)',
     fontSize: 9,
-    fontWeight: "700",
-    letterSpacing: 1.6,
-    marginTop: 2,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    marginTop: 1,
   },
   peekWrap: { position: "absolute", right: 0, bottom: 130, width: 56, height: 56 },
   peekBtn: {

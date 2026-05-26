@@ -193,3 +193,43 @@ export const spotify = {
   myPlaylists: () => call<any>("/me/playlists?limit=20"),
   currentlyPlaying: () => call<any>("/me/player/currently-playing"),
 };
+
+// ============================================================
+// Web Playback SDK quality config
+// ============================================================
+//
+// The Spotify Web API has NO endpoint to set playback quality — it is
+// controlled either by the user's account tier (Free 96-160kbps / Premium up
+// to 320kbps OGG_VORBIS) OR by the Web Playback SDK at instantiation time.
+//
+// We don't currently instantiate the Web Playback SDK (Convoy delegates
+// playback to the user's native Spotify app via deep-links). But when/if a
+// future browser-mode listener mode is added, this helper maps our proximity
+// `MusicBroadcastQuality` enum to the SDK's `streamingFormat` option:
+//
+//   const sdk = new Spotify.Player({
+//     name: "Convoy",
+//     getOAuthToken: cb => cb(token),
+//     ...spotifyPlayerQualityConfig(quality),
+//   });
+//
+// SDK reference: https://developer.spotify.com/documentation/web-playback-sdk
+export type SpotifyStreamingQuality = "lossless" | "high" | "normal";
+
+export function spotifyPlayerQualityConfig(quality: SpotifyStreamingQuality) {
+  // `streamingFormat` is the only public knob the SDK exposes. There's no
+  // per-track override — re-instantiate the SDK if the user crosses tier
+  // boundaries mid-session.
+  switch (quality) {
+    case "lossless":
+      // "VERY_HIGH" = OGG_VORBIS 320kbps (Premium only). Fall back to HIGH
+      // automatically if the listener's account doesn't support it.
+      return { streamingFormat: "OGG_VORBIS_320" as const };
+    case "high":
+      return { streamingFormat: "OGG_VORBIS_160" as const };
+    case "normal":
+    default:
+      return { streamingFormat: "OGG_VORBIS_96" as const };
+  }
+}
+

@@ -377,15 +377,34 @@ function SpotifyPanel() {
           <View style={styles.broadcastHeader}>
             <Ionicons name="radio" size={18} color="#FFD60A" />
             <Text style={styles.broadcastTitle}>Broadcast to Community</Text>
+            {/* Quality badge — color-coded per tier so the admin sees
+                instantly what bitrate the convoy is receiving. Pulls live
+                from the proximity store, no extra props needed. */}
+            <View style={[
+              styles.qualityBadge,
+              musicQuality === "lossless" && { backgroundColor: "rgba(52,199,89,0.18)", borderColor: "rgba(52,199,89,0.55)" },
+              musicQuality === "high"     && { backgroundColor: "rgba(255,149,0,0.18)", borderColor: "rgba(255,149,0,0.55)" },
+              musicQuality === "normal"   && { backgroundColor: "rgba(142,142,147,0.18)", borderColor: "rgba(142,142,147,0.55)" },
+            ]}>
+              <Ionicons
+                name={musicQuality === "lossless" ? "headset" : musicQuality === "high" ? "musical-note" : "radio-outline"}
+                size={11}
+                color={musicQuality === "lossless" ? "#34C759" : musicQuality === "high" ? "#FF9500" : "#8E8E93"}
+              />
+              <Text style={[
+                styles.qualityBadgeText,
+                { color: musicQuality === "lossless" ? "#34C759" : musicQuality === "high" ? "#FF9500" : "#8E8E93" },
+              ]}>
+                {musicQuality === "lossless" ? "LOSSLESS" : musicQuality === "high" ? "HQ" : "STANDARD"}
+              </Text>
+            </View>
           </View>
           <Text style={styles.broadcastSub}>
             {currentTrack ? (
               <>
-                Broadcasting in{" "}
-                <Text style={{ color: proximityTier === "close" ? "#34C759" : proximityTier === "mid" ? "#FF9500" : "#8E8E93", fontWeight: "700" }}>
-                  {musicQuality === "lossless" ? "Lossless" : musicQuality === "high" ? "High Quality" : "Standard"}
-                </Text>
-                {" · "}{proximityPeers} {proximityPeers === 1 ? "car" : "cars"} in convoy
+                {proximityPeers} {proximityPeers === 1 ? "car" : "cars"} in convoy
+                {" · "}
+                {musicQuality === "lossless" ? "320 kbps OGG" : musicQuality === "high" ? "160 kbps OGG" : "96 kbps OGG"}
               </>
             ) : (
               "Start playing a track on Spotify, then broadcast it to your convoy"
@@ -564,7 +583,22 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,214,10,0.3)',
   },
   broadcastHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  broadcastTitle: { color: '#FFD60A', fontSize: 15, fontWeight: '700' },
+  broadcastTitle: { color: '#FFD60A', fontSize: 15, fontWeight: '700', flex: 1 },
+  // Tier-color quality pill that lives in the broadcast card header.
+  qualityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  qualityBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
   broadcastSub: { color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 14 },
   broadcastBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',

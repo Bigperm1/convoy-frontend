@@ -608,12 +608,19 @@ export default function MapScreen() {
           });
         }
         // Music broadcast from the community admin — surface a non-intrusive
-        // toast at the bottom-center "🎵 jeff: Smooth Operator — Sade" that
-        // auto-dismisses after 5s. `action: 'stop'` immediately clears it.
+        // toast at the bottom-center "🎵 jeff: Smooth Operator — Sade · HQ"
+        // that auto-dismisses after 5s. `action: 'stop'` immediately clears it.
         if (m.type === "music_broadcast") {
           if (m.action === "play" && m.track) {
             const who = m.broadcaster_handle || "Admin";
-            setMusicToast(`🎵 ${who}: ${m.track.name}${m.track.artist ? ` — ${m.track.artist}` : ""}`);
+            // Quality badge appended to the toast so listeners can see at a
+            // glance what tier the admin is pushing. "Lossless"/"HQ"/"SD"
+            // mirror Spotify's own terminology so users intuit instantly.
+            const qLabel =
+              m.quality === "lossless" ? " · 🎧 Lossless" :
+              m.quality === "high"     ? " · HQ" :
+              m.quality === "normal"   ? "" : ""; // hide for standard / unknown
+            setMusicToast(`🎵 ${who}: ${m.track.name}${m.track.artist ? ` — ${m.track.artist}` : ""}${qLabel}`);
             if (musicToastTimer.current) clearTimeout(musicToastTimer.current);
             musicToastTimer.current = setTimeout(() => setMusicToast(null), 5000);
           } else if (m.action === "stop") {

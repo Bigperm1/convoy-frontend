@@ -1083,6 +1083,24 @@ async def startup():
     await db.communities.create_index("invite_code")
     await db.communities.create_index("name")
 
+    # ============================================================
+    # Demo / seed data
+    # ============================================================
+    # By default this fires on every cold start and is what powers the
+    # local dev experience (demo@revradar.app, AlexGT, SaraS2K, the two
+    # public communities). For TestFlight builds + production deploys
+    # we want a CLEAN database so beta testers don't see fake drivers.
+    #
+    # Set SEED_DEMO_DATA=0 (or "false") in the backend `.env` to skip.
+    # Recommended values per environment:
+    #   - local dev          → 1 (default)
+    #   - staging / TestFlight → 0
+    #   - production         → 0
+    seed_flag = os.environ.get("SEED_DEMO_DATA", "1").strip().lower()
+    if seed_flag in ("0", "false", "no", "off"):
+        logger.info("Convoy started (seed skipped: SEED_DEMO_DATA=%s).", seed_flag)
+        return
+
     # Seed demo users
     seeds = [
         {"email": "demo@revradar.app", "password": "demo1234", "handle": "DemoDriver", "car": ("Toyota", "Supra", 1998, "Red")},

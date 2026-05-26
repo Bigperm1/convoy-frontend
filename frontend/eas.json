@@ -1,38 +1,45 @@
 {
   "cli": {
     "version": ">= 12.0.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "channel": "development",
-      "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://motorist-hub.preview.emergentagent.com"
-      }
+      "ios": { "simulator": true },
+      "channel": "development"
     },
     "preview": {
       "distribution": "internal",
+      "ios": { "simulator": false, "resourceClass": "m-medium" },
+      "android": { "buildType": "apk" },
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://motorist-hub.preview.emergentagent.com"
+        "EXPO_PUBLIC_ENV": "preview"
       }
     },
     "production": {
+      "distribution": "store",
+      "ios": { "resourceClass": "m-medium", "autoIncrement": true },
+      "android": { "buildType": "app-bundle", "autoIncrement": true },
       "channel": "production",
-      "autoIncrement": true,
       "env": {
-        "_comment": "Replace EXPO_PUBLIC_BACKEND_URL with your Emergent .sh deployed URL after clicking Deploy.",
-        "EXPO_PUBLIC_BACKEND_URL": "https://YOUR-CONVOY-APP.emergent.sh",
-        "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "$EXPO_PUBLIC_GOOGLE_MAPS_KEY",
-        "EXPO_PUBLIC_SPOTIFY_CLIENT_ID": "$EXPO_PUBLIC_SPOTIFY_CLIENT_ID",
-        "EXPO_PUBLIC_SUPABASE_URL": "$EXPO_PUBLIC_SUPABASE_URL",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "$EXPO_PUBLIC_SUPABASE_ANON_KEY"
+        "EXPO_PUBLIC_ENV": "production"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "REPLACE_WITH_YOUR_APPLE_ID_EMAIL",
+        "ascAppId": "REPLACE_WITH_YOUR_APP_STORE_CONNECT_APP_ID",
+        "appleTeamId": "REPLACE_WITH_YOUR_APPLE_TEAM_ID"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./play-store-service-account.json",
+        "track": "internal"
+      }
+    }
   }
 }

@@ -780,104 +780,11 @@ def _classify_intent(text: str) -> dict:
     return out
 
 
-# ---------- External Alerts Feed (Waze-style proxy) ----------
-# Polls one or more JSON feeds and normalizes to {id, type, lat, lng, ts, raw_type, subtype, source}.
-# Two named feeds (matches Waze rtproxy convention enthusiast apps use):
-#   - "na"  → North America   (EXTERNAL_FEED_NA_URL, default https://rtproxy-na.waze.com/)
-#   - "row" → Rest of World   (EXTERNAL_FEED_ROW_URL, default https://rtproxy-row.waze.com/)
-# Frontend can pass ?feeds=na,row to enable any combination. Backend caches per-feed-set 25s.
+# NOTE: The legacy Waze-style external alerts proxy (`/api/feed/external`) was
+# removed June 2025. The upstream Waze rtproxy endpoints returned 403 to all
+# requests and the feature was already hidden in the Layers UI. Hazards are
+# now sourced exclusively from our own Supabase mirror + Mongo collection.
 
-EXTERNAL_FEEDS = {
-    "na": os.environ.get("EXTERNAL_FEED_NA_URL", "https://rtproxy-na.waze.com/"),
-    "row": os.environ.get("EXTERNAL_FEED_ROW_URL", "https://rtproxy-row.waze.com/"),
-}
-# Legacy single-URL var still honored as default for "na" if set
-if os.environ.get("EXTERNAL_FEED_URL"):
-    EXTERNAL_FEEDS["na"] = os.environ["EXTERNAL_FEED_URL"]
-
-_feed_cache: Dict[str, dict] = {}  # keyed by sorted feed-set, e.g. "na,row"
-_FEED_CACHE_TTL = 25.0
-
-def _normalize_alert_type(raw: str) -> str:
-    if not raw: return "OTHER"
-    r = str(raw).upper()
-    if "POLICE" in r: return "POLICE"
-    if "ACCIDENT" in r or "CRASH" in r: return "ACCIDENT"
-    if "JAM" in r or "TRAFFIC" in r: return "JAM"
-    if "HAZARD" in r or "OBJECT" in r or "POTHOLE" in r or "ROAD" in r or "DEBRIS" in r: return "HAZARD"
-    if "CONSTRUCTION" in r: return "CONSTRUCTION"
-    if "WEATHER" in r: return "WEATHER"
-    return "OTHER"
-
-def _alert_id(item: dict, lat: float, lng: float, raw_type: str) -> str:
-    for k in ("uuid", "id", "alertId", "alert_id"):
-        v = item.get(k)
-        if v: return str(v)
-    h = hashlib.sha1(f"{raw_type}|{round(lat, 5)}|{round(lng, 5)}".encode()).hexdigest()
-    return h[:16]
-
-def _extract_alerts(payload, source_key: str = "") -> List[dict]:
-    if payload is None: return []
-    if isinstance(payload, list):
-        items = payload
-    elif isinstance(payload, dict):
-        items = (
-            payload.get("alerts")
-            or (payload.get("data", {}).get("alerts") if isinstance(payload.get("data"), dict) else None)
-        ) or payload.get("items") or []
-    else:
-        items = []
-
-    out: List[dict] = []
-    for it in items:
-        if not isinstance(it, dict): continue
-        lat = it.get("lat") or it.get("latitude")
-        lng = it.get("lng") or it.get("lon") or it.get("longitude")
-        if lat is None or lng is None:
-            loc = it.get("location") or {}
-            if isinstance(loc, dict):
-                lat = loc.get("y") if "y" in loc else loc.get("lat")
-                lng = loc.get("x") if "x" in loc else loc.get("lng")
-        try:
-            lat = float(lat); lng = float(lng)
-        except (TypeError, ValueError):
-            continue
-        raw_type = str(it.get("type") or it.get("alertType") or "OTHER")
-        subtype = it.get("subtype") or it.get("subType") or ""
-        ts_val = it.get("pubMillis") or it.get("ts") or it.get("timestamp")
-        try:
-            ts = float(ts_val) / (1000.0 if ts_val and ts_val > 1e12 else 1.0) if ts_val else time.time()
-        except (TypeError, ValueError):
-            ts = time.time()
-        out.append({
-            "id": _alert_id(it, lat, lng, raw_type),
-            "type": _normalize_alert_type(raw_type),
-            "raw_type": raw_type,
-            "subtype": subtype,
-            "lat": lat, "lng": lng,
-            "ts": ts,
-            "source": source_key,  # "na" | "row"
-        })
-    return out
-
-async def _fetch_one_feed(client: httpx.AsyncClient, key: str, url: str, params: dict) -> dict:
-    """Fetch a single named feed; never raises — returns status info even on failure."""
-    try:
-        resp = await client.get(url, params=params or None,
-                                headers={"User-Agent": "Convoy/1.0", "Accept": "application/json"})
-        resp.raise_for_status()
-        try:
-            payload = resp.json()
-        except Exception:
-            import json as _json
-            payload = _json.loads(resp.text)
-        return {"key": key, "url": url, "status": "ok", "error": None, "alerts": _extract_alerts(payload, key)}
-    except httpx.HTTPStatusError as e:
-        return {"key": key, "url": url, "status": "http_error", "error": f"{e.response.status_code}", "alerts": []}
-    except httpx.RequestError as e:
-        return {"key": key, "url": url, "status": "network_error", "error": str(e)[:120], "alerts": []}
-    except Exception as e:
-        return {"key": key, "url": url, "status": "parse_error", "error": str(e)[:120], "alerts": []}
 
 @api.get("/directions")
 async def directions_proxy(
@@ -921,64 +828,6 @@ async def directions_proxy(
             return r.json()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"directions upstream error: {e}")
-
-
-@api.get("/feed/external")
-async def external_feed(
-    user=Depends(get_current_user),
-    feeds: str = "na",
-    top: Optional[float] = None,
-    bottom: Optional[float] = None,
-    left: Optional[float] = None,
-    right: Optional[float] = None,
-):
-    """Proxy + normalize one or more external alert feeds. ?feeds=na,row to combine.
-    Per-feed-set cache (25s) keeps the hop light against 60s frontend polling."""
-    keys = [k.strip().lower() for k in (feeds or "").split(",") if k.strip()]
-    keys = [k for k in keys if k in EXTERNAL_FEEDS]
-    if not keys:
-        keys = ["na"]
-    cache_key = ",".join(sorted(set(keys)))
-    now = time.time()
-    cached = _feed_cache.get(cache_key)
-    if cached and (now - cached["ts"]) < _FEED_CACHE_TTL:
-        return cached["data"]
-
-    params = {}
-    if top is not None: params["top"] = top
-    if bottom is not None: params["bottom"] = bottom
-    if left is not None: params["left"] = left
-    if right is not None: params["right"] = right
-
-    async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-        results = await asyncio.gather(*[
-            _fetch_one_feed(client, k, EXTERNAL_FEEDS[k], params) for k in keys
-        ])
-
-    # Merge + dedup across feeds (same id wins → first encountered)
-    merged: Dict[str, dict] = {}
-    for r in results:
-        for a in r["alerts"]:
-            if a["id"] not in merged:
-                merged[a["id"]] = a
-
-    feeds_info = [{"key": r["key"], "url": r["url"], "status": r["status"], "error": r["error"], "count": len(r["alerts"])} for r in results]
-    overall_status = "ok" if all(r["status"] == "ok" for r in results) else (
-        "partial" if any(r["status"] == "ok" for r in results) else results[0]["status"] if results else "error"
-    )
-
-    out = {
-        "alerts": list(merged.values()),
-        "count": len(merged),
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "feeds": feeds_info,
-        # Back-compat fields:
-        "source": ", ".join(EXTERNAL_FEEDS[k] for k in keys),
-        "upstream_status": overall_status,
-        "upstream_error": next((r["error"] for r in results if r["error"]), None),
-    }
-    _feed_cache[cache_key] = {"data": out, "ts": now}
-    return out
 
 
 # ---------- WebSocket ----------

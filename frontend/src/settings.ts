@@ -12,8 +12,6 @@ import { useEffect, useState } from "react";
 const KEY = "convoy.settings.v2";
 
 export type Settings = {
-  feedNA: boolean;          // North America Waze feed
-  feedROW: boolean;         // International (Rest-of-World) Waze feed
   highlightConvoy: boolean; // Gold border around Convoy community reports
   alertSound: boolean;      // Chime when a new Convoy hazard appears
   // Route preferences (passed to Google Directions API as `avoid=...`)
@@ -47,8 +45,6 @@ export type Settings = {
 };
 
 export const DEFAULT_SETTINGS: Settings = {
-  feedNA: true,
-  feedROW: false,
   highlightConvoy: true,
   alertSound: false,
   avoidTolls: false,
@@ -108,12 +104,10 @@ export function useSettings(): [Settings, (p: Partial<Settings>) => Promise<Sett
   return [s, updateSettings];
 }
 
-// Helper: build the feeds query param for /api/feed/external from current settings.
-export function feedsQuery(s: Settings): string {
-  const keys: string[] = [];
-  if (s.feedNA) keys.push("na");
-  if (s.feedROW) keys.push("row");
-  return keys.join(",");
+// Helper kept as a no-op stub for legacy call sites. The external Waze-style
+// feed was removed June 2025 — callers should just stop using this.
+export function feedsQuery(_s: Settings): string {
+  return "";
 }
 
 // Speed formatting — converts the device-reported speed (m/s) to the user's

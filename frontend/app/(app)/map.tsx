@@ -15,7 +15,12 @@ import ConvoyMap, { Hazard, Peer } from "../../src/ConvoyMap";
 import DestinationSearch from "../../src/DestinationSearch";
 import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 import { voiceBus, geocodeQuery } from "../../src/voiceBus";
-import { useExternalAlerts, registerExternalFeedBackgroundTask } from "../../src/externalFeed";
+import { useCommunityRoutes, createCommunityRoute, CommunityRoute } from "../../src/communityRoutes";
+import Speedometer from "../../src/components/Speedometer";
+import { ReportToast, MusicToast } from "../../src/components/AlertToast";
+import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
+import NavigationPanel from "../../src/components/NavigationPanel";
+import StepDrawer, { StepDrawerHandle } from "../../src/components/StepDrawer";
 import { useSettings, getSettings, updateSettings as updateGlobalSettings } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
@@ -24,7 +29,6 @@ import {
   fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtEtaSec,
 } from "../../src/nav";
-import { useCommunityRoutes, createCommunityRoute, CommunityRoute } from "../../src/communityRoutes";
 
 type RouteInfo = {
   distance_text: string;
@@ -130,13 +134,7 @@ export default function MapScreen() {
     }
   }, [destination]);
 
-  // ----- External alerts feed (Waze-style polling, dedup + auto-clear) -----
-  const externalFeed = useExternalAlerts(60_000);
   const [settings] = useSettings();
-  useEffect(() => {
-    // Best-effort iOS/Android background fetch (≥15min cadence). Foreground polling above is the primary path.
-    registerExternalFeedBackgroundTask().catch(() => {});
-  }, []);
 
   // Optional Convoy alert sound — chime when a NEW community hazard appears
   const prevHazardIdsRef = useRef<Set<string>>(new Set());
@@ -290,38 +288,12 @@ export default function MapScreen() {
 
   // ===== Step Drawer =====
   // Slides up from the bottom when a route is selected, lists each maneuver,
-  // and auto-hides after 3s. Users can grab the pill to drag it back up; a
-  // small handle at the bottom of the screen re-opens it when hidden.
-  const [stepDrawerVisible, setStepDrawerVisible] = useState(false);
-  const stepDrawerAnim = useRef(new Animated.Value(0)).current; // 0=hidden, 1=shown
+  // and auto-hides after 3s. The drawer is fully encapsulated in
+  // `components/StepDrawer` — we just hold a ref so we can drive open/close.
+  const stepDrawerRef = useRef<StepDrawerHandle | null>(null);
   const stepDrawerAutoHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const DRAWER_HEIGHT = 320;
-  const slideStepDrawerUp = () => {
-    setStepDrawerVisible(true);
-    Animated.spring(stepDrawerAnim, { toValue: 1, useNativeDriver: true, tension: 65, friction: 11 }).start();
-  };
-  const slideStepDrawerDown = () => {
-    Animated.timing(stepDrawerAnim, { toValue: 0, duration: 280, useNativeDriver: true }).start(({ finished }) => {
-      if (finished) setStepDrawerVisible(false);
-    });
-  };
-  // Drag-down-to-dismiss gesture on the drawer's grab pill. Hold-drag scrubs
-  // the open progress live; release > 60px or fling-down kills the drawer.
-  const stepPan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 5,
-      onPanResponderMove: (_, g) => {
-        if (g.dy > 0) {
-          const progress = Math.max(0, 1 - g.dy / DRAWER_HEIGHT);
-          stepDrawerAnim.setValue(progress);
-        }
-      },
-      onPanResponderRelease: (_, g) => {
-        if (g.dy > 60 || g.vy > 0.5) slideStepDrawerDown();
-        else slideStepDrawerUp();
-      },
-    })
-  ).current;
+  const slideStepDrawerUp = () => stepDrawerRef.current?.open();
+  const slideStepDrawerDown = () => stepDrawerRef.current?.close();
 
   // Tap a route polyline on the map → keep ONLY that route, fire up nav with
   // chase-cam (45° behind the car), and pop the step drawer for 3s so the
@@ -662,9 +634,9 @@ export default function MapScreen() {
         try { await api.post("/location", { lat, lng, speed: speed || 0, heading: heading || 0 }); } catch {}
       }
     } catch {}
-    // 3. Reload peer list + community list + external alerts in parallel so
+    // 3. Reload peer list + community list in parallel so
     //    everything visible on the map snaps to the latest server state.
-    try { await Promise.all([loadPeers(), loadCommunities?.(), externalFeed?.refetch?.()]); } catch {}
+    try { await Promise.all([loadPeers(), loadCommunities?.()]); } catch {}
   };
 
   const reportHazard = async (kind: string, opts?: { fromVoice?: boolean }) => {
@@ -979,7 +951,7 @@ export default function MapScreen() {
         peers={peerList}
         leaderUserId={leaderUserId}
         hazards={visibleHazards}
-        externalAlerts={externalFeed.alerts}
+        externalAlerts={[]}
         highlightConvoy={settings.highlightConvoy}
         destination={destination}
         encodedPolyline={encodedPolyline}
@@ -1025,7 +997,7 @@ export default function MapScreen() {
               return (
                 <View style={styles.liveOverlay} pointerEvents="none">
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length + externalFeed.alerts.length} alerts</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts</Text>
                 </View>
               );
             })()}
@@ -1044,7 +1016,7 @@ export default function MapScreen() {
               return (
                 <View style={styles.liveOverlay} pointerEvents="none">
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length + externalFeed.alerts.length} alerts</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts</Text>
                 </View>
               );
             })()}
@@ -1243,7 +1215,7 @@ export default function MapScreen() {
                 Peeked 80% off-screen by default; tap the visible 20% edge to
                 expand and see maneuver + End. Tap End → ends nav (which also
                 takes the drawer off-screen with the route). */}
-            <NavActionDrawer
+            <NavigationPanel
               visible={navDrawerOpen}
               onExpand={() => setNavDrawerOpen(true)}
               onCollapse={() => setNavDrawerOpen(false)}
@@ -1304,7 +1276,7 @@ export default function MapScreen() {
       {/* ===== Speedometer HUD (bottom-left glass overlay) =====
           Pulls live speed from coords.speed (m/s) → km/h. Floors small values
           to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
-      <SpeedometerHUD speedMs={coords?.speed} speedLimit={speedLimitRef.current} unit={settings.speedUnit} />
+      <Speedometer speedMs={coords?.speed} speedLimit={speedLimitRef.current} unit={settings.speedUnit} />
 
       <PeerModal
         peer={selectedPeer ? { ...selectedPeer } as any : null}
@@ -1540,21 +1512,11 @@ export default function MapScreen() {
       {/* ===== Report confirmation toast =====
           Brief glassy pill at the bottom-center that confirms a Police or
           Hazard report was sent. Auto-dismisses after 2.5s (set by reportAlert). */}
-      {!!alertConfirm && (
-        <View pointerEvents="none" style={styles.toast}>
-          <Text style={styles.toastText}>
-            {alertConfirm === 'police' ? '🛡 Police reported' : '⚠️ Hazard reported'}
-          </Text>
-        </View>
-      )}
+      <ReportToast kind={alertConfirm as any} />
       {/* Music broadcast toast — shows up when the convoy admin pushes a
           track from the Music screen. Sits slightly higher than the report
           toast so they don't overlap if both fire close together. */}
-      {!!musicToast && (
-        <View pointerEvents="none" style={[styles.toast, { bottom: 210, backgroundColor: 'rgba(29,185,84,0.95)' }]}>
-          <Text style={styles.toastText} numberOfLines={1}>{musicToast}</Text>
-        </View>
-      )}
+      <MusicToast message={musicToast} />
 
       {/* ===== Step Drawer — slide-up turn list =====
           Appears the moment a user taps a route. The active route's maneuvers
@@ -1563,56 +1525,11 @@ export default function MapScreen() {
           on the bottom edge to re-summon it; the drawer's top handle is
           draggable to dismiss with a fling. */}
       {routes.length > 0 && (
-        <>
-          {!stepDrawerVisible && (
-            <TouchableOpacity
-              testID="step-drawer-handle"
-              style={styles.stepGrabHandle}
-              onPress={slideStepDrawerUp}
-              activeOpacity={0.75}
-            >
-              <View style={styles.stepGrabPill} />
-            </TouchableOpacity>
-          )}
-          <Animated.View
-            pointerEvents={stepDrawerVisible ? 'auto' : 'none'}
-            style={[
-              styles.stepDrawer,
-              {
-                transform: [{
-                  translateY: stepDrawerAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [DRAWER_HEIGHT, 0],
-                  }),
-                }],
-              },
-            ]}
-          >
-            <View {...stepPan.panHandlers} style={styles.stepDrawerHandle}>
-              <View style={styles.stepGrabPill} />
-            </View>
-            <View style={styles.stepSummary}>
-              <Text style={styles.stepDuration}>{(routes[0] as any)?.duration_in_traffic_text ?? routes[0]?.duration_text}</Text>
-              <Text style={styles.stepDistance}>{routes[0]?.distance_text}</Text>
-            </View>
-            <ScrollView style={styles.stepList} showsVerticalScrollIndicator={false}>
-              {((routes[0] as any)?.steps ?? []).map((step: any, i: number) => (
-                <View key={i} style={styles.stepRow}>
-                  <Ionicons
-                    name={maneuverIcon(step.maneuver)}
-                    size={20}
-                    color="#FFFFFF"
-                    style={{ marginTop: 2 }}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.stepText}>{step.html}</Text>
-                    <Text style={styles.stepDist}>{step.distance_text}</Text>
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-          </Animated.View>
-        </>
+        <StepDrawer
+          ref={stepDrawerRef}
+          route={routes[0] as any}
+          maneuverIcon={maneuverIcon}
+        />
       )}
     </View>
   );
@@ -1681,348 +1598,6 @@ function toHazard(s: SupaHazard): Hazard {
   };
 }
 
-// Right-edge "peek tab" for hazard reporting.
-// Inactive: tucked off-screen with ~33% peeking out (drawer-pull affordance).
-// Active: animated slide to fully-visible at the right edge of the screen.
-const PEEK_W = 56;          // square edge length
-const PEEK_VISIBLE_RATIO = 0.33;
-const PEEK_HIDDEN_TX = PEEK_W * (1 - PEEK_VISIBLE_RATIO); // 67% off-screen
-
-// Speedometer HUD — bottom-left glass overlay.
-// Pulls speed (m/s) from the location watcher, converts to km/h (×3.6),
-// and floors to 0 below 1 km/h so a stationary GPS doesn't read "1".
-//
-// Smoothing buffer: GPS speed momentarily drops to 0 mid-drive (tunnel,
-// urban canyon, brief signal stutter). Without smoothing the HUD flickers
-// 65 → 0 → 65 in under a second. We hold the previous reading for up to
-// HOLD_MS (2s) before allowing it to fall to 0. Any non-zero reading
-// resets the hold and updates immediately.
-const SPEEDO_HOLD_MS = 2000;
-// Exponential-moving-average smoothing factor for the displayed km/h.
-// alpha = 0.25 → ~4-sample window: each new reading contributes 25% to the
-// displayed value, prior smoothed value 75%. Result: 32 → 31 → 28 → 24 → 20
-// instead of the raw 32 → 0 → 20 jumps the user reported in field testing.
-const SPEEDO_EMA_ALPHA = 0.25;
-function SpeedometerHUD({ speedMs, speedLimit, unit }: { speedMs?: number; speedLimit?: number | null; unit: 'kmh' | 'mph' }) {
-  // rawKmh: this tick's converted speed (>=1 km/h or 0)
-  const rawKmh = (() => {
-    if (typeof speedMs !== "number" || !Number.isFinite(speedMs) || speedMs < 0) return 0;
-    const v = speedMs * 3.6;
-    return v < 1 ? 0 : v;
-  })();
-
-  // displayKmh: what the UI actually shows. Smoothed via EMA so rapid GPS
-  // fluctuations look like gradual transitions rather than jumps.
-  const [displayKmh, setDisplayKmh] = useState(0);
-  // Last non-zero reading + timestamp — survives across renders.
-  const lastNonZeroRef = useRef<{ value: number; ts: number }>({ value: 0, ts: 0 });
-  // Pending fall-to-zero timer so we can cancel if speed comes back.
-  const fallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (fallTimerRef.current) {
-      clearTimeout(fallTimerRef.current);
-      fallTimerRef.current = null;
-    }
-
-    if (rawKmh > 0) {
-      // Live speed — apply EMA smoothing toward the new value.
-      lastNonZeroRef.current = { value: rawKmh, ts: Date.now() };
-      setDisplayKmh((prev) =>
-        prev <= 0
-          ? rawKmh                                        // first reading after rest → snap
-          : prev * (1 - SPEEDO_EMA_ALPHA) + rawKmh * SPEEDO_EMA_ALPHA
-      );
-      return;
-    }
-
-    // rawKmh === 0. If we have a recent positive reading, hold briefly,
-    // otherwise EMA-decay toward 0 (so we glide down rather than slamming).
-    const last = lastNonZeroRef.current;
-    const elapsed = Date.now() - last.ts;
-    if (last.value > 0 && elapsed < SPEEDO_HOLD_MS) {
-      const remaining = SPEEDO_HOLD_MS - elapsed;
-      fallTimerRef.current = setTimeout(() => {
-        if (lastNonZeroRef.current.ts === last.ts) {
-          // Decay toward 0 with the same EMA so the final transition is smooth.
-          setDisplayKmh((prev) => prev * (1 - SPEEDO_EMA_ALPHA));
-        }
-      }, remaining);
-    } else {
-      setDisplayKmh((prev) => prev * (1 - SPEEDO_EMA_ALPHA));
-    }
-  }, [rawKmh]);
-
-  // Cleanup the timer on unmount.
-  useEffect(() => () => {
-    if (fallTimerRef.current) clearTimeout(fallTimerRef.current);
-  }, []);
-
-  // Speed-limit color logic. Posted limit always arrives in KPH from Google
-  // Roads — convert it to the user's display unit (MPH if needed) BEFORE
-  // doing any threshold math, otherwise a 30 mph limit gets compared against
-  // a 100 kph speed and everyone looks like they're flying.
-  //
-  // Threshold is 20 km/h over → orange / red, scaled for MPH (~12 mph).
-  //
-  //  - no limit known  → dark (calm, "no data")
-  //  - under or equal  → dark (calm, normal)
-  //  - 1–over_step     → orange (caution)
-  //  - over_step+      → red    (danger)
-  const isMph = unit === 'mph';
-  const speedDisplay = isMph ? Math.round(displayKmh * 0.621371) : Math.round(displayKmh);
-  const limitDisplay = speedLimit == null
-    ? null
-    : isMph
-      ? Math.round(speedLimit * 0.621371)
-      : Math.round(speedLimit);
-  const overStep = isMph ? 12 : 20;     // ~12 mph ≈ 20 km/h
-  const speedoBg = !limitDisplay || speedDisplay <= limitDisplay
-    ? 'rgba(28,28,30,0.88)'
-    : speedDisplay <= limitDisplay + overStep
-      ? '#FF9500'
-      : '#FF3B30';
-
-  return (
-    <View style={styles.speedHudWrap} pointerEvents="none">
-      <View style={[styles.speedHud, { backgroundColor: speedoBg }]}>
-        <View style={styles.speedHudInner}>
-          <Text style={styles.speedHudValue}>{speedDisplay}</Text>
-          <Text style={styles.speedHudUnit}>{isMph ? 'MPH' : 'KM/H'}</Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-/**
- * Right-edge peek drawer.
- *
- * Two states animated via translateX:
- *   - peeked  (default, !visible) — 75% off-screen, only the leading edge of
- *             the icons sticks out as a "drawer pull" affordance.
- *   - open    (visible=true)      — translateX = 0, full icons visible.
- *
- * Tapping the peek edge fires `onExpand` (parent flips visible→true).
- * Tapping an icon when OPEN fires `onReport(kind)` (parent inserts into
- * Supabase + sets visible→false, auto-snapping back to peek).
- *
- * Accident + Traffic deliberately removed — high-priority only.
- */
-const DRAWER_W = 84;                  // outer width of the drawer (icon + padding)
-const DRAWER_PEEK_TX = DRAWER_W * 0.80; // 80% off-screen when peeked (per spec)
-function HazardDrawer({
-  visible,
-  onExpand,
-  onCollapse,
-  onReport,
-}: {
-  visible: boolean;
-  onExpand: () => void;
-  onCollapse: () => void;
-  onReport: (kind: string) => void;
-}) {
-  const tx = useRef(new Animated.Value(visible ? 0 : DRAWER_PEEK_TX)).current;
-  useEffect(() => {
-    Animated.spring(tx, {
-      toValue: visible ? 0 : DRAWER_PEEK_TX,
-      useNativeDriver: true,
-      friction: 9,
-      tension: 80,
-    }).start();
-  }, [visible, tx]);
-
-  // Auto-collapse after 5 s of no interaction. Cleared/reset on tap (since the
-  // tap will either fire a report — which collapses anyway — or, when peeked,
-  // expand and start a fresh 5 s window). Without this the drawer stays open
-  // forever if the driver glances away mid-trip and forgets it.
-  useEffect(() => {
-    if (!visible) return;
-    const t = setTimeout(() => onCollapse(), 5000);
-    return () => clearTimeout(t);
-  }, [visible, onCollapse]);
-
-  const handle = (kind: string) => {
-    if (!visible) {
-      onExpand();
-      return;
-    }
-    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
-    onReport(kind);
-  };
-
-  return (
-    <Animated.View
-      style={[styles.drawerWrap, { transform: [{ translateX: tx }] }]}
-      testID="report-panel"
-    >
-      <Glass radius={20}>
-        <View style={styles.drawerInner}>
-          {/* Police (blue) */}
-          <TouchableOpacity
-            testID="report-police"
-            onPress={() => handle("police")}
-            activeOpacity={0.85}
-            style={[styles.drawerBtn, { backgroundColor: "rgba(10,132,255,0.18)", borderColor: "rgba(10,132,255,0.55)" }]}
-          >
-            <Ionicons name="shield-checkmark" size={26} color="#0A84FF" />
-            <Text style={[styles.drawerBtnText, { color: "#0A84FF" }]}>Police</Text>
-          </TouchableOpacity>
-
-          {/* Hazard (orange) — wire schema kind = 'road' to match
-              HAZARDS_SUPABASE_SETUP.md check constraint. */}
-          <TouchableOpacity
-            testID="report-road"
-            onPress={() => handle("road")}
-            activeOpacity={0.85}
-            style={[styles.drawerBtn, { backgroundColor: "rgba(255,159,10,0.18)", borderColor: "rgba(255,159,10,0.55)" }]}
-          >
-            <Ionicons name="warning" size={26} color="#FF9F0A" />
-            <Text style={[styles.drawerBtnText, { color: "#FF9F0A" }]}>Hazard</Text>
-          </TouchableOpacity>
-        </View>
-      </Glass>
-    </Animated.View>
-  );
-}
-
-/**
- * Navigation Action Drawer — peeked 80% off-screen on the right edge,
- * positioned ABOVE the HazardDrawer in the right-side stack.
- *
- * Peeked state shows just the maneuver-icon glyph as a "drawer pull".
- * Tap → expands fully and reveals:
- *    - Big maneuver arrow + distance to next turn
- *    - Truncated step instruction
- *    - Mute toggle
- *    - End-nav red button
- *
- * Replaces the previous full-width top maneuver banner and the bottom-LEFT
- * red End pill — both are now nested in this single right-side drawer to
- * keep the chase-cam center clear (per the "open the middle of the map"
- * directive).
- */
-function NavActionDrawer({
-  visible,
-  onExpand,
-  onCollapse,
-  maneuverIcon,
-  distance,
-  instruction,
-  muted,
-  onToggleMute,
-  onEnd,
-}: {
-  visible: boolean;
-  onExpand: () => void;
-  onCollapse: () => void;
-  maneuverIcon: any;
-  distance: string;
-  instruction: string;
-  muted: boolean;
-  onToggleMute: () => void;
-  onEnd: () => void;
-}) {
-  const tx = useRef(new Animated.Value(visible ? 0 : DRAWER_PEEK_TX)).current;
-  useEffect(() => {
-    Animated.spring(tx, {
-      toValue: visible ? 0 : DRAWER_PEEK_TX,
-      useNativeDriver: true,
-      friction: 9,
-      tension: 80,
-    }).start();
-  }, [visible, tx]);
-
-  // 5 s auto-collapse — same pattern as HazardDrawer. Cleared on unmount or
-  // visible→false. The driver shouldn't have to dig out of an open nav
-  // overlay if they bumped it accidentally; the chase-cam stays unobstructed.
-  useEffect(() => {
-    if (!visible) return;
-    const t = setTimeout(() => onCollapse(), 5000);
-    return () => clearTimeout(t);
-  }, [visible, onCollapse]);
-
-  // Peeked: tapping the leading edge expands.
-  // Open: tap on a button executes that action; tap on the bare maneuver
-  // glyph (where there's no nested button) collapses back to peek.
-  if (!visible) {
-    return (
-      <Animated.View
-        style={[styles.navDrawerWrap, { transform: [{ translateX: tx }] }]}
-        testID="nav-drawer"
-      >
-        <TouchableOpacity onPress={onExpand} activeOpacity={0.85}>
-          <Glass radius={20}>
-            <View style={styles.navDrawerPeek}>
-              <Ionicons name={maneuverIcon} size={26} color="#fff" />
-            </View>
-          </Glass>
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  }
-  return (
-    <Animated.View
-      style={[styles.navDrawerWrap, { transform: [{ translateX: tx }] }]}
-      testID="nav-drawer-open"
-    >
-      <Glass radius={20}>
-        <View style={styles.navDrawerOpen}>
-          {/* Maneuver glyph + distance — tappable to collapse back to peek */}
-          <TouchableOpacity onPress={onCollapse} activeOpacity={0.85} style={styles.navDrawerHeader}>
-            <Ionicons name={maneuverIcon} size={28} color="#fff" />
-            <Text style={styles.navDrawerDist}>{distance}</Text>
-          </TouchableOpacity>
-          {/* Step instruction (truncated) */}
-          <Text style={styles.navDrawerInst} numberOfLines={3}>{instruction}</Text>
-          {/* Mute toggle */}
-          <TouchableOpacity testID="nav-mute" onPress={onToggleMute} style={styles.navDrawerBtn} activeOpacity={0.85}>
-            <Ionicons name={muted ? "volume-mute" : "volume-high"} size={18} color="#fff" />
-            <Text style={styles.navDrawerBtnText}>{muted ? "Muted" : "Sound"}</Text>
-          </TouchableOpacity>
-          {/* End nav (red) */}
-          <TouchableOpacity testID="end-nav" onPress={onEnd} style={[styles.navDrawerBtn, styles.navDrawerEndBtn]} activeOpacity={0.85}>
-            <Ionicons name="close" size={18} color="#fff" />
-            <Text style={styles.navDrawerBtnText}>End</Text>
-          </TouchableOpacity>
-        </View>
-      </Glass>
-    </Animated.View>
-  );
-}
-
-
-function ReportPeekTab({ active, onPress }: { active: boolean; onPress: () => void }) {
-  const tx = useRef(new Animated.Value(active ? 0 : PEEK_HIDDEN_TX)).current;
-  useEffect(() => {
-    Animated.spring(tx, {
-      toValue: active ? 0 : PEEK_HIDDEN_TX,
-      useNativeDriver: true,
-      friction: 9,
-      tension: 90,
-    }).start();
-  }, [active, tx]);
-  return (
-    <Animated.View
-      pointerEvents="box-none"
-      style={[styles.peekWrap, { transform: [{ translateX: tx }] }]}
-    >
-      <TouchableOpacity
-        testID="report-fab"
-        onPress={onPress}
-        activeOpacity={0.85}
-        style={styles.peekBtn}
-      >
-        <LinearGradient
-          colors={active ? ["#FF453A", "#A6201E"] : [COLORS.primary, COLORS.primaryDim]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
-        <Ionicons name={active ? "close" : "warning"} size={26} color="#fff" />
-      </TouchableOpacity>
-    </Animated.View>
-  );
-}
 
 // Community moderation: when disputes outweigh confirms by a margin, hide the hazard.
 // (Server-side cleanup can also be added via a Supabase trigger or scheduled function.)
@@ -2244,138 +1819,11 @@ const styles = StyleSheet.create({
   // (12) and same bottom anchor (90) for visual symmetry. Inner Text nodes
   // render the speed number + unit label. Background color is set inline on
   // the View (dark / orange / red) by SpeedometerHUD based on speed vs limit.
-  speedHudWrap: {
-    position: 'absolute',
-    left: 12,
-    bottom: 90,
-    zIndex: 6,
-  },
-  speedHud: {
-    width: 64,
-    height: 64,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
-    overflow: 'hidden',
-  },
-  // Hairline inner wrapper — kept around so existing JSX (<View speedHudInner>)
-  // doesn't need to be touched. Just lays the number above the unit label.
-  speedHudInner: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  speedHudValue: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '700',
-    lineHeight: 24,
-    letterSpacing: -0.5,
-  },
-  speedHudUnit: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 9,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    marginTop: 1,
-  },
-  peekWrap: { position: "absolute", right: 0, bottom: 130, width: 56, height: 56 },
-  peekBtn: {
-    width: 56, height: 56,
-    borderTopLeftRadius: 14, borderBottomLeftRadius: 14,
-    borderTopRightRadius: 0, borderBottomRightRadius: 0,
-    overflow: "hidden",
-    alignItems: "center", justifyContent: "center",
-    ...Platform.select({
-      ios: { shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 14, shadowOffset: { width: -2, height: 6 } },
-      android: { elevation: 8 },
-      web: { boxShadow: "-4px 6px 18px rgba(0,0,0,0.4)" } as any,
-    }),
-  },
   // Legacy circular FAB styles kept for reference (now unused).
   fab: { position: "absolute", bottom: 120, right: 18, width: 60, height: 60, borderRadius: 30, overflow: "hidden" },
   fabInner: { flex: 1, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center" },
 
-  reportPanel: { position: "absolute", bottom: 190, right: 18, padding: 4, minWidth: 170 },
 
-  // Slim slide-out hazard drawer — anchored right edge, sits in the MIDDLE
-  // of the right-side stack: NavActionDrawer above, ETA pill below.
-  drawerWrap: {
-    position: "absolute",
-    right: 0,            // flush to the edge — only 20% sticks out by default
-    bottom: 220,         // leaves room for ETA pill at bottom: 100
-    zIndex: 8,
-  },
-  drawerInner: {
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    gap: 10,
-    flexDirection: "column",
-  },
-  drawerBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: 2,
-  },
-  drawerBtnText: { fontSize: 11, fontWeight: "700", letterSpacing: 0.4, marginTop: 2 },
-
-  // ---- Right-edge Navigation Action Drawer ----
-  // Sits ABOVE the HazardDrawer in the right-side stack. Same peek pattern.
-  // When peeked: only the maneuver glyph leading edge sticks out (20%).
-  // When open: full vertical column with maneuver, instruction, mute, End.
-  navDrawerWrap: {
-    position: "absolute",
-    right: 0,
-    bottom: 360,         // sits above HazardDrawer (which is at bottom: 220)
-    zIndex: 9,
-  },
-  navDrawerPeek: {
-    width: 64,
-    height: 64,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  navDrawerOpen: {
-    width: 180,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 10,
-  },
-  navDrawerHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  navDrawerDist: { color: "#fff", fontWeight: "800", fontSize: 18, letterSpacing: -0.3 },
-  navDrawerInst: { color: COLORS.text, fontSize: 13, lineHeight: 18 },
-  navDrawerBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.10)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.18)",
-  },
-  navDrawerEndBtn: {
-    backgroundColor: "#FF3B30",
-    borderColor: "rgba(255,255,255,0)",
-  },
-  navDrawerBtnText: { color: "#fff", fontSize: 12, fontWeight: "700", letterSpacing: 0.4 },
-  reportBtn: { flexDirection: "row", alignItems: "center", padding: 10, gap: 12 },
-  reportIco: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  reportText: { color: COLORS.text, fontWeight: "500", fontSize: 14 },
 
   // ---- Community Routes (admin-shared cruises) ----
   routesStripWrap: { position: "absolute", left: 0, right: 0, top: 150, zIndex: 5 },
@@ -2456,80 +1904,6 @@ const styles = StyleSheet.create({
     borderWidth: 2, borderColor: "rgba(28,28,30,0.85)",
   },
   fabBadgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
-  // Report confirmation toast — appears bottom-center when a Police/Hazard
-  // report is sent. Sits above the tab bar (bottom: 160) and ignores touches
-  // so it never blocks the map underneath.
-  toast: {
-    position: 'absolute', bottom: 160, alignSelf: 'center',
-    backgroundColor: 'rgba(28,28,30,0.92)',
-    paddingHorizontal: 20, paddingVertical: 11,
-    borderRadius: 22, zIndex: 9999,
-  },
-  toastText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-
-  // ===== Step Drawer =====
-  // Dark glass panel that slides up from `bottom: 72` (above the tab bar) on
-  // route selection. translateY is driven by `stepDrawerAnim` (0 = hidden
-  // below the screen at DRAWER_HEIGHT (320px), 1 = fully visible at y=0).
-  stepDrawer: {
-    position: 'absolute',
-    bottom: 72,
-    left: 0, right: 0,
-    height: 320,
-    backgroundColor: 'rgba(18,18,20,0.97)',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    zIndex: 200,
-    paddingBottom: 12,
-  },
-  // Top of the drawer — the area the user grabs to drag down/dismiss. Also
-  // visually echoes the iOS bottom-sheet pattern with a small pill.
-  stepDrawerHandle: {
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  // The tiny pill itself — visible both inside the open drawer AND at the
-  // bottom of the screen when the drawer is hidden (re-summon affordance).
-  stepGrabPill: {
-    width: 36, height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.35)',
-  },
-  // Re-summon strip — sits above the tab bar when the drawer is tucked away.
-  // Tap to slide the drawer back up.
-  stepGrabHandle: {
-    position: 'absolute',
-    bottom: 72,
-    left: 0, right: 0,
-    alignItems: 'center',
-    paddingVertical: 8,
-    zIndex: 199,
-  },
-  // Header row inside the drawer — duration on the left (big), distance on
-  // the right (small, lower-case). Hairline divider below separates it from
-  // the step list.
-  stepSummary: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
-  },
-  stepDuration: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  stepDistance: { color: 'rgba(255,255,255,0.55)', fontSize: 14, alignSelf: 'flex-end' },
-  // Scrollable list of turn-by-turn maneuvers.
-  stepList: { flex: 1, paddingHorizontal: 18, marginTop: 8 },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.07)',
-    gap: 12,
-  },
-  stepText: { color: '#fff', fontSize: 14, fontWeight: '500', flexShrink: 1 },
-  stepDist: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 2 },
   // Tiny live-status pill that overlays the top edge of the search bar
   // (replaces the old dark header). Green dot + "X live · Y alerts" in a
   // glassy rounded chip — subtle, glanceable, never blocks the map.

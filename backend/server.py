@@ -702,6 +702,42 @@ async def text_to_speech(body: TTSBody, user=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"TTS failed: {e}")
 
 
+# ---------- Community music broadcast (admin → all members) ----------
+# Admin pushes the currently-playing track to every member of their convoy.
+# Members see a toast on their map screen (handled by the 'music_broadcast'
+# WebSocket message handler in app/(app)/map.tsx). The endpoint is called
+# every 10s while the admin's Music screen has broadcasting toggled on, so
+# members who reconnect mid-broadcast still receive the track. `action:stop`
+# is a one-shot that clears the toast on every client.
+class MusicBroadcastBody(BaseModel):
+    action: str                              # "play" | "stop"
+    community_id: str                        # the convoy the broadcast is scoped to
+    track: Optional[dict] = None             # required when action == "play"
+
+
+@api.post("/community/broadcast-music")
+async def broadcast_music(body: MusicBroadcastBody, user=Depends(get_current_user)):
+    if body.action not in ("play", "stop"):
+        raise HTTPException(status_code=400, detail="Invalid action")
+    community = await db.communities.find_one({"id": body.community_id}, {"_id": 0})
+    if not community:
+        raise HTTPException(status_code=404, detail="Community not found")
+    if community.get("admin_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="Only the community admin can broadcast")
+    members = community.get("members", [])
+    if not members:
+        return {"ok": True, "delivered": 0}
+    await ws_manager.broadcast_to_users(members, {
+        "type": "music_broadcast",
+        "action": body.action,
+        "track": body.track,
+        "broadcaster_handle": user.get("handle", ""),
+        "broadcaster_id": user.get("id"),
+        "community_id": body.community_id,
+    })
+    return {"ok": True, "delivered": len(members)}
+
+
 def _classify_intent(text: str) -> dict:
     """Return {text, intent, query?} for a transcript. Order matters - more specific first."""
     import re

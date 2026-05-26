@@ -87,6 +87,10 @@ export default function MapScreen() {
   const posHistoryRef = useRef<{ lat: number; lng: number; ts: number }[]>([]);
   // Transient toast state for "Police reported" / "Hazard reported" feedback.
   const [alertConfirm, setAlertConfirm] = useState<string | null>(null);
+  // Music broadcast toast — surfaced when the community admin pushes a track
+  // via Music screen → "🎵 jeff: Smooth Operator — Sade". Auto-dismisses 5s.
+  const [musicToast, setMusicToast] = useState<string | null>(null);
+  const musicToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Right-edge Navigation Action Drawer — peeked 80% off-screen by default
   // when turn-by-turn is engaged. Tap the visible 20% to expand and see the
   // current maneuver + End. Auto-collapses on tap-out / route end.
@@ -575,6 +579,20 @@ export default function MapScreen() {
             if (prev.some((h: any) => h.id === m.hazard.id)) return prev;
             return [m.hazard, ...prev];
           });
+        }
+        // Music broadcast from the community admin — surface a non-intrusive
+        // toast at the bottom-center "🎵 jeff: Smooth Operator — Sade" that
+        // auto-dismisses after 5s. `action: 'stop'` immediately clears it.
+        if (m.type === "music_broadcast") {
+          if (m.action === "play" && m.track) {
+            const who = m.broadcaster_handle || "Admin";
+            setMusicToast(`🎵 ${who}: ${m.track.name}${m.track.artist ? ` — ${m.track.artist}` : ""}`);
+            if (musicToastTimer.current) clearTimeout(musicToastTimer.current);
+            musicToastTimer.current = setTimeout(() => setMusicToast(null), 5000);
+          } else if (m.action === "stop") {
+            if (musicToastTimer.current) clearTimeout(musicToastTimer.current);
+            setMusicToast(null);
+          }
         }
       } catch {}
     };
@@ -1375,6 +1393,14 @@ export default function MapScreen() {
           <Text style={styles.toastText}>
             {alertConfirm === 'police' ? '🛡 Police reported' : '⚠️ Hazard reported'}
           </Text>
+        </View>
+      )}
+      {/* Music broadcast toast — shows up when the convoy admin pushes a
+          track from the Music screen. Sits slightly higher than the report
+          toast so they don't overlap if both fire close together. */}
+      {!!musicToast && (
+        <View pointerEvents="none" style={[styles.toast, { bottom: 210, backgroundColor: 'rgba(29,185,84,0.95)' }]}>
+          <Text style={styles.toastText} numberOfLines={1}>{musicToast}</Text>
         </View>
       )}
 

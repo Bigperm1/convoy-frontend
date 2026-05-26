@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator, Linking, Platform, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -6,6 +6,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
 import { startLogin, getStoredToken, logout, spotify, isConfigured } from "../../src/spotify";
+import { useAuth } from "../../src/auth";
+import { useSettings } from "../../src/settings";
+import { api } from "../../src/api";
 
 type Source = "spotify" | "apple" | "soundcloud";
 
@@ -66,19 +69,47 @@ export default function MusicScreen() {
         <Text style={styles.sub}>Sign in to bring your library on the road</Text>
       </View>
 
-      <View style={styles.tabs}>
-        {(["spotify", "apple", "soundcloud"] as Source[]).map((s) => (
-          <TouchableOpacity key={s} testID={`music-${s}`} style={[styles.tab, source === s && styles.tabActive]} onPress={() => setSource(s)}>
-            <Ionicons
-              name={s === "spotify" ? "musical-note" : s === "apple" ? "logo-apple" : "cloud"}
-              size={16}
-              color={source === s ? "#fff" : COLORS.text}
-            />
-            <Text style={[styles.tabText, source === s && { color: "#fff", fontWeight: "600" }]}>
-              {s === "soundcloud" ? "SoundCloud" : s === "apple" ? "Apple Music" : "Spotify"}
-            </Text>
-          </TouchableOpacity>
-        ))}
+      {/* Service selector — iPhone-home-screen-style app icons rather than
+          generic tabs. Selected icon scales up + a small Convoy-gold dot
+          appears under its label. Each icon uses the brand color of the
+          service (Spotify green, Apple pink→purple gradient, SoundCloud
+          orange) so it reads instantly at a glance. */}
+      <View style={styles.serviceRow}>
+        {[
+          { id: "spotify",    label: "Spotify",     bg: "#1DB954", grad: null,                    icon: "musical-notes" as const },
+          { id: "apple",      label: "Apple Music", bg: null,      grad: ["#FC5C7D", "#6A3093"],   icon: "musical-note"  as const },
+          { id: "soundcloud", label: "SoundCloud",  bg: "#FF5500", grad: null,                    icon: "cloud"         as const },
+        ].map((svc) => {
+          const selected = source === svc.id;
+          return (
+            <TouchableOpacity
+              key={svc.id}
+              testID={`music-${svc.id}`}
+              onPress={() => setSource(svc.id as Source)}
+              style={[styles.serviceIcon, selected && styles.serviceIconSelected]}
+              activeOpacity={0.85}
+            >
+              {svc.grad ? (
+                <LinearGradient
+                  colors={svc.grad as any}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.serviceIconBg}
+                >
+                  <Ionicons name={svc.icon} size={32} color="#fff" />
+                </LinearGradient>
+              ) : (
+                <View style={[styles.serviceIconBg, { backgroundColor: svc.bg as string }]}>
+                  <Ionicons name={svc.icon} size={32} color="#fff" />
+                </View>
+              )}
+              <Text style={[styles.serviceLabel, selected && styles.serviceLabelSelected]}>
+                {svc.label}
+              </Text>
+              {selected && <View style={styles.serviceSelectedDot} />}
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {source === "spotify" && <SpotifyPanel />}
@@ -128,14 +159,29 @@ function ComingSoon({ name, reason }: { name: string; reason: string }) {
 }
 
 function SpotifyPanel() {
+  const { user } = useAuth();
+  const [settings] = useSettings();
   const [signedIn, setSignedIn] = useState<boolean>(false);
   const [me, setMe] = useState<any>(null);
   const [tracks, setTracks] = useState<any[]>([]);
   const [playlists, setPlaylists] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  // ===== Now-playing + community broadcast =====
+  // `currentTrack` powers the broadcast card so the admin sees exactly what
+  // they're about to push. It's refreshed every 10s while the panel is
+  // mounted (Spotify's currently-playing endpoint is lightweight).
+  const [currentTrack, setCurrentTrack] = useState<any>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const broadcastInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const nowPlayingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeCommunityId = settings.activeCommunityId;
 
   const refresh = async () => {
-    const t = getStoredToken();
+    // getStoredToken is now async — must be awaited. Previously the sync call
+    // returned `Promise<string|null>` which coerced to truthy via "[object Promise]",
+    // which is why the panel briefly entered a signed-in state then crashed.
+    const t = await getStoredToken();
     if (!t) { setSignedIn(false); return; }
     setSignedIn(true);
     try {
@@ -146,13 +192,105 @@ function SpotifyPanel() {
       setMe(profile);
       setTracks(top.items || []);
       setPlaylists(pls.items || []);
-    } catch (e: any) {
+    } catch {
       // Token may have been revoked; clear it
-      logout(); setSignedIn(false);
+      await logout(); setSignedIn(false);
     } finally { setLoading(false); }
   };
 
+  // Currently-playing poll — feeds the admin broadcast card. Pauses when the
+  // user isn't signed in to avoid a 401 loop.
+  const refreshNowPlaying = async () => {
+    try {
+      const np = await spotify.currentlyPlaying();
+      if (np && np.item) {
+        setCurrentTrack({
+          name: np.item.name,
+          artist: np.item.artists?.map((a: any) => a.name).join(", "),
+          albumArt: np.item.album?.images?.[0]?.url,
+          uri: np.item.uri,
+        });
+      } else {
+        setCurrentTrack(null);
+      }
+    } catch {
+      setCurrentTrack(null);
+    }
+  };
+
   useEffect(() => { refresh(); }, []);
+
+  // Poll currently-playing every 10s while signed in. Cleared on sign-out / unmount.
+  useEffect(() => {
+    if (!signedIn) {
+      if (nowPlayingInterval.current) clearInterval(nowPlayingInterval.current);
+      return;
+    }
+    refreshNowPlaying();
+    nowPlayingInterval.current = setInterval(refreshNowPlaying, 10000);
+    return () => { if (nowPlayingInterval.current) clearInterval(nowPlayingInterval.current); };
+  }, [signedIn]);
+
+  // Resolve admin status — only the community admin can broadcast. Re-checks
+  // when the active community changes (user switches convoys in Settings).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!activeCommunityId || !user) { setIsAdmin(false); return; }
+      try {
+        const { data } = await api.get(`/communities/${activeCommunityId}`);
+        if (!cancelled) setIsAdmin(data?.admin_id === user.id);
+      } catch { if (!cancelled) setIsAdmin(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [activeCommunityId, user?.id]);
+
+  // Cleanup any in-flight broadcast on unmount.
+  useEffect(() => () => {
+    if (broadcastInterval.current) clearInterval(broadcastInterval.current);
+  }, []);
+
+  // Push the current track to every member of the active community. Repeats
+  // every 10s so members who join mid-broadcast still receive it. The
+  // backend re-broadcasts on the WebSocket, where the map screen renders a
+  // toast (see map.tsx 'music_broadcast' handler).
+  const toggleBroadcast = async () => {
+    if (!activeCommunityId) return;
+    if (isBroadcasting) {
+      if (broadcastInterval.current) clearInterval(broadcastInterval.current);
+      setIsBroadcasting(false);
+      try {
+        await api.post("/community/broadcast-music", {
+          action: "stop",
+          community_id: activeCommunityId,
+        });
+      } catch {}
+      return;
+    }
+    if (!currentTrack) {
+      Alert.alert("Nothing playing", "Start a song on Spotify first, then come back to broadcast.");
+      return;
+    }
+    setIsBroadcasting(true);
+    const pushTrack = async () => {
+      if (!currentTrack) return;
+      try {
+        await api.post("/community/broadcast-music", {
+          action: "play",
+          community_id: activeCommunityId,
+          track: {
+            name: currentTrack.name,
+            artist: currentTrack.artist,
+            albumArt: currentTrack.albumArt,
+            spotifyUri: currentTrack.uri,
+            service: "spotify",
+          },
+        });
+      } catch {}
+    };
+    pushTrack();
+    broadcastInterval.current = setInterval(pushTrack, 10000);
+  };
 
   const onSignIn = async () => {
     if (Platform.OS !== "web") {
@@ -167,8 +305,13 @@ function SpotifyPanel() {
     catch (e: any) { Alert.alert("Sign-in failed", e?.message || ""); }
   };
 
-  const onSignOut = () => {
-    logout(); setSignedIn(false); setMe(null); setTracks([]); setPlaylists([]);
+  const onSignOut = async () => {
+    await logout(); setSignedIn(false); setMe(null); setTracks([]); setPlaylists([]);
+    setCurrentTrack(null);
+    if (isBroadcasting) {
+      if (broadcastInterval.current) clearInterval(broadcastInterval.current);
+      setIsBroadcasting(false);
+    }
   };
 
   if (!signedIn) {
@@ -215,6 +358,41 @@ function SpotifyPanel() {
           </TouchableOpacity>
         </View>
       </Glass>
+
+      {/* Broadcast card — only the community admin sees this. Push the
+          currently-playing track to every member of the active convoy.
+          Members see a toast on the map screen with the track + caller name.
+          Broadcast repeats every 10s so members who reconnect mid-song still
+          pick it up. */}
+      {isAdmin && (
+        <View style={styles.broadcastCard}>
+          <View style={styles.broadcastHeader}>
+            <Ionicons name="radio" size={18} color="#FFD60A" />
+            <Text style={styles.broadcastTitle}>Broadcast to Community</Text>
+          </View>
+          <Text style={styles.broadcastSub}>
+            {currentTrack
+              ? `Share "${currentTrack.name}" with all cars in your convoy`
+              : "Start playing a track on Spotify, then broadcast it to your convoy"}
+          </Text>
+          <TouchableOpacity
+            testID="music-broadcast-toggle"
+            style={[styles.broadcastBtn, isBroadcasting && styles.broadcastBtnActive, !currentTrack && !isBroadcasting && styles.broadcastBtnDisabled]}
+            onPress={toggleBroadcast}
+            disabled={!currentTrack && !isBroadcasting}
+            activeOpacity={0.85}
+          >
+            <Ionicons
+              name={isBroadcasting ? "stop-circle" : "radio"}
+              size={20}
+              color={isBroadcasting ? "#FF3B30" : "#1C1C1E"}
+            />
+            <Text style={[styles.broadcastBtnText, isBroadcasting && { color: "#FF3B30" }]}>
+              {isBroadcasting ? "Stop Broadcasting" : "Start Broadcasting"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {loading && <ActivityIndicator color={COLORS.primary} style={{ marginVertical: 12 }} />}
 
@@ -335,4 +513,49 @@ const styles = StyleSheet.create({
   thumb: { width: 48, height: 48, borderRadius: 8, backgroundColor: "#222" },
   rowTitle: { color: COLORS.text, fontWeight: "500" },
   rowSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
+
+  // ===== App-icon-style service selector =====
+  serviceRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 24,
+    marginTop: 20,
+    marginBottom: 28,
+  },
+  serviceIcon: { alignItems: 'center', gap: 8 },
+  serviceIconBg: {
+    width: 72, height: 72,
+    borderRadius: 16,   // iPhone-style "squircle" feel
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  serviceIconSelected: { transform: [{ scale: 1.08 }] },
+  serviceLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: '500' },
+  serviceLabelSelected: { color: '#FFFFFF', fontWeight: '700' },
+  serviceSelectedDot: {
+    width: 5, height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#FFD60A',   // Convoy gold dot under the active label
+  },
+
+  // ===== Admin broadcast card =====
+  broadcastCard: {
+    marginBottom: 14, padding: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,214,10,0.3)',
+  },
+  broadcastHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  broadcastTitle: { color: '#FFD60A', fontSize: 15, fontWeight: '700' },
+  broadcastSub: { color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 14 },
+  broadcastBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, backgroundColor: '#FFD60A',
+    paddingVertical: 12, borderRadius: 12,
+  },
+  broadcastBtnActive: { backgroundColor: 'rgba(255,59,48,0.15)', borderWidth: 1, borderColor: '#FF3B30' },
+  broadcastBtnDisabled: { opacity: 0.45 },
+  broadcastBtnText: { color: '#1C1C1E', fontSize: 15, fontWeight: '700' },
 });

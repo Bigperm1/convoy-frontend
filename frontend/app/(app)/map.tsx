@@ -849,6 +849,30 @@ export default function MapScreen() {
     }
   }, [communityRoutes]);
 
+  // Publish the proximity tier whenever peers or our coords change. Talk and
+  // Music screens subscribe via `useLatestTier()` so they can pick HD/Clear/
+  // Standard recording presets and broadcast-quality flags without spinning
+  // up their own Supabase presence channels. setLatestTier is a no-op if the
+  // value hasn't actually changed, so this is cheap to fire on every delta.
+  //
+  // IMPORTANT: this effect MUST live above the `if (!coords) return` early
+  // return so React sees the same number of hooks on every render (else it
+  // throws "Rendered more hooks than during the previous render"). The
+  // guards live INSIDE the effect callback, not around the hook call.
+  useEffect(() => {
+    if (!coords) return;
+    // Re-build the merged peer list inline (the post-return `peerList` const
+    // isn't reachable here). This mirrors the same merge logic used below.
+    const byId: Record<string, { lat: number; lng: number }> = {};
+    Object.values(peers).forEach((p: any) => {
+      if (typeof p?.lat === "number" && typeof p?.lng === "number") byId[p.user_id] = { lat: p.lat, lng: p.lng };
+    });
+    presence.peers.forEach((p) => { byId[p.user_id] = { lat: p.lat, lng: p.lng }; });
+    const merged = Object.values(byId);
+    const tier = getProximityTier(coords.lat, coords.lng, merged);
+    setLatestTier(tier, merged.length);
+  }, [peers, presence.peers, coords?.lat, coords?.lng]);
+
   // Load a community route into the active navigation flow
   const loadCommunityRoute = (r: CommunityRoute) => {
     setDestination({ lat: r.dest_lat, lng: r.dest_lng, label: r.dest_label || r.name });
@@ -898,18 +922,6 @@ export default function MapScreen() {
   })();
   const liveDot = live === "live" ? COLORS.success : live === "connecting" ? COLORS.warning : COLORS.danger;
   const liveText = live === "live" ? "Live" : live === "connecting" ? "Connecting" : "Offline";
-
-  // Publish the proximity tier whenever peers or our coords change. Talk and
-  // Music screens subscribe via `useLatestTier()` so they can pick HD/Clear/
-  // Standard recording presets and broadcast-quality flags without spinning
-  // up their own Supabase presence channels. setLatestTier is a no-op if
-  // the value hasn't actually changed, so this is cheap to fire on every
-  // peerList/coords delta.
-  useEffect(() => {
-    if (!coords) return;
-    const tier = getProximityTier(coords.lat, coords.lng, peerList);
-    setLatestTier(tier, peerList.length);
-  }, [peerList, coords?.lat, coords?.lng]);
 
   // Filter out community-downvoted hazards before rendering
   const visibleHazards = hazards.filter(isHazardVisible);

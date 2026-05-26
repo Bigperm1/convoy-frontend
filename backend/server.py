@@ -670,7 +670,7 @@ async def text_to_speech(body: TTSBody, user=Depends(get_current_user)):
         # Frontend treats 503 as "fall back to expo-speech" — see nav.ts speakOne().
         raise HTTPException(status_code=503, detail="TTS not configured")
     try:
-        from openai import AsyncOpenAI
+        from openai import AsyncOpenAI, RateLimitError, AuthenticationError, APIStatusError
         client = AsyncOpenAI(api_key=openai_key)
         response = await client.audio.speech.create(
             model="tts-1",
@@ -683,6 +683,20 @@ async def text_to_speech(body: TTSBody, user=Depends(get_current_user)):
         return {"audio_b64": base64.b64encode(audio_bytes).decode("utf-8"), "mime": "audio/mp3"}
     except HTTPException:
         raise
+    except RateLimitError as e:
+        # Quota exhausted / billing-not-configured / per-minute rate limit hit.
+        # Surface this as 503 so nav.ts treats it the same as "TTS not configured"
+        # and falls back to expo-speech without a stack trace polluting the logs.
+        logger.warning("TTS rate-limit / quota: %s", str(e)[:200])
+        raise HTTPException(status_code=503, detail="TTS quota exhausted")
+    except AuthenticationError as e:
+        logger.warning("TTS auth: %s", str(e)[:200])
+        raise HTTPException(status_code=503, detail="TTS auth failed")
+    except APIStatusError as e:
+        # Catch-all for other 4xx/5xx from OpenAI — still surface as 503 so the
+        # frontend silently degrades instead of showing a hard error to the driver.
+        logger.warning("TTS OpenAI status %s: %s", getattr(e, "status_code", "?"), str(e)[:200])
+        raise HTTPException(status_code=503, detail="TTS unavailable")
     except Exception as e:
         logger.exception("TTS failed")
         raise HTTPException(status_code=500, detail=f"TTS failed: {e}")

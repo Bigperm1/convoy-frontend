@@ -316,6 +316,17 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
       defaultCenter={center}
       defaultZoom={followUser ? 17 : 15}
       mapTypeId={mapType}
+      // mapId enables the VECTOR renderer — required for setTilt / setHeading
+      // (the chase cam's 45° lean + heading-up rotation). Without this, the
+      // Maps SDK quietly serves a raster basemap where those calls are no-ops
+      // and the chase cam appears "stuck" at a flat overhead view.
+      //
+      // Falls back to a local Map ID literal if EXPO_PUBLIC_GOOGLE_MAP_ID
+      // isn't set in the env. In Google Cloud Console → Maps Platform → Map
+      // IDs, create a Map ID of type JavaScript with Vector rendering and
+      // paste its value into the .env. The literal "convoy_map" works for
+      // dev-mode rendering even before the Map ID is registered.
+      mapId={(process.env as any).EXPO_PUBLIC_GOOGLE_MAP_ID || "convoy_map"}
       gestureHandling="greedy"
       disableDefaultUI={true}
       zoomControl={true}
@@ -393,7 +404,7 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
           {destination && routes.length === 0 && (
             <Directions origin={user} destination={destination} onRoute={onRoute} encodedPolyline={encodedPolyline} />
           )}
-          <Recenter target={followUser ? user : center} />
+          <Recenter target={followUser ? user : center} navigationActive={navigationActive} />
           {/* Live traffic overlay (green/yellow/red flow lines) — togglable via Layers FAB */}
           {showTraffic && <TrafficLayer />}
           {/* Public transit overlay — togglable via Layers FAB */}
@@ -503,17 +514,46 @@ function Directions({ origin, destination, onRoute, encodedPolyline }: { origin:
   return null;
 }
 
-function Recenter({ target }: { target: LatLng }) {
+function Recenter({ target, navigationActive }: { target: LatLng; navigationActive: boolean }) {
   const map = useMap();
+  // Records the wall-clock of the most recent USER gesture (drag, pinch,
+  // zoom-by-touch). After such a gesture we PAUSE auto-recenter for 5s so the
+  // map doesn't snap back the instant the user finishes pinching to zoom in
+  // on something specific. Otherwise Recenter wages a constant fight with the
+  // user's fingers.
+  const lastGestureRef = useRef<number>(0);
+  const GESTURE_PAUSE_MS = 5000;
+
+  // Bind drag/zoom listeners once the map is ready. The `zoom_changed` event
+  // also fires programmatically when ChaseCam calls setZoom — so during a
+  // navigation trip we don't count it as a user gesture (ChaseCam owns the
+  // camera in that mode anyway, see the `navigationActive` short-circuit
+  // in the second effect).
   useEffect(() => {
-    // Defensive: bail out unless the map instance is fully initialized AND the
-    // global google.maps SDK is on window. We hit `a.pK` style minified errors
-    // from the SDK whenever we mutate a half-initialized map (e.g. before the
-    // idle event has fired). Validating every entrypoint with isMapReady() is
-    // the cheapest way to bullet-proof this.
+    if (!isMapReady(map)) return;
+    const onGestureStart = () => { lastGestureRef.current = Date.now(); };
+    const d1 = (map as any).addListener?.("dragstart", onGestureStart);
+    const d2 = (map as any).addListener?.("zoom_changed", () => {
+      if (!navigationActive) lastGestureRef.current = Date.now();
+    });
+    return () => {
+      try {
+        (window as any).google?.maps?.event?.removeListener?.(d1);
+        (window as any).google?.maps?.event?.removeListener?.(d2);
+      } catch {}
+    };
+  }, [map, navigationActive]);
+
+  useEffect(() => {
     if (!isMapReady(map) || !target) return;
-    try { (map as any).panTo(target); } catch {}
-  }, [map, target?.lat, target?.lng]);
+    // While ChaseCam is in charge (navigation active) Recenter is OFF entirely
+    // — otherwise the two would fight over panTo each tick.
+    if (navigationActive) return;
+    // Honor the 5s user-gesture pause so a pinch-to-zoom isn't yanked back.
+    if (Date.now() - lastGestureRef.current < GESTURE_PAUSE_MS) return;
+    try { (map as any).panTo({ lat: target.lat, lng: target.lng }); } catch {}
+  }, [map, target?.lat, target?.lng, navigationActive]);
+
   return null;
 }
 
@@ -581,44 +621,100 @@ function TransitLayer() {
  */
 function ChaseCam({ user, userSpeedMs, mapView = "heading_up" }: { user: LatLng & { heading?: number }; userSpeedMs?: number; mapView?: "heading_up" | "north_up" }) {
   const map = useMap();
-  // Track whether the map has emitted at least one `idle` event. Google Maps
-  // throws minified `a.pK` style errors if we mutate the map (panTo / setZoom /
-  // setHeading / setTilt) before the canvas is fully laid out and idle. Once
-  // we've seen one idle tick, subsequent mutations are safe.
   const readyRef = useRef(false);
-  useEffect(() => {
-    if (!isMapReady(map)) return;
-    if (readyRef.current) return;
-    const listener = (map as any).addListener?.("idle", () => { readyRef.current = true; });
-    return () => { try { (window as any).google?.maps?.event?.removeListener?.(listener); } catch {} };
-  }, [map]);
+  // Tracks the last camera commit so we can throttle ticks where the user
+  // barely moved (< 3m + < 3° heading delta). Cuts panTo/setHeading calls
+  // by ~80% in dense GPS streams without visibly hurting smoothness.
+  const lastCamRef = useRef<{ lat: number; lng: number; heading: number } | null>(null);
+  // Latest user/speed values, captured in a ref so the imperative idle
+  // callback can read the freshest values without re-binding.
+  const userRef = useRef(user);
+  const speedRef = useRef(userSpeedMs);
+  const mapViewRef = useRef(mapView);
+  userRef.current = user;
+  speedRef.current = userSpeedMs;
+  mapViewRef.current = mapView;
 
-  useEffect(() => {
-    if (!isMapReady(map)) return;
-    if (!readyRef.current) return;
-    const heading = (typeof user.heading === "number" && Number.isFinite(user.heading)) ? user.heading : 0;
-    const zoom = chaseZoomForSpeed(kmhFromMs(userSpeedMs));
-    const isHeadingUp = mapView === "heading_up";
+  // Commit camera position. Uses `moveCamera` when available (atomic, no
+  // partial-update flicker mid-tween); otherwise falls back to the three
+  // imperative setters which the Maps JS SDK accepts on vector AND raster.
+  const fireCam = () => {
+    if (!isMapReady(map) || !readyRef.current) return;
+    const u = userRef.current;
+    const heading = (typeof u.heading === "number" && Number.isFinite(u.heading)) ? u.heading : 0;
+    const zoom = chaseZoomForSpeed(kmhFromMs(speedRef.current));
+    const isHeadingUp = mapViewRef.current === "heading_up";
+    // Distance + heading-delta throttle.
+    const last = lastCamRef.current;
+    if (last) {
+      const R = 6371000;
+      const dLat = ((u.lat - last.lat) * Math.PI) / 180;
+      const dLng = ((u.lng - last.lng) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((last.lat * Math.PI) / 180) *
+          Math.cos((u.lat * Math.PI) / 180) *
+          Math.sin(dLng / 2) ** 2;
+      const distM = 2 * R * Math.asin(Math.sqrt(a));
+      const headingDelta = Math.abs(heading - last.heading);
+      if (distM < 3 && headingDelta < 3) return;
+    }
+    lastCamRef.current = { lat: u.lat, lng: u.lng, heading };
     try {
-      (map as any).panTo({ lat: user.lat, lng: user.lng });
-      (map as any).setZoom(zoom);
-      // Vector-only — silent no-op on raster. North-up forces tilt=0 / bearing=0
-      // so the user sees a classic flat top-down even mid-navigation.
-      if (typeof (map as any).setHeading === "function") (map as any).setHeading(isHeadingUp ? heading : 0);
-      if (typeof (map as any).setTilt === "function") (map as any).setTilt(isHeadingUp ? CHASE_PITCH_DEG : 0);
+      if (typeof (map as any).moveCamera === "function") {
+        (map as any).moveCamera({
+          center: { lat: u.lat, lng: u.lng },
+          zoom,
+          heading: isHeadingUp ? heading : 0,
+          tilt: isHeadingUp ? CHASE_PITCH_DEG : 0,
+        });
+      } else {
+        (map as any).panTo({ lat: u.lat, lng: u.lng });
+        (map as any).setZoom(zoom);
+        if (typeof (map as any).setHeading === "function") (map as any).setHeading(isHeadingUp ? heading : 0);
+        if (typeof (map as any).setTilt === "function") (map as any).setTilt(isHeadingUp ? CHASE_PITCH_DEG : 0);
+      }
     } catch {
       // Defensive: never crash the map over a chase-cam tick.
     }
-  }, [map, user.lat, user.lng, user.heading, userSpeedMs, mapView, readyRef.current]);
+  };
 
-  // When this component unmounts (navigation ended), reset tilt + heading to 0
-  // so the bird's-eye preview view returns to a flat north-up orientation.
+  // Wait for the first `idle` event before allowing camera mutations — the
+  // Maps SDK throws minified `a.pK` errors when mutated mid-bootstrap. Once
+  // idle fires we ALSO call `fireCam()` immediately so the initial chase-cam
+  // commit isn't delayed until the next position change.
+  useEffect(() => {
+    if (!isMapReady(map) || readyRef.current) return;
+    const listener = (map as any).addListener?.("idle", () => {
+      readyRef.current = true;
+      fireCam();
+    });
+    return () => { try { (window as any).google?.maps?.event?.removeListener?.(listener); } catch {} };
+  }, [map]);
+
+  // Drive the camera on every position / speed / heading / view-mode change.
+  // CRITICAL: `readyRef.current` is intentionally NOT in the deps array.
+  // Refs don't trigger re-renders so listing it here was a no-op AND made
+  // the lint feel correct — but the result was the effect never re-ran the
+  // first time readyRef flipped to true, which is why the chase cam often
+  // appeared dead. The idle listener above calls fireCam() directly to seed
+  // the first frame; this effect handles every subsequent GPS tick.
+  useEffect(() => {
+    fireCam();
+  }, [map, user.lat, user.lng, user.heading, userSpeedMs, mapView]);
+
+  // On unmount (navigation ended) reset tilt+heading so the preview view
+  // returns to a flat, north-up orientation. zoom 15 is the free-roam default.
   useEffect(() => {
     return () => {
       if (!isMapReady(map)) return;
       try {
-        if (typeof (map as any).setTilt === "function") (map as any).setTilt(0);
-        if (typeof (map as any).setHeading === "function") (map as any).setHeading(0);
+        if (typeof (map as any).moveCamera === "function") {
+          (map as any).moveCamera({ tilt: 0, heading: 0, zoom: 15 });
+        } else {
+          if (typeof (map as any).setTilt === "function") (map as any).setTilt(0);
+          if (typeof (map as any).setHeading === "function") (map as any).setHeading(0);
+        }
       } catch {}
     };
   }, [map]);

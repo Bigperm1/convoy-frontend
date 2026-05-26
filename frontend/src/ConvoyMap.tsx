@@ -179,9 +179,17 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
     // this, GPS jitter at idle (±1-3 m) was causing 5+ animateCamera calls/sec
     // and visible flicker.
     const lastCamRef = useRef<{ lat: number; lng: number; heading: number } | null>(null);
+    // User-gesture lockout — when the driver pinches/pans the map, suspend
+    // chase-cam camera writes for 4s so the gesture isn't immediately
+    // undone by the next GPS tick. Set inside `onRegionChangeComplete`
+    // below when `details.isGesture` is true.
+    const userGestureRef = useRef<number>(0);
     useEffect(() => {
       if (!navigationActive) return;
       if (!mapRef.current) return;
+      // Honor the gesture lockout — the user just touched the map, let them
+      // pinch to zoom in without the chase-cam yanking them back.
+      if (Date.now() - userGestureRef.current < 4000) return;
       const heading = (typeof user.heading === "number" && Number.isFinite(user.heading)) ? user.heading : 0;
       // Distance vs last-camera position (Haversine, plain JS — no extra deps).
       const last = lastCamRef.current;
@@ -274,6 +282,17 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
         // Empty-map tap → bubble up to parent (close search UI etc).
         // Marker / Polyline taps don't trigger onPress, so this is safe.
         onPress={onMapPress ? () => onMapPress() : undefined}
+        // User-gesture detection — react-native-maps fires this on every
+        // region settle. `details.isGesture` is true ONLY when the change
+        // was caused by a finger drag/pinch (not animateCamera). When that
+        // happens, stamp `userGestureRef` so the chase-cam effect skips
+        // the next 4 seconds of GPS-driven camera writes, letting the user
+        // freely pinch to zoom or pan to inspect without being yanked back.
+        onRegionChangeComplete={(_region, details) => {
+          if ((details as any)?.isGesture) {
+            userGestureRef.current = Date.now();
+          }
+        }}
       >
         {/* "You" marker — pulls body + color straight from the Garage profile
             via Props.user. anchor 0.5/0.5 keeps the silhouette centered on the

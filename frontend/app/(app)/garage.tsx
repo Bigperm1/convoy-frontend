@@ -16,10 +16,14 @@ import { api, formatErr } from "../../src/api";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
 import CarMarker, { CAR_BODIES, CAR_COLORS, CarBody } from "../../src/CarMarker";
+import { useSettings, kmhToDisplay } from "../../src/settings";
 
 export default function GarageScreen() {
   const { user, refresh } = useAuth();
   const router = useRouter();
+  // Speed-unit preference — the backend always stores top_speed_record in
+  // KM/H so we convert at the display layer to match the user's choice.
+  const [settings] = useSettings();
 
   const [year, setYear]   = useState<string>(user?.car_year ? String(user.car_year) : "");
   const [make, setMake]   = useState<string>(user?.car_make || "");
@@ -121,10 +125,10 @@ export default function GarageScreen() {
               <View style={styles.pbValueWrap}>
                 <Text style={styles.pbValue} testID="garage-personal-best-value">
                   {user?.top_speed_record && user.top_speed_record > 0
-                    ? Math.round(user.top_speed_record)
+                    ? kmhToDisplay(user.top_speed_record, settings.speedUnit)
                     : "—"}
                 </Text>
-                <Text style={styles.pbUnit}>km/h</Text>
+                <Text style={styles.pbUnit}>{settings.speedUnit === 'mph' ? 'mph' : 'km/h'}</Text>
               </View>
             </View>
           </Glass>

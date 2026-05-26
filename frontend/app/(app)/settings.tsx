@@ -136,6 +136,35 @@ export default function SettingsScreen() {
           Heading Up is the default and feels like Waze/Google during driving. North Up keeps the world steady — helpful for getting your bearings or scanning a wide area. Your choice persists across launches.
         </Text>
 
+        {/* Speed Units — radio choice between metric and imperial. The map's
+            location watcher reverse-geocodes the user's country every 60s
+            and auto-flips this setting (US → MPH, everywhere else → KM/H)
+            until the user taps a button here, which sets `speedUnitManual`
+            and suppresses further auto-detect writes. */}
+        <Text style={styles.sectionLabel}>SPEED UNITS</Text>
+        <Glass radius={16} style={styles.card}>
+          <RadioRow
+            icon="speedometer"
+            iconColor="#FFD60A"
+            title="KM/H"
+            subtitle="Kilometres per hour · Canada, Mexico, EU, most of the world"
+            selected={settings.speedUnit === "kmh"}
+            onSelect={() => setSettings({ speedUnit: "kmh", speedUnitManual: true })}
+          />
+          <View style={styles.divider} />
+          <RadioRow
+            icon="speedometer-outline"
+            iconColor="#FF9500"
+            title="MPH"
+            subtitle="Miles per hour · United States"
+            selected={settings.speedUnit === "mph"}
+            onSelect={() => setSettings({ speedUnit: "mph", speedUnitManual: true })}
+          />
+        </Glass>
+        <Text style={styles.helpText}>
+          Auto-switches at the USA/Canada border based on your GPS location. Tap KM/H or MPH to lock your preference — you won't be auto-flipped again until you tap a unit button.
+        </Text>
+
         {/* Live Feeds */}
         <Text style={styles.sectionLabel}>LIVE TRAFFIC FEEDS</Text>
         <Glass radius={16} style={styles.card}>

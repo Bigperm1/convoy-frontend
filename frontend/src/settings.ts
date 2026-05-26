@@ -34,6 +34,16 @@ export type Settings = {
   //   "north_up":   classic flat top-down (pitch 0°, bearing 0°). Map stays
   //                 fixed north; the car silhouette rotates with heading.
   mapView: "heading_up" | "north_up";
+  // Speed display units.
+  //   'kmh' — metric (default)
+  //   'mph' — imperial
+  // The stored value is ALWAYS the resolved unit — the auto-detect logic
+  // (reverse geocode at the user's current GPS location) writes 'mph' when
+  // the driver is inside the USA and 'kmh' everywhere else. The user can
+  // permanently override this via the Settings → SPEED UNITS toggle, which
+  // sets `speedUnitManual: true` to suppress further auto-detect writes.
+  speedUnit: 'kmh' | 'mph';
+  speedUnitManual: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -51,6 +61,11 @@ export const DEFAULT_SETTINGS: Settings = {
   // cam the moment they start driving. Users who prefer classic top-down can
   // switch in Settings → MAP VIEW; the choice persists across launches.
   mapView: "heading_up",
+  // Default to KM/H. The map screen's reverse-geocode-on-first-fix flips this
+  // to MPH automatically if the driver is inside the USA. Once a user toggles
+  // manually, `speedUnitManual` flips to true and the auto path is suppressed.
+  speedUnit: 'kmh',
+  speedUnitManual: false,
 };
 
 let cached: Settings = { ...DEFAULT_SETTINGS };
@@ -99,4 +114,22 @@ export function feedsQuery(s: Settings): string {
   if (s.feedNA) keys.push("na");
   if (s.feedROW) keys.push("row");
   return keys.join(",");
+}
+
+// Speed formatting — converts the device-reported speed (m/s) to the user's
+// preferred display unit. Used by the Map speedometer HUD AND the Garage
+// "Top Cruise Speed" card so both screens stay in sync with the toggle.
+//   formatSpeed(13.4, 'kmh') → { value: 48, label: 'KM/H' }
+//   formatSpeed(13.4, 'mph') → { value: 30, label: 'MPH' }
+export function formatSpeed(speedMs: number, unit: 'kmh' | 'mph'): { value: number; label: string } {
+  if (unit === 'mph') return { value: Math.round(speedMs * 2.23694), label: 'MPH' };
+  return { value: Math.round(speedMs * 3.6), label: 'KM/H' };
+}
+
+// Convert a stored KM/H value (e.g. top_speed_record from the backend, which
+// always lives in KM/H) into the user's current display unit. Returns an
+// integer suitable for direct rendering.
+export function kmhToDisplay(kmh: number, unit: 'kmh' | 'mph'): number {
+  if (unit === 'mph') return Math.round(kmh * 0.621371);
+  return Math.round(kmh);
 }

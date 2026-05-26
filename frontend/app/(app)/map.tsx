@@ -16,7 +16,7 @@ import DestinationSearch from "../../src/DestinationSearch";
 import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 import { voiceBus, geocodeQuery } from "../../src/voiceBus";
 import { useExternalAlerts, registerExternalFeedBackgroundTask } from "../../src/externalFeed";
-import { useSettings } from "../../src/settings";
+import { useSettings, getSettings, updateSettings as updateGlobalSettings } from "../../src/settings";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import PeerModal from "../../src/PeerModal";
 import {
@@ -288,6 +288,10 @@ export default function MapScreen() {
   // speedo can color-code over/under the posted limit.
   const speedLimitRef = useRef<number | null>(null);
   const lastSpeedLimitFetchRef = useRef<number>(0);
+  // Border-detection: throttle the reverse-geocode lookup to once a minute,
+  // and only if the user hasn't manually picked a unit in Settings (see
+  // `settings.speedUnitManual` — set true when they tap a unit button).
+  const lastUnitCheckRef = useRef<number>(0);
   useEffect(() => {
     let sub: any = null;
     (async () => {
@@ -330,6 +334,38 @@ export default function MapScreen() {
                   .then((d) => {
                     const limit = d?.speedLimits?.[0]?.speedLimit;       // KPH
                     if (typeof limit === 'number') speedLimitRef.current = limit;
+                  })
+                  .catch(() => {});
+              }
+            }
+            // Border-aware speed-unit auto-detect.
+            //   * Skips entirely if the user has manually chosen a unit
+            //     (settings.speedUnitManual === true).
+            //   * Runs ONCE immediately (lastUnitCheckRef===0), then every
+            //     60s while the watcher is active so a road-trip from BC
+            //     into Washington flips KM/H → MPH within ~1 minute.
+            //   * US → MPH, everywhere else (Canada/Mexico/EU/etc) → KM/H.
+            //   * Reads from getSettings() (module-level, always-fresh) to
+            //     avoid the stale-closure trap that the React state copy
+            //     would create inside this useEffect([]).
+            const liveSettings = getSettings();
+            if (!liveSettings.speedUnitManual && (lastUnitCheckRef.current === 0 || now - lastUnitCheckRef.current > 60000)) {
+              lastUnitCheckRef.current = now;
+              const GKEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
+              if (GKEY) {
+                fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${pos.coords.latitude},${pos.coords.longitude}&result_type=country&key=${GKEY}`)
+                  .then((r) => r.json())
+                  .then((data) => {
+                    const country = data?.results?.[0]?.address_components?.find(
+                      (c: any) => c.types?.includes('country')
+                    )?.short_name;
+                    const detected: 'kmh' | 'mph' = country === 'US' ? 'mph' : 'kmh';
+                    // Race-safety re-check: settings may have changed while
+                    // the network round-trip was in flight.
+                    const cur = getSettings();
+                    if (!cur.speedUnitManual && detected !== cur.speedUnit) {
+                      updateGlobalSettings({ speedUnit: detected }).catch(() => {});
+                    }
                   })
                   .catch(() => {});
               }
@@ -1128,7 +1164,7 @@ export default function MapScreen() {
       {/* ===== Speedometer HUD (bottom-left glass overlay) =====
           Pulls live speed from coords.speed (m/s) → km/h. Floors small values
           to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
-      <SpeedometerHUD speedMs={coords?.speed} speedLimit={speedLimitRef.current} />
+      <SpeedometerHUD speedMs={coords?.speed} speedLimit={speedLimitRef.current} unit={settings.speedUnit} />
 
       <PeerModal
         peer={selectedPeer ? { ...selectedPeer } as any : null}
@@ -1350,7 +1386,7 @@ const SPEEDO_HOLD_MS = 2000;
 // displayed value, prior smoothed value 75%. Result: 32 → 31 → 28 → 24 → 20
 // instead of the raw 32 → 0 → 20 jumps the user reported in field testing.
 const SPEEDO_EMA_ALPHA = 0.25;
-function SpeedometerHUD({ speedMs, speedLimit }: { speedMs?: number; speedLimit?: number | null }) {
+function SpeedometerHUD({ speedMs, speedLimit, unit }: { speedMs?: number; speedLimit?: number | null; unit: 'kmh' | 'mph' }) {
   // rawKmh: this tick's converted speed (>=1 km/h or 0)
   const rawKmh = (() => {
     if (typeof speedMs !== "number" || !Number.isFinite(speedMs) || speedMs < 0) return 0;
@@ -1405,17 +1441,28 @@ function SpeedometerHUD({ speedMs, speedLimit }: { speedMs?: number; speedLimit?
     if (fallTimerRef.current) clearTimeout(fallTimerRef.current);
   }, []);
 
-  // Speed-limit color logic. Posted limit comes in as KPH (Google Roads API)
-  // or null when the road has no posted limit / we haven't fetched yet:
+  // Speed-limit color logic. Posted limit always arrives in KPH from Google
+  // Roads — convert it to the user's display unit (MPH if needed) BEFORE
+  // doing any threshold math, otherwise a 30 mph limit gets compared against
+  // a 100 kph speed and everyone looks like they're flying.
+  //
+  // Threshold is 20 km/h over → orange / red, scaled for MPH (~12 mph).
+  //
   //  - no limit known  → dark (calm, "no data")
   //  - under or equal  → dark (calm, normal)
-  //  - 1–20 over       → orange (caution)
-  //  - 20+ over        → red    (danger)
-  const speedKmh = Math.round(displayKmh);
-  const limit = speedLimit ?? null;
-  const speedoBg = !limit || speedKmh <= limit
+  //  - 1–over_step     → orange (caution)
+  //  - over_step+      → red    (danger)
+  const isMph = unit === 'mph';
+  const speedDisplay = isMph ? Math.round(displayKmh * 0.621371) : Math.round(displayKmh);
+  const limitDisplay = speedLimit == null
+    ? null
+    : isMph
+      ? Math.round(speedLimit * 0.621371)
+      : Math.round(speedLimit);
+  const overStep = isMph ? 12 : 20;     // ~12 mph ≈ 20 km/h
+  const speedoBg = !limitDisplay || speedDisplay <= limitDisplay
     ? 'rgba(28,28,30,0.88)'
-    : speedKmh <= limit + 20
+    : speedDisplay <= limitDisplay + overStep
       ? '#FF9500'
       : '#FF3B30';
 
@@ -1423,8 +1470,8 @@ function SpeedometerHUD({ speedMs, speedLimit }: { speedMs?: number; speedLimit?
     <View style={styles.speedHudWrap} pointerEvents="none">
       <View style={[styles.speedHud, { backgroundColor: speedoBg }]}>
         <View style={styles.speedHudInner}>
-          <Text style={styles.speedHudValue}>{speedKmh}</Text>
-          <Text style={styles.speedHudUnit}>KM/H</Text>
+          <Text style={styles.speedHudValue}>{speedDisplay}</Text>
+          <Text style={styles.speedHudUnit}>{isMph ? 'MPH' : 'KM/H'}</Text>
         </View>
       </View>
     </View>

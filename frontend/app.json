@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.convoy.driver",
+      "bundleIdentifier": "com.convoy.app",
       "config": {
         "googleMapsApiKey": "AIzaSyDLysQuU6tOcmbdlsHJPYUqviq4TrwEUx0"
       },
@@ -28,7 +28,7 @@
       }
     },
     "android": {
-      "package": "app.convoy.driver",
+      "package": "com.convoy.app",
       "googleServicesFile": "./google-services.json",
       "config": {
         "googleMaps": {

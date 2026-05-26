@@ -12,6 +12,7 @@ import { api, formatErr } from "../../src/api";
 import Glass from "../../src/Glass";
 import { useSettings } from "../../src/settings";
 import { livePttBus } from "../../src/livePtt";
+import { useLatestTier, getPttRecordingOptions } from "../../src/proximityAudio";
 
 type Community = {
   id: string; name: string; description: string; member_count: number; is_admin: boolean;
@@ -41,6 +42,11 @@ export default function ComsScreen() {
   // Track the active channel id in a ref so the live PTT bus subscription
   // always sees the latest selection without needing to resubscribe per change.
   const activeRef = useRef<string | null>(null);
+  // Adaptive audio quality — pulls the latest proximity tier from the shared
+  // store (published by map.tsx every time peers/coords change). Drives the
+  // PTT recording preset AND the "HD/Clear/Standard Audio" badge under the
+  // mic button so the driver knows which preset is currently in effect.
+  const { tier: proximityTier, peerCount: proximityPeers } = useLatestTier();
   // Roster of members in the currently-active community. Refreshed whenever
   // the active channel changes so the user always sees the right crew.
   const [members, setMembers] = useState<any[]>([]);
@@ -140,7 +146,7 @@ export default function ComsScreen() {
     Animated.spring(press, { toValue: 0.96, useNativeDriver: true, speed: 30, bounciness: 6 }).start();
     try {
       const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await rec.prepareToRecordAsync(getPttRecordingOptions(proximityTier));
       await rec.startAsync();
       recRef.current = rec;
       setRecording(true);
@@ -255,6 +261,19 @@ export default function ComsScreen() {
 
         {/* ===== PTT button — Apple liquid-glass design, perfectly centered ===== */}
         <View style={styles.pttSection}>
+          {/* Adaptive audio quality badge — dot color + label scale with how
+              close the convoy is. Green/HD when a peer is within 500m,
+              orange/Clear within 2km, grey/Standard beyond. */}
+          <View style={styles.tierBadge}>
+            <View style={[
+              styles.tierDot,
+              { backgroundColor: proximityTier === "close" ? "#34C759" : proximityTier === "mid" ? "#FF9500" : "#8E8E93" },
+            ]} />
+            <Text style={styles.tierLabel}>
+              {proximityTier === "close" ? "HD Audio" : proximityTier === "mid" ? "Clear Audio" : "Standard Audio"}
+              {proximityPeers > 0 ? ` · ${proximityPeers}` : ""}
+            </Text>
+          </View>
           <View style={styles.stage}>
             {/* Layer 1: expanding ripples (only while recording) */}
             <Animated.View
@@ -512,6 +531,22 @@ const styles = StyleSheet.create({
 
   // ----- PTT stage (everything centered using a fixed-size stage) -----
   pttSection: { alignItems: "center", justifyContent: "center", paddingTop: 24, paddingBottom: 12 },
+  // ===== Adaptive-audio tier badge =====
+  // Tiny pill above the PTT button that mirrors the live `proximityTier`
+  // computed from peer distances. Purely informational — no tap target.
+  tierBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "center",
+    marginBottom: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  tierDot: { width: 8, height: 8, borderRadius: 4 },
+  tierLabel: { color: "rgba(255,255,255,0.7)", fontSize: 12, fontWeight: "600", letterSpacing: 0.3 },
   stage: {
     width: STAGE, height: STAGE,
     alignItems: "center", justifyContent: "center",

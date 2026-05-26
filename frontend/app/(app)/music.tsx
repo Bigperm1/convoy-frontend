@@ -9,6 +9,7 @@ import { startLogin, getStoredToken, logout, spotify, isConfigured } from "../..
 import { useAuth } from "../../src/auth";
 import { useSettings } from "../../src/settings";
 import { api } from "../../src/api";
+import { useLatestTier, getMusicBroadcastQuality } from "../../src/proximityAudio";
 
 type Source = "spotify" | "apple" | "soundcloud";
 
@@ -176,6 +177,11 @@ function SpotifyPanel() {
   const broadcastInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const nowPlayingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeCommunityId = settings.activeCommunityId;
+  // Adaptive broadcast quality — derived from how close convoy members are.
+  // Pulled from the shared proximity store published by map.tsx, so we never
+  // duplicate the Supabase presence subscription here.
+  const { tier: proximityTier, peerCount: proximityPeers } = useLatestTier();
+  const musicQuality = getMusicBroadcastQuality(proximityTier);
 
   const refresh = async () => {
     // getStoredToken is now async — must be awaited. Previously the sync call
@@ -278,12 +284,14 @@ function SpotifyPanel() {
         await api.post("/community/broadcast-music", {
           action: "play",
           community_id: activeCommunityId,
+          quality: musicQuality,    // 'lossless' | 'high' | 'normal' — set by proximity tier
           track: {
             name: currentTrack.name,
             artist: currentTrack.artist,
             albumArt: currentTrack.albumArt,
             spotifyUri: currentTrack.uri,
             service: "spotify",
+            quality: musicQuality,
           },
         });
       } catch {}
@@ -371,9 +379,17 @@ function SpotifyPanel() {
             <Text style={styles.broadcastTitle}>Broadcast to Community</Text>
           </View>
           <Text style={styles.broadcastSub}>
-            {currentTrack
-              ? `Share "${currentTrack.name}" with all cars in your convoy`
-              : "Start playing a track on Spotify, then broadcast it to your convoy"}
+            {currentTrack ? (
+              <>
+                Broadcasting in{" "}
+                <Text style={{ color: proximityTier === "close" ? "#34C759" : proximityTier === "mid" ? "#FF9500" : "#8E8E93", fontWeight: "700" }}>
+                  {musicQuality === "lossless" ? "Lossless" : musicQuality === "high" ? "High Quality" : "Standard"}
+                </Text>
+                {" · "}{proximityPeers} {proximityPeers === 1 ? "car" : "cars"} in convoy
+              </>
+            ) : (
+              "Start playing a track on Spotify, then broadcast it to your convoy"
+            )}
           </Text>
           <TouchableOpacity
             testID="music-broadcast-toggle"

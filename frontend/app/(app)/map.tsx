@@ -17,6 +17,7 @@ import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 import { voiceBus, geocodeQuery } from "../../src/voiceBus";
 import { useExternalAlerts, registerExternalFeedBackgroundTask } from "../../src/externalFeed";
 import { useSettings, getSettings, updateSettings as updateGlobalSettings } from "../../src/settings";
+import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import PeerModal from "../../src/PeerModal";
 import {
@@ -897,6 +898,18 @@ export default function MapScreen() {
   })();
   const liveDot = live === "live" ? COLORS.success : live === "connecting" ? COLORS.warning : COLORS.danger;
   const liveText = live === "live" ? "Live" : live === "connecting" ? "Connecting" : "Offline";
+
+  // Publish the proximity tier whenever peers or our coords change. Talk and
+  // Music screens subscribe via `useLatestTier()` so they can pick HD/Clear/
+  // Standard recording presets and broadcast-quality flags without spinning
+  // up their own Supabase presence channels. setLatestTier is a no-op if
+  // the value hasn't actually changed, so this is cheap to fire on every
+  // peerList/coords delta.
+  useEffect(() => {
+    if (!coords) return;
+    const tier = getProximityTier(coords.lat, coords.lng, peerList);
+    setLatestTier(tier, peerList.length);
+  }, [peerList, coords?.lat, coords?.lng]);
 
   // Filter out community-downvoted hazards before rendering
   const visibleHazards = hazards.filter(isHazardVisible);

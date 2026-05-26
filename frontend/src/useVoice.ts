@@ -4,10 +4,16 @@ import * as SecureStore from "expo-secure-store";
 import { Alert } from "react-native";
 import { api, formatErr } from "./api";
 import { voiceBus } from "./voiceBus";
+import { getPttRecordingOptions, type ProximityTier } from "./proximityAudio";
 
 export type VoiceResult = { text: string; intent: string | null; query?: string };
 
-export function useVoice() {
+// Optional `tier` arg lets callers (PTT screen, search-bar mic) pick a
+// recording quality that scales with how close the convoy is. Default 'far'
+// preserves the lightweight 32k mono behavior for non-comms voice (e.g. the
+// search-bar transcription FAB, where bitrate is moot — only voice clarity
+// matters and Whisper handles low-bitrate input fine).
+export function useVoice(tier: ProximityTier = "far") {
   const recRef = useRef<Audio.Recording | null>(null);
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -27,14 +33,15 @@ export function useVoice() {
     if (!(await ensurePerm())) return;
     try {
       const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      // Adaptive quality based on convoy proximity tier (see proximityAudio.ts).
+      await rec.prepareToRecordAsync(getPttRecordingOptions(tier));
       await rec.startAsync();
       recRef.current = rec;
       setRecording(true);
     } catch (e) {
       console.warn("record start", e);
     }
-  }, [recording, ensurePerm]);
+  }, [recording, ensurePerm, tier]);
 
   const stop = useCallback(async (): Promise<string | null> => {
     const rec = recRef.current;

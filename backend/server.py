@@ -11,6 +11,7 @@ import secrets as _secrets
 import tempfile
 import hashlib
 import time
+import base64
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict
 
@@ -645,6 +646,46 @@ async def transcribe(body: TranscribeIn, user=Depends(get_current_user)):
         except Exception: pass
 
     return _classify_intent(text)
+
+
+# ---------- TTS (natural-voice navigation prompts) ----------
+# Proxies an OpenAI TTS request and returns the audio as base64 MP3 so the
+# Expo client can play it through expo-av (native) or an HTMLAudio data URI
+# (web). This replaces the robotic expo-speech voice in nav.ts for live
+# turn-by-turn guidance. tts-1 (not tts-1-hd) is used for low latency —
+# nav prompts must fire within ~1s of the maneuver trigger to feel timely.
+class TTSBody(BaseModel):
+    text: str
+    voice: str = "nova"   # OpenAI voices: alloy / echo / fable / onyx / nova / shimmer
+
+
+@api.post("/tts")
+async def text_to_speech(body: TTSBody, user=Depends(get_current_user)):
+    """Convert short navigation text into a natural-voice MP3 (base64)."""
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not openai_key:
+        # Frontend treats 503 as "fall back to expo-speech" — see nav.ts speakOne().
+        raise HTTPException(status_code=503, detail="TTS not configured")
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=openai_key)
+        response = await client.audio.speech.create(
+            model="tts-1",
+            voice=body.voice or "nova",
+            input=text,
+            response_format="mp3",
+        )
+        # OpenAI SDK exposes the raw bytes via `.content` (HttpxBinaryResponseContent).
+        audio_bytes = getattr(response, "content", None) or response.read()
+        return {"audio_b64": base64.b64encode(audio_bytes).decode("utf-8"), "mime": "audio/mp3"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("TTS failed")
+        raise HTTPException(status_code=500, detail=f"TTS failed: {e}")
 
 
 def _classify_intent(text: str) -> dict:

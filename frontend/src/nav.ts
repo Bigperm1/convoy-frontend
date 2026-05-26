@@ -303,11 +303,57 @@ export function useTurnByTurn(
   return state;
 }
 
-// ---- Speech helper (no-op on web if not supported) ----
+// ---- Speech helper — natural OpenAI TTS with expo-speech fallback ----
+//
+// Calls `POST /api/tts` (OpenAI tts-1, voice "nova") to fetch a base64 MP3
+// for the prompt, then plays it through expo-av on native (writes the MP3
+// to the cache dir first) or an HTMLAudio data URI on web. A simple FIFO
+// queue guarantees prompts never overlap — "In 200 meters, turn left" will
+// finish before "Turn right onto Main Street" starts.
+//
+// If the backend returns 503 (no OPENAI_API_KEY configured) or anything
+// else fails (offline, quota, decode error), we silently fall back to the
+// classic robotic expo-speech voice so navigation still has audio.
+
+const ttsQueue: string[] = [];
+let ttsPlaying = false;
+
 function speak(text: string) {
+  if (!text || !text.trim()) return;
+  ttsQueue.push(text);
+  if (!ttsPlaying) {
+    // fire-and-forget the drainer
+    drainTtsQueue();
+  }
+}
+
+async function drainTtsQueue(): Promise<void> {
+  if (ttsQueue.length === 0) { ttsPlaying = false; return; }
+  ttsPlaying = true;
+  const text = ttsQueue.shift()!;
+  try {
+    await speakOne(text);
+  } catch {
+    // speakOne already handles its own fallbacks — never let it kill the queue.
+  }
+  // Drain the next prompt — guarantees serial playback.
+  drainTtsQueue();
+}
+
+async function speakOne(text: string): Promise<void> {
+  // 1) Preferred: OpenAI TTS via backend proxy. Returns base64 MP3.
+  try {
+    const { data } = await api.post("/tts", { text, voice: "nova" });
+    if (data?.audio_b64) {
+      await playBase64Audio(data.audio_b64, data.mime ?? "audio/mp3");
+      return;
+    }
+  } catch {
+    // Fall through to expo-speech fallback.
+  }
+  // 2) Fallback: expo-speech (robotic but always works offline).
   try {
     if (Platform.OS === "web") {
-      // expo-speech wraps Web Speech API on web; some browsers need a user gesture first.
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         Speech.speak(text, { rate: 1.0, pitch: 1.0 });
       }
@@ -315,6 +361,51 @@ function speak(text: string) {
     }
     Speech.speak(text, { rate: 1.0, pitch: 1.0 });
   } catch { /* ignore */ }
+}
+
+async function playBase64Audio(b64: string, mime: string): Promise<void> {
+  if (Platform.OS === "web") {
+    // Web: data URI in an HTMLAudio element. resolve on end OR error so the
+    // queue keeps moving even if autoplay is blocked (first user gesture
+    // required on some browsers).
+    return new Promise((resolve) => {
+      try {
+        // eslint-disable-next-line no-undef
+        const audio = new Audio(`data:${mime};base64,${b64}`);
+        audio.onended = () => resolve();
+        audio.onerror = () => resolve();
+        audio.play().catch(() => resolve());
+      } catch {
+        resolve();
+      }
+    });
+  }
+  // Native: write MP3 to cache and play with expo-av. Matches the same pattern
+  // used by livePtt.ts so we share the audio-decoder warmup with PTT.
+  try {
+    const { Audio } = await import("expo-av");
+    const FileSystem = await import("expo-file-system/legacy");
+    const path = FileSystem.cacheDirectory + `tts_${Date.now()}.mp3`;
+    await FileSystem.writeAsStringAsync(path, b64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return new Promise((resolve) => {
+      Audio.Sound.createAsync({ uri: path }, { shouldPlay: true })
+        .then(({ sound }) => {
+          sound.setOnPlaybackStatusUpdate((status: any) => {
+            if (!status?.isLoaded || status?.didJustFinish) {
+              sound.unloadAsync().catch(() => {});
+              // Best-effort cleanup of the cached MP3 so /cache doesn't grow.
+              FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
+              resolve();
+            }
+          });
+        })
+        .catch(() => resolve());
+    });
+  } catch {
+    return;
+  }
 }
 
 // Trim things like "toward" / "destination will be on the right" that bloat TTS.

@@ -188,6 +188,17 @@ export function useTurnByTurn(
   const announcedRef = useRef<Set<string>>(new Set());
   const lastSpokeRef = useRef<number>(0);
   const lastOffRouteAtRef = useRef<number>(0);
+  // Mirror of the latest `state` so the step machine can read the current
+  // stepIndex synchronously without taking `state` as a dep (which would
+  // make the effect re-run on every state commit and trigger duplicate
+  // voice prompts). Synced every time we call `setState` below.
+  const stateRef = useRef<TbtState>({
+    active: false,
+    stepIndex: 0,
+    distanceToManeuverM: 0,
+    distanceRemainingM: 0,
+    etaSeconds: 0,
+  });
   // ===== Trip-state flag for the start-of-trip voice =====
   // Once we've announced "Starting navigation…" for the current trip we lock
   // it for the ENTIRE trip. Reset only happens on cancel (active → false) or
@@ -201,18 +212,26 @@ export function useTurnByTurn(
   useEffect(() => { routeRef.current = route; }, [route]);
 
   // Trip lifecycle effect — runs ONLY on `active` toggle, never on polyline
-  // change. This is what kills the voice loop: a mid-trip alternate-route
-  // reshuffle no longer triggers the "Starting navigation" greeting again.
+  // change. Resets the module-level voice gate so a fresh trip starts with
+  // a clean lock + timestamp (else the previous trip's `_lastSpoke` could
+  // silently throttle the new trip's start announcement).
   useEffect(() => {
     if (!active) {
-      Speech.stop();
+      resetSpeakGate();
       announcedRef.current.clear();
       hasAnnouncedStartRef.current = false; // re-arm for next trip
-      setState({ active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0 });
+      const cleared: TbtState = { active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0 };
+      stateRef.current = cleared;
+      setState(cleared);
       return;
     }
+    // Brand-new trip — clear stale prompt history and reset the gate so the
+    // 1.5s throttle from any prior trip can't suppress the start phrase.
+    resetSpeakGate();
     announcedRef.current.clear();
-    setState((s) => ({ ...s, active: true, stepIndex: 0 }));
+    const fresh: TbtState = { ...stateRef.current, active: true, stepIndex: 0 };
+    stateRef.current = fresh;
+    setState(fresh);
     // Speak ONCE per trip — guarded by the boolean ref. Read route from
     // routeRef so we get whatever route is current right now, without
     // putting `route` in the dependency array.
@@ -226,79 +245,90 @@ export function useTurnByTurn(
     }
   }, [active]);
 
-  // Step machine
+  // Step machine — all logic runs OUTSIDE setState to avoid React 18 concurrent
+  // mode firing the body twice (which caused duplicate voice prompts). We also
+  // dropped `route?.polyline` from the deps so a parent re-render with a fresh
+  // route object reference (same data) doesn't retrigger the effect mid-trip.
+  // The `routeRef` keeps the latest route reachable without taking a dep on it.
   useEffect(() => {
-    if (!active || !route || !user) return;
-    const steps = route.steps;
+    if (!active || !user) return;
+    const r = routeRef.current;
+    if (!r) return;
+    const steps = r.steps;
     if (!steps?.length) return;
 
-    setState((prev) => {
-      let stepIdx = Math.min(prev.stepIndex, steps.length - 1);
-      let cur = steps[stepIdx];
-      let dManeuver = haversineMeters(user, cur.end);
+    // ---- All computation outside setState ----
+    let stepIdx = Math.min(stateRef.current.stepIndex, steps.length - 1);
+    const prevStepIdx = stepIdx;
+    let cur = steps[stepIdx];
+    let dManeuver = haversineMeters(user, cur.end);
 
-      // Advance step when close to its end coord
-      while (stepIdx < steps.length - 1 && dManeuver < ADVANCE_THRESHOLD_M) {
-        stepIdx += 1;
-        cur = steps[stepIdx];
-        dManeuver = haversineMeters(user, cur.end);
-        announcedRef.current.clear(); // reset prompts for new step
-      }
+    // Advance step when close to its end coord. Done BEFORE voice prompts
+    // so we never re-announce the just-completed step.
+    while (stepIdx < steps.length - 1 && dManeuver < ADVANCE_THRESHOLD_M) {
+      stepIdx += 1;
+      cur = steps[stepIdx];
+      dManeuver = haversineMeters(user, cur.end);
+    }
+    // Only clear announced prompts ONCE (not on each loop iteration) if we
+    // actually crossed at least one step boundary.
+    if (stepIdx !== prevStepIdx) announcedRef.current.clear();
 
-      // Voice prompts at fixed distances
-      if (!options?.mute) {
-        for (const t of VOICE_THRESHOLDS) {
-          const key = `${stepIdx}-${t}`;
-          if (dManeuver <= t && !announcedRef.current.has(key)) {
-            const verb = maneuverVerb(steps[Math.min(stepIdx + 1, steps.length - 1)].maneuver);
-            const distLabel = t >= 1000 ? `${(t / 1000).toFixed(1)} kilometers` : `${t} meters`;
-            const inst = stripDirections(steps[Math.min(stepIdx + 1, steps.length - 1)].html);
-            const utter = stepIdx + 1 < steps.length
-              ? (t === 30 ? `${verb}.` : `In ${distLabel}, ${verb.toLowerCase()}${inst ? " onto " + inst : ""}.`)
-              : (t === 30 ? "You have arrived." : `In ${distLabel}, you will arrive at your destination.`);
-            // Avoid stacking prompts (min 1.2s spacing)
-            if (Date.now() - lastSpokeRef.current > 1200) {
-              speak(utter);
-              lastSpokeRef.current = Date.now();
-            }
-            announcedRef.current.add(key);
-            break;
-          }
+    // Voice prompts at fixed distances. The module-level `_speakLock` +
+    // `_lastSpoke` throttle inside `speak()` is the hard guard; this set
+    // tracks which (step, threshold) pairs have already fired this trip.
+    if (!options?.mute) {
+      for (const t of VOICE_THRESHOLDS) {
+        const key = `${stepIdx}-${t}`;
+        if (dManeuver <= t && !announcedRef.current.has(key)) {
+          const nextStep = steps[Math.min(stepIdx + 1, steps.length - 1)];
+          const verb = maneuverVerb(nextStep.maneuver);
+          const distLabel = t >= 1000 ? `${(t / 1000).toFixed(1)} kilometers` : `${t} meters`;
+          const inst = stripDirections(nextStep.html);
+          const utter = stepIdx + 1 < steps.length
+            ? (t === 30 ? `${verb}.` : `In ${distLabel}, ${verb.toLowerCase()}${inst ? " onto " + inst : ""}.`)
+            : (t === 30 ? "You have arrived." : `In ${distLabel}, you will arrive at your destination.`);
+          speak(utter);
+          announcedRef.current.add(key);
+          break;
         }
       }
+    }
 
-      // Off-route detection: distance from user to ALL upcoming step start lines
-      // Simple proxy: if user is > REROUTE_DISTANCE_M from current step's start AND end, fire callback (debounced 8s)
-      const dStart = haversineMeters(user, cur.start);
-      if (dStart > REROUTE_DISTANCE_M && dManeuver > REROUTE_DISTANCE_M) {
-        const now = Date.now();
-        if (now - lastOffRouteAtRef.current > 8000) {
-          lastOffRouteAtRef.current = now;
-          options?.onOffRoute?.();
-        }
+    // Off-route detection (debounced 8s)
+    const dStart = haversineMeters(user, cur.start);
+    if (dStart > REROUTE_DISTANCE_M && dManeuver > REROUTE_DISTANCE_M) {
+      const now = Date.now();
+      if (now - lastOffRouteAtRef.current > 8000) {
+        lastOffRouteAtRef.current = now;
+        options?.onOffRoute?.();
       }
+    }
 
-      // Distance remaining = distance to current step end + sum of remaining step lengths
-      let remaining = dManeuver;
-      for (let i = stepIdx + 1; i < steps.length; i++) remaining += steps[i].distance_m;
+    // Distance remaining + ETA scaling
+    let remaining = dManeuver;
+    for (let i = stepIdx + 1; i < steps.length; i++) remaining += steps[i].distance_m;
+    const eta = (remaining / Math.max(r.distance_m, 1)) * r.duration_s;
 
-      const eta = (remaining / Math.max(route.distance_m, 1)) * route.duration_s;
+    // Arrival
+    if (stepIdx === steps.length - 1 && dManeuver < 20) {
+      if (!options?.mute) speak("You have arrived at your destination.");
+      options?.onArrive?.();
+    }
 
-      // Arrival
-      if (stepIdx === steps.length - 1 && dManeuver < 20) {
-        if (!options?.mute) speak("You have arrived at your destination.");
-        options?.onArrive?.();
-      }
-
-      return {
-        active: true,
-        stepIndex: stepIdx,
-        distanceToManeuverM: dManeuver,
-        distanceRemainingM: remaining,
-        etaSeconds: eta,
-      };
-    });
-  }, [active, user?.lat, user?.lng, route?.polyline]);
+    // Single state commit — setter ONLY receives the computed values, no
+    // side effects, so React running the updater twice in concurrent mode
+    // is safe and idempotent.
+    const next: TbtState = {
+      active: true,
+      stepIndex: stepIdx,
+      distanceToManeuverM: dManeuver,
+      distanceRemainingM: remaining,
+      etaSeconds: eta,
+    };
+    stateRef.current = next;
+    setState(next);
+  }, [active, user?.lat, user?.lng]);
 
   return state;
 }
@@ -307,23 +337,52 @@ export function useTurnByTurn(
 //
 // Calls `POST /api/tts` (OpenAI tts-1, voice "nova") to fetch a base64 MP3
 // for the prompt, then plays it through expo-av on native (writes the MP3
-// to the cache dir first) or an HTMLAudio data URI on web. A simple FIFO
-// queue guarantees prompts never overlap — "In 200 meters, turn left" will
-// finish before "Turn right onto Main Street" starts.
+// to the cache dir first) or an HTMLAudio data URI on web. A FIFO queue
+// guarantees prompts never overlap mid-playback, and a module-level lock +
+// 1500ms time-based throttle hard-blocks duplicate prompts caused by
+// React 18 concurrent re-renders or step-machine double-fires.
 //
 // If the backend returns 503 (no OPENAI_API_KEY configured) or anything
 // else fails (offline, quota, decode error), we silently fall back to the
 // classic robotic expo-speech voice so navigation still has audio.
+
+// Module-level voice gate. `_speakLock` is the in-flight guard — true while
+// we're either fetching the OpenAI MP3 or actively playing audio. `_lastSpoke`
+// is the wall-clock timestamp of the LAST attempt; the 1500ms gap below
+// throttles back-to-back triggers (e.g. when a GPS tick races a re-render).
+let _speakLock = false;
+let _lastSpoke = 0;
 
 const ttsQueue: string[] = [];
 let ttsPlaying = false;
 
 function speak(text: string) {
   if (!text || !text.trim()) return;
+  const now = Date.now();
+  // Hard throttle — never accept a new prompt within 1.5s of the last one.
+  // This is the primary defense against the "voice loop" bug: even if the
+  // step machine fires the same prompt 3× back-to-back due to a re-render,
+  // only the first one survives.
+  if (now - _lastSpoke < 1500) return;
+  _lastSpoke = now;
   ttsQueue.push(text);
   if (!ttsPlaying) {
     // fire-and-forget the drainer
     drainTtsQueue();
+  }
+}
+
+// Public reset — called by the trip lifecycle effect when navigation stops,
+// so a fresh trip starts with a clean voice gate (no stale lock, no stale
+// timestamp from the previous trip).
+function resetSpeakGate() {
+  _speakLock = false;
+  _lastSpoke = 0;
+  ttsQueue.length = 0;
+  ttsPlaying = false;
+  try { Speech.stop(); } catch {}
+  if (Platform.OS === "web" && typeof window !== "undefined" && "speechSynthesis" in window) {
+    try { window.speechSynthesis.cancel(); } catch {}
   }
 }
 

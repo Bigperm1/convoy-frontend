@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -163,7 +163,9 @@ export default function MapScreen() {
   }, [hazards, settings.alertSound]);
 
   // Unified multi-route directions (web + native). Fetches up to 3 alternates with `alternatives=true`.
-  // The "Route Line" = blue selected route; alternates render gray and are tappable to swap.
+  // Routes are SORTED by current traffic-aware ETA (fastest first) and tagged with
+  // a rank-based color: green (fastest) / orange (2nd) / red (3rd+) so the user
+  // can see at-a-glance which polyline is the best pick.
   // Honors avoid-tolls/highways/ferries route preferences from settings.
   useEffect(() => {
     if (!destination || !coords) {
@@ -172,19 +174,33 @@ export default function MapScreen() {
     }
     let cancelled = false;
     (async () => {
-      const results = await fetchDirections(coords, destination, {
+      const raw = await fetchDirections(coords, destination, {
         tolls: settings.avoidTolls,
         highways: settings.avoidHighways,
         ferries: settings.avoidFerries,
       });
       if (cancelled) return;
+      // Sort by traffic-aware ETA when available, else fall back to free-flow
+      // duration. This mirrors what Google Maps does in its "Best route" pick.
+      const sorted = [...raw].sort((a, b) => {
+        const da = a.duration_in_traffic_s ?? a.duration_s ?? 0;
+        const db = b.duration_in_traffic_s ?? b.duration_s ?? 0;
+        return da - db;
+      });
+      // Color-rank: green (fastest) → orange (mid) → red (slowest). Cast to
+      // any so we can attach an extra `color` field without modifying the
+      // shared NavRoute type in src/nav.ts.
+      const results = sorted.map((r, i) => ({
+        ...r,
+        color: i === 0 ? '#34C759' : i === 1 ? '#FF9500' : '#FF3B30',
+      })) as any[];
       setRoutes(results);
       setSelectedRouteIndex(0);
       const r0 = results[0];
       setRoute(r0 ? {
         distance_text: r0.distance_text,
         duration_text: r0.duration_text,
-        steps: r0.steps.map((s) => ({ html: s.html, distance_text: s.distance_text, maneuver: s.maneuver })),
+        steps: r0.steps.map((s: any) => ({ html: s.html, distance_text: s.distance_text, maneuver: s.maneuver })),
       } : null);
     })();
     return () => { cancelled = true; };
@@ -238,7 +254,67 @@ export default function MapScreen() {
     setRoute(null);
     setShowSteps(false);
     setNavMode("preview");
+    // Also retract the step drawer so it doesn't dangle on a destination-less map.
+    slideStepDrawerDown();
   };
+
+  // ===== Step Drawer =====
+  // Slides up from the bottom when a route is selected, lists each maneuver,
+  // and auto-hides after 3s. Users can grab the pill to drag it back up; a
+  // small handle at the bottom of the screen re-opens it when hidden.
+  const [stepDrawerVisible, setStepDrawerVisible] = useState(false);
+  const stepDrawerAnim = useRef(new Animated.Value(0)).current; // 0=hidden, 1=shown
+  const stepDrawerAutoHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const DRAWER_HEIGHT = 320;
+  const slideStepDrawerUp = () => {
+    setStepDrawerVisible(true);
+    Animated.spring(stepDrawerAnim, { toValue: 1, useNativeDriver: true, tension: 65, friction: 11 }).start();
+  };
+  const slideStepDrawerDown = () => {
+    Animated.timing(stepDrawerAnim, { toValue: 0, duration: 280, useNativeDriver: true }).start(({ finished }) => {
+      if (finished) setStepDrawerVisible(false);
+    });
+  };
+  // Drag-down-to-dismiss gesture on the drawer's grab pill. Hold-drag scrubs
+  // the open progress live; release > 60px or fling-down kills the drawer.
+  const stepPan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 5,
+      onPanResponderMove: (_, g) => {
+        if (g.dy > 0) {
+          const progress = Math.max(0, 1 - g.dy / DRAWER_HEIGHT);
+          stepDrawerAnim.setValue(progress);
+        }
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 60 || g.vy > 0.5) slideStepDrawerDown();
+        else slideStepDrawerUp();
+      },
+    })
+  ).current;
+
+  // Tap a route polyline on the map → keep ONLY that route, fire up nav with
+  // chase-cam (45° behind the car), and pop the step drawer for 3s so the
+  // driver can glance at the turn list before it tucks away.
+  const handleSelectRoute = (index: number) => {
+    const chosen = routes[index];
+    if (!chosen) return;
+    setRoutes([chosen]);
+    setSelectedRouteIndex(0);
+    setShowSteps(false);
+    setNavMode("turn-by-turn");
+    // Force chase cam on — `mapView` controls bearing-lock + 45° pitch downstream.
+    updateGlobalSettings({ mapView: 'heading_up' }).catch(() => {});
+    slideStepDrawerUp();
+    if (stepDrawerAutoHideTimer.current) clearTimeout(stepDrawerAutoHideTimer.current);
+    stepDrawerAutoHideTimer.current = setTimeout(() => {
+      slideStepDrawerDown();
+    }, 3000);
+  };
+  // Clear the auto-hide timer on unmount so we don't leak.
+  useEffect(() => () => {
+    if (stepDrawerAutoHideTimer.current) clearTimeout(stepDrawerAutoHideTimer.current);
+  }, []);
 
   // Continuous GPS watch while in turn-by-turn mode (updates user position for the engine + camera follow)
   useEffect(() => {
@@ -841,7 +917,7 @@ export default function MapScreen() {
         encodedPolyline={encodedPolyline}
         routes={routes}
         selectedRouteIndex={selectedRouteIndex}
-        onSelectRoute={(i) => setSelectedRouteIndex(i)}
+        onSelectRoute={handleSelectRoute}
         followUser={navMode === "turn-by-turn"}
         // Chase-cam (3D, heading-rotated, dynamic-zoom) is on whenever turn-
         // by-turn nav is actively running. Pitch defaults to 45° in ConvoyMap.
@@ -1300,6 +1376,65 @@ export default function MapScreen() {
             {alertConfirm === 'police' ? '🛡 Police reported' : '⚠️ Hazard reported'}
           </Text>
         </View>
+      )}
+
+      {/* ===== Step Drawer — slide-up turn list =====
+          Appears the moment a user taps a route. The active route's maneuvers
+          are listed in a dark glassy panel that auto-tucks after 3s so the
+          driver gets back to a clear chase-cam view. A small grab pill sits
+          on the bottom edge to re-summon it; the drawer's top handle is
+          draggable to dismiss with a fling. */}
+      {routes.length > 0 && (
+        <>
+          {!stepDrawerVisible && (
+            <TouchableOpacity
+              testID="step-drawer-handle"
+              style={styles.stepGrabHandle}
+              onPress={slideStepDrawerUp}
+              activeOpacity={0.75}
+            >
+              <View style={styles.stepGrabPill} />
+            </TouchableOpacity>
+          )}
+          <Animated.View
+            pointerEvents={stepDrawerVisible ? 'auto' : 'none'}
+            style={[
+              styles.stepDrawer,
+              {
+                transform: [{
+                  translateY: stepDrawerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [DRAWER_HEIGHT, 0],
+                  }),
+                }],
+              },
+            ]}
+          >
+            <View {...stepPan.panHandlers} style={styles.stepDrawerHandle}>
+              <View style={styles.stepGrabPill} />
+            </View>
+            <View style={styles.stepSummary}>
+              <Text style={styles.stepDuration}>{(routes[0] as any)?.duration_in_traffic_text ?? routes[0]?.duration_text}</Text>
+              <Text style={styles.stepDistance}>{routes[0]?.distance_text}</Text>
+            </View>
+            <ScrollView style={styles.stepList} showsVerticalScrollIndicator={false}>
+              {((routes[0] as any)?.steps ?? []).map((step: any, i: number) => (
+                <View key={i} style={styles.stepRow}>
+                  <Ionicons
+                    name={maneuverIcon(step.maneuver)}
+                    size={20}
+                    color="#FFFFFF"
+                    style={{ marginTop: 2 }}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.stepText}>{step.html}</Text>
+                    <Text style={styles.stepDist}>{step.distance_text}</Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          </Animated.View>
+        </>
       )}
     </View>
   );
@@ -2132,6 +2267,70 @@ const styles = StyleSheet.create({
     borderRadius: 22, zIndex: 9999,
   },
   toastText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+
+  // ===== Step Drawer =====
+  // Dark glass panel that slides up from `bottom: 72` (above the tab bar) on
+  // route selection. translateY is driven by `stepDrawerAnim` (0 = hidden
+  // below the screen at DRAWER_HEIGHT (320px), 1 = fully visible at y=0).
+  stepDrawer: {
+    position: 'absolute',
+    bottom: 72,
+    left: 0, right: 0,
+    height: 320,
+    backgroundColor: 'rgba(18,18,20,0.97)',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    zIndex: 200,
+    paddingBottom: 12,
+  },
+  // Top of the drawer — the area the user grabs to drag down/dismiss. Also
+  // visually echoes the iOS bottom-sheet pattern with a small pill.
+  stepDrawerHandle: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  // The tiny pill itself — visible both inside the open drawer AND at the
+  // bottom of the screen when the drawer is hidden (re-summon affordance).
+  stepGrabPill: {
+    width: 36, height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.35)',
+  },
+  // Re-summon strip — sits above the tab bar when the drawer is tucked away.
+  // Tap to slide the drawer back up.
+  stepGrabHandle: {
+    position: 'absolute',
+    bottom: 72,
+    left: 0, right: 0,
+    alignItems: 'center',
+    paddingVertical: 8,
+    zIndex: 199,
+  },
+  // Header row inside the drawer — duration on the left (big), distance on
+  // the right (small, lower-case). Hairline divider below separates it from
+  // the step list.
+  stepSummary: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  stepDuration: { color: '#fff', fontSize: 20, fontWeight: '700' },
+  stepDistance: { color: 'rgba(255,255,255,0.55)', fontSize: 14, alignSelf: 'flex-end' },
+  // Scrollable list of turn-by-turn maneuvers.
+  stepList: { flex: 1, paddingHorizontal: 18, marginTop: 8 },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.07)',
+    gap: 12,
+  },
+  stepText: { color: '#fff', fontSize: 14, fontWeight: '500', flexShrink: 1 },
+  stepDist: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 2 },
   // Tiny live-status pill that overlays the top edge of the search bar
   // (replaces the old dark header). Green dot + "X live · Y alerts" in a
   // glassy rounded chip — subtle, glanceable, never blocks the map.

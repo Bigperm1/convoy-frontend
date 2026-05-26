@@ -397,7 +397,7 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
 // Renders pre-decoded route polylines as native google.maps.Polyline objects.
 // Alternates are rendered first (gray, lower zIndex) so the selected route (blue) sits on top.
 function RoutesLayer({ routes, selectedIndex, onSelect }: {
-  routes: { polyline: string }[];
+  routes: { polyline: string; color?: string }[];
   selectedIndex: number;
   onSelect?: (index: number) => void;
 }) {
@@ -415,14 +415,18 @@ function RoutesLayer({ routes, selectedIndex, onSelect }: {
     routes.forEach((r, i) => {
       const path = G.geometry.encoding.decodePath(r.polyline);
       const isSelected = i === selectedIndex;
+      // Each route carries its rank color from map.tsx (green/orange/red). On
+      // web we can use the proper strokeOpacity prop to dim alternates instead
+      // of baking alpha into the hex string.
+      const color = r.color ?? (i === 0 ? '#34C759' : i === 1 ? '#FF9500' : '#FF3B30');
       const pl = new G.Polyline({
         path,
         map,
-        strokeColor: isSelected ? "#0A84FF" : "#8E8E93",
-        strokeOpacity: isSelected ? 0.95 : 0.7,
+        strokeColor: color,
+        strokeOpacity: isSelected ? 1.0 : 0.45,
         strokeWeight: isSelected ? 6 : 4,
-        zIndex: isSelected ? 500 : 100,
-        clickable: true,
+        zIndex: isSelected ? 2 : 1,
+        clickable: !isSelected,        // selected route shouldn't swallow taps
       });
       pl.addListener("click", () => onSelect?.(i));
       polysRef.current.push(pl);

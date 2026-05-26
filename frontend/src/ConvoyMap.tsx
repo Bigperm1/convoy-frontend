@@ -237,11 +237,15 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
         return routes.map((r, i) => ({
           coords: decodePolyline(r.polyline).map((p) => ({ latitude: p.lat, longitude: p.lng })),
           isSelected: i === selectedRouteIndex,
+          // Each route carries its rank color from map.tsx (green/orange/red).
+          // Fall back to the same palette by index when an older caller hasn't
+          // attached `.color` yet.
+          color: (r as any).color ?? (i === 0 ? '#34C759' : i === 1 ? '#FF9500' : '#FF3B30'),
           index: i,
         }));
       }
       if (encodedPolyline) {
-        return [{ coords: decodePolyline(encodedPolyline).map((p) => ({ latitude: p.lat, longitude: p.lng })), isSelected: true, index: 0 }];
+        return [{ coords: decodePolyline(encodedPolyline).map((p) => ({ latitude: p.lat, longitude: p.lng })), isSelected: true, color: '#34C759', index: 0 }];
       }
       return [];
     }, [routes, encodedPolyline, selectedRouteIndex]);
@@ -359,23 +363,27 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
             </View>
           </Marker>
         )}
-        {/* Render alternates first (gray), then the selected route on top (blue). Tappable. */}
+        {/* Alternates first (dimmed via hex-alpha — strokeOpacity isn't a
+            react-native-maps prop on either platform), then the selected
+            route on top. Each polyline carries its rank color (green/orange/red). */}
         {Polyline && routePolylines.filter(r => !r.isSelected).map((r) => (
           <Polyline
             key={`alt-${r.index}`}
             coordinates={r.coords}
-            strokeColor="#8E8E93"
+            strokeColor={`${r.color}73`}  /* 0x73 ≈ 45% alpha */
             strokeWidth={4}
             tappable
             onPress={() => onSelectRoute?.(r.index)}
+            zIndex={1}
           />
         ))}
         {Polyline && routePolylines.filter(r => r.isSelected).map((r) => (
           <Polyline
             key={`sel-${r.index}`}
             coordinates={r.coords}
-            strokeColor="#0A84FF"
+            strokeColor={r.color}
             strokeWidth={6}
+            zIndex={2}
           />
         ))}
       </MapView>

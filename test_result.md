@@ -283,10 +283,40 @@ metadata:
 
 test_plan:
   current_focus:
-    - "POST /api/community/broadcast-music — admin-only WebSocket fan-out for Music screen"
+    - "PUT /api/auth/push-token — device push token registration"
+    - "POST /api/notifications/hail — peer hail with WebSocket + push relay fallback"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+backend_hail:
+  - task: "PUT /api/auth/push-token — device push token registration (FCM/APNs)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "All 5/5 A-suite assertions PASS via public URL https://motorist-hub.preview.emergentagent.com/api (see /app/backend_test.py). Detailed verdicts: (A1) PASS — PUT /api/auth/push-token without Authorization, body {token:'dummy',platform:'ios'} → HTTP 401 {'detail':'Not authenticated'}. (A2) PASS — With demo bearer, body {token:'',platform:'ios'} → HTTP 400 with detail EXACTLY 'token required' (matches code at server.py:245-246 which trims and checks emptiness before the platform check). (A3) PASS — With demo bearer, body {token:'fake-fcm-token-xyz',platform:'banana'} → HTTP 400 with detail EXACTLY 'Invalid platform' (server.py:247 — only ios/android/web accepted). (A4) PASS — With demo bearer, body {token:'fake-apns-token-12345',platform:'ios'} → HTTP 200 with body EXACTLY {'ok':True}. Subsequent GET /api/auth/me → 200, confirming the write didn't corrupt the user doc (public_user does NOT expose push_token/push_platform per code review of public_user() at server.py:143-152 — that's by design, push fields are stored server-side only and read by /notifications/hail). (A5) PASS — With demo bearer, body {token:'different-token-abc',platform:'android'} → HTTP 200 {'ok':True} — idempotent overwrite path works ($set overwrites both push_token and push_platform in one update). Endpoint working exactly as specified."
+
+  - task: "POST /api/notifications/hail — peer hail with community share-check + push relay + WS fallback"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "All 7/7 B-suite assertions PASS via public URL https://motorist-hub.preview.emergentagent.com/api (see /app/backend_test.py). Setup: (i) Registered fresh target user hail-target-1860c069@convoy.app (id=43293419-e100-446d-b9f7-9adac0995c8c) via POST /api/auth/register (no car fields). (ii) GET /api/communities/mine as demo → returned 2 admin communities: 'Bay Area Drivers' (id=d96fc987-4850-486c-8132-8601c4114aeb) and 'YVRGRC' (id=1f69cee3-...). Picked 'Bay Area Drivers' per spec; captured invite_code='LNshfmMu'. (iii) Target joined via POST /api/communities/join?code=LNshfmMu → 200 with is_member=true. (iv) GET /api/communities/{cid} as demo → 200 with member_count=3 (demo, alex from seed, and the new target) and members_users containing both demo's id and target's id — share-check precondition satisfied. Detailed verdicts: (B1) PASS — POST /api/notifications/hail WITHOUT Authorization, body {target_user_id:<target>,community_id:<cid>} → HTTP 401 {'detail':'Not authenticated'}. (B2) PASS — With demo bearer, body {target_user_id:'11111111-2222-3333-4444-555555555555'} (random uuid, never registered, no shared community) → HTTP 403 with detail EXACTLY 'You must be in the same community to hail' — confirms the Mongo $all share-check at server.py:813-817 correctly rejects strangers. (B3) PASS — With demo bearer, body {target_user_id:'00000000-0000-0000-0000-000000000000',community_id:<cid>} (bogus id within a community demo IS in) → HTTP 403 with same detail. Confirms the $all check requires BOTH ids in members[] — passing a valid community_id is NOT a bypass because the bogus user isn't actually in any community's member list. (B4) **HAPPY PATH PASS** — With demo bearer, body {target_user_id:<target>,community_id:<cid>} (target has no push_token registered yet) → HTTP 200 with body EXACTLY {'ok':True,'method':'websocket'}. Confirms the no-token branch (server.py:828-829) takes the _send_hail_via_ws path. (B5a) PASS — Logged in as target, PUT /api/auth/push-token {token:'fake-fcm-token-target',platform:'android'} → HTTP 200 {'ok':True} — push_token now persisted on target's Mongo doc. (B5b) **CRITICAL PASS** — As demo, repeated the hail → HTTP 200 with body EXACTLY {'ok':True,'method':'websocket_no_key'}. Confirms the relay-key-not-provisioned branch (server.py:834-839): EMERGENT_PUSH_KEY in env is literally 'placeholder' (verified via env check), so `not push_key or push_key == 'placeholder'` → True → WS fallback runs and the response 'method' field is mutated to 'websocket_no_key' before return. (C) REGRESSION — all 5 unrelated endpoints unaffected: GET /api/auth/me → 200; GET /api/communities/mine → 200; POST /api/hazards {kind:'police',lat:37.5,lng:-122.3,note:''} → 200 with id=b82aaaab-...; DELETE /api/hazards/{id} → 200 cleanup; POST /api/community/broadcast-music {action:'stop',community_id:<cid>} → 200 {'ok':True,'delivered':3} (3 = demo + alex from seed + the new target who joined this test run). (LOG SCAN) Captured byte offset of /var/log/supervisor/backend.err.log BEFORE tests started and read only new content after — ZERO new bytes, ZERO Tracebacks, ZERO 'Internal Server Error'. The backend.out.log shows clean 200/401/403 returns for every assertion (no 500). NOTE: B6 (target_user_id that exists nowhere → user-lookup 404) was correctly skipped per spec — the share-check fires before db.users.find_one so this path can't be reached without DB manipulation. WS-frame assertion in B5 was skipped per spec ('If WS testing is hard, skip this sub-check and just verify the HTTP 200 + method field') — the HTTP-level contract is verified. Endpoint working exactly as designed; community share-check + token resolution + relay-key gating + WS fallback labels all match the implementation. CLEANUP NOTE: the test added 1 random user (hail-target-1860c069@convoy.app) and no extra communities — original demo communities 'Bay Area Drivers' (now with 3 members) and 'YVRGRC' remain. The target user's push_token field is set ('fake-fcm-token-target') but no delete-user endpoint exists per spec, so they'll just sit in the users collection with that one extra field — no harm."
+
+agent_communication:
+    - agent: "testing"
+      message: "Hail + push-token regression PASS (24/24 assertions) via public URL https://motorist-hub.preview.emergentagent.com/api (see /app/backend_test.py). PUT /api/auth/push-token A1-A5 (auth gate, empty-token-400, invalid-platform-400, ios-200, idempotent-android-overwrite-200) all match the spec EXACTLY including the detail strings 'token required' and 'Invalid platform'. POST /api/notifications/hail B1 (401), B2 (random uuid → 403 share-check), B3 (bogus uuid + valid community_id → 403 share-check still fires because $all requires both ids in members[]), B4 (happy path, target has no push_token → 200 {ok:true,method:'websocket'}), B5 (target now has push_token + EMERGENT_PUSH_KEY=placeholder → 200 {ok:true,method:'websocket_no_key'}) all PASS. Regression: GET /auth/me, GET /communities/mine, POST+DELETE /hazards, POST /community/broadcast-music all return 200. Backend err log scan: zero new tracebacks, zero 500s during the test window. EMERGENT_PUSH_KEY=placeholder and OPENAI_API_KEY=<set> in backend env confirm the websocket_no_key code path is the expected one in this env (the relay-200 path with method='push' would require a real EMERGENT_PUSH_KEY). NOTE: 'Bay Area Drivers' community now has 3 members (demo + alex from seed + the new test target hail-target-1860c069@convoy.app) — only the original 2 demo communities remain so 'untouched-original-2-communities' is satisfied; only side-effect is +1 member which is intrinsic to testing the share-check. Endpoints working exactly as designed; main agent can safely finish this task."
 
 backend_music_broadcast:
   - task: "POST /api/community/broadcast-music — community admin pushes current track to all members via WebSocket"

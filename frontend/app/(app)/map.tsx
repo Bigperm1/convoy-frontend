@@ -17,10 +17,11 @@ import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 import { voiceBus, geocodeQuery } from "../../src/voiceBus";
 import { useCommunityRoutes, createCommunityRoute, CommunityRoute } from "../../src/communityRoutes";
 import Speedometer from "../../src/components/Speedometer";
-import { ReportToast, MusicToast } from "../../src/components/AlertToast";
+import { ReportToast, MusicToast, HailToast } from "../../src/components/AlertToast";
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
 import NavigationPanel from "../../src/components/NavigationPanel";
 import StepDrawer, { StepDrawerHandle } from "../../src/components/StepDrawer";
+import { hailBus } from "../../src/hailBus";
 import { useSettings, getSettings, updateSettings as updateGlobalSettings } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
@@ -96,6 +97,14 @@ export default function MapScreen() {
   // via Music screen → "🎵 jeff: Smooth Operator — Sade". Auto-dismisses 5s.
   const [musicToast, setMusicToast] = useState<string | null>(null);
   const musicToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Hail toast — surfaced when a peer pushes us via POST /api/notifications/hail.
+  // Two delivery paths feed this:
+  //   - OS push notification while app is foregrounded (via hailBus from _layout)
+  //   - Raw WebSocket frame (via livePtt listener — see useEffect below)
+  // Both write to this single state slot so the UI is identical regardless
+  // of transport.
+  const [hailToast, setHailToast] = useState<string | null>(null);
+  const hailToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Right-edge Navigation Action Drawer — peeked 80% off-screen by default
   // when turn-by-turn is engaged. Tap the visible 20% to expand and see the
   // current maneuver + End. Auto-collapses on tap-out / route end.
@@ -334,6 +343,26 @@ export default function MapScreen() {
     })();
     return () => { if (sub) sub.remove(); };
   }, [navMode]);
+
+  // ===== Hail subscription =====
+  //
+  // Peers can hail us via two transports — both feed `hailBus`:
+  //   1. OS push notification (handled in app/(app)/_layout.tsx, which
+  //      republishes to `hailBus` so the foregrounded map sees the same toast).
+  //   2. Raw WebSocket fallback frame from the backend's `_send_hail_via_ws`
+  //      (also forwarded to `hailBus` by the global WS listener).
+  // Either way, this effect just pops a 5s toast.
+  useEffect(() => {
+    const off = hailBus.on(({ fromHandle }) => {
+      setHailToast(`🚨 ${fromHandle} is hailing you!`);
+      if (hailToastTimer.current) clearTimeout(hailToastTimer.current);
+      hailToastTimer.current = setTimeout(() => setHailToast(null), 5000);
+    });
+    return () => {
+      off();
+      if (hailToastTimer.current) clearTimeout(hailToastTimer.current);
+    };
+  }, []);
 
   // ----- Initial location -----
   useEffect(() => {
@@ -1517,6 +1546,9 @@ export default function MapScreen() {
           track from the Music screen. Sits slightly higher than the report
           toast so they don't overlap if both fire close together. */}
       <MusicToast message={musicToast} />
+      {/* Peer hail toast — bright red, pinned highest so it never gets buried
+          under the music broadcast pill. Fed by `hailBus` (push + WS). */}
+      <HailToast message={hailToast} />
 
       {/* ===== Step Drawer — slide-up turn list =====
           Appears the moment a user taps a route. The active route's maneuvers

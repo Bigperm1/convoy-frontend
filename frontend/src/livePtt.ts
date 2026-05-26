@@ -20,6 +20,7 @@ import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
 import { getToken, wsUrl } from "./api";
 import { getSettings } from "./settings";
+import { hailBus } from "./hailBus";
 
 export type PTTMessage = {
   id: string;
@@ -153,6 +154,21 @@ export function useLiveWalkieListener(getActiveChannelId: () => string | null | 
       ws.onmessage = (ev: any) => {
         try {
           const data = JSON.parse(typeof ev.data === "string" ? ev.data : "");
+
+          // ===== Hail frame (peer summon) =====
+          // Backend's `_send_hail_via_ws` fan-out — always honored regardless
+          // of channel scope since hails are 1:1 directed. We just re-emit
+          // onto `hailBus` so the foregrounded map can toast it. (When the
+          // app is BACKGROUNDED, the user instead sees a real OS push from
+          // the Emergent push relay — both paths share the same toast UI.)
+          if (data?.type === "hail") {
+            hailBus.emit({
+              fromHandle: String(data.from_handle || "Driver"),
+              fromId: String(data.from_id || ""),
+            });
+            return;
+          }
+
           if (data?.type !== "ptt" || !data?.message) return;
           const m: PTTMessage = data.message;
           const ch = getterRef.current?.();

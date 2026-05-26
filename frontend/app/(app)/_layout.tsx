@@ -9,6 +9,61 @@ import VoiceController from "../../src/VoiceController";
 import VoiceTabButton from "../../src/VoiceTabButton";
 import { useLiveWalkieListener } from "../../src/livePtt";
 import { useSettings } from "../../src/settings";
+import { api } from "../../src/api";
+import { hailBus } from "../../src/hailBus";
+import * as Notifications from "expo-notifications";
+
+// ===== Push notification module-scope config =====
+//
+// Both `setNotificationHandler` and the registration helper MUST run before
+// any push notification is delivered. expo-notifications is native-only — on
+// web all these APIs throw, so we guard with Platform.OS !== "web".
+//
+// `handleNotification` controls how a push is rendered when the app is in the
+// foreground. Default behavior on iOS/Android is to do nothing in foreground;
+// we want the OS banner + sound so the user sees the Hail immediately.
+if (Platform.OS !== "web") {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
+
+// One-shot async helper invoked from the layout's mount effect. Pulls the
+// FCM/APNs device token from the OS and PUTs it to /auth/push-token. Safe to
+// call on every cold start — backend is idempotent.
+async function registerForPushNotifications() {
+  if (Platform.OS === "web") return;
+
+  try {
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let final = existing;
+    if (existing !== "granted") {
+      const { status } = await Notifications.requestPermissionsAsync();
+      final = status;
+    }
+    if (final !== "granted") {
+      // User denied — leave silently, the WS fallback path will handle Hails.
+      return;
+    }
+
+    // `getDevicePushTokenAsync` returns the native FCM/APNs token, which is
+    // what the Emergent push relay expects (NOT `getExpoPushTokenAsync`).
+    const tokenData = await Notifications.getDevicePushTokenAsync();
+    if (!tokenData?.data) return;
+
+    await api.put("/auth/push-token", {
+      token: tokenData.data,
+      platform: Platform.OS,
+    });
+  } catch (e) {
+    // Permission denied, simulator, or other token-fetch failure. Non-fatal.
+    if (__DEV__) console.warn("Push token registration failed:", e);
+  }
+}
 
 export default function AppLayout() {
   const { user } = useAuth();
@@ -25,6 +80,48 @@ export default function AppLayout() {
   useEffect(() => {
     if (user === null) router.replace("/(auth)/login");
   }, [user, router]);
+
+  // ===== Push notifications =====
+  //
+  // Register on mount (handles cold-start tokens) and re-register whenever
+  // the auth user changes — covers logout → login → re-login flows so the
+  // token gets re-saved against the new user's row.
+  useEffect(() => {
+    if (!user) return;
+    registerForPushNotifications();
+  }, [user]);
+
+  // Foreground delivery listener — fires while the app is open. We DON'T
+  // rely on the system banner here; instead we forward the hail to `hailBus`
+  // which the map screen renders as an in-app toast (matches the existing
+  // hail-via-WebSocket UX so users see the same UI regardless of transport).
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const sub = Notifications.addNotificationReceivedListener((notification) => {
+      const data = (notification.request.content.data ?? {}) as any;
+      if (data?.type === "hail") {
+        hailBus.emit({
+          fromHandle: String(data.from_handle || "Driver"),
+          fromId: String(data.from_id || ""),
+        });
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Tap-to-open listener — fires when the user taps the OS notification
+  // banner while the app is backgrounded or killed. For Hails we route to
+  // the Map tab so they can see the hailer's car blink on the map.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = (response.notification.request.content.data ?? {}) as any;
+      if (data?.type === "hail") {
+        router.push("/(app)/map");
+      }
+    });
+    return () => sub.remove();
+  }, [router]);
 
   if (user === undefined) {
     return (

@@ -67,6 +67,10 @@ class CarUpdate(BaseModel):
     # Personal best top cruise speed in km/h. Sent from the map screen whenever
     # the user beats their own record (throttled client-side to ≤ 1/min).
     top_speed_record: Optional[float] = None
+    # FCM/APNs device push token — saved when the client registers via
+    # PUT /api/auth/push-token. Stored here so the /notifications/hail
+    # endpoint can look it up by user id.
+    push_token: Optional[str] = None
 
 class LocationIn(BaseModel):
     lat: float
@@ -218,6 +222,37 @@ async def update_profile(body: CarUpdate, user=Depends(get_current_user)):
     if update: await db.users.update_one({"id": user["id"]}, {"$set": update})
     fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     return public_user(fresh)
+
+
+# ---------- Push Notification token registration ----------
+# Saved when the client calls `getDevicePushTokenAsync()` on app launch
+# (see frontend/app/(app)/_layout.tsx). The value is an FCM token on Android
+# and an APNs token on iOS — both are looked up later by /notifications/hail.
+# We persist both `push_token` and `push_platform` so the relay knows which
+# upstream channel to use, and so we can revoke tokens by platform if needed.
+class PushTokenBody(BaseModel):
+    token: str
+    platform: str  # "android" | "ios"
+
+
+@api.put("/auth/push-token")
+async def save_push_token(body: PushTokenBody, user=Depends(get_current_user)):
+    """Persist the device push token + platform for the authenticated user.
+
+    Idempotent — the client may call this on every cold start since tokens
+    can rotate. We just overwrite the existing fields.
+    """
+    if not body.token or not body.token.strip():
+        raise HTTPException(status_code=400, detail="token required")
+    if body.platform not in ("ios", "android", "web"):
+        # `web` will never deliver via push but we accept it so the call
+        # doesn't 4xx on devs running in the browser preview.
+        raise HTTPException(status_code=400, detail="Invalid platform")
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"push_token": body.token, "push_platform": body.platform}},
+    )
+    return {"ok": True}
 
 
 # ---------- Location ----------
@@ -735,6 +770,109 @@ async def broadcast_music(body: MusicBroadcastBody, user=Depends(get_current_use
         "community_id": body.community_id,
     })
     return {"ok": True, "delivered": len(members)}
+
+
+# ---------- Hail (peer push notification) ----------
+# When the user taps the "Hail" button in the PeerModal we want a real push
+# notification on the recipient's lockscreen — not just a WebSocket ping
+# that's silently dropped when the app is killed. This endpoint:
+#   1. Verifies the caller and target share at least one community
+#      (prevents spamming random nearby drivers).
+#   2. Looks up the target's `push_token` saved by /auth/push-token.
+#   3. Fan-out via Emergent Managed Push relay (works in iOS APNs + Android
+#      FCM all-states); falls back to a raw WebSocket frame if (a) the relay
+#      key is unset (local dev), (b) the target hasn't registered a token, or
+#      (c) the relay returns an error. The WS path is what was already wired
+#      pre-this-feature, so behavior never regresses.
+# Body shape kept thin so the frontend doesn't need to know which community
+# context the modal opened in — `community_id` is optional (used only for
+# data payload routing, not the share-check).
+class HailBody(BaseModel):
+    target_user_id: str
+    community_id: Optional[str] = None
+
+
+PUSH_RELAY_URL = "https://integrations.emergentagent.com/api/v1/push/trigger"
+
+
+async def _send_hail_via_ws(target_user_id: str, sender: dict) -> dict:
+    """Always-on fallback: raw WebSocket fan-out to the target user.
+    Returns the response body shape the HTTP endpoint will use."""
+    await ws_manager.broadcast_to_users([target_user_id], {
+        "type": "hail",
+        "from_handle": sender.get("handle", "Driver"),
+        "from_id": sender["id"],
+    })
+    return {"ok": True, "method": "websocket"}
+
+
+@api.post("/notifications/hail")
+async def hail_peer(body: HailBody, user=Depends(get_current_user)):
+    # 1. Verify caller and target share a community. Mongo $all matches docs
+    #    whose `members` array contains BOTH user ids.
+    shared = await db.communities.find_one({
+        "members": {"$all": [user["id"], body.target_user_id]}
+    })
+    if not shared:
+        raise HTTPException(status_code=403, detail="You must be in the same community to hail")
+
+    # 2. Target lookup.
+    target = await db.users.find_one({"id": body.target_user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    push_token = target.get("push_token")
+    sender_handle = user.get("handle", "A driver")
+
+    # 3. If no token, go straight to WS.
+    if not push_token:
+        return await _send_hail_via_ws(body.target_user_id, user)
+
+    # 4. Try the Emergent push relay. If anything goes sideways, fall back
+    #    to WS — never raise to the caller; the user just tapped a button
+    #    expecting some kind of delivery.
+    push_key = os.environ.get("EMERGENT_PUSH_KEY", "").strip()
+    if not push_key or push_key == "placeholder":
+        # Local dev or relay-key not provisioned yet. WS fallback.
+        ws_resp = await _send_hail_via_ws(body.target_user_id, user)
+        ws_resp["method"] = "websocket_no_key"
+        return ws_resp
+
+    payload = {
+        "token": push_token,
+        "title": f"🚨 Hail from {sender_handle}",
+        "body": f"{sender_handle} is hailing you on Convoy",
+        "data": {
+            "type": "hail",
+            "from_id": user["id"],
+            "from_handle": sender_handle,
+            "community_id": body.community_id or "",
+        },
+        "sound": "default",
+        "badge": 1,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                PUSH_RELAY_URL,
+                headers={"X-Push-Key": push_key, "Content-Type": "application/json"},
+                json=payload,
+            )
+        # Send WS in addition (redundant delivery) so foregrounded clients
+        # get the toast even without OS push permission.
+        await ws_manager.broadcast_to_users([body.target_user_id], {
+            "type": "hail",
+            "from_handle": sender_handle,
+            "from_id": user["id"],
+        })
+        return {"ok": True, "method": "push", "status": resp.status_code}
+    except Exception as e:
+        logger.warning(f"Hail push relay failed, falling back to WS: {e}")
+        ws_resp = await _send_hail_via_ws(body.target_user_id, user)
+        ws_resp["method"] = "websocket_fallback"
+        ws_resp["error"] = str(e)[:120]
+        return ws_resp
 
 
 def _classify_intent(text: str) -> dict:

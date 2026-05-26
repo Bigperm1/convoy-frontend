@@ -29,6 +29,7 @@
     },
     "android": {
       "package": "app.convoy.driver",
+      "googleServicesFile": "./google-services.json",
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyDLysQuU6tOcmbdlsHJPYUqviq4TrwEUx0"
@@ -60,6 +61,13 @@
           "imageWidth": 220,
           "resizeMode": "contain",
           "backgroundColor": "#000000"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#FFD60A"
         }
       ]
     ],

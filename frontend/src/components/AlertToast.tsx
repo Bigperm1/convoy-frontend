@@ -32,6 +32,21 @@ export function MusicToast({ message }: { message: string | null }) {
   );
 }
 
+// HailToast — surfaced when a peer hails this device (either via OS push or
+// WebSocket fallback). Pinned higher than MusicToast so a Hail isn't visually
+// buried by an ongoing track broadcast. Bright red gradient for urgency.
+export function HailToast({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <View
+      pointerEvents="none"
+      style={[styles.toast, { bottom: 260, backgroundColor: "rgba(255,59,48,0.95)" }]}
+    >
+      <Text style={styles.toastText} numberOfLines={1}>{message}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   toast: {
     position: "absolute",

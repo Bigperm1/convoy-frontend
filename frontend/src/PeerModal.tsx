@@ -1,9 +1,10 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import * as Speech from "expo-speech";
 import { BlurView } from "expo-blur";
 import { COLORS } from "./theme";
+import { api } from "./api";
+import { getSettings } from "./settings";
 import type { Peer } from "./ConvoyMap";
 
 type Props = {
@@ -33,13 +34,48 @@ const lastSeen = (iso?: string) => {
 };
 
 export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
+  // ===== Hail state =====
+  //
+  // Three phases:
+  //   idle    — show "Hail <driver>" with radio icon
+  //   sending — show "Hailing..." with spinner-ish ellipsis, disable taps
+  //   sent    — show "Hailed! ✓" with checkmark for 3s, then re-enable
+  //
+  // Auto-reset when the modal is closed/reopened so a re-hail starts fresh.
+  const [hailing, setHailing] = useState(false);
+  const [hailSent, setHailSent] = useState(false);
+  useEffect(() => {
+    if (!visible) {
+      setHailing(false);
+      setHailSent(false);
+    }
+  }, [visible]);
+
   if (!peer) return null;
   const distKm = myCoords ? haversineKm(myCoords, { lat: peer.lat, lng: peer.lng }) : null;
 
-  const hail = () => {
-    const name = peer.handle || "driver";
-    try { Speech.stop(); Speech.speak(`Hailing ${name}.`, { rate: 1.0 }); } catch {}
-    onClose();
+  const hail = async () => {
+    if (hailing || hailSent) return;
+    setHailing(true);
+    try {
+      // Best-effort grab of the current convoy context — used by the backend
+      // to enrich the push payload (not for the share-check; that lives on
+      // the Mongo `communities` collection).
+      const s = await getSettings().catch(() => null as any);
+      await api.post("/notifications/hail", {
+        target_user_id: peer.user_id,
+        community_id: s?.activeCommunityId ?? undefined,
+      });
+      setHailSent(true);
+      // Auto-reset the confirmation after 3s so the user can hail again.
+      setTimeout(() => setHailSent(false), 3000);
+    } catch (e: any) {
+      // 403 = "must share a community" — surface as inline state without
+      // tearing the modal. Other errors are just logged.
+      if (__DEV__) console.warn("Hail failed:", e?.response?.data || e);
+    } finally {
+      setHailing(false);
+    }
   };
 
   return (
@@ -91,9 +127,29 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
                 )}
               </View>
 
-              <TouchableOpacity testID="peer-hail" onPress={hail} style={styles.hailBtn} activeOpacity={0.85}>
-                <Ionicons name="radio" size={20} color="#fff" />
-                <Text style={styles.hailText}>Hail {peer.handle || "driver"}</Text>
+              <TouchableOpacity
+                testID="peer-hail"
+                onPress={hail}
+                disabled={hailing || hailSent}
+                style={[
+                  styles.hailBtn,
+                  hailSent && styles.hailBtnSent,
+                  hailing && styles.hailBtnSending,
+                ]}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name={hailSent ? "checkmark-circle" : "radio"}
+                  size={20}
+                  color="#fff"
+                />
+                <Text style={styles.hailText}>
+                  {hailing
+                    ? "Hailing…"
+                    : hailSent
+                      ? `Hailed ${peer.handle || "driver"} ✓`
+                      : `Hail ${peer.handle || "driver"}`}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -122,5 +178,7 @@ const styles = StyleSheet.create({
   metaText: { color: COLORS.text, fontSize: 12, fontWeight: "600" },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: COLORS.success },
   hailBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: 14 },
+  hailBtnSending: { opacity: 0.75 },
+  hailBtnSent: { backgroundColor: COLORS.success },
   hailText: { color: "#fff", fontWeight: "700", fontSize: 15, letterSpacing: 0.2 },
 });

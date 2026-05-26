@@ -100,6 +100,8 @@ type Props = {
   // Used by the parent to dismiss transient overlays like the search UI.
   onMapPress?: () => void;
   onHazardPress: (h: Hazard) => void;
+  /** Long-press / right-click a hazard pin to remove it (creator only). */
+  onHazardLongPress?: (h: Hazard) => void;
   onPeerPress?: (p: Peer) => void;
   onExternalAlertPress?: (a: ExternalAlert) => void;
   onRoute?: (info: any) => void;
@@ -148,7 +150,7 @@ function decodePolyline(encoded: string): LatLng[] {
   return points;
 }
 
-export default function ConvoyMap({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", onMapPress, onHazardPress, onPeerPress, onExternalAlertPress }: Props) {
+export default function ConvoyMap({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", onMapPress, onHazardPress, onHazardLongPress, onPeerPress, onExternalAlertPress }: Props) {
   // Ref to the underlying react-native-maps MapView so we can drive the camera
   // (pitch + heading + zoom) directly during turn-by-turn navigation.
   const mapRef = useRef<any>(null);
@@ -327,7 +329,7 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
           );
         })}
         {hazards.map((h) => (
-          <Marker key={`u-${h.id}`} coordinate={{ latitude: h.lat, longitude: h.lng }} anchor={{ x: 0.5, y: 1 }} onPress={() => onHazardPress(h)}>
+          <Marker key={`u-${h.id}`} coordinate={{ latitude: h.lat, longitude: h.lng }} anchor={{ x: 0.5, y: 1 }} onPress={() => onHazardPress(h)} onCalloutPress={() => onHazardLongPress?.(h)}>
             <View style={styles.hazardWrap}>
               <View style={[
                 styles.hazardBubble,

@@ -68,6 +68,8 @@ type Props = {
   // Empty-map click → bubble up so the parent can dismiss search overlays etc.
   onMapPress?: () => void;
   onHazardPress: (h: Hazard) => void;
+  /** Right-click a hazard pin (web equivalent of long-press) to remove it. */
+  onHazardLongPress?: (h: Hazard) => void;
   onPeerPress?: (p: Peer) => void;
   onExternalAlertPress?: (a: ExternalAlert) => void;
   onRoute?: (info: { distance_text: string; duration_text: string; steps: { html: string; distance_text: string; maneuver?: string }[] } | null) => void;
@@ -300,7 +302,7 @@ function MapSkeleton() {
   );
 }
 
-function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", mapType = "hybrid", showTraffic = true, showTransit = false, showHazards = true, onMapPress, onHazardPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
+function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", mapType = "hybrid", showTraffic = true, showTransit = false, showHazards = true, onMapPress, onHazardPress, onHazardLongPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
   // Authoritative "is the SDK ready to touch?" flag — flips to true ONLY after
   // window.google.maps has been imported, authenticated, and exposed on the
   // window. We refuse to mount <Map /> at all until then, which is the
@@ -356,7 +358,19 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
             );
           })}
           {showHazards && hazards.map((h) => (
-            <Marker key={`u-${h.id}`} position={h} icon={communityPin(hazardColor(h.kind), HAZARD_GLYPHS[h.kind] || "!", highlightConvoy)} onClick={() => onHazardPress(h)} title={`${h.kind} · by ${h.reporter_handle || "anon"}${highlightConvoy ? " · CONVOY" : ""}`} />
+            <Marker
+              key={`u-${h.id}`}
+              position={h}
+              icon={communityPin(hazardColor(h.kind), HAZARD_GLYPHS[h.kind] || "!", highlightConvoy)}
+              onClick={() => onHazardPress(h)}
+              /* Web has no long-press; use double-click as the destructive
+                 affordance. @vis.gl/react-google-maps exposes onRightClick too
+                 but iOS Safari doesn't fire it reliably — dblclick works on
+                 every browser + touch device the app supports. */
+              onDblClick={() => onHazardLongPress?.(h)}
+              onRightClick={() => onHazardLongPress?.(h)}
+              title={`${h.kind} · by ${h.reporter_handle || "anon"}${highlightConvoy ? " · CONVOY" : ""} · double-click to remove`}
+            />
           ))}
           {externalAlerts.map((a) => (
             <Marker

@@ -252,6 +252,31 @@ export default function MapScreen() {
     Speech.stop();
     setNavMode("preview");
   };
+  // Delete a hazard (by id) — used by the long-press / right-click flow on
+  // markers. Optimistically removes from local state on success so the pin
+  // disappears immediately. Backend already authorizes (only the original
+  // reporter can delete; otherwise the API silently no-ops with 200).
+  const deleteHazard = async (hazardId: string) => {
+    try {
+      await api.delete(`/hazards/${hazardId}`);
+      setHazards((prev) => prev.filter((h) => h.id !== hazardId));
+    } catch (e) {
+      console.warn("deleteHazard failed", e);
+    }
+  };
+  // Wired to ConvoyMap's new `onHazardLongPress` prop. Pops the standard
+  // native confirm dialog so a tap on a real pin doesn't accidentally remove
+  // it — destructive operations always require a deliberate second tap.
+  const handleHazardLongPress = (h: Hazard) => {
+    Alert.alert(
+      "Remove Alert",
+      `Remove this ${h.kind} alert?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Remove", style: "destructive", onPress: () => deleteHazard(h.id) },
+      ]
+    );
+  };
   const clearRoute = () => {
     Speech.stop();
     setDestination(null);
@@ -970,6 +995,7 @@ export default function MapScreen() {
         // peek at the map fullscreen mid-trip without ending navigation.
         onMapPress={() => { if (searchVisible) setSearchVisible(false); }}
         onHazardPress={(h) => setSelected(h)}
+        onHazardLongPress={handleHazardLongPress}
         onPeerPress={(p) => {
           // Find the matching presence record (has online_at, etc.) — fallback to bare peer
           const full = presence.peers.find((pp) => pp.user_id === p.user_id);
@@ -1203,25 +1229,16 @@ export default function MapScreen() {
         </Glass>
       )}
 
-      {/* ===== Turn-by-turn overlays — ETA pill + right-edge nav drawer ===== */}
+      {/* ===== Turn-by-turn overlays — right-edge nav drawer only =====
+          The bottom-right ETA / Remaining pill was removed; that data is
+          still computed in `tbt` (used by the NavActionDrawer) so callers
+          that want it can read it directly. */}
       {navMode === "turn-by-turn" && activeRoute && tbt.active && (() => {
         const stepIdx = Math.min(tbt.stepIndex + 1, activeRoute.steps.length - 1);
         const upcoming = activeRoute.steps[stepIdx];
         const verb = maneuverVerb(upcoming?.maneuver);
         return (
           <>
-            {/* Bottom-right ETA pill — bottom of the right-side stack.
-                Sits below the Hazard drawer and above the Hub tab icon. */}
-            <Glass radius={16} style={styles.tripDataRight}>
-              <View style={styles.tripDataInner}>
-                <Text style={styles.tripDataValue}>{fmtEtaSec(tbt.etaSeconds)}</Text>
-                <Text style={styles.tripDataLabel}>ETA</Text>
-                <View style={styles.tripDataDivider} />
-                <Text style={styles.tripDataValue}>{fmtDistanceM(tbt.distanceRemainingM)}</Text>
-                <Text style={styles.tripDataLabel}>Remaining</Text>
-              </View>
-            </Glass>
-
             {/* Right-edge Navigation Action Drawer — TOP of the right stack.
                 Peeked 80% off-screen by default; tap the visible 20% edge to
                 expand and see maneuver + End. Tap End → ends nav (which also
@@ -1331,19 +1348,51 @@ export default function MapScreen() {
         >
           <Ionicons name="layers" size={20} color="#fff" />
         </TouchableOpacity>
-        <TouchableOpacity
-          testID="directions-fab"
-          onPress={() => { setSearchVisible(true); }}
-          activeOpacity={0.85}
-          style={[styles.fab, styles.fabPrimary]}
-        >
-          <Ionicons name="navigate" size={20} color="#fff" />
-        </TouchableOpacity>
+        {/* Stop Navigation — appears LEFT of the Directions FAB when a trip
+            is active. Identical 42×42 footprint, red bg, white X. Tap to
+            cancel the current route and drop back to free-roam map view. */}
+        {(navMode === "turn-by-turn" || routes.length > 0) && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity
+              testID="stop-nav-fab"
+              onPress={() => { endNav(); clearRoute(); }}
+              activeOpacity={0.85}
+              style={[styles.fab, styles.stopNavBtn]}
+            >
+              <Ionicons name="close" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID="directions-fab"
+              onPress={() => { setSearchVisible(true); }}
+              activeOpacity={0.85}
+              style={[styles.fab, styles.fabPrimary]}
+            >
+              <Ionicons name="navigate" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        )}
+        {!(navMode === "turn-by-turn" || routes.length > 0) && (
+          <TouchableOpacity
+            testID="directions-fab"
+            onPress={() => { setSearchVisible(true); }}
+            activeOpacity={0.85}
+            style={[styles.fab, styles.fabPrimary]}
+          >
+            <Ionicons name="navigate" size={20} color="#fff" />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* ===== Layers bottom sheet =====
           Half-screen modal with toggle rows for Satellite, Traffic, Transit,
           Hazards, and a Waze deep-link action. Backdrop tap to dismiss. */}
+      {/* ===== Layers + Settings bottom sheet =====
+          Full settings panel grouped into sections: MAP LAYERS, PRIVACY,
+          MAP VIEW (radio), ROUTE OPTIONS, ALERTS. Replaces the old minimal
+          layers sheet. Scrollable so all sections are reachable on small
+          phones, capped at 70% of screen height. Waze + external feeds
+          rows removed per spec — those toggles live in the full Settings
+          screen for power users. */}
       <Modal
         visible={layersOpen}
         transparent
@@ -1355,54 +1404,132 @@ export default function MapScreen() {
           style={styles.sheetBackdrop}
           onPress={() => setLayersOpen(false)}
         >
-          <TouchableOpacity activeOpacity={1} style={styles.sheetCard} onPress={() => {}}>
+          <TouchableOpacity activeOpacity={1} style={[styles.sheetCard, { maxHeight: '70%' }]} onPress={() => {}}>
             <View style={styles.sheetGrip} />
-            <Text style={styles.sheetTitle}>Map layers</Text>
-
-            <LayerRow
-              icon="globe-outline" iconColor="#34C759" label="Satellite"
-              value={mapType === "hybrid"}
-              onToggle={(v) => setMapType(v ? "hybrid" : "roadmap")}
-            />
-            <LayerRow
-              icon="speedometer-outline" iconColor="#FF9F0A" label="Traffic"
-              value={showTraffic}
-              onToggle={setShowTraffic}
-            />
-            <LayerRow
-              icon="train-outline" iconColor="#0A84FF" label="Transit"
-              value={showTransit}
-              onToggle={setShowTransit}
-            />
-            <LayerRow
-              icon="warning-outline" iconColor="#FFC700" label="Hazards"
-              value={showHazards}
-              onToggle={setShowHazards}
-            />
-            <TouchableOpacity
-              testID="waze-deeplink"
-              onPress={() => {
-                // Waze deep-link: try the app URL first, fall back to web on web/no-app.
-                const target = coords ? `waze://?ll=${coords.lat},${coords.lng}&navigate=yes` : "waze://";
-                const fallback = "https://waze.com/ul";
-                Linking.canOpenURL(target).then((ok) => {
-                  Linking.openURL(ok ? target : fallback).catch(() => Linking.openURL(fallback));
-                }).catch(() => Linking.openURL(fallback));
-                setLayersOpen(false);
-              }}
-              style={styles.layerRow}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.layerIcon, { backgroundColor: "#33CCFF22" }]}>
-                <Ionicons name="open-outline" size={18} color="#33CCFF" />
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* ----- MAP LAYERS ----- */}
+              <Text style={styles.layerSectionHeader}>MAP LAYERS</Text>
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Satellite</Text>
+                  <Text style={styles.layerRowSub}>Aerial imagery</Text>
+                </View>
+                <Switch value={mapType === "hybrid"} onValueChange={(v) => setMapType(v ? "hybrid" : "roadmap")}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.layerLabel}>Open in Waze</Text>
-                <Text style={styles.layerSub}>Launches the Waze app for live community alerts</Text>
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Traffic overlay</Text>
+                  <Text style={styles.layerRowSub}>Live congestion colors</Text>
+                </View>
+                <Switch value={showTraffic} onValueChange={setShowTraffic}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
-              <Ionicons name="chevron-forward" size={18} color={COLORS.textDim} />
-            </TouchableOpacity>
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Transit overlay</Text>
+                  <Text style={styles.layerRowSub}>Buses, trains, subway</Text>
+                </View>
+                <Switch value={showTransit} onValueChange={setShowTransit}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Hazards</Text>
+                  <Text style={styles.layerRowSub}>Show community + Waze pins</Text>
+                </View>
+                <Switch value={showHazards} onValueChange={setShowHazards}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
 
+              {/* ----- PRIVACY ----- */}
+              <Text style={styles.layerSectionHeader}>PRIVACY</Text>
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Avatar Live</Text>
+                  <Text style={styles.layerRowSub}>Hide your car from the map</Text>
+                </View>
+                <Switch value={settings.avatarLive !== false} onValueChange={(v) => updateGlobalSettings({ avatarLive: v })}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Comms Live</Text>
+                  <Text style={styles.layerRowSub}>Mute push-to-talk audio</Text>
+                </View>
+                <Switch value={settings.commsLive !== false} onValueChange={(v) => updateGlobalSettings({ commsLive: v })}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
+
+              {/* ----- MAP VIEW (radio, not toggle) ----- */}
+              <Text style={styles.layerSectionHeader}>MAP VIEW</Text>
+              {(['heading_up', 'north_up'] as const).map((mode) => (
+                <TouchableOpacity
+                  key={mode}
+                  style={styles.layerRow}
+                  activeOpacity={0.7}
+                  onPress={() => updateGlobalSettings({ mapView: mode })}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.layerRowLabel}>
+                      {mode === 'heading_up' ? '🧭 Heading Up (Chase Cam)' : '⬆️ North Up (Classic)'}
+                    </Text>
+                    <Text style={styles.layerRowSub}>
+                      {mode === 'heading_up' ? '45° behind your car, rotates with you' : 'Top-down, fixed north orientation'}
+                    </Text>
+                  </View>
+                  {settings.mapView === mode && (
+                    <Ionicons name="checkmark" size={18} color="#FFD60A" />
+                  )}
+                </TouchableOpacity>
+              ))}
+
+              {/* ----- ROUTE OPTIONS ----- */}
+              <Text style={styles.layerSectionHeader}>ROUTE OPTIONS</Text>
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Avoid Tolls</Text>
+                  <Text style={styles.layerRowSub}>Route around toll roads</Text>
+                </View>
+                <Switch value={!!settings.avoidTolls} onValueChange={(v) => updateGlobalSettings({ avoidTolls: v })}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Avoid Highways</Text>
+                  <Text style={styles.layerRowSub}>Prefer surface streets</Text>
+                </View>
+                <Switch value={!!settings.avoidHighways} onValueChange={(v) => updateGlobalSettings({ avoidHighways: v })}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Avoid Ferries</Text>
+                  <Text style={styles.layerRowSub}>Skip water crossings</Text>
+                </View>
+                <Switch value={!!settings.avoidFerries} onValueChange={(v) => updateGlobalSettings({ avoidFerries: v })}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
+
+              {/* ----- ALERTS ----- */}
+              <Text style={styles.layerSectionHeader}>ALERTS</Text>
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Alert Sound</Text>
+                  <Text style={styles.layerRowSub}>Chime on new hazard nearby</Text>
+                </View>
+                <Switch value={!!settings.alertSound} onValueChange={(v) => updateGlobalSettings({ alertSound: v })}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
+              <View style={[styles.layerRow, { borderBottomWidth: 0 }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Highlight Convoy Reports</Text>
+                  <Text style={styles.layerRowSub}>Gold border on community pins</Text>
+                </View>
+                <Switch value={!!settings.highlightConvoy} onValueChange={(v) => updateGlobalSettings({ highlightConvoy: v })}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
+            </ScrollView>
             <TouchableOpacity onPress={() => setLayersOpen(false)} style={styles.sheetClose}>
               <Text style={styles.sheetCloseText}>Done</Text>
             </TouchableOpacity>
@@ -2298,6 +2425,27 @@ const styles = StyleSheet.create({
   // Directions = primary action → Convoy blue. Same 42×42 footprint as the
   // others (was 44×44 in spec, but matching the rest reads cleaner).
   fabPrimary: { backgroundColor: "rgba(10,132,255,0.92)" },
+  // Stop Navigation — red 42×42 button shown LEFT of Directions while a trip
+  // is active. Same footprint, attention-grabbing red bg so the driver knows
+  // exactly where to tap to bail out of nav.
+  stopNavBtn: { backgroundColor: "#FF3B30" },
+  // ===== Layers / Settings sheet =====
+  // New grouped section headers + row styles. The legacy `layerRow` (icon +
+  // toggle + chevron) below is left intact for any other consumers, but the
+  // sheet itself now uses these layerRowLabel/Sub styles which take up the
+  // text column when an inline `Switch` is the trailing element.
+  layerSectionHeader: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginTop: 18,
+    marginBottom: 6,
+    paddingHorizontal: 18,
+  },
+  layerRowLabel: { color: '#FFFFFF', fontSize: 15, fontWeight: '500' },
+  layerRowSub: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 2 },
   // Small badge with the active-alert count pinned to top-right of the Alerts FAB.
   fabBadge: {
     position: "absolute", top: -4, right: -4,
@@ -2405,7 +2553,14 @@ const styles = StyleSheet.create({
   },
   sheetGrip: { width: 38, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.25)", alignSelf: "center", marginBottom: 14 },
   sheetTitle: { color: COLORS.text, fontSize: 18, fontWeight: "700", marginBottom: 12, letterSpacing: -0.2 },
-  layerRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 },
+  layerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.07)',
+  },
   layerIcon: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   layerLabel: { color: COLORS.text, fontSize: 15, fontWeight: "600" },
   layerSub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },

@@ -310,42 +310,34 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
 
 const styles = StyleSheet.create({
   wrap: {},
-  // Outer row — fixed 48px tall, vertically centers everything.
-  // Houses the white search pill (flex:1) PLUS the profile avatar (36×36)
-  // as sibling children. paddingHorizontal/marginHorizontal anchor it
-  // safely off the screen edges; marginTop gives breathing room from the
-  // safe-area inset.
+  // Outer row — fixed 48px tall, respects iOS/Android safe area via marginTop.
+  // Houses the white search pill (flex:1) PLUS the profile avatar (34×34) as
+  // sibling children. NO absolute positioning — pure flex row.
   searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 12,
+    marginTop: Platform.OS === 'ios' ? 56 : 36,
     height: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    marginHorizontal: 0,
-    marginTop: 8,
   },
-  // Google-Maps-style white pill — light surface, dark text, rounded 23
-  // (half of 46 = full pill). flex:1 lets it absorb all leftover horizontal
-  // space while the avatar holds its 36px footprint to the right.
+  // Google-Maps-style white pill — flex:1 absorbs all leftover horizontal
+  // space while the avatar holds its 34px footprint to the right.
   bar: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     height: 46,
     borderRadius: 23,
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    gap: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(0,0,0,0.06)",
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    elevation: 5,
   },
-  // Dark charcoal text + dark placeholder on the white surface — high
-  // contrast for readability while driving.
-  input: { flex: 1, color: "#202124", fontSize: 15, padding: 0 },
+  // Dark charcoal text on white surface — high contrast for readability.
+  input: { flex: 1, fontSize: 16, color: '#1C1C1E', paddingVertical: 0 },
   // The Go arrow stays in Convoy blue accent so the submit affordance is
   // unmistakable on the light bar.
   goBtn: {
@@ -354,33 +346,31 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   goBtnDisabled: { opacity: 0.35 },
-  // Yellow PTT mic — 32×32 circle, inline child of the bar (NOT absolute).
-  // marginLeft 8 keeps it visually separated from the input text.
+  // Yellow PTT mic — 30×30 circle, inline child of the bar (NOT absolute).
+  // marginLeft 6 keeps it tight against the input text.
   micBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: "#FFD60A",            // Convoy gold
-    alignItems: "center", justifyContent: "center",
-    marginLeft: 8,
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: '#FFD60A',
+    alignItems: 'center', justifyContent: 'center',
+    marginLeft: 6,
   },
   // When actively recording the mic flips to a hot red to mirror the legacy
   // tab-bar mic's "now broadcasting" affordance.
   micBtnRec: { backgroundColor: "#FF3B30" },
-  // Profile avatar — 36×36 circle to the RIGHT of the search pill (OUTSIDE
+  // Profile avatar — 34×34 circle to the RIGHT of the search pill (OUTSIDE
   // the white surface). Sibling of `.bar` inside `.searchRow` so it stays
-  // vertically centered with no absolute positioning. White border per the
-  // Google-Maps spec — pops the avatar over the underlying map.
+  // vertically centered with no absolute positioning.
   avatarBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: "#5F6368",
-    alignItems: "center", justifyContent: "center",
-    overflow: "hidden",
+    width: 34, height: 34, borderRadius: 17,
     marginLeft: 10,
-    borderWidth: 2,
-    borderColor: "#FFFFFF",
-    alignSelf: "center",
-    shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3,
+    borderWidth: 2, borderColor: '#FFFFFF',
+    alignSelf: 'center',
+    backgroundColor: '#5F6368',
+    alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
+    shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
-  avatarImg: { width: 36, height: 36 },
+  avatarImg: { width: 34, height: 34 },
   // Suggestion list — white surface harmonizes with the new bar; dark text.
   // Offset by the row's horizontal padding (12) so it visually aligns under
   // the pill rather than under the avatar.

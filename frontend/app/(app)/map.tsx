@@ -281,8 +281,13 @@ export default function MapScreen() {
   }, []);
 
   // ----- Continuous heading + position watcher -----
-  // Updates `coords.heading` as the user drives so the car silhouette on the
-  // map rotates the right way. Uses moderate frequency to keep battery sane.
+  // BestForNavigation accuracy + 1s tick + 0m distance gate so the speedometer
+  // updates every second instead of every ~4s/8m. Battery cost is acceptable
+  // for a car-enthusiast app — this is the same cadence Google Maps uses.
+  // Also drives a throttled Google Roads speed-limit lookup (1×/10s) so the
+  // speedo can color-code over/under the posted limit.
+  const speedLimitRef = useRef<number | null>(null);
+  const lastSpeedLimitFetchRef = useRef<number>(0);
   useEffect(() => {
     let sub: any = null;
     (async () => {
@@ -290,12 +295,12 @@ export default function MapScreen() {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted") return;
         sub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.Balanced, timeInterval: 4000, distanceInterval: 8 },
+          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 0 },
           (pos) => {
             const h = pos.coords.heading;
             const heading = typeof h === "number" && h >= 0 ? h : undefined;
             const sRaw = pos.coords.speed;
-            const speed = typeof sRaw === "number" && sRaw >= 0 ? sRaw : undefined;
+            const speed = typeof sRaw === "number" && sRaw >= 0 ? sRaw : 0;  // clamp negatives
             // Push to the position history buffer so we can recall where the
             // driver was 5s ago (when they tap a hazard/police report button).
             posHistoryRef.current.push({ lat: pos.coords.latitude, lng: pos.coords.longitude, ts: Date.now() });
@@ -304,13 +309,29 @@ export default function MapScreen() {
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,
               heading: heading ?? cur?.heading,
-              speed: speed ?? cur?.speed,
+              speed,
             }));
-            // Personal-best tracking: convert m/s → km/h, ignore stationary jitter (<1 km/h)
-            if (typeof speed === "number") {
-              const kmh = speed * 3.6;
-              if (kmh >= 1) {
-                setSessionMaxSpeed((m) => (kmh > m ? kmh : m));
+            const kmh = speed * 3.6;
+            // Personal-best tracking (in-memory): ignore stationary jitter (<1 km/h).
+            // The throttled PUT to /auth/profile is handled by the existing
+            // `useEffect([sessionMaxSpeed, ...])` block below — no duplicate post here.
+            if (kmh >= 1) {
+              setSessionMaxSpeed((m) => (kmh > m ? kmh : m));
+            }
+            // Google Roads speed-limit lookup — throttled to 1/10s so we
+            // stay well under the free-tier quota.
+            const now = Date.now();
+            if (now - lastSpeedLimitFetchRef.current > 10000) {
+              lastSpeedLimitFetchRef.current = now;
+              const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
+              if (KEY) {
+                fetch(`https://roads.googleapis.com/v1/speedLimits?path=${pos.coords.latitude},${pos.coords.longitude}&key=${KEY}`)
+                  .then((r) => r.json())
+                  .then((d) => {
+                    const limit = d?.speedLimits?.[0]?.speedLimit;       // KPH
+                    if (typeof limit === 'number') speedLimitRef.current = limit;
+                  })
+                  .catch(() => {});
               }
             }
           }
@@ -1107,7 +1128,7 @@ export default function MapScreen() {
       {/* ===== Speedometer HUD (bottom-left glass overlay) =====
           Pulls live speed from coords.speed (m/s) → km/h. Floors small values
           to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
-      <SpeedometerHUD speedMs={coords?.speed} />
+      <SpeedometerHUD speedMs={coords?.speed} speedLimit={speedLimitRef.current} />
 
       <PeerModal
         peer={selectedPeer ? { ...selectedPeer } as any : null}
@@ -1132,7 +1153,7 @@ export default function MapScreen() {
           onPress={() => reportAlert('police')}
           activeOpacity={0.75}
         >
-          <Ionicons name="shield-checkmark" size={22} color="#3478F6" />
+          <Ionicons name="shield-checkmark" size={20} color="#3478F6" />
         </TouchableOpacity>
         {/* Road-hazard report button — same flow with kind='road'. */}
         <TouchableOpacity
@@ -1141,7 +1162,7 @@ export default function MapScreen() {
           onPress={() => reportAlert('road')}
           activeOpacity={0.75}
         >
-          <Ionicons name="warning" size={22} color="#FFD60A" />
+          <Ionicons name="warning" size={20} color="#FFD60A" />
         </TouchableOpacity>
         <TouchableOpacity
           testID="layers-fab"
@@ -1329,7 +1350,7 @@ const SPEEDO_HOLD_MS = 2000;
 // displayed value, prior smoothed value 75%. Result: 32 → 31 → 28 → 24 → 20
 // instead of the raw 32 → 0 → 20 jumps the user reported in field testing.
 const SPEEDO_EMA_ALPHA = 0.25;
-function SpeedometerHUD({ speedMs }: { speedMs?: number }) {
+function SpeedometerHUD({ speedMs, speedLimit }: { speedMs?: number; speedLimit?: number | null }) {
   // rawKmh: this tick's converted speed (>=1 km/h or 0)
   const rawKmh = (() => {
     if (typeof speedMs !== "number" || !Number.isFinite(speedMs) || speedMs < 0) return 0;
@@ -1384,14 +1405,28 @@ function SpeedometerHUD({ speedMs }: { speedMs?: number }) {
     if (fallTimerRef.current) clearTimeout(fallTimerRef.current);
   }, []);
 
+  // Speed-limit color logic. Posted limit comes in as KPH (Google Roads API)
+  // or null when the road has no posted limit / we haven't fetched yet:
+  //  - no limit known  → dark (calm, "no data")
+  //  - under or equal  → dark (calm, normal)
+  //  - 1–20 over       → orange (caution)
+  //  - 20+ over        → red    (danger)
+  const speedKmh = Math.round(displayKmh);
+  const limit = speedLimit ?? null;
+  const speedoBg = !limit || speedKmh <= limit
+    ? 'rgba(28,28,30,0.88)'
+    : speedKmh <= limit + 20
+      ? '#FF9500'
+      : '#FF3B30';
+
   return (
     <View style={styles.speedHudWrap} pointerEvents="none">
-      <Glass radius={12} style={styles.speedHud}>
+      <View style={[styles.speedHud, { backgroundColor: speedoBg }]}>
         <View style={styles.speedHudInner}>
-          <Text style={styles.speedHudValue}>{Math.round(displayKmh)}</Text>
+          <Text style={styles.speedHudValue}>{speedKmh}</Text>
           <Text style={styles.speedHudUnit}>KM/H</Text>
         </View>
-      </Glass>
+      </View>
     </View>
   );
 }
@@ -1835,7 +1870,12 @@ const styles = StyleSheet.create({
     bottom: 100,           // tab bar (~85) + small gap so it sits above the Map icon
     zIndex: 6,
   },
-  speedHud: { },
+  speedHud: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
+  },
   speedHudInner: {
     minWidth: 92,
     paddingHorizontal: 14,
@@ -1992,22 +2032,22 @@ const styles = StyleSheet.create({
   // bottom-left.
   fabStack: {
     position: "absolute",
-    right: 16,
-    bottom: 120,                 // above tab bar + speedometer HUD baseline
-    gap: 10,
+    right: 12,
+    bottom: 90,                  // closer to the tab bar drawer per spec
+    gap: 8,                      // tighter gap between buttons
     alignItems: "center",
   },
   fab: {
-    width: 48, height: 48,
-    borderRadius: 14,
-    backgroundColor: "rgba(28,28,30,0.85)",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
-    shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
-    elevation: 6,
+    width: 42, height: 42,
+    borderRadius: 10,
+    backgroundColor: 'rgba(28,28,30,0.88)',
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
-  // Directions = primary action → Convoy blue/teal accent.
-  fabPrimary: { backgroundColor: "rgba(10,132,255,0.92)", borderColor: "rgba(255,255,255,0.28)" },
+  // Directions = primary action → Convoy blue. Same 42×42 footprint as the
+  // others (was 44×44 in spec, but matching the rest reads cleaner).
+  fabPrimary: { backgroundColor: "rgba(10,132,255,0.92)" },
   // Small badge with the active-alert count pinned to top-right of the Alerts FAB.
   fabBadge: {
     position: "absolute", top: -4, right: -4,

@@ -303,6 +303,12 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
         provider="google"
         mapType="hybrid"
         style={StyleSheet.absoluteFill}
+        // Bug #1 — clamp the zoom range so the user can never zoom out so far
+        // that Google Maps stops serving tiles (black canvas). 8 ≈ regional view
+        // (multiple cities), 20 ≈ street-level. Anything below 8 on hybrid/satellite
+        // tiles returns empty tiles → black screen.
+        minZoomLevel={8}
+        maxZoomLevel={20}
         // initialRegion always set so the very first frame is positioned correctly.
         initialRegion={region}
         // While chase cam owns the camera (navigation), OR the user has

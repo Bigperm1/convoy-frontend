@@ -4,6 +4,7 @@ import {
   Platform, ScrollView, Alert, Image, ActivityIndicator, Keyboard,
 } from "react-native";
 import { useRouter, Link } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
@@ -38,9 +39,14 @@ export default function Signup() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [handle, setHandle] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const { register } = useAuth();
   const router = useRouter();
+
+  // Stable toggle callback so the memoized password Field doesn't see a
+  // new function identity each render.
+  const togglePassword = useCallback(() => setShowPassword((v) => !v), []);
 
   // useCallback stable refs so the memoized <Field> doesn't see new
   // prop identities each render and skip-paint correctly.
@@ -128,6 +134,9 @@ export default function Signup() {
               onChange={setPassword}
               placeholder="••••••"
               secure
+              secureVisible={showPassword}
+              onToggleSecure={togglePassword}
+              toggleTestID="signup-password-toggle"
               autoCapitalize="none"
               textContentType="newPassword"
               autoComplete="new-password"
@@ -184,6 +193,13 @@ type FieldProps = {
   onChange: (v: string) => void;
   placeholder?: string;
   secure?: boolean;
+  // Bug #3 — show/hide password support. When `onToggleSecure` is provided
+  // the Field renders an eye-icon button on the right side that flips the
+  // `secureTextEntry` masking on tap. `secureVisible` is the OWNER'S state
+  // (true = password text shown, false = masked).
+  secureVisible?: boolean;
+  onToggleSecure?: () => void;
+  toggleTestID?: string;
   testID?: string;
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   keyboardType?: "default" | "email-address" | "numeric" | "phone-pad" | "number-pad" | "url";
@@ -195,35 +211,60 @@ type FieldProps = {
 
 const Field = React.memo(function Field({
   label, value, onChange, placeholder, secure, testID,
+  secureVisible, onToggleSecure, toggleTestID,
   autoCapitalize = "none", keyboardType = "default",
   textContentType, autoComplete, returnKeyType, onSubmitEditing,
 }: FieldProps) {
+  // `secure` decides whether masking is even possible; `secureVisible`
+  // (when toggleable) inverts it. If no toggle is wired, behave exactly
+  // like the previous version (`secureTextEntry={!!secure}`).
+  const masked = !!secure && !secureVisible;
+  const hasToggle = !!onToggleSecure;
   return (
     <View>
       <Text style={styles.label}>{label}</Text>
-      <TextInput
-        testID={testID}
-        style={styles.input}
-        value={value}
-        onChangeText={onChange}
-        secureTextEntry={!!secure}
-        autoCapitalize={autoCapitalize}
-        keyboardType={keyboardType}
-        // Turn OFF autocorrect for ALL auth fields — it caused the QuickType
-        // bar to flash in and out as the user typed handles / passwords,
-        // which is what made the form feel "janky" on iOS.
-        autoCorrect={false}
-        textContentType={textContentType}
-        autoComplete={autoComplete}
-        returnKeyType={returnKeyType}
-        onSubmitEditing={onSubmitEditing}
-        placeholder={placeholder}
-        placeholderTextColor={COLORS.textMute}
-        // Disable spell-check too — same reasoning as autoCorrect.
-        spellCheck={false}
-        // Match keyboard appearance to our dark UI.
-        keyboardAppearance="dark"
-      />
+      <View style={hasToggle ? styles.pwWrap : undefined}>
+        <TextInput
+          testID={testID}
+          style={[styles.input, hasToggle && styles.pwInput]}
+          value={value}
+          onChangeText={onChange}
+          secureTextEntry={masked}
+          autoCapitalize={autoCapitalize}
+          keyboardType={keyboardType}
+          // Turn OFF autocorrect for ALL auth fields — it caused the QuickType
+          // bar to flash in and out as the user typed handles / passwords,
+          // which is what made the form feel "janky" on iOS.
+          autoCorrect={false}
+          textContentType={textContentType}
+          autoComplete={autoComplete}
+          returnKeyType={returnKeyType}
+          onSubmitEditing={onSubmitEditing}
+          placeholder={placeholder}
+          placeholderTextColor={COLORS.textMute}
+          // Disable spell-check too — same reasoning as autoCorrect.
+          spellCheck={false}
+          // Match keyboard appearance to our dark UI.
+          keyboardAppearance="dark"
+        />
+        {hasToggle && (
+          <TouchableOpacity
+            testID={toggleTestID}
+            onPress={onToggleSecure}
+            style={styles.pwToggle}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={secureVisible ? "Hide password" : "Show password"}
+          >
+            <Ionicons
+              name={secureVisible ? "eye-off-outline" : "eye-outline"}
+              size={22}
+              color={COLORS.textDim}
+            />
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 });
@@ -238,6 +279,13 @@ const styles = StyleSheet.create({
   // Friendly hint that car selection lives in Garage, not signup.
   hint: { color: COLORS.textDim, fontSize: 12, marginTop: 18, lineHeight: 16, fontStyle: "italic" },
   input: { backgroundColor: "rgba(118,118,128,0.18)", color: COLORS.text, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12, fontSize: 16 },
+  // Password row container — flex/position wrapper for the input + eye toggle.
+  pwWrap: { position: "relative", justifyContent: "center" },
+  pwInput: { paddingRight: 48 },
+  pwToggle: {
+    position: "absolute", right: 6, top: 0, bottom: 0,
+    width: 44, alignItems: "center", justifyContent: "center",
+  },
   btn: { marginTop: 22, borderRadius: 14, overflow: "hidden" },
   // Visible disabled state — opacity dip while the spinner runs so the user
   // sees the click "took" instead of wondering if their tap missed.

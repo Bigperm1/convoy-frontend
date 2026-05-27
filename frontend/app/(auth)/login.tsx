@@ -14,6 +14,7 @@ import Glass from "../../src/Glass";
 export default function Login() {
   const [email, setEmail] = useState("demo@revradar.app");
   const [password, setPassword] = useState("demo1234");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
@@ -80,23 +81,40 @@ export default function Login() {
               placeholderTextColor={COLORS.textMute}
             />
             <Text style={styles.label}>Password</Text>
-            <TextInput
-              testID="login-password"
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              spellCheck={false}
-              textContentType="password"
-              autoComplete="current-password"
-              returnKeyType="go"
-              keyboardAppearance="dark"
-              onSubmitEditing={onSubmit}
-              placeholder="••••••••"
-              placeholderTextColor={COLORS.textMute}
-            />
+            <View style={styles.pwWrap}>
+              <TextInput
+                testID="login-password"
+                style={[styles.input, styles.pwInput]}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                spellCheck={false}
+                textContentType="password"
+                autoComplete="current-password"
+                returnKeyType="go"
+                keyboardAppearance="dark"
+                onSubmitEditing={onSubmit}
+                placeholder="••••••••"
+                placeholderTextColor={COLORS.textMute}
+              />
+              <TouchableOpacity
+                testID="login-password-toggle"
+                onPress={() => setShowPassword((v) => !v)}
+                style={styles.pwToggle}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+              >
+                <Ionicons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={22}
+                  color={COLORS.textDim}
+                />
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity
               testID="login-submit"
               style={[styles.btn, busy && styles.btnBusy]}
@@ -152,6 +170,14 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: "rgba(118,118,128,0.18)",
     color: COLORS.text, paddingVertical: 14, paddingHorizontal: 14, borderRadius: 14, fontSize: 16,
+  },
+  // Password row — wraps the TextInput + show/hide eye toggle in a single
+  // horizontal container so they share one rounded background.
+  pwWrap: { position: "relative", justifyContent: "center" },
+  pwInput: { paddingRight: 48 },
+  pwToggle: {
+    position: "absolute", right: 6, top: 0, bottom: 0,
+    width: 44, alignItems: "center", justifyContent: "center",
   },
   btn: { marginTop: 22, borderRadius: 14, overflow: "hidden" },
   // Visible busy state — opacity dip while the spinner runs so the user

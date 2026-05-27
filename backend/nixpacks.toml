@@ -1,0 +1,14 @@
+# Railway uses Nixpacks to build the container.
+# We need to install ffmpeg at the OS level because backend/server.py
+# shells out to it for PTT audio amplification (Bug 9 — +14 dB gain).
+# Without this block Railway would deploy without ffmpeg and the PTT
+# endpoint would silently pass clips through unboosted.
+
+[phases.setup]
+nixPkgs = ["python311", "ffmpeg"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[start]
+cmd = "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8001} --workers 1 --proxy-headers --forwarded-allow-ips=*"

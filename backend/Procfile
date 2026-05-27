@@ -1,0 +1,5 @@
+# Railway / Render / Heroku-style process declaration.
+# Railway reads $PORT from the env and routes traffic to it.
+# uvicorn flags: --workers 1 because we keep PTT WebSocket state + ws_manager
+# in-process; multi-worker would split connections across processes.
+web: uvicorn server:app --host 0.0.0.0 --port ${PORT:-8001} --workers 1 --proxy-headers --forwarded-allow-ips="*"

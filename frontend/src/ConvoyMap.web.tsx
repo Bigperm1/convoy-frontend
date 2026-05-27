@@ -325,6 +325,10 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
       style={{ width: "100%", height: "100%", minHeight: 300 }}
       defaultCenter={center}
       defaultZoom={followUser ? 17 : 15}
+      // Bug #1 — clamp zoom range. Google's vector basemap stops serving tiles
+      // below zoom 3 → black canvas. Clamp to 8 (regional view) to be safe.
+      minZoom={8}
+      maxZoom={20}
       mapTypeId={mapType}
       // mapId enables the VECTOR renderer — required for setTilt / setHeading
       // (the chase cam's 45° lean + heading-up rotation). Without this, the

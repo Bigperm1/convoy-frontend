@@ -8,7 +8,11 @@
       "developmentClient": true,
       "distribution": "internal",
       "ios": { "simulator": true },
-      "channel": "development"
+      "channel": "development",
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://motorist-hub.preview.emergentagent.com",
+        "EXPO_PUBLIC_ENV": "development"
+      }
     },
     "preview": {
       "distribution": "internal",
@@ -16,6 +20,7 @@
       "android": { "buildType": "apk" },
       "channel": "preview",
       "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://motorist-hub.preview.emergentagent.com",
         "EXPO_PUBLIC_ENV": "preview"
       }
     },
@@ -25,6 +30,7 @@
       "android": { "buildType": "app-bundle", "autoIncrement": true },
       "channel": "production",
       "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://motorist-hub.preview.emergentagent.com",
         "EXPO_PUBLIC_ENV": "production"
       }
     }

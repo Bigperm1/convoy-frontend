@@ -1,7 +1,20 @@
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-export const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL as string;
+// Hardcoded fallback for the production backend host. Used when
+// `EXPO_PUBLIC_BACKEND_URL` is missing at Metro bundle time — this is the
+// failure mode behind the "404 on signup" we saw in the first iOS TestFlight
+// build (EAS Build didn't have the env var so axios was hitting a relative
+// `undefined/api/...` URL on the device).
+//
+// Two-layer defense: (1) this string is baked into the JS bundle so the app
+// ALWAYS has a working backend even with zero env-var injection, and (2)
+// `eas.json` now also passes EXPO_PUBLIC_BACKEND_URL to every build profile
+// for cleanliness. Either fix alone is sufficient.
+const PROD_BACKEND_URL = "https://motorist-hub.preview.emergentagent.com";
+
+export const BACKEND_URL =
+  (process.env.EXPO_PUBLIC_BACKEND_URL as string) || PROD_BACKEND_URL;
 export const API_BASE = `${BACKEND_URL}/api`;
 
 const TOKEN_KEY = "convoy_token";

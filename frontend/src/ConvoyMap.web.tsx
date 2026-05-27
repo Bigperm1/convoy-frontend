@@ -5,6 +5,7 @@ import { APIProvider, Map, Marker, useMap, useMapsLibrary, useApiIsLoaded } from
 import { COLORS } from "./theme";
 import { getVehiclePngDataUri, getVehiclePngDataUriOrDefault, isGRCColor } from "./vehicleAssets";
 import type { ExternalAlert, ExternalAlertType } from "./externalFeed";
+import { BearingTracker } from "./bearing";
 
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
 
@@ -61,6 +62,10 @@ type Props = {
   selectedRouteIndex?: number;
   onSelectRoute?: (index: number) => void;
   followUser?: boolean;
+  // Mirrors ConvoyMap.tsx (native): caller's `isFollowing` state. We fire
+  // this when the user drags the Google Maps Web JS map by hand, so the
+  // parent can disable the follow flag and stop tracking the user.
+  onUserPan?: () => void;
   // Mirrors ConvoyMap.tsx (native): when on, web map zooms in tight, sets
   // tilt 45° (Vector mode only — no-op on Raster), and rotates to user.heading.
   navigationActive?: boolean;
@@ -302,7 +307,12 @@ function MapSkeleton() {
   );
 }
 
-function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", mapType = "hybrid", showTraffic = true, showTransit = false, showHazards = true, onMapPress, onHazardPress, onHazardLongPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
+function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onUserPan, navigationActive = false, userSpeedMs, mapView = "heading_up", mapType = "hybrid", showTraffic = true, showTransit = false, showHazards = true, onMapPress, onHazardPress, onHazardLongPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
+  // Bearing tracker — same logic as the native ConvoyMap. See src/bearing.ts.
+  // Resolves "all cars face north when stopped" by remembering each peer's
+  // last good heading + computing bearing-from-prev-coord when GPS heading
+  // is missing/zero.
+  const bearingRef = useRef(new BearingTracker());
   // Authoritative "is the SDK ready to touch?" flag — flips to true ONLY after
   // window.google.maps has been imported, authenticated, and exposed on the
   // window. We refuse to mount <Map /> at all until then, which is the
@@ -333,6 +343,23 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
       // Empty-map click → bubble up to parent (close search etc).
       // @vis.gl/react-google-maps fires onClick only for the basemap, not POIs.
       onClick={onMapPress ? (() => onMapPress()) : undefined}
+      // Manual drag = user wants to inspect the map. Mirror the native
+      // ConvoyMap behavior: flip the parent's isFollowing flag to false.
+      // We listen for onCameraChanged with the "gesture" change reason
+      // because @vis.gl/react-google-maps doesn't expose a raw onDragstart.
+      onCameraChanged={(e: any) => {
+        // The library's event shape exposes `e.detail.center` etc — pan
+        // events are best detected by checking the difference from the
+        // tracked user position. Simpler heuristic: if the map is moved
+        // while followUser is true, the most likely cause is a user gesture
+        // (because our snap-recenter effect doesn't fire onCameraChanged).
+        // Use a small distance threshold to avoid false-positives from
+        // sub-pixel reflows.
+        if (!followUser || !e?.detail?.center) return;
+        const dLat = Math.abs(e.detail.center.lat - user.lat);
+        const dLng = Math.abs(e.detail.center.lng - user.lng);
+        if (dLat > 0.0008 || dLng > 0.0008) onUserPan?.();
+      }}
     >
           {/* "You" marker — always renders the GR Corolla PNG (default Heavy
               Metal when no color is picked) at fixed 48×48 px. Suppressed when
@@ -340,7 +367,7 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
           {!hideSelfMarker && (
             <Marker
               position={user}
-              icon={grcCarIconDataUrl(user.carColor, user.heading || 0, 48)}
+              icon={grcCarIconDataUrl(user.carColor, bearingRef.current.get("self", user.lat, user.lng, user.heading), 48)}
               zIndex={1000}
             />
           )}
@@ -351,7 +378,7 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
             const sz = isLeader ? 56 : 48;
             // Peer marker — always GRC PNG, slug-first then label fallback,
             // then default Heavy Metal. NO generic silhouettes.
-            const url = grcCarIconDataUrl(p.activeColor || p.carColor, p.heading, sz);
+            const url = grcCarIconDataUrl(p.activeColor || p.carColor, bearingRef.current.get(p.user_id, p.lat, p.lng, p.heading), sz);
             return (
               <Marker
                 key={p.user_id}

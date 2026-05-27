@@ -91,6 +91,15 @@ export default function MapScreen() {
   // can report a hazard "5 seconds ago" (matches Waze-style flow where the
   // driver passes the hazard before they react and tap the button).
   const posHistoryRef = useRef<{ lat: number; lng: number; ts: number }[]>([]);
+  // Map follow-mode flag (Bug 7 fix). Default ON so the map auto-centers on
+  // the user when the screen first loads. The instant the user pans the map
+  // with a finger gesture, `onUserPan` callback flips this to false and the
+  // map stops chasing the user — they're free to inspect any region. Tapping
+  // the Recenter FAB flips it back to true and ConvoyMap fires animateCamera
+  // to snap home. Turn-by-turn navigation overrides this entirely (chase-cam
+  // ALWAYS tracks during active nav regardless of this flag).
+  const [isFollowing, setIsFollowing] = useState(true);
+
   // Transient toast state for "Police reported" / "Hazard reported" feedback.
   const [alertConfirm, setAlertConfirm] = useState<string | null>(null);
   // Music broadcast toast — surfaced when the community admin pushes a track
@@ -994,7 +1003,14 @@ export default function MapScreen() {
         routes={routes}
         selectedRouteIndex={selectedRouteIndex}
         onSelectRoute={handleSelectRoute}
-        followUser={navMode === "turn-by-turn"}
+        // Follow-mode logic: chase-cam during nav, otherwise driven by the
+        // explicit `isFollowing` state. When the user pans the map manually,
+        // ConvoyMap fires `onUserPan` and we flip off follow mode — the map
+        // stops tracking the user's position until they tap the Recenter FAB.
+        followUser={navMode === "turn-by-turn" || isFollowing}
+        onUserPan={() => {
+          if (isFollowing) setIsFollowing(false);
+        }}
         // Chase-cam (3D, heading-rotated, dynamic-zoom) is on whenever turn-
         // by-turn nav is actively running. Pitch defaults to 45° in ConvoyMap.
         navigationActive={navMode === "turn-by-turn" && tbt.active}
@@ -1356,6 +1372,23 @@ export default function MapScreen() {
         >
           <Ionicons name="layers" size={20} color="#fff" />
         </TouchableOpacity>
+        {/* ===== Recenter FAB =====
+            Only visible when follow-mode is OFF (the user has panned away from
+            their position). Tap → flips `isFollowing` back to true which both
+            (a) re-binds the map's `region` prop in ConvoyMap so subsequent
+            GPS updates track the user, AND (b) fires an animateCamera() snap
+            to the current coord for instant feedback. Active state is shown
+            with a tinted accent so the user understands the toggle. */}
+        {!isFollowing && navMode !== "turn-by-turn" && (
+          <TouchableOpacity
+            testID="recenter-fab"
+            onPress={() => setIsFollowing(true)}
+            activeOpacity={0.85}
+            style={[styles.fab, { backgroundColor: 'rgba(10,132,255,0.95)' }]}
+          >
+            <Ionicons name="locate" size={20} color="#fff" />
+          </TouchableOpacity>
+        )}
         {/* Stop Navigation — appears LEFT of the Directions FAB when a trip
             is active. Identical 42×42 footprint, red bg, white X. Tap to
             cancel the current route and drop back to free-roam map view. */}

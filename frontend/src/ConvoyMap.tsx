@@ -10,6 +10,7 @@ import Svg, { Path, Circle, G, Defs, LinearGradient as SvgGrad, Stop, Rect, Text
 import { COLORS } from "./theme";
 import type { ExternalAlert, ExternalAlertType } from "./externalFeed";
 import CarMarker from "./CarMarker";
+import { BearingTracker } from "./bearing";
 
 let MapView: any = null;
 let Marker: any = null;
@@ -85,6 +86,12 @@ type Props = {
   selectedRouteIndex?: number;
   onSelectRoute?: (index: number) => void;
   followUser?: boolean;
+  // Fires when the user pans/pinches the map — caller should flip its
+  // `isFollowing` state to false so subsequent location updates don't yank
+  // the camera back. The user can re-enable follow mode via the Recenter
+  // FAB which calls `setIsFollowing(true)` and triggers `followUser` to flip
+  // back to true, at which point this component snaps the camera home.
+  onUserPan?: () => void;
   // 3D chase-cam mode — when true the map switches to pitch=45°, rotates
   // automatically to match the car's heading, and dynamically zooms based
   // on userSpeedMs (city = closer, highway = wider).
@@ -150,10 +157,40 @@ function decodePolyline(encoded: string): LatLng[] {
   return points;
 }
 
-export default function ConvoyMap({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, navigationActive = false, userSpeedMs, mapView = "heading_up", onMapPress, onHazardPress, onHazardLongPress, onPeerPress, onExternalAlertPress }: Props) {
+export default function ConvoyMap({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onUserPan, navigationActive = false, userSpeedMs, mapView = "heading_up", onMapPress, onHazardPress, onHazardLongPress, onPeerPress, onExternalAlertPress }: Props) {
   // Ref to the underlying react-native-maps MapView so we can drive the camera
   // (pitch + heading + zoom) directly during turn-by-turn navigation.
   const mapRef = useRef<any>(null);
+  // Per-user heading tracker — see src/bearing.ts. Maps "self" + each peer's
+  // user_id to a smoothed bearing that survives stationary periods. This is
+  // what fixes the "all cars face north when standing still" bug — instead
+  // of using the raw `heading` prop (which goes 0 at low speed), we ask the
+  // tracker for the effective bearing given (a) the GPS heading if non-zero,
+  // (b) the delta from the previous position if we've moved ≥3m, or
+  // (c) the last cached bearing otherwise.
+  const bearingRef = useRef(new BearingTracker());
+
+  // Snap the camera back to the user the instant `followUser` flips from
+  // false → true. This is what makes the Recenter FAB feel responsive: the
+  // moment the user taps it, the map animates back to their position with
+  // a nice ease, instead of waiting for the next GPS tick. We DELIBERATELY
+  // depend only on `followUser` (not coords) so re-mounts during follow
+  // don't keep firing animateCamera and fighting user pans.
+  useEffect(() => {
+    if (!followUser || navigationActive) return;
+    if (!mapRef.current) return;
+    try {
+      mapRef.current.animateCamera(
+        {
+          center: { latitude: user.lat, longitude: user.lng },
+          // pitch/heading: leave them as-is so the user keeps whichever
+          // mapView they prefer (heading-up vs north-up).
+        },
+        { duration: 600 }
+      );
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followUser]);
 
   // ---- Real Google Maps (EAS dev build) ----
   if (MapView) {
@@ -268,10 +305,12 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
         style={StyleSheet.absoluteFill}
         // initialRegion always set so the very first frame is positioned correctly.
         initialRegion={region}
-        // While chase cam owns the camera, we DON'T pass the static region — that
-        // would reset pitch/heading on every render. Outside of navigation we keep
-        // the old region-driven behavior so the map still recenters as before.
-        region={navigationActive ? undefined : region}
+        // While chase cam owns the camera (navigation), OR the user has
+        // dragged out of follow mode, we DON'T pass the static region — that
+        // would reset pitch/heading on every render OR yank the camera back
+        // to the user after they panned away. Only when `followUser` is
+        // true AND not navigating do we treat `region` as the source of truth.
+        region={(navigationActive || !followUser) ? undefined : region}
         showsCompass={!navigationActive}
         rotateEnabled
         pitchEnabled
@@ -284,13 +323,16 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
         onPress={onMapPress ? () => onMapPress() : undefined}
         // User-gesture detection — react-native-maps fires this on every
         // region settle. `details.isGesture` is true ONLY when the change
-        // was caused by a finger drag/pinch (not animateCamera). When that
-        // happens, stamp `userGestureRef` so the chase-cam effect skips
-        // the next 4 seconds of GPS-driven camera writes, letting the user
-        // freely pinch to zoom or pan to inspect without being yanked back.
+        // was caused by a finger drag/pinch (not animateCamera). Two effects:
+        //   1. Stamp `userGestureRef` so the chase-cam effect skips the next
+        //      4 seconds of GPS-driven camera writes (existing behavior).
+        //   2. NEW: fire `onUserPan()` so the parent can flip its
+        //      `isFollowing` state to false and stop tracking the user. The
+        //      user then explicitly re-enables follow via the Recenter FAB.
         onRegionChangeComplete={(_region, details) => {
           if ((details as any)?.isGesture) {
             userGestureRef.current = Date.now();
+            onUserPan?.();
           }
         }}
       >
@@ -312,7 +354,7 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
             <CarMarker
               body={(user.carBody as any) || "sedan"}
               color={user.carColor}
-              heading={user.heading || 0}
+              heading={bearingRef.current.get("self", user.lat, user.lng, user.heading)}
               size={48}
             />
           </Marker>
@@ -335,7 +377,7 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
                   body={(p.carBody as any) || "sedan"}
                   color={p.carColor}
                   activeColor={p.activeColor}
-                  heading={p.heading || 0}
+                  heading={bearingRef.current.get(p.user_id, p.lat, p.lng, p.heading)}
                   size={isLeader ? 56 : 48}
                 />
                 {!!p.carType && (
@@ -582,7 +624,7 @@ function RoutePreviewFallback({ center, user, peers, hazards, externalAlerts = [
           <CarMarker
             body={(user.carBody as any) || "sedan"}
             color={user.carColor}
-            heading={user.heading || 0}
+            heading={bearingRef.current.get("self", user.lat, user.lng, user.heading)}
             size={44}
           />
         </View>

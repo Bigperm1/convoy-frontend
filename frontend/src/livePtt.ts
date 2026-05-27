@@ -21,6 +21,9 @@ import * as FileSystem from "expo-file-system/legacy";
 import { getToken, wsUrl } from "./api";
 import { getSettings } from "./settings";
 import { hailBus } from "./hailBus";
+import { setIdleAudioMode, setPlaybackAudioMode } from "./audioMode";
+import { showTransmitNotification } from "./pttNotification";
+import { AppState } from "react-native";
 
 export type PTTMessage = {
   id: string;
@@ -55,6 +58,19 @@ async function playOne(m: PTTMessage) {
       try { await activeSound.unloadAsync(); } catch {}
       activeSound = null;
     }
+    // Force playback audio category (loudspeaker / Bluetooth, NOT earpiece).
+    // Important even if we already set it at boot — recording may have flipped
+    // us back into .playAndRecord which mutes incoming clips to earpiece-only.
+    await setPlaybackAudioMode();
+
+    // Background notification — fire a local notification ONLY when the app
+    // is backgrounded so the driver knows someone is transmitting even when
+    // the screen is off / they're on another app. Foreground users see the
+    // talk-screen UI directly so no notification needed.
+    if (AppState.currentState !== "active") {
+      showTransmitNotification(m.handle || "Driver").catch(() => {});
+    }
+
     let uri: string;
     if (Platform.OS === "web") {
       uri = `data:audio/mp4;base64,${m.audio_b64}`;
@@ -70,7 +86,9 @@ async function playOne(m: PTTMessage) {
     }
     const { sound } = await Audio.Sound.createAsync(
       { uri },
-      { shouldPlay: true },
+      // volume: 1.0 = max. Without this, expo-av defaults to ~0.5 which
+      // sounded like "the earpiece is half-busted" on real devices.
+      { shouldPlay: true, volume: 1.0 },
       (status: any) => {
         if (status?.didJustFinish) {
           sound.unloadAsync().catch(() => {});
@@ -80,6 +98,9 @@ async function playOne(m: PTTMessage) {
         }
       }
     );
+    // Defensive — set volume after load too in case the constructor ignored it
+    // on a particular platform (web Safari has been seen to clamp this).
+    try { await sound.setVolumeAsync(1.0); } catch {}
     activeSound = sound;
   } catch {
     // Swallow playback errors so a single bad clip doesn't permanently jam the
@@ -124,16 +145,14 @@ export function useLiveWalkieListener(getActiveChannelId: () => string | null | 
 
     // One-time audio session prep — needed on iOS so playback works while
     // ringer is muted (drivers' phones are usually on silent in a mount).
-    (async () => {
-      try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
-        });
-      } catch {}
-    })();
+    //
+    // CRITICAL: `setIdleAudioMode()` flips `allowsRecordingIOS: false` which
+    // forces the iOS audio category to `.playback` instead of `.playAndRecord`.
+    // Without this, incoming PTT clips come out of the tiny earpiece speaker
+    // at ~10% volume. This was the "Comms volume too low" bug.
+    // Same call also enables full loudspeaker + Bluetooth A2DP routing on
+    // Android via `playThroughEarpieceAndroid: false`.
+    setIdleAudioMode();
 
     const connect = async () => {
       if (!alive) return;

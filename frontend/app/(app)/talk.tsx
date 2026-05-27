@@ -13,6 +13,7 @@ import Glass from "../../src/Glass";
 import { useSettings } from "../../src/settings";
 import { livePttBus } from "../../src/livePtt";
 import { useLatestTier, getPttRecordingOptions } from "../../src/proximityAudio";
+import { setRecordingAudioMode, setIdleAudioMode } from "../../src/audioMode";
 
 type Community = {
   id: string; name: string; description: string; member_count: number; is_admin: boolean;
@@ -37,7 +38,14 @@ export default function ComsScreen() {
   const [history, setHistory] = useState<PTT[]>([]);
   const [loading, setLoading] = useState(true);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  // Recording start timestamp (epoch ms). Used to compute duration_ms ourselves
+  // because expo-av's `Recording.getStatusAsync().durationMillis` is unreliable
+  // — it sometimes returns 0 or a stale cached value AFTER `stopAndUnloadAsync`,
+  // which is why every clip in the comms history was showing "0s". By capturing
+  // the wall-clock time at recordStart() and recordStop() we always have a
+  // ground-truth duration regardless of what expo-av reports.
   const recRef = useRef<Audio.Recording | null>(null);
+  const recordStartTsRef = useRef<number>(0);
   const soundRef = useRef<Audio.Sound | null>(null);
   // Track the active channel id in a ref so the live PTT bus subscription
   // always sees the latest selection without needing to resubscribe per change.
@@ -67,7 +75,10 @@ export default function ComsScreen() {
       setLoading(false);
       try {
         await Audio.requestPermissionsAsync();
-        await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+        // Boot in PLAYBACK mode so the first incoming PTT comes out of the
+        // loudspeaker / Bluetooth (not the earpiece). We re-enter recording
+        // mode just-in-time inside `startRec` and flip back after stop.
+        await setIdleAudioMode();
       } catch {}
     })();
     return () => { if (soundRef.current) { soundRef.current.unloadAsync().catch(() => {}); soundRef.current = null; } };
@@ -145,9 +156,17 @@ export default function ComsScreen() {
     }
     Animated.spring(press, { toValue: 0.96, useNativeDriver: true, speed: 30, bounciness: 6 }).start();
     try {
+      // Switch to RECORDING audio category — this enables `.playAndRecord`
+      // on iOS so the mic is hot. We flip back to PLAYBACK in stopRec so the
+      // OUTGOING-then-INCOMING transition uses the loudspeaker, not earpiece.
+      await setRecordingAudioMode();
       const rec = new Audio.Recording();
       await rec.prepareToRecordAsync(getPttRecordingOptions(proximityTier));
       await rec.startAsync();
+      // Capture our own start timestamp — expo-av's status.durationMillis is
+      // unreliable post-stop and was the root cause of "0s duration" in the
+      // history list. Wall-clock diff is always accurate.
+      recordStartTsRef.current = Date.now();
       recRef.current = rec;
       setRecording(true);
     } catch (e) { Alert.alert("Mic error", String(e)); }
@@ -160,10 +179,20 @@ export default function ComsScreen() {
     setRecording(false);
     setBusy(true);
     try {
+      // Compute duration BEFORE we touch expo-av. This is the ground truth.
+      // Floor at 200ms — anything shorter is almost certainly an accidental
+      // tap and the user shouldn't see "0s" in their own history feed.
+      const measuredDurationMs = recordStartTsRef.current > 0
+        ? Math.max(200, Date.now() - recordStartTsRef.current)
+        : 0;
+      recordStartTsRef.current = 0;
+
       await rec.stopAndUnloadAsync();
-      const status = await rec.getStatusAsync();
       const uri = rec.getURI();
       recRef.current = null;
+      // Switch back to PLAYBACK mode so any incoming PTT clip (or our own
+      // playback if the user replays from history) hits the loudspeaker.
+      setIdleAudioMode().catch(() => {});
       if (!uri) return;
       const res = await fetch(uri);
       const blob = await res.blob();
@@ -173,7 +202,7 @@ export default function ComsScreen() {
         r.onerror = reject;
         r.readAsDataURL(blob);
       });
-      await api.post("/ptt", { channel: active, audio_b64: b64, duration_ms: (status as any)?.durationMillis || 0 });
+      await api.post("/ptt", { channel: active, audio_b64: b64, duration_ms: measuredDurationMs });
       await loadHistory();
     } catch (e) { Alert.alert("Send failed", formatErr(e)); }
     finally { setBusy(false); }
@@ -206,9 +235,14 @@ export default function ComsScreen() {
         uri = path;
       }
 
+      // Force loud-speaker output before any history replay too. Without
+      // this, replaying a clip immediately after recording one comes out of
+      // the iPhone earpiece at ~10% volume.
+      await setIdleAudioMode();
+
       const { sound } = await Audio.Sound.createAsync(
         { uri },
-        { shouldPlay: true },
+        { shouldPlay: true, volume: 1.0 },
         (status: any) => {
           if (status?.didJustFinish) {
             setPlayingId(null);
@@ -216,6 +250,7 @@ export default function ComsScreen() {
           }
         }
       );
+      try { await sound.setVolumeAsync(1.0); } catch {}
       soundRef.current = sound;
       setPlayingId(m.id);
     } catch (e: any) {

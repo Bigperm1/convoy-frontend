@@ -11,7 +11,7 @@
 
 import React, { useRef, useState, useCallback } from "react";
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, Dimensions,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, useWindowDimensions,
   Platform, StatusBar,
 } from "react-native";
 import { useRouter } from "expo-router";
@@ -21,8 +21,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export const ONBOARDING_KEY = "convoy:onboarded:v1";
-
-const { width: SCREEN_W } = Dimensions.get("window");
 
 // Convoy gold accent. Hardcoded here (not pulled from COLORS) so the brand
 // palette of the onboarding stays consistent even if the theme is later
@@ -59,6 +57,11 @@ export default function Onboarding() {
   const router = useRouter();
   const listRef = useRef<FlatList<Slide>>(null);
   const [page, setPage] = useState(0);
+  // useWindowDimensions auto-updates on rotation / resize so paging stays
+  // perfectly synced. Dimensions.get('window') is a one-shot read at module
+  // import time and was misaligning slides when the OS reported a different
+  // viewport than what was cached at module load.
+  const { width: SCREEN_W } = useWindowDimensions();
 
   const finish = useCallback(async () => {
     // Persist the flag BEFORE navigating so the index gate doesn't race-loop
@@ -100,7 +103,10 @@ export default function Onboarding() {
       </View>
 
       <SafeAreaView edges={["top", "bottom"]} style={styles.safe}>
-        {/* Top bar — Skip aligned right, mirrors iOS standards. */}
+        {/* Top bar — Skip aligned right, mirrors iOS standards.
+            Horizontal padding lives HERE (not on SafeAreaView) so the
+            FlatList below can be edge-to-edge — that way page snapping uses
+            the exact viewport width and slides land perfectly centered. */}
         <View style={styles.topBar}>
           <Text style={styles.brand}>CONVOY</Text>
           {page < SLIDES.length - 1 && (
@@ -118,26 +124,33 @@ export default function Onboarding() {
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={onMomentumEnd}
           keyExtractor={(item, idx) => `${idx}-${item.title}`}
+          // Items match SCREEN_W exactly — no fractional rounding errors.
           getItemLayout={(_, index) => ({ length: SCREEN_W, offset: SCREEN_W * index, index })}
+          // FlatList sits flush against the screen edges so the page snap
+          // distance equals the live SCREEN_W. The slide CONTENT is then
+          // centered both axes by its own flex/justifyContent rules.
+          style={styles.list}
+          contentContainerStyle={{ alignItems: "stretch" }}
           renderItem={({ item, index }) => (
             <View style={[styles.slide, { width: SCREEN_W }]} testID={`onboarding-slide-${index}`}>
-              {/* Car-silhouette illustration — Ionicons stand-in for now;
-                  upgrade to a custom SVG once we have brand artwork. */}
-              <View style={styles.iconWrap}>
-                <View style={styles.iconRing} />
-                <View style={styles.iconCore}>
-                  <Ionicons name={item.icon} size={72} color={GOLD} />
+              <View style={styles.slideInner}>
+                {/* Car-silhouette illustration — Ionicons stand-in for now;
+                    upgrade to a custom SVG once we have brand artwork. */}
+                <View style={styles.iconWrap}>
+                  <View style={styles.iconRing} />
+                  <View style={styles.iconCore}>
+                    <Ionicons name={item.icon} size={72} color={GOLD} />
+                  </View>
                 </View>
+                <Text style={styles.title}>{item.title}</Text>
+                <Text style={styles.body}>{item.body}</Text>
               </View>
-              <Text style={styles.title}>{item.title}</Text>
-              <Text style={styles.body}>{item.body}</Text>
             </View>
           )}
         />
 
-        {/* Dot indicator. Inline JSX instead of a separate component — the
-            three dots keep the layout dependency-free. */}
-        <View style={styles.dotsRow}>
+        {/* Dot indicator. */}
+        <View style={[styles.dotsRow, styles.bottomGutter]}>
           {SLIDES.map((_, i) => (
             <View
               key={i}
@@ -149,21 +162,23 @@ export default function Onboarding() {
           ))}
         </View>
 
-        <TouchableOpacity
-          style={styles.cta}
-          onPress={next}
-          activeOpacity={0.85}
-          testID="onboarding-next"
-        >
-          <LinearGradient
-            colors={[GOLD, GOLD_DIM]}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
-          <Text style={styles.ctaText}>
-            {page < SLIDES.length - 1 ? "Continue" : "Let's Roll  →"}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.bottomGutter}>
+          <TouchableOpacity
+            style={styles.cta}
+            onPress={next}
+            activeOpacity={0.85}
+            testID="onboarding-next"
+          >
+            <LinearGradient
+              colors={[GOLD, GOLD_DIM]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+            <Text style={styles.ctaText}>
+              {page < SLIDES.length - 1 ? "Continue" : "Let's Roll  →"}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     </View>
   );
@@ -174,18 +189,21 @@ const styles = StyleSheet.create({
   glowWrap: { ...StyleSheet.absoluteFillObject, alignItems: "center" },
   glow: {
     position: "absolute",
-    top: -SCREEN_W * 0.35,
-    width: SCREEN_W * 1.8,
-    height: SCREEN_W * 1.8,
-    borderRadius: SCREEN_W * 0.9,
+    top: -200,
+    width: 700,
+    height: 700,
+    borderRadius: 350,
   },
-  safe: { flex: 1, paddingHorizontal: 24 },
+  // SafeAreaView is full-bleed (no horizontal padding) so the FlatList can
+  // hit screen edges and pagingEnabled snaps cleanly.
+  safe: { flex: 1 },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingTop: 8,
     paddingBottom: 12,
+    paddingHorizontal: 24,
   },
   brand: {
     color: GOLD,
@@ -200,10 +218,20 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // Slide layout: icon on top third, title middle, body bottom.
+  // FlatList sits flush with screen edges; vertical flex is what shrinks
+  // around the topBar / dots / CTA. `flexGrow: 0` is critical otherwise
+  // RN tries to give the list infinite height inside flexbox.
+  list: { flexGrow: 0, flexShrink: 1, alignSelf: "stretch" },
+
+  // Each slide is exactly viewport-wide and centers its inner content.
   slide: {
-    flex: 1,
-    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // Inner padded card — keeps copy from kissing the edges, while the OUTER
+  // slide stays SCREEN_W exactly so paging arithmetic is bulletproof.
+  slideInner: {
+    paddingHorizontal: 32,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -212,7 +240,7 @@ const styles = StyleSheet.create({
     height: 220,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 48,
+    marginBottom: 40,
   },
   iconRing: {
     position: "absolute",
@@ -249,6 +277,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
+  bottomGutter: { paddingHorizontal: 24 },
   dotsRow: {
     flexDirection: "row",
     justifyContent: "center",

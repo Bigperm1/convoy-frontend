@@ -29,6 +29,18 @@ export const CAR_BODIES: { id: CarBody; label: string; emoji: string }[] = [
   { id: "motorcycle", label: "Motorbike",  emoji: "🏍️" },
 ];
 
+// 5 supported GR Corolla paint colors that actually have rendered PNG
+// silhouettes. The garage picker MUST only offer these — any other color
+// name resolves to the default Heavy Metal PNG, which used to be the
+// silent "I picked a color but the map didn't change" bug.
+export const GARAGE_COLORS: { name: string; hex: string }[] = [
+  { name: "Supersonic Red",       hex: "#D60019" },
+  { name: "Blue Flame",           hex: "#1E9CFF" },
+  { name: "Ice Cap White",        hex: "#F4F6F8" },
+  { name: "Heavy Metal",          hex: "#5C5F66" },
+  { name: "Precious Black Pearl", hex: "#0E0F12" },
+];
+
 // 12 named car colors that map to good-looking hexes. Free-form `car_color`
 // strings are also accepted (CSS color syntax) — the silhouette will use them as-is.
 // Color palette. The first 5 are the "primary" garage colors (named per the

@@ -283,11 +283,26 @@ metadata:
 
 test_plan:
   current_focus:
-    - "PUT /api/auth/push-token — device push token registration"
-    - "POST /api/notifications/hail — peer hail with WebSocket + push relay fallback"
+    - "POST /api/ptt — server-side ffmpeg amplification (Bug 9 — +14 dB / 500% boost with soft-knee compression)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+backend_ptt_amplify:
+  - task: "POST /api/ptt — server-side ffmpeg amplification (Bug 9)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added amplify_ptt_audio() at server.py:615-658, called from post_ptt() at server.py:670. Pipeline: base64 m4a → temp file → ffmpeg with filter 'volume=14dB,acompressor=threshold=-6dB:knee=3dB:ratio=4:attack=3:release=250' → re-encode AAC 96 kbps mono → base64 out. PTT_GAIN_DB=14 (~5× amplitude = the requested 500%). On ANY ffmpeg failure (timeout 4s, non-zero exit, decode error) the function returns the ORIGINAL b64 unchanged — PTT delivery is never blocked by amplification."
+        - working: true
+          agent: "testing"
+          comment: "All 14/14 assertions PASS via public URL https://motorist-hub.preview.emergentagent.com/api (see /app/backend_test_ptt_amplify.py). Detailed verdicts: (1) PASS — POST /api/auth/login {demo@revradar.app/demo1234} → 200 + JWT (len=224). (2) PASS — GET /api/communities/mine → 200 with 2 admin communities; picked 'Bay Area Drivers' (id=d96fc987-4850-486c-8132-8601c4114aeb). (3) AUTH GATE PASS — POST /api/ptt without Authorization, body {channel:<cid>,audio_b64:'short',duration_ms:100} → HTTP 401 {'detail':'Not authenticated'}. (4) MEMBERSHIP GATE PASS — POST /api/ptt with bearer, body {channel:'00000000-0000-0000-0000-000000000000',audio_b64:'shortbase64',duration_ms:100} → HTTP 403 {'detail':'Not a member of this community'} (exact match). (5) EMPTY AUDIO SHORT-CIRCUIT PASS — POST /api/ptt with bearer + {channel:<cid>,audio_b64:'',duration_ms:0} → HTTP 200 {'ok':true,'id':'66135213-...'}. Confirms len<64 early-return in amplify_ptt_audio. (6) HAPPY PATH PASS — Generated 1s 440Hz sine via local ffmpeg (9416 src bytes, b64 len=12556). POST /api/ptt with bearer + {channel:<cid>,audio_b64:<real_b64>,duration_ms:1000} → HTTP 200 {'ok':true,'id':'1717242f-...'}. (6b) PASS — GET /api/ptt/{cid} returned a list containing the new id; decoded its audio_b64 → 13450 bytes (DIFFERS from 9416-byte source, proving amplifier ran and re-encoded). CRITICAL: ffprobe -show_streams confirms rc=0, exactly 1 stream, codec_name='aac', codec_type='audio', channels=1, bit_rate=95481 (~96 kbps mono — matches the spec). (7) CORRUPT AUDIO PASSTHROUGH PASS — POST /api/ptt with bearer + {channel:<cid>,audio_b64:<base64 of 'this is not an m4a file at all'×20>,duration_ms:500} → HTTP 200 {'ok':true,'id':'36fe9c85-...'} (NOT 5xx). Backend logged exactly ONE 'PTT amplify failed' WARNING during this test (expected graceful log). (8) REGRESSION PASS — Final GET /api/ptt/{cid} → HTTP 200 with 3 messages, all expected ids present. (9) LOG SCAN PASS — Captured err.log byte offset BEFORE test (691134) and read 183 new bytes after; ZERO 'Traceback (most recent call last)', ZERO 'Internal Server Error', exactly 1 'PTT amplify failed' WARNING (the expected graceful log from the corrupt-audio test). Endpoint working exactly as specified: amplification runs on real audio (verified valid AAC + byte-differs), gracefully passes through on decode failure (never 5xx), and never blocks PTT delivery."
 
 backend_hail:
   - task: "PUT /api/auth/push-token — device push token registration (FCM/APNs)"

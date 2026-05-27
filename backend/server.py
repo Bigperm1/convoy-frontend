@@ -585,6 +585,79 @@ async def delete_community_route(cid: str, rid: str, user=Depends(get_current_us
     return {"ok": True}
 
 
+# ---------- PTT audio amplification ----------
+# Convoy PTT clips are recorded on driver phones, then played back through
+# car speakers — often over road noise. expo-av caps playback volume at 1.0
+# on both iOS and Android, so even at full system volume the clips can sound
+# weak. The fix: amplify on the SERVER, once, when the clip arrives. All
+# clients then play the already-loud version at expo-av's normal 1.0 cap.
+#
+# Pipeline (ffmpeg one-shot):
+#   1. Decode the incoming m4a/aac into PCM
+#   2. `volume=5.0`     — +14 dB gain (the requested 500%)
+#   3. `acompressor`    — soft-knee compressor stops the boosted signal from
+#      clipping the +14 dB peaks. Settings match the user-provided spec:
+#        threshold -6 dB, knee 3 dB, ratio 4:1, attack 3 ms, release 250 ms
+#   4. Re-encode to AAC LC at 96 kbps mono (matches the client's record
+#      bitrate at "far" proximity tier — no quality loss vs the source).
+#
+# Failure mode: if ffmpeg fails for ANY reason (corrupt input, unsupported
+# codec, container weirdness), we log and pass the original b64 through
+# unmodified. PTT delivery must never be blocked by amplification.
+
+PTT_GAIN_DB = 14.0          # +14 dB ≈ ×5 amplitude (the requested "500% louder")
+PTT_COMP_FILTER = (
+    "volume={gain}dB,"
+    "acompressor=threshold=-6dB:knee=3dB:ratio=4:attack=3:release=250"
+).format(gain=PTT_GAIN_DB)
+
+
+async def amplify_ptt_audio(audio_b64: str) -> str:
+    """Boost a base64 m4a clip by ~5× with soft-knee compression. Returns
+    the new base64 (or the original on failure)."""
+    if not audio_b64 or len(audio_b64) < 64:
+        return audio_b64
+    try:
+        raw = base64.b64decode(audio_b64)
+    except Exception:
+        return audio_b64
+
+    # Use named temp files so ffmpeg has stable paths to read/write. We can't
+    # pipe both directions efficiently because AAC needs a seekable container.
+    inp = tempfile.NamedTemporaryFile(suffix=".m4a", delete=False)
+    out = tempfile.NamedTemporaryFile(suffix=".m4a", delete=False)
+    try:
+        inp.write(raw); inp.flush(); inp.close()
+        out.close()
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", inp.name,
+            "-af", PTT_COMP_FILTER,
+            "-c:a", "aac", "-b:a", "96k", "-ac", "1",
+            out.name,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=4.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            return audio_b64
+        if proc.returncode != 0:
+            logger.warning(f"PTT amplify failed: {(stderr or b'').decode()[:200]}")
+            return audio_b64
+        with open(out.name, "rb") as f:
+            return base64.b64encode(f.read()).decode("ascii")
+    except Exception as e:
+        logger.warning(f"PTT amplify exception: {e}")
+        return audio_b64
+    finally:
+        try: os.unlink(inp.name)
+        except Exception: pass
+        try: os.unlink(out.name)
+        except Exception: pass
+
+
 # ---------- PTT (channel = community id) ----------
 @api.post("/ptt")
 async def post_ptt(body: PTTIn, user=Depends(get_current_user)):
@@ -592,9 +665,12 @@ async def post_ptt(body: PTTIn, user=Depends(get_current_user)):
     c = await db.communities.find_one({"id": body.channel})
     if not c or user["id"] not in c.get("members", []):
         raise HTTPException(status_code=403, detail="Not a member of this community")
+    # Amplify the clip before we store/broadcast it (Bug 9: comms volume).
+    # Boosted clip = louder playback on every device + no client-side change.
+    boosted_b64 = await amplify_ptt_audio(body.audio_b64)
     msg = {
         "id": str(uuid.uuid4()), "channel": body.channel, "user_id": user["id"],
-        "handle": user.get("handle", ""), "audio_b64": body.audio_b64,
+        "handle": user.get("handle", ""), "audio_b64": boosted_b64,
         "duration_ms": body.duration_ms, "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.ptt.insert_one(msg)

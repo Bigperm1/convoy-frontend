@@ -15,7 +15,7 @@ import { useAuth } from "../../src/auth";
 import { api, formatErr } from "../../src/api";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
-import CarMarker, { CAR_BODIES, CAR_COLORS, CarBody } from "../../src/CarMarker";
+import CarMarker, { CAR_BODIES, GARAGE_COLORS, CarBody } from "../../src/CarMarker";
 import { useSettings, kmhToDisplay } from "../../src/settings";
 
 export default function GarageScreen() {
@@ -28,7 +28,7 @@ export default function GarageScreen() {
   const [year, setYear]   = useState<string>(user?.car_year ? String(user.car_year) : "");
   const [make, setMake]   = useState<string>(user?.car_make || "");
   const [model, setModel] = useState<string>(user?.car_model || "");
-  const [color, setColor] = useState<string>(user?.car_color || "Bayside Blue");
+  const [color, setColor] = useState<string>(user?.car_color || "Heavy Metal");
   const [body, setBody]   = useState<CarBody>((user?.car_type as CarBody) || "sedan");
   const [busy, setBusy]   = useState(false);
 
@@ -137,14 +137,15 @@ export default function GarageScreen() {
           <Field label="Year" value={year} onChange={setYear} placeholder="1999" keyboard="number-pad" testID="garage-year" />
           <Field label="Make" value={make} onChange={setMake} placeholder="Nissan" testID="garage-make" />
           <Field label="Model" value={model} onChange={setModel} placeholder="Skyline GT-R" testID="garage-model" />
-          <Field label="Color" value={color} onChange={setColor} placeholder="Bayside Blue" testID="garage-color" />
+          <Field label="Color" value={color} onChange={setColor} placeholder="Heavy Metal" testID="garage-color" />
 
-          {/* Color swatches — tap-to-pick. Each chip shows the named color
-              underneath so the driver can communicate "Stratosphere Blue" to
-              fellow community members instead of guessing the hex. */}
+          {/* Color swatches — tap-to-pick. Only the 5 GR Corolla paint
+              colors with rendered PNG assets are offered here. Any other
+              color string would silently fall back to the Heavy Metal PNG
+              (the "I saved a color but the map didn't change" Bug 10). */}
           <Text style={styles.section}>Quick colors</Text>
           <View style={styles.swatchRow}>
-            {CAR_COLORS.map((c) => {
+            {GARAGE_COLORS.map((c) => {
               const active = color.toLowerCase() === c.name.toLowerCase();
               return (
                 <TouchableOpacity

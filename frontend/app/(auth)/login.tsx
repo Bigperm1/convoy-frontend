@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert, Image,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView,
+  Platform, ScrollView, Alert, Image, ActivityIndicator, Keyboard,
 } from "react-native";
 import { useRouter, Link } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,8 +18,9 @@ export default function Login() {
   const { login } = useAuth();
   const router = useRouter();
 
-  const onSubmit = async () => {
+  const onSubmit = useCallback(async () => {
     if (!email || !password) return Alert.alert("Enter email and password");
+    Keyboard.dismiss();
     try {
       setBusy(true);
       await login(email.trim(), password);
@@ -28,11 +30,20 @@ export default function Login() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [email, password, login, router]);
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: COLORS.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: COLORS.bg }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Ambient gradient blobs */}
         <View style={styles.blobBlue} />
         <View style={styles.blobIndigo} />
@@ -58,7 +69,13 @@ export default function Login() {
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
+              autoCorrect={false}
+              spellCheck={false}
               keyboardType="email-address"
+              textContentType="emailAddress"
+              autoComplete="email"
+              returnKeyType="next"
+              keyboardAppearance="dark"
               placeholder="you@convoy.app"
               placeholderTextColor={COLORS.textMute}
             />
@@ -69,13 +86,38 @@ export default function Login() {
               value={password}
               onChangeText={setPassword}
               secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              spellCheck={false}
+              textContentType="password"
+              autoComplete="current-password"
+              returnKeyType="go"
+              keyboardAppearance="dark"
+              onSubmitEditing={onSubmit}
               placeholder="••••••••"
               placeholderTextColor={COLORS.textMute}
             />
-            <TouchableOpacity testID="login-submit" style={styles.btn} onPress={onSubmit} disabled={busy} activeOpacity={0.85}>
+            <TouchableOpacity
+              testID="login-submit"
+              style={[styles.btn, busy && styles.btnBusy]}
+              onPress={onSubmit}
+              disabled={busy}
+              activeOpacity={0.85}
+            >
               {/* Convoy yellow CTA — matches Sign-up + brand mark */}
-              <LinearGradient colors={["#FFE45C", "#FFC700", "#FF9F0A"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
-                <Text style={styles.btnText}>{busy ? "Signing in…" : "Sign in"}</Text>
+              <LinearGradient
+                colors={["#FFE45C", "#FFC700", "#FF9F0A"]}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={styles.btnGrad}
+              >
+                {busy ? (
+                  <View style={styles.btnInner}>
+                    <ActivityIndicator size="small" color="#1a1a1a" />
+                    <Text style={styles.btnText}>Signing in…</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.btnText}>Sign in</Text>
+                )}
               </LinearGradient>
             </TouchableOpacity>
 
@@ -112,7 +154,11 @@ const styles = StyleSheet.create({
     color: COLORS.text, paddingVertical: 14, paddingHorizontal: 14, borderRadius: 14, fontSize: 16,
   },
   btn: { marginTop: 22, borderRadius: 14, overflow: "hidden" },
-  btnGrad: { paddingVertical: 16, alignItems: "center" },
+  // Visible busy state — opacity dip while the spinner runs so the user
+  // sees the click "took" instead of wondering if their tap missed.
+  btnBusy: { opacity: 0.7 },
+  btnGrad: { paddingVertical: 16, alignItems: "center", justifyContent: "center" },
+  btnInner: { flexDirection: "row", alignItems: "center", gap: 10 },
   // Dark glyph on the bright yellow CTA — high contrast, matches brand mark color.
   btnText: { color: "#1a1a1a", fontWeight: "700", fontSize: 16, letterSpacing: 0.2 },
   linkAction: { color: "#FFC700", fontWeight: "600" },

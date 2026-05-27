@@ -22,10 +22,6 @@
         "NSCameraUsageDescription": "Add photos of your car to your garage",
         "NSSpeechRecognitionUsageDescription": "Voice activation for hands-free driving",
         "UIBackgroundModes": ["audio", "location", "fetch"]
-      },
-      "entitlements": {
-        "com.apple.developer.carplay-audio": true,
-        "com.apple.developer.carplay-communication": true
       }
     },
     "android": {

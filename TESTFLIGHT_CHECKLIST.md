@@ -11,9 +11,9 @@ steps that **must be done outside this container**.
 ## 1. Pre-flight — Apple Developer Account
 
 - [ ] Active **Apple Developer Program** membership ($99/yr)
-- [ ] App Store Connect record created for **`com.convoy.app`**
+- [ ] App Store Connect record created for **`com.sw0rdfisch.convoy`**
   - App name: **Convoy**
-  - Bundle ID: `com.convoy.app`
+  - Bundle ID: `com.sw0rdfisch.convoy`
   - SKU: anything unique (e.g. `convoy-2025`)
   - Primary language: English (US)
 - [ ] If you previously registered `app.convoy.driver`, **delete it** or rename — we changed the bundle id to match Firebase.
@@ -44,8 +44,8 @@ steps that **must be done outside this container**.
 - [ ] Confirm `app.json` has the correct values (already done):
   - `version: "1.0.1"`
   - `ios.buildNumber: "1"`
-  - `ios.bundleIdentifier: "com.convoy.app"`
-  - `android.package: "com.convoy.app"`
+  - `ios.bundleIdentifier: "com.sw0rdfisch.convoy"`
+  - `android.package: "com.sw0rdfisch.convoy"`
   - `android.versionCode: 1`
   - `android.googleServicesFile: "./google-services.json"`
   - `plugins: [..., "expo-notifications"]`

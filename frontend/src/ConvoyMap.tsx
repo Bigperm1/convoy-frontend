@@ -309,7 +309,7 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
         // that Google Maps stops serving tiles (black canvas). 8 ≈ regional view
         // (multiple cities), 20 ≈ street-level. Anything below 8 on hybrid/satellite
         // tiles returns empty tiles → black screen.
-        minZoomLevel={8}
+        minZoomLevel={3}
         maxZoomLevel={20}
         // initialRegion always set so the very first frame is positioned correctly.
         initialRegion={region}

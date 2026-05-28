@@ -226,7 +226,7 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
       if (!mapRef.current) return;
       // Honor the gesture lockout — the user just touched the map, let them
       // pinch to zoom in without the chase-cam yanking them back.
-      if (Date.now() - userGestureRef.current < 4000) return;
+      if (Date.now() - userGestureRef.current < 5000) return;
       const heading = (typeof user.heading === "number" && Number.isFinite(user.heading)) ? user.heading : 0;
       // Distance vs last-camera position (Haversine, plain JS — no extra deps).
       const last = lastCamRef.current;
@@ -266,6 +266,8 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
     useEffect(() => {
       if (navigationActive) return;
       if (!mapRef.current) return;
+      // Don't fight an active pinch/pan gesture
+      if (Date.now() - userGestureRef.current < 5000) return;
       try {
         mapRef.current.animateCamera(
           { center: { latitude: center.lat, longitude: center.lng }, pitch: 0, heading: 0, zoom: 15 },
@@ -319,6 +321,7 @@ export default function ConvoyMap({ center, user, hideSelfMarker = false, peers,
         region={(navigationActive || !followUser) ? undefined : region}
         showsCompass={!navigationActive}
         rotateEnabled
+          zoomTapEnabled={false}
         pitchEnabled
         // Live Google traffic overlay — green/yellow/red speed-of-flow lines on
         // the map at all times (not just during navigation). Uses Google's

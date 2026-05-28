@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { Tabs, useRouter } from "expo-router";
+import { Tabs, useRouter, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
@@ -130,7 +130,7 @@ export default function AppLayout() {
       </View>
     );
   }
-  if (!user) return null;
+  if (!user) return <Redirect href="/(auth)/login" />;
 
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.bg }}>

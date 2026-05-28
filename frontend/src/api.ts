@@ -11,7 +11,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // ALWAYS has a working backend even with zero env-var injection, and (2)
 // `eas.json` now also passes EXPO_PUBLIC_BACKEND_URL to every build profile
 // for cleanliness. Either fix alone is sufficient.
-const PROD_BACKEND_URL = "https://motorist-hub.preview.emergentagent.com";
+const PROD_BACKEND_URL = "https://web-production-10065.up.railway.app";
 
 export const BACKEND_URL =
   (process.env.EXPO_PUBLIC_BACKEND_URL as string) || PROD_BACKEND_URL;

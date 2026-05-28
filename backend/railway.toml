@@ -19,4 +19,4 @@ healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 
 [build]
-builder = "NIXPACKS"
+builder = "HEROKU"

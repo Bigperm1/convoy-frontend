@@ -24,7 +24,14 @@
         "NSMicrophoneUsageDescription": "Push-to-talk and voice commands",
         "NSCameraUsageDescription": "Add photos of your car to your garage",
         "NSSpeechRecognitionUsageDescription": "Voice activation for hands-free driving",
-        "UIBackgroundModes": ["audio", "location", "fetch"]
+        "UIBackgroundModes": [
+          "audio",
+          "location",
+          "fetch",
+          "audio",
+          "location",
+          "fetch"
+        ]
       }
     },
     "android": {
@@ -42,6 +49,10 @@
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "RECORD_AUDIO",
+        "INTERNET",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "RECORD_AUDIO",
@@ -74,6 +85,16 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "1e72b32e-e0c5-4126-b590-ea2ec6e596e1"
+      }
+    },
+    "owner": "sw0rdfisch",
+    "updates": {
+      "url": "https://u.expo.dev/1e72b32e-e0c5-4126-b590-ea2ec6e596e1"
     }
   }
 }

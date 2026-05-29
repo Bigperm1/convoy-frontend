@@ -90,7 +90,8 @@ type Props = {
   navigationActive?: boolean;
   userSpeedMs?: number;
   mapView?: "heading_up" | "north_up";
-  // Layer toggles
+  // Layer toggles — mapType is passed directly by map.tsx; show3DMap is an alias
+  mapType?: string;
   show3DMap?: boolean;
   onMapPress?: () => void;
   onHazardPress: (h: Hazard) => void;
@@ -139,12 +140,11 @@ export default function ConvoyMap({
   const mapRef = useRef<any>(null);
   const bearingRef = useRef(new BearingTracker());
 
-  // ---- Determine map type based on 3D toggle and platform ----
-  // hybridFlyover = iOS 3D tilted aerial with building extrusions
-  // hybrid = satellite + road labels (2D, works both platforms)
-  const mapType = show3DMap
+  // ---- Determine map type ----
+  // mapType prop from map.tsx takes precedence over show3DMap toggle.
+  const resolvedMapType = mapType ?? (show3DMap
     ? (Platform.OS === "ios" ? "hybridFlyover" : "hybrid")
-    : "hybrid";
+    : "hybrid");
 
   // ---- Navigation SDK chase cam ----
   // When the Navigation SDK native module is available, we initialise it
@@ -262,7 +262,7 @@ export default function ConvoyMap({
     <MapView
       ref={mapRef}
       provider="google"
-      mapType={mapType}
+      mapType={resolvedMapType as any}
       style={StyleSheet.absoluteFill}
       minZoomLevel={3}
       maxZoomLevel={20}

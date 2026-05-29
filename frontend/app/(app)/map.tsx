@@ -1500,7 +1500,7 @@ export default function MapScreen() {
                 <Switch
                   value={mapType === "hybridFlyover"}
                   onValueChange={(v) => setMapType(v ? "hybridFlyover" : "hybrid")}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C"
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>

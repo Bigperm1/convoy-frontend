@@ -28,7 +28,7 @@ export async function clearToken() {
   try { await AsyncStorage.removeItem(TOKEN_KEY); } catch {}
 }
 
-export const api = axios.create({ baseURL: API_BASE, timeout: 20000 });
+export const api = axios.create({ baseURL: API_BASE, timeout: 60000 });
 
 api.interceptors.request.use(async (config) => {
   const t = await getToken();
@@ -42,6 +42,7 @@ export function wsUrl(token: string) {
 }
 
 export function formatErr(e: any): string {
+    if (e?.code === "ECONNABORTED" || e?.message?.includes("timeout")) return "Server is starting up — please try again in a few seconds.";
   const d = e?.response?.data?.detail;
   if (!d) return e?.message || "Something went wrong";
   if (typeof d === "string") return d;

@@ -10,8 +10,9 @@
       "ios": { "simulator": true },
       "channel": "development",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://motorist-hub.preview.emergentagent.com",
-        "EXPO_PUBLIC_ENV": "development"
+        "EXPO_PUBLIC_BACKEND_URL": "https://convoy-backend-j9q1.onrender.com",
+        "EXPO_PUBLIC_ENV": "development",
+        "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "AIzaSyDj69IfW8Dy7aeX-gaHldHGsSL1WO7sD_M"
       }
     },
     "preview": {
@@ -20,8 +21,9 @@
       "android": { "buildType": "apk" },
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://motorist-hub.preview.emergentagent.com",
-        "EXPO_PUBLIC_ENV": "preview"
+        "EXPO_PUBLIC_BACKEND_URL": "https://convoy-backend-j9q1.onrender.com",
+        "EXPO_PUBLIC_ENV": "preview",
+        "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "AIzaSyDj69IfW8Dy7aeX-gaHldHGsSL1WO7sD_M"
       }
     },
     "production": {
@@ -30,8 +32,9 @@
       "android": { "buildType": "app-bundle", "autoIncrement": true },
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://motorist-hub.preview.emergentagent.com",
-        "EXPO_PUBLIC_ENV": "production"
+        "EXPO_PUBLIC_BACKEND_URL": "https://convoy-backend-j9q1.onrender.com",
+        "EXPO_PUBLIC_ENV": "production",
+        "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "AIzaSyDj69IfW8Dy7aeX-gaHldHGsSL1WO7sD_M"
       }
     }
   },

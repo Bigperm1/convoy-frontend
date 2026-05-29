@@ -22,14 +22,16 @@ import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButton
 import NavigationPanel from "../../src/components/NavigationPanel";
 import StepDrawer, { StepDrawerHandle } from "../../src/components/StepDrawer";
 import { hailBus } from "../../src/hailBus";
-import { useSettings, getSettings, updateSettings as updateGlobalSettings } from "../../src/settings";
+import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import PeerModal from "../../src/PeerModal";
 import {
-  fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
+  fetchRoutes, fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtEtaSec,
 } from "../../src/nav";
+import WeatherHUD from "../../src/components/WeatherHUD";
+import { useWeatherLayer } from "../../src/weatherLayer";
 
 type RouteInfo = {
   distance_text: string;
@@ -82,7 +84,13 @@ export default function MapScreen() {
   // mapType:    "hybrid" = satellite + labels (default), "roadmap" = flat road view.
   // showTraffic / showTransit / showHazards toggle their respective overlays.
   // layersOpen drives the layers bottom sheet modal.
-  const [mapType, setMapType] = useState<"hybrid" | "roadmap">("hybrid");
+  const [mapType, setMapType] = useState<"hybrid" | "roadmap" | "hybridFlyover">("hybrid");
+  const showWeatherLayer = settings.showWeatherLayer ?? false;
+  const { weather } = useWeatherLayer(
+    coords?.lat ?? null,
+    coords?.lng ?? null,
+    showWeatherLayer,
+  );
   const [showTraffic, setShowTraffic] = useState(true);
   const [showTransit, setShowTransit] = useState(false);
   const [showHazards, setShowHazards] = useState(true);
@@ -195,7 +203,7 @@ export default function MapScreen() {
     }
     let cancelled = false;
     (async () => {
-      const raw = await fetchDirections(coords, destination, {
+      const raw = await fetchRoutes(coords, destination, {
         tolls: settings.avoidTolls,
         highways: settings.avoidHighways,
         ferries: settings.avoidFerries,
@@ -245,7 +253,7 @@ export default function MapScreen() {
     onOffRoute: () => {
       // Auto-reroute: refetch directions from the current GPS position (honoring user's avoid prefs)
       if (!coords || !destination) return;
-      fetchDirections(coords, destination, {
+      fetchRoutes(coords, destination, {
         tolls: settings.avoidTolls,
         highways: settings.avoidHighways,
         ferries: settings.avoidFerries,
@@ -1329,6 +1337,12 @@ export default function MapScreen() {
           Pulls live speed from coords.speed (m/s) → km/h. Floors small values
           to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
       <Speedometer speedMs={coords?.speed} speedLimit={speedLimitRef.current} unit={settings.speedUnit} />
+      {/* Weather HUD — only shown when weather layer is on and we have data */}
+      {showWeatherLayer && weather && (
+        <View style={{ position: 'absolute', bottom: 120, left: 16, zIndex: 25 }}>
+          <WeatherHUD weather={weather} unit={settings.speedUnit} />
+        </View>
+      )}
 
       <PeerModal
         peer={selectedPeer ? { ...selectedPeer } as any : null}
@@ -1465,6 +1479,28 @@ export default function MapScreen() {
                 </View>
                 <Switch value={showTraffic} onValueChange={setShowTraffic}
                   trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
+              {/* Weather layer */}
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Weather</Text>
+                  <Text style={styles.layerRowSub}>Temperature, wind & precipitation</Text>
+                </View>
+                <Switch
+                  value={showWeatherLayer}
+                  onValueChange={(v) => updateSettings({ showWeatherLayer: v })}
+                  trackColor={{ false: '#3A3A3C', true: '#5AC8FA' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
+              {/* 3D Map / Flyover */}
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>3D Map</Text>
+                  <Text style={styles.layerRowSub}>Building extrusions & flyover</Text>
+                </View>
+                <Switch
+                  value={mapType === "hybridFlyover"}
+                  onValueChange={(v) => setMapType(v ? "hybridFlyover" : "hybrid")}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C"
               </View>
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>

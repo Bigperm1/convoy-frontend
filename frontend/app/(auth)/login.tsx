@@ -1,3 +1,4 @@
+import ConvoyLogo from '../../src/components/ConvoyLogo';
 import React, { useCallback, useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView,
@@ -40,6 +41,7 @@ export default function Login() {
       keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
     >
       <ScrollView
+      <ConvoyLogo size={100} style={{ marginBottom: 32, marginTop: 24 }} />
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}

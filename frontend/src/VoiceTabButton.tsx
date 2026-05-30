@@ -6,12 +6,12 @@ import { useVoice } from "./useVoice";
 
 // Elevated, oversized brand-yellow mic that lives in the middle of the tab bar.
 // Press-and-hold records; release transcribes. Pulses bigger while recording.
-// Pressing it does NOT navigate — it triggers voice activation. The "voice" route file is a no-op.
+// Pressing it does NOT navigate â it triggers voice activation. The "voice" route file is a no-op.
 
 const SIZE = 72;          // a bit bigger so the icon never crops on the curve
 const ICON_SIZE = 30;     // glyph stays centered, well clear of the rounded edge
 
-// Convoy logo yellow → warm amber gradient. Switches to red while transmitting.
+// Convoy logo yellow â warm amber gradient. Switches to red while transmitting.
 const IDLE_COLORS = ["#FFE45C", "#FFC700", "#FF9F0A"];
 const REC_COLORS = ["#FF6B35", "#FF3B30", "#A6201E"];
 
@@ -24,7 +24,7 @@ export default function VoiceTabButton() {
 
   useEffect(() => {
     if (recording) {
-      // Big breath — grows ~30% bigger so the user feels the press "land".
+      // Big breath â grows ~30% bigger so the user feels the press "land".
       const breath = Animated.loop(
         Animated.sequence([
           Animated.timing(pulse, { toValue: 1.30, duration: 480, easing: Easing.out(Easing.quad), useNativeDriver: true }),
@@ -54,7 +54,7 @@ export default function VoiceTabButton() {
     Animated.spring(press, { toValue: 1, useNativeDriver: true, speed: 18, bounciness: 8 }).start();
     const uri = await stop();
     if (!uri) return;
-    await transcribe(uri); // result is broadcast on voiceBus → VoiceController shows banner & routes
+    await transcribe(uri); // result is broadcast on voiceBus â VoiceController shows banner & routes
   };
 
   return (
@@ -79,7 +79,7 @@ export default function VoiceTabButton() {
           style={styles.btn}
         >
           <LinearGradient
-            colors={recording ? REC_COLORS : IDLE_COLORS}
+            colors={(recording ? REC_COLORS : IDLE_COLORS) as [string, string, ...string[]]}
             start={{ x: 0.2, y: 0 }}
             end={{ x: 0.8, y: 1 }}
             style={StyleSheet.absoluteFill}

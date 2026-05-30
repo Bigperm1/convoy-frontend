@@ -107,10 +107,10 @@ export default function SettingsScreen() {
           />
         </Glass>
         <Text style={styles.helpText}>
-          Your car only ever appears on maps inside communities you've joined — strangers from outside the crew can never see you. Toggle Avatar Live off to vanish from the map entirely.
+          Your car only ever appears on maps inside communities you've joined â strangers from outside the crew can never see you. Toggle Avatar Live off to vanish from the map entirely.
         </Text>
 
-        {/* Map View — exclusive radio choice. We render two RadioRows that
+        {/* Map View â exclusive radio choice. We render two RadioRows that
             mirror each other's state so toggling one auto-flips the other. */}
         <Text style={styles.sectionLabel}>MAP VIEW</Text>
         <Glass radius={16} style={styles.card}>
@@ -118,7 +118,7 @@ export default function SettingsScreen() {
             icon="navigate"
             iconColor="#0A84FF"
             title="Heading Up"
-            subtitle="Drone view · map rotates under the car · pitch 45° · car always points up"
+            subtitle="Drone view Â· map rotates under the car Â· pitch 45Â° Â· car always points up"
             selected={settings.mapView === "heading_up"}
             onSelect={() => setSettings({ mapView: "heading_up" })}
           />
@@ -127,18 +127,18 @@ export default function SettingsScreen() {
             icon="compass-outline"
             iconColor="#34C759"
             title="North Up"
-            subtitle="Classic view · map stays fixed north · pitch 0° · car rotates on top"
+            subtitle="Classic view Â· map stays fixed north Â· pitch 0Â° Â· car rotates on top"
             selected={settings.mapView === "north_up"}
             onSelect={() => setSettings({ mapView: "north_up" })}
           />
         </Glass>
         <Text style={styles.helpText}>
-          Heading Up is the default and feels like Waze/Google during driving. North Up keeps the world steady — helpful for getting your bearings or scanning a wide area. Your choice persists across launches.
+          Heading Up is the default and feels like Waze/Google during driving. North Up keeps the world steady â helpful for getting your bearings or scanning a wide area. Your choice persists across launches.
         </Text>
 
-        {/* Speed Units — radio choice between metric and imperial. The map's
+        {/* Speed Units â radio choice between metric and imperial. The map's
             location watcher reverse-geocodes the user's country every 60s
-            and auto-flips this setting (US → MPH, everywhere else → KM/H)
+            and auto-flips this setting (US â MPH, everywhere else â KM/H)
             until the user taps a button here, which sets `speedUnitManual`
             and suppresses further auto-detect writes. */}
         <Text style={styles.sectionLabel}>SPEED UNITS</Text>
@@ -147,7 +147,7 @@ export default function SettingsScreen() {
             icon="speedometer"
             iconColor="#FFD60A"
             title="KM/H"
-            subtitle="Kilometres per hour · Canada, Mexico, EU, most of the world"
+            subtitle="Kilometres per hour Â· Canada, Mexico, EU, most of the world"
             selected={settings.speedUnit === "kmh"}
             onSelect={() => setSettings({ speedUnit: "kmh", speedUnitManual: true })}
           />
@@ -156,13 +156,13 @@ export default function SettingsScreen() {
             icon="speedometer-outline"
             iconColor="#FF9500"
             title="MPH"
-            subtitle="Miles per hour · United States"
+            subtitle="Miles per hour Â· United States"
             selected={settings.speedUnit === "mph"}
             onSelect={() => setSettings({ speedUnit: "mph", speedUnitManual: true })}
           />
         </Glass>
         <Text style={styles.helpText}>
-          Auto-switches at the USA/Canada border based on your GPS location. Tap KM/H or MPH to lock your preference — you won't be auto-flipped again until you tap a unit button.
+          Auto-switches at the USA/Canada border based on your GPS location. Tap KM/H or MPH to lock your preference â you won't be auto-flipped again until you tap a unit button.
         </Text>
 
         {/* Live Feeds */}
@@ -172,22 +172,22 @@ export default function SettingsScreen() {
             icon="globe-outline"
             iconColor="#3478F6"
             title="North America"
-            subtitle="rtproxy-na.waze.com · Police, accidents, jams"
-            value={settings.feedNA}
-            onChange={(v) => setSettings({ feedNA: v })}
+            subtitle="rtproxy-na.waze.com Â· Police, accidents, jams"
+            value={(settings as any).feedNA}
+            onChange={(v) => (setSettings as any)({ feedNA: v })}
           />
           <View style={styles.divider} />
           <ToggleRow
             icon="earth-outline"
             iconColor="#5AC8FA"
             title="International"
-            subtitle="rtproxy-row.waze.com · Rest of World"
-            value={settings.feedROW}
-            onChange={(v) => setSettings({ feedROW: v })}
+            subtitle="rtproxy-row.waze.com Â· Rest of World"
+            value={(settings as any).feedROW}
+            onChange={(v) => (setSettings as any)({ feedROW: v })}
           />
         </Glass>
         <Text style={styles.helpText}>
-          Public live-feed proxies enthusiast apps tap into. Disabling both will hide the “live” pins on the map.
+          Public live-feed proxies enthusiast apps tap into. Disabling both will hide the âliveâ pins on the map.
         </Text>
 
         {/* Convoy Community */}
@@ -247,7 +247,7 @@ export default function SettingsScreen() {
           />
         </Glass>
         <Text style={styles.helpText}>
-          Applied to every directions request — including auto-reroute when you go off-route. Routes refresh automatically when you toggle a preference.
+          Applied to every directions request â including auto-reroute when you go off-route. Routes refresh automatically when you toggle a preference.
         </Text>
 
         {/* Drive Mode */}
@@ -295,7 +295,7 @@ function RadioRow({
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.subtitle}>{subtitle}</Text>
       </View>
-      {/* Radio ring — filled core when selected, hollow ring otherwise. */}
+      {/* Radio ring â filled core when selected, hollow ring otherwise. */}
       <View style={[styles.radioOuter, selected && { borderColor: "#FFC700" }]}>
         {selected && <View style={styles.radioInner} />}
       </View>
@@ -330,7 +330,7 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
   },
   badgeText: { color: "#FFD60A", fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
-  // Radio button visuals — used by RadioRow for mutually-exclusive choices.
+  // Radio button visuals â used by RadioRow for mutually-exclusive choices.
   // Hollow ring when unselected, filled yellow core when selected, matching
   // the Convoy brand accent so the active state pops without a Switch.
   radioOuter: {

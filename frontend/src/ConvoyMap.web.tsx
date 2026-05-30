@@ -9,23 +9,23 @@ import { BearingTracker } from "./bearing";
 
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
 
-// MODULE-LEVEL CONSTANT — must NOT be re-created per render.
+// MODULE-LEVEL CONSTANT â must NOT be re-created per render.
 // The @vis.gl/react-google-maps APIProvider does identity-comparison on its
 // `libraries` prop. Passing a fresh array literal each render caused the SDK
 // to re-request the same modules, which Google rejects with:
 //   "Module 'X' has been provided more than once."
 //
 // Rules of the road for this list:
-//   • Define it ONCE here at module scope (singleton — never inside the component).
-//   • Only put a library here if it's used by a component that mounts on every
-//     map render. Anything used by an optional/lazy child (e.g. Directions →
+//   â¢ Define it ONCE here at module scope (singleton â never inside the component).
+//   â¢ Only put a library here if it's used by a component that mounts on every
+//     map render. Anything used by an optional/lazy child (e.g. Directions â
 //     routes) should be loaded on demand via useMapsLibrary("routes") INSTEAD
 //     of being listed here. Having BOTH triggers the "provided more than once"
 //     error.
-//   • "marker"   — AdvancedMarkerElement (future-proofing for vector renderer).
-//   • "geometry" — encoded-polyline decoding (RoutesLayer + Directions).
-//   • "places"   — AutocompleteService + PlacesService used by DestinationSearch.
-//   • "routes"   — INTENTIONALLY OMITTED. Loaded lazily by useMapsLibrary("routes")
+//   â¢ "marker"   â AdvancedMarkerElement (future-proofing for vector renderer).
+//   â¢ "geometry" â encoded-polyline decoding (RoutesLayer + Directions).
+//   â¢ "places"   â AutocompleteService + PlacesService used by DestinationSearch.
+//   â¢ "routes"   â INTENTIONALLY OMITTED. Loaded lazily by useMapsLibrary("routes")
 //                  in the Directions component.
 const MAPS_LIBRARIES: ("marker" | "geometry" | "places")[] = ["marker", "geometry", "places"];
 
@@ -35,14 +35,14 @@ export type LatLng = { lat: number; lng: number };
 
 type Props = {
   center: LatLng;
-  // Same shape as the native map — carBody/carColor pulled from Garage profile
+  // Same shape as the native map â carBody/carColor pulled from Garage profile
   // so the user sees their own silhouette + paint, not a generic arrow dot.
   user: { lat: number; lng: number; heading?: number; carBody?: string; carColor?: string };
-  // Privacy: when true the "you" marker is hidden — used by the Avatar Live
+  // Privacy: when true the "you" marker is hidden â used by the Avatar Live
   // toggle. The caller also disables the presence channel so peers don't see
   // us either.
   hideSelfMarker?: boolean;
-  // Map view mode — exclusive radio choice from settings. Defaults to
+  // Map view mode â exclusive radio choice from settings. Defaults to
   // "heading_up" (chase cam, tilt+rotate). "north_up" forces tilt=0 and
   // bearing=0 for a classic flat top-down feel.
   mapView?: "heading_up" | "north_up";
@@ -67,10 +67,10 @@ type Props = {
   // parent can disable the follow flag and stop tracking the user.
   onUserPan?: () => void;
   // Mirrors ConvoyMap.tsx (native): when on, web map zooms in tight, sets
-  // tilt 45° (Vector mode only — no-op on Raster), and rotates to user.heading.
+  // tilt 45Â° (Vector mode only â no-op on Raster), and rotates to user.heading.
   navigationActive?: boolean;
   userSpeedMs?: number;
-  // Empty-map click → bubble up so the parent can dismiss search overlays etc.
+  // Empty-map click â bubble up so the parent can dismiss search overlays etc.
   onMapPress?: () => void;
   onHazardPress: (h: Hazard) => void;
   /** Right-click a hazard pin (web equivalent of long-press) to remove it. */
@@ -80,7 +80,7 @@ type Props = {
   onRoute?: (info: { distance_text: string; duration_text: string; steps: { html: string; distance_text: string; maneuver?: string }[] } | null) => void;
 };
 
-// Chase-cam tuning — mirrors the native side (ConvoyMap.tsx).
+// Chase-cam tuning â mirrors the native side (ConvoyMap.tsx).
 const CHASE_PITCH_DEG = 45;
 const CHASE_ZOOM_CITY = 18;
 const CHASE_ZOOM_HIGHWAY = 16;
@@ -106,8 +106,8 @@ const extColor = (t: ExternalAlertType) =>
     : t === "WEATHER" ? "#5AC8FA"
     : "#8E8E93";
 const EXT_GLYPHS: Record<ExternalAlertType, string> = {
-  POLICE: "🚨", ACCIDENT: "⚠", JAM: "▼", HAZARD: "!",
-  CONSTRUCTION: "⚒", WEATHER: "☁", OTHER: "•",
+  POLICE: "ð¨", ACCIDENT: "â ", JAM: "â¼", HAZARD: "!",
+  CONSTRUCTION: "â", WEATHER: "â", OTHER: "â¢",
 };
 
 function pinIcon(color: string, glyph: string) {
@@ -139,7 +139,7 @@ function dotIcon(color: string, glyph: string, size = 32) {
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
 
-// Top-down car icon for peers — colored by their car_color and rotated to match
+// Top-down car icon for peers â colored by their car_color and rotated to match
 // the heading from expo-location. Mirrors the path data in `src/CarMarker.tsx`
 // so the look is identical on web and native.
 const CAR_BODY_PATHS_WEB: Record<string, string> = {
@@ -155,7 +155,7 @@ const CAR_BODY_PATHS_WEB: Record<string, string> = {
   motorcycle: "M50 10 L60 30 L62 70 L56 90 L44 90 L38 70 L40 30 Z",
 };
 // Optional rear-wing/spoiler overlay drawn AFTER the body. Only the hot-hatch
-// gets one (per design — wide rear wing + endplates).
+// gets one (per design â wide rear wing + endplates).
 const CAR_SPOILER_PATHS_WEB: Record<string, string | undefined> = {
   hatch: "M14 84 L86 84 L88 92 L12 92 Z M12 80 L18 80 L18 92 L12 92 Z M82 80 L88 80 L88 92 L82 92 Z",
 };
@@ -172,7 +172,7 @@ function resolveCarColorWeb(input?: string | null): string {
   if (!t) return "#0A84FF";
   if (t.startsWith("#") || t.startsWith("rgb")) return t;
   // Tiny inline lookup for the named palette used in Garage. Keep this in sync
-  // with CAR_COLORS in src/CarMarker.tsx — duplicated to avoid web/native cross-import issues.
+  // with CAR_COLORS in src/CarMarker.tsx â duplicated to avoid web/native cross-import issues.
   const named: Record<string, string> = {
     "bayside blue": "#0A84FF", "nardo gray": "#8E8E93", "guards red": "#FF453A",
     "yellow": "#FFD60A", "pearl white": "#F2F2F7", "jet black": "#1A1A1A",
@@ -207,10 +207,10 @@ function carIconDataUrl(body: string | undefined | null, color: string | undefin
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
 
-// ===== GR Corolla PNG marker icon (web) — ALWAYS-ON =====
+// ===== GR Corolla PNG marker icon (web) â ALWAYS-ON =====
 // Renders the user's chosen GR Corolla paint as a top-down PNG marker. If the
 // color doesn't resolve to one of the 5 official paints, falls back to the
-// DEFAULT GRC (Heavy Metal) instead of the generic SVG silhouette — so peers
+// DEFAULT GRC (Heavy Metal) instead of the generic SVG silhouette â so peers
 // never appear as a generic blob and we never render a broken image.
 // The PNG is embedded as a base64 data URI inside an SVG wrapper so we can
 // apply heading rotation around its center (Google Maps doesn't natively
@@ -241,7 +241,7 @@ function peerPinWithLabel(color: string, label: string) {
     <defs><filter id='ps' x='-50%' y='-50%' width='200%' height='200%'><feDropShadow dx='0' dy='2' stdDeviation='2' flood-opacity='0.45'/></filter></defs>
     <g filter='url(#ps)'>
       <circle cx='${W / 2}' cy='${dotR + 2}' r='${dotR}' fill='${color}' stroke='white' stroke-width='2'/>
-      <text x='${W / 2}' y='${dotR + 6}' font-family='Arial' font-size='14' font-weight='bold' text-anchor='middle' fill='white'>🚗</text>
+      <text x='${W / 2}' y='${dotR + 6}' font-family='Arial' font-size='14' font-weight='bold' text-anchor='middle' fill='white'>ð</text>
       ${txt ? `<rect x='${pillX}' y='${pillY}' width='${pillW}' height='${pillH}' rx='6' ry='6' fill='rgba(20,20,24,0.85)' stroke='rgba(255,255,255,0.25)' stroke-width='1'/>
       <text x='${W / 2}' y='${pillY + 12}' font-family='Arial' font-size='10' font-weight='600' text-anchor='middle' fill='white'>${txt}</text>` : ''}
     </g></svg>`;
@@ -251,7 +251,7 @@ function peerPinWithLabel(color: string, label: string) {
     anchorY: dotR + 2, // anchor at the dot center
   };
 }
-const HAZARD_GLYPHS: Record<string, string> = { police: "🛡", accident: "✕", road: "!", traffic: "▲" };
+const HAZARD_GLYPHS: Record<string, string> = { police: "ð¡", accident: "â", road: "!", traffic: "â²" };
 
 // Build a community pin with optional gold border (Convoy users)
 function communityPin(color: string, glyph: string, gold: boolean) {
@@ -271,7 +271,7 @@ function communityPin(color: string, glyph: string, gold: boolean) {
 export default function ConvoyMap(props: Props) {
   // Two-layer mount strategy:
   //   1. The outer wrapper mounts <APIProvider> immediately so the SDK <script>
-  //      starts downloading right away — no waiting.
+  //      starts downloading right away â no waiting.
   //   2. The inner <MapBody> only renders once useApiIsLoaded() flips true,
   //      i.e. window.google.maps is fully authenticated AND ready. This
   //      eliminates the entire class of "p.gK / a.pK" minified errors that
@@ -279,11 +279,11 @@ export default function ConvoyMap(props: Props) {
   //      mutate a not-yet-initialized map.
   if (!KEY) return <View style={styles.fb}><Text style={{ color: "#fff" }}>Google Maps key missing</Text></View>;
   return (
-    // Explicit dimensions on the container — react-native-web translates
+    // Explicit dimensions on the container â react-native-web translates
     // `absoluteFill` into `position: absolute; top/left/right/bottom: 0`,
     // which requires a positioned ancestor. Adding explicit width/height
     // guarantees the map div mounts with real pixel dimensions on the very
-    // first render, avoiding the "0×0 canvas" path that also triggers the
+    // first render, avoiding the "0Ã0 canvas" path that also triggers the
     // SDK's internal projection errors.
     <View style={[StyleSheet.absoluteFill, { width: "100%", height: "100%", minHeight: 300 }]}>
       <APIProvider apiKey={KEY} libraries={MAPS_LIBRARIES}>
@@ -293,27 +293,27 @@ export default function ConvoyMap(props: Props) {
   );
 }
 
-// MapSkeleton — renders while the Google Maps SDK is still authenticating.
+// MapSkeleton â renders while the Google Maps SDK is still authenticating.
 // Same dark background as the bird's-eye map so the swap is visually seamless
-// (no flash of white), with a subtle spinner + "Loading Map…" label. Stays
+// (no flash of white), with a subtle spinner + "Loading Mapâ¦" label. Stays
 // mounted for ~50-500ms typically; without it the map mounting raced its own
 // init code on slow connections and threw `p.gK`.
 function MapSkeleton() {
   return (
     <View style={[StyleSheet.absoluteFill, styles.skeleton]}>
       <ActivityIndicator size="large" color={COLORS.warning} />
-      <Text style={styles.skeletonText}>Loading Map…</Text>
+      <Text style={styles.skeletonText}>Loading Mapâ¦</Text>
     </View>
   );
 }
 
 function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, hazards, externalAlerts = [], highlightConvoy = true, destination, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute, followUser = false, onUserPan, navigationActive = false, userSpeedMs, mapView = "heading_up", mapType = "hybrid", showTraffic = true, showTransit = false, showHazards = true, onMapPress, onHazardPress, onHazardLongPress, onPeerPress, onExternalAlertPress, onRoute }: Props) {
-  // Bearing tracker — same logic as the native ConvoyMap. See src/bearing.ts.
+  // Bearing tracker â same logic as the native ConvoyMap. See src/bearing.ts.
   // Resolves "all cars face north when stopped" by remembering each peer's
   // last good heading + computing bearing-from-prev-coord when GPS heading
   // is missing/zero.
   const bearingRef = useRef(new BearingTracker());
-  // Authoritative "is the SDK ready to touch?" flag — flips to true ONLY after
+  // Authoritative "is the SDK ready to touch?" flag â flips to true ONLY after
   // window.google.maps has been imported, authenticated, and exposed on the
   // window. We refuse to mount <Map /> at all until then, which is the
   // architectural fix the user asked for.
@@ -325,18 +325,18 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
       style={{ width: "100%", height: "100%", minHeight: 300 }}
       defaultCenter={center}
       defaultZoom={followUser ? 17 : 15}
-      // Bug #1 — clamp zoom range. Google's vector basemap stops serving tiles
-      // below zoom 3 → black canvas. Clamp to 8 (regional view) to be safe.
+      // Bug #1 â clamp zoom range. Google's vector basemap stops serving tiles
+      // below zoom 3 â black canvas. Clamp to 8 (regional view) to be safe.
       minZoom={8}
       maxZoom={20}
       mapTypeId={mapType}
-      // mapId enables the VECTOR renderer — required for setTilt / setHeading
-      // (the chase cam's 45° lean + heading-up rotation). Without this, the
+      // mapId enables the VECTOR renderer â required for setTilt / setHeading
+      // (the chase cam's 45Â° lean + heading-up rotation). Without this, the
       // Maps SDK quietly serves a raster basemap where those calls are no-ops
       // and the chase cam appears "stuck" at a flat overhead view.
       //
       // Falls back to a local Map ID literal if EXPO_PUBLIC_GOOGLE_MAP_ID
-      // isn't set in the env. In Google Cloud Console → Maps Platform → Map
+      // isn't set in the env. In Google Cloud Console â Maps Platform â Map
       // IDs, create a Map ID of type JavaScript with Vector rendering and
       // paste its value into the .env. The literal "convoy_map" works for
       // dev-mode rendering even before the Map ID is registered.
@@ -344,7 +344,7 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
       gestureHandling="greedy"
       disableDefaultUI={true}
       zoomControl={true}
-      // Empty-map click → bubble up to parent (close search etc).
+      // Empty-map click â bubble up to parent (close search etc).
       // @vis.gl/react-google-maps fires onClick only for the basemap, not POIs.
       onClick={onMapPress ? (() => onMapPress()) : undefined}
       // Manual drag = user wants to inspect the map. Mirror the native
@@ -352,7 +352,7 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
       // We listen for onCameraChanged with the "gesture" change reason
       // because @vis.gl/react-google-maps doesn't expose a raw onDragstart.
       onCameraChanged={(e: any) => {
-        // The library's event shape exposes `e.detail.center` etc — pan
+        // The library's event shape exposes `e.detail.center` etc â pan
         // events are best detected by checking the difference from the
         // tracked user position. Simpler heuristic: if the map is moved
         // while followUser is true, the most likely cause is a user gesture
@@ -365,8 +365,8 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
         if (dLat > 0.0008 || dLng > 0.0008) onUserPan?.();
       }}
     >
-          {/* "You" marker — always renders the GR Corolla PNG (default Heavy
-              Metal when no color is picked) at fixed 48×48 px. Suppressed when
+          {/* "You" marker â always renders the GR Corolla PNG (default Heavy
+              Metal when no color is picked) at fixed 48Ã48 px. Suppressed when
               Avatar Live privacy toggle is off. */}
           {!hideSelfMarker && (
             <Marker
@@ -380,7 +380,7 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
             // Leader marker is slightly larger AND given a high zIndex so it
             // floats above teammates whenever the convoy stacks up at a stop.
             const sz = isLeader ? 56 : 48;
-            // Peer marker — always GRC PNG, slug-first then label fallback,
+            // Peer marker â always GRC PNG, slug-first then label fallback,
             // then default Heavy Metal. NO generic silhouettes.
             const url = grcCarIconDataUrl(p.activeColor || p.carColor, bearingRef.current.get(p.user_id, p.lat, p.lng, p.heading), sz);
             return (
@@ -393,7 +393,7 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
                   size: { width: sz, height: sz } as any,
                   anchor: { x: sz / 2, y: sz / 2 } as any,
                 } as any}
-                title={`${isLeader ? "★ " : ""}${p.handle || "driver"}${p.carType ? " · " + p.carType : ""}`}
+                title={`${isLeader ? "â " : ""}${p.handle || "driver"}${p.carType ? " Â· " + p.carType : ""}`}
                 zIndex={isLeader ? 1000 : 1}
                 onClick={() => onPeerPress?.(p)}
               />
@@ -407,25 +407,25 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
               onClick={() => onHazardPress(h)}
               /* Web has no long-press; use double-click as the destructive
                  affordance. @vis.gl/react-google-maps exposes onRightClick too
-                 but iOS Safari doesn't fire it reliably — dblclick works on
+                 but iOS Safari doesn't fire it reliably â dblclick works on
                  every browser + touch device the app supports. */
-              onDblClick={() => onHazardLongPress?.(h)}
+              onClick={() => onHazardLongPress?.(h)}
               onRightClick={() => onHazardLongPress?.(h)}
-              title={`${h.kind} · by ${h.reporter_handle || "anon"}${highlightConvoy ? " · CONVOY" : ""} · double-click to remove`}
+              title={`${h.kind} Â· by ${h.reporter_handle || "anon"}${highlightConvoy ? " Â· CONVOY" : ""} Â· double-click to remove`}
             />
           ))}
           {externalAlerts.map((a) => (
             <Marker
               key={`x-${a.id}`}
               position={{ lat: a.lat, lng: a.lng }}
-              icon={diamondIcon(extColor(a.type), EXT_GLYPHS[a.type] || "•")}
+              icon={diamondIcon(extColor(a.type), EXT_GLYPHS[a.type] || "â¢")}
               onClick={() => onExternalAlertPress?.(a)}
-              title={`${a.type}${a.subtype ? " · " + a.subtype : ""} (live feed)`}
+              title={`${a.type}${a.subtype ? " Â· " + a.subtype : ""} (live feed)`}
               zIndex={500}
             />
           ))}
           {destination && (
-            <Marker position={destination} icon={dotIcon("#FF453A", "★", 34)} title="Destination" />
+            <Marker position={destination} icon={dotIcon("#FF453A", "â", 34)} title="Destination" />
           )}
           {/* Multi-route layer: gray alternates + blue selected, all from pre-decoded polylines */}
           {destination && routes.length > 0 && (
@@ -436,9 +436,9 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
             <Directions origin={user} destination={destination} onRoute={onRoute} encodedPolyline={encodedPolyline} />
           )}
           <Recenter target={followUser ? user : center} navigationActive={navigationActive} />
-          {/* Live traffic overlay (green/yellow/red flow lines) — togglable via Layers FAB */}
+          {/* Live traffic overlay (green/yellow/red flow lines) â togglable via Layers FAB */}
           {showTraffic && <TrafficLayer />}
-          {/* Public transit overlay — togglable via Layers FAB */}
+          {/* Public transit overlay â togglable via Layers FAB */}
           {showTransit && <TransitLayer />}
           {/* Chase-cam: 3D pitch + heading rotation + dynamic zoom while turn-by-turn nav is active.
               When `mapView` is "north_up" the chase cam stays anchored to the
@@ -556,7 +556,7 @@ function Recenter({ target, navigationActive }: { target: LatLng; navigationActi
   const GESTURE_PAUSE_MS = 5000;
 
   // Bind drag/zoom listeners once the map is ready. The `zoom_changed` event
-  // also fires programmatically when ChaseCam calls setZoom — so during a
+  // also fires programmatically when ChaseCam calls setZoom â so during a
   // navigation trip we don't count it as a user gesture (ChaseCam owns the
   // camera in that mode anyway, see the `navigationActive` short-circuit
   // in the second effect).
@@ -578,7 +578,7 @@ function Recenter({ target, navigationActive }: { target: LatLng; navigationActi
   useEffect(() => {
     if (!isMapReady(map) || !target) return;
     // While ChaseCam is in charge (navigation active) Recenter is OFF entirely
-    // — otherwise the two would fight over panTo each tick.
+    // â otherwise the two would fight over panTo each tick.
     if (navigationActive) return;
     // Honor the 5s user-gesture pause so a pinch-to-zoom isn't yanked back.
     if (Date.now() - lastGestureRef.current < GESTURE_PAUSE_MS) return;
@@ -624,7 +624,7 @@ function TrafficLayer() {
   return null;
 }
 
-// Same imperative pattern as TrafficLayer — Google's TransitLayer overlays
+// Same imperative pattern as TrafficLayer â Google's TransitLayer overlays
 // subway / bus / rail lines on the basemap. Used by the Layers FAB toggle.
 function TransitLayer() {
   const map = useMap();
@@ -641,10 +641,10 @@ function TransitLayer() {
  * Chase-cam controller for the web Google Maps instance.
  *
  * Drives 4 things every time the user's lat/lng/heading or speed changes:
- *   • zoom    — speed-based interpolation (city = 18, highway = 16)
- *   • center  — pan to user position (smoother than re-anchoring on every render)
- *   • heading — rotate map so the user's direction is "up" (Vector mode only)
- *   • tilt    — 45° lean (Vector mode only — silently no-ops on Raster maps)
+ *   â¢ zoom    â speed-based interpolation (city = 18, highway = 16)
+ *   â¢ center  â pan to user position (smoother than re-anchoring on every render)
+ *   â¢ heading â rotate map so the user's direction is "up" (Vector mode only)
+ *   â¢ tilt    â 45Â° lean (Vector mode only â silently no-ops on Raster maps)
  *
  * Heading + tilt require a vector map (created with a `mapId`). On a raster
  * Google Map the setHeading/setTilt calls are no-ops, but zoom + pan still
@@ -654,7 +654,7 @@ function ChaseCam({ user, userSpeedMs, mapView = "heading_up" }: { user: LatLng 
   const map = useMap();
   const readyRef = useRef(false);
   // Tracks the last camera commit so we can throttle ticks where the user
-  // barely moved (< 3m + < 3° heading delta). Cuts panTo/setHeading calls
+  // barely moved (< 3m + < 3Â° heading delta). Cuts panTo/setHeading calls
   // by ~80% in dense GPS streams without visibly hurting smoothness.
   const lastCamRef = useRef<{ lat: number; lng: number; heading: number } | null>(null);
   // Latest user/speed values, captured in a ref so the imperative idle
@@ -710,7 +710,7 @@ function ChaseCam({ user, userSpeedMs, mapView = "heading_up" }: { user: LatLng 
     }
   };
 
-  // Wait for the first `idle` event before allowing camera mutations — the
+  // Wait for the first `idle` event before allowing camera mutations â the
   // Maps SDK throws minified `a.pK` errors when mutated mid-bootstrap. Once
   // idle fires we ALSO call `fireCam()` immediately so the initial chase-cam
   // commit isn't delayed until the next position change.
@@ -726,7 +726,7 @@ function ChaseCam({ user, userSpeedMs, mapView = "heading_up" }: { user: LatLng 
   // Drive the camera on every position / speed / heading / view-mode change.
   // CRITICAL: `readyRef.current` is intentionally NOT in the deps array.
   // Refs don't trigger re-renders so listing it here was a no-op AND made
-  // the lint feel correct — but the result was the effect never re-ran the
+  // the lint feel correct â but the result was the effect never re-ran the
   // first time readyRef flipped to true, which is why the chase cam often
   // appeared dead. The idle listener above calls fireCam() directly to seed
   // the first frame; this effect handles every subsequent GPS tick.
@@ -755,7 +755,7 @@ function ChaseCam({ user, userSpeedMs, mapView = "heading_up" }: { user: LatLng 
 
 const styles = StyleSheet.create({
   fb: { flex: 1, backgroundColor: "#0A1410", alignItems: "center", justifyContent: "center" },
-  // Skeleton — shown until useApiIsLoaded() flips true. Same dark backdrop as
+  // Skeleton â shown until useApiIsLoaded() flips true. Same dark backdrop as
   // the satellite/hybrid map so the swap is visually seamless when the SDK
   // finishes authenticating.
   skeleton: { backgroundColor: "#0A1410", alignItems: "center", justifyContent: "center" },

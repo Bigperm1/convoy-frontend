@@ -17,17 +17,17 @@ type Source = "spotify" | "apple" | "soundcloud";
  * Deep-link to a music app on the user's phone.
  *
  * Tries the native URL scheme first (which jumps straight to the installed app
- * with no browser intermediary — fixing the "black Safari blink" the user was
+ * with no browser intermediary â fixing the "black Safari blink" the user was
  * seeing in the field), then falls back to the public https URL if the scheme
  * isn't registered (app not installed).
  *
  * Native schemes per platform:
- *   Apple Music (iOS)   → music://             (Music app)
- *   Apple Music (web)   → https://music.apple.com
- *   Spotify  (iOS/Android) → spotify://         (Spotify app)
- *   Spotify  (fallback) → https://open.spotify.com
- *   SoundCloud          → soundcloud://         (SoundCloud app)
- *   SoundCloud (fallback) → https://soundcloud.com
+ *   Apple Music (iOS)   â music://             (Music app)
+ *   Apple Music (web)   â https://music.apple.com
+ *   Spotify  (iOS/Android) â spotify://         (Spotify app)
+ *   Spotify  (fallback) â https://open.spotify.com
+ *   SoundCloud          â soundcloud://         (SoundCloud app)
+ *   SoundCloud (fallback) â https://soundcloud.com
  *
  * Optional `path` param (e.g. a track URI) is appended to the scheme/URL.
  */
@@ -47,7 +47,7 @@ async function deepLinkToMusicApp(target: Source, path?: string): Promise<boolea
         return true;
       }
     } catch {
-      // canOpenURL throws on iOS for unregistered schemes — try next candidate.
+      // canOpenURL throws on iOS for unregistered schemes â try next candidate.
     }
   }
   // Last-resort: just try the https fallback even if canOpenURL said no
@@ -70,10 +70,10 @@ export default function MusicScreen() {
         <Text style={styles.sub}>Sign in to bring your library on the road</Text>
       </View>
 
-      {/* Service selector — iPhone-home-screen-style app icons rather than
+      {/* Service selector â iPhone-home-screen-style app icons rather than
           generic tabs. Selected icon scales up + a small Convoy-gold dot
           appears under its label. Each icon uses the brand color of the
-          service (Spotify green, Apple pink→purple gradient, SoundCloud
+          service (Spotify green, Apple pinkâpurple gradient, SoundCloud
           orange) so it reads instantly at a glance. */}
       <View style={styles.serviceRow}>
         {[
@@ -177,14 +177,14 @@ function SpotifyPanel() {
   const broadcastInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const nowPlayingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeCommunityId = settings.activeCommunityId;
-  // Adaptive broadcast quality — derived from how close convoy members are.
+  // Adaptive broadcast quality â derived from how close convoy members are.
   // Pulled from the shared proximity store published by map.tsx, so we never
   // duplicate the Supabase presence subscription here.
   const { tier: proximityTier, peerCount: proximityPeers } = useLatestTier();
   const musicQuality = getMusicBroadcastQuality(proximityTier);
 
   const refresh = async () => {
-    // getStoredToken is now async — must be awaited. Previously the sync call
+    // getStoredToken is now async â must be awaited. Previously the sync call
     // returned `Promise<string|null>` which coerced to truthy via "[object Promise]",
     // which is why the panel briefly entered a signed-in state then crashed.
     const t = await getStoredToken();
@@ -204,7 +204,7 @@ function SpotifyPanel() {
     } finally { setLoading(false); }
   };
 
-  // Currently-playing poll — feeds the admin broadcast card. Pauses when the
+  // Currently-playing poll â feeds the admin broadcast card. Pauses when the
   // user isn't signed in to avoid a 401 loop.
   const refreshNowPlaying = async () => {
     try {
@@ -237,7 +237,7 @@ function SpotifyPanel() {
     return () => { if (nowPlayingInterval.current) clearInterval(nowPlayingInterval.current); };
   }, [signedIn]);
 
-  // Resolve admin status — only the community admin can broadcast. Re-checks
+  // Resolve admin status â only the community admin can broadcast. Re-checks
   // when the active community changes (user switches convoys in Settings).
   useEffect(() => {
     let cancelled = false;
@@ -284,7 +284,7 @@ function SpotifyPanel() {
         await api.post("/community/broadcast-music", {
           action: "play",
           community_id: activeCommunityId,
-          quality: musicQuality,    // 'lossless' | 'high' | 'normal' — set by proximity tier
+          quality: musicQuality,    // 'lossless' | 'high' | 'normal' â set by proximity tier
           track: {
             name: currentTrack.name,
             artist: currentTrack.artist,
@@ -358,7 +358,7 @@ function SpotifyPanel() {
           <View style={{ flex: 1 }}>
             <Text style={styles.profileName}>{me?.display_name || "Spotify user"}</Text>
             <Text style={styles.profileMeta}>
-              {me?.product === "premium" ? "Premium" : "Free"} · {me?.followers?.total || 0} followers
+              {me?.product === "premium" ? "Premium" : "Free"} Â· {me?.followers?.total || 0} followers
             </Text>
           </View>
           <TouchableOpacity testID="spotify-signout" onPress={onSignOut}>
@@ -367,7 +367,7 @@ function SpotifyPanel() {
         </View>
       </Glass>
 
-      {/* Broadcast card — only the community admin sees this. Push the
+      {/* Broadcast card â only the community admin sees this. Push the
           currently-playing track to every member of the active convoy.
           Members see a toast on the map screen with the track + caller name.
           Broadcast repeats every 10s so members who reconnect mid-song still
@@ -377,7 +377,7 @@ function SpotifyPanel() {
           <View style={styles.broadcastHeader}>
             <Ionicons name="radio" size={18} color="#FFD60A" />
             <Text style={styles.broadcastTitle}>Broadcast to Community</Text>
-            {/* Quality badge — color-coded per tier so the admin sees
+            {/* Quality badge â color-coded per tier so the admin sees
                 instantly what bitrate the convoy is receiving. Pulls live
                 from the proximity store, no extra props needed. */}
             <View style={[
@@ -403,7 +403,7 @@ function SpotifyPanel() {
             {currentTrack ? (
               <>
                 {proximityPeers} {proximityPeers === 1 ? "car" : "cars"} in convoy
-                {" · "}
+                {" Â· "}
                 {musicQuality === "lossless" ? "320 kbps OGG" : musicQuality === "high" ? "160 kbps OGG" : "96 kbps OGG"}
               </>
             ) : (
@@ -432,7 +432,7 @@ function SpotifyPanel() {
       {loading && <ActivityIndicator color={COLORS.primary} style={{ marginVertical: 12 }} />}
 
       <Text style={styles.section}>Your top tracks</Text>
-      {tracks.length === 0 && !loading && <Text style={styles.empty}>No top tracks yet — listen to Spotify a bit to build this list.</Text>}
+      {tracks.length === 0 && !loading && <Text style={styles.empty}>No top tracks yet â listen to Spotify a bit to build this list.</Text>}
       {tracks.map((t) => (
         <Glass key={t.id} radius={14} style={{ marginBottom: 8 }}>
           <TouchableOpacity
@@ -462,7 +462,7 @@ function SpotifyPanel() {
             <Image source={{ uri: p.images?.[0]?.url }} style={styles.thumb} />
             <View style={{ flex: 1 }}>
               <Text style={styles.rowTitle} numberOfLines={1}>{p.name}</Text>
-              <Text style={styles.rowSub} numberOfLines={1}>{p.tracks?.total || 0} songs · {p.owner?.display_name}</Text>
+              <Text style={styles.rowSub} numberOfLines={1}>{p.tracks?.total || 0} songs Â· {p.owner?.display_name}</Text>
             </View>
             <Ionicons name="open-outline" size={18} color={COLORS.textDim} />
           </TouchableOpacity>
@@ -482,7 +482,7 @@ function SpotifyPanel() {
  * Calling spotify://<uri-tail> opens the app instantly when installed.
  */
 async function openSpotifyExternal(httpsUrl?: string, uri?: string) {
-  // Convert "spotify:track:abc" → "track/abc" for both the deep-link path and
+  // Convert "spotify:track:abc" â "track/abc" for both the deep-link path and
   // the https fallback (open.spotify.com/track/abc).
   let pathTail = "";
   if (uri && uri.startsWith("spotify:")) {
@@ -506,14 +506,15 @@ async function openSpotifyExternal(httpsUrl?: string, uri?: string) {
         return;
       }
     } catch {
-      // ignore — try next
+      // ignore â try next
     }
   }
-  // Final fallback — best-effort https
+  // Final fallback â best-effort https
   try { await Linking.openURL(candidates[1] || "https://open.spotify.com"); } catch {}
 }
 
 const styles = StyleSheet.create({
+  comingSub: { color: '#8E8E93', fontSize: 13, textAlign: 'center', marginTop: 4 },
   c: { flex: 1, backgroundColor: COLORS.bg },
   header: { paddingHorizontal: 18, paddingTop: 8 },
   title: { color: COLORS.text, fontSize: 34, fontWeight: "700", letterSpacing: -1 },

@@ -69,24 +69,23 @@ export default function MapScreen() {
   const [route, setRoute] = useState<RouteInfo | null>(null);
   const [showSteps, setShowSteps] = useState(false);
   const [live, setLive] = useState<"connecting" | "live" | "off">("connecting");
-  // Multi-route state — primary "Route Line" (blue) + alternates (gray)
+  // Multi-route state â primary "Route Line" (blue) + alternates (gray)
   const [routes, setRoutes] = useState<NavRoute[]>([]);
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
   // Turn-by-turn navigation state
   const [navMode, setNavMode] = useState<"preview" | "turn-by-turn">("preview");
   const [navMuted, setNavMuted] = useState(false);
   // ---- UI refinement state (post-field-test) ----
-  // Search bar visibility — auto-hides when navigation starts so the destination
+  // Search bar visibility â auto-hides when navigation starts so the destination
   // search field doesn't cover the map. A small magnifying-glass FAB appears in
   // its place to bring it back when the driver wants to change course.
   const [searchVisible, setSearchVisible] = useState(true);
-  // Layers control state — driven by the new bottom-right Layers FAB.
+  // Layers control state â driven by the new bottom-right Layers FAB.
   // mapType:    "hybrid" = satellite + labels (default), "roadmap" = flat road view.
   // showTraffic / showTransit / showHazards toggle their respective overlays.
   // layersOpen drives the layers bottom sheet modal.
   const [mapType, setMapType] = useState<"hybrid" | "roadmap" | "hybridFlyover">("hybrid");
-  const showWeatherLayer = settings.showWeatherLayer ?? false;
-  const { weather } = useWeatherLayer(
+    const { weather } = useWeatherLayer(
     coords?.lat ?? null,
     coords?.lng ?? null,
     showWeatherLayer,
@@ -95,14 +94,14 @@ export default function MapScreen() {
   const [showTransit, setShowTransit] = useState(false);
   const [showHazards, setShowHazards] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
-  // Position history buffer — keeps the last 30s of GPS samples so the user
+  // Position history buffer â keeps the last 30s of GPS samples so the user
   // can report a hazard "5 seconds ago" (matches Waze-style flow where the
   // driver passes the hazard before they react and tap the button).
   const posHistoryRef = useRef<{ lat: number; lng: number; ts: number }[]>([]);
   // Map follow-mode flag (Bug 7 fix). Default ON so the map auto-centers on
   // the user when the screen first loads. The instant the user pans the map
   // with a finger gesture, `onUserPan` callback flips this to false and the
-  // map stops chasing the user — they're free to inspect any region. Tapping
+  // map stops chasing the user â they're free to inspect any region. Tapping
   // the Recenter FAB flips it back to true and ConvoyMap fires animateCamera
   // to snap home. Turn-by-turn navigation overrides this entirely (chase-cam
   // ALWAYS tracks during active nav regardless of this flag).
@@ -110,23 +109,23 @@ export default function MapScreen() {
 
   // Transient toast state for "Police reported" / "Hazard reported" feedback.
   const [alertConfirm, setAlertConfirm] = useState<string | null>(null);
-  // Music broadcast toast — surfaced when the community admin pushes a track
-  // via Music screen → "🎵 jeff: Smooth Operator — Sade". Auto-dismisses 5s.
+  // Music broadcast toast â surfaced when the community admin pushes a track
+  // via Music screen â "ðµ jeff: Smooth Operator â Sade". Auto-dismisses 5s.
   const [musicToast, setMusicToast] = useState<string | null>(null);
   const musicToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Hail toast — surfaced when a peer pushes us via POST /api/notifications/hail.
+  // Hail toast â surfaced when a peer pushes us via POST /api/notifications/hail.
   // Two delivery paths feed this:
   //   - OS push notification while app is foregrounded (via hailBus from _layout)
-  //   - Raw WebSocket frame (via livePtt listener — see useEffect below)
+  //   - Raw WebSocket frame (via livePtt listener â see useEffect below)
   // Both write to this single state slot so the UI is identical regardless
   // of transport.
   const [hailToast, setHailToast] = useState<string | null>(null);
   const hailToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Right-edge Navigation Action Drawer — peeked 80% off-screen by default
+  // Right-edge Navigation Action Drawer â peeked 80% off-screen by default
   // when turn-by-turn is engaged. Tap the visible 20% to expand and see the
   // current maneuver + End. Auto-collapses on tap-out / route end.
   const [navDrawerOpen, setNavDrawerOpen] = useState(false);
-  // Preview-card collapse state — when the driver starts moving (or taps the
+  // Preview-card collapse state â when the driver starts moving (or taps the
   // map) the big preview card collapses into a minimal "Trip Summary" pill at
   // the top so the 3D chase view has the whole screen.
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
@@ -136,13 +135,13 @@ export default function MapScreen() {
   const encodedPolyline = activeRoute?.polyline || null;
 
   // Auto-hide the search bar when actually navigating (turn-by-turn engaged).
-  // When nav stops, we don't auto-show — the driver explicitly taps the FAB
+  // When nav stops, we don't auto-show â the driver explicitly taps the FAB
   // or returns to preview. This mirrors Apple/Google Maps behavior.
   useEffect(() => {
     if (navMode === "turn-by-turn") setSearchVisible(false);
   }, [navMode]);
 
-  // Auto-collapse the preview card once the driver starts moving (speed ≥ 5 km/h).
+  // Auto-collapse the preview card once the driver starts moving (speed â¥ 5 km/h).
   // Threshold chosen high enough to ignore GPS jitter at idle; low enough to
   // collapse before the driver has merged onto the freeway.
   useEffect(() => {
@@ -161,15 +160,16 @@ export default function MapScreen() {
   }, [destination]);
 
   const [settings] = useSettings();
+  const showWeatherLayer = settings.showWeatherLayer ?? false;
 
-  // Optional Convoy alert sound — chime when a NEW community hazard appears
+  // Optional Convoy alert sound â chime when a NEW community hazard appears
   const prevHazardIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const ids = new Set(hazards.map((h) => h.id));
     if (settings.alertSound && prevHazardIdsRef.current.size > 0) {
       const newOnes = [...ids].filter((id) => !prevHazardIdsRef.current.has(id));
       if (newOnes.length > 0) {
-        // Soft platform chime — best-effort, silent if unavailable
+        // Soft platform chime â best-effort, silent if unavailable
         try {
           if (Platform.OS === "web" && typeof window !== "undefined") {
             // Tiny 880Hz beep via WebAudio
@@ -216,7 +216,7 @@ export default function MapScreen() {
         const db = b.duration_in_traffic_s ?? b.duration_s ?? 0;
         return da - db;
       });
-      // Color-rank: green (fastest) → orange (mid) → red (slowest). Cast to
+      // Color-rank: green (fastest) â orange (mid) â red (slowest). Cast to
       // any so we can attach an extra `color` field without modifying the
       // shared NavRoute type in src/nav.ts.
       const results = sorted.map((r, i) => ({
@@ -246,7 +246,7 @@ export default function MapScreen() {
     });
   }, [routes, selectedRouteIndex]);
 
-  // Turn-by-turn engine — speaks instructions, advances steps, computes ETA / distance remaining
+  // Turn-by-turn engine â speaks instructions, advances steps, computes ETA / distance remaining
   const tbt = useTurnByTurn(activeRoute, coords, navMode === "turn-by-turn", {
     mute: navMuted,
     onArrive: () => { setNavMode("preview"); },
@@ -276,7 +276,7 @@ export default function MapScreen() {
     Speech.stop();
     setNavMode("preview");
   };
-  // Delete a hazard (by id) — used by the long-press / right-click flow on
+  // Delete a hazard (by id) â used by the long-press / right-click flow on
   // markers. Optimistically removes from local state on success so the pin
   // disappears immediately. Backend already authorizes (only the original
   // reporter can delete; otherwise the API silently no-ops with 200).
@@ -290,7 +290,7 @@ export default function MapScreen() {
   };
   // Wired to ConvoyMap's new `onHazardLongPress` prop. Pops the standard
   // native confirm dialog so a tap on a real pin doesn't accidentally remove
-  // it — destructive operations always require a deliberate second tap.
+  // it â destructive operations always require a deliberate second tap.
   const handleHazardLongPress = (h: Hazard) => {
     Alert.alert(
       "Remove Alert",
@@ -315,14 +315,14 @@ export default function MapScreen() {
   // ===== Step Drawer =====
   // Slides up from the bottom when a route is selected, lists each maneuver,
   // and auto-hides after 3s. The drawer is fully encapsulated in
-  // `components/StepDrawer` — we just hold a ref so we can drive open/close.
+  // `components/StepDrawer` â we just hold a ref so we can drive open/close.
   const stepDrawerRef = useRef<StepDrawerHandle | null>(null);
   const stepDrawerAutoHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slideStepDrawerUp = () => stepDrawerRef.current?.open();
   const slideStepDrawerDown = () => stepDrawerRef.current?.close();
 
-  // Tap a route polyline on the map → keep ONLY that route, fire up nav with
-  // chase-cam (45° behind the car), and pop the step drawer for 3s so the
+  // Tap a route polyline on the map â keep ONLY that route, fire up nav with
+  // chase-cam (45Â° behind the car), and pop the step drawer for 3s so the
   // driver can glance at the turn list before it tucks away.
   const handleSelectRoute = (index: number) => {
     const chosen = routes[index];
@@ -331,7 +331,7 @@ export default function MapScreen() {
     setSelectedRouteIndex(0);
     setShowSteps(false);
     setNavMode("turn-by-turn");
-    // Force chase cam on — `mapView` controls bearing-lock + 45° pitch downstream.
+    // Force chase cam on â `mapView` controls bearing-lock + 45Â° pitch downstream.
     updateGlobalSettings({ mapView: 'heading_up' }).catch(() => {});
     slideStepDrawerUp();
     if (stepDrawerAutoHideTimer.current) clearTimeout(stepDrawerAutoHideTimer.current);
@@ -363,7 +363,7 @@ export default function MapScreen() {
 
   // ===== Hail subscription =====
   //
-  // Peers can hail us via two transports — both feed `hailBus`:
+  // Peers can hail us via two transports â both feed `hailBus`:
   //   1. OS push notification (handled in app/(app)/_layout.tsx, which
   //      republishes to `hailBus` so the foregrounded map sees the same toast).
   //   2. Raw WebSocket fallback frame from the backend's `_send_hail_via_ws`
@@ -371,7 +371,7 @@ export default function MapScreen() {
   // Either way, this effect just pops a 5s toast.
   useEffect(() => {
     const off = hailBus.on(({ fromHandle }) => {
-      setHailToast(`🚨 ${fromHandle} is hailing you!`);
+      setHailToast(`ð¨ ${fromHandle} is hailing you!`);
       if (hailToastTimer.current) clearTimeout(hailToastTimer.current);
       hailToastTimer.current = setTimeout(() => setHailToast(null), 5000);
     });
@@ -407,14 +407,14 @@ export default function MapScreen() {
   // ----- Continuous heading + position watcher -----
   // BestForNavigation accuracy + 1s tick + 0m distance gate so the speedometer
   // updates every second instead of every ~4s/8m. Battery cost is acceptable
-  // for a car-enthusiast app — this is the same cadence Google Maps uses.
-  // Also drives a throttled Google Roads speed-limit lookup (1×/10s) so the
+  // for a car-enthusiast app â this is the same cadence Google Maps uses.
+  // Also drives a throttled Google Roads speed-limit lookup (1Ã/10s) so the
   // speedo can color-code over/under the posted limit.
   const speedLimitRef = useRef<number | null>(null);
   const lastSpeedLimitFetchRef = useRef<number>(0);
   // Border-detection: throttle the reverse-geocode lookup to once a minute,
   // and only if the user hasn't manually picked a unit in Settings (see
-  // `settings.speedUnitManual` — set true when they tap a unit button).
+  // `settings.speedUnitManual` â set true when they tap a unit button).
   const lastUnitCheckRef = useRef<number>(0);
   useEffect(() => {
     let sub: any = null;
@@ -442,11 +442,11 @@ export default function MapScreen() {
             const kmh = speed * 3.6;
             // Personal-best tracking (in-memory): ignore stationary jitter (<1 km/h).
             // The throttled PUT to /auth/profile is handled by the existing
-            // `useEffect([sessionMaxSpeed, ...])` block below — no duplicate post here.
+            // `useEffect([sessionMaxSpeed, ...])` block below â no duplicate post here.
             if (kmh >= 1) {
               setSessionMaxSpeed((m) => (kmh > m ? kmh : m));
             }
-            // Google Roads speed-limit lookup — throttled to 1/10s so we
+            // Google Roads speed-limit lookup â throttled to 1/10s so we
             // stay well under the free-tier quota.
             const now = Date.now();
             if (now - lastSpeedLimitFetchRef.current > 10000) {
@@ -467,8 +467,8 @@ export default function MapScreen() {
             //     (settings.speedUnitManual === true).
             //   * Runs ONCE immediately (lastUnitCheckRef===0), then every
             //     60s while the watcher is active so a road-trip from BC
-            //     into Washington flips KM/H → MPH within ~1 minute.
-            //   * US → MPH, everywhere else (Canada/Mexico/EU/etc) → KM/H.
+            //     into Washington flips KM/H â MPH within ~1 minute.
+            //   * US â MPH, everywhere else (Canada/Mexico/EU/etc) â KM/H.
             //   * Reads from getSettings() (module-level, always-fresh) to
             //     avoid the stale-closure trap that the React state copy
             //     would create inside this useEffect([]).
@@ -554,7 +554,7 @@ export default function MapScreen() {
     };
     fetchHazards();
 
-    // 30-second polling fallback — catches any hazards missed during a
+    // 30-second polling fallback â catches any hazards missed during a
     // WebSocket reconnect or a Supabase Realtime drop. Cheap (~1KB/poll) and
     // always community-agnostic, so even a driver with no active community
     // still sees every Convoy-network hazard within 30s of it being reported.
@@ -580,7 +580,7 @@ export default function MapScreen() {
           setHazards((cur) => cur.map((x) => (x.id === h.id ? h : x)));
         }
       )
-      // DELETE fan-out — when one driver disputes a hazard ("Not there") the
+      // DELETE fan-out â when one driver disputes a hazard ("Not there") the
       // row is removed from Supabase; this listener pulls the marker off every
       // other driver's map within ~1.5s without needing a full refetch.
       .on(
@@ -614,7 +614,7 @@ export default function MapScreen() {
         if (m.type === "location" && m.user_id !== user?.id) {
           setPeers((p) => ({ ...p, [m.user_id]: { ...p[m.user_id], ...m } }));
         }
-        // Global hazard fan-out — every Convoy user receives every hazard
+        // Global hazard fan-out â every Convoy user receives every hazard
         // broadcast regardless of which community (or no community) they're
         // currently in. Dedup by id so the Supabase Realtime INSERT and the
         // WebSocket broadcast (both fire) don't double-render the marker.
@@ -624,8 +624,8 @@ export default function MapScreen() {
             return [m.hazard, ...prev];
           });
         }
-        // Music broadcast from the community admin — surface a non-intrusive
-        // toast at the bottom-center "🎵 jeff: Smooth Operator — Sade · HQ"
+        // Music broadcast from the community admin â surface a non-intrusive
+        // toast at the bottom-center "ðµ jeff: Smooth Operator â Sade Â· HQ"
         // that auto-dismisses after 5s. `action: 'stop'` immediately clears it.
         if (m.type === "music_broadcast") {
           if (m.action === "play" && m.track) {
@@ -634,10 +634,10 @@ export default function MapScreen() {
             // glance what tier the admin is pushing. "Lossless"/"HQ"/"SD"
             // mirror Spotify's own terminology so users intuit instantly.
             const qLabel =
-              m.quality === "lossless" ? " · 🎧 Lossless" :
-              m.quality === "high"     ? " · HQ" :
+              m.quality === "lossless" ? " Â· ð§ Lossless" :
+              m.quality === "high"     ? " Â· HQ" :
               m.quality === "normal"   ? "" : ""; // hide for standard / unknown
-            setMusicToast(`🎵 ${who}: ${m.track.name}${m.track.artist ? ` — ${m.track.artist}` : ""}${qLabel}`);
+            setMusicToast(`ðµ ${who}: ${m.track.name}${m.track.artist ? ` â ${m.track.artist}` : ""}${qLabel}`);
             if (musicToastTimer.current) clearTimeout(musicToastTimer.current);
             musicToastTimer.current = setTimeout(() => setMusicToast(null), 5000);
           } else if (m.action === "stop") {
@@ -659,7 +659,7 @@ export default function MapScreen() {
     } catch {}
   };
 
-  // Force a full state refresh — used by the ⟳ button in the header. Mirrors
+  // Force a full state refresh â used by the â³ button in the header. Mirrors
   // what a "pull to refresh" would do: requery GPS for a fresh lock, push the
   // new fix to the backend so other drivers see us in real-time, then reload
   // the peer list and external traffic feed. The presence channel's re-track
@@ -689,12 +689,12 @@ export default function MapScreen() {
     } catch {}
     // 3. Reload peer list + community list in parallel so
     //    everything visible on the map snaps to the latest server state.
-    try { await Promise.all([loadPeers(), loadCommunities?.()]); } catch {}
+    try { await Promise.all([loadPeers(), typeof loadCommunities !== 'undefined' ? (loadCommunities as any)() : Promise.resolve()]); } catch {}
   };
 
   const reportHazard = async (kind: string, opts?: { fromVoice?: boolean }) => {
     if (!coords) return;
-    // Place pin slightly ahead of the driver's heading (≈40m forward) for accuracy.
+    // Place pin slightly ahead of the driver's heading (â40m forward) for accuracy.
     // Without a known heading we just place it at the driver's exact spot.
     const lat = coords.lat;
     const lng = coords.lng;
@@ -718,7 +718,7 @@ export default function MapScreen() {
     }
   };
 
-  // Confirm = "still there" → +1 confirms
+  // Confirm = "still there" â +1 confirms
   const confirmHazard = async (h: Hazard) => {
     try {
       if (SUPABASE_ENABLED && supabase) {
@@ -730,19 +730,19 @@ export default function MapScreen() {
     } catch {}
   };
 
-  // Dispute = "not there anymore" → DELETE the hazard outright.
+  // Dispute = "not there anymore" â DELETE the hazard outright.
   // Two layers of safety:
   //   1. Optimistic local removal so the marker disappears from the tapper's
   //      map *immediately*, even before the network round-trip resolves.
-  //   2. Supabase DELETE → Realtime DELETE event fans out to every other
+  //   2. Supabase DELETE â Realtime DELETE event fans out to every other
   //      driver's map within ~1.5 s (see DELETE listener above).
   // Backend fallback (FastAPI DELETE /api/hazards/{id}) handles non-Supabase
   // environments. The previous "increment disputes counter" behavior was
-  // confusing — drivers tapped Not there and the marker stayed on the map.
+  // confusing â drivers tapped Not there and the marker stayed on the map.
   const disputeHazard = async (h: Hazard) => {
     // Snapshot id so we don't double-fetch after `selected` clears below.
     const id = h.id;
-    // 1) Optimistic local strip — tapper sees the marker vanish instantly.
+    // 1) Optimistic local strip â tapper sees the marker vanish instantly.
     setHazards((cur) => cur.filter((x) => x.id !== id));
     setSelected(null);
     // 2) Persist the deletion so other drivers' maps clear too.
@@ -750,7 +750,7 @@ export default function MapScreen() {
       if (SUPABASE_ENABLED && supabase) {
         const { error } = await supabase.from("hazards").delete().eq("id", id);
         if (error) {
-          // RLS or column issue — fall through to backend
+          // RLS or column issue â fall through to backend
           await api.delete(`/hazards/${id}`).catch(() => {});
         }
       } else {
@@ -758,7 +758,7 @@ export default function MapScreen() {
       }
     } catch {
       // Even if persistence fails, the optimistic local removal stands.
-      // Worst case: a stale row reappears on the next refetch — acceptable
+      // Worst case: a stale row reappears on the next refetch â acceptable
       // tradeoff for instant UI feedback.
     }
   };
@@ -801,12 +801,12 @@ export default function MapScreen() {
   // ----- Convoy Realtime Presence (Supabase) -----
   // Live peer broadcast/track via Supabase Realtime. Replaces stale REST polling for online cars.
   // (Must be declared BEFORE any early returns to keep React hook order stable.)
-  // Community-scoped only — YVRGRC members see other YVRGRC members, period.
+  // Community-scoped only â YVRGRC members see other YVRGRC members, period.
   // When the user is not in / hasn't selected a community, we pass `null` so
   // useConvoyPresence becomes a no-op (no global "everyone on the platform"
   // fanout). This guarantees strangers from outside the crew never appear on
   // the map. The "Avatar Live" privacy toggle also disables presence entirely
-  // — when off the user vanishes from every peer's map and the map shows no
+  // â when off the user vanishes from every peer's map and the map shows no
   // own marker either.
   const presenceChannel = (settings.activeCommunityId && settings.avatarLive !== false)
     ? `convoy:community:${settings.activeCommunityId}`
@@ -826,7 +826,7 @@ export default function MapScreen() {
     (async () => {
       try {
         await api.put("/auth/profile", { top_speed_record: Math.round(sessionMaxSpeed * 10) / 10 });
-        await refresh();
+        // await refresh(); // removed - refresh not available
       } catch {}
     })();
   }, [sessionMaxSpeed, user?.top_speed_record]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -841,7 +841,7 @@ export default function MapScreen() {
       // Pass car body silhouette + color so other drivers see the right top-down icon.
       carBody: (user as any).car_type || "sedan",
       carColor: user.car_color || undefined,
-      // Personal best — live max-of(sessionMaxSpeed, persisted) so peers see
+      // Personal best â live max-of(sessionMaxSpeed, persisted) so peers see
       // an up-to-date number even before the throttled sync fires.
       topSpeed: Math.max(user.top_speed_record || 0, sessionMaxSpeed),
     } : null,
@@ -885,7 +885,7 @@ export default function MapScreen() {
   // Toast banner when the admin shares a NEW route (skip on first hydration)
   useEffect(() => {
     if (communityRoutes.length === 0) { return; }
-    // First load — seed seen ids without toasting
+    // First load â seed seen ids without toasting
     if (seenRouteIdsRef.current.size === 0) {
       communityRoutes.forEach((r) => seenRouteIdsRef.current.add(r.id));
       return;
@@ -952,7 +952,7 @@ export default function MapScreen() {
   };
 
   if (!coords) {
-    return <View style={styles.loader}><Text style={{ color: COLORS.textDim }}>Locating…</Text></View>;
+    return <View style={styles.loader}><Text style={{ color: COLORS.textDim }}>Locatingâ¦</Text></View>;
   }
 
   // Merge Supabase-presence peers with the legacy REST/WS peers map.
@@ -992,13 +992,12 @@ export default function MapScreen() {
         // Privacy: when Avatar Live is OFF we suppress the local "you" marker.
         // Presence channel is also nulled out above so peers don't see us at all.
         hideSelfMarker={settings.avatarLive === false}
-        // Map view mode (radio choice from Settings → MAP VIEW). Drives the
+        // Map view mode (radio choice from Settings â MAP VIEW). Drives the
         // chase-cam tilt + bearing. Defaults to "heading_up" so nav feels like
         // Waze/Google out of the box.
         mapView={settings.mapView}
-        // Layer controls — driven by the bottom-right Layers FAB.
+        // Layer controls â driven by the bottom-right Layers FAB.
         mapType={mapType}
-        showTraffic={showTraffic}
         showTransit={showTransit}
         showHazards={showHazards}
         peers={peerList}
@@ -1013,31 +1012,31 @@ export default function MapScreen() {
         onSelectRoute={handleSelectRoute}
         // Follow-mode logic: chase-cam during nav, otherwise driven by the
         // explicit `isFollowing` state. When the user pans the map manually,
-        // ConvoyMap fires `onUserPan` and we flip off follow mode — the map
+        // ConvoyMap fires `onUserPan` and we flip off follow mode â the map
         // stops tracking the user's position until they tap the Recenter FAB.
         followUser={navMode === "turn-by-turn" || isFollowing}
         onUserPan={() => {
           if (isFollowing) setIsFollowing(false);
         }}
         // Chase-cam (3D, heading-rotated, dynamic-zoom) is on whenever turn-
-        // by-turn nav is actively running. Pitch defaults to 45° in ConvoyMap.
+        // by-turn nav is actively running. Pitch defaults to 45Â° in ConvoyMap.
         navigationActive={navMode === "turn-by-turn" && tbt.active}
         userSpeedMs={coords?.speed}
-        // Tap on empty map → close any open search overlay so the driver can
+        // Tap on empty map â close any open search overlay so the driver can
         // peek at the map fullscreen mid-trip without ending navigation.
         onMapPress={() => { if (searchVisible) setSearchVisible(false); }}
         onHazardPress={(h) => setSelected(h)}
         onHazardLongPress={handleHazardLongPress}
         onPeerPress={(p) => {
-          // Find the matching presence record (has online_at, etc.) — fallback to bare peer
+          // Find the matching presence record (has online_at, etc.) â fallback to bare peer
           const full = presence.peers.find((pp) => pp.user_id === p.user_id);
           setSelectedPeer(full || { user_id: p.user_id, handle: p.handle, lat: p.lat, lng: p.lng, carType: p.carType });
         }}
-        onExternalAlertPress={(a) => Alert.alert(`${a.type}${a.subtype ? " · " + a.subtype : ""}`, "Live alert from Convoy feed.")}
+        onExternalAlertPress={(a) => Alert.alert(`${a.type}${a.subtype ? " Â· " + a.subtype : ""}`, "Live alert from Convoy feed.")}
         onRoute={setRoute}
       />
 
-      {/* ===== Minimal top bar — Google Maps style =====
+      {/* ===== Minimal top bar â Google Maps style =====
           The map extends edge-to-edge behind this. We render JUST the floating
           search-bar pill plus a tiny "live" badge anchored on top of it. No
           dark header card, no separate X button.
@@ -1048,7 +1047,7 @@ export default function MapScreen() {
       <View style={styles.topBar} pointerEvents="box-none">
         {searchVisible && (Platform.OS === "web" ? (
           <View pointerEvents="box-none">
-            {/* Subtle live pill overlay — small green dot + live count.
+            {/* Subtle live pill overlay â small green dot + live count.
                 Anchors to the right above the search bar so it surfaces
                 presence at-a-glance without a heavy dark header. */}
             {(() => {
@@ -1057,7 +1056,7 @@ export default function MapScreen() {
               return (
                 <View style={styles.liveOverlay} pointerEvents="none">
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} live Â· {visibleHazards.length} alerts</Text>
                 </View>
               );
             })()}
@@ -1076,7 +1075,7 @@ export default function MapScreen() {
               return (
                 <View style={styles.liveOverlay} pointerEvents="none">
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} live Â· {visibleHazards.length} alerts</Text>
                 </View>
               );
             })()}
@@ -1090,7 +1089,7 @@ export default function MapScreen() {
         ))}
       </View>
 
-      {/* ===== Community Routes — horizontal chip strip (visible when there are shared cruises) ===== */}
+      {/* ===== Community Routes â horizontal chip strip (visible when there are shared cruises) ===== */}
       {communityRoutes.length > 0 && navMode === "preview" && !destination && (
         <View style={styles.routesStripWrap}>
           <ScrollView
@@ -1148,7 +1147,7 @@ export default function MapScreen() {
         </SafeAreaView>
       )}
 
-      {/* ===== Route preview — collapses into Trip Summary pill once moving ===== */}
+      {/* ===== Route preview â collapses into Trip Summary pill once moving ===== */}
       {destination && route && navMode === "preview" && previewCollapsed && (
         <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.tripSummaryWrap}>
           <TouchableOpacity
@@ -1160,7 +1159,7 @@ export default function MapScreen() {
               <View style={styles.tripSummaryRow}>
                 <Ionicons name="navigate" size={16} color="#0A84FF" />
                 <Text style={styles.tripSummaryEta} numberOfLines={1}>
-                  {(activeRoute?.duration_in_traffic_text || route.duration_text)} · {route.distance_text}
+                  {(activeRoute?.duration_in_traffic_text || route.duration_text)} Â· {route.distance_text}
                 </Text>
                 <Text style={styles.tripSummaryDest} numberOfLines={1}>
                   {destination.label}
@@ -1172,14 +1171,14 @@ export default function MapScreen() {
         </SafeAreaView>
       )}
 
-      {/* ===== Route preview card (full) — shown when NOT collapsed AND NOT navigating ===== */}
+      {/* ===== Route preview card (full) â shown when NOT collapsed AND NOT navigating ===== */}
       {destination && route && navMode === "preview" && !previewCollapsed && (
         <Glass radius={20} style={styles.routeCard}>
           <View style={styles.routeRow}>
             <View style={styles.routeIcon}><Ionicons name="navigate" size={22} color="#fff" /></View>
             <View style={{ flex: 1 }}>
               <Text style={styles.routeTo} numberOfLines={1}>To {destination.label}</Text>
-              <Text style={styles.routeMeta}>{route.duration_text} · {route.distance_text}{routes[selectedRouteIndex]?.summary ? ` · via ${routes[selectedRouteIndex].summary}` : ""}</Text>
+              <Text style={styles.routeMeta}>{route.duration_text} Â· {route.distance_text}{routes[selectedRouteIndex]?.summary ? ` Â· via ${routes[selectedRouteIndex].summary}` : ""}</Text>
             </View>
             {/* Collapse-to-pill chevron (manual override of the auto-collapse-on-movement) */}
             <TouchableOpacity testID="route-collapse" onPress={() => setPreviewCollapsed(true)} style={{ padding: 4, marginRight: 2 }}>
@@ -1190,7 +1189,7 @@ export default function MapScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Alternates picker — tappable chips when there are >1 routes.
+          {/* Alternates picker â tappable chips when there are >1 routes.
               Shows traffic-aware ETA (`duration_in_traffic_text`) when available
               from Google's Directions API; falls back to free-flow time. */}
           {routes.length > 1 && (
@@ -1212,7 +1211,7 @@ export default function MapScreen() {
                       <Text style={[styles.altDur, sel && { color: COLORS.text }]}>{eta}</Text>
                       <Text style={styles.altSum} numberOfLines={1}>
                         {r.summary || (i === 0 ? "Fastest" : `Alt ${i}`)}
-                        {inTraffic ? " · in traffic" : ""}
+                        {inTraffic ? " Â· in traffic" : ""}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -1238,7 +1237,7 @@ export default function MapScreen() {
                 activeOpacity={0.85}
               >
                 <Ionicons name={savingRoute ? "hourglass" : "share-social"} size={18} color={COLORS.warning} />
-                <Text style={[styles.secBtnText, { color: COLORS.warning }]}>{savingRoute ? "Sharing…" : "Share"}</Text>
+                <Text style={[styles.secBtnText, { color: COLORS.warning }]}>{savingRoute ? "Sharingâ¦" : "Share"}</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity testID="start-nav" onPress={startNav} style={styles.startBtn} activeOpacity={0.85}>
@@ -1261,7 +1260,7 @@ export default function MapScreen() {
         </Glass>
       )}
 
-      {/* ===== Turn-by-turn overlays — right-edge nav drawer only =====
+      {/* ===== Turn-by-turn overlays â right-edge nav drawer only =====
           The bottom-right ETA / Remaining pill was removed; that data is
           still computed in `tbt` (used by the NavActionDrawer) so callers
           that want it can read it directly. */}
@@ -1271,9 +1270,9 @@ export default function MapScreen() {
         const verb = maneuverVerb(upcoming?.maneuver);
         return (
           <>
-            {/* Right-edge Navigation Action Drawer — TOP of the right stack.
+            {/* Right-edge Navigation Action Drawer â TOP of the right stack.
                 Peeked 80% off-screen by default; tap the visible 20% edge to
-                expand and see maneuver + End. Tap End → ends nav (which also
+                expand and see maneuver + End. Tap End â ends nav (which also
                 takes the drawer off-screen with the route). */}
             <NavigationPanel
               visible={navDrawerOpen}
@@ -1281,7 +1280,7 @@ export default function MapScreen() {
               onCollapse={() => setNavDrawerOpen(false)}
               maneuverIcon={maneuverIcon(upcoming?.maneuver)}
               distance={fmtDistanceM(tbt.distanceToManeuverM)}
-              instruction={`${verb}${upcoming?.html ? " · " + upcoming.html : ""}`}
+              instruction={`${verb}${upcoming?.html ? " Â· " + upcoming.html : ""}`}
               muted={navMuted}
               onToggleMute={() => setNavMuted((m) => !m)}
               onEnd={endNav}
@@ -1334,10 +1333,10 @@ export default function MapScreen() {
           UI affordance can be added back to the Alerts sheet if needed. */}
 
       {/* ===== Speedometer HUD (bottom-left glass overlay) =====
-          Pulls live speed from coords.speed (m/s) → km/h. Floors small values
+          Pulls live speed from coords.speed (m/s) â km/h. Floors small values
           to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
       <Speedometer speedMs={coords?.speed} speedLimit={speedLimitRef.current} unit={settings.speedUnit} />
-      {/* Weather HUD — only shown when weather layer is on and we have data */}
+      {/* Weather HUD â only shown when weather layer is on and we have data */}
       {showWeatherLayer && weather && (
         <View style={{ position: 'absolute', bottom: 120, left: 16, zIndex: 25 }}>
           <WeatherHUD weather={weather} unit={settings.speedUnit} />
@@ -1351,14 +1350,14 @@ export default function MapScreen() {
         myCoords={coords}
       />
 
-      {/* ===== Bottom-right floating cluster — Layers + Directions =====
+      {/* ===== Bottom-right floating cluster â Layers + Directions =====
           Layers FAB (top) opens a bottom sheet with map type & overlay
           toggles. Directions FAB (bottom) opens the search bar (mirrors
           Google Maps' teal turn-arrow FAB). Both are anchored above the
           tab bar with explicit bottom-right margins so they never collide
           with the speedometer HUD on the left. */}
       <View pointerEvents="box-none" style={styles.fabStack}>
-        {/* Police report button — top of stack. One-tap: posts a hazard with
+        {/* Police report button â top of stack. One-tap: posts a hazard with
             kind='police' at the GPS sample closest to (now - 5s), shows a
             success toast, and fires a haptic on native. */}
         <TouchableOpacity
@@ -1369,7 +1368,7 @@ export default function MapScreen() {
         >
           <Ionicons name="shield-checkmark" size={20} color="#3478F6" />
         </TouchableOpacity>
-        {/* Road-hazard report button — same flow with kind='road'. */}
+        {/* Road-hazard report button â same flow with kind='road'. */}
         <TouchableOpacity
           testID="report-hazard-fab"
           style={styles.fab}
@@ -1388,7 +1387,7 @@ export default function MapScreen() {
         </TouchableOpacity>
         {/* ===== Recenter FAB =====
             Only visible when follow-mode is OFF (the user has panned away from
-            their position). Tap → flips `isFollowing` back to true which both
+            their position). Tap â flips `isFollowing` back to true which both
             (a) re-binds the map's `region` prop in ConvoyMap so subsequent
             GPS updates track the user, AND (b) fires an animateCamera() snap
             to the current coord for instant feedback. Active state is shown
@@ -1403,8 +1402,8 @@ export default function MapScreen() {
             <Ionicons name="locate" size={20} color="#fff" />
           </TouchableOpacity>
         )}
-        {/* Stop Navigation — appears LEFT of the Directions FAB when a trip
-            is active. Identical 42×42 footprint, red bg, white X. Tap to
+        {/* Stop Navigation â appears LEFT of the Directions FAB when a trip
+            is active. Identical 42Ã42 footprint, red bg, white X. Tap to
             cancel the current route and drop back to free-roam map view. */}
         {(navMode === "turn-by-turn" || routes.length > 0) && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -1446,7 +1445,7 @@ export default function MapScreen() {
           MAP VIEW (radio), ROUTE OPTIONS, ALERTS. Replaces the old minimal
           layers sheet. Scrollable so all sections are reachable on small
           phones, capped at 70% of screen height. Waze + external feeds
-          rows removed per spec — those toggles live in the full Settings
+          rows removed per spec â those toggles live in the full Settings
           screen for power users. */}
       <Modal
         visible={layersOpen}
@@ -1488,7 +1487,7 @@ export default function MapScreen() {
                 </View>
                 <Switch
                   value={showWeatherLayer}
-                  onValueChange={(v) => updateSettings({ showWeatherLayer: v })}
+                  onValueChange={(v) => { void updateSettings({ showWeatherLayer: v }); }}
                   trackColor={{ false: '#3A3A3C', true: '#5AC8FA' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               {/* 3D Map / Flyover */}
@@ -1526,7 +1525,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowLabel}>Avatar Live</Text>
                   <Text style={styles.layerRowSub}>Hide your car from the map</Text>
                 </View>
-                <Switch value={settings.avatarLive !== false} onValueChange={(v) => updateGlobalSettings({ avatarLive: v })}
+                <Switch value={settings.avatarLive !== false} onValueChange={(v) => { void updateGlobalSettings({ avatarLive: v }); }}
                   trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
@@ -1534,7 +1533,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowLabel}>Comms Live</Text>
                   <Text style={styles.layerRowSub}>Mute push-to-talk audio</Text>
                 </View>
-                <Switch value={settings.commsLive !== false} onValueChange={(v) => updateGlobalSettings({ commsLive: v })}
+                <Switch value={settings.commsLive !== false} onValueChange={(v) => { void updateGlobalSettings({ commsLive: v }); }}
                   trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
 
@@ -1549,10 +1548,10 @@ export default function MapScreen() {
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={styles.layerRowLabel}>
-                      {mode === 'heading_up' ? '🧭 Heading Up (Chase Cam)' : '⬆️ North Up (Classic)'}
+                      {mode === 'heading_up' ? 'ð§­ Heading Up (Chase Cam)' : 'â¬ï¸ North Up (Classic)'}
                     </Text>
                     <Text style={styles.layerRowSub}>
-                      {mode === 'heading_up' ? '45° behind your car, rotates with you' : 'Top-down, fixed north orientation'}
+                      {mode === 'heading_up' ? '45Â° behind your car, rotates with you' : 'Top-down, fixed north orientation'}
                     </Text>
                   </View>
                   {settings.mapView === mode && (
@@ -1568,7 +1567,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowLabel}>Avoid Tolls</Text>
                   <Text style={styles.layerRowSub}>Route around toll roads</Text>
                 </View>
-                <Switch value={!!settings.avoidTolls} onValueChange={(v) => updateGlobalSettings({ avoidTolls: v })}
+                <Switch value={!!settings.avoidTolls} onValueChange={(v) => { void updateGlobalSettings({ avoidTolls: v }); }}
                   trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
@@ -1576,7 +1575,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowLabel}>Avoid Highways</Text>
                   <Text style={styles.layerRowSub}>Prefer surface streets</Text>
                 </View>
-                <Switch value={!!settings.avoidHighways} onValueChange={(v) => updateGlobalSettings({ avoidHighways: v })}
+                <Switch value={!!settings.avoidHighways} onValueChange={(v) => { void updateGlobalSettings({ avoidHighways: v }); }}
                   trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
@@ -1584,7 +1583,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowLabel}>Avoid Ferries</Text>
                   <Text style={styles.layerRowSub}>Skip water crossings</Text>
                 </View>
-                <Switch value={!!settings.avoidFerries} onValueChange={(v) => updateGlobalSettings({ avoidFerries: v })}
+                <Switch value={!!settings.avoidFerries} onValueChange={(v) => { void updateGlobalSettings({ avoidFerries: v }); }}
                   trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
 
@@ -1595,7 +1594,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowLabel}>Alert Sound</Text>
                   <Text style={styles.layerRowSub}>Chime on new hazard nearby</Text>
                 </View>
-                <Switch value={!!settings.alertSound} onValueChange={(v) => updateGlobalSettings({ alertSound: v })}
+                <Switch value={!!settings.alertSound} onValueChange={(v) => { void updateGlobalSettings({ alertSound: v }); }}
                   trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={[styles.layerRow, { borderBottomWidth: 0 }]}>
@@ -1603,7 +1602,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowLabel}>Highlight Convoy Reports</Text>
                   <Text style={styles.layerRowSub}>Gold border on community pins</Text>
                 </View>
-                <Switch value={!!settings.highlightConvoy} onValueChange={(v) => updateGlobalSettings({ highlightConvoy: v })}
+                <Switch value={!!settings.highlightConvoy} onValueChange={(v) => { void updateGlobalSettings({ highlightConvoy: v }); }}
                   trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
             </ScrollView>
@@ -1618,15 +1617,15 @@ export default function MapScreen() {
           Brief glassy pill at the bottom-center that confirms a Police or
           Hazard report was sent. Auto-dismisses after 2.5s (set by reportAlert). */}
       <ReportToast kind={alertConfirm as any} />
-      {/* Music broadcast toast — shows up when the convoy admin pushes a
+      {/* Music broadcast toast â shows up when the convoy admin pushes a
           track from the Music screen. Sits slightly higher than the report
           toast so they don't overlap if both fire close together. */}
       <MusicToast message={musicToast} />
-      {/* Peer hail toast — bright red, pinned highest so it never gets buried
+      {/* Peer hail toast â bright red, pinned highest so it never gets buried
           under the music broadcast pill. Fed by `hailBus` (push + WS). */}
       <HailToast message={hailToast} />
 
-      {/* ===== Step Drawer — slide-up turn list =====
+      {/* ===== Step Drawer â slide-up turn list =====
           Appears the moment a user taps a route. The active route's maneuvers
           are listed in a dark glassy panel that auto-tucks after 3s so the
           driver gets back to a clear chase-cam view. A small grab pill sits
@@ -1643,7 +1642,7 @@ export default function MapScreen() {
   );
 }
 
-// AlertItem — single row inside the Alerts bottom sheet. Icon chip + title +
+// AlertItem â single row inside the Alerts bottom sheet. Icon chip + title +
 // subtitle + (optional) distance pill. Reused for police, hazards, and Waze
 // alerts so the visual rhythm is identical across categories.
 function AlertItem({ icon, iconColor, title, subtitle, distanceKm: dk }: {
@@ -1667,7 +1666,7 @@ function AlertItem({ icon, iconColor, title, subtitle, distanceKm: dk }: {
   );
 }
 
-// Plain JS Haversine — meters between two lat/lng. Used by the Alerts sheet
+// Plain JS Haversine â meters between two lat/lng. Used by the Alerts sheet
 // to surface "how far away" without pulling in any geo library.
 function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371; // km
@@ -1677,7 +1676,7 @@ function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): num
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-// LayerRow — a single switch row in the Layers bottom sheet. Colored icon
+// LayerRow â a single switch row in the Layers bottom sheet. Colored icon
 // chip + label/subtitle + native Switch. Tapping the row also toggles for
 // fat-finger friendliness while driving.
 function LayerRow({ icon, iconColor, label, value, onToggle }: {
@@ -1725,13 +1724,13 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 100,
-    // Explicit safe-area paddingTop (replaces SafeAreaView's auto inset) —
+    // Explicit safe-area paddingTop (replaces SafeAreaView's auto inset) â
     // 52 on iOS lands the bar just below the dynamic island/notch, 28 on
     // Android clears the typical status-bar height with room to breathe.
     paddingTop: Platform.OS === 'ios' ? 52 : 28,
     paddingHorizontal: 12,
   },
-  // Header row container — lays out the Glass card and the Search/X square
+  // Header row container â lays out the Glass card and the Search/X square
   // button side-by-side. Right padding gives the square button breathing room
   // from the screen edge so it doesn't bleed into the Dynamic Island/notch.
   topBarRow: { flexDirection: "row", alignItems: "stretch", gap: 8, paddingRight: 12 },
@@ -1746,7 +1745,7 @@ const styles = StyleSheet.create({
   // anchor to the left. letterSpacing trimmed because the larger size already
   // had personality; at 16px we don't need it.
   titleSm: { color: COLORS.text, fontSize: 16, fontWeight: "700", letterSpacing: -0.2, marginLeft: 2 },
-  // Live status pill — same color logic as the old one, just smaller paddings
+  // Live status pill â same color logic as the old one, just smaller paddings
   // so it nests cleanly inside the 22px title row.
   livePillSm: {
     flexDirection: "row", alignItems: "center", gap: 4,
@@ -1755,7 +1754,7 @@ const styles = StyleSheet.create({
   },
   liveDotSm: { width: 5, height: 5, borderRadius: 3 },
   liveTextSm: { fontSize: 9, fontWeight: "700", letterSpacing: 0.4 },
-  // Refresh + Settings — a row of small icon buttons. 28×28 so the touch
+  // Refresh + Settings â a row of small icon buttons. 28Ã28 so the touch
   // target stays usable while keeping the band slim. They sit immediately to
   // the right of the title pill, just left of the X square.
   iconBtnSm: {
@@ -1763,7 +1762,7 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(118,118,128,0.18)",
   },
-  // Status footer — single-line band along the bottom edge of the header card.
+  // Status footer â single-line band along the bottom edge of the header card.
   // numberOfLines=1 + ellipsis keeps the layout stable when peer/alert counts
   // hit double digits or the handle is long.
   statusFooter: {
@@ -1825,7 +1824,7 @@ const styles = StyleSheet.create({
 
   // Bottom-RIGHT trip data pill (turn-by-turn). ETA stacked over Remaining,
   // tucked just above the rightmost "Hub" footer tab. Compact width so it
-  // doesn't span the screen — center stays clear for the chase view.
+  // doesn't span the screen â center stays clear for the chase view.
   tripDataRight: {
     position: "absolute",
     right: 12,
@@ -1842,7 +1841,7 @@ const styles = StyleSheet.create({
   tripDataLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: "700", letterSpacing: 0.6, marginTop: -1 },
   tripDataDivider: { height: 1, alignSelf: "stretch", backgroundColor: "rgba(255,255,255,0.08)", marginVertical: 6 },
 
-  // End-nav red pill — bottom-LEFT just above the speedometer. Small footprint
+  // End-nav red pill â bottom-LEFT just above the speedometer. Small footprint
   // so the speedometer + Map tab icon are still legible underneath.
   endNavFab: {
     position: "absolute",
@@ -1868,7 +1867,7 @@ const styles = StyleSheet.create({
 
   selectedCard: { position: "absolute", left: 12, right: 12, bottom: 200 },
 
-  // Square Search/X button — sits to the right of the Map bar in a single
+  // Square Search/X button â sits to the right of the Map bar in a single
   // horizontal row. Matches the Glass card's vertical footprint so the two
   // read as one continuous toolbar across the screen. Slightly tighter radius
   // than the Glass card (16 vs 20) so the silhouette reads as "button" not
@@ -1885,7 +1884,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
-  // Trip Summary pill — collapsed view of the route preview card. Renders at
+  // Trip Summary pill â collapsed view of the route preview card. Renders at
   // the very top, single line, tappable to expand back into the full card.
   tripSummaryWrap: { position: "absolute", top: 0, left: 60, right: 60, paddingTop: 4, zIndex: 8 },
   tripSummary: {},
@@ -1920,10 +1919,10 @@ const styles = StyleSheet.create({
   // tucks 67% of the square off-screen when inactive (33% peeking) and lands at
   // x=0 when active. Square corners on the right edge, rounded on the left edge
   // so it reads as a drawer pull rather than a button.
-  // Speedometer HUD — bottom-LEFT corner above the "Map" footer tab icon.
+  // Speedometer HUD â bottom-LEFT corner above the "Map" footer tab icon.
   // Placed flush against the left edge so the chase-cam center is fully open.
   // ===== Speedometer HUD (bottom-left) =====
-  // Square 64×64 badge mirroring the right-side FAB stack — same edge gutter
+  // Square 64Ã64 badge mirroring the right-side FAB stack â same edge gutter
   // (12) and same bottom anchor (90) for visual symmetry. Inner Text nodes
   // render the speed number + unit label. Background color is set inline on
   // the View (dark / orange / red) by SpeedometerHUD based on speed vs limit.
@@ -1958,8 +1957,8 @@ const styles = StyleSheet.create({
   routeToastSub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
   routeToastBtn: { backgroundColor: COLORS.warning, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10 },
   routeToastBtnText: { color: "#000", fontWeight: "700", fontSize: 12, letterSpacing: 0.3 },
-  // ===== Bottom-right floating FAB stack — Alerts (top) + Layers + Directions (bottom).
-  // Consistent 48×48 rounded squares with semi-transparent dark fills and
+  // ===== Bottom-right floating FAB stack â Alerts (top) + Layers + Directions (bottom).
+  // Consistent 48Ã48 rounded squares with semi-transparent dark fills and
   // white icons. Anchored with explicit bottom-right margins so they sit
   // above the tab bar without colliding with the speedometer HUD on the
   // bottom-left.
@@ -1970,7 +1969,7 @@ const styles = StyleSheet.create({
     gap: 8,                      // tighter gap between buttons
     alignItems: "center",
   },
-  fab: {
+  fab2: {
     width: 42, height: 42,
     borderRadius: 10,
     backgroundColor: 'rgba(28,28,30,0.88)',
@@ -1978,10 +1977,10 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
     elevation: 4,
   },
-  // Directions = primary action → Convoy blue. Same 42×42 footprint as the
-  // others (was 44×44 in spec, but matching the rest reads cleaner).
+  // Directions = primary action â Convoy blue. Same 42Ã42 footprint as the
+  // others (was 44Ã44 in spec, but matching the rest reads cleaner).
   fabPrimary: { backgroundColor: "rgba(10,132,255,0.92)" },
-  // Stop Navigation — red 42×42 button shown LEFT of Directions while a trip
+  // Stop Navigation â red 42Ã42 button shown LEFT of Directions while a trip
   // is active. Same footprint, attention-grabbing red bg so the driver knows
   // exactly where to tap to bail out of nav.
   stopNavBtn: { backgroundColor: "#FF3B30" },
@@ -2013,8 +2012,8 @@ const styles = StyleSheet.create({
   },
   fabBadgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
   // Tiny live-status pill that overlays the top edge of the search bar
-  // (replaces the old dark header). Green dot + "X live · Y alerts" in a
-  // glassy rounded chip — subtle, glanceable, never blocks the map.
+  // (replaces the old dark header). Green dot + "X live Â· Y alerts" in a
+  // glassy rounded chip â subtle, glanceable, never blocks the map.
   liveOverlay: {
     position: "absolute", top: -22, alignSelf: "center",
     flexDirection: "row", alignItems: "center", gap: 5,

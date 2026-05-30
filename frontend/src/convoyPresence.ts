@@ -1,12 +1,12 @@
-// Supabase Realtime Presence — live peer tracking for the Convoy.
+// Supabase Realtime Presence â live peer tracking for the Convoy.
 //
 // Each user joins a channel and broadcasts their position + metadata. Presence
 // auto-handles join/leave so the map updates instantly when someone connects
 // or drops off (no polling, no manual disconnect plumbing).
 //
 // Channel naming convention:
-//   - "convoy:global"       — everyone, default
-//   - "convoy:community:<id>" — scoped to a specific community
+//   - "convoy:global"       â everyone, default
+//   - "convoy:community:<id>" â scoped to a specific community
 //
 // Each peer payload looks like:
 //   { user_id, handle, lat, lng, carType, heading?, online_at }
@@ -25,12 +25,12 @@ export type ConvoyPresencePeer = {
   carBody?: string;     // sedan / coupe / suv / sports / truck / hatch / motorcycle / van
   carColor?: string;
   // Canonical GR Corolla broadcast slug (e.g. "grc_heavy_metal"). Empty/undefined
-  // when the user hasn't picked one of the official GRC paints — peer marker
+  // when the user hasn't picked one of the official GRC paints â peer marker
   // falls back to the SVG silhouette so we never render a broken image.
   activeColor?: string;
   heading?: number;
   online_at?: string;
-  // Personal best top cruise speed (km/h) — broadcast so peers can see each other's record.
+  // Personal best top cruise speed (km/h) â broadcast so peers can see each other's record.
   topSpeed?: number;
 };
 
@@ -40,7 +40,7 @@ export type ConvoyMe = {
   carType?: string;
   carBody?: string;
   carColor?: string;
-  // Optional pre-resolved slug — if omitted we compute it from carColor below.
+  // Optional pre-resolved slug â if omitted we compute it from carColor below.
   activeColor?: string;
   // Personal best top cruise speed (km/h). Sent every time we re-track the channel.
   topSpeed?: number;
@@ -67,7 +67,7 @@ export function useConvoyPresence(
 
   // Join / leave channel when channelName or me.user_id changes
   useEffect(() => {
-    // No channel name = privacy-off / no active community → completely opt out
+    // No channel name = privacy-off / no active community â completely opt out
     // of presence. We clear any stale peer list so the previous community's
     // pins disappear instantly the moment Avatar Live is toggled off.
     if (!channelName || !SUPABASE_ENABLED || !supabase || !me?.user_id) {
@@ -85,7 +85,7 @@ export function useConvoyPresence(
     channel
       .on("presence", { event: "sync" }, () => {
         const state = channel.presenceState();
-        // Flatten { user_id: [payload, ...] } → array, drop ourselves
+        // Flatten { user_id: [payload, ...] } â array, drop ourselves
         const list: ConvoyPresencePeer[] = [];
         Object.entries(state).forEach(([uid, presences]) => {
           if (uid === me.user_id) return;
@@ -120,7 +120,7 @@ export function useConvoyPresence(
               carType: me.carType,
               carBody: me.carBody,
               carColor: me.carColor,
-              // Canonical GRC slug — auto-derived if caller didn't pre-resolve.
+              // Canonical GRC slug â auto-derived if caller didn't pre-resolve.
               activeColor: me.activeColor || toGRCSlug(me.carColor) || undefined,
               topSpeed: me.topSpeed,
               lat: coords.lat,
@@ -137,7 +137,7 @@ export function useConvoyPresence(
 
     return () => {
       try { channel.untrack().catch(() => {}); } catch {}
-      try { supabase.removeChannel(channel); } catch {}
+      try { supabase?.removeChannel(channel); } catch {}
       channelRef.current = null;
       setPeers([]);
       setStatus("idle");

@@ -1,13 +1,13 @@
-// ConvoyMap â Google Navigation SDK map component for Convoy.
+// ConvoyMap Ã¢ÂÂ Google Navigation SDK map component for Convoy.
 //
 // ARCHITECTURE:
 //   Uses @googlemaps/react-native-navigation-sdk exclusively.
 //   No react-native-maps. No other map library.
 //
-//   NavigationView   â full-screen map surface (Google Maps tiles + nav UI)
-//   MapViewController â programmatic markers, polylines, camera
-//   NavigationViewController â chase-cam during active navigation
-//   Expo Go fallback â SVG route preview (no native modules available)
+//   NavigationView   Ã¢ÂÂ full-screen map surface (Google Maps tiles + nav UI)
+//   MapViewController Ã¢ÂÂ programmatic markers, polylines, camera
+//   NavigationViewController Ã¢ÂÂ chase-cam during active navigation
+//   Expo Go fallback Ã¢ÂÂ SVG route preview (no native modules available)
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { View, Text, StyleSheet, Dimensions, Platform } from "react-native";
@@ -22,7 +22,7 @@ import type { ExternalAlert, ExternalAlertType } from "./externalFeed";
 import CarMarker from "./CarMarker";
 import { BearingTracker } from "./bearing";
 
-// ââ Lazy-load Navigation SDK (not available in Expo Go) ââââââââââââââââââââââââââââââ
+// Ã¢ÂÂÃ¢ÂÂ Lazy-load Navigation SDK (not available in Expo Go) Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 let NavigationView: any = null;
 let NavMapColorScheme: any = null;
 try {
@@ -33,7 +33,7 @@ try {
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-// ââ Types ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// Ã¢ÂÂÃ¢ÂÂ Types Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 export type Hazard = {
   id: string; kind: string; lat: number; lng: number;
   reporter_handle?: string; confirms?: number; disputes?: number;
@@ -74,7 +74,7 @@ type Props = {
   onRoute?: (info: any) => void;
 };
 
-// ââ Helpers ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// Ã¢ÂÂÃ¢ÂÂ Helpers Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 const CONVOY_GOLD = "#FFD60A";
 
 const hazardColor = (k: string) =>
@@ -114,7 +114,7 @@ const peerMarkerId     = (id: string) => `peer_${id}`;
 const SELF_MARKER_ID   = "convoy_self";
 const DEST_MARKER_ID   = "convoy_dest";
 
-// ââ Main component âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// Ã¢ÂÂÃ¢ÂÂ Main component Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 export default function ConvoyMap({
   center, user, hideSelfMarker = false, peers, leaderUserId,
   hazards, externalAlerts = [], highlightConvoy = true,
@@ -130,7 +130,7 @@ export default function ConvoyMap({
   const livePolylineIds = useRef<Set<string>>(new Set());
   const userGestureRef  = useRef<number>(0);
 
-  // â Decoded polylines âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂ Decoded polylines Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
   const routePolylines = useMemo(() => {
     if (routes.length > 0) {
       return routes.map((r, i) => ({
@@ -147,7 +147,7 @@ export default function ConvoyMap({
     return [];
   }, [routes, encodedPolyline, selectedRouteIndex]);
 
-  // â Sync markers to native map ââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂ Sync markers to native map Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
   const syncMarkers = useCallback((vc: any) => {
     if (!vc) return;
     const desired = new Set<string>();
@@ -180,7 +180,7 @@ export default function ConvoyMap({
     liveMarkerIds.current = desired;
   }, [hideSelfMarker, user, destination, hazards, externalAlerts, peers, leaderUserId]);
 
-  // â Sync polylines to native map âââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂ Sync polylines to native map Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
   const syncPolylines = useCallback((vc: any) => {
     if (!vc) return;
     const desired = new Set<string>();
@@ -197,7 +197,7 @@ export default function ConvoyMap({
   useEffect(() => { syncMarkers(mapVCRef.current); }, [syncMarkers]);
   useEffect(() => { syncPolylines(mapVCRef.current); }, [syncPolylines]);
 
-  // â Chase cam via NavigationViewController âââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂ Chase cam via NavigationViewController Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
   useEffect(() => {
     if (!navVCRef.current || !navigationActive) return;
     try {
@@ -205,7 +205,7 @@ export default function ConvoyMap({
     } catch {}
   }, [navigationActive, mapView]);
 
-  // â Recenter when nav ends or followUser changes ââââââââââââââââââââââââââââ
+  // Ã¢ÂÂ Recenter when nav ends or followUser changes Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
   useEffect(() => {
     const vc = mapVCRef.current;
     if (!vc || Date.now() - userGestureRef.current < 5000) return;
@@ -216,7 +216,7 @@ export default function ConvoyMap({
     }
   }, [followUser, navigationActive, user.lat, user.lng]);
 
-  // â NavigationView callbacks ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂ NavigationView callbacks Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
   const onMapViewControllerCreated = useCallback((vc: any) => {
     mapVCRef.current = vc;
     try { vc.moveCamera({ target: { lat: center.lat, lng: center.lng }, zoom: 15, tilt: 0, bearing: 0 }); } catch {}
@@ -248,7 +248,7 @@ export default function ConvoyMap({
     }
   }, [hazards, externalAlerts, peers, onHazardPress, onExternalAlertPress, onPeerPress]);
 
-  // â No native SDK (Expo Go) ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂ No native SDK (Expo Go) Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
   if (!NavigationView) {
     return (
       <RoutePreviewFallback
@@ -259,7 +259,7 @@ export default function ConvoyMap({
     );
   }
 
-  // â Full Google Navigation SDK map âââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂ Full Google Navigation SDK map Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
   return (
     <View style={StyleSheet.absoluteFill}>
       <NavigationView
@@ -285,7 +285,7 @@ export default function ConvoyMap({
   );
 }
 
-// ââ Expo Go SVG fallback ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// Ã¢ÂÂÃ¢ÂÂ Expo Go SVG fallback Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 function RoutePreviewFallback({
   center, user, hideSelfMarker = false, peers, hazards, externalAlerts = [], highlightConvoy = true,
   destination, encodedPolyline, routes = [], selectedRouteIndex = 0,
@@ -334,7 +334,7 @@ function RoutePreviewFallback({
           return <Path key={`alt-${i}`} d={d} stroke="#8E8E93" strokeWidth={5} fill="none" strokeLinecap="round" strokeLinejoin="round" opacity={0.7} onPress={onSelectRoute ? () => onSelectRoute(i) : undefined} />;
         })}
         {routePaths[selectedRouteIndex] && (<G><Path d={routePaths[selectedRouteIndex] as string} stroke="#0A84FF" strokeWidth={9} fill="none" strokeLinecap="round" strokeLinejoin="round" opacity={0.95} /><Path d={routePaths[selectedRouteIndex] as string} stroke="#FFFFFF" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="2 10" opacity={0.5} /></G>)}
-        {peers.map((p: Peer) => { const xy = project(p.lat, p.lng); return (<G key={p.user_id}><Circle cx={xy.x} cy={xy.y} r={11} fill={COLORS.success} fillOpacity={0.2} /><Circle cx={xy.x} cy={xy.y} r={6} fill={COLORS.success} stroke="#fff" strokeWidth={2} />{!!p.carType && (<SvgText x={xy.x} y={xy.y + 22} fontSize="10" fontWeight="600" fill="#fff" textAnchor="middle" stroke="rgba(0,0,0,0.65)" strokeWidth="2.5">{p.carType.length > 22 ? p.carType.slice(0, 20) + "\u2026" : p.carType}</SvgText>)}</G>); })}
+        {peers.map((p: Peer) => { const xy = project(p.lat, p.lng); return (<G key={p.user_id}><Circle cx={xy.x} cy={xy.y} r={11} fill={COLORS.success} fillOpacity={0.2} /><Circle cx={xy.x} cy={xy.y} r={6} fill={COLORS.success} stroke="#fff" strokeWidth={2} />{!!p.carType && (<SvgText x={xy.x} y={xy.y + 22} fontSize="10" fontWeight="600" fill="#fff" textAnchor="middle" stroke="rgba(0,0,0,0.65)" strokeWidth="2.5">{p.carType.length > 22 ? p.carType.slice(0, 20) + "…" : p.carType}</SvgText>)}</G>); })}
         {hazards.map((h: Hazard) => { const xy = project(h.lat, h.lng); const c = hazardColor(h.kind); return (<G key={`u-${h.id}`}>{highlightConvoy && <Circle cx={xy.x} cy={xy.y} r={13} fill="none" stroke={CONVOY_GOLD} strokeWidth={2} />}<Circle cx={xy.x} cy={xy.y} r={14} fill={c} fillOpacity={0.25} /><Circle cx={xy.x} cy={xy.y} r={9} fill={c} stroke={highlightConvoy ? CONVOY_GOLD : "#fff"} strokeWidth={highlightConvoy ? 2.5 : 2} /></G>); })}
         {externalAlerts.map((a: ExternalAlert) => { const xy = project(a.lat, a.lng); const c = extColor(a.type); const s = 7; return (<G key={`x-${a.id}`}><Circle cx={xy.x} cy={xy.y} r={11} fill={c} fillOpacity={0.22} /><Path d={`M ${xy.x} ${xy.y - s} L ${xy.x + s} ${xy.y} L ${xy.x} ${xy.y + s} L ${xy.x - s} ${xy.y} Z`} fill={c} stroke="#fff" strokeWidth={1.5} /></G>); })}
         {destXY && (<G><Circle cx={destXY.x} cy={destXY.y} r={14} fill={COLORS.danger} fillOpacity={0.3} /><Circle cx={destXY.x} cy={destXY.y} r={9} fill={COLORS.danger} stroke="#fff" strokeWidth={2} /></G>)}

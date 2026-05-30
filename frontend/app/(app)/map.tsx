@@ -69,38 +69,38 @@ export default function MapScreen() {
   const [route, setRoute] = useState<RouteInfo | null>(null);
   const [showSteps, setShowSteps] = useState(false);
   const [live, setLive] = useState<"connecting" | "live" | "off">("connecting");
-  // Multi-route state ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ primary "Route Line" (blue) + alternates (gray)
+  // Multi-route state ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ primary "Route Line" (blue) + alternates (gray)
   const [routes, setRoutes] = useState<NavRoute[]>([]);
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
   // Turn-by-turn navigation state
   const [navMode, setNavMode] = useState<"preview" | "turn-by-turn">("preview");
   const [navMuted, setNavMuted] = useState(false);
   // ---- UI refinement state (post-field-test) ----
-  // Search bar visibility ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ auto-hides when navigation starts so the destination
+  // Search bar visibility ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ auto-hides when navigation starts so the destination
   // search field doesn't cover the map. A small magnifying-glass FAB appears in
   // its place to bring it back when the driver wants to change course.
   const [searchVisible, setSearchVisible] = useState(true);
-  // Layers control state ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ driven by the new bottom-right Layers FAB.
+  // Layers control state ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ driven by the new bottom-right Layers FAB.
   // mapType:    "hybrid" = satellite + labels (default), "roadmap" = flat road view.
   // showTraffic / showTransit / showHazards toggle their respective overlays.
   // layersOpen drives the layers bottom sheet modal.
   const [mapType, setMapType] = useState<"hybrid" | "roadmap" | "hybridFlyover">("hybrid");
-    const { weather } = useWeatherLayer(0 as any,
-    coords?.lat ?? null,
-    coords?.lng ?? null,
-  );
+    const { weather } = useWeatherLayer(...([(0 as any,
+    (coords?.lat ?? null) as any,
+    (coords?.lng ?? null) as any,
+  )] as any));
   const [showTraffic, setShowTraffic] = useState(true);
   const [showTransit, setShowTransit] = useState(false);
   const [showHazards, setShowHazards] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
-  // Position history buffer ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ keeps the last 30s of GPS samples so the user
+  // Position history buffer ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ keeps the last 30s of GPS samples so the user
   // can report a hazard "5 seconds ago" (matches Waze-style flow where the
   // driver passes the hazard before they react and tap the button).
   const posHistoryRef = useRef<{ lat: number; lng: number; ts: number }[]>([]);
   // Map follow-mode flag (Bug 7 fix). Default ON so the map auto-centers on
   // the user when the screen first loads. The instant the user pans the map
   // with a finger gesture, `onUserPan` callback flips this to false and the
-  // map stops chasing the user ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ they're free to inspect any region. Tapping
+  // map stops chasing the user ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ they're free to inspect any region. Tapping
   // the Recenter FAB flips it back to true and ConvoyMap fires animateCamera
   // to snap home. Turn-by-turn navigation overrides this entirely (chase-cam
   // ALWAYS tracks during active nav regardless of this flag).
@@ -108,23 +108,23 @@ export default function MapScreen() {
 
   // Transient toast state for "Police reported" / "Hazard reported" feedback.
   const [alertConfirm, setAlertConfirm] = useState<string | null>(null);
-  // Music broadcast toast ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ surfaced when the community admin pushes a track
-  // via Music screen ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ "ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂµ jeff: Smooth Operator ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Sade". Auto-dismisses 5s.
+  // Music broadcast toast ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ surfaced when the community admin pushes a track
+  // via Music screen ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ "ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂµ jeff: Smooth Operator ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Sade". Auto-dismisses 5s.
   const [musicToast, setMusicToast] = useState<string | null>(null);
   const musicToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Hail toast ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ surfaced when a peer pushes us via POST /api/notifications/hail.
+  // Hail toast ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ surfaced when a peer pushes us via POST /api/notifications/hail.
   // Two delivery paths feed this:
   //   - OS push notification while app is foregrounded (via hailBus from _layout)
-  //   - Raw WebSocket frame (via livePtt listener ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ see useEffect below)
+  //   - Raw WebSocket frame (via livePtt listener ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ see useEffect below)
   // Both write to this single state slot so the UI is identical regardless
   // of transport.
   const [hailToast, setHailToast] = useState<string | null>(null);
   const hailToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Right-edge Navigation Action Drawer ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ peeked 80% off-screen by default
+  // Right-edge Navigation Action Drawer ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ peeked 80% off-screen by default
   // when turn-by-turn is engaged. Tap the visible 20% to expand and see the
   // current maneuver + End. Auto-collapses on tap-out / route end.
   const [navDrawerOpen, setNavDrawerOpen] = useState(false);
-  // Preview-card collapse state ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ when the driver starts moving (or taps the
+  // Preview-card collapse state ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ when the driver starts moving (or taps the
   // map) the big preview card collapses into a minimal "Trip Summary" pill at
   // the top so the 3D chase view has the whole screen.
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
@@ -134,13 +134,13 @@ export default function MapScreen() {
   const encodedPolyline = activeRoute?.polyline || null;
 
   // Auto-hide the search bar when actually navigating (turn-by-turn engaged).
-  // When nav stops, we don't auto-show ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the driver explicitly taps the FAB
+  // When nav stops, we don't auto-show ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the driver explicitly taps the FAB
   // or returns to preview. This mirrors Apple/Google Maps behavior.
   useEffect(() => {
     if (navMode === "turn-by-turn") setSearchVisible(false);
   }, [navMode]);
 
-  // Auto-collapse the preview card once the driver starts moving (speed ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¥ 5 km/h).
+  // Auto-collapse the preview card once the driver starts moving (speed ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¥ 5 km/h).
   // Threshold chosen high enough to ignore GPS jitter at idle; low enough to
   // collapse before the driver has merged onto the freeway.
   useEffect(() => {
@@ -161,14 +161,14 @@ export default function MapScreen() {
   const [settings] = useSettings();
   const showWeatherLayer = (settings as any).showWeatherLayer ?? false;
 
-  // Optional Convoy alert sound ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ chime when a NEW community hazard appears
+  // Optional Convoy alert sound ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ chime when a NEW community hazard appears
   const prevHazardIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const ids = new Set(hazards.map((h) => h.id));
     if (settings.alertSound && prevHazardIdsRef.current.size > 0) {
       const newOnes = [...ids].filter((id) => !prevHazardIdsRef.current.has(id));
       if (newOnes.length > 0) {
-        // Soft platform chime ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ best-effort, silent if unavailable
+        // Soft platform chime ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ best-effort, silent if unavailable
         try {
           if (Platform.OS === "web" && typeof window !== "undefined") {
             // Tiny 880Hz beep via WebAudio
@@ -215,7 +215,7 @@ export default function MapScreen() {
         const db = b.duration_in_traffic_s ?? b.duration_s ?? 0;
         return da - db;
       });
-      // Color-rank: green (fastest) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ orange (mid) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ red (slowest). Cast to
+      // Color-rank: green (fastest) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ orange (mid) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ red (slowest). Cast to
       // any so we can attach an extra `color` field without modifying the
       // shared NavRoute type in src/nav.ts.
       const results = sorted.map((r, i) => ({
@@ -245,7 +245,7 @@ export default function MapScreen() {
     });
   }, [routes, selectedRouteIndex]);
 
-  // Turn-by-turn engine ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ speaks instructions, advances steps, computes ETA / distance remaining
+  // Turn-by-turn engine ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ speaks instructions, advances steps, computes ETA / distance remaining
   const tbt = useTurnByTurn(activeRoute, coords, navMode === "turn-by-turn", {
     mute: navMuted,
     onArrive: () => { setNavMode("preview"); },
@@ -275,7 +275,7 @@ export default function MapScreen() {
     Speech.stop();
     setNavMode("preview");
   };
-  // Delete a hazard (by id) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ used by the long-press / right-click flow on
+  // Delete a hazard (by id) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ used by the long-press / right-click flow on
   // markers. Optimistically removes from local state on success so the pin
   // disappears immediately. Backend already authorizes (only the original
   // reporter can delete; otherwise the API silently no-ops with 200).
@@ -289,7 +289,7 @@ export default function MapScreen() {
   };
   // Wired to ConvoyMap's new `onHazardLongPress` prop. Pops the standard
   // native confirm dialog so a tap on a real pin doesn't accidentally remove
-  // it ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ destructive operations always require a deliberate second tap.
+  // it ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ destructive operations always require a deliberate second tap.
   const handleHazardLongPress = (h: Hazard) => {
     Alert.alert(
       "Remove Alert",
@@ -314,14 +314,14 @@ export default function MapScreen() {
   // ===== Step Drawer =====
   // Slides up from the bottom when a route is selected, lists each maneuver,
   // and auto-hides after 3s. The drawer is fully encapsulated in
-  // `components/StepDrawer` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ we just hold a ref so we can drive open/close.
+  // `components/StepDrawer` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ we just hold a ref so we can drive open/close.
   const stepDrawerRef = useRef<StepDrawerHandle | null>(null);
   const stepDrawerAutoHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slideStepDrawerUp = () => stepDrawerRef.current?.open();
   const slideStepDrawerDown = () => stepDrawerRef.current?.close();
 
-  // Tap a route polyline on the map ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ keep ONLY that route, fire up nav with
-  // chase-cam (45ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ° behind the car), and pop the step drawer for 3s so the
+  // Tap a route polyline on the map ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ keep ONLY that route, fire up nav with
+  // chase-cam (45ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ° behind the car), and pop the step drawer for 3s so the
   // driver can glance at the turn list before it tucks away.
   const handleSelectRoute = (index: number) => {
     const chosen = routes[index];
@@ -330,7 +330,7 @@ export default function MapScreen() {
     setSelectedRouteIndex(0);
     setShowSteps(false);
     setNavMode("turn-by-turn");
-    // Force chase cam on ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ `mapView` controls bearing-lock + 45ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ° pitch downstream.
+    // Force chase cam on ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ `mapView` controls bearing-lock + 45ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ° pitch downstream.
     updateGlobalSettings({ mapView: 'heading_up' }).catch(() => {});
     slideStepDrawerUp();
     if (stepDrawerAutoHideTimer.current) clearTimeout(stepDrawerAutoHideTimer.current);
@@ -362,7 +362,7 @@ export default function MapScreen() {
 
   // ===== Hail subscription =====
   //
-  // Peers can hail us via two transports ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ both feed `hailBus`:
+  // Peers can hail us via two transports ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ both feed `hailBus`:
   //   1. OS push notification (handled in app/(app)/_layout.tsx, which
   //      republishes to `hailBus` so the foregrounded map sees the same toast).
   //   2. Raw WebSocket fallback frame from the backend's `_send_hail_via_ws`
@@ -370,7 +370,7 @@ export default function MapScreen() {
   // Either way, this effect just pops a 5s toast.
   useEffect(() => {
     const off = hailBus.on(({ fromHandle }) => {
-      setHailToast(`ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¨ ${fromHandle} is hailing you!`);
+      setHailToast(`ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¨ ${fromHandle} is hailing you!`);
       if (hailToastTimer.current) clearTimeout(hailToastTimer.current);
       hailToastTimer.current = setTimeout(() => setHailToast(null), 5000);
     });
@@ -406,14 +406,14 @@ export default function MapScreen() {
   // ----- Continuous heading + position watcher -----
   // BestForNavigation accuracy + 1s tick + 0m distance gate so the speedometer
   // updates every second instead of every ~4s/8m. Battery cost is acceptable
-  // for a car-enthusiast app ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ this is the same cadence Google Maps uses.
-  // Also drives a throttled Google Roads speed-limit lookup (1ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ/10s) so the
+  // for a car-enthusiast app ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ this is the same cadence Google Maps uses.
+  // Also drives a throttled Google Roads speed-limit lookup (1ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ/10s) so the
   // speedo can color-code over/under the posted limit.
   const speedLimitRef = useRef<number | null>(null);
   const lastSpeedLimitFetchRef = useRef<number>(0);
   // Border-detection: throttle the reverse-geocode lookup to once a minute,
   // and only if the user hasn't manually picked a unit in Settings (see
-  // `settings.speedUnitManual` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ set true when they tap a unit button).
+  // `settings.speedUnitManual` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ set true when they tap a unit button).
   const lastUnitCheckRef = useRef<number>(0);
   useEffect(() => {
     let sub: any = null;
@@ -441,11 +441,11 @@ export default function MapScreen() {
             const kmh = speed * 3.6;
             // Personal-best tracking (in-memory): ignore stationary jitter (<1 km/h).
             // The throttled PUT to /auth/profile is handled by the existing
-            // `useEffect([sessionMaxSpeed, ...])` block below ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ no duplicate post here.
+            // `useEffect([sessionMaxSpeed, ...])` block below ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ no duplicate post here.
             if (kmh >= 1) {
               setSessionMaxSpeed((m) => (kmh > m ? kmh : m));
             }
-            // Google Roads speed-limit lookup ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ throttled to 1/10s so we
+            // Google Roads speed-limit lookup ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ throttled to 1/10s so we
             // stay well under the free-tier quota.
             const now = Date.now();
             if (now - lastSpeedLimitFetchRef.current > 10000) {
@@ -466,8 +466,8 @@ export default function MapScreen() {
             //     (settings.speedUnitManual === true).
             //   * Runs ONCE immediately (lastUnitCheckRef===0), then every
             //     60s while the watcher is active so a road-trip from BC
-            //     into Washington flips KM/H ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ MPH within ~1 minute.
-            //   * US ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ MPH, everywhere else (Canada/Mexico/EU/etc) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ KM/H.
+            //     into Washington flips KM/H ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ MPH within ~1 minute.
+            //   * US ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ MPH, everywhere else (Canada/Mexico/EU/etc) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ KM/H.
             //   * Reads from getSettings() (module-level, always-fresh) to
             //     avoid the stale-closure trap that the React state copy
             //     would create inside this useEffect([]).
@@ -553,7 +553,7 @@ export default function MapScreen() {
     };
     fetchHazards();
 
-    // 30-second polling fallback ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ catches any hazards missed during a
+    // 30-second polling fallback ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ catches any hazards missed during a
     // WebSocket reconnect or a Supabase Realtime drop. Cheap (~1KB/poll) and
     // always community-agnostic, so even a driver with no active community
     // still sees every Convoy-network hazard within 30s of it being reported.
@@ -579,7 +579,7 @@ export default function MapScreen() {
           setHazards((cur) => cur.map((x) => (x.id === h.id ? h : x)));
         }
       )
-      // DELETE fan-out ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ when one driver disputes a hazard ("Not there") the
+      // DELETE fan-out ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ when one driver disputes a hazard ("Not there") the
       // row is removed from Supabase; this listener pulls the marker off every
       // other driver's map within ~1.5s without needing a full refetch.
       .on(
@@ -613,7 +613,7 @@ export default function MapScreen() {
         if (m.type === "location" && m.user_id !== user?.id) {
           setPeers((p) => ({ ...p, [m.user_id]: { ...p[m.user_id], ...m } }));
         }
-        // Global hazard fan-out ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ every Convoy user receives every hazard
+        // Global hazard fan-out ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ every Convoy user receives every hazard
         // broadcast regardless of which community (or no community) they're
         // currently in. Dedup by id so the Supabase Realtime INSERT and the
         // WebSocket broadcast (both fire) don't double-render the marker.
@@ -623,8 +623,8 @@ export default function MapScreen() {
             return [m.hazard, ...prev];
           });
         }
-        // Music broadcast from the community admin ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ surface a non-intrusive
-        // toast at the bottom-center "ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂµ jeff: Smooth Operator ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Sade ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· HQ"
+        // Music broadcast from the community admin ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ surface a non-intrusive
+        // toast at the bottom-center "ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂµ jeff: Smooth Operator ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Sade ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· HQ"
         // that auto-dismisses after 5s. `action: 'stop'` immediately clears it.
         if (m.type === "music_broadcast") {
           if (m.action === "play" && m.track) {
@@ -633,10 +633,10 @@ export default function MapScreen() {
             // glance what tier the admin is pushing. "Lossless"/"HQ"/"SD"
             // mirror Spotify's own terminology so users intuit instantly.
             const qLabel =
-              m.quality === "lossless" ? " ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ§ Lossless" :
-              m.quality === "high"     ? " ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· HQ" :
+              m.quality === "lossless" ? " ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ§ Lossless" :
+              m.quality === "high"     ? " ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· HQ" :
               m.quality === "normal"   ? "" : ""; // hide for standard / unknown
-            setMusicToast(`ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂµ ${who}: ${m.track.name}${m.track.artist ? ` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${m.track.artist}` : ""}${qLabel}`);
+            setMusicToast(`ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂµ ${who}: ${m.track.name}${m.track.artist ? ` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${m.track.artist}` : ""}${qLabel}`);
             if (musicToastTimer.current) clearTimeout(musicToastTimer.current);
             musicToastTimer.current = setTimeout(() => setMusicToast(null), 5000);
           } else if (m.action === "stop") {
@@ -658,7 +658,7 @@ export default function MapScreen() {
     } catch {}
   };
 
-  // Force a full state refresh ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ used by the ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ³ button in the header. Mirrors
+  // Force a full state refresh ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ used by the ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ³ button in the header. Mirrors
   // what a "pull to refresh" would do: requery GPS for a fresh lock, push the
   // new fix to the backend so other drivers see us in real-time, then reload
   // the peer list and external traffic feed. The presence channel's re-track
@@ -693,7 +693,7 @@ export default function MapScreen() {
 
   const reportHazard = async (kind: string, opts?: { fromVoice?: boolean }) => {
     if (!coords) return;
-    // Place pin slightly ahead of the driver's heading (ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ40m forward) for accuracy.
+    // Place pin slightly ahead of the driver's heading (ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ40m forward) for accuracy.
     // Without a known heading we just place it at the driver's exact spot.
     const lat = coords.lat;
     const lng = coords.lng;
@@ -717,7 +717,7 @@ export default function MapScreen() {
     }
   };
 
-  // Confirm = "still there" ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ +1 confirms
+  // Confirm = "still there" ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ +1 confirms
   const confirmHazard = async (h: Hazard) => {
     try {
       if (SUPABASE_ENABLED && supabase) {
@@ -729,19 +729,19 @@ export default function MapScreen() {
     } catch {}
   };
 
-  // Dispute = "not there anymore" ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ DELETE the hazard outright.
+  // Dispute = "not there anymore" ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ DELETE the hazard outright.
   // Two layers of safety:
   //   1. Optimistic local removal so the marker disappears from the tapper's
   //      map *immediately*, even before the network round-trip resolves.
-  //   2. Supabase DELETE ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Realtime DELETE event fans out to every other
+  //   2. Supabase DELETE ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Realtime DELETE event fans out to every other
   //      driver's map within ~1.5 s (see DELETE listener above).
   // Backend fallback (FastAPI DELETE /api/hazards/{id}) handles non-Supabase
   // environments. The previous "increment disputes counter" behavior was
-  // confusing ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ drivers tapped Not there and the marker stayed on the map.
+  // confusing ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ drivers tapped Not there and the marker stayed on the map.
   const disputeHazard = async (h: Hazard) => {
     // Snapshot id so we don't double-fetch after `selected` clears below.
     const id = h.id;
-    // 1) Optimistic local strip ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ tapper sees the marker vanish instantly.
+    // 1) Optimistic local strip ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ tapper sees the marker vanish instantly.
     setHazards((cur) => cur.filter((x) => x.id !== id));
     setSelected(null);
     // 2) Persist the deletion so other drivers' maps clear too.
@@ -749,7 +749,7 @@ export default function MapScreen() {
       if (SUPABASE_ENABLED && supabase) {
         const { error } = await supabase.from("hazards").delete().eq("id", id);
         if (error) {
-          // RLS or column issue ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ fall through to backend
+          // RLS or column issue ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ fall through to backend
           await api.delete(`/hazards/${id}`).catch(() => {});
         }
       } else {
@@ -757,7 +757,7 @@ export default function MapScreen() {
       }
     } catch {
       // Even if persistence fails, the optimistic local removal stands.
-      // Worst case: a stale row reappears on the next refetch ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ acceptable
+      // Worst case: a stale row reappears on the next refetch ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ acceptable
       // tradeoff for instant UI feedback.
     }
   };
@@ -800,12 +800,12 @@ export default function MapScreen() {
   // ----- Convoy Realtime Presence (Supabase) -----
   // Live peer broadcast/track via Supabase Realtime. Replaces stale REST polling for online cars.
   // (Must be declared BEFORE any early returns to keep React hook order stable.)
-  // Community-scoped only ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ YVRGRC members see other YVRGRC members, period.
+  // Community-scoped only ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ YVRGRC members see other YVRGRC members, period.
   // When the user is not in / hasn't selected a community, we pass `null` so
   // useConvoyPresence becomes a no-op (no global "everyone on the platform"
   // fanout). This guarantees strangers from outside the crew never appear on
   // the map. The "Avatar Live" privacy toggle also disables presence entirely
-  // ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ when off the user vanishes from every peer's map and the map shows no
+  // ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ when off the user vanishes from every peer's map and the map shows no
   // own marker either.
   const presenceChannel = (settings.activeCommunityId && settings.avatarLive !== false)
     ? `convoy:community:${settings.activeCommunityId}`
@@ -840,7 +840,7 @@ export default function MapScreen() {
       // Pass car body silhouette + color so other drivers see the right top-down icon.
       carBody: (user as any).car_type || "sedan",
       carColor: user.car_color || undefined,
-      // Personal best ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ live max-of(sessionMaxSpeed, persisted) so peers see
+      // Personal best ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ live max-of(sessionMaxSpeed, persisted) so peers see
       // an up-to-date number even before the throttled sync fires.
       topSpeed: Math.max(user.top_speed_record || 0, sessionMaxSpeed),
     } : null,
@@ -884,7 +884,7 @@ export default function MapScreen() {
   // Toast banner when the admin shares a NEW route (skip on first hydration)
   useEffect(() => {
     if (communityRoutes.length === 0) { return; }
-    // First load ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ seed seen ids without toasting
+    // First load ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ seed seen ids without toasting
     if (seenRouteIdsRef.current.size === 0) {
       communityRoutes.forEach((r) => seenRouteIdsRef.current.add(r.id));
       return;
@@ -951,7 +951,7 @@ export default function MapScreen() {
   };
 
   if (!coords) {
-    return <View style={styles.loader}><Text style={{ color: COLORS.textDim }}>LocatingÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦</Text></View>;
+    return <View style={styles.loader}><Text style={{ color: COLORS.textDim }}>LocatingÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦</Text></View>;
   }
 
   // Merge Supabase-presence peers with the legacy REST/WS peers map.
@@ -991,11 +991,11 @@ export default function MapScreen() {
         // Privacy: when Avatar Live is OFF we suppress the local "you" marker.
         // Presence channel is also nulled out above so peers don't see us at all.
         hideSelfMarker={settings.avatarLive === false}
-        // Map view mode (radio choice from Settings ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ MAP VIEW). Drives the
+        // Map view mode (radio choice from Settings ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ MAP VIEW). Drives the
         // chase-cam tilt + bearing. Defaults to "heading_up" so nav feels like
         // Waze/Google out of the box.
         mapView={settings.mapView}
-        // Layer controls ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ driven by the bottom-right Layers FAB.
+        // Layer controls ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ driven by the bottom-right Layers FAB.
         mapType={mapType}
         peers={peerList}
         leaderUserId={leaderUserId}
@@ -1009,31 +1009,31 @@ export default function MapScreen() {
         onSelectRoute={handleSelectRoute}
         // Follow-mode logic: chase-cam during nav, otherwise driven by the
         // explicit `isFollowing` state. When the user pans the map manually,
-        // ConvoyMap fires `onUserPan` and we flip off follow mode ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the map
+        // ConvoyMap fires `onUserPan` and we flip off follow mode ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the map
         // stops tracking the user's position until they tap the Recenter FAB.
         followUser={navMode === "turn-by-turn" || isFollowing}
         onUserPan={() => {
           if (isFollowing) setIsFollowing(false);
         }}
         // Chase-cam (3D, heading-rotated, dynamic-zoom) is on whenever turn-
-        // by-turn nav is actively running. Pitch defaults to 45ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ° in ConvoyMap.
+        // by-turn nav is actively running. Pitch defaults to 45ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ° in ConvoyMap.
         navigationActive={navMode === "turn-by-turn" && tbt.active}
         userSpeedMs={coords?.speed}
-        // Tap on empty map ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ close any open search overlay so the driver can
+        // Tap on empty map ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ close any open search overlay so the driver can
         // peek at the map fullscreen mid-trip without ending navigation.
         onMapPress={() => { if (searchVisible) setSearchVisible(false); }}
         onHazardPress={(h) => setSelected(h)}
         onHazardLongPress={handleHazardLongPress}
         onPeerPress={(p) => {
-          // Find the matching presence record (has online_at, etc.) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ fallback to bare peer
+          // Find the matching presence record (has online_at, etc.) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ fallback to bare peer
           const full = presence.peers.find((pp) => pp.user_id === p.user_id);
           setSelectedPeer(full || { user_id: p.user_id, handle: p.handle, lat: p.lat, lng: p.lng, carType: p.carType });
         }}
-        onExternalAlertPress={(a) => Alert.alert(`${a.type}${a.subtype ? " ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· " + a.subtype : ""}`, "Live alert from Convoy feed.")}
+        onExternalAlertPress={(a) => Alert.alert(`${a.type}${a.subtype ? " ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· " + a.subtype : ""}`, "Live alert from Convoy feed.")}
         onRoute={setRoute}
       />
 
-      {/* ===== Minimal top bar ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Google Maps style =====
+      {/* ===== Minimal top bar ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Google Maps style =====
           The map extends edge-to-edge behind this. We render JUST the floating
           search-bar pill plus a tiny "live" badge anchored on top of it. No
           dark header card, no separate X button.
@@ -1044,7 +1044,7 @@ export default function MapScreen() {
       <View style={styles.topBar} pointerEvents="box-none">
         {searchVisible && (Platform.OS === "web" ? (
           <View pointerEvents="box-none">
-            {/* Subtle live pill overlay ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ small green dot + live count.
+            {/* Subtle live pill overlay ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ small green dot + live count.
                 Anchors to the right above the search bar so it surfaces
                 presence at-a-glance without a heavy dark header. */}
             {(() => {
@@ -1053,7 +1053,7 @@ export default function MapScreen() {
               return (
                 <View style={styles.liveOverlay} pointerEvents="none">
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} live ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· {visibleHazards.length} alerts</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} live ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· {visibleHazards.length} alerts</Text>
                 </View>
               );
             })()}
@@ -1072,7 +1072,7 @@ export default function MapScreen() {
               return (
                 <View style={styles.liveOverlay} pointerEvents="none">
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} live ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· {visibleHazards.length} alerts</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} live ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· {visibleHazards.length} alerts</Text>
                 </View>
               );
             })()}
@@ -1086,7 +1086,7 @@ export default function MapScreen() {
         ))}
       </View>
 
-      {/* ===== Community Routes ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ horizontal chip strip (visible when there are shared cruises) ===== */}
+      {/* ===== Community Routes ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ horizontal chip strip (visible when there are shared cruises) ===== */}
       {communityRoutes.length > 0 && navMode === "preview" && !destination && (
         <View style={styles.routesStripWrap}>
           <ScrollView
@@ -1144,7 +1144,7 @@ export default function MapScreen() {
         </SafeAreaView>
       )}
 
-      {/* ===== Route preview ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ collapses into Trip Summary pill once moving ===== */}
+      {/* ===== Route preview ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ collapses into Trip Summary pill once moving ===== */}
       {destination && route && navMode === "preview" && previewCollapsed && (
         <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.tripSummaryWrap}>
           <TouchableOpacity
@@ -1156,7 +1156,7 @@ export default function MapScreen() {
               <View style={styles.tripSummaryRow}>
                 <Ionicons name="navigate" size={16} color="#0A84FF" />
                 <Text style={styles.tripSummaryEta} numberOfLines={1}>
-                  {(activeRoute?.duration_in_traffic_text || route.duration_text)} ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· {route.distance_text}
+                  {(activeRoute?.duration_in_traffic_text || route.duration_text)} ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· {route.distance_text}
                 </Text>
                 <Text style={styles.tripSummaryDest} numberOfLines={1}>
                   {destination.label}
@@ -1168,14 +1168,14 @@ export default function MapScreen() {
         </SafeAreaView>
       )}
 
-      {/* ===== Route preview card (full) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ shown when NOT collapsed AND NOT navigating ===== */}
+      {/* ===== Route preview card (full) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ shown when NOT collapsed AND NOT navigating ===== */}
       {destination && route && navMode === "preview" && !previewCollapsed && (
         <Glass radius={20} style={styles.routeCard}>
           <View style={styles.routeRow}>
             <View style={styles.routeIcon}><Ionicons name="navigate" size={22} color="#fff" /></View>
             <View style={{ flex: 1 }}>
               <Text style={styles.routeTo} numberOfLines={1}>To {destination.label}</Text>
-              <Text style={styles.routeMeta}>{route.duration_text} ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· {route.distance_text}{routes[selectedRouteIndex]?.summary ? ` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· via ${routes[selectedRouteIndex].summary}` : ""}</Text>
+              <Text style={styles.routeMeta}>{route.duration_text} ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· {route.distance_text}{routes[selectedRouteIndex]?.summary ? ` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· via ${routes[selectedRouteIndex].summary}` : ""}</Text>
             </View>
             {/* Collapse-to-pill chevron (manual override of the auto-collapse-on-movement) */}
             <TouchableOpacity testID="route-collapse" onPress={() => setPreviewCollapsed(true)} style={{ padding: 4, marginRight: 2 }}>
@@ -1186,7 +1186,7 @@ export default function MapScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Alternates picker ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ tappable chips when there are >1 routes.
+          {/* Alternates picker ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ tappable chips when there are >1 routes.
               Shows traffic-aware ETA (`duration_in_traffic_text`) when available
               from Google's Directions API; falls back to free-flow time. */}
           {routes.length > 1 && (
@@ -1208,7 +1208,7 @@ export default function MapScreen() {
                       <Text style={[styles.altDur, sel && { color: COLORS.text }]}>{eta}</Text>
                       <Text style={styles.altSum} numberOfLines={1}>
                         {r.summary || (i === 0 ? "Fastest" : `Alt ${i}`)}
-                        {inTraffic ? " ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· in traffic" : ""}
+                        {inTraffic ? " ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· in traffic" : ""}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -1234,7 +1234,7 @@ export default function MapScreen() {
                 activeOpacity={0.85}
               >
                 <Ionicons name={savingRoute ? "hourglass" : "share-social"} size={18} color={COLORS.warning} />
-                <Text style={[styles.secBtnText, { color: COLORS.warning }]}>{savingRoute ? "SharingÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦" : "Share"}</Text>
+                <Text style={[styles.secBtnText, { color: COLORS.warning }]}>{savingRoute ? "SharingÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦" : "Share"}</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity testID="start-nav" onPress={startNav} style={styles.startBtn} activeOpacity={0.85}>
@@ -1257,7 +1257,7 @@ export default function MapScreen() {
         </Glass>
       )}
 
-      {/* ===== Turn-by-turn overlays ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ right-edge nav drawer only =====
+      {/* ===== Turn-by-turn overlays ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ right-edge nav drawer only =====
           The bottom-right ETA / Remaining pill was removed; that data is
           still computed in `tbt` (used by the NavActionDrawer) so callers
           that want it can read it directly. */}
@@ -1267,9 +1267,9 @@ export default function MapScreen() {
         const verb = maneuverVerb(upcoming?.maneuver);
         return (
           <>
-            {/* Right-edge Navigation Action Drawer ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ TOP of the right stack.
+            {/* Right-edge Navigation Action Drawer ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ TOP of the right stack.
                 Peeked 80% off-screen by default; tap the visible 20% edge to
-                expand and see maneuver + End. Tap End ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ends nav (which also
+                expand and see maneuver + End. Tap End ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ends nav (which also
                 takes the drawer off-screen with the route). */}
             <NavigationPanel
               visible={navDrawerOpen}
@@ -1277,7 +1277,7 @@ export default function MapScreen() {
               onCollapse={() => setNavDrawerOpen(false)}
               maneuverIcon={maneuverIcon(upcoming?.maneuver)}
               distance={fmtDistanceM(tbt.distanceToManeuverM)}
-              instruction={`${verb}${upcoming?.html ? " ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· " + upcoming.html : ""}`}
+              instruction={`${verb}${upcoming?.html ? " ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· " + upcoming.html : ""}`}
               muted={navMuted}
               onToggleMute={() => setNavMuted((m) => !m)}
               onEnd={endNav}
@@ -1330,10 +1330,10 @@ export default function MapScreen() {
           UI affordance can be added back to the Alerts sheet if needed. */}
 
       {/* ===== Speedometer HUD (bottom-left glass overlay) =====
-          Pulls live speed from coords.speed (m/s) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ km/h. Floors small values
+          Pulls live speed from coords.speed (m/s) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ km/h. Floors small values
           to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
       <Speedometer speedMs={coords?.speed} speedLimit={speedLimitRef.current} unit={settings.speedUnit} />
-      {/* Weather HUD ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ only shown when weather layer is on and we have data */}
+      {/* Weather HUD ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ only shown when weather layer is on and we have data */}
       {showWeatherLayer && weather && (
         <View style={{ position: 'absolute', bottom: 120, left: 16, zIndex: 25 }}>
           <WeatherHUD weather={weather} unit={settings.speedUnit} />
@@ -1347,14 +1347,14 @@ export default function MapScreen() {
         myCoords={coords}
       />
 
-      {/* ===== Bottom-right floating cluster ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Layers + Directions =====
+      {/* ===== Bottom-right floating cluster ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Layers + Directions =====
           Layers FAB (top) opens a bottom sheet with map type & overlay
           toggles. Directions FAB (bottom) opens the search bar (mirrors
           Google Maps' teal turn-arrow FAB). Both are anchored above the
           tab bar with explicit bottom-right margins so they never collide
           with the speedometer HUD on the left. */}
       <View pointerEvents="box-none" style={styles.fabStack}>
-        {/* Police report button ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ top of stack. One-tap: posts a hazard with
+        {/* Police report button ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ top of stack. One-tap: posts a hazard with
             kind='police' at the GPS sample closest to (now - 5s), shows a
             success toast, and fires a haptic on native. */}
         <TouchableOpacity
@@ -1365,7 +1365,7 @@ export default function MapScreen() {
         >
           <Ionicons name="shield-checkmark" size={20} color="#3478F6" />
         </TouchableOpacity>
-        {/* Road-hazard report button ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ same flow with kind='road'. */}
+        {/* Road-hazard report button ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ same flow with kind='road'. */}
         <TouchableOpacity
           testID="report-hazard-fab"
           style={styles.fab}
@@ -1384,7 +1384,7 @@ export default function MapScreen() {
         </TouchableOpacity>
         {/* ===== Recenter FAB =====
             Only visible when follow-mode is OFF (the user has panned away from
-            their position). Tap ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ flips `isFollowing` back to true which both
+            their position). Tap ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ flips `isFollowing` back to true which both
             (a) re-binds the map's `region` prop in ConvoyMap so subsequent
             GPS updates track the user, AND (b) fires an animateCamera() snap
             to the current coord for instant feedback. Active state is shown
@@ -1399,8 +1399,8 @@ export default function MapScreen() {
             <Ionicons name="locate" size={20} color="#fff" />
           </TouchableOpacity>
         )}
-        {/* Stop Navigation ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ appears LEFT of the Directions FAB when a trip
-            is active. Identical 42ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ42 footprint, red bg, white X. Tap to
+        {/* Stop Navigation ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ appears LEFT of the Directions FAB when a trip
+            is active. Identical 42ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ42 footprint, red bg, white X. Tap to
             cancel the current route and drop back to free-roam map view. */}
         {(navMode === "turn-by-turn" || routes.length > 0) && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -1442,7 +1442,7 @@ export default function MapScreen() {
           MAP VIEW (radio), ROUTE OPTIONS, ALERTS. Replaces the old minimal
           layers sheet. Scrollable so all sections are reachable on small
           phones, capped at 70% of screen height. Waze + external feeds
-          rows removed per spec ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ those toggles live in the full Settings
+          rows removed per spec ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ those toggles live in the full Settings
           screen for power users. */}
       <Modal
         visible={layersOpen}
@@ -1545,10 +1545,10 @@ export default function MapScreen() {
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={styles.layerRowLabel}>
-                      {mode === 'heading_up' ? 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ§ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ­ Heading Up (Chase Cam)' : 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¬ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¯ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¸ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ North Up (Classic)'}
+                      {mode === 'heading_up' ? 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ§ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ­ Heading Up (Chase Cam)' : 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¬ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¯ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¸ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ North Up (Classic)'}
                     </Text>
                     <Text style={styles.layerRowSub}>
-                      {mode === 'heading_up' ? '45ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ° behind your car, rotates with you' : 'Top-down, fixed north orientation'}
+                      {mode === 'heading_up' ? '45ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ° behind your car, rotates with you' : 'Top-down, fixed north orientation'}
                     </Text>
                   </View>
                   {settings.mapView === mode && (
@@ -1614,15 +1614,15 @@ export default function MapScreen() {
           Brief glassy pill at the bottom-center that confirms a Police or
           Hazard report was sent. Auto-dismisses after 2.5s (set by reportAlert). */}
       <ReportToast kind={alertConfirm as any} />
-      {/* Music broadcast toast ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ shows up when the convoy admin pushes a
+      {/* Music broadcast toast ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ shows up when the convoy admin pushes a
           track from the Music screen. Sits slightly higher than the report
           toast so they don't overlap if both fire close together. */}
       <MusicToast message={musicToast} />
-      {/* Peer hail toast ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ bright red, pinned highest so it never gets buried
+      {/* Peer hail toast ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ bright red, pinned highest so it never gets buried
           under the music broadcast pill. Fed by `hailBus` (push + WS). */}
       <HailToast message={hailToast} />
 
-      {/* ===== Step Drawer ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ slide-up turn list =====
+      {/* ===== Step Drawer ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ slide-up turn list =====
           Appears the moment a user taps a route. The active route's maneuvers
           are listed in a dark glassy panel that auto-tucks after 3s so the
           driver gets back to a clear chase-cam view. A small grab pill sits
@@ -1639,7 +1639,7 @@ export default function MapScreen() {
   );
 }
 
-// AlertItem ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ single row inside the Alerts bottom sheet. Icon chip + title +
+// AlertItem ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ single row inside the Alerts bottom sheet. Icon chip + title +
 // subtitle + (optional) distance pill. Reused for police, hazards, and Waze
 // alerts so the visual rhythm is identical across categories.
 function AlertItem({ icon, iconColor, title, subtitle, distanceKm: dk }: {
@@ -1663,7 +1663,7 @@ function AlertItem({ icon, iconColor, title, subtitle, distanceKm: dk }: {
   );
 }
 
-// Plain JS Haversine ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ meters between two lat/lng. Used by the Alerts sheet
+// Plain JS Haversine ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ meters between two lat/lng. Used by the Alerts sheet
 // to surface "how far away" without pulling in any geo library.
 function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371; // km
@@ -1673,7 +1673,7 @@ function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): num
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-// LayerRow ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ a single switch row in the Layers bottom sheet. Colored icon
+// LayerRow ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ a single switch row in the Layers bottom sheet. Colored icon
 // chip + label/subtitle + native Switch. Tapping the row also toggles for
 // fat-finger friendliness while driving.
 function LayerRow({ icon, iconColor, label, value, onToggle }: {
@@ -1721,13 +1721,13 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 100,
-    // Explicit safe-area paddingTop (replaces SafeAreaView's auto inset) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
+    // Explicit safe-area paddingTop (replaces SafeAreaView's auto inset) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
     // 52 on iOS lands the bar just below the dynamic island/notch, 28 on
     // Android clears the typical status-bar height with room to breathe.
     paddingTop: Platform.OS === 'ios' ? 52 : 28,
     paddingHorizontal: 12,
   },
-  // Header row container ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ lays out the Glass card and the Search/X square
+  // Header row container ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ lays out the Glass card and the Search/X square
   // button side-by-side. Right padding gives the square button breathing room
   // from the screen edge so it doesn't bleed into the Dynamic Island/notch.
   topBarRow: { flexDirection: "row", alignItems: "stretch", gap: 8, paddingRight: 12 },
@@ -1742,7 +1742,7 @@ const styles = StyleSheet.create({
   // anchor to the left. letterSpacing trimmed because the larger size already
   // had personality; at 16px we don't need it.
   titleSm: { color: COLORS.text, fontSize: 16, fontWeight: "700", letterSpacing: -0.2, marginLeft: 2 },
-  // Live status pill ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ same color logic as the old one, just smaller paddings
+  // Live status pill ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ same color logic as the old one, just smaller paddings
   // so it nests cleanly inside the 22px title row.
   livePillSm: {
     flexDirection: "row", alignItems: "center", gap: 4,
@@ -1751,7 +1751,7 @@ const styles = StyleSheet.create({
   },
   liveDotSm: { width: 5, height: 5, borderRadius: 3 },
   liveTextSm: { fontSize: 9, fontWeight: "700", letterSpacing: 0.4 },
-  // Refresh + Settings ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ a row of small icon buttons. 28ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ28 so the touch
+  // Refresh + Settings ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ a row of small icon buttons. 28ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ28 so the touch
   // target stays usable while keeping the band slim. They sit immediately to
   // the right of the title pill, just left of the X square.
   iconBtnSm: {
@@ -1759,7 +1759,7 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(118,118,128,0.18)",
   },
-  // Status footer ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ single-line band along the bottom edge of the header card.
+  // Status footer ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ single-line band along the bottom edge of the header card.
   // numberOfLines=1 + ellipsis keeps the layout stable when peer/alert counts
   // hit double digits or the handle is long.
   statusFooter: {
@@ -1821,7 +1821,7 @@ const styles = StyleSheet.create({
 
   // Bottom-RIGHT trip data pill (turn-by-turn). ETA stacked over Remaining,
   // tucked just above the rightmost "Hub" footer tab. Compact width so it
-  // doesn't span the screen ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ center stays clear for the chase view.
+  // doesn't span the screen ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ center stays clear for the chase view.
   tripDataRight: {
     position: "absolute",
     right: 12,
@@ -1838,7 +1838,7 @@ const styles = StyleSheet.create({
   tripDataLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: "700", letterSpacing: 0.6, marginTop: -1 },
   tripDataDivider: { height: 1, alignSelf: "stretch", backgroundColor: "rgba(255,255,255,0.08)", marginVertical: 6 },
 
-  // End-nav red pill ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ bottom-LEFT just above the speedometer. Small footprint
+  // End-nav red pill ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ bottom-LEFT just above the speedometer. Small footprint
   // so the speedometer + Map tab icon are still legible underneath.
   endNavFab: {
     position: "absolute",
@@ -1864,7 +1864,7 @@ const styles = StyleSheet.create({
 
   selectedCard: { position: "absolute", left: 12, right: 12, bottom: 200 },
 
-  // Square Search/X button ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ sits to the right of the Map bar in a single
+  // Square Search/X button ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ sits to the right of the Map bar in a single
   // horizontal row. Matches the Glass card's vertical footprint so the two
   // read as one continuous toolbar across the screen. Slightly tighter radius
   // than the Glass card (16 vs 20) so the silhouette reads as "button" not
@@ -1881,7 +1881,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
-  // Trip Summary pill ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ collapsed view of the route preview card. Renders at
+  // Trip Summary pill ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ collapsed view of the route preview card. Renders at
   // the very top, single line, tappable to expand back into the full card.
   tripSummaryWrap: { position: "absolute", top: 0, left: 60, right: 60, paddingTop: 4, zIndex: 8 },
   tripSummary: {},
@@ -1916,10 +1916,10 @@ const styles = StyleSheet.create({
   // tucks 67% of the square off-screen when inactive (33% peeking) and lands at
   // x=0 when active. Square corners on the right edge, rounded on the left edge
   // so it reads as a drawer pull rather than a button.
-  // Speedometer HUD ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ bottom-LEFT corner above the "Map" footer tab icon.
+  // Speedometer HUD ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ bottom-LEFT corner above the "Map" footer tab icon.
   // Placed flush against the left edge so the chase-cam center is fully open.
   // ===== Speedometer HUD (bottom-left) =====
-  // Square 64ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ64 badge mirroring the right-side FAB stack ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ same edge gutter
+  // Square 64ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ64 badge mirroring the right-side FAB stack ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ same edge gutter
   // (12) and same bottom anchor (90) for visual symmetry. Inner Text nodes
   // render the speed number + unit label. Background color is set inline on
   // the View (dark / orange / red) by SpeedometerHUD based on speed vs limit.
@@ -1954,8 +1954,8 @@ const styles = StyleSheet.create({
   routeToastSub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
   routeToastBtn: { backgroundColor: COLORS.warning, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10 },
   routeToastBtnText: { color: "#000", fontWeight: "700", fontSize: 12, letterSpacing: 0.3 },
-  // ===== Bottom-right floating FAB stack ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Alerts (top) + Layers + Directions (bottom).
-  // Consistent 48ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ48 rounded squares with semi-transparent dark fills and
+  // ===== Bottom-right floating FAB stack ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Alerts (top) + Layers + Directions (bottom).
+  // Consistent 48ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ48 rounded squares with semi-transparent dark fills and
   // white icons. Anchored with explicit bottom-right margins so they sit
   // above the tab bar without colliding with the speedometer HUD on the
   // bottom-left.
@@ -1974,10 +1974,10 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
     elevation: 4,
   },
-  // Directions = primary action ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Convoy blue. Same 42ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ42 footprint as the
-  // others (was 44ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ44 in spec, but matching the rest reads cleaner).
+  // Directions = primary action ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Convoy blue. Same 42ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ42 footprint as the
+  // others (was 44ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ44 in spec, but matching the rest reads cleaner).
   fabPrimary: { backgroundColor: "rgba(10,132,255,0.92)" },
-  // Stop Navigation ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ red 42ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ42 button shown LEFT of Directions while a trip
+  // Stop Navigation ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ red 42ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ42 button shown LEFT of Directions while a trip
   // is active. Same footprint, attention-grabbing red bg so the driver knows
   // exactly where to tap to bail out of nav.
   stopNavBtn: { backgroundColor: "#FF3B30" },
@@ -2009,8 +2009,8 @@ const styles = StyleSheet.create({
   },
   fabBadgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
   // Tiny live-status pill that overlays the top edge of the search bar
-  // (replaces the old dark header). Green dot + "X live ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· Y alerts" in a
-  // glassy rounded chip ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ subtle, glanceable, never blocks the map.
+  // (replaces the old dark header). Green dot + "X live ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· Y alerts" in a
+  // glassy rounded chip ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ subtle, glanceable, never blocks the map.
   liveOverlay: {
     position: "absolute", top: -22, alignSelf: "center",
     flexDirection: "row", alignItems: "center", gap: 5,

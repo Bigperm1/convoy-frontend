@@ -1,4 +1,4 @@
-// WeatherHUD — compact on-map weather chip shown when the weather layer is on.
+// WeatherHUD â compact on-map weather chip shown when the weather layer is on.
 // Displays current temperature, conditions icon, wind and precip at a glance.
 import React from "react";
 import { View, Text, StyleSheet, Platform } from "react-native";
@@ -13,15 +13,15 @@ type Props = {
 
 export default function WeatherHUD({ weather, unit }: Props) {
   const temp = unit === 'mph'
-    ? `${Math.round(weather.tempF)}°F`
-    : `${Math.round(weather.tempC)}°C`;
+    ? `${Math.round(weather.tempF)}Â°F`
+    : `${Math.round(weather.tempC)}Â°C`;
   const wind = unit === 'mph'
     ? `${Math.round(weather.windSpeedMph)} mph ${windDirectionLabel(weather.windDirectionDeg)}`
     : `${Math.round(weather.windSpeedKph)} km/h ${windDirectionLabel(weather.windDirectionDeg)}`;
 
   return (
     <View style={styles.chip}>
-      <Ionicons name={weatherIconName(weather)} size={18} color="#FFD60A" />
+      <Ionicons name={weatherIconName(weather) as any} size={18} color="#FFD60A" />
       <Text style={styles.temp}>{temp}</Text>
       <View style={styles.divider} />
       <Ionicons name="arrow-up-circle-outline" size={13} color="rgba(255,255,255,0.55)" style={{ transform: [{ rotate: `${weather.windDirectionDeg}deg` }] }} />

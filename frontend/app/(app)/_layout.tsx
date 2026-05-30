@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { NavigationProvider } from "@googlemaps/react-native-navigation-sdk";
 import { Tabs, useRouter, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
@@ -16,7 +17,7 @@ import * as Notifications from "expo-notifications";
 // ===== Push notification module-scope config =====
 //
 // Both `setNotificationHandler` and the registration helper MUST run before
-// any push notification is delivered. expo-notifications is native-only â on
+// any push notification is delivered. expo-notifications is native-only Ã¢ÂÂ on
 // web all these APIs throw, so we guard with Platform.OS !== "web".
 //
 // `handleNotification` controls how a push is rendered when the app is in the
@@ -36,7 +37,7 @@ if (Platform.OS !== "web") {
 
 // One-shot async helper invoked from the layout's mount effect. Pulls the
 // FCM/APNs device token from the OS and PUTs it to /auth/push-token. Safe to
-// call on every cold start â backend is idempotent.
+// call on every cold start Ã¢ÂÂ backend is idempotent.
 async function registerForPushNotifications() {
   if (Platform.OS === "web") return;
 
@@ -48,7 +49,7 @@ async function registerForPushNotifications() {
       final = status;
     }
     if (final !== "granted") {
-      // User denied â leave silently, the WS fallback path will handle Hails.
+      // User denied Ã¢ÂÂ leave silently, the WS fallback path will handle Hails.
       return;
     }
 
@@ -73,7 +74,7 @@ export default function AppLayout() {
   const [settings] = useSettings();
 
   // Mount the live walkie-talkie WebSocket listener once for the entire
-  // (app) shell â incoming PTT transmissions auto-play even when the user is
+  // (app) shell Ã¢ÂÂ incoming PTT transmissions auto-play even when the user is
   // on the Map, Music, Hub or Settings tab. The getter is read on every
   // incoming frame, so switching active community in Comms is reflected
   // immediately without reopening the socket.
@@ -86,14 +87,14 @@ export default function AppLayout() {
   // ===== Push notifications =====
   //
   // Register on mount (handles cold-start tokens) and re-register whenever
-  // the auth user changes â covers logout â login â re-login flows so the
+  // the auth user changes Ã¢ÂÂ covers logout Ã¢ÂÂ login Ã¢ÂÂ re-login flows so the
   // token gets re-saved against the new user's row.
   useEffect(() => {
     if (!user) return;
     registerForPushNotifications();
   }, [user]);
 
-  // Foreground delivery listener â fires while the app is open. We DON'T
+  // Foreground delivery listener Ã¢ÂÂ fires while the app is open. We DON'T
   // rely on the system banner here; instead we forward the hail to `hailBus`
   // which the map screen renders as an in-app toast (matches the existing
   // hail-via-WebSocket UX so users see the same UI regardless of transport).
@@ -111,7 +112,7 @@ export default function AppLayout() {
     return () => sub.remove();
   }, []);
 
-  // Tap-to-open listener â fires when the user taps the OS notification
+  // Tap-to-open listener Ã¢ÂÂ fires when the user taps the OS notification
   // banner while the app is backgrounded or killed. For Hails we route to
   // the Map tab so they can see the hailer's car blink on the map.
   useEffect(() => {
@@ -171,7 +172,7 @@ export default function AppLayout() {
           tabBarButtonTestID: "tab-talk",
           tabBarIcon: ({ color, size }) => <Ionicons name="flash" size={size - 1} color={color} />,
         }} />
-        {/* Voice screen is no longer represented in the bottom tab bar â the
+        {/* Voice screen is no longer represented in the bottom tab bar Ã¢ÂÂ the
             press-and-hold mic now lives inside the map's search bar (Google
             Maps-style). We keep the route file registered with href:null so
             any deep links into /voice still resolve without crashing. */}
@@ -191,7 +192,7 @@ export default function AppLayout() {
         <Tabs.Screen name="garage" options={{ href: null }} />
       </Tabs>
 
-      {/* Global voice transcript banner (FAB removed â the elevated mic in the tab bar is the new CTA) */}
+      {/* Global voice transcript banner (FAB removed Ã¢ÂÂ the elevated mic in the tab bar is the new CTA) */}
       <VoiceController />
     </View>
   );

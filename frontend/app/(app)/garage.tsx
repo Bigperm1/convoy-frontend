@@ -1,8 +1,8 @@
-// Garage — driver profile editor.
+// Garage â driver profile editor.
 //
 // Lets the user edit their car: Year / Make / Model / Color, then pick the
 // silhouette body type and car color shown to other drivers on the map.
-// PATCH-style — sends only the changed fields to PUT /auth/profile.
+// PATCH-style â sends only the changed fields to PUT /auth/profile.
 
 import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, Platform, KeyboardAvoidingView } from "react-native";
@@ -21,7 +21,7 @@ import { useSettings, kmhToDisplay } from "../../src/settings";
 export default function GarageScreen() {
   const { user, refresh } = useAuth();
   const router = useRouter();
-  // Speed-unit preference — the backend always stores top_speed_record in
+  // Speed-unit preference â the backend always stores top_speed_record in
   // KM/H so we convert at the display layer to match the user's choice.
   const [settings] = useSettings();
 
@@ -74,7 +74,7 @@ export default function GarageScreen() {
           contentContainerStyle={{ padding: 18, paddingBottom: 120 }}
           keyboardShouldPersistTaps="handled"
         >
-          {/* ===== Live Preview — virtual garage stage =====
+          {/* ===== Live Preview â virtual garage stage =====
               Replaces the flat Glass card with a polished "showroom" look:
               radial concrete-floor gradient + LED accent border. The car sits
               on the stage and recolors live as the user picks a swatch below.
@@ -83,7 +83,7 @@ export default function GarageScreen() {
             <View style={styles.stageLed} testID="garage-stage" pointerEvents="none" />
             <LinearGradient
               colors={[
-                "rgba(40,40,46,0.92)",  // back wall — darker concrete
+                "rgba(40,40,46,0.92)",  // back wall â darker concrete
                 "rgba(28,28,32,0.92)",  // floor center
                 "rgba(18,18,22,0.95)",  // foreground edge
               ]}
@@ -103,12 +103,12 @@ export default function GarageScreen() {
               </View>
               <View style={styles.stageCaption}>
                 <Text style={styles.previewLabel}>{[year, make, model].filter(Boolean).join(" ") || "Your car"}</Text>
-                <Text style={styles.previewSub}>{color || "—"} · {body}</Text>
+                <Text style={styles.previewSub}>{color || "â"} Â· {body}</Text>
               </View>
             </LinearGradient>
           </View>
 
-          {/* Personal best — Top Cruise Speed from Map sessions. Auto-tracked, read-only. */}
+          {/* Personal best â Top Cruise Speed from Map sessions. Auto-tracked, read-only. */}
           <Glass radius={22} style={{ marginBottom: 18 }}>
             <View style={styles.pbBox} testID="garage-personal-best">
               <View style={styles.pbIconWrap}>
@@ -118,7 +118,7 @@ export default function GarageScreen() {
                 <Text style={styles.pbLabel}>Top Cruise Speed</Text>
                 <Text style={styles.pbHint}>
                   {user?.top_speed_record && user.top_speed_record > 0
-                    ? "Personal best — beat it on your next drive."
+                    ? "Personal best â beat it on your next drive."
                     : "Drive with the Map open to set your first record."}
                 </Text>
               </View>
@@ -126,7 +126,7 @@ export default function GarageScreen() {
                 <Text style={styles.pbValue} testID="garage-personal-best-value">
                   {user?.top_speed_record && user.top_speed_record > 0
                     ? kmhToDisplay(user.top_speed_record, settings.speedUnit)
-                    : "—"}
+                    : "â"}
                 </Text>
                 <Text style={styles.pbUnit}>{settings.speedUnit === 'mph' ? 'mph' : 'km/h'}</Text>
               </View>
@@ -139,7 +139,7 @@ export default function GarageScreen() {
           <Field label="Model" value={model} onChange={setModel} placeholder="Skyline GT-R" testID="garage-model" />
           <Field label="Color" value={color} onChange={setColor} placeholder="Heavy Metal" testID="garage-color" />
 
-          {/* Color swatches — tap-to-pick. Only the 5 GR Corolla paint
+          {/* Color swatches â tap-to-pick. Only the 5 GR Corolla paint
               colors with rendered PNG assets are offered here. Any other
               color string would silently fall back to the Heavy Metal PNG
               (the "I saved a color but the map didn't change" Bug 10). */}
@@ -194,7 +194,7 @@ export default function GarageScreen() {
           {/* Save */}
           <TouchableOpacity testID="garage-save" disabled={busy} onPress={save} style={styles.btn} activeOpacity={0.85}>
             <LinearGradient colors={["#FFE45C", "#FFC700", "#FF9F0A"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
-              <Text style={styles.btnText}>{busy ? "Saving…" : "Save garage"}</Text>
+              <Text style={styles.btnText}>{busy ? "Savingâ¦" : "Save garage"}</Text>
             </LinearGradient>
           </TouchableOpacity>
         </ScrollView>
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
   section: { color: COLORS.text, fontSize: 16, fontWeight: "600", marginTop: 22, marginBottom: 8, letterSpacing: -0.2 },
   label: { color: COLORS.textDim, fontSize: 12, marginBottom: 6, fontWeight: "500" },
   input: { backgroundColor: "rgba(118,118,128,0.18)", color: COLORS.text, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12, fontSize: 16 },
-  // Preview block — virtual-garage stage (concrete + LED frame)
+  // Preview block â virtual-garage stage (concrete + LED frame)
   stageOuter: {
     marginBottom: 18,
     borderRadius: 24,
@@ -263,7 +263,7 @@ const styles = StyleSheet.create({
   },
   stageCar: { alignItems: "center", marginBottom: 10 },
   stageCaption: { alignItems: "center" },
-  previewBox: { padding: 16, alignItems: "center" }, // legacy — kept in case
+  previewBox: { padding: 16, alignItems: "center" }, // legacy â kept in case
   previewLabel: { color: COLORS.text, fontSize: 16, fontWeight: "700", marginTop: 8 },
   previewSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2, textTransform: "capitalize" },
   // Personal best tile
@@ -279,7 +279,7 @@ const styles = StyleSheet.create({
   pbValueWrap: { alignItems: "flex-end" },
   pbValue: { color: "#FFC700", fontSize: 28, fontWeight: "800", letterSpacing: -0.5, lineHeight: 30 },
   pbUnit: { color: COLORS.textDim, fontSize: 11, fontWeight: "600", marginTop: 2 },
-  // Color swatches — tiles with a label underneath each color circle.
+  // Color swatches â tiles with a label underneath each color circle.
   swatchRow: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 6, marginBottom: 8 },
   swatchTile: { alignItems: "center", width: 76 },
   swatch: {

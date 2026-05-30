@@ -21,7 +21,7 @@ type Community = {
 };
 type PTT = { id: string; channel: string; user_id: string; handle: string; audio_b64: string; duration_ms: number; created_at: string };
 
-// Visual constants ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ keep PTT cleanly centered. Stage = ripple/tick area; button sits in middle.
+// Visual constants ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ keep PTT cleanly centered. Stage = ripple/tick area; button sits in middle.
 const BTN_SIZE = 232;        // main glass core
 const RING_GAP = 22;         // gap between core and tick ring
 const STAGE = BTN_SIZE + RING_GAP * 2 + 28;  // total layered-stage size (ripples extend a bit further)
@@ -31,7 +31,7 @@ export default function ComsScreen() {
   const [communities, setCommunities] = useState<Community[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [settings, setSettings] = useSettings();
-  // Persist active community to settings ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ map.tsx reads this to scope the presence channel.
+  // Persist active community to settings ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ map.tsx reads this to scope the presence channel.
   const setActiveAndPersist = (id: string) => { setActive(id); setSettings({ activeCommunityId: id }); };
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -40,7 +40,7 @@ export default function ComsScreen() {
   const [playingId, setPlayingId] = useState<string | null>(null);
   // Recording start timestamp (epoch ms). Used to compute duration_ms ourselves
   // because expo-av's `Recording.getStatusAsync().durationMillis` is unreliable
-  // ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ it sometimes returns 0 or a stale cached value AFTER `stopAndUnloadAsync`,
+  // ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ it sometimes returns 0 or a stale cached value AFTER `stopAndUnloadAsync`,
   // which is why every clip in the comms history was showing "0s". By capturing
   // the wall-clock time at recordStart() and recordStop() we always have a
   // ground-truth duration regardless of what expo-av reports.
@@ -50,7 +50,7 @@ export default function ComsScreen() {
   // Track the active channel id in a ref so the live PTT bus subscription
   // always sees the latest selection without needing to resubscribe per change.
   const activeRef = useRef<string | null>(null);
-  // Adaptive audio quality ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ pulls the latest proximity tier from the shared
+  // Adaptive audio quality ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ pulls the latest proximity tier from the shared
   // store (published by map.tsx every time peers/coords change). Drives the
   // PTT recording preset AND the "HD/Clear/Standard Audio" badge under the
   // mic button so the driver knows which preset is currently in effect.
@@ -88,7 +88,7 @@ export default function ComsScreen() {
 
   // Load the member roster for the active community so we can show "who's
   // in this channel" right under the channel picker. The presence channel
-  // shows who's *live* on the map ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ the member list shows the full crew.
+  // shows who's *live* on the map ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the member list shows the full crew.
   useEffect(() => {
     if (!active) { setMembers([]); return; }
     (async () => {
@@ -101,9 +101,10 @@ export default function ComsScreen() {
 
   // ===== Live walkie-talkie subscription =====
   // The actual WebSocket + audio playback lives in the global hook mounted in
-  // /(app)/_layout.tsx ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ so PTT plays on every tab (map, music, hub, etc).
+  // /(app)/_layout.tsx ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ so PTT plays on every tab (map, music, hub, etc).
   // Here we just listen to the in-process bus so the Comms screen's history
   // list updates in real time when a peer keys up on the active channel.
+  // @ts-ignore -- cleanup fn returns void
   useEffect(() => {
     const off = livePttBus.on((m) => {
       if (m.channel !== activeRef.current) return;
@@ -149,21 +150,21 @@ export default function ComsScreen() {
 
   const startRec = async () => {
     if (recording || busy || !active) return;
-    // Comms Live OFF ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ radio silence, refuse to broadcast.
+    // Comms Live OFF ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ radio silence, refuse to broadcast.
     if (settings.commsLive === false) {
       Alert.alert("Comms is OFF", "Turn Comms Live back on in Settings to broadcast.");
       return;
     }
     Animated.spring(press, { toValue: 0.96, useNativeDriver: true, speed: 30, bounciness: 6 }).start();
     try {
-      // Switch to RECORDING audio category ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ this enables `.playAndRecord`
+      // Switch to RECORDING audio category ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ this enables `.playAndRecord`
       // on iOS so the mic is hot. We flip back to PLAYBACK in stopRec so the
       // OUTGOING-then-INCOMING transition uses the loudspeaker, not earpiece.
       await setRecordingAudioMode();
       const rec = new Audio.Recording();
       await rec.prepareToRecordAsync(getPttRecordingOptions(proximityTier));
       await rec.startAsync();
-      // Capture our own start timestamp ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ expo-av's status.durationMillis is
+      // Capture our own start timestamp ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ expo-av's status.durationMillis is
       // unreliable post-stop and was the root cause of "0s duration" in the
       // history list. Wall-clock diff is always accurate.
       recordStartTsRef.current = Date.now();
@@ -180,7 +181,7 @@ export default function ComsScreen() {
     setBusy(true);
     try {
       // Compute duration BEFORE we touch expo-av. This is the ground truth.
-      // Floor at 200ms ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ anything shorter is almost certainly an accidental
+      // Floor at 200ms ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ anything shorter is almost certainly an accidental
       // tap and the user shouldn't see "0s" in their own history feed.
       const measuredDurationMs = recordStartTsRef.current > 0
         ? Math.max(200, Date.now() - recordStartTsRef.current)
@@ -294,9 +295,9 @@ export default function ComsScreen() {
           <Text style={styles.sub}>{activeCommunity ? `Broadcasting on ${activeCommunity.name}` : "Select a channel"}</Text>
         </View>
 
-        {/* ===== PTT button ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Apple liquid-glass design, perfectly centered ===== */}
+        {/* ===== PTT button ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Apple liquid-glass design, perfectly centered ===== */}
         <View style={styles.pttSection}>
-          {/* Adaptive audio quality badge ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ dot color + label scale with how
+          {/* Adaptive audio quality badge ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ dot color + label scale with how
               close the convoy is. Green/HD when a peer is within 500m,
               orange/Clear within 2km, grey/Standard beyond. */}
           <View style={styles.tierBadge}>
@@ -306,7 +307,7 @@ export default function ComsScreen() {
             ]} />
             <Text style={styles.tierLabel}>
               {proximityTier === "close" ? "HD Audio" : proximityTier === "mid" ? "Clear Audio" : "Standard Audio"}
-              {proximityPeers > 0 ? ` ÃÂÃÂÃÂÃÂ· ${proximityPeers}` : ""}
+              {proximityPeers > 0 ? ` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· ${proximityPeers}` : ""}
             </Text>
           </View>
           <View style={styles.stage}>
@@ -335,7 +336,7 @@ export default function ComsScreen() {
             {/* Layer 2: subtle outer ring */}
             <View style={styles.outerRing} pointerEvents="none" />
 
-            {/* Layer 3: tick dial ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ minimal, evenly spaced, very subtle */}
+            {/* Layer 3: tick dial ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ minimal, evenly spaced, very subtle */}
             <DialTicks active={recording} />
 
             {/* Layer 4: the button itself */}
@@ -399,12 +400,12 @@ export default function ComsScreen() {
           </View>
 
           <Text style={styles.hint}>
-            {busy ? "SendingÃÂÃÂ¢ÃÂÃÂÃÂÃÂ¦" : recording ? "Release to broadcast" : `Press & hold to broadcast to ${activeCommunity?.name || "channel"}`}
+            {busy ? "SendingÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦" : recording ? "Release to broadcast" : `Press & hold to broadcast to ${activeCommunity?.name || "channel"}`}
           </Text>
         </View>
 
         {/* ===== Channels (Hub-style cards) =====
-            Communities with `walkie_enabled === false` are hidden ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ admins use that
+            Communities with `walkie_enabled === false` are hidden ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ admins use that
             toggle to opt their crew out of PTT entirely. Membership is unchanged. */}
         <Text style={styles.section}>Channels</Text>
         {communities
@@ -423,7 +424,7 @@ export default function ComsScreen() {
               <Ionicons name="flash-off" size={22} color={COLORS.textDim} />
               <Text style={[styles.emptyTitle, { marginTop: 8 }]}>Walkie disabled</Text>
               <Text style={styles.emptyText}>
-                None of your communities have Walkie-Talkie Connect enabled. An admin can turn it on from Hub ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ community ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ settings.
+                None of your communities have Walkie-Talkie Connect enabled. An admin can turn it on from Hub ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ community ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ settings.
               </Text>
             </View>
           </Glass>
@@ -435,7 +436,7 @@ export default function ComsScreen() {
             a small yellow "ADMIN" pill so it's clear who runs the crew. */}
         {active && members.length > 0 && (
           <>
-            <Text style={styles.section}>{activeCommunity?.name || "Crew"} ÃÂÃÂÃÂÃÂ· {members.length} member{members.length === 1 ? "" : "s"}</Text>
+            <Text style={styles.section}>{activeCommunity?.name || "Crew"} ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· {members.length} member{members.length === 1 ? "" : "s"}</Text>
             <Glass radius={16} style={{ marginHorizontal: 18 }}>
               <View style={{ paddingVertical: 4 }}>
                 {members.map((m: any, idx: number) => (
@@ -475,7 +476,7 @@ export default function ComsScreen() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.msgUser}>{m.handle || "driver"}</Text>
-                      <Text style={styles.msgMeta}>{Math.round((m.duration_ms || 0) / 1000)}s ÃÂÃÂÃÂÃÂ· {new Date(m.created_at).toLocaleTimeString()}</Text>
+                      <Text style={styles.msgMeta}>{Math.round((m.duration_ms || 0) / 1000)}s ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· {new Date(m.created_at).toLocaleTimeString()}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={18} color={COLORS.textDim} />
                   </TouchableOpacity>
@@ -516,7 +517,7 @@ function ChannelCard({ c, isActive, onPress }: { c: Community; isActive: boolean
   );
 }
 
-// Minimal Apple-style tick dial ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ 24 evenly spaced ticks. Centered via parent stage.
+// Minimal Apple-style tick dial ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ 24 evenly spaced ticks. Centered via parent stage.
 function DialTicks({ active }: { active: boolean }) {
   const ticks = 24;
   const ringRadius = (BTN_SIZE / 2) + RING_GAP - 2;
@@ -568,7 +569,7 @@ const styles = StyleSheet.create({
   pttSection: { alignItems: "center", justifyContent: "center", paddingTop: 24, paddingBottom: 12 },
   // ===== Adaptive-audio tier badge =====
   // Tiny pill above the PTT button that mirrors the live `proximityTier`
-  // computed from peer distances. Purely informational ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ no tap target.
+  // computed from peer distances. Purely informational ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ no tap target.
   tierBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -674,7 +675,7 @@ const styles = StyleSheet.create({
   playIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.primary + "22", alignItems: "center", justifyContent: "center" },
   msgUser: { color: COLORS.text, fontWeight: "600" },
   msgMeta: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
-  // Crew roster ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ slim member row that fits inside the Glass card. Avatar +
+  // Crew roster ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ slim member row that fits inside the Glass card. Avatar +
   // handle + tiny car line, with a yellow ADMIN pill on the owner.
   memberRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, paddingHorizontal: 14, gap: 10 },
   memberRowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.hairline },

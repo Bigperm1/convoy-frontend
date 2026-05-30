@@ -1,6 +1,6 @@
 // Top-down vehicle silhouette used as the live map marker for community peers.
 //
-// Renders an SVG car/motorcycle pointing toward the heading angle (0° = north),
+// Renders an SVG car/motorcycle pointing toward the heading angle (0Â° = north),
 // tinted with the user's car color. Falls back to a sedan if body type is unknown.
 //
 // Design intent (Waze/Apple Maps-style):
@@ -19,18 +19,18 @@ import { getVehiclePngOrDefault } from "./vehicleAssets";
 export type CarBody = "sedan" | "coupe" | "suv" | "sports" | "truck" | "hatch" | "motorcycle" | "van";
 
 export const CAR_BODIES: { id: CarBody; label: string; emoji: string }[] = [
-  { id: "sedan",      label: "Sedan",      emoji: "🚗" },
-  { id: "coupe",      label: "Coupe",      emoji: "🏎️" },
-  { id: "sports",     label: "Sports",     emoji: "🏁" },
-  { id: "suv",        label: "SUV",        emoji: "🚙" },
-  { id: "hatch",      label: "Hatch",      emoji: "🚘" },
-  { id: "truck",      label: "Truck",      emoji: "🛻" },
-  { id: "van",        label: "Van",        emoji: "🚐" },
-  { id: "motorcycle", label: "Motorbike",  emoji: "🏍️" },
+  { id: "sedan",      label: "Sedan",      emoji: "ð" },
+  { id: "coupe",      label: "Coupe",      emoji: "ðï¸" },
+  { id: "sports",     label: "Sports",     emoji: "ð" },
+  { id: "suv",        label: "SUV",        emoji: "ð" },
+  { id: "hatch",      label: "Hatch",      emoji: "ð" },
+  { id: "truck",      label: "Truck",      emoji: "ð»" },
+  { id: "van",        label: "Van",        emoji: "ð" },
+  { id: "motorcycle", label: "Motorbike",  emoji: "ðï¸" },
 ];
 
 // 5 supported GR Corolla paint colors that actually have rendered PNG
-// silhouettes. The garage picker MUST only offer these — any other color
+// silhouettes. The garage picker MUST only offer these â any other color
 // name resolves to the default Heavy Metal PNG, which used to be the
 // silent "I picked a color but the map didn't change" bug.
 export const GARAGE_COLORS: { name: string; hex: string }[] = [
@@ -42,9 +42,9 @@ export const GARAGE_COLORS: { name: string; hex: string }[] = [
 ];
 
 // 12 named car colors that map to good-looking hexes. Free-form `car_color`
-// strings are also accepted (CSS color syntax) — the silhouette will use them as-is.
+// strings are also accepted (CSS color syntax) â the silhouette will use them as-is.
 // Color palette. The first 5 are the "primary" garage colors (named per the
-// product spec — Supersonic Red, Stratosphere Blue, Ice Cap White, Heavy
+// product spec â Supersonic Red, Stratosphere Blue, Ice Cap White, Heavy
 // Metal, Precious Black Pearl). The remainder are legacy/extra options kept
 // so existing user profiles ("Bayside Blue", "Guards Red", etc.) still
 // resolve correctly via the lookup in `resolveCarColor()`.
@@ -56,7 +56,7 @@ export const CAR_COLORS: { name: string; hex: string }[] = [
   { name: "Heavy Metal",            hex: "#5C5F66" }, // metallic gunmetal gray
   { name: "Precious Black Pearl",   hex: "#0E0F12" }, // deep pearlescent black
   // ---- Legacy / extended ----
-  { name: "Stratosphere Blue", hex: "#1F4FB8" }, // legacy — aliased to Blue Flame PNG
+  { name: "Stratosphere Blue", hex: "#1F4FB8" }, // legacy â aliased to Blue Flame PNG
   { name: "Bayside Blue",   hex: "#0A84FF" },
   { name: "Nardo Gray",     hex: "#8E8E93" },
   { name: "Guards Red",     hex: "#FF453A" },
@@ -89,7 +89,7 @@ type Props = {
    * Canonical GR Corolla slug broadcast over Supabase presence
    * (e.g. "grc_heavy_metal"). When provided, takes precedence over `color`
    * for asset lookup. Defaults to the Heavy Metal GRC PNG if neither
-   * `activeColor` nor `color` resolves to one of the 5 known paints — we
+   * `activeColor` nor `color` resolves to one of the 5 known paints â we
    * never render a generic silhouette.
    */
   activeColor?: string | null;
@@ -98,19 +98,19 @@ type Props = {
   testID?: string;
 };
 
-// Path data is drawn as if the vehicle is pointing UP (heading 0°). We then
-// rotate the entire <G> by `heading`. All paths are sized to a 100×100 viewBox.
+// Path data is drawn as if the vehicle is pointing UP (heading 0Â°). We then
+// rotate the entire <G> by `heading`. All paths are sized to a 100Ã100 viewBox.
 // NOTE: The legacy SVG silhouette paths below are retained only as historical
 // reference. Live rendering always uses the GR Corolla PNG assets (see render
 // body in CarMarker default export).
 
 export default function CarMarker({ color, activeColor, heading, size = 40, testID }: Props) {
-  // Heading from expo-location is degrees clockwise from true north — used as
+  // Heading from expo-location is degrees clockwise from true north â used as
   // a CSS rotate degree directly.
   const angle = Number.isFinite(heading as number) ? Math.round((heading as number) % 360) : 0;
   // Resolve to a GR Corolla PNG. If color/activeColor don't match one of the
   // 5 official paints, we fall back to the DEFAULT_GRC PNG ("Heavy Metal") so
-  // every driver always shows up as a recognisable top-down car — never a
+  // every driver always shows up as a recognisable top-down car â never a
   // generic SVG silhouette or a broken image.
   const asset = getVehiclePngOrDefault(activeColor || color);
   return (

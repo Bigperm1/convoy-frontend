@@ -1,308 +1,300 @@
-// Garage â driver profile editor.
-//
-// Lets the user edit their car: Year / Make / Model / Color, then pick the
-// silhouette body type and car color shown to other drivers on the map.
-// PATCH-style â sends only the changed fields to PUT /auth/profile.
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  Image, SafeAreaView, Dimensions, FlatList, ViewToken,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { getSettings, updateSettings } from '../../src/settings';
+import { COLORS } from '../../src/theme';
+import { getGarageImage } from '../../src/carImages';
+import { YEARS, getMakeNames, getModelsForMake, getColorsForModel } from '../../src/carDatabase';
 
-import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, Platform, KeyboardAvoidingView } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+const { width: SCREEN_W } = Dimensions.get('window');
+const ITEM_H = 52;
+const VISIBLE = 3;
+const PICKER_H = ITEM_H * VISIBLE;
 
-import { useAuth } from "../../src/auth";
-import { api, formatErr } from "../../src/api";
-import { COLORS } from "../../src/theme";
-import Glass from "../../src/Glass";
-import CarMarker, { CAR_BODIES, GARAGE_COLORS, CarBody } from "../../src/CarMarker";
-import { useSettings, kmhToDisplay } from "../../src/settings";
+// ── Drum-roll picker ─────────────────────────────────────────────────────────
+type PickerProps = {
+  items: string[];
+  selected: string;
+  onSelect: (val: string) => void;
+  placeholder?: string;
+};
 
-export default function GarageScreen() {
-  const { user, refresh } = useAuth();
-  const router = useRouter();
-  // Speed-unit preference â the backend always stores top_speed_record in
-  // KM/H so we convert at the display layer to match the user's choice.
-  const [settings] = useSettings();
+function DrumPicker({ items, selected, onSelect, placeholder }: PickerProps) {
+  const listRef = useRef<FlatList>(null);
+  const selectedIdx = items.indexOf(selected);
+  const lastIdx = useRef(selectedIdx);
 
-  const [year, setYear]   = useState<string>(user?.car_year ? String(user.car_year) : "");
-  const [make, setMake]   = useState<string>(user?.car_make || "");
-  const [model, setModel] = useState<string>(user?.car_model || "");
-  const [color, setColor] = useState<string>(user?.car_color || "Heavy Metal");
-  const [body, setBody]   = useState<CarBody>((user?.car_type as CarBody) || "sedan");
-  const [busy, setBusy]   = useState(false);
-
-  // Re-hydrate when user object changes (e.g. after refresh)
   useEffect(() => {
-    if (!user) return;
-    setYear(user.car_year ? String(user.car_year) : "");
-    setMake(user.car_make || "");
-    setModel(user.car_model || "");
-    setColor(user.car_color || "Bayside Blue");
-    setBody((user.car_type as CarBody) || "sedan");
-  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (selectedIdx >= 0) {
+      listRef.current?.scrollToIndex({ index: selectedIdx, animated: true, viewPosition: 0.5 });
+    }
+  }, [selectedIdx]);
 
-  const save = async () => {
-    setBusy(true);
-    try {
-      const yearNum = year.trim() ? Number(year.trim()) : null;
-      await api.put("/auth/profile", {
-        car_year: Number.isFinite(yearNum as number) ? yearNum : null,
-        car_make: make.trim(),
-        car_model: model.trim(),
-        car_color: color.trim(),
-        car_type: body,
-      });
-      await refresh();
-      Alert.alert("Saved", "Your garage is up to date.");
-    } catch (e) { Alert.alert("Save failed", formatErr(e)); }
-    finally { setBusy(false); }
-  };
+  const onViewableChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    if (viewableItems.length === 0) return;
+    const midItem = viewableItems[Math.floor(viewableItems.length / 2)];
+    if (!midItem || midItem.index === null) return;
+    const newIdx = midItem.index;
+    if (newIdx !== lastIdx.current) {
+      lastIdx.current = newIdx;
+      Haptics.selectionAsync();
+      onSelect(items[newIdx]);
+    }
+  }).current;
+
+  if (items.length === 0) {
+    return (
+      <View style={styles.pickerEmpty}>
+        <Text style={styles.pickerEmptyText}>{placeholder ?? 'Select above first'}</Text>
+      </View>
+    );
+  }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={22} color={COLORS.text} />
-          </TouchableOpacity>
-          <Text style={styles.title}>Garage</Text>
-          <View style={{ width: 36 }} />
-        </View>
-
-        <ScrollView
-          contentContainerStyle={{ padding: 18, paddingBottom: 120 }}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* ===== Live Preview â virtual garage stage =====
-              Replaces the flat Glass card with a polished "showroom" look:
-              radial concrete-floor gradient + LED accent border. The car sits
-              on the stage and recolors live as the user picks a swatch below.
-              Inspired by the high-end virtual garage reference. */}
-          <View style={styles.stageOuter}>
-            <View style={styles.stageLed} testID="garage-stage" pointerEvents="none" />
-            <LinearGradient
-              colors={[
-                "rgba(40,40,46,0.92)",  // back wall â darker concrete
-                "rgba(28,28,32,0.92)",  // floor center
-                "rgba(18,18,22,0.95)",  // foreground edge
-              ]}
-              start={{ x: 0.5, y: 0 }}
-              end={{ x: 0.5, y: 1 }}
-              style={styles.stageBg}
+    <View style={styles.pickerWrap}>
+      <View style={styles.pickerHighlight} pointerEvents="none" />
+      <FlatList
+        ref={listRef}
+        data={items}
+        keyExtractor={(item) => item}
+        snapToInterval={ITEM_H}
+        decelerationRate="fast"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingVertical: ITEM_H }}
+        onViewableItemsChanged={onViewableChanged}
+        viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
+        renderItem={({ item }) => {
+          const isSelected = item === selected;
+          return (
+            <TouchableOpacity
+              style={styles.pickerItem}
+              onPress={() => {
+                Haptics.selectionAsync();
+                onSelect(item);
+                const idx = items.indexOf(item);
+                listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+              }}
+              activeOpacity={0.7}
             >
-              {/* radial spotlight on the car (subtle) */}
-              <LinearGradient
-                colors={[ "rgba(255,255,255,0.10)", "rgba(255,255,255,0)" ]}
-                style={styles.stageSpot}
-                start={{ x: 0.5, y: 0 }}
-                end={{ x: 0.5, y: 1 }}
-              />
-              <View style={styles.stageCar}>
-                <CarMarker body={body} color={color} heading={0} size={170} />
-              </View>
-              <View style={styles.stageCaption}>
-                <Text style={styles.previewLabel}>{[year, make, model].filter(Boolean).join(" ") || "Your car"}</Text>
-                <Text style={styles.previewSub}>{color || "â"} Â· {body}</Text>
-              </View>
-            </LinearGradient>
-          </View>
-
-          {/* Personal best â Top Cruise Speed from Map sessions. Auto-tracked, read-only. */}
-          <Glass radius={22} style={{ marginBottom: 18 }}>
-            <View style={styles.pbBox} testID="garage-personal-best">
-              <View style={styles.pbIconWrap}>
-                <Ionicons name="speedometer" size={26} color="#FFC700" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.pbLabel}>Top Cruise Speed</Text>
-                <Text style={styles.pbHint}>
-                  {user?.top_speed_record && user.top_speed_record > 0
-                    ? "Personal best â beat it on your next drive."
-                    : "Drive with the Map open to set your first record."}
-                </Text>
-              </View>
-              <View style={styles.pbValueWrap}>
-                <Text style={styles.pbValue} testID="garage-personal-best-value">
-                  {user?.top_speed_record && user.top_speed_record > 0
-                    ? kmhToDisplay(user.top_speed_record, settings.speedUnit)
-                    : "â"}
-                </Text>
-                <Text style={styles.pbUnit}>{settings.speedUnit === 'mph' ? 'mph' : 'km/h'}</Text>
-              </View>
-            </View>
-          </Glass>
-
-          {/* Year / Make / Model / Color */}
-          <Field label="Year" value={year} onChange={setYear} placeholder="1999" keyboard="number-pad" testID="garage-year" />
-          <Field label="Make" value={make} onChange={setMake} placeholder="Nissan" testID="garage-make" />
-          <Field label="Model" value={model} onChange={setModel} placeholder="Skyline GT-R" testID="garage-model" />
-          <Field label="Color" value={color} onChange={setColor} placeholder="Heavy Metal" testID="garage-color" />
-
-          {/* Color swatches â tap-to-pick. Only the 5 GR Corolla paint
-              colors with rendered PNG assets are offered here. Any other
-              color string would silently fall back to the Heavy Metal PNG
-              (the "I saved a color but the map didn't change" Bug 10). */}
-          <Text style={styles.section}>Quick colors</Text>
-          <View style={styles.swatchRow}>
-            {GARAGE_COLORS.map((c) => {
-              const active = color.toLowerCase() === c.name.toLowerCase();
-              return (
-                <TouchableOpacity
-                  key={c.name}
-                  onPress={() => setColor(c.name)}
-                  activeOpacity={0.85}
-                  testID={`garage-color-${c.name}`}
-                  style={styles.swatchTile}
-                >
-                  <View style={[
-                    styles.swatch,
-                    { backgroundColor: c.hex },
-                    active && styles.swatchActive,
-                    // Lift Ice Cap White off the dark background so it doesn't
-                    // look like an empty chip.
-                    c.name === "Ice Cap White" && { borderColor: "rgba(255,255,255,0.28)" },
-                  ]} />
-                  <Text style={[styles.swatchLabel, active && styles.swatchLabelActive]} numberOfLines={1}>
-                    {c.name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {/* Body type / icon */}
-          <Text style={styles.section}>Car icon</Text>
-          <View style={styles.bodyGrid}>
-            {CAR_BODIES.map((b) => {
-              const active = body === b.id;
-              return (
-                <TouchableOpacity
-                  key={b.id}
-                  onPress={() => setBody(b.id)}
-                  activeOpacity={0.85}
-                  testID={`garage-body-${b.id}`}
-                  style={[styles.bodyCard, active && styles.bodyCardActive]}
-                >
-                  <CarMarker body={b.id} color={color} heading={0} size={56} />
-                  <Text style={[styles.bodyLabel, active && { color: COLORS.text }]}>{b.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {/* Save */}
-          <TouchableOpacity testID="garage-save" disabled={busy} onPress={save} style={styles.btn} activeOpacity={0.85}>
-            <LinearGradient colors={["#FFE45C", "#FFC700", "#FF9F0A"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
-              <Text style={styles.btnText}>{busy ? "Savingâ¦" : "Save garage"}</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
-  );
-}
-
-function Field({ label, value, onChange, placeholder, keyboard, testID }: any) {
-  return (
-    <View style={{ marginTop: 10 }}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput
-        testID={testID}
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={COLORS.textMute}
-        keyboardType={keyboard || "default"}
-        style={styles.input}
+              <Text style={[styles.pickerItemText, isSelected && styles.pickerItemSelected]}>
+                {item}
+              </Text>
+            </TouchableOpacity>
+          );
+        }}
       />
     </View>
   );
 }
 
+// ── Color swatch row ─────────────────────────────────────────────────────────
+type ColorPickerProps = {
+  colors: { name: string; hex: string }[];
+  selected: string;
+  onSelect: (name: string) => void;
+};
+
+function ColorPicker({ colors, selected, onSelect }: ColorPickerProps) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.colorRow}>
+      {colors.map((c) => {
+        const isSelected = c.name === selected;
+        return (
+          <TouchableOpacity
+            key={c.name}
+            style={[styles.swatchWrap, isSelected && styles.swatchSelected]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              onSelect(c.name);
+            }}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.swatch, { backgroundColor: c.hex }]} />
+            <Text style={[styles.swatchLabel, isSelected && styles.swatchLabelSelected]} numberOfLines={1}>
+              {c.name}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+// ── Main screen ──────────────────────────────────────────────────────────────
+export default function GarageScreen() {
+  const router = useRouter();
+  const [year,  setYear]  = useState('2025');
+  const [make,  setMake]  = useState('');
+  const [model, setModel] = useState('');
+  const [color, setColor] = useState('');
+  const [topSpeed, setTopSpeed] = useState<number | null>(null);
+
+  const makes   = getMakeNames();
+  const models  = make  ? getModelsForMake(make).map(m => m.name)  : [];
+  const colors  = (make && model) ? getColorsForModel(make, model) : [];
+
+  // Load saved settings
+  useEffect(() => {
+    const s = getSettings();
+    if (s.carYear)  setYear(s.carYear);
+    if (s.carMake)  setMake(s.carMake);
+    if (s.carModel) setModel(s.carModel);
+    if (s.carColor) setColor(s.carColor);
+    if (s.topSpeed) setTopSpeed(s.topSpeed);
+  }, []);
+
+  // Save on any change
+  const save = useCallback((updates: Record<string, any>) => {
+    updateSettings(updates);
+  }, []);
+
+  const handleYear = (v: string) => { setYear(v);  save({ carYear: v }); };
+  const handleMake = (v: string) => {
+    setMake(v); setModel(''); setColor('');
+    save({ carMake: v, carModel: '', carColor: '' });
+  };
+  const handleModel = (v: string) => {
+    setModel(v); setColor('');
+    save({ carModel: v, carColor: '' });
+    // Auto-select first color
+    const cols = getColorsForModel(make, v);
+    if (cols.length > 0) {
+      setColor(cols[0].name);
+      save({ carModel: v, carColor: cols[0].name });
+    }
+  };
+  const handleColor = (v: string) => { setColor(v); save({ carColor: v }); };
+
+  const carImage = getGarageImage(make, model, color);
+  const displayColor = colors.find(c => c.name === color);
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color={COLORS.text} />
+          </TouchableOpacity>
+          <Text style={styles.title}>Garage</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        {/* Car hero card */}
+        <View style={styles.heroCard}>
+          <View style={styles.heroLedBorder} pointerEvents="none" />
+          <LinearGradient
+            colors={['#1A1A1A', '#0D0D0D']}
+            style={styles.heroGradient}
+          >
+            <Image
+              source={carImage}
+              style={styles.heroImage}
+              resizeMode="contain"
+            />
+            <View style={styles.heroCaption}>
+              <Text style={styles.heroTitle}>
+                {year && make && model ? `${year} ${make} ${model}` : 'Select your car'}
+              </Text>
+              {color ? (
+                <View style={styles.heroColorRow}>
+                  {displayColor && <View style={[styles.heroColorDot, { backgroundColor: displayColor.hex }]} />}
+                  <Text style={styles.heroSub}>{color}</Text>
+                </View>
+              ) : null}
+            </View>
+          </LinearGradient>
+        </View>
+
+        {/* Top speed badge */}
+        {topSpeed ? (
+          <View style={styles.speedCard}>
+            <View style={styles.speedIcon}>
+              <Ionicons name="speedometer" size={22} color="#FFD60A" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.speedLabel}>Top Cruise Speed</Text>
+              <Text style={styles.speedSub}>Personal best — beat it on your next drive.</Text>
+            </View>
+            <Text style={styles.speedValue}>{topSpeed}</Text>
+            <Text style={styles.speedUnit}>km/h</Text>
+          </View>
+        ) : null}
+
+        {/* Pickers */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Year</Text>
+          <DrumPicker items={YEARS} selected={year} onSelect={handleYear} />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Make</Text>
+          <DrumPicker items={makes} selected={make} onSelect={handleMake} placeholder="Select a year first" />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Model</Text>
+          <DrumPicker items={models} selected={model} onSelect={handleModel} placeholder="Select a make first" />
+        </View>
+
+        {colors.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Color</Text>
+            <ColorPicker colors={colors} selected={color} onSelect={handleColor} />
+          </View>
+        )}
+
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
 const styles = StyleSheet.create({
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 10 },
-  backBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  title: { color: COLORS.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.4 },
-  section: { color: COLORS.text, fontSize: 16, fontWeight: "600", marginTop: 22, marginBottom: 8, letterSpacing: -0.2 },
-  label: { color: COLORS.textDim, fontSize: 12, marginBottom: 6, fontWeight: "500" },
-  input: { backgroundColor: "rgba(118,118,128,0.18)", color: COLORS.text, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12, fontSize: 16 },
-  // Preview block â virtual-garage stage (concrete + LED frame)
-  stageOuter: {
-    marginBottom: 18,
-    borderRadius: 24,
-    overflow: "hidden",
-    position: "relative",
-  },
-  // Glowing LED border outline. Sits on top of the gradient; pointerEvents none.
-  stageLed: {
-    position: "absolute",
-    top: 0, left: 0, right: 0, bottom: 0,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: "rgba(255,199,0,0.55)", // brand yellow LED accent
-    shadowColor: "#FFC700",
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 0 },
-    zIndex: 2,
-  },
-  stageBg: {
-    paddingHorizontal: 18,
-    paddingVertical: 22,
-    minHeight: 230,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 24,
-  },
-  stageSpot: {
-    position: "absolute",
-    top: 0, left: "10%", right: "10%",
-    height: "60%",
-    borderRadius: 200,
-  },
-  stageCar: { alignItems: "center", marginBottom: 10 },
-  stageCaption: { alignItems: "center" },
-  previewBox: { padding: 16, alignItems: "center" }, // legacy â kept in case
-  previewLabel: { color: COLORS.text, fontSize: 16, fontWeight: "700", marginTop: 8 },
-  previewSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2, textTransform: "capitalize" },
-  // Personal best tile
-  pbBox: { flexDirection: "row", alignItems: "center", gap: 14, padding: 16 },
-  pbIconWrap: {
-    width: 48, height: 48, borderRadius: 14,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(255,199,0,0.14)",
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,199,0,0.45)",
-  },
-  pbLabel: { color: COLORS.text, fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
-  pbHint: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
-  pbValueWrap: { alignItems: "flex-end" },
-  pbValue: { color: "#FFC700", fontSize: 28, fontWeight: "800", letterSpacing: -0.5, lineHeight: 30 },
-  pbUnit: { color: COLORS.textDim, fontSize: 11, fontWeight: "600", marginTop: 2 },
-  // Color swatches â tiles with a label underneath each color circle.
-  swatchRow: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 6, marginBottom: 8 },
-  swatchTile: { alignItems: "center", width: 76 },
-  swatch: {
-    width: 38, height: 38, borderRadius: 19,
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.10)",
-  },
-  swatchActive: { borderColor: "#FFC700", transform: [{ scale: 1.10 }] },
-  swatchLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: "600", marginTop: 6, textAlign: "center" },
-  swatchLabelActive: { color: COLORS.text, fontWeight: "700" },
-  // Body grid
-  bodyGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  bodyCard: {
-    width: "30%", aspectRatio: 1,
-    backgroundColor: "rgba(118,118,128,0.12)",
-    borderWidth: 1, borderColor: COLORS.hairline,
-    borderRadius: 14,
-    alignItems: "center", justifyContent: "center", gap: 4,
-  },
-  bodyCardActive: { borderColor: "#FFC700", backgroundColor: "rgba(255,199,0,0.10)" },
-  bodyLabel: { color: COLORS.textDim, fontSize: 11, fontWeight: "600", letterSpacing: 0.2 },
-  // CTA
-  btn: { marginTop: 28, borderRadius: 16, overflow: "hidden" },
-  btnGrad: { paddingVertical: 16, alignItems: "center" },
-  btnText: { color: "#1a1a1a", fontWeight: "700", fontSize: 16, letterSpacing: 0.2 },
+  safe:               { flex: 1, backgroundColor: '#000' },
+  scroll:             { paddingBottom: 60 },
+  header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
+  backBtn:            { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  title:              { color: '#fff', fontSize: 20, fontWeight: '600' },
+
+  heroCard:           { marginHorizontal: 16, marginBottom: 16, borderRadius: 24, overflow: 'hidden', position: 'relative' },
+  heroLedBorder:      { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 24, borderWidth: 1.5, borderColor: 'rgba(255,214,10,0.5)', zIndex: 2 },
+  heroGradient:       { padding: 20, alignItems: 'center', minHeight: 260 },
+  heroImage:          { width: SCREEN_W - 72, height: 200 },
+  heroCaption:        { alignItems: 'center', marginTop: 8 },
+  heroTitle:          { color: '#fff', fontSize: 18, fontWeight: '700' },
+  heroColorRow:       { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 },
+  heroColorDot:       { width: 10, height: 10, borderRadius: 5 },
+  heroSub:            { color: '#888', fontSize: 14 },
+
+  speedCard:          { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 16, backgroundColor: '#111', borderRadius: 16, padding: 14, gap: 12 },
+  speedIcon:          { width: 44, height: 44, borderRadius: 12, backgroundColor: '#1A1A00', alignItems: 'center', justifyContent: 'center' },
+  speedLabel:         { color: '#fff', fontSize: 15, fontWeight: '600' },
+  speedSub:           { color: '#666', fontSize: 12, marginTop: 2 },
+  speedValue:         { color: '#FFD60A', fontSize: 28, fontWeight: '700' },
+  speedUnit:          { color: '#888', fontSize: 12, alignSelf: 'flex-end', marginBottom: 4 },
+
+  section:            { marginHorizontal: 16, marginBottom: 20 },
+  sectionLabel:       { color: '#888', fontSize: 13, fontWeight: '500', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 },
+
+  pickerWrap:         { height: PICKER_H, borderRadius: 16, backgroundColor: '#111', overflow: 'hidden', position: 'relative' },
+  pickerHighlight:    { position: 'absolute', top: ITEM_H, left: 0, right: 0, height: ITEM_H, backgroundColor: 'rgba(255,214,10,0.07)', borderTopWidth: 1, borderBottomWidth: 1, borderColor: 'rgba(255,214,10,0.2)', zIndex: 1 },
+  pickerItem:         { height: ITEM_H, alignItems: 'center', justifyContent: 'center' },
+  pickerItemText:     { color: '#555', fontSize: 17 },
+  pickerItemSelected: { color: '#fff', fontSize: 19, fontWeight: '600' },
+  pickerEmpty:        { height: PICKER_H, borderRadius: 16, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
+  pickerEmptyText:    { color: '#444', fontSize: 15 },
+
+  colorRow:           { paddingVertical: 4, gap: 10, paddingHorizontal: 2 },
+  swatchWrap:         { alignItems: 'center', gap: 6, padding: 8, borderRadius: 12, borderWidth: 1.5, borderColor: 'transparent', minWidth: 70 },
+  swatchSelected:     { borderColor: '#FFD60A', backgroundColor: 'rgba(255,214,10,0.08)' },
+  swatch:             { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
+  swatchLabel:        { color: '#666', fontSize: 11, textAlign: 'center' },
+  swatchLabelSelected:{ color: '#FFD60A' },
 });

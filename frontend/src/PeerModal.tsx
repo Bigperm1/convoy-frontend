@@ -37,9 +37,9 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
   // ===== Hail state =====
   //
   // Three phases:
-  //   idle    â show "Hail <driver>" with radio icon
-  //   sending â show "Hailing..." with spinner-ish ellipsis, disable taps
-  //   sent    â show "Hailed! â" with checkmark for 3s, then re-enable
+  //   idle    Ã¢ÂÂ show "Hail <driver>" with radio icon
+  //   sending Ã¢ÂÂ show "Hailing..." with spinner-ish ellipsis, disable taps
+  //   sent    Ã¢ÂÂ show "Hailed! Ã¢ÂÂ" with checkmark for 3s, then re-enable
   //
   // Auto-reset when the modal is closed/reopened so a re-hail starts fresh.
   const [hailing, setHailing] = useState(false);
@@ -58,10 +58,10 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
     if (hailing || hailSent) return;
     setHailing(true);
     try {
-      // Best-effort grab of the current convoy context â used by the backend
+      // Best-effort grab of the current convoy context Ã¢ÂÂ used by the backend
       // to enrich the push payload (not for the share-check; that lives on
       // the Mongo `communities` collection).
-      const s = await getSettings().then(r => r).catch(() => null as any);
+      const s = await Promise.resolve().then(() => getSettings()).catch(() => null as any);
       await api.post("/notifications/hail", {
         target_user_id: peer.user_id,
         community_id: s?.activeCommunityId ?? undefined,
@@ -70,7 +70,7 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
       // Auto-reset the confirmation after 3s so the user can hail again.
       setTimeout(() => setHailSent(false), 3000);
     } catch (e: any) {
-      // 403 = "must share a community" â surface as inline state without
+      // 403 = "must share a community" Ã¢ÂÂ surface as inline state without
       // tearing the modal. Other errors are just logged.
       if (__DEV__) console.warn("Hail failed:", e?.response?.data || e);
     } finally {
@@ -145,9 +145,9 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
                 />
                 <Text style={styles.hailText}>
                   {hailing
-                    ? "Hailingâ¦"
+                    ? "HailingÃ¢ÂÂ¦"
                     : hailSent
-                      ? `Hailed ${peer.handle || "driver"} â`
+                      ? `Hailed ${peer.handle || "driver"} Ã¢ÂÂ`
                       : `Hail ${peer.handle || "driver"}`}
                 </Text>
               </TouchableOpacity>

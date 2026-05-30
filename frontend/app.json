@@ -72,6 +72,20 @@
           "icon": "./assets/images/icon.png",
           "color": "#FFD60A"
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.0"
+          },
+          "android": {
+            "minSdkVersion": 24,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "buildToolsVersion": "35.0.0"
+          }
+        }
       ]
     ],
     "experiments": {

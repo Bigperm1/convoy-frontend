@@ -381,6 +381,9 @@ export default function MapScreen() {
   useEffect(() => {
     (async () => {
       let lat = 37.7749, lng = -122.4194;
+      // Render the map immediately with a sane default so we never hang on "Locating…";
+      // the real GPS fix below refines this within a few seconds.
+      setCoords((cur) => cur || { lat, lng });
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === "granted") {

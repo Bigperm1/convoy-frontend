@@ -1,8 +1,7 @@
-import React, { useRef, forwardRef } from 'react';
+import React, { forwardRef } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { NavigationView } from '@googlemaps/react-native-navigation-sdk';
 
-// Exact fields used by map.tsx and PeerModal.tsx
 export interface Peer {
   user_id: string;
   handle?: string;
@@ -11,6 +10,7 @@ export interface Peer {
   heading?: number;
   speed?: number;
   carType?: string;
+  carBody?: string;
   carColor?: string;
   topSpeed?: number;
   online_at?: string;
@@ -47,7 +47,6 @@ const ConvoyMap = forwardRef<any, Props>(function ConvoyMap(_props, _ref) {
         androidStylingOptions={{}}
         iOSStylingOptions={{}}
         onMapReady={() => {}}
-        onRouteChanged={() => {}}
         onArrival={() => {}}
       />
     </View>

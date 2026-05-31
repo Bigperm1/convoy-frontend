@@ -1,6 +1,7 @@
-import React, { forwardRef } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { NavigationView } from '@googlemaps/react-native-navigation-sdk';
+import React, { forwardRef, useEffect, useRef, useState } from "react";
+import { View, StyleSheet } from "react-native";
+import { NavigationView } from "@googlemaps/react-native-navigation-sdk";
+import { getVehiclePngDataUriOrDefault } from "./vehicleAssets";
 
 export interface Peer {
   user_id: string;
@@ -38,38 +39,113 @@ export interface UserLocation {
   speed?: number;
 }
 
-// Typed props preserve callback inference; intersection allows extra props from map.tsx
-interface TypedProps {
-  center?: { lat: number; lng: number; heading?: number; speed?: number };
-  user?: UserLocation;
-  peers?: Peer[];
-  hazards?: Hazard[];
+// Accept the full prop surface map.tsx passes (route/hazard/etc.) without
+// breaking types; Phase 1 implements the car markers (self + peers). The
+// remaining props are accepted and passed through for later phases.
+interface ConvoyMapProps {
+  center?: { lat: number; lng: number; heading?: number } | null;
+  user?: UserLocation | null;
   hideSelfMarker?: boolean;
-  mapView?: string;
-  mapType?: string;
-  showWeatherLayer?: boolean;
-  show3DMap?: boolean;
-  onHazardPress?: (h: Hazard) => void;
-  onPeerPress?: (p: Peer) => void;
-  onExternalAlertPress?: (a: any) => void;
-  onRoute?: React.Dispatch<any>;
+  peers?: Record<string, Peer> | Peer[] | null;
+  [key: string]: any;
 }
 
-type Props = TypedProps & Record<string, any>;
+const SELF_ID = "self";
 
-const ConvoyMap = forwardRef<any, Props>(function ConvoyMap(_props, _ref) {
+type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number };
+
+const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
+  const { user, peers, hideSelfMarker, onMapReady } = props;
+  const [mapCtrl, setMapCtrl] = useState<any>(null);
+  const drawnIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!mapCtrl) return;
+    let cancelled = false;
+
+    const desired: CarPoint[] = [];
+
+    // "You" marker — your own car, in your profile color, rotated to heading.
+    // Suppressed when Avatar Live is OFF (hideSelfMarker).
+    if (
+      !hideSelfMarker &&
+      user &&
+      typeof user.lat === "number" &&
+      typeof user.lng === "number"
+    ) {
+      desired.push({
+        id: SELF_ID,
+        lat: user.lat,
+        lng: user.lng,
+        color: user.carColor,
+        heading: user.heading,
+      });
+    }
+
+    // Every other member in the community.
+    const peerList: Peer[] = Array.isArray(peers)
+      ? peers
+      : peers
+      ? Object.values(peers)
+      : [];
+    peerList.forEach((p) => {
+      if (p && typeof p.lat === "number" && typeof p.lng === "number") {
+        desired.push({
+          id: "peer_" + p.user_id,
+          lat: p.lat,
+          lng: p.lng,
+          color: p.carColor,
+          heading: p.heading,
+        });
+      }
+    });
+
+    const nextIds = new Set(desired.map((d) => d.id));
+
+    // Remove markers that are no longer present.
+    drawnIds.current.forEach((id) => {
+      if (!nextIds.has(id)) {
+        try {
+          mapCtrl.removeMarker(id);
+        } catch (e) {}
+      }
+    });
+
+    // Add or update markers (addMarker updates in place when id matches).
+    (async () => {
+      for (const d of desired) {
+        try {
+          await mapCtrl.addMarker({
+            id: d.id,
+            position: { lat: d.lat, lng: d.lng },
+            imgPath: getVehiclePngDataUriOrDefault(d.color),
+            rotation: d.heading || 0,
+            flat: true,
+          });
+        } catch (e) {}
+      }
+      if (!cancelled) drawnIds.current = nextIds;
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mapCtrl, user, peers, hideSelfMarker]);
+
   return (
-    <View style={styles.container}>
+    <View style={styles.container} ref={ref as any}>
       <NavigationView
         style={styles.map}
-        androidStylingOptions={{}}
-        iOSStylingOptions={{}}
-        onMapReady={() => {}}
+        onMapViewControllerCreated={setMapCtrl}
+        onMapReady={() => {
+          if (typeof onMapReady === "function") onMapReady();
+        }}
       />
     </View>
   );
 });
 
+ConvoyMap.displayName = "ConvoyMap";
 export default ConvoyMap;
 
 const styles = StyleSheet.create({

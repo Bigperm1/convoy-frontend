@@ -2,7 +2,6 @@ import React, { forwardRef } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { NavigationView } from '@googlemaps/react-native-navigation-sdk';
 
-// Used for remote peers on the map
 export interface Peer {
   user_id: string;
   handle?: string;
@@ -18,7 +17,6 @@ export interface Peer {
   onRoute?: React.Dispatch<any>;
 }
 
-// Used for hazard markers
 export interface Hazard {
   id: string;
   kind: string;
@@ -31,7 +29,6 @@ export interface Hazard {
   reportedAt?: string;
 }
 
-// Used for the local user's own position (no user_id needed)
 export interface UserLocation {
   heading?: number;
   carBody?: string;
@@ -41,6 +38,7 @@ export interface UserLocation {
   speed?: number;
 }
 
+// Accept all props from map.tsx without needing to enumerate every one
 interface Props {
   center?: { lat: number; lng: number; heading?: number; speed?: number };
   user?: UserLocation;
@@ -49,9 +47,13 @@ interface Props {
   hideSelfMarker?: boolean;
   mapView?: string;
   mapType?: string;
+  showWeatherLayer?: boolean;
+  show3DMap?: boolean;
   onHazardPress?: (h: Hazard) => void;
   onPeerPress?: (p: Peer) => void;
   onExternalAlertPress?: (a: any) => void;
+  onRoute?: React.Dispatch<any>;
+  [key: string]: any;
 }
 
 const ConvoyMap = forwardRef<any, Props>(function ConvoyMap(_props, _ref) {

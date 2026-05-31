@@ -1,196 +1,347 @@
-import ConvoyLogo from '../../src/components/ConvoyLogo';
-import React, { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView,
-  Platform, ScrollView, Alert, Image, ActivityIndicator, Keyboard,
-} from "react-native";
-import { useRouter, Link } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-import { useAuth } from "../../src/auth";
-import { COLORS } from "../../src/theme";
-import { formatErr } from "../../src/api";
-import Glass from "../../src/Glass";
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  SafeAreaView,
+  ScrollView,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
+import { signInWithEmail } from '../src/auth';
+import { LinearGradient } from 'expo-linear-gradient';
 
-export default function Login() {
-  const [email, setEmail] = useState("demo@revradar.app");
-  const [password, setPassword] = useState("demo1234");
-  const [showPassword, setShowPassword] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const { login } = useAuth();
+const CREDS_KEY = 'convoy.saved.credentials';
+const SAVE_CREDS_KEY = 'convoy.save.credentials';
+
+export default function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [saveCredentials, setSaveCredentials] = useState(false);
+  const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  const onSubmit = useCallback(async () => {
-    if (!email || !password) return Alert.alert("Enter email and password");
-    Keyboard.dismiss();
+  // Load saved credentials on mount
+  useEffect(() => {
+    loadSavedCredentials();
+  }, []);
+
+  const loadSavedCredentials = async () => {
     try {
-      setBusy(true);
-      await login(email.trim(), password);
-      router.replace("/(app)/map");
+      const saved = await AsyncStorage.getItem(SAVE_CREDS_KEY);
+      if (saved === 'true') {
+        const creds = await AsyncStorage.getItem(CREDS_KEY);
+        if (creds) {
+          const { email: savedEmail, password: savedPassword } = JSON.parse(creds);
+          setEmail(savedEmail || '');
+          setPassword(savedPassword || '');
+          setSaveCredentials(true);
+        }
+      }
     } catch (e) {
-      Alert.alert("Sign in failed", formatErr(e));
-    } finally {
-      setBusy(false);
+      console.error('Error loading saved credentials:', e);
     }
-  }, [email, password, login, router]);
+  };
+
+  const handleSignIn = useCallback(async () => {
+    if (!email || !password) {
+      Alert.alert('Error', 'Please enter email and password');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const success = await signInWithEmail(email, password);
+      if (success) {
+        // Save credentials if checkbox is checked
+        if (saveCredentials) {
+          await AsyncStorage.setItem(CREDS_KEY, JSON.stringify({ email, password }));
+          await AsyncStorage.setItem(SAVE_CREDS_KEY, 'true');
+        } else {
+          await AsyncStorage.removeItem(CREDS_KEY);
+          await AsyncStorage.setItem(SAVE_CREDS_KEY, 'false');
+        }
+        router.replace('/(app)/map');
+      } else {
+        Alert.alert('Error', 'Invalid email or password');
+      }
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Sign in failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [email, password, saveCredentials, router]);
+
+  const handleForgotPassword = () => {
+    Alert.alert(
+      'Password Reset',
+      'Please contact support at support@convoy.app or visit convoy.app/reset',
+      [{ text: 'OK' }]
+    );
+  };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: COLORS.bg }}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
-    >
-      <ScrollView
-      
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-        showsVerticalScrollIndicator={false}
+    <SafeAreaView style={styles.safe}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.container}
       >
-        {/* Ambient gradient blobs */}
-        <View style={styles.blobBlue} />
-        <View style={styles.blobIndigo} />
-        <LinearGradient colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.6)", "#000"]} style={StyleSheet.absoluteFill} pointerEvents="none" />
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Logo */}
+          <View style={styles.logoSection}>
+            <View style={styles.logoBadge}>
+              <Text style={styles.logoBadgeText}>C</Text>
+            </View>
+            <Text style={styles.appName}>Convoy</Text>
+            <Text style={styles.tagline}>Drive together. See everything.</Text>
+          </View>
 
-        <View style={styles.brand}>
-          <Image
-            source={require("../../assets/images/brand-mark.png")}
-            style={styles.brandLogo}
-            resizeMode="contain"
-            testID="logo"
-          />
-          <Text style={styles.title}>Convoy</Text>
-          <Text style={styles.tag}>Drive together. See everything.</Text>
-        </View>
-
-        <Glass radius={28} style={styles.card}>
-          <View style={{ padding: 22 }}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              testID="login-email"
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              autoCorrect={false}
-              spellCheck={false}
-              keyboardType="email-address"
-              textContentType="emailAddress"
-              autoComplete="email"
-              returnKeyType="next"
-              keyboardAppearance="dark"
-              placeholder="you@convoy.app"
-              placeholderTextColor={COLORS.textMute}
-            />
-            <Text style={styles.label}>Password</Text>
-            <View style={styles.pwWrap}>
-              <TextInput
-                testID="login-password"
-                style={[styles.input, styles.pwInput]}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-                autoCorrect={false}
-                spellCheck={false}
-                textContentType="password"
-                autoComplete="current-password"
-                returnKeyType="go"
-                keyboardAppearance="dark"
-                onSubmitEditing={onSubmit}
-                placeholder="••••••••"
-                placeholderTextColor={COLORS.textMute}
-              />
-              <TouchableOpacity
-                testID="login-password-toggle"
-                onPress={() => setShowPassword((v) => !v)}
-                style={styles.pwToggle}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel={showPassword ? "Hide password" : "Show password"}
-              >
-                <Ionicons
-                  name={showPassword ? "eye-off-outline" : "eye-outline"}
-                  size={22}
-                  color={COLORS.textDim}
+          {/* Sign In Form */}
+          <View style={styles.formSection}>
+            <View style={styles.formCard}>
+              {/* Email */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Email</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your email"
+                  placeholderTextColor="#666"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  editable={!loading}
                 />
+              </View>
+
+              {/* Password */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Password</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your password"
+                  placeholderTextColor="#666"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                  editable={!loading}
+                />
+              </View>
+
+              {/* Save Credentials Checkbox */}
+              <TouchableOpacity
+                style={styles.checkboxRow}
+                onPress={() => setSaveCredentials(!saveCredentials)}
+                disabled={loading}
+              >
+                <View style={[styles.checkbox, saveCredentials && styles.checkboxChecked]}>
+                  {saveCredentials && <Text style={styles.checkmark}>✓</Text>}
+                </View>
+                <Text style={styles.checkboxLabel}>Save credentials on this device</Text>
+              </TouchableOpacity>
+
+              {/* Sign In Button */}
+              <TouchableOpacity
+                style={styles.signInButton}
+                onPress={handleSignIn}
+                disabled={loading}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={['#FFE45C', '#FFC700', '#FF9F0A']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.buttonGradient}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#1a1a1a" size="small" />
+                  ) : (
+                    <Text style={styles.signInButtonText}>Sign in</Text>
+                  )}
+                </LinearGradient>
               </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              testID="login-submit"
-              style={[styles.btn, busy && styles.btnBusy]}
-              onPress={onSubmit}
-              disabled={busy}
-              activeOpacity={0.85}
-            >
-              {/* Convoy yellow CTA — matches Sign-up + brand mark */}
-              <LinearGradient
-                colors={["#FFE45C", "#FFC700", "#FF9F0A"]}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                style={styles.btnGrad}
+
+            {/* Links */}
+            <View style={styles.linksSection}>
+              <Text style={styles.linkText}>
+                New here?{' '}
+                <Text
+                  style={styles.linkHighlight}
+                  onPress={() => router.push('/(auth)/signup')}
+                >
+                  Create account
+                </Text>
+              </Text>
+              <TouchableOpacity
+                onPress={handleForgotPassword}
+                disabled={loading}
               >
-                {busy ? (
-                  <View style={styles.btnInner}>
-                    <ActivityIndicator size="small" color="#1a1a1a" />
-                    <Text style={styles.btnText}>Signing in…</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.btnText}>Sign in</Text>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
-
-            <Link href="/(auth)/signup" asChild>
-              <TouchableOpacity testID="link-signup" style={styles.linkBtn}>
-                <Text style={styles.linkText}>New here? <Text style={styles.linkAction}>Create account</Text></Text>
+                <Text style={styles.forgotLink}>Forgot password?</Text>
               </TouchableOpacity>
-            </Link>
-          </View>
-        </Glass>
+            </View>
 
-        <Text style={styles.footer}>Demo: demo@revradar.app · demo1234</Text>
-      </ScrollView>
-    </KeyboardAvoidingView>
+            {/* Demo Info */}
+            <View style={styles.demoInfo}>
+              <Text style={styles.demoText}>
+                Demo: demo@revradar.app · demo1234
+              </Text>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { flexGrow: 1, padding: 24, justifyContent: "center", backgroundColor: COLORS.bg },
-  blobBlue: { position: "absolute", top: -120, right: -80, width: 360, height: 360, borderRadius: 999, backgroundColor: COLORS.primary, opacity: 0.18, filter: "blur(80px)" as any },
-  blobIndigo: { position: "absolute", bottom: -120, left: -100, width: 320, height: 320, borderRadius: 999, backgroundColor: COLORS.accent, opacity: 0.16 },
-  brand: { alignItems: "center", marginBottom: 32 },
-  brandLogo: { width: 110, height: 110, marginBottom: 14 },
-  logoBox: {
-    width: 84, height: 84, borderRadius: 24, alignItems: "center", justifyContent: "center", marginBottom: 18,
-    backgroundColor: COLORS.surfaceSolid, borderWidth: 1, borderColor: COLORS.hairlineStrong,
+  safe: { flex: 1, backgroundColor: '#0A0A0A' },
+  container: { flex: 1 },
+  scrollContent: {
+    flexGrow: 1,
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+    justifyContent: 'space-between',
   },
-  title: { color: COLORS.text, fontSize: 38, fontWeight: "700", letterSpacing: -1 },
-  tag: { color: COLORS.textDim, marginTop: 4, fontSize: 15, letterSpacing: -0.2 },
-  card: { },
-  label: { color: COLORS.textDim, fontSize: 13, marginTop: 14, marginBottom: 8, fontWeight: "500" },
+  logoSection: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  logoBadge: {
+    width: 80,
+    height: 80,
+    borderRadius: 16,
+    backgroundColor: '#1a1a1a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: '#FFD60A',
+  },
+  logoBadgeText: {
+    fontSize: 40,
+    fontWeight: '700',
+    color: '#FFD60A',
+  },
+  appName: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  tagline: {
+    fontSize: 16,
+    color: '#999',
+  },
+  formSection: {
+    gap: 24,
+  },
+  formCard: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 16,
+    padding: 20,
+    gap: 20,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  inputGroup: {
+    gap: 8,
+  },
+  label: {
+    color: '#ccc',
+    fontSize: 14,
+    fontWeight: '500',
+  },
   input: {
-    backgroundColor: "rgba(118,118,128,0.18)",
-    color: COLORS.text, paddingVertical: 14, paddingHorizontal: 14, borderRadius: 14, fontSize: 16,
+    backgroundColor: '#0A0A0A',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    color: '#fff',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#333',
   },
-  // Password row — wraps the TextInput + show/hide eye toggle in a single
-  // horizontal container so they share one rounded background.
-  pwWrap: { position: "relative", justifyContent: "center" },
-  pwInput: { paddingRight: 48 },
-  pwToggle: {
-    position: "absolute", right: 6, top: 0, bottom: 0,
-    width: 44, alignItems: "center", justifyContent: "center",
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
-  btn: { marginTop: 22, borderRadius: 14, overflow: "hidden" },
-  // Visible busy state — opacity dip while the spinner runs so the user
-  // sees the click "took" instead of wondering if their tap missed.
-  btnBusy: { opacity: 0.7 },
-  btnGrad: { paddingVertical: 16, alignItems: "center", justifyContent: "center" },
-  btnInner: { flexDirection: "row", alignItems: "center", gap: 10 },
-  // Dark glyph on the bright yellow CTA — high contrast, matches brand mark color.
-  btnText: { color: "#1a1a1a", fontWeight: "700", fontSize: 16, letterSpacing: 0.2 },
-  linkAction: { color: "#FFC700", fontWeight: "600" },
-  linkBtn: { marginTop: 16, alignItems: "center" },
-  linkText: { color: COLORS.textDim, fontSize: 14 },
-  footer: { color: COLORS.textMute, textAlign: "center", marginTop: 22, fontSize: 12 },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#666',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#FFD60A',
+    borderColor: '#FFD60A',
+  },
+  checkmark: {
+    color: '#000',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  checkboxLabel: {
+    color: '#999',
+    fontSize: 14,
+  },
+  signInButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginTop: 8,
+  },
+  buttonGradient: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  signInButtonText: {
+    color: '#1a1a1a',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  linksSection: {
+    gap: 16,
+    alignItems: 'center',
+  },
+  linkText: {
+    color: '#999',
+    fontSize: 14,
+  },
+  linkHighlight: {
+    color: '#FFD60A',
+    fontWeight: '600',
+  },
+  forgotLink: {
+    color: '#FFD60A',
+    fontSize: 14,
+    fontWeight: '500',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  demoInfo: {
+    backgroundColor: 'rgba(255, 214, 10, 0.1)',
+    borderRadius: 12,
+    padding: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#FFD60A',
+  },
+  demoText: {
+    color: '#FFD60A',
+    fontSize: 12,
+    fontWeight: '500',
+  },
 });

@@ -17,7 +17,7 @@ const ITEM_H = 52;
 const VISIBLE = 3;
 const PICKER_H = ITEM_H * VISIBLE;
 
-// ── Drum-roll picker ─────────────────────────────────────────────────────────
+// ââ Drum-roll picker âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 type PickerProps = {
   items: string[];
   selected: string;
@@ -93,7 +93,7 @@ function DrumPicker({ items, selected, onSelect, placeholder }: PickerProps) {
   );
 }
 
-// ── Color swatch row ─────────────────────────────────────────────────────────
+// ââ Color swatch row âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 type ColorPickerProps = {
   colors: { name: string; hex: string }[];
   selected: string;
@@ -126,7 +126,7 @@ function ColorPicker({ colors, selected, onSelect }: ColorPickerProps) {
   );
 }
 
-// ── Main screen ──────────────────────────────────────────────────────────────
+// ââ Main screen ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 export default function GarageScreen() {
   const router = useRouter();
   const [year,  setYear]  = useState('2025');
@@ -221,7 +221,7 @@ export default function GarageScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.speedLabel}>Top Cruise Speed</Text>
-              <Text style={styles.speedSub}>Personal best — beat it on your next drive.</Text>
+              <Text style={styles.speedSub}>Personal best â beat it on your next drive.</Text>
             </View>
             <Text style={styles.speedValue}>{topSpeed}</Text>
             <Text style={styles.speedUnit}>km/h</Text>

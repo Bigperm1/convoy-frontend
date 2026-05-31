@@ -4,6 +4,7 @@ import {
   SafeAreaView, ScrollView, Easing,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
@@ -36,6 +37,7 @@ export default function TalkScreen() {
 
   const glow = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(1)).current;
+  const askedMic = useRef(false);
 
   useEffect(() => {
     if (pressed) {
@@ -55,6 +57,11 @@ export default function TalkScreen() {
 
   const onPressIn = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    // Ask for mic permission the first time the user actually transmits.
+    if (!askedMic.current) {
+      askedMic.current = true;
+      Audio.requestPermissionsAsync().catch(() => {});
+    }
     setDropdownOpen(false);
     setPressed(true);
   };

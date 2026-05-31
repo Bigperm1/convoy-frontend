@@ -18,14 +18,14 @@ const screens = [
   {
     id: 'drive-together',
     title: 'Drive Together',
-    description: 'See your convoy in real time. Every car, every hazard, every turn.',
+    description: 'See your convoy in real time.',
     image: require('../../assets/onboarding/drive_together.png'),
     btnText: 'Continue',
   },
   {
     id: 'talk-hands-free',
     title: 'Talk Hands-Free',
-    description: 'Push-to-talk walkie-talkie built for the road. HD audio when your crew is close.',
+    description: 'Push-to-talk walkie-talkie built for the road.',
     image: require('../../assets/onboarding/talk_hands-free.png'),
     btnText: 'Continue',
   },
@@ -40,7 +40,7 @@ const screens = [
 
 export default function Onboarding() {
   const [currentIdx, setCurrentIdx] = useState(0);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef(null);
   const router = useRouter();
 
   const goNext = () => {

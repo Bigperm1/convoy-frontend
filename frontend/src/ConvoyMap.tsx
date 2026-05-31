@@ -47,6 +47,7 @@ interface Props {
   peers?: Peer[];
   hazards?: Hazard[];
   hideSelfMarker?: boolean;
+  mapView?: string;
   onHazardPress?: (h: Hazard) => void;
   onPeerPress?: (p: Peer) => void;
   onExternalAlertPress?: (a: any) => void;

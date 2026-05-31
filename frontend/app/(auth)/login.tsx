@@ -17,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../src/auth';
+import { api } from '../../src/api';
 
 const CREDS_KEY = 'convoy.saved.credentials';
 const SAVE_CREDS_KEY = 'convoy.save.credentials';
@@ -26,8 +27,19 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [saveCredentials, setSaveCredentials] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [waking, setWaking] = useState(false);
   const router = useRouter();
   const { login } = useAuth();
+
+  useEffect(() => {
+
+    // Wake the backend early (Render free tier cold-starts after idle).
+
+    api.get('/api/health').catch(() => {});
+
+  }, []);
+
+  
 
   useEffect(() => {
     loadSavedCredentials();
@@ -56,6 +68,7 @@ export default function LoginScreen() {
       return;
     }
     setLoading(true);
+      const wakeTimer = setTimeout(() => setWaking(true), 4000);
     try {
       await login(email.trim(), password);
       if (saveCredentials) {
@@ -69,6 +82,8 @@ export default function LoginScreen() {
     } catch (e) {
       Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Invalid email or password');
     } finally {
+      clearTimeout(wakeTimer);
+      setWaking(false);
       setLoading(false);
     }
   }, [email, password, saveCredentials, login, router]);

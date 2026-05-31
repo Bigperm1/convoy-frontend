@@ -38,8 +38,8 @@ export interface UserLocation {
   speed?: number;
 }
 
-// Accept all props from map.tsx without needing to enumerate every one
-interface Props {
+// Typed props preserve callback inference; intersection allows extra props from map.tsx
+interface TypedProps {
   center?: { lat: number; lng: number; heading?: number; speed?: number };
   user?: UserLocation;
   peers?: Peer[];
@@ -53,8 +53,9 @@ interface Props {
   onPeerPress?: (p: Peer) => void;
   onExternalAlertPress?: (a: any) => void;
   onRoute?: React.Dispatch<any>;
-  [key: string]: any;
 }
+
+type Props = TypedProps & Record<string, any>;
 
 const ConvoyMap = forwardRef<any, Props>(function ConvoyMap(_props, _ref) {
   return (

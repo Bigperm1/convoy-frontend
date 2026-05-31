@@ -1,9 +1,10 @@
-name: Build and submit iOS
+name: Build and submit iOS (manual)
 
+# MANUAL TRIGGER ONLY — pushes do NOT auto-build (avoids surprise EAS charges).
+# Run this from the Expo dashboard (Workflows -> Run workflow) or 'eas workflow:run',
+# only when a new TestFlight build is actually wanted.
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch: {}
 
 jobs:
   build_ios:
@@ -20,8 +21,3 @@ jobs:
       platform: ios
       profile: production
       build_id: ${{ needs.build_ios.outputs.build_id }}
-
-# NOTE: Android build temporarily removed — it was failing (Gradle / dual maps-lib
-# conflict) and competing for build concurrency, stalling the iOS queue. Re-add a
-# build_android job once the Android map setup is sorted and the Play service-account
-# key is in place.

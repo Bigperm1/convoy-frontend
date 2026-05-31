@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useRouter } from 'expo-router';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator, Linking, Platform, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -61,13 +62,19 @@ async function deepLinkToMusicApp(target: Source, path?: string): Promise<boolea
 }
 
 export default function MusicScreen() {
+  const router = useRouter();
   const [source, setSource] = useState<Source>("spotify");
 
   return (
     <SafeAreaView style={styles.c} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Music</Text>
-        <Text style={styles.sub}>Sign in to bring your library on the road</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>Music</Text>
+          <Text style={styles.sub}>Sign in to bring your library on the road</Text>
+        </View>
+        <TouchableOpacity onPress={() => router.push('/(app)/garage')} hitSlop={12} style={styles.garageBtn}>
+          <Ionicons name="car-sport" size={26} color="#FFD60A" />
+        </TouchableOpacity>
       </View>
 
       {/* Service selector â iPhone-home-screen-style app icons rather than
@@ -514,9 +521,10 @@ async function openSpotifyExternal(httpsUrl?: string, uri?: string) {
 }
 
 const styles = StyleSheet.create({
+  garageBtn: { padding: 4, marginTop: 4 },
   comingSub: { color: '#8E8E93', fontSize: 13, textAlign: 'center', marginTop: 4 },
   c: { flex: 1, backgroundColor: COLORS.bg },
-  header: { paddingHorizontal: 18, paddingTop: 8 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',  paddingHorizontal: 18, paddingTop: 8 },
   title: { color: COLORS.text, fontSize: 34, fontWeight: "700", letterSpacing: -1 },
   sub: { color: COLORS.textDim, marginTop: 2, fontSize: 13 },
   tabs: { flexDirection: "row", paddingHorizontal: 16, paddingTop: 14, gap: 8 },

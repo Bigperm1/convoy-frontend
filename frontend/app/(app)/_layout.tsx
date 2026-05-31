@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { NavigationProvider } from "@googlemaps/react-native-navigation-sdk";
+// import { NavigationProvider } from "@googlemaps/react-native-navigation-sdk"; // unused while on react-native-maps
 import { Tabs, useRouter, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";

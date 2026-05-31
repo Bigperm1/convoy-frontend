@@ -1,4 +1,4 @@
-name: Build and submit iOS
+name: Build and submit (iOS + Android)
 
 on:
   push:
@@ -20,3 +20,23 @@ jobs:
       platform: ios
       profile: production
       build_id: ${{ needs.build_ios.outputs.build_id }}
+
+  build_android:
+    name: Build Android app
+    type: build
+    params:
+      platform: android
+      profile: production
+
+  # ── Android submit is DISABLED until a Google service account key is added to
+  # ── EAS (Credentials → Android → "Google service account key for EAS Submit")
+  # ── AND the first .aab has been uploaded manually in the Play Console once.
+  # ── Uncomment this block after both are done.
+  # submit_android:
+  #   name: Submit to Google Play
+  #   needs: [build_android]
+  #   type: submit
+  #   params:
+  #     platform: android
+  #     profile: production
+  #     build_id: ${{ needs.build_android.outputs.build_id }}

@@ -85,8 +85,6 @@ export default function MusicScreen() {
       <View style={styles.serviceRow}>
         {[
           { id: "spotify",    label: "Spotify",     bg: "#1DB954", grad: null,                    icon: "musical-notes" as const },
-          { id: "apple",      label: "Apple Music", bg: null,      grad: ["#FC5C7D", "#6A3093"],   icon: "musical-note"  as const },
-          { id: "soundcloud", label: "SoundCloud",  bg: "#FF5500", grad: null,                    icon: "cloud"         as const },
         ].map((svc) => {
           const selected = source === svc.id;
           return (

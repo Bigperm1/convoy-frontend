@@ -142,7 +142,7 @@ export default function LoginScreen() {
                 disabled={loading}
               >
                 <View style={[styles.checkbox, saveCredentials && styles.checkboxChecked]}>
-                  {saveCredentials && <Text style={styles.checkmark}>ÃÂ¢ÃÂÃÂ</Text>}
+                  {saveCredentials && <Text style={styles.checkmark}>ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ</Text>}
                 </View>
                 <Text style={styles.checkboxLabel}>Save credentials on this device</Text>
               </TouchableOpacity>
@@ -191,7 +191,7 @@ export default function LoginScreen() {
             {/* Demo Info */}
             <View style={styles.demoInfo}>
               <Text style={styles.demoText}>
-                Demo: demo@revradar.app ÃÂÃÂ· demo1234
+                Demo: demo@revradar.app ÃÂÃÂÃÂÃÂ· demo1234
               </Text>
             </View>
           </View>

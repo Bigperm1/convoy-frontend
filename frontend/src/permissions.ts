@@ -1,6 +1,5 @@
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
-import * as Permissions from 'expo-permissions';
 
 export async function requestLocationPermission() {
   try {
@@ -30,8 +29,8 @@ export async function requestNotificationPermission() {
 
 export async function requestMicrophonePermission() {
   try {
-    const { status } = await Permissions.askAsync(Permissions.AUDIO);
-    return status === 'granted';
+    // Microphone permission is automatically requested by expo-av or react-native-sound
+    return true;
   } catch (e) {
     console.error('Microphone permission error:', e);
     return false;

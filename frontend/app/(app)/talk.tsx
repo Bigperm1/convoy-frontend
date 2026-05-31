@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useRouter } from 'expo-router';
 import {
   View,
   Text,
@@ -10,12 +11,16 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 export default function TalkScreen() {
+  const router = useRouter();
   const [isListening, setIsListening] = useState(false);
 
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <Text style={styles.title}>Comms</Text>
+        <TouchableOpacity onPress={() => router.push('/(app)/garage')} hitSlop={12} style={styles.garageBtn}>
+          <Ionicons name="car-sport" size={26} color="#FFD60A" />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.content}>
@@ -39,8 +44,9 @@ export default function TalkScreen() {
 }
 
 const styles = StyleSheet.create({
+  garageBtn: { padding: 4 },
   safe: { flex: 1, backgroundColor: '#0A0A0A' },
-  header: {
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', 
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,

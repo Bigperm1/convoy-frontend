@@ -3,7 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { NavigationView } from '@googlemaps/react-native-navigation-sdk';
 
 export interface Peer {
-  user_id: string;
+  user_id?: string;
   handle?: string;
   lat: number;
   lng: number;
@@ -47,7 +47,6 @@ const ConvoyMap = forwardRef<any, Props>(function ConvoyMap(_props, _ref) {
         androidStylingOptions={{}}
         iOSStylingOptions={{}}
         onMapReady={() => {}}
-        onArrival={() => {}}
       />
     </View>
   );

@@ -171,7 +171,12 @@ export default function LoginScreen() {
                 style={styles.buttonGradient}
               >
                 {loading ? (
-                  <ActivityIndicator color="#1a1a1a" size="small" />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                    <ActivityIndicator color="#1a1a1a" size="small" />
+                    {waking && (
+                      <Text style={styles.wakingText}>Waking up server…</Text>
+                    )}
+                  </View>
                 ) : (
                   <Text style={styles.signInButtonText}>Sign in</Text>
                 )}
@@ -219,6 +224,7 @@ const styles = StyleSheet.create({
   signInButton: { borderRadius: 10, overflow: 'hidden', marginTop: 4 },
   buttonGradient: { paddingVertical: 14, alignItems: 'center' },
   signInButtonText: { color: '#1a1a1a', fontWeight: '700', fontSize: 15 },
+  wakingText: { color: '#1a1a1a', fontSize: 13, fontWeight: '700', marginLeft: 8 },
   linksSection: { gap: 12, alignItems: 'center', marginTop: 8 },
   linkText: { color: '#999', fontSize: 13 },
   linkHighlight: { color: '#FFD60A', fontWeight: '600' },

@@ -1,32 +1,31 @@
-import React, { useEffect, useRef, forwardRef } from 'react';
+import React, { useRef, forwardRef } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { NavigationView } from '@googlemaps/react-native-navigation-sdk';
 
+// Exact fields used by map.tsx and PeerModal.tsx
 export interface Peer {
-  userId: string;
+  user_id: string;
+  handle?: string;
   lat: number;
   lng: number;
-  heading: number;
+  heading?: number;
   speed?: number;
-  carBody: string;
+  carType?: string;
   carColor?: string;
-  user: {
-    heading: number;
-    carBody: string;
-    carColor?: string;
-    lat: number;
-    lng: number;
-    speed?: number;
-  };
-  onRoute: React.Dispatch<any>;
+  topSpeed?: number;
+  online_at?: string;
+  onRoute?: React.Dispatch<any>;
 }
 
 export interface Hazard {
   id: string;
+  kind: string;
   lat: number;
   lng: number;
-  type: string;
   subtype?: string;
+  confirms?: number;
+  disputes?: number;
+  reporter_handle?: string;
   reportedAt?: string;
 }
 
@@ -40,13 +39,10 @@ interface Props {
   onExternalAlertPress?: (a: any) => void;
 }
 
-const ConvoyMap = forwardRef<any, Props>(function ConvoyMap(props, ref) {
-  const navViewRef = useRef<any>(null);
-
+const ConvoyMap = forwardRef<any, Props>(function ConvoyMap(_props, _ref) {
   return (
     <View style={styles.container}>
       <NavigationView
-        ref={navViewRef}
         style={styles.map}
         androidStylingOptions={{}}
         iOSStylingOptions={{}}

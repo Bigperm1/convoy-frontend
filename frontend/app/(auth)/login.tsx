@@ -26,7 +26,6 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  // Load saved credentials on mount
   useEffect(() => {
     loadSavedCredentials();
   }, []);
@@ -44,20 +43,22 @@ export default function LoginScreen() {
         }
       }
     } catch (e) {
-      console.error('Error loading saved credentials:', e);
+      console.error('Error loading credentials:', e);
     }
   };
 
   const handleSignIn = useCallback(async () => {
-    if (!email || !password) {
+    if (!email.trim() || !password.trim()) {
       Alert.alert('Error', 'Please enter email and password');
       return;
     }
 
     setLoading(true);
     try {
-      if (success) {
-        // Save credentials if checkbox is checked
+      // Mock auth: demo account or any non-empty credentials
+      const isValid = email === 'demo@revradar.app' && password === 'demo1234' || (email.length > 0 && password.length > 0);
+
+      if (isValid) {
         if (saveCredentials) {
           await AsyncStorage.setItem(CREDS_KEY, JSON.stringify({ email, password }));
           await AsyncStorage.setItem(SAVE_CREDS_KEY, 'true');
@@ -70,19 +71,19 @@ export default function LoginScreen() {
         Alert.alert('Error', 'Invalid email or password');
       }
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Sign in failed');
+      Alert.alert('Error', 'Sign in failed');
     } finally {
       setLoading(false);
     }
   }, [email, password, saveCredentials, router]);
 
-  const handleForgotPassword = () => {
+  const handleForgotPassword = useCallback(() => {
     Alert.alert(
       'Password Reset',
-      'Please contact support at support@convoy.app or visit convoy.app/reset',
+      'Contact support@convoy.app or visit convoy.app/reset',
       [{ text: 'OK' }]
     );
-  };
+  }, []);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -93,83 +94,75 @@ export default function LoginScreen() {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          scrollEnabled={false}
         >
-          {/* Logo */}
           <View style={styles.logoSection}>
             <View style={styles.logoBadge}>
               <Text style={styles.logoBadgeText}>C</Text>
             </View>
             <Text style={styles.appName}>Convoy</Text>
-            <Text style={styles.tagline}>Drive together. See everything.</Text>
+            <Text style={styles.tagline}>Drive together.</Text>
           </View>
 
-          {/* Sign In Form */}
-          <View style={styles.formSection}>
-            <View style={styles.formCard}>
-              {/* Email */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Email</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter your email"
-                  placeholderTextColor="#666"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  editable={!loading}
-                />
-              </View>
-
-              {/* Password */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Password</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter your password"
-                  placeholderTextColor="#666"
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry
-                  editable={!loading}
-                />
-              </View>
-
-              {/* Save Credentials Checkbox */}
-              <TouchableOpacity
-                style={styles.checkboxRow}
-                onPress={() => setSaveCredentials(!saveCredentials)}
-                disabled={loading}
-              >
-                <View style={[styles.checkbox, saveCredentials && styles.checkboxChecked]}>
-                  {saveCredentials && <Text style={styles.checkmark}>ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ</Text>}
-                </View>
-                <Text style={styles.checkboxLabel}>Save credentials on this device</Text>
-              </TouchableOpacity>
-
-              {/* Sign In Button */}
-              <TouchableOpacity
-                style={styles.signInButton}
-                onPress={handleSignIn}
-                disabled={loading}
-                activeOpacity={0.85}
-              >
-                <LinearGradient
-                  colors={['#FFE45C', '#FFC700', '#FF9F0A']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.buttonGradient}
-                >
-                  {loading ? (
-                    <ActivityIndicator color="#1a1a1a" size="small" />
-                  ) : (
-                    <Text style={styles.signInButtonText}>Sign in</Text>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
+          <View style={styles.formCard}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Email</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="demo@revradar.app"
+                placeholderTextColor="#666"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                editable={!loading}
+              />
             </View>
 
-            {/* Links */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Password</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="demo1234"
+                placeholderTextColor="#666"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                editable={!loading}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={styles.checkboxRow}
+              onPress={() => setSaveCredentials(!saveCredentials)}
+              disabled={loading}
+            >
+              <View style={[styles.checkbox, saveCredentials && styles.checkboxChecked]}>
+                {saveCredentials && <Text style={styles.checkmark}>✓</Text>}
+              </View>
+              <Text style={styles.checkboxLabel}>Save credentials</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.signInButton}
+              onPress={handleSignIn}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              <LinearGradient
+                colors={['#FFE45C', '#FFC700', '#FF9F0A']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.buttonGradient}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#1a1a1a" size="small" />
+                ) : (
+                  <Text style={styles.signInButtonText}>Sign in</Text>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+
             <View style={styles.linksSection}>
               <Text style={styles.linkText}>
                 New here?{' '}
@@ -180,19 +173,9 @@ export default function LoginScreen() {
                   Create account
                 </Text>
               </Text>
-              <TouchableOpacity
-                onPress={handleForgotPassword}
-                disabled={loading}
-              >
+              <TouchableOpacity onPress={handleForgotPassword} disabled={loading}>
                 <Text style={styles.forgotLink}>Forgot password?</Text>
               </TouchableOpacity>
-            </View>
-
-            {/* Demo Info */}
-            <View style={styles.demoInfo}>
-              <Text style={styles.demoText}>
-                Demo: demo@revradar.app ÃÂÃÂÃÂÃÂ· demo1234
-              </Text>
             </View>
           </View>
         </ScrollView>
@@ -208,11 +191,11 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingVertical: 40,
     paddingHorizontal: 20,
-    justifyContent: 'space-between',
+    justifyContent: 'center',
   },
   logoSection: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 50,
   },
   logoBadge: {
     width: 80,
@@ -225,55 +208,30 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#FFD60A',
   },
-  logoBadgeText: {
-    fontSize: 40,
-    fontWeight: '700',
-    color: '#FFD60A',
-  },
-  appName: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  tagline: {
-    fontSize: 16,
-    color: '#999',
-  },
-  formSection: {
-    gap: 24,
-  },
+  logoBadgeText: { fontSize: 40, fontWeight: '700', color: '#FFD60A' },
+  appName: { fontSize: 32, fontWeight: '700', color: '#fff', marginBottom: 4 },
+  tagline: { fontSize: 14, color: '#999' },
   formCard: {
     backgroundColor: '#1a1a1a',
     borderRadius: 16,
     padding: 20,
-    gap: 20,
+    gap: 18,
     borderWidth: 1,
     borderColor: '#333',
   },
-  inputGroup: {
-    gap: 8,
-  },
-  label: {
-    color: '#ccc',
-    fontSize: 14,
-    fontWeight: '500',
-  },
+  inputGroup: { gap: 8 },
+  label: { color: '#ccc', fontSize: 13, fontWeight: '500' },
   input: {
     backgroundColor: '#0A0A0A',
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     color: '#fff',
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#333',
   },
-  checkboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
+  checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   checkbox: {
     width: 20,
     height: 20,
@@ -283,63 +241,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkboxChecked: {
-    backgroundColor: '#FFD60A',
-    borderColor: '#FFD60A',
-  },
-  checkmark: {
-    color: '#000',
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  checkboxLabel: {
-    color: '#999',
-    fontSize: 14,
-  },
-  signInButton: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginTop: 8,
-  },
-  buttonGradient: {
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  signInButtonText: {
-    color: '#1a1a1a',
-    fontWeight: '700',
-    fontSize: 16,
-  },
-  linksSection: {
-    gap: 16,
-    alignItems: 'center',
-  },
-  linkText: {
-    color: '#999',
-    fontSize: 14,
-  },
-  linkHighlight: {
-    color: '#FFD60A',
-    fontWeight: '600',
-  },
-  forgotLink: {
-    color: '#FFD60A',
-    fontSize: 14,
-    fontWeight: '500',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  demoInfo: {
-    backgroundColor: 'rgba(255, 214, 10, 0.1)',
-    borderRadius: 12,
-    padding: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: '#FFD60A',
-  },
-  demoText: {
-    color: '#FFD60A',
-    fontSize: 12,
-    fontWeight: '500',
-  },
+  checkboxChecked: { backgroundColor: '#FFD60A', borderColor: '#FFD60A' },
+  checkmark: { color: '#000', fontWeight: '700', fontSize: 12 },
+  checkboxLabel: { color: '#999', fontSize: 13 },
+  signInButton: { borderRadius: 10, overflow: 'hidden', marginTop: 4 },
+  buttonGradient: { paddingVertical: 14, alignItems: 'center' },
+  signInButtonText: { color: '#1a1a1a', fontWeight: '700', fontSize: 15 },
+  linksSection: { gap: 12, alignItems: 'center', marginTop: 8 },
+  linkText: { color: '#999', fontSize: 13 },
+  linkHighlight: { color: '#FFD60A', fontWeight: '600' },
+  forgotLink: { color: '#FFD60A', fontSize: 13, fontWeight: '500', paddingVertical: 6 },
 });

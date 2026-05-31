@@ -93,6 +93,7 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.logoSection}>
+            <Text style={styles.brandName}>CONVOY</Text>
             <Image
               source={require('../../assets/images/brand-mark.png')}
               style={styles.logo}
@@ -188,8 +189,9 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingVertical: 40, paddingHorizontal: 20, justifyContent: 'center' },
   logoSection: { alignItems: 'center', marginBottom: 40 },
-  logo: { width: 120, height: 120, marginBottom: 12 },
-  tagline: { fontSize: 14, color: '#999' },
+  brandName: { fontSize: 40, fontWeight: '800', color: '#FFD60A', letterSpacing: 4, marginBottom: 4, textAlign: 'center' },
+    logo: { width: 170, height: 170, marginBottom: 16 },
+  tagline: { fontSize: 21, color: '#9a9a9a', textAlign: 'center', fontWeight: '600', letterSpacing: 0.3 },
   formCard: { backgroundColor: '#1a1a1a', borderRadius: 16, padding: 20, gap: 18, borderWidth: 1, borderColor: '#333' },
   inputGroup: { gap: 8 },
   label: { color: '#ccc', fontSize: 13, fontWeight: '500' },

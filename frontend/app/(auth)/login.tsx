@@ -11,10 +11,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Image,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useAuth } from '../../src/auth';
 
 const CREDS_KEY = 'convoy.saved.credentials';
 const SAVE_CREDS_KEY = 'convoy.save.credentials';
@@ -25,6 +27,7 @@ export default function LoginScreen() {
   const [saveCredentials, setSaveCredentials] = useState(false);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const { login } = useAuth();
 
   useEffect(() => {
     loadSavedCredentials();
@@ -36,9 +39,9 @@ export default function LoginScreen() {
       if (saved === 'true') {
         const creds = await AsyncStorage.getItem(CREDS_KEY);
         if (creds) {
-          const { email: savedEmail, password: savedPassword } = JSON.parse(creds);
-          setEmail(savedEmail || '');
-          setPassword(savedPassword || '');
+          const parsed = JSON.parse(creds);
+          setEmail(parsed.email || '');
+          setPassword(parsed.password || '');
           setSaveCredentials(true);
         }
       }
@@ -48,39 +51,32 @@ export default function LoginScreen() {
   };
 
   const handleSignIn = useCallback(async () => {
-    if (!email.trim() || !password.trim()) {
+    if (!email.trim() || !password) {
       Alert.alert('Error', 'Please enter email and password');
       return;
     }
-
     setLoading(true);
     try {
-      // Mock auth: demo account or any non-empty credentials
-      const isValid = email === 'demo@revradar.app' && password === 'demo1234' || (email.length > 0 && password.length > 0);
-
-      if (isValid) {
-        if (saveCredentials) {
-          await AsyncStorage.setItem(CREDS_KEY, JSON.stringify({ email, password }));
-          await AsyncStorage.setItem(SAVE_CREDS_KEY, 'true');
-        } else {
-          await AsyncStorage.removeItem(CREDS_KEY);
-          await AsyncStorage.setItem(SAVE_CREDS_KEY, 'false');
-        }
-        router.replace('/(app)/map');
+      await login(email.trim(), password);
+      if (saveCredentials) {
+        await AsyncStorage.setItem(CREDS_KEY, JSON.stringify({ email: email.trim(), password }));
+        await AsyncStorage.setItem(SAVE_CREDS_KEY, 'true');
       } else {
-        Alert.alert('Error', 'Invalid email or password');
+        await AsyncStorage.removeItem(CREDS_KEY);
+        await AsyncStorage.setItem(SAVE_CREDS_KEY, 'false');
       }
+      router.replace('/(app)/map');
     } catch (e) {
-      Alert.alert('Error', 'Sign in failed');
+      Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Invalid email or password');
     } finally {
       setLoading(false);
     }
-  }, [email, password, saveCredentials, router]);
+  }, [email, password, saveCredentials, login, router]);
 
   const handleForgotPassword = useCallback(() => {
     Alert.alert(
       'Password Reset',
-      'Contact support@convoy.app or visit convoy.app/reset',
+      'Contact support@convoy.app to reset your password.',
       [{ text: 'OK' }]
     );
   }, []);
@@ -94,13 +90,14 @@ export default function LoginScreen() {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          scrollEnabled={false}
+          keyboardShouldPersistTaps="handled"
         >
           <View style={styles.logoSection}>
-            <View style={styles.logoBadge}>
-              <Text style={styles.logoBadgeText}>C</Text>
-            </View>
-            <Text style={styles.appName}>Convoy</Text>
+            <Image
+              source={require('../../assets/images/brand-mark.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
             <Text style={styles.tagline}>Drive together.</Text>
           </View>
 
@@ -109,12 +106,13 @@ export default function LoginScreen() {
               <Text style={styles.label}>Email</Text>
               <TextInput
                 style={styles.input}
-                placeholder="demo@revradar.app"
+                placeholder="you@example.com"
                 placeholderTextColor="#666"
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
                 autoCapitalize="none"
+                autoCorrect={false}
                 editable={!loading}
               />
             </View>
@@ -123,7 +121,7 @@ export default function LoginScreen() {
               <Text style={styles.label}>Password</Text>
               <TextInput
                 style={styles.input}
-                placeholder="demo1234"
+                placeholder="Enter your password"
                 placeholderTextColor="#666"
                 value={password}
                 onChangeText={setPassword}
@@ -136,6 +134,7 @@ export default function LoginScreen() {
               style={styles.checkboxRow}
               onPress={() => setSaveCredentials(!saveCredentials)}
               disabled={loading}
+              activeOpacity={0.7}
             >
               <View style={[styles.checkbox, saveCredentials && styles.checkboxChecked]}>
                 {saveCredentials && <Text style={styles.checkmark}>✓</Text>}
@@ -147,7 +146,7 @@ export default function LoginScreen() {
               style={styles.signInButton}
               onPress={handleSignIn}
               disabled={loading}
-              activeOpacity={0.8}
+              activeOpacity={0.85}
             >
               <LinearGradient
                 colors={['#FFE45C', '#FFC700', '#FF9F0A']}
@@ -187,60 +186,16 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0A0A0A' },
   container: { flex: 1 },
-  scrollContent: {
-    flexGrow: 1,
-    paddingVertical: 40,
-    paddingHorizontal: 20,
-    justifyContent: 'center',
-  },
-  logoSection: {
-    alignItems: 'center',
-    marginBottom: 50,
-  },
-  logoBadge: {
-    width: 80,
-    height: 80,
-    borderRadius: 16,
-    backgroundColor: '#1a1a1a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: '#FFD60A',
-  },
-  logoBadgeText: { fontSize: 40, fontWeight: '700', color: '#FFD60A' },
-  appName: { fontSize: 32, fontWeight: '700', color: '#fff', marginBottom: 4 },
+  scrollContent: { flexGrow: 1, paddingVertical: 40, paddingHorizontal: 20, justifyContent: 'center' },
+  logoSection: { alignItems: 'center', marginBottom: 40 },
+  logo: { width: 120, height: 120, marginBottom: 12 },
   tagline: { fontSize: 14, color: '#999' },
-  formCard: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    padding: 20,
-    gap: 18,
-    borderWidth: 1,
-    borderColor: '#333',
-  },
+  formCard: { backgroundColor: '#1a1a1a', borderRadius: 16, padding: 20, gap: 18, borderWidth: 1, borderColor: '#333' },
   inputGroup: { gap: 8 },
   label: { color: '#ccc', fontSize: 13, fontWeight: '500' },
-  input: {
-    backgroundColor: '#0A0A0A',
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    color: '#fff',
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#333',
-  },
+  input: { backgroundColor: '#0A0A0A', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, color: '#fff', fontSize: 16, borderWidth: 1, borderColor: '#333' },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: '#666',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 2, borderColor: '#666', alignItems: 'center', justifyContent: 'center' },
   checkboxChecked: { backgroundColor: '#FFD60A', borderColor: '#FFD60A' },
   checkmark: { color: '#000', fontWeight: '700', fontSize: 12 },
   checkboxLabel: { color: '#999', fontSize: 13 },

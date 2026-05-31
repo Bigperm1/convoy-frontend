@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { signInWithEmail } from '../../src/auth';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const CREDS_KEY = 'convoy.saved.credentials';
@@ -57,7 +56,6 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      const success = await signInWithEmail(email, password);
       if (success) {
         // Save credentials if checkbox is checked
         if (saveCredentials) {
@@ -144,7 +142,7 @@ export default function LoginScreen() {
                 disabled={loading}
               >
                 <View style={[styles.checkbox, saveCredentials && styles.checkboxChecked]}>
-                  {saveCredentials && <Text style={styles.checkmark}>â</Text>}
+                  {saveCredentials && <Text style={styles.checkmark}>Ã¢ÂÂ</Text>}
                 </View>
                 <Text style={styles.checkboxLabel}>Save credentials on this device</Text>
               </TouchableOpacity>
@@ -193,7 +191,7 @@ export default function LoginScreen() {
             {/* Demo Info */}
             <View style={styles.demoInfo}>
               <Text style={styles.demoText}>
-                Demo: demo@revradar.app Â· demo1234
+                Demo: demo@revradar.app ÃÂ· demo1234
               </Text>
             </View>
           </View>

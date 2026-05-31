@@ -1,7 +1,5 @@
-import React, { forwardRef, useEffect, useRef, useState } from "react";
-import { View, StyleSheet } from "react-native";
-import { NavigationView } from "@googlemaps/react-native-navigation-sdk";
-import { getVehiclePngDataUriOrDefault } from "./vehicleAssets";
+import React, { forwardRef } from "react";
+import { View, Text, StyleSheet } from "react-native";
 
 export interface Peer {
   user_id: string;
@@ -39,108 +37,40 @@ export interface UserLocation {
   speed?: number;
 }
 
-// Accept the full prop surface map.tsx passes (route/hazard/etc.) without
-// breaking types; Phase 1 implements the car markers (self + peers). The
-// remaining props are accepted and passed through for later phases.
+// TEMPORARY SAFE PLACEHOLDER.
+// The Google Navigation SDK (@googlemaps/react-native-navigation-sdk) requires a
+// config plugin + native init (Terms/init) that are not yet wired in this build.
+// Mounting <NavigationView> on launch was hard-crashing the app the moment the map
+// screen rendered. Until the SDK is properly configured (or we switch to
+// react-native-maps), this component renders a non-native placeholder so the rest of
+// the app (login, comms, music, garage) is fully usable. All props/exports are kept
+// so map.tsx continues to compile and pass data unchanged.
 interface ConvoyMapProps {
   center?: { lat: number; lng: number; heading?: number } | null;
   user?: UserLocation | null;
   hideSelfMarker?: boolean;
   peers?: Record<string, Peer> | Peer[] | null;
+  onMapReady?: () => void;
   [key: string]: any;
 }
 
-const SELF_ID = "self";
-
-type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number };
-
 const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
-  const { user, peers, hideSelfMarker, onMapReady } = props;
-  const [mapCtrl, setMapCtrl] = useState<any>(null);
-  const drawnIds = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (!mapCtrl) return;
-    let cancelled = false;
-
-    const desired: CarPoint[] = [];
-
-    // "You" marker — your own car, in your profile color, rotated to heading.
-    // Suppressed when Avatar Live is OFF (hideSelfMarker).
-    if (
-      !hideSelfMarker &&
-      user &&
-      typeof user.lat === "number" &&
-      typeof user.lng === "number"
-    ) {
-      desired.push({
-        id: SELF_ID,
-        lat: user.lat,
-        lng: user.lng,
-        color: user.carColor,
-        heading: user.heading,
-      });
-    }
-
-    // Every other member in the community.
-    const peerList: Peer[] = Array.isArray(peers)
-      ? peers
-      : peers
-      ? Object.values(peers)
-      : [];
-    peerList.forEach((p) => {
-      if (p && typeof p.lat === "number" && typeof p.lng === "number") {
-        desired.push({
-          id: "peer_" + p.user_id,
-          lat: p.lat,
-          lng: p.lng,
-          color: p.carColor,
-          heading: p.heading,
-        });
-      }
-    });
-
-    const nextIds = new Set(desired.map((d) => d.id));
-
-    // Remove markers that are no longer present.
-    drawnIds.current.forEach((id) => {
-      if (!nextIds.has(id)) {
-        try {
-          mapCtrl.removeMarker(id);
-        } catch (e) {}
-      }
-    });
-
-    // Add or update markers (addMarker updates in place when id matches).
-    (async () => {
-      for (const d of desired) {
-        try {
-          await mapCtrl.addMarker({
-            id: d.id,
-            position: { lat: d.lat, lng: d.lng },
-            imgPath: getVehiclePngDataUriOrDefault(d.color),
-            rotation: d.heading || 0,
-            flat: true,
-          });
-        } catch (e) {}
-      }
-      if (!cancelled) drawnIds.current = nextIds;
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [mapCtrl, user, peers, hideSelfMarker]);
+  const { peers } = props;
+  const peerCount = Array.isArray(peers)
+    ? peers.length
+    : peers
+    ? Object.keys(peers).length
+    : 0;
 
   return (
     <View style={styles.container} ref={ref as any}>
-      <NavigationView
-        style={styles.map}
-        onMapViewControllerCreated={setMapCtrl}
-        onMapReady={() => {
-          if (typeof onMapReady === "function") onMapReady();
-        }}
-      />
+      <View style={styles.center}>
+        <Text style={styles.title}>Map</Text>
+        <Text style={styles.sub}>Live map is being set up.</Text>
+        {peerCount > 0 ? (
+          <Text style={styles.sub}>{peerCount} nearby in your convoy</Text>
+        ) : null}
+      </View>
     </View>
   );
 });
@@ -149,6 +79,8 @@ ConvoyMap.displayName = "ConvoyMap";
 export default ConvoyMap;
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  map: { flex: 1 },
+  container: { flex: 1, backgroundColor: "#0d0d0f" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
+  title: { color: "#FFD60A", fontSize: 22, fontWeight: "800", marginBottom: 8 },
+  sub: { color: "#98989F", fontSize: 14, marginTop: 2, textAlign: "center" },
 });

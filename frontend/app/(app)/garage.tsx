@@ -17,7 +17,7 @@ const ITEM_H = 52;
 const VISIBLE = 3;
 const PICKER_H = ITEM_H * VISIBLE;
 
-// Ã¢ÂÂÃ¢ÂÂ Drum-roll picker Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// ---- Drum-roll picker (used for Year / Make / Model / Color) ----
 type PickerProps = {
   items: string[];
   selected: string;
@@ -31,10 +31,15 @@ function DrumPicker({ items, selected, onSelect, placeholder }: PickerProps) {
   const lastIdx = useRef(selectedIdx);
 
   useEffect(() => {
-    if (selectedIdx >= 0) {
-      listRef.current?.scrollToIndex({ index: selectedIdx, animated: true, viewPosition: 0.5 });
+    if (selectedIdx >= 0 && items.length > 0) {
+      // guard against scrolling before layout
+      requestAnimationFrame(() => {
+        try {
+          listRef.current?.scrollToIndex({ index: selectedIdx, animated: true, viewPosition: 0.5 });
+        } catch (e) {}
+      });
     }
-  }, [selectedIdx]);
+  }, [selectedIdx, items.length]);
 
   const onViewableChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (viewableItems.length === 0) return;
@@ -69,6 +74,7 @@ function DrumPicker({ items, selected, onSelect, placeholder }: PickerProps) {
         contentContainerStyle={{ paddingVertical: ITEM_H }}
         onViewableItemsChanged={onViewableChanged}
         viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
+        getItemLayout={(_, index) => ({ length: ITEM_H, offset: ITEM_H * index, index })}
         renderItem={({ item }) => {
           const isSelected = item === selected;
           return (
@@ -78,7 +84,11 @@ function DrumPicker({ items, selected, onSelect, placeholder }: PickerProps) {
                 Haptics.selectionAsync();
                 onSelect(item);
                 const idx = items.indexOf(item);
-                listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+                if (idx >= 0) {
+                  try {
+                    listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+                  } catch (e) {}
+                }
               }}
               activeOpacity={0.7}
             >
@@ -93,40 +103,7 @@ function DrumPicker({ items, selected, onSelect, placeholder }: PickerProps) {
   );
 }
 
-// Ã¢ÂÂÃ¢ÂÂ Color swatch row Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
-type ColorPickerProps = {
-  colors: { name: string; hex: string }[];
-  selected: string;
-  onSelect: (name: string) => void;
-};
-
-function ColorPicker({ colors, selected, onSelect }: ColorPickerProps) {
-  return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.colorRow}>
-      {colors.map((c) => {
-        const isSelected = c.name === selected;
-        return (
-          <TouchableOpacity
-            key={c.name}
-            style={[styles.swatchWrap, isSelected && styles.swatchSelected]}
-            onPress={() => {
-              Haptics.selectionAsync();
-              onSelect(c.name);
-            }}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.swatch, { backgroundColor: c.hex }]} />
-            <Text style={[styles.swatchLabel, isSelected && styles.swatchLabelSelected]} numberOfLines={1}>
-              {c.name}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </ScrollView>
-  );
-}
-
-// Ã¢ÂÂÃ¢ÂÂ Main screen Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// ---- Main screen ----
 export default function GarageScreen() {
   const router = useRouter();
   const [year,  setYear]  = useState('2025');
@@ -135,9 +112,10 @@ export default function GarageScreen() {
   const [color, setColor] = useState('');
   const [topSpeed, setTopSpeed] = useState<number | null>(null);
 
-  const makes   = getMakeNames();
-  const models  = make  ? getModelsForMake(make).map(m => m.name)  : [];
-  const colors  = (make && model) ? getColorsForModel(make, model) : [];
+  const makes      = getMakeNames();
+  const models     = make ? getModelsForMake(make).map(m => m.name) : [];
+  const colors     = (make && model) ? getColorsForModel(make, model) : [];
+  const colorNames = colors.map(c => c.name);
 
   // Load saved settings
   useEffect(() => {
@@ -149,26 +127,29 @@ export default function GarageScreen() {
     if (s.topSpeed) setTopSpeed(s.topSpeed);
   }, []);
 
-  // Save on any change
   const save = useCallback((updates: Record<string, any>) => {
     updateSettings(updates);
   }, []);
 
-  const handleYear = (v: string) => { setYear(v);  save({ carYear: v }); };
+  const handleYear = (v: string) => { setYear(v); save({ carYear: v }); };
+
   const handleMake = (v: string) => {
     setMake(v); setModel(''); setColor('');
     save({ carMake: v, carModel: '', carColor: '' });
   };
+
   const handleModel = (v: string) => {
     setModel(v); setColor('');
     save({ carModel: v, carColor: '' });
-    // Auto-select first color
+    // Auto-select first color so the hero immediately shows a real photo
     const cols = getColorsForModel(make, v);
     if (cols.length > 0) {
       setColor(cols[0].name);
       save({ carModel: v, carColor: cols[0].name });
     }
   };
+
+  // Color selection — DrumPicker already fires a haptic; no double-buzz here.
   const handleColor = (v: string) => { setColor(v); save({ carColor: v }); };
 
   const carImage = getGarageImage(make, model, color);
@@ -187,18 +168,11 @@ export default function GarageScreen() {
           <View style={{ width: 40 }} />
         </View>
 
-        {/* Car hero card */}
+        {/* Car hero card — updates live with make / model / color */}
         <View style={styles.heroCard}>
           <View style={styles.heroLedBorder} pointerEvents="none" />
-          <LinearGradient
-            colors={['#1A1A1A', '#0D0D0D']}
-            style={styles.heroGradient}
-          >
-            <Image
-              source={carImage}
-              style={styles.heroImage}
-              resizeMode="contain"
-            />
+          <LinearGradient colors={['#1A1A1A', '#0D0D0D']} style={styles.heroGradient}>
+            <Image source={carImage} style={styles.heroImage} resizeMode="contain" />
             <View style={styles.heroCaption}>
               <Text style={styles.heroTitle}>
                 {year && make && model ? `${year} ${make} ${model}` : 'Select your car'}
@@ -221,7 +195,7 @@ export default function GarageScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.speedLabel}>Top Cruise Speed</Text>
-              <Text style={styles.speedSub}>Personal best Ã¢ÂÂ beat it on your next drive.</Text>
+              <Text style={styles.speedSub}>Personal best - beat it on your next drive.</Text>
             </View>
             <Text style={styles.speedValue}>{topSpeed}</Text>
             <Text style={styles.speedUnit}>km/h</Text>
@@ -244,10 +218,10 @@ export default function GarageScreen() {
           <DrumPicker items={models} selected={model} onSelect={handleModel} placeholder="Select a make first" />
         </View>
 
-        {colors.length > 0 && (
+        {colorNames.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Color</Text>
-            <ColorPicker colors={colors} selected={color} onSelect={handleColor} />
+            <DrumPicker items={colorNames} selected={color} onSelect={handleColor} placeholder="Select a model first" />
           </View>
         )}
 
@@ -290,11 +264,4 @@ const styles = StyleSheet.create({
   pickerItemSelected: { color: '#fff', fontSize: 19, fontWeight: '600' },
   pickerEmpty:        { height: PICKER_H, borderRadius: 16, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
   pickerEmptyText:    { color: '#444', fontSize: 15 },
-
-  colorRow:           { paddingVertical: 4, gap: 10, paddingHorizontal: 2 },
-  swatchWrap:         { alignItems: 'center', gap: 6, padding: 8, borderRadius: 12, borderWidth: 1.5, borderColor: 'transparent', minWidth: 70 },
-  swatchSelected:     { borderColor: '#FFD60A', backgroundColor: 'rgba(255,214,10,0.08)' },
-  swatch:             { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  swatchLabel:        { color: '#666', fontSize: 11, textAlign: 'center' },
-  swatchLabelSelected:{ color: '#FFD60A' },
 });

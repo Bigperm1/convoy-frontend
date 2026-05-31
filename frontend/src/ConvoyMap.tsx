@@ -1,34 +1,66 @@
-import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, SafeAreaView } from 'react-native';
-import { GoogleMapsView } from '@googlemaps/react-native-navigation-sdk';
+import React, { useEffect, useRef, forwardRef } from 'react';
+import { View, StyleSheet } from 'react-native';
+import { NavigationView } from '@googlemaps/react-native-navigation-sdk';
 
-export default function ConvoyMap() {
-  const mapRef = useRef(null);
-
-  useEffect(() => {
-    // Map initialization
-  }, []);
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      <GoogleMapsView
-        ref={mapRef}
-        style={styles.map}
-        initialCamera={{
-          bearing: 0,
-          target: {
-            latitude: 37.78,
-            longitude: -122.41,
-          },
-          tilt: 0,
-          zoom: 12,
-        }}
-      />
-    </SafeAreaView>
-  );
+export interface Peer {
+  userId: string;
+  lat: number;
+  lng: number;
+  heading: number;
+  speed?: number;
+  carBody: string;
+  carColor?: string;
+  user: {
+    heading: number;
+    carBody: string;
+    carColor?: string;
+    lat: number;
+    lng: number;
+    speed?: number;
+  };
+  onRoute: React.Dispatch<any>;
 }
 
+export interface Hazard {
+  id: string;
+  lat: number;
+  lng: number;
+  type: string;
+  subtype?: string;
+  reportedAt?: string;
+}
+
+interface Props {
+  center?: { lat: number; lng: number; heading?: number; speed?: number };
+  user?: Peer;
+  peers?: Peer[];
+  hazards?: Hazard[];
+  onHazardPress?: (h: Hazard) => void;
+  onPeerPress?: (p: Peer) => void;
+  onExternalAlertPress?: (a: any) => void;
+}
+
+const ConvoyMap = forwardRef<any, Props>(function ConvoyMap(props, ref) {
+  const navViewRef = useRef<any>(null);
+
+  return (
+    <View style={styles.container}>
+      <NavigationView
+        ref={navViewRef}
+        style={styles.map}
+        androidStylingOptions={{}}
+        iOSStylingOptions={{}}
+        onMapReady={() => {}}
+        onRouteChanged={() => {}}
+        onArrival={() => {}}
+      />
+    </View>
+  );
+});
+
+export default ConvoyMap;
+
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
+  container: { flex: 1 },
   map: { flex: 1 },
 });

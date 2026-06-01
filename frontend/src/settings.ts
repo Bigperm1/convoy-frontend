@@ -18,11 +18,15 @@ speedUnit: 'kmh' | 'mph';
 speedUnitManual: boolean;
 showWeatherLayer: boolean;
 show3DMap: boolean;
+showNearby: boolean;
+feedNA: boolean;
+feedROW: boolean;
 carYear?: string;
 carMake?: string;
 carModel?: string;
 carColor?: string;
 topSpeed?: number;
+callSign?: string;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -39,11 +43,15 @@ speedUnit: 'kmh',
 speedUnitManual: false,
 showWeatherLayer: false,
 show3DMap: false,
+showNearby: true,
+feedNA: true,
+feedROW: false,
 carYear: undefined,
 carMake: undefined,
 carModel: undefined,
 carColor: undefined,
 topSpeed: undefined,
+callSign: undefined,
 };
 
 let cached: Settings = { ...DEFAULT_SETTINGS };

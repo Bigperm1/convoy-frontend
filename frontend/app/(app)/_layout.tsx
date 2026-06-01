@@ -1,5 +1,4 @@
 import React, { useEffect } from "react";
-import { NavigationProvider } from "@googlemaps/react-native-navigation-sdk";
 import { Tabs, useRouter, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
@@ -78,7 +77,7 @@ export default function AppLayout() {
   // on the Map, Music, Hub or Settings tab. The getter is read on every
   // incoming frame, so switching active community in Comms is reflected
   // immediately without reopening the socket.
-  useLiveWalkieListener(() => settings.activeCommunityId);
+  useLiveWalkieListener(() => settings.activeCommunityId, () => user?.id);
 
   useEffect(() => {
     if (user === null) router.replace("/(auth)/login");

@@ -20,6 +20,13 @@ expo-env.d.ts
 
 # Metro
 .metro-health-check*
+.metro-cache/
+
+# secrets / credentials — NEVER commit
+.env
+play-store-service-account.json
+play-store-service-account.json.json
+*-service-account*.json
 
 # debug
 npm-debug.*

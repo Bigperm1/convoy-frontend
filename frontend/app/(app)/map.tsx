@@ -13,13 +13,13 @@ import { useRouter } from "expo-router";
 import Glass from "../../src/Glass";
 import ConvoyMap, { Hazard, Peer } from "../../src/ConvoyMap";
 import DestinationSearch from "../../src/DestinationSearch";
+import LogoMenu from "../../src/components/LogoMenu";
 import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 import { voiceBus, geocodeQuery } from "../../src/voiceBus";
 import { useCommunityRoutes, createCommunityRoute, CommunityRoute } from "../../src/communityRoutes";
-import Speedometer from "../../src/components/Speedometer";
+import TurnByTurnNav, { SpeedPill } from "../../src/components/TurnByTurnNav";
 import { ReportToast, MusicToast, HailToast } from "../../src/components/AlertToast";
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
-import NavigationPanel from "../../src/components/NavigationPanel";
 import StepDrawer, { StepDrawerHandle } from "../../src/components/StepDrawer";
 import { hailBus } from "../../src/hailBus";
 import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings } from "../../src/settings";
@@ -84,7 +84,7 @@ export default function MapScreen() {
   // mapType:    "hybrid" = satellite + labels (default), "roadmap" = flat road view.
   // showTraffic / showTransit / showHazards toggle their respective overlays.
   // layersOpen drives the layers bottom sheet modal.
-  const [mapType, setMapType] = useState<"hybrid" | "roadmap" | "hybridFlyover">("hybrid");
+  const [mapType, setMapType] = useState<"hybrid" | "roadmap" | "hybridFlyover">(getSettings().show3DMap ? "hybridFlyover" : "hybrid");
     const { weather } = (useWeatherLayer as any)(0, null, null);
   const [showTraffic, setShowTraffic] = useState(true);
   const [showTransit, setShowTransit] = useState(false);
@@ -1062,6 +1062,7 @@ export default function MapScreen() {
               onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
               onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
               onProfilePress={() => router.push("/(app)/hub" as any)}
+              profileSlot={<View style={styles.mapLogoBacking}><LogoMenu size={30} /></View>}
             />
           </View>
         ) : (
@@ -1081,6 +1082,7 @@ export default function MapScreen() {
               onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
               onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
               onProfilePress={() => router.push("/(app)/hub" as any)}
+              profileSlot={<View style={styles.mapLogoBacking}><LogoMenu size={30} /></View>}
             />
           </View>
         ))}
@@ -1257,32 +1259,26 @@ export default function MapScreen() {
         </Glass>
       )}
 
-      {/* ===== Turn-by-turn overlays — right-edge nav drawer only =====
-          The bottom-right ETA / Remaining pill was removed; that data is
-          still computed in `tbt` (used by the NavActionDrawer) so callers
-          that want it can read it directly. */}
+      {/* ===== Turn-by-turn overlays — Google-Maps-style =====
+          Top maneuver banner (always visible) + bottom ETA bar, rendered by
+          TurnByTurnNav. All values come from the `tbt` engine. Replaced the
+          old right-edge pull-tab drawer. */}
       {navMode === "turn-by-turn" && activeRoute && tbt.active && (() => {
         const stepIdx = Math.min(tbt.stepIndex + 1, activeRoute.steps.length - 1);
         const upcoming = activeRoute.steps[stepIdx];
         const verb = maneuverVerb(upcoming?.maneuver);
+        const instruction = upcoming?.html ? upcoming.html : verb;
         return (
-          <>
-            {/* Right-edge Navigation Action Drawer — TOP of the right stack.
-                Peeked 80% off-screen by default; tap the visible 20% edge to
-                expand and see maneuver + End. Tap End → ends nav (which also
-                takes the drawer off-screen with the route). */}
-            <NavigationPanel
-              visible={navDrawerOpen}
-              onExpand={() => setNavDrawerOpen(true)}
-              onCollapse={() => setNavDrawerOpen(false)}
-              maneuverIcon={maneuverIcon(upcoming?.maneuver)}
-              distance={fmtDistanceM(tbt.distanceToManeuverM)}
-              instruction={`${verb}${upcoming?.html ? " · " + upcoming.html : ""}`}
-              muted={navMuted}
-              onToggleMute={() => setNavMuted((m) => !m)}
-              onEnd={endNav}
-            />
-          </>
+          <TurnByTurnNav
+            maneuverIcon={maneuverIcon(upcoming?.maneuver)}
+            distanceToTurn={fmtDistanceM(tbt.distanceToManeuverM)}
+            instruction={instruction}
+            eta={fmtEtaSec(tbt.etaSeconds)}
+            distanceRemaining={fmtDistanceM(tbt.distanceRemainingM)}
+            muted={navMuted}
+            onToggleMute={() => setNavMuted((m) => !m)}
+            onEnd={endNav}
+          />
         );
       })()}
 
@@ -1332,7 +1328,7 @@ export default function MapScreen() {
       {/* ===== Speedometer HUD (bottom-left glass overlay) =====
           Pulls live speed from coords.speed (m/s) → km/h. Floors small values
           to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
-      <Speedometer speedMs={coords?.speed} speedLimit={speedLimitRef.current} unit={settings.speedUnit} />
+      <SpeedPill speedMs={coords?.speed} unit={settings.speedUnit} />
       {/* Weather HUD — only shown when weather layer is on and we have data */}
       {showWeatherLayer && weather && (
         <View style={{ position: 'absolute', bottom: 120, left: 16, zIndex: 25 }}>
@@ -1495,7 +1491,7 @@ export default function MapScreen() {
                 </View>
                 <Switch
                   value={mapType === "hybridFlyover"}
-                  onValueChange={(v) => setMapType(v ? "hybridFlyover" : "hybrid")}
+                  onValueChange={(v) => { setMapType(v ? "hybridFlyover" : "hybrid"); void updateSettings({ show3DMap: v }); }}
                   trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
@@ -1878,6 +1874,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(10,132,255,0.92)", // matches Apple Maps blue
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+  },
+
+  // Dark circular backing behind the brand logo on the MAP screen only.
+  // The logo sits over live map imagery (roads/satellite), so unlike the
+  // solid-dark Comms/Music headers it needs a backing to stay crisp over any
+  // background. 40×40 circle mirrors the old profile-avatar footprint.
+  mapLogoBacking: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(20,20,22,0.9)',
+    borderWidth: 1.5, borderColor: 'rgba(255,214,10,0.55)',
+    shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 6,
   },
 

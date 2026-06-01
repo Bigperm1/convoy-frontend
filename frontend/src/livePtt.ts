@@ -132,10 +132,15 @@ export function enqueueLivePtt(m: PTTMessage) {
  * `getActiveChannelId` is a getter (not a value) so the listener always reads
  * the latest selection without needing to reopen the socket on every change.
  */
-export function useLiveWalkieListener(getActiveChannelId: () => string | null | undefined) {
-  // Stash the getter in a ref so the WS handler always sees the latest.
+export function useLiveWalkieListener(
+  getActiveChannelId: () => string | null | undefined,
+  getSelfId?: () => string | null | undefined,
+) {
+  // Stash the getters in refs so the WS handler always sees the latest.
   const getterRef = useRef(getActiveChannelId);
   useEffect(() => { getterRef.current = getActiveChannelId; }, [getActiveChannelId]);
+  const selfRef = useRef(getSelfId);
+  useEffect(() => { selfRef.current = getSelfId; }, [getSelfId]);
 
   useEffect(() => {
     let alive = true;
@@ -195,6 +200,12 @@ export function useLiveWalkieListener(getActiveChannelId: () => string | null | 
           // still update. Audio playback is gated by the Comms Live privacy
           // toggle — when off the user wants total radio silence.
           livePttBus.emit(m);
+          // Don't auto-play our OWN transmission back to us (the backend echoes
+          // every clip to all channel members, including the sender). The clip
+          // still lands in the history list via the bus above, so the sender
+          // can replay it on demand — they just won't hear themselves live.
+          const selfId = selfRef.current?.();
+          if (selfId && m.user_id === selfId) return;
           const commsLive = getSettings().commsLive !== false;
           if (commsLive && m.channel === ch) {
             enqueueLivePtt(m);

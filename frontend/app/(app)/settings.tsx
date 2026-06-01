@@ -105,6 +105,15 @@ export default function SettingsScreen() {
             value={settings.avatarLive}
             onChange={(v) => setSettings({ avatarLive: v })}
           />
+          <View style={styles.divider} />
+          <ToggleRow
+            icon="people-outline"
+            iconColor="#30D158"
+            title="Nearby"
+            subtitle="Show how many crew members are near you on the Comms screen."
+            value={settings.showNearby}
+            onChange={(v) => setSettings({ showNearby: v })}
+          />
         </Glass>
         <Text style={styles.helpText}>
           Your car only ever appears on maps inside communities you've joined â strangers from outside the crew can never see you. Toggle Avatar Live off to vanish from the map entirely.
@@ -134,6 +143,33 @@ export default function SettingsScreen() {
         </Glass>
         <Text style={styles.helpText}>
           Heading Up is the default and feels like Waze/Google during driving. North Up keeps the world steady â helpful for getting your bearings or scanning a wide area. Your choice persists across launches.
+        </Text>
+
+        {/* Map Layers - persisted overlays that also appear on the map's
+            in-context Layers sheet. Satellite/Traffic/Hazards stay map-only
+            (they're view controls you flip while looking at the map). */}
+        <Text style={styles.sectionLabel}>MAP LAYERS</Text>
+        <Glass radius={16} style={styles.card}>
+          <ToggleRow
+            icon="cloudy"
+            iconColor="#5AC8FA"
+            title="Weather"
+            subtitle="Temperature, wind & precipitation overlay on the map"
+            value={settings.showWeatherLayer}
+            onChange={(v) => setSettings({ showWeatherLayer: v })}
+          />
+          <View style={styles.divider} />
+          <ToggleRow
+            icon="cube"
+            iconColor="#FFD60A"
+            title="3D Map"
+            subtitle="Building extrusions & flyover perspective during navigation"
+            value={settings.show3DMap}
+            onChange={(v) => setSettings({ show3DMap: v })}
+          />
+        </Glass>
+        <Text style={styles.helpText}>
+          These persist across launches. Satellite, Traffic, and Hazard pins are toggled from the map's own Layers button since you flip those while looking at the map.
         </Text>
 
         {/* Speed Units â radio choice between metric and imperial. The map's
@@ -173,8 +209,8 @@ export default function SettingsScreen() {
             iconColor="#3478F6"
             title="North America"
             subtitle="rtproxy-na.waze.com Â· Police, accidents, jams"
-            value={(settings as any).feedNA}
-            onChange={(v) => (setSettings as any)({ feedNA: v })}
+            value={settings.feedNA}
+            onChange={(v) => setSettings({ feedNA: v })}
           />
           <View style={styles.divider} />
           <ToggleRow
@@ -182,8 +218,8 @@ export default function SettingsScreen() {
             iconColor="#5AC8FA"
             title="International"
             subtitle="rtproxy-row.waze.com Â· Rest of World"
-            value={(settings as any).feedROW}
-            onChange={(v) => (setSettings as any)({ feedROW: v })}
+            value={settings.feedROW}
+            onChange={(v) => setSettings({ feedROW: v })}
           />
         </Glass>
         <Text style={styles.helpText}>

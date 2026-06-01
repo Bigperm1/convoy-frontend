@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useRouter } from 'expo-router';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator, Linking, Platform, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -11,6 +10,7 @@ import { useAuth } from "../../src/auth";
 import { useSettings } from "../../src/settings";
 import { api } from "../../src/api";
 import { useLatestTier, getMusicBroadcastQuality } from "../../src/proximityAudio";
+import LogoMenu from "../../src/components/LogoMenu";
 
 type Source = "spotify" | "apple" | "soundcloud";
 
@@ -62,7 +62,6 @@ async function deepLinkToMusicApp(target: Source, path?: string): Promise<boolea
 }
 
 export default function MusicScreen() {
-  const router = useRouter();
   const [source, setSource] = useState<Source>("spotify");
 
   return (
@@ -72,9 +71,7 @@ export default function MusicScreen() {
           <Text style={styles.title}>Music</Text>
           <Text style={styles.sub}>Sign in to bring your library on the road</Text>
         </View>
-        <TouchableOpacity onPress={() => router.push('/(app)/garage')} hitSlop={12} style={styles.garageBtn}>
-          <Ionicons name="car-sport" size={26} color="#FFD60A" />
-        </TouchableOpacity>
+        <LogoMenu size={30} style={styles.garageBtn} />
       </View>
 
       {/* Service selector â iPhone-home-screen-style app icons rather than

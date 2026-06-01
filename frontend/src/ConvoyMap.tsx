@@ -1,7 +1,21 @@
-import React, { forwardRef, useEffect, useRef, useState } from "react";
-import { View, StyleSheet } from "react-native";
-import { NavigationView } from "@googlemaps/react-native-navigation-sdk";
-import { getVehiclePngDataUriOrDefault } from "./vehicleAssets";
+// ConvoyMap.tsx — NATIVE map (iOS/Android) built on react-native-maps.
+//
+// WHY react-native-maps (not the Google Navigation SDK):
+//   The Navigation SDK requires a config plugin, native TOS acceptance, and a
+//   Google-authorized "Navigation SDK" product on the API key — none of which
+//   were provisioned, so <NavigationView> rendered blank (the map "never
+//   worked" on device). react-native-maps renders the standard Google base map
+//   using the `googleMapsApiKey` already set in app.json, with no special
+//   authorization. All the premium feel (satellite imagery, custom car
+//   markers, chase-cam, route polylines) lives here and is engine-agnostic.
+//
+// This file mirrors the behavior of ConvoyMap.web.tsx (vis.gl) so web + native
+// look and behave the same. The web file is unchanged.
+
+import React, { forwardRef, useEffect, useRef } from "react";
+import { View, Image, StyleSheet, Platform } from "react-native";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import { getVehiclePngOrDefault } from "./vehicleAssets";
 
 export interface Peer {
   user_id: string;
@@ -13,6 +27,7 @@ export interface Peer {
   carType?: string;
   carBody?: string;
   carColor?: string;
+  activeColor?: string;
   topSpeed?: number;
   online_at?: string;
   onRoute?: React.Dispatch<any>;
@@ -39,108 +54,295 @@ export interface UserLocation {
   speed?: number;
 }
 
-// Accept the full prop surface map.tsx passes (route/hazard/etc.) without
-// breaking types; Phase 1 implements the car markers (self + peers). The
-// remaining props are accepted and passed through for later phases.
+type LatLng = { lat: number; lng: number };
+
 interface ConvoyMapProps {
   center?: { lat: number; lng: number; heading?: number } | null;
   user?: UserLocation | null;
   hideSelfMarker?: boolean;
+  mapView?: "heading_up" | "north_up";
+  // map.tsx may pass "hybridFlyover" (3D toggle) — we treat it as hybrid + pitch.
+  mapType?: "hybrid" | "roadmap" | "hybridFlyover";
   peers?: Record<string, Peer> | Peer[] | null;
+  leaderUserId?: string | null;
+  hazards?: Hazard[] | null;
+  externalAlerts?: any[];
+  highlightConvoy?: boolean;
+  destination?: LatLng | null;
+  encodedPolyline?: string | null;
+  routes?: { polyline: string; color?: string }[];
+  selectedRouteIndex?: number;
+  onSelectRoute?: (index: number) => void;
+  followUser?: boolean;
+  onUserPan?: () => void;
+  navigationActive?: boolean;
+  userSpeedMs?: number;
+  showTraffic?: boolean;
+  onMapPress?: () => void;
+  onHazardPress?: (h: Hazard) => void;
+  onHazardLongPress?: (h: Hazard) => void;
+  onPeerPress?: (p: Peer) => void;
+  onExternalAlertPress?: (a: any) => void;
+  onRoute?: (info: any) => void;
+  onMapReady?: () => void;
   [key: string]: any;
 }
 
 const SELF_ID = "self";
 
-type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number };
+// ===== Chase-cam tuning — mirrors ConvoyMap.web.tsx =====
+const CHASE_PITCH_DEG = 45;
+const CHASE_ZOOM_CITY = 18;
+const CHASE_ZOOM_HIGHWAY = 16;
+const CHASE_KMH_CITY = 30;
+const CHASE_KMH_HIGHWAY = 100;
+const FREE_ZOOM = 15;
+const FOLLOW_ZOOM = 17;
+
+function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
+function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
+function chaseZoomForSpeed(kmh: number) {
+  if (kmh <= CHASE_KMH_CITY) return CHASE_ZOOM_CITY;
+  if (kmh >= CHASE_KMH_HIGHWAY) return CHASE_ZOOM_HIGHWAY;
+  return lerp(CHASE_ZOOM_CITY, CHASE_ZOOM_HIGHWAY, (kmh - CHASE_KMH_CITY) / (CHASE_KMH_HIGHWAY - CHASE_KMH_CITY));
+}
+
+// Decode a Google encoded polyline into [{latitude, longitude}]. react-native-maps
+// has no built-in decoder (unlike vis.gl's geometry lib on web), so we inline the
+// standard algorithm. Returns [] on bad input so a malformed polyline never crashes.
+function decodePolyline(encoded?: string | null): { latitude: number; longitude: number }[] {
+  if (!encoded) return [];
+  const points: { latitude: number; longitude: number }[] = [];
+  let index = 0, lat = 0, lng = 0;
+  try {
+    while (index < encoded.length) {
+      let b: number, shift = 0, result = 0;
+      do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+      lat += dlat;
+      shift = 0; result = 0;
+      do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+      lng += dlng;
+      points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
+    }
+  } catch { return points; }
+  return points;
+}
+
+const HAZARD_COLOR: Record<string, string> = {
+  police: "#3478F6", accident: "#FF453A", road: "#FF9F0A", traffic: "#FF9F0A",
+};
+
+type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer };
 
 const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
-  const { user, peers, hideSelfMarker, onMapReady } = props;
-  const [mapCtrl, setMapCtrl] = useState<any>(null);
-  const drawnIds = useRef<Set<string>>(new Set());
+  const {
+    center, user, peers, hideSelfMarker, mapView = "heading_up",
+    mapType = "hybrid", leaderUserId, hazards, highlightConvoy,
+    destination, routes = [], selectedRouteIndex = 0, onSelectRoute,
+    followUser = false, onUserPan, navigationActive = false, userSpeedMs,
+    showTraffic = true, onMapPress, onHazardPress, onHazardLongPress,
+    onPeerPress, onMapReady,
+  } = props;
 
-  useEffect(() => {
-    if (!mapCtrl) return;
-    let cancelled = false;
+  const mapRef = useRef<MapView | null>(null);
+  const readyRef = useRef(false);
+  // Throttle camera commits: skip ticks where the user barely moved.
+  const lastCamRef = useRef<{ lat: number; lng: number; heading: number } | null>(null);
+  // Suppress the onUserPan callback while WE are the ones moving the camera
+  // (programmatic animateCamera fires onPanDrag-adjacent region changes).
+  const selfMovingRef = useRef(false);
 
-    const desired: CarPoint[] = [];
+  // ----- Base-map type. react-native-maps has no "hybridFlyover"; map it to hybrid. -----
+  const resolvedMapType: "standard" | "hybrid" = mapType === "roadmap" ? "standard" : "hybrid";
 
-    // "You" marker — your own car, in your profile color, rotated to heading.
-    // Suppressed when Avatar Live is OFF (hideSelfMarker).
-    if (
-      !hideSelfMarker &&
-      user &&
-      typeof user.lat === "number" &&
-      typeof user.lng === "number"
-    ) {
-      desired.push({
-        id: SELF_ID,
-        lat: user.lat,
-        lng: user.lng,
-        color: user.carColor,
-        heading: user.heading,
-      });
+  // ----- Initial region (only used for uncontrolled first paint) -----
+  const initialRegion =
+    center && typeof center.lat === "number"
+      ? { latitude: center.lat, longitude: center.lng, latitudeDelta: 0.02, longitudeDelta: 0.02 }
+      : user && typeof user.lat === "number"
+      ? { latitude: user.lat as number, longitude: user.lng as number, latitudeDelta: 0.02, longitudeDelta: 0.02 }
+      : undefined;
+
+  // ===== Camera control =====
+  // followUser (free-roam) → follow position at a fixed zoom, north-up, flat.
+  // navigationActive (chase cam) → speed-zoom, heading-up (unless north_up), 45° pitch.
+  const commitCamera = (force = false) => {
+    const m = mapRef.current;
+    if (!m || !readyRef.current) return;
+    const lat = user?.lat ?? center?.lat;
+    const lng = user?.lng ?? center?.lng;
+    if (typeof lat !== "number" || typeof lng !== "number") return;
+
+    const heading = (typeof user?.heading === "number" && Number.isFinite(user.heading)) ? user.heading : 0;
+    const isHeadingUp = mapView === "heading_up";
+
+    let zoom = FREE_ZOOM;
+    let pitch = 0;
+    let camHeading = 0;
+
+    if (navigationActive) {
+      zoom = chaseZoomForSpeed(kmhFromMs(userSpeedMs));
+      pitch = isHeadingUp ? CHASE_PITCH_DEG : 0;
+      camHeading = isHeadingUp ? heading : 0;
+    } else if (followUser) {
+      zoom = FOLLOW_ZOOM;
+    } else if (!force) {
+      // Not following and not navigating — let the user roam freely.
+      return;
     }
 
-    // Every other member in the community.
-    const peerList: Peer[] = Array.isArray(peers)
-      ? peers
-      : peers
-      ? Object.values(peers)
-      : [];
-    peerList.forEach((p) => {
-      if (p && typeof p.lat === "number" && typeof p.lng === "number") {
-        desired.push({
-          id: "peer_" + p.user_id,
-          lat: p.lat,
-          lng: p.lng,
-          color: p.carColor,
-          heading: p.heading,
-        });
+    // Throttle: skip < 3m + < 3° heading change (unless forced).
+    if (!force) {
+      const last = lastCamRef.current;
+      if (last) {
+        const R = 6371000;
+        const dLat = ((lat - last.lat) * Math.PI) / 180;
+        const dLng = ((lng - last.lng) * Math.PI) / 180;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos((last.lat * Math.PI) / 180) * Math.cos((lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+        const distM = 2 * R * Math.asin(Math.sqrt(a));
+        if (distM < 3 && Math.abs(camHeading - last.heading) < 3) return;
       }
-    });
+    }
+    lastCamRef.current = { lat, lng, heading: camHeading };
 
-    const nextIds = new Set(desired.map((d) => d.id));
+    selfMovingRef.current = true;
+    try {
+      m.animateCamera(
+        { center: { latitude: lat, longitude: lng }, heading: camHeading, pitch, zoom },
+        { duration: force ? 350 : 700 }
+      );
+    } catch {}
+    // Release the self-moving guard after the animation window.
+    setTimeout(() => { selfMovingRef.current = false; }, (force ? 350 : 700) + 120);
+  };
 
-    // Remove markers that are no longer present.
-    drawnIds.current.forEach((id) => {
-      if (!nextIds.has(id)) {
-        try {
-          mapCtrl.removeMarker(id);
-        } catch (e) {}
-      }
-    });
+  // Drive the camera on every relevant change.
+  useEffect(() => {
+    commitCamera(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.lat, user?.lng, user?.heading, userSpeedMs, followUser, navigationActive, mapView]);
 
-    // Add or update markers (addMarker updates in place when id matches).
-    (async () => {
-      for (const d of desired) {
-        try {
-          await mapCtrl.addMarker({
-            id: d.id,
-            position: { lat: d.lat, lng: d.lng },
-            imgPath: getVehiclePngDataUriOrDefault(d.color),
-            rotation: d.heading || 0,
-            flat: true,
-          });
-        } catch (e) {}
-      }
-      if (!cancelled) drawnIds.current = nextIds;
-    })();
+  // When nav ends, flatten the camera back to north-up free-roam.
+  useEffect(() => {
+    if (navigationActive) return;
+    const m = mapRef.current;
+    if (!m || !readyRef.current) return;
+    if (followUser) return; // commitCamera handles the follow case
+    selfMovingRef.current = true;
+    try { m.animateCamera({ pitch: 0, heading: 0, zoom: FREE_ZOOM }, { duration: 350 }); } catch {}
+    setTimeout(() => { selfMovingRef.current = false; }, 480);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigationActive]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [mapCtrl, user, peers, hideSelfMarker]);
+  // ===== Build the car-marker list (self + peers) =====
+  const cars: CarPoint[] = [];
+  if (!hideSelfMarker && user && typeof user.lat === "number" && typeof user.lng === "number") {
+    cars.push({ id: SELF_ID, lat: user.lat, lng: user.lng, color: user.carColor, heading: user.heading });
+  }
+  const peerList: Peer[] = Array.isArray(peers) ? peers : peers ? Object.values(peers) : [];
+  peerList.forEach((p) => {
+    if (p && typeof p.lat === "number" && typeof p.lng === "number") {
+      cars.push({
+        id: "peer_" + p.user_id, lat: p.lat, lng: p.lng,
+        color: p.activeColor || p.carColor, heading: p.heading,
+        leader: !!leaderUserId && p.user_id === leaderUserId, peer: p,
+      });
+    }
+  });
+
+  const visibleHazards = (hazards || []).filter((h: Hazard) => h && typeof h.lat === "number" && typeof h.lng === "number");
 
   return (
-    <View style={styles.container} ref={ref as any}>
-      <NavigationView
+    <View style={styles.container}>
+      <MapView
+        ref={mapRef}
         style={styles.map}
-        onMapViewControllerCreated={setMapCtrl}
-        onMapReady={() => {
-          if (typeof onMapReady === "function") onMapReady();
-        }}
-      />
+        provider={PROVIDER_GOOGLE}
+        initialRegion={initialRegion}
+        mapType={resolvedMapType}
+        showsTraffic={!!showTraffic}
+        showsUserLocation={false}
+        showsMyLocationButton={false}
+        showsCompass={false}
+        rotateEnabled
+        pitchEnabled
+        toolbarEnabled={false}
+        onMapReady={() => { readyRef.current = true; commitCamera(true); onMapReady?.(); }}
+        onPress={() => onMapPress?.()}
+        onPanDrag={() => { if (!selfMovingRef.current) onUserPan?.(); }}
+      >
+        {/* Car markers — self + every peer. Each is a rotated top-down PNG of
+            the GR Corolla in the driver's paint (default Heavy Metal). */}
+        {cars.map((c) => {
+          const size = c.leader ? 52 : 44;
+          return (
+            <Marker
+              key={c.id}
+              identifier={c.id}
+              coordinate={{ latitude: c.lat, longitude: c.lng }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              flat
+              tracksViewChanges={false}
+              zIndex={c.id === SELF_ID || c.leader ? 1000 : 1}
+              onPress={() => { if (c.peer) onPeerPress?.(c.peer); }}
+            >
+              <View style={{ width: size, height: size, transform: [{ rotate: `${c.heading || 0}deg` }] }}>
+                <Image
+                  source={getVehiclePngOrDefault(c.color) as any}
+                  style={{ width: size, height: size, resizeMode: "contain" }}
+                />
+              </View>
+            </Marker>
+          );
+        })}
+
+        {/* Community hazard pins. Gold ring when Highlight Convoy is on. */}
+        {visibleHazards.map((h: Hazard) => (
+          <Marker
+            key={`hz_${h.id}`}
+            coordinate={{ latitude: h.lat, longitude: h.lng }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            zIndex={5}
+            onPress={() => onHazardPress?.(h)}
+          >
+            <View style={[
+              styles.hazardPin,
+              { backgroundColor: HAZARD_COLOR[h.kind] || "#FF9F0A" },
+              highlightConvoy && styles.hazardPinConvoy,
+            ]} />
+          </Marker>
+        ))}
+
+        {/* Destination pin. */}
+        {destination && (
+          <Marker coordinate={{ latitude: destination.lat, longitude: destination.lng }} anchor={{ x: 0.5, y: 0.5 }} zIndex={6}>
+            <View style={styles.destPin} />
+          </Marker>
+        )}
+
+        {/* Route polylines — alternates dimmed, selected route bright on top. */}
+        {destination && routes.map((r: { polyline: string; color?: string }, i: number) => {
+          const coords = decodePolyline(r.polyline);
+          if (coords.length === 0) return null;
+          const isSel = i === selectedRouteIndex;
+          const color = r.color ?? (i === 0 ? "#34C759" : i === 1 ? "#FF9500" : "#FF3B30");
+          return (
+            <Polyline
+              key={`route_${i}`}
+              coordinates={coords}
+              strokeColor={color}
+              strokeWidth={isSel ? 6 : 4}
+              zIndex={isSel ? 2 : 1}
+              tappable={!isSel}
+              onPress={() => onSelectRoute?.(i)}
+              lineCap="round"
+              lineJoin="round"
+            />
+          );
+        })}
+      </MapView>
     </View>
   );
 });
@@ -151,4 +353,18 @@ export default ConvoyMap;
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
+  // Round hazard dot with a white ring; gold ring overrides white for Convoy reports.
+  hazardPin: {
+    width: 26, height: 26, borderRadius: 13,
+    borderWidth: 3, borderColor: "#FFFFFF",
+    ...Platform.select({
+      ios: { shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 3, shadowOffset: { width: 0, height: 2 } },
+      android: { elevation: 4 },
+    }),
+  },
+  hazardPinConvoy: { borderColor: "#FFD60A" },
+  destPin: {
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: "#FF453A", borderWidth: 3, borderColor: "#FFFFFF",
+  },
 });

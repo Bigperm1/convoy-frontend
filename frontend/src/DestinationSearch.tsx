@@ -19,6 +19,10 @@ type Props = {
   // Tapping the round profile avatar on the right of the bar opens whatever
   // the consumer wants (typically the Hub screen).
   onProfilePress?: () => void;
+  // Optional override for the right-side profile control. When provided, this
+  // node is rendered in place of the default avatar button (used by the map
+  // to drop in the global LogoMenu). Takes precedence over onProfilePress.
+  profileSlot?: React.ReactNode;
 };
 
 let _placesService: any = null;
@@ -85,7 +89,7 @@ async function placeDetailsRest(place_id: string): Promise<{ lat: number; lng: n
   } catch { return null; }
 }
 
-export default function DestinationSearch({ origin, onSelect, onClear, initialValue, onProfilePress }: Props) {
+export default function DestinationSearch({ origin, onSelect, onClear, initialValue, onProfilePress, profileSlot }: Props) {
   const [text, setText] = useState(initialValue || "");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -274,18 +278,26 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
             the right, with marginLeft 10 so it visually reads as a separate
             element (mirrors Google Maps). alignSelf: "center" keeps it on
             the row's vertical centerline alongside the pill. */}
-        <TouchableOpacity
-          testID="search-profile"
-          onPress={onProfilePress}
-          activeOpacity={0.8}
-          style={styles.avatarBtn}
-        >
-          {avatarUri ? (
-            <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
-          ) : (
-            <Ionicons name="person" size={18} color="#fff" />
-          )}
-        </TouchableOpacity>
+        {/* Profile control — by default a round avatar that opens the Hub.
+            The map passes `profileSlot` to render the global LogoMenu here
+            instead, so the search-bar's right-side control becomes the
+            app-wide Garage/Community/Settings/Profile menu. */}
+        {profileSlot ? (
+          <View style={styles.avatarSlot}>{profileSlot}</View>
+        ) : (
+          <TouchableOpacity
+            testID="search-profile"
+            onPress={onProfilePress}
+            activeOpacity={0.8}
+            style={styles.avatarBtn}
+          >
+            {avatarUri ? (
+              <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
+            ) : (
+              <Ionicons name="person" size={18} color="#fff" />
+            )}
+          </TouchableOpacity>
+        )}
       </View>
       {open && suggestions.length > 0 && (
         <ScrollView
@@ -380,6 +392,9 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
   avatarImg: { width: 34, height: 34 },
+  // Wrapper that keeps a custom profileSlot (e.g. LogoMenu) on the same
+  // vertical centerline as the search pill, matching the avatar's gutter.
+  avatarSlot: { marginLeft: 10, alignSelf: 'center' },
   // Suggestion list — white surface harmonizes with the new bar; dark text.
   // Offset by the row's horizontal padding (12) so it visually aligns under
   // the pill rather than under the avatar.

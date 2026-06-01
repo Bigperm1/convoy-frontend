@@ -12,6 +12,7 @@ import { useAuth } from "../../src/auth";
 import { api, formatErr } from "../../src/api";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
+import { useSettings, updateSettings } from "../../src/settings";
 
 type Community = {
   id: string; name: string; description: string; member_count: number;
@@ -26,6 +27,7 @@ type Community = {
 export default function HubScreen() {
   const { user, logout, refresh } = useAuth();
   const router = useRouter();
+  const [settings] = useSettings();
   const [mine, setMine] = useState<Community[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -75,7 +77,7 @@ export default function HubScreen() {
           </Glass>
         )}
         {mine.map((c) => (
-          <CommunityCard key={c.id} c={c} onPress={() => setShowDetail(c)} />
+          <CommunityCard key={c.id} c={c} active={c.id === settings.activeCommunityId} onPress={() => setShowDetail(c)} />
         ))}
 
         <TouchableOpacity testID="logout-btn" style={styles.logoutBtn} onPress={logout}>
@@ -109,7 +111,7 @@ function ActionCard({ icon, label, onPress, testID }: any) {
   );
 }
 
-function CommunityCard({ c, onPress }: { c: Community; onPress: () => void }) {
+function CommunityCard({ c, onPress, active }: { c: Community; onPress: () => void; active?: boolean }) {
   // Tiny on-row indicators showing which sub-systems this community has enabled.
   const features = [
     { on: c.walkie_enabled !== false, icon: "flash", color: "#FF6A00" },
@@ -130,6 +132,7 @@ function CommunityCard({ c, onPress }: { c: Community; onPress: () => void }) {
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <Text style={styles.commName}>{c.name}</Text>
+              {active && <View style={styles.activeBadge}><Text style={styles.activeBadgeText}>ACTIVE</Text></View>}
               {c.is_admin && <View style={styles.adminBadge}><Text style={styles.adminBadgeText}>ADMIN</Text></View>}
             </View>
             <Text style={styles.commMeta}>{c.member_count} members{c.pending_count > 0 && c.is_admin ? ` · ${c.pending_count} pending` : ""}</Text>
@@ -374,22 +377,74 @@ function SearchModal({ visible, onClose, onChanged }: any) {
 }
 
 function CommunityDetailModal({ community, onClose, onChanged }: any) {
+  const [settings] = useSettings();
   const [c, setC] = useState<any>(null);
   // Description-edit state (admin only). The save button only enables when the
   // textarea has actually changed from the canonical server value.
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState("");
   const [descSaving, setDescSaving] = useState(false);
+  // Name-edit + logo state (admin only).
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [nameSaving, setNameSaving] = useState(false);
+  const [logoSaving, setLogoSaving] = useState(false);
   useEffect(() => {
-    if (!community) { setC(null); setEditingDesc(false); return; }
+    if (!community) { setC(null); setEditingDesc(false); setEditingName(false); return; }
     (async () => {
       try {
         const { data } = await api.get(`/communities/${community.id}`);
         setC(data);
         setDescDraft(data?.description || "");
+        setNameDraft(data?.name || "");
       } catch {}
     })();
   }, [community]);
+
+  // Active-convoy state — the community you're actively driving with. Drives
+  // map presence broadcast, comms HD proximity tier, and which crew the Comms
+  // page surfaces. Reads/writes settings.activeCommunityId (persisted).
+  const activeId = settings.activeCommunityId;
+  const isActive = !!(c?.id || community?.id) && activeId === (c?.id || community?.id);
+  const toggleActive = () => {
+    const id = c?.id || community?.id;
+    if (!id) return;
+    updateSettings({ activeCommunityId: isActive ? null : id });
+  };
+
+  // Admin: rename the community (backend PUT accepts `name`).
+  const saveName = async () => {
+    if (!c?.id || !nameDraft.trim()) return;
+    try {
+      setNameSaving(true);
+      const { data } = await api.put(`/communities/${c.id}`, { name: nameDraft.trim() });
+      setC({ ...c, ...data });
+      setEditingName(false);
+      onChanged();
+    } catch (e) { Alert.alert("Failed", formatErr(e)); }
+    finally { setNameSaving(false); }
+  };
+
+  // Admin: change the community profile pic (backend PUT accepts `logo_b64`).
+  const pickAndSaveLogo = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== "granted") return Alert.alert("Permission needed", "We need photo access to set a community logo.");
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true, aspect: [1, 1], quality: 0.6, base64: true,
+      });
+      if (res.canceled) return;
+      const a = res.assets?.[0];
+      if (!a?.base64) return;
+      const logo_b64 = `data:${a.mimeType || "image/jpeg"};base64,${a.base64}`;
+      setLogoSaving(true);
+      const { data } = await api.put(`/communities/${c.id}`, { logo_b64 });
+      setC({ ...c, ...data });
+      onChanged();
+    } catch (e) { Alert.alert("Failed", formatErr(e)); }
+    finally { setLogoSaving(false); }
+  };
 
   const saveDescription = async () => {
     if (!c?.id) return;
@@ -437,6 +492,65 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
             <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={COLORS.textDim} /></TouchableOpacity>
           </View>
           <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+            {/* Active-convoy toggle — sets this as the crew you're driving with. */}
+            {(c?.is_member || c?.is_admin) && (
+              <TouchableOpacity
+                testID="set-active-community"
+                onPress={toggleActive}
+                activeOpacity={0.85}
+                style={[styles.activeBtn, isActive && styles.activeBtnOn]}
+              >
+                <Ionicons name={isActive ? "radio" : "radio-outline"} size={18} color={isActive ? "#0A0A0A" : COLORS.primary} />
+                <Text style={[styles.activeBtnText, isActive && { color: "#0A0A0A" }]} numberOfLines={1}>
+                  {isActive ? "Active convoy — you're driving with this crew" : "Set as active convoy"}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Admin identity editor — tappable logo + name. Members see the
+                read-only name in the sheet title above. */}
+            {c?.is_admin && (
+              <View style={styles.adminIdentity}>
+                <TouchableOpacity onPress={pickAndSaveLogo} activeOpacity={0.85} style={styles.adminLogoWrap} testID="edit-community-logo">
+                  {c?.logo_b64 ? (
+                    <Image source={{ uri: c.logo_b64 }} style={styles.adminLogo} />
+                  ) : (
+                    <View style={styles.adminLogoPlaceholder}><Ionicons name="image-outline" size={22} color={COLORS.textDim} /></View>
+                  )}
+                  <View style={styles.adminLogoEditBadge}>
+                    <Ionicons name={logoSaving ? "hourglass" : "camera"} size={12} color="#0A0A0A" />
+                  </View>
+                </TouchableOpacity>
+                <View style={{ flex: 1 }}>
+                  {editingName ? (
+                    <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+                      <TextInput
+                        testID="edit-community-name"
+                        value={nameDraft}
+                        onChangeText={setNameDraft}
+                        style={[styles.input, { flex: 1, marginTop: 0 }]}
+                        placeholder="Community name"
+                        placeholderTextColor={COLORS.textMute}
+                      />
+                      <TouchableOpacity
+                        onPress={saveName}
+                        disabled={nameSaving || !nameDraft.trim()}
+                        style={[styles.smallBtn, { backgroundColor: COLORS.success, opacity: nameSaving || !nameDraft.trim() ? 0.5 : 1 }]}
+                      >
+                        <Text style={styles.smallBtnText}>{nameSaving ? "…" : "Save"}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <TouchableOpacity onPress={() => { setNameDraft(c?.name || ""); setEditingName(true); }} activeOpacity={0.7} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Text style={styles.adminIdentityName} numberOfLines={1}>{c?.name}</Text>
+                      <Ionicons name="pencil" size={14} color={COLORS.warning} />
+                    </TouchableOpacity>
+                  )}
+                  <Text style={styles.adminIdentityHint}>Tap the photo or name to edit</Text>
+                </View>
+              </View>
+            )}
+
             {/* Description — read-only for members, inline-edit for admin. */}
             {c?.is_admin && editingDesc ? (
               <View style={{ marginBottom: 6 }}>
@@ -642,6 +756,39 @@ const styles = StyleSheet.create({
   },
   adminBadge: { backgroundColor: COLORS.warning + "33", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   adminBadgeText: { color: COLORS.warning, fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
+  activeBadge: { backgroundColor: COLORS.success + "33", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  activeBadgeText: { color: COLORS.success, fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
+
+  // Active-convoy toggle button inside the detail sheet.
+  activeBtn: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingVertical: 13, paddingHorizontal: 14, borderRadius: 14,
+    backgroundColor: "rgba(255,214,10,0.12)",
+    borderWidth: 1, borderColor: "rgba(255,214,10,0.4)",
+    marginBottom: 14,
+  },
+  activeBtnOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  activeBtnText: { flex: 1, color: COLORS.primary, fontWeight: "700", fontSize: 14 },
+
+  // Admin identity editor (logo + name) at the top of the detail sheet.
+  adminIdentity: { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 14 },
+  adminLogoWrap: { width: 60, height: 60 },
+  adminLogo: { width: 60, height: 60, borderRadius: 16 },
+  adminLogoPlaceholder: {
+    width: 60, height: 60, borderRadius: 16,
+    backgroundColor: "rgba(118,118,128,0.2)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: COLORS.hairline, borderStyle: "dashed",
+  },
+  adminLogoEditBadge: {
+    position: "absolute", right: -4, bottom: -4,
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: COLORS.primary,
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "#1A1A1C",
+  },
+  adminIdentityName: { color: COLORS.text, fontSize: 18, fontWeight: "700", letterSpacing: -0.3 },
+  adminIdentityHint: { color: COLORS.textDim, fontSize: 11, marginTop: 3 },
 
   logoutBtn: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 32, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,69,58,0.3)" },
   logoutText: { color: COLORS.danger, fontWeight: "600", fontSize: 15 },

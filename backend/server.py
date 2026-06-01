@@ -791,6 +791,33 @@ async def list_ptt(channel: str, user=Depends(get_current_user)):
     return list(reversed(items))
 
 
+@api.delete("/ptt/{ptt_id}")
+async def delete_ptt(ptt_id: str, user=Depends(get_current_user)):
+    """Delete a single transmission. The author can always delete their own;
+    the community admin can delete any clip in their channel (moderation).
+    Idempotent: a missing clip returns ok so the client UI stays clean."""
+    msg = await db.ptt.find_one({"id": ptt_id}, {"_id": 0})
+    if not msg:
+        return {"ok": True, "id": ptt_id}
+    allowed = msg.get("user_id") == user["id"]
+    if not allowed:
+        c = await db.communities.find_one({"id": msg.get("channel")}, {"_id": 0})
+        allowed = bool(c and c.get("admin_id") == user["id"])
+    if not allowed:
+        raise HTTPException(status_code=403, detail="You can only delete your own transmissions")
+    await db.ptt.delete_one({"id": ptt_id})
+    # Real-time removal on other members' Comms lists.
+    ch = msg.get("channel")
+    if ch:
+        c = await db.communities.find_one({"id": ch}, {"_id": 0})
+        if c:
+            await ws_manager.broadcast_to_users(
+                c.get("members", []),
+                {"type": "ptt_deleted", "id": ptt_id, "channel": ch},
+            )
+    return {"ok": True, "id": ptt_id}
+
+
 # ---------- Voice transcribe ----------
 async def _transcribe_audio(file_path: str) -> str:
     """

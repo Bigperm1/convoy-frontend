@@ -26,8 +26,8 @@ import { View, Text, StyleSheet, TouchableOpacity, Platform } from "react-native
 import { Ionicons } from "@expo/vector-icons";
 
 const YELLOW = "#FFD60A";
-const HOLD_MS = 2000;
-const EMA_ALPHA = 0.25;
+const HOLD_MS = 800;
+const EMA_ALPHA = 0.45;
 
 // ---- Speed pill (always-on, bottom-left) ----
 // Pulled in as a sub-component so the smoothing state is self-contained.
@@ -35,7 +35,7 @@ export function SpeedPill({ speedMs, unit }: { speedMs?: number; unit: "kmh" | "
   const rawKmh = (() => {
     if (typeof speedMs !== "number" || !Number.isFinite(speedMs) || speedMs < 0) return 0;
     const v = speedMs * 3.6;
-    return v < 1 ? 0 : v;
+    return v < 2 ? 0 : v;
   })();
 
   const [displayKmh, setDisplayKmh] = useState(0);
@@ -49,20 +49,13 @@ export function SpeedPill({ speedMs, unit }: { speedMs?: number; unit: "kmh" | "
       setDisplayKmh((prev) => (prev <= 0 ? rawKmh : prev * (1 - EMA_ALPHA) + rawKmh * EMA_ALPHA));
       return;
     }
-    // Stopped (rawKmh === 0). Decay the displayed value toward zero, but SNAP
-    // to a hard 0 once it dips below 1 km/h — otherwise the exponential decay
-    // (prev * 0.75) only ever approaches zero and the pill lingers on "2" / "3"
-    // while the car is parked. `decay` returns 0 when the result rounds to 0.
-    const decay = (prev: number) => { const next = prev * (1 - EMA_ALPHA); return next < 1 ? 0 : next; };
+    // Stopped (rawKmh === 0). Hold the last reading briefly, then SNAP straight
+    // to 0. The previous code decayed gradually, but this effect only re-runs
+    // when rawKmh CHANGES — so at a dead stop (rawKmh pinned at 0) it ran once
+    // and left the pill stuck on a phantom 3-7 km/h. A hard snap guarantees 0.
     const last = lastNonZeroRef.current;
-    const elapsed = Date.now() - last.ts;
-    if (last.value > 0 && elapsed < HOLD_MS) {
-      fallTimerRef.current = setTimeout(() => {
-        if (lastNonZeroRef.current.ts === last.ts) setDisplayKmh(decay);
-      }, HOLD_MS - elapsed);
-    } else {
-      setDisplayKmh(decay);
-    }
+    const wait = Math.max(0, HOLD_MS - (Date.now() - last.ts));
+    fallTimerRef.current = setTimeout(() => { setDisplayKmh(0); }, wait);
   }, [rawKmh]);
 
   useEffect(() => () => { if (fallTimerRef.current) clearTimeout(fallTimerRef.current); }, []);

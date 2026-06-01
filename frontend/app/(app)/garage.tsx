@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { getSettings, updateSettings } from '../../src/settings';
 import { COLORS } from '../../src/theme';
+import { api } from '../../src/api';
 import { getGarageImage } from '../../src/carImages';
 import { YEARS, getMakeNames, getModelsForMake, getColorsForModel } from '../../src/carDatabase';
 
@@ -133,10 +134,35 @@ export default function GarageScreen() {
     if (s.carColor) setColor(s.carColor);
     if (s.topSpeed) setTopSpeed(s.topSpeed);
     if (s.callSign) setCallSign(s.callSign);
+    // One-time sync of any EXISTING local car identity up to the backend, so
+    // users who picked their car before backend-sync existed get their paint
+    // onto the map without having to re-select anything.
+    if (s.carMake || s.carModel || s.carColor) {
+      api.put('/auth/profile', {
+        car_make: s.carMake || undefined,
+        car_model: s.carModel || undefined,
+        car_color: s.carColor || undefined,
+        car_year: s.carYear ? (parseInt(s.carYear, 10) || undefined) : undefined,
+      }).catch(() => {});
+    }
   }, []);
 
   const save = useCallback((updates: Record<string, any>) => {
     updateSettings(updates);
+    // Mirror car identity to the BACKEND profile so OTHER drivers see the
+    // right paint/model on the map. Presence, /users/nearby AND the /location
+    // broadcast all read the backend user doc — the Garage used to save only
+    // locally, which is why a peer's car reverted to the default Heavy Metal
+    // color the moment they started moving (live frames came from the backend,
+    // which never knew the chosen color).
+    const profile: Record<string, any> = {};
+    if ('carMake' in updates) profile.car_make = updates.carMake;
+    if ('carModel' in updates) profile.car_model = updates.carModel;
+    if ('carColor' in updates) profile.car_color = updates.carColor;
+    if ('carYear' in updates) { const y = parseInt(updates.carYear, 10); if (y) profile.car_year = y; }
+    if (Object.keys(profile).length > 0) {
+      api.put('/auth/profile', profile).catch(() => {});
+    }
   }, []);
 
   const handleYear = (v: string) => { setYear(v); save({ carYear: v }); setOpenField(null); };
@@ -173,6 +199,15 @@ export default function GarageScreen() {
       carColor: color,
       callSign: callSign.trim(),
     });
+    // Push the full car identity to the backend so peers render us correctly.
+    try {
+      await api.put('/auth/profile', {
+        car_make: make || undefined,
+        car_model: model || undefined,
+        car_color: color || undefined,
+        car_year: parseInt(year, 10) || undefined,
+      });
+    } catch {}
     setSaved(true);
     setTimeout(() => router.back(), 650);
   };

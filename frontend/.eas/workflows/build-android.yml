@@ -1,0 +1,22 @@
+name: Build Android (internal APK)
+
+# MANUAL TRIGGER ONLY — same policy as iOS (pushes never auto-build, so no
+# surprise EAS charges). Produces an INTERNAL-DISTRIBUTION APK that testers
+# install directly from the EAS link/QR code — no Google Play / Play Console
+# account needed. Run from the Expo dashboard (Workflows -> Run workflow) or
+# with `eas workflow:run build-android.yml`.
+#
+# Uses the `preview` profile (eas.json): buildType=apk, distribution=internal.
+# There is intentionally NO submit step — testers sideload the APK. When you
+# later want a Google Play "Internal testing" track, switch to the `production`
+# profile (app-bundle) and add a submit job like the iOS workflow has.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build_android:
+    name: Build Android APK
+    type: build
+    params:
+      platform: android
+      profile: preview

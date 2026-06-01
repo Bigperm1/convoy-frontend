@@ -50,6 +50,36 @@ const maneuverIcon = (m?: string): any => {
   return "arrow-up";
 };
 
+// ---- Foreground-location permission, resolved AT MOST once per launch ----
+// Reads the saved status first and only fires the OS prompt when it's still
+// "undetermined" (the genuine first launch). All three location consumers
+// (initial fix + continuous watcher + turn-by-turn watcher) funnel through
+// here, and an in-flight lock means simultaneous callers on a cold start share
+// ONE request instead of stacking duplicate prompts.
+//
+// NOTE: iOS only persists "Allow While Using App". If a tester taps "Allow
+// Once", iOS resets the status to undetermined on the next cold start, so the
+// prompt legitimately returns — that's an OS behavior we can't suppress. The
+// fix below stops the APP from ever re-prompting once permission is granted.
+let _locPermInFlight: Promise<boolean> | null = null;
+async function ensureLocationPermission(): Promise<boolean> {
+  if (_locPermInFlight) return _locPermInFlight;
+  _locPermInFlight = (async () => {
+    try {
+      let { status } = await Location.getForegroundPermissionsAsync();
+      if (status === "undetermined") {
+        status = (await Location.requestForegroundPermissionsAsync()).status;
+      }
+      return status === "granted";
+    } catch {
+      return false;
+    }
+  })();
+  const granted = await _locPermInFlight;
+  _locPermInFlight = null;   // allow a fresh re-read later (e.g. after Settings change)
+  return granted;
+}
+
 export default function MapScreen() {
   const { user, token } = useAuth();
   const router = useRouter();
@@ -352,8 +382,7 @@ export default function MapScreen() {
     let sub: Location.LocationSubscription | null = null;
     (async () => {
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") return;
+        if (!(await ensureLocationPermission())) return;
         sub = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1500, distanceInterval: 5 },
           (pos) => setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
@@ -398,11 +427,7 @@ export default function MapScreen() {
     (async () => {
       let lat = 37.7749, lng = -122.4194;   // fallback only if denied / GPS times out
       try {
-        let { status } = await Location.getForegroundPermissionsAsync();
-        if (status === "undetermined") {
-          status = (await Location.requestForegroundPermissionsAsync()).status;
-        }
-        if (status === "granted") {
+        if (await ensureLocationPermission()) {
           const pos = await Promise.race([
             Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
             new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
@@ -437,8 +462,7 @@ export default function MapScreen() {
     let sub: any = null;
     (async () => {
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") return;
+        if (!(await ensureLocationPermission())) return;
         sub = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 0 },
           (pos) => {
@@ -460,7 +484,7 @@ export default function MapScreen() {
             // throttle so every other driver's /users/nearby (polled by
             // loadPeers) shows us live. Pure REST â no Supabase Realtime needed.
             const nowPost = Date.now();
-            if (nowPost - lastLocPostRef.current > 4000) {
+            if (nowPost - lastLocPostRef.current > 1000) {
               lastLocPostRef.current = nowPost;
               api.post("/location", {
                 lat: pos.coords.latitude, lng: pos.coords.longitude,

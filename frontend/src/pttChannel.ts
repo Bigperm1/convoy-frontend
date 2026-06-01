@@ -186,10 +186,17 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
   // Keep the ref pointing at the latest stopAndSend for the 60s cap timer.
   stopAndSendRef.current = stopAndSend;
 
+  // Delete a transmission from this channel (author or community admin). Removes
+  // it locally immediately for snappy UX, then tells the backend to delete it.
+  const remove = useCallback(async (id: string) => {
+    setHistory((cur) => cur.filter((x) => x.id !== id));
+    try { await api.delete(`/ptt/${id}`); } catch {}
+  }, []);
+
   // Clear the cap timer if the hook unmounts mid-recording.
   useEffect(() => () => {
     if (maxTimerRef.current) clearTimeout(maxTimerRef.current);
   }, []);
 
-  return { recording, sending, history, start, stopAndSend, cancel };
+  return { recording, sending, history, start, stopAndSend, cancel, remove };
 }

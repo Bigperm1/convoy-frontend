@@ -1,7 +1,23 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-const URL = process.env.EXPO_PUBLIC_SUPABASE_URL as string;
-const KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY as string;
+// Hardcoded fallback for the Supabase project. Mirrors the two-layer defense
+// used for BACKEND_URL in api.ts: if EAS Build doesn't inject the
+// EXPO_PUBLIC_SUPABASE_* env vars at bundle time, presence/live-avatars would
+// silently go dark (the client becomes null and useConvoyPresence no-ops with
+// status "disabled"). That's exactly the bug that shipped in 1.1.0 (24) —
+// eas.json passed BACKEND_URL + GOOGLE_MAPS_KEY but NOT the Supabase vars, so
+// SUPABASE_ENABLED was false on device and no one ever saw each other's car.
+//
+// The anon key is designed to be embedded in client apps (it's the public,
+// Row-Level-Security-protected key, not a secret), so baking it in as a
+// fallback is safe and consistent with how the Google Maps key already ships.
+// eas.json ALSO injects these now; either layer alone is sufficient.
+const FALLBACK_SUPABASE_URL = "https://pgtbjiszjglznjagolse.supabase.co";
+const FALLBACK_SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBndGJqaXN6amdsem5qYWdvbHNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyOTE4NTYsImV4cCI6MjA5Mzg2Nzg1Nn0.ouxO8zCeFi6hjB0UJmDv_k8tPuz0NOWLAZdg91nhyt4";
+
+const URL = (process.env.EXPO_PUBLIC_SUPABASE_URL as string) || FALLBACK_SUPABASE_URL;
+const KEY = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY as string) || FALLBACK_SUPABASE_ANON_KEY;
 
 // Only create the Supabase client in the browser. supabase-js v2 instantiates
 // a Realtime WebSocket on construction which crashes Node SSR (Node 20 has no

@@ -41,14 +41,19 @@ const ALIASES: Record<string, GRCColorKey> = {
   "blue flame":           "blue_flame",
   "stratosphere blue":    "blue_flame", // legacy alias
   "ice cap white":        "ice_cap_white",
+  "icecap white":         "ice_cap_white", // Garage uses one-word "Icecap"
   "heavy metal":          "heavy_metal",
   "precious black pearl": "precious_black_pearl",
+  "black onyx":           "precious_black_pearl", // Garage label for the black GRC paint
+  "onyx":                 "precious_black_pearl",
   // Snake_case keys
   "supersonic_red":       "supersonic_red",
   "blue_flame":           "blue_flame",
   "ice_cap_white":        "ice_cap_white",
+  "icecap_white":         "ice_cap_white",
   "heavy_metal":          "heavy_metal",
   "precious_black_pearl": "precious_black_pearl",
+  "black_onyx":           "precious_black_pearl",
   // GRC slug prefix (user-spec format: e.g. "grc_heavymetal")
   "grc_supersonic_red":   "supersonic_red",
   "grc_supersonicred":    "supersonic_red",

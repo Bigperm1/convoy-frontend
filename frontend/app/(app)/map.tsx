@@ -25,6 +25,7 @@ import { hailBus } from "../../src/hailBus";
 import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
+import { BearingTracker } from "../../src/bearing";
 import PeerModal from "../../src/PeerModal";
 import {
   fetchRoutes, fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
@@ -61,6 +62,11 @@ export default function MapScreen() {
   // at most once every 60s to keep battery + network use low while driving.
   const [sessionMaxSpeed, setSessionMaxSpeed] = useState(0);
   const lastTopSyncAtRef = useRef(0);
+  // Heading tracker — resolves a stable marker heading from GPS heading when
+  // moving, or inferred travel bearing when GPS heading is missing/zero, so a
+  // parked car keeps pointing its last direction of travel instead of snapping
+  // north. Shared across self + peers (keyed by id).
+  const bearingTrackerRef = useRef(new BearingTracker());
   const [hazards, setHazards] = useState<Hazard[]>([]);
   const [peers, setPeers] = useState<Record<string, Peer>>({});
   const [showReport, setShowReport] = useState(false);
@@ -837,9 +843,11 @@ export default function MapScreen() {
       handle: user.handle,
       // Combine make + model for a friendly pin label, e.g. "Porsche 911 GT3 RS"
       carType: [user.car_make, user.car_model].filter(Boolean).join(" ").trim() || undefined,
-      // Pass car body silhouette + color so other drivers see the right top-down icon.
       carBody: (user as any).car_type || "sedan",
-      carColor: user.car_color || undefined,
+      // Pass car body silhouette + color so other drivers see the right top-down icon.
+      // carColor sourced from LOCAL settings (Garage) first so peers see the
+      // paint the driver actually picked, with the backend value as fallback.
+      carColor: settings.carColor || user.car_color || undefined,
       // Personal best — live max-of(sessionMaxSpeed, persisted) so peers see
       // an up-to-date number even before the throttled sync fires.
       topSpeed: Math.max(user.top_speed_record || 0, sessionMaxSpeed),
@@ -965,6 +973,13 @@ export default function MapScreen() {
         lat: p.lat,
         lng: p.lng,
         carType: p.carType,
+        carBody: p.carBody,
+        // Carry the peer's paint + heading through so their marker renders in
+        // the right color and rotated to their direction of travel. activeColor
+        // is the canonical grc_* slug; carColor is the human label fallback.
+        carColor: p.carColor,
+        activeColor: p.activeColor,
+        heading: p.heading,
       } as Peer;
     });
     return Object.values(byId);
@@ -984,9 +999,15 @@ export default function MapScreen() {
         // marker uses the same SVG silhouette + paint other drivers see.
         user={{
           ...coords,
-          heading: coords.heading || 0,
+          // Resolve a stable heading: GPS heading when moving, inferred travel
+          // bearing otherwise, last-known when stopped (never snaps to north).
+          heading: bearingTrackerRef.current.get("self", coords.lat, coords.lng, coords.heading),
           carBody: ((user as any)?.car_type as string) || "sedan",
-          carColor: user?.car_color || undefined,
+          // Car paint comes from the Garage, which persists to LOCAL settings
+          // (settings.carColor) — NOT the backend user profile. Read settings
+          // first so a paint change in the Garage reflects on the map
+          // immediately; fall back to the backend value, then undefined.
+          carColor: settings.carColor || user?.car_color || undefined,
         }}
         // Privacy: when Avatar Live is OFF we suppress the local "you" marker.
         // Presence channel is also nulled out above so peers don't see us at all.

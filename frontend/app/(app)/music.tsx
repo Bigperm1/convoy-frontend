@@ -326,23 +326,57 @@ function SpotifyPanel() {
 
   if (!signedIn) {
     return (
-      <View style={styles.signinWrap}>
-        <Glass radius={24} style={{ width: "100%", maxWidth: 360 }}>
-          <View style={{ padding: 24, alignItems: "center" }}>
-            <View style={[styles.comingIcon, { backgroundColor: "#1DB95433" }]}>
-              <Ionicons name="musical-notes" size={36} color="#1DB954" />
-            </View>
-            <Text style={styles.signTitle}>Sign in to Spotify</Text>
-            <Text style={styles.signText}>Bring your playlists, top tracks and now-playing into Convoy.</Text>
-            <TouchableOpacity testID="spotify-signin" onPress={onSignIn} style={styles.spotifyBtn} activeOpacity={0.85}>
-              <LinearGradient colors={["#1DB954", "#159A41"]} style={styles.spotifyGrad}>
-                <Ionicons name="logo-rss" size={18} color="#fff" />
-                <Text style={styles.spotifyText}>Continue with Spotify</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+      <ScrollView
+        contentContainerStyle={styles.signinScroll}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Spotify-style hero: big logo, headline, the green pill CTA, and a
+            faux "recent" shelf so the screen feels alive instead of an empty
+            void below a single icon. */}
+        <View style={styles.spotifyHero}>
+          <View style={styles.spotifyLogoCircle}>
+            <Ionicons name="musical-notes" size={48} color="#1DB954" />
           </View>
-        </Glass>
-      </View>
+          <Text style={styles.spotifyHeadline}>Millions of songs.{"\n"}Free on Convoy.</Text>
+          <Text style={styles.spotifyTagline}>
+            Connect Spotify to bring your playlists, top tracks, and now-playing
+            right into your convoy.
+          </Text>
+
+          <TouchableOpacity testID="spotify-signin" onPress={onSignIn} style={styles.spotifyPillBtn} activeOpacity={0.85}>
+            <LinearGradient colors={["#1ED760", "#1DB954"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.spotifyPillGrad}>
+              <Ionicons name="musical-notes" size={20} color="#000" />
+              <Text style={styles.spotifyPillText}>Continue with Spotify</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <View style={styles.comingSoonChip}>
+            <Ionicons name="sparkles" size={13} color="#FFD60A" />
+            <Text style={styles.comingSoonChipText}>Apple Music & SoundCloud — Coming Soon!</Text>
+          </View>
+        </View>
+
+        {/* Faux preview shelf — dimmed placeholder rows that hint at what the
+            library will look like once connected. Non-interactive. */}
+        <View style={styles.previewShelf} pointerEvents="none">
+          <Text style={styles.previewShelfLabel}>WHAT YOU'LL SEE</Text>
+          {[
+            { t: "Your top tracks", s: "Ranked by what you actually play" },
+            { t: "Your playlists", s: "Every mix, ready for the road" },
+            { t: "Now playing", s: "Broadcast a song to your whole convoy" },
+          ].map((row, i) => (
+            <View key={i} style={styles.previewRow}>
+              <View style={styles.previewThumb}>
+                <Ionicons name={i === 2 ? "radio" : "musical-note"} size={20} color="rgba(255,255,255,0.25)" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.previewRowTitle}>{row.t}</Text>
+                <Text style={styles.previewRowSub}>{row.s}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      </ScrollView>
     );
   }
 
@@ -528,6 +562,58 @@ const styles = StyleSheet.create({
   tabText: { color: COLORS.text, fontSize: 13, fontWeight: "500" },
 
   signinWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
+  // ===== Spotify-style sign-in hero (fills the screen, no empty void) =====
+  signinScroll: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 120 },
+  spotifyHero: { alignItems: "center", paddingTop: 24, paddingBottom: 28 },
+  spotifyLogoCircle: {
+    width: 96, height: 96, borderRadius: 48,
+    backgroundColor: "rgba(29,185,84,0.14)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(29,185,84,0.4)",
+    marginBottom: 22,
+  },
+  spotifyHeadline: {
+    color: "#FFFFFF", fontSize: 28, fontWeight: "800",
+    textAlign: "center", letterSpacing: -0.6, lineHeight: 34,
+  },
+  spotifyTagline: {
+    color: "rgba(255,255,255,0.6)", fontSize: 15, lineHeight: 21,
+    textAlign: "center", marginTop: 12, paddingHorizontal: 8, maxWidth: 340,
+  },
+  spotifyPillBtn: { marginTop: 26, borderRadius: 999, overflow: "hidden", alignSelf: "stretch", maxWidth: 360 },
+  spotifyPillGrad: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
+    paddingVertical: 16,
+  },
+  spotifyPillText: { color: "#000", fontWeight: "800", fontSize: 16, letterSpacing: 0.2 },
+  comingSoonChip: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    marginTop: 18, paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,214,10,0.12)",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,214,10,0.45)",
+  },
+  comingSoonChipText: { color: "#FFD60A", fontSize: 12, fontWeight: "700", letterSpacing: 0.2 },
+  // Faux preview shelf shown under the CTA
+  previewShelf: {
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.08)",
+    paddingTop: 20,
+  },
+  previewShelfLabel: {
+    color: "rgba(255,255,255,0.35)", fontSize: 11, fontWeight: "700",
+    letterSpacing: 0.8, marginBottom: 12, marginLeft: 4,
+  },
+  previewRow: {
+    flexDirection: "row", alignItems: "center", gap: 14,
+    paddingVertical: 10,
+  },
+  previewThumb: {
+    width: 48, height: 48, borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    alignItems: "center", justifyContent: "center",
+  },
+  previewRowTitle: { color: "rgba(255,255,255,0.85)", fontSize: 15, fontWeight: "600" },
+  previewRowSub: { color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 2 },
   signTitle: { color: COLORS.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.4, marginTop: 14 },
   signText: { color: COLORS.textDim, textAlign: "center", marginTop: 8, fontSize: 14, lineHeight: 20 },
   spotifyBtn: { marginTop: 20, borderRadius: 14, overflow: "hidden", alignSelf: "stretch" },

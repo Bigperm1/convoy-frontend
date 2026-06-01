@@ -12,7 +12,7 @@
 // This file mirrors the behavior of ConvoyMap.web.tsx (vis.gl) so web + native
 // look and behave the same. The web file is unchanged.
 
-import React, { forwardRef, useEffect, useRef } from "react";
+import React, { forwardRef, useEffect, useRef, useState } from "react";
 import { View, Image, StyleSheet, Platform } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
@@ -135,6 +135,50 @@ const HAZARD_COLOR: Record<string, string> = {
 };
 
 type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer };
+
+// ===== CarMarker =====
+// A single car marker (self or peer). The custom <Image> child of a
+// react-native-maps <Marker> must be captured into a native snapshot AFTER the
+// PNG has loaded, or iOS renders a default blue placeholder dot instead of the
+// car. We start with tracksViewChanges=true so the loaded image is captured,
+// then flip it false (battery saver) once the image's onLoad fires + a frame.
+// Re-enables tracking whenever the color or heading changes so the snapshot
+// refreshes (e.g. user changes paint in the Garage, or the car turns).
+function CarMarker({ car, onPress }: { car: CarPoint; onPress?: () => void }) {
+  const [track, setTrack] = useState(true);
+  const size = car.leader ? 52 : 44;
+  const src = getVehiclePngOrDefault(car.color);
+
+  // Whenever the visual inputs change, re-enable tracking so the marker
+  // re-snapshots with the new paint / rotation, then settle it off again.
+  useEffect(() => {
+    setTrack(true);
+    const t = setTimeout(() => setTrack(false), 800);
+    return () => clearTimeout(t);
+  }, [src, car.color, car.heading]);
+
+  return (
+    <Marker
+      identifier={car.id}
+      coordinate={{ latitude: car.lat, longitude: car.lng }}
+      anchor={{ x: 0.5, y: 0.5 }}
+      flat
+      tracksViewChanges={track}
+      zIndex={car.id === SELF_ID || car.leader ? 1000 : 1}
+      onPress={() => { if (car.peer) onPress?.(); }}
+    >
+      <View style={{ width: size, height: size, transform: [{ rotate: `${car.heading || 0}deg` }] }}>
+        <Image
+          source={src as any}
+          style={{ width: size, height: size, resizeMode: "contain" }}
+          // Final guarantee: the instant the PNG paints, force one more
+          // snapshot so the car (not a blue placeholder) is what's captured.
+          onLoad={() => { setTrack(true); setTimeout(() => setTrack(false), 200); }}
+        />
+      </View>
+    </Marker>
+  );
+}
 
 const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
   const {
@@ -274,29 +318,12 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
         onPanDrag={() => { if (!selfMovingRef.current) onUserPan?.(); }}
       >
         {/* Car markers — self + every peer. Each is a rotated top-down PNG of
-            the GR Corolla in the driver's paint (default Heavy Metal). */}
-        {cars.map((c) => {
-          const size = c.leader ? 52 : 44;
-          return (
-            <Marker
-              key={c.id}
-              identifier={c.id}
-              coordinate={{ latitude: c.lat, longitude: c.lng }}
-              anchor={{ x: 0.5, y: 0.5 }}
-              flat
-              tracksViewChanges={false}
-              zIndex={c.id === SELF_ID || c.leader ? 1000 : 1}
-              onPress={() => { if (c.peer) onPeerPress?.(c.peer); }}
-            >
-              <View style={{ width: size, height: size, transform: [{ rotate: `${c.heading || 0}deg` }] }}>
-                <Image
-                  source={getVehiclePngOrDefault(c.color) as any}
-                  style={{ width: size, height: size, resizeMode: "contain" }}
-                />
-              </View>
-            </Marker>
-          );
-        })}
+            the GR Corolla in the driver's paint (default Heavy Metal).
+            Rendered via CarMarker so the PNG is snapshot-captured AFTER load
+            (avoids the iOS blue-placeholder-dot bug). */}
+        {cars.map((c) => (
+          <CarMarker key={c.id} car={c} onPress={() => { if (c.peer) onPeerPress?.(c.peer); }} />
+        ))}
 
         {/* Community hazard pins. Gold ring when Highlight Convoy is on. */}
         {visibleHazards.map((h: Hazard) => (

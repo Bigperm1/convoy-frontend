@@ -49,14 +49,19 @@ export function SpeedPill({ speedMs, unit }: { speedMs?: number; unit: "kmh" | "
       setDisplayKmh((prev) => (prev <= 0 ? rawKmh : prev * (1 - EMA_ALPHA) + rawKmh * EMA_ALPHA));
       return;
     }
+    // Stopped (rawKmh === 0). Decay the displayed value toward zero, but SNAP
+    // to a hard 0 once it dips below 1 km/h — otherwise the exponential decay
+    // (prev * 0.75) only ever approaches zero and the pill lingers on "2" / "3"
+    // while the car is parked. `decay` returns 0 when the result rounds to 0.
+    const decay = (prev: number) => { const next = prev * (1 - EMA_ALPHA); return next < 1 ? 0 : next; };
     const last = lastNonZeroRef.current;
     const elapsed = Date.now() - last.ts;
     if (last.value > 0 && elapsed < HOLD_MS) {
       fallTimerRef.current = setTimeout(() => {
-        if (lastNonZeroRef.current.ts === last.ts) setDisplayKmh((prev) => prev * (1 - EMA_ALPHA));
+        if (lastNonZeroRef.current.ts === last.ts) setDisplayKmh(decay);
       }, HOLD_MS - elapsed);
     } else {
-      setDisplayKmh((prev) => prev * (1 - EMA_ALPHA));
+      setDisplayKmh(decay);
     }
   }, [rawKmh]);
 

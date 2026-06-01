@@ -18,7 +18,7 @@ import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
-import { getToken, wsUrl } from "./api";
+import { api, getToken, wsUrl } from "./api";
 import { getSettings } from "./settings";
 import { hailBus } from "./hailBus";
 import { setIdleAudioMode, setPlaybackAudioMode } from "./audioMode";
@@ -50,6 +50,11 @@ export const livePttBus = {
 const queue: PTTMessage[] = [];
 let playing = false;
 let activeSound: Audio.Sound | null = null;
+
+// Dedup guard shared by BOTH delivery transports (the WebSocket below AND the
+// polling fallback). First transport to see a given clip id wins; the other
+// skips it, so a clip delivered by both never plays or emits twice.
+const handledIds = new Set<string>();
 
 async function playOne(m: PTTMessage) {
   try {
@@ -195,6 +200,8 @@ export function useLiveWalkieListener(
 
           if (data?.type !== "ptt" || !data?.message) return;
           const m: PTTMessage = data.message;
+          // Dedup across WS + poll fallback — first transport to see this id wins.
+          if (m?.id) { if (handledIds.has(m.id)) return; handledIds.add(m.id); }
           const ch = getterRef.current?.();
           // Always emit on the bus so screens that listen for the history list
           // still update. Audio playback is gated by the Comms Live privacy
@@ -221,9 +228,58 @@ export function useLiveWalkieListener(
       };
     };
     connect();
+
+    // ---- Polling fallback (belt-and-suspenders) ----
+    // The WS above is the primary, low-latency transport. But on flaky mobile
+    // networks, app backgrounding, or Render free-tier socket idling, frames
+    // get dropped and a transmission is "sent but never received". So we ALSO
+    // poll GET /api/ptt/{channel} every 5s and deliver anything the socket
+    // missed (deduped via handledIds so nothing double-plays). Mirrors the
+    // hazards screen's Realtime-plus-poll defense. The FIRST poll for a given
+    // channel only SEEDS the seen-set (so we never replay the stored backlog);
+    // after that, genuinely new + recent clips are auto-played.
+    let pollTimer: any = null;
+    let seededChannel: string | null | undefined = null;
+    const poll = async () => {
+      try {
+        const ch = getterRef.current?.();
+        // Only poll while foregrounded: iOS suspends background JS timers anyway,
+        // and we don't want to burn cellular re-downloading the clip list while
+        // the phone's in a pocket. Background reception leans on the WS (kept
+        // alive by the background-audio mode) plus push notifications.
+        if (ch && AppState.currentState === "active") {
+          const { data } = await api.get(`/ptt/${ch}`);
+          if (Array.isArray(data)) {
+            const isSeedPass = seededChannel !== ch;
+            // Oldest first so playback order matches the order things were said.
+            const sorted = [...data].sort(
+              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            );
+            for (const m of sorted) {
+              if (!m || !m.id || handledIds.has(m.id)) continue;
+              handledIds.add(m.id);
+              livePttBus.emit(m);                              // history updates everywhere
+              if (isSeedPass) continue;                        // don't replay backlog on first sight
+              const selfId = selfRef.current?.();
+              if (selfId && m.user_id === selfId) continue;    // never play our own clip
+              const createdMs = new Date(m.created_at).getTime();
+              const recent = Number.isFinite(createdMs) ? (Date.now() - createdMs < 30000) : false;
+              if (recent && getSettings().commsLive !== false && m.channel === ch) {
+                enqueueLivePtt(m);
+              }
+            }
+            seededChannel = ch;
+          }
+        }
+      } catch { /* offline / transient — retry next tick */ }
+      if (alive) pollTimer = setTimeout(poll, 6000);
+    };
+    poll();
+
     return () => {
       alive = false;
       if (timer) clearTimeout(timer);
+      if (pollTimer) clearTimeout(pollTimer);
       try { ws?.close(); } catch {}
       ws = null;
     };

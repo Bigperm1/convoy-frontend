@@ -759,10 +759,16 @@ async def post_ptt(body: PTTIn, user=Depends(get_current_user)):
     # Amplify the clip before we store/broadcast it (Bug 9: comms volume).
     # Boosted clip = louder playback on every device + no client-side change.
     boosted_b64 = await amplify_ptt_audio(body.audio_b64)
+    _now = datetime.now(timezone.utc)
     msg = {
         "id": str(uuid.uuid4()), "channel": body.channel, "user_id": user["id"],
         "handle": user.get("handle", ""), "audio_b64": boosted_b64,
-        "duration_ms": body.duration_ms, "created_at": datetime.now(timezone.utc).isoformat(),
+        "duration_ms": body.duration_ms, "created_at": _now.isoformat(),
+        # Transmissions auto-expire after 5 hours. `expires_at` is both the
+        # filter used by GET /ptt and the field a MongoDB TTL index watches to
+        # PERMANENTLY delete the clip (see startup index). So old comms can
+        # never resurface on a fresh install / new build.
+        "expires_at": (_now + timedelta(hours=5)).isoformat(),
     }
     await db.ptt.insert_one(msg)
     msg.pop("_id", None)
@@ -786,7 +792,16 @@ async def list_ptt(channel: str, user=Depends(get_current_user)):
     c = await db.communities.find_one({"id": channel})
     if not c or user["id"] not in c.get("members", []):
         raise HTTPException(status_code=403, detail="Not a member")
-    cursor = db.ptt.find({"channel": channel}, {"_id": 0}).sort("created_at", -1).limit(20)
+    # Hard 5-hour window — never return (and lazily purge) anything older, so a
+    # stale clip can't resurface after a reinstall even before the TTL index
+    # sweeps it. The TTL index (see startup) is the permanent deleter; this
+    # filter is the immediate guarantee at read time.
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+    # Fire-and-forget purge of this channel's expired clips.
+    asyncio.create_task(db.ptt.delete_many({"channel": channel, "created_at": {"$lt": cutoff}}))
+    cursor = db.ptt.find(
+        {"channel": channel, "created_at": {"$gte": cutoff}}, {"_id": 0}
+    ).sort("created_at", -1).limit(20)
     items = await cursor.to_list(20)
     return list(reversed(items))
 
@@ -1222,28 +1237,48 @@ async def directions_proxy(
 
 # ---------- WebSocket ----------
 class WSManager:
+    # A single user can hold MORE THAN ONE socket at once - the Map screen opens
+    # one for live peer locations while the app-wide PTT listener (livePtt.ts)
+    # holds another for comms. The old design kept ONE socket per user and closed
+    # the previous one on every new connect, so those two sockets fought and kept
+    # kicking each other off - which dropped live comms whenever the Map tab was
+    # open. We now keep a SET of sockets per user and fan out to all of them, so
+    # comms come through seamlessly on every tab.
     def __init__(self):
-        self.active: Dict[str, WebSocket] = {}
+        self.active: Dict[str, set] = {}
         self.lock = asyncio.Lock()
 
     async def connect(self, user_id: str, ws: WebSocket):
         await ws.accept()
         async with self.lock:
-            old = self.active.get(user_id)
-            self.active[user_id] = ws
-        if old:
-            try: await old.close()
-            except Exception: pass
+            self.active.setdefault(user_id, set()).add(ws)
 
-    async def disconnect(self, user_id: str):
-        async with self.lock: self.active.pop(user_id, None)
+    async def disconnect(self, user_id: str, ws: Optional[WebSocket] = None):
+        async with self.lock:
+            if ws is None:
+                self.active.pop(user_id, None)
+            else:
+                conns = self.active.get(user_id)
+                if conns is not None:
+                    conns.discard(ws)
+                    if not conns:
+                        self.active.pop(user_id, None)
+
+    async def _send(self, ws, message: dict) -> bool:
+        try:
+            await ws.send_json(message)
+            return True
+        except Exception:
+            return False
 
     async def broadcast(self, message: dict):
-        dead = []
-        for uid, ws in list(self.active.items()):
-            try: await ws.send_json(message)
-            except Exception: dead.append(uid)
-        for uid in dead: await self.disconnect(uid)
+        dead = []  # (user_id, ws) pairs whose send failed
+        for uid, conns in list(self.active.items()):
+            for ws in list(conns):
+                if not await self._send(ws, message):
+                    dead.append((uid, ws))
+        for uid, ws in dead:
+            await self.disconnect(uid, ws)
 
     async def broadcast_to_users(self, user_ids, message: dict):
         """
@@ -1255,12 +1290,15 @@ class WSManager:
             return
         target = set(user_ids)
         dead = []
-        for uid, ws in list(self.active.items()):
-            if uid not in target:
+        for uid in target:
+            conns = self.active.get(uid)
+            if not conns:
                 continue
-            try: await ws.send_json(message)
-            except Exception: dead.append(uid)
-        for uid in dead: await self.disconnect(uid)
+            for ws in list(conns):
+                if not await self._send(ws, message):
+                    dead.append((uid, ws))
+        for uid, ws in dead:
+            await self.disconnect(uid, ws)
 
 ws_manager = WSManager()
 
@@ -1286,10 +1324,10 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
                                             "lat": data.get("lat"), "lng": data.get("lng"),
                                             "heading": data.get("heading", 0), "speed": data.get("speed", 0)})
     except WebSocketDisconnect:
-        await ws_manager.disconnect(user_id)
+        await ws_manager.disconnect(user_id, websocket)
     except Exception as e:
         logger.warning(f"WS error: {e}")
-        await ws_manager.disconnect(user_id)
+        await ws_manager.disconnect(user_id, websocket)
 
 
 @api.get("/")
@@ -1332,9 +1370,24 @@ async def startup():
     await db.users.create_index("id", unique=True)
     await db.hazards.create_index("expires_at")
     await db.ptt.create_index([("channel", 1), ("created_at", -1)])
+    await db.ptt.create_index("created_at")
     await db.communities.create_index("id", unique=True)
     await db.communities.create_index("invite_code")
     await db.communities.create_index("name")
+
+    # Background sweeper: permanently delete PTT transmissions older than 5h.
+    # created_at is stored as an ISO string (not a BSON Date), so a native TTL
+    # index won't apply — we run our own lightweight purge every 30 min. This
+    # guarantees clips are gone server-wide even for channels no one opens.
+    async def _ptt_sweeper():
+        while True:
+            try:
+                cutoff = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+                await db.ptt.delete_many({"created_at": {"$lt": cutoff}})
+            except Exception as e:
+                logger.warning("PTT sweeper error: %s", str(e)[:160])
+            await asyncio.sleep(1800)  # 30 minutes
+    asyncio.create_task(_ptt_sweeper())
 
     # ============================================================
     # Demo / seed data

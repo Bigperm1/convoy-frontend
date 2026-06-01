@@ -18,19 +18,27 @@ export function useVoice(tier: ProximityTier = "far") {
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const ensurePerm = useCallback(async () => {
-    const { status } = await Audio.requestPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Microphone permission required");
-      return false;
+  const ensurePerm = useCallback(async (): Promise<"granted" | "prompted" | "denied"> => {
+    const perm = await Audio.getPermissionsAsync();
+    if (perm.status === "granted") {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      return "granted";
     }
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-    return true;
+    if (perm.canAskAgain) {
+      try { await Audio.requestPermissionsAsync(); } catch {}
+      return "prompted";
+    }
+    Alert.alert("Microphone permission required");
+    return "denied";
   }, []);
 
   const start = useCallback(async () => {
     if (recording) return;
-    if (!(await ensurePerm())) return;
+    const perm = await ensurePerm();
+    // Don't start a recording in the same gesture that showed the OS prompt —
+    // doing so while the iOS audio session is re-activating crashes the app.
+    // Permission is granted now, so the next press records normally.
+    if (perm !== "granted") return;
     try {
       const rec = new Audio.Recording();
       // Adaptive quality based on convoy proximity tier (see proximityAudio.ts).

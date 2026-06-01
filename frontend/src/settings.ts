@@ -84,6 +84,26 @@ return cached;
 // Alias kept for backward-compat — callers that used updateGlobalSettings still compile.
 export const updateGlobalSettings = updateSettings;
 
+// Backfill EMPTY local car fields from the backend profile. Local stays the
+// source of truth for edits; this only fills blanks, so it restores the car
+// after a fresh install / new build (which wipes AsyncStorage) without ever
+// clobbering a selection the user just made. Keeps the car "attached to the
+// account" instead of living only on the device.
+export async function hydrateCarFromProfile(p: {
+  car_make?: string | null;
+  car_model?: string | null;
+  car_color?: string | null;
+  car_year?: number | null;
+}): Promise<void> {
+  await ensureSettingsLoaded();
+  const patch: Partial<Settings> = {};
+  if (!cached.carMake && p.car_make) patch.carMake = p.car_make;
+  if (!cached.carModel && p.car_model) patch.carModel = p.car_model;
+  if (!cached.carColor && p.car_color) patch.carColor = p.car_color;
+  if (!cached.carYear && p.car_year != null) patch.carYear = String(p.car_year);
+  if (Object.keys(patch).length) await updateSettings(patch);
+}
+
 export function useSettings(): [Settings, (p: Partial<Settings>) => Promise<Settings>] {
 const [s, setS] = useState<Settings>(cached);
 useEffect(() => {

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ImageBackground, SafeAreaView, Dimensions, TextInput, LayoutAnimation,
@@ -9,6 +9,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { getSettings, updateSettings } from '../../src/settings';
+import { useAuth } from '../../src/auth';
 import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
 import { getGarageImage } from '../../src/carImages';
@@ -105,6 +106,7 @@ function Dropdown({
 // ---- Main screen ----
 export default function GarageScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const [year,  setYear]  = useState('2025');
   const [make,  setMake]  = useState('');
   const [model, setModel] = useState('');
@@ -125,15 +127,35 @@ export default function GarageScreen() {
   const colorNames = colors.map(c => c.name);
   const swatchFor  = (name: string) => colors.find(c => c.name === name)?.hex;
 
-  // Load saved settings
+  // Load saved settings — prefer locally-saved values, but fall back to the
+  // backend profile so a fresh install / new build (local storage wiped) still
+  // shows the car attached to the account instead of forcing a re-entry.
+  const hydratedRef = useRef(false);
   useEffect(() => {
+    if (user === undefined || hydratedRef.current) return; // wait for auth, run once
+    hydratedRef.current = true;
     const s = getSettings();
-    if (s.carYear)  setYear(s.carYear);
-    if (s.carMake)  setMake(s.carMake);
-    if (s.carModel) setModel(s.carModel);
-    if (s.carColor) setColor(s.carColor);
+    const y  = s.carYear  || (user?.car_year != null ? String(user.car_year) : '');
+    const mk = s.carMake  || user?.car_make  || '';
+    const md = s.carModel || user?.car_model || '';
+    const cl = s.carColor || user?.car_color || '';
+    if (y)  setYear(y);
+    if (mk) setMake(mk);
+    if (md) setModel(md);
+    if (cl) setColor(cl);
     if (s.topSpeed) setTopSpeed(s.topSpeed);
+    else if (user?.top_speed_record) setTopSpeed(user.top_speed_record);
     if (s.callSign) setCallSign(s.callSign);
+
+    // If local was empty but the profile had the car, persist it locally so the
+    // rest of the app (map self-marker, presence) picks it up immediately too.
+    const patch: Record<string, any> = {};
+    if (!s.carMake  && user?.car_make)  patch.carMake  = user.car_make;
+    if (!s.carModel && user?.car_model) patch.carModel = user.car_model;
+    if (!s.carColor && user?.car_color) patch.carColor = user.car_color;
+    if (!s.carYear  && user?.car_year != null) patch.carYear = String(user.car_year);
+    if (Object.keys(patch).length) updateSettings(patch);
+
     // One-time sync of any EXISTING local car identity up to the backend, so
     // users who picked their car before backend-sync existed get their paint
     // onto the map without having to re-select anything.
@@ -145,7 +167,7 @@ export default function GarageScreen() {
         car_year: s.carYear ? (parseInt(s.carYear, 10) || undefined) : undefined,
       }).catch(() => {});
     }
-  }, []);
+  }, [user]);
 
   const save = useCallback((updates: Record<string, any>) => {
     updateSettings(updates);

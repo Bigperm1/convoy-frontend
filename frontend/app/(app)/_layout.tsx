@@ -9,7 +9,7 @@ import VoiceController from "../../src/VoiceController";
 import VoiceTabButton from "../../src/VoiceTabButton";
 import CommsTalkingToast from "../../src/components/CommsTalkingToast";
 import { useLiveWalkieListener } from "../../src/livePtt";
-import { useSettings } from "../../src/settings";
+import { useSettings, hydrateCarFromProfile } from "../../src/settings";
 import { api } from "../../src/api";
 import { hailBus } from "../../src/hailBus";
 import * as Notifications from "expo-notifications";
@@ -94,6 +94,20 @@ export default function AppLayout() {
   useEffect(() => {
     if (!user) return;
     registerForPushNotifications();
+  }, [user]);
+
+  // Backfill the car identity from the account profile whenever the user loads.
+  // A fresh install / new build wipes local AsyncStorage, so without this the
+  // Garage (and the map self-marker) come up empty even though the car is saved
+  // on the account. Only fills blanks, so it never overrides a local edit.
+  useEffect(() => {
+    if (!user) return;
+    hydrateCarFromProfile({
+      car_make: user.car_make,
+      car_model: user.car_model,
+      car_color: user.car_color,
+      car_year: user.car_year ?? null,
+    });
   }, [user]);
 
   // Foreground delivery listener Ã¢ÂÂ fires while the app is open. We DON'T

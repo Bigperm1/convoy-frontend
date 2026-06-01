@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, Pressable, TouchableOpacity, Animated,
-  SafeAreaView, ScrollView, Easing, Image, PanResponder,
+  SafeAreaView, ScrollView, Easing, Image,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Audio } from 'expo-av';
@@ -42,69 +42,6 @@ const TIER_META: Record<ProximityTier, { label: string; color: string }> = {
   far: { label: 'Standard', color: '#8E8E93' },
 };
 
-const SWIPE_DELETE_W = 84;
-
-// Swipeable transmission row — drag left to reveal a Delete button. Built on
-// PanResponder so it needs no extra gesture library and won't fight the
-// parent ScrollView (it only claims a gesture once horizontal movement
-// dominates). Only one row is open at a time, controlled by the parent via
-// `isOpen`; swiping a new one closes the rest.
-function SwipeRow({
-  children, isOpen, onSwipeOpen, onSwipeClose, onDelete,
-}: {
-  children: React.ReactNode;
-  isOpen: boolean;
-  onSwipeOpen: () => void;
-  onSwipeClose: () => void;
-  onDelete: () => void;
-}) {
-  const tx = useRef(new Animated.Value(0)).current;
-  const openRef = useRef(isOpen);
-  const startRef = useRef(0);
-
-  // Animate to match the controlled open state (so opening one row springs the
-  // others shut).
-  useEffect(() => {
-    openRef.current = isOpen;
-    Animated.spring(tx, { toValue: isOpen ? -SWIPE_DELETE_W : 0, useNativeDriver: false, bounciness: 0 }).start();
-  }, [isOpen]);
-
-  const pan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 8,
-      onPanResponderGrant: () => { startRef.current = openRef.current ? -SWIPE_DELETE_W : 0; },
-      onPanResponderMove: (_e, g) => {
-        const nx = Math.max(-SWIPE_DELETE_W, Math.min(0, startRef.current + g.dx));
-        tx.setValue(nx);
-      },
-      onPanResponderRelease: (_e, g) => {
-        const nx = startRef.current + g.dx;
-        if (nx < -SWIPE_DELETE_W / 2) {
-          Animated.spring(tx, { toValue: -SWIPE_DELETE_W, useNativeDriver: false, bounciness: 0 }).start();
-          onSwipeOpen();
-        } else {
-          Animated.spring(tx, { toValue: 0, useNativeDriver: false, bounciness: 0 }).start();
-          onSwipeClose();
-        }
-      },
-    })
-  ).current;
-
-  return (
-    <View style={styles.swipeWrap}>
-      <View style={styles.swipeDeleteBg}>
-        <TouchableOpacity onPress={onDelete} style={styles.swipeDeleteBtn} activeOpacity={0.85}>
-          <Ionicons name="trash" size={20} color="#fff" />
-          <Text style={styles.swipeDeleteText}>Delete</Text>
-        </TouchableOpacity>
-      </View>
-      <Animated.View style={[styles.swipeFront, { transform: [{ translateX: tx }] }]} {...pan.panHandlers}>
-        {children}
-      </Animated.View>
-    </View>
-  );
-}
-
 export default function TalkScreen() {
   const router = useRouter();
   const [settings, setSettings] = useSettings();
@@ -116,9 +53,7 @@ export default function TalkScreen() {
   const [playingId, setPlayingId] = useState<string | null>(null);
   // Recent-transmissions sheet: CLOSED by default so it never covers the mic.
   // It opens on demand (toggle pill) and a tap anywhere off it dismisses it.
-  // openSwipeId = the one row whose swipe-to-delete is currently revealed.
   const [txOpen, setTxOpen] = useState(false);
-  const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
   // Live nearby count fetched directly on this screen (works even if the map
   // tab hasn't been opened this session). Gated by the Nearby setting.
   const [nearbyCount, setNearbyCount] = useState<number | null>(null);
@@ -158,6 +93,18 @@ export default function TalkScreen() {
   useFocusEffect(useCallback(() => {
     loadCommunities();
     loadNearby();
+    // Pre-warm mic permission when Comms opens, so the OS prompt is handled
+    // calmly here rather than under a press. Requesting it during a PTT press
+    // and then immediately starting a recording crashes the iOS audio session.
+    // Only prompts when status is still undetermined.
+    (async () => {
+      try {
+        const p = await Audio.getPermissionsAsync();
+        if (p.status === 'undetermined' && p.canAskAgain) {
+          await Audio.requestPermissionsAsync();
+        }
+      } catch {}
+    })();
     // Poll nearby every 20s while the Comms screen is focused.
     const t = setInterval(loadNearby, 20000);
     return () => clearInterval(t);
@@ -365,6 +312,10 @@ export default function TalkScreen() {
 
       {/* Body */}
       <View style={styles.body}>
+        {/* Mic + its sonar ring live in a fixed 320x320 box so the ring is
+            always perfectly centered on the mic (the absolute ring fills this
+            box, and the mic fills it too, so they share the same center). */}
+        <View style={styles.micWrap}>
         {/* Expanding sonar ring while transmitting */}
         <Animated.View
           pointerEvents="none"
@@ -388,6 +339,7 @@ export default function TalkScreen() {
             </View>
           </Pressable>
         </Animated.View>
+        </View>
 
         <Text style={[styles.pttLabel, pressed && { color: YELLOW }]}>
           {!active ? 'Pick a convoy to talk' : pressed ? 'Release to send' : 'Hold to Talk'}
@@ -400,7 +352,7 @@ export default function TalkScreen() {
           <TouchableOpacity
             style={styles.txToggle}
             activeOpacity={0.85}
-            onPress={() => { Haptics.selectionAsync(); setOpenSwipeId(null); setTxOpen((o) => !o); }}
+            onPress={() => { Haptics.selectionAsync(); setTxOpen((o) => !o); }}
           >
             <Ionicons name="radio" size={15} color={YELLOW} />
             <Text style={styles.txToggleText}>
@@ -413,10 +365,10 @@ export default function TalkScreen() {
 
         {/* Tap-away backdrop + the transmissions sheet. The backdrop fills the
             screen so a tap ANYWHERE off the sheet closes it (the mic sits under
-            it while open; close first to transmit). Swipe a row left to delete. */}
+            it while open; close first to transmit). */}
         {active && !dropdownOpen && txOpen && (
           <>
-            <Pressable style={styles.txBackdrop} onPress={() => { setOpenSwipeId(null); setTxOpen(false); }} />
+            <Pressable style={styles.txBackdrop} onPress={() => { setTxOpen(false); }} />
             <View style={styles.txSheet}>
               <Text style={styles.txSheetTitle}>Recent Transmissions</Text>
               {ptt.history.length === 0 ? (
@@ -424,30 +376,22 @@ export default function TalkScreen() {
               ) : (
                 <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
                   {ptt.history.map((m) => (
-                    <SwipeRow
-                      key={m.id}
-                      isOpen={openSwipeId === m.id}
-                      onSwipeOpen={() => setOpenSwipeId(m.id)}
-                      onSwipeClose={() => setOpenSwipeId((cur) => (cur === m.id ? null : cur))}
-                      onDelete={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                        setOpenSwipeId(null);
-                        ptt.remove(m.id);
-                      }}
-                    >
-                      <TouchableOpacity onPress={() => playConvo(m)} style={styles.playBtn} activeOpacity={0.8}>
-                        <Ionicons name={playingId === m.id ? 'pause' : 'play'} size={18} color="#000" />
-                      </TouchableOpacity>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.convoSpeaker} numberOfLines={1}>{m.handle || 'Driver'}</Text>
-                        <Text style={styles.convoMeta}>{fmtClock(m.created_at)} · {fmtDur(m.duration_ms)}</Text>
-                      </View>
-                      {playingId === m.id && (
-                        <View style={styles.playingPill}>
-                          <Ionicons name="volume-high" size={13} color={YELLOW} />
+                    <View key={m.id} style={styles.convoRow}>
+                      <View style={styles.convoTop}>
+                        <TouchableOpacity onPress={() => playConvo(m)} style={styles.playBtn} activeOpacity={0.8}>
+                          <Ionicons name={playingId === m.id ? 'pause' : 'play'} size={18} color="#000" />
+                        </TouchableOpacity>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.convoSpeaker} numberOfLines={1}>{m.handle || 'Driver'}</Text>
+                          <Text style={styles.convoMeta}>{fmtClock(m.created_at)} · {fmtDur(m.duration_ms)}</Text>
                         </View>
-                      )}
-                    </SwipeRow>
+                        {playingId === m.id && (
+                          <View style={styles.playingPill}>
+                            <Ionicons name="volume-high" size={13} color={YELLOW} />
+                          </View>
+                        )}
+                      </View>
+                    </View>
                   ))}
                 </ScrollView>
               )}
@@ -503,9 +447,11 @@ const styles = StyleSheet.create({
 
   body: { flex: 1, alignItems: 'center', justifyContent: 'center', position: 'relative' },
 
-  glowWrap: { borderRadius: 170, elevation: 18 },
+  micWrap: { width: 320, height: 320, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
+  glowWrap: { width: 320, height: 320, borderRadius: 160, alignItems: 'center', justifyContent: 'center', elevation: 18 },
   pttRing: {
     position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
     width: 320, height: 320, borderRadius: 160,
     borderWidth: 3, borderColor: YELLOW,
   },
@@ -556,11 +502,6 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.55, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 24,
   },
   txSheetTitle: { color: '#fff', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 6, marginLeft: 4 },
-  swipeWrap: { position: 'relative', overflow: 'hidden', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#262629' },
-  swipeDeleteBg: { position: 'absolute', right: 0, top: 0, bottom: 0, width: SWIPE_DELETE_W, backgroundColor: '#FF3B30', alignItems: 'center', justifyContent: 'center' },
-  swipeDeleteBtn: { flex: 1, width: SWIPE_DELETE_W, alignItems: 'center', justifyContent: 'center', gap: 2 },
-  swipeDeleteText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  swipeFront: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, paddingHorizontal: 4, backgroundColor: '#161618' },
 
   dismissOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
 });

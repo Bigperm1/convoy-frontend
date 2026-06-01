@@ -23,6 +23,11 @@ import { livePttBus, type PTTMessage } from "./livePtt";
 
 export type { PTTMessage };
 
+// Transmissions auto-expire after 5 hours everywhere — the backend stops
+// returning (and deletes) older clips, and the client filters too so a long
+// continuous session never keeps stale audio in memory.
+const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+
 async function uriToBase64(uri: string): Promise<string> {
   // Web: fetch + FileReader. Native: expo-file-system reads base64 directly,
   // but fetch()+FileReader also works for file:// URIs on RN and keeps this
@@ -62,10 +67,15 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
       try {
         const { data } = await api.get(`/ptt/${channel}`);
         if (!cancelled && Array.isArray(data)) {
-          // Newest first for the list.
-          const sorted = [...data].sort(
-            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          );
+          // Drop anything older than 5h (auto-expire), then newest-first.
+          const sorted = [...data]
+            .filter((m) => {
+              const t = new Date(m?.created_at).getTime();
+              return Number.isFinite(t) ? (Date.now() - t < FIVE_HOURS_MS) : true;
+            })
+            .sort(
+              (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            );
           setHistory(sorted);
         }
       } catch { /* keep empty; live bus will still populate */ }
@@ -80,18 +90,38 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
     if (!channel) return;
     const off = livePttBus.on((m) => {
       if (m.channel !== channel) return;
-      setHistory((cur) => (cur.some((x) => x.id === m.id) ? cur : [m, ...cur]));
+      setHistory((cur) => {
+        if (cur.some((x) => x.id === m.id)) return cur;
+        // Prepend the new clip and prune anything past the 5h expiry window.
+        return [m, ...cur].filter((x) => {
+          const t = new Date(x.created_at).getTime();
+          return Number.isFinite(t) ? (Date.now() - t < FIVE_HOURS_MS) : true;
+        });
+      });
     });
     // Wrap so the cleanup returns void (livePttBus.on's unsubscribe returns the
     // Set.delete boolean, which doesn't satisfy React's EffectCallback type).
     return () => { off(); };
   }, [channel]);
 
-  const ensurePerm = useCallback(async () => {
-    const { status } = await Audio.requestPermissionsAsync();
-    if (status !== "granted") return false;
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-    return true;
+  // Resolve mic permission WITHOUT crashing the audio session. On iOS, calling
+  // requestPermissionsAsync() shows the system prompt, and starting a recording
+  // in the SAME gesture the prompt resolves crashes the audio session (it's
+  // still re-activating from the interruption). So: if already granted, set the
+  // audio mode and report "granted" (safe to record now). If we must PROMPT,
+  // report "prompted" and let the caller bail out of recording for this press;
+  // the next press records cleanly once the session has settled.
+  const ensurePerm = useCallback(async (): Promise<"granted" | "prompted" | "denied"> => {
+    const perm = await Audio.getPermissionsAsync();
+    if (perm.status === "granted") {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      return "granted";
+    }
+    if (perm.canAskAgain) {
+      try { await Audio.requestPermissionsAsync(); } catch {}
+      return "prompted";
+    }
+    return "denied";
   }, []);
 
   const start = useCallback(async () => {
@@ -100,8 +130,13 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
     // is observed in the post-start check below.
     wantRef.current = true;
     if (recRef.current) return;            // already recording
-    if (!(await ensurePerm())) { wantRef.current = false; return; }
-    if (!wantRef.current) return;          // released during the permission prompt
+    const perm = await ensurePerm();
+    // If we just showed the OS mic prompt (or it's denied), do NOT start a
+    // recording in this gesture — starting one while the iOS audio session is
+    // re-activating right after the prompt crashes the app. Permission is now
+    // granted, so the user's NEXT press records normally.
+    if (perm !== "granted") { wantRef.current = false; return; }
+    if (!wantRef.current) return;          // released during the permission check
     try {
       const rec = new Audio.Recording();
       await rec.prepareToRecordAsync(getPttRecordingOptions(tier));

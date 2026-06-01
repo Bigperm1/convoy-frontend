@@ -31,7 +31,11 @@ const TOP_DOWN_IMAGES: Record<string, any> = {
 };
 
 // Default fallback images
-const DEFAULT_GARAGE = require('../assets/vehicles/heavy_metal.png');
+// No-car-selected Garage hero = premium showroom photo (replaces the old
+// top-down heavy-metal PNG). NOTE: this image must exist on disk before a
+// build or Metro will fail to resolve the require — save the supplied showroom
+// image to assets/images/showroom.png.
+const DEFAULT_GARAGE = require('../assets/images/showroom.png');
 const DEFAULT_TOPDOWN = require('../assets/vehicles/heavy_metal.png');
 
 export function getGarageImage(make: string, model: string, color: string): any {

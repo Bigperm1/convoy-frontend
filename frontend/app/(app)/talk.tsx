@@ -57,6 +57,7 @@ export default function TalkScreen() {
 
   const glow = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(1)).current;
+  const ring = useRef(new Animated.Value(0)).current;
   const playerRef = useRef<Audio.Sound | null>(null);
 
   // The active community = the one whose id matches settings.activeCommunityId.
@@ -96,17 +97,24 @@ export default function TalkScreen() {
 
   useEffect(() => {
     if (pressed) {
-      Animated.timing(scale, { toValue: 1.05, duration: 130, useNativeDriver: false }).start();
+      Animated.timing(scale, { toValue: 1.08, duration: 130, useNativeDriver: false }).start();
       Animated.loop(
         Animated.sequence([
-          Animated.timing(glow, { toValue: 1, duration: 650, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
-          Animated.timing(glow, { toValue: 0.45, duration: 650, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+          Animated.timing(glow, { toValue: 1, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+          Animated.timing(glow, { toValue: 0.5, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
         ])
+      ).start();
+      // Expanding "sonar" ring that radiates out each cycle for a lively pulse.
+      ring.setValue(0);
+      Animated.loop(
+        Animated.timing(ring, { toValue: 1, duration: 1100, easing: Easing.out(Easing.ease), useNativeDriver: false })
       ).start();
     } else {
       glow.stopAnimation();
+      ring.stopAnimation();
       Animated.timing(scale, { toValue: 1, duration: 130, useNativeDriver: false }).start();
       Animated.timing(glow, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+      Animated.timing(ring, { toValue: 0, duration: 200, useNativeDriver: false }).start();
     }
   }, [pressed]);
 
@@ -122,9 +130,11 @@ export default function TalkScreen() {
     ptt.start();
   };
   const onPressOut = () => {
-    if (!active || !pressed) return;
+    if (!active) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setPressed(false);
+    // Always attempt a stop on release (stopAndSend is safe when idle) so a
+    // release can never be skipped and leave the mic open.
     ptt.stopAndSend();
   };
 
@@ -174,6 +184,9 @@ export default function TalkScreen() {
   useEffect(() => () => { playerRef.current?.unloadAsync().catch(() => {}); }, []);
 
   const glowOpacity = glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.95] });
+  const glowRadius = glow.interpolate({ inputRange: [0, 1], outputRange: [22, 60] });
+  const ringScale = ring.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.6] });
+  const ringOpacity = ring.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 0.55, 0] });
 
   const tierMeta = TIER_META[tier];
   // Connected line: prefer the live nearby count (when the Nearby setting is
@@ -232,6 +245,13 @@ export default function TalkScreen() {
         <LogoMenu size={30} style={styles.garageBtn} />
       </View>
 
+      {/* Tap anywhere outside the mic to dismiss the open switcher. Rendered
+          before the body so the mic Pressable stays on top and still works;
+          empty-space taps fall through to this overlay. */}
+      {dropdownOpen && (
+        <Pressable style={styles.dismissOverlay} onPress={() => setDropdownOpen(false)} />
+      )}
+
       {/* Community switcher dropdown — lists all joined communities. */}
       {dropdownOpen && (
         <View style={styles.switcher}>
@@ -277,6 +297,11 @@ export default function TalkScreen() {
 
       {/* Body */}
       <View style={styles.body}>
+        {/* Expanding sonar ring while transmitting */}
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.pttRing, { opacity: ringOpacity, transform: [{ scale: ringScale }] }]}
+        />
         <Animated.View
           style={[
             styles.glowWrap,
@@ -284,14 +309,14 @@ export default function TalkScreen() {
               transform: [{ scale }],
               shadowColor: YELLOW,
               shadowOpacity: glowOpacity,
-              shadowRadius: 34,
+              shadowRadius: glowRadius,
               shadowOffset: { width: 0, height: 0 },
             },
           ]}
         >
           <Pressable onPressIn={onPressIn} onPressOut={onPressOut} style={[styles.pttOuter, pressed && styles.pttOuterActive, !active && styles.pttOuterDisabled]}>
             <View style={[styles.pttInner, pressed && styles.pttInnerActive]}>
-              <Ionicons name="mic" size={96} color={pressed ? YELLOW : active ? '#fff' : '#555'} />
+              <Ionicons name="mic" size={112} color={pressed ? YELLOW : active ? '#fff' : '#555'} />
             </View>
           </Pressable>
         </Animated.View>
@@ -382,15 +407,20 @@ const styles = StyleSheet.create({
 
   body: { flex: 1, alignItems: 'center', justifyContent: 'center', position: 'relative' },
 
-  glowWrap: { borderRadius: 150, elevation: 18 },
+  glowWrap: { borderRadius: 170, elevation: 18 },
+  pttRing: {
+    position: 'absolute',
+    width: 320, height: 320, borderRadius: 160,
+    borderWidth: 3, borderColor: YELLOW,
+  },
   pttOuter: {
-    width: 280, height: 280, borderRadius: 140, backgroundColor: '#0e0e10',
-    alignItems: 'center', justifyContent: 'center', borderWidth: 5, borderColor: '#2a2a2e',
+    width: 320, height: 320, borderRadius: 160, backgroundColor: '#0e0e10',
+    alignItems: 'center', justifyContent: 'center', borderWidth: 6, borderColor: '#2a2a2e',
   },
   pttOuterActive: { borderColor: YELLOW },
   pttOuterDisabled: { opacity: 0.5 },
   pttInner: {
-    width: 224, height: 224, borderRadius: 112, backgroundColor: '#141417',
+    width: 256, height: 256, borderRadius: 128, backgroundColor: '#141417',
     alignItems: 'center', justifyContent: 'center',
   },
   pttInnerActive: { backgroundColor: '#1f1b00' },
@@ -412,4 +442,5 @@ const styles = StyleSheet.create({
   playBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: YELLOW, alignItems: 'center', justifyContent: 'center' },
   convoSpeaker: { color: '#fff', fontSize: 15, fontWeight: '600' },
   convoMeta: { color: '#888', fontSize: 12, marginTop: 1 },
+  dismissOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
 });

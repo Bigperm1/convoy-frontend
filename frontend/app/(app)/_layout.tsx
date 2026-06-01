@@ -42,11 +42,13 @@ async function registerForPushNotifications() {
   if (Platform.OS === "web") return;
 
   try {
-    const { status: existing } = await Notifications.getPermissionsAsync();
-    let final = existing;
-    if (existing !== "granted") {
-      const { status } = await Notifications.requestPermissionsAsync();
-      final = status;
+    const perm = await Notifications.getPermissionsAsync();
+    let final = perm.status;
+    // Only PROMPT on the very first launch (status still "undetermined"). On
+    // later launches we just read the saved status, so the OS prompt never
+    // reappears. If previously denied, we silently skip (WS fallback delivers).
+    if (perm.status === "undetermined" && perm.canAskAgain) {
+      final = (await Notifications.requestPermissionsAsync()).status;
     }
     if (final !== "granted") {
       // User denied Ã¢ÂÂ leave silently, the WS fallback path will handle Hails.

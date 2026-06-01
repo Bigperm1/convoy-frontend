@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Image, SafeAreaView, Dimensions, TextInput, LayoutAnimation,
+  ImageBackground, SafeAreaView, Dimensions, TextInput, LayoutAnimation,
   Platform, UIManager,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -193,11 +193,18 @@ export default function GarageScreen() {
           <View style={{ width: 40 }} />
         </View>
 
-        {/* Car hero card — updates live with make / model / color */}
-        <View style={styles.heroCard}>
-          <View style={styles.heroLedBorder} pointerEvents="none" />
-          <LinearGradient colors={['#1A1A1A', '#0D0D0D']} style={styles.heroGradient}>
-            <Image source={carImage} style={styles.heroImage} resizeMode="contain" />
+        {/* Car hero — full-bleed image that fades to black (welcome-carousel
+            style). No card/LED border; the photo melts into the page and the
+            car name sits over the bottom fade for a premium showroom feel. */}
+        <View style={styles.heroWrap}>
+          <ImageBackground source={carImage} style={styles.heroBg} resizeMode="cover">
+            {/* Subtle top vignette + strong bottom fade to black so the image
+                blends into the #000 background like the onboarding slides. */}
+            <LinearGradient
+              colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0)', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.97)']}
+              locations={[0, 0.28, 0.62, 1]}
+              style={StyleSheet.absoluteFill}
+            />
             <View style={styles.heroCaption}>
               <Text style={styles.heroTitle}>
                 {year && make && model ? `${year} ${make} ${model}` : 'Select your car'}
@@ -207,9 +214,11 @@ export default function GarageScreen() {
                   {displayColor && <View style={[styles.heroColorDot, { backgroundColor: displayColor.hex }]} />}
                   <Text style={styles.heroSub}>{color}</Text>
                 </View>
-              ) : null}
+              ) : (
+                <Text style={styles.heroHint}>Pick your year, make & model below</Text>
+              )}
             </View>
-          </LinearGradient>
+          </ImageBackground>
         </View>
 
         {/* Top speed badge */}
@@ -315,15 +324,16 @@ const styles = StyleSheet.create({
   backBtn:            { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title:              { color: '#fff', fontSize: 20, fontWeight: '600' },
 
-  heroCard:           { marginHorizontal: 16, marginBottom: 16, borderRadius: 24, overflow: 'hidden', position: 'relative' },
-  heroLedBorder:      { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 24, borderWidth: 1.5, borderColor: 'rgba(255,214,10,0.5)', zIndex: 2 },
-  heroGradient:       { padding: 20, alignItems: 'center', minHeight: 260 },
-  heroImage:          { width: SCREEN_W - 72, height: 200 },
-  heroCaption:        { alignItems: 'center', marginTop: 8 },
-  heroTitle:          { color: '#fff', fontSize: 18, fontWeight: '700' },
-  heroColorRow:       { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 },
-  heroColorDot:       { width: 10, height: 10, borderRadius: 5 },
-  heroSub:            { color: '#888', fontSize: 14 },
+  // Premium full-bleed hero — image fades to black (welcome-carousel style),
+  // no card/LED border. The car name overlays the bottom fade.
+  heroWrap:           { width: SCREEN_W, height: 240, marginBottom: 14, backgroundColor: '#000' },
+  heroBg:             { flex: 1, justifyContent: 'flex-end' },
+  heroCaption:        { paddingHorizontal: 24, paddingBottom: 22 },
+  heroTitle:          { color: '#fff', fontSize: 26, fontWeight: '800', letterSpacing: -0.3 },
+  heroColorRow:       { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 8 },
+  heroColorDot:       { width: 12, height: 12, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
+  heroSub:            { color: '#ccc', fontSize: 15, fontWeight: '500' },
+  heroHint:           { color: '#999', fontSize: 14, marginTop: 6 },
 
   speedCard:          { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 16, backgroundColor: '#111', borderRadius: 16, padding: 14, gap: 12 },
   speedIcon:          { width: 44, height: 44, borderRadius: 12, backgroundColor: '#1A1A00', alignItems: 'center', justifyContent: 'center' },
@@ -332,11 +342,11 @@ const styles = StyleSheet.create({
   speedValue:         { color: '#FFD60A', fontSize: 28, fontWeight: '700' },
   speedUnit:          { color: '#888', fontSize: 12, alignSelf: 'flex-end', marginBottom: 4 },
 
-  section:            { marginHorizontal: 16, marginBottom: 16 },
-  sectionLabel:       { color: '#888', fontSize: 13, fontWeight: '500', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 },
+  section:            { marginHorizontal: 16, marginBottom: 10 },
+  sectionLabel:       { color: '#888', fontSize: 13, fontWeight: '500', marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.8 },
 
   // Collapsed field row (dropdown header + call-sign input share this)
-  fieldRow:           { flexDirection: 'row', alignItems: 'center', minHeight: 54, borderRadius: 16, backgroundColor: '#111', paddingHorizontal: 16, borderWidth: 1, borderColor: '#1E1E1E' },
+  fieldRow:           { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderRadius: 16, backgroundColor: '#111', paddingHorizontal: 16, borderWidth: 1, borderColor: '#1E1E1E' },
   fieldRowOpen:       { borderColor: 'rgba(255,214,10,0.4)', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
   fieldRowDisabled:   { opacity: 0.5 },
   fieldValueRow:      { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -355,7 +365,7 @@ const styles = StyleSheet.create({
   callSignInput:      { flex: 1, color: '#fff', fontSize: 17, fontWeight: '600', paddingVertical: 14 },
 
   // Save button
-  saveBtn:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginHorizontal: 16, marginTop: 12, height: 54, borderRadius: 16, backgroundColor: YELLOW },
+  saveBtn:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginHorizontal: 16, marginTop: 8, height: 52, borderRadius: 16, backgroundColor: YELLOW },
   saveBtnDone:        { backgroundColor: '#4CD964' },
   saveBtnText:        { color: '#000', fontSize: 17, fontWeight: '700' },
 });

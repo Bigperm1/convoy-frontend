@@ -384,18 +384,28 @@ export default function MapScreen() {
   }, []);
 
   // ----- Initial location -----
+  // Resolve the FIRST GPS fix BEFORE mounting the map at a real position. We
+  // intentionally do NOT seed a default (San Francisco) up front: doing so
+  // mounted the map there and then JUMPED to the user's real location the
+  // instant they tapped "Allow", which reloaded tiles and read as a "glitch".
+  // Now the map holds the brief "Locating…" state (capped at 6s) and mounts
+  // once, directly where the driver is.
+  //
+  // Permission is only REQUESTED when its status is still "undetermined" (the
+  // very first launch). On every later launch we just READ the status via
+  // getForegroundPermissionsAsync, so the OS prompt never reappears.
   useEffect(() => {
     (async () => {
-      let lat = 37.7749, lng = -122.4194;
-      // Render the map immediately with a sane default so we never hang on "Locating…";
-      // the real GPS fix below refines this within a few seconds.
-      setCoords((cur) => cur || { lat, lng });
+      let lat = 37.7749, lng = -122.4194;   // fallback only if denied / GPS times out
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
+        let { status } = await Location.getForegroundPermissionsAsync();
+        if (status === "undetermined") {
+          status = (await Location.requestForegroundPermissionsAsync()).status;
+        }
         if (status === "granted") {
           const pos = await Promise.race([
-            Location.getCurrentPositionAsync({}),
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
           ]);
           if (pos && (pos as any).coords) {
             lat = (pos as any).coords.latitude;
@@ -421,6 +431,8 @@ export default function MapScreen() {
   // and only if the user hasn't manually picked a unit in Settings (see
   // `settings.speedUnitManual` — set true when they tap a unit button).
   const lastUnitCheckRef = useRef<number>(0);
+  // Throttle backend /location POSTs (live-avatar publish) to ~once / 4s.
+  const lastLocPostRef = useRef<number>(0);
   useEffect(() => {
     let sub: any = null;
     (async () => {
@@ -444,6 +456,17 @@ export default function MapScreen() {
               heading: heading ?? cur?.heading,
               speed,
             }));
+            // Live-avatar publish â push our position to the backend on a ~4s
+            // throttle so every other driver's /users/nearby (polled by
+            // loadPeers) shows us live. Pure REST â no Supabase Realtime needed.
+            const nowPost = Date.now();
+            if (nowPost - lastLocPostRef.current > 4000) {
+              lastLocPostRef.current = nowPost;
+              api.post("/location", {
+                lat: pos.coords.latitude, lng: pos.coords.longitude,
+                speed, heading: heading ?? 0,
+              }).catch(() => {});
+            }
             const kmh = speed * 3.6;
             // Personal-best tracking (in-memory): ignore stationary jitter (<1 km/h).
             // The throttled PUT to /auth/profile is handled by the existing
@@ -617,7 +640,20 @@ export default function MapScreen() {
       try {
         const m = JSON.parse(ev.data);
         if (m.type === "location" && m.user_id !== user?.id) {
-          setPeers((p) => ({ ...p, [m.user_id]: { ...p[m.user_id], ...m } }));
+          setPeers((p) => ({
+            ...p,
+            [m.user_id]: {
+              ...p[m.user_id],
+              user_id: m.user_id,
+              handle: m.handle ?? p[m.user_id]?.handle,
+              lat: m.lat,
+              lng: m.lng,
+              heading: typeof m.heading === "number" ? m.heading : p[m.user_id]?.heading,
+              carType: [m.car_make, m.car_model].filter(Boolean).join(" ").trim() || p[m.user_id]?.carType,
+              carBody: m.car_type || p[m.user_id]?.carBody,
+              carColor: m.car_color || p[m.user_id]?.carColor,
+            } as any,
+          }));
         }
         // Global hazard fan-out — every Convoy user receives every hazard
         // broadcast regardless of which community (or no community) they're
@@ -658,11 +694,38 @@ export default function MapScreen() {
   const loadPeers = async () => {
     try {
       const { data } = await api.get("/users/nearby");
-      const pm: Record<string, Peer> = {};
-      data.forEach((u: any) => { if (u.lat && u.lng) pm[u.id] = { user_id: u.id, handle: u.handle, lat: u.lat, lng: u.lng }; });
-      setPeers(pm);
+      setPeers((prev) => {
+        const next: Record<string, Peer> = { ...prev };
+        (Array.isArray(data) ? data : []).forEach((u: any) => {
+          if (u.lat && u.lng) {
+            next[u.id] = {
+              ...next[u.id],
+              user_id: u.id,
+              handle: u.handle,
+              lat: u.lat,
+              lng: u.lng,
+              heading: typeof u.heading === "number" ? u.heading : next[u.id]?.heading,
+              // /users/nearby returns the full car profile, so peers render in
+              // their real GR Corolla paint + body, not a generic marker.
+              carType: [u.car_make, u.car_model].filter(Boolean).join(" ").trim() || next[u.id]?.carType,
+              carBody: u.car_type || next[u.id]?.carBody,
+              carColor: u.car_color || next[u.id]?.carColor,
+            } as Peer;
+          }
+        });
+        return next;
+      });
     } catch {}
   };
+
+  // Live-avatar backstop: poll nearby drivers every 10s. This is the reliable
+  // transport (plain REST, independent of Supabase Realtime) that guarantees
+  // peers appear even if the presence WebSocket never connects. loadPeers
+  // MERGES (never wipes) so live WS/presence updates aren't clobbered.
+  useEffect(() => {
+    const t = setInterval(() => { loadPeers(); }, 10000);
+    return () => clearInterval(t);
+  }, []);
 
   // Force a full state refresh — used by the ⟳ button in the header. Mirrors
   // what a "pull to refresh" would do: requery GPS for a fresh lock, push the

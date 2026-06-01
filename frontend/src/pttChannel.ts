@@ -43,6 +43,13 @@ async function uriToBase64(uri: string): Promise<string> {
 export function usePttChannel(channel: string | null | undefined, tier: ProximityTier = "far") {
   const recRef = useRef<Audio.Recording | null>(null);
   const startedAtRef = useRef<number>(0);
+  // True while the user is holding the button. Lets the async start() detect a
+  // release that arrived BEFORE recording actually began (runaway-mic fix).
+  const wantRef = useRef(false);
+  // Hard-cap timer so a single clip can never exceed 60s.
+  const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Latest stopAndSend, callable from the cap timer without a forward-ref cycle.
+  const stopAndSendRef = useRef<null | (() => Promise<boolean>)>(null);
   const [recording, setRecording] = useState(false);
   const [sending, setSending] = useState(false);
   const [history, setHistory] = useState<PTTMessage[]>([]);
@@ -88,23 +95,43 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
   }, []);
 
   const start = useCallback(async () => {
-    if (recording || !channel) return;
-    if (!(await ensurePerm())) return;
+    if (!channel) return;
+    // Mark intent immediately so a release that beats the async start sequence
+    // is observed in the post-start check below.
+    wantRef.current = true;
+    if (recRef.current) return;            // already recording
+    if (!(await ensurePerm())) { wantRef.current = false; return; }
+    if (!wantRef.current) return;          // released during the permission prompt
     try {
       const rec = new Audio.Recording();
       await rec.prepareToRecordAsync(getPttRecordingOptions(tier));
       await rec.startAsync();
+      // RUNAWAY-MIC FIX: if the user already released while we were preparing
+      // (onPressOut -> stopAndSend ran while recRef.current was still null, so
+      // it had nothing to stop), do NOT leave a hot mic running. Stop+discard
+      // now. This was the cause of the 13-minute recording.
+      if (!wantRef.current) {
+        try { await rec.stopAndUnloadAsync(); } catch {}
+        setRecording(false);
+        return;
+      }
       recRef.current = rec;
       startedAtRef.current = Date.now();
       setRecording(true);
+      // Belt-and-suspenders: hard-cap a single transmission at 60s so a missed
+      // release can never record indefinitely again.
+      if (maxTimerRef.current) clearTimeout(maxTimerRef.current);
+      maxTimerRef.current = setTimeout(() => { stopAndSendRef.current?.(); }, 60000);
     } catch {
       recRef.current = null;
       setRecording(false);
     }
-  }, [recording, channel, ensurePerm, tier]);
+  }, [channel, ensurePerm, tier]);
 
   // Stop recording and broadcast to the channel. Returns true on a sent clip.
   const stopAndSend = useCallback(async (): Promise<boolean> => {
+    wantRef.current = false;
+    if (maxTimerRef.current) { clearTimeout(maxTimerRef.current); maxTimerRef.current = null; }
     const rec = recRef.current;
     recRef.current = null;
     if (!rec) { setRecording(false); return false; }
@@ -147,11 +174,21 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
   // Abandon an in-progress recording without sending (e.g. user has no active
   // channel, or a cancel gesture). Safe to call even if not recording.
   const cancel = useCallback(async () => {
+    wantRef.current = false;
+    if (maxTimerRef.current) { clearTimeout(maxTimerRef.current); maxTimerRef.current = null; }
     const rec = recRef.current;
     recRef.current = null;
     setRecording(false);
     if (!rec) return;
     try { await rec.stopAndUnloadAsync(); } catch {}
+  }, []);
+
+  // Keep the ref pointing at the latest stopAndSend for the 60s cap timer.
+  stopAndSendRef.current = stopAndSend;
+
+  // Clear the cap timer if the hook unmounts mid-recording.
+  useEffect(() => () => {
+    if (maxTimerRef.current) clearTimeout(maxTimerRef.current);
   }, []);
 
   return { recording, sending, history, start, stopAndSend, cancel };

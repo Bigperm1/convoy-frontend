@@ -100,12 +100,8 @@ export default function LoginScreen() {
   }, [email, password, saveCredentials, login, router]);
 
   const handleForgotPassword = useCallback(() => {
-    Alert.alert(
-      'Password Reset',
-      'Contact support@convoy.app to reset your password.',
-      [{ text: 'OK' }]
-    );
-  }, []);
+    router.push('/(auth)/forgot-password' as any);
+  }, [router]);
 
   return (
     <SafeAreaView style={styles.safe}>

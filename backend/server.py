@@ -57,6 +57,14 @@ class LoginIn(BaseModel):
     email: EmailStr
     password: str
 
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+class ResetPasswordIn(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: str
+
 class CarUpdate(BaseModel):
     handle: Optional[str] = None
     car_make: Optional[str] = None
@@ -213,9 +221,88 @@ async def login(body: LoginIn):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return {"token": make_token(user["id"], email), "user": public_user(user)}
 
+
+# ---------- Password reset (emails a 6-digit code) ----------
+RESEND_API_URL = "https://api.resend.com/emails"
+
+async def _send_email(to: str, subject: str, html: str) -> bool:
+    """Send a transactional email via Resend (HTTP API, no SMTP needed).
+    Returns True on success. No-ops gracefully (returns False) if
+    RESEND_API_KEY isn't set so the reset flow degrades instead of erroring.
+    To switch providers later, only this function needs to change."""
+    key = os.environ.get("RESEND_API_KEY", "").strip()
+    if not key:
+        logger.warning("RESEND_API_KEY not set — reset email NOT sent to %s", to)
+        return False
+    sender = os.environ.get("EMAIL_FROM", "Convoy <onboarding@resend.dev>")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(
+                RESEND_API_URL,
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={"from": sender, "to": [to], "subject": subject, "html": html},
+            )
+        if r.status_code >= 400:
+            logger.warning("Resend error %s: %s", r.status_code, r.text[:200])
+            return False
+        return True
+    except Exception as e:
+        logger.warning("Resend send failed: %s", str(e)[:160])
+        return False
+
+
+@api.post("/auth/forgot-password")
+async def forgot_password(body: ForgotPasswordIn):
+    """Email a 6-digit reset code. ALWAYS returns {ok: True} regardless of
+    whether the address exists, so we never reveal which emails are registered."""
+    email = body.email.lower()
+    user = await db.users.find_one({"email": email})
+    if user:
+        code = f"{_secrets.randbelow(1000000):06d}"
+        expires = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+        await db.users.update_one({"id": user["id"]}, {"$set": {
+            "reset_code": code, "reset_code_expires": expires,
+        }})
+        html = (
+            "<div style='font-family:sans-serif;max-width:420px'>"
+            "<h2 style='color:#111'>Convoy password reset</h2>"
+            "<p>Use this code to reset your password:</p>"
+            f"<p style='font-size:30px;font-weight:800;letter-spacing:6px;color:#111'>{code}</p>"
+            "<p style='color:#666'>This code expires in 15 minutes. "
+            "If you didn't request it, you can ignore this email.</p>"
+            "</div>"
+        )
+        await _send_email(email, "Your Convoy reset code", html)
+    return {"ok": True}
+
+
+@api.post("/auth/reset-password")
+async def reset_password(body: ResetPasswordIn):
+    """Verify the 6-digit code and set a new password."""
+    email = body.email.lower()
+    user = await db.users.find_one({"email": email})
+    if not user or not user.get("reset_code") or user.get("reset_code") != body.code.strip():
+        raise HTTPException(status_code=400, detail="Invalid or expired code")
+    expires = user.get("reset_code_expires")
+    try:
+        if not expires or datetime.fromisoformat(expires) < datetime.now(timezone.utc):
+            raise HTTPException(status_code=400, detail="Invalid or expired code")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid or expired code")
+    if len(body.new_password or "") < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"password_hash": hash_pw(body.new_password)},
+         "$unset": {"reset_code": "", "reset_code_expires": ""}},
+    )
+    return {"ok": True}
+
+
 @api.get("/auth/me")
 async def me(user=Depends(get_current_user)): return public_user(user)
-
 @api.put("/auth/profile")
 async def update_profile(body: CarUpdate, user=Depends(get_current_user)):
     update = {k: v for k, v in body.dict().items() if v is not None}
@@ -263,7 +350,9 @@ async def update_location(body: LocationIn, user=Depends(get_current_user)):
         "last_seen": datetime.now(timezone.utc).isoformat(),
     }})
     await ws_manager.broadcast({"type": "location", "user_id": user["id"], "handle": user.get("handle", ""),
-                                "lat": body.lat, "lng": body.lng, "speed": body.speed, "heading": body.heading})
+                                "lat": body.lat, "lng": body.lng, "speed": body.speed, "heading": body.heading,
+                                "car_make": user.get("car_make", ""), "car_model": user.get("car_model", ""),
+                                "car_color": user.get("car_color", ""), "car_type": user.get("car_type", "sedan")})
     return {"ok": True}
 
 @api.get("/users/nearby")
@@ -605,7 +694,9 @@ async def delete_community_route(cid: str, rid: str, user=Depends(get_current_us
 # codec, container weirdness), we log and pass the original b64 through
 # unmodified. PTT delivery must never be blocked by amplification.
 
-PTT_GAIN_DB = 14.0          # +14 dB ≈ ×5 amplitude (the requested "500% louder")
+PTT_GAIN_DB = 16.0          # ~+16 dB (≈ ×6.3 amplitude) — ~25% louder than the
+                            # previous +14 dB/×5, per field feedback. The
+                            # compressor below tames the extra peaks.
 PTT_COMP_FILTER = (
     "volume={gain}dB,"
     "acompressor=threshold=-6dB:knee=3dB:ratio=4:attack=3:release=250"

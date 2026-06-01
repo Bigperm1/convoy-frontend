@@ -2,7 +2,7 @@
   "expo": {
     "name": "Convoy",
     "slug": "convoy",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "convoy",
@@ -14,7 +14,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
-      "buildNumber": "25",
+      "buildNumber": "26",
       "config": {
         "googleMapsApiKey": "AIzaSyDLysQuU6tOcmbdlsHJPYUqviq4TrwEUx0"
       },
@@ -25,9 +25,6 @@
         "NSCameraUsageDescription": "Add photos of your car to your garage",
         "NSSpeechRecognitionUsageDescription": "Voice activation for hands-free driving",
         "UIBackgroundModes": [
-          "audio",
-          "location",
-          "fetch",
           "audio",
           "location",
           "fetch"

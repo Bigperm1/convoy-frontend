@@ -1953,8 +1953,24 @@ const styles = StyleSheet.create({
   // (12) and same bottom anchor (90) for visual symmetry. Inner Text nodes
   // render the speed number + unit label. Background color is set inline on
   // the View (dark / orange / red) by SpeedometerHUD based on speed vs limit.
-  // Legacy circular FAB styles kept for reference (now unused).
-  fab: { position: "absolute", bottom: 120, right: 18, width: 60, height: 60, borderRadius: 30, overflow: "hidden" },
+  // Bottom-right FAB buttons. These are flex children of `fabStack` (which
+  // owns the absolute positioning + vertical-column layout), so they must NOT
+  // be position:absolute themselves. The old style WAS absolute at a fixed
+  // bottom/right, which collapsed every button onto the same spot — the blue
+  // Directions FAB landed on top of the pile and read as a stray "blue dot"
+  // floating over the map (and tapping it toggled the search bar + logo).
+  // Now: 48×48 rounded squares, semi-transparent dark fill, centered white
+  // icon. fabPrimary (blue Directions) / stopNavBtn (red Stop) / the inline
+  // recenter blue override just the fill.
+  fab: {
+    width: 48, height: 48,
+    borderRadius: 12,
+    backgroundColor: "rgba(28,28,30,0.88)",
+    alignItems: "center", justifyContent: "center",
+    overflow: "hidden",
+    shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
   fabInner: { flex: 1, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center" },
 
 

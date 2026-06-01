@@ -7,6 +7,7 @@ import { View, ActivityIndicator, Platform, StyleSheet } from "react-native";
 import { BlurView } from "expo-blur";
 import VoiceController from "../../src/VoiceController";
 import VoiceTabButton from "../../src/VoiceTabButton";
+import CommsTalkingToast from "../../src/components/CommsTalkingToast";
 import { useLiveWalkieListener } from "../../src/livePtt";
 import { useSettings } from "../../src/settings";
 import { api } from "../../src/api";
@@ -121,6 +122,13 @@ export default function AppLayout() {
       if (data?.type === "hail") {
         router.push("/(app)/map");
       }
+      // PTT push tapped from the lockscreen / banner while backgrounded or
+      // killed -> open the Comms transcript so the driver can replay what they
+      // missed. (Requires the backend to send a {type:"ptt"} push on each
+      // transmission; the receive + tap handling here is ready regardless.)
+      if (data?.type === "ptt") {
+        router.push("/(app)/talk");
+      }
     });
     return () => sub.remove();
   }, [router]);
@@ -193,6 +201,10 @@ export default function AppLayout() {
 
       {/* Global voice transcript banner (FAB removed Ã¢ÂÂ the elevated mic in the tab bar is the new CTA) */}
       <VoiceController />
+
+      {/* App-wide "someone is transmitting" banner so live comms are visible
+          on every tab while foregrounded (audio already plays globally). */}
+      <CommsTalkingToast />
     </View>
   );
 }

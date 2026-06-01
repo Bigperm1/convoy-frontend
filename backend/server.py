@@ -682,6 +682,12 @@ async def post_ptt(body: PTTIn, user=Depends(get_current_user)):
     # own transmission echo on release.
     members = [uid for uid in c.get("members", []) if uid != user["id"]]
     await ws_manager.broadcast_to_users(members, {"type": "ptt", "message": msg})
+    # Push fan-out for members whose app is backgrounded / force-closed (i.e.
+    # NOT in the live WS registry) so they still get a lockscreen heads-up and
+    # can tap to open the Comms transcript. _send_ptt_push already filters to
+    # offline members + no-ops when EMERGENT_PUSH_KEY isn't set. Fire-and-forget
+    # so it never blocks the HTTP response or the live WS delivery above.
+    asyncio.create_task(_send_ptt_push(members, user.get("handle", ""), body.channel, user["id"]))
     return {"ok": True, "id": msg["id"]}
 
 @api.get("/ptt/{channel}")
@@ -869,6 +875,59 @@ class HailBody(BaseModel):
 
 
 PUSH_RELAY_URL = "https://integrations.emergentagent.com/api/v1/push/trigger"
+
+
+async def _send_ptt_push(member_ids, sender_handle: str, channel: str, sender_id: str):
+    """Best-effort push fan-out for a PTT transmission.
+
+    Mirrors the Hail push path (Emergent relay). Targets ONLY members who are
+    NOT currently connected over the WebSocket — i.e. the app is backgrounded
+    or force-closed, which is exactly when the live WS/poll delivery can't
+    reach them. Foregrounded members already heard the clip via
+    broadcast_to_users, so pushing them too would double-notify.
+
+    Fire-and-forget: never raises, never blocks the /ptt HTTP response. The
+    `data.type == "ptt"` payload is what the app's notification handler keys
+    on to deep-link into the Comms transcript when tapped.
+    """
+    push_key = os.environ.get("EMERGENT_PUSH_KEY", "").strip()
+    if not push_key or push_key == "placeholder":
+        return  # relay not provisioned (local dev) — WS path already handled live delivery
+    # "Offline" = not in the live WS registry. Those are the ones that need a push.
+    offline = [uid for uid in member_ids if uid not in ws_manager.active]
+    if not offline:
+        return
+    targets = await db.users.find(
+        {"id": {"$in": offline}, "push_token": {"$nin": [None, ""]}},
+        {"_id": 0, "id": 1, "push_token": 1},
+    ).to_list(500)
+    if not targets:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            for t in targets:
+                payload = {
+                    "token": t["push_token"],
+                    "title": "🎙 Convoy comms",
+                    "body": f"{sender_handle} sent a transmission",
+                    "data": {
+                        "type": "ptt",
+                        "channel": channel,
+                        "from_handle": sender_handle,
+                        "from_id": sender_id,
+                    },
+                    "sound": "default",
+                }
+                try:
+                    await client.post(
+                        PUSH_RELAY_URL,
+                        headers={"X-Push-Key": push_key, "Content-Type": "application/json"},
+                        json=payload,
+                    )
+                except Exception as e:
+                    logger.warning(f"PTT push failed for {t.get('id')}: {str(e)[:120]}")
+    except Exception as e:
+        logger.warning(f"PTT push fan-out error: {str(e)[:120]}")
 
 
 async def _send_hail_via_ws(target_user_id: str, sender: dict) -> dict:

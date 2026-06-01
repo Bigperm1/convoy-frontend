@@ -79,8 +79,19 @@ export default function LoginScreen() {
         await AsyncStorage.setItem(SAVE_CREDS_KEY, 'false');
       }
       router.replace('/(app)/map');
-    } catch (e) {
-      Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Invalid email or password');
+    } catch (e: any) {
+      const status = e && e.response ? e.response.status : 0;
+      let title = 'Sign in failed';
+      let msg = 'Something went wrong. Please try again.';
+      if (status === 401) {
+        msg = 'Incorrect email or password. Please double-check and try again.';
+      } else if (status === 422) {
+        msg = 'Please enter a valid email and password.';
+      } else if (status === 0) {
+        title = 'Connection problem';
+        msg = 'Can\'t reach the server. Check your internet connection and try again.';
+      }
+      Alert.alert(title, msg);
     } finally {
       clearTimeout(wakeTimer);
       setWaking(false);

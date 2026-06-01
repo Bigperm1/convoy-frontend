@@ -1,7 +1,7 @@
 {
   "cli": {
     "version": ">= 12.0.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
@@ -28,7 +28,7 @@
     },
     "production": {
       "distribution": "store",
-      "ios": { "resourceClass": "m-medium", "autoIncrement": true },
+      "ios": { "resourceClass": "m-medium" },
       "android": { "buildType": "app-bundle", "autoIncrement": true },
       "channel": "production",
       "env": {

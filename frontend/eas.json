@@ -20,7 +20,7 @@
     "preview": {
       "distribution": "internal",
       "ios": { "simulator": false, "resourceClass": "m-medium" },
-      "android": { "buildType": "apk" },
+      "android": { "buildType": "apk", "resourceClass": "large" },
       "channel": "preview",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://convoy-backend-j9q1.onrender.com",
@@ -33,7 +33,7 @@
     "production": {
       "distribution": "store",
       "ios": { "resourceClass": "m-medium" },
-      "android": { "buildType": "app-bundle", "autoIncrement": true },
+      "android": { "buildType": "app-bundle", "autoIncrement": true, "resourceClass": "large" },
       "channel": "production",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://convoy-backend-j9q1.onrender.com",

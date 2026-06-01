@@ -13,6 +13,7 @@ avoidFerries: boolean;
 activeCommunityId?: string | null;
 commsLive: boolean;
 avatarLive: boolean;
+  callSign?: string;
 mapView: "heading_up" | "north_up";
 speedUnit: 'kmh' | 'mph';
 speedUnitManual: boolean;
@@ -34,6 +35,7 @@ avoidFerries: false,
 activeCommunityId: null,
 commsLive: true,
 avatarLive: true,
+  callSign: '',
 mapView: "heading_up",
 speedUnit: 'kmh',
 speedUnitManual: false,

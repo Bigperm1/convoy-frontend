@@ -13,6 +13,7 @@ import { useSettings, hydrateCarFromProfile } from "../../src/settings";
 import { api } from "../../src/api";
 import { hailBus } from "../../src/hailBus";
 import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
 
 // ===== Push notification module-scope config =====
 //
@@ -55,9 +56,15 @@ async function registerForPushNotifications() {
       return;
     }
 
-    // `getDevicePushTokenAsync` returns the native FCM/APNs token, which is
-    // what the Emergent push relay expects (NOT `getExpoPushTokenAsync`).
-    const tokenData = await Notifications.getDevicePushTokenAsync();
+    // Expo push token ("ExponentPushToken[...]"). Expo's hosted push service
+    // relays to FCM (Android) / APNs (iOS) on our behalf, so the backend only
+    // has to POST to Expo - no Emergent relay, no raw FCM/APNs handling.
+    const projectId =
+      Constants?.expoConfig?.extra?.eas?.projectId ??
+      (Constants as any)?.easConfig?.projectId;
+    const tokenData = await Notifications.getExpoPushTokenAsync(
+      projectId ? { projectId } : undefined
+    );
     if (!tokenData?.data) return;
 
     await api.put("/auth/push-token", {

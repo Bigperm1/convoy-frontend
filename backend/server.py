@@ -351,7 +351,7 @@ async def admin_reset_code(body: ForgotPasswordIn, user=Depends(get_current_user
 # whatever build the owner has marked current, so the QR / link you share never
 # changes across builds - you just repoint the target from the Admin panel after
 # each new build. The target persists in Mongo so it survives redeploys.
-_DEFAULT_ANDROID_INSTALL = "https://expo.dev/accounts/sw0rdfisch/projects/convoy/builds/c8e5a12e-69f2-4400-a84d-6d2367d1fbba"
+_DEFAULT_ANDROID_INSTALL = "https://expo.dev/accounts/sw0rdfisch/projects/convoy/builds/dd56c0d1-5b94-4a2d-9a5d-5c228487dc56"  # 1.1.7 (32)
 
 class InstallUrlIn(BaseModel):
     url: str
@@ -892,7 +892,7 @@ async def post_ptt(body: PTTIn, user=Depends(get_current_user)):
     # Push fan-out for members whose app is backgrounded / force-closed (i.e.
     # NOT in the live WS registry) so they still get a lockscreen heads-up and
     # can tap to open the Comms transcript. _send_ptt_push already filters to
-    # offline members + no-ops when EMERGENT_PUSH_KEY isn't set. Fire-and-forget
+    # offline members + no-ops when there's nothing to deliver. Fire-and-forget
     # so it never blocks the HTTP response or the live WS delivery above.
     asyncio.create_task(_send_ptt_push(members, user.get("handle", ""), body.channel, user["id"]))
     return {"ok": True, "id": msg["id"]}
@@ -945,42 +945,22 @@ async def delete_ptt(ptt_id: str, user=Depends(get_current_user)):
 
 # ---------- Voice transcribe ----------
 async def _transcribe_audio(file_path: str) -> str:
-    """
-    Run Whisper on a local audio file.
-
-    Provider preference:
-      1. OPENAI_API_KEY (direct OpenAI SDK) — works on any host (Railway, Render, Fly, etc.).
-      2. EMERGENT_LLM_KEY (Emergent universal key via emergentintegrations) — works inside Emergent.
-
-    Set OPENAI_API_KEY in your deployment env to use a portable, host-agnostic path.
-    Either env var is sufficient; if both are present OPENAI_API_KEY wins.
-    """
+    """Run Whisper on a local audio file via the OpenAI API.
+    Requires OPENAI_API_KEY in the deployment env."""
     openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if openai_key:
-        # Direct OpenAI SDK — async client, works on any cloud.
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=openai_key)
-        with open(file_path, "rb") as f:
-            resp = await client.audio.transcriptions.create(
-                model="whisper-1",
-                file=f,
-                response_format="json",
-                language="en",
-            )
-        return getattr(resp, "text", "") or ""
-
-    emergent_key = os.environ.get("EMERGENT_LLM_KEY", "").strip()
-    if emergent_key:
-        from emergentintegrations.llm.openai import OpenAISpeechToText
-        stt = OpenAISpeechToText(api_key=emergent_key)
-        with open(file_path, "rb") as f:
-            resp = await stt.transcribe(file=f, model="whisper-1", response_format="json", language="en")
-        return getattr(resp, "text", "") or ""
-
-    raise HTTPException(
-        status_code=500,
-        detail="No LLM key configured. Set OPENAI_API_KEY (recommended) or EMERGENT_LLM_KEY.",
-    )
+    if not openai_key:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
+    # Direct OpenAI SDK — async client, works on any cloud.
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(api_key=openai_key)
+    with open(file_path, "rb") as f:
+        resp = await client.audio.transcriptions.create(
+            model="whisper-1",
+            file=f,
+            response_format="json",
+            language="en",
+        )
+    return getattr(resp, "text", "") or ""
 
 
 @api.post("/voice/transcribe")
@@ -1103,12 +1083,9 @@ async def broadcast_music(body: MusicBroadcastBody, user=Depends(get_current_use
 # that's silently dropped when the app is killed. This endpoint:
 #   1. Verifies the caller and target share at least one community
 #      (prevents spamming random nearby drivers).
-#   2. Looks up the target's `push_token` saved by /auth/push-token.
-#   3. Fan-out via Emergent Managed Push relay (works in iOS APNs + Android
-#      FCM all-states); falls back to a raw WebSocket frame if (a) the relay
-#      key is unset (local dev), (b) the target hasn't registered a token, or
-#      (c) the relay returns an error. The WS path is what was already wired
-#      pre-this-feature, so behavior never regresses.
+#   2. Sends a WebSocket frame for foregrounded clients, then an Expo push
+#      (FCM/APNs via Expo's hosted service) for backgrounded / closed apps. The
+#      WS path is always-on, so a missing or invalid token never loses the hail.
 # Body shape kept thin so the frontend doesn't need to know which community
 # context the modal opened in — `community_id` is optional (used only for
 # data payload routing, not the share-check).
@@ -1117,13 +1094,37 @@ class HailBody(BaseModel):
     community_id: Optional[str] = None
 
 
-PUSH_RELAY_URL = "https://integrations.emergentagent.com/api/v1/push/trigger"
+# Expo push - Expo's hosted service relays our messages to FCM (Android) and
+# APNs (iOS), so the backend never touches either directly. Tokens are the
+# "ExponentPushToken[...]" values the app registers on launch. An optional
+# EXPO_ACCESS_TOKEN (Expo dashboard -> project -> Access Tokens) adds an auth
+# layer but is NOT required for delivery.
+EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+
+
+async def _send_expo_push(messages: list):
+    """Best-effort batch push via Expo. `messages` is a list of
+    {to, title, body, data, sound} dicts whose `to` is an Expo push token.
+    Never raises - push must never block or break the calling request."""
+    if not messages:
+        return
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    access = os.environ.get("EXPO_ACCESS_TOKEN", "").strip()
+    if access:
+        headers["Authorization"] = f"Bearer {access}"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Expo accepts up to 100 messages per request.
+            for i in range(0, len(messages), 100):
+                await client.post(EXPO_PUSH_URL, headers=headers, json=messages[i:i + 100])
+    except Exception as e:
+        logger.warning(f"Expo push error: {str(e)[:160]}")
 
 
 async def _send_ptt_push(member_ids, sender_handle: str, channel: str, sender_id: str):
     """Best-effort push fan-out for a PTT transmission.
 
-    Mirrors the Hail push path (Emergent relay). Targets ONLY members who are
+    Mirrors the Hail push path (Expo). Targets ONLY members who are
     NOT currently connected over the WebSocket — i.e. the app is backgrounded
     or force-closed, which is exactly when the live WS/poll delivery can't
     reach them. Foregrounded members already heard the clip via
@@ -1133,9 +1134,6 @@ async def _send_ptt_push(member_ids, sender_handle: str, channel: str, sender_id
     `data.type == "ptt"` payload is what the app's notification handler keys
     on to deep-link into the Comms transcript when tapped.
     """
-    push_key = os.environ.get("EMERGENT_PUSH_KEY", "").strip()
-    if not push_key or push_key == "placeholder":
-        return  # relay not provisioned (local dev) — WS path already handled live delivery
     # "Offline" = not in the live WS registry. Those are the ones that need a push.
     offline = [uid for uid in member_ids if uid not in ws_manager.active]
     if not offline:
@@ -1146,31 +1144,14 @@ async def _send_ptt_push(member_ids, sender_handle: str, channel: str, sender_id
     ).to_list(500)
     if not targets:
         return
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            for t in targets:
-                payload = {
-                    "token": t["push_token"],
-                    "title": "🎙 Convoy comms",
-                    "body": f"{sender_handle} sent a transmission",
-                    "data": {
-                        "type": "ptt",
-                        "channel": channel,
-                        "from_handle": sender_handle,
-                        "from_id": sender_id,
-                    },
-                    "sound": "default",
-                }
-                try:
-                    await client.post(
-                        PUSH_RELAY_URL,
-                        headers={"X-Push-Key": push_key, "Content-Type": "application/json"},
-                        json=payload,
-                    )
-                except Exception as e:
-                    logger.warning(f"PTT push failed for {t.get('id')}: {str(e)[:120]}")
-    except Exception as e:
-        logger.warning(f"PTT push fan-out error: {str(e)[:120]}")
+    messages = [{
+        "to": t["push_token"],
+        "title": "🎙 Convoy comms",
+        "body": f"{sender_handle} sent a transmission",
+        "data": {"type": "ptt", "channel": channel, "from_handle": sender_handle, "from_id": sender_id},
+        "sound": "default",
+    } for t in targets]
+    await _send_expo_push(messages)
 
 
 async def _send_hail_via_ws(target_user_id: str, sender: dict) -> dict:
@@ -1199,58 +1180,35 @@ async def hail_peer(body: HailBody, user=Depends(get_current_user)):
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
-    push_token = target.get("push_token")
     sender_handle = user.get("handle", "A driver")
 
-    # 3. If no token, go straight to WS.
-    if not push_token:
-        return await _send_hail_via_ws(body.target_user_id, user)
+    # 3. Always fire the WebSocket frame first - foregrounded clients show the
+    #    in-app toast even without OS push permission.
+    await ws_manager.broadcast_to_users([body.target_user_id], {
+        "type": "hail",
+        "from_handle": sender_handle,
+        "from_id": user["id"],
+    })
 
-    # 4. Try the Emergent push relay. If anything goes sideways, fall back
-    #    to WS — never raise to the caller; the user just tapped a button
-    #    expecting some kind of delivery.
-    push_key = os.environ.get("EMERGENT_PUSH_KEY", "").strip()
-    if not push_key or push_key == "placeholder":
-        # Local dev or relay-key not provisioned yet. WS fallback.
-        ws_resp = await _send_hail_via_ws(body.target_user_id, user)
-        ws_resp["method"] = "websocket_no_key"
-        return ws_resp
-
-    payload = {
-        "token": push_token,
-        "title": f"🚨 Hail from {sender_handle}",
-        "body": f"{sender_handle} is hailing you on Convoy",
-        "data": {
-            "type": "hail",
-            "from_id": user["id"],
-            "from_handle": sender_handle,
-            "community_id": body.community_id or "",
-        },
-        "sound": "default",
-        "badge": 1,
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                PUSH_RELAY_URL,
-                headers={"X-Push-Key": push_key, "Content-Type": "application/json"},
-                json=payload,
-            )
-        # Send WS in addition (redundant delivery) so foregrounded clients
-        # get the toast even without OS push permission.
-        await ws_manager.broadcast_to_users([body.target_user_id], {
-            "type": "hail",
-            "from_handle": sender_handle,
-            "from_id": user["id"],
-        })
-        return {"ok": True, "method": "push", "status": resp.status_code}
-    except Exception as e:
-        logger.warning(f"Hail push relay failed, falling back to WS: {e}")
-        ws_resp = await _send_hail_via_ws(body.target_user_id, user)
-        ws_resp["method"] = "websocket_fallback"
-        ws_resp["error"] = str(e)[:120]
-        return ws_resp
+    # 4. Expo push for backgrounded / closed apps. Best-effort; the WS above is
+    #    the always-on path, so a missing or invalid token never loses the hail.
+    push_token = target.get("push_token")
+    if push_token:
+        await _send_expo_push([{
+            "to": push_token,
+            "title": f"🚨 Hail from {sender_handle}",
+            "body": f"{sender_handle} is hailing you on Convoy",
+            "data": {
+                "type": "hail",
+                "from_id": user["id"],
+                "from_handle": sender_handle,
+                "community_id": body.community_id or "",
+            },
+            "sound": "default",
+            "badge": 1,
+        }])
+        return {"ok": True, "method": "expo+ws"}
+    return {"ok": True, "method": "ws"}
 
 
 def _classify_intent(text: str) -> dict:

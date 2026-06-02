@@ -11,6 +11,7 @@ import { useAuth } from '../../src/auth';
 import { COLORS } from '../../src/theme';
 
 const OWNER_EMAIL = 'jwellsmorton@gmail.com';
+const PERMANENT_INSTALL_URL = 'https://convoy-backend-j9q1.onrender.com/api/install/android';
 
 type AdminUser = {
   id: string;
@@ -49,12 +50,18 @@ export default function AdminScreen() {
   // email -> { code, expires_at }, so a freshly minted code stays visible inline.
   const [codes, setCodes] = useState<Record<string, { code: string; expires_at: string }>>({});
   const [busyEmail, setBusyEmail] = useState<string | null>(null);
+  const [installUrl, setInstallUrl] = useState('');
+  const [installSaving, setInstallSaving] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
     try {
       const { data } = await api.get('/admin/users');
       setUsers(Array.isArray(data) ? data : []);
+      try {
+        const r = await api.get('/admin/install-url');
+        if (r?.data?.url) setInstallUrl(r.data.url);
+      } catch {}
     } catch (e: any) {
       const status = e?.response?.status;
       setError(status === 403 ? 'Not authorized.' : formatErr(e));
@@ -91,6 +98,23 @@ export default function AdminScreen() {
       setBusyEmail(null);
     }
   }, []);
+
+  const saveInstallUrl = useCallback(async () => {
+    const url = installUrl.trim();
+    if (!url.startsWith('http')) {
+      Alert.alert('Invalid URL', 'Paste the full https:// build URL from Expo.');
+      return;
+    }
+    setInstallSaving(true);
+    try {
+      await api.post('/admin/install-url', { url });
+      Alert.alert('Updated', 'Your shared install link / QR now opens this build.');
+    } catch (e: any) {
+      Alert.alert("Couldn't update", formatErr(e));
+    } finally {
+      setInstallSaving(false);
+    }
+  }, [installUrl]);
 
   const renderItem = useCallback(({ item }: { item: AdminUser }) => {
     const code = codes[item.email];
@@ -177,6 +201,35 @@ export default function AdminScreen() {
             data={filtered}
             keyExtractor={(u) => u.id}
             renderItem={renderItem}
+            ListHeaderComponent={
+              <View style={styles.installCard}>
+                <Text style={styles.installTitle}>Android install link</Text>
+                <Text style={styles.installHint}>
+                  Share this one link / QR with testers — it always opens whichever build you set below. You never have to hand out a new link again.
+                </Text>
+                <Text selectable style={styles.installPerm}>{PERMANENT_INSTALL_URL}</Text>
+                <Text style={styles.installLabel}>After each build, paste its Expo build URL here</Text>
+                <TextInput
+                  style={styles.installInput}
+                  value={installUrl}
+                  onChangeText={setInstallUrl}
+                  placeholder="https://expo.dev/accounts/.../builds/..."
+                  placeholderTextColor="#666"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={[styles.installSave, installSaving && { opacity: 0.6 }]}
+                  onPress={saveInstallUrl}
+                  disabled={installSaving}
+                  activeOpacity={0.85}
+                >
+                  {installSaving
+                    ? <ActivityIndicator size="small" color="#1a1a1a" />
+                    : <Text style={styles.installSaveText}>Update install target</Text>}
+                </TouchableOpacity>
+              </View>
+            }
             contentContainerStyle={{ paddingBottom: 120, paddingHorizontal: 14 }}
             ListEmptyComponent={<Text style={styles.centerText}>No matching users.</Text>}
             keyboardShouldPersistTaps="handled"
@@ -220,4 +273,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 10, minWidth: 96, alignItems: 'center',
   },
   resetBtnText: { color: '#1a1a1a', fontWeight: '700', fontSize: 13 },
+  installCard: {
+    backgroundColor: '#161618', borderRadius: 14, borderWidth: 1, borderColor: '#2a2a2e',
+    padding: 14, marginBottom: 12,
+  },
+  installTitle: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
+  installHint: { color: COLORS.textDim, fontSize: 12, marginTop: 3, lineHeight: 17 },
+  installPerm: { color: '#FFD60A', fontSize: 13, fontWeight: '600', marginTop: 8 },
+  installLabel: { color: COLORS.textDim, fontSize: 11, marginTop: 12, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.6 },
+  installInput: {
+    backgroundColor: '#0A0A0A', borderRadius: 10, borderWidth: 1, borderColor: '#333',
+    color: '#fff', fontSize: 13, paddingHorizontal: 12, paddingVertical: 9,
+  },
+  installSave: {
+    backgroundColor: '#FFD60A', borderRadius: 10, marginTop: 10,
+    paddingVertical: 11, alignItems: 'center',
+  },
+  installSaveText: { color: '#1a1a1a', fontWeight: '700', fontSize: 13 },
 });

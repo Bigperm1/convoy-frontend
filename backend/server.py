@@ -19,6 +19,7 @@ import bcrypt
 import httpx
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import RedirectResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
@@ -343,6 +344,41 @@ async def admin_reset_code(body: ForgotPasswordIn, user=Depends(get_current_user
     # The owner relays this code to the tester, who enters it on the existing
     # reset screen along with a new password. 30-min window for the hand-off.
     return {"email": email, "handle": target.get("handle", ""), "code": code, "expires_at": expires}
+
+
+# ---------- Permanent Android install link ----------
+# ONE stable URL to hand testers: /api/install/android. It 302-redirects to
+# whatever build the owner has marked current, so the QR / link you share never
+# changes across builds - you just repoint the target from the Admin panel after
+# each new build. The target persists in Mongo so it survives redeploys.
+_DEFAULT_ANDROID_INSTALL = "https://expo.dev/accounts/sw0rdfisch/projects/convoy/builds/c8e5a12e-69f2-4400-a84d-6d2367d1fbba"
+
+class InstallUrlIn(BaseModel):
+    url: str
+
+async def _android_install_url() -> str:
+    doc = await db.config.find_one({"_id": "android_install"})
+    return (doc or {}).get("url") or _DEFAULT_ANDROID_INSTALL
+
+@api.get("/install/android")
+async def install_android():
+    return RedirectResponse(await _android_install_url(), status_code=302)
+
+@api.get("/admin/install-url")
+async def admin_get_install_url(user=Depends(get_current_user)):
+    if not _is_owner(user):
+        raise HTTPException(status_code=403, detail="Owner only")
+    return {"url": await _android_install_url()}
+
+@api.post("/admin/install-url")
+async def admin_set_install_url(body: InstallUrlIn, user=Depends(get_current_user)):
+    if not _is_owner(user):
+        raise HTTPException(status_code=403, detail="Owner only")
+    url = body.url.strip()
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="Enter a full https:// build URL")
+    await db.config.update_one({"_id": "android_install"}, {"$set": {"url": url}}, upsert=True)
+    return {"ok": True, "url": url}
 
 
 @api.get("/auth/me")

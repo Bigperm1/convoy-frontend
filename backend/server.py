@@ -400,9 +400,21 @@ async def list_hazards(user=Depends(get_current_user)):
 
 @api.post("/hazards/{hid}/confirm")
 async def confirm_hazard(hid: str, user=Depends(get_current_user)):
-    res = await db.hazards.update_one({"id": hid}, {"$inc": {"confirms": 1}})
-    if not res.matched_count: raise HTTPException(status_code=404, detail="Not found")
-    return await db.hazards.find_one({"id": hid}, {"_id": 0})
+    h = await db.hazards.find_one({"id": hid}, {"_id": 0})
+    if not h:
+        raise HTTPException(status_code=404, detail="Not found")
+    # Count DISTINCT confirming drivers only (a driver can't pad the count).
+    # A "still there" vote also refreshes the 30-min expiry window, since the
+    # hazard was just observed to still be present.
+    if user["id"] not in h.get("confirmed_by", []):
+        await db.hazards.update_one({"id": hid}, {
+            "$inc": {"confirms": 1},
+            "$addToSet": {"confirmed_by": user["id"]},
+            "$set": {"expires_at": (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()},
+        })
+    h = await db.hazards.find_one({"id": hid}, {"_id": 0})
+    await ws_manager.broadcast({"type": "hazard_update", "hazard": h})
+    return h
 
 
 @api.post("/hazards/{hid}/dispute")
@@ -410,12 +422,27 @@ async def dispute_hazard(hid: str, user=Depends(get_current_user)):
     """Community downvote — increments dispute counter so other clients can hide
     heavily-disputed hazards. Kept for back-compat with older clients; new
     clients call DELETE /hazards/{hid} directly to remove the marker."""
-    res = await db.hazards.update_one({"id": hid}, {"$inc": {"disputes": 1}})
-    if not res.matched_count: raise HTTPException(status_code=404, detail="Not found")
     h = await db.hazards.find_one({"id": hid}, {"_id": 0})
-    # If the community has voted it down significantly, expire it immediately.
-    if h and (h.get("disputes", 0) >= (h.get("confirms", 1) + 2)):
-        await db.hazards.update_one({"id": hid}, {"$set": {"expires_at": datetime.now(timezone.utc).isoformat()}})
+    if not h:
+        raise HTTPException(status_code=404, detail="Not found")
+    # Count DISTINCT disputing drivers. One driver tapping "Gone" twice can't
+    # erase a real hazard - it takes a SECOND independent driver. Once two
+    # different drivers agree it's gone, remove the pin for everyone and fan
+    # the removal out over the socket so every map clears within ~1s.
+    disputed_by = h.get("disputed_by", [])
+    if user["id"] not in disputed_by:
+        disputed_by = disputed_by + [user["id"]]
+        await db.hazards.update_one({"id": hid}, {
+            "$inc": {"disputes": 1},
+            "$addToSet": {"disputed_by": user["id"]},
+        })
+    if len(disputed_by) >= 2:
+        await db.hazards.delete_one({"id": hid})
+        asyncio.create_task(supa.delete_row("hazards", hid))
+        await ws_manager.broadcast({"type": "hazard_removed", "id": hid})
+        return {"ok": True, "id": hid, "removed": True}
+    h = await db.hazards.find_one({"id": hid}, {"_id": 0})
+    await ws_manager.broadcast({"type": "hazard_update", "hazard": h})
     return h
 
 
@@ -434,6 +461,9 @@ async def delete_hazard(hid: str, user=Depends(get_current_user)):
     await db.hazards.delete_one({"id": hid})
     # 2. Mirror into Supabase so all peers' Realtime listeners fire.
     asyncio.create_task(supa.delete_row("hazards", hid))
+    # 3. Fan the removal out over our own socket too, so clients that aren't on
+    #    Supabase Realtime (or whose Realtime dropped) still clear the pin fast.
+    await ws_manager.broadcast({"type": "hazard_removed", "id": hid})
     return {"ok": True, "id": hid}
 
 

@@ -14,7 +14,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
-      "buildNumber": "29",
+      "buildNumber": "30",
       "config": {
         "googleMapsApiKey": "AIzaSyDLysQuU6tOcmbdlsHJPYUqviq4TrwEUx0"
       },
@@ -34,7 +34,7 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 29,
+      "versionCode": 30,
       "googleServicesFile": "./google-services.json",
       "config": {
         "googleMaps": {

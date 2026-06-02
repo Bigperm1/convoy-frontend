@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import * as Speech from "expo-speech";
@@ -141,6 +141,13 @@ export default function MapScreen() {
 
   // Transient toast state for "Police reported" / "Hazard reported" feedback.
   const [alertConfirm, setAlertConfirm] = useState<string | null>(null);
+  // Pass-by "still there?" prompt. Set when we drive within ~120m of a
+  // community hazard that isn't ours. Two "Gone" votes (from any drivers)
+  // removes the marker for everyone. promptedHazardsRef ensures we ask at most
+  // once per hazard per session so the card never nags on every GPS tick.
+  const [passPrompt, setPassPrompt] = useState<Hazard | null>(null);
+  const promptedHazardsRef = useRef<Set<string>>(new Set());
+  const passPromptTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Music broadcast toast — surfaced when the community admin pushes a track
   // via Music screen → "🎵 jeff: Smooth Operator — Sade". Auto-dismisses 5s.
   const [musicToast, setMusicToast] = useState<string | null>(null);
@@ -570,7 +577,16 @@ export default function MapScreen() {
   const reportAlert = async (kind: 'police' | 'road') => {
     const pos = getPos5SecAgo();
     try {
-      await api.post('/hazards', { kind, lat: pos.lat, lng: pos.lng, note: '' });
+      // Capture the created hazard from the response and drop it on the map
+      // IMMEDIATELY. Previously we relied on Supabase Realtime / the WebSocket
+      // echo / the 30s poll to bring our own pin back, so the reporter often
+      // saw the "reported" toast but no marker. Optimistic add fixes that; the
+      // realtime + poll paths still keep every OTHER driver in sync, and the
+      // id-dedup below means the echo never double-renders the pin.
+      const { data } = await api.post('/hazards', { kind, lat: pos.lat, lng: pos.lng, note: '' });
+      if (data && data.id) {
+        setHazards((prev) => (prev.some((h) => h.id === data.id) ? prev : [data, ...prev]));
+      }
       setAlertConfirm(kind);
       setTimeout(() => setAlertConfirm(null), 2500);
       if (Platform.OS !== 'web') {
@@ -580,6 +596,7 @@ export default function MapScreen() {
       }
     } catch (e) {
       console.warn('reportAlert failed', e);
+      Alert.alert('Report failed', 'Could not send your report. Check your connection and try again.');
     }
   };
 
@@ -689,6 +706,18 @@ export default function MapScreen() {
             return [m.hazard, ...prev];
           });
         }
+        // Vote count changed (someone confirmed/disputed) - merge the fresh
+        // confirms/disputes onto the existing pin so every map stays in sync.
+        if (m.type === "hazard_update" && m.hazard && m.hazard.id) {
+          setHazards((prev) => prev.map((h: any) => (h.id === m.hazard.id ? { ...h, ...m.hazard } : h)));
+        }
+        // Hazard removed (2 distinct "Gone" votes, reporter delete, or expiry).
+        // Pull it off this map immediately and dismiss any open card for it.
+        if (m.type === "hazard_removed" && m.id) {
+          setHazards((prev) => prev.filter((h: any) => h.id !== m.id));
+          setSelected((s) => (s && s.id === m.id ? null : s));
+          setPassPrompt((p) => (p && p.id === m.id ? null : p));
+        }
         // Music broadcast from the community admin — surface a non-intrusive
         // toast at the bottom-center "🎵 jeff: Smooth Operator — Sade · HQ"
         // that auto-dismisses after 5s. `action: 'stop'` immediately clears it.
@@ -788,16 +817,11 @@ export default function MapScreen() {
     if (!coords) return;
     // Place pin slightly ahead of the driver's heading (≈40m forward) for accuracy.
     // Without a known heading we just place it at the driver's exact spot.
-    const lat = coords.lat;
-    const lng = coords.lng;
+    const pos = getPos5SecAgo();
     try {
-      if (SUPABASE_ENABLED && supabase) {
-        const { error } = await supabase.from("hazards").insert({
-          kind, lat, lng, reporter_handle: user?.handle || "anon",
-        });
-        if (error) throw error;
-      } else {
-        await api.post("/hazards", { kind, lat, lng, note: "" });
+      const { data } = await api.post("/hazards", { kind, lat: pos.lat, lng: pos.lng, note: "" });
+      if (data && data.id) {
+        setHazards((prev) => (prev.some((x) => x.id === data.id) ? prev : [data, ...prev]));
       }
       setShowReport(false);
       // Voice-driven reports get a spoken acknowledgement so the driver can keep eyes on the road
@@ -810,49 +834,28 @@ export default function MapScreen() {
     }
   };
 
-  // Confirm = "still there" → +1 confirms
+  // Confirm = "still there" -> +1 confirm (backend tracks distinct voters and
+  // refreshes the expiry). Optimistically bump the local count and dismiss any
+  // open card / pass-by prompt for this hazard.
   const confirmHazard = async (h: Hazard) => {
-    try {
-      if (SUPABASE_ENABLED && supabase) {
-        await supabase.from("hazards").update({ confirms: (h.confirms || 1) + 1 }).eq("id", h.id);
-      } else {
-        await api.post(`/hazards/${h.id}/confirm`);
-      }
-      setSelected(null);
-    } catch {}
+    setHazards((cur) => cur.map((x) => (x.id === h.id ? { ...x, confirms: (x.confirms || 1) + 1 } : x)));
+    setSelected((s) => (s && s.id === h.id ? null : s));
+    setPassPrompt((p) => (p && p.id === h.id ? null : p));
+    try { await api.post(`/hazards/${h.id}/confirm`); } catch {}
   };
 
-  // Dispute = "not there anymore" → DELETE the hazard outright.
-  // Two layers of safety:
-  //   1. Optimistic local removal so the marker disappears from the tapper's
-  //      map *immediately*, even before the network round-trip resolves.
-  //   2. Supabase DELETE → Realtime DELETE event fans out to every other
-  //      driver's map within ~1.5 s (see DELETE listener above).
-  // Backend fallback (FastAPI DELETE /api/hazards/{id}) handles non-Supabase
-  // environments. The previous "increment disputes counter" behavior was
-  // confusing — drivers tapped Not there and the marker stayed on the map.
+  // Dispute = "not there anymore" -> a VOTE, not an instant delete. The backend
+  // counts DISTINCT drivers who vote "Gone"; once 2 different drivers agree, it
+  // removes the pin for everyone and broadcasts hazard_removed over the socket.
+  // Here we optimistically bump the local dispute count (so the tapper sees
+  // their vote land) and dismiss any open card / pass-by prompt. We do NOT strip
+  // the marker locally on a single vote - one driver can't unilaterally erase a
+  // real hazard; it takes a second independent confirmation.
   const disputeHazard = async (h: Hazard) => {
-    // Snapshot id so we don't double-fetch after `selected` clears below.
-    const id = h.id;
-    // 1) Optimistic local strip — tapper sees the marker vanish instantly.
-    setHazards((cur) => cur.filter((x) => x.id !== id));
-    setSelected(null);
-    // 2) Persist the deletion so other drivers' maps clear too.
-    try {
-      if (SUPABASE_ENABLED && supabase) {
-        const { error } = await supabase.from("hazards").delete().eq("id", id);
-        if (error) {
-          // RLS or column issue — fall through to backend
-          await api.delete(`/hazards/${id}`).catch(() => {});
-        }
-      } else {
-        await api.delete(`/hazards/${id}`).catch(() => {});
-      }
-    } catch {
-      // Even if persistence fails, the optimistic local removal stands.
-      // Worst case: a stale row reappears on the next refetch — acceptable
-      // tradeoff for instant UI feedback.
-    }
+    setHazards((cur) => cur.map((x) => (x.id === h.id ? { ...x, disputes: (x.disputes || 0) + 1 } : x)));
+    setSelected((s) => (s && s.id === h.id ? null : s));
+    setPassPrompt((p) => (p && p.id === h.id ? null : p));
+    try { await api.post(`/hazards/${h.id}/dispute`); } catch {}
   };
 
   const hazardColor = (k: string) =>
@@ -889,6 +892,39 @@ export default function MapScreen() {
     });
     return unsub;
   }, [coords]);
+
+  // ----- Pass-by hazard check ("still there?") -----
+  // When we drive within ~120m of a community hazard that isn't ours, pop a
+  // one-time prompt asking if it's still there. "Gone" casts a dispute vote;
+  // two distinct drivers voting Gone removes the marker for everyone (the
+  // backend enforces the 2-vote threshold). We ask at most once per hazard per
+  // session, never for our own pins, and skip very fresh pins so we don't
+  // prompt the instant one is reported next to us.
+  useEffect(() => {
+    if (!coords || !showHazards || passPrompt) return;
+    const myHandle = user?.handle;
+    for (const h of hazards) {
+      if (!h || !h.id) continue;
+      if (promptedHazardsRef.current.has(h.id)) continue;
+      if ((h.disputes || 0) >= 2) continue;
+      if (myHandle && h.reporter_handle === myHandle) continue;
+      const created = (h as any).created_at ? new Date((h as any).created_at).getTime() : 0;
+      if (created && Date.now() - created < 20000) continue;
+      if (distanceKm(coords.lat, coords.lng, h.lat, h.lng) <= 0.12) {
+        promptedHazardsRef.current.add(h.id);
+        setPassPrompt(h);
+        if (passPromptTimer.current) clearTimeout(passPromptTimer.current);
+        passPromptTimer.current = setTimeout(
+          () => setPassPrompt((p) => (p && p.id === h.id ? null : p)),
+          15000
+        );
+        break;
+      }
+    }
+  }, [coords?.lat, coords?.lng, hazards, showHazards, passPrompt, user?.handle]);
+
+  // Clear the pass-by auto-dismiss timer on unmount so we don't leak.
+  useEffect(() => () => { if (passPromptTimer.current) clearTimeout(passPromptTimer.current); }, []);
 
   // ----- Convoy Realtime Presence (Supabase) -----
   // Live peer broadcast/track via Supabase Realtime. Replaces stale REST polling for online cars.
@@ -1415,12 +1451,60 @@ export default function MapScreen() {
             </TouchableOpacity>
           </View>
           <View style={styles.selBtnRow}>
-            <TouchableOpacity testID={`dispute-${selected.id}`} onPress={() => disputeHazard(selected)} style={[styles.voteBtn, styles.voteBtnDispute]} activeOpacity={0.85}>
-              <Ionicons name="thumbs-down" size={16} color="#fff" />
-              <Text style={styles.voteBtnText}>Not there</Text>
+            {(!!user?.handle && selected.reporter_handle === user.handle) ? (
+              // Your own pin: tap -> Remove (with a native confirm inside
+              // handleHazardLongPress). This is the "tap to delete on
+              // confirmation" flow for the driver who placed it.
+              <TouchableOpacity testID={`remove-${selected.id}`} onPress={() => handleHazardLongPress(selected)} style={[styles.voteBtn, styles.voteBtnDispute, { flex: 1 }]} activeOpacity={0.85}>
+                <Ionicons name="trash" size={16} color="#fff" />
+                <Text style={styles.voteBtnText}>Remove my alert</Text>
+              </TouchableOpacity>
+            ) : (
+              // Someone else's pin: cast a crowd vote. Two "Gone" votes from
+              // distinct drivers removes it for everyone.
+              <>
+                <TouchableOpacity testID={`dispute-${selected.id}`} onPress={() => disputeHazard(selected)} style={[styles.voteBtn, styles.voteBtnDispute]} activeOpacity={0.85}>
+                  <Ionicons name="thumbs-down" size={16} color="#fff" />
+                  <Text style={styles.voteBtnText}>Gone</Text>
+                </TouchableOpacity>
+                <TouchableOpacity testID={`confirm-${selected.id}`} onPress={() => confirmHazard(selected)} style={[styles.voteBtn, styles.voteBtnConfirm]} activeOpacity={0.85}>
+                  <Ionicons name="thumbs-up" size={16} color="#fff" />
+                  <Text style={styles.voteBtnText}>Still there</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </Glass>
+      )}
+
+      {/* ===== Pass-by "still there?" prompt =====
+          One-time card shown when we pass within ~120m of another driver's
+          alert. "Gone" casts a dispute vote (2 distinct votes removes the pin
+          for everyone); "Still there" confirms it. Auto-dismisses after 15s.
+          Gated on !selected so it never stacks on the tapped-pin card. */}
+      {passPrompt && !selected && (
+        <Glass radius={20} style={styles.selectedCard}>
+          <View style={styles.selRow}>
+            <View style={[styles.hazardBubble, { backgroundColor: hazardColor(passPrompt.kind) }]}>
+              <Ionicons name={hazardIcon(passPrompt.kind)} size={22} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.selTitle}>
+                {passPrompt.kind.charAt(0).toUpperCase() + passPrompt.kind.slice(1)} ahead — still there?
+              </Text>
+              <Text style={styles.selSub}>Help your convoy keep alerts accurate</Text>
+            </View>
+            <TouchableOpacity onPress={() => setPassPrompt(null)} style={{ padding: 6 }}>
+              <Ionicons name="close" size={20} color={COLORS.textDim} />
             </TouchableOpacity>
-            <TouchableOpacity testID={`confirm-${selected.id}`} onPress={() => confirmHazard(selected)} style={[styles.voteBtn, styles.voteBtnConfirm]} activeOpacity={0.85}>
-              <Ionicons name="thumbs-up" size={16} color="#fff" />
+          </View>
+          <View style={styles.selBtnRow}>
+            <TouchableOpacity testID={`pass-gone-${passPrompt.id}`} onPress={() => disputeHazard(passPrompt)} style={[styles.voteBtn, styles.voteBtnDispute]} activeOpacity={0.85}>
+              <Ionicons name="close-circle" size={16} color="#fff" />
+              <Text style={styles.voteBtnText}>Gone</Text>
+            </TouchableOpacity>
+            <TouchableOpacity testID={`pass-stillthere-${passPrompt.id}`} onPress={() => confirmHazard(passPrompt)} style={[styles.voteBtn, styles.voteBtnConfirm]} activeOpacity={0.85}>
+              <Ionicons name="checkmark-circle" size={16} color="#fff" />
               <Text style={styles.voteBtnText}>Still there</Text>
             </TouchableOpacity>
           </View>
@@ -1457,34 +1541,40 @@ export default function MapScreen() {
           Google Maps' teal turn-arrow FAB). Both are anchored above the
           tab bar with explicit bottom-right margins so they never collide
           with the speedometer HUD on the left. */}
+      {/* Layers / map-settings button - native Google position: top-right,
+          just under the search bar. Opens the layers + settings sheet. Hidden
+          during turn-by-turn so it never crowds the maneuver banner. */}
+      {navMode !== "turn-by-turn" && (
+        <TouchableOpacity
+          testID="layers-fab"
+          onPress={() => setLayersOpen(true)}
+          activeOpacity={0.85}
+          style={styles.layersBtn}
+        >
+          <Ionicons name="layers" size={20} color="#3C3C43" />
+        </TouchableOpacity>
+      )}
+
       <View pointerEvents="box-none" style={styles.fabStack}>
         {/* Police report button — top of stack. One-tap: posts a hazard with
             kind='police' at the GPS sample closest to (now - 5s), shows a
             success toast, and fires a haptic on native. */}
         <TouchableOpacity
           testID="report-police-fab"
-          style={styles.fab}
+          style={[styles.fab, styles.fabPolice]}
           onPress={() => reportAlert('police')}
-          activeOpacity={0.75}
+          activeOpacity={0.8}
         >
-          <Ionicons name="shield-checkmark" size={20} color="#3478F6" />
+          <MaterialCommunityIcons name="police-badge" size={24} color="#fff" />
         </TouchableOpacity>
         {/* Road-hazard report button — same flow with kind='road'. */}
         <TouchableOpacity
           testID="report-hazard-fab"
-          style={styles.fab}
+          style={[styles.fab, styles.fabHazard]}
           onPress={() => reportAlert('road')}
-          activeOpacity={0.75}
+          activeOpacity={0.8}
         >
-          <Ionicons name="warning" size={20} color="#FFD60A" />
-        </TouchableOpacity>
-        <TouchableOpacity
-          testID="layers-fab"
-          onPress={() => setLayersOpen(true)}
-          activeOpacity={0.85}
-          style={styles.fab}
-        >
-          <Ionicons name="layers" size={20} color="#fff" />
+          <MaterialCommunityIcons name="alert" size={24} color="#fff" />
         </TouchableOpacity>
         {/* ===== Recenter FAB =====
             Only visible when follow-mode is OFF (the user has panned away from
@@ -1498,9 +1588,9 @@ export default function MapScreen() {
             testID="recenter-fab"
             onPress={() => setIsFollowing(true)}
             activeOpacity={0.85}
-            style={[styles.fab, { backgroundColor: 'rgba(10,132,255,0.95)' }]}
+            style={styles.fab}
           >
-            <Ionicons name="locate" size={20} color="#fff" />
+            <Ionicons name="locate" size={22} color="#0A84FF" />
           </TouchableOpacity>
         )}
         {/* Stop Navigation — appears LEFT of the Directions FAB when a trip
@@ -1807,12 +1897,12 @@ function toHazard(s: SupaHazard): Hazard {
 }
 
 
-// Community moderation: when disputes outweigh confirms by a margin, hide the hazard.
-// (Server-side cleanup can also be added via a Supabase trigger or scheduled function.)
+// Community moderation: a hazard hides once it has 2 "Gone" votes. The backend
+// also hard-removes at 2 distinct disputing drivers and broadcasts the removal,
+// so this is mainly a client-side backstop for the brief window before that
+// event arrives (and for any stale row that slips through a poll).
 const isHazardVisible = (h: Hazard) => {
-  const d = h.disputes || 0;
-  const c = h.confirms || 1;
-  return d < c + 2; // e.g. 0/1 visible, 1/1 visible, 2/1 visible, 3/1 hidden
+  return (h.disputes || 0) < 2;
 };
 
 const styles = StyleSheet.create({
@@ -2051,12 +2141,33 @@ const styles = StyleSheet.create({
   // recenter blue override just the fill.
   fab: {
     width: 48, height: 48,
-    borderRadius: 12,
-    backgroundColor: "rgba(28,28,30,0.88)",
+    borderRadius: 24,
+    backgroundColor: "#FFFFFF",
     alignItems: "center", justifyContent: "center",
-    overflow: "hidden",
-    shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.08)",
+    shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
+  },
+  // Waze-style colored report buttons - the two primary "report" actions are
+  // solid color fills (no border) so they pop against the white utility
+  // buttons. Blue police matches the police pin; amber matches the road pin.
+  fabPolice: { backgroundColor: "#3478F6", borderWidth: 0 },
+  fabHazard: { backgroundColor: "#FF9F0A", borderWidth: 0 },
+  // Layers / map-settings button, native Google position (top-right, under the
+  // search bar). White rounded square so it reads as a control, distinct from
+  // the round action buttons in the bottom cluster.
+  layersBtn: {
+    position: "absolute",
+    right: 12,
+    top: Platform.OS === "ios" ? 116 : 92,
+    width: 44, height: 44,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.08)",
+    shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
+    zIndex: 50,
   },
   fabInner: { flex: 1, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center" },
 
@@ -2109,11 +2220,11 @@ const styles = StyleSheet.create({
   },
   // Directions = primary action → Convoy blue. Same 42×42 footprint as the
   // others (was 44×44 in spec, but matching the rest reads cleaner).
-  fabPrimary: { backgroundColor: "rgba(10,132,255,0.92)" },
+  fabPrimary: { backgroundColor: "#0A84FF", borderWidth: 0 },
   // Stop Navigation — red 42×42 button shown LEFT of Directions while a trip
   // is active. Same footprint, attention-grabbing red bg so the driver knows
   // exactly where to tap to bail out of nav.
-  stopNavBtn: { backgroundColor: "#FF3B30" },
+  stopNavBtn: { backgroundColor: "#FF3B30", borderWidth: 0 },
   // ===== Layers / Settings sheet =====
   // New grouped section headers + row styles. The legacy `layerRow` (icon +
   // toggle + chevron) below is left intact for any other consumers, but the

@@ -6,8 +6,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import ConvoyLogo from './ConvoyLogo';
+import { useAuth } from '../auth';
 
 const YELLOW = '#FFD60A';
+const OWNER_EMAIL = 'jwellsmorton@gmail.com';
 
 type Item = {
   label: string;
@@ -15,14 +17,13 @@ type Item = {
   route: string;
 };
 
-// The four global destinations behind the logo. Community + Profile both point
-// at the Hub for now (Hub already hosts community create/discover/admin and the
-// profile editor); they'll be repointed when dedicated screens exist.
+// The global destinations behind the logo. Community points at the Hub (which
+// hosts community create/discover/admin); the Admin row is appended at runtime
+// for the owner only (see below).
 const ITEMS: Item[] = [
   { label: 'Garage',    icon: 'car-sport',        route: '/(app)/garage' },
   { label: 'Community', icon: 'people',           route: '/(app)/hub' },
   { label: 'Settings',  icon: 'settings-sharp',   route: '/(app)/settings' },
-  { label: 'Profile',   icon: 'person-circle',    route: '/(app)/hub' },
 ];
 
 type Props = {
@@ -40,7 +41,15 @@ type Props = {
  */
 export default function LogoMenu({ size = 32, style }: Props) {
   const router = useRouter();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
+
+  // Owner-only Admin entry (roster + password resets). Appended to the menu
+  // only for the app owner's account so regular drivers never see it.
+  const isOwner = (user?.email || '').trim().toLowerCase() === OWNER_EMAIL;
+  const items: Item[] = isOwner
+    ? [...ITEMS, { label: 'Admin', icon: 'shield-checkmark', route: '/(app)/admin' }]
+    : ITEMS;
 
   const openMenu = () => {
     Haptics.selectionAsync();
@@ -81,10 +90,10 @@ export default function LogoMenu({ size = 32, style }: Props) {
               <ConvoyLogo size={22} />
               <Text style={styles.cardTitle}>Convoy</Text>
             </View>
-            {ITEMS.map((item, i) => (
+            {items.map((item, i) => (
               <TouchableOpacity
                 key={item.label}
-                style={[styles.row, i === ITEMS.length - 1 && styles.rowLast]}
+                style={[styles.row, i === items.length - 1 && styles.rowLast]}
                 activeOpacity={0.7}
                 onPress={() => go(item.route)}
                 testID={`logo-menu-${item.label.toLowerCase()}`}

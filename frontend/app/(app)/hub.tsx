@@ -48,7 +48,17 @@ export default function HubScreen() {
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={COLORS.primary} />}>
         <View style={styles.headerRow}>
-          <Text style={styles.title}>Hub</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <TouchableOpacity
+              testID="hub-back"
+              onPress={() => { if (router.canGoBack()) router.back(); else router.push("/(app)/map" as any); }}
+              hitSlop={10}
+              style={{ padding: 2, marginLeft: -4 }}
+            >
+              <Ionicons name="chevron-back" size={26} color={COLORS.text} />
+            </TouchableOpacity>
+            <Text style={styles.title}>Hub</Text>
+          </View>
           <TouchableOpacity
             testID="profile-btn"
             onPress={() => router.push("/(app)/garage")}

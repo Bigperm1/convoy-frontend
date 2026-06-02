@@ -16,6 +16,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/auth';
 import { api } from '../../src/api';
 
@@ -25,6 +26,7 @@ const SAVE_CREDS_KEY = 'convoy.save.credentials';
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [saveCredentials, setSaveCredentials] = useState(false);
   const [loading, setLoading] = useState(false);
   const [waking, setWaking] = useState(false);
@@ -35,7 +37,7 @@ export default function LoginScreen() {
 
     // Wake the backend early (Render free tier cold-starts after idle).
 
-    api.get('/api/health').catch(() => {});
+    api.get('/health').catch(() => {});
 
   }, []);
 
@@ -142,15 +144,29 @@ export default function LoginScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Password</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your password"
-                placeholderTextColor="#666"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                editable={!loading}
-              />
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={styles.inputFlex}
+                  placeholder="Enter your password"
+                  placeholderTextColor="#666"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                  editable={!loading}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="password"
+                />
+                <TouchableOpacity
+                  onPress={() => setShowPassword((s) => !s)}
+                  style={styles.eyeBtn}
+                  hitSlop={10}
+                  disabled={loading}
+                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={20} color="#888" />
+                </TouchableOpacity>
+              </View>
             </View>
 
             <TouchableOpacity
@@ -223,6 +239,9 @@ const styles = StyleSheet.create({
   inputGroup: { gap: 8 },
   label: { color: '#ccc', fontSize: 13, fontWeight: '500' },
   input: { backgroundColor: '#0A0A0A', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, color: '#fff', fontSize: 16, borderWidth: 1, borderColor: '#333' },
+  inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0A0A0A', borderRadius: 10, borderWidth: 1, borderColor: '#333', paddingRight: 8 },
+  inputFlex: { flex: 1, paddingVertical: 12, paddingHorizontal: 14, color: '#fff', fontSize: 16 },
+  eyeBtn: { padding: 8 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 2, borderColor: '#666', alignItems: 'center', justifyContent: 'center' },
   checkboxChecked: { backgroundColor: '#FFD60A', borderColor: '#FFD60A' },

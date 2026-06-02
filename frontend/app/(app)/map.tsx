@@ -471,7 +471,7 @@ export default function MapScreen() {
       try {
         if (!(await ensureLocationPermission())) return;
         sub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 0 },
+          { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 0 },
           (pos) => {
             const h = pos.coords.heading;
             const heading = typeof h === "number" && h >= 0 ? h : undefined;
@@ -491,7 +491,13 @@ export default function MapScreen() {
             // throttle so every other driver's /users/nearby (polled by
             // loadPeers) shows us live. Pure REST â no Supabase Realtime needed.
             const nowPost = Date.now();
-            if (nowPost - lastLocPostRef.current > 1000) {
+            // Battery: while moving, publish every 1s so peers see smooth
+            // movement (the 1.1.4 "1s avatar" behavior). While effectively
+            // stationary (< ~2 km/h - parked, or GPS jitter), back off to one
+            // post every 12s: a parked car has nothing new to broadcast, and
+            // this slashes cellular-radio wakeups during meets and stops.
+            const postEveryMs = speed > 0.5 ? 1000 : 12000;
+            if (nowPost - lastLocPostRef.current > postEveryMs) {
               lastLocPostRef.current = nowPost;
               api.post("/location", {
                 lat: pos.coords.latitude, lng: pos.coords.longitude,
@@ -508,7 +514,10 @@ export default function MapScreen() {
             // Google Roads speed-limit lookup — throttled to 1/10s so we
             // stay well under the free-tier quota.
             const now = Date.now();
-            if (now - lastSpeedLimitFetchRef.current > 10000) {
+            // Only check the posted speed limit while actually moving - no
+            // point hitting the Roads API every 10s while parked. Saves a
+            // network round-trip per cycle whenever the car is stopped.
+            if (speed > 0.5 && now - lastSpeedLimitFetchRef.current > 10000) {
               lastSpeedLimitFetchRef.current = now;
               const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
               if (KEY) {

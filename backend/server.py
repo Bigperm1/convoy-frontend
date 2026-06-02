@@ -301,6 +301,50 @@ async def reset_password(body: ResetPasswordIn):
     return {"ok": True}
 
 
+# ---------- Owner-only admin ----------
+# The app owner can view the roster and mint password-reset codes to relay to
+# locked-out testers by hand (Discord/text) - no email or SMS provider needed.
+# Strictly gated to the owner account by email; every other user gets 403.
+OWNER_EMAIL = "jwellsmorton@gmail.com"
+
+def _is_owner(user: dict) -> bool:
+    return (user.get("email") or "").strip().lower() == OWNER_EMAIL
+
+@api.get("/admin/users")
+async def admin_list_users(user=Depends(get_current_user)):
+    if not _is_owner(user):
+        raise HTTPException(status_code=403, detail="Owner only")
+    cursor = db.users.find({}, {"_id": 0, "password_hash": 0, "reset_code": 0, "reset_code_expires": 0}).sort("created_at", -1)
+    users = await cursor.to_list(2000)
+    return [{
+        "id": u.get("id"),
+        "email": u.get("email", ""),
+        "handle": u.get("handle", ""),
+        "car_make": u.get("car_make", ""),
+        "car_model": u.get("car_model", ""),
+        "car_color": u.get("car_color", ""),
+        "created_at": u.get("created_at"),
+        "last_seen": u.get("last_seen"),
+    } for u in users]
+
+@api.post("/admin/reset-code")
+async def admin_reset_code(body: ForgotPasswordIn, user=Depends(get_current_user)):
+    if not _is_owner(user):
+        raise HTTPException(status_code=403, detail="Owner only")
+    email = body.email.strip().lower()
+    target = await db.users.find_one({"email": email})
+    if not target:
+        raise HTTPException(status_code=404, detail="No account with that email")
+    code = f"{_secrets.randbelow(1000000):06d}"
+    expires = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+    await db.users.update_one({"id": target["id"]}, {"$set": {
+        "reset_code": code, "reset_code_expires": expires,
+    }})
+    # The owner relays this code to the tester, who enters it on the existing
+    # reset screen along with a new password. 30-min window for the hand-off.
+    return {"email": email, "handle": target.get("handle", ""), "code": code, "expires_at": expires}
+
+
 @api.get("/auth/me")
 async def me(user=Depends(get_current_user)): return public_user(user)
 @api.put("/auth/profile")

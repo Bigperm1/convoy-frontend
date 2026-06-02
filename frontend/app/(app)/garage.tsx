@@ -106,7 +106,7 @@ function Dropdown({
 // ---- Main screen ----
 export default function GarageScreen() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, refresh } = useAuth();
   const [year,  setYear]  = useState('2025');
   const [make,  setMake]  = useState('');
   const [model, setModel] = useState('');
@@ -146,6 +146,7 @@ export default function GarageScreen() {
     if (s.topSpeed) setTopSpeed(s.topSpeed);
     else if (user?.top_speed_record) setTopSpeed(user.top_speed_record);
     if (s.callSign) setCallSign(s.callSign);
+    else if (user?.handle) setCallSign(user.handle);
 
     // If local was empty but the profile had the car, persist it locally so the
     // rest of the app (map self-marker, presence) picks it up immediately too.
@@ -214,21 +215,28 @@ export default function GarageScreen() {
   // the call sign and gives clear feedback before returning.
   const handleSave = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const sign = callSign.trim();
     await updateSettings({
       carYear: year,
       carMake: make,
       carModel: model,
       carColor: color,
-      callSign: callSign.trim(),
+      callSign: sign,
     });
-    // Push the full car identity to the backend so peers render us correctly.
+    // Push the full identity to the backend so peers render us correctly AND
+    // the call sign (= account handle) persists to the account: it survives a
+    // reinstall and is the name other drivers see on the map and in comms.
     try {
       await api.put('/auth/profile', {
         car_make: make || undefined,
         car_model: model || undefined,
         car_color: color || undefined,
         car_year: parseInt(year, 10) || undefined,
+        ...(sign ? { handle: sign } : {}),
       });
+      // Refresh the in-memory auth user so the new call sign takes effect
+      // app-wide (map self-marker, presence, Hub header) without a relaunch.
+      await refresh();
     } catch {}
     setSaved(true);
     setTimeout(() => router.back(), 650);

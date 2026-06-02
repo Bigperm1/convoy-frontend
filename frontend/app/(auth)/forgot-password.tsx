@@ -28,6 +28,7 @@ export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const requestCode = useCallback(async () => {
@@ -130,15 +131,28 @@ export default function ForgotPasswordScreen() {
                 </View>
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>New password</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="At least 6 characters"
-                    placeholderTextColor="#666"
-                    value={newPassword}
-                    onChangeText={setNewPassword}
-                    secureTextEntry
-                    editable={!loading}
-                  />
+                  <View style={styles.inputRow}>
+                    <TextInput
+                      style={styles.inputFlex}
+                      placeholder="At least 6 characters"
+                      placeholderTextColor="#666"
+                      value={newPassword}
+                      onChangeText={setNewPassword}
+                      secureTextEntry={!showPw}
+                      editable={!loading}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <TouchableOpacity
+                      onPress={() => setShowPw((s) => !s)}
+                      style={styles.eyeBtn}
+                      hitSlop={10}
+                      disabled={loading}
+                      accessibilityLabel={showPw ? 'Hide password' : 'Show password'}
+                    >
+                      <Ionicons name={showPw ? 'eye-off' : 'eye'} size={20} color="#888" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </>
             )}
@@ -190,6 +204,9 @@ const styles = StyleSheet.create({
   inputGroup: { gap: 8 },
   label: { color: '#ccc', fontSize: 13, fontWeight: '500' },
   input: { backgroundColor: '#0A0A0A', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, color: '#fff', fontSize: 16, borderWidth: 1, borderColor: '#333' },
+  inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0A0A0A', borderRadius: 10, borderWidth: 1, borderColor: '#333', paddingRight: 8 },
+  inputFlex: { flex: 1, paddingVertical: 12, paddingHorizontal: 14, color: '#fff', fontSize: 16 },
+  eyeBtn: { padding: 8 },
   codeInput: { fontSize: 22, letterSpacing: 8, fontWeight: '700', textAlign: 'center' },
   primaryBtn: { borderRadius: 10, overflow: 'hidden', marginTop: 4 },
   buttonGradient: { paddingVertical: 14, alignItems: 'center' },

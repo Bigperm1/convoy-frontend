@@ -41,6 +41,56 @@ api = APIRouter(prefix="/api")
 bearer = HTTPBearer(auto_error=False)
 
 
+# ---------- Apple Music (MusicKit) developer token ----------
+# Signs a short-lived ES256 "developer token" from our MusicKit private key
+# (.p8). The .p8 is a SECRET and lives only here (Render env vars), never in
+# the app. The app fetches a token from GET /api/apple-music/developer-token,
+# then exchanges it for an Apple Music *user* token on-device via MusicKit.
+#
+# Required env vars (set these in Render):
+#   APPLE_MUSIC_KEY_ID   - the 10-char Key ID of the MusicKit key
+#   APPLE_MUSIC_TEAM_ID  - your Apple Developer Team ID (the token issuer)
+#   APPLE_MUSIC_P8       - the FULL contents of the AuthKey_XXXX.p8 file
+#                          (PEM incl. the BEGIN/END PRIVATE KEY lines). Literal
+#                          "\n" sequences are accepted and normalized.
+_apple_music_token_cache: Dict[str, object] = {"token": None, "exp": 0.0}
+
+def _build_apple_music_developer_token() -> str:
+    key_id = os.environ.get("APPLE_MUSIC_KEY_ID", "").strip()
+    team_id = os.environ.get("APPLE_MUSIC_TEAM_ID", "").strip()
+    p8 = os.environ.get("APPLE_MUSIC_P8", "")
+    if not (key_id and team_id and p8):
+        raise HTTPException(status_code=503, detail="Apple Music is not configured on the server")
+    # Render keeps multi-line values fine, but tolerate escaped newlines too.
+    private_key = p8.replace("\\n", "\n").strip()
+    issued = int(time.time())
+    # Apple allows developer tokens up to 6 months; use ~150 days and refresh
+    # well before expiry (see the cache check below).
+    expires = issued + 150 * 24 * 60 * 60
+    try:
+        token = jwt.encode(
+            {"iss": team_id, "iat": issued, "exp": expires},
+            private_key,
+            algorithm="ES256",
+            headers={"alg": "ES256", "kid": key_id},
+        )
+    except Exception as e:
+        logger.error("Apple Music token signing failed: %s", e)
+        raise HTTPException(status_code=500, detail="Could not sign Apple Music developer token")
+    _apple_music_token_cache["token"] = token
+    _apple_music_token_cache["exp"] = float(expires)
+    return token
+
+@api.get("/apple-music/developer-token")
+async def apple_music_developer_token():
+    """Return a cached MusicKit developer token, re-signing only near expiry."""
+    cached = _apple_music_token_cache.get("token")
+    exp = float(_apple_music_token_cache.get("exp") or 0)
+    if cached and exp - time.time() > 24 * 60 * 60:
+        return {"token": cached}
+    return {"token": _build_apple_music_developer_token()}
+
+
 # ---------- Models ----------
 class RegisterIn(BaseModel):
     email: EmailStr

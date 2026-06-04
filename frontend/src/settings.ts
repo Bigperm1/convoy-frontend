@@ -17,7 +17,6 @@ mapView: "heading_up" | "north_up";
 speedUnit: 'kmh' | 'mph';
 speedUnitManual: boolean;
 showWeatherLayer: boolean;
-show3DMap: boolean;
 showNearby: boolean;
 feedNA: boolean;
 feedROW: boolean;
@@ -42,7 +41,6 @@ mapView: "heading_up",
 speedUnit: 'kmh',
 speedUnitManual: false,
 showWeatherLayer: false,
-show3DMap: false,
 showNearby: true,
 feedNA: true,
 feedROW: false,

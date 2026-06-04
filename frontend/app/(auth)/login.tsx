@@ -19,6 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/auth';
 import { api } from '../../src/api';
+import Constants from 'expo-constants';
 
 const CREDS_KEY = 'convoy.saved.credentials';
 const SAVE_CREDS_KEY = 'convoy.save.credentials';
@@ -32,6 +33,12 @@ export default function LoginScreen() {
   const [waking, setWaking] = useState(false);
   const router = useRouter();
   const { login } = useAuth();
+
+  const appVersion = Constants.expoConfig?.version ?? '?';
+  const buildNumber =
+    Platform.OS === 'ios'
+      ? Constants.expoConfig?.ios?.buildNumber ?? '?'
+      : String(Constants.expoConfig?.android?.versionCode ?? '?');
 
   useEffect(() => {
 
@@ -222,6 +229,7 @@ export default function LoginScreen() {
             </View>
           </View>
         </ScrollView>
+        <Text style={styles.versionText}>v{appVersion} ({buildNumber})</Text>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -255,4 +263,5 @@ const styles = StyleSheet.create({
   linkText: { color: '#999', fontSize: 13 },
   linkHighlight: { color: '#FFD60A', fontWeight: '600' },
   forgotLink: { color: '#FFD60A', fontSize: 13, fontWeight: '500', paddingVertical: 6 },
+  versionText: { color: '#555', fontSize: 12, textAlign: 'center', paddingVertical: 10 },
 });

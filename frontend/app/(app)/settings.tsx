@@ -158,15 +158,6 @@ export default function SettingsScreen() {
             value={settings.showWeatherLayer}
             onChange={(v) => setSettings({ showWeatherLayer: v })}
           />
-          <View style={styles.divider} />
-          <ToggleRow
-            icon="cube"
-            iconColor="#FFD60A"
-            title="3D Map"
-            subtitle="Building extrusions & flyover perspective during navigation"
-            value={settings.show3DMap}
-            onChange={(v) => setSettings({ show3DMap: v })}
-          />
         </Glass>
         <Text style={styles.helpText}>
           These persist across launches. Satellite, Traffic, and Hazard pins are toggled from the map's own Layers button since you flip those while looking at the map.

@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 import * as Speech from "expo-speech";
-import { api } from "./api";
+import { api, GOOGLE_MAPS_KEY } from "./api";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -104,7 +104,7 @@ export async function fetchRoutes(
       const res = await api.get("/routes", { params });
       routes = res.data?.routes ?? [];
     } else {
-      const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
+      const KEY = GOOGLE_MAPS_KEY;
       if (!KEY) return [];
 
       const avoidTolls = avoid?.tolls ?? false;
@@ -118,7 +118,6 @@ export async function fetchRoutes(
         travelMode: "DRIVE",
         computeAlternativeRoutes: true,
         routingPreference: "TRAFFIC_AWARE",
-        departureTime: new Date().toISOString(),
         routeModifiers: {
           avoidTolls, avoidHighways, avoidFerries,
         },
@@ -205,7 +204,7 @@ export const fetchDirections = fetchRoutes;
 function parseDurationSeconds(dur: string | undefined): number {
   if (!dur) return 0;
   // Routes API returns durations as "NNNs" e.g. "1234s"
-  const match = dur.match(/^(d+)s$/);
+  const match = dur.match(/^(\d+)s$/);
   if (match) return parseInt(match[1], 10);
   // Fallback: treat as numeric string
   const n = parseFloat(dur);

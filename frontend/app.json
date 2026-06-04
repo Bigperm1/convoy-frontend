@@ -2,7 +2,7 @@
   "expo": {
     "name": "Convoy",
     "slug": "convoy",
-    "version": "1.1.8",
+    "version": "1.1.10",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "convoy",
@@ -14,11 +14,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
-      "buildNumber": "33",
+      "buildNumber": "37",
       "config": {
-        "googleMapsApiKey": "AIzaSyDLysQuU6tOcmbdlsHJPYUqviq4TrwEUx0"
+        "googleMapsApiKey": "AIzaSyC0w5LHgZ1ud3EmeAhUkr4aOAOf89bE09U"
       },
       "infoPlist": {
+        "NSAppleMusicUsageDescription": "Play and control Apple Music right inside Convoy",
         "NSLocationWhenInUseUsageDescription": "Show nearby drivers and hazards on the map",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Keep the convoy live in the background",
         "NSMicrophoneUsageDescription": "Push-to-talk and voice commands",
@@ -34,11 +35,11 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 33,
+      "versionCode": 37,
       "googleServicesFile": "./google-services.json",
       "config": {
         "googleMaps": {
-          "apiKey": "AIzaSyDLysQuU6tOcmbdlsHJPYUqviq4TrwEUx0"
+          "apiKey": "AIzaSyC0w5LHgZ1ud3EmeAhUkr4aOAOf89bE09U"
         }
       },
       "adaptiveIcon": {

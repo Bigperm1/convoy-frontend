@@ -208,7 +208,8 @@ const styles = StyleSheet.create({
   // ----- Speed pill (always-on, bottom-left) -----
   speedWrap: { position: "absolute", left: 12, bottom: 90, zIndex: 55 },
   speedPill: {
-    minWidth: 60,
+    width: 78,
+    height: 60,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 16,

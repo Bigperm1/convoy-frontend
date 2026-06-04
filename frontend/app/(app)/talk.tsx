@@ -335,7 +335,7 @@ export default function TalkScreen() {
         >
           <Pressable onPressIn={onPressIn} onPressOut={onPressOut} style={[styles.pttOuter, pressed && styles.pttOuterActive, !active && styles.pttOuterDisabled]}>
             <View style={[styles.pttInner, pressed && styles.pttInnerActive]}>
-              <Ionicons name="mic" size={112} color={pressed ? YELLOW : active ? '#fff' : '#555'} />
+              <Ionicons name="mic" size={112} color={pressed ? '#fff' : active ? YELLOW : 'rgba(255,214,10,0.5)'} />
             </View>
           </Pressable>
         </Animated.View>

@@ -5,6 +5,7 @@
 // "showWeatherLayer" setting is enabled.
 
 import { useEffect, useRef, useState } from "react";
+import { GOOGLE_MAPS_KEY } from "./api";
 
 export type WeatherCondition = {
   tempC: number;
@@ -34,7 +35,7 @@ export async function fetchWeatherConditions(
   lat: number,
   lng: number
 ): Promise<WeatherCondition | null> {
-  const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
+  const KEY = GOOGLE_MAPS_KEY;
   if (!KEY) return null;
 
   try {
@@ -48,31 +49,32 @@ export async function fetchWeatherConditions(
     if (!res.ok) return null;
     const data = await res.json();
 
-    // Map the Google Weather API response to our internal type
-    const current = data?.currentConditions;
-    if (!current) return null;
+    // The Weather API returns all fields at the TOP LEVEL of the response
+    // (NOT nested under a `currentConditions` key — that was the bug). Guard on
+    // a core field so a bad/empty payload returns null cleanly.
+    if (!data || !data.weatherCondition) return null;
 
-    const tempC = current.temperature?.degrees ?? 0;
-    const feelsLikeC = current.feelsLike?.degrees ?? tempC;
-    const wind = current.wind;
+    const tempC = data.temperature?.degrees ?? 0;
+    const feelsLikeC = data.feelsLikeTemperature?.degrees ?? tempC;
+    const wind = data.wind;
     const windKph = wind?.speed?.value ?? 0;
-    const precipProb = current.precipitation?.probability?.percent ?? 0;
+    const precipProb = data.precipitation?.probability?.percent ?? 0;
 
     return {
       tempC,
       tempF: (tempC * 9) / 5 + 32,
       feelsLikeC,
       feelsLikeF: (feelsLikeC * 9) / 5 + 32,
-      description: current.weatherCondition?.description?.text ?? current.weatherCondition?.type ?? "Unknown",
-      icon: current.weatherCondition?.iconBaseUri ?? "",
-      humidity: current.relativeHumidity ?? 0,
+      description: data.weatherCondition?.description?.text ?? data.weatherCondition?.type ?? "Unknown",
+      icon: data.weatherCondition?.iconBaseUri ?? "",
+      humidity: data.relativeHumidity ?? 0,
       windSpeedKph: windKph,
       windSpeedMph: windKph * 0.621371,
       windDirectionDeg: wind?.direction?.degrees ?? 0,
       precipProbability: precipProb,
-      visibility: current.visibility?.distance ?? 0,
-      uvIndex: current.uvIndex ?? 0,
-      isDaytime: current.isDaytime ?? true,
+      visibility: data.visibility?.distance ?? 0,
+      uvIndex: data.uvIndex ?? 0,
+      isDaytime: data.isDaytime ?? true,
       fetchedAt: Date.now(),
     };
   } catch {

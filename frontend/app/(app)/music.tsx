@@ -1,701 +1,362 @@
-import React, { useState, useEffect, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator, Linking, Platform, Alert } from "react-native";
+import React, { useCallback, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Linking,
+  Platform,
+  TextInput,
+  ActivityIndicator,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import { Image } from "expo-image";
 import { COLORS } from "../../src/theme";
-import Glass from "../../src/Glass";
-import { startLogin, getStoredToken, logout, spotify, isConfigured } from "../../src/spotify";
-import { useAuth } from "../../src/auth";
-import { useSettings } from "../../src/settings";
-import { api } from "../../src/api";
-import { useLatestTier, getMusicBroadcastQuality } from "../../src/proximityAudio";
 import LogoMenu from "../../src/components/LogoMenu";
+import {
+  isMusicSupported,
+  authorize,
+  checkSubscription,
+  searchSongs,
+  playSong,
+  toggle,
+  skipNext,
+  skipPrev,
+  useCurrentSong,
+  useIsPlaying,
+  type AppleSong,
+} from "../../src/applePlayer";
 
-type Source = "spotify" | "apple" | "soundcloud";
+// Apple Music brand red → pink.
+const AM_PINK: [string, string] = ["#FB5C74", "#FA2D48"];
 
 /**
- * Deep-link to a music app on the user's phone.
- *
- * Tries the native URL scheme first (which jumps straight to the installed app
- * with no browser intermediary â fixing the "black Safari blink" the user was
- * seeing in the field), then falls back to the public https URL if the scheme
- * isn't registered (app not installed).
- *
- * Native schemes per platform:
- *   Apple Music (iOS)   â music://             (Music app)
- *   Apple Music (web)   â https://music.apple.com
- *   Spotify  (iOS/Android) â spotify://         (Spotify app)
- *   Spotify  (fallback) â https://open.spotify.com
- *   SoundCloud          â soundcloud://         (SoundCloud app)
- *   SoundCloud (fallback) â https://soundcloud.com
- *
- * Optional `path` param (e.g. a track URI) is appended to the scheme/URL.
+ * Deep-link into the Apple Music app — used as a fallback when on-device
+ * MusicKit playback isn't available (non-iOS) or the user needs to subscribe.
+ * Tries native music:// first, then itms-music://, then the public https URL.
  */
-async function deepLinkToMusicApp(target: Source, path?: string): Promise<boolean> {
-  const candidates: Record<Source, string[]> = {
-    apple: Platform.OS === "ios"
+async function openAppleMusic(path?: string): Promise<boolean> {
+  const candidates =
+    Platform.OS === "ios"
       ? [`music://${path ?? ""}`, `itms-music://${path ?? ""}`, `https://music.apple.com${path ? "/" + path : ""}`]
-      : [`https://music.apple.com${path ? "/" + path : ""}`],
-    spotify: [`spotify://${path ?? ""}`, `https://open.spotify.com${path ? "/" + path : ""}`],
-    soundcloud: [`soundcloud://${path ?? ""}`, `https://soundcloud.com${path ? "/" + path : ""}`],
-  };
-  for (const url of candidates[target]) {
+      : [`https://music.apple.com${path ? "/" + path : ""}`];
+  for (const url of candidates) {
     try {
-      const ok = await Linking.canOpenURL(url);
-      if (ok) {
+      if (await Linking.canOpenURL(url)) {
         await Linking.openURL(url);
         return true;
       }
     } catch {
-      // canOpenURL throws on iOS for unregistered schemes â try next candidate.
+      // canOpenURL throws on iOS for unregistered schemes — try the next one.
     }
   }
-  // Last-resort: just try the https fallback even if canOpenURL said no
-  // (some Android setups under-report support).
   try {
-    await Linking.openURL(candidates[target][candidates[target].length - 1]);
+    await Linking.openURL(candidates[candidates.length - 1]);
     return true;
   } catch {
     return false;
   }
 }
 
+/** Resolve an Apple artwork template/url to a concrete square image URL. */
+function artURL(raw?: string, size = 120): string | undefined {
+  if (!raw || typeof raw !== "string") return undefined;
+  return raw.replace("{w}", String(size)).replace("{h}", String(size)).replace("{f}", "jpg");
+}
+
 export default function MusicScreen() {
-  const [source, setSource] = useState<Source>("spotify");
+  // Apple Music "Listen Now" date overline — built from arrays rather than
+  // toLocaleDateString so it renders identically regardless of Hermes' Intl.
+  const d = new Date();
+  const DAYS = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
+  const MONTHS = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"];
+  const today = `${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
+
+  const [authorized, setAuthorized] = useState(false);
+  const [canPlay, setCanPlay] = useState<boolean | null>(null);
+  const [connecting, setConnecting] = useState(false);
+
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<AppleSong[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+
+  // Reactive now-playing state from the native player (no-ops off iOS).
+  const { song } = useCurrentSong() as { song: any };
+  const { isPlaying } = useIsPlaying();
+
+  const handleConnect = useCallback(async () => {
+    setConnecting(true);
+    try {
+      const ok = await authorize();
+      setAuthorized(ok);
+      if (ok) {
+        const sub = await checkSubscription();
+        setCanPlay(sub.canPlay);
+      }
+    } finally {
+      setConnecting(false);
+    }
+  }, []);
+
+  const runSearch = useCallback(async () => {
+    const q = query.trim();
+    if (!q) return;
+    setSearching(true);
+    setSearched(true);
+    try {
+      setResults(await searchSongs(q));
+    } finally {
+      setSearching(false);
+    }
+  }, [query]);
+
+  const ready = isMusicSupported && authorized && canPlay === true;
+  const nowPlaying = song && (song.title || song.name);
 
   return (
     <SafeAreaView style={styles.c} edges={["top"]}>
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Music</Text>
-          <Text style={styles.sub}>Sign in to bring your library on the road</Text>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: nowPlaying ? 200 : 130 }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header — Apple Music "Listen Now" style. */}
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.dateOverline}>{today}</Text>
+            <Text style={styles.title}>Listen Now</Text>
+          </View>
+          <LogoMenu size={30} style={styles.logoBtn} />
         </View>
-        <LogoMenu size={30} style={styles.garageBtn} />
-      </View>
 
-      {/* Service selector â iPhone-home-screen-style app icons rather than
-          generic tabs. Selected icon scales up + a small Convoy-gold dot
-          appears under its label. Each icon uses the brand color of the
-          service (Spotify green, Apple pinkâpurple gradient, SoundCloud
-          orange) so it reads instantly at a glance. */}
-      <View style={styles.serviceRow}>
-        {[
-          { id: "spotify",    label: "Spotify",     bg: "#1DB954", grad: null,                    icon: "musical-notes" as const },
-        ].map((svc) => {
-          const selected = source === svc.id;
-          return (
-            <TouchableOpacity
-              key={svc.id}
-              testID={`music-${svc.id}`}
-              onPress={() => setSource(svc.id as Source)}
-              style={[styles.serviceIcon, selected && styles.serviceIconSelected]}
-              activeOpacity={0.85}
-            >
-              {svc.grad ? (
-                <LinearGradient
-                  colors={svc.grad as any}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.serviceIconBg}
-                >
-                  <Ionicons name={svc.icon} size={32} color="#fff" />
-                </LinearGradient>
-              ) : (
-                <View style={[styles.serviceIconBg, { backgroundColor: svc.bg as string }]}>
-                  <Ionicons name={svc.icon} size={32} color="#fff" />
-                </View>
+        {/* ---- Search + results (only once connected & subscribed) ---- */}
+        {ready && (
+          <>
+            <View style={styles.searchWrap}>
+              <Ionicons name="search" size={18} color={COLORS.textDim} />
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                onSubmitEditing={runSearch}
+                returnKeyType="search"
+                placeholder="Songs, artists, albums"
+                placeholderTextColor={COLORS.textDim}
+                style={styles.searchInput}
+                autoCorrect={false}
+                testID="am-search-input"
+              />
+              {query.length > 0 && (
+                <TouchableOpacity onPress={() => { setQuery(""); setResults([]); setSearched(false); }}>
+                  <Ionicons name="close-circle" size={18} color={COLORS.textDim} />
+                </TouchableOpacity>
               )}
-              <Text style={[styles.serviceLabel, selected && styles.serviceLabelSelected]}>
-                {svc.label}
-              </Text>
-              {selected && <View style={styles.serviceSelectedDot} />}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+            </View>
 
-      {source === "spotify" && <SpotifyPanel />}
-      {source === "apple" && <ComingSoon name="Apple Music" reason="Apple Music sign-in requires the Apple Developer Program ($99/yr) and a server-signed MusicKit JWT." />}
-      {source === "soundcloud" && <ComingSoon name="SoundCloud" reason="SoundCloud closed public API registrations in 2021. We'll re-enable when access reopens." />}
+            {searching && <ActivityIndicator color={AM_PINK[0]} style={{ marginTop: 24 }} />}
+
+            {!searching && searched && results.length === 0 && (
+              <Text style={styles.empty}>No songs found. Try another search.</Text>
+            )}
+
+            {!searching && results.length > 0 && (
+              <View style={styles.results}>
+                {results.map((s, i) => (
+                  <TouchableOpacity
+                    key={s.id || String(i)}
+                    style={[styles.row, i === results.length - 1 && styles.rowLast]}
+                    activeOpacity={0.7}
+                    onPress={() => playSong(s.id)}
+                    testID={`am-result-${i}`}
+                  >
+                    {s.artworkUrl ? (
+                      <Image source={{ uri: artURL(s.artworkUrl, 100) }} style={styles.rowArt} contentFit="cover" />
+                    ) : (
+                      <View style={[styles.rowArt, styles.rowArtPlaceholder]}>
+                        <Ionicons name="musical-note" size={18} color={COLORS.textDim} />
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.rowTitle} numberOfLines={1}>{s.title ?? "Unknown"}</Text>
+                      <Text style={styles.rowSub} numberOfLines={1}>{s.artistName ?? ""}</Text>
+                    </View>
+                    <Ionicons name="play-circle" size={26} color={AM_PINK[1]} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {!searched && (
+              <Text style={styles.hint}>Search Apple Music and tap a song to play it right here.</Text>
+            )}
+          </>
+        )}
+
+        {/* ---- Connect hero (iOS, not yet authorized) ---- */}
+        {isMusicSupported && !ready && (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={authorized && canPlay === false ? () => openAppleMusic() : handleConnect}
+            disabled={connecting}
+            testID="apple-music-connect"
+            style={styles.heroWrap}
+          >
+            <LinearGradient colors={AM_PINK} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+              <View style={styles.heroLogo}>
+                <Ionicons name="musical-notes" size={30} color="#fff" />
+              </View>
+              <Text style={styles.heroTitle}>Apple Music</Text>
+              <Text style={styles.heroSub}>
+                {authorized && canPlay === false
+                  ? "You're connected, but an active Apple Music subscription is needed to play full songs."
+                  : "Connect your Apple Music account to search and play over 100 million songs right inside Convoy."}
+              </Text>
+              <View style={styles.heroBtn}>
+                {connecting ? (
+                  <ActivityIndicator color={AM_PINK[1]} />
+                ) : (
+                  <>
+                    <Ionicons
+                      name={authorized && canPlay === false ? "open-outline" : "link"}
+                      size={16}
+                      color={AM_PINK[1]}
+                    />
+                    <Text style={styles.heroBtnText}>
+                      {authorized && canPlay === false ? "Open Apple Music" : "Connect Apple Music"}
+                    </Text>
+                  </>
+                )}
+              </View>
+              <Text style={styles.heroNote}>Apple Music subscription required</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+
+        {/* ---- Non-iOS fallback: deep-link only ---- */}
+        {!isMusicSupported && (
+          <TouchableOpacity activeOpacity={0.9} onPress={() => openAppleMusic()} testID="apple-music-open" style={styles.heroWrap}>
+            <LinearGradient colors={AM_PINK} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+              <View style={styles.heroLogo}>
+                <Ionicons name="musical-notes" size={30} color="#fff" />
+              </View>
+              <Text style={styles.heroTitle}>Apple Music</Text>
+              <Text style={styles.heroSub}>
+                In-app playback is available on iPhone. Tap to open Apple Music on this device.
+              </Text>
+              <View style={styles.heroBtn}>
+                <Ionicons name="open-outline" size={16} color={AM_PINK[1]} />
+                <Text style={styles.heroBtnText}>Open Apple Music</Text>
+              </View>
+              <Text style={styles.heroNote}>Apple Music subscription required</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+
+        <Text style={styles.footer}>
+          Convoy plays Apple Music through your own subscription. Your library, account, and billing
+          stay with Apple Music.
+        </Text>
+      </ScrollView>
+
+      {/* ---- Now-playing bar ---- */}
+      {nowPlaying && (
+        <View style={styles.nowBar}>
+          {artURL(song?.artworkUrl ?? song?.artwork?.url, 96) ? (
+            <Image source={{ uri: artURL(song?.artworkUrl ?? song?.artwork?.url, 96) }} style={styles.nowArt} contentFit="cover" />
+          ) : (
+            <View style={[styles.nowArt, styles.rowArtPlaceholder]}>
+              <Ionicons name="musical-note" size={16} color={COLORS.textDim} />
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.nowTitle} numberOfLines={1}>{song?.title ?? song?.name ?? "Now Playing"}</Text>
+            <Text style={styles.nowSub} numberOfLines={1}>{song?.artistName ?? song?.artist ?? ""}</Text>
+          </View>
+          <TouchableOpacity onPress={() => skipPrev()} hitSlop={8} testID="am-prev">
+            <Ionicons name="play-skip-back" size={22} color={COLORS.text} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => toggle()} hitSlop={8} style={{ marginHorizontal: 14 }} testID="am-toggle">
+            <Ionicons name={isPlaying ? "pause" : "play"} size={26} color={COLORS.text} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => skipNext()} hitSlop={8} testID="am-next">
+            <Ionicons name="play-skip-forward" size={22} color={COLORS.text} />
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
-function ComingSoon({ name, reason }: { name: string; reason: string }) {
-  // Map the human label back to the Source key used by deepLinkToMusicApp.
-  // Deep-link directly to the installed app so the user lands inside Apple
-  // Music / SoundCloud immediately rather than a black Safari blink.
-  const target: Source | null =
-    name === "Apple Music" ? "apple" : name === "SoundCloud" ? "soundcloud" : null;
-  const handleOpen = async () => {
-    if (!target) return;
-    const opened = await deepLinkToMusicApp(target);
-    if (!opened) {
-      Alert.alert("Couldn't open", `${name} isn't available on this device. Install it from the App Store.`);
-    }
-  };
-  return (
-    <View style={styles.comingWrap}>
-      <Glass radius={24}>
-        <View style={{ padding: 24, alignItems: "center" }}>
-          <View style={styles.comingIcon}>
-            <Ionicons name="time" size={40} color={COLORS.warning} />
-          </View>
-          <Text style={styles.comingTitle}>{name}</Text>
-          <Text style={styles.comingSub}>{reason}</Text>
-          {target && (
-            <TouchableOpacity
-              testID={`open-${name.toLowerCase().replace(/\s/g, '-')}`}
-              onPress={handleOpen}
-              style={styles.openBtn}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="open-outline" size={16} color="#fff" />
-              <Text style={styles.openBtnText}>Open in {name}</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </Glass>
-    </View>
-  );
-}
-
-function SpotifyPanel() {
-  const { user } = useAuth();
-  const [settings] = useSettings();
-  const [signedIn, setSignedIn] = useState<boolean>(false);
-  const [me, setMe] = useState<any>(null);
-  const [tracks, setTracks] = useState<any[]>([]);
-  const [playlists, setPlaylists] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  // ===== Now-playing + community broadcast =====
-  // `currentTrack` powers the broadcast card so the admin sees exactly what
-  // they're about to push. It's refreshed every 10s while the panel is
-  // mounted (Spotify's currently-playing endpoint is lightweight).
-  const [currentTrack, setCurrentTrack] = useState<any>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isBroadcasting, setIsBroadcasting] = useState(false);
-  const broadcastInterval = useRef<ReturnType<typeof setInterval> | null>(null);
-  const nowPlayingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
-  const activeCommunityId = settings.activeCommunityId;
-  // Adaptive broadcast quality â derived from how close convoy members are.
-  // Pulled from the shared proximity store published by map.tsx, so we never
-  // duplicate the Supabase presence subscription here.
-  const { tier: proximityTier, peerCount: proximityPeers } = useLatestTier();
-  const musicQuality = getMusicBroadcastQuality(proximityTier);
-
-  const refresh = async () => {
-    // getStoredToken is now async â must be awaited. Previously the sync call
-    // returned `Promise<string|null>` which coerced to truthy via "[object Promise]",
-    // which is why the panel briefly entered a signed-in state then crashed.
-    const t = await getStoredToken();
-    if (!t) { setSignedIn(false); return; }
-    setSignedIn(true);
-    try {
-      setLoading(true);
-      const [profile, top, pls] = await Promise.all([
-        spotify.me(), spotify.topTracks(), spotify.myPlaylists(),
-      ]);
-      setMe(profile);
-      setTracks(top.items || []);
-      setPlaylists(pls.items || []);
-    } catch {
-      // Token may have been revoked; clear it
-      await logout(); setSignedIn(false);
-    } finally { setLoading(false); }
-  };
-
-  // Currently-playing poll â feeds the admin broadcast card. Pauses when the
-  // user isn't signed in to avoid a 401 loop.
-  const refreshNowPlaying = async () => {
-    try {
-      const np = await spotify.currentlyPlaying();
-      if (np && np.item) {
-        setCurrentTrack({
-          name: np.item.name,
-          artist: np.item.artists?.map((a: any) => a.name).join(", "),
-          albumArt: np.item.album?.images?.[0]?.url,
-          uri: np.item.uri,
-        });
-      } else {
-        setCurrentTrack(null);
-      }
-    } catch {
-      setCurrentTrack(null);
-    }
-  };
-
-  useEffect(() => { refresh(); }, []);
-
-  // Poll currently-playing every 10s while signed in. Cleared on sign-out / unmount.
-  useEffect(() => {
-    if (!signedIn) {
-      if (nowPlayingInterval.current) clearInterval(nowPlayingInterval.current);
-      return;
-    }
-    refreshNowPlaying();
-    nowPlayingInterval.current = setInterval(refreshNowPlaying, 10000);
-    return () => { if (nowPlayingInterval.current) clearInterval(nowPlayingInterval.current); };
-  }, [signedIn]);
-
-  // Resolve admin status â only the community admin can broadcast. Re-checks
-  // when the active community changes (user switches convoys in Settings).
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!activeCommunityId || !user) { setIsAdmin(false); return; }
-      try {
-        const { data } = await api.get(`/communities/${activeCommunityId}`);
-        if (!cancelled) setIsAdmin(data?.admin_id === user.id);
-      } catch { if (!cancelled) setIsAdmin(false); }
-    })();
-    return () => { cancelled = true; };
-  }, [activeCommunityId, user?.id]);
-
-  // Cleanup any in-flight broadcast on unmount.
-  useEffect(() => () => {
-    if (broadcastInterval.current) clearInterval(broadcastInterval.current);
-  }, []);
-
-  // Push the current track to every member of the active community. Repeats
-  // every 10s so members who join mid-broadcast still receive it. The
-  // backend re-broadcasts on the WebSocket, where the map screen renders a
-  // toast (see map.tsx 'music_broadcast' handler).
-  const toggleBroadcast = async () => {
-    if (!activeCommunityId) return;
-    if (isBroadcasting) {
-      if (broadcastInterval.current) clearInterval(broadcastInterval.current);
-      setIsBroadcasting(false);
-      try {
-        await api.post("/community/broadcast-music", {
-          action: "stop",
-          community_id: activeCommunityId,
-        });
-      } catch {}
-      return;
-    }
-    if (!currentTrack) {
-      Alert.alert("Nothing playing", "Start a song on Spotify first, then come back to broadcast.");
-      return;
-    }
-    setIsBroadcasting(true);
-    const pushTrack = async () => {
-      if (!currentTrack) return;
-      try {
-        await api.post("/community/broadcast-music", {
-          action: "play",
-          community_id: activeCommunityId,
-          quality: musicQuality,    // 'lossless' | 'high' | 'normal' â set by proximity tier
-          track: {
-            name: currentTrack.name,
-            artist: currentTrack.artist,
-            albumArt: currentTrack.albumArt,
-            spotifyUri: currentTrack.uri,
-            service: "spotify",
-            quality: musicQuality,
-          },
-        });
-      } catch {}
-    };
-    pushTrack();
-    broadcastInterval.current = setInterval(pushTrack, 10000);
-  };
-
-  const onSignIn = async () => {
-    if (Platform.OS !== "web") {
-      Alert.alert("Web only", "Spotify sign-in works in the web preview. For native, build an EAS dev client.");
-      return;
-    }
-    if (!isConfigured()) {
-      Alert.alert("Not configured", "Add EXPO_PUBLIC_SPOTIFY_CLIENT_ID to .env");
-      return;
-    }
-    try { await startLogin(); }
-    catch (e: any) { Alert.alert("Sign-in failed", e?.message || ""); }
-  };
-
-  const onSignOut = async () => {
-    await logout(); setSignedIn(false); setMe(null); setTracks([]); setPlaylists([]);
-    setCurrentTrack(null);
-    if (isBroadcasting) {
-      if (broadcastInterval.current) clearInterval(broadcastInterval.current);
-      setIsBroadcasting(false);
-    }
-  };
-
-  if (!signedIn) {
-    return (
-      <ScrollView
-        contentContainerStyle={styles.signinScroll}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Spotify-style hero: big logo, headline, the green pill CTA, and a
-            faux "recent" shelf so the screen feels alive instead of an empty
-            void below a single icon. */}
-        <View style={styles.spotifyHero}>
-          <View style={styles.spotifyLogoCircle}>
-            <Ionicons name="musical-notes" size={48} color="#1DB954" />
-          </View>
-          <Text style={styles.spotifyHeadline}>Millions of songs.{"\n"}Free on Convoy.</Text>
-          <Text style={styles.spotifyTagline}>
-            Connect Spotify to bring your playlists, top tracks, and now-playing
-            right into your convoy.
-          </Text>
-
-          <TouchableOpacity testID="spotify-signin" onPress={onSignIn} style={styles.spotifyPillBtn} activeOpacity={0.85}>
-            <LinearGradient colors={["#1ED760", "#1DB954"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.spotifyPillGrad}>
-              <Ionicons name="musical-notes" size={20} color="#000" />
-              <Text style={styles.spotifyPillText}>Continue with Spotify</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          <View style={styles.comingSoonChip}>
-            <Ionicons name="sparkles" size={13} color="#FFD60A" />
-            <Text style={styles.comingSoonChipText}>Apple Music & SoundCloud — Coming Soon!</Text>
-          </View>
-        </View>
-
-        {/* Faux preview shelf — dimmed placeholder rows that hint at what the
-            library will look like once connected. Non-interactive. */}
-        <View style={styles.previewShelf} pointerEvents="none">
-          <Text style={styles.previewShelfLabel}>WHAT YOU'LL SEE</Text>
-          {[
-            { t: "Your top tracks", s: "Ranked by what you actually play" },
-            { t: "Your playlists", s: "Every mix, ready for the road" },
-            { t: "Now playing", s: "Broadcast a song to your whole convoy" },
-          ].map((row, i) => (
-            <View key={i} style={styles.previewRow}>
-              <View style={styles.previewThumb}>
-                <Ionicons name={i === 2 ? "radio" : "musical-note"} size={20} color="rgba(255,255,255,0.25)" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.previewRowTitle}>{row.t}</Text>
-                <Text style={styles.previewRowSub}>{row.s}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-      </ScrollView>
-    );
-  }
-
-  return (
-    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 110 }}>
-      <Glass radius={20} style={{ marginBottom: 14 }}>
-        <View style={styles.profileRow}>
-          {me?.images?.[0]?.url ? (
-            <Image source={{ uri: me.images[0].url }} style={styles.profileAvatar} />
-          ) : (
-            <View style={[styles.profileAvatar, { backgroundColor: "#1DB954", alignItems: "center", justifyContent: "center" }]}>
-              <Ionicons name="person" size={22} color="#fff" />
-            </View>
-          )}
-          <View style={{ flex: 1 }}>
-            <Text style={styles.profileName}>{me?.display_name || "Spotify user"}</Text>
-            <Text style={styles.profileMeta}>
-              {me?.product === "premium" ? "Premium" : "Free"} Â· {me?.followers?.total || 0} followers
-            </Text>
-          </View>
-          <TouchableOpacity testID="spotify-signout" onPress={onSignOut}>
-            <Ionicons name="log-out" size={22} color={COLORS.textDim} />
-          </TouchableOpacity>
-        </View>
-      </Glass>
-
-      {/* Broadcast card â only the community admin sees this. Push the
-          currently-playing track to every member of the active convoy.
-          Members see a toast on the map screen with the track + caller name.
-          Broadcast repeats every 10s so members who reconnect mid-song still
-          pick it up. */}
-      {isAdmin && (
-        <View style={styles.broadcastCard}>
-          <View style={styles.broadcastHeader}>
-            <Ionicons name="radio" size={18} color="#FFD60A" />
-            <Text style={styles.broadcastTitle}>Broadcast to Community</Text>
-            {/* Quality badge â color-coded per tier so the admin sees
-                instantly what bitrate the convoy is receiving. Pulls live
-                from the proximity store, no extra props needed. */}
-            <View style={[
-              styles.qualityBadge,
-              musicQuality === "lossless" && { backgroundColor: "rgba(52,199,89,0.18)", borderColor: "rgba(52,199,89,0.55)" },
-              musicQuality === "high"     && { backgroundColor: "rgba(255,149,0,0.18)", borderColor: "rgba(255,149,0,0.55)" },
-              musicQuality === "normal"   && { backgroundColor: "rgba(142,142,147,0.18)", borderColor: "rgba(142,142,147,0.55)" },
-            ]}>
-              <Ionicons
-                name={musicQuality === "lossless" ? "headset" : musicQuality === "high" ? "musical-note" : "radio-outline"}
-                size={11}
-                color={musicQuality === "lossless" ? "#34C759" : musicQuality === "high" ? "#FF9500" : "#8E8E93"}
-              />
-              <Text style={[
-                styles.qualityBadgeText,
-                { color: musicQuality === "lossless" ? "#34C759" : musicQuality === "high" ? "#FF9500" : "#8E8E93" },
-              ]}>
-                {musicQuality === "lossless" ? "LOSSLESS" : musicQuality === "high" ? "HQ" : "STANDARD"}
-              </Text>
-            </View>
-          </View>
-          <Text style={styles.broadcastSub}>
-            {currentTrack ? (
-              <>
-                {proximityPeers} {proximityPeers === 1 ? "car" : "cars"} in convoy
-                {" Â· "}
-                {musicQuality === "lossless" ? "320 kbps OGG" : musicQuality === "high" ? "160 kbps OGG" : "96 kbps OGG"}
-              </>
-            ) : (
-              "Start playing a track on Spotify, then broadcast it to your convoy"
-            )}
-          </Text>
-          <TouchableOpacity
-            testID="music-broadcast-toggle"
-            style={[styles.broadcastBtn, isBroadcasting && styles.broadcastBtnActive, !currentTrack && !isBroadcasting && styles.broadcastBtnDisabled]}
-            onPress={toggleBroadcast}
-            disabled={!currentTrack && !isBroadcasting}
-            activeOpacity={0.85}
-          >
-            <Ionicons
-              name={isBroadcasting ? "stop-circle" : "radio"}
-              size={20}
-              color={isBroadcasting ? "#FF3B30" : "#1C1C1E"}
-            />
-            <Text style={[styles.broadcastBtnText, isBroadcasting && { color: "#FF3B30" }]}>
-              {isBroadcasting ? "Stop Broadcasting" : "Start Broadcasting"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {loading && <ActivityIndicator color={COLORS.primary} style={{ marginVertical: 12 }} />}
-
-      <Text style={styles.section}>Your top tracks</Text>
-      {tracks.length === 0 && !loading && <Text style={styles.empty}>No top tracks yet â listen to Spotify a bit to build this list.</Text>}
-      {tracks.map((t) => (
-        <Glass key={t.id} radius={14} style={{ marginBottom: 8 }}>
-          <TouchableOpacity
-            testID={`track-${t.id}`}
-            style={styles.row}
-            onPress={() => openSpotifyExternal(t.external_urls?.spotify, t.uri)}
-          >
-            <Image source={{ uri: t.album?.images?.[2]?.url || t.album?.images?.[0]?.url }} style={styles.thumb} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle} numberOfLines={1}>{t.name}</Text>
-              <Text style={styles.rowSub} numberOfLines={1}>{t.artists?.map((a: any) => a.name).join(", ")}</Text>
-            </View>
-            <Ionicons name="open-outline" size={18} color={COLORS.textDim} />
-          </TouchableOpacity>
-        </Glass>
-      ))}
-
-      <Text style={styles.section}>Your playlists</Text>
-      {playlists.length === 0 && !loading && <Text style={styles.empty}>No playlists yet.</Text>}
-      {playlists.map((p) => (
-        <Glass key={p.id} radius={14} style={{ marginBottom: 8 }}>
-          <TouchableOpacity
-            testID={`playlist-${p.id}`}
-            style={styles.row}
-            onPress={() => openSpotifyExternal(p.external_urls?.spotify, p.uri)}
-          >
-            <Image source={{ uri: p.images?.[0]?.url }} style={styles.thumb} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle} numberOfLines={1}>{p.name}</Text>
-              <Text style={styles.rowSub} numberOfLines={1}>{p.tracks?.total || 0} songs Â· {p.owner?.display_name}</Text>
-            </View>
-            <Ionicons name="open-outline" size={18} color={COLORS.textDim} />
-          </TouchableOpacity>
-        </Glass>
-      ))}
-    </ScrollView>
-  );
-}
-
-/**
- * Open a Spotify entity (track / playlist) in the native Spotify app first,
- * fall back to https://open.spotify.com.
- *
- * Spotify URIs look like  spotify:track:abc123  or  spotify:playlist:xyz789.
- * Tapping a https://open.spotify.com URL on iOS shows a black Safari blink
- * before the Universal Link kicks in (and sometimes never does on Expo Go).
- * Calling spotify://<uri-tail> opens the app instantly when installed.
- */
-async function openSpotifyExternal(httpsUrl?: string, uri?: string) {
-  // Convert "spotify:track:abc" â "track/abc" for both the deep-link path and
-  // the https fallback (open.spotify.com/track/abc).
-  let pathTail = "";
-  if (uri && uri.startsWith("spotify:")) {
-    const parts = uri.split(":"); // ["spotify", "track", "abc"]
-    if (parts.length >= 3) pathTail = `${parts[1]}/${parts.slice(2).join(":")}`;
-  } else if (httpsUrl) {
-    // Strip the https://open.spotify.com/ prefix to get the same tail shape.
-    pathTail = httpsUrl.replace(/^https?:\/\/open\.spotify\.com\//, "");
-  }
-
-  const candidates = [
-    pathTail ? `spotify://${pathTail}` : `spotify://`,
-    httpsUrl || (pathTail ? `https://open.spotify.com/${pathTail}` : "https://open.spotify.com"),
-  ];
-  for (const url of candidates) {
-    if (!url) continue;
-    try {
-      const ok = await Linking.canOpenURL(url);
-      if (ok) {
-        await Linking.openURL(url);
-        return;
-      }
-    } catch {
-      // ignore â try next
-    }
-  }
-  // Final fallback â best-effort https
-  try { await Linking.openURL(candidates[1] || "https://open.spotify.com"); } catch {}
-}
-
 const styles = StyleSheet.create({
-  garageBtn: { padding: 4, marginTop: 4 },
-  comingSub: { color: '#8E8E93', fontSize: 13, textAlign: 'center', marginTop: 4 },
   c: { flex: 1, backgroundColor: COLORS.bg },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',  paddingHorizontal: 18, paddingTop: 8 },
-  title: { color: COLORS.text, fontSize: 34, fontWeight: "700", letterSpacing: -1 },
-  sub: { color: COLORS.textDim, marginTop: 2, fontSize: 13 },
-  tabs: { flexDirection: "row", paddingHorizontal: 16, paddingTop: 14, gap: 8 },
-  tab: { flex: 1, flexDirection: "row", justifyContent: "center", alignItems: "center", padding: 12, borderRadius: 12, backgroundColor: "rgba(118,118,128,0.18)", gap: 6 },
-  tabActive: { backgroundColor: COLORS.primary },
-  tabText: { color: COLORS.text, fontSize: 13, fontWeight: "500" },
 
-  signinWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  // ===== Spotify-style sign-in hero (fills the screen, no empty void) =====
-  signinScroll: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 120 },
-  spotifyHero: { alignItems: "center", paddingTop: 24, paddingBottom: 28 },
-  spotifyLogoCircle: {
-    width: 96, height: 96, borderRadius: 48,
-    backgroundColor: "rgba(29,185,84,0.14)",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "rgba(29,185,84,0.4)",
-    marginBottom: 22,
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 10, paddingBottom: 6 },
+  dateOverline: { color: "rgba(235,235,245,0.5)", fontSize: 13, fontWeight: "700", letterSpacing: 0.4 },
+  title: { color: COLORS.text, fontSize: 34, fontWeight: "800", letterSpacing: -1, marginTop: 2 },
+  logoBtn: { padding: 4 },
+
+  // ===== Search =====
+  searchWrap: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    marginHorizontal: 20, marginTop: 14, paddingHorizontal: 14, height: 44,
+    backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 12,
   },
-  spotifyHeadline: {
-    color: "#FFFFFF", fontSize: 28, fontWeight: "800",
-    textAlign: "center", letterSpacing: -0.6, lineHeight: 34,
-  },
-  spotifyTagline: {
-    color: "rgba(255,255,255,0.6)", fontSize: 15, lineHeight: 21,
-    textAlign: "center", marginTop: 12, paddingHorizontal: 8, maxWidth: 340,
-  },
-  spotifyPillBtn: { marginTop: 26, borderRadius: 999, overflow: "hidden", alignSelf: "stretch", maxWidth: 360 },
-  spotifyPillGrad: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
-    paddingVertical: 16,
-  },
-  spotifyPillText: { color: "#000", fontWeight: "800", fontSize: 16, letterSpacing: 0.2 },
-  comingSoonChip: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    marginTop: 18, paddingHorizontal: 12, paddingVertical: 7,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,214,10,0.12)",
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,214,10,0.45)",
-  },
-  comingSoonChipText: { color: "#FFD60A", fontSize: 12, fontWeight: "700", letterSpacing: 0.2 },
-  // Faux preview shelf shown under the CTA
-  previewShelf: {
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.08)",
-    paddingTop: 20,
-  },
-  previewShelfLabel: {
-    color: "rgba(255,255,255,0.35)", fontSize: 11, fontWeight: "700",
-    letterSpacing: 0.8, marginBottom: 12, marginLeft: 4,
-  },
-  previewRow: {
-    flexDirection: "row", alignItems: "center", gap: 14,
-    paddingVertical: 10,
-  },
-  previewThumb: {
-    width: 48, height: 48, borderRadius: 10,
+  searchInput: { flex: 1, color: COLORS.text, fontSize: 16, paddingVertical: 0 },
+  hint: { color: COLORS.textDim, fontSize: 14, lineHeight: 20, paddingHorizontal: 22, marginTop: 18 },
+  empty: { color: COLORS.textDim, fontSize: 15, textAlign: "center", marginTop: 26 },
+
+  // ===== Results list =====
+  results: {
+    marginTop: 18, marginHorizontal: 20,
     backgroundColor: "rgba(255,255,255,0.05)",
-    alignItems: "center", justifyContent: "center",
+    borderRadius: 14, overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.08)",
   },
-  previewRowTitle: { color: "rgba(255,255,255,0.85)", fontSize: 15, fontWeight: "600" },
-  previewRowSub: { color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 2 },
-  signTitle: { color: COLORS.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.4, marginTop: 14 },
-  signText: { color: COLORS.textDim, textAlign: "center", marginTop: 8, fontSize: 14, lineHeight: 20 },
-  spotifyBtn: { marginTop: 20, borderRadius: 14, overflow: "hidden", alignSelf: "stretch" },
-  spotifyGrad: { paddingVertical: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 10 },
-  spotifyText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  row: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    paddingHorizontal: 12, paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.08)",
+  },
+  rowLast: { borderBottomWidth: 0 },
+  rowArt: { width: 48, height: 48, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.06)" },
+  rowArtPlaceholder: { alignItems: "center", justifyContent: "center" },
+  rowTitle: { color: COLORS.text, fontSize: 15, fontWeight: "600" },
+  rowSub: { color: COLORS.textDim, fontSize: 13, marginTop: 1 },
 
-  comingWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  comingIcon: { width: 76, height: 76, borderRadius: 38, backgroundColor: COLORS.warning + "22", alignItems: "center", justifyContent: "center", marginBottom: 14 },
-  comingTitle: { color: COLORS.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.4 },
-  openBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 14, backgroundColor: COLORS.primary, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 12 },
-  openBtnText: { color: "#fff", fontWeight: "600", fontSize: 14 },
-  comingText: { color: COLORS.textDim, textAlign: "center", marginTop: 8, fontSize: 14, lineHeight: 20 },
+  // ===== Apple Music connect hero =====
+  heroWrap: {
+    marginHorizontal: 20, marginTop: 16, borderRadius: 20, overflow: "hidden",
+    shadowColor: "#FA2D48", shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10,
+  },
+  hero: { padding: 22 },
+  heroLogo: {
+    width: 52, height: 52, borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center",
+  },
+  heroTitle: { color: "#fff", fontSize: 26, fontWeight: "800", letterSpacing: -0.6, marginTop: 14 },
+  heroSub: { color: "rgba(255,255,255,0.92)", fontSize: 14, lineHeight: 20, marginTop: 6 },
+  heroBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start",
+    backgroundColor: "#fff", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 999, marginTop: 18, minHeight: 40,
+  },
+  heroBtnText: { color: "#FA2D48", fontSize: 14, fontWeight: "800", letterSpacing: 0.2 },
+  heroNote: { color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: "600", marginTop: 14 },
 
-  profileRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
-  profileAvatar: { width: 48, height: 48, borderRadius: 24 },
-  profileName: { color: COLORS.text, fontWeight: "600", fontSize: 16 },
-  profileMeta: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
+  footer: { color: "rgba(235,235,245,0.45)", fontSize: 12, lineHeight: 18, textAlign: "center", paddingHorizontal: 24, marginTop: 26 },
 
-  section: { color: COLORS.textDim, marginTop: 18, marginBottom: 8, fontSize: 13, fontWeight: "500", paddingHorizontal: 4 },
-  empty: { color: COLORS.textMute, fontSize: 13, paddingHorizontal: 4 },
-  row: { flexDirection: "row", alignItems: "center", padding: 10, gap: 12 },
-  thumb: { width: 48, height: 48, borderRadius: 8, backgroundColor: "#222" },
-  rowTitle: { color: COLORS.text, fontWeight: "500" },
-  rowSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
-
-  // ===== App-icon-style service selector =====
-  serviceRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 24,
-    marginTop: 20,
-    marginBottom: 28,
+  // ===== Now-playing bar =====
+  nowBar: {
+    position: "absolute", left: 12, right: 12, bottom: 96,
+    flexDirection: "row", alignItems: "center", gap: 12,
+    paddingHorizontal: 12, paddingVertical: 10,
+    backgroundColor: "rgba(34,35,38,0.98)", borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)",
+    shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 12,
   },
-  serviceIcon: { alignItems: 'center', gap: 8 },
-  serviceIconBg: {
-    width: 72, height: 72,
-    borderRadius: 16,   // iPhone-style "squircle" feel
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
-  },
-  serviceIconSelected: { transform: [{ scale: 1.08 }] },
-  serviceLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: '500' },
-  serviceLabelSelected: { color: '#FFFFFF', fontWeight: '700' },
-  serviceSelectedDot: {
-    width: 5, height: 5,
-    borderRadius: 2.5,
-    backgroundColor: '#FFD60A',   // Convoy gold dot under the active label
-  },
-
-  // ===== Admin broadcast card =====
-  broadcastCard: {
-    marginBottom: 14, padding: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,214,10,0.3)',
-  },
-  broadcastHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  broadcastTitle: { color: '#FFD60A', fontSize: 15, fontWeight: '700', flex: 1 },
-  // Tier-color quality pill that lives in the broadcast card header.
-  qualityBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  qualityBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-  },
-  broadcastSub: { color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 14 },
-  broadcastBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, backgroundColor: '#FFD60A',
-    paddingVertical: 12, borderRadius: 12,
-  },
-  broadcastBtnActive: { backgroundColor: 'rgba(255,59,48,0.15)', borderWidth: 1, borderColor: '#FF3B30' },
-  broadcastBtnDisabled: { opacity: 0.45 },
-  broadcastBtnText: { color: '#1C1C1E', fontSize: 15, fontWeight: '700' },
+  nowArt: { width: 44, height: 44, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.06)" },
+  nowTitle: { color: COLORS.text, fontSize: 14, fontWeight: "700" },
+  nowSub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
 });

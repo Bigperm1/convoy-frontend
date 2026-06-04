@@ -7,8 +7,9 @@ import { COLORS } from "./theme";
 import { geocodeQuery } from "./voiceBus";
 import { useVoice } from "./useVoice";
 import { useAuth } from "./auth";
+import { GOOGLE_MAPS_KEY } from "./api";
 
-const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
+const KEY = GOOGLE_MAPS_KEY;
 
 type Suggestion = { place_id: string; description: string };
 type Props = {
@@ -54,37 +55,55 @@ function ensureGoogleWeb(): Promise<void> {
   return _googleReadyPromise;
 }
 
-// REST-based autocomplete (works on iOS/Android/Expo Go)
-async function autocompleteRest(input: string, origin?: { lat: number; lng: number }): Promise<Suggestion[]> {
-  const url = new URL("https://maps.googleapis.com/maps/api/place/autocomplete/json");
-  url.searchParams.set("input", input);
-  url.searchParams.set("key", KEY);
-  if (origin) {
-    url.searchParams.set("location", `${origin.lat},${origin.lng}`);
-    url.searchParams.set("radius", "50000");
-  }
+// REST-based autocomplete via the Places API (New) — works on iOS/Android/Expo Go.
+// The legacy /maps/api/place/* endpoints are NOT available to projects that
+// first enabled Places after 1 Mar 2025 (convoy-497805's key was created later),
+// so they return REQUEST_DENIED and the search silently showed no suggestions.
+// Places (New) uses POST + a JSON body + an X-Goog-Api-Key header.
+async function autocompleteRest(input: string, origin?: { lat: number; lng: number }, onDebug?: (s: string) => void): Promise<Suggestion[]> {
   try {
-    const res = await fetch(url.toString());
+    const body: any = { input };
+    if (origin) {
+      body.locationBias = {
+        circle: { center: { latitude: origin.lat, longitude: origin.lng }, radius: 50000.0 },
+      };
+    }
+    const res = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": KEY },
+      body: JSON.stringify(body),
+    });
     const data = await res.json();
-    if (data.status !== "OK") return [];
-    return (data.predictions || []).slice(0, 5).map((p: any) => ({ place_id: p.place_id, description: p.description }));
-  } catch { return []; }
+    onDebug?.(`HTTP ${res.status}${res.ok ? "" : " ERR"} key=\u2026${(KEY || "").slice(-5)} ${JSON.stringify(data).slice(0, 150)}`);
+    // (New) returns { suggestions: [{ placePrediction: { placeId, text: { text } } }, ...] }.
+    // Some entries can be queryPrediction (no place) — filter to placePrediction only.
+    return (data.suggestions || [])
+      .filter((s: any) => s.placePrediction)
+      .slice(0, 5)
+      .map((s: any) => ({
+        place_id: s.placePrediction.placeId,
+        description: s.placePrediction.text?.text ?? "",
+      }));
+  } catch (e) { onDebug?.(`THREW key=\u2026${(KEY || "").slice(-5)}: ${String(e).slice(0, 150)}`); return []; }
 }
 
+// Place Details via the Places API (New): GET /v1/places/{placeId} with a field
+// mask header. Returns location + names we map back to our {lat,lng,label} shape.
 async function placeDetailsRest(place_id: string): Promise<{ lat: number; lng: number; label: string } | null> {
-  const url = new URL("https://maps.googleapis.com/maps/api/place/details/json");
-  url.searchParams.set("place_id", place_id);
-  url.searchParams.set("fields", "geometry/location,name,formatted_address");
-  url.searchParams.set("key", KEY);
   try {
-    const res = await fetch(url.toString());
+    const res = await fetch(`https://places.googleapis.com/v1/places/${place_id}`, {
+      method: "GET",
+      headers: {
+        "X-Goog-Api-Key": KEY,
+        "X-Goog-FieldMask": "location,displayName,formattedAddress",
+      },
+    });
     const data = await res.json();
-    if (data.status !== "OK") return null;
-    const r = data.result;
+    if (!data.location) return null;
     return {
-      lat: r.geometry.location.lat,
-      lng: r.geometry.location.lng,
-      label: r.name || r.formatted_address,
+      lat: data.location.latitude,
+      lng: data.location.longitude,
+      label: data.displayName?.text || data.formattedAddress || "",
     };
   } catch { return null; }
 }
@@ -93,6 +112,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
   const [text, setText] = useState(initialValue || "");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
+  const [dbg, setDbg] = useState<string>("");
   const tRef = useRef<any>(null);
 
   useEffect(() => {
@@ -122,7 +142,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
         }
       );
     } else {
-      const list = await autocompleteRest(q, origin);
+      const list = await autocompleteRest(q, origin, setDbg);
       setSuggestions(list);
     }
   };
@@ -225,15 +245,20 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           own content without affecting avatar placement. */}
       <View style={styles.searchRow} pointerEvents="box-none">
         <View style={styles.bar} {...dismissPan.panHandlers}>
-          {/* Charcoal search glyph on the left — Google Maps style anchor.
-              Dark color (#5F6368) works against the new white pill bar. */}
-          <Ionicons name="search" size={18} color="#5F6368" />
+          {/* Convoy logo on the LEFT = the menu button (Google puts its 'G'
+              here). Tapping opens the Convoy menu, which drops below the bar.
+              Falls back to a search glyph if no logo slot was provided. */}
+          {profileSlot ? (
+            <View style={styles.logoSlot}>{profileSlot}</View>
+          ) : (
+            <Ionicons name="search" size={18} color="rgba(235,235,245,0.55)" />
+          )}
           <TextInput
             testID="destination-input"
             value={text}
             onChangeText={onChangeText}
-            placeholder="Search destination"
-            placeholderTextColor="#80868B"
+            placeholder="Search here"
+            placeholderTextColor="rgba(235,235,245,0.5)"
             style={styles.input}
             onFocus={() => setOpen(true)}
             returnKeyType="go"
@@ -253,7 +278,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           )}
           {!!text && (
             <TouchableOpacity testID="destination-clear" onPress={clear}>
-              <Ionicons name="close-circle" size={20} color="#5F6368" />
+              <Ionicons name="close-circle" size={20} color="rgba(235,235,245,0.6)" />
             </TouchableOpacity>
           )}
           {/* PTT mic — yellow circle, press-and-hold like Google Maps' voice
@@ -263,41 +288,19 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
               testID="search-mic"
               onPressIn={onMicPressIn}
               onPressOut={onMicPressOut}
-              activeOpacity={0.85}
-              style={[styles.micBtn, voice.recording && styles.micBtnRec]}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.micBtn}
             >
               <Ionicons
                 name={voice.recording ? "radio" : "mic"}
-                size={16}
-                color={voice.recording ? "#fff" : "#1a1a1a"}
+                size={22}
+                color={voice.recording ? "#FF3B30" : "#FFD60A"}
               />
             </TouchableOpacity>
           </Animated.View>
         </View>
-        {/* Profile avatar — opens the Hub screen. OUTSIDE the white pill, to
-            the right, with marginLeft 10 so it visually reads as a separate
-            element (mirrors Google Maps). alignSelf: "center" keeps it on
-            the row's vertical centerline alongside the pill. */}
-        {/* Profile control — by default a round avatar that opens the Hub.
-            The map passes `profileSlot` to render the global LogoMenu here
-            instead, so the search-bar's right-side control becomes the
-            app-wide Garage/Community/Settings/Profile menu. */}
-        {profileSlot ? (
-          <View style={styles.avatarSlot}>{profileSlot}</View>
-        ) : (
-          <TouchableOpacity
-            testID="search-profile"
-            onPress={onProfilePress}
-            activeOpacity={0.8}
-            style={styles.avatarBtn}
-          >
-            {avatarUri ? (
-              <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
-            ) : (
-              <Ionicons name="person" size={18} color="#fff" />
-            )}
-          </TouchableOpacity>
-        )}
+        {/* Logo/menu now lives on the LEFT inside the bar — no right-side control. */}
       </View>
       {open && suggestions.length > 0 && (
         <ScrollView
@@ -316,6 +319,11 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           ))}
         </ScrollView>
       )}
+      {dbg ? (
+        <Text style={{ color: "#FF3B30", fontSize: 11, marginTop: 6, marginHorizontal: 12, backgroundColor: "rgba(0,0,0,0.6)", padding: 4 }} numberOfLines={5}>
+          {dbg}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -345,20 +353,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 14,
+    backgroundColor: 'rgba(34,35,38,0.96)',
+    paddingLeft: 8,
+    paddingRight: 14,
     paddingVertical: 7,
     borderRadius: 28,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.06)',
+    borderColor: 'rgba(255,255,255,0.12)',
     shadowColor: '#000',
-    shadowOpacity: 0.18,
+    shadowOpacity: 0.3,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
     elevation: 5,
   },
   // Dark charcoal text on white surface — high contrast for readability.
-  input: { flex: 1, fontSize: 16, color: '#1C1C1E', paddingVertical: 0 },
+  input: { flex: 1, fontSize: 16, color: '#F5F5F7', paddingVertical: 0 },
   // The Go arrow stays in Convoy blue accent so the submit affordance is
   // unmistakable on the light bar.
   goBtn: {
@@ -370,10 +379,9 @@ const styles = StyleSheet.create({
   // Yellow PTT mic — 30×30 circle, inline child of the bar (NOT absolute).
   // marginLeft 6 keeps it tight against the input text.
   micBtn: {
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: '#FFD60A',
+    width: 32, height: 32,
     alignItems: 'center', justifyContent: 'center',
-    marginLeft: 6,
+    marginLeft: 2,
   },
   // When actively recording the mic flips to a hot red to mirror the legacy
   // tab-bar mic's "now broadcasting" affordance.
@@ -395,10 +403,12 @@ const styles = StyleSheet.create({
   // Wrapper that keeps a custom profileSlot (e.g. LogoMenu) on the same
   // vertical centerline as the search pill, matching the avatar's gutter.
   avatarSlot: { marginLeft: 10, alignSelf: 'center' },
+  // Leading logo/menu button inside the bar (left), Google 'G' position.
+  logoSlot: { alignSelf: 'center', marginRight: 2 },
   // Suggestion list — white surface harmonizes with the new bar; dark text.
   // Offset by the row's horizontal padding (12) so it visually aligns under
   // the pill rather than under the avatar.
-  list: { backgroundColor: "#FFFFFF", borderRadius: 14, marginTop: 8, marginHorizontal: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.08)", overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
+  list: { backgroundColor: "rgba(28,28,30,0.98)", borderRadius: 14, marginTop: 8, marginHorizontal: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.10)", overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
   row: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12 },
-  rowText: { color: "#202124", flex: 1, fontSize: 14 },
+  rowText: { color: "#F5F5F7", flex: 1, fontSize: 14 },
 });

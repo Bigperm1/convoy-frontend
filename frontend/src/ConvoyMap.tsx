@@ -61,8 +61,7 @@ interface ConvoyMapProps {
   user?: UserLocation | null;
   hideSelfMarker?: boolean;
   mapView?: "heading_up" | "north_up";
-  // map.tsx may pass "hybridFlyover" (3D toggle) — we treat it as hybrid + pitch.
-  mapType?: "hybrid" | "roadmap" | "hybridFlyover";
+  mapType?: "hybrid" | "roadmap";
   peers?: Record<string, Peer> | Peer[] | null;
   leaderUserId?: string | null;
   hazards?: Hazard[] | null;
@@ -134,6 +133,14 @@ const HAZARD_COLOR: Record<string, string> = {
   police: "#3478F6", accident: "#FF453A", road: "#FF9F0A", traffic: "#FF9F0A",
 };
 
+// Always hide Google's transit overlay (SkyTrain / bus / subway lines + station
+// icons). Convoy is a driving app, so transit lines are clutter. customMapStyle
+// only affects the "standard" (roadmap) base map; satellite/hybrid never draws
+// these overlays anyway, so applying this unconditionally is safe.
+const HIDE_TRANSIT_STYLE: any[] = [
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+];
+
 type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer };
 
 // ===== CarMarker =====
@@ -147,13 +154,22 @@ type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?
 function CarMarker({ car, onPress }: { car: CarPoint; onPress?: () => void }) {
   const [track, setTrack] = useState(true);
   const size = car.leader ? 52 : 44;
+  // The marker is captured into a native bitmap sized to this view's bounds.
+  // A rotated square of side `size` needs up to size*√2 (≈1.41×) to avoid
+  // clipping its corners, so the OUTER box is 1.5× and centers the rotated car
+  // inside it. The transparent margin is invisible but stops the top/bottom/
+  // corner clipping seen on denser screens (1080/1440).
+  const box = Math.ceil(size * 1.5);
   const src = getVehiclePngOrDefault(car.color);
 
   // Whenever the visual inputs change, re-enable tracking so the marker
   // re-snapshots with the new paint / rotation, then settle it off again.
+  // The settle is generous (1200ms) so high-density devices finish decoding
+  // the PNG before we freeze the snapshot — a short timer froze a half-painted
+  // (clipped) car on 1080/1440 screens while 720 finished in time.
   useEffect(() => {
     setTrack(true);
-    const t = setTimeout(() => setTrack(false), 800);
+    const t = setTimeout(() => setTrack(false), 1200);
     return () => clearTimeout(t);
   }, [src, car.color, car.heading]);
 
@@ -167,14 +183,18 @@ function CarMarker({ car, onPress }: { car: CarPoint; onPress?: () => void }) {
       zIndex={car.id === SELF_ID || car.leader ? 1000 : 1}
       onPress={() => { if (car.peer) onPress?.(); }}
     >
-      <View style={{ width: size, height: size, transform: [{ rotate: `${car.heading || 0}deg` }] }}>
-        <Image
-          source={src as any}
-          style={{ width: size, height: size, resizeMode: "contain" }}
-          // Final guarantee: the instant the PNG paints, force one more
-          // snapshot so the car (not a blue placeholder) is what's captured.
-          onLoad={() => { setTrack(true); setTimeout(() => setTrack(false), 200); }}
-        />
+      {/* Oversized transparent box so the rotated car never clips at its bounds. */}
+      <View style={{ width: box, height: box, alignItems: "center", justifyContent: "center" }}>
+        <View style={{ width: size, height: size, transform: [{ rotate: `${car.heading || 0}deg` }] }}>
+          <Image
+            source={src as any}
+            style={{ width: size, height: size, resizeMode: "contain" }}
+            fadeDuration={0}
+            // The instant the PNG paints, force one more snapshot so the car
+            // (not a blue placeholder or half-rendered frame) is captured.
+            onLoad={() => { setTrack(true); setTimeout(() => setTrack(false), 400); }}
+          />
+        </View>
       </View>
     </Marker>
   );
@@ -197,8 +217,11 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
   // Suppress the onUserPan callback while WE are the ones moving the camera
   // (programmatic animateCamera fires onPanDrag-adjacent region changes).
   const selfMovingRef = useRef(false);
+  // Tracks which destination we've already framed (zoom-to-fit) so we don't
+  // re-fit on every route recompute / GPS tick.
+  const fittedDestRef = useRef<string | null>(null);
 
-  // ----- Base-map type. react-native-maps has no "hybridFlyover"; map it to hybrid. -----
+  // ----- Base-map type: "roadmap" -> standard, otherwise satellite/hybrid. -----
   const resolvedMapType: "standard" | "hybrid" = mapType === "roadmap" ? "standard" : "hybrid";
 
   // ----- Initial region (only used for uncontrolled first paint) -----
@@ -280,6 +303,35 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigationActive]);
 
+  // ===== Preview: fit the camera to ALL alternative routes =====
+  // When routes are computed and we're NOT navigating, zoom out to frame the
+  // whole set of options end-to-end (Google's route-overview behavior). Guarded
+  // by fittedDestRef so it fires ONCE per destination, not on every recompute.
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!destination) { fittedDestRef.current = null; return; }
+    if (!m || !readyRef.current || navigationActive || routes.length === 0) return;
+    const key = `${destination.lat.toFixed(5)},${destination.lng.toFixed(5)}`;
+    if (fittedDestRef.current === key) return;
+    const pts: { latitude: number; longitude: number }[] = [];
+    routes.forEach((r: { polyline: string }) => decodePolyline(r.polyline).forEach((c) => pts.push(c)));
+    if (user && typeof user.lat === "number" && typeof user.lng === "number") {
+      pts.push({ latitude: user.lat, longitude: user.lng });
+    }
+    pts.push({ latitude: destination.lat, longitude: destination.lng });
+    if (pts.length < 2) return;
+    fittedDestRef.current = key;
+    selfMovingRef.current = true;
+    try {
+      m.fitToCoordinates(pts, {
+        edgePadding: { top: 140, right: 60, bottom: 340, left: 60 },
+        animated: true,
+      });
+    } catch {}
+    setTimeout(() => { selfMovingRef.current = false; }, 900);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routes, destination, navigationActive]);
+
   // ===== Build the car-marker list (self + peers) =====
   const cars: CarPoint[] = [];
   if (!hideSelfMarker && user && typeof user.lat === "number" && typeof user.lng === "number") {
@@ -306,6 +358,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
         provider={PROVIDER_GOOGLE}
         initialRegion={initialRegion}
         mapType={resolvedMapType}
+        customMapStyle={HIDE_TRANSIT_STYLE}
         showsTraffic={!!showTraffic}
         showsUserLocation={false}
         showsMyLocationButton={false}
@@ -349,26 +402,44 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
           </Marker>
         )}
 
-        {/* Route polylines — alternates dimmed, selected route bright on top. */}
-        {destination && routes.map((r: { polyline: string; color?: string }, i: number) => {
+        {/* Route polylines — Google style: gray alternates first, then the
+            SELECTED route drawn LAST (on top) in bright app-yellow. Each line is
+            keyed by the current selection so react-native-maps fully REMOUNTS it
+            when selection changes — without that, iOS keeps the old stroke color
+            and the selected line renders with a stale/default (blue) stroke. */}
+        {destination && routes.map((r: { polyline: string }, i: number) => {
+          if (i === selectedRouteIndex) return null; // selected drawn on top below
           const coords = decodePolyline(r.polyline);
           if (coords.length === 0) return null;
-          const isSel = i === selectedRouteIndex;
-          const color = r.color ?? (i === 0 ? "#34C759" : i === 1 ? "#FF9500" : "#FF3B30");
           return (
             <Polyline
-              key={`route_${i}`}
+              key={`alt_${i}_${selectedRouteIndex}`}
               coordinates={coords}
-              strokeColor={color}
-              strokeWidth={isSel ? 6 : 4}
-              zIndex={isSel ? 2 : 1}
-              tappable={!isSel}
+              strokeColor="#9AA0A6"
+              strokeWidth={4}
+              zIndex={1}
+              tappable
               onPress={() => onSelectRoute?.(i)}
               lineCap="round"
               lineJoin="round"
             />
           );
         })}
+        {destination && routes[selectedRouteIndex] && (() => {
+          const coords = decodePolyline(routes[selectedRouteIndex].polyline);
+          if (coords.length === 0) return null;
+          return (
+            <Polyline
+              key={`sel_${selectedRouteIndex}`}
+              coordinates={coords}
+              strokeColor="#FFD60A"
+              strokeWidth={7}
+              zIndex={3}
+              lineCap="round"
+              lineJoin="round"
+            />
+          );
+        })()}
       </MapView>
     </View>
   );

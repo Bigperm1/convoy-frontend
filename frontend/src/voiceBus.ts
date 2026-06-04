@@ -1,6 +1,8 @@
 // Lightweight pub/sub for voice command results.
 // Any screen can subscribe to react to recognized intents.
 
+import { GOOGLE_MAPS_KEY } from "./api";
+
 export type VoiceCommand = {
   text: string;
   intent: string | null;
@@ -29,7 +31,7 @@ export async function geocodeQuery(
   query: string,
   origin?: { lat: number; lng: number }
 ): Promise<{ lat: number; lng: number; label: string } | null> {
-  const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY as string;
+  const KEY = GOOGLE_MAPS_KEY;
   if (!KEY || !query) return null;
 
   // 1) Try Find Place From Text — handles POIs ("nearest gas station") + landmarks

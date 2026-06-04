@@ -7,6 +7,7 @@ import { View, ActivityIndicator, Platform, StyleSheet } from "react-native";
 import { BlurView } from "expo-blur";
 import VoiceController from "../../src/VoiceController";
 import VoiceTabButton from "../../src/VoiceTabButton";
+import ConvoyWaveIcon from "../../src/components/ConvoyWaveIcon";
 import CommsTalkingToast from "../../src/components/CommsTalkingToast";
 import { useLiveWalkieListener } from "../../src/livePtt";
 import { useSettings, hydrateCarFromProfile } from "../../src/settings";
@@ -171,36 +172,36 @@ export default function AppLayout() {
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
-            backgroundColor: Platform.OS === "web" ? "rgba(20,20,22,0.92)" : "transparent",
-            borderTopColor: COLORS.hairline,
+            // Match the search pill's dark surface so the bar reads as the same
+            // material as the rest of the Google-style chrome.
+            backgroundColor: "rgba(34,35,38,0.96)",
+            borderTopColor: "rgba(255,255,255,0.12)",
             borderTopWidth: StyleSheet.hairlineWidth,
-            height: 84,
-            paddingBottom: 22,
+            height: 88,
+            paddingBottom: 24,
             paddingTop: 10,
             position: "absolute",
             // allow the elevated mic to overflow upward
             overflow: "visible",
           },
-          tabBarBackground: () =>
-            Platform.OS === "web" ? null : (
-              <BlurView tint="dark" intensity={70} style={StyleSheet.absoluteFill} />
-            ),
+          // Solid dark surface (no blur) so the color matches the search bar.
+          tabBarBackground: () => null,
           tabBarActiveTintColor: COLORS.primary,
           tabBarInactiveTintColor: COLORS.textDim,
-          tabBarLabelStyle: { fontSize: 10, fontWeight: "600", letterSpacing: -0.1 },
+          tabBarLabelStyle: { fontSize: 12, fontWeight: "500", letterSpacing: 0 },
         }}
       >
         <Tabs.Screen name="map" options={{
           tabBarLabel: "Map",
-          tabBarActiveTintColor: "#0A84FF",
+          tabBarActiveTintColor: "#1F6BFF",
           tabBarButtonTestID: "tab-map",
-          tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size - 2} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="navigate" size={27} color={color} />,
         }} />
         <Tabs.Screen name="talk" options={{
           tabBarLabel: "Comms",
-          tabBarActiveTintColor: "#FF6A00",
+          tabBarActiveTintColor: "#FFD60A",
           tabBarButtonTestID: "tab-talk",
-          tabBarIcon: ({ color, size }) => <Ionicons name="flash" size={size - 1} color={color} />,
+          tabBarIcon: ({ color }) => <ConvoyWaveIcon size={27} color={color} />,
         }} />
         {/* Voice screen is no longer represented in the bottom tab bar Ã¢ÂÂ the
             press-and-hold mic now lives inside the map's search bar (Google
@@ -211,7 +212,7 @@ export default function AppLayout() {
           tabBarLabel: "Music",
           tabBarActiveTintColor: "#FF453A",
           tabBarButtonTestID: "tab-music",
-          tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" size={size - 2} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="musical-notes" size={27} color={color} />,
         }} />
         {/* Hub is now reached via the circular profile avatar on the right
             edge of the map search bar (mirrors Google Maps). Hidden from the

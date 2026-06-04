@@ -120,10 +120,8 @@ export default function MapScreen() {
   // mapType:    "hybrid" = satellite + labels (default), "roadmap" = flat road view.
   // showTraffic / showTransit / showHazards toggle their respective overlays.
   // layersOpen drives the layers bottom sheet modal.
-  const [mapType, setMapType] = useState<"hybrid" | "roadmap" | "hybridFlyover">(getSettings().show3DMap ? "hybridFlyover" : "hybrid");
-    const { weather } = (useWeatherLayer as any)(0, null, null);
+  const [mapType, setMapType] = useState<"hybrid" | "roadmap">("hybrid");
   const [showTraffic, setShowTraffic] = useState(true);
-  const [showTransit, setShowTransit] = useState(false);
   const [showHazards, setShowHazards] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
   // Position history buffer — keeps the last 30s of GPS samples so the user
@@ -200,6 +198,9 @@ export default function MapScreen() {
 
   const [settings] = useSettings();
   const showWeatherLayer = (settings as any).showWeatherLayer ?? false;
+  // Live weather for the on-map HUD — current conditions at the user's GPS
+  // position, fetched only while the Weather layer is enabled (auto-refresh ~5 min).
+  const { weather } = useWeatherLayer(coords?.lat ?? null, coords?.lng ?? null, showWeatherLayer);
 
   // Optional Convoy alert sound — chime when a NEW community hazard appears
   const prevHazardIdsRef = useRef<Set<string>>(new Set());
@@ -258,9 +259,10 @@ export default function MapScreen() {
       // Color-rank: green (fastest) → orange (mid) → red (slowest). Cast to
       // any so we can attach an extra `color` field without modifying the
       // shared NavRoute type in src/nav.ts.
-      const results = sorted.map((r, i) => ({
+      // Cap at two options — fastest + best traffic-aware alternate.
+      const results = sorted.slice(0, 2).map((r, i) => ({
         ...r,
-        color: i === 0 ? '#34C759' : i === 1 ? '#FF9500' : '#FF3B30',
+        color: i === 0 ? '#FFD60A' : '#9AA0A6',
       })) as any[];
       setRoutes(results);
       setSelectedRouteIndex(0);
@@ -273,6 +275,13 @@ export default function MapScreen() {
     })();
     return () => { cancelled = true; };
   }, [destination, coords, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
+
+  // When a destination is picked, drop follow-mode so the camera can zoom out to
+  // frame all route options (ConvoyMap fits to the polylines). The Recenter FAB
+  // re-enables follow when the driver wants to track their car again.
+  useEffect(() => {
+    if (destination) setIsFollowing(false);
+  }, [destination]);
 
   // Mirror RouteInfo whenever the user picks a different alternate
   useEffect(() => {
@@ -298,7 +307,7 @@ export default function MapScreen() {
         ferries: settings.avoidFerries,
       }).then((res) => {
         if (res.length > 0) {
-          setRoutes(res);
+          setRoutes(res.slice(0, 2));
           setSelectedRouteIndex(0);
           if (!navMuted) Speech.speak("Recalculating route.", { rate: 1.0 });
         }
@@ -1195,30 +1204,7 @@ export default function MapScreen() {
           from the dynamic island / status bar across devices, and zIndex:100
           guarantees it stays above the map's overlay markers/controls. */}
       <View style={styles.topBar} pointerEvents="box-none">
-        {searchVisible && (Platform.OS === "web" ? (
-          <View pointerEvents="box-none">
-            {/* Subtle live pill overlay — small green dot + live count.
-                Anchors to the right above the search bar so it surfaces
-                presence at-a-glance without a heavy dark header. */}
-            {(() => {
-              const selfLive = settings.avatarLive !== false && !!settings.activeCommunityId ? 1 : 0;
-              const liveCount = selfLive + peerList.length;
-              return (
-                <View style={styles.liveOverlay} pointerEvents="none">
-                  <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts</Text>
-                </View>
-              );
-            })()}
-            <DestinationSearch
-              origin={coords}
-              onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
-              onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
-              onProfilePress={() => router.push("/(app)/hub" as any)}
-              profileSlot={<View style={styles.mapLogoBacking}><LogoMenu size={30} /></View>}
-            />
-          </View>
-        ) : (
+        {searchVisible && (
           <View pointerEvents="box-none">
             {(() => {
               const selfLive = settings.avatarLive !== false && !!settings.activeCommunityId ? 1 : 0;
@@ -1235,10 +1221,10 @@ export default function MapScreen() {
               onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
               onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
               onProfilePress={() => router.push("/(app)/hub" as any)}
-              profileSlot={<View style={styles.mapLogoBacking}><LogoMenu size={30} /></View>}
+              profileSlot={<LogoMenu size={28} />}
             />
           </View>
-        ))}
+        )}
       </View>
 
       {/* ===== Community Routes — horizontal chip strip (visible when there are shared cruises) ===== */}
@@ -1323,78 +1309,72 @@ export default function MapScreen() {
         </SafeAreaView>
       )}
 
-      {/* ===== Route preview card (full) — shown when NOT collapsed AND NOT navigating ===== */}
+      {/* ===== Route preview — Google-Maps-style bottom sheet (driving only) ===== */}
       {destination && route && navMode === "preview" && !previewCollapsed && (
-        <Glass radius={20} style={styles.routeCard}>
-          <View style={styles.routeRow}>
-            <View style={styles.routeIcon}><Ionicons name="navigate" size={22} color="#fff" /></View>
+        <View style={styles.routeSheet}>
+          <View style={styles.sheetGrabber} />
+          <View style={styles.sheetHeaderRow}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.routeTo} numberOfLines={1}>To {destination.label}</Text>
-              <Text style={styles.routeMeta}>{route.duration_text} · {route.distance_text}{routes[selectedRouteIndex]?.summary ? ` · via ${routes[selectedRouteIndex].summary}` : ""}</Text>
+              <Text style={styles.sheetDest} numberOfLines={1}>{destination.label}</Text>
+              <Text style={styles.sheetMeta} numberOfLines={1}>
+                {(activeRoute?.duration_in_traffic_text || route.duration_text)} · {route.distance_text}
+                {routes[selectedRouteIndex]?.summary ? ` · via ${routes[selectedRouteIndex].summary}` : ""}
+              </Text>
             </View>
-            {/* Collapse-to-pill chevron (manual override of the auto-collapse-on-movement) */}
-            <TouchableOpacity testID="route-collapse" onPress={() => setPreviewCollapsed(true)} style={{ padding: 4, marginRight: 2 }}>
-              <Ionicons name="chevron-up" size={22} color={COLORS.textDim} />
+            {/* Collapse-to-pill chevron (manual override of auto-collapse-on-movement) */}
+            <TouchableOpacity testID="route-collapse" onPress={() => setPreviewCollapsed(true)} style={styles.sheetHeaderBtn}>
+              <Ionicons name="chevron-down" size={22} color={COLORS.textDim} />
             </TouchableOpacity>
-            <TouchableOpacity testID="route-clear" onPress={clearRoute} style={{ padding: 4 }}>
-              <Ionicons name="close-circle" size={24} color={COLORS.textDim} />
+            <TouchableOpacity testID="route-clear" onPress={clearRoute} style={styles.sheetHeaderBtn}>
+              <Ionicons name="close" size={22} color={COLORS.textDim} />
             </TouchableOpacity>
           </View>
 
-          {/* Alternates picker — tappable chips when there are >1 routes.
-              Shows traffic-aware ETA (`duration_in_traffic_text`) when available
-              from Google's Directions API; falls back to free-flow time. */}
+          {/* Up to two traffic-based options. Fastest is selected by default and
+              rendered in convoy yellow (both here and on the map polyline). */}
           {routes.length > 1 && (
-            <View style={styles.altsRow}>
+            <View style={styles.routeOptsRow}>
               {routes.map((r, i) => {
                 const sel = i === selectedRouteIndex;
                 const eta = r.duration_in_traffic_text || r.duration_text;
-                const inTraffic = !!r.duration_in_traffic_text && r.duration_in_traffic_s !== r.duration_s;
                 return (
                   <TouchableOpacity
                     key={i}
                     testID={`alt-${i}`}
                     onPress={() => setSelectedRouteIndex(i)}
                     activeOpacity={0.85}
-                    style={[styles.altChip, sel && styles.altChipActive]}
+                    style={[styles.routeOpt, sel && styles.routeOptActive]}
                   >
-                    <View style={[styles.altDot, { backgroundColor: sel ? "#0A84FF" : inTraffic ? "#FF9F0A" : "#8E8E93" }]} />
-                    <View>
-                      <Text style={[styles.altDur, sel && { color: COLORS.text }]}>{eta}</Text>
-                      <Text style={styles.altSum} numberOfLines={1}>
-                        {r.summary || (i === 0 ? "Fastest" : `Alt ${i}`)}
-                        {inTraffic ? " · in traffic" : ""}
-                      </Text>
-                    </View>
+                    <Text style={[styles.routeOptEta, sel && styles.routeOptEtaActive]}>{eta}</Text>
+                    <Text style={[styles.routeOptSum, sel && styles.routeOptSumActive]} numberOfLines={1}>
+                      {r.summary || (i === 0 ? "Fastest" : "Alternate")}
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
           )}
 
-          {/* Action row */}
-          <View style={styles.actionRow}>
-            <TouchableOpacity testID="route-toggle" onPress={() => setShowSteps((s) => !s)} style={styles.secBtn}>
+          {/* Action row — Steps toggle, optional Share (admin), Start (convoy yellow). */}
+          <View style={styles.sheetActions}>
+            <TouchableOpacity testID="route-toggle" onPress={() => setShowSteps((s) => !s)} style={styles.sheetSecBtn} activeOpacity={0.85}>
               <Ionicons name={showSteps ? "chevron-down" : "list"} size={18} color={COLORS.text} />
-              <Text style={styles.secBtnText}>{showSteps ? "Hide" : "Steps"}</Text>
+              <Text style={styles.sheetSecText}>{showSteps ? "Hide" : "Steps"}</Text>
             </TouchableOpacity>
-            {/* Admin-only: share this destination with the active community.
-                Hidden if the active community has Map Connect disabled. */}
             {isAdminOfActive && settings.activeCommunityId && activeMapEnabled && (
               <TouchableOpacity
                 testID="save-to-convoy"
                 onPress={saveCurrentDestinationToConvoy}
-                style={[styles.secBtn, savingRoute && { opacity: 0.6 }]}
+                style={[styles.sheetSecBtn, savingRoute && { opacity: 0.6 }]}
                 disabled={savingRoute}
                 activeOpacity={0.85}
               >
-                <Ionicons name={savingRoute ? "hourglass" : "share-social"} size={18} color={COLORS.warning} />
-                <Text style={[styles.secBtnText, { color: COLORS.warning }]}>{savingRoute ? "Sharing…" : "Share"}</Text>
+                <Ionicons name={savingRoute ? "hourglass" : "share-social"} size={18} color="#FFD60A" />
               </TouchableOpacity>
             )}
-            <TouchableOpacity testID="start-nav" onPress={startNav} style={styles.startBtn} activeOpacity={0.85}>
-              <Ionicons name="navigate-circle" size={20} color="#fff" />
-              <Text style={styles.startBtnText}>Start</Text>
+            <TouchableOpacity testID="start-nav" onPress={startNav} style={styles.sheetStartBtn} activeOpacity={0.9}>
+              <Ionicons name="navigate" size={20} color="#0A0A0A" />
+              <Text style={styles.sheetStartText}>Start</Text>
             </TouchableOpacity>
           </View>
 
@@ -1409,7 +1389,7 @@ export default function MapScreen() {
               ))}
             </ScrollView>
           )}
-        </Glass>
+        </View>
       )}
 
       {/* ===== Turn-by-turn overlays — Google-Maps-style =====
@@ -1530,13 +1510,13 @@ export default function MapScreen() {
           Pulls live speed from coords.speed (m/s) → km/h. Floors small values
           to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
       <SpeedPill speedMs={coords?.speed} unit={settings.speedUnit} />
-      {/* Weather HUD — only shown when weather layer is on and we have data */}
+      {/* Weather HUD — compact temp-only chip stacked just above the speedometer
+          in the bottom-left HUD column (matches the speedo's box + opacity). */}
       {showWeatherLayer && weather && (
-        <View style={{ position: 'absolute', bottom: 120, left: 16, zIndex: 25 }}>
-          <WeatherHUD weather={weather} unit={settings.speedUnit} />
+        <View style={{ position: 'absolute', left: 12, bottom: 158, zIndex: 55 }}>
+          <WeatherHUD weather={weather} unit={settings.speedUnit} compact />
         </View>
       )}
-
       <PeerModal
         peer={selectedPeer ? { ...selectedPeer } as any : null}
         visible={!!selectedPeer}
@@ -1553,18 +1533,10 @@ export default function MapScreen() {
       {/* Layers / map-settings button - native Google position: top-right,
           just under the search bar. Opens the layers + settings sheet. Hidden
           during turn-by-turn so it never crowds the maneuver banner. */}
-      {navMode !== "turn-by-turn" && (
-        <TouchableOpacity
-          testID="layers-fab"
-          onPress={() => setLayersOpen(true)}
-          activeOpacity={0.85}
-          style={styles.layersBtn}
-        >
-          <Ionicons name="layers" size={20} color="#3C3C43" />
-        </TouchableOpacity>
-      )}
+      {/* Top-right Layers FAB removed — map layers now live in the Convoy menu
+          (tap the logo in the search bar → "Map Layers"). */}
 
-      <View pointerEvents="box-none" style={styles.fabStack}>
+      <View pointerEvents="box-none" style={[styles.fabStack, (destination && route && navMode === "preview" && !previewCollapsed) ? styles.fabStackLifted : null]}>
         {/* Police report button — top of stack. One-tap: posts a hazard with
             kind='police' at the GPS sample closest to (now - 5s), shows a
             success toast, and fires a haptic on native. */}
@@ -1574,7 +1546,7 @@ export default function MapScreen() {
           onPress={() => reportAlert('police')}
           activeOpacity={0.8}
         >
-          <MaterialCommunityIcons name="police-badge" size={24} color="#fff" />
+          <MaterialCommunityIcons name="police-badge" size={24} color="#4DA3FF" />
         </TouchableOpacity>
         {/* Road-hazard report button — same flow with kind='road'. */}
         <TouchableOpacity
@@ -1583,7 +1555,7 @@ export default function MapScreen() {
           onPress={() => reportAlert('road')}
           activeOpacity={0.8}
         >
-          <MaterialCommunityIcons name="alert" size={24} color="#fff" />
+          <MaterialCommunityIcons name="alert" size={24} color="#FFB340" />
         </TouchableOpacity>
         {/* ===== Recenter FAB =====
             Only visible when follow-mode is OFF (the user has panned away from
@@ -1599,7 +1571,7 @@ export default function MapScreen() {
             activeOpacity={0.85}
             style={styles.fab}
           >
-            <Ionicons name="locate" size={22} color="#0A84FF" />
+            <Ionicons name="locate" size={22} color="#fff" />
           </TouchableOpacity>
         )}
         {/* Stop Navigation — appears LEFT of the Directions FAB when a trip
@@ -1689,25 +1661,6 @@ export default function MapScreen() {
                   value={showWeatherLayer}
                   onValueChange={(v) => { void updateSettings({ showWeatherLayer: v }); }}
                   trackColor={{ false: '#3A3A3C', true: '#5AC8FA' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-              {/* 3D Map / Flyover */}
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>3D Map</Text>
-                  <Text style={styles.layerRowSub}>Building extrusions & flyover</Text>
-                </View>
-                <Switch
-                  value={mapType === "hybridFlyover"}
-                  onValueChange={(v) => { setMapType(v ? "hybridFlyover" : "hybrid"); void updateSettings({ show3DMap: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Transit overlay</Text>
-                  <Text style={styles.layerRowSub}>Buses, trains, subway</Text>
-                </View>
-                <Switch value={showTransit} onValueChange={setShowTransit}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>
@@ -1984,6 +1937,40 @@ const styles = StyleSheet.create({
   hazardBubble: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.85)" },
 
   routeCard: { position: "absolute", left: 12, right: 12, bottom: 110, maxHeight: 460 },
+
+  // ===== Google-Maps-style route preview bottom sheet =====
+  // Flush to the bottom edge, full width, top corners only. The FAB stack is
+  // lifted above this (styles.fabStackLifted) whenever it's visible so the
+  // controls never sit underneath it.
+  routeSheet: {
+    position: "absolute", left: 0, right: 0, bottom: 0,
+    backgroundColor: "rgba(20,20,22,0.98)",
+    borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    borderTopWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)",
+    paddingTop: 8, paddingHorizontal: 16,
+    paddingBottom: Platform.OS === "ios" ? 30 : 18,
+    maxHeight: "62%",
+    zIndex: 30,
+    shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: -4 }, elevation: 14,
+  },
+  sheetGrabber: { width: 38, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.22)", alignSelf: "center", marginBottom: 12 },
+  sheetHeaderRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingBottom: 12 },
+  sheetDest: { color: COLORS.text, fontSize: 19, fontWeight: "700", letterSpacing: -0.3 },
+  sheetMeta: { color: COLORS.success, fontSize: 13, marginTop: 3, fontWeight: "500" },
+  sheetHeaderBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(118,118,128,0.22)" },
+  routeOptsRow: { flexDirection: "row", gap: 10, paddingBottom: 12 },
+  routeOpt: { flex: 1, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)" },
+  routeOptActive: { borderColor: "#FFD60A", backgroundColor: "rgba(255,214,10,0.12)" },
+  routeOptEta: { color: COLORS.text, fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
+  routeOptEtaActive: { color: "#FFD60A" },
+  routeOptSum: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
+  routeOptSumActive: { color: "rgba(255,214,10,0.85)" },
+  sheetActions: { flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 2 },
+  sheetSecBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 13, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(255,255,255,0.05)" },
+  sheetSecText: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
+  sheetStartBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 14, backgroundColor: "#FFD60A" },
+  sheetStartText: { color: "#0A0A0A", fontWeight: "800", fontSize: 16, letterSpacing: 0.2 },
+  fabStackLifted: { bottom: 232 },
   routeRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
   routeIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center" },
   routeTo: { color: COLORS.text, fontWeight: "600", fontSize: 15 },
@@ -2149,19 +2136,19 @@ const styles = StyleSheet.create({
   // icon. fabPrimary (blue Directions) / stopNavBtn (red Stop) / the inline
   // recenter blue override just the fill.
   fab: {
-    width: 48, height: 48,
-    borderRadius: 24,
-    backgroundColor: "#FFFFFF",
+    width: 52, height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(28,28,30,0.92)",
     alignItems: "center", justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.08)",
-    shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 5,
   },
   // Waze-style colored report buttons - the two primary "report" actions are
   // solid color fills (no border) so they pop against the white utility
   // buttons. Blue police matches the police pin; amber matches the road pin.
-  fabPolice: { backgroundColor: "#3478F6", borderWidth: 0 },
-  fabHazard: { backgroundColor: "#FF9F0A", borderWidth: 0 },
+  fabPolice: {},
+  fabHazard: {},
   // Layers / map-settings button, native Google position (top-right, under the
   // search bar). White rounded square so it reads as a control, distinct from
   // the round action buttons in the bottom cluster.
@@ -2169,12 +2156,12 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 12,
     top: Platform.OS === "ios" ? 116 : 92,
-    width: 44, height: 44,
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
+    width: 48, height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(28,28,30,0.92)",
     alignItems: "center", justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.08)",
-    shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 5,
     zIndex: 50,
   },
@@ -2216,7 +2203,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 12,
     bottom: 90,                  // closer to the tab bar drawer per spec
-    gap: 8,                      // tighter gap between buttons
+    gap: 10,                     // a touch more breathing room between buttons
     alignItems: "center",
   },
   fab2: {
@@ -2229,7 +2216,7 @@ const styles = StyleSheet.create({
   },
   // Directions = primary action → Convoy blue. Same 42×42 footprint as the
   // others (was 44×44 in spec, but matching the rest reads cleaner).
-  fabPrimary: { backgroundColor: "#0A84FF", borderWidth: 0 },
+  fabPrimary: {},
   // Stop Navigation — red 42×42 button shown LEFT of Directions while a trip
   // is active. Same footprint, attention-grabbing red bg so the driver knows
   // exactly where to tap to bail out of nav.

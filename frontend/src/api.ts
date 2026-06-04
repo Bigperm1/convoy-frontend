@@ -16,6 +16,16 @@ export const BACKEND_URL =
   (process.env.EXPO_PUBLIC_BACKEND_URL as string) || PROD_BACKEND_URL;
 export const API_BASE = `${BACKEND_URL}/api`;
 
+// Same two-layer defense for the Google Maps web-services key (Places, Routes,
+// Weather, Geocoding, Roads). EAS Build has intermittently failed to inject
+// EXPO_PUBLIC_* vars (see the BACKEND_URL note above). Unlike the native Maps
+// SDK key (set in app.json, used for tiles), this key is ONLY read from the
+// env at bundle time — so a missing/stale injection silently kills
+// search/route/weather while tiles keep working. Hardcoding the prod key as a
+// fallback guarantees it's always present regardless of EAS env injection.
+const PROD_MAPS_KEY = "AIzaSyDj69IfW8Dy7aeX-gaHIdHGsSL1WO7sD_M";
+export const GOOGLE_MAPS_KEY = PROD_MAPS_KEY;
+
 const TOKEN_KEY = "convoy_token";
 
 export async function saveToken(token: string) {

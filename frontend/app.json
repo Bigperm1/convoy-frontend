@@ -35,7 +35,7 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 40,
+      "versionCode": 41,
       "googleServicesFile": "./google-services.json",
       "config": {
         "googleMaps": {
@@ -68,7 +68,8 @@
       [
         "react-native-maps",
         {
-          "iosGoogleMapsApiKey": "AIzaSyC0w5LHgZ1ud3EmeAhUkr4aOAOf89bE09U"
+          "iosGoogleMapsApiKey": "AIzaSyC0w5LHgZ1ud3EmeAhUkr4aOAOf89bE09U",
+          "androidGoogleMapsApiKey": "AIzaSyC0w5LHgZ1ud3EmeAhUkr4aOAOf89bE09U"
         }
       ],
       [

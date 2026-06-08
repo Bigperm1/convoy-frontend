@@ -38,6 +38,20 @@ const isAndroid = Platform.OS === 'android';
 // TODO(DHU): confirm this constant renders correctly on the head unit.
 const AA_UNIT_METERS = 1;
 
+// react-native-carplay's Android checkForConnection() emits a spurious
+// `didConnect` at startup even with NO head unit attached (it calls
+// eventEmitter.didConnect() unconditionally). Building any template before a
+// real Android Auto session exists crashes natively: createScreen() reads a
+// lateinit `carContext` that is only set once the car session connects. So on
+// Android we ignore connect events that arrive in the brief window right after
+// the library loads (the spurious one); genuine head-unit connections happen
+// well after launch and are honored normally.
+// TODO(native, next build): the upstream fix is guarding checkForConnection on
+// `carContext.isInitialized`; fold that into the next native build and remove
+// this JS window-guard at the same time.
+const ANDROID_SPURIOUS_CONNECT_GUARD_MS = 5000;
+let libLoadedAt = 0;
+
 // ---- lazy, guarded access to react-native-carplay ----
 // `undefined` = not yet attempted, `null` = unavailable. Typed loosely on
 // purpose (the library is a beta; we only call a handful of runtime methods).
@@ -48,6 +62,7 @@ function getLib(): any {
     if (Platform.OS !== 'web' && (NativeModules as any).RNCarPlay) {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       _lib = require('react-native-carplay');
+      libLoadedAt = Date.now();
     } else {
       _lib = null;
     }
@@ -229,7 +244,17 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
       }
     };
 
-    const onConnect = () => { setConnected(true); setRoot(); };
+    const onConnect = () => {
+      // Ignore react-native-carplay's spurious Android startup connect (see the
+      // note by ANDROID_SPURIOUS_CONNECT_GUARD_MS). Without this the library
+      // reports "connected" at launch with no car and setRoot() builds a
+      // template against an uninitialized carContext -> native crash.
+      if (isAndroid && Date.now() - libLoadedAt < ANDROID_SPURIOUS_CONNECT_GUARD_MS) {
+        return;
+      }
+      setConnected(true);
+      setRoot();
+    };
     const onDisconnect = () => {
       setConnected(false);
       mapTemplateRef.current = null;

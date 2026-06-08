@@ -2,7 +2,9 @@ import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
+import { Image } from "expo-image";
 import { COLORS } from "./theme";
+import { getVehiclePngOrDefault } from "./vehicleAssets";
 import { api } from "./api";
 import { getSettings } from "./settings";
 import type { Peer } from "./ConvoyMap";
@@ -53,6 +55,9 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
 
   if (!peer) return null;
   const distKm = myCoords ? haversineKm(myCoords, { lat: peer.lat, lng: peer.lng }) : null;
+  // Hail button content (icon+text) color: dark glyphs on the yellow idle/
+  // sending state for contrast, white on the green "sent" state.
+  const hailContent = hailSent ? "#fff" : "#1a1a1a";
 
   const hail = async () => {
     if (hailing || hailSent) return;
@@ -91,7 +96,11 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
             <View style={styles.inner}>
               <View style={styles.header}>
                 <View style={styles.avatar}>
-                  <Ionicons name="car-sport" size={28} color="#fff" />
+                  <Image
+                    source={getVehiclePngOrDefault(peer.activeColor ?? peer.carColor)}
+                    style={styles.avatarImg}
+                    contentFit="contain"
+                  />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.handle}>{peer.handle || "Driver"}</Text>
@@ -105,7 +114,7 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
               <View style={styles.metaRow}>
                 {distKm != null && (
                   <View style={styles.metaCell}>
-                    <Ionicons name="navigate" size={14} color={COLORS.primary} />
+                    <Ionicons name="navigate" size={14} color={COLORS.brand} />
                     <Text style={styles.metaText}>
                       {distKm < 1 ? `${Math.round(distKm * 1000)} m` : `${distKm.toFixed(1)} km`}
                     </Text>
@@ -141,9 +150,9 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
                 <Ionicons
                   name={hailSent ? "checkmark-circle" : "radio"}
                   size={20}
-                  color="#fff"
+                  color={hailContent}
                 />
-                <Text style={styles.hailText}>
+                <Text style={[styles.hailText, { color: hailContent }]}>
                   {hailing
                     ? "HailingÃ¢ÂÂ¦"
                     : hailSent
@@ -168,7 +177,8 @@ const styles = StyleSheet.create({
   },
   inner: { padding: 18 },
   header: { flexDirection: "row", alignItems: "center", gap: 12 },
-  avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.success, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.85)" },
+  avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 2, borderColor: "rgba(255,214,10,0.55)" },
+  avatarImg: { width: 46, height: 46 },
   handle: { color: COLORS.text, fontSize: 18, fontWeight: "700", letterSpacing: -0.3 },
   car: { color: COLORS.textDim, fontSize: 13, marginTop: 2 },
   closeBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.10)" },
@@ -177,7 +187,7 @@ const styles = StyleSheet.create({
   metaCellAccent: { backgroundColor: "rgba(255,199,0,0.12)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,199,0,0.45)" },
   metaText: { color: COLORS.text, fontSize: 12, fontWeight: "600" },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: COLORS.success },
-  hailBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: 14 },
+  hailBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: COLORS.brand, paddingVertical: 14, borderRadius: 14 },
   hailBtnSending: { opacity: 0.75 },
   hailBtnSent: { backgroundColor: COLORS.success },
   hailText: { color: "#fff", fontWeight: "700", fontSize: 15, letterSpacing: 0.2 },

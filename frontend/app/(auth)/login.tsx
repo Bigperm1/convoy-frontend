@@ -139,7 +139,7 @@ export default function LoginScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="you@example.com"
-                placeholderTextColor="#666"
+                placeholderTextColor="#808080"
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -155,7 +155,7 @@ export default function LoginScreen() {
                 <TextInput
                   style={styles.inputFlex}
                   placeholder="Enter your password"
-                  placeholderTextColor="#666"
+                  placeholderTextColor="#808080"
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
@@ -242,26 +242,26 @@ const styles = StyleSheet.create({
   logoSection: { alignItems: 'center', marginBottom: 40 },
   brandName: { fontSize: 40, fontWeight: '800', color: '#FFD60A', letterSpacing: 4, marginBottom: 4, textAlign: 'center' },
     logo: { width: 170, height: 170, marginBottom: 16 },
-  tagline: { fontSize: 21, color: '#9a9a9a', textAlign: 'center', fontWeight: '600', letterSpacing: 0.3 },
+  tagline: { fontSize: 21, color: '#808080', textAlign: 'center', fontWeight: '600', letterSpacing: 0.3 },
   formCard: { backgroundColor: '#1a1a1a', borderRadius: 16, padding: 20, gap: 18, borderWidth: 1, borderColor: '#333' },
   inputGroup: { gap: 8 },
-  label: { color: '#ccc', fontSize: 13, fontWeight: '500' },
-  input: { backgroundColor: '#0A0A0A', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, color: '#fff', fontSize: 16, borderWidth: 1, borderColor: '#333' },
+  label: { color: '#808080', fontSize: 13, fontWeight: '500' },
+  input: { backgroundColor: '#0A0A0A', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16, borderWidth: 1, borderColor: '#333' },
   inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0A0A0A', borderRadius: 10, borderWidth: 1, borderColor: '#333', paddingRight: 8 },
-  inputFlex: { flex: 1, paddingVertical: 12, paddingHorizontal: 14, color: '#fff', fontSize: 16 },
+  inputFlex: { flex: 1, paddingVertical: 12, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16 },
   eyeBtn: { padding: 8 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 2, borderColor: '#666', alignItems: 'center', justifyContent: 'center' },
   checkboxChecked: { backgroundColor: '#FFD60A', borderColor: '#FFD60A' },
   checkmark: { color: '#000', fontWeight: '700', fontSize: 12 },
-  checkboxLabel: { color: '#999', fontSize: 13 },
+  checkboxLabel: { color: '#808080', fontSize: 13 },
   signInButton: { borderRadius: 10, overflow: 'hidden', marginTop: 4 },
   buttonGradient: { paddingVertical: 14, alignItems: 'center' },
   signInButtonText: { color: '#1a1a1a', fontWeight: '700', fontSize: 15 },
   wakingText: { color: '#1a1a1a', fontSize: 13, fontWeight: '700', marginLeft: 8 },
   linksSection: { gap: 12, alignItems: 'center', marginTop: 8 },
-  linkText: { color: '#999', fontSize: 13 },
+  linkText: { color: '#808080', fontSize: 13 },
   linkHighlight: { color: '#FFD60A', fontWeight: '600' },
   forgotLink: { color: '#FFD60A', fontSize: 13, fontWeight: '500', paddingVertical: 6 },
-  versionText: { color: '#555', fontSize: 12, textAlign: 'center', paddingVertical: 10 },
+  versionText: { color: '#808080', fontSize: 12, textAlign: 'center', paddingVertical: 10 },
 });

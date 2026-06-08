@@ -426,7 +426,7 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
           {destination && (
             <Marker position={destination} icon={dotIcon("#FF453A", "Ã¢ÂÂ", 34)} title="Destination" />
           )}
-          {/* Multi-route layer: gray alternates + blue selected, all from pre-decoded polylines */}
+          {/* Multi-route layer: gray alternates + yellow selected, all from pre-decoded polylines */}
           {destination && routes.length > 0 && (
             <RoutesLayer routes={routes} selectedIndex={selectedRouteIndex} onSelect={onSelectRoute} />
           )}
@@ -450,7 +450,7 @@ function MapBody({ center, user, hideSelfMarker = false, peers, leaderUserId, ha
 }
 
 // Renders pre-decoded route polylines as native google.maps.Polyline objects.
-// Alternates are rendered first (gray, lower zIndex) so the selected route (blue) sits on top.
+// Alternates are rendered first (gray, lower zIndex) so the selected route (yellow) sits on top.
 function RoutesLayer({ routes, selectedIndex, onSelect }: {
   routes: { polyline: string; color?: string }[];
   selectedIndex: number;
@@ -470,10 +470,11 @@ function RoutesLayer({ routes, selectedIndex, onSelect }: {
     routes.forEach((r, i) => {
       const path = G.geometry.encoding.decodePath(r.polyline);
       const isSelected = i === selectedIndex;
-      // Each route carries its rank color from map.tsx (green/orange/red). On
-      // web we can use the proper strokeOpacity prop to dim alternates instead
-      // of baking alpha into the hex string.
-      const color = r.color ?? (i === 0 ? '#34C759' : i === 1 ? '#FF9500' : '#FF3B30');
+      // Match the NATIVE map exactly: selected route = convoy-yellow, every
+      // alternate = neutral grey. We deliberately IGNORE any per-route `color`
+      // passed from map.tsx so web and native can never diverge again — that
+      // divergence (web falling back to green/blue) is what this fixes.
+      const color = isSelected ? '#FFD60A' : '#9AA0A6';
       const pl = new G.Polyline({
         path,
         map,
@@ -506,7 +507,7 @@ function Directions({ origin, destination, onRoute, encodedPolyline }: { origin:
       renderer.current = new routesLib.DirectionsRenderer({
         map,
         suppressMarkers: true,
-        polylineOptions: { strokeColor: "#0A84FF", strokeOpacity: 0.95, strokeWeight: 6 },
+        polylineOptions: { strokeColor: "#FFD60A", strokeOpacity: 0.95, strokeWeight: 6 },
       });
     } else {
       renderer.current.setMap(map);

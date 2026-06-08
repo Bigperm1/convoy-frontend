@@ -130,14 +130,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   value: {
-    color: "#FFFFFF",
+    color: "#F4F4F4",
     fontSize: 22,
     fontWeight: "700",
     lineHeight: 24,
     letterSpacing: -0.5,
   },
   unit: {
-    color: "rgba(255,255,255,0.7)",
+    color: "#808080",
     fontSize: 9,
     fontWeight: "600",
     letterSpacing: 0.5,

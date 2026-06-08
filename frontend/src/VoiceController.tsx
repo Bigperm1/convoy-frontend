@@ -99,16 +99,16 @@ export default function VoiceController() {
             <View style={styles.bannerInner}>
               <View style={styles.bannerIcon}>
                 <Ionicons
-                  name={banner!.intent ? "checkmark-circle" : "ear"}
+                  name={banner!.intent ? "checkmark-circle" : "mic"}
                   size={20}
-                  color={banner!.intent ? COLORS.success : COLORS.textDim}
+                  color={COLORS.brand}
                 />
               </View>
               <View style={{ flex: 1 }}>
                 {!!banner!.text && (
                   <Text style={styles.transcript} numberOfLines={1}>"{banner!.text}"</Text>
                 )}
-                <Text style={[styles.action, { color: banner!.intent ? COLORS.success : COLORS.textDim }]} numberOfLines={1}>
+                <Text style={[styles.action, { color: banner!.intent ? COLORS.brand : COLORS.textDim }]} numberOfLines={1}>
                   {action || "No command recognized"}
                 </Text>
               </View>
@@ -123,7 +123,10 @@ export default function VoiceController() {
 const styles = StyleSheet.create({
   bannerWrap: {
     position: "absolute",
-    top: Platform.OS === "ios" ? 60 : 28,
+    // Sits just BELOW the floating search bar (ends ~y100 iOS / ~76 Android) and
+    // the live pill beneath it, so the transcript banner is readable instead of
+    // tucked up under the dynamic island where it was easy to miss.
+    top: Platform.OS === "ios" ? 132 : 108,
     left: 12, right: 12,
     alignItems: "center",
     zIndex: 9999,
@@ -131,8 +134,8 @@ const styles = StyleSheet.create({
   banner: {
     overflow: "hidden",
     borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,214,10,0.35)",
     width: "100%",
     maxWidth: 460,
   },
@@ -140,7 +143,7 @@ const styles = StyleSheet.create({
   bannerIcon: {
     width: 32, height: 32, borderRadius: 16,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,214,10,0.16)",
   },
   transcript: { color: COLORS.text, fontSize: 13, fontWeight: "500" },
   action: { fontSize: 12, marginTop: 2, fontWeight: "600", letterSpacing: 0.2 },

@@ -840,10 +840,10 @@ const styles = StyleSheet.create({
 
   btn: { marginTop: 22, borderRadius: 14, overflow: "hidden" },
   btnGrad: { paddingVertical: 14, alignItems: "center" },
-  btnText: { color: "#fff", fontWeight: "600", fontSize: 16 },
+  btnText: { color: "#F4F4F4", fontWeight: "600", fontSize: 16 },
 
   smallBtn: { flexDirection: "row", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: COLORS.primary, alignItems: "center" },
-  smallBtnText: { color: "#fff", fontWeight: "600", fontSize: 13 },
+  smallBtnText: { color: "#F4F4F4", fontWeight: "600", fontSize: 13 },
 
   statusBadge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: COLORS.success + "33" },
   statusText: { color: COLORS.success, fontSize: 12, fontWeight: "600" },

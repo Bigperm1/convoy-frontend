@@ -1,15 +1,17 @@
 // applePlayer.ios.ts — iOS implementation.
 //
 // Wraps the native Apple MusicKit framework via @lomray/react-native-apple-music.
-// The native framework auto-generates the developer token using the app's
-// MusicKit App-Service capability (enabled on the App ID com.sw0rdfisch.convoy),
-// so there is NO server-signed token to pass in here. The convoy-backend
-// /api/apple-music/developer-token endpoint is only for the REST-API path
-// (server-side search, future "listening rooms") and is not used by this file.
+// Auth + the user's LIBRARY (playlists, library songs, recently played) need
+// only the user's authorization — no developer token. CATALOG access (search +
+// catalog playback) additionally needs the app's MusicKit developer-token
+// entitlement provisioned into the build; if that's missing the native call
+// rejects, which is why catalog search can come back empty even when auth
+// succeeds. searchSongsDiagnostic() surfaces that real error to the UI.
 //
 // Metro resolves this *.ios.ts variant on iOS; every other platform gets the
 // no-op stub in applePlayer.ts, so the native module is never bundled off-iOS.
 
+import { NativeModules } from "react-native";
 import {
   Auth,
   Player,
@@ -27,6 +29,22 @@ export type AppleSong = {
   albumName?: string;
   artworkUrl?: string;
   duration?: number; // ms
+};
+
+export type ApplePlaylist = {
+  id: string;
+  name: string;
+  artworkUrl?: string;
+  trackCount?: number;
+  description?: string;
+};
+
+export type RecentItem = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  artworkUrl?: string;
+  type?: string; // "song" | "album" | "playlist" | "station"
 };
 
 // ---- Authorization -------------------------------------------------------
@@ -55,51 +73,180 @@ export async function checkSubscription(): Promise<{
     };
   } catch (e) {
     console.warn("[applePlayer] checkSubscription failed", e);
-    // Assume they could subscribe so we still surface the offer UI.
     return { canPlay: false, canSubscribe: true };
   }
 }
 
-// ---- Catalog search ------------------------------------------------------
+// ---- Shared mappers ------------------------------------------------------
 
-/** Pull a usable artwork URL out of whatever shape the native result uses. */
-function pickArtwork(s: any): string | undefined {
+/** Raw Apple artwork URL/template (sizing is applied at the UI layer). */
+function rawArt(s: any): string | undefined {
   const raw =
     s?.artworkUrl ??
     s?.artwork?.url ??
     s?.attributes?.artwork?.url ??
     undefined;
-  if (!raw || typeof raw !== "string") return undefined;
-  // Apple artwork URLs are templates with {w}/{h}/{f} placeholders.
-  return raw
-    .replace("{w}", "300")
-    .replace("{h}", "300")
-    .replace("{f}", "jpg");
+  return typeof raw === "string" && raw ? raw : undefined;
 }
+
+function mapSong(s: any): AppleSong {
+  return {
+    id: String(s?.id ?? s?.songId ?? s?.playParams?.id ?? ""),
+    title: s?.title ?? s?.name ?? s?.attributes?.name,
+    artistName: s?.artistName ?? s?.artist ?? s?.attributes?.artistName,
+    albumName: s?.albumName ?? s?.attributes?.albumName,
+    artworkUrl: rawArt(s),
+    duration: Number(s?.duration ?? s?.attributes?.durationInMillis ?? 0),
+  };
+}
+
+function errText(e: any): string {
+  return String(e?.message ?? e?.code ?? (typeof e === "string" ? e : JSON.stringify(e)) ?? "unknown error");
+}
+
+// ---- Catalog search ------------------------------------------------------
 
 /** Search the Apple Music catalog for songs. Always resolves to an array. */
 export async function searchSongs(query: string): Promise<AppleSong[]> {
+  return (await searchSongsDiagnostic(query)).songs;
+}
+
+/**
+ * Catalog search that DOES NOT swallow the native error.
+ *
+ * MusicKit.catalogSearch() internally try/catches and returns
+ * `{songs:[],albums:[]}` on failure, hiding why it failed. Here we call the
+ * native MusicModule.catalogSearch directly so a token/storefront/entitlement
+ * rejection bubbles up and we can display it. Falls back to the library wrapper
+ * if the native module isn't reachable for some reason.
+ */
+export async function searchSongsDiagnostic(
+  query: string
+): Promise<{ songs: AppleSong[]; error?: string }> {
   const q = query.trim();
-  if (!q) return [];
+  if (!q) return { songs: [] };
+  const Native: any = (NativeModules as any).MusicModule;
   try {
-    const res: any = await (MusicKit as any).catalogSearch(q, ["songs"]);
+    let res: any;
+    if (Native?.catalogSearch) {
+      res = await Native.catalogSearch(q, ["songs"], {});
+    } else {
+      res = await (MusicKit as any).catalogSearch(q, ["songs"]);
+    }
     const list: any[] =
       res?.songs ?? res?.results?.songs ?? (Array.isArray(res) ? res : []);
-    return (Array.isArray(list) ? list : []).map((s: any) => ({
-      id: String(s?.id ?? s?.songId ?? s?.playParams?.id ?? ""),
-      title: s?.title ?? s?.name ?? s?.attributes?.name,
-      artistName: s?.artistName ?? s?.artist ?? s?.attributes?.artistName,
-      albumName: s?.albumName ?? s?.attributes?.albumName,
-      artworkUrl: pickArtwork(s),
-      duration: Number(s?.duration ?? s?.attributes?.durationInMillis ?? 0),
-    }));
+    return { songs: (Array.isArray(list) ? list : []).map(mapSong) };
+  } catch (e: any) {
+    console.warn("[applePlayer] catalogSearch native error", e);
+    return { songs: [], error: errText(e) };
+  }
+}
+
+// ---- Library (needs only user authorization) -----------------------------
+
+export async function getUserPlaylists(
+  limit = 50
+): Promise<{ playlists: ApplePlaylist[]; error?: string }> {
+  try {
+    const res: any = await (MusicKit as any).getUserPlaylists({ limit });
+    const list: any[] = res?.playlists ?? [];
+    return {
+      playlists: (Array.isArray(list) ? list : []).map((p: any) => ({
+        id: String(p?.id ?? ""),
+        name: p?.name ?? "Playlist",
+        artworkUrl: rawArt(p),
+        trackCount: Number(p?.trackCount ?? 0),
+        description: p?.description,
+      })),
+    };
+  } catch (e: any) {
+    console.warn("[applePlayer] getUserPlaylists failed", e);
+    return { playlists: [], error: errText(e) };
+  }
+}
+
+export async function getLibrarySongs(
+  limit = 60
+): Promise<{ songs: AppleSong[]; error?: string }> {
+  try {
+    const res: any = await (MusicKit as any).getLibrarySongs({ limit });
+    const list: any[] = res?.songs ?? [];
+    return { songs: (Array.isArray(list) ? list : []).map(mapSong) };
+  } catch (e: any) {
+    console.warn("[applePlayer] getLibrarySongs failed", e);
+    return { songs: [], error: errText(e) };
+  }
+}
+
+export async function getRecentlyPlayed(): Promise<{ items: RecentItem[]; error?: string }> {
+  try {
+    const res: any = await (MusicKit as any).getTracksFromLibrary();
+    const list: any[] = res?.recentlyPlayedItems ?? [];
+    return {
+      items: (Array.isArray(list) ? list : []).map((t: any) => ({
+        id: String(t?.id ?? ""),
+        title: t?.title ?? "",
+        subtitle: t?.subtitle ?? "",
+        artworkUrl: rawArt(t),
+        type: t?.type,
+      })),
+    };
+  } catch (e: any) {
+    console.warn("[applePlayer] getRecentlyPlayed failed", e);
+    return { items: [], error: errText(e) };
+  }
+}
+
+export async function getPlaylistSongs(playlistId: string): Promise<AppleSong[]> {
+  if (!playlistId) return [];
+  try {
+    const res: any = await (MusicKit as any).getPlaylistSongs(playlistId, {});
+    const list: any[] = res?.songs ?? [];
+    return (Array.isArray(list) ? list : []).map(mapSong);
   } catch (e) {
-    console.warn("[applePlayer] searchSongs failed", e);
+    console.warn("[applePlayer] getPlaylistSongs failed", e);
     return [];
   }
 }
 
-// ---- Playback ------------------------------------------------------------
+// ---- Library playback ----------------------------------------------------
+
+export async function playLibrarySong(songId: string): Promise<void> {
+  if (!songId) return;
+  try {
+    await (MusicKit as any).playLibrarySong(songId);
+  } catch (e) {
+    console.warn("[applePlayer] playLibrarySong failed", e);
+  }
+}
+
+export async function playLibraryPlaylist(playlistId: string, startingAt = -1): Promise<void> {
+  if (!playlistId) return;
+  try {
+    await (MusicKit as any).playLibraryPlaylist(playlistId, startingAt);
+  } catch (e) {
+    console.warn("[applePlayer] playLibraryPlaylist failed", e);
+  }
+}
+
+/** Best-effort play for a recently-played library item (song/playlist/album). */
+export async function playRecentItem(item: RecentItem): Promise<void> {
+  if (!item?.id) return;
+  try {
+    if (item.type === "playlist") {
+      await (MusicKit as any).playLibraryPlaylist(item.id, -1);
+    } else if (item.type === "song") {
+      await (MusicKit as any).playLibrarySong(item.id);
+    } else {
+      await (MusicKit as any).setPlaybackQueue(item.id, item.type || "album");
+      await Player.play();
+    }
+  } catch (e) {
+    console.warn("[applePlayer] playRecentItem failed", e);
+  }
+}
+
+// ---- Catalog playback ----------------------------------------------------
 
 /** Queue a single catalog song by ID and start playback. */
 export async function playSong(songId: string): Promise<void> {
@@ -113,43 +260,23 @@ export async function playSong(songId: string): Promise<void> {
 }
 
 export const play = (): void => {
-  try {
-    Player.play();
-  } catch (e) {
-    console.warn("[applePlayer] play failed", e);
-  }
+  try { Player.play(); } catch (e) { console.warn("[applePlayer] play failed", e); }
 };
 
 export const pause = (): void => {
-  try {
-    Player.pause();
-  } catch (e) {
-    console.warn("[applePlayer] pause failed", e);
-  }
+  try { Player.pause(); } catch (e) { console.warn("[applePlayer] pause failed", e); }
 };
 
 export const toggle = (): void => {
-  try {
-    Player.togglePlayerState();
-  } catch (e) {
-    console.warn("[applePlayer] toggle failed", e);
-  }
+  try { Player.togglePlayerState(); } catch (e) { console.warn("[applePlayer] toggle failed", e); }
 };
 
 export const skipNext = (): void => {
-  try {
-    Player.skipToNextEntry();
-  } catch (e) {
-    console.warn("[applePlayer] skipNext failed", e);
-  }
+  try { Player.skipToNextEntry(); } catch (e) { console.warn("[applePlayer] skipNext failed", e); }
 };
 
 export const skipPrev = (): void => {
-  try {
-    Player.skipToPreviousEntry();
-  } catch (e) {
-    console.warn("[applePlayer] skipPrev failed", e);
-  }
+  try { Player.skipToPreviousEntry(); } catch (e) { console.warn("[applePlayer] skipPrev failed", e); }
 };
 
 // ---- Reactive hooks (re-exported straight from the native module) --------

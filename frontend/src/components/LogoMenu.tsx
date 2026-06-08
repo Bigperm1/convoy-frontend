@@ -145,7 +145,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#2a2a2e',
   },
-  cardTitle: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.2 },
+  cardTitle: { color: '#F4F4F4', fontSize: 16, fontWeight: '700', letterSpacing: 0.2 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -161,5 +161,5 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,214,10,0.10)',
     alignItems: 'center', justifyContent: 'center',
   },
-  rowLabel: { flex: 1, color: '#fff', fontSize: 16, fontWeight: '600' },
+  rowLabel: { flex: 1, color: '#F4F4F4', fontSize: 16, fontWeight: '600' },
 });

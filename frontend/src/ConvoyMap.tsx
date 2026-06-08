@@ -12,10 +12,12 @@
 // This file mirrors the behavior of ConvoyMap.web.tsx (vis.gl) so web + native
 // look and behave the same. The web file is unchanged.
 
-import React, { forwardRef, useEffect, useRef, useState } from "react";
-import { View, Image, StyleSheet, Platform } from "react-native";
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import React, { forwardRef, useEffect, useMemo, useRef, useState } from "react";
+import { View, Text, Image, StyleSheet, Platform, Easing } from "react-native";
+import MapView, { Marker, MarkerAnimated, AnimatedRegion, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
+import type { WeatherKind } from "./weatherLayer";
 
 export interface Peer {
   user_id: string;
@@ -65,9 +67,13 @@ interface ConvoyMapProps {
   peers?: Record<string, Peer> | Peer[] | null;
   leaderUserId?: string | null;
   hazards?: Hazard[] | null;
+  speedCameras?: { id: string; lat: number; lng: number }[];
+  places?: { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean }[];
+  showPlacePins?: boolean;
   externalAlerts?: any[];
   highlightConvoy?: boolean;
   destination?: LatLng | null;
+  destWeather?: { kind: WeatherKind; temp: string } | null;
   encodedPolyline?: string | null;
   routes?: { polyline: string; color?: string }[];
   selectedRouteIndex?: number;
@@ -81,6 +87,7 @@ interface ConvoyMapProps {
   onHazardPress?: (h: Hazard) => void;
   onHazardLongPress?: (h: Hazard) => void;
   onPeerPress?: (p: Peer) => void;
+  onPlacePress?: (p: { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean }) => void;
   onExternalAlertPress?: (a: any) => void;
   onRoute?: (info: any) => void;
   onMapReady?: () => void;
@@ -88,6 +95,23 @@ interface ConvoyMapProps {
 }
 
 const SELF_ID = "self";
+
+// Destination arrival-weather chip icon: map a WeatherKind to an icon + tint.
+// `mci` selects MaterialCommunityIcons (fog) vs Ionicons (everything else).
+function destWxIcon(kind: WeatherKind): { name: string; color: string; mci: boolean } {
+  switch (kind) {
+    case "clear-day": return { name: "sunny", color: "#FFD60A", mci: false };
+    case "clear-night": return { name: "moon", color: "#DCE3F0", mci: false };
+    case "partly-day": return { name: "partly-sunny", color: "#FFD60A", mci: false };
+    case "partly-night": return { name: "cloudy-night", color: "#DCE3F0", mci: false };
+    case "cloudy": return { name: "cloud", color: "#AEB4BD", mci: false };
+    case "fog": return { name: "weather-fog", color: "#AEB4BD", mci: true };
+    case "rain": return { name: "rainy", color: "#5AC8FA", mci: false };
+    case "snow": return { name: "snow", color: "#EAF6FF", mci: false };
+    case "thunder": return { name: "thunderstorm", color: "#FFD60A", mci: false };
+    default: return { name: "partly-sunny", color: "#FFD60A", mci: false };
+  }
+}
 
 // ===== Chase-cam tuning — mirrors ConvoyMap.web.tsx =====
 const CHASE_PITCH_DEG = 45;
@@ -129,6 +153,41 @@ function decodePolyline(encoded?: string | null): { latitude: number; longitude:
   return points;
 }
 
+// Round the sharp corners of a route line so it reads as smooth curves instead
+// of hard angles. We soften the GEOMETRY here (Chaikin corner-cutting) rather
+// than relying on the Polyline `lineJoin="round"` prop, because react-native-maps
+// 1.20.1 ignores that prop on iOS + Google Maps (the same regression that pins
+// the stroke to default blue). By smoothing the path itself, the line reads as
+// rounded no matter what the native layer does with joins. Endpoints are kept
+// exact (line still starts on the car and ends on the destination), straight
+// runs are left essentially untouched, and two passes takes the edge off turns
+// without visibly pulling the line off the road. Tune `iterations` up for
+// rounder corners (more points), down for tighter ones.
+function smoothPath(
+  pts: { latitude: number; longitude: number }[],
+  iterations = 2
+): { latitude: number; longitude: number }[] {
+  let p = pts;
+  for (let it = 0; it < iterations; it++) {
+    if (p.length < 3) return p;
+    const out: { latitude: number; longitude: number }[] = [p[0]];
+    for (let i = 0; i < p.length - 1; i++) {
+      const a = p[i], b = p[i + 1];
+      out.push({
+        latitude: a.latitude * 0.75 + b.latitude * 0.25,
+        longitude: a.longitude * 0.75 + b.longitude * 0.25,
+      });
+      out.push({
+        latitude: a.latitude * 0.25 + b.latitude * 0.75,
+        longitude: a.longitude * 0.25 + b.longitude * 0.75,
+      });
+    }
+    out.push(p[p.length - 1]);
+    p = out;
+  }
+  return p;
+}
+
 const HAZARD_COLOR: Record<string, string> = {
   police: "#3478F6", accident: "#FF453A", road: "#FF9F0A", traffic: "#FF9F0A",
 };
@@ -141,60 +200,285 @@ const HIDE_TRANSIT_STYLE: any[] = [
   { featureType: "transit", stylers: [{ visibility: "off" }] },
 ];
 
-type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer };
+type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; speedMs?: number; leader?: boolean; peer?: Peer };
+
+// Snapshot settle windows for CarMarker. react-native-maps captures the marker's
+// child view into a native bitmap; on Android that capture can come back
+// blank/partial at high pixel density (1080p/1440p) if frozen too early (the
+// vanishing-avatar bug), so we give it a much longer window to settle before
+// turning the snapshot OFF — so we're not re-capturing every frame (that
+// continuous capture was the on-the-move stutter). iOS captures almost instantly.
+const SNAPSHOT_SETTLE_MS = Platform.OS === "android" ? 3000 : 1200;
+const SNAPSHOT_RELOAD_MS = Platform.OS === "android" ? 2000 : 400;
+
+// ===== Avatar route-snapping helper =====
+// Project a lat/lng onto the nearest point of a polyline (the route line) and
+// report the perpendicular distance in metres. Equirectangular projection —
+// plenty accurate for the short segments of a road geometry, and cheap enough
+// to run on every GPS fix.
+function nearestOnPolyline(
+  lat: number,
+  lng: number,
+  pts: { latitude: number; longitude: number }[]
+): { latitude: number; longitude: number; distM: number } | null {
+  if (!pts || pts.length < 2) return null;
+  const kx = Math.cos((lat * Math.PI) / 180); // longitude shrink at this latitude
+  const px = lng * kx, py = lat;
+  let bestLat = pts[0].latitude, bestLng = pts[0].longitude, bestD = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const ax = pts[i].longitude * kx, ay = pts[i].latitude;
+    const bx = pts[i + 1].longitude * kx, by = pts[i + 1].latitude;
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const cx = ax + t * dx, cy = ay + t * dy;
+    const ex = px - cx, ey = py - cy;
+    const d = ex * ex + ey * ey;
+    if (d < bestD) { bestD = d; bestLat = cy; bestLng = cx / kx; }
+  }
+  return { latitude: bestLat, longitude: bestLng, distM: Math.sqrt(bestD) * 111320 };
+}
 
 // ===== CarMarker =====
-// A single car marker (self or peer). The custom <Image> child of a
-// react-native-maps <Marker> must be captured into a native snapshot AFTER the
-// PNG has loaded, or iOS renders a default blue placeholder dot instead of the
-// car. We start with tracksViewChanges=true so the loaded image is captured,
-// then flip it false (battery saver) once the image's onLoad fires + a frame.
-// Re-enables tracking whenever the color or heading changes so the snapshot
-// refreshes (e.g. user changes paint in the Garage, or the car turns).
-function CarMarker({ car, onPress }: { car: CarPoint; onPress?: () => void }) {
-  const [track, setTrack] = useState(true);
-  const size = car.leader ? 52 : 44;
-  // The marker is captured into a native bitmap sized to this view's bounds.
-  // A rotated square of side `size` needs up to size*√2 (≈1.41×) to avoid
-  // clipping its corners, so the OUTER box is 1.5× and centers the rotated car
-  // inside it. The transparent margin is invisible but stops the top/bottom/
-  // corner clipping seen on denser screens (1080/1440).
-  const box = Math.ceil(size * 1.5);
+// A single car marker (self or peer), rendered via react-native-maps' NATIVE
+// `image` prop — NOT a captured child <View>/<Image>. The view→bitmap capture
+// path collapsed the tall, narrow car PNG into a full-height ~1px-wide sliver on
+// Android under the New Architecture; resizeMode / resizeMethod / collapsable
+// fixes couldn't beat it because they all still went through that capture. The
+// native image prop draws the bundled PNG directly: no capture, no sliver, and
+// it behaves identically on iOS. Marker size now comes from the asset itself
+// (the 44 / @2x 88 / @3x 132 px set in assets/vehicles), it rotates to heading
+// via the native `rotation` prop, and glides between fixes via an AnimatedRegion.
+const CarMarker = React.memo(function CarMarker({ car, onPress }: { car: CarPoint; onPress?: () => void }) {
   const src = getVehiclePngOrDefault(car.color);
 
-  // Whenever the visual inputs change, re-enable tracking so the marker
-  // re-snapshots with the new paint / rotation, then settle it off again.
-  // The settle is generous (1200ms) so high-density devices finish decoding
-  // the PNG before we freeze the snapshot — a short timer froze a half-painted
-  // (clipped) car on 1080/1440 screens while 720 finished in time.
+  // ===== Smooth gliding position =====
+  // Snapping the marker to each raw GPS fix made the car "jump". Instead we keep
+  // an AnimatedRegion and ease the coordinate toward each new fix over ~1s so the
+  // car glides like native Google Maps. Persisted via ref across re-renders.
+  const coord = useRef(
+    new AnimatedRegion({ latitude: car.lat, longitude: car.lng, latitudeDelta: 0, longitudeDelta: 0 })
+  ).current;
   useEffect(() => {
-    setTrack(true);
-    const t = setTimeout(() => setTrack(false), 1200);
-    return () => clearTimeout(t);
-  }, [src, car.color, car.heading]);
+    const anim = coord.timing({
+      latitude: car.lat,
+      longitude: car.lng,
+      latitudeDelta: 0,
+      longitudeDelta: 0,
+      // Linear easing = constant-velocity glide. The default ease-in-out made
+      // the car accelerate mid-segment then decelerate at each fix (~1s), which
+      // reads as a subtle pulse. Duration is a touch longer than the fix cadence
+      // so a slightly-late fix interrupts an in-progress glide rather than
+      // letting the car stop and restart (which would stutter).
+      duration: 1100,
+      easing: Easing.linear,
+      useNativeDriver: false,
+    } as any);
+    anim.start();
+    return () => { try { (anim as any).stop?.(); } catch {} };
+  }, [car.lat, car.lng, coord]);
+
+  // ===== Heading hold at low speed =====
+  // GPS heading swings wildly near 0 speed, which spins the car in place at
+  // stops/lights. Hold the last heading until we're actually moving (>~5km/h).
+  const [displayHeading, setDisplayHeading] = useState(car.heading || 0);
+  useEffect(() => {
+    const moving = typeof car.speedMs === "number" ? car.speedMs >= 1.4 : true;
+    if (moving && typeof car.heading === "number" && Number.isFinite(car.heading)) {
+      setDisplayHeading(car.heading);
+    }
+  }, [car.heading, car.speedMs]);
 
   return (
-    <Marker
+    <MarkerAnimated
       identifier={car.id}
-      coordinate={{ latitude: car.lat, longitude: car.lng }}
+      coordinate={coord as any}
       anchor={{ x: 0.5, y: 0.5 }}
       flat
-      tracksViewChanges={track}
+      rotation={displayHeading}
+      image={src as any}
+      tracksViewChanges={false}
       zIndex={car.id === SELF_ID || car.leader ? 1000 : 1}
       onPress={() => { if (car.peer) onPress?.(); }}
+    />
+  );
+}, (prev, next) => {
+  // Skip re-render unless THIS car's own data changed. Without this, every peer
+  // marker re-rendered on every self GPS fix (the parent rebuilds the cars list
+  // each tick) — a big chunk of the moving-stutter. The self marker still
+  // updates because its own lat/lng/heading change each fix.
+  const a = prev.car, b = next.car;
+  return a.id === b.id && a.lat === b.lat && a.lng === b.lng
+    && a.color === b.color && a.heading === b.heading
+    && a.speedMs === b.speedMs && a.leader === b.leader;
+});
+
+// ===== RouteEtaMarker =====
+// A small ETA pill (e.g. "32 min") pinned at the midpoint of a route polyline,
+// like native Google Maps. Selected route → convoy-yellow; alternates → grey.
+// Tapping it selects that route (same as tapping the line). Same snapshot dance
+// as CarMarker: track on until the pill paints, then settle off for battery.
+function RouteEtaMarker({ coordinate, label, selected, onPress }: {
+  coordinate: { latitude: number; longitude: number };
+  label: string; selected: boolean; onPress?: () => void;
+}) {
+  const [track, setTrack] = useState(true);
+  useEffect(() => {
+    setTrack(true);
+    // Shared Android-aware settle window (3000ms Android / 1200 iOS). The old
+    // hardcoded 800ms froze the bitmap before the ETA text reliably painted on
+    // Android, so the pill could capture blank/clipped — same too-early-freeze
+    // the camera/place markers hit. Re-armed on label/selection change.
+    const t = setTimeout(() => setTrack(false), SNAPSHOT_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [label, selected]);
+  return (
+    <Marker
+      coordinate={coordinate}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={track}
+      zIndex={selected ? 4 : 2}
+      onPress={onPress}
     >
-      {/* Oversized transparent box so the rotated car never clips at its bounds. */}
-      <View style={{ width: box, height: box, alignItems: "center", justifyContent: "center" }}>
-        <View style={{ width: size, height: size, transform: [{ rotate: `${car.heading || 0}deg` }] }}>
-          <Image
-            source={src as any}
-            style={{ width: size, height: size, resizeMode: "contain" }}
-            fadeDuration={0}
-            // The instant the PNG paints, force one more snapshot so the car
-            // (not a blue placeholder or half-rendered frame) is captured.
-            onLoad={() => { setTrack(true); setTimeout(() => setTrack(false), 400); }}
-          />
+      <View style={[styles.etaPill, selected ? styles.etaPillSel : styles.etaPillAlt]}>
+        <Text style={[styles.etaPillText, selected ? styles.etaPillTextSel : styles.etaPillTextAlt]}>{label}</Text>
+      </View>
+    </Marker>
+  );
+}
+
+// ===== CameraMarker =====
+// A fixed speed-camera pin (OpenStreetMap). Same snapshot dance as the other
+// custom markers: track on until it paints, then settle off for battery (a city
+// can put many on screen at once).
+function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
+  const [track, setTrack] = useState(true);
+  useEffect(() => {
+    setTrack(true);
+    // Use the shared Android-aware settle window (3000ms on Android, 1200 on
+    // iOS). The old hardcoded 1200ms froze the bitmap before the vector-icon
+    // pin reliably painted on Android (high-DPI/Fabric capture lag), so camera
+    // pins captured blank and never showed — the same too-early-freeze the
+    // PlaceMarker/DestWeatherMarker already dodge with SNAPSHOT_SETTLE_MS.
+    const t = setTimeout(() => setTrack(false), SNAPSHOT_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <Marker
+      coordinate={{ latitude: lat, longitude: lng }}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={track}
+      zIndex={4}
+    >
+      <View style={styles.camPin}>
+        <Ionicons name="camera" size={13} color="#fff" />
+      </View>
+    </Marker>
+  );
+}
+
+// ===== PlaceMarker =====
+// Category quick-search result pin (gas price chip / fuel badge / named place).
+// Uses the same Android snapshot dance as the other text markers — WITHOUT it
+// the price/name bitmap is captured before the text lays out and freezes clipped
+// ("$2." instead of "$2.07", "Noo" instead of the full name). Re-armed whenever
+// the label/price changes so a fresh search re-captures cleanly.
+type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
+
+function PlaceMarker({ place, onPress, showPins = true }: { place: PlacePoint; onPress?: (p: PlacePoint) => void; showPins?: boolean }) {
+  const [track, setTrack] = useState(true);
+  useEffect(() => {
+    setTrack(true);
+    const t = setTimeout(() => setTrack(false), SNAPSHOT_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [place.label, place.price, place.isGas, place.cheapest, showPins]);
+  // Explicit widths sized to the text. Android react-native-maps mis-measures
+  // the intrinsic width of Text inside a custom marker view, so the bitmap
+  // freezes too narrow and clips ("$2.07" -> "$2."). A hard width (border-box,
+  // so it already includes padding + border) forces Yoga to lay the chip out
+  // wide enough BEFORE the snapshot is taken — no dependence on text
+  // measurement. Per-char estimates are generous so we over-size rather than
+  // clip; names cap at the label maxWidth and ellipsize beyond.
+  const priceWidth = place.price ? place.price.length * 10 + 18 : undefined;
+  const nameWidth = Math.min(150, (place.label?.length || 0) * 8 + 18);
+  // Non-gas pins capture the OUTER wrap (label + icon column), not the label,
+  // so the wrap needs its own explicit width or Android can still collapse it
+  // and clip the label inside. Sized to the label, floored at the icon width.
+  const wrapWidth = Math.max(nameWidth, 34);
+
+  // Marker content. The "Place pins" setting (showPins) hides the pure pin
+  // GLYPHS — the teardrop under a name and the gas-pump badge for a station
+  // with no price — while ALWAYS keeping price chips and name labels. A
+  // no-price gas station with pins off has nothing left to draw, so we render
+  // no marker at all for it.
+  let content: React.ReactNode = null;
+  if (place.isGas) {
+    if (place.price) {
+      content = (
+        <View style={[styles.placeLabel, styles.placePriceLabel, place.cheapest ? styles.placePriceCheapest : null, { width: priceWidth }]}>
+          <Text style={[styles.placeLabelText, styles.placePriceText, styles.placeTextCenter]} numberOfLines={1}>{place.price}</Text>
         </View>
+      );
+    } else if (showPins) {
+      content = (
+        <View style={styles.gasGlyph}>
+          <MaterialCommunityIcons name="gas-station" size={20} color="#FFD60A" />
+        </View>
+      );
+    }
+  } else {
+    content = (
+      <View style={[styles.placePinWrap, { width: wrapWidth }]}>
+        <View style={[styles.placeLabel, { width: nameWidth }]}>
+          <Text style={[styles.placeLabelText, styles.placeTextCenter]} numberOfLines={1}>{place.label}</Text>
+        </View>
+        {showPins && (
+          <View style={styles.locPin}>
+            {/* Black border = a slightly larger black pin behind a smaller
+                yellow one; the black rim shows through as a clean outline. */}
+            <Ionicons name="location" size={32} color="#000000" />
+            <Ionicons name="location" size={25} color="#FFD60A" style={styles.locPinInner} />
+          </View>
+        )}
+      </View>
+    );
+  }
+  if (!content) return null;
+  return (
+    <Marker
+      coordinate={{ latitude: place.lat, longitude: place.lng }}
+      anchor={place.isGas ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 1 }}
+      zIndex={place.cheapest ? 5 : 4}
+      tracksViewChanges={track}
+      onPress={() => onPress?.(place)}
+    >
+      {content}
+    </Marker>
+  );
+}
+
+// ===== DestWeatherMarker =====
+// Arrival-weather chip floating above the destination pin. Same snapshot dance
+// so the temperature text isn't captured clipped on Android.
+function DestWeatherMarker({ coordinate, weather }: {
+  coordinate: { latitude: number; longitude: number };
+  weather: { kind: WeatherKind; temp: string };
+}) {
+  const [track, setTrack] = useState(true);
+  useEffect(() => {
+    setTrack(true);
+    const t = setTimeout(() => setTrack(false), SNAPSHOT_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [weather.kind, weather.temp]);
+  const ic = destWxIcon(weather.kind);
+  return (
+    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 1 }} zIndex={7} tappable={false} tracksViewChanges={track}>
+      <View style={[styles.destWxChip, { width: weather.temp.length * 8 + 44 }]}>
+        {ic.mci
+          ? <MaterialCommunityIcons name={ic.name as any} size={14} color={ic.color} />
+          : <Ionicons name={ic.name as any} size={14} color={ic.color} />}
+        <Text style={styles.destWxText}>{weather.temp}</Text>
       </View>
     </Marker>
   );
@@ -203,11 +487,11 @@ function CarMarker({ car, onPress }: { car: CarPoint; onPress?: () => void }) {
 const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
   const {
     center, user, peers, hideSelfMarker, mapView = "heading_up",
-    mapType = "hybrid", leaderUserId, hazards, highlightConvoy,
-    destination, routes = [], selectedRouteIndex = 0, onSelectRoute,
+    mapType = "hybrid", leaderUserId, hazards, speedCameras, highlightConvoy,
+    destination, destWeather, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
     showTraffic = true, onMapPress, onHazardPress, onHazardLongPress,
-    onPeerPress, onMapReady,
+    onPeerPress, onMapReady, places, onPlacePress, showPlacePins = true,
   } = props;
 
   const mapRef = useRef<MapView | null>(null);
@@ -232,14 +516,37 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
       ? { latitude: user.lat as number, longitude: user.lng as number, latitudeDelta: 0.02, longitudeDelta: 0.02 }
       : undefined;
 
+  // ===== Route-snapping the avatar =====
+  // Decoded active route line (only while navigating) + the self position to
+  // display: snapped onto that line when we're close to it (≤ 40 m), else raw
+  // GPS. Threaded into BOTH the chase camera and the avatar marker so the puck
+  // rides the green/blue route line like native Google Maps instead of drifting
+  // off-road on noisy fixes. Beyond 40 m we keep the raw fix (you're genuinely
+  // off-route; the turn-by-turn engine handles rerouting).
+  const activePolyPts = useMemo(() => {
+    if (!navigationActive) return null;
+    const enc = (routes[selectedRouteIndex] || routes[0])?.polyline || encodedPolyline;
+    const pts = enc ? decodePolyline(enc) : [];
+    return pts.length >= 2 ? pts : null;
+  }, [navigationActive, routes, selectedRouteIndex, encodedPolyline]);
+
+  const selfDisplay = useMemo(() => {
+    if (!user || typeof user.lat !== "number" || typeof user.lng !== "number") return null;
+    if (activePolyPts) {
+      const snap = nearestOnPolyline(user.lat, user.lng, activePolyPts);
+      if (snap && snap.distM < 40) return { lat: snap.latitude, lng: snap.longitude };
+    }
+    return { lat: user.lat, lng: user.lng };
+  }, [user?.lat, user?.lng, activePolyPts]);
+
   // ===== Camera control =====
   // followUser (free-roam) → follow position at a fixed zoom, north-up, flat.
   // navigationActive (chase cam) → speed-zoom, heading-up (unless north_up), 45° pitch.
   const commitCamera = (force = false) => {
     const m = mapRef.current;
     if (!m || !readyRef.current) return;
-    const lat = user?.lat ?? center?.lat;
-    const lng = user?.lng ?? center?.lng;
+    const lat = selfDisplay?.lat ?? center?.lat;
+    const lng = selfDisplay?.lng ?? center?.lng;
     if (typeof lat !== "number" || typeof lng !== "number") return;
 
     const heading = (typeof user?.heading === "number" && Number.isFinite(user.heading)) ? user.heading : 0;
@@ -335,18 +642,30 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
   // ===== Build the car-marker list (self + peers) =====
   const cars: CarPoint[] = [];
   if (!hideSelfMarker && user && typeof user.lat === "number" && typeof user.lng === "number") {
-    cars.push({ id: SELF_ID, lat: user.lat, lng: user.lng, color: user.carColor, heading: user.heading });
+    // Snapped-to-route position while navigating (see selfDisplay) so the avatar
+    // rides the line instead of wandering off-road; raw GPS otherwise.
+    const sLat = selfDisplay?.lat ?? user.lat;
+    const sLng = selfDisplay?.lng ?? user.lng;
+    cars.push({ id: SELF_ID, lat: sLat, lng: sLng, color: user.carColor, heading: user.heading, speedMs: user.speed });
   }
   const peerList: Peer[] = Array.isArray(peers) ? peers : peers ? Object.values(peers) : [];
   peerList.forEach((p) => {
     if (p && typeof p.lat === "number" && typeof p.lng === "number") {
       cars.push({
         id: "peer_" + p.user_id, lat: p.lat, lng: p.lng,
-        color: p.activeColor || p.carColor, heading: p.heading,
+        color: p.activeColor || p.carColor, heading: p.heading, speedMs: p.speed,
         leader: !!leaderUserId && p.user_id === leaderUserId, peer: p,
       });
     }
   });
+
+  // Decode + corner-smooth each route once per routes change (memoized so it
+  // doesn't recompute on every GPS tick). Used only for the DRAWN lines; the
+  // camera fit, route-snapping and ETA midpoints keep the raw road geometry.
+  const smoothedRouteCoords = useMemo(
+    () => (routes || []).map((r: { polyline: string }) => smoothPath(decodePolyline(r.polyline))),
+    [routes]
+  );
 
   const visibleHazards = (hazards || []).filter((h: Hazard) => h && typeof h.lat === "number" && typeof h.lng === "number");
 
@@ -395,12 +714,36 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
           </Marker>
         ))}
 
+        {/* Fixed speed cameras (OpenStreetMap). Pins only — the proximity
+            voice alert is handled in map.tsx. */}
+        {(speedCameras || []).map((c: { id: string; lat: number; lng: number }) => (
+          <CameraMarker key={`cam_${c.id}`} lat={c.lat} lng={c.lng} />
+        ))}
+
         {/* Destination pin. */}
         {destination && (
           <Marker coordinate={{ latitude: destination.lat, longitude: destination.lng }} anchor={{ x: 0.5, y: 0.5 }} zIndex={6}>
             <View style={styles.destPin} />
           </Marker>
         )}
+
+        {/* Arrival-weather chip — floats just above the destination pin showing
+            the forecast for your estimated arrival time. Separate marker,
+            anchored bottom-center, so the pin stays exactly on the coordinate. */}
+        {destination && destWeather && (
+          <DestWeatherMarker
+            coordinate={{ latitude: destination.lat, longitude: destination.lng }}
+            weather={destWeather}
+          />
+        )}
+
+        {/* Category quick-search result pins (from the search-bar pills). Tap a
+            pin to route there — handled by onPlacePress up in map.tsx. Rendered
+            via PlaceMarker so the price/name bitmap is captured AFTER the text
+            lays out (fixes the Android clip: "$2." → "$2.07", "Noo" → full name). */}
+        {(places || []).map((p: PlacePoint) => (
+          <PlaceMarker key={`place_${p.id}`} place={p} onPress={onPlacePress} showPins={showPlacePins} />
+        ))}
 
         {/* Route polylines — Google style: gray alternates first, then the
             SELECTED route drawn LAST (on top) in bright app-yellow. Each line is
@@ -409,7 +752,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
             and the selected line renders with a stale/default (blue) stroke. */}
         {destination && routes.map((r: { polyline: string }, i: number) => {
           if (i === selectedRouteIndex) return null; // selected drawn on top below
-          const coords = decodePolyline(r.polyline);
+          const coords = smoothedRouteCoords[i] || [];
           if (coords.length === 0) return null;
           return (
             <Polyline
@@ -426,7 +769,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
           );
         })}
         {destination && routes[selectedRouteIndex] && (() => {
-          const coords = decodePolyline(routes[selectedRouteIndex].polyline);
+          const coords = smoothedRouteCoords[selectedRouteIndex] || [];
           if (coords.length === 0) return null;
           return (
             <Polyline
@@ -440,6 +783,25 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
             />
           );
         })()}
+
+        {/* Route ETA pills — native-style time marker at each route's midpoint.
+            Preview only (hidden during active turn-by-turn). Tap to select. */}
+        {destination && !navigationActive && routes.map((r: any, i: number) => {
+          const coords = decodePolyline(r.polyline);
+          if (coords.length === 0) return null;
+          const mid = coords[Math.floor(coords.length / 2)];
+          const label = r.duration_in_traffic_text || r.duration_text || "";
+          if (!label) return null;
+          return (
+            <RouteEtaMarker
+              key={`eta_${i}_${selectedRouteIndex}`}
+              coordinate={mid}
+              label={label}
+              selected={i === selectedRouteIndex}
+              onPress={() => onSelectRoute?.(i)}
+            />
+          );
+        })}
       </MapView>
     </View>
   );
@@ -451,6 +813,13 @@ export default ConvoyMap;
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
+  // Route ETA pill (time marker on each route, preview mode)
+  etaPill: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 13, borderWidth: 1 },
+  etaPillSel: { backgroundColor: "#FFD60A", borderColor: "rgba(0,0,0,0.2)" },
+  etaPillAlt: { backgroundColor: "rgba(28,28,30,0.95)", borderColor: "rgba(255,255,255,0.25)" },
+  etaPillText: { fontSize: 12, fontWeight: "700" },
+  etaPillTextSel: { color: "#1C1C1E" },
+  etaPillTextAlt: { color: "#C9C9CE" },
   // Round hazard dot with a white ring; gold ring overrides white for Convoy reports.
   hazardPin: {
     width: 26, height: 26, borderRadius: 13,
@@ -461,8 +830,57 @@ const styles = StyleSheet.create({
     }),
   },
   hazardPinConvoy: { borderColor: "#FFD60A" },
+  placePinWrap: { alignItems: "center", maxWidth: 150 },
+  placeLabel: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 6, paddingVertical: 2,
+    borderRadius: 6, marginBottom: 1,
+    maxWidth: 150,
+    borderWidth: 1, borderColor: "rgba(0,0,0,0.55)",
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  placeLabelText: { color: "#000000", fontSize: 11, fontWeight: "700" },
+  placeTextCenter: { textAlign: "center" },
+  // Stacked location pin: black (larger) behind yellow (smaller) = black border.
+  locPin: { alignItems: "center", justifyContent: "center" },
+  locPinInner: { position: "absolute" },
+  // 1px transparent child for parked/empty pool slots (kept mounted, opacity 0).
+  placeHiddenDot: { width: 1, height: 1 },
+  placePriceLabel: { backgroundColor: "#FFD60A", borderWidth: 1, borderColor: "rgba(0,0,0,0.55)" },
+  placePriceCheapest: { backgroundColor: "#30D158", borderColor: "rgba(0,0,0,0.55)" },
+  placePriceText: { color: "#0A0A0A", fontSize: 13, fontWeight: "800" },
+  gasGlyph: {
+    width: 30, height: 30, borderRadius: 15,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(20,20,22,0.92)",
+    borderWidth: 1, borderColor: "rgba(255,214,10,0.6)",
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 2,
+  },
   destPin: {
     width: 22, height: 22, borderRadius: 11,
     backgroundColor: "#FF453A", borderWidth: 3, borderColor: "#FFFFFF",
+  },
+  destWxChip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "rgba(22,22,24,0.92)",
+    borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4,
+    marginBottom: 8,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
+    ...Platform.select({
+      ios: { shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+      android: { elevation: 5 },
+    }),
+  },
+  destWxText: { color: "#fff", fontSize: 12, fontWeight: "700", letterSpacing: -0.2 },
+  camPin: {
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: "rgba(28,28,30,0.95)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "#FF453A",
+    ...Platform.select({
+      ios: { shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 3, shadowOffset: { width: 0, height: 2 } },
+      android: { elevation: 4 },
+    }),
   },
 });

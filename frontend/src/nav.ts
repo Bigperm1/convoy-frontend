@@ -5,8 +5,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
-import * as Speech from "expo-speech";
 import { api, GOOGLE_MAPS_KEY } from "./api";
+import { setPlaybackAudioMode } from "./audioMode";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -352,17 +352,61 @@ export function useTurnByTurn(
 }
 
 // ---- Speech helper ----
+// Spoken-direction playback rate (1.0 = normal). Slightly slowed so turn
+// callouts are easier to catch while driving.
+const NAV_TTS_RATE = 0.9;
+
+// Normalize text for natural speech: spell out street-type AND unit
+// abbreviations so the TTS voice never reads "min", "km", or "Rd" literally.
+// Unit expansions are anchored to a preceding digit so ordinary words are
+// never mangled (the "m" in "Salmon Ave" is left alone).
+function toSpeech(s: string): string {
+  if (!s) return s;
+  let out = s
+    // Street / road types
+    .replace(/\bRd\b\.?/g, "Road")
+    .replace(/\bAve\b\.?/g, "Avenue")
+    .replace(/\bBlvd\b\.?/g, "Boulevard")
+    .replace(/\bDr\b\.?/g, "Drive")
+    .replace(/\bHwy\b\.?/g, "Highway")
+    .replace(/\bPkwy\b\.?/g, "Parkway")
+    .replace(/\bCres\b\.?/g, "Crescent")
+    .replace(/\bCt\b\.?/g, "Court")
+    .replace(/\bPl\b\.?/g, "Place")
+    .replace(/\bLn\b\.?/g, "Lane")
+    .replace(/\bSq\b\.?/g, "Square")
+    .replace(/\bTrl\b\.?/g, "Trail")
+    .replace(/\bSt\b\.?(?!\s+[A-Z])/g, "Street");
+  // Units — only when attached to a number, so plain words are never touched.
+  // Order matters: longer/space forms before the bare "m".
+  out = out
+    .replace(/(\d(?:\.\d+)?)\s*km\b/gi, "$1 kilometers")
+    .replace(/(\d(?:\.\d+)?)\s*mi\b/gi, "$1 miles")
+    .replace(/(\d)\s*ft\b/gi, "$1 feet")
+    .replace(/(\d)\s*min\b/gi, "$1 minutes")
+    .replace(/(\d)\s*sec\b/gi, "$1 seconds")
+    .replace(/(\d)\s*hr\b/gi, "$1 hours")
+    .replace(/(\d)\s*h\b/g, "$1 hours")   // "1h 30m" → hours part
+    .replace(/(\d)\s+m\b/g, "$1 meters")  // "500 m" (space) ⇒ meters
+    .replace(/(\d)m\b/g, "$1 minutes");    // "30m" (no space) ⇒ minutes (Xh Ym)
+  return out;
+}
+
 let _speakLock = false;
 let _lastSpoke = 0;
+let _lastRerouteSpoke = 0;
 const ttsQueue: string[] = [];
 let ttsPlaying = false;
+// The currently-playing TTS Sound (native) so nav teardown can stop a
+// half-spoken instruction. Web playback is fire-and-forget.
+let _currentSound: any = null;
 
 function speak(text: string) {
   if (!text || !text.trim()) return;
   const now = Date.now();
   if (now - _lastSpoke < 1500) return;
   _lastSpoke = now;
-  ttsQueue.push(text);
+  ttsQueue.push(toSpeech(text));
   if (!ttsPlaying) drainTtsQueue();
 }
 
@@ -371,10 +415,32 @@ function resetSpeakGate() {
   _lastSpoke = 0;
   ttsQueue.length = 0;
   ttsPlaying = false;
-  try { Speech.stop(); } catch {}
-  if (Platform.OS === "web" && typeof window !== "undefined" && "speechSynthesis" in window) {
-    try { window.speechSynthesis.cancel(); } catch {}
-  }
+}
+
+// Announce a reroute through the SAME Nova queue as every other instruction
+// (never the device voice) so it can't talk over Nova, de-duped to once per
+// 12s so a persistent off-route condition doesn't nag every cycle.
+export function announceReroute() {
+  const now = Date.now();
+  if (now - _lastRerouteSpoke < 12000) return;
+  _lastRerouteSpoke = now;
+  speak("Recalculating route.");
+}
+
+// General-purpose Nova announcement (e.g. hazard-report confirmations) — uses
+// the same queue as turn instructions so nothing ever talks over anything else.
+export function announce(text: string) {
+  speak(text);
+}
+
+// Stop nav speech immediately — clears the queue AND the in-flight playback so
+// a half-spoken instruction doesn't linger after End / Clear.
+export function stopSpeech() {
+  resetSpeakGate();
+  _lastRerouteSpoke = 0;
+  try { _currentSound?.stopAsync?.(); } catch {}
+  try { _currentSound?.unloadAsync?.(); } catch {}
+  _currentSound = null;
 }
 
 async function drainTtsQueue(): Promise<void> {
@@ -390,16 +456,11 @@ async function speakOne(text: string): Promise<void> {
     const { data } = await api.post("/tts", { text, voice: "nova" });
     if (data?.audio_b64) {
       await playBase64Audio(data.audio_b64, data.mime ?? "audio/mp3");
-      return;
     }
-  } catch {}
-  try {
-    if (Platform.OS === "web") {
-      if (typeof window !== "undefined" && "speechSynthesis" in window) Speech.speak(text, { rate: 1.0, pitch: 1.0 });
-      return;
-    }
-    Speech.speak(text, { rate: 1.0, pitch: 1.0 });
-  } catch {}
+  } catch {
+    // TTS unavailable: stay silent. The on-screen nav banner still shows the
+    // turn, and we no longer fall back to the robotic device voice.
+  }
 }
 
 async function playBase64Audio(b64: string, mime: string): Promise<void> {
@@ -407,6 +468,8 @@ async function playBase64Audio(b64: string, mime: string): Promise<void> {
     return new Promise((resolve) => {
       try {
         const audio = new Audio(`data:${mime};base64,${b64}`);
+        audio.playbackRate = NAV_TTS_RATE;
+        (audio as any).preservesPitch = true;
         audio.onended = () => resolve();
         audio.onerror = () => resolve();
         audio.play().catch(() => resolve());
@@ -416,13 +479,23 @@ async function playBase64Audio(b64: string, mime: string): Promise<void> {
   try {
     const { Audio } = await import("expo-av");
     const FileSystem = await import("expo-file-system/legacy");
-    const path = FileSystem.cacheDirectory + `tts_${Date.now()}.mp3`;
+    const ext = mime.includes("wav") ? "wav" : "mp3";
+    const path = FileSystem.cacheDirectory + `tts_${Date.now()}.${ext}`;
     await FileSystem.writeAsStringAsync(path, b64, { encoding: FileSystem.EncodingType.Base64 });
+    // Route to the loudspeaker at full volume. After a PTT recording the iOS
+    // session is left in .playAndRecord, which sends playback to the quiet
+    // earpiece — that's what made the nav voice sound faint. Forcing playback
+    // mode (the same helper comms uses) puts Nova back on the main speaker, and
+    // volume:1.0 overrides expo-av's ~0.5 default (so it's markedly louder).
+    await setPlaybackAudioMode();
     return new Promise((resolve) => {
-      Audio.Sound.createAsync({ uri: path }, { shouldPlay: true })
+      Audio.Sound.createAsync({ uri: path }, { shouldPlay: true, rate: NAV_TTS_RATE, shouldCorrectPitch: true, volume: 1.0 })
         .then(({ sound }) => {
+          _currentSound = sound;
+          sound.setVolumeAsync(1.0).catch(() => {});
           sound.setOnPlaybackStatusUpdate((status: any) => {
             if (!status?.isLoaded || status?.didJustFinish) {
+              if (_currentSound === sound) _currentSound = null;
               sound.unloadAsync().catch(() => {});
               FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
               resolve();

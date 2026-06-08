@@ -1,8 +1,9 @@
 // Cross-platform Places Autocomplete using the Places (New) REST endpoint on native,
 // and the JS Maps lib (already loaded by ConvoyMap) on web.
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform, ScrollView, Keyboard, PanResponder, Animated, Easing, Image } from "react-native";
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform, ScrollView, Keyboard, PanResponder, Animated, Easing, Image, Vibration } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { COLORS } from "./theme";
 import { geocodeQuery } from "./voiceBus";
 import { useVoice } from "./useVoice";
@@ -24,6 +25,10 @@ type Props = {
   // node is rendered in place of the default avatar button (used by the map
   // to drop in the global LogoMenu). Takes precedence over onProfilePress.
   profileSlot?: React.ReactNode;
+  // When provided, the text field becomes a button: tapping it fires this
+  // instead of typing inline (the map uses it to open the full-screen search
+  // screen). The mic + logo remain fully interactive.
+  onPressField?: () => void;
 };
 
 let _placesService: any = null;
@@ -108,11 +113,10 @@ async function placeDetailsRest(place_id: string): Promise<{ lat: number; lng: n
   } catch { return null; }
 }
 
-export default function DestinationSearch({ origin, onSelect, onClear, initialValue, onProfilePress, profileSlot }: Props) {
+export default function DestinationSearch({ origin, onSelect, onClear, initialValue, onProfilePress, profileSlot, onPressField }: Props) {
   const [text, setText] = useState(initialValue || "");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
-  const [dbg, setDbg] = useState<string>("");
   const tRef = useRef<any>(null);
 
   useEffect(() => {
@@ -142,7 +146,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
         }
       );
     } else {
-      const list = await autocompleteRest(q, origin, setDbg);
+      const list = await autocompleteRest(q, origin);
       setSuggestions(list);
     }
   };
@@ -187,8 +191,8 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
     if (voice.recording) {
       Animated.loop(
         Animated.sequence([
-          Animated.timing(micPulse, { toValue: 1.18, duration: 420, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-          Animated.timing(micPulse, { toValue: 1.04, duration: 420, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+          Animated.timing(micPulse, { toValue: 1.28, duration: 360, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+          Animated.timing(micPulse, { toValue: 1.06, duration: 360, easing: Easing.in(Easing.quad), useNativeDriver: true }),
         ])
       ).start();
     } else {
@@ -196,7 +200,14 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
       micPulse.setValue(1);
     }
   }, [voice.recording, micPulse]);
-  const onMicPressIn = async () => { await voice.start(); };
+  const onMicPressIn = async () => {
+    // Instant tactile feedback the moment you press — fired synchronously
+    // BEFORE awaiting the recorder, so it lands on touch rather than after
+    // the audio engine spins up (which is what made it feel like "no haptic").
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+    if (Platform.OS === "android") { try { Vibration.vibrate(35); } catch {} }
+    await voice.start();
+  };
   const onMicPressOut = async () => {
     const uri = await voice.stop();
     if (uri) await voice.transcribe(uri); // result broadcast on voiceBus → VoiceController banner + routing
@@ -253,18 +264,29 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           ) : (
             <Ionicons name="search" size={18} color="rgba(235,235,245,0.55)" />
           )}
-          <TextInput
-            testID="destination-input"
-            value={text}
-            onChangeText={onChangeText}
-            placeholder="Search here"
-            placeholderTextColor="rgba(235,235,245,0.5)"
-            style={styles.input}
-            onFocus={() => setOpen(true)}
-            returnKeyType="go"
-            onSubmitEditing={submit}
-            blurOnSubmit={false}
-          />
+          {onPressField ? (
+            <TouchableOpacity
+              testID="destination-open-search"
+              style={styles.fieldTap}
+              activeOpacity={0.7}
+              onPress={onPressField}
+            >
+              <Text style={styles.fieldTapText} numberOfLines={1}>Search here</Text>
+            </TouchableOpacity>
+          ) : (
+            <TextInput
+              testID="destination-input"
+              value={text}
+              onChangeText={onChangeText}
+              placeholder="Search here"
+              placeholderTextColor="#808080"
+              style={styles.input}
+              onFocus={() => setOpen(true)}
+              returnKeyType="go"
+              onSubmitEditing={submit}
+              blurOnSubmit={false}
+            />
+          )}
           {/* Submit / clear — only shown when there's text in the field, so the
               mic occupies a stable position on the right at all times. */}
           {!!text.trim() && (
@@ -289,13 +311,13 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
               onPressIn={onMicPressIn}
               onPressOut={onMicPressOut}
               activeOpacity={0.7}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              style={styles.micBtn}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={[styles.micBtn, voice.recording && styles.micBtnRecording]}
             >
               <Ionicons
                 name={voice.recording ? "radio" : "mic"}
-                size={22}
-                color={voice.recording ? "#FF3B30" : "#FFD60A"}
+                size={24}
+                color={voice.recording ? "#fff" : "#FFD60A"}
               />
             </TouchableOpacity>
           </Animated.View>
@@ -313,17 +335,12 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
         >
           {suggestions.map((s) => (
             <TouchableOpacity key={s.place_id} testID={`sug-${s.place_id}`} style={styles.row} onPress={() => { Keyboard.dismiss(); pick(s); }}>
-              <Ionicons name="location" size={16} color={COLORS.primary} />
+              <Ionicons name="location" size={16} color={COLORS.brand} />
               <Text style={styles.rowText} numberOfLines={1}>{s.description}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
       )}
-      {dbg ? (
-        <Text style={{ color: "#FF3B30", fontSize: 11, marginTop: 6, marginHorizontal: 12, backgroundColor: "rgba(0,0,0,0.6)", padding: 4 }} numberOfLines={5}>
-          {dbg}
-        </Text>
-      ) : null}
     </View>
   );
 }
@@ -367,7 +384,11 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   // Dark charcoal text on white surface — high contrast for readability.
-  input: { flex: 1, fontSize: 16, color: '#F5F5F7', paddingVertical: 0 },
+  input: { flex: 1, fontSize: 16, color: '#F4F4F4', paddingVertical: 0 },
+  // Read-only tappable field — the map passes onPressField to open the
+  // full-screen search. Mirrors the input's flex + font so the bar is identical.
+  fieldTap: { flex: 1, justifyContent: 'center', paddingVertical: 2 },
+  fieldTapText: { fontSize: 16, color: '#808080' },
   // The Go arrow stays in Convoy blue accent so the submit affordance is
   // unmistakable on the light bar.
   goBtn: {
@@ -379,9 +400,16 @@ const styles = StyleSheet.create({
   // Yellow PTT mic — 30×30 circle, inline child of the bar (NOT absolute).
   // marginLeft 6 keeps it tight against the input text.
   micBtn: {
-    width: 32, height: 32,
+    width: 38, height: 38, borderRadius: 19,
     alignItems: 'center', justifyContent: 'center',
     marginLeft: 2,
+  },
+  // Recording: fills hot red with a glowing halo so the press reads as a big,
+  // dynamic "transmitting" state (like the comms PTT press), white glyph on top.
+  micBtnRecording: {
+    backgroundColor: '#FF3B30',
+    shadowColor: '#FF3B30', shadowOpacity: 0.9, shadowRadius: 12, shadowOffset: { width: 0, height: 0 },
+    elevation: 10,
   },
   // When actively recording the mic flips to a hot red to mirror the legacy
   // tab-bar mic's "now broadcasting" affordance.
@@ -410,5 +438,5 @@ const styles = StyleSheet.create({
   // the pill rather than under the avatar.
   list: { backgroundColor: "rgba(28,28,30,0.98)", borderRadius: 14, marginTop: 8, marginHorizontal: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.10)", overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
   row: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12 },
-  rowText: { color: "#F5F5F7", flex: 1, fontSize: 14 },
+  rowText: { color: "#F4F4F4", flex: 1, fontSize: 14 },
 });

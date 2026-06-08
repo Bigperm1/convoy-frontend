@@ -311,7 +311,7 @@ export default function GarageScreen() {
               value={callSign}
               onChangeText={setCallSign}
               placeholder="e.g. Maverick"
-              placeholderTextColor="#555"
+              placeholderTextColor="#808080"
               maxLength={20}
               autoCapitalize="words"
               returnKeyType="done"
@@ -387,47 +387,47 @@ const styles = StyleSheet.create({
   scroll:             { paddingBottom: 60 },
   header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
   backBtn:            { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  title:              { color: '#fff', fontSize: 20, fontWeight: '600' },
+  title:              { color: '#F4F4F4', fontSize: 20, fontWeight: '600' },
 
   // Premium full-bleed hero — image fades to black (welcome-carousel style),
   // no card/LED border. The car name overlays the bottom fade.
   heroWrap:           { width: SCREEN_W, height: 240, marginBottom: 14, backgroundColor: '#000' },
   heroBg:             { flex: 1, justifyContent: 'flex-end' },
   heroCaption:        { paddingHorizontal: 24, paddingBottom: 22 },
-  heroTitle:          { color: '#fff', fontSize: 26, fontWeight: '800', letterSpacing: -0.3 },
+  heroTitle:          { color: '#F4F4F4', fontSize: 26, fontWeight: '800', letterSpacing: -0.3 },
   heroColorRow:       { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 8 },
   heroColorDot:       { width: 12, height: 12, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
-  heroSub:            { color: '#ccc', fontSize: 15, fontWeight: '500' },
-  heroHint:           { color: '#999', fontSize: 14, marginTop: 6 },
+  heroSub:            { color: '#808080', fontSize: 15, fontWeight: '500' },
+  heroHint:           { color: '#808080', fontSize: 14, marginTop: 6 },
 
   speedCard:          { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 16, backgroundColor: '#111', borderRadius: 16, padding: 14, gap: 12 },
   speedIcon:          { width: 44, height: 44, borderRadius: 12, backgroundColor: '#1A1A00', alignItems: 'center', justifyContent: 'center' },
-  speedLabel:         { color: '#fff', fontSize: 15, fontWeight: '600' },
-  speedSub:           { color: '#666', fontSize: 12, marginTop: 2 },
+  speedLabel:         { color: '#F4F4F4', fontSize: 15, fontWeight: '600' },
+  speedSub:           { color: '#808080', fontSize: 12, marginTop: 2 },
   speedValue:         { color: '#FFD60A', fontSize: 28, fontWeight: '700' },
-  speedUnit:          { color: '#888', fontSize: 12, alignSelf: 'flex-end', marginBottom: 4 },
+  speedUnit:          { color: '#808080', fontSize: 12, alignSelf: 'flex-end', marginBottom: 4 },
 
   section:            { marginHorizontal: 16, marginBottom: 10 },
-  sectionLabel:       { color: '#888', fontSize: 13, fontWeight: '500', marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.8 },
+  sectionLabel:       { color: '#808080', fontSize: 13, fontWeight: '500', marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.8 },
 
   // Collapsed field row (dropdown header + call-sign input share this)
   fieldRow:           { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderRadius: 16, backgroundColor: '#111', paddingHorizontal: 16, borderWidth: 1, borderColor: '#1E1E1E' },
   fieldRowOpen:       { borderColor: 'rgba(255,214,10,0.4)', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
   fieldRowDisabled:   { opacity: 0.5 },
   fieldValueRow:      { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  fieldValue:         { color: '#fff', fontSize: 17, fontWeight: '600' },
-  fieldPlaceholder:   { color: '#555', fontWeight: '400' },
+  fieldValue:         { color: '#F4F4F4', fontSize: 17, fontWeight: '600' },
+  fieldPlaceholder:   { color: '#808080', fontWeight: '400' },
   swatchDot:          { width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
 
   // Expanded options
   optionList:         { backgroundColor: '#0E0E0E', borderBottomLeftRadius: 16, borderBottomRightRadius: 16, borderWidth: 1, borderTopWidth: 0, borderColor: 'rgba(255,214,10,0.4)', overflow: 'hidden' },
   optionRow:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 50, borderTopWidth: 1, borderTopColor: '#1A1A1A' },
   optionRowSel:       { backgroundColor: 'rgba(255,214,10,0.08)' },
-  optionText:         { color: '#bbb', fontSize: 16 },
-  optionTextSel:      { color: '#fff', fontWeight: '600' },
+  optionText:         { color: '#808080', fontSize: 16 },
+  optionTextSel:      { color: '#F4F4F4', fontWeight: '600' },
 
   // Call sign input
-  callSignInput:      { flex: 1, color: '#fff', fontSize: 17, fontWeight: '600', paddingVertical: 14 },
+  callSignInput:      { flex: 1, color: '#F4F4F4', fontSize: 17, fontWeight: '600', paddingVertical: 14 },
 
   // Save button
   saveBtn:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginHorizontal: 16, marginTop: 8, height: 52, borderRadius: 16, backgroundColor: YELLOW },

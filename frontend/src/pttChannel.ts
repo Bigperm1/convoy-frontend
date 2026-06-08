@@ -20,6 +20,7 @@ import { Audio } from "expo-av";
 import { api } from "./api";
 import { getPttRecordingOptions, type ProximityTier } from "./proximityAudio";
 import { livePttBus, type PTTMessage } from "./livePtt";
+import { setRecordingAudioMode } from "./audioMode";
 
 export type { PTTMessage };
 
@@ -27,6 +28,14 @@ export type { PTTMessage };
 // returning (and deletes) older clips, and the client filters too so a long
 // continuous session never keeps stale audio in memory.
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+
+// ----- Hands-free VOX (voice-activated transmit) tuning -----
+// VOX_DB_THRESHOLD is in metering dBFS (0 = max, -160 = silence). Input above
+// it counts as speech; after VOX_SILENCE_MS of continuous quiet a turn auto-
+// ends. These may need tuning against real device mics / road noise.
+const VOX_SILENCE_MS = 1000;
+const VOX_DB_THRESHOLD = -40;
+const VOX_POLL_MS = 250;
 
 async function uriToBase64(uri: string): Promise<string> {
   // Web: fetch + FileReader. Native: expo-file-system reads base64 directly,
@@ -58,6 +67,14 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
   const [recording, setRecording] = useState(false);
   const [sending, setSending] = useState(false);
   const [history, setHistory] = useState<PTTMessage[]>([]);
+
+  // ----- Hands-free VOX state -----
+  const voxTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const voxLastVoiceRef = useRef(0);
+  const voxHeardRef = useRef(false);
+  const voxClosingRef = useRef(false);
+  const onVoxCloseRef = useRef<null | ((sent: boolean) => void)>(null);
+  const [voxActive, setVoxActive] = useState(false);
 
   // ----- History: initial backlog for the active channel -----
   useEffect(() => {
@@ -114,7 +131,8 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
   const ensurePerm = useCallback(async (): Promise<"granted" | "prompted" | "denied"> => {
     const perm = await Audio.getPermissionsAsync();
     if (perm.status === "granted") {
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      // Full recording session config (ducks music rather than hard-stopping it).
+      await setRecordingAudioMode();
       return "granted";
     }
     if (perm.canAskAgain) {
@@ -218,6 +236,62 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
     try { await rec.stopAndUnloadAsync(); } catch {}
   }, []);
 
+  // ===== Hands-free VOX (voice-activated transmit) =====
+  // Used by private threads: open the mic with a single tap and talk
+  // hands-free. A metering loop samples the input level; after VOX_SILENCE_MS
+  // of continuous quiet it auto-sends the turn and closes (tap again for the
+  // next turn). A turn with NO detected speech is discarded rather than sent.
+  const finishVox = useCallback(async (): Promise<boolean> => {
+    if (voxClosingRef.current) return false;     // guard against re-entry
+    voxClosingRef.current = true;
+    if (voxTimerRef.current) { clearInterval(voxTimerRef.current); voxTimerRef.current = null; }
+    setVoxActive(false);
+    let sent = false;
+    try {
+      if (voxHeardRef.current && recRef.current) sent = await stopAndSend();
+      else await cancel();                       // discard a silent turn
+    } finally {
+      const cb = onVoxCloseRef.current;
+      onVoxCloseRef.current = null;
+      voxClosingRef.current = false;
+      try { cb?.(sent); } catch {}
+    }
+    return sent;
+  }, [stopAndSend, cancel]);
+
+  const startVox = useCallback(async (onClose?: (sent: boolean) => void) => {
+    if (!channel || voxActive || recRef.current) return;
+    onVoxCloseRef.current = onClose ?? null;
+    voxHeardRef.current = false;
+    await start();   // reuse the proven start path (perm gate, runaway guard, 60s cap)
+    if (!recRef.current) {                        // perm prompt / failed start — nothing opened
+      const cb = onVoxCloseRef.current; onVoxCloseRef.current = null;
+      try { cb?.(false); } catch {}
+      return;
+    }
+    setVoxActive(true);
+    voxLastVoiceRef.current = Date.now();          // full silence window to start talking
+    voxTimerRef.current = setInterval(async () => {
+      const rec = recRef.current;
+      if (!rec) {
+        // Recording stopped outside VOX (e.g. the 60s hard cap already sent it).
+        if (voxTimerRef.current) { clearInterval(voxTimerRef.current); voxTimerRef.current = null; }
+        setVoxActive(false);
+        const cb = onVoxCloseRef.current; onVoxCloseRef.current = null;
+        try { cb?.(true); } catch {}
+        return;
+      }
+      try {
+        const st: any = await rec.getStatusAsync();
+        const level = typeof st?.metering === "number" ? st.metering : -160;
+        if (level > VOX_DB_THRESHOLD) { voxLastVoiceRef.current = Date.now(); voxHeardRef.current = true; }
+        else if (Date.now() - voxLastVoiceRef.current > VOX_SILENCE_MS) { await finishVox(); }
+      } catch {}
+    }, VOX_POLL_MS);
+  }, [channel, voxActive, start, finishVox]);
+
+  const stopVox = useCallback(() => finishVox(), [finishVox]);
+
   // Keep the ref pointing at the latest stopAndSend for the 60s cap timer.
   stopAndSendRef.current = stopAndSend;
 
@@ -228,10 +302,15 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
     try { await api.delete(`/ptt/${id}`); } catch {}
   }, []);
 
-  // Clear the cap timer if the hook unmounts mid-recording.
+  // Clear timers + kill any hot mic if the hook unmounts mid-transmit (hold OR
+  // VOX) so navigating away can never leave a runaway recording open.
   useEffect(() => () => {
     if (maxTimerRef.current) clearTimeout(maxTimerRef.current);
+    if (voxTimerRef.current) clearInterval(voxTimerRef.current);
+    const rec = recRef.current;
+    recRef.current = null;
+    if (rec) { rec.stopAndUnloadAsync().catch(() => {}); }
   }, []);
 
-  return { recording, sending, history, start, stopAndSend, cancel, remove };
+  return { recording, sending, history, start, stopAndSend, cancel, remove, voxActive, startVox, stopVox };
 }

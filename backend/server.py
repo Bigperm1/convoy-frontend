@@ -1013,6 +1013,81 @@ async def _transcribe_audio(file_path: str) -> str:
     return getattr(resp, "text", "") or ""
 
 
+# ---- Gemini voice parsing (multimodal: audio -> {text, intent, query}) ----
+# A single Gemini call transcribes the clip AND classifies the intent, replacing
+# the Whisper + regex two-step. Gated entirely on GEMINI_API_KEY: if it's unset
+# (or the call fails for any reason) /voice/transcribe falls back to Whisper +
+# _classify_intent, so the search-bar mic never regresses. The key lives only in
+# the Render env (never in the app). Free key: https://aistudio.google.com/apikey
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_VOICE_PROMPT = (
+    "You are the voice-command parser for Convoy, a driving app. The audio is a "
+    "short clip of a driver speaking, often over road noise.\n"
+    "1) Transcribe exactly what they said into `text`.\n"
+    "2) Choose exactly one `intent` from: navigate_to, clear_route, report_police, "
+    "report_accident, report_road, report_traffic, open_talk, open_music, "
+    "open_drive, open_hub, open_map, none.\n"
+    "3) If intent is navigate_to, set `query` to JUST the destination, cleaned up "
+    "for a maps search (e.g. \"head over to the Timmies on McCallum\" -> "
+    "\"Tim Hortons McCallum Road\"). Otherwise set query to null.\n"
+    "Reply with ONLY a JSON object: "
+    "{\"text\": string, \"intent\": string, \"query\": string or null}."
+)
+_VALID_INTENTS = {
+    "navigate_to", "clear_route", "report_police", "report_accident", "report_road",
+    "report_traffic", "open_talk", "open_music", "open_drive", "open_hub", "open_map", "none",
+}
+
+def _gemini_audio_mime(mime: str) -> str:
+    m = (mime or "").lower()
+    if "m4a" in m or "mp4" in m or "aac" in m: return "audio/mp4"
+    if "wav" in m: return "audio/wav"
+    if "mp3" in m or "mpeg" in m: return "audio/mpeg"
+    if "ogg" in m: return "audio/ogg"
+    return mime or "audio/mp4"
+
+async def _gemini_voice_parse(audio_b64: str, mime: str) -> Optional[dict]:
+    """Transcribe + classify in one Gemini call. Returns {text,intent,query?}
+    or None to signal 'fall back to Whisper'."""
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
+        return None
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": GEMINI_VOICE_PROMPT},
+                {"inline_data": {"mime_type": _gemini_audio_mime(mime), "data": audio_b64}},
+            ],
+        }],
+        "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(url, headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=payload)
+        if r.status_code >= 400:
+            logger.warning("Gemini voice error %s: %s", r.status_code, r.text[:240])
+            return None
+        data = r.json()
+        parts = (((data.get("candidates") or [{}])[0]).get("content") or {}).get("parts") or []
+        raw = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+        if not raw:
+            return None
+        import json as _json
+        parsed = _json.loads(raw)
+        intent = parsed.get("intent")
+        if intent not in _VALID_INTENTS or intent == "none":
+            intent = None
+        out = {"text": parsed.get("text") or "", "intent": intent}
+        q = parsed.get("query")
+        if intent == "navigate_to" and q:
+            out["query"] = str(q).strip()
+        return out
+    except Exception as e:
+        logger.warning("Gemini voice parse failed: %s", str(e)[:200])
+        return None
+
+
 @api.post("/voice/transcribe")
 async def transcribe(body: TranscribeIn, user=Depends(get_current_user)):
     import base64
@@ -1020,6 +1095,14 @@ async def transcribe(body: TranscribeIn, user=Depends(get_current_user)):
     except Exception: raise HTTPException(status_code=400, detail="Invalid audio")
     if len(audio_bytes) < 1000:
         raise HTTPException(status_code=400, detail="Audio too short")
+
+    # Primary: Gemini multimodal (transcribe + intent in one call). Returns None
+    # when GEMINI_API_KEY is unset or the call fails, in which case we fall
+    # through to the Whisper + regex path below so the mic never regresses.
+    gem = await _gemini_voice_parse(body.audio_b64, body.mime or "audio/m4a")
+    if gem is not None:
+        return gem
+
     suffix = ".m4a" if "m4a" in (body.mime or "") else ".wav"
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
     tmp.write(audio_bytes); tmp.flush(); tmp.close()
@@ -1048,12 +1131,94 @@ class TTSBody(BaseModel):
     voice: str = "nova"   # OpenAI voices: alloy / echo / fable / onyx / nova / shimmer
 
 
+# ---- Gemini TTS (controllable natural voice; replaces Nova when configured) ----
+# Activated by setting GEMINI_TTS_VOICE in Render (e.g. "Charon"). When unset,
+# /tts uses OpenAI Nova exactly as before, so deploying this is inert until you
+# flip the switch. On ANY Gemini failure (429 quota, 500, empty audio), /tts
+# falls back to the OpenAI path below, so the nav voice never goes silent during
+# the swap. Gemini TTS returns raw PCM (24 kHz mono 16-bit); we wrap it in a WAV
+# header with the stdlib `wave` module (no ffmpeg) so expo-av can play it.
+# Voice options (30): Charon=informative, Iapetus/Erinome=clear, Kore=firm,
+# Schedar=even, Vindemiatrix=gentle, Sulafat=warm, etc. Steer tone/pace with
+# GEMINI_TTS_STYLE (a natural-language preamble prepended to each line).
+GEMINI_TTS_MODEL = os.environ.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
+GEMINI_TTS_VOICE = os.environ.get("GEMINI_TTS_VOICE", "").strip()  # unset = use Nova
+GEMINI_TTS_STYLE = os.environ.get(
+    "GEMINI_TTS_STYLE",
+    "Say in a calm, clear, natural voice at a measured pace, like a car GPS navigator: ",
+)
+
+def _pcm_to_wav_b64(pcm_b64: str, rate: int = 24000, channels: int = 1, sampwidth: int = 2) -> str:
+    """Wrap raw little-endian PCM (Gemini's audio output) in a WAV container."""
+    import io, wave
+    pcm = base64.b64decode(pcm_b64)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(sampwidth)
+        wf.setframerate(rate)
+        wf.writeframes(pcm)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+async def _gemini_tts(text: str) -> Optional[str]:
+    """Generate speech via Gemini TTS. Returns base64 WAV, or None to fall back
+    to OpenAI. Gated on GEMINI_API_KEY + GEMINI_TTS_VOICE."""
+    import re
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not (key and GEMINI_TTS_VOICE):
+        return None
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TTS_MODEL}:generateContent"
+    payload = {
+        "contents": [{"parts": [{"text": GEMINI_TTS_STYLE + text}]}],
+        "generationConfig": {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {
+                "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": GEMINI_TTS_VOICE}}
+            },
+        },
+    }
+    # The TTS preview model occasionally 500s (emits text instead of audio); one
+    # quick retry smooths that over per Google's guidance. A 429 is a hard quota
+    # signal, so don't retry — fall back to Nova immediately.
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as c:
+                r = await c.post(url, headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=payload)
+            if r.status_code >= 400:
+                logger.warning("Gemini TTS error %s: %s", r.status_code, r.text[:240])
+                if r.status_code == 429:
+                    return None
+                continue
+            data = r.json()
+            parts = (((data.get("candidates") or [{}])[0]).get("content") or {}).get("parts") or []
+            for p in parts:
+                if not isinstance(p, dict):
+                    continue
+                inline = p.get("inlineData") or p.get("inline_data")
+                if inline and inline.get("data"):
+                    mt = inline.get("mimeType") or inline.get("mime_type") or ""
+                    rm = re.search(r"rate=(\d+)", mt)
+                    rate = int(rm.group(1)) if rm else 24000
+                    return _pcm_to_wav_b64(inline["data"], rate=rate)
+            logger.warning("Gemini TTS returned no audio (attempt %d)", attempt + 1)
+        except Exception as e:
+            logger.warning("Gemini TTS exception: %s", str(e)[:200])
+    return None
+
+
 @api.post("/tts")
 async def text_to_speech(body: TTSBody, user=Depends(get_current_user)):
     """Convert short navigation text into a natural-voice MP3 (base64)."""
     text = (body.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
+
+    # Primary: Gemini TTS when GEMINI_TTS_VOICE is set (returns base64 WAV).
+    # None = not configured or failed -> fall through to OpenAI Nova below.
+    gem = await _gemini_tts(text)
+    if gem is not None:
+        return {"audio_b64": gem, "mime": "audio/wav"}
+
     openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not openai_key:
         # Frontend treats 503 as "fall back to expo-speech" — see nav.ts speakOne().
@@ -1259,6 +1424,86 @@ async def hail_peer(body: HailBody, user=Depends(get_current_user)):
         }])
         return {"ok": True, "method": "expo+ws"}
     return {"ok": True, "method": "ws"}
+
+
+# ---------- Share to specific members (peer push, any content kind) ----------
+# Generalizes the Hail path: lets a user push a piece of content — a song, a
+# route, or a comms clip — to one or more SPECIFIC members they share a
+# community with. Delivered the same way as a hail: a WS frame for foregrounded
+# clients plus an Expo push for backgrounded/closed apps, with a
+# `data.type == "share"` payload the app keys on to show/open the shared item.
+class ShareBody(BaseModel):
+    target_user_ids: List[str]
+    kind: str                        # "music" | "route" | "comm"
+    payload: Optional[dict] = None   # kind-specific (e.g. {title, artist, url})
+    community_id: Optional[str] = None
+
+_SHARE_KINDS = {"music", "route", "comm"}
+
+@api.post("/notifications/share")
+async def share_to_members(body: ShareBody, user=Depends(get_current_user)):
+    if body.kind not in _SHARE_KINDS:
+        raise HTTPException(status_code=400, detail="Invalid share kind")
+    targets_in = [t for t in (body.target_user_ids or []) if t and t != user["id"]]
+    if not targets_in:
+        raise HTTPException(status_code=400, detail="No recipients")
+
+    # Only allow sharing to people the sender shares at least one community with
+    # (same anti-spam guard as Hail). Collect the union of co-members.
+    allowed: set = set()
+    async for c in db.communities.find({"members": user["id"]}, {"_id": 0, "members": 1}):
+        allowed.update(c.get("members", []))
+    allowed.discard(user["id"])
+    recipients = [t for t in targets_in if t in allowed]
+    if not recipients:
+        raise HTTPException(status_code=403, detail="You can only share with members of your communities")
+
+    sender_handle = user.get("handle", "A driver")
+    payload = body.payload or {}
+
+    if body.kind == "music":
+        title = f"\U0001F3B5 {sender_handle} shared a song"
+        sub = " — ".join([p for p in [payload.get("title"), payload.get("artist")] if p]) or "Tap to listen"
+    elif body.kind == "route":
+        title = f"\U0001F4CD {sender_handle} shared a route"
+        sub = payload.get("name") or payload.get("dest_label") or "Tap to navigate"
+    else:  # comm
+        title = f"\U0001F399 {sender_handle} shared a clip"
+        sub = "Tap to listen in Comms"
+
+    data = {
+        "type": "share",
+        "kind": body.kind,
+        "from_id": user["id"],
+        "from_handle": sender_handle,
+        "community_id": body.community_id or "",
+        "payload": payload,
+    }
+
+    # 1. WS frame — foregrounded clients can show an in-app toast.
+    await ws_manager.broadcast_to_users(recipients, {
+        "type": "share",
+        "kind": body.kind,
+        "from_handle": sender_handle,
+        "from_id": user["id"],
+        "payload": payload,
+    })
+
+    # 2. Expo push for backgrounded / closed apps.
+    tokens = await db.users.find(
+        {"id": {"$in": recipients}, "push_token": {"$nin": [None, ""]}},
+        {"_id": 0, "id": 1, "push_token": 1},
+    ).to_list(500)
+    messages = [{
+        "to": t["push_token"],
+        "title": title,
+        "body": sub,
+        "data": data,
+        "sound": "default",
+    } for t in tokens]
+    await _send_expo_push(messages)
+
+    return {"ok": True, "delivered": len(recipients)}
 
 
 def _classify_intent(text: str) -> dict:

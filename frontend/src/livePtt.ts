@@ -21,6 +21,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { api, getToken, wsUrl } from "./api";
 import { getSettings } from "./settings";
 import { hailBus } from "./hailBus";
+import { shareBus } from "./shareBus";
 import { setIdleAudioMode, setPlaybackAudioMode } from "./audioMode";
 import { showTransmitNotification } from "./pttNotification";
 import { AppState } from "react-native";
@@ -44,6 +45,57 @@ export const livePttBus = {
   on(fn: Listener) { listeners.add(fn); return () => listeners.delete(fn); },
   emit(m: PTTMessage) { listeners.forEach((fn) => { try { fn(m); } catch {} }); },
 };
+
+// When the Comms screen is focused it shows its OWN "X is talking" indicator
+// right above the mic, so the global top banner stands down there to avoid
+// double-display. The Comms screen toggles this on focus / blur.
+let commsScreenFocused = false;
+export function setCommsScreenFocused(v: boolean) { commsScreenFocused = v; }
+export function isCommsScreenFocused(): boolean { return commsScreenFocused; }
+
+// ----- Walkie floor control (one-talker-at-a-time) -----
+// The single app WS (opened below) carries floor_acquire / floor_release to
+// the server and floor state back. We expose tiny send helpers + a bus so the
+// Comms screen can lock the mic when someone else holds the floor. Fail-open:
+// if the socket isn't up, sends are no-ops and the caller transmits anyway.
+type FloorFrame = { channel: string; state: "held" | "free"; holder_id?: string; holder_handle?: string };
+const floorListeners = new Set<(f: FloorFrame) => void>();
+export const floorBus = {
+  on(fn: (f: FloorFrame) => void) { floorListeners.add(fn); return () => floorListeners.delete(fn); },
+  emit(f: FloorFrame) { floorListeners.forEach((fn) => { try { fn(f); } catch {} }); },
+};
+
+// ----- Thread lifecycle (delete fan-out) -----
+// When any participant deletes a private conversation, the backend fans out a
+// `thread_deleted` frame to every participant so each inbox drops it live.
+type ThreadEvent = { type: "deleted"; id: string };
+const threadListeners = new Set<(e: ThreadEvent) => void>();
+export const threadBus = {
+  on(fn: (e: ThreadEvent) => void) { threadListeners.add(fn); return () => threadListeners.delete(fn); },
+  emit(e: ThreadEvent) { threadListeners.forEach((fn) => { try { fn(e); } catch {} }); },
+};
+
+let activeWs: WebSocket | null = null;
+const floorState: Record<string, { holder_id: string; holder_handle: string; ts: number }> = {};
+
+function wsSend(obj: any): boolean {
+  try {
+    if (activeWs && activeWs.readyState === 1) { activeWs.send(JSON.stringify(obj)); return true; }
+  } catch {}
+  return false;
+}
+
+export function acquireFloor(channel: string) { if (channel) wsSend({ type: "floor_acquire", channel }); }
+export function releaseFloor(channel: string) { if (channel) wsSend({ type: "floor_release", channel }); }
+
+// Current holder of a channel's floor, or null. Client-side TTL mirrors the
+// server's so a missed "free" frame can never lock the mic forever.
+export function getFloorHolder(channel: string): { id: string; handle: string } | null {
+  const f = floorState[channel];
+  if (!f) return null;
+  if (Date.now() - f.ts > 65000) { delete floorState[channel]; return null; }
+  return { id: f.holder_id, handle: f.holder_handle };
+}
 
 // Module-scoped playback queue + lock so a second mount doesn't double-play
 // (defensive — we only mount once in the layout, but hot reload happens).
@@ -179,7 +231,7 @@ export function useLiveWalkieListener(
         return;
       }
 
-      ws.onopen = () => { backoff = 1000; };
+      ws.onopen = () => { backoff = 1000; activeWs = ws; };
       ws.onmessage = (ev: any) => {
         try {
           const data = JSON.parse(typeof ev.data === "string" ? ev.data : "");
@@ -195,6 +247,44 @@ export function useLiveWalkieListener(
               fromHandle: String(data.from_handle || "Driver"),
               fromId: String(data.from_id || ""),
             });
+            return;
+          }
+
+          // ===== Share frame (a member sent you a song / route / clip) =====
+          // 1:1 directed like hails, so honored regardless of channel scope.
+          // Re-emit onto shareBus for the global <ShareToast> to render.
+          if (data?.type === "share") {
+            shareBus.emit({
+              kind: (data.kind as any) || "music",
+              fromHandle: String(data.from_handle || "Driver"),
+              fromId: String(data.from_id || ""),
+              payload: data.payload || {},
+            });
+            return;
+          }
+
+          // ===== Thread deleted (a participant removed the conversation) =====
+          // 1:1/group directed like hails — honored regardless of the active
+          // channel so the Comms inbox drops it even while viewing another.
+          if (data?.type === "thread_deleted" && data?.id) {
+            threadBus.emit({ type: "deleted", id: String(data.id) });
+            return;
+          }
+
+          // ===== Floor control frame (who holds the mic) =====
+          if (data?.type === "floor" && data?.channel) {
+            const f: FloorFrame = {
+              channel: String(data.channel),
+              state: data.state === "free" ? "free" : "held",
+              holder_id: data.holder_id ? String(data.holder_id) : undefined,
+              holder_handle: data.holder_handle ? String(data.holder_handle) : undefined,
+            };
+            if (f.state === "held" && f.holder_id) {
+              floorState[f.channel] = { holder_id: f.holder_id, holder_handle: f.holder_handle || "Driver", ts: Date.now() };
+            } else {
+              delete floorState[f.channel];
+            }
+            floorBus.emit(f);
             return;
           }
 
@@ -282,6 +372,7 @@ export function useLiveWalkieListener(
       if (pollTimer) clearTimeout(pollTimer);
       try { ws?.close(); } catch {}
       ws = null;
+      activeWs = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -32,11 +32,13 @@ export async function setRecordingAudioMode() {
       // locks the screen / switches apps. Required for "transmitting while
       // backgrounded" to keep working and for Bluetooth routing to persist.
       staysActiveInBackground: true,
-      // DoNotMix → other audio (music, nav voice) is paused while we record.
-      // Prevents Spotify from bleeding through your transmission.
-      interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-      shouldDuckAndroid: false,
-      interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+      // DuckOthers → music (Apple Music / Spotify) is temporarily LOWERED while
+      // comms is active and automatically restored when comms stops, instead of
+      // being hard-stopped (DoNotMix) and left dead. Trade-off: ducked music can
+      // bleed faintly into a transmission, acceptable for walkie-grade voice.
+      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+      shouldDuckAndroid: true,
+      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
       // Android: route to loudspeaker / Bluetooth, never the earpiece.
       playThroughEarpieceAndroid: false,
     });
@@ -60,9 +62,12 @@ export async function setPlaybackAudioMode() {
       allowsRecordingIOS: false,
       playsInSilentModeIOS: true,
       staysActiveInBackground: true,
-      interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-      shouldDuckAndroid: false,
-      interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+      // DuckOthers → an incoming transmission dips the music and it pops back up
+      // when the clip finishes (the "music never comes back" fix). Ducking is
+      // tied to ACTIVE playback, so while idle the session doesn't touch music.
+      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+      shouldDuckAndroid: true,
+      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
       playThroughEarpieceAndroid: false,
     });
   } catch {}

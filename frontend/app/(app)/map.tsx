@@ -1,18 +1,18 @@
-import React, { useEffect, useRef, useState, useMemo } from "react";
+import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
-import * as Speech from "expo-speech";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { api, formatErr, wsUrl } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import Glass from "../../src/Glass";
 import ConvoyMap, { Hazard, Peer } from "../../src/ConvoyMap";
 import DestinationSearch from "../../src/DestinationSearch";
+import CategoryPills, { PlaceResult } from "../../src/components/CategoryPills";
 import LogoMenu from "../../src/components/LogoMenu";
 import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 import { voiceBus, geocodeQuery } from "../../src/voiceBus";
@@ -27,12 +27,23 @@ import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import { BearingTracker } from "../../src/bearing";
 import PeerModal from "../../src/PeerModal";
+import ShareSheet from "../../src/ShareSheet";
 import {
   fetchRoutes, fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
-  fmtDistanceM, fmtEtaSec,
+  fmtDistanceM, fmtEtaSec, announceReroute, stopSpeech, announce,
 } from "../../src/nav";
 import WeatherHUD from "../../src/components/WeatherHUD";
-import { useWeatherLayer } from "../../src/weatherLayer";
+import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
+import { useSpeedCameras } from "../../src/speedCameras";
+import { useSpeedLimit } from "../../src/speedLimit";
+import ConvoyLogo from "../../src/components/ConvoyLogo";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { addRecentRoute } from "../../src/recentRoutes";
+import NavSearchScreen from "../../src/NavSearchScreen";
+import { CarouselMember } from "../../src/components/MemberCarousel";
+import { shareInbox } from "../../src/shareInbox";
+import { startNavBanner, stopNavBanner, updateNavBanner } from "../../src/navNotification";
+import { PoliceBadgeIcon, HazardIcon } from "../../src/components/MapControlIcons";
 
 type RouteInfo = {
   distance_text: string;
@@ -80,10 +91,39 @@ async function ensureLocationPermission(): Promise<boolean> {
   return granted;
 }
 
+// Add stops / Saved route pills are designed but hidden until their features
+// (multi-stop routing + saved places) are built. Flip to true to reveal them.
+const SHOW_EXTRA_ROUTE_PILLS = false;
+
+// The bottom tab bar's fixed height (mirrors app/(app)/_layout.tsx). Banners
+// float just above it; the FABs + speedo + weather lift above the active
+// banner. The tab bar itself ALWAYS stays visible so the user can leave Maps.
+const TAB_BAR_H = 88;
+
+// Cold-start intro overlay state. Module-level so it persists across map
+// re-mounts within a single app launch — the logo cover only plays once, on a
+// true cold start, not every time you tab back to the map.
+let _introPlayed = false;
+const LAST_LOC_KEY = "convoy:lastLoc";
+
+// Format a Date as a 12-hour clock like "10:42 AM" without relying on Intl
+// (Hermes' Intl is limited on device, so we build the string by hand).
+function fmtClock(d: Date): string {
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${h}:${m < 10 ? "0" + m : m} ${ampm}`;
+}
+
 export default function MapScreen() {
   const { user, token } = useAuth();
   const router = useRouter();
   const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number; speed?: number } | null>(null);
+  // Cold-start intro overlay (logo on black until the first fix lands).
+  const introFade = useRef(new Animated.Value(_introPlayed ? 0 : 1)).current;
+  const [introVisible, setIntroVisible] = useState(!_introPlayed);
 
   // ---- Personal Best speed tracking ----
   // sessionMaxSpeed: highest km/h seen since the screen mounted (in-memory only).
@@ -102,8 +142,14 @@ export default function MapScreen() {
   const [showReport, setShowReport] = useState(false);
   const [selected, setSelected] = useState<Hazard | null>(null);
   const [destination, setDestination] = useState<{ lat: number; lng: number; label: string } | null>(null);
+  // Category-pill nearby-search results, shown as tappable pins on the map.
+  const [placePins, setPlacePins] = useState<PlaceResult[]>([]);
   const [route, setRoute] = useState<RouteInfo | null>(null);
   const [showSteps, setShowSteps] = useState(false);
+  // Slide-up "share route to members" sheet. Replaces the old Supabase
+  // community-route write so route sharing works with no Supabase backend
+  // config (shares the destination to specific members via /notifications/share).
+  const [routeShareOpen, setRouteShareOpen] = useState(false);
   const [live, setLive] = useState<"connecting" | "live" | "off">("connecting");
   // Multi-route state — primary "Route Line" (blue) + alternates (gray)
   const [routes, setRoutes] = useState<NavRoute[]>([]);
@@ -116,11 +162,15 @@ export default function MapScreen() {
   // search field doesn't cover the map. A small magnifying-glass FAB appears in
   // its place to bring it back when the driver wants to change course.
   const [searchVisible, setSearchVisible] = useState(true);
+  // Full-screen destination search (NavSearchScreen) — opens on a search-bar
+  // tap. navRoster holds the active community's members so the "drive to a
+  // friend" carousel can show offline members greyed out.
+  const [navSearchOpen, setNavSearchOpen] = useState(false);
+  const [navRoster, setNavRoster] = useState<{ id: string; handle: string; car_color?: string; is_admin?: boolean }[]>([]);
   // Layers control state — driven by the new bottom-right Layers FAB.
   // mapType:    "hybrid" = satellite + labels (default), "roadmap" = flat road view.
   // showTraffic / showTransit / showHazards toggle their respective overlays.
   // layersOpen drives the layers bottom sheet modal.
-  const [mapType, setMapType] = useState<"hybrid" | "roadmap">("hybrid");
   const [showTraffic, setShowTraffic] = useState(true);
   const [showHazards, setShowHazards] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
@@ -166,6 +216,9 @@ export default function MapScreen() {
   // map) the big preview card collapses into a minimal "Trip Summary" pill at
   // the top so the 3D chase view has the whole screen.
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
+  // Measured height of the preview "Drive" banner so the FABs/speedo/weather
+  // lift to sit exactly above it (it floats just above the tab bar).
+  const [previewBannerH, setPreviewBannerH] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
 
   const activeRoute: NavRoute | null = routes[selectedRouteIndex] || null;
@@ -178,15 +231,99 @@ export default function MapScreen() {
     if (navMode === "turn-by-turn") setSearchVisible(false);
   }, [navMode]);
 
-  // Auto-collapse the preview card once the driver starts moving (speed ≥ 5 km/h).
-  // Threshold chosen high enough to ignore GPS jitter at idle; low enough to
-  // collapse before the driver has merged onto the freeway.
+  const navAutoStartedRef = useRef(false);
+  // Reset the one-shot auto-start guard whenever the destination changes.
+  useEffect(() => { navAutoStartedRef.current = false; }, [destination]);
+
+  // Auto-START turn-by-turn once the driver begins moving (≥ 5 km/h) with a route
+  // set. Replaces the old "collapse to a trip-summary pill" flow — the new
+  // turn-by-turn UI (TurnByTurnNav + StepDrawer) now pops up on its own when you
+  // drive off, instead of a stale pill sitting where the new UI belongs. Fires at
+  // most once per destination (navAutoStartedRef, set inside startNav) and never
+  // fights a manual End.
   useEffect(() => {
-    if (!destination || !route) return;          // nothing to collapse yet
-    if (navMode === "turn-by-turn") return;      // turn-by-turn UI takes over
+    if (!destination || !route) return;
+    if (navMode === "turn-by-turn") return;
+    if (navAutoStartedRef.current) return;
     const kmh = (coords?.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
-    if (kmh >= 5 && !previewCollapsed) setPreviewCollapsed(true);
+    if (kmh >= 5) startNav();
   }, [coords?.speed, destination, route, navMode]);
+
+  // ---- Full-screen search wiring ----
+  // A picked place behaves exactly like the inline bar's onSelect.
+  const onSearchSelectPlace = (loc: { lat: number; lng: number; label: string }) => {
+    setDestination(loc);
+    setShowSteps(true);
+    setSearchVisible(false);
+  };
+  // A tapped category result pin routes straight to it (same flow as a picked
+  // search result) and clears the remaining category pins from the map.
+  const handlePlacePinPress = (p: PlaceResult) => {
+    setPlacePins([]);
+    onSearchSelectPlace({ lat: p.lat, lng: p.lng, label: p.label });
+  };
+  // Tapping a live friend routes to their current position and, once the route
+  // computes, rolls straight into turn-by-turn (Google-Maps "directions to a
+  // contact" feel). pendingFriendStartRef bridges the async route fetch.
+  const pendingFriendStartRef = useRef(false);
+  const onSearchSelectFriend = (m: CarouselMember) => {
+    if (typeof m.lat !== "number" || typeof m.lng !== "number") return;
+    pendingFriendStartRef.current = true;
+    setDestination({ lat: m.lat, lng: m.lng, label: m.handle || "Friend" });
+    setShowSteps(true);
+    setSearchVisible(false);
+  };
+  useEffect(() => {
+    if (!pendingFriendStartRef.current) return;
+    if (activeRoute && navMode !== "turn-by-turn") {
+      pendingFriendStartRef.current = false;
+      startNav();
+    }
+  }, [activeRoute, navMode]);
+  // Fetch the active community roster when the search opens (same pattern as
+  // ShareSheet) so offline members appear greyed in the friend carousel.
+  useEffect(() => {
+    if (!navSearchOpen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = getSettings();
+        let cid: string | null = s?.activeCommunityId ?? null;
+        if (!cid) {
+          const { data } = await api.get("/communities/mine");
+          cid = Array.isArray(data) && data[0]?.id ? data[0].id : null;
+        }
+        if (!cid) { if (!cancelled) setNavRoster([]); return; }
+        const [meRes, cRes] = await Promise.all([
+          api.get("/auth/me").catch(() => ({ data: null as any })),
+          api.get(`/communities/${cid}`),
+        ]);
+        const myId = meRes?.data?.id;
+        const roster = (cRes?.data?.members_users || [])
+          .filter((mem: any) => mem && mem.id && mem.id !== myId)
+          .map((mem: any) => ({ id: mem.id, handle: mem.handle, car_color: mem.car_color, is_admin: mem.is_admin }));
+        if (!cancelled) setNavRoster(roster);
+      } catch {
+        if (!cancelled) setNavRoster([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [navSearchOpen]);
+
+  // ----- Receive a shared route -----
+  // A crew member's shared route lands in shareInbox (via the ShareToast). We
+  // consume it once — on the ping if this screen is already mounted, else on
+  // next focus — and set it as our destination. The destination→routes effect
+  // then computes OUR own route from OUR location and the Drive preview shows.
+  const applyPendingRoute = useCallback(() => {
+    const r = shareInbox.takeRoute();
+    if (!r) return;
+    setDestination({ lat: r.lat, lng: r.lng, label: r.label });
+    setShowSteps(true);
+    setSearchVisible(false);
+  }, []);
+  useEffect(() => shareInbox.subscribe(applyPendingRoute), [applyPendingRoute]);
+  useFocusEffect(applyPendingRoute);
 
   // When destination clears, reset both UI states so a fresh search restarts clean.
   useEffect(() => {
@@ -197,10 +334,37 @@ export default function MapScreen() {
   }, [destination]);
 
   const [settings] = useSettings();
-  const showWeatherLayer = (settings as any).showWeatherLayer ?? false;
+  // Map base style (satellite vs default road map) is persisted in settings so
+  // it's controllable from the Settings screen AND the on-map Layers sheet.
+  const mapType: "hybrid" | "roadmap" = (settings as any).mapType ?? "hybrid";
+  const showWeatherLayer = (settings as any).showWeatherLayer ?? true;
   // Live weather for the on-map HUD — current conditions at the user's GPS
   // position, fetched only while the Weather layer is enabled (auto-refresh ~5 min).
   const { weather } = useWeatherLayer(coords?.lat ?? null, coords?.lng ?? null, showWeatherLayer);
+  // 7-day daily forecast for the driver's location — feeds the tappable
+  // WeatherHUD chip's pop-up outlook. Gated on the same weather-layer toggle.
+  const dailyForecast = useDailyForecast(coords?.lat ?? null, coords?.lng ?? null, showWeatherLayer);
+  // Destination arrival weather — hourly forecast at the destination; we pick
+  // the hour matching your ETA (now + route duration) and surface it as a
+  // weather chip on the end pin. Gated on the weather layer toggle + a route.
+  const destForecast = useDestinationWeather(destination?.lat ?? null, destination?.lng ?? null, showWeatherLayer && !!destination);
+  const destWeather = useMemo(() => {
+    if (!destination || !destForecast) return null;
+    const durS = activeRoute?.duration_in_traffic_s ?? activeRoute?.duration_s ?? 0;
+    const cond = pickForecastAt(destForecast, Date.now() + durS * 1000);
+    if (!cond) return null;
+    const t = Math.round(settings.speedUnit === "mph" ? cond.tempF : cond.tempC);
+    return { kind: weatherKind(cond), temp: `${t}\u00b0` };
+  }, [destination, destForecast, activeRoute?.duration_in_traffic_s, activeRoute?.duration_s, settings.speedUnit]);
+
+  // Fixed speed cameras (OpenStreetMap), fetched around the driver and cached.
+  // Drives both the map pins and the Nova proximity voice alert below.
+  const speedCamerasEnabled = (settings as any).speedCameras !== false;
+  const speedCameras = useSpeedCameras(coords?.lat ?? null, coords?.lng ?? null, speedCamerasEnabled);
+  // Posted speed limit for the road you're on (OpenStreetMap maxspeed via
+  // Overpass). Feeds the speedometer's over-limit pulse; null when the road has
+  // no maxspeed tag, in which case the pill simply stays neutral.
+  const speedLimitKmh = useSpeedLimit(coords?.lat ?? null, coords?.lng ?? null, true);
 
   // Optional Convoy alert sound — chime when a NEW community hazard appears
   const prevHazardIdsRef = useRef<Set<string>>(new Set());
@@ -231,19 +395,29 @@ export default function MapScreen() {
     prevHazardIdsRef.current = ids;
   }, [hazards, settings.alertSound]);
 
+  // Latest GPS coords mirror — lets the route fetch read the current origin
+  // WITHOUT taking `coords` as an effect dependency. Depending on `coords`
+  // re-fired this effect every GPS tick (~1/sec), which hammered the Directions
+  // API and reset the user's selected alternate back to 0 every second (so a
+  // tapped route never stayed yellow). We now fetch only when the destination
+  // or route options change, reading the live origin from this ref.
+  const coordsRef = useRef(coords);
+  useEffect(() => { coordsRef.current = coords; }, [coords]);
+
   // Unified multi-route directions (web + native). Fetches up to 3 alternates with `alternatives=true`.
   // Routes are SORTED by current traffic-aware ETA (fastest first) and tagged with
   // a rank-based color: green (fastest) / orange (2nd) / red (3rd+) so the user
   // can see at-a-glance which polyline is the best pick.
   // Honors avoid-tolls/highways/ferries route preferences from settings.
   useEffect(() => {
-    if (!destination || !coords) {
+    const origin = coordsRef.current;
+    if (!destination || !origin) {
       setRoutes([]); setSelectedRouteIndex(0); setRoute(null);
       return;
     }
     let cancelled = false;
     (async () => {
-      const raw = await fetchRoutes(coords, destination, {
+      const raw = await fetchRoutes(origin, destination, {
         tolls: settings.avoidTolls,
         highways: settings.avoidHighways,
         ferries: settings.avoidFerries,
@@ -274,13 +448,13 @@ export default function MapScreen() {
       } : null);
     })();
     return () => { cancelled = true; };
-  }, [destination, coords, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
+  }, [destination, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
 
   // When a destination is picked, drop follow-mode so the camera can zoom out to
   // frame all route options (ConvoyMap fits to the polylines). The Recenter FAB
   // re-enables follow when the driver wants to track their car again.
   useEffect(() => {
-    if (destination) setIsFollowing(false);
+    if (destination) { setIsFollowing(false); setPlacePins([]); }
   }, [destination]);
 
   // Mirror RouteInfo whenever the user picks a different alternate
@@ -309,19 +483,43 @@ export default function MapScreen() {
         if (res.length > 0) {
           setRoutes(res.slice(0, 2));
           setSelectedRouteIndex(0);
-          if (!navMuted) Speech.speak("Recalculating route.", { rate: 1.0 });
+          if (!navMuted) announceReroute();
         }
       });
     },
   });
 
+  // System nav-notification banner — keeps the current turn on screen as a
+  // heads-up notification even when Convoy is backgrounded (home/lock screen).
+  // A background location task drives it. iOS works on the current build;
+  // Android lights up after the next native build (permissions staged in
+  // app.json). navBgActiveRef tracks whether the bg task is driving updates; if
+  // it isn't (e.g. background-location permission denied), the second effect
+  // drives the banner from the live foreground GPS coords instead.
+  const navBgActiveRef = useRef(false);
+  useEffect(() => {
+    if (navMode !== "turn-by-turn" || !activeRoute) return;
+    startNavBanner(activeRoute, destination?.label)
+      .then((bg) => { navBgActiveRef.current = bg; })
+      .catch(() => {});
+    return () => { navBgActiveRef.current = false; stopNavBanner(); };
+  }, [navMode, activeRoute, destination?.label]);
+  useEffect(() => {
+    if (navMode === "turn-by-turn" && coords && !navBgActiveRef.current) {
+      updateNavBanner(coords.lat, coords.lng);
+    }
+  }, [coords, navMode]);
+
   const startNav = () => {
     if (!activeRoute) return;
+    navAutoStartedRef.current = true;
+    if (destination) addRecentRoute({ label: destination.label, lat: destination.lat, lng: destination.lng });
     setShowSteps(false);
     setNavMode("turn-by-turn");
   };
   const endNav = () => {
-    Speech.stop();
+    stopSpeech();
+    navAutoStartedRef.current = true;  // stay stopped until a new destination is set
     setNavMode("preview");
   };
   // Delete a hazard (by id) — used by the long-press / right-click flow on
@@ -350,7 +548,7 @@ export default function MapScreen() {
     );
   };
   const clearRoute = () => {
-    Speech.stop();
+    stopSpeech();
     setDestination(null);
     setRoutes([]);
     setRoute(null);
@@ -369,44 +567,38 @@ export default function MapScreen() {
   const slideStepDrawerUp = () => stepDrawerRef.current?.open();
   const slideStepDrawerDown = () => stepDrawerRef.current?.close();
 
-  // Tap a route polyline on the map → keep ONLY that route, fire up nav with
-  // chase-cam (45° behind the car), and pop the step drawer for 3s so the
-  // driver can glance at the turn list before it tucks away.
+  // Grabber pan kept for the drag affordance, but swipe-to-collapse was removed
+  // with the old trip-summary pill — the Drive banner now stays up until you tap
+  // Start (or auto-start by driving off).
+  const sheetPan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => g.dy > 8 && Math.abs(g.dy) > Math.abs(g.dx),
+      onPanResponderRelease: () => {},
+    })
+  ).current;
+
+  // Tap a route polyline on the map (or an alternate chip in the sheet) →
+  // SELECT it: highlight that route in convoy-yellow and refresh the ETA,
+  // matching native Google Maps where tapping an alternate just previews it.
+  // The driver then taps Start to begin turn-by-turn. (Previously this
+  // collapsed to the tapped route and jumped straight into navigation, which
+  // is why tapping a line never simply "turned it yellow".)
   const handleSelectRoute = (index: number) => {
-    const chosen = routes[index];
-    if (!chosen) return;
-    setRoutes([chosen]);
-    setSelectedRouteIndex(0);
-    setShowSteps(false);
-    setNavMode("turn-by-turn");
-    // Force chase cam on — `mapView` controls bearing-lock + 45° pitch downstream.
-    updateGlobalSettings({ mapView: 'heading_up' }).catch(() => {});
-    slideStepDrawerUp();
-    if (stepDrawerAutoHideTimer.current) clearTimeout(stepDrawerAutoHideTimer.current);
-    stepDrawerAutoHideTimer.current = setTimeout(() => {
-      slideStepDrawerDown();
-    }, 3000);
+    if (index < 0 || index >= routes.length) return;
+    setSelectedRouteIndex(index);
   };
   // Clear the auto-hide timer on unmount so we don't leak.
   useEffect(() => () => {
     if (stepDrawerAutoHideTimer.current) clearTimeout(stepDrawerAutoHideTimer.current);
   }, []);
 
-  // Continuous GPS watch while in turn-by-turn mode (updates user position for the engine + camera follow)
-  useEffect(() => {
-    if (navMode !== "turn-by-turn") return;
-    let sub: Location.LocationSubscription | null = null;
-    (async () => {
-      try {
-        if (!(await ensureLocationPermission())) return;
-        sub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1500, distanceInterval: 5 },
-          (pos) => setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-        );
-      } catch {}
-    })();
-    return () => { if (sub) sub.remove(); };
-  }, [navMode]);
+  // NOTE: there is intentionally NO separate turn-by-turn GPS watcher here.
+  // The always-on watcher below (1s, heading+speed) is the single source of
+  // `coords` for both the engine and the chase camera. A second nav-only
+  // watcher used to run alongside it and called setCoords({lat,lng}) WITHOUT
+  // heading/speed, so during nav the two watchers alternated and speed kept
+  // flickering to undefined — which made the chase-cam zoom oscillate and the
+  // car/heading jitter. One watcher = stable speed, stable zoom, smooth marker.
 
   // ===== Hail subscription =====
   //
@@ -441,33 +633,66 @@ export default function MapScreen() {
   // getForegroundPermissionsAsync, so the OS prompt never reappears.
   useEffect(() => {
     (async () => {
-      let lat = 37.7749, lng = -122.4194;   // fallback only if denied / GPS times out
+      // 1) Seed INSTANTLY from the location cached on a previous run so the map
+      //    mounts near the driver instead of a default (San Francisco) and then
+      //    visibly jumping. The intro overlay hides this until a real fix lands.
+      try {
+        const raw = await AsyncStorage.getItem(LAST_LOC_KEY);
+        if (raw) {
+          const c = JSON.parse(raw);
+          if (typeof c?.lat === "number" && typeof c?.lng === "number") {
+            setCoords((cur) => cur ?? { lat: c.lat, lng: c.lng });
+          }
+        }
+      } catch {}
       try {
         if (await ensureLocationPermission()) {
+          // OS-cached last fix is instant — seed with it if we had no app cache.
+          try {
+            const last = await Location.getLastKnownPositionAsync();
+            if (last?.coords) setCoords((cur) => cur ?? { lat: last.coords.latitude, lng: last.coords.longitude });
+          } catch {}
           const pos = await Promise.race([
             Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
             new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
           ]);
           if (pos && (pos as any).coords) {
-            lat = (pos as any).coords.latitude;
-            lng = (pos as any).coords.longitude;
+            const lat = (pos as any).coords.latitude;
+            const lng = (pos as any).coords.longitude;
+            setCoords({ lat, lng });
+            try { await AsyncStorage.setItem(LAST_LOC_KEY, JSON.stringify({ lat, lng })); } catch {}
+            try { await api.post("/location", { lat, lng, speed: 0, heading: 0 }); } catch {}
           }
         }
       } catch {}
-      setCoords({ lat, lng });
-      try { await api.post("/location", { lat, lng, speed: 0, heading: 0 }); } catch {}
+      // Last resort: only if we STILL have nothing to show seed San Francisco
+      // so the map isn't blank (first launch / denied / no cache / GPS failed).
+      setCoords((cur) => cur ?? { lat: 37.7749, lng: -122.4194 });
       loadPeers();
     })();
   }, []);
+
+  // ===== Cold-start intro overlay reveal =====
+  // Fade the logo cover the moment we have ANY location to show (cached / OS
+  // last-known / fresh fix), or after a hard 7s cap so we never get stuck on
+  // the logo. _introPlayed gates it to a single play per app launch.
+  useEffect(() => {
+    if (_introPlayed) return;
+    const reveal = () => {
+      if (_introPlayed) return;
+      _introPlayed = true;
+      Animated.timing(introFade, { toValue: 0, duration: 450, useNativeDriver: true })
+        .start(() => setIntroVisible(false));
+    };
+    if (coords) { reveal(); return; }
+    const t = setTimeout(reveal, 7000);
+    return () => clearTimeout(t);
+  }, [coords]);
 
   // ----- Continuous heading + position watcher -----
   // BestForNavigation accuracy + 1s tick + 0m distance gate so the speedometer
   // updates every second instead of every ~4s/8m. Battery cost is acceptable
   // for a car-enthusiast app — this is the same cadence Google Maps uses.
-  // Also drives a throttled Google Roads speed-limit lookup (1×/10s) so the
-  // speedo can color-code over/under the posted limit.
-  const speedLimitRef = useRef<number | null>(null);
-  const lastSpeedLimitFetchRef = useRef<number>(0);
   // Border-detection: throttle the reverse-geocode lookup to once a minute,
   // and only if the user hasn't manually picked a unit in Settings (see
   // `settings.speedUnitManual` — set true when they tap a unit button).
@@ -520,25 +745,11 @@ export default function MapScreen() {
             if (kmh >= 1) {
               setSessionMaxSpeed((m) => (kmh > m ? kmh : m));
             }
-            // Google Roads speed-limit lookup — throttled to 1/10s so we
-            // stay well under the free-tier quota.
+            // Posted speed limit now comes from OpenStreetMap via the
+            // useSpeedLimit() hook (Google Roads Speed Limits is a gated, paid
+            // endpoint that was disabled on this project). `now` is still used
+            // by the border-aware unit auto-detect just below.
             const now = Date.now();
-            // Only check the posted speed limit while actually moving - no
-            // point hitting the Roads API every 10s while parked. Saves a
-            // network round-trip per cycle whenever the car is stopped.
-            if (speed > 0.5 && now - lastSpeedLimitFetchRef.current > 10000) {
-              lastSpeedLimitFetchRef.current = now;
-              const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
-              if (KEY) {
-                fetch(`https://roads.googleapis.com/v1/speedLimits?path=${pos.coords.latitude},${pos.coords.longitude}&key=${KEY}`)
-                  .then((r) => r.json())
-                  .then((d) => {
-                    const limit = d?.speedLimits?.[0]?.speedLimit;       // KPH
-                    if (typeof limit === 'number') speedLimitRef.current = limit;
-                  })
-                  .catch(() => {});
-              }
-            }
             // Border-aware speed-unit auto-detect.
             //   * Skips entirely if the user has manually chosen a unit
             //     (settings.speedUnitManual === true).
@@ -845,7 +1056,7 @@ export default function MapScreen() {
       // Voice-driven reports get a spoken acknowledgement so the driver can keep eyes on the road
       if (opts?.fromVoice && !navMuted) {
         const label = kind === "police" ? "Police" : kind === "accident" ? "Accident" : kind === "traffic" ? "Traffic" : "Hazard";
-        try { Speech.speak(`${label} reported. Thanks driver.`, { rate: 1.0, pitch: 1.0 }); } catch {}
+        try { announce(`${label} reported. Thanks driver.`); } catch {}
       }
     } catch (e: any) {
       Alert.alert("Report failed", e?.message || formatErr(e));
@@ -899,7 +1110,7 @@ export default function MapScreen() {
       }
 
       if (intent === "navigate_to" && cmd.query) {
-        const loc = await geocodeQuery(cmd.query, coords || undefined);
+        const loc = await geocodeQuery(cmd.query, coords || undefined, true);
         if (loc) {
           setDestination(loc);
           setShowSteps(true);
@@ -943,6 +1154,26 @@ export default function MapScreen() {
 
   // Clear the pass-by auto-dismiss timer on unmount so we don't leak.
   useEffect(() => () => { if (passPromptTimer.current) clearTimeout(passPromptTimer.current); }, []);
+
+  // ----- Speed-camera proximity voice alert (Nova) -----
+  // Announce ONCE when we come within ~300 m of a fixed speed camera while
+  // actually moving (>= 25 km/h); re-arm a camera only after we've left a wider
+  // ~600 m radius so a return trip past it can alert again. Respects the nav
+  // mute toggle and the Speed Cameras setting.
+  const announcedCamsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!coords || !speedCamerasEnabled || speedCameras.length === 0) return;
+    const kmh = (coords.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
+    const announced = announcedCamsRef.current;
+    for (const c of speedCameras) {
+      const dM = distanceKm(coords.lat, coords.lng, c.lat, c.lng) * 1000;
+      if (dM > 600) { announced.delete(c.id); continue; }   // re-arm once well past
+      if (dM <= 300 && kmh >= 25 && !announced.has(c.id)) {
+        announced.add(c.id);
+        if (!navMuted) { try { announce("Speed camera ahead."); } catch {} }
+      }
+    }
+  }, [coords?.lat, coords?.lng, speedCameras, speedCamerasEnabled, navMuted]);
 
   // ----- Convoy Realtime Presence (Supabase) -----
   // Live peer broadcast/track via Supabase Realtime. Replaces stale REST polling for online cars.
@@ -1078,6 +1309,31 @@ export default function MapScreen() {
     setRouteToast(null);
   };
 
+  // Share the current route with the user's community (any member). Reuses the
+  // community-routes pipe so the crew can load the same destination/path from
+  // the map. The backend authorizes; on failure we surface the reason.
+  const shareRouteToCommunity = async () => {
+    if (!destination) return;
+    if (!settings.activeCommunityId) {
+      Alert.alert("Join a community first", "Select or join a community to share routes with your crew.");
+      return;
+    }
+    try {
+      await createCommunityRoute({
+        community_id: settings.activeCommunityId,
+        name: destination.label || "Shared route",
+        dest_label: destination.label,
+        dest_lat: destination.lat,
+        dest_lng: destination.lng,
+        polyline: activeRoute?.polyline || undefined,
+      });
+      try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+      Alert.alert("Route shared", "Your crew can now load this route from the map.");
+    } catch (e: any) {
+      Alert.alert("Couldn't share route", e?.response?.data?.detail || e?.message || "Try again");
+    }
+  };
+
   // Admin saves the current destination as a shared route for the community
   const saveCurrentDestinationToConvoy = async () => {
     if (!destination || !settings.activeCommunityId) return;
@@ -1131,6 +1387,39 @@ export default function MapScreen() {
   // Filter out community-downvoted hazards before rendering
   const visibleHazards = hazards.filter(isHazardVisible);
 
+  // Friend carousel list: every roster member, marked live (with their current
+  // location) when they're present in the merged peerList. Offline members are
+  // kept so the carousel can show them greyed out.
+  const livePeerById = new Map<string, Peer>();
+  peerList.forEach((p) => { if (p.user_id) livePeerById.set(p.user_id, p); });
+  const navMembers: CarouselMember[] = navRoster.map((m) => {
+    const p = livePeerById.get(m.id);
+    const isLive = !!p && typeof p.lat === "number" && typeof p.lng === "number";
+    return {
+      id: m.id,
+      handle: m.handle,
+      car_color: m.car_color ?? p?.activeColor ?? p?.carColor,
+      is_admin: m.is_admin,
+      isLive,
+      lat: p?.lat,
+      lng: p?.lng,
+    };
+  });
+
+  // Bottom-anchored chrome lift. Banners float just above the always-visible
+  // tab bar; the FABs + speedo + weather lift to clear whichever banner is up.
+  //   • preview "Drive" banner → lift by its measured height
+  //   • turn-by-turn step bar  → lift by the collapsed step-bar height
+  const bannerUp = !!destination && !!route && navMode === "preview" && !previewCollapsed;
+  const navBarUp = navMode === "turn-by-turn" && tbt.active;
+  const STEP_BAR_H = 84;
+  const controlsBottom = bannerUp
+    ? TAB_BAR_H + previewBannerH + 12
+    : navBarUp
+    ? TAB_BAR_H + STEP_BAR_H + 12
+    : 90;
+  const weatherBottom = controlsBottom + 68;
+
   return (
     <View style={styles.c}>
       <ConvoyMap
@@ -1162,9 +1451,11 @@ export default function MapScreen() {
         peers={peerList}
         leaderUserId={leaderUserId}
         hazards={visibleHazards}
+        speedCameras={speedCameras}
         externalAlerts={[]}
         highlightConvoy={settings.highlightConvoy}
         destination={destination}
+        destWeather={destWeather}
         encodedPolyline={encodedPolyline}
         routes={routes}
         selectedRouteIndex={selectedRouteIndex}
@@ -1183,7 +1474,7 @@ export default function MapScreen() {
         userSpeedMs={coords?.speed}
         // Tap on empty map → close any open search overlay so the driver can
         // peek at the map fullscreen mid-trip without ending navigation.
-        onMapPress={() => { if (searchVisible) setSearchVisible(false); }}
+        onMapPress={() => { /* search bar stays pinned until a route is selected — no auto-hide on map tap */ }}
         onHazardPress={(h: any) => setSelected(h)}
         onHazardLongPress={handleHazardLongPress}
         onPeerPress={(p: any) => {
@@ -1192,6 +1483,9 @@ export default function MapScreen() {
           setSelectedPeer(full || { user_id: p.user_id, handle: p.handle, lat: p.lat, lng: p.lng, carType: p.carType });
         }}
         onExternalAlertPress={(a: any) => Alert.alert(`${a.type}${a.subtype ? " · " + a.subtype : ""}`, "Live alert from Convoy feed.")}
+        places={placePins}
+        showPlacePins={settings.showPlacePins !== false}
+        onPlacePress={handlePlacePinPress}
         onRoute={setRoute}
       />
 
@@ -1206,23 +1500,27 @@ export default function MapScreen() {
       <View style={styles.topBar} pointerEvents="box-none">
         {searchVisible && (
           <View pointerEvents="box-none">
+            <DestinationSearch
+              origin={coords}
+              onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
+              onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
+              onProfilePress={() => router.push("/(app)/hub" as any)}
+              onPressField={() => setNavSearchOpen(true)}
+              profileSlot={<LogoMenu size={28} />}
+            />
+            {/* Category quick-search pills (Gas / Food / Coffee / …) directly
+                under the search bar, Google-Maps style. Results drop as pins. */}
+            <CategoryPills origin={coords} onResults={setPlacePins} />
             {(() => {
               const selfLive = settings.avatarLive !== false && !!settings.activeCommunityId ? 1 : 0;
               const liveCount = selfLive + peerList.length;
               return (
                 <View style={styles.liveOverlay} pointerEvents="none">
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts · v3</Text>
                 </View>
               );
             })()}
-            <DestinationSearch
-              origin={coords}
-              onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
-              onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
-              onProfilePress={() => router.push("/(app)/hub" as any)}
-              profileSlot={<LogoMenu size={28} />}
-            />
           </View>
         )}
       </View>
@@ -1285,112 +1583,78 @@ export default function MapScreen() {
         </SafeAreaView>
       )}
 
-      {/* ===== Route preview — collapses into Trip Summary pill once moving ===== */}
-      {destination && route && navMode === "preview" && previewCollapsed && (
-        <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.tripSummaryWrap}>
-          <TouchableOpacity
-            testID="trip-summary-pill"
-            onPress={() => setPreviewCollapsed(false)}
-            activeOpacity={0.85}
-          >
-            <Glass radius={16} style={styles.tripSummary}>
-              <View style={styles.tripSummaryRow}>
-                <Ionicons name="navigate" size={16} color="#0A84FF" />
-                <Text style={styles.tripSummaryEta} numberOfLines={1}>
-                  {(activeRoute?.duration_in_traffic_text || route.duration_text)} · {route.distance_text}
-                </Text>
-                <Text style={styles.tripSummaryDest} numberOfLines={1}>
-                  {destination.label}
-                </Text>
-                <Ionicons name="chevron-down" size={16} color={COLORS.textDim} />
+      {/* Old collapsed "trip-summary" pill removed — it sat where the new
+          turn-by-turn UI belongs and blocked it from showing. Driving off now
+          auto-starts turn-by-turn (see navAutoStartedRef effect above). */}
+
+      {/* ===== Route preview banner — "Drive" header, trip summary, Start ===== */}
+      {destination && route && navMode === "preview" && !previewCollapsed && (() => {
+        const ar = activeRoute;
+        const durSec = ar?.duration_in_traffic_s ?? ar?.duration_s ?? 0;
+        const durMin = Math.max(1, Math.round(durSec / 60));
+        const arriveStr = fmtClock(new Date(Date.now() + durSec * 1000));
+        const distStr = ar?.distance_text ?? route.distance_text;
+        const bestLabel = selectedRouteIndex === 0 ? "Best route" : (ar?.summary ? `via ${ar.summary}` : "Alternate");
+        return (
+          <View style={styles.routeSheet} onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>
+            {/* Grabber — swipe down to collapse to the trip pill. */}
+            <View {...sheetPan.panHandlers}>
+              <View style={styles.sheetGrabber} />
+            </View>
+
+            {/* Header — Drive (yellow) · share to community · close */}
+            <View style={styles.bannerHeader}>
+              <Text style={styles.bannerDrive}>Drive</Text>
+              <View style={styles.bannerHeaderRight}>
+                <TouchableOpacity testID="share-route" onPress={() => { Haptics.selectionAsync().catch(() => {}); setRouteShareOpen(true); }} hitSlop={10}>
+                  <Ionicons name="share-outline" size={22} color="#EBEBF5" />
+                </TouchableOpacity>
+                <TouchableOpacity testID="route-clear" onPress={clearRoute} hitSlop={10}>
+                  <Ionicons name="close" size={24} color="#EBEBF5" />
+                </TouchableOpacity>
               </View>
-            </Glass>
-          </TouchableOpacity>
-        </SafeAreaView>
-      )}
-
-      {/* ===== Route preview — Google-Maps-style bottom sheet (driving only) ===== */}
-      {destination && route && navMode === "preview" && !previewCollapsed && (
-        <View style={styles.routeSheet}>
-          <View style={styles.sheetGrabber} />
-          <View style={styles.sheetHeaderRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sheetDest} numberOfLines={1}>{destination.label}</Text>
-              <Text style={styles.sheetMeta} numberOfLines={1}>
-                {(activeRoute?.duration_in_traffic_text || route.duration_text)} · {route.distance_text}
-                {routes[selectedRouteIndex]?.summary ? ` · via ${routes[selectedRouteIndex].summary}` : ""}
-              </Text>
             </View>
-            {/* Collapse-to-pill chevron (manual override of auto-collapse-on-movement) */}
-            <TouchableOpacity testID="route-collapse" onPress={() => setPreviewCollapsed(true)} style={styles.sheetHeaderBtn}>
-              <Ionicons name="chevron-down" size={22} color={COLORS.textDim} />
-            </TouchableOpacity>
-            <TouchableOpacity testID="route-clear" onPress={clearRoute} style={styles.sheetHeaderBtn}>
-              <Ionicons name="close" size={22} color={COLORS.textDim} />
-            </TouchableOpacity>
-          </View>
 
-          {/* Up to two traffic-based options. Fastest is selected by default and
-              rendered in convoy yellow (both here and on the map polyline). */}
-          {routes.length > 1 && (
-            <View style={styles.routeOptsRow}>
-              {routes.map((r, i) => {
-                const sel = i === selectedRouteIndex;
-                const eta = r.duration_in_traffic_text || r.duration_text;
-                return (
-                  <TouchableOpacity
-                    key={i}
-                    testID={`alt-${i}`}
-                    onPress={() => setSelectedRouteIndex(i)}
-                    activeOpacity={0.85}
-                    style={[styles.routeOpt, sel && styles.routeOptActive]}
-                  >
-                    <Text style={[styles.routeOptEta, sel && styles.routeOptEtaActive]}>{eta}</Text>
-                    <Text style={[styles.routeOptSum, sel && styles.routeOptSumActive]} numberOfLines={1}>
-                      {r.summary || (i === 0 ? "Fastest" : "Alternate")}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
+            <View style={styles.bannerDivider} />
 
-          {/* Action row — Steps toggle, optional Share (admin), Start (convoy yellow). */}
-          <View style={styles.sheetActions}>
-            <TouchableOpacity testID="route-toggle" onPress={() => setShowSteps((s) => !s)} style={styles.sheetSecBtn} activeOpacity={0.85}>
-              <Ionicons name={showSteps ? "chevron-down" : "list"} size={18} color={COLORS.text} />
-              <Text style={styles.sheetSecText}>{showSteps ? "Hide" : "Steps"}</Text>
-            </TouchableOpacity>
-            {isAdminOfActive && settings.activeCommunityId && activeMapEnabled && (
-              <TouchableOpacity
-                testID="save-to-convoy"
-                onPress={saveCurrentDestinationToConvoy}
-                style={[styles.sheetSecBtn, savingRoute && { opacity: 0.6 }]}
-                disabled={savingRoute}
-                activeOpacity={0.85}
-              >
-                <Ionicons name={savingRoute ? "hourglass" : "share-social"} size={18} color="#FFD60A" />
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity testID="start-nav" onPress={startNav} style={styles.sheetStartBtn} activeOpacity={0.9}>
-              <Ionicons name="navigate" size={20} color="#0A0A0A" />
-              <Text style={styles.sheetStartText}>Start</Text>
-            </TouchableOpacity>
-          </View>
-
-          {showSteps && (
-            <ScrollView style={styles.stepsList} contentContainerStyle={{ paddingBottom: 12 }} testID="route-steps">
-              {route.steps.map((s, i) => (
-                <View key={i} style={styles.stepRow}>
-                  <View style={styles.stepIcon}><Ionicons name={maneuverIcon(s.maneuver)} size={16} color={COLORS.primary} /></View>
-                  <Text style={styles.stepText} numberOfLines={2}>{s.html}</Text>
-                  <Text style={styles.stepDist}>{s.distance_text}</Text>
+            {/* Summary — duration · arrive time · distance · best-route label */}
+            <View style={styles.bannerSummary}>
+              <View style={styles.bannerDurCol}>
+                <Text style={styles.bannerDurNum}>{durMin}</Text>
+                <Text style={styles.bannerDurUnit}>min</Text>
+              </View>
+              <View>
+                <View style={styles.bannerArriveRow}>
+                  <Text style={styles.bannerArriveLabel}>Arrive</Text>
+                  <Text style={styles.bannerArriveTime}>{arriveStr}</Text>
                 </View>
-              ))}
-            </ScrollView>
-          )}
-        </View>
-      )}
+                <Text style={styles.bannerDist}>{distStr}</Text>
+              </View>
+              <Text style={styles.bannerBest}>{bestLabel}</Text>
+            </View>
+
+            {/* Pills — Start (yellow). Add stops + Saved designed but hidden. */}
+            <View style={styles.bannerPills}>
+              <TouchableOpacity testID="start-nav" onPress={startNav} style={[styles.bannerPill, styles.bannerPillStart]} activeOpacity={0.9}>
+                <Ionicons name="navigate" size={18} color="#1C1C1E" />
+                <Text style={styles.bannerPillStartText}>Start</Text>
+              </TouchableOpacity>
+              {SHOW_EXTRA_ROUTE_PILLS && (
+                <>
+                  <TouchableOpacity style={[styles.bannerPill, styles.bannerPillBlue]} activeOpacity={0.9} testID="add-stops">
+                    <Ionicons name="add-circle-outline" size={18} color="#fff" />
+                    <Text style={styles.bannerPillBlueText}>Add stops</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.bannerPill, styles.bannerPillBlue]} activeOpacity={0.9} testID="saved-routes">
+                    <Ionicons name="bookmark" size={18} color="#fff" />
+                    <Text style={styles.bannerPillBlueText}>Saved</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </View>
+        );
+      })()}
 
       {/* ===== Turn-by-turn overlays — Google-Maps-style =====
           Top maneuver banner (always visible) + bottom ETA bar, rendered by
@@ -1408,6 +1672,7 @@ export default function MapScreen() {
             instruction={instruction}
             eta={fmtEtaSec(tbt.etaSeconds)}
             distanceRemaining={fmtDistanceM(tbt.distanceRemainingM)}
+            arrival={fmtClock(new Date(Date.now() + tbt.etaSeconds * 1000))}
             muted={navMuted}
             onToggleMute={() => setNavMuted((m) => !m)}
             onEnd={endNav}
@@ -1509,12 +1774,12 @@ export default function MapScreen() {
       {/* ===== Speedometer HUD (bottom-left glass overlay) =====
           Pulls live speed from coords.speed (m/s) → km/h. Floors small values
           to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
-      <SpeedPill speedMs={coords?.speed} unit={settings.speedUnit} />
+      <SpeedPill speedMs={coords?.speed} unit={settings.speedUnit} bottom={controlsBottom} limitKmh={speedLimitKmh} />
       {/* Weather HUD — compact temp-only chip stacked just above the speedometer
           in the bottom-left HUD column (matches the speedo's box + opacity). */}
       {showWeatherLayer && weather && (
-        <View style={{ position: 'absolute', left: 12, bottom: 158, zIndex: 55 }}>
-          <WeatherHUD weather={weather} unit={settings.speedUnit} compact />
+        <View style={{ position: 'absolute', left: 12, bottom: weatherBottom, zIndex: 55 }}>
+          <WeatherHUD weather={weather} unit={settings.speedUnit} compact forecast={dailyForecast} />
         </View>
       )}
       <PeerModal
@@ -1522,6 +1787,25 @@ export default function MapScreen() {
         visible={!!selectedPeer}
         onClose={() => setSelectedPeer(null)}
         myCoords={coords}
+      />
+
+      {/* Share the current destination to specific community members (push +
+          in-app toast via /notifications/share — no Supabase needed). */}
+      <ShareSheet
+        visible={routeShareOpen}
+        onClose={() => setRouteShareOpen(false)}
+        share={
+          destination
+            ? {
+                kind: "route",
+                name: destination.label,
+                dest_label: destination.label,
+                dest_lat: destination.lat,
+                dest_lng: destination.lng,
+                polyline: (activeRoute as any)?.polyline,
+              }
+            : null
+        }
       />
 
       {/* ===== Bottom-right floating cluster — Layers + Directions =====
@@ -1536,7 +1820,7 @@ export default function MapScreen() {
       {/* Top-right Layers FAB removed — map layers now live in the Convoy menu
           (tap the logo in the search bar → "Map Layers"). */}
 
-      <View pointerEvents="box-none" style={[styles.fabStack, (destination && route && navMode === "preview" && !previewCollapsed) ? styles.fabStackLifted : null]}>
+      <View pointerEvents="box-none" style={[styles.fabStack, { bottom: controlsBottom }]}>
         {/* Police report button — top of stack. One-tap: posts a hazard with
             kind='police' at the GPS sample closest to (now - 5s), shows a
             success toast, and fires a haptic on native. */}
@@ -1546,7 +1830,7 @@ export default function MapScreen() {
           onPress={() => reportAlert('police')}
           activeOpacity={0.8}
         >
-          <MaterialCommunityIcons name="police-badge" size={24} color="#4DA3FF" />
+          <PoliceBadgeIcon size={40} />
         </TouchableOpacity>
         {/* Road-hazard report button — same flow with kind='road'. */}
         <TouchableOpacity
@@ -1555,7 +1839,7 @@ export default function MapScreen() {
           onPress={() => reportAlert('road')}
           activeOpacity={0.8}
         >
-          <MaterialCommunityIcons name="alert" size={24} color="#FFB340" />
+          <HazardIcon size={34} />
         </TouchableOpacity>
         {/* ===== Recenter FAB =====
             Only visible when follow-mode is OFF (the user has panned away from
@@ -1571,42 +1855,12 @@ export default function MapScreen() {
             activeOpacity={0.85}
             style={styles.fab}
           >
-            <Ionicons name="locate" size={22} color="#fff" />
+            <Ionicons name="locate" size={40} color="#fff" />
           </TouchableOpacity>
         )}
-        {/* Stop Navigation — appears LEFT of the Directions FAB when a trip
-            is active. Identical 42×42 footprint, red bg, white X. Tap to
-            cancel the current route and drop back to free-roam map view. */}
-        {(navMode === "turn-by-turn" || routes.length > 0) && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <TouchableOpacity
-              testID="stop-nav-fab"
-              onPress={() => { endNav(); clearRoute(); }}
-              activeOpacity={0.85}
-              style={[styles.fab, styles.stopNavBtn]}
-            >
-              <Ionicons name="close" size={22} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              testID="directions-fab"
-              onPress={() => { setSearchVisible(true); }}
-              activeOpacity={0.85}
-              style={[styles.fab, styles.fabPrimary]}
-            >
-              <Ionicons name="navigate" size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        )}
-        {!(navMode === "turn-by-turn" || routes.length > 0) && (
-          <TouchableOpacity
-            testID="directions-fab"
-            onPress={() => { setSearchVisible(true); }}
-            activeOpacity={0.85}
-            style={[styles.fab, styles.fabPrimary]}
-          >
-            <Ionicons name="navigate" size={20} color="#fff" />
-          </TouchableOpacity>
-        )}
+        {/* Bottom search/arrow FAB removed entirely — the destination search
+            bar stays pinned at the top until a route is selected (then the
+            guidance banner overlaps it), so a re-summon FAB isn't needed. */}
       </View>
 
       {/* ===== Layers bottom sheet =====
@@ -1640,7 +1894,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowLabel}>Satellite</Text>
                   <Text style={styles.layerRowSub}>Aerial imagery</Text>
                 </View>
-                <Switch value={mapType === "hybrid"} onValueChange={(v) => setMapType(v ? "hybrid" : "roadmap")}
+                <Switch value={mapType === "hybrid"} onValueChange={(v) => { void updateGlobalSettings({ mapType: v ? "hybrid" : "roadmap" }); }}
                   trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
@@ -1784,12 +2038,34 @@ export default function MapScreen() {
           driver gets back to a clear chase-cam view. A small grab pill sits
           on the bottom edge to re-summon it; the drawer's top handle is
           draggable to dismiss with a fling. */}
-      {routes.length > 0 && (
+      {navMode === "turn-by-turn" && activeRoute && tbt.active && (
         <StepDrawer
           ref={stepDrawerRef}
-          route={routes[0] as any}
+          route={activeRoute as any}
           maneuverIcon={maneuverIcon}
+          eta={fmtEtaSec(tbt.etaSeconds)}
+          distanceRemaining={fmtDistanceM(tbt.distanceRemainingM)}
+          arrival={fmtClock(new Date(Date.now() + tbt.etaSeconds * 1000))}
+          onEnd={endNav}
         />
+      )}
+
+      {/* ===== Full-screen destination search (opens on search-bar tap) ===== */}
+      <NavSearchScreen
+        visible={navSearchOpen}
+        onClose={() => setNavSearchOpen(false)}
+        origin={coords}
+        members={navMembers}
+        onSelectPlace={onSearchSelectPlace}
+        onSelectFriend={onSearchSelectFriend}
+      />
+
+      {/* ===== Cold-start intro overlay — logo on black until first fix ===== */}
+      {introVisible && (
+        <Animated.View pointerEvents="auto" style={[styles.introOverlay, { opacity: introFade }]}>
+          <ConvoyLogo size={132} />
+          <Text style={styles.introWord}>CONVOY</Text>
+        </Animated.View>
       )}
     </View>
   );
@@ -1939,21 +2215,41 @@ const styles = StyleSheet.create({
   routeCard: { position: "absolute", left: 12, right: 12, bottom: 110, maxHeight: 460 },
 
   // ===== Google-Maps-style route preview bottom sheet =====
-  // Flush to the bottom edge, full width, top corners only. The FAB stack is
-  // lifted above this (styles.fabStackLifted) whenever it's visible so the
-  // controls never sit underneath it.
+  // Floats just above the tab bar (bottom: TAB_BAR_H), full width, top corners
+  // only. The FABs + speedo + weather lift above it via `controlsBottom`
+  // (driven by the banner's measured height) so nothing sits underneath it.
   routeSheet: {
-    position: "absolute", left: 0, right: 0, bottom: 0,
-    backgroundColor: "rgba(20,20,22,0.98)",
+    position: "absolute", left: 0, right: 0, bottom: TAB_BAR_H,
+    backgroundColor: "#141416",
     borderTopLeftRadius: 22, borderTopRightRadius: 22,
     borderTopWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)",
     paddingTop: 8, paddingHorizontal: 16,
-    paddingBottom: Platform.OS === "ios" ? 30 : 18,
+    paddingBottom: 16,
     maxHeight: "62%",
     zIndex: 30,
     shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: -4 }, elevation: 14,
   },
   sheetGrabber: { width: 38, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.22)", alignSelf: "center", marginBottom: 12 },
+  // ===== Route preview banner =====
+  bannerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  bannerDrive: { color: "#FFD60A", fontSize: 22, fontWeight: "700", letterSpacing: -0.3 },
+  bannerHeaderRight: { flexDirection: "row", alignItems: "center", gap: 18 },
+  bannerDivider: { height: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.14)", marginHorizontal: -16, marginBottom: 14 },
+  bannerSummary: { flexDirection: "row", alignItems: "flex-start", gap: 18, marginBottom: 16 },
+  bannerDurCol: { alignItems: "center" },
+  bannerDurNum: { color: "#F4F4F4", fontSize: 30, fontWeight: "700", letterSpacing: -0.5, lineHeight: 32 },
+  bannerDurUnit: { color: "#808080", fontSize: 13, marginTop: 2 },
+  bannerArriveRow: { flexDirection: "row", alignItems: "baseline", gap: 8 },
+  bannerArriveLabel: { color: "#808080", fontSize: 13 },
+  bannerArriveTime: { color: "#F4F4F4", fontSize: 16, fontWeight: "600" },
+  bannerDist: { color: "#F4F4F4", fontSize: 16, fontWeight: "600", marginTop: 3 },
+  bannerBest: { color: "#30D158", fontSize: 14, fontWeight: "600", marginLeft: "auto" },
+  bannerPills: { flexDirection: "row", gap: 10 },
+  bannerPill: { flex: 1, height: 46, borderRadius: 23, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  bannerPillStart: { backgroundColor: "#FFD60A" },
+  bannerPillStartText: { color: "#1C1C1E", fontSize: 16, fontWeight: "700" },
+  bannerPillBlue: { backgroundColor: "#0A84FF" },
+  bannerPillBlueText: { color: "#F4F4F4", fontSize: 14, fontWeight: "600" },
   sheetHeaderRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingBottom: 12 },
   sheetDest: { color: COLORS.text, fontSize: 19, fontWeight: "700", letterSpacing: -0.3 },
   sheetMeta: { color: COLORS.success, fontSize: 13, marginTop: 3, fontWeight: "500" },
@@ -1970,7 +2266,6 @@ const styles = StyleSheet.create({
   sheetSecText: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
   sheetStartBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 14, backgroundColor: "#FFD60A" },
   sheetStartText: { color: "#0A0A0A", fontWeight: "800", fontSize: 16, letterSpacing: 0.2 },
-  fabStackLifted: { bottom: 232 },
   routeRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
   routeIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center" },
   routeTo: { color: COLORS.text, fontWeight: "600", fontSize: 15 },
@@ -1987,7 +2282,7 @@ const styles = StyleSheet.create({
   secBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: COLORS.hairline, backgroundColor: "rgba(255,255,255,0.04)" },
   secBtnText: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
   startBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 14, backgroundColor: "#0A84FF" },
-  startBtnText: { color: "#fff", fontWeight: "700", fontSize: 15, letterSpacing: 0.3 },
+  startBtnText: { color: "#F4F4F4", fontWeight: "700", fontSize: 15, letterSpacing: 0.3 },
   // Steps
   stepsList: { maxHeight: 220, paddingHorizontal: 14, paddingTop: 0 },
   stepRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.hairline },
@@ -2045,12 +2340,12 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
     elevation: 6,
   },
-  endNavFabText: { color: "#fff", fontWeight: "700", fontSize: 13, letterSpacing: 0.2 },
+  endNavFabText: { color: "#F4F4F4", fontWeight: "700", fontSize: 13, letterSpacing: 0.2 },
   etaBig: { color: COLORS.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.4 },
   etaLabel: { color: COLORS.textDim, fontSize: 11, marginTop: 2, letterSpacing: 0.4 },
   etaDivider: { width: StyleSheet.hairlineWidth, height: 36, backgroundColor: COLORS.hairline },
   endBtn: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#FF3B30", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 14 },
-  endBtnText: { color: "#fff", fontWeight: "700", letterSpacing: 0.3 },
+  endBtnText: { color: "#F4F4F4", fontWeight: "700", letterSpacing: 0.3 },
 
   selectedCard: { position: "absolute", left: 12, right: 12, bottom: 200 },
 
@@ -2110,7 +2405,7 @@ const styles = StyleSheet.create({
   },
   voteBtnConfirm: { backgroundColor: COLORS.success },
   voteBtnDispute: { backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,69,58,0.5)" },
-  voteBtnText: { color: "#fff", fontWeight: "700", fontSize: 14, letterSpacing: 0.2 },
+  voteBtnText: { color: "#F4F4F4", fontWeight: "700", fontSize: 14, letterSpacing: 0.2 },
   // (legacy, kept for reference but unused)
   confirmBtn: { paddingHorizontal: 14, paddingVertical: 10, backgroundColor: COLORS.primary + "33", borderRadius: 12, borderWidth: 1, borderColor: COLORS.primary + "55" },
   confirmText: { color: COLORS.primary, fontWeight: "700" },
@@ -2136,8 +2431,8 @@ const styles = StyleSheet.create({
   // icon. fabPrimary (blue Directions) / stopNavBtn (red Stop) / the inline
   // recenter blue override just the fill.
   fab: {
-    width: 52, height: 52,
-    borderRadius: 26,
+    width: 60, height: 60,
+    borderRadius: 30,
     backgroundColor: "rgba(28,28,30,0.92)",
     alignItems: "center", justifyContent: "center",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
@@ -2227,7 +2522,7 @@ const styles = StyleSheet.create({
   // sheet itself now uses these layerRowLabel/Sub styles which take up the
   // text column when an inline `Switch` is the trailing element.
   layerSectionHeader: {
-    color: 'rgba(255,255,255,0.4)',
+    color: '#808080',
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.8,
@@ -2236,8 +2531,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     paddingHorizontal: 18,
   },
-  layerRowLabel: { color: '#FFFFFF', fontSize: 15, fontWeight: '500' },
-  layerRowSub: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 2 },
+  layerRowLabel: { color: '#F4F4F4', fontSize: 15, fontWeight: '500' },
+  layerRowSub: { color: '#808080', fontSize: 12, marginTop: 2 },
   // Small badge with the active-alert count pinned to top-right of the Alerts FAB.
   fabBadge: {
     position: "absolute", top: -4, right: -4,
@@ -2247,12 +2542,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     borderWidth: 2, borderColor: "rgba(28,28,30,0.85)",
   },
-  fabBadgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
+  fabBadgeText: { color: "#F4F4F4", fontSize: 10, fontWeight: "700" },
   // Tiny live-status pill that overlays the top edge of the search bar
   // (replaces the old dark header). Green dot + "X live · Y alerts" in a
   // glassy rounded chip — subtle, glanceable, never blocks the map.
   liveOverlay: {
-    position: "absolute", top: -22, alignSelf: "center",
+    alignSelf: "center", marginTop: 8,
     flexDirection: "row", alignItems: "center", gap: 5,
     paddingHorizontal: 9, paddingVertical: 3,
     borderRadius: 999,
@@ -2260,7 +2555,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
     zIndex: 5,
   },
-  liveOverlayText: { color: "#fff", fontSize: 10, fontWeight: "600", letterSpacing: 0.2 },
+  liveOverlayText: { color: "#F4F4F4", fontSize: 10, fontWeight: "600", letterSpacing: 0.2 },
   // ===== Layers bottom sheet =====
   sheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   sheetCard: {
@@ -2289,5 +2584,15 @@ const styles = StyleSheet.create({
   alertsEmpty: { color: COLORS.textDim, fontSize: 13, textAlign: "center", marginTop: 22 },
   alertItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
   distPill: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, backgroundColor: "rgba(118,118,128,0.35)" },
-  distPillText: { color: "#fff", fontSize: 11, fontWeight: "600" },
+  distPillText: { color: "#F4F4F4", fontSize: 11, fontWeight: "600" },
+  // Cold-start intro overlay — logo on black covering everything until the
+  // first location fix lands, then fades out.
+  introOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#000",
+    alignItems: "center", justifyContent: "center",
+    gap: 18,
+    zIndex: 100000,
+  },
+  introWord: { color: "#FFD60A", fontSize: 22, fontWeight: "800", letterSpacing: 6, marginLeft: 6 },
 });

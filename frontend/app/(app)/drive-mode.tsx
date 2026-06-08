@@ -62,6 +62,6 @@ const styles = StyleSheet.create({
   row: { flex: 1, flexDirection: "row", gap: 14 },
   tileWrap: { flex: 1 },
   tile: { flex: 1, alignItems: "center", justifyContent: "center", overflow: "hidden", borderRadius: 28, gap: 12 },
-  tileLabel: { color: "#fff", fontSize: 22, fontWeight: "800", letterSpacing: -0.3 },
+  tileLabel: { color: "#F4F4F4", fontSize: 22, fontWeight: "800", letterSpacing: -0.3 },
   hint: { color: COLORS.textDim, textAlign: "center", fontSize: 12, marginTop: 12 },
 });

@@ -124,7 +124,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
-  dist: { color: "#fff", fontWeight: "800", fontSize: 18, letterSpacing: -0.3 },
+  dist: { color: "#F4F4F4", fontWeight: "800", fontSize: 18, letterSpacing: -0.3 },
   inst: { color: COLORS.text, fontSize: 13, lineHeight: 18 },
   btn: {
     flexDirection: "row",
@@ -142,5 +142,5 @@ const styles = StyleSheet.create({
     backgroundColor: "#FF3B30",
     borderColor: "rgba(255,255,255,0)",
   },
-  btnText: { color: "#fff", fontSize: 12, fontWeight: "700", letterSpacing: 0.4 },
+  btnText: { color: "#F4F4F4", fontSize: 12, fontWeight: "700", letterSpacing: 0.4 },
 });

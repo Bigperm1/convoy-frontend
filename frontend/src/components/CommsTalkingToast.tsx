@@ -16,7 +16,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, Platform, AppState } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { livePttBus } from "../livePtt";
+import { livePttBus, isCommsScreenFocused } from "../livePtt";
 import { getSettings } from "../settings";
 import { useAuth } from "../auth";
 
@@ -31,12 +31,21 @@ export default function CommsTalkingToast() {
     const off = livePttBus.on((m) => {
       // Foreground only — the OS notification covers the backgrounded case.
       if (AppState.currentState !== "active") return;
+      // The Comms screen shows its own indicator above the mic, so don't
+      // double up with this global top banner while it's focused.
+      if (isCommsScreenFocused()) return;
       // Don't announce our own voice back to us.
       if (user?.id && m.user_id === user.id) return;
       const s = getSettings();
-      // Respect the Comms Live mute toggle + only the active convoy channel.
+      // Respect the Comms Live mute toggle + only the active channel (the
+      // selected private thread, else the whole-crew community channel).
       if (s.commsLive === false) return;
-      if (!s.activeCommunityId || m.channel !== s.activeCommunityId) return;
+      const activeCh = s.activeThreadId || s.activeCommunityId;
+      if (!activeCh || m.channel !== activeCh) return;
+      // Ignore the backlog the listener replays on cold start / channel switch:
+      // only a genuinely RECENT clip means someone is talking right now.
+      const created = new Date(m.created_at).getTime();
+      if (Number.isFinite(created) && Date.now() - created > 15000) return;
 
       setHandle(m.handle || "Driver");
       if (timer.current) clearTimeout(timer.current);
@@ -85,5 +94,5 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 8,
   },
-  text: { color: "#fff", fontSize: 13, fontWeight: "700", letterSpacing: 0.2 },
+  text: { color: "#F4F4F4", fontSize: 13, fontWeight: "700", letterSpacing: 0.2 },
 });

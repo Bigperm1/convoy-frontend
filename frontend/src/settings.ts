@@ -11,13 +11,22 @@ avoidTolls: boolean;
 avoidHighways: boolean;
 avoidFerries: boolean;
 activeCommunityId?: string | null;
+activeThreadId?: string | null;
 commsLive: boolean;
 avatarLive: boolean;
 mapView: "heading_up" | "north_up";
+mapType: "hybrid" | "roadmap";
 speedUnit: 'kmh' | 'mph';
 speedUnitManual: boolean;
 showWeatherLayer: boolean;
+weatherOnMigrated: boolean;
+speedCameras: boolean;
+showPlacePins: boolean;
 showNearby: boolean;
+// Gas Jockey — declutter the map's Gas pins by favorite brand + octane.
+gasBrands?: Record<string, boolean>;          // brandKey -> shown; undefined = all shown
+gasOther: boolean;                            // show unbranded / unrecognized stations
+gasOctane?: '94' | '91' | '89' | '87' | null; // selected octane; null = show all
 feedNA: boolean;
 feedROW: boolean;
 carYear?: string;
@@ -35,13 +44,21 @@ avoidTolls: false,
 avoidHighways: false,
 avoidFerries: false,
 activeCommunityId: null,
+activeThreadId: null,
 commsLive: true,
 avatarLive: true,
 mapView: "heading_up",
+mapType: "hybrid",
 speedUnit: 'kmh',
 speedUnitManual: false,
-showWeatherLayer: false,
+showWeatherLayer: true,
+weatherOnMigrated: true,
+speedCameras: true,
+showPlacePins: true,
 showNearby: true,
+gasBrands: undefined,
+gasOther: true,
+gasOctane: null,
 feedNA: true,
 feedROW: false,
 carYear: undefined,
@@ -59,7 +76,20 @@ const listeners = new Set<(s: Settings) => void>();
 const loadPromise: Promise<Settings> = (async () => {
 try {
 const raw = await AsyncStorage.getItem(KEY);
-if (raw) cached = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+if (raw) {
+const parsed = JSON.parse(raw);
+cached = { ...DEFAULT_SETTINGS, ...parsed };
+// One-time migration: the weather HUD now defaults ON. Existing installs have
+// showWeatherLayer:false persisted from the old default (not from the user
+// deliberately turning it off), so flip it on ONCE here. The weatherOnMigrated
+// flag is then stored, so anyone who later turns weather OFF stays off —
+// "on by default, off only if explicitly turned off."
+if (parsed.weatherOnMigrated === undefined) {
+cached.showWeatherLayer = true;
+cached.weatherOnMigrated = true;
+try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
+}
+}
 } catch {}
 loaded = true;
 listeners.forEach((l) => l(cached));

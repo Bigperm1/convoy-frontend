@@ -9,13 +9,15 @@ export const COLORS = {
   hairlineStrong: "rgba(255,255,255,0.16)",
   primary: "#0A84FF", // system blue
   primaryDim: "#0064D1",
+  brand: "#FFD60A", // Convoy yellow — the logo/mic accent, our signature color
+  brandDim: "#FFC700",
   accent: "#5E5CE6", // indigo
   success: "#30D158",
   warning: "#FF9F0A",
   danger: "#FF453A",
-  text: "#FFFFFF",
-  textDim: "#98989F",
-  textMute: "#636366",
+  text: "#F4F4F4",
+  textDim: "#808080",
+  textMute: "#808080",
 };
 
 export const FONT = {

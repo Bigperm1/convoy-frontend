@@ -3,16 +3,19 @@ import { Tabs, useRouter, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
-import { View, ActivityIndicator, Platform, StyleSheet } from "react-native";
+import { View, ActivityIndicator, Platform, StyleSheet, Text } from "react-native";
 import { BlurView } from "expo-blur";
 import VoiceController from "../../src/VoiceController";
 import VoiceTabButton from "../../src/VoiceTabButton";
 import ConvoyWaveIcon from "../../src/components/ConvoyWaveIcon";
+import CommsTabButton from "../../src/components/CommsTabButton";
 import CommsTalkingToast from "../../src/components/CommsTalkingToast";
+import ShareToast from "../../src/ShareToast";
 import { useLiveWalkieListener } from "../../src/livePtt";
 import { useSettings, hydrateCarFromProfile } from "../../src/settings";
 import { api } from "../../src/api";
 import { hailBus } from "../../src/hailBus";
+import { shareBus } from "../../src/shareBus";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 
@@ -27,13 +30,29 @@ import Constants from "expo-constants";
 // we want the OS banner + sound so the user sees the Hail immediately.
 if (Platform.OS !== "web") {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
+    handleNotification: async (notification) => {
+      // The turn-by-turn nav banner (tagged data.nav) is a BACKGROUND affordance:
+      // the map screen already shows the in-app maneuver banner, so don't pop the
+      // system heads-up over it while the app is foregrounded. This handler only
+      // runs in the foreground — backgrounded, the OS shows the banner normally.
+      const isNav = (notification?.request?.content?.data as any)?.nav === true;
+      if (isNav) {
+        return {
+          shouldShowAlert: false,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+          shouldShowBanner: false,
+          shouldShowList: true,
+        };
+      }
+      return {
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      };
+    },
   });
 }
 
@@ -83,12 +102,17 @@ export default function AppLayout() {
   const router = useRouter();
   const [settings] = useSettings();
 
+  // Comms is "active" whenever a convoy or private thread is selected. Keep the
+  // Comms tab lit yellow from ANY tab as a persistent "you're connected" cue,
+  // instead of going dim like a normal unfocused tab.
+  const commsActive = !!(settings.activeThreadId || settings.activeCommunityId);
+
   // Mount the live walkie-talkie WebSocket listener once for the entire
   // (app) shell Ã¢ÂÂ incoming PTT transmissions auto-play even when the user is
   // on the Map, Music, Hub or Settings tab. The getter is read on every
   // incoming frame, so switching active community in Comms is reflected
   // immediately without reopening the socket.
-  useLiveWalkieListener(() => settings.activeCommunityId, () => user?.id);
+  useLiveWalkieListener(() => settings.activeThreadId || settings.activeCommunityId, () => user?.id);
 
   useEffect(() => {
     if (user === null) router.replace("/(auth)/login");
@@ -132,6 +156,14 @@ export default function AppLayout() {
           fromId: String(data.from_id || ""),
         });
       }
+      if (data?.type === "share") {
+        shareBus.emit({
+          kind: (data.kind as any) || "music",
+          fromHandle: String(data.from_handle || "Driver"),
+          fromId: String(data.from_id || ""),
+          payload: data.payload || {},
+        });
+      }
     });
     return () => sub.remove();
   }, []);
@@ -152,6 +184,12 @@ export default function AppLayout() {
       // transmission; the receive + tap handling here is ready regardless.)
       if (data?.type === "ptt") {
         router.push("/(app)/talk");
+      }
+      // Tapped a share push from the lockscreen / banner -> open the relevant
+      // tab (music for a song, map for a route, comms for a clip).
+      if (data?.type === "share") {
+        const k = String(data.kind || "music");
+        router.push((k === "route" ? "/(app)/map" : k === "comm" ? "/(app)/talk" : "/(app)/music") as any);
       }
     });
     return () => sub.remove();
@@ -193,15 +231,18 @@ export default function AppLayout() {
       >
         <Tabs.Screen name="map" options={{
           tabBarLabel: "Map",
-          tabBarActiveTintColor: "#1F6BFF",
+          tabBarActiveTintColor: "#00629b",
           tabBarButtonTestID: "tab-map",
           tabBarIcon: ({ color }) => <Ionicons name="navigate" size={27} color={color} />,
         }} />
         <Tabs.Screen name="talk" options={{
-          tabBarLabel: "Comms",
+          tabBarLabel: ({ color }) => (
+            <Text style={{ color: commsActive ? "#FFD60A" : color, fontSize: 12, fontWeight: "500" }}>Comms</Text>
+          ),
           tabBarActiveTintColor: "#FFD60A",
           tabBarButtonTestID: "tab-talk",
-          tabBarIcon: ({ color }) => <ConvoyWaveIcon size={27} color={color} />,
+          tabBarButton: (props) => <CommsTabButton {...props} selfId={user?.id} />,
+          tabBarIcon: ({ color }) => <ConvoyWaveIcon size={40} color={commsActive ? "#FFD60A" : color} />,
         }} />
         {/* Voice screen is no longer represented in the bottom tab bar Ã¢ÂÂ the
             press-and-hold mic now lives inside the map's search bar (Google
@@ -230,6 +271,9 @@ export default function AppLayout() {
       {/* App-wide "someone is transmitting" banner so live comms are visible
           on every tab while foregrounded (audio already plays globally). */}
       <CommsTalkingToast />
+
+      {/* Global "a member shared a song / route / clip with you" toast. */}
+      <ShareToast />
     </View>
   );
 }

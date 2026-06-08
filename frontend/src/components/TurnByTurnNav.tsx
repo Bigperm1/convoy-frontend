@@ -22,16 +22,20 @@
 // GPS stutter doesn't make the number flicker.
 
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Platform, Animated } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 const YELLOW = "#FFD60A";
+const OVER_RED = "#FF3B30";
 const HOLD_MS = 800;
 const EMA_ALPHA = 0.45;
+// Grace buffer (km/h) before the speedometer flags you as speeding, so a GPS
+// blip or rounding right at the posted limit doesn't trigger a false red pulse.
+const OVER_BUFFER_KMH = 2;
 
 // ---- Speed pill (always-on, bottom-left) ----
 // Pulled in as a sub-component so the smoothing state is self-contained.
-export function SpeedPill({ speedMs, unit }: { speedMs?: number; unit: "kmh" | "mph" }) {
+export function SpeedPill({ speedMs, unit, bottom, limitKmh }: { speedMs?: number; unit: "kmh" | "mph"; bottom?: number; limitKmh?: number | null }) {
   const rawKmh = (() => {
     if (typeof speedMs !== "number" || !Number.isFinite(speedMs) || speedMs < 0) return 0;
     const v = speedMs * 3.6;
@@ -63,11 +67,50 @@ export function SpeedPill({ speedMs, unit }: { speedMs?: number; unit: "kmh" | "
   const isMph = unit === "mph";
   const value = isMph ? Math.round(displayKmh * 0.621371) : Math.round(displayKmh);
 
+  // Over-limit detection. The posted limit (Google Roads, in KPH) is compared
+  // against the smoothed speed with a small grace buffer so we don't flash red
+  // the instant the needle grazes the limit (GPS noise / rounding). When the
+  // road has no known limit (Roads API returned nothing) we never flag — better
+  // to stay silent than cry wolf.
+  const speeding =
+    typeof limitKmh === "number" && limitKmh > 0 && displayKmh > limitKmh + OVER_BUFFER_KMH;
+
+  // Pulsing red halo behind the pill while speeding. Native-driver opacity +
+  // scale (no layout thrash); the loop runs only while `speeding` is true and
+  // is fully torn down the moment you drop back under the limit.
+  const pulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    let loop: Animated.CompositeAnimation | null = null;
+    if (speeding) {
+      pulse.setValue(0);
+      loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulse, { toValue: 1, duration: 550, useNativeDriver: true }),
+          Animated.timing(pulse, { toValue: 0, duration: 550, useNativeDriver: true }),
+        ])
+      );
+      loop.start();
+    } else {
+      pulse.stopAnimation();
+      pulse.setValue(0);
+    }
+    return () => { if (loop) loop.stop(); };
+  }, [speeding, pulse]);
+
+  const haloOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0, 0.6] });
+  const haloScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.45] });
+
   return (
-    <View style={styles.speedWrap} pointerEvents="none">
-      <View style={styles.speedPill}>
+    <View style={[styles.speedWrap, typeof bottom === "number" ? { bottom } : null]} pointerEvents="none">
+      {speeding && (
+        <Animated.View
+          style={[styles.speedHalo, { opacity: haloOpacity, transform: [{ scale: haloScale }] }]}
+          pointerEvents="none"
+        />
+      )}
+      <View style={[styles.speedPill, speeding && styles.speedPillOver]}>
         <Text style={styles.speedValue}>{value}</Text>
-        <Text style={styles.speedUnit}>{isMph ? "mph" : "km/h"}</Text>
+        <Text style={[styles.speedUnit, speeding && styles.speedUnitOver]}>{isMph ? "mph" : "km/h"}</Text>
       </View>
     </View>
   );
@@ -82,6 +125,7 @@ type Props = {
   // Trip progress
   eta: string;                 // time remaining, e.g. "12 min"
   distanceRemaining: string;   // e.g. "8.4 km"
+  arrival: string;             // arrival clock, e.g. "10:42 AM"
   // Controls
   muted: boolean;
   onToggleMute: () => void;
@@ -89,7 +133,7 @@ type Props = {
 };
 
 export default function TurnByTurnNav({
-  maneuverIcon, distanceToTurn, instruction, eta, distanceRemaining,
+  maneuverIcon, distanceToTurn, instruction, eta, distanceRemaining, arrival,
   muted, onToggleMute, onEnd,
 }: Props) {
   return (
@@ -110,19 +154,9 @@ export default function TurnByTurnNav({
         </View>
       </View>
 
-      {/* ===== Bottom ETA bar ===== */}
-      <View style={styles.bottomWrap} pointerEvents="box-none">
-        <View style={styles.etaBar}>
-          <View style={styles.etaTextBlock}>
-            <Text style={styles.etaTime}>{eta}</Text>
-            <Text style={styles.etaDist}>{distanceRemaining}</Text>
-          </View>
-          <TouchableOpacity onPress={onEnd} style={styles.endBtn} activeOpacity={0.85} testID="end-nav">
-            <Ionicons name="close" size={20} color="#fff" />
-            <Text style={styles.endText}>End</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      {/* Bottom trip bar removed — the StepDrawer now owns the bottom bar
+          (collapsed: time · distance · arrival + red Exit, pulls up for steps),
+          floating just above the always-visible tab bar. */}
     </>
   );
 }
@@ -157,53 +191,46 @@ const styles = StyleSheet.create({
     backgroundColor: YELLOW,
     alignItems: "center", justifyContent: "center",
   },
-  distanceToTurn: { color: "#fff", fontSize: 28, fontWeight: "800", letterSpacing: -0.5, lineHeight: 32 },
-  instruction: { color: "rgba(255,255,255,0.8)", fontSize: 15, fontWeight: "500", marginTop: 1 },
+  distanceToTurn: { color: "#F4F4F4", fontSize: 28, fontWeight: "800", letterSpacing: -0.5, lineHeight: 32 },
+  instruction: { color: "#808080", fontSize: 15, fontWeight: "500", marginTop: 1 },
   muteBtn: {
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center", justifyContent: "center",
   },
 
-  // ----- Bottom ETA bar -----
+  // ----- Bottom trip bar (thin convoy-yellow) -----
   bottomWrap: {
     position: "absolute",
-    left: 0, right: 0, bottom: 28,
-    paddingHorizontal: 12,
-    alignItems: "center",
+    left: 12, right: 12, bottom: 28,
     zIndex: 60,
   },
-  etaBar: {
+  navYellowBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#161618",
-    borderRadius: 18,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    minWidth: 240,
+    gap: 14,
+    backgroundColor: "#FFD60A",
+    borderRadius: 16,
+    paddingVertical: 7,
+    paddingLeft: 16,
+    paddingRight: 7,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(0,0,0,0.18)",
     shadowColor: "#000",
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 12,
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 10,
   },
-  etaTextBlock: { flexDirection: "row", alignItems: "baseline", gap: 10 },
-  etaTime: { color: "#34C759", fontSize: 20, fontWeight: "800", letterSpacing: -0.3 },
-  etaDist: { color: "rgba(255,255,255,0.65)", fontSize: 15, fontWeight: "600" },
-  endBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
+  navYellowTime: { color: "#1C1C1E", fontSize: 17, fontWeight: "800", letterSpacing: -0.3 },
+  navYellowMeta: { color: "#3A3A3C", fontSize: 14, fontWeight: "600" },
+  navExitBtn: {
+    marginLeft: "auto",
+    width: 44, height: 44, borderRadius: 22,
     backgroundColor: "#FF3B30",
-    paddingVertical: 9,
-    paddingHorizontal: 16,
-    borderRadius: 14,
-    marginLeft: 18,
+    alignItems: "center", justifyContent: "center",
   },
-  endText: { color: "#fff", fontSize: 15, fontWeight: "700", letterSpacing: 0.2 },
+  navExitText: { color: "#F4F4F4", fontSize: 12, fontWeight: "700", letterSpacing: 0.2 },
 
   // ----- Speed pill (always-on, bottom-left) -----
   speedWrap: { position: "absolute", left: 12, bottom: 90, zIndex: 55 },
@@ -224,6 +251,17 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 5,
   },
-  speedValue: { color: "#fff", fontSize: 24, fontWeight: "800", letterSpacing: -0.5, lineHeight: 26 },
-  speedUnit: { color: "rgba(255,255,255,0.6)", fontSize: 10, fontWeight: "600", letterSpacing: 0.3, marginTop: 1 },
+  speedValue: { color: "#F4F4F4", fontSize: 24, fontWeight: "800", letterSpacing: -0.5, lineHeight: 26 },
+  speedUnit: { color: "#808080", fontSize: 10, fontWeight: "600", letterSpacing: 0.3, marginTop: 1 },
+  // Over-the-limit state: pill turns solid red with a brighter border; the unit
+  // label lightens so it stays legible on red.
+  speedPillOver: { backgroundColor: OVER_RED, borderColor: "rgba(255,255,255,0.55)" },
+  speedUnitOver: { color: "rgba(255,255,255,0.85)" },
+  // Pulsing glow ring behind the pill (same red), scaled out by the animation.
+  speedHalo: {
+    position: "absolute",
+    top: 0, left: 0, right: 0, bottom: 0,
+    borderRadius: 16,
+    backgroundColor: OVER_RED,
+  },
 });

@@ -6,9 +6,18 @@ import { useRouter } from "expo-router";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
 import { useSettings, DEFAULT_SETTINGS } from "../../src/settings";
+import { GAS_BRANDS, OCTANES } from "../../src/gasJockey";
 
 // Re-export for navigation
 const _DRIVE_MODE_ROUTE = "/(app)/drive-mode";
+
+// Short pump-grade labels for the Gas Jockey octane radio rows.
+const OCTANE_SUB: Record<string, string> = {
+  "87": "Regular",
+  "89": "Mid-grade",
+  "91": "Premium",
+  "94": "Ultra / high-octane premium",
+};
 
 type RowProps = {
   icon: any;
@@ -148,6 +157,32 @@ export default function SettingsScreen() {
         {/* Map Layers - persisted overlays that also appear on the map's
             in-context Layers sheet. Satellite/Traffic/Hazards stay map-only
             (they're view controls you flip while looking at the map). */}
+        {/* Map Style - satellite (aerial) vs the standard road map. Persisted
+            and synced with the map's own Layers sheet. */}
+        <Text style={styles.sectionLabel}>MAP STYLE</Text>
+        <Glass radius={16} style={styles.card}>
+          <RadioRow
+            icon="map"
+            iconColor="#34C759"
+            title="Default"
+            subtitle="Standard road map, clean labels, lighter on data"
+            selected={settings.mapType === "roadmap"}
+            onSelect={() => setSettings({ mapType: "roadmap" })}
+          />
+          <View style={styles.divider} />
+          <RadioRow
+            icon="globe"
+            iconColor="#0A84FF"
+            title="Satellite"
+            subtitle="Aerial imagery with road labels"
+            selected={settings.mapType === "hybrid"}
+            onSelect={() => setSettings({ mapType: "hybrid" })}
+          />
+        </Glass>
+        <Text style={styles.helpText}>
+          Choose how the map looks. This stays in sync with the Satellite switch on the map's own Layers button.
+        </Text>
+
         <Text style={styles.sectionLabel}>MAP LAYERS</Text>
         <Glass radius={16} style={styles.card}>
           <ToggleRow
@@ -158,9 +193,79 @@ export default function SettingsScreen() {
             value={settings.showWeatherLayer}
             onChange={(v) => setSettings({ showWeatherLayer: v })}
           />
+          <View style={styles.divider} />
+          <ToggleRow
+            icon="camera"
+            iconColor="#FF453A"
+            title="Speed cameras"
+            subtitle="Show fixed speed cameras and get a Nova voice alert as you approach (OpenStreetMap)"
+            value={settings.speedCameras !== false}
+            onChange={(v) => setSettings({ speedCameras: v })}
+          />
+          <View style={styles.divider} />
+          <ToggleRow
+            icon="location"
+            iconColor="#FFD60A"
+            title="Place pins"
+            subtitle="Show the pin markers for category search results. Gas prices and place names always stay visible."
+            value={settings.showPlacePins !== false}
+            onChange={(v) => setSettings({ showPlacePins: v })}
+          />
         </Glass>
         <Text style={styles.helpText}>
-          These persist across launches. Satellite, Traffic, and Hazard pins are toggled from the map's own Layers button since you flip those while looking at the map.
+          These persist across launches. Traffic and Hazard pins are toggled from the map's own Layers button since you flip those while looking at the map.
+        </Text>
+
+        {/* Gas Jockey — declutter the map's Gas category pins by favorite brand
+            + octane. Everything defaults ON, so pins are unfiltered until the
+            driver starts switching chains off or picks an octane. */}
+        <Text style={styles.sectionLabel}>GAS JOCKEY</Text>
+        <Glass radius={16} style={styles.card}>
+          {GAS_BRANDS.map((b, i) => (
+            <React.Fragment key={b.key}>
+              {i > 0 && <View style={styles.divider} />}
+              <ToggleRow
+                icon="business"
+                iconColor="#FF9F0A"
+                title={b.label}
+                value={(settings.gasBrands ?? {})[b.key] !== false}
+                onChange={(v) => setSettings({ gasBrands: { ...(settings.gasBrands ?? {}), [b.key]: v } })}
+              />
+            </React.Fragment>
+          ))}
+          <View style={styles.divider} />
+          <ToggleRow
+            icon="ellipsis-horizontal-circle-outline"
+            iconColor="#8E8E93"
+            title="Other"
+            subtitle="Unbranded & independent stations"
+            value={settings.gasOther !== false}
+            onChange={(v) => setSettings({ gasOther: v })}
+          />
+        </Glass>
+        <Text style={styles.helpText}>
+          Pick the chains you actually stop at — anything you switch off is hidden from the map's Gas pins. Leave them all on to see every station.
+        </Text>
+
+        {/* Octane — mutually exclusive. Picking one turns the others off; tap
+            the selected one again to clear back to showing every grade. */}
+        <Glass radius={16} style={styles.card}>
+          {OCTANES.map((o, i) => (
+            <React.Fragment key={o}>
+              {i > 0 && <View style={styles.divider} />}
+              <RadioRow
+                icon="flame"
+                iconColor="#FF9F0A"
+                title={`${o} octane`}
+                subtitle={OCTANE_SUB[o]}
+                selected={settings.gasOctane === o}
+                onSelect={() => setSettings({ gasOctane: settings.gasOctane === o ? null : o })}
+              />
+            </React.Fragment>
+          ))}
+        </Glass>
+        <Text style={styles.helpText}>
+          Show only stations that carry your fuel. Choosing an octane turns the others off; tap it again to clear and show all grades. Stations that don't publish fuel data stay visible.
         </Text>
 
         {/* Speed Units â radio choice between metric and imperial. The map's

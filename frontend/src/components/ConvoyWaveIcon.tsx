@@ -1,11 +1,11 @@
 import React from 'react';
-import Svg, { Line, Path } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
 
 /**
- * Comms "sound wave" tab icon — three center bars (like a voice level meter)
- * with concentric arcs radiating left and right (broadcasting). Stroke color
- * is driven by the `color` prop so it tints with the tab's active/inactive
- * state. Mirrors the reference art the user provided for the Comms tab.
+ * Comms tab icon — the classic wireless "broadcast" symbol: a solid center dot
+ * with concentric arcs radiating left and right (transmitting both ways), per
+ * the reference the user picked. The `color` prop drives both the dot fill and
+ * the arc stroke so it tints with the tab's active/inactive state.
  */
 export default function ConvoyWaveIcon({
   size = 24,
@@ -16,16 +16,14 @@ export default function ConvoyWaveIcon({
 }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      {/* center voice-level bars */}
-      <Line x1={12} y1={6.5} x2={12} y2={17.5} stroke={color} strokeWidth={1.9} strokeLinecap="round" />
-      <Line x1={9} y1={9} x2={9} y2={15} stroke={color} strokeWidth={1.9} strokeLinecap="round" />
-      <Line x1={15} y1={9} x2={15} y2={15} stroke={color} strokeWidth={1.9} strokeLinecap="round" />
+      {/* solid center dot */}
+      <Circle cx={12} cy={12} r={2.2} fill={color} />
       {/* right radiating arcs */}
-      <Path d="M17 9 A 3.5 3.5 0 0 1 17 15" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
-      <Path d="M19.6 7.2 A 5.7 5.7 0 0 1 19.6 16.8" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
+      <Path d="M15.2 8.8 A 4 4 0 0 1 15.2 15.2" stroke={color} strokeWidth={1.9} strokeLinecap="round" />
+      <Path d="M18 6.8 A 6.4 6.4 0 0 1 18 17.2" stroke={color} strokeWidth={1.9} strokeLinecap="round" />
       {/* left radiating arcs */}
-      <Path d="M7 9 A 3.5 3.5 0 0 0 7 15" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
-      <Path d="M4.4 7.2 A 5.7 5.7 0 0 0 4.4 16.8" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
+      <Path d="M8.8 8.8 A 4 4 0 0 0 8.8 15.2" stroke={color} strokeWidth={1.9} strokeLinecap="round" />
+      <Path d="M6 6.8 A 6.4 6.4 0 0 0 6 17.2" stroke={color} strokeWidth={1.9} strokeLinecap="round" />
     </Svg>
   );
 }

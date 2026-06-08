@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
   },
   headerText: {
     flex: 1,
-    color: "#fff",
+    color: "#F4F4F4",
     fontSize: 15,
     fontWeight: "700",
     letterSpacing: 0.3,
@@ -165,6 +165,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   labelWrap: { flex: 1 },
-  label: { color: "#fff", fontSize: 14, fontWeight: "600" },
-  subtitle: { color: "rgba(255,255,255,0.45)", fontSize: 11, marginTop: 2 },
+  label: { color: "#F4F4F4", fontSize: 14, fontWeight: "600" },
+  subtitle: { color: "#808080", fontSize: 11, marginTop: 2 },
 });

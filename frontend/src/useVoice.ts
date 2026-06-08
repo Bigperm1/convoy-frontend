@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Audio } from "expo-av";
+import * as Haptics from "expo-haptics";
 import * as SecureStore from "expo-secure-store";
-import { Alert } from "react-native";
+import { Alert, Platform, Vibration } from "react-native";
 import { api, formatErr } from "./api";
 import { voiceBus } from "./voiceBus";
 import { getPttRecordingOptions, type ProximityTier } from "./proximityAudio";
@@ -46,6 +47,13 @@ export function useVoice(tier: ProximityTier = "far") {
       await rec.startAsync();
       recRef.current = rec;
       setRecording(true);
+      // Tactile confirmation that the mic is live. Lives in the hook so every
+      // Gemini voice button (tab-bar mic + search-bar mic) gets it for free.
+      // iOS gets the Taptic engine; Android's impactAsync is faint and often
+      // gated by system settings, so we ALSO fire a short Vibration there so
+      // the press is unmistakable.
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+      if (Platform.OS === "android") { try { Vibration.vibrate(35); } catch {} }
     } catch (e) {
       console.warn("record start", e);
     }
@@ -85,8 +93,11 @@ export function useVoice(tier: ProximityTier = "far") {
       const result = data as VoiceResult;
       // Broadcast to any subscribed screens
       voiceBus.emit({ text: result.text || "", intent: result.intent ?? null, query: result.query, ts: Date.now() });
+      // Success buzz when the command comes back understood.
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       return result;
     } catch (e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
       Alert.alert("Voice", formatErr(e));
       return null;
     } finally {

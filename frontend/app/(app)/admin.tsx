@@ -185,7 +185,7 @@ export default function AdminScreen() {
             <TextInput
               style={styles.search}
               placeholder="Search email or handle"
-              placeholderTextColor="#666"
+              placeholderTextColor="#808080"
               value={query}
               onChangeText={setQuery}
               autoCapitalize="none"
@@ -214,7 +214,7 @@ export default function AdminScreen() {
                   value={installUrl}
                   onChangeText={setInstallUrl}
                   placeholder="https://expo.dev/accounts/.../builds/..."
-                  placeholderTextColor="#666"
+                  placeholderTextColor="#808080"
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
@@ -255,7 +255,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 14, marginBottom: 8, paddingHorizontal: 12,
     backgroundColor: '#1a1a1a', borderRadius: 12, borderWidth: 1, borderColor: '#333',
   },
-  search: { flex: 1, color: '#fff', fontSize: 15, paddingVertical: Platform.OS === 'ios' ? 11 : 7 },
+  search: { flex: 1, color: '#F4F4F4', fontSize: 15, paddingVertical: Platform.OS === 'ios' ? 11 : 7 },
   row: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#161618', borderRadius: 14, borderWidth: 1, borderColor: '#262629',
@@ -263,7 +263,7 @@ const styles = StyleSheet.create({
   },
   handle: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
   email: { color: COLORS.textDim, fontSize: 13, marginTop: 1 },
-  meta: { color: '#6b6f6d', fontSize: 12, marginTop: 3 },
+  meta: { color: '#808080', fontSize: 12, marginTop: 3 },
   codePill: {
     color: '#FFD60A', fontSize: 14, fontWeight: '800', letterSpacing: 1,
     marginTop: 6,
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
   installLabel: { color: COLORS.textDim, fontSize: 11, marginTop: 12, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.6 },
   installInput: {
     backgroundColor: '#0A0A0A', borderRadius: 10, borderWidth: 1, borderColor: '#333',
-    color: '#fff', fontSize: 13, paddingHorizontal: 12, paddingVertical: 9,
+    color: '#F4F4F4', fontSize: 13, paddingHorizontal: 12, paddingVertical: 9,
   },
   installSave: {
     backgroundColor: '#FFD60A', borderRadius: 10, marginTop: 10,

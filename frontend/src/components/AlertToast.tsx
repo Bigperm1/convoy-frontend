@@ -58,5 +58,5 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     zIndex: 9999,
   },
-  toastText: { color: "#fff", fontSize: 14, fontWeight: "600" },
+  toastText: { color: "#F4F4F4", fontSize: 14, fontWeight: "600" },
 });

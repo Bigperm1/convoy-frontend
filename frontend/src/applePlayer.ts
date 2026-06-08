@@ -16,6 +16,22 @@ export type AppleSong = {
   duration?: number; // ms
 };
 
+export type ApplePlaylist = {
+  id: string;
+  name: string;
+  artworkUrl?: string;
+  trackCount?: number;
+  description?: string;
+};
+
+export type RecentItem = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  artworkUrl?: string;
+  type?: string;
+};
+
 export async function authorize(): Promise<boolean> {
   return false;
 }
@@ -29,6 +45,44 @@ export async function checkSubscription(): Promise<{
 
 export async function searchSongs(_query: string): Promise<AppleSong[]> {
   return [];
+}
+
+export async function searchSongsDiagnostic(
+  _query: string
+): Promise<{ songs: AppleSong[]; error?: string }> {
+  return { songs: [] };
+}
+
+export async function getUserPlaylists(
+  _limit?: number
+): Promise<{ playlists: ApplePlaylist[]; error?: string }> {
+  return { playlists: [] };
+}
+
+export async function getLibrarySongs(
+  _limit?: number
+): Promise<{ songs: AppleSong[]; error?: string }> {
+  return { songs: [] };
+}
+
+export async function getRecentlyPlayed(): Promise<{ items: RecentItem[]; error?: string }> {
+  return { items: [] };
+}
+
+export async function getPlaylistSongs(_playlistId: string): Promise<AppleSong[]> {
+  return [];
+}
+
+export async function playLibrarySong(_songId: string): Promise<void> {
+  /* no-op off iOS */
+}
+
+export async function playLibraryPlaylist(_playlistId: string, _startingAt?: number): Promise<void> {
+  /* no-op off iOS */
+}
+
+export async function playRecentItem(_item: RecentItem): Promise<void> {
+  /* no-op off iOS */
 }
 
 export async function playSong(_songId: string): Promise<void> {

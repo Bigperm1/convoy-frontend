@@ -30,7 +30,7 @@
     "expo-av": "^16.0.8",
     "expo-background-fetch": "~14.0.9",
     "expo-blur": "~15.0.8",
-    "expo-build-properties": "~0.14.0",
+    "expo-build-properties": "~1.0.10",
     "expo-constants": "~18.0.13",
     "expo-device": "~8.0.10",
     "expo-file-system": "~19.0.22",
@@ -57,7 +57,7 @@
     "react-native": "0.81.5",
     "react-native-dotenv": "^3.4.11",
     "react-native-gesture-handler": "~2.28.0",
-    "react-native-maps": "1.20.1",
+    "react-native-maps": "1.26.18",
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
@@ -77,5 +77,12 @@
     "typescript": "~5.9.3"
   },
   "private": true,
+  "expo": {
+    "install": {
+      "exclude": [
+        "react-native-maps"
+      ]
+    }
+  },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

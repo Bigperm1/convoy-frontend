@@ -32,6 +32,7 @@ import {
   fetchRoutes, fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtEtaSec, announceReroute, stopSpeech, announce,
 } from "../../src/nav";
+import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
 import { useSpeedCameras } from "../../src/speedCameras";
@@ -522,6 +523,12 @@ export default function MapScreen() {
     navAutoStartedRef.current = true;  // stay stopped until a new destination is set
     setNavMode("preview");
   };
+
+  // ---- CarPlay / Android Auto mirror (Phase 1) ----
+  // Mirrors the active route + live turn-by-turn state onto the car display.
+  // Consumes the SAME tbt/route the phone UI uses — no second engine, no double
+  // voice. Safe no-op on web and on any build without the CarPlay native module.
+  useConvoyCarPlay({ route: activeRoute, tbt, user: coords, destination, peers, onEnd: endNav });
   // Delete a hazard (by id) — used by the long-press / right-click flow on
   // markers. Optimistically removes from local state on success so the pin
   // disappears immediately. Backend already authorizes (only the original

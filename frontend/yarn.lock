@@ -6557,6 +6557,11 @@ react-is@^19.1.0:
   resolved "https://registry.yarnpkg.com/react-is/-/react-is-19.2.7.tgz#57668ee86a78574a542b0a539455212b2c086df2"
   integrity sha512-kZFnouyVv7eP/Phmrlo9FK+zcAdriZJvzxXHF1Sl1P377WSGe2G/JxVolhTrB/jeV47lKImhNUsijjHAAbcl/A==
 
+react-native-carplay@^2.4.1-beta.0:
+  version "2.4.1-beta.0"
+  resolved "https://registry.yarnpkg.com/react-native-carplay/-/react-native-carplay-2.4.1-beta.0.tgz#985c44e4eae622e7d2cf17c5b996a0182dbf5a52"
+  integrity sha512-tYJymLgJi+0516niv4ApGVC+VgENX/uCYqCX81tewSILWnS6KR7M0A9+bHyNk8xoheFyYGruX7onYxU2U8ykPA==
+
 react-native-dotenv@^3.4.11:
   version "3.4.11"
   resolved "https://registry.yarnpkg.com/react-native-dotenv/-/react-native-dotenv-3.4.11.tgz#2e6c4eabd55d5f1bf109b3dd9141dadf9c55cdd4"

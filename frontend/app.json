@@ -35,7 +35,7 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 41,
+      "versionCode": 42,
       "googleServicesFile": "./google-services.json",
       "config": {
         "googleMaps": {
@@ -109,7 +109,8 @@
             "buildToolsVersion": "35.0.0"
           }
         }
-      ]
+      ],
+      "./plugins/withConvoyAndroidAuto.js"
     ],
     "experiments": {
       "typedRoutes": true

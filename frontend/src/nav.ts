@@ -29,6 +29,10 @@ export type NavRoute = {
   duration_s: number;
   duration_in_traffic_text?: string;
   duration_in_traffic_s?: number;
+  // Free-flow (no-traffic) duration from the Routes API `staticDuration`. Used
+  // only to gauge congestion for the route-start greeting; duration_s stays the
+  // traffic-aware ETA the UI shows.
+  freeflow_s?: number;
   steps: NavStep[];
 };
 
@@ -136,6 +140,7 @@ export async function fetchRoutes(
             // response size and avoid unnecessary billing for unused fields.
             "X-Goog-FieldMask": [
               "routes.duration",
+              "routes.staticDuration",
               "routes.distanceMeters",
               "routes.polyline.encodedPolyline",
               "routes.description",
@@ -167,6 +172,7 @@ export async function fetchRoutes(
     const distM = r.distanceMeters ?? leg?.distanceMeters ?? 0;
     const durS = parseDurationSeconds(r.duration ?? leg?.duration);
     const trafficDurS = parseDurationSeconds(r.duration ?? leg?.duration);
+    const freeflowS = parseDurationSeconds(r.staticDuration ?? leg?.staticDuration);
 
     return {
       polyline: r.polyline?.encodedPolyline ?? "",
@@ -175,6 +181,7 @@ export async function fetchRoutes(
       duration_text: formatDuration(durS),
       distance_m: distM,
       duration_s: durS,
+      freeflow_s: freeflowS || undefined,
       duration_in_traffic_text: trafficDurS !== durS ? formatDuration(trafficDurS) : undefined,
       duration_in_traffic_s: trafficDurS !== durS ? trafficDurS : undefined,
       steps: (leg?.steps ?? []).map((s: any): NavStep => {
@@ -352,9 +359,11 @@ export function useTurnByTurn(
 }
 
 // ---- Speech helper ----
-// Spoken-direction playback rate (1.0 = normal). Slightly slowed so turn
-// callouts are easier to catch while driving.
-const NAV_TTS_RATE = 0.9;
+// Spoken-direction playback rate (1.0 = normal). Nudged a touch ABOVE normal so
+// Nova's callouts feel brisk rather than sluggish. Pitch is corrected on both
+// web and native (preservesPitch / shouldCorrectPitch), so faster playback
+// speeds her up without chipmunking her voice.
+const NAV_TTS_RATE = 1.05;
 
 // Normalize text for natural speech: spell out street-type AND unit
 // abbreviations so the TTS voice never reads "min", "km", or "Rd" literally.
@@ -401,8 +410,62 @@ let ttsPlaying = false;
 // half-spoken instruction. Web playback is fire-and-forget.
 let _currentSound: any = null;
 
+// ---- Route-start greeting coordination ----
+// The personable Nova greeting must ALWAYS play before the first turn callout,
+// with a clear pause between them. The greeting text is fetched async, so the
+// instant routing begins the caller reserves a "greeting in flight" hold
+// (reserveGreeting). While that hold is up, turn callouts (e.g. the engine's
+// "Starting navigation\u2026") are PARKED — not dropped, not spoken. When the greeting
+// arrives, deliverGreeting leads the queue with the greeting + a pause + a
+// sentinel that clears the hold and replays the parked callout. If the fetch
+// fails or times out, cancelGreeting releases the parked callout immediately.
+const PAUSE_TOKEN = "\u0000pause:";            // followed by milliseconds
+const GREETING_DONE_TOKEN = "\u0000greetdone"; // clears the hold + flushes
+const GREETING_PAUSE_MS = 1200;               // gap between greeting and 1st turn
+let _greetingInFlight = false;
+let _greetingTimer: ReturnType<typeof setTimeout> | null = null;
+let _heldSpeech: string | null = null;        // latest parked turn callout (raw)
+
+export function reserveGreeting(): void {
+  _greetingInFlight = true;
+  _heldSpeech = null;
+  if (_greetingTimer) clearTimeout(_greetingTimer);
+  // Safety valve: never hold the first instruction more than 4s on a slow or
+  // failed backend call.
+  _greetingTimer = setTimeout(() => { if (_greetingInFlight) cancelGreeting(); }, 4000);
+}
+
+export function deliverGreeting(text: string): void {
+  if (_greetingTimer) { clearTimeout(_greetingTimer); _greetingTimer = null; }
+  if (!_greetingInFlight) return;             // already cancelled / timed out
+  const t = (text || "").trim();
+  if (!t) { cancelGreeting(); return; }
+  // Lead the queue: greeting, then a pause, then the hold-clear sentinel.
+  ttsQueue.unshift(toSpeech(t), PAUSE_TOKEN + GREETING_PAUSE_MS, GREETING_DONE_TOKEN);
+  _lastSpoke = Date.now();
+  if (!ttsPlaying) drainTtsQueue();
+}
+
+export function cancelGreeting(): void {
+  if (_greetingTimer) { clearTimeout(_greetingTimer); _greetingTimer = null; }
+  _greetingInFlight = false;
+  _flushHeldSpeech();
+}
+
+function _flushHeldSpeech(): void {
+  const held = _heldSpeech;
+  _heldSpeech = null;
+  if (held) {
+    ttsQueue.push(toSpeech(held));
+    if (!ttsPlaying) drainTtsQueue();
+  }
+}
+
 function speak(text: string) {
   if (!text || !text.trim()) return;
+  // While the route-start greeting is in flight, park the latest turn callout
+  // so the greeting always leads (it's replayed once the greeting + pause end).
+  if (_greetingInFlight) { _heldSpeech = text; return; }
   const now = Date.now();
   if (now - _lastSpoke < 1500) return;
   _lastSpoke = now;
@@ -415,16 +478,22 @@ function resetSpeakGate() {
   _lastSpoke = 0;
   ttsQueue.length = 0;
   ttsPlaying = false;
+  // Clear any in-flight greeting hold so a fresh nav session starts clean.
+  _greetingInFlight = false;
+  _heldSpeech = null;
+  if (_greetingTimer) { clearTimeout(_greetingTimer); _greetingTimer = null; }
 }
 
-// Announce a reroute through the SAME Nova queue as every other instruction
-// (never the device voice) so it can't talk over Nova, de-duped to once per
-// 12s so a persistent off-route condition doesn't nag every cycle.
+// Reroute is intentionally SILENT. Convoy used to speak "Recalculating route."
+// here, but it was intrusive on drives, so the spoken callout is removed
+// entirely. The route itself still recomputes in the background via the
+// off-route handler in the map screen — we just never announce it out loud.
+// The throttle/timestamp is kept so stopSpeech() stays consistent.
 export function announceReroute() {
   const now = Date.now();
   if (now - _lastRerouteSpoke < 12000) return;
   _lastRerouteSpoke = now;
-  speak("Recalculating route.");
+  // (no speech — see note above)
 }
 
 // General-purpose Nova announcement (e.g. hazard-report confirmations) — uses
@@ -446,8 +515,17 @@ export function stopSpeech() {
 async function drainTtsQueue(): Promise<void> {
   if (ttsQueue.length === 0) { ttsPlaying = false; return; }
   ttsPlaying = true;
-  const text = ttsQueue.shift()!;
-  try { await speakOne(text); } catch {}
+  const item = ttsQueue.shift()!;
+  if (item === GREETING_DONE_TOKEN) {
+    // Greeting + pause finished — release the hold and replay the parked turn.
+    _greetingInFlight = false;
+    _flushHeldSpeech();
+  } else if (item.startsWith(PAUSE_TOKEN)) {
+    const ms = parseInt(item.slice(PAUSE_TOKEN.length), 10) || 0;
+    if (ms > 0) await new Promise((r) => setTimeout(r, ms));
+  } else {
+    try { await speakOne(item); } catch {}
+  }
   drainTtsQueue();
 }
 

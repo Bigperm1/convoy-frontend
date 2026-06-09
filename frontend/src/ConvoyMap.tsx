@@ -153,34 +153,56 @@ function decodePolyline(encoded?: string | null): { latitude: number; longitude:
   return points;
 }
 
-// Round the sharp corners of a route line so it reads as smooth curves instead
-// of hard angles. We soften the GEOMETRY here (Chaikin corner-cutting) rather
-// than relying on the Polyline `lineJoin="round"` prop, because react-native-maps
-// 1.20.1 ignores that prop on iOS + Google Maps (the same regression that pins
-// the stroke to default blue). By smoothing the path itself, the line reads as
-// rounded no matter what the native layer does with joins. Endpoints are kept
-// exact (line still starts on the car and ends on the destination), straight
-// runs are left essentially untouched, and two passes takes the edge off turns
-// without visibly pulling the line off the road. Tune `iterations` up for
-// rounder corners (more points), down for tighter ones.
+// Round only the GENTLE bends of a route line so it reads as smooth curves,
+// while leaving SHARP turns (e.g. 90-degree intersection turns) as EXACT
+// vertices so they stay crisp and on the road. This is *selective* Chaikin
+// corner-cutting: at each interior vertex we measure the turn deviation and only
+// round it when it's below `maxRoundDeg`. The previous version cut every corner
+// unconditionally, which pulled sharp turns off the road and across buildings
+// (and away from the route-snapped car). Endpoints are always kept exact.
+function turnDeviationDeg(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number },
+  c: { latitude: number; longitude: number }
+): number {
+  const kx = Math.cos((b.latitude * Math.PI) / 180); // shrink longitude at this latitude
+  const v1x = (b.longitude - a.longitude) * kx, v1y = b.latitude - a.latitude;
+  const v2x = (c.longitude - b.longitude) * kx, v2y = c.latitude - b.latitude;
+  const m1 = Math.hypot(v1x, v1y), m2 = Math.hypot(v2x, v2y);
+  if (m1 === 0 || m2 === 0) return 0;
+  let cos = (v1x * v2x + v1y * v2y) / (m1 * m2);
+  cos = cos < -1 ? -1 : cos > 1 ? 1 : cos;
+  return (Math.acos(cos) * 180) / Math.PI; // 0 = dead straight, 90 = right-angle turn
+}
+
 function smoothPath(
   pts: { latitude: number; longitude: number }[],
-  iterations = 2
+  iterations = 2,
+  maxRoundDeg = 35
 ): { latitude: number; longitude: number }[] {
   let p = pts;
   for (let it = 0; it < iterations; it++) {
     if (p.length < 3) return p;
     const out: { latitude: number; longitude: number }[] = [p[0]];
-    for (let i = 0; i < p.length - 1; i++) {
-      const a = p[i], b = p[i + 1];
-      out.push({
-        latitude: a.latitude * 0.75 + b.latitude * 0.25,
-        longitude: a.longitude * 0.75 + b.longitude * 0.25,
-      });
-      out.push({
-        latitude: a.latitude * 0.25 + b.latitude * 0.75,
-        longitude: a.longitude * 0.25 + b.longitude * 0.75,
-      });
+    for (let i = 1; i < p.length - 1; i++) {
+      const a = p[i - 1], b = p[i], c = p[i + 1];
+      if (turnDeviationDeg(a, b, c) >= maxRoundDeg) {
+        // Sharp turn (intersection) — keep the corner exact so it stays a real
+        // 90-degree corner sitting on the road.
+        out.push(b);
+      } else {
+        // Gentle bend — cut the corner lightly toward each neighbour so it
+        // rounds. Only a 25% pull, and only on shallow angles, so the line
+        // never visibly leaves the road.
+        out.push({
+          latitude: b.latitude * 0.75 + a.latitude * 0.25,
+          longitude: b.longitude * 0.75 + a.longitude * 0.25,
+        });
+        out.push({
+          latitude: b.latitude * 0.75 + c.latitude * 0.25,
+          longitude: b.longitude * 0.75 + c.longitude * 0.25,
+        });
+      }
     }
     out.push(p[p.length - 1]);
     p = out;
@@ -378,6 +400,38 @@ function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
   );
 }
 
+// ===== HazardMarker =====
+// Community hazard / police pin, rendered as a flat ICON image (police.png for
+// police reports, hazard.png for everything else) with NO colored circle behind
+// it. Same Android snapshot-settle dance as the other custom markers so the
+// bitmap isn't frozen before the image paints. resizeMode "contain" preserves
+// whatever aspect ratio the source PNGs have, so sizing is just the box below.
+const HAZARD_ICONS: Record<string, any> = {
+  police: require("../assets/images/police.png"),
+};
+const HAZARD_ICON_DEFAULT = require("../assets/images/hazard.png");
+
+function HazardMarker({ hazard, onPress }: { hazard: Hazard; onPress?: () => void }) {
+  const [track, setTrack] = useState(true);
+  useEffect(() => {
+    setTrack(true);
+    const t = setTimeout(() => setTrack(false), SNAPSHOT_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [hazard.kind]);
+  const src = HAZARD_ICONS[hazard.kind] || HAZARD_ICON_DEFAULT;
+  return (
+    <Marker
+      coordinate={{ latitude: hazard.lat, longitude: hazard.lng }}
+      anchor={{ x: 0.5, y: 0.5 }}
+      zIndex={5}
+      tracksViewChanges={track}
+      onPress={onPress}
+    >
+      <Image source={src} style={styles.hazardIcon} resizeMode="contain" />
+    </Marker>
+  );
+}
+
 // ===== PlaceMarker =====
 // Category quick-search result pin (gas price chip / fuel badge / named place).
 // Uses the same Android snapshot dance as the other text markers — WITHOUT it
@@ -490,7 +544,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
     mapType = "hybrid", leaderUserId, hazards, speedCameras, highlightConvoy,
     destination, destWeather, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
-    showTraffic = true, onMapPress, onHazardPress, onHazardLongPress,
+    showTraffic = true, onMapPress, onMapLongPress, onHazardPress, onHazardLongPress,
     onPeerPress, onMapReady, places, onPlacePress, showPlacePins = true,
   } = props;
 
@@ -659,9 +713,11 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
     }
   });
 
-  // Decode + corner-smooth each route once per routes change (memoized so it
-  // doesn't recompute on every GPS tick). Used only for the DRAWN lines; the
-  // camera fit, route-snapping and ETA midpoints keep the raw road geometry.
+  // Decode each route once per routes change (memoized so it doesn't recompute
+  // on every GPS tick). smoothPath now rounds only GENTLE bends and keeps sharp
+  // turns (>= 35-degree deviation, i.e. 90-degree intersection turns) as exact
+  // on-road vertices — curves read smooth, corners stay crisp and never cut
+  // across buildings.
   const smoothedRouteCoords = useMemo(
     () => (routes || []).map((r: { polyline: string }) => smoothPath(decodePolyline(r.polyline))),
     [routes]
@@ -687,6 +743,10 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
         toolbarEnabled={false}
         onMapReady={() => { readyRef.current = true; commitCamera(true); onMapReady?.(); }}
         onPress={() => onMapPress?.()}
+        onLongPress={(e: any) => {
+          const co = e?.nativeEvent?.coordinate;
+          if (co && typeof co.latitude === "number") onMapLongPress?.({ lat: co.latitude, lng: co.longitude });
+        }}
         onPanDrag={() => { if (!selfMovingRef.current) onUserPan?.(); }}
       >
         {/* Car markers — self + every peer. Each is a rotated top-down PNG of
@@ -698,20 +758,9 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
         ))}
 
         {/* Community hazard pins. Gold ring when Highlight Convoy is on. */}
+        {/* Community hazard / police pins — flat icon images, no circle. */}
         {visibleHazards.map((h: Hazard) => (
-          <Marker
-            key={`hz_${h.id}`}
-            coordinate={{ latitude: h.lat, longitude: h.lng }}
-            anchor={{ x: 0.5, y: 0.5 }}
-            zIndex={5}
-            onPress={() => onHazardPress?.(h)}
-          >
-            <View style={[
-              styles.hazardPin,
-              { backgroundColor: HAZARD_COLOR[h.kind] || "#FF9F0A" },
-              highlightConvoy && styles.hazardPinConvoy,
-            ]} />
-          </Marker>
+          <HazardMarker key={`hz_${h.id}`} hazard={h} onPress={() => onHazardPress?.(h)} />
         ))}
 
         {/* Fixed speed cameras (OpenStreetMap). Pins only — the proximity
@@ -830,6 +879,7 @@ const styles = StyleSheet.create({
     }),
   },
   hazardPinConvoy: { borderColor: "#FFD60A" },
+  hazardIcon: { width: 40, height: 40 },
   placePinWrap: { alignItems: "center", maxWidth: 150 },
   placeLabel: {
     backgroundColor: "#FFFFFF",

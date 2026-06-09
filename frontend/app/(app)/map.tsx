@@ -40,6 +40,8 @@ import { useSpeedLimit } from "../../src/speedLimit";
 import ConvoyLogo from "../../src/components/ConvoyLogo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
+import { speakRouteGreeting } from "../../src/novaGreeting";
+import { useSavedPlaces, saveSavedPlace, predictDestination, resolveTarget, ensureSavedPlacesLoaded } from "../../src/savedPlaces";
 import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
@@ -233,8 +235,11 @@ export default function MapScreen() {
   }, [navMode]);
 
   const navAutoStartedRef = useRef(false);
+  // One-shot guard so the Nova greeting fires once per destination (not on
+  // every route recompute / reroute).
+  const greetedDestRef = useRef<string | null>(null);
   // Reset the one-shot auto-start guard whenever the destination changes.
-  useEffect(() => { navAutoStartedRef.current = false; }, [destination]);
+  useEffect(() => { navAutoStartedRef.current = false; greetedDestRef.current = null; }, [destination]);
 
   // Auto-START turn-by-turn once the driver begins moving (≥ 5 km/h) with a route
   // set. Replaces the old "collapse to a trip-summary pill" flow — the new
@@ -335,6 +340,10 @@ export default function MapScreen() {
   }, [destination]);
 
   const [settings] = useSettings();
+  // Saved places (Home/Work/custom) + the time-of-day destination suggestion.
+  const [savedPlaces] = useSavedPlaces();
+  const [suggestion, setSuggestion] = useState<{ lat: number; lng: number; label: string; reason: string } | null>(null);
+  const suggestionDismissedRef = useRef(false);
   // Map base style (satellite vs default road map) is persisted in settings so
   // it's controllable from the Settings screen AND the on-map Layers sheet.
   const mapType: "hybrid" | "roadmap" = (settings as any).mapType ?? "hybrid";
@@ -469,6 +478,10 @@ export default function MapScreen() {
     });
   }, [routes, selectedRouteIndex]);
 
+  // The Nova route-start greeting is fired from startNav() below (the single
+  // entry point for manual Start, drive-off auto-start, and friend-routes) so
+  // it leads the engine's first turn callout with a pause between them.
+
   // Turn-by-turn engine — speaks instructions, advances steps, computes ETA / distance remaining
   const tbt = useTurnByTurn(activeRoute, coords, navMode === "turn-by-turn", {
     mute: navMuted,
@@ -515,6 +528,26 @@ export default function MapScreen() {
     if (!activeRoute) return;
     navAutoStartedRef.current = true;
     if (destination) addRecentRoute({ label: destination.label, lat: destination.lat, lng: destination.lng });
+    // Personable Nova greeting, fired the instant routing begins and BEFORE the
+    // engine's first turn callout. speakRouteGreeting reserves the speech slot
+    // synchronously (so the "Starting navigation…" line is parked behind it),
+    // then plays the greeting, a pause, then releases the first direction. Once
+    // per destination; silent while muted. Runs before setNavMode so the
+    // reservation is in place when the turn engine speaks.
+    if (!navMuted && destination && activeRoute) {
+      const key = `${destination.lat.toFixed(4)},${destination.lng.toFixed(4)}`;
+      if (greetedDestRef.current !== key) {
+        greetedDestRef.current = key;
+        void speakRouteGreeting({
+          destination: { lat: destination.lat, lng: destination.lng },
+          destinationName: destination.label,
+          destinationCity: destination.label,
+          route: activeRoute,
+          weatherKind: destWeather?.kind ?? null,
+          temperature: destWeather?.temp ?? null,
+        });
+      }
+    }
     setShowSteps(false);
     setNavMode("turn-by-turn");
   };
@@ -564,6 +597,44 @@ export default function MapScreen() {
     // Also retract the step drawer so it doesn't dangle on a destination-less map.
     slideStepDrawerDown();
   };
+
+  // ----- Saved places: long-press the map to save Home / Work -----
+  const handleMapLongPress = (c: { lat: number; lng: number }) => {
+    Alert.alert(
+      "Save this spot",
+      "Set it as a quick destination for predictions and your Nova greeting.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Home",
+          onPress: () => {
+            void saveSavedPlace({ kind: "home", lat: c.lat, lng: c.lng });
+            try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+            Alert.alert("Saved", "This spot is now your Home.");
+          },
+        },
+        {
+          text: "Work",
+          onPress: () => {
+            void saveSavedPlace({ kind: "work", lat: c.lat, lng: c.lng });
+            try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+            Alert.alert("Saved", "This spot is now your Work.");
+          },
+        },
+      ]
+    );
+  };
+
+  // ----- Predicted destination ("Head to Work?") -----
+  // One-tap accept routes there (same flow as picking a search result); the
+  // greeting + preview banner follow. Dismiss hides it for the session.
+  const acceptSuggestion = () => {
+    if (!suggestion) return;
+    const s = suggestion;
+    setSuggestion(null);
+    onSearchSelectPlace({ lat: s.lat, lng: s.lng, label: s.label });
+  };
+  const dismissSuggestion = () => { suggestionDismissedRef.current = true; setSuggestion(null); };
 
   // ===== Step Drawer =====
   // Slides up from the bottom when a route is selected, lists each maneuver,
@@ -1163,7 +1234,7 @@ export default function MapScreen() {
   useEffect(() => () => { if (passPromptTimer.current) clearTimeout(passPromptTimer.current); }, []);
 
   // ----- Speed-camera proximity voice alert (Nova) -----
-  // Announce ONCE when we come within ~300 m of a fixed speed camera while
+  // Announce ONCE when we come within ~100 m of a fixed speed camera while
   // actually moving (>= 25 km/h); re-arm a camera only after we've left a wider
   // ~600 m radius so a return trip past it can alert again. Respects the nav
   // mute toggle and the Speed Cameras setting.
@@ -1175,12 +1246,73 @@ export default function MapScreen() {
     for (const c of speedCameras) {
       const dM = distanceKm(coords.lat, coords.lng, c.lat, c.lng) * 1000;
       if (dM > 600) { announced.delete(c.id); continue; }   // re-arm once well past
-      if (dM <= 300 && kmh >= 25 && !announced.has(c.id)) {
+      if (dM <= 100 && kmh >= 25 && !announced.has(c.id)) {
         announced.add(c.id);
         if (!navMuted) { try { announce("Speed camera ahead."); } catch {} }
       }
     }
   }, [coords?.lat, coords?.lng, speedCameras, speedCamerasEnabled, navMuted]);
+
+  // ----- Hazard / police proximity voice alert (Nova) -----
+  // Mirror of the speed-camera alert, but for community hazards: announce ONCE
+  // when we come within ~500 m of a hazard while moving (>= 20 km/h), re-arming
+  // a given hazard only after we've left a wider ~800 m radius. Police get a
+  // "police reported ahead" callout; other kinds get their own phrasing.
+  // Respects the nav mute toggle and the Hazards layer toggle. NOTE: distance-
+  // only (no heading cone yet), matching the camera alert — a hazard 500 m
+  // behind you can still trigger; a forward-cone filter can be added later.
+  const announcedHazardsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!coords || !showHazards || hazards.length === 0) return;
+    const kmh = (coords.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
+    const announced = announcedHazardsRef.current;
+    for (const h of hazards) {
+      if (!h || !h.id) continue;
+      const dM = distanceKm(coords.lat, coords.lng, h.lat, h.lng) * 1000;
+      if (dM > 800) { announced.delete(h.id); continue; }   // re-arm once well past
+      if (dM <= 500 && kmh >= 20 && !announced.has(h.id)) {
+        announced.add(h.id);
+        if (!navMuted) {
+          const phrase =
+            h.kind === "police" ? "Heads up, police reported ahead." :
+            h.kind === "accident" ? "Accident reported ahead." :
+            h.kind === "traffic" ? "Traffic reported ahead." :
+            "Hazard on the road ahead.";
+          try { announce(phrase); } catch {}
+        }
+      }
+    }
+  }, [coords?.lat, coords?.lng, hazards, showHazards, navMuted]);
+
+  // ----- Predicted destination suggestion -----
+  // When the map is idle (no destination, not navigating) and Home/Work are
+  // saved, surface a one-tap "Head to Work?" from the time-of-day prediction.
+  // Origin is read from coordsRef so this doesn't refire on every GPS tick.
+  useEffect(() => {
+    if (suggestionDismissedRef.current) { setSuggestion(null); return; }
+    if (destination || navMode === "turn-by-turn") { setSuggestion(null); return; }
+    const c = coordsRef.current;
+    const pred = predictDestination(new Date(), c?.lat, c?.lng);
+    setSuggestion(pred ? { lat: pred.place.lat, lng: pred.place.lng, label: pred.place.label, reason: pred.reason } : null);
+  }, [savedPlaces, destination, navMode]);
+
+  // ----- Deep link: convoy://go?to=work -----
+  // Opens straight into a route to a saved place (powers the iOS Shortcuts
+  // "when CarPlay connects -> Open Convoy" stopgap). Resolves the ?to= target
+  // against saved places and routes there exactly like a picked search result.
+  useEffect(() => {
+    const handleUrl = async (url: string | null) => {
+      if (!url || !/[?&]to=/i.test(url) || !/\bgo\b/i.test(url)) return;
+      const m = url.match(/[?&]to=([^&]+)/i);
+      if (!m) return;
+      await ensureSavedPlacesLoaded();
+      const place = resolveTarget(decodeURIComponent(m[1]));
+      if (place) onSearchSelectPlace({ lat: place.lat, lng: place.lng, label: place.label });
+    };
+    Linking.getInitialURL().then(handleUrl).catch(() => {});
+    const sub = Linking.addEventListener("url", (e) => { void handleUrl(e.url); });
+    return () => { try { sub.remove(); } catch {} };
+  }, []);
 
   // ----- Convoy Realtime Presence (Supabase) -----
   // Live peer broadcast/track via Supabase Realtime. Replaces stale REST polling for online cars.
@@ -1482,6 +1614,7 @@ export default function MapScreen() {
         // Tap on empty map → close any open search overlay so the driver can
         // peek at the map fullscreen mid-trip without ending navigation.
         onMapPress={() => { /* search bar stays pinned until a route is selected — no auto-hide on map tap */ }}
+        onMapLongPress={handleMapLongPress}
         onHazardPress={(h: any) => setSelected(h)}
         onHazardLongPress={handleHazardLongPress}
         onPeerPress={(p: any) => {
@@ -1827,6 +1960,31 @@ export default function MapScreen() {
       {/* Top-right Layers FAB removed — map layers now live in the Convoy menu
           (tap the logo in the search bar → "Map Layers"). */}
 
+      {/* ===== Predicted-destination suggestion ("Head to Work?") =====
+          Shown on an idle map when Home/Work are saved and the time-of-day
+          prediction has a pick. Go routes there (greeting + preview follow). */}
+      {suggestion && !destination && navMode === "preview" && (
+        <View style={styles.suggestWrap} pointerEvents="box-none">
+          <Glass radius={16} style={styles.suggestCard}>
+            <View style={styles.suggestRow}>
+              <View style={styles.suggestIcon}>
+                <Ionicons name="navigate-circle" size={22} color="#FFD60A" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.suggestTitle} numberOfLines={1}>Head to {suggestion.label}?</Text>
+                <Text style={styles.suggestSub} numberOfLines={1}>Tap Go to start your usual drive</Text>
+              </View>
+              <TouchableOpacity onPress={acceptSuggestion} style={styles.suggestGo} activeOpacity={0.85}>
+                <Text style={styles.suggestGoText}>Go</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={dismissSuggestion} style={{ padding: 6 }}>
+                <Ionicons name="close" size={18} color={COLORS.textDim} />
+              </TouchableOpacity>
+            </View>
+          </Glass>
+        </View>
+      )}
+
       <View pointerEvents="box-none" style={[styles.fabStack, { bottom: controlsBottom }]}>
         {/* Police report button — top of stack. One-tap: posts a hazard with
             kind='police' at the GPS sample closest to (now - 5s), shows a
@@ -2153,6 +2311,17 @@ const isHazardVisible = (h: Hazard) => {
 const styles = StyleSheet.create({
   c: { flex: 1, backgroundColor: "#0A1410" },
   loader: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
+
+  // Predicted-destination suggestion card ("Head to Work?"), top-anchored just
+  // under the search bar so it never collides with the bottom FABs / speedo.
+  suggestWrap: { position: "absolute", left: 12, right: 12, top: Platform.OS === "ios" ? 150 : 124, zIndex: 40 },
+  suggestCard: {},
+  suggestRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10 },
+  suggestIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,214,10,0.15)", alignItems: "center", justifyContent: "center" },
+  suggestTitle: { color: COLORS.text, fontWeight: "700", fontSize: 14 },
+  suggestSub: { color: COLORS.textDim, fontSize: 11, marginTop: 1 },
+  suggestGo: { backgroundColor: "#FFD60A", paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12 },
+  suggestGoText: { color: "#1C1C1E", fontWeight: "800", fontSize: 14 },
 
   topBar: {
     position: 'absolute',

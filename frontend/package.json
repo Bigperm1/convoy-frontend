@@ -9,6 +9,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "typecheck": "tsc --noEmit",
     "eas-build-pre-install": "npm install -g patch-package",
     "postinstall": "patch-package"
   },

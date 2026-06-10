@@ -957,9 +957,14 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
           );
         })()}
 
-        {/* Route ETA pills — native-style time marker at each route's midpoint.
-            Preview only (hidden during active turn-by-turn). Tap to select. */}
+        {/* Route ETA pills — native-style time marker on each ALTERNATE route's
+            midpoint, Google-style. The SELECTED route is skipped on purpose: its
+            ETA already shows in the bottom "Drive" card, so drawing a pill for it
+            too produced two near-identical pills stacked where the routes diverge
+            (the "2 × 10 min" the tester saw). Preview only; tap an alternate to
+            switch to it. */}
         {destination && !navigationActive && routes.map((r: any, i: number) => {
+          if (i === selectedRouteIndex) return null;
           const coords = decodePolyline(r.polyline);
           if (coords.length === 0) return null;
           const mid = coords[Math.floor(coords.length / 2)];
@@ -970,7 +975,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
               key={`eta_${i}_${selectedRouteIndex}`}
               coordinate={mid}
               label={label}
-              selected={i === selectedRouteIndex}
+              selected={false}
               onPress={() => onSelectRoute?.(i)}
             />
           );

@@ -324,6 +324,88 @@ function nearestOnPolyline(
   return { latitude: bestLat, longitude: bestLng, distM: Math.sqrt(bestD) * 111320 };
 }
 
+// Compass bearing (deg, 0=N, clockwise) from point A to point B.
+function bearingDeg(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const φ1 = (aLat * Math.PI) / 180, φ2 = (bLat * Math.PI) / 180;
+  const Δλ = ((bLng - aLng) * Math.PI) / 180;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371000;
+  const dLat = ((bLat - aLat) * Math.PI) / 180, dLng = ((bLng - aLng) * Math.PI) / 180;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+// Walk `aheadM` metres forward along the route polyline from the point nearest
+// (fromLat,fromLng) — i.e. the driver's snapped position — and return the point
+// there plus the route bearing at that point. Used to drop the upcoming-turn
+// arrow ON the route line at the next maneuver (distanceToManeuverM ahead).
+function pointAlongRoute(
+  pts: { latitude: number; longitude: number }[],
+  fromLat: number,
+  fromLng: number,
+  aheadM: number
+): { lat: number; lng: number; bearing: number } | null {
+  if (!pts || pts.length < 2 || !(aheadM > 0)) return null;
+  // 1. nearest segment + projection (equirectangular, mirrors nearestOnPolyline)
+  const kx = Math.cos((fromLat * Math.PI) / 180);
+  const px = fromLng * kx, py = fromLat;
+  let bestI = 0, bestLat = pts[0].latitude, bestLng = pts[0].longitude, bestD = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const ax = pts[i].longitude * kx, ay = pts[i].latitude;
+    const bx = pts[i + 1].longitude * kx, by = pts[i + 1].latitude;
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const cx = ax + t * dx, cy = ay + t * dy;
+    const ex = px - cx, ey = py - cy;
+    const d = ex * ex + ey * ey;
+    if (d < bestD) { bestD = d; bestI = i; bestLat = cy; bestLng = cx / kx; }
+  }
+  // 2. walk forward from the projection by aheadM metres
+  let remaining = aheadM, curLat = bestLat, curLng = bestLng;
+  for (let i = bestI; i < pts.length - 1; i++) {
+    const sLat = i === bestI ? curLat : pts[i].latitude;
+    const sLng = i === bestI ? curLng : pts[i].longitude;
+    const eLat = pts[i + 1].latitude, eLng = pts[i + 1].longitude;
+    const segLen = haversineM(sLat, sLng, eLat, eLng);
+    if (segLen >= remaining) {
+      const f = segLen > 0 ? remaining / segLen : 0;
+      return { lat: sLat + (eLat - sLat) * f, lng: sLng + (eLng - sLng) * f, bearing: bearingDeg(sLat, sLng, eLat, eLng) };
+    }
+    remaining -= segLen;
+  }
+  const n = pts.length;
+  return { lat: pts[n - 1].latitude, lng: pts[n - 1].longitude, bearing: bearingDeg(pts[n - 2].latitude, pts[n - 2].longitude, pts[n - 1].latitude, pts[n - 1].longitude) };
+}
+
+// ===== ManeuverArrow =====
+// White chevron dropped on the route line at the upcoming maneuver, pointing
+// the direction of travel through it (Google-style). Uses the NATIVE image prop
+// + flat + rotation (same reliable path as CarMarker), and the same Android
+// map-bearing compensation so it doesn't end up sideways in heading-up.
+const TURN_ARROW_ICON = require("../assets/images/turn_arrow.png");
+function ManeuverArrow({ lat, lng, bearing, mapHeading = 0 }: { lat: number; lng: number; bearing: number; mapHeading?: number }) {
+  const rotation = Platform.OS === "android"
+    ? ((bearing - mapHeading) % 360 + 360) % 360
+    : bearing;
+  return (
+    <Marker
+      coordinate={{ latitude: lat, longitude: lng }}
+      anchor={{ x: 0.5, y: 0.5 }}
+      flat
+      rotation={rotation}
+      image={TURN_ARROW_ICON as any}
+      tracksViewChanges={false}
+      zIndex={4}
+    />
+  );
+}
+
 // ===== CarMarker =====
 // A single car marker (self or peer), rendered via react-native-maps' NATIVE
 // `image` prop — NOT a captured child <View>/<Image>. The view→bitmap capture
@@ -684,6 +766,19 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
     return { lat: user.lat, lng: user.lng };
   }, [user?.lat, user?.lng, activePolyPts]);
 
+  // Upcoming-turn arrow: a point ON the active route, distanceToManeuverM ahead
+  // of the driver, with the route bearing there. Shown only while navigating and
+  // when the maneuver is reasonably close (18–500 m) so it's the UPCOMING corner,
+  // not a turn miles away. null otherwise (no arrow).
+  const maneuverArrow = useMemo(() => {
+    if (!navigationActive || !activePolyPts) return null;
+    const d = distanceToManeuverM;
+    if (typeof d !== "number" || !Number.isFinite(d) || d < 18 || d > 500) return null;
+    const from = selfDisplay ?? (user && typeof user.lat === "number" && typeof user.lng === "number" ? { lat: user.lat, lng: user.lng } : null);
+    if (!from) return null;
+    return pointAlongRoute(activePolyPts, from.lat, from.lng, d);
+  }, [navigationActive, activePolyPts, distanceToManeuverM, selfDisplay?.lat, selfDisplay?.lng, user?.lat, user?.lng]);
+
   // ===== Camera control =====
   // followUser (free-roam) → follow position at a fixed zoom, north-up, flat.
   // navigationActive (chase cam) → speed-zoom, heading-up (unless north_up), 45° pitch.
@@ -951,6 +1046,17 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
             zIndex={3}
             lineCap="round"
             lineJoin="round"
+          />
+        )}
+
+        {/* Upcoming-turn arrow ON the route line (Google-style). Direct child of
+            MapView — never wrapped in a Fragment. */}
+        {maneuverArrow && (
+          <ManeuverArrow
+            lat={maneuverArrow.lat}
+            lng={maneuverArrow.lng}
+            bearing={maneuverArrow.bearing}
+            mapHeading={mapHeadingDeg}
           />
         )}
 

@@ -20,9 +20,34 @@ type AdminUser = {
   car_make?: string;
   car_model?: string;
   car_color?: string;
+  push_platform?: string;   // "ios" | "android" | "web"
+  device_model?: string;    // "iPhone 15 Pro", "Pixel 7"
+  device_brand?: string;    // "Apple", "Google", "Samsung"
+  os_name?: string;         // "iOS", "Android"
+  os_version?: string;      // "18.1", "14"
   created_at?: string | null;
   last_seen?: string | null;
 };
+
+// Compact one-line device label, e.g. "iPhone 15 Pro · iOS 18.1" or
+// "Pixel 7 · Android 14". Falls back to whatever we have; "Unknown device"
+// for older clients that predate device reporting.
+function deviceLabel(u: AdminUser): string {
+  const model = u.device_model || (u.device_brand ? u.device_brand : '');
+  const os =
+    u.os_name && u.os_version ? `${u.os_name} ${u.os_version}`
+    : u.os_name || (u.push_platform ? u.push_platform.toUpperCase() : '');
+  const parts = [model, os].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'Unknown device';
+}
+
+// Icon hint for the platform: Apple logo for iOS, Android robot otherwise.
+function deviceIcon(u: AdminUser): any {
+  const p = (u.os_name || u.push_platform || '').toLowerCase();
+  if (p.includes('ios') || p.includes('apple')) return 'logo-apple';
+  if (p.includes('android')) return 'logo-android';
+  return 'phone-portrait-outline';
+}
 
 // Short, friendly timestamp: "just now" / "3h ago" / "Apr 12". Defensive
 // against null / unparseable values so a bad row never crashes the list.
@@ -127,6 +152,10 @@ export default function AdminScreen() {
           <Text style={styles.meta} numberOfLines={1}>
             {[item.car_make, item.car_model].filter(Boolean).join(' ') || 'No car set'} · seen {ago(item.last_seen)}
           </Text>
+          <View style={styles.deviceRow}>
+            <Ionicons name={deviceIcon(item)} size={12} color="#7FA8FF" />
+            <Text style={styles.deviceText} numberOfLines={1}>{deviceLabel(item)}</Text>
+          </View>
           {code && (
             <Text selectable style={styles.codePill}>
               Code {code.code} · relay now
@@ -264,6 +293,8 @@ const styles = StyleSheet.create({
   handle: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
   email: { color: COLORS.textDim, fontSize: 13, marginTop: 1 },
   meta: { color: '#808080', fontSize: 12, marginTop: 3 },
+  deviceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
+  deviceText: { color: '#7FA8FF', fontSize: 12, fontWeight: '600', flexShrink: 1 },
   codePill: {
     color: '#FFD60A', fontSize: 14, fontWeight: '800', letterSpacing: 1,
     marginTop: 6,

@@ -374,6 +374,12 @@ async def admin_list_users(user=Depends(get_current_user)):
         "car_make": u.get("car_make", ""),
         "car_model": u.get("car_model", ""),
         "car_color": u.get("car_color", ""),
+        # Device identity so the owner can see what each tester is running.
+        "push_platform": u.get("push_platform", ""),
+        "device_model": u.get("device_model", ""),
+        "device_brand": u.get("device_brand", ""),
+        "os_name": u.get("os_name", ""),
+        "os_version": u.get("os_version", ""),
         "created_at": u.get("created_at"),
         "last_seen": u.get("last_seen"),
     } for u in users]
@@ -448,27 +454,38 @@ async def update_profile(body: CarUpdate, user=Depends(get_current_user)):
 # We persist both `push_token` and `push_platform` so the relay knows which
 # upstream channel to use, and so we can revoke tokens by platform if needed.
 class PushTokenBody(BaseModel):
-    token: str
-    platform: str  # "android" | "ios"
+    # token is optional now: a user who denied push still calls this so we can
+    # record which device they're on for the admin roster (device_* fields).
+    token: Optional[str] = None
+    platform: str  # "android" | "ios" | "web"
+    # Human-readable device identity (expo-device on the client). All optional —
+    # older clients and the web preview won't send them.
+    device_model: Optional[str] = None    # "iPhone 15 Pro", "Pixel 7"
+    device_brand: Optional[str] = None    # "Apple", "Google", "Samsung"
+    os_name: Optional[str] = None         # "iOS", "Android"
+    os_version: Optional[str] = None      # "18.1", "14"
 
 
 @api.put("/auth/push-token")
 async def save_push_token(body: PushTokenBody, user=Depends(get_current_user)):
-    """Persist the device push token + platform for the authenticated user.
+    """Persist the device push token + platform + device identity.
 
-    Idempotent — the client may call this on every cold start since tokens
-    can rotate. We just overwrite the existing fields.
+    Idempotent — the client may call this on every cold start since tokens can
+    rotate. Token is optional (a user who denied push still reports their
+    device for the admin roster); device_* fields are stored when present.
     """
-    if not body.token or not body.token.strip():
-        raise HTTPException(status_code=400, detail="token required")
     if body.platform not in ("ios", "android", "web"):
         # `web` will never deliver via push but we accept it so the call
         # doesn't 4xx on devs running in the browser preview.
         raise HTTPException(status_code=400, detail="Invalid platform")
-    await db.users.update_one(
-        {"id": user["id"]},
-        {"$set": {"push_token": body.token, "push_platform": body.platform}},
-    )
+    update: dict = {"push_platform": body.platform}
+    if body.token and body.token.strip():
+        update["push_token"] = body.token
+    for field in ("device_model", "device_brand", "os_name", "os_version"):
+        val = getattr(body, field)
+        if val:
+            update[field] = val
+    await db.users.update_one({"id": user["id"]}, {"$set": update})
     return {"ok": True}
 
 

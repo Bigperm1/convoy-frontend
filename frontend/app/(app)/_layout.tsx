@@ -18,11 +18,12 @@ import { hailBus } from "../../src/hailBus";
 import { shareBus } from "../../src/shareBus";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
+import * as Device from "expo-device";
 
 // ===== Push notification module-scope config =====
 //
 // Both `setNotificationHandler` and the registration helper MUST run before
-// any push notification is delivered. expo-notifications is native-only Ã¢ÂÂ on
+// any push notification is delivered. expo-notifications is native-only — on
 // web all these APIs throw, so we guard with Platform.OS !== "web".
 //
 // `handleNotification` controls how a push is rendered when the app is in the
@@ -58,9 +59,26 @@ if (Platform.OS !== "web") {
 
 // One-shot async helper invoked from the layout's mount effect. Pulls the
 // FCM/APNs device token from the OS and PUTs it to /auth/push-token. Safe to
-// call on every cold start Ã¢ÂÂ backend is idempotent.
+// call on every cold start — backend is idempotent.
+// Human-readable device identity (expo-device). Reported to the backend so the
+// owner admin roster shows what each tester is actually running.
+function deviceInfo() {
+  return {
+    device_model: Device.modelName || undefined,                    // "iPhone 15 Pro", "Pixel 7"
+    device_brand: Device.brand || Device.manufacturer || undefined, // "Apple", "Google", "Samsung"
+    os_name: Device.osName || Platform.OS,                          // "iOS", "Android"
+    os_version: Device.osVersion || undefined,                      // "18.1", "14"
+  };
+}
+
 async function registerForPushNotifications() {
   if (Platform.OS === "web") return;
+  // Always report the device identity — even if push is denied/unavailable — so
+  // the admin roster knows what every tester is on. The backend token field is
+  // optional, so a device-only update is valid.
+  const info = deviceInfo();
+  const reportDeviceOnly = () =>
+    api.put("/auth/push-token", { platform: Platform.OS, ...info }).catch(() => {});
 
   try {
     const perm = await Notifications.getPermissionsAsync();
@@ -72,7 +90,8 @@ async function registerForPushNotifications() {
       final = (await Notifications.requestPermissionsAsync()).status;
     }
     if (final !== "granted") {
-      // User denied Ã¢ÂÂ leave silently, the WS fallback path will handle Hails.
+      // No push — still record the device, then leave (WS fallback handles Hails).
+      await reportDeviceOnly();
       return;
     }
 
@@ -85,14 +104,20 @@ async function registerForPushNotifications() {
     const tokenData = await Notifications.getExpoPushTokenAsync(
       projectId ? { projectId } : undefined
     );
-    if (!tokenData?.data) return;
+    if (!tokenData?.data) {
+      await reportDeviceOnly();
+      return;
+    }
 
     await api.put("/auth/push-token", {
       token: tokenData.data,
       platform: Platform.OS,
+      ...info,
     });
   } catch (e) {
-    // Permission denied, simulator, or other token-fetch failure. Non-fatal.
+    // Permission denied, simulator, or other token-fetch failure. Non-fatal —
+    // still try to record the device identity for the roster.
+    await reportDeviceOnly();
     if (__DEV__) console.warn("Push token registration failed:", e);
   }
 }
@@ -108,7 +133,7 @@ export default function AppLayout() {
   const commsActive = !!(settings.activeThreadId || settings.activeCommunityId);
 
   // Mount the live walkie-talkie WebSocket listener once for the entire
-  // (app) shell Ã¢ÂÂ incoming PTT transmissions auto-play even when the user is
+  // (app) shell — incoming PTT transmissions auto-play even when the user is
   // on the Map, Music, Hub or Settings tab. The getter is read on every
   // incoming frame, so switching active community in Comms is reflected
   // immediately without reopening the socket.
@@ -121,7 +146,7 @@ export default function AppLayout() {
   // ===== Push notifications =====
   //
   // Register on mount (handles cold-start tokens) and re-register whenever
-  // the auth user changes Ã¢ÂÂ covers logout Ã¢ÂÂ login Ã¢ÂÂ re-login flows so the
+  // the auth user changes — covers logout → login → re-login flows so the
   // token gets re-saved against the new user's row.
   useEffect(() => {
     if (!user) return;
@@ -142,7 +167,7 @@ export default function AppLayout() {
     });
   }, [user]);
 
-  // Foreground delivery listener Ã¢ÂÂ fires while the app is open. We DON'T
+  // Foreground delivery listener — fires while the app is open. We DON'T
   // rely on the system banner here; instead we forward the hail to `hailBus`
   // which the map screen renders as an in-app toast (matches the existing
   // hail-via-WebSocket UX so users see the same UI regardless of transport).
@@ -168,7 +193,7 @@ export default function AppLayout() {
     return () => sub.remove();
   }, []);
 
-  // Tap-to-open listener Ã¢ÂÂ fires when the user taps the OS notification
+  // Tap-to-open listener — fires when the user taps the OS notification
   // banner while the app is backgrounded or killed. For Hails we route to
   // the Map tab so they can see the hailer's car blink on the map.
   useEffect(() => {
@@ -244,7 +269,7 @@ export default function AppLayout() {
           tabBarButton: (props) => <CommsTabButton {...props} selfId={user?.id} />,
           tabBarIcon: ({ color }) => <ConvoyWaveIcon size={40} color={commsActive ? "#FFD60A" : color} />,
         }} />
-        {/* Voice screen is no longer represented in the bottom tab bar Ã¢ÂÂ the
+        {/* Voice screen is no longer represented in the bottom tab bar — the
             press-and-hold mic now lives inside the map's search bar (Google
             Maps-style). We keep the route file registered with href:null so
             any deep links into /voice still resolve without crashing. */}
@@ -265,7 +290,7 @@ export default function AppLayout() {
         <Tabs.Screen name="admin" options={{ href: null }} />
       </Tabs>
 
-      {/* Global voice transcript banner (FAB removed Ã¢ÂÂ the elevated mic in the tab bar is the new CTA) */}
+      {/* Global voice transcript banner (FAB removed — the elevated mic in the tab bar is the new CTA) */}
       <VoiceController />
 
       {/* App-wide "someone is transmitting" banner so live comms are visible

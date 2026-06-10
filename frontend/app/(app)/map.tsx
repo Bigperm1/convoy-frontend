@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder, TextInput } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -30,7 +30,7 @@ import PeerModal from "../../src/PeerModal";
 import ShareSheet from "../../src/ShareSheet";
 import {
   fetchRoutes, fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
-  fmtDistanceM, fmtEtaSec, announceReroute, stopSpeech, announce,
+  fmtDistanceM, fmtEtaSec, announceReroute, stopSpeech, announce, haversineMeters,
 } from "../../src/nav";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import WeatherHUD from "../../src/components/WeatherHUD";
@@ -40,8 +40,8 @@ import { useSpeedLimit } from "../../src/speedLimit";
 import ConvoyLogo from "../../src/components/ConvoyLogo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
-import { speakRouteGreeting } from "../../src/novaGreeting";
-import { useSavedPlaces, saveSavedPlace, predictDestination, resolveTarget, ensureSavedPlacesLoaded } from "../../src/savedPlaces";
+import { prepareRouteGreeting, playPreparedGreeting, clearPreparedGreeting } from "../../src/novaGreeting";
+import { useSavedPlaces, saveSavedPlace, removeSavedPlace, predictDestination, resolveTarget, ensureSavedPlacesLoaded } from "../../src/savedPlaces";
 import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
@@ -120,6 +120,73 @@ function fmtClock(d: Date): string {
   return `${h}:${m < 10 ? "0" + m : m} ${ampm}`;
 }
 
+// ===== Proactive-reroute hazard helpers =====
+// Only these hazard kinds justify suggesting a detour — a police pin doesn't
+// slow you down, so it never triggers a reroute prompt.
+const REROUTE_HAZARD_KINDS = new Set(["accident", "road", "traffic"]);
+
+// Spoken phrase fragment: "there's <X> ahead".
+function hazardReason(kind: string): string {
+  switch (kind) {
+    case "accident": return "an accident";
+    case "road": return "a road hazard";
+    case "traffic": return "heavy traffic";
+    default: return "a holdup";
+  }
+}
+// Short prompt title for the on-screen Yes/No dialog.
+function hazardTitle(kind: string): string {
+  switch (kind) {
+    case "accident": return "Accident ahead";
+    case "road": return "Road hazard ahead";
+    case "traffic": return "Heavy traffic ahead";
+    default: return "Slowdown ahead";
+  }
+}
+// Nearest reroute-worthy hazard that lies AHEAD on the way to the destination
+// (closer to the destination than we currently are) and within ~3 km. Returns
+// its kind + distance rounded to whole km (min 1), or null if none qualifies.
+function nearestHazardAhead(
+  origin: { lat: number; lng: number },
+  dest: { lat: number; lng: number },
+  hazards: { kind: string; lat: number; lng: number }[]
+): { kind: string; distKm: number } | null {
+  const myDistToDest = haversineMeters(origin, dest);
+  let best: { kind: string; distM: number } | null = null;
+  for (const h of hazards || []) {
+    if (!h || !REROUTE_HAZARD_KINDS.has(h.kind)) continue;
+    if (typeof h.lat !== "number" || typeof h.lng !== "number") continue;
+    const distM = haversineMeters(origin, { lat: h.lat, lng: h.lng });
+    if (distM > 3000) continue;                                  // not close yet
+    if (haversineMeters({ lat: h.lat, lng: h.lng }, dest) > myDistToDest) continue; // behind us
+    if (!best || distM < best.distM) best = { kind: h.kind, distM };
+  }
+  if (!best) return null;
+  return { kind: best.kind, distKm: Math.max(1, Math.round(best.distM / 1000)) };
+}
+
+// ===== Nova speeding-alert lines =====
+// tier 1 = light/humorous nudge (~20 over); tier 2 = firmer warning (~40 over).
+// `over` is the amount over the limit in the driver's own unit; `hey` is an
+// optional "<call sign>, " prefix. First letter is capitalized so it reads right
+// whether or not a call sign is present.
+function speedingLine(tier: 1 | 2, over: number, hey: string): string {
+  const nudges = [
+    `${hey}lead foot much? You're ${over} over the limit, save it for the track.`,
+    `${hey}the GR is loving this, but the speed limit isn't. You're ${over} over.`,
+    `${hey}someone's in a hurry. That's ${over} over the limit, keep it sensible.`,
+    `${hey}feeling spicy? You're ${over} over the posted limit. Ease off a touch.`,
+  ];
+  const warns = [
+    `${hey}slow it down. You're ${over} over the limit. That's a serious ticket and a real risk.`,
+    `${hey}ease off now. ${over} over the posted limit is pushing your luck.`,
+    `${hey}bring it back down. You're ${over} over the limit, this one's not worth it.`,
+  ];
+  const pool = tier === 2 ? warns : nudges;
+  const raw = pool[Math.floor(Math.random() * pool.length)];
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
 export default function MapScreen() {
   const { user, token } = useAuth();
   const router = useRouter();
@@ -177,6 +244,9 @@ export default function MapScreen() {
   const [showTraffic, setShowTraffic] = useState(true);
   const [showHazards, setShowHazards] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
+  // Custom saved-place naming modal (cross-platform; Alert.prompt is iOS-only).
+  const [savePlaceModal, setSavePlaceModal] = useState<{ lat: number; lng: number } | null>(null);
+  const [savePlaceName, setSavePlaceName] = useState("");
   // Position history buffer — keeps the last 30s of GPS samples so the user
   // can report a hazard "5 seconds ago" (matches Waze-style flow where the
   // driver passes the hazard before they react and tap the button).
@@ -239,7 +309,7 @@ export default function MapScreen() {
   // every route recompute / reroute).
   const greetedDestRef = useRef<string | null>(null);
   // Reset the one-shot auto-start guard whenever the destination changes.
-  useEffect(() => { navAutoStartedRef.current = false; greetedDestRef.current = null; }, [destination]);
+  useEffect(() => { navAutoStartedRef.current = false; greetedDestRef.current = null; clearPreparedGreeting(); }, [destination]);
 
   // Auto-START turn-by-turn once the driver begins moving (≥ 5 km/h) with a route
   // set. Replaces the old "collapse to a trip-summary pill" flow — the new
@@ -347,6 +417,9 @@ export default function MapScreen() {
   // Map base style (satellite vs default road map) is persisted in settings so
   // it's controllable from the Settings screen AND the on-map Layers sheet.
   const mapType: "hybrid" | "roadmap" = (settings as any).mapType ?? "hybrid";
+  // Dark base-map styling. Only visibly affects the standard (roadmap) map —
+  // satellite/hybrid ignore customMapStyle — so it reads best with Satellite off.
+  const mapDark = settings.mapDark === true;
   const showWeatherLayer = (settings as any).showWeatherLayer ?? true;
   // Live weather for the on-map HUD — current conditions at the user's GPS
   // position, fetched only while the Weather layer is enabled (auto-refresh ~5 min).
@@ -375,6 +448,37 @@ export default function MapScreen() {
   // Overpass). Feeds the speedometer's over-limit pulse; null when the road has
   // no maxspeed tag, in which case the pill simply stays neutral.
   const speedLimitKmh = useSpeedLimit(coords?.lat ?? null, coords?.lng ?? null, true);
+
+  // ===== Nova speeding alerts =====
+  // Humorous nudge at ~20 km/h over the posted limit; a firmer warning at ~40
+  // over. Posted limit comes from useSpeedLimit (OpenStreetMap). Honors the nav
+  // mute. Each tier speaks at most once per ~45s, escalates immediately when you
+  // cross into the warning tier, and re-arms only after you drop back under the
+  // nudge line — so it never nags continuously. Thresholds are in km/h (per the
+  // spec); the spoken amount is converted to the driver's unit.
+  const SPEED_NUDGE_OVER_KMH = 20;
+  const SPEED_WARN_OVER_KMH = 40;
+  const speedAlertLastRef = useRef(0);
+  const speedAlertTierRef = useRef<0 | 1 | 2>(0);
+  useEffect(() => {
+    if (navMuted) return;
+    if (!settings.novaSpeeding) return;
+    if (!speedLimitKmh || speedLimitKmh <= 0) return;
+    const kmh = (coords?.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
+    if (kmh < 5) return;
+    const overKmh = kmh - speedLimitKmh;
+    if (overKmh < SPEED_NUDGE_OVER_KMH) { speedAlertTierRef.current = 0; return; } // sensible — re-arm
+    const tier: 1 | 2 = overKmh >= SPEED_WARN_OVER_KMH ? 2 : 1;
+    const now = Date.now();
+    // Speak when we cross INTO a higher tier, or after the per-tier cooldown.
+    if (tier <= speedAlertTierRef.current && now - speedAlertLastRef.current < 45000) return;
+    speedAlertTierRef.current = tier;
+    speedAlertLastRef.current = now;
+    const mph = settings.speedUnit === "mph";
+    const overDisp = Math.max(1, Math.round(mph ? overKmh / 1.60934 : overKmh));
+    const cs = (getSettings().callSign || "").trim();
+    try { announce(speedingLine(tier, overDisp, cs ? `${cs}, ` : "")); } catch {}
+  }, [coords?.speed, speedLimitKmh, navMuted, settings.speedUnit, settings.novaSpeeding]);
 
   // Optional Convoy alert sound — chime when a NEW community hazard appears
   const prevHazardIdsRef = useRef<Set<string>>(new Set());
@@ -478,9 +582,26 @@ export default function MapScreen() {
     });
   }, [routes, selectedRouteIndex]);
 
-  // The Nova route-start greeting is fired from startNav() below (the single
-  // entry point for manual Start, drive-off auto-start, and friend-routes) so
-  // it leads the engine's first turn callout with a pause between them.
+  // ----- Personable Nova route greeting (pre-load) -----
+  // The moment a route is plotted (preview), pre-fetch + pre-synthesize Nova's
+  // greeting in the background so it can play INSTANTLY when the driver taps
+  // Start. Once per destination, quiet while muted. Actual playback + parking of
+  // the first turn callout happens in startNav -> playPreparedGreeting.
+  useEffect(() => {
+    if (!destination || !activeRoute) return;
+    if (navMuted) return;
+    const key = `${destination.lat.toFixed(4)},${destination.lng.toFixed(4)}`;
+    if (greetedDestRef.current === key) return;
+    greetedDestRef.current = key;
+    prepareRouteGreeting({
+      destination: { lat: destination.lat, lng: destination.lng },
+      destinationName: destination.label,
+      destinationCity: destination.label,
+      route: activeRoute,
+      weatherKind: destWeather?.kind ?? null,
+      temperature: destWeather?.temp ?? null,
+    }, key);
+  }, [destination, activeRoute, destWeather, navMuted]);
 
   // Turn-by-turn engine — speaks instructions, advances steps, computes ETA / distance remaining
   const tbt = useTurnByTurn(activeRoute, coords, navMode === "turn-by-turn", {
@@ -502,6 +623,108 @@ export default function MapScreen() {
       });
     },
   });
+
+  // ===== Proactive reroute recommendation (Nova) =====
+  // While navigating, every 60s we re-check live traffic from the current
+  // position. If a meaningfully faster route exists (>=5 min faster on its own,
+  // or >=2 min faster when a reported incident sits on the road ahead), Nova
+  // speaks up and a Yes/No prompt offers the switch. We NEVER reroute silently —
+  // the driver always confirms (spoken question + tap). Accepting reuses the
+  // SAME setRoutes/setSelectedRouteIndex(0) swap the off-route auto-reroute uses,
+  // so the turn engine picks up the new line cleanly. Everything reads from refs
+  // so the interval closure never goes stale.
+  const tbtEtaRef = useRef(0);
+  useEffect(() => { tbtEtaRef.current = tbt.etaSeconds; }, [tbt.etaSeconds]);
+  const hazardsRef = useRef<Hazard[]>([]);
+  useEffect(() => { hazardsRef.current = hazards; }, [hazards]);
+  const destRef = useRef(destination);
+  useEffect(() => { destRef.current = destination; }, [destination]);
+  const activeRouteRef = useRef<NavRoute | null>(activeRoute);
+  useEffect(() => { activeRouteRef.current = activeRoute; }, [activeRoute]);
+  const navMutedRef = useRef(navMuted);
+  useEffect(() => { navMutedRef.current = navMuted; }, [navMuted]);
+  const rerouteBusyRef = useRef(false);        // a check is in flight
+  const rerouteShowingRef = useRef(false);     // a prompt is currently up
+  const rerouteSuppressUntilRef = useRef(0);   // hush window after accept/decline
+
+  const checkForFasterRoute = useCallback(async () => {
+    if (!getSettings().novaMidDrive) return;
+    if (rerouteBusyRef.current || rerouteShowingRef.current) return;
+    const now = Date.now();
+    if (now < rerouteSuppressUntilRef.current) return;
+    const origin = coordsRef.current;
+    const dest = destRef.current;
+    const cur = activeRouteRef.current;
+    if (!origin || !dest || !cur) return;
+    const curEta = tbtEtaRef.current;
+    if (!curEta || curEta < 240) return; // almost there — don't bother
+
+    rerouteBusyRef.current = true;
+    try {
+      const s = getSettings();
+      const fresh = await fetchRoutes(origin, dest, {
+        tolls: s.avoidTolls, highways: s.avoidHighways, ferries: s.avoidFerries,
+      });
+      if (!fresh.length) return;
+      // Fastest live option from where we are right now.
+      const best = fresh.reduce((a, b) => (b.duration_s < a.duration_s ? b : a));
+      if (best.polyline && cur.polyline && best.polyline === cur.polyline) return; // same line
+      const savedSec = curEta - best.duration_s;
+      const hz = nearestHazardAhead(origin, dest, hazardsRef.current);
+      const bigSaving = savedSec >= 300;            // >=5 min on its own
+      const hazardSaving = !!hz && savedSec >= 120;  // >=2 min + a known incident ahead
+      if (!bigSaving && !hazardSaving) return;
+
+      const mins = Math.max(1, Math.round(savedSec / 60));
+      const minLabel = `${mins} ${mins === 1 ? "minute" : "minutes"}`;
+      const cs = (s.callSign || "").trim();
+      const hey = cs ? `Hey ${cs}, ` : "";
+      const where = hz
+        ? `there's ${hazardReason(hz.kind)} about ${hz.distKm} ${hz.distKm === 1 ? "kilometer" : "kilometers"} ahead`
+        : "traffic is building ahead";
+      const spoken = `${hey}${where}. A faster route saves about ${minLabel}. Want me to switch?`;
+
+      rerouteShowingRef.current = true;
+      if (!navMutedRef.current) { try { announce(spoken); } catch {} }
+      Alert.alert(
+        hz ? hazardTitle(hz.kind) : "Faster route available",
+        `A faster route saves about ${minLabel}.`,
+        [
+          {
+            text: "No thanks", style: "cancel",
+            onPress: () => {
+              rerouteShowingRef.current = false;
+              rerouteSuppressUntilRef.current = Date.now() + 300000; // hush 5 min
+            },
+          },
+          {
+            text: "Take it",
+            onPress: () => {
+              rerouteShowingRef.current = false;
+              rerouteSuppressUntilRef.current = Date.now() + 120000; // settle 2 min
+              setRoutes([best]);            // same swap the off-route path uses
+              setSelectedRouteIndex(0);
+              if (!navMutedRef.current) { try { announce("Okay, taking the faster route."); } catch {} }
+            },
+          },
+        ],
+        { cancelable: false }
+      );
+    } catch {
+      // ignore — try again on the next interval
+    } finally {
+      rerouteBusyRef.current = false;
+    }
+  }, []);
+
+  // Drive the check on a 60s interval, only while actively navigating.
+  useEffect(() => {
+    if (navMode !== "turn-by-turn") return;
+    rerouteShowingRef.current = false; // fresh drive starts clean
+    const id = setInterval(() => { void checkForFasterRoute(); }, 60000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navMode]);
 
   // System nav-notification banner — keeps the current turn on screen as a
   // heads-up notification even when Convoy is backgrounded (home/lock screen).
@@ -528,26 +751,14 @@ export default function MapScreen() {
     if (!activeRoute) return;
     navAutoStartedRef.current = true;
     if (destination) addRecentRoute({ label: destination.label, lat: destination.lat, lng: destination.lng });
-    // Personable Nova greeting, fired the instant routing begins and BEFORE the
-    // engine's first turn callout. speakRouteGreeting reserves the speech slot
-    // synchronously (so the "Starting navigation…" line is parked behind it),
-    // then plays the greeting, a pause, then releases the first direction. Once
-    // per destination; silent while muted. Runs before setNavMode so the
+    // Clear any prior speech/state FIRST, then reserve + play the greeting. The
+    // turn engine's activate path no longer resets the speech gate, so whatever
+    // we queue here (greeting audio + the in-flight hold) survives until it ends.
+    stopSpeech();
+    // Play the greeting pre-loaded during preview, BEFORE the engine's first
+    // turn callout (which is parked behind it). Runs before setNavMode so the
     // reservation is in place when the turn engine speaks.
-    if (!navMuted && destination && activeRoute) {
-      const key = `${destination.lat.toFixed(4)},${destination.lng.toFixed(4)}`;
-      if (greetedDestRef.current !== key) {
-        greetedDestRef.current = key;
-        void speakRouteGreeting({
-          destination: { lat: destination.lat, lng: destination.lng },
-          destinationName: destination.label,
-          destinationCity: destination.label,
-          route: activeRoute,
-          weatherKind: destWeather?.kind ?? null,
-          temperature: destWeather?.temp ?? null,
-        });
-      }
-    }
+    if (!navMuted) void playPreparedGreeting();
     setShowSteps(false);
     setNavMode("turn-by-turn");
   };
@@ -623,6 +834,37 @@ export default function MapScreen() {
         },
       ]
     );
+  };
+
+  // ----- Bookmark the current destination from the Drive shelf -----
+  // Saves the active destination as a quick place. Home/Work are the predictive
+  // anchors (used by the greeting + "Head to..." suggestion); "Save" stores it as
+  // a custom place. All three appear in the search screen's Saved list.
+  const saveCurrentDestination = () => {
+    if (!destination) return;
+    const d = destination;
+    Alert.alert(
+      "Save place",
+      d.label || "Save this destination for quick access.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Home", onPress: () => { void saveSavedPlace({ kind: "home", lat: d.lat, lng: d.lng, address: d.label }); try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {} } },
+        { text: "Work", onPress: () => { void saveSavedPlace({ kind: "work", lat: d.lat, lng: d.lng, address: d.label }); try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {} } },
+        { text: "Custom…", onPress: () => { setSavePlaceName(d.label || ""); setSavePlaceModal({ lat: d.lat, lng: d.lng }); } },
+      ]
+    );
+  };
+
+  // Commit the typed custom name from the modal as a custom saved place.
+  const commitCustomSave = () => {
+    const m = savePlaceModal;
+    if (!m) return;
+    const name = savePlaceName.trim();
+    if (!name) return;
+    void saveSavedPlace({ kind: "custom", label: name, lat: m.lat, lng: m.lng });
+    try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+    setSavePlaceModal(null);
+    setSavePlaceName("");
   };
 
   // ----- Predicted destination ("Head to Work?") -----
@@ -1587,6 +1829,7 @@ export default function MapScreen() {
         mapView={settings.mapView}
         // Layer controls — driven by the bottom-right Layers FAB.
         mapType={mapType}
+        mapDark={mapDark}
         peers={peerList}
         leaderUserId={leaderUserId}
         hazards={visibleHazards}
@@ -1730,6 +1973,9 @@ export default function MapScreen() {
       {/* ===== Route preview banner — "Drive" header, trip summary, Start ===== */}
       {destination && route && navMode === "preview" && !previewCollapsed && (() => {
         const ar = activeRoute;
+        // Is this destination already a saved place (within ~160 m)? Drives the
+        // bookmark icon's filled/outline state in the header.
+        const savedMatch = savedPlaces.find((p) => distanceKm(p.lat, p.lng, destination.lat, destination.lng) <= 0.16);
         const durSec = ar?.duration_in_traffic_s ?? ar?.duration_s ?? 0;
         const durMin = Math.max(1, Math.round(durSec / 60));
         const arriveStr = fmtClock(new Date(Date.now() + durSec * 1000));
@@ -1746,6 +1992,9 @@ export default function MapScreen() {
             <View style={styles.bannerHeader}>
               <Text style={styles.bannerDrive}>Drive</Text>
               <View style={styles.bannerHeaderRight}>
+                <TouchableOpacity testID="save-destination" onPress={() => { if (savedMatch) { void removeSavedPlace(savedMatch.id); try { Haptics.selectionAsync(); } catch {} } else { saveCurrentDestination(); } }} hitSlop={10}>
+                  <Ionicons name={savedMatch ? "bookmark" : "bookmark-outline"} size={21} color={savedMatch ? "#FFD60A" : "#EBEBF5"} />
+                </TouchableOpacity>
                 <TouchableOpacity testID="share-route" onPress={() => { Haptics.selectionAsync().catch(() => {}); setRouteShareOpen(true); }} hitSlop={10}>
                   <Ionicons name="share-outline" size={22} color="#EBEBF5" />
                 </TouchableOpacity>
@@ -1823,8 +2072,8 @@ export default function MapScreen() {
       {selected && !destination && (
         <Glass radius={20} style={styles.selectedCard}>
           <View style={styles.selRow}>
-            <View style={[styles.hazardBubble, { backgroundColor: hazardColor(selected.kind) }]}>
-              <Ionicons name={hazardIcon(selected.kind)} size={22} color="#fff" />
+            <View style={styles.hazardImgWrap}>
+              <HazardKindIcon kind={selected.kind} size={46} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.selTitle}>{selected.kind.charAt(0).toUpperCase() + selected.kind.slice(1)}</Text>
@@ -1879,8 +2128,8 @@ export default function MapScreen() {
       {passPrompt && !selected && (
         <Glass radius={20} style={styles.selectedCard}>
           <View style={styles.selRow}>
-            <View style={[styles.hazardBubble, { backgroundColor: hazardColor(passPrompt.kind) }]}>
-              <Ionicons name={hazardIcon(passPrompt.kind)} size={22} color="#fff" />
+            <View style={styles.hazardImgWrap}>
+              <HazardKindIcon kind={passPrompt.kind} size={46} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.selTitle}>
@@ -2059,7 +2308,15 @@ export default function MapScreen() {
                   <Text style={styles.layerRowLabel}>Satellite</Text>
                   <Text style={styles.layerRowSub}>Aerial imagery</Text>
                 </View>
-                <Switch value={mapType === "hybrid"} onValueChange={(v) => { void updateGlobalSettings({ mapType: v ? "hybrid" : "roadmap" }); }}
+                <Switch value={mapType === "hybrid"} onValueChange={(v) => { void updateGlobalSettings(v ? { mapType: "hybrid", mapDark: false } : { mapType: "roadmap" }); }}
+                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Dark map</Text>
+                  <Text style={styles.layerRowSub}>Navy night styling — switches off Satellite</Text>
+                </View>
+                <Switch value={mapDark} onValueChange={(v) => { void updateGlobalSettings(v ? { mapDark: true, mapType: "roadmap" } : { mapDark: false }); }}
                   trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
@@ -2225,6 +2482,34 @@ export default function MapScreen() {
         onSelectFriend={onSearchSelectFriend}
       />
 
+      {/* ===== Name a custom saved place (cross-platform TextInput modal) ===== */}
+      <Modal visible={!!savePlaceModal} transparent animationType="fade" onRequestClose={() => setSavePlaceModal(null)}>
+        <TouchableOpacity activeOpacity={1} style={styles.nameModalBackdrop} onPress={() => setSavePlaceModal(null)}>
+          <TouchableOpacity activeOpacity={1} style={styles.nameModalCard} onPress={() => {}}>
+            <Text style={styles.nameModalTitle}>Name this place</Text>
+            <TextInput
+              value={savePlaceName}
+              onChangeText={setSavePlaceName}
+              placeholder="e.g. Gym, Mom's, Cars and Coffee"
+              placeholderTextColor="#808080"
+              style={styles.nameModalInput}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={commitCustomSave}
+              maxLength={40}
+            />
+            <View style={styles.nameModalRow}>
+              <TouchableOpacity onPress={() => setSavePlaceModal(null)} style={[styles.nameModalBtn, styles.nameModalCancel]} activeOpacity={0.85}>
+                <Text style={styles.nameModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={commitCustomSave} style={[styles.nameModalBtn, styles.nameModalSave, !savePlaceName.trim() && { opacity: 0.5 }]} activeOpacity={0.9} disabled={!savePlaceName.trim()}>
+                <Text style={styles.nameModalSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       {/* ===== Cold-start intro overlay — logo on black until first fix ===== */}
       {introVisible && (
         <Animated.View pointerEvents="auto" style={[styles.introOverlay, { opacity: introFade }]}>
@@ -2233,6 +2518,20 @@ export default function MapScreen() {
         </Animated.View>
       )}
     </View>
+  );
+}
+
+// HazardKindIcon — the SAME police.png / hazard.png marker art used on the map,
+// reused inside the hazard detail card and the pass-by prompt so the icon is
+// identical everywhere (continuity). Police -> police.png; everything else ->
+// hazard.png. No colored circle, matching the bare-image map markers.
+function HazardKindIcon({ kind, size = 44 }: { kind: string; size?: number }) {
+  return (
+    <Image
+      source={kind === "police" ? require("../../assets/images/police.png") : require("../../assets/images/hazard.png")}
+      style={{ width: size, height: size }}
+      resizeMode="contain"
+    />
   );
 }
 
@@ -2387,6 +2686,9 @@ const styles = StyleSheet.create({
   liveText: { fontSize: 10, fontWeight: "700", letterSpacing: 0.4 },
 
   hazardBubble: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.85)" },
+  // Bare-image container for the hazard/police art in the detail card + pass-by
+  // prompt. Same 48×48 footprint as hazardBubble so the card layout is unchanged.
+  hazardImgWrap: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
 
   routeCard: { position: "absolute", left: 12, right: 12, bottom: 110, maxHeight: 460 },
 
@@ -2755,6 +3057,17 @@ const styles = StyleSheet.create({
   layerSub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
   sheetClose: { marginTop: 14, alignSelf: "center", paddingHorizontal: 22, paddingVertical: 10, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.10)" },
   sheetCloseText: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
+  // Custom saved-place naming modal
+  nameModalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", alignItems: "center", padding: 24 },
+  nameModalCard: { width: "100%", maxWidth: 420, backgroundColor: "#15171A", borderRadius: 20, padding: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)" },
+  nameModalTitle: { color: COLORS.text, fontSize: 17, fontWeight: "700", marginBottom: 14, letterSpacing: -0.2 },
+  nameModalInput: { backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: "#F4F4F4", fontSize: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.14)" },
+  nameModalRow: { flexDirection: "row", gap: 10, marginTop: 16 },
+  nameModalBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  nameModalCancel: { backgroundColor: "rgba(255,255,255,0.08)" },
+  nameModalCancelText: { color: COLORS.text, fontWeight: "600", fontSize: 15 },
+  nameModalSave: { backgroundColor: "#FFD60A" },
+  nameModalSaveText: { color: "#1C1C1E", fontWeight: "800", fontSize: 15 },
   // Alerts sheet styles
   alertsGroup: { color: COLORS.textDim, fontSize: 11, fontWeight: "700", letterSpacing: 0.7, marginTop: 14, marginBottom: 4, textTransform: "uppercase" },
   alertsEmpty: { color: COLORS.textDim, fontSize: 13, textAlign: "center", marginTop: 22 },

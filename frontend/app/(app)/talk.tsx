@@ -536,7 +536,7 @@ export default function TalkScreen() {
             )}
           </Pressable>
         )}
-        <LogoMenu size={30} style={styles.garageBtn} />
+        <LogoMenu size={30} style={styles.garageBtn} align="right" />
       </View>
 
       {/* Tap anywhere outside the mic to dismiss the open switcher. Rendered

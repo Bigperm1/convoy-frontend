@@ -95,5 +95,13 @@ export const toggle = (): void => {};
 export const skipNext = (): void => {};
 export const skipPrev = (): void => {};
 
+export async function duckForSpeech(): Promise<void> {
+  /* no-op off iOS — external apps duck via the audio session */
+}
+
+export async function unduckForSpeech(): Promise<void> {
+  /* no-op off iOS */
+}
+
 export const useCurrentSong = (): { song: AppleSong | null } => ({ song: null });
 export const useIsPlaying = (): { isPlaying: boolean } => ({ isPlaying: false });

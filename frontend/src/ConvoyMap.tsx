@@ -64,6 +64,7 @@ interface ConvoyMapProps {
   hideSelfMarker?: boolean;
   mapView?: "heading_up" | "north_up";
   mapType?: "hybrid" | "roadmap";
+  mapDark?: boolean;
   peers?: Record<string, Peer> | Peer[] | null;
   leaderUserId?: string | null;
   hazards?: Hazard[] | null;
@@ -220,6 +221,37 @@ const HAZARD_COLOR: Record<string, string> = {
 // these overlays anyway, so applying this unconditionally is safe.
 const HIDE_TRANSIT_STYLE: any[] = [
   { featureType: "transit", stylers: [{ visibility: "off" }] },
+];
+
+// Dark "night" styling for the STANDARD (roadmap) base map. customMapStyle only
+// affects the standard map — satellite/hybrid ignore it — so this visibly takes
+// effect only when Satellite is OFF. Transit is hidden here too so the dark map
+// matches the light map's clutter level. (Standard Google night-mode palette.)
+const DARK_MAP_STYLE: any[] = [
+  { elementType: "geometry", stylers: [{ color: "#1d2c4d" }] },
+  { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#8ec3b9" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#1a3646" }] },
+  { featureType: "administrative.country", elementType: "geometry.stroke", stylers: [{ color: "#4b6878" }] },
+  { featureType: "administrative.land_parcel", elementType: "labels.text.fill", stylers: [{ color: "#64779e" }] },
+  { featureType: "administrative.province", elementType: "geometry.stroke", stylers: [{ color: "#4b6878" }] },
+  { featureType: "landscape.man_made", elementType: "geometry.stroke", stylers: [{ color: "#334e87" }] },
+  { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#023e58" }] },
+  { featureType: "poi", elementType: "geometry", stylers: [{ color: "#283d6a" }] },
+  { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#6f9ba5" }] },
+  { featureType: "poi", elementType: "labels.text.stroke", stylers: [{ color: "#1d2c4d" }] },
+  { featureType: "poi.park", elementType: "geometry.fill", stylers: [{ color: "#023e58" }] },
+  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#3C7680" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#304a7d" }] },
+  { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#98a5be" }] },
+  { featureType: "road", elementType: "labels.text.stroke", stylers: [{ color: "#1d2c4d" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#2c6675" }] },
+  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#255763" }] },
+  { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#b0d5ce" }] },
+  { featureType: "road.highway", elementType: "labels.text.stroke", stylers: [{ color: "#023e58" }] },
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#0e1626" }] },
+  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#4e6d70" }] },
 ];
 
 type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; speedMs?: number; leader?: boolean; peer?: Peer };
@@ -541,7 +573,7 @@ function DestWeatherMarker({ coordinate, weather }: {
 const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
   const {
     center, user, peers, hideSelfMarker, mapView = "heading_up",
-    mapType = "hybrid", leaderUserId, hazards, speedCameras, highlightConvoy,
+    mapType = "hybrid", mapDark = false, leaderUserId, hazards, speedCameras, highlightConvoy,
     destination, destWeather, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
     showTraffic = true, onMapPress, onMapLongPress, onHazardPress, onHazardLongPress,
@@ -733,7 +765,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
         provider={PROVIDER_GOOGLE}
         initialRegion={initialRegion}
         mapType={resolvedMapType}
-        customMapStyle={HIDE_TRANSIT_STYLE}
+        customMapStyle={mapDark ? DARK_MAP_STYLE : HIDE_TRANSIT_STYLE}
         showsTraffic={!!showTraffic}
         showsUserLocation={false}
         showsMyLocationButton={false}
@@ -824,7 +856,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
             <Polyline
               key={`sel_${selectedRouteIndex}`}
               coordinates={coords}
-              strokeColor="#FFD60A"
+              strokeColor="#0A84FF"
               strokeWidth={7}
               zIndex={3}
               lineCap="round"
@@ -864,10 +896,10 @@ const styles = StyleSheet.create({
   map: { flex: 1 },
   // Route ETA pill (time marker on each route, preview mode)
   etaPill: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 13, borderWidth: 1 },
-  etaPillSel: { backgroundColor: "#FFD60A", borderColor: "rgba(0,0,0,0.2)" },
+  etaPillSel: { backgroundColor: "#0A84FF", borderColor: "rgba(0,0,0,0.2)" },
   etaPillAlt: { backgroundColor: "rgba(28,28,30,0.95)", borderColor: "rgba(255,255,255,0.25)" },
   etaPillText: { fontSize: 12, fontWeight: "700" },
-  etaPillTextSel: { color: "#1C1C1E" },
+  etaPillTextSel: { color: "#FFFFFF" },
   etaPillTextAlt: { color: "#C9C9CE" },
   // Round hazard dot with a white ring; gold ring overrides white for Convoy reports.
   hazardPin: {

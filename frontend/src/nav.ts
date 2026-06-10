@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 import { api, GOOGLE_MAPS_KEY } from "./api";
 import { setPlaybackAudioMode } from "./audioMode";
+import { duckForSpeech, unduckForSpeech } from "./applePlayer";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -280,7 +281,11 @@ export function useTurnByTurn(
       setState(cleared);
       return;
     }
-    resetSpeakGate();
+    // NOTE: no resetSpeakGate() here. startNav() calls stopSpeech() right before
+    // reserving the Nova greeting, so resetting again on activate would wipe the
+    // greeting we just queued (and clear the in-flight hold) — which let the first
+    // turn callout play OVER the greeting. Teardown reset still runs in the
+    // !active branch above.
     announcedRef.current.clear();
     const fresh: TbtState = { ...stateRef.current, active: true, stepIndex: 0 };
     stateRef.current = fresh;
@@ -404,11 +409,46 @@ function toSpeech(s: string): string {
 let _speakLock = false;
 let _lastSpoke = 0;
 let _lastRerouteSpoke = 0;
-const ttsQueue: string[] = [];
+type TtsItem = string | { _greetAudio: string; mime: string };
+const ttsQueue: TtsItem[] = [];
 let ttsPlaying = false;
 // The currently-playing TTS Sound (native) so nav teardown can stop a
 // half-spoken instruction. Web playback is fire-and-forget.
 let _currentSound: any = null;
+
+// ===== In-app music ducking (Apple Music / MusicKit) =====
+// expo-av's `.duckOthers` already dips OTHER apps (Spotify, podcasts) while Nova
+// speaks, but NOT same-app audio — so the in-app Music tab (Apple Music via
+// MusicKit, an out-of-process system player) would otherwise play right over
+// her. We pause it for the duration of her speech and resume after. Debounced:
+// back-to-back callouts and the greeting→first-turn gap collapse into a single
+// pause/resume instead of flickering. Safe by construction — see applePlayer.
+let _musicDucked = false;
+let _unduckTimer: ReturnType<typeof setTimeout> | null = null;
+
+function _duckMusicForSpeech(): void {
+  if (_unduckTimer) { clearTimeout(_unduckTimer); _unduckTimer = null; }
+  if (_musicDucked) return;
+  _musicDucked = true;
+  void duckForSpeech();
+}
+
+function _restoreMusicSoon(): void {
+  if (_unduckTimer) clearTimeout(_unduckTimer);
+  _unduckTimer = setTimeout(() => {
+    _unduckTimer = null;
+    if (!_musicDucked) return;
+    _musicDucked = false;
+    void unduckForSpeech();
+  }, 800);
+}
+
+function _restoreMusicNow(): void {
+  if (_unduckTimer) { clearTimeout(_unduckTimer); _unduckTimer = null; }
+  if (!_musicDucked) return;
+  _musicDucked = false;
+  void unduckForSpeech();
+}
 
 // ---- Route-start greeting coordination ----
 // The personable Nova greeting must ALWAYS play before the first turn callout,
@@ -432,7 +472,7 @@ export function reserveGreeting(): void {
   if (_greetingTimer) clearTimeout(_greetingTimer);
   // Safety valve: never hold the first instruction more than 4s on a slow or
   // failed backend call.
-  _greetingTimer = setTimeout(() => { if (_greetingInFlight) cancelGreeting(); }, 4000);
+  _greetingTimer = setTimeout(() => { if (_greetingInFlight) cancelGreeting(); }, 8000);
 }
 
 export function deliverGreeting(text: string): void {
@@ -442,6 +482,17 @@ export function deliverGreeting(text: string): void {
   if (!t) { cancelGreeting(); return; }
   // Lead the queue: greeting, then a pause, then the hold-clear sentinel.
   ttsQueue.unshift(toSpeech(t), PAUSE_TOKEN + GREETING_PAUSE_MS, GREETING_DONE_TOKEN);
+  _lastSpoke = Date.now();
+  if (!ttsPlaying) drainTtsQueue();
+}
+
+// Like deliverGreeting, but plays PRE-SYNTHESIZED audio (prepared during the
+// route preview) so the greeting starts instantly at Start with no /tts hop.
+export function deliverGreetingAudio(b64: string, mime: string): void {
+  if (_greetingTimer) { clearTimeout(_greetingTimer); _greetingTimer = null; }
+  if (!_greetingInFlight) return;
+  if (!b64) { cancelGreeting(); return; }
+  ttsQueue.unshift({ _greetAudio: b64, mime: mime || "audio/mp3" }, PAUSE_TOKEN + GREETING_PAUSE_MS, GREETING_DONE_TOKEN);
   _lastSpoke = Date.now();
   if (!ttsPlaying) drainTtsQueue();
 }
@@ -482,6 +533,8 @@ function resetSpeakGate() {
   _greetingInFlight = false;
   _heldSpeech = null;
   if (_greetingTimer) { clearTimeout(_greetingTimer); _greetingTimer = null; }
+  // Nav stopped/cleared — let any ducked in-app music come back immediately.
+  _restoreMusicNow();
 }
 
 // Reroute is intentionally SILENT. Convoy used to speak "Recalculating route."
@@ -513,10 +566,14 @@ export function stopSpeech() {
 }
 
 async function drainTtsQueue(): Promise<void> {
-  if (ttsQueue.length === 0) { ttsPlaying = false; return; }
+  if (ttsQueue.length === 0) { ttsPlaying = false; _restoreMusicSoon(); return; }
   ttsPlaying = true;
   const item = ttsQueue.shift()!;
-  if (item === GREETING_DONE_TOKEN) {
+  if (typeof item !== "string") {
+    // Pre-synthesized greeting audio (prepared during preview, no /tts hop).
+    _duckMusicForSpeech();
+    try { await playBase64Audio(item._greetAudio, item.mime); } catch {}
+  } else if (item === GREETING_DONE_TOKEN) {
     // Greeting + pause finished — release the hold and replay the parked turn.
     _greetingInFlight = false;
     _flushHeldSpeech();
@@ -524,6 +581,7 @@ async function drainTtsQueue(): Promise<void> {
     const ms = parseInt(item.slice(PAUSE_TOKEN.length), 10) || 0;
     if (ms > 0) await new Promise((r) => setTimeout(r, ms));
   } else {
+    _duckMusicForSpeech();
     try { await speakOne(item); } catch {}
   }
   drainTtsQueue();

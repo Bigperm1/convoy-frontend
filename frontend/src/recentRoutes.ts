@@ -44,6 +44,18 @@ export async function addRecentRoute(r: { label: string; lat: number; lng: numbe
   }
 }
 
+export async function removeRecentRoute(lat: number, lng: number): Promise<RecentRoute[]> {
+  try {
+    const list = await getRecentRoutes();
+    const k = coordKey(lat, lng);
+    const next = list.filter((x) => coordKey(x.lat, x.lng) !== k);
+    await AsyncStorage.setItem(KEY, JSON.stringify(next));
+    return next;
+  } catch {
+    return await getRecentRoutes();
+  }
+}
+
 export async function clearRecentRoutes(): Promise<void> {
   try {
     await AsyncStorage.removeItem(KEY);

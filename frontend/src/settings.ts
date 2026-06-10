@@ -16,6 +16,10 @@ commsLive: boolean;
 avatarLive: boolean;
 mapView: "heading_up" | "north_up";
 mapType: "hybrid" | "roadmap";
+mapDark: boolean;
+novaGreeting: boolean;
+novaSpeeding: boolean;
+novaMidDrive: boolean;
 speedUnit: 'kmh' | 'mph';
 speedUnitManual: boolean;
 showWeatherLayer: boolean;
@@ -49,6 +53,10 @@ commsLive: true,
 avatarLive: true,
 mapView: "heading_up",
 mapType: "hybrid",
+mapDark: false,
+novaGreeting: true,
+novaSpeeding: true,
+novaMidDrive: true,
 speedUnit: 'kmh',
 speedUnitManual: false,
 showWeatherLayer: true,

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Modal, Pressable, Platform,
+  View, Text, StyleSheet, TouchableOpacity, Modal, Pressable, Platform, Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -10,6 +10,8 @@ import { useAuth } from '../auth';
 
 const YELLOW = '#FFD60A';
 const OWNER_EMAIL = 'jwellsmorton@gmail.com';
+const CARD_W = 230;
+const GAP = 8; // gap between the logo's bottom and the dropdown's top
 
 type Item = {
   label: string;
@@ -31,18 +33,29 @@ type Props = {
   size?: number;
   /** Optional style override for the touchable wrapper. */
   style?: any;
+  /**
+   * Which side of the screen the dropdown anchors to:
+   *  - 'left'  (default): card's left edge under the logo — used on the map,
+   *    where the logo lives on the left of the header.
+   *  - 'right': card's right edge under the logo — used on the Comms and Music
+   *    headers, where the logo sits on the right.
+   */
+  align?: 'left' | 'right';
 };
 
 /**
- * Global brand-logo button that opens a Garage / Community / Settings / Profile
- * menu. Fully self-contained — owns its own open/close state and renders the
- * menu in a transparent Modal so it floats above any screen layout and a tap
- * outside dismisses it. Drop <LogoMenu /> into any header; no parent state.
+ * Global brand-logo button that opens a Garage / Community / Settings menu.
+ * On open it measures the logo's on-screen position and drops the dropdown just
+ * beneath it — so the menu's top lines up with the header's divider line — then
+ * anchors it to the left or right edge per `align`. Self-contained: renders in a
+ * transparent Modal so it floats above any screen and a tap outside dismisses.
  */
-export default function LogoMenu({ size = 32, style }: Props) {
+export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
   const router = useRouter();
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
+  const btnRef = useRef<any>(null);
+  const [anchor, setAnchor] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   // Owner-only Admin entry (roster + password resets). Appended to the menu
   // only for the app owner's account so regular drivers never see it.
@@ -53,7 +66,18 @@ export default function LogoMenu({ size = 32, style }: Props) {
 
   const openMenu = () => {
     Haptics.selectionAsync();
-    setOpen(true);
+    const node = btnRef.current;
+    // Measure the logo so the dropdown can drop right under it. measureInWindow
+    // returns window-space coords, matching the Modal's coordinate space.
+    if (node && typeof node.measureInWindow === 'function') {
+      node.measureInWindow((x: number, y: number, w: number, h: number) => {
+        setAnchor({ x, y, w, h });
+        setOpen(true);
+      });
+    } else {
+      setAnchor(null);
+      setOpen(true);
+    }
   };
 
   const go = (route: string) => {
@@ -64,9 +88,18 @@ export default function LogoMenu({ size = 32, style }: Props) {
     setTimeout(() => router.push(route as any), 10);
   };
 
+  const screenW = Dimensions.get('window').width;
+  const fallbackTop = Platform.OS === 'ios' ? 96 : 64;
+  const top = anchor ? anchor.y + anchor.h + GAP : fallbackTop;
+  const horiz =
+    align === 'right'
+      ? { right: Math.max(12, screenW - (anchor ? anchor.x + anchor.w : screenW - 16)) }
+      : { left: Math.max(12, Math.min(anchor ? anchor.x : 16, screenW - CARD_W - 12)) };
+
   return (
     <>
       <TouchableOpacity
+        ref={btnRef}
         onPress={openMenu}
         activeOpacity={0.8}
         hitSlop={10}
@@ -84,8 +117,9 @@ export default function LogoMenu({ size = 32, style }: Props) {
       >
         {/* Backdrop — tap anywhere outside the card to dismiss. */}
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          {/* Card — stop propagation so taps inside don't close it. */}
-          <Pressable style={styles.card} onPress={() => {}}>
+          {/* Card — absolutely positioned under the logo; stop propagation so
+              taps inside don't close it. */}
+          <Pressable style={[styles.card, { top }, horiz]} onPress={() => {}}>
             <View style={styles.cardHeader}>
               <ConvoyLogo size={22} />
               <Text style={styles.cardTitle}>Convoy</Text>
@@ -116,14 +150,10 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',
-    // Anchor the card to the top-left, just under the status bar, near where
-    // the logo lives in the headers.
-    paddingTop: Platform.OS === 'ios' ? 96 : 64,
-    paddingHorizontal: 16,
-    alignItems: 'flex-start',
   },
   card: {
-    width: 230,
+    position: 'absolute',
+    width: CARD_W,
     backgroundColor: '#161618',
     borderRadius: 18,
     borderWidth: 1,

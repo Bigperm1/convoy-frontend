@@ -20,9 +20,16 @@ export type SpeedCamera = { id: string; lat: number; lng: number };
 const FETCH_RADIUS_M = 40000;   // pull cameras within ~40 km of the driver
 const REFETCH_MOVE_M = 20000;   // only re-query once they've driven > ~20 km
 const MIN_REFETCH_MS = 60000;   // and never more than once a minute
-// Public Overpass instance. If it's busy it returns 429/504; we just retry on
-// the next qualifying move rather than spamming it.
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+// Public Overpass instances. The main one frequently returns 429/504 when busy;
+// when that happens we fall through to the next mirror in the SAME pass (rather
+// than showing no cameras until the driver moves 20 km). All three speak the
+// identical Overpass QL API. If every mirror is busy we return [] and try again
+// on the next qualifying move.
+const OVERPASS_MIRRORS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+];
 
 function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const R = 6371000;
@@ -42,21 +49,26 @@ export async function fetchSpeedCamerasAround(
 ): Promise<SpeedCamera[]> {
   const query =
     `[out:json][timeout:25];node(around:${Math.round(radiusM)},${lat},${lng})[highway=speed_camera];out body;`;
-  try {
-    const res = await fetch(OVERPASS_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "data=" + encodeURIComponent(query),
-    });
-    if (!res.ok) return [];
-    const json: any = await res.json();
-    const els: any[] = Array.isArray(json?.elements) ? json.elements : [];
-    return els
-      .filter((e) => e && typeof e.lat === "number" && typeof e.lon === "number")
-      .map((e) => ({ id: String(e.id), lat: e.lat, lng: e.lon }));
-  } catch {
-    return [];
+  // Try each mirror in turn; the first that answers OK wins. A non-OK status
+  // (rate-limit / gateway timeout) or a network error falls through to the next.
+  for (const url of OVERPASS_MIRRORS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "data=" + encodeURIComponent(query),
+      });
+      if (!res.ok) continue;
+      const json: any = await res.json();
+      const els: any[] = Array.isArray(json?.elements) ? json.elements : [];
+      return els
+        .filter((e) => e && typeof e.lat === "number" && typeof e.lon === "number")
+        .map((e) => ({ id: String(e.id), lat: e.lat, lng: e.lon }));
+    } catch {
+      continue;
+    }
   }
+  return [];
 }
 
 /**

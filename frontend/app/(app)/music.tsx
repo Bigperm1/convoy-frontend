@@ -325,7 +325,7 @@ export default function MusicScreen() {
             <Text style={styles.dateOverline}>{today}</Text>
             <Text style={styles.title}>Listen Now</Text>
           </View>
-          <LogoMenu size={30} style={styles.logoBtn} />
+          <LogoMenu size={30} style={styles.logoBtn} align="right" />
         </View>
 
         {/* Cold-start: show a spinner while the silent auth check runs, so the

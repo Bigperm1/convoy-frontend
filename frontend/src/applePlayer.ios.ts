@@ -215,6 +215,7 @@ export async function playLibrarySong(songId: string): Promise<void> {
   if (!songId) return;
   try {
     await (MusicKit as any).playLibrarySong(songId);
+    await Player.play();
   } catch (e) {
     console.warn("[applePlayer] playLibrarySong failed", e);
   }
@@ -224,6 +225,7 @@ export async function playLibraryPlaylist(playlistId: string, startingAt = -1): 
   if (!playlistId) return;
   try {
     await (MusicKit as any).playLibraryPlaylist(playlistId, startingAt);
+    await Player.play();
   } catch (e) {
     console.warn("[applePlayer] playLibraryPlaylist failed", e);
   }
@@ -239,8 +241,8 @@ export async function playRecentItem(item: RecentItem): Promise<void> {
       await (MusicKit as any).playLibrarySong(item.id);
     } else {
       await (MusicKit as any).setPlaybackQueue(item.id, item.type || "album");
-      await Player.play();
     }
+    await Player.play();
   } catch (e) {
     console.warn("[applePlayer] playRecentItem failed", e);
   }
@@ -278,6 +280,33 @@ export const skipNext = (): void => {
 export const skipPrev = (): void => {
   try { Player.skipToPreviousEntry(); } catch (e) { console.warn("[applePlayer] skipPrev failed", e); }
 };
+
+// ---- Nova voice ducking --------------------------------------------------
+// The in-app Apple Music player (MusicKit) is an out-of-process system player,
+// so it is NOT ducked by Convoy's expo-av `.duckOthers` session — that only
+// ducks OTHER apps (e.g. Spotify), never same-app audio. So while Nova speaks
+// we explicitly pause Apple Music and resume it afterwards. We only pause when
+// it's actually playing, and only resume if WE paused it, so we never start
+// playback the user had paused themselves.
+let _duckedByNova = false;
+
+export async function duckForSpeech(): Promise<void> {
+  try {
+    const st = await Player.getCurrentState();
+    if (String(st?.playbackStatus) === "playing") {
+      _duckedByNova = true;
+      Player.pause();
+    }
+  } catch {
+    // getCurrentState unsupported / nothing loaded — leave music untouched.
+  }
+}
+
+export async function unduckForSpeech(): Promise<void> {
+  if (!_duckedByNova) return;
+  _duckedByNova = false;
+  try { Player.play(); } catch {}
+}
 
 // ---- Reactive hooks (re-exported straight from the native module) --------
 

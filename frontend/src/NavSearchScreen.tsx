@@ -24,8 +24,10 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
 import { autocompletePlaces, placeDetails, Suggestion } from "./places";
-import { getRecentRoutes, RecentRoute } from "./recentRoutes";
+import { getRecentRoutes, removeRecentRoute, RecentRoute } from "./recentRoutes";
 import MemberCarousel, { CarouselMember } from "./components/MemberCarousel";
+import { useSavedPlaces } from "./savedPlaces";
+import { Swipeable, GestureHandlerRootView } from "react-native-gesture-handler";
 
 type Props = {
   visible: boolean;
@@ -50,6 +52,7 @@ export default function NavSearchScreen({
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const tRef = useRef<any>(null);
+  const [saved, , removeSavedPlace] = useSavedPlaces();
 
   useEffect(() => {
     if (!visible) return;
@@ -89,11 +92,29 @@ export default function NavSearchScreen({
     onClose();
   };
 
+  const pickSaved = (p: { lat: number; lng: number; label: string }) => {
+    onSelectPlace({ lat: p.lat, lng: p.lng, label: p.label });
+    onClose();
+  };
+
+  const handleDeleteRecent = (r: RecentRoute) => {
+    setRecents((prev) => prev.filter((x) => !(x.lat === r.lat && x.lng === r.lng)));
+    void removeRecentRoute(r.lat, r.lng);
+  };
+
+  // Red "Delete" action revealed when a row is swiped left.
+  const renderDelete = (onPress: () => void) => () => (
+    <TouchableOpacity style={styles.swipeDelete} onPress={onPress} activeOpacity={0.85}>
+      <Ionicons name="trash" size={20} color="#fff" />
+      <Text style={styles.swipeDeleteText}>Delete</Text>
+    </TouchableOpacity>
+  );
+
   const typing = text.trim().length > 0;
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.root}>
+      <GestureHandlerRootView style={styles.root}>
         {/* Search header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.backBtn}>
@@ -146,17 +167,22 @@ export default function NavSearchScreen({
                 <View style={styles.section}>
                   <Text style={styles.sectionLabel}>RECENT</Text>
                   {recents.map((r) => (
-                    <TouchableOpacity
+                    <Swipeable
                       key={`${r.lat},${r.lng}`}
-                      style={styles.resultRow}
-                      onPress={() => pickRecent(r)}
-                      activeOpacity={0.7}
+                      renderRightActions={renderDelete(() => handleDeleteRecent(r))}
+                      overshootRight={false}
                     >
-                      <View style={styles.pinWrap}>
-                        <Ionicons name="time-outline" size={18} color={COLORS.textDim} />
-                      </View>
-                      <Text style={styles.resultText} numberOfLines={1}>{r.label}</Text>
-                    </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.resultRow, styles.swipeRow]}
+                        onPress={() => pickRecent(r)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.pinWrap}>
+                          <Ionicons name="time-outline" size={18} color={COLORS.textDim} />
+                        </View>
+                        <Text style={styles.resultText} numberOfLines={1}>{r.label}</Text>
+                      </TouchableOpacity>
+                    </Swipeable>
                   ))}
                 </View>
               )}
@@ -170,10 +196,38 @@ export default function NavSearchScreen({
                   emptyText="No one in your convoy is live right now."
                 />
               </View>
+
+              {saved.length > 0 && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>SAVED</Text>
+                  {saved.map((p) => (
+                    <Swipeable
+                      key={p.id}
+                      renderRightActions={renderDelete(() => { void removeSavedPlace(p.id); })}
+                      overshootRight={false}
+                    >
+                      <TouchableOpacity
+                        style={[styles.resultRow, styles.swipeRow]}
+                        onPress={() => pickSaved(p)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.pinWrap}>
+                          <Ionicons
+                            name={p.kind === "home" ? "home" : p.kind === "work" ? "briefcase" : "bookmark"}
+                            size={18}
+                            color={COLORS.brand}
+                          />
+                        </View>
+                        <Text style={styles.resultText} numberOfLines={1}>{p.label}</Text>
+                      </TouchableOpacity>
+                    </Swipeable>
+                  ))}
+                </View>
+              )}
             </>
           )}
         </ScrollView>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -214,4 +268,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   resultText: { color: COLORS.text, flex: 1, fontSize: 15 },
+  swipeRow: { backgroundColor: "#0B0B0D" },
+  swipeDelete: {
+    backgroundColor: "#FF453A",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    width: 96,
+  },
+  swipeDeleteText: { color: "#fff", fontSize: 13, fontWeight: "700" },
 });

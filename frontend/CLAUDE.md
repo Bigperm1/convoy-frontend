@@ -29,7 +29,7 @@ eas submit --profile production --platform ios|android
 ```
 
 - Three profiles in `eas.json`: `development` (dev client, iOS simulator), `preview` (internal APK / ad-hoc), `production` (store bundle, `autoIncrement` on Android).
-- `runtimeVersion.policy = "appVersion"` — an OTA `eas update` only reaches builds whose `app.json` `version` matches. Bump native `version` when you ship native changes; OTA-only fixes go to existing builds with the same version.
+- `runtimeVersion` is a **FIXED string** (currently `"1.1.11"`), NOT the `appVersion` policy. An OTA `eas update` reaches every build whose `runtimeVersion` matches this string, regardless of the marketing `version`. So you can bump `version` freely for JS/OTA releases without orphaning installed builds. **Only bump `runtimeVersion` when you ship a NATIVE change** (new/updated native module, native config/plugin, SDK bump) — and cut a fresh build at the new runtime. Bumping it for a JS-only change would needlessly cut existing testers off from OTAs; forgetting to bump it after a native change can push JS that an old binary can't run. (History: it was previously `policy: "appVersion"`, which silently orphaned a tester stuck on a 1.1.7 build from every 1.1.11 OTA.)
 - Recent commits prefixed `OTA:` are JS-only changes shipped via `eas update`.
 
 ## Architecture

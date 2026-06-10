@@ -416,12 +416,24 @@ function RouteEtaMarker({ coordinate, label, selected, onPress }: {
 const CAMERA_ICON = require("../assets/images/speed_camera.png");
 
 function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
+  // Start tracking, then freeze after the settle window — same dance as
+  // HazardMarker. On Android, react-native-maps markers mounted with
+  // tracksViewChanges={false} BEFORE the image bitmap has loaded render blank
+  // and never repaint (the camera "fix" that swapped the glyph for a PNG still
+  // hit this). Tracking for the first frames lets the icon paint, then we freeze
+  // so we're not re-rasterizing every pin on every camera commit.
+  const [track, setTrack] = useState(true);
+  useEffect(() => {
+    setTrack(true);
+    const t = setTimeout(() => setTrack(false), SNAPSHOT_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, []);
   return (
     <Marker
       coordinate={{ latitude: lat, longitude: lng }}
       anchor={{ x: 0.5, y: 0.5 }}
       image={CAMERA_ICON as any}
-      tracksViewChanges={false}
+      tracksViewChanges={track}
       zIndex={4}
     />
   );

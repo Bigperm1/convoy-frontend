@@ -925,37 +925,34 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
             />
           );
         })}
-        {destination && routes[selectedRouteIndex] && (() => {
-          const coords = smoothedRouteCoords[selectedRouteIndex] || [];
-          if (coords.length === 0) return null;
-          // Google-Maps-style route line: a darker-blue CASING drawn first
-          // (wider, lower zIndex) with a brighter blue CORE on top, so the line
-          // reads as a thick rounded ribbon with a crisp edge against satellite/
-          // dark basemaps — instead of a thin flat stroke. Both keyed by the
-          // selection so iOS fully remounts them (stale-stroke-color workaround).
-          return (
-            <React.Fragment key={`sel_${selectedRouteIndex}`}>
-              <Polyline
-                key={`sel_casing_${selectedRouteIndex}`}
-                coordinates={coords}
-                strokeColor="#0A3D91"
-                strokeWidth={13}
-                zIndex={2}
-                lineCap="round"
-                lineJoin="round"
-              />
-              <Polyline
-                key={`sel_core_${selectedRouteIndex}`}
-                coordinates={coords}
-                strokeColor="#2A8CFF"
-                strokeWidth={9}
-                zIndex={3}
-                lineCap="round"
-                lineJoin="round"
-              />
-            </React.Fragment>
-          );
-        })()}
+        {/* Selected route — Google-style cased ribbon. Rendered as TWO DIRECT
+            MapView children (NOT wrapped in a React.Fragment): react-native-maps
+            silently drops overlays nested in a Fragment, which is why the casing
+            never showed even though the OTA shipped. The gray alternates above
+            render because they're a plain array of <Polyline> — we match that.
+            Dark casing first (wider, lower z), Google-blue core on top. */}
+        {destination && (smoothedRouteCoords[selectedRouteIndex]?.length ?? 0) > 0 && (
+          <Polyline
+            key={`sel_casing_${selectedRouteIndex}`}
+            coordinates={smoothedRouteCoords[selectedRouteIndex]}
+            strokeColor="#174EA6"
+            strokeWidth={14}
+            zIndex={2}
+            lineCap="round"
+            lineJoin="round"
+          />
+        )}
+        {destination && (smoothedRouteCoords[selectedRouteIndex]?.length ?? 0) > 0 && (
+          <Polyline
+            key={`sel_core_${selectedRouteIndex}`}
+            coordinates={smoothedRouteCoords[selectedRouteIndex]}
+            strokeColor="#1A73E8"
+            strokeWidth={9}
+            zIndex={3}
+            lineCap="round"
+            lineJoin="round"
+          />
+        )}
 
         {/* Route ETA pills — native-style time marker on each ALTERNATE route's
             midpoint, Google-style. The SELECTED route is skipped on purpose: its

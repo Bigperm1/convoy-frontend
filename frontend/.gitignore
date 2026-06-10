@@ -44,3 +44,6 @@ yarn-error.*
 *.tsbuildinfo
 
 app-example
+
+# local planning / scratch notes
+tonight-batch.md

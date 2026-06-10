@@ -608,6 +608,22 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
   // ----- Base-map type: "roadmap" -> standard, otherwise satellite/hybrid. -----
   const resolvedMapType: "standard" | "hybrid" = mapType === "roadmap" ? "standard" : "hybrid";
 
+  // ----- Traffic re-assert after a base-map style change -----
+  // Google Maps drops the native traffic layer when `customMapStyle` (or the
+  // map type) is re-applied — e.g. switching into dark mode. Because the
+  // `showsTraffic` PROP is still true, react-native-maps never re-sends it, so
+  // live traffic silently vanishes until the user toggles a layer (which forces
+  // a re-apply — exactly the "toggle the map type and it comes back" symptom).
+  // We reproduce that toggle automatically: whenever the style key changes,
+  // briefly flip traffic off then back on so the native trafficEnabled flag is
+  // re-asserted on the fresh base map.
+  const [trafficReassert, setTrafficReassert] = useState(true);
+  useEffect(() => {
+    setTrafficReassert(false);
+    const t = setTimeout(() => setTrafficReassert(true), 120);
+    return () => clearTimeout(t);
+  }, [mapDark, resolvedMapType]);
+
   // ----- Initial region (only used for uncontrolled first paint) -----
   const initialRegion =
     center && typeof center.lat === "number"
@@ -787,7 +803,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
         initialRegion={initialRegion}
         mapType={resolvedMapType}
         customMapStyle={mapDark ? DARK_MAP_STYLE : HIDE_TRANSIT_STYLE}
-        showsTraffic={!!showTraffic}
+        showsTraffic={!!showTraffic && trafficReassert}
         showsUserLocation={false}
         showsMyLocationButton={false}
         showsCompass={false}

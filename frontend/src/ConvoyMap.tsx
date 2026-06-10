@@ -403,32 +403,27 @@ function RouteEtaMarker({ coordinate, label, selected, onPress }: {
 }
 
 // ===== CameraMarker =====
-// A fixed speed-camera pin (OpenStreetMap). Same snapshot dance as the other
-// custom markers: track on until it paints, then settle off for battery (a city
-// can put many on screen at once).
+// A fixed speed-camera pin (OpenStreetMap), drawn via react-native-maps' NATIVE
+// `image` prop — NOT a captured child <View>/<Ionicons>.
+//
+// The old version rendered an Ionicons "camera" GLYPH inside a styled View and
+// relied on the snapshot→bitmap capture path. On New-Architecture Android that
+// vector font glyph wasn't rasterized when the marker bitmap was frozen, so the
+// capture came back BLANK and cameras showed on iOS but NEVER on Android (even
+// with the 3 s settle window). The native image prop draws the bundled PNG
+// directly: no capture, no blank pins, identical on both platforms. Density
+// variants (speed_camera@2x/@3x.png) size it to the ~26 pt pin.
+const CAMERA_ICON = require("../assets/images/speed_camera.png");
+
 function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
-  const [track, setTrack] = useState(true);
-  useEffect(() => {
-    setTrack(true);
-    // Use the shared Android-aware settle window (3000ms on Android, 1200 on
-    // iOS). The old hardcoded 1200ms froze the bitmap before the vector-icon
-    // pin reliably painted on Android (high-DPI/Fabric capture lag), so camera
-    // pins captured blank and never showed — the same too-early-freeze the
-    // PlaceMarker/DestWeatherMarker already dodge with SNAPSHOT_SETTLE_MS.
-    const t = setTimeout(() => setTrack(false), SNAPSHOT_SETTLE_MS);
-    return () => clearTimeout(t);
-  }, []);
   return (
     <Marker
       coordinate={{ latitude: lat, longitude: lng }}
       anchor={{ x: 0.5, y: 0.5 }}
-      tracksViewChanges={track}
+      image={CAMERA_ICON as any}
+      tracksViewChanges={false}
       zIndex={4}
-    >
-      <View style={styles.camPin}>
-        <Ionicons name="camera" size={13} color="#fff" />
-      </View>
-    </Marker>
+    />
   );
 }
 
@@ -648,6 +643,13 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
       camHeading = isHeadingUp ? heading : 0;
     } else if (followUser) {
       zoom = FOLLOW_ZOOM;
+      // Honor the Heading-Up / North-Up setting outside active navigation too.
+      // Free-roam follow rotates to course but stays FLAT (no 45° chase tilt —
+      // that's reserved for turn-by-turn). This ALSO keeps the map heading-up
+      // during any window where turn-by-turn is engaged (followUser true) but
+      // the engine hasn't yet flagged tbt.active (navigationActive false), so it
+      // no longer snaps back to north mid-drive.
+      camHeading = isHeadingUp ? heading : 0;
     } else if (!force) {
       // Not following and not navigating — let the user roam freely.
       return;
@@ -955,14 +957,4 @@ const styles = StyleSheet.create({
     }),
   },
   destWxText: { color: "#fff", fontSize: 12, fontWeight: "700", letterSpacing: -0.2 },
-  camPin: {
-    width: 26, height: 26, borderRadius: 13,
-    backgroundColor: "rgba(28,28,30,0.95)",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 2, borderColor: "#FF453A",
-    ...Platform.select({
-      ios: { shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 3, shadowOffset: { width: 0, height: 2 } },
-      android: { elevation: 4 },
-    }),
-  },
 });

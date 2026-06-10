@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 import { api, GOOGLE_MAPS_KEY } from "./api";
-import { setPlaybackAudioMode } from "./audioMode";
+import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
 
 export type LatLng = { lat: number; lng: number };
@@ -248,13 +248,61 @@ type TbtState = {
   etaSeconds: number;
 };
 
-const VOICE_THRESHOLDS = [400, 150, 30] as const;
+// Speed-aware voice lead. Fixed-distance callouts fire too late at speed (the
+// "Nova falls behind the car" bug — a 30 m final cue is ~1 second of warning on
+// the highway) and too early in town. Scale the trigger to a constant TIME
+// before the maneuver, clamped so it stays sane when stopped/crawling or very
+// fast. TTS adds ~1–2 s of queue+network latency, so the imminent lead must
+// cover reaction time AND that latency.
+const IMMINENT_LEAD_S = 7;     // "Turn now" cue ~7 s out
+const IMMINENT_MIN_M = 30;
+const IMMINENT_MAX_M = 250;
+const PREPARE_LEAD_S = 30;     // "In X, turn …" heads-up ~30 s out
+const PREPARE_MIN_M = 150;
+const PREPARE_MAX_M = 1200;
 const ADVANCE_THRESHOLD_M = 25;
 const REROUTE_DISTANCE_M = 80;
 
+// Arrival lines — varied so Nova doesn't say the exact same thing every trip.
+// Spoken by the engine (not the screen) so the line survives nav teardown; the
+// map screen's onArrive ends navigation WITHOUT stopSpeech so it isn't cut off.
+const ARRIVAL_LINES = [
+  "You've arrived at your destination.",
+  "Here we are — you've made it.",
+  "Arrived. Nice driving.",
+  "This is it, you've reached your destination.",
+  "You made it — welcome.",
+  "Destination reached. Enjoy.",
+];
+function arrivalLine(): string {
+  return ARRIVAL_LINES[Math.floor(Math.random() * ARRIVAL_LINES.length)];
+}
+
+// "Less intrusive Nova" filter. Maneuvers that just mean "keep going" aren't
+// worth a spoken callout — speaking them ("continue straight for 2 km") is the
+// nagging the driver complained about. We skip ONLY these, so real turns,
+// merges, ramps, forks, roundabouts and U-turns still speak.
+const SILENT_MANEUVERS = new Set([
+  "straight", "continue", "name_change", "name-change", "depart",
+]);
+// Decide whether a maneuver is worth speaking. A known non-actionable maneuver
+// is silenced. For an empty/unknown maneuver we fall back to the instruction
+// text and speak ONLY if it clearly describes a real maneuver — so we never
+// drop a genuine turn that arrived without a maneuver code, but still stay quiet
+// on "Continue on Main St" filler.
+function isSpokenManeuver(maneuver?: string, html?: string): boolean {
+  const m = (maneuver || "").toLowerCase();
+  if (m && !SILENT_MANEUVERS.has(m)) return true;
+  const h = (html || "").toLowerCase();
+  return /\b(turn|merge|exit|ramp|fork|u-?turn|roundabout|keep (?:left|right))\b/.test(h);
+}
+
 export function useTurnByTurn(
   route: NavRoute | null,
-  user: LatLng | null,
+  // `speed` (m/s, from GPS) rides along on the position the caller already
+  // passes (map.tsx hands us `coords`, which carries it) — used to scale the
+  // voice lead distance with speed. Optional so other callers stay compatible.
+  user: (LatLng & { speed?: number }) | null,
   active: boolean,
   options?: { mute?: boolean; onArrive?: () => void; onOffRoute?: () => void }
 ) {
@@ -319,20 +367,40 @@ export function useTurnByTurn(
     }
     if (stepIdx !== prevStepIdx) announcedRef.current.clear();
 
+    // Speed-aware spoken callouts. The lead distance scales with current speed
+    // so a cue lands a steady few seconds before the turn at any speed, and the
+    // SPOKEN distance is the live distance-to-maneuver (the SAME value the
+    // on-screen banner shows via fmtDistanceM) instead of a fixed threshold
+    // number — so voice and screen always agree.
     if (!options?.mute) {
-      for (const t of VOICE_THRESHOLDS) {
-        const key = `${stepIdx}-${t}`;
-        if (dManeuver <= t && !announcedRef.current.has(key)) {
-          const nextStep = steps[Math.min(stepIdx + 1, steps.length - 1)];
+      const spd = Math.max(0, user.speed ?? 0);
+      const imminentM = Math.min(IMMINENT_MAX_M, Math.max(IMMINENT_MIN_M, spd * IMMINENT_LEAD_S));
+      const prepareM = Math.min(PREPARE_MAX_M, Math.max(PREPARE_MIN_M, spd * PREPARE_LEAD_S));
+      const prepKey = `${stepIdx}-prep`;
+      const immKey = `${stepIdx}-imm`;
+      const isFinal = stepIdx >= steps.length - 1;
+      if (isFinal) {
+        // Final leg → arrival heads-up only; the actual "You have arrived" +
+        // onArrive fire from the dManeuver < 20 block below.
+        if (dManeuver <= prepareM && !announcedRef.current.has(prepKey)) {
+          speak(`In ${fmtDistanceM(dManeuver)}, you will arrive at your destination.`);
+          announcedRef.current.add(prepKey);
+        }
+      } else {
+        const nextStep = steps[stepIdx + 1];
+        // Less-intrusive filter: only speak for actual maneuvers, not "continue
+        // straight" filler. (#6)
+        if (isSpokenManeuver(nextStep.maneuver, nextStep.html)) {
           const verb = maneuverVerb(nextStep.maneuver);
-          const distLabel = t >= 1000 ? `${(t / 1000).toFixed(1)} kilometers` : `${t} meters`;
           const inst = stripDirections(nextStep.html);
-          const utter = stepIdx + 1 < steps.length
-            ? (t === 30 ? `${verb}.` : `In ${distLabel}, ${verb.toLowerCase()}${inst ? " onto " + inst : ""}.`)
-            : (t === 30 ? "You have arrived." : `In ${distLabel}, you will arrive at your destination.`);
-          speak(utter);
-          announcedRef.current.add(key);
-          break;
+          if (dManeuver <= imminentM && !announcedRef.current.has(immKey)) {
+            speak(`${verb}.`);
+            announcedRef.current.add(immKey);
+            announcedRef.current.add(prepKey); // a "prepare" this late would be noise
+          } else if (dManeuver <= prepareM && !announcedRef.current.has(prepKey)) {
+            speak(`In ${fmtDistanceM(dManeuver)}, ${verb.toLowerCase()}${inst ? " onto " + inst : ""}.`);
+            announcedRef.current.add(prepKey);
+          }
         }
       }
     }
@@ -350,8 +418,10 @@ export function useTurnByTurn(
     for (let i = stepIdx + 1; i < steps.length; i++) remaining += steps[i].distance_m;
     const eta = (remaining / Math.max(r.distance_m, 1)) * r.duration_s;
 
-    if (stepIdx === steps.length - 1 && dManeuver < 20) {
-      if (!options?.mute) speak("You have arrived at your destination.");
+    const arriveKey = `${steps.length - 1}-arrived`;
+    if (stepIdx === steps.length - 1 && dManeuver < 20 && !announcedRef.current.has(arriveKey)) {
+      announcedRef.current.add(arriveKey);   // fire once, not on every parked GPS tick
+      if (!options?.mute) speak(arrivalLine());
       options?.onArrive?.();
     }
 
@@ -535,6 +605,9 @@ function resetSpeakGate() {
   if (_greetingTimer) { clearTimeout(_greetingTimer); _greetingTimer = null; }
   // Nav stopped/cleared — let any ducked in-app music come back immediately.
   _restoreMusicNow();
+  // ...and release the ducking audio session so external music (Spotify etc.)
+  // returns to full volume the moment nav ends, not just when the queue drains.
+  void setIdleAudioMode();
 }
 
 // Reroute is intentionally SILENT. Convoy used to speak "Recalculating route."
@@ -566,7 +639,15 @@ export function stopSpeech() {
 }
 
 async function drainTtsQueue(): Promise<void> {
-  if (ttsQueue.length === 0) { ttsPlaying = false; _restoreMusicSoon(); return; }
+  if (ttsQueue.length === 0) {
+    ttsPlaying = false;
+    _restoreMusicSoon();
+    // Queue fully drained — release the ducking audio session so EXTERNAL music
+    // (Spotify, podcasts) returns to full volume. Without this the session stays
+    // in .duckOthers and the user's music is stuck quiet until they force-quit.
+    void setIdleAudioMode();
+    return;
+  }
   ttsPlaying = true;
   const item = ttsQueue.shift()!;
   if (typeof item !== "string") {

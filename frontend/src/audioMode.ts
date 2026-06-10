@@ -73,10 +73,46 @@ export async function setPlaybackAudioMode() {
   } catch {}
 }
 
-/** IDLE / listener state — same as playback but called on app boot.
+/** IDLE / listener state — speaker-ready but NON-ducking.
  *
- * Configured so that the moment a PTT message arrives over WebSocket the
- * sound can play at full volume without us racing to reconfigure first. */
+ * Same loudspeaker routing as playback (`allowsRecordingIOS: false` →
+ * `.playback`, never the earpiece) so the moment a PTT clip or a Nova callout
+ * arrives it can play at full volume without us racing to reconfigure. The key
+ * difference from playback is the interruption mode: idle MUST NOT duck other
+ * apps.
+ *
+ * Why this matters (the "music stuck quiet until force-quit" regression): the
+ * `.duckOthers` / `shouldDuckAndroid` modes dip external audio (Spotify,
+ * podcasts) for as long as OUR session stays active. Because the session stays
+ * active in the background (`staysActiveInBackground: true`), leaving it in a
+ * ducking mode after a Nova clip or PTT transmission finished kept the user's
+ * music permanently quiet. Returning to a MIX (non-ducking) mode the instant
+ * the TTS/PTT queue drains releases the duck so external audio pops back to
+ * full volume. Active playback re-applies `setPlaybackAudioMode()` (ducking)
+ * right before each clip, so we only duck while something is actually speaking.
+ *
+ * iOS vs Android: the lingering-duck bug is iOS-specific — its AVAudioSession
+ * stays active (`staysActiveInBackground`) with the `.duckOthers` option, so
+ * other apps stay ducked even with nothing playing. `InterruptionModeIOS
+ * .MixWithOthers` is what releases that. Android ducks via per-playback audio
+ * focus, which is abandoned the moment the clip's Sound unloads, so idle holds
+ * no focus and external music is already full-volume; `shouldDuckAndroid: false`
+ * is set for completeness. (Android has no MixWithOthers interruption mode — the
+ * enum only exposes DoNotMix/DuckOthers — and the idle value is inert while
+ * nothing is playing, since active clips set `setPlaybackAudioMode()` first.) */
 export async function setIdleAudioMode() {
-  return setPlaybackAudioMode();
+  try {
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      // MIX, not duck — idle must leave external music at full volume (iOS).
+      interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+      // Android ducks via per-playback focus (released on unload), so idle holds
+      // no focus; shouldDuckAndroid:false is the meaningful non-duck toggle here.
+      shouldDuckAndroid: false,
+      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+      playThroughEarpieceAndroid: false,
+    });
+  } catch {}
 }

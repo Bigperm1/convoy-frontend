@@ -32,7 +32,7 @@ export type StepDrawerHandle = {
 
 type Props = {
   route: Route | null;
-  maneuverIcon: (m?: string) => any;
+  maneuverIcon: (m?: string, html?: string) => any;
   // Live trip progress (turn-by-turn). When provided, the summary bar shows
   // them in the yellow-banner layout; otherwise it falls back to route totals.
   eta?: string;                 // time remaining, e.g. "12 min"
@@ -122,7 +122,7 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
           <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
             {steps.map((step, i) => (
               <View key={i} style={styles.row}>
-                <Ionicons name={maneuverIcon(step.maneuver)} size={20} color="#FFFFFF" style={{ marginTop: 2 }} />
+                <Ionicons name={maneuverIcon(step.maneuver, step.html)} size={20} color="#FFFFFF" style={{ marginTop: 2 }} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.text}>{step.html}</Text>
                   <Text style={styles.dist}>{step.distance_text}</Text>

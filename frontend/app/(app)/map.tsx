@@ -54,13 +54,33 @@ type RouteInfo = {
   steps: { html: string; distance_text: string; maneuver?: string }[];
 };
 
-const maneuverIcon = (m?: string): any => {
-  if (!m) return "arrow-up";
-  if (m.includes("left")) return "arrow-back";
-  if (m.includes("right")) return "arrow-forward";
-  if (m.includes("uturn")) return "refresh";
-  if (m.includes("merge")) return "git-merge";
-  if (m.includes("ramp")) return "swap-horizontal";
+const maneuverIcon = (m?: string, html?: string): any => {
+  // Routes API v2 maneuvers are UPPER_SNAKE ("TURN_LEFT", "RAMP_RIGHT", …);
+  // legacy/cached data is lower-kebab ("turn-left"). Lowercase so ONE set of
+  // substring checks covers both. The old code tested lowercase against the
+  // uppercase enum, never matched, and every turn fell through to a straight
+  // arrow. Check the COMPOUND maneuvers (uturn/merge/ramp) before the bare
+  // left/right tests, since their names also contain "left"/"right" and would
+  // otherwise be drawn as a plain turn arrow.
+  const fromCode = (s: string): string | null => {
+    if (s.includes("uturn") || s.includes("u-turn")) return "refresh";
+    if (s.includes("merge")) return "git-merge";
+    if (s.includes("ramp")) return "swap-horizontal";
+    if (s.includes("left")) return "arrow-back";
+    if (s.includes("right")) return "arrow-forward";
+    return null;
+  };
+  const code = m ? fromCode(m.toLowerCase()) : null;
+  if (code) return code;
+  // Maneuver missing/unhelpful (DEPART, STRAIGHT, or blank) — the instruction
+  // text reliably carries the direction ("Turn left onto Main St"). Scan it with
+  // word boundaries so street names ("Wright St", "Leftbank Ave") don't trip a
+  // false turn.
+  const h = (html || "").toLowerCase();
+  if (/\bu-?turn\b/.test(h)) return "refresh";
+  if (/\bmerge\b/.test(h)) return "git-merge";
+  if (/\bleft\b/.test(h)) return "arrow-back";
+  if (/\bright\b/.test(h)) return "arrow-forward";
   return "arrow-up";
 };
 
@@ -176,15 +196,87 @@ function speedingLine(tier: 1 | 2, over: number, hey: string): string {
     `${hey}the GR is loving this, but the speed limit isn't. You're ${over} over.`,
     `${hey}someone's in a hurry. That's ${over} over the limit, keep it sensible.`,
     `${hey}feeling spicy? You're ${over} over the posted limit. Ease off a touch.`,
+    `${hey}easy does it, speed racer. You're ${over} over the limit.`,
   ];
   const warns = [
     `${hey}slow it down. You're ${over} over the limit. That's a serious ticket and a real risk.`,
     `${hey}ease off now. ${over} over the posted limit is pushing your luck.`,
     `${hey}bring it back down. You're ${over} over the limit, this one's not worth it.`,
+    `${hey}seriously, back off the throttle. ${over} over is dangerous territory.`,
+    `${hey}dial it back now. You're ${over} over the limit — that's a real risk to everyone.`,
   ];
   const pool = tier === 2 ? warns : nudges;
   const raw = pool[Math.floor(Math.random() * pool.length)];
   return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+// Pick a random entry from a non-empty pool.
+function pick<T>(pool: T[]): T {
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// ===== Nova line pools — ≥5 variations each so she doesn't repeat herself =====
+const REROUTE_ACCEPT_LINES = [
+  "Okay, taking the faster route.",
+  "Got it, switching to the quicker way.",
+  "Rerouting you to the faster road now.",
+  "Done — we'll take the faster route.",
+  "Sure thing, jumping on the quicker route.",
+];
+
+const SPEED_CAMERA_LINES = [
+  "Speed camera ahead.",
+  "Heads up, speed camera coming up.",
+  "Speed camera ahead, watch your speed.",
+  "Camera ahead — ease off a touch.",
+  "Speed camera just ahead, keep it legal.",
+];
+
+// Hazard-ahead callouts keyed by hazard kind, so the phrasing fits each kind,
+// with a generic fallback for anything else.
+const HAZARD_AHEAD_LINES: Record<string, string[]> = {
+  police: [
+    "Heads up, police reported ahead.",
+    "Police spotted ahead, mind your speed.",
+    "Cops reported up ahead.",
+    "Heads up — police on the road ahead.",
+    "Police ahead, keep it clean.",
+  ],
+  accident: [
+    "Accident reported ahead.",
+    "Heads up, crash reported up ahead.",
+    "There's an accident on the road ahead.",
+    "Accident ahead, take it easy.",
+    "Collision reported ahead, stay sharp.",
+  ],
+  traffic: [
+    "Traffic reported ahead.",
+    "Heads up, slow traffic ahead.",
+    "Congestion reported up ahead.",
+    "Traffic building ahead.",
+    "Slowdown reported on the road ahead.",
+  ],
+};
+const HAZARD_AHEAD_FALLBACK = [
+  "Hazard on the road ahead.",
+  "Heads up, hazard reported ahead.",
+  "Something on the road ahead, stay alert.",
+  "Hazard reported up ahead.",
+  "Watch out, hazard ahead.",
+];
+function hazardAheadLine(kind: string): string {
+  return pick(HAZARD_AHEAD_LINES[kind] ?? HAZARD_AHEAD_FALLBACK);
+}
+
+// Report-confirmation lines. `label` is the hazard kind ("Police", "Hazard", …).
+function reportConfirmLine(label: string): string {
+  return pick([
+    `${label} reported. Thanks driver.`,
+    `${label} on the map. Thanks for the heads up.`,
+    `Got it — ${label.toLowerCase()} reported. Nice one.`,
+    `${label} reported. The convoy's got your back.`,
+    `Thanks driver, ${label.toLowerCase()} is on the map.`,
+  ]);
 }
 
 export default function MapScreen() {
@@ -460,6 +552,7 @@ export default function MapScreen() {
   const SPEED_WARN_OVER_KMH = 40;
   const speedAlertLastRef = useRef(0);
   const speedAlertTierRef = useRef<0 | 1 | 2>(0);
+  const speedAlertCountRef = useRef(0);
   useEffect(() => {
     if (navMuted) return;
     if (!settings.novaSpeeding) return;
@@ -472,8 +565,18 @@ export default function MapScreen() {
     const now = Date.now();
     // Speak when we cross INTO a higher tier, or after the per-tier cooldown.
     if (tier <= speedAlertTierRef.current && now - speedAlertLastRef.current < 45000) return;
+    const escalated = tier > speedAlertTierRef.current;
     speedAlertTierRef.current = tier;
     speedAlertLastRef.current = now;
+    // Every-3rd throttle (#7): on top of the 45s-per-tier cooldown, only every
+    // 3rd qualifying trigger actually speaks, so sustained speeding nags far
+    // less. Crossing into a HIGHER tier (the serious-warning band) resets the
+    // counter so that more urgent alert always speaks immediately rather than
+    // being swallowed by the throttle.
+    if (escalated) speedAlertCountRef.current = 0;
+    const speak3rd = speedAlertCountRef.current % 3 === 0;
+    speedAlertCountRef.current += 1;
+    if (!speak3rd) return;
     const mph = settings.speedUnit === "mph";
     const overDisp = Math.max(1, Math.round(mph ? overKmh / 1.60934 : overKmh));
     const cs = (getSettings().callSign || "").trim();
@@ -606,7 +709,15 @@ export default function MapScreen() {
   // Turn-by-turn engine — speaks instructions, advances steps, computes ETA / distance remaining
   const tbt = useTurnByTurn(activeRoute, coords, navMode === "turn-by-turn", {
     mute: navMuted,
-    onArrive: () => { setNavMode("preview"); },
+    onArrive: () => {
+      // The engine already spoke the (varied) arrival line. End navigation here
+      // WITHOUT endNav()/stopSpeech() — that would cut the arrival line off
+      // mid-word. Mirror endNav's state changes minus the speech kill; flipping
+      // navMode runs the engine's teardown (clears the queue) but leaves the
+      // in-flight arrival clip playing to the end.
+      navAutoStartedRef.current = true;  // stay stopped until a new destination is set
+      setNavMode("preview");
+    },
     onOffRoute: () => {
       // Auto-reroute: refetch directions from the current GPS position (honoring user's avoid prefs)
       if (!coords || !destination) return;
@@ -704,7 +815,7 @@ export default function MapScreen() {
               rerouteSuppressUntilRef.current = Date.now() + 120000; // settle 2 min
               setRoutes([best]);            // same swap the off-route path uses
               setSelectedRouteIndex(0);
-              if (!navMutedRef.current) { try { announce("Okay, taking the faster route."); } catch {} }
+              if (!navMutedRef.current) { try { announce(pick(REROUTE_ACCEPT_LINES)); } catch {} }
             },
           },
         ],
@@ -1376,7 +1487,7 @@ export default function MapScreen() {
       // Voice-driven reports get a spoken acknowledgement so the driver can keep eyes on the road
       if (opts?.fromVoice && !navMuted) {
         const label = kind === "police" ? "Police" : kind === "accident" ? "Accident" : kind === "traffic" ? "Traffic" : "Hazard";
-        try { announce(`${label} reported. Thanks driver.`); } catch {}
+        try { announce(reportConfirmLine(label)); } catch {}
       }
     } catch (e: any) {
       Alert.alert("Report failed", e?.message || formatErr(e));
@@ -1490,7 +1601,7 @@ export default function MapScreen() {
       if (dM > 600) { announced.delete(c.id); continue; }   // re-arm once well past
       if (dM <= 100 && kmh >= 25 && !announced.has(c.id)) {
         announced.add(c.id);
-        if (!navMuted) { try { announce("Speed camera ahead."); } catch {} }
+        if (!navMuted) { try { announce(pick(SPEED_CAMERA_LINES)); } catch {} }
       }
     }
   }, [coords?.lat, coords?.lng, speedCameras, speedCamerasEnabled, navMuted]);
@@ -1515,12 +1626,7 @@ export default function MapScreen() {
       if (dM <= 500 && kmh >= 20 && !announced.has(h.id)) {
         announced.add(h.id);
         if (!navMuted) {
-          const phrase =
-            h.kind === "police" ? "Heads up, police reported ahead." :
-            h.kind === "accident" ? "Accident reported ahead." :
-            h.kind === "traffic" ? "Traffic reported ahead." :
-            "Hazard on the road ahead.";
-          try { announce(phrase); } catch {}
+          try { announce(hazardAheadLine(h.kind)); } catch {}
         }
       }
     }
@@ -2056,7 +2162,7 @@ export default function MapScreen() {
         const instruction = upcoming?.html ? upcoming.html : verb;
         return (
           <TurnByTurnNav
-            maneuverIcon={maneuverIcon(upcoming?.maneuver)}
+            maneuverIcon={maneuverIcon(upcoming?.maneuver, upcoming?.html)}
             distanceToTurn={fmtDistanceM(tbt.distanceToManeuverM)}
             instruction={instruction}
             eta={fmtEtaSec(tbt.etaSeconds)}

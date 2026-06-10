@@ -20,7 +20,7 @@ import { Audio } from "expo-av";
 import { api } from "./api";
 import { getPttRecordingOptions, type ProximityTier } from "./proximityAudio";
 import { livePttBus, type PTTMessage } from "./livePtt";
-import { setRecordingAudioMode } from "./audioMode";
+import { setRecordingAudioMode, setIdleAudioMode } from "./audioMode";
 
 export type { PTTMessage };
 
@@ -203,6 +203,10 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
       uri = rec.getURI?.() ?? null;
     } finally {
       setRecording(false);
+      // Recording is done — drop the ducking session back to non-ducking idle so
+      // external music (Spotify, podcasts) returns to full volume right away
+      // instead of staying quiet until the next clip / app restart.
+      void setIdleAudioMode();
     }
     if (!uri) return false;
     // Ignore accidental sub-300ms taps — nothing meaningful was said.
@@ -234,6 +238,9 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
     setRecording(false);
     if (!rec) return;
     try { await rec.stopAndUnloadAsync(); } catch {}
+    // Cancelled recording — release the ducking session so external music
+    // returns to full volume immediately.
+    void setIdleAudioMode();
   }, []);
 
   // ===== Hands-free VOX (voice-activated transmit) =====

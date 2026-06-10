@@ -170,7 +170,13 @@ async function playOne(m: PTTMessage) {
 function drain() {
   if (playing) return;
   const next = queue.shift();
-  if (!next) return;
+  if (!next) {
+    // No more clips queued — release the ducking session that playOne() set, so
+    // external music (Spotify, podcasts) returns to full volume instead of
+    // staying quiet until the next clip or an app restart.
+    void setIdleAudioMode();
+    return;
+  }
   playing = true;
   playOne(next);
 }

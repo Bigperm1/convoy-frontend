@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder, TextInput } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder, TextInput, AppState } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -1120,6 +1120,22 @@ export default function MapScreen() {
     return () => clearTimeout(t);
   }, [coords]);
 
+  // App foreground/background state — gates battery-hungry work (the 1 Hz GPS
+  // watcher and the nearby-driver poll) so it pauses while the app is in the
+  // background and we're not navigating. The audio session stays active in the
+  // background (for PTT + nav voice), which keeps JS timers alive — so without
+  // this, GPS + polling would otherwise keep running on the home/lock screen.
+  const [appActive, setAppActive] = useState(true);
+  useEffect(() => {
+    const s = AppState.addEventListener("change", (st) => setAppActive(st === "active"));
+    return () => s.remove();
+  }, []);
+  // Live nav flag the watcher can read WITHOUT re-subscribing on every nav
+  // start/stop (re-subscribing mid-drive would blip GPS). Only appActive flips
+  // the watcher; nav state is consulted via this ref.
+  const navActiveRef = useRef(false);
+  useEffect(() => { navActiveRef.current = navMode === "turn-by-turn"; }, [navMode]);
+
   // ----- Continuous heading + position watcher -----
   // BestForNavigation accuracy + 1s tick + 0m distance gate so the speedometer
   // updates every second instead of every ~4s/8m. Battery cost is acceptable
@@ -1135,6 +1151,12 @@ export default function MapScreen() {
     (async () => {
       try {
         if (!(await ensureLocationPermission())) return;
+        // Battery: don't run the high-accuracy 1 Hz GPS watcher while the app is
+        // backgrounded AND we're not navigating — there's no visible map and no
+        // route to follow, so it would just drain the battery. Foreground OR an
+        // active turn-by-turn route keeps it on. (Backgrounded navigation also
+        // has its own bg-location task in navNotification.ts.)
+        if (!appActive && !navActiveRef.current) return;
         sub = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 0 },
           (pos) => {
@@ -1218,7 +1240,9 @@ export default function MapScreen() {
       } catch {}
     })();
     return () => { try { sub?.remove?.(); } catch {} };
-  }, []);
+    // Re-subscribe only on foreground/background change (not on every nav
+    // start/stop — that's read via navActiveRef to avoid GPS blips mid-drive).
+  }, [appActive]);
 
   // ----- Hazard/Police reporting (Waze-style "5s ago" anchor) -----
   // Drivers usually notice a hazard a beat after they pass it. Snapping the
@@ -1436,9 +1460,14 @@ export default function MapScreen() {
   // peers appear even if the presence WebSocket never connects. loadPeers
   // MERGES (never wipes) so live WS/presence updates aren't clobbered.
   useEffect(() => {
+    // Battery: pause the 10s network poll while backgrounded — the map isn't
+    // visible, so polling peers just wakes the cellular radio for nothing.
+    // Refresh once immediately on (re)foreground so peers are fresh on return.
+    if (!appActive) return;
+    loadPeers();
     const t = setInterval(() => { loadPeers(); }, 10000);
     return () => clearInterval(t);
-  }, []);
+  }, [appActive]);
 
   // Force a full state refresh — used by the ⟳ button in the header. Mirrors
   // what a "pull to refresh" would do: requery GPS for a fresh lock, push the

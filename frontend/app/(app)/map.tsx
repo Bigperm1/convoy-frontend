@@ -1994,6 +1994,9 @@ export default function MapScreen() {
         // by-turn nav is actively running. Pitch defaults to 45° in ConvoyMap.
         navigationActive={navMode === "turn-by-turn" && tbt.active}
         userSpeedMs={coords?.speed}
+        // Feeds the dynamic corner zoom: ease wider on the straights, tighten in
+        // as the next maneuver approaches.
+        distanceToManeuverM={tbt.distanceToManeuverM}
         // Tap on empty map → close any open search overlay so the driver can
         // peek at the map fullscreen mid-trip without ending navigation.
         onMapPress={() => { /* search bar stays pinned until a route is selected — no auto-hide on map tap */ }}

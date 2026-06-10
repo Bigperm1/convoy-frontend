@@ -83,6 +83,9 @@ interface ConvoyMapProps {
   onUserPan?: () => void;
   navigationActive?: boolean;
   userSpeedMs?: number;
+  // Live distance (m) to the next maneuver, from the turn-by-turn engine. Drives
+  // the dynamic "ease wider, tighten into the corner" chase zoom.
+  distanceToManeuverM?: number;
   showTraffic?: boolean;
   onMapPress?: () => void;
   onHazardPress?: (h: Hazard) => void;
@@ -116,12 +119,22 @@ function destWxIcon(kind: WeatherKind): { name: string; color: string; mci: bool
 
 // ===== Chase-cam tuning — mirrors ConvoyMap.web.tsx =====
 const CHASE_PITCH_DEG = 45;
-const CHASE_ZOOM_CITY = 18;
-const CHASE_ZOOM_HIGHWAY = 16;
+// Baseline chase zoom is deliberately a notch WIDER than before (was 18/16) so
+// in portrait you see more of the road ahead. We tighten back in near corners
+// (see cornerZoom below), so this trades default closeness for situational
+// awareness without losing detail at the turn.
+const CHASE_ZOOM_CITY = 17;
+const CHASE_ZOOM_HIGHWAY = 15;
 const CHASE_KMH_CITY = 30;
 const CHASE_KMH_HIGHWAY = 100;
 const FREE_ZOOM = 15;
 const FOLLOW_ZOOM = 17;
+// Dynamic corner zoom: as the next maneuver approaches, ease the camera in to
+// this tighter level so the turn is easy to read in portrait. Beyond FAR we sit
+// at the (wider) speed baseline; within NEAR we're fully zoomed to CORNER.
+const CORNER_ZOOM = 18.5;
+const CORNER_FAR_M = 280;
+const CORNER_NEAR_M = 70;
 
 function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
 function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
@@ -129,6 +142,16 @@ function chaseZoomForSpeed(kmh: number) {
   if (kmh <= CHASE_KMH_CITY) return CHASE_ZOOM_CITY;
   if (kmh >= CHASE_KMH_HIGHWAY) return CHASE_ZOOM_HIGHWAY;
   return lerp(CHASE_ZOOM_CITY, CHASE_ZOOM_HIGHWAY, (kmh - CHASE_KMH_CITY) / (CHASE_KMH_HIGHWAY - CHASE_KMH_CITY));
+}
+// Blend the speed baseline with a corner zoom-in. `t` goes 0 (>= FAR from the
+// turn) → 1 (<= NEAR). We never zoom out below the speed baseline, only tighten
+// in toward CORNER_ZOOM as the maneuver nears, and the 700ms animateCamera makes
+// it read as a smooth ease rather than a snap.
+function chaseZoom(kmh: number, distToManeuverM?: number) {
+  const base = chaseZoomForSpeed(kmh);
+  if (typeof distToManeuverM !== "number" || !Number.isFinite(distToManeuverM) || distToManeuverM <= 0) return base;
+  const t = (CORNER_FAR_M - distToManeuverM) / (CORNER_FAR_M - CORNER_NEAR_M);
+  return Math.max(base, lerp(base, CORNER_ZOOM, t));
 }
 
 // Decode a Google encoded polyline into [{latitude, longitude}]. react-native-maps
@@ -413,22 +436,18 @@ function RouteEtaMarker({ coordinate, label, selected, onPress }: {
 // A fixed speed-camera pin (OpenStreetMap), drawn via react-native-maps' NATIVE
 // `image` prop — NOT a captured child <View>/<Ionicons>.
 //
-// The old version rendered an Ionicons "camera" GLYPH inside a styled View and
-// relied on the snapshot→bitmap capture path. On New-Architecture Android that
-// vector font glyph wasn't rasterized when the marker bitmap was frozen, so the
-// capture came back BLANK and cameras showed on iOS but NEVER on Android (even
-// with the 3 s settle window). The native image prop draws the bundled PNG
-// directly: no capture, no blank pins, identical on both platforms. Density
-// variants (speed_camera@2x/@3x.png) size it to the ~26 pt pin.
+// Speed-camera pin. Rendered as a CHILD <Image> inside the Marker (the exact
+// path HazardMarker/police use and which is proven to render on Android),
+// NOT via the native `image` prop. The `image` prop on react-native-maps
+// Android is unreliable for JS-bundled / OTA-delivered PNGs — it left cameras
+// blank on Android even after the glyph→PNG swap and the tracksViewChanges fix.
+// Hazards and police, which use a child <Image>, render fine on the same
+// devices, so we mirror them exactly. Density variants (@2x/@3x) size it.
 const CAMERA_ICON = require("../assets/images/speed_camera.png");
 
 function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
-  // Start tracking, then freeze after the settle window — same dance as
-  // HazardMarker. On Android, react-native-maps markers mounted with
-  // tracksViewChanges={false} BEFORE the image bitmap has loaded render blank
-  // and never repaint (the camera "fix" that swapped the glyph for a PNG still
-  // hit this). Tracking for the first frames lets the icon paint, then we freeze
-  // so we're not re-rasterizing every pin on every camera commit.
+  // Track on mount so the child <Image> bitmap is captured once the PNG has
+  // loaded, then freeze so we're not re-rasterizing every pin on every commit.
   const [track, setTrack] = useState(true);
   useEffect(() => {
     setTrack(true);
@@ -439,10 +458,11 @@ function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
     <Marker
       coordinate={{ latitude: lat, longitude: lng }}
       anchor={{ x: 0.5, y: 0.5 }}
-      image={CAMERA_ICON as any}
-      tracksViewChanges={track}
       zIndex={4}
-    />
+      tracksViewChanges={track}
+    >
+      <Image source={CAMERA_ICON} style={styles.cameraIcon} resizeMode="contain" />
+    </Marker>
   );
 }
 
@@ -589,7 +609,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
     center, user, peers, hideSelfMarker, mapView = "heading_up",
     mapType = "hybrid", mapDark = false, leaderUserId, hazards, speedCameras, highlightConvoy,
     destination, destWeather, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute,
-    followUser = false, onUserPan, navigationActive = false, userSpeedMs,
+    followUser = false, onUserPan, navigationActive = false, userSpeedMs, distanceToManeuverM,
     showTraffic = true, onMapPress, onMapLongPress, onHazardPress, onHazardLongPress,
     onPeerPress, onMapReady, places, onPlacePress, showPlacePins = true,
   } = props;
@@ -673,7 +693,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
     let camHeading = 0;
 
     if (navigationActive) {
-      zoom = chaseZoomForSpeed(kmhFromMs(userSpeedMs));
+      zoom = chaseZoom(kmhFromMs(userSpeedMs), distanceToManeuverM);
       pitch = isHeadingUp ? CHASE_PITCH_DEG : 0;
       camHeading = isHeadingUp ? heading : 0;
     } else if (followUser) {
@@ -719,7 +739,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
   useEffect(() => {
     commitCamera(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.lat, user?.lng, user?.heading, userSpeedMs, followUser, navigationActive, mapView]);
+  }, [user?.lat, user?.lng, user?.heading, userSpeedMs, distanceToManeuverM, followUser, navigationActive, mapView]);
 
   // When nav ends, flatten the camera back to north-up free-roam.
   useEffect(() => {
@@ -889,16 +909,32 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
         {destination && routes[selectedRouteIndex] && (() => {
           const coords = smoothedRouteCoords[selectedRouteIndex] || [];
           if (coords.length === 0) return null;
+          // Google-Maps-style route line: a darker-blue CASING drawn first
+          // (wider, lower zIndex) with a brighter blue CORE on top, so the line
+          // reads as a thick rounded ribbon with a crisp edge against satellite/
+          // dark basemaps — instead of a thin flat stroke. Both keyed by the
+          // selection so iOS fully remounts them (stale-stroke-color workaround).
           return (
-            <Polyline
-              key={`sel_${selectedRouteIndex}`}
-              coordinates={coords}
-              strokeColor="#0A84FF"
-              strokeWidth={7}
-              zIndex={3}
-              lineCap="round"
-              lineJoin="round"
-            />
+            <React.Fragment key={`sel_${selectedRouteIndex}`}>
+              <Polyline
+                key={`sel_casing_${selectedRouteIndex}`}
+                coordinates={coords}
+                strokeColor="#0A3D91"
+                strokeWidth={13}
+                zIndex={2}
+                lineCap="round"
+                lineJoin="round"
+              />
+              <Polyline
+                key={`sel_core_${selectedRouteIndex}`}
+                coordinates={coords}
+                strokeColor="#2A8CFF"
+                strokeWidth={9}
+                zIndex={3}
+                lineCap="round"
+                lineJoin="round"
+              />
+            </React.Fragment>
           );
         })()}
 
@@ -949,6 +985,7 @@ const styles = StyleSheet.create({
   },
   hazardPinConvoy: { borderColor: "#FFD60A" },
   hazardIcon: { width: 40, height: 40 },
+  cameraIcon: { width: 34, height: 34 },
   placePinWrap: { alignItems: "center", maxWidth: 150 },
   placeLabel: {
     backgroundColor: "#FFFFFF",

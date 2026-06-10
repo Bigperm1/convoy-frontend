@@ -145,7 +145,7 @@ export default function WeatherHUD({ weather, unit, compact, forecast }: Props) 
           testID="weather-chip"
         >
           <WeatherGlyph kind={weatherKind(weather)} size={26} />
-          <Text style={styles.compactTemp}>{temp}</Text>
+          <Text style={styles.compactTemp} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{temp}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -223,9 +223,9 @@ const styles = StyleSheet.create({
   // Compact temp-only chip — matches the SpeedPill box (size + opacity) so the
   // weather + speed chips stack cleanly in the bottom-left HUD column.
   compactChip: {
-    width: 78,
+    width: 84,
     height: 60,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingVertical: 8,
     borderRadius: 16,
     backgroundColor: "rgba(22,22,24,0.92)",

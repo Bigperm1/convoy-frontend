@@ -109,8 +109,8 @@ export function SpeedPill({ speedMs, unit, bottom, limitKmh }: { speedMs?: numbe
         />
       )}
       <View style={[styles.speedPill, speeding && styles.speedPillOver]}>
-        <Text style={styles.speedValue}>{value}</Text>
-        <Text style={[styles.speedUnit, speeding && styles.speedUnitOver]}>{isMph ? "mph" : "km/h"}</Text>
+        <Text style={styles.speedValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{value}</Text>
+        <Text style={[styles.speedUnit, speeding && styles.speedUnitOver]} numberOfLines={1}>{isMph ? "mph" : "km/h"}</Text>
       </View>
     </View>
   );
@@ -235,9 +235,9 @@ const styles = StyleSheet.create({
   // ----- Speed pill (always-on, bottom-left) -----
   speedWrap: { position: "absolute", left: 12, bottom: 90, zIndex: 55 },
   speedPill: {
-    width: 78,
+    width: 84,
     height: 60,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingVertical: 8,
     borderRadius: 16,
     backgroundColor: "rgba(22,22,24,0.92)",

@@ -41,12 +41,20 @@ function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): num
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 
-/** Fetch fixed speed cameras within `radiusM` of a point from OSM Overpass. */
+/**
+ * Fetch fixed speed cameras within `radiusM` of a point from OSM Overpass.
+ *
+ * Returns an ARRAY on a successful response (possibly empty — that genuinely
+ * means "no cameras in this radius"), or `null` when EVERY mirror failed
+ * (rate-limit / gateway timeout / network error). The caller must treat `null`
+ * differently from `[]`: a failure should be retried, an empty success should
+ * not — see useSpeedCameras.
+ */
 export async function fetchSpeedCamerasAround(
   lat: number,
   lng: number,
   radiusM = FETCH_RADIUS_M
-): Promise<SpeedCamera[]> {
+): Promise<SpeedCamera[] | null> {
   const query =
     `[out:json][timeout:25];node(around:${Math.round(radiusM)},${lat},${lng})[highway=speed_camera];out body;`;
   // Try each mirror in turn; the first that answers OK wins. A non-OK status
@@ -68,7 +76,7 @@ export async function fetchSpeedCamerasAround(
       continue;
     }
   }
-  return [];
+  return null; // every mirror failed — signal "retry", not "no cameras here"
 }
 
 /**
@@ -100,10 +108,20 @@ export function useSpeedCameras(
 
     inFlightRef.current = true;
     lastFetchRef.current = now;
-    centerRef.current = { lat, lng };
+    const fetchedAt = { lat, lng };
     (async () => {
       const cams = await fetchSpeedCamerasAround(lat, lng);
-      setCameras(cams);
+      if (cams) {
+        // Success (even if zero cameras): lock this center so we don't re-query
+        // until the driver leaves the radius.
+        centerRef.current = fetchedAt;
+        setCameras(cams);
+      }
+      // cams === null → every Overpass mirror failed. Deliberately DON'T set
+      // centerRef, so the distance guard stays open and the next GPS tick
+      // retries (still throttled to once per MIN_REFETCH_MS). Without this, a
+      // single failed fetch on app start locked cameras out for ~20km — the
+      // "they showed up, then vanished after a restart and never returned" bug.
       inFlightRef.current = false;
     })();
   }, [lat, lng, enabled]);

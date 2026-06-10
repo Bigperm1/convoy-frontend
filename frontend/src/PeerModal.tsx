@@ -14,6 +14,9 @@ type Props = {
   visible: boolean;
   onClose: () => void;
   myCoords?: { lat: number; lng: number } | null;
+  // The hailing user's OWN personal-best cruise speed (km/h), shown on the YOHB
+  // button as a flex when you fist-bump a peer. Live max-of(persisted, session).
+  myTopSpeed?: number;
 };
 
 function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -35,13 +38,13 @@ const lastSeen = (iso?: string) => {
   return `${Math.round(sec / 3600)}h ago`;
 };
 
-export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
+export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed }: Props) {
   // ===== Hail state =====
   //
   // Three phases:
-  //   idle    Ã¢ÂÂ show "Hail <driver>" with radio icon
-  //   sending Ã¢ÂÂ show "Hailing..." with spinner-ish ellipsis, disable taps
-  //   sent    Ã¢ÂÂ show "Hailed! Ã¢ÂÂ" with checkmark for 3s, then re-enable
+  //   idle    — show "Hail <driver>" with radio icon
+  //   sending — show "Hailing..." with spinner-ish ellipsis, disable taps
+  //   sent    — show "Hailed! ✓" with checkmark for 3s, then re-enable
   //
   // Auto-reset when the modal is closed/reopened so a re-hail starts fresh.
   const [hailing, setHailing] = useState(false);
@@ -63,7 +66,7 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
     if (hailing || hailSent) return;
     setHailing(true);
     try {
-      // Best-effort grab of the current convoy context Ã¢ÂÂ used by the backend
+      // Best-effort grab of the current convoy context — used by the backend
       // to enrich the push payload (not for the share-check; that lives on
       // the Mongo `communities` collection).
       const s = await Promise.resolve().then(() => getSettings()).catch(() => null as any);
@@ -75,7 +78,7 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
       // Auto-reset the confirmation after 3s so the user can hail again.
       setTimeout(() => setHailSent(false), 3000);
     } catch (e: any) {
-      // 403 = "must share a community" Ã¢ÂÂ surface as inline state without
+      // 403 = "must share a community" — surface as inline state without
       // tearing the modal. Other errors are just logged.
       if (__DEV__) console.warn("Hail failed:", e?.response?.data || e);
     } finally {
@@ -152,13 +155,20 @@ export default function PeerModal({ peer, visible, onClose, myCoords }: Props) {
                   size={20}
                   color={hailContent}
                 />
-                <Text style={[styles.hailText, { color: hailContent }]}>
-                  {hailing
-                    ? "HailingÃ¢ÂÂ¦"
-                    : hailSent
-                      ? `Hailed ${peer.handle || "driver"} Ã¢ÂÂ`
-                      : `Hail ${peer.handle || "driver"}`}
-                </Text>
+                <View style={{ alignItems: "center" }}>
+                  <Text style={[styles.hailText, { color: hailContent }]}>
+                    {hailing
+                      ? "YOHB… 👊"
+                      : hailSent
+                        ? `YOHB'd ${peer.handle || "driver"} 👊`
+                        : `YOHB ${peer.handle || "driver"} 👊`}
+                  </Text>
+                  {typeof myTopSpeed === "number" && myTopSpeed > 0 && (
+                    <Text style={[styles.hailSubText, { color: hailContent }]}>
+                      Your PB · {Math.round(myTopSpeed)} km/h
+                    </Text>
+                  )}
+                </View>
               </TouchableOpacity>
             </View>
           </View>
@@ -191,4 +201,5 @@ const styles = StyleSheet.create({
   hailBtnSending: { opacity: 0.75 },
   hailBtnSent: { backgroundColor: COLORS.success },
   hailText: { color: "#fff", fontWeight: "700", fontSize: 15, letterSpacing: 0.2 },
+  hailSubText: { fontWeight: "600", fontSize: 11, letterSpacing: 0.2, opacity: 0.85, marginTop: 1 },
 });

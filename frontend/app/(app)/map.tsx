@@ -280,7 +280,7 @@ function reportConfirmLine(label: string): string {
 }
 
 export default function MapScreen() {
-  const { user, token } = useAuth();
+  const { user, token, refresh } = useAuth();
   const router = useRouter();
   const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number; speed?: number } | null>(null);
   // Cold-start intro overlay (logo on black until the first fix lands).
@@ -1041,7 +1041,7 @@ export default function MapScreen() {
   // Either way, this effect just pops a 5s toast.
   useEffect(() => {
     const off = hailBus.on(({ fromHandle }) => {
-      setHailToast(`🚨 ${fromHandle} is hailing you!`);
+      setHailToast(`👊 ${fromHandle} sent you a YOHB!`);
       if (hailToastTimer.current) clearTimeout(hailToastTimer.current);
       hailToastTimer.current = setTimeout(() => setHailToast(null), 5000);
     });
@@ -1719,7 +1719,12 @@ export default function MapScreen() {
     (async () => {
       try {
         await api.put("/auth/profile", { top_speed_record: Math.round(sessionMaxSpeed * 10) / 10 });
-        // await refresh(); // removed - refresh not available
+        // Pull the persisted value back into the local `user` so the garage PB,
+        // presence broadcast, and anything else reading user.top_speed_record
+        // reflect the new record immediately instead of staying stale until the
+        // next app launch. Throttled (≤1/min) by the guard above, so the extra
+        // /auth/me GET is cheap.
+        await refresh();
       } catch {}
     })();
   }, [sessionMaxSpeed, user?.top_speed_record]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2311,6 +2316,7 @@ export default function MapScreen() {
         visible={!!selectedPeer}
         onClose={() => setSelectedPeer(null)}
         myCoords={coords}
+        myTopSpeed={Math.max(user?.top_speed_record || 0, sessionMaxSpeed)}
       />
 
       {/* Share the current destination to specific community members (push +

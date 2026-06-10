@@ -235,6 +235,13 @@ const DARK_MAP_STYLE: any[] = [
   { featureType: "administrative.country", elementType: "geometry.stroke", stylers: [{ color: "#4b6878" }] },
   { featureType: "administrative.land_parcel", elementType: "labels.text.fill", stylers: [{ color: "#64779e" }] },
   { featureType: "administrative.province", elementType: "geometry.stroke", stylers: [{ color: "#4b6878" }] },
+  // Building FILL is set explicitly (not just the stroke below). Android's Google
+  // Maps SDK fills man_made geometry with its own default — the navy "building
+  // blocks" look we want — while iOS leaves it nearly transparent (flat, washed
+  // out). Pinning the fill makes iOS render buildings like Android instead of
+  // each SDK falling back to a different default. Tune this hex if the blocks
+  // read too light/dark on a real device.
+  { featureType: "landscape.man_made", elementType: "geometry.fill", stylers: [{ color: "#2a3f6a" }] },
   { featureType: "landscape.man_made", elementType: "geometry.stroke", stylers: [{ color: "#334e87" }] },
   { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#023e58" }] },
   { featureType: "poi", elementType: "geometry", stylers: [{ color: "#283d6a" }] },

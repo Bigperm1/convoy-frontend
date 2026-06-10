@@ -1411,8 +1411,8 @@ async def hail_peer(body: HailBody, user=Depends(get_current_user)):
     if push_token:
         await _send_expo_push([{
             "to": push_token,
-            "title": f"🚨 Hail from {sender_handle}",
-            "body": f"{sender_handle} is hailing you on Convoy",
+            "title": f"👊 YOHB from {sender_handle}",
+            "body": f"{sender_handle} sent you a YOHB on Convoy",
             "data": {
                 "type": "hail",
                 "from_id": user["id"],

@@ -334,7 +334,7 @@ function nearestOnPolyline(
 // it behaves identically on iOS. Marker size now comes from the asset itself
 // (the 44 / @2x 88 / @3x 132 px set in assets/vehicles), it rotates to heading
 // via the native `rotation` prop, and glides between fixes via an AnimatedRegion.
-const CarMarker = React.memo(function CarMarker({ car, onPress }: { car: CarPoint; onPress?: () => void }) {
+const CarMarker = React.memo(function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading?: number; onPress?: () => void }) {
   const src = getVehiclePngOrDefault(car.color);
 
   // ===== Smooth gliding position =====
@@ -374,13 +374,21 @@ const CarMarker = React.memo(function CarMarker({ car, onPress }: { car: CarPoin
     }
   }, [car.heading, car.speedMs]);
 
+  // On Android, subtract the map bearing so the flat marker (which the SDK draws
+  // in screen space, not rotated with the map) still points up the rotated road
+  // in heading-up. iOS rotates flat markers with the map, so it uses the raw
+  // compass heading. Normalized to [0,360) to avoid negative angles.
+  const rotation = Platform.OS === "android"
+    ? ((displayHeading - mapHeading) % 360 + 360) % 360
+    : displayHeading;
+
   return (
     <MarkerAnimated
       identifier={car.id}
       coordinate={coord as any}
       anchor={{ x: 0.5, y: 0.5 }}
       flat
-      rotation={displayHeading}
+      rotation={rotation}
       image={src as any}
       tracksViewChanges={false}
       zIndex={car.id === SELF_ID || car.leader ? 1000 : 1}
@@ -388,14 +396,15 @@ const CarMarker = React.memo(function CarMarker({ car, onPress }: { car: CarPoin
     />
   );
 }, (prev, next) => {
-  // Skip re-render unless THIS car's own data changed. Without this, every peer
-  // marker re-rendered on every self GPS fix (the parent rebuilds the cars list
-  // each tick) — a big chunk of the moving-stutter. The self marker still
-  // updates because its own lat/lng/heading change each fix.
+  // Skip re-render unless THIS car's own data changed (or the map bearing moved,
+  // which changes every car's screen rotation in heading-up). Without the per-car
+  // guard, every peer marker re-rendered on every self GPS fix — a big chunk of
+  // the moving-stutter. Re-rendering only updates the cheap native rotation prop.
   const a = prev.car, b = next.car;
   return a.id === b.id && a.lat === b.lat && a.lng === b.lng
     && a.color === b.color && a.heading === b.heading
-    && a.speedMs === b.speedMs && a.leader === b.leader;
+    && a.speedMs === b.speedMs && a.leader === b.leader
+    && prev.mapHeading === next.mapHeading;
 });
 
 // ===== RouteEtaMarker =====
@@ -782,6 +791,16 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routes, destination, navigationActive]);
 
+  // Current map bearing (camera heading), mirroring commitCamera's camHeading:
+  // heading-up while navigating/following → self heading, else north (0). On
+  // Android, react-native-maps does NOT rotate a flat marker WITH the map — the
+  // `rotation` is applied in screen space — so in heading-up the car kept
+  // pointing at its compass heading instead of up the rotated road ("car
+  // sideways"). CarMarker subtracts this bearing on Android so every car rides
+  // nose-forward. iOS rotates flat markers with the map already, so it ignores it.
+  const selfHeadingDeg = (typeof user?.heading === "number" && Number.isFinite(user.heading)) ? user.heading : 0;
+  const mapHeadingDeg = (mapView === "heading_up" && (navigationActive || followUser)) ? selfHeadingDeg : 0;
+
   // ===== Build the car-marker list (self + peers) =====
   const cars: CarPoint[] = [];
   if (!hideSelfMarker && user && typeof user.lat === "number" && typeof user.lng === "number") {
@@ -843,7 +862,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
             Rendered via CarMarker so the PNG is snapshot-captured AFTER load
             (avoids the iOS blue-placeholder-dot bug). */}
         {cars.map((c) => (
-          <CarMarker key={c.id} car={c} onPress={() => { if (c.peer) onPeerPress?.(c.peer); }} />
+          <CarMarker key={c.id} car={c} mapHeading={mapHeadingDeg} onPress={() => { if (c.peer) onPeerPress?.(c.peer); }} />
         ))}
 
         {/* Community hazard pins. Gold ring when Highlight Convoy is on. */}

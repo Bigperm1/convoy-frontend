@@ -3,7 +3,7 @@ import { Tabs, useRouter, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
-import { View, ActivityIndicator, Platform, StyleSheet, Text } from "react-native";
+import { View, ActivityIndicator, Platform, StyleSheet, Text, AppState } from "react-native";
 import { BlurView } from "expo-blur";
 import VoiceController from "../../src/VoiceController";
 import VoiceTabButton from "../../src/VoiceTabButton";
@@ -152,6 +152,21 @@ export default function AppLayout() {
     if (!user) return;
     registerForPushNotifications();
   }, [user]);
+
+  // ===== Clear the app-icon badge =====
+  // A backgrounded Hail/YOHB push carries `badge: 1`, so iOS stamps the app
+  // icon. Nothing ever reset it, so the badge stuck forever. Opening the app
+  // means you've read it — so zero the badge on launch AND every time the app
+  // returns to the foreground. (Foreground pushes set no badge — see the
+  // notification handler's shouldSetBadge:false — so there's nothing to clear
+  // while already open.)
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const clear = () => { Notifications.setBadgeCountAsync(0).catch(() => {}); };
+    clear();
+    const sub = AppState.addEventListener("change", (st) => { if (st === "active") clear(); });
+    return () => sub.remove();
+  }, []);
 
   // Backfill the car identity from the account profile whenever the user loads.
   // A fresh install / new build wipes local AsyncStorage, so without this the

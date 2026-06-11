@@ -86,6 +86,9 @@ interface ConvoyMapProps {
   // Live distance (m) to the next maneuver, from the turn-by-turn engine. Drives
   // the dynamic "ease wider, tighten into the corner" chase zoom.
   distanceToManeuverM?: number;
+  // Coordinate of the upcoming maneuver (the corner). The turn arrow locks here
+  // and snaps to the next corner when this step completes. null = no arrow.
+  maneuverCoord?: { lat: number; lng: number } | null;
   showTraffic?: boolean;
   onMapPress?: () => void;
   onHazardPress?: (h: Hazard) => void;
@@ -339,21 +342,18 @@ function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): num
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 
-// Walk `aheadM` metres forward along the route polyline from the point nearest
-// (fromLat,fromLng) — i.e. the driver's snapped position — and return the point
-// there plus the route bearing at that point. Used to drop the upcoming-turn
-// arrow ON the route line at the next maneuver (distanceToManeuverM ahead).
-function pointAlongRoute(
+// Bearing (deg) of the route AT the point nearest (lat,lng) — i.e. the direction
+// of travel through the maneuver. Used to orient the stationary turn arrow that
+// sticks to the corner. Returns null if the polyline is too short.
+function bearingAtPointOnRoute(
   pts: { latitude: number; longitude: number }[],
-  fromLat: number,
-  fromLng: number,
-  aheadM: number
-): { lat: number; lng: number; bearing: number } | null {
-  if (!pts || pts.length < 2 || !(aheadM > 0)) return null;
-  // 1. nearest segment + projection (equirectangular, mirrors nearestOnPolyline)
-  const kx = Math.cos((fromLat * Math.PI) / 180);
-  const px = fromLng * kx, py = fromLat;
-  let bestI = 0, bestLat = pts[0].latitude, bestLng = pts[0].longitude, bestD = Infinity;
+  lat: number,
+  lng: number
+): number | null {
+  if (!pts || pts.length < 2) return null;
+  const kx = Math.cos((lat * Math.PI) / 180);
+  const px = lng * kx, py = lat;
+  let bestI = 0, bestD = Infinity;
   for (let i = 0; i < pts.length - 1; i++) {
     const ax = pts[i].longitude * kx, ay = pts[i].latitude;
     const bx = pts[i + 1].longitude * kx, by = pts[i + 1].latitude;
@@ -364,30 +364,17 @@ function pointAlongRoute(
     const cx = ax + t * dx, cy = ay + t * dy;
     const ex = px - cx, ey = py - cy;
     const d = ex * ex + ey * ey;
-    if (d < bestD) { bestD = d; bestI = i; bestLat = cy; bestLng = cx / kx; }
+    if (d < bestD) { bestD = d; bestI = i; }
   }
-  // 2. walk forward from the projection by aheadM metres
-  let remaining = aheadM, curLat = bestLat, curLng = bestLng;
-  for (let i = bestI; i < pts.length - 1; i++) {
-    const sLat = i === bestI ? curLat : pts[i].latitude;
-    const sLng = i === bestI ? curLng : pts[i].longitude;
-    const eLat = pts[i + 1].latitude, eLng = pts[i + 1].longitude;
-    const segLen = haversineM(sLat, sLng, eLat, eLng);
-    if (segLen >= remaining) {
-      const f = segLen > 0 ? remaining / segLen : 0;
-      return { lat: sLat + (eLat - sLat) * f, lng: sLng + (eLng - sLng) * f, bearing: bearingDeg(sLat, sLng, eLat, eLng) };
-    }
-    remaining -= segLen;
-  }
-  const n = pts.length;
-  return { lat: pts[n - 1].latitude, lng: pts[n - 1].longitude, bearing: bearingDeg(pts[n - 2].latitude, pts[n - 2].longitude, pts[n - 1].latitude, pts[n - 1].longitude) };
+  return bearingDeg(pts[bestI].latitude, pts[bestI].longitude, pts[bestI + 1].latitude, pts[bestI + 1].longitude);
 }
 
 // ===== ManeuverArrow =====
-// White chevron dropped on the route line at the upcoming maneuver, pointing
-// the direction of travel through it (Google-style). Uses the NATIVE image prop
-// + flat + rotation (same reliable path as CarMarker), and the same Android
-// map-bearing compensation so it doesn't end up sideways in heading-up.
+// Long white arrow LOCKED to the upcoming corner (the maneuver coordinate),
+// pointing the direction of travel through it. It stays put on the corner and
+// snaps to the next corner when the step completes. Native image prop + flat +
+// rotation (same reliable path as CarMarker) with the Android map-bearing
+// compensation so it isn't sideways in heading-up. zIndex above the route ribbon.
 const TURN_ARROW_ICON = require("../assets/images/turn_arrow.png");
 function ManeuverArrow({ lat, lng, bearing, mapHeading = 0 }: { lat: number; lng: number; bearing: number; mapHeading?: number }) {
   const rotation = Platform.OS === "android"
@@ -401,7 +388,7 @@ function ManeuverArrow({ lat, lng, bearing, mapHeading = 0 }: { lat: number; lng
       rotation={rotation}
       image={TURN_ARROW_ICON as any}
       tracksViewChanges={false}
-      zIndex={4}
+      zIndex={6}
     />
   );
 }
@@ -700,7 +687,7 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
     center, user, peers, hideSelfMarker, mapView = "heading_up",
     mapType = "hybrid", mapDark = false, leaderUserId, hazards, speedCameras, highlightConvoy,
     destination, destWeather, encodedPolyline, routes = [], selectedRouteIndex = 0, onSelectRoute,
-    followUser = false, onUserPan, navigationActive = false, userSpeedMs, distanceToManeuverM,
+    followUser = false, onUserPan, navigationActive = false, userSpeedMs, distanceToManeuverM, maneuverCoord,
     showTraffic = true, onMapPress, onMapLongPress, onHazardPress, onHazardLongPress,
     onPeerPress, onMapReady, places, onPlacePress, showPlacePins = true,
   } = props;
@@ -766,18 +753,16 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
     return { lat: user.lat, lng: user.lng };
   }, [user?.lat, user?.lng, activePolyPts]);
 
-  // Upcoming-turn arrow: a point ON the active route, distanceToManeuverM ahead
-  // of the driver, with the route bearing there. Shown only while navigating and
-  // when the maneuver is reasonably close (18–500 m) so it's the UPCOMING corner,
-  // not a turn miles away. null otherwise (no arrow).
+  // Upcoming-turn arrow LOCKED to the corner: it sits on the maneuver coordinate
+  // (not a moving point ahead of the car) so it stays put on the corner and
+  // snaps to the next corner when the step completes (maneuverCoord changes).
+  // Bearing = the route's direction through that corner. null = no arrow.
   const maneuverArrow = useMemo(() => {
-    if (!navigationActive || !activePolyPts) return null;
-    const d = distanceToManeuverM;
-    if (typeof d !== "number" || !Number.isFinite(d) || d < 18 || d > 500) return null;
-    const from = selfDisplay ?? (user && typeof user.lat === "number" && typeof user.lng === "number" ? { lat: user.lat, lng: user.lng } : null);
-    if (!from) return null;
-    return pointAlongRoute(activePolyPts, from.lat, from.lng, d);
-  }, [navigationActive, activePolyPts, distanceToManeuverM, selfDisplay?.lat, selfDisplay?.lng, user?.lat, user?.lng]);
+    if (!navigationActive || !maneuverCoord || !activePolyPts) return null;
+    const bearing = bearingAtPointOnRoute(activePolyPts, maneuverCoord.lat, maneuverCoord.lng);
+    if (bearing == null) return null;
+    return { lat: maneuverCoord.lat, lng: maneuverCoord.lng, bearing };
+  }, [navigationActive, maneuverCoord?.lat, maneuverCoord?.lng, activePolyPts]);
 
   // ===== Camera control =====
   // followUser (free-roam) → follow position at a fixed zoom, north-up, flat.
@@ -1026,11 +1011,13 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
             never showed even though the OTA shipped. The gray alternates above
             render because they're a plain array of <Polyline> — we match that.
             Dark casing first (wider, lower z), Google-blue core on top. */}
+        {/* Tiffany-blue cased ribbon: a darker teal-blue casing on the edges
+            fading to a bright Tiffany-blue core down the middle. */}
         {destination && (smoothedRouteCoords[selectedRouteIndex]?.length ?? 0) > 0 && (
           <Polyline
             key={`sel_casing_${selectedRouteIndex}`}
             coordinates={smoothedRouteCoords[selectedRouteIndex]}
-            strokeColor="#174EA6"
+            strokeColor="#0C5A63"
             strokeWidth={14}
             zIndex={2}
             lineCap="round"
@@ -1039,11 +1026,22 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
         )}
         {destination && (smoothedRouteCoords[selectedRouteIndex]?.length ?? 0) > 0 && (
           <Polyline
+            key={`sel_mid_${selectedRouteIndex}`}
+            coordinates={smoothedRouteCoords[selectedRouteIndex]}
+            strokeColor="#2FA7A0"
+            strokeWidth={11}
+            zIndex={3}
+            lineCap="round"
+            lineJoin="round"
+          />
+        )}
+        {destination && (smoothedRouteCoords[selectedRouteIndex]?.length ?? 0) > 0 && (
+          <Polyline
             key={`sel_core_${selectedRouteIndex}`}
             coordinates={smoothedRouteCoords[selectedRouteIndex]}
-            strokeColor="#1A73E8"
-            strokeWidth={9}
-            zIndex={3}
+            strokeColor="#81D8D0"
+            strokeWidth={8}
+            zIndex={4}
             lineCap="round"
             lineJoin="round"
           />

@@ -1914,6 +1914,14 @@ export default function MapScreen() {
   //   • turn-by-turn step bar  → lift by the collapsed step-bar height
   const bannerUp = !!destination && !!route && navMode === "preview" && !previewCollapsed;
   const navBarUp = navMode === "turn-by-turn" && tbt.active;
+  // Coordinate of the upcoming corner (current step's end) for the locked turn
+  // arrow. null on the final/arrival leg so no arrow sits on the destination.
+  const maneuverCoord = (() => {
+    const steps = activeRoute?.steps;
+    if (!tbt.active || !steps || tbt.stepIndex >= steps.length - 1) return null;
+    const end = steps[tbt.stepIndex]?.end;
+    return end ? { lat: end.lat, lng: end.lng } : null;
+  })();
   const STEP_BAR_H = 84;
   const controlsBottom = bannerUp
     ? TAB_BAR_H + previewBannerH + 12
@@ -1978,6 +1986,8 @@ export default function MapScreen() {
         // Feeds the dynamic corner zoom: ease wider on the straights, tighten in
         // as the next maneuver approaches.
         distanceToManeuverM={tbt.distanceToManeuverM}
+        // The corner the turn arrow locks onto (snaps to the next when completed).
+        maneuverCoord={maneuverCoord}
         // Tap on empty map → close any open search overlay so the driver can
         // peek at the map fullscreen mid-trip without ending navigation.
         onMapPress={() => { /* search bar stays pinned until a route is selected — no auto-hide on map tap */ }}

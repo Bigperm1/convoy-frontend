@@ -29,11 +29,11 @@ Reuse `_send_expo_push` fan-out to all members of both communities, body `"[Othe
 - **Incoming requests** → Accept / Decline.
 - **Active syncs** → "Synced with [B] · expires in 23 h" + Unsync.
 
-## Open decisions (need your call)
-1. **Proximity basis:** min distance between any two live members (first cars meet) — *recommended* — vs community centroids (whole groups overlap). Min-pairwise fires earlier.
-2. **Re-arm:** if groups separate then re-approach, notify again, or once per sync only? (*Recommended: once per sync.*)
-3. **Who can sync:** any admin/co-admin, or owner only? (*Recommended: any admin.*)
-4. **How B is found:** public search by name, or an explicit sync code the A admin shares? (*Recommended: search public communities + code fallback.*)
+## Decisions — LOCKED (2026-06-10)
+1. **Proximity basis:** min distance between any two *live* members (first cars meet). Fires earliest.
+2. **Re-arm:** notify **once per sync** (`arrived_notified` flag, no re-fire on re-approach).
+3. **Who can sync:** any admin or co-admin (`_is_comm_admin`).
+4. **How B is found:** search public communities by name, with an explicit **sync code** fallback the A admin can share.
 
 ## Perf note
 Proximity-on-`/location` is throttled and only runs when the mover's active community has an `active` sync, so it's cheap in the common (no-sync) case.

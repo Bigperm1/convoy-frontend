@@ -32,8 +32,8 @@ New collection `planned_drives` (the existing community-routes plumbing + `Route
 - **Members:** an "Upcoming drives" list + an incoming card with **Going / Maybe / Decline**; on Going, a **Start route** button (and/or auto-prompt at `scheduled_at`).
 - **Admin sees the RSVP roster** (who's going/maybe/declined).
 
-## Open decisions (need your call)
-1. **Route delivery timing:** send the route on **accept** (member can start anytime) vs at **drive start** (admin triggers, everyone launches together) vs **both**? (*Recommended: on accept, plus an optional admin "start" broadcast.*)
-2. **Route compute:** precompute at create (one route for all) vs per-member from their own location at start. (*Recommended: store destination; compute each member's route from their location when they Start — handles different origins.*) → if so, `polyline` is optional/preview-only.
-3. **Reminders:** push a reminder N minutes before `scheduled_at`? (*Recommended: optional, e.g., 30 min before — needs a light scheduler.*)
-4. **Who can plan:** any admin/co-admin or owner only? (*Recommended: any admin.*)
+## Decisions — LOCKED (2026-06-10)
+1. **Route delivery timing:** route is sent **on accept** (member can Start anytime), **plus** an optional admin **"start together" broadcast** to all "going" attendees.
+2. **Route compute:** store the **destination**; compute **each member's route from their own location** when they hit Start (handles different origins). `polyline` on the drive is **preview-only**.
+3. **Reminders:** push a reminder **30 min before** `scheduled_at` (light scheduler / lazy check on access).
+4. **Who can plan:** any admin or co-admin (`_is_comm_admin`).

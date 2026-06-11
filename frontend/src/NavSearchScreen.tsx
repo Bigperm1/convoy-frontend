@@ -26,7 +26,7 @@ import { COLORS } from "./theme";
 import { autocompletePlaces, placeDetails, Suggestion } from "./places";
 import { getRecentRoutes, removeRecentRoute, RecentRoute } from "./recentRoutes";
 import MemberCarousel, { CarouselMember } from "./components/MemberCarousel";
-import { useSavedPlaces } from "./savedPlaces";
+import { useSavedPlaces, predictDestination, type Prediction } from "./savedPlaces";
 import { Swipeable, GestureHandlerRootView } from "react-native-gesture-handler";
 
 type Props = {
@@ -53,6 +53,10 @@ export default function NavSearchScreen({
   const inputRef = useRef<TextInput>(null);
   const tRef = useRef<any>(null);
   const [saved, , removeSavedPlace] = useSavedPlaces();
+  // Time-of-day prediction over the Home/Work anchors — shown as a one-tap
+  // "PREDICTIVE" row at the top of the idle list (replaces the old always-on
+  // map banner). null when there's no confident guess (no anchors saved, etc.).
+  const [prediction, setPrediction] = useState<Prediction>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -60,9 +64,10 @@ export default function NavSearchScreen({
     setSuggestions([]);
     setLoading(false);
     getRecentRoutes().then(setRecents).catch(() => {});
+    setPrediction(predictDestination(new Date(), origin?.lat, origin?.lng));
     const t = setTimeout(() => inputRef.current?.focus(), 250);
     return () => clearTimeout(t);
-  }, [visible]);
+  }, [visible, origin?.lat, origin?.lng, saved]);
 
   const onChange = (q: string) => {
     setText(q);
@@ -163,6 +168,24 @@ export default function NavSearchScreen({
             </View>
           ) : (
             <>
+              {prediction && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>PREDICTIVE</Text>
+                  <TouchableOpacity
+                    style={styles.resultRow}
+                    onPress={() => pickSaved(prediction.place)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.pinWrap}>
+                      <Ionicons name="navigate-circle" size={18} color="#FFD60A" />
+                    </View>
+                    <Text style={[styles.resultText, styles.predictiveText]} numberOfLines={1}>
+                      {prediction.place.label}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               {recents.length > 0 && (
                 <View style={styles.section}>
                   <Text style={styles.sectionLabel}>RECENT</Text>
@@ -268,6 +291,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   resultText: { color: COLORS.text, flex: 1, fontSize: 15 },
+  predictiveText: { color: "#FFD60A", fontWeight: "600" },
   swipeRow: { backgroundColor: "#0B0B0D" },
   swipeDelete: {
     backgroundColor: "#FF453A",

@@ -24,6 +24,9 @@ const NAV_NOTIF_ID = "convoy-nav-banner";
 const NAV_CHANNEL = "navigation";
 const ROUTE_KEY = "convoy:navRoute";
 const PROGRESS_KEY = "convoy:navProgress";
+// Only pop the off-screen banner once the next maneuver is this close — so it
+// reads as "your turn is coming up", not a constant ping the whole drive.
+const ANNOUNCE_DISTANCE_M = 500;
 
 type SlimStep = { endLat: number; endLng: number; maneuver?: string; html: string };
 type SlimRoute = { steps: SlimStep[]; destLabel?: string };
@@ -88,7 +91,18 @@ export async function updateNavBanner(lat: number, lng: number): Promise<void> {
   const arriving = idx >= steps.length - 1 && d < 60;
   const stepKey = arriving ? steps.length : idx;
 
-  // Same step as last banner → just persist progress, no re-pop.
+  // ONLY surface the banner when the next maneuver is actually incoming (within
+  // ANNOUNCE_DISTANCE) or we're arriving. Previously it popped on every step
+  // change — often a turn that's still kilometres away — so it re-banner-ed the
+  // whole drive. Far from the turn we stay quiet and just remember progress; the
+  // banner now behaves like Google's "turn left in 400 m", once per turn.
+  const incoming = arriving || d <= ANNOUNCE_DISTANCE_M;
+  if (!incoming) {
+    try { await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx, notified })); } catch {}
+    return;
+  }
+
+  // Already announced THIS turn's incoming banner → don't re-pop on every fix.
   if (stepKey === notified) {
     _notifiedStep = notified;
     try { await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx, notified })); } catch {}
@@ -147,15 +161,15 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
     };
     _route = slim;
     _stepIdx = 0;
-    _notifiedStep = 0;
+    _notifiedStep = -1; // -1 so the FIRST turn still announces when it's incoming
     try {
       await AsyncStorage.setItem(ROUTE_KEY, JSON.stringify(slim));
-      await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx: 0, notified: 0 }));
+      await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx: 0, notified: -1 }));
     } catch {}
 
-    // Immediate first banner so the driver sees it the moment nav starts.
-    const firstNext = slim.steps[Math.min(1, Math.max(0, slim.steps.length - 1))];
-    if (firstNext) await postBanner(strip(firstNext.html) || "Navigating", "Navigation started");
+    // No "Navigation started" banner — the off-screen banner should appear ONLY
+    // when a maneuver is incoming (handled by updateNavBanner's proximity gate),
+    // not the moment nav starts.
 
     // Background location keeps the banner updating while backgrounded. Needs
     // "Always" on iOS / background permission on Android — best-effort.

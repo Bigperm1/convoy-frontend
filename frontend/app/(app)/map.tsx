@@ -41,7 +41,7 @@ import ConvoyLogo from "../../src/components/ConvoyLogo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
 import { prepareRouteGreeting, playPreparedGreeting, clearPreparedGreeting } from "../../src/novaGreeting";
-import { useSavedPlaces, saveSavedPlace, removeSavedPlace, predictDestination, resolveTarget, ensureSavedPlacesLoaded } from "../../src/savedPlaces";
+import { useSavedPlaces, saveSavedPlace, removeSavedPlace, resolveTarget, ensureSavedPlacesLoaded } from "../../src/savedPlaces";
 import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
@@ -502,10 +502,9 @@ export default function MapScreen() {
   }, [destination]);
 
   const [settings] = useSettings();
-  // Saved places (Home/Work/custom) + the time-of-day destination suggestion.
+  // Saved places (Home/Work/custom). The time-of-day prediction now surfaces as
+  // the PREDICTIVE row in the search screen (NavSearchScreen), not an on-map banner.
   const [savedPlaces] = useSavedPlaces();
-  const [suggestion, setSuggestion] = useState<{ lat: number; lng: number; label: string; reason: string } | null>(null);
-  const suggestionDismissedRef = useRef(false);
   // Map base style (satellite vs default road map) is persisted in settings so
   // it's controllable from the Settings screen AND the on-map Layers sheet.
   const mapType: "hybrid" | "roadmap" = (settings as any).mapType ?? "hybrid";
@@ -977,17 +976,6 @@ export default function MapScreen() {
     setSavePlaceModal(null);
     setSavePlaceName("");
   };
-
-  // ----- Predicted destination ("Head to Work?") -----
-  // One-tap accept routes there (same flow as picking a search result); the
-  // greeting + preview banner follow. Dismiss hides it for the session.
-  const acceptSuggestion = () => {
-    if (!suggestion) return;
-    const s = suggestion;
-    setSuggestion(null);
-    onSearchSelectPlace({ lat: s.lat, lng: s.lng, label: s.label });
-  };
-  const dismissSuggestion = () => { suggestionDismissedRef.current = true; setSuggestion(null); };
 
   // ===== Step Drawer =====
   // Slides up from the bottom when a route is selected, lists each maneuver,
@@ -1661,17 +1649,6 @@ export default function MapScreen() {
     }
   }, [coords?.lat, coords?.lng, hazards, showHazards, navMuted]);
 
-  // ----- Predicted destination suggestion -----
-  // When the map is idle (no destination, not navigating) and Home/Work are
-  // saved, surface a one-tap "Head to Work?" from the time-of-day prediction.
-  // Origin is read from coordsRef so this doesn't refire on every GPS tick.
-  useEffect(() => {
-    if (suggestionDismissedRef.current) { setSuggestion(null); return; }
-    if (destination || navMode === "turn-by-turn") { setSuggestion(null); return; }
-    const c = coordsRef.current;
-    const pred = predictDestination(new Date(), c?.lat, c?.lng);
-    setSuggestion(pred ? { lat: pred.place.lat, lng: pred.place.lng, label: pred.place.label, reason: pred.reason } : null);
-  }, [savedPlaces, destination, navMode]);
 
   // ----- Deep link: convoy://go?to=work -----
   // Opens straight into a route to a saved place (powers the iOS Shortcuts
@@ -2353,31 +2330,6 @@ export default function MapScreen() {
       {/* Top-right Layers FAB removed — map layers now live in the Convoy menu
           (tap the logo in the search bar → "Map Layers"). */}
 
-      {/* ===== Predicted-destination suggestion ("Head to Work?") =====
-          Shown on an idle map when Home/Work are saved and the time-of-day
-          prediction has a pick. Go routes there (greeting + preview follow). */}
-      {suggestion && !destination && navMode === "preview" && (
-        <View style={styles.suggestWrap} pointerEvents="box-none">
-          <Glass radius={16} style={styles.suggestCard}>
-            <View style={styles.suggestRow}>
-              <View style={styles.suggestIcon}>
-                <Ionicons name="navigate-circle" size={22} color="#FFD60A" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.suggestTitle} numberOfLines={1}>Head to {suggestion.label}?</Text>
-                <Text style={styles.suggestSub} numberOfLines={1}>Tap Go to start your usual drive</Text>
-              </View>
-              <TouchableOpacity onPress={acceptSuggestion} style={styles.suggestGo} activeOpacity={0.85}>
-                <Text style={styles.suggestGoText}>Go</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={dismissSuggestion} style={{ padding: 6 }}>
-                <Ionicons name="close" size={18} color={COLORS.textDim} />
-              </TouchableOpacity>
-            </View>
-          </Glass>
-        </View>
-      )}
-
       <View pointerEvents="box-none" style={[styles.fabStack, { bottom: controlsBottom }]}>
         {/* Police report button — top of stack. One-tap: posts a hazard with
             kind='police' at the GPS sample closest to (now - 5s), shows a
@@ -2755,16 +2707,6 @@ const styles = StyleSheet.create({
   c: { flex: 1, backgroundColor: "#0A1410" },
   loader: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
 
-  // Predicted-destination suggestion card ("Head to Work?"), top-anchored just
-  // under the search bar so it never collides with the bottom FABs / speedo.
-  suggestWrap: { position: "absolute", left: 12, right: 12, top: Platform.OS === "ios" ? 150 : 124, zIndex: 40 },
-  suggestCard: {},
-  suggestRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10 },
-  suggestIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,214,10,0.15)", alignItems: "center", justifyContent: "center" },
-  suggestTitle: { color: COLORS.text, fontWeight: "700", fontSize: 14 },
-  suggestSub: { color: COLORS.textDim, fontSize: 11, marginTop: 1 },
-  suggestGo: { backgroundColor: "#FFD60A", paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12 },
-  suggestGoText: { color: "#1C1C1E", fontWeight: "800", fontSize: 14 },
 
   topBar: {
     position: 'absolute',

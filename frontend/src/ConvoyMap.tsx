@@ -1110,7 +1110,7 @@ const styles = StyleSheet.create({
   },
   hazardPinConvoy: { borderColor: "#FFD60A" },
   hazardIcon: { width: 40, height: 40 },
-  cameraIcon: { width: 34, height: 34 },
+  cameraIcon: { width: 28, height: 28 },
   placePinWrap: { alignItems: "center", maxWidth: 150 },
   placeLabel: {
     backgroundColor: "#FFFFFF",

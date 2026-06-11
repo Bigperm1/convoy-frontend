@@ -64,10 +64,15 @@ export default function NavSearchScreen({
     setSuggestions([]);
     setLoading(false);
     getRecentRoutes().then(setRecents).catch(() => {});
+    // Prediction is computed ONCE when the sheet opens (origin at that moment).
+    // IMPORTANT: this effect must depend ONLY on `visible` — adding origin/saved
+    // made it re-run on every GPS tick, which cleared the search box mid-type
+    // ("the search bar keeps deleting"). Reset belongs to open/close only.
     setPrediction(predictDestination(new Date(), origin?.lat, origin?.lng));
     const t = setTimeout(() => inputRef.current?.focus(), 250);
     return () => clearTimeout(t);
-  }, [visible, origin?.lat, origin?.lng, saved]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const onChange = (q: string) => {
     setText(q);

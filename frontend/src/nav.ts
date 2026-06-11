@@ -262,7 +262,49 @@ const PREPARE_LEAD_S = 30;     // "In X, turn …" heads-up ~30 s out
 const PREPARE_MIN_M = 150;
 const PREPARE_MAX_M = 1200;
 const ADVANCE_THRESHOLD_M = 25;
-const REROUTE_DISTANCE_M = 80;
+const REROUTE_DISTANCE_M = 80; // PERPENDICULAR distance off the route line before off-route
+
+// Decode a Google encoded polyline → [{lat,lng}]. Used to measure how far off the
+// ROUTE LINE the driver actually is (perpendicular) — the correct off-route signal.
+function decodePolyline(encoded: string): LatLng[] {
+  const pts: LatLng[] = [];
+  let index = 0, lat = 0, lng = 0;
+  try {
+    while (index < encoded.length) {
+      let b: number, shift = 0, result = 0;
+      do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+      shift = 0; result = 0;
+      do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+      pts.push({ lat: lat / 1e5, lng: lng / 1e5 });
+    }
+  } catch { return []; }
+  return pts;
+}
+
+// Min perpendicular distance (m) from a point to the route polyline. Mid-segment
+// on a straight highway this is ~0, so it does NOT false-flag off-route the way
+// distance-to-step-endpoints did (which caused the underpass/bridge detours).
+function distToPolylineM(lat: number, lng: number, pts: LatLng[]): number {
+  if (!pts || pts.length < 2) return Infinity;
+  const kx = Math.cos((lat * Math.PI) / 180);
+  const px = lng * kx, py = lat;
+  let best = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const ax = pts[i].lng * kx, ay = pts[i].lat;
+    const bx = pts[i + 1].lng * kx, by = pts[i + 1].lat;
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const cx = ax + t * dx, cy = ay + t * dy;
+    const ex = px - cx, ey = py - cy;
+    const d = ex * ex + ey * ey;
+    if (d < best) best = d;
+  }
+  return Math.sqrt(best) * 111320;
+}
 
 // Arrival lines — varied so Nova doesn't say the exact same thing every trip.
 // Spoken by the engine (not the screen) so the line survives nav teardown; the
@@ -313,6 +355,8 @@ export function useTurnByTurn(
   const announcedRef = useRef<Set<string>>(new Set());
   const lastSpokeRef = useRef<number>(0);
   const lastOffRouteAtRef = useRef<number>(0);
+  const offRouteStreakRef = useRef<number>(0);
+  const polyCacheRef = useRef<{ key: string; pts: LatLng[] }>({ key: "", pts: [] });
   const stateRef = useRef<TbtState>({
     active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0,
   });
@@ -355,6 +399,11 @@ export function useTurnByTurn(
     if (!r) return;
     const steps = r.steps;
     if (!steps?.length) return;
+
+    // Cache the decoded route polyline per route (for perpendicular off-route).
+    if (polyCacheRef.current.key !== r.polyline) {
+      polyCacheRef.current = { key: r.polyline, pts: r.polyline ? decodePolyline(r.polyline) : [] };
+    }
 
     let stepIdx = Math.min(stateRef.current.stepIndex, steps.length - 1);
     const prevStepIdx = stepIdx;
@@ -406,12 +455,22 @@ export function useTurnByTurn(
       }
     }
 
-    const dStart = haversineMeters(user, cur.start);
-    if (dStart > REROUTE_DISTANCE_M && dManeuver > REROUTE_DISTANCE_M) {
-      const now = Date.now();
-      if (now - lastOffRouteAtRef.current > 8000) {
-        lastOffRouteAtRef.current = now;
-        options?.onOffRoute?.();
+    // Off-route by PERPENDICULAR distance to the route LINE — not distance to the
+    // step's endpoints (which falsely flagged off-route in the middle of a long
+    // highway step → the underpass/bridge detours). Require it to persist ≥2 GPS
+    // ticks so a transient spike under an underpass doesn't trigger a reroute.
+    const routePts = polyCacheRef.current.pts;
+    if (routePts.length >= 2) {
+      const dRoute = distToPolylineM(user.lat, user.lng, routePts);
+      if (dRoute > REROUTE_DISTANCE_M) offRouteStreakRef.current += 1;
+      else offRouteStreakRef.current = 0;
+      if (offRouteStreakRef.current >= 2) {
+        const now = Date.now();
+        if (now - lastOffRouteAtRef.current > 8000) {
+          lastOffRouteAtRef.current = now;
+          offRouteStreakRef.current = 0;
+          options?.onOffRoute?.();
+        }
       }
     }
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput,
   KeyboardAvoidingView, Platform, Alert, Modal, RefreshControl, Share, Image, Switch,
@@ -388,6 +388,7 @@ function SearchModal({ visible, onClose, onChanged }: any) {
 
 function CommunityDetailModal({ community, onClose, onChanged }: any) {
   const [settings] = useSettings();
+  const { user } = useAuth();
   const [c, setC] = useState<any>(null);
   // Description-edit state (admin only). The save button only enables when the
   // textarea has actually changed from the canonical server value.
@@ -493,7 +494,59 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
     ]);
   };
 
+  // ===== Admin: member + admin management =====
+  const refreshDetail = async () => {
+    if (!c?.id) return;
+    try { const { data } = await api.get(`/communities/${c.id}`); setC(data); } catch {}
+  };
+  const removeMember = (m: any) => {
+    Alert.alert("Remove member?", `Remove ${m.handle || "this member"} from the community?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: async () => {
+        try { await api.delete(`/communities/${c.id}/members/${m.id}`); await refreshDetail(); onChanged(); }
+        catch (e) { Alert.alert("Failed", formatErr(e)); }
+      }},
+    ]);
+  };
+  const toggleAdmin = async (m: any) => {
+    try {
+      if (m.is_admin) await api.delete(`/communities/${c.id}/admins/${m.id}`);
+      else await api.post(`/communities/${c.id}/admins/${m.id}`);
+      await refreshDetail(); onChanged();
+    } catch (e) { Alert.alert("Failed", formatErr(e)); }
+  };
+  const transfer = (m: any) => {
+    Alert.alert("Hand over ownership?", `Make ${m.handle || "this member"} the owner? You'll stay on as a regular member.`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Hand over", style: "destructive", onPress: async () => {
+        try { await api.post(`/communities/${c.id}/transfer/${m.id}`); await refreshDetail(); onChanged(); }
+        catch (e) { Alert.alert("Failed", formatErr(e)); }
+      }},
+    ]);
+  };
+
+  // Global member search (find anyone on Convoy, then add to this community).
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const searchTimer = useRef<any>(null);
+  const memberIds: string[] = (c?.members_users || []).map((m: any) => m.id);
+  const doSearch = (q: string) => {
+    setSearchQ(q);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (q.trim().length < 2) { setSearchResults([]); return; }
+    searchTimer.current = setTimeout(async () => {
+      try { const { data } = await api.get("/users/search", { params: { q } }); setSearchResults(data); }
+      catch { setSearchResults([]); }
+    }, 250);
+  };
+  const addMember = async (uid: string) => {
+    try { await api.post(`/communities/${c.id}/members/${uid}`); await refreshDetail(); onChanged(); }
+    catch (e) { Alert.alert("Failed", formatErr(e)); }
+  };
+
   return (
+    <>
     <Modal visible={!!community} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.modalRoot}>
         <View style={[styles.sheet, { maxHeight: "85%" }]}>
@@ -603,33 +656,70 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
 
             {/* Member roster — visible to every member. Shows handle + car
                 line + an ADMIN pill on the owner so it's clear who runs it. */}
-            <Text style={[styles.label, { marginTop: 18 }]}>Members ({c?.members_users?.length || 0})</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 18 }}>
+              <Text style={styles.label}>Members ({c?.members_users?.length || 0})</Text>
+              {c?.is_admin && (
+                <TouchableOpacity
+                  testID="add-member"
+                  onPress={() => { setSearchOpen(true); setSearchQ(""); setSearchResults([]); }}
+                  style={styles.addMemberBtn}
+                >
+                  <Ionicons name="person-add" size={15} color={COLORS.primary} />
+                  <Text style={styles.addMemberText}>Add</Text>
+                </TouchableOpacity>
+              )}
+            </View>
             {(!c?.members_users || c.members_users.length === 0) && (
               <Text style={{ color: COLORS.textMute }}>No members yet</Text>
             )}
-            {c?.members_users?.map((m: any) => (
-              <View key={m.id} style={styles.pendingRow}>
-                <View style={styles.pendingAvatar}><Ionicons name="person" size={16} color="#fff" /></View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Text style={styles.pendingName}>{m.handle || "anon"}</Text>
-                    {m.is_admin && (
-                      <View style={styles.adminBadge}>
-                        <Text style={styles.adminBadgeText}>ADMIN</Text>
-                      </View>
-                    )}
+            {c?.members_users?.map((m: any) => {
+              const isSelf = m.id === user?.id;
+              // Co-admins can only remove regular members; the owner can act on
+              // anyone except themselves. The owner row never shows actions.
+              const canRemove = c?.is_admin && !isSelf && !m.is_owner && (c?.is_owner || !m.is_admin);
+              return (
+                <View key={m.id} style={styles.pendingRow}>
+                  <View style={styles.pendingAvatar}><Ionicons name="person" size={16} color="#fff" /></View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Text style={styles.pendingName}>{m.handle || "anon"}{isSelf ? " (you)" : ""}</Text>
+                      {m.is_owner ? (
+                        <View style={[styles.adminBadge, { backgroundColor: "#FFD60A22" }]}>
+                          <Text style={[styles.adminBadgeText, { color: "#FFD60A" }]}>OWNER</Text>
+                        </View>
+                      ) : m.is_admin ? (
+                        <View style={styles.adminBadge}>
+                          <Text style={styles.adminBadgeText}>ADMIN</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    {(m.car_make || m.car_model || m.car_color) ? (
+                      <Text style={[styles.commMeta, { fontSize: 11 }]} numberOfLines={1}>
+                        {[m.car_color, m.car_make, m.car_model].filter(Boolean).join(" ")}
+                      </Text>
+                    ) : null}
                   </View>
-                  {(m.car_make || m.car_model || m.car_color) ? (
-                    <Text style={[styles.commMeta, { fontSize: 11 }]} numberOfLines={1}>
-                      {[m.car_color, m.car_make, m.car_model].filter(Boolean).join(" ")}
-                    </Text>
-                  ) : null}
+                  {/* Owner-only: promote/demote co-admin (max 2) + hand over ownership. */}
+                  {c?.is_owner && !isSelf && !m.is_owner && (
+                    <>
+                      <TouchableOpacity onPress={() => toggleAdmin(m)} hitSlop={8} style={styles.memberAction} testID={`toggle-admin-${m.id}`}>
+                        <Ionicons name={m.is_admin ? "star" : "star-outline"} size={18} color="#FFD60A" />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => transfer(m)} hitSlop={8} style={styles.memberAction} testID={`transfer-${m.id}`}>
+                        <Ionicons name="ribbon-outline" size={18} color={COLORS.primary} />
+                      </TouchableOpacity>
+                    </>
+                  )}
+                  {canRemove && (
+                    <TouchableOpacity onPress={() => removeMember(m)} hitSlop={8} style={styles.memberAction} testID={`remove-member-${m.id}`}>
+                      <Ionicons name="person-remove-outline" size={18} color={COLORS.danger} />
+                    </TouchableOpacity>
+                  )}
                 </View>
-              </View>
-            ))}
-
-            {c?.is_admin && (
-              <></>
+              );
+            })}
+            {c?.is_owner && (
+              <Text style={styles.adminHint}>★ make/remove admin (max 2) · 🎀 hand over ownership · remove member</Text>
             )}
 
             {c?.is_admin && (
@@ -675,6 +765,60 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
         </View>
       </View>
     </Modal>
+
+    {/* Add-member search — find anyone on Convoy by handle/email and add them. */}
+    <Modal visible={searchOpen} animationType="slide" transparent onRequestClose={() => setSearchOpen(false)}>
+      <View style={styles.modalRoot}>
+        <View style={[styles.sheet, { maxHeight: "80%" }]}>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>Add member</Text>
+            <TouchableOpacity onPress={() => setSearchOpen(false)}><Ionicons name="close" size={22} color={COLORS.textDim} /></TouchableOpacity>
+          </View>
+          <TextInput
+            testID="member-search-input"
+            value={searchQ}
+            onChangeText={doSearch}
+            placeholder="Search Convoy by handle or email"
+            placeholderTextColor={COLORS.textMute}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={[styles.input, { marginTop: 0 }]}
+          />
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }}>
+            {searchResults.map((r: any) => {
+              const already = memberIds.includes(r.id);
+              return (
+                <View key={r.id} style={styles.pendingRow}>
+                  <View style={styles.pendingAvatar}><Ionicons name="person" size={16} color="#fff" /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pendingName}>{r.handle || "anon"}</Text>
+                    {(r.car_make || r.car_model || r.car_color) ? (
+                      <Text style={[styles.commMeta, { fontSize: 11 }]} numberOfLines={1}>
+                        {[r.car_color, r.car_make, r.car_model].filter(Boolean).join(" ")}
+                      </Text>
+                    ) : null}
+                  </View>
+                  {already ? (
+                    <Text style={{ color: COLORS.textMute, fontSize: 12 }}>Member</Text>
+                  ) : (
+                    <TouchableOpacity testID={`add-${r.id}`} onPress={() => addMember(r.id)} style={[styles.smallBtn, { backgroundColor: COLORS.success }]}>
+                      <Text style={styles.smallBtnText}>Add</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              );
+            })}
+            {searchQ.trim().length >= 2 && searchResults.length === 0 && (
+              <Text style={{ color: COLORS.textMute, marginTop: 16, textAlign: "center" }}>No matches</Text>
+            )}
+            {searchQ.trim().length < 2 && (
+              <Text style={{ color: COLORS.textMute, marginTop: 16, textAlign: "center" }}>Type at least 2 characters.</Text>
+            )}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+    </>
   );
 }
 
@@ -766,6 +910,10 @@ const styles = StyleSheet.create({
   },
   adminBadge: { backgroundColor: COLORS.warning + "33", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   adminBadgeText: { color: COLORS.warning, fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
+  addMemberBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.14)" },
+  addMemberText: { color: COLORS.primary, fontSize: 12, fontWeight: "700" },
+  memberAction: { paddingHorizontal: 6, paddingVertical: 4 },
+  adminHint: { color: COLORS.textMute, fontSize: 10, marginTop: 8, lineHeight: 14 },
   activeBadge: { backgroundColor: COLORS.success + "33", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   activeBadgeText: { color: COLORS.success, fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
 

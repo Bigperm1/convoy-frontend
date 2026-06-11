@@ -210,9 +210,15 @@ def public_user(u: dict) -> dict:
         "heading": u.get("heading", 0), "speed": u.get("speed", 0),
     }
 
+# Admin rights = the owner (admin_id) OR any co-admin (up to 2). Owner-only
+# actions (manage co-admins, transfer ownership, delete) check admin_id directly.
+def _is_comm_admin(c: dict, uid: Optional[str]) -> bool:
+    return bool(uid) and (uid == c.get("admin_id") or uid in c.get("co_admins", []))
+
 def public_community(c: dict, viewer_id: Optional[str] = None) -> dict:
     members = c.get("members", [])
     pending = c.get("pending_requests", [])
+    co_admins = c.get("co_admins", [])
     return {
         "id": c["id"], "name": c["name"], "description": c.get("description", ""),
         "is_public": c.get("is_public", True),
@@ -223,9 +229,12 @@ def public_community(c: dict, viewer_id: Optional[str] = None) -> dict:
         "map_enabled": c.get("map_enabled", True),
         "admin_id": c.get("admin_id"),
         "admin_handle": c.get("admin_handle", ""),
+        "co_admins": co_admins,
         "member_count": len(members),
         "pending_count": len(pending),
-        "is_admin": viewer_id == c.get("admin_id"),
+        # is_admin = owner or co-admin; is_owner = the single owner only.
+        "is_admin": _is_comm_admin(c, viewer_id),
+        "is_owner": viewer_id == c.get("admin_id"),
         "is_member": viewer_id in members if viewer_id else False,
         "is_pending": viewer_id in pending if viewer_id else False,
         "invite_code": c.get("invite_code"),
@@ -673,7 +682,7 @@ async def get_community(cid: str, user=Depends(get_current_user)):
     member_ids = c.get("members", [])
     if member_ids:
         members = await db.users.find({"id": {"$in": member_ids}}, {"_id": 0, "password_hash": 0}).to_list(500)
-        is_admin = user["id"] == c.get("admin_id")
+        viewer_is_admin = _is_comm_admin(c, user["id"])
         out["members_users"] = [
             {
                 "id": u["id"],
@@ -682,16 +691,18 @@ async def get_community(cid: str, user=Depends(get_current_user)):
                 "car_model": u.get("car_model", ""),
                 "car_color": u.get("car_color", ""),
                 "car_type": u.get("car_type", ""),
-                # Email only visible to the admin (privacy-friendly default).
-                "email": u.get("email", "") if is_admin or u["id"] == user["id"] else None,
-                "is_admin": u["id"] == c.get("admin_id"),
+                # Email only visible to admins (privacy-friendly default).
+                "email": u.get("email", "") if viewer_is_admin or u["id"] == user["id"] else None,
+                # Role flags so the admin UI can show Owner / Admin / Member.
+                "is_owner": u["id"] == c.get("admin_id"),
+                "is_admin": _is_comm_admin(c, u["id"]),
             }
             for u in members
         ]
     else:
         out["members_users"] = []
-    if user["id"] == c.get("admin_id"):
-        # Return pending request user details for admin
+    if _is_comm_admin(c, user["id"]):
+        # Pending join-request details — visible to any admin (owner or co-admin).
         pending = c.get("pending_requests", [])
         users = await db.users.find({"id": {"$in": pending}}, {"_id": 0, "password_hash": 0}).to_list(200) if pending else []
         out["pending_users"] = [{"id": u["id"], "handle": u.get("handle", ""), "email": u.get("email", "")} for u in users]
@@ -728,7 +739,7 @@ async def request_join(cid: str, user=Depends(get_current_user)):
 async def approve_request(cid: str, uid: str, user=Depends(get_current_user)):
     c = await db.communities.find_one({"id": cid})
     if not c: raise HTTPException(status_code=404, detail="Not found")
-    if user["id"] != c.get("admin_id"): raise HTTPException(status_code=403, detail="Admin only")
+    if not _is_comm_admin(c, user["id"]): raise HTTPException(status_code=403, detail="Admin only")
     await db.communities.update_one({"id": cid}, {
         "$pull": {"pending_requests": uid},
         "$addToSet": {"members": uid},
@@ -740,8 +751,97 @@ async def approve_request(cid: str, uid: str, user=Depends(get_current_user)):
 async def reject_request(cid: str, uid: str, user=Depends(get_current_user)):
     c = await db.communities.find_one({"id": cid})
     if not c: raise HTTPException(status_code=404, detail="Not found")
-    if user["id"] != c.get("admin_id"): raise HTTPException(status_code=403, detail="Admin only")
+    if not _is_comm_admin(c, user["id"]): raise HTTPException(status_code=403, detail="Admin only")
     await db.communities.update_one({"id": cid}, {"$pull": {"pending_requests": uid}})
+    fresh = await db.communities.find_one({"id": cid}, {"_id": 0})
+    return public_community(fresh, viewer_id=user["id"])
+
+# ---------- Community admin: member + admin management ----------
+# Global user search so a community admin can find ANYONE on Convoy by handle or
+# email and add them. Min 2 chars; escaped so user input can't inject regex.
+@api.get("/users/search")
+async def search_users_global(q: str, user=Depends(get_current_user)):
+    term = (q or "").strip()
+    if len(term) < 2:
+        return []
+    rx = {"$regex": re.escape(term), "$options": "i"}
+    found = await db.users.find(
+        {"$or": [{"handle": rx}, {"email": rx}]},
+        {"_id": 0, "password_hash": 0},
+    ).limit(20).to_list(20)
+    return [{
+        "id": u["id"], "handle": u.get("handle", ""),
+        "car_make": u.get("car_make", ""), "car_model": u.get("car_model", ""),
+        "car_color": u.get("car_color", ""),
+    } for u in found]
+
+# Admin directly adds a found user to the community (no pending step).
+@api.post("/communities/{cid}/members/{uid}")
+async def admin_add_member(cid: str, uid: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"id": cid})
+    if not c: raise HTTPException(status_code=404, detail="Not found")
+    if not _is_comm_admin(c, user["id"]): raise HTTPException(status_code=403, detail="Admin only")
+    if not await db.users.find_one({"id": uid}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=404, detail="User not found")
+    await db.communities.update_one({"id": cid}, {
+        "$addToSet": {"members": uid}, "$pull": {"pending_requests": uid},
+    })
+    fresh = await db.communities.find_one({"id": cid}, {"_id": 0})
+    return public_community(fresh, viewer_id=user["id"])
+
+# Admin removes a member. The owner can't be removed; only the owner can remove
+# another admin (co-admins can't kick each other or the owner).
+@api.delete("/communities/{cid}/members/{uid}")
+async def admin_remove_member(cid: str, uid: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"id": cid})
+    if not c: raise HTTPException(status_code=404, detail="Not found")
+    if not _is_comm_admin(c, user["id"]): raise HTTPException(status_code=403, detail="Admin only")
+    if uid == c.get("admin_id"): raise HTTPException(status_code=400, detail="Can't remove the owner")
+    if uid in c.get("co_admins", []) and user["id"] != c.get("admin_id"):
+        raise HTTPException(status_code=403, detail="Only the owner can remove an admin")
+    await db.communities.update_one({"id": cid}, {"$pull": {"members": uid, "co_admins": uid, "pending_requests": uid}})
+    fresh = await db.communities.find_one({"id": cid}, {"_id": 0})
+    return public_community(fresh, viewer_id=user["id"])
+
+# Owner promotes a member to co-admin (max 2).
+@api.post("/communities/{cid}/admins/{uid}")
+async def add_co_admin(cid: str, uid: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"id": cid})
+    if not c: raise HTTPException(status_code=404, detail="Not found")
+    if user["id"] != c.get("admin_id"): raise HTTPException(status_code=403, detail="Owner only")
+    if uid not in c.get("members", []): raise HTTPException(status_code=400, detail="Must be a member first")
+    if uid == c.get("admin_id"): raise HTTPException(status_code=400, detail="Already the owner")
+    co = c.get("co_admins", [])
+    if uid not in co:
+        if len(co) >= 2: raise HTTPException(status_code=400, detail="Max 2 co-admins")
+        await db.communities.update_one({"id": cid}, {"$addToSet": {"co_admins": uid}})
+    fresh = await db.communities.find_one({"id": cid}, {"_id": 0})
+    return public_community(fresh, viewer_id=user["id"])
+
+# Owner demotes a co-admin back to a regular member.
+@api.delete("/communities/{cid}/admins/{uid}")
+async def remove_co_admin(cid: str, uid: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"id": cid})
+    if not c: raise HTTPException(status_code=404, detail="Not found")
+    if user["id"] != c.get("admin_id"): raise HTTPException(status_code=403, detail="Owner only")
+    await db.communities.update_one({"id": cid}, {"$pull": {"co_admins": uid}})
+    fresh = await db.communities.find_one({"id": cid}, {"_id": 0})
+    return public_community(fresh, viewer_id=user["id"])
+
+# Owner hands the community over to another member. The new owner is removed from
+# co_admins (now the owner); the old owner stays on as a regular member.
+@api.post("/communities/{cid}/transfer/{uid}")
+async def transfer_ownership(cid: str, uid: str, user=Depends(get_current_user)):
+    c = await db.communities.find_one({"id": cid})
+    if not c: raise HTTPException(status_code=404, detail="Not found")
+    if user["id"] != c.get("admin_id"): raise HTTPException(status_code=403, detail="Owner only")
+    if uid not in c.get("members", []): raise HTTPException(status_code=400, detail="New owner must be a member")
+    new_owner = await db.users.find_one({"id": uid}, {"_id": 0, "handle": 1})
+    await db.communities.update_one({"id": cid}, {
+        "$set": {"admin_id": uid, "admin_handle": (new_owner or {}).get("handle", "")},
+        "$pull": {"co_admins": uid},
+        "$addToSet": {"members": uid},
+    })
     fresh = await db.communities.find_one({"id": cid}, {"_id": 0})
     return public_community(fresh, viewer_id=user["id"])
 

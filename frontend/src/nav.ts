@@ -8,6 +8,7 @@ import { Platform } from "react-native";
 import { api, GOOGLE_MAPS_KEY } from "./api";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
+import { isOnCall } from "./callState";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -716,10 +717,23 @@ async function playBase64Audio(b64: string, mime: string): Promise<void> {
       let done = false;
       const finish = () => { if (done) return; done = true; resolve(); };
       const watchdog = setTimeout(finish, 15000);
-      Audio.Sound.createAsync({ uri: path }, { shouldPlay: true, rate: NAV_TTS_RATE, shouldCorrectPitch: true, volume: 1.0 })
+      // On a phone call, duck Nova WAY down so she isn't loud over the call —
+      // applies to every callout during the call. Start near-silent and ease up
+      // to the ducked level (gentle fade, no jarring blast); full volume
+      // otherwise. (Call detection is native — inert until that module ships.)
+      const onCall = isOnCall();
+      const targetVol = onCall ? 0.22 : 1.0;
+      const startVol = onCall ? 0.05 : 1.0;
+      Audio.Sound.createAsync({ uri: path }, { shouldPlay: true, rate: NAV_TTS_RATE, shouldCorrectPitch: true, volume: startVol })
         .then(({ sound }) => {
           _currentSound = sound;
-          sound.setVolumeAsync(1.0).catch(() => {});
+          sound.setVolumeAsync(startVol).catch(() => {});
+          if (onCall) {
+            // Fire-and-forget ramp up to the ducked level (~0.3s). If the clip
+            // finishes first, these setVolume calls just no-op on the unloaded sound.
+            setTimeout(() => { sound.setVolumeAsync(0.13).catch(() => {}); }, 120);
+            setTimeout(() => { sound.setVolumeAsync(targetVol).catch(() => {}); }, 280);
+          }
           sound.setOnPlaybackStatusUpdate((status: any) => {
             if (!status?.isLoaded || status?.didJustFinish) {
               if (_currentSound === sound) _currentSound = null;

@@ -19,6 +19,7 @@ import { shareBus } from "../../src/shareBus";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
+import { initCallDetection } from "../../src/callState";
 
 // ===== Push notification module-scope config =====
 //
@@ -167,6 +168,10 @@ export default function AppLayout() {
     const sub = AppState.addEventListener("change", (st) => { if (st === "active") clear(); });
     return () => sub.remove();
   }, []);
+
+  // Start phone-call detection (ducks Nova while on a call). No-op until the
+  // native detector module ships in a build — see src/callState.ts.
+  useEffect(() => { initCallDetection(); }, []);
 
   // Backfill the car identity from the account profile whenever the user loads.
   // A fresh install / new build wipes local AsyncStorage, so without this the

@@ -342,18 +342,22 @@ function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): num
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 
-// Bearing (deg) of the route AT the point nearest (lat,lng) — i.e. the direction
-// of travel through the maneuver. Used to orient the stationary turn arrow that
-// sticks to the corner. Returns null if the polyline is too short.
-function bearingAtPointOnRoute(
+// Slice of the route polyline AROUND the maneuver — from `beforeM` metres before
+// the corner to `afterM` metres after — so the turn arrow FOLLOWS the road and
+// bends through the corner instead of being a straight image. Returns the bent
+// path plus the arrowhead point (path end) and its bearing (last segment dir).
+function routeSliceAround(
   pts: { latitude: number; longitude: number }[],
   lat: number,
-  lng: number
-): number | null {
+  lng: number,
+  beforeM: number,
+  afterM: number
+): { path: { latitude: number; longitude: number }[]; head: { lat: number; lng: number; bearing: number } } | null {
   if (!pts || pts.length < 2) return null;
+  // nearest segment + projection point P (equirectangular)
   const kx = Math.cos((lat * Math.PI) / 180);
   const px = lng * kx, py = lat;
-  let bestI = 0, bestD = Infinity;
+  let bestI = 0, bestLat = pts[0].latitude, bestLng = pts[0].longitude, bestD = Infinity;
   for (let i = 0; i < pts.length - 1; i++) {
     const ax = pts[i].longitude * kx, ay = pts[i].latitude;
     const bx = pts[i + 1].longitude * kx, by = pts[i + 1].latitude;
@@ -364,19 +368,41 @@ function bearingAtPointOnRoute(
     const cx = ax + t * dx, cy = ay + t * dy;
     const ex = px - cx, ey = py - cy;
     const d = ex * ex + ey * ey;
-    if (d < bestD) { bestD = d; bestI = i; }
+    if (d < bestD) { bestD = d; bestI = i; bestLat = cy; bestLng = cx / kx; }
   }
-  return bearingDeg(pts[bestI].latitude, pts[bestI].longitude, pts[bestI + 1].latitude, pts[bestI + 1].longitude);
+  // forward from P, collecting vertices until afterM is consumed
+  const fwd: { latitude: number; longitude: number }[] = [];
+  { let rem = afterM, cuLat = bestLat, cuLng = bestLng;
+    for (let i = bestI; i < pts.length - 1; i++) {
+      const eLat = pts[i + 1].latitude, eLng = pts[i + 1].longitude;
+      const segLen = haversineM(cuLat, cuLng, eLat, eLng);
+      if (segLen >= rem) { const f = segLen > 0 ? rem / segLen : 0; fwd.push({ latitude: cuLat + (eLat - cuLat) * f, longitude: cuLng + (eLng - cuLng) * f }); break; }
+      rem -= segLen; fwd.push({ latitude: eLat, longitude: eLng }); cuLat = eLat; cuLng = eLng;
+    }
+  }
+  // backward from P, collecting vertices until beforeM is consumed
+  const bwd: { latitude: number; longitude: number }[] = [];
+  { let rem = beforeM, cuLat = bestLat, cuLng = bestLng;
+    for (let i = bestI; i >= 0; i--) {
+      const sLat = pts[i].latitude, sLng = pts[i].longitude;
+      const segLen = haversineM(cuLat, cuLng, sLat, sLng);
+      if (segLen >= rem) { const f = segLen > 0 ? rem / segLen : 0; bwd.push({ latitude: cuLat + (sLat - cuLat) * f, longitude: cuLng + (sLng - cuLng) * f }); break; }
+      rem -= segLen; bwd.push({ latitude: sLat, longitude: sLng }); cuLat = sLat; cuLng = sLng;
+    }
+  }
+  const path = [...bwd.reverse(), { latitude: bestLat, longitude: bestLng }, ...fwd];
+  if (path.length < 2) return null;
+  const a = path[path.length - 2], b = path[path.length - 1];
+  return { path, head: { lat: b.latitude, lng: b.longitude, bearing: bearingDeg(a.latitude, a.longitude, b.latitude, b.longitude) } };
 }
 
-// ===== ManeuverArrow =====
-// Long white arrow LOCKED to the upcoming corner (the maneuver coordinate),
-// pointing the direction of travel through it. It stays put on the corner and
-// snaps to the next corner when the step completes. Native image prop + flat +
-// rotation (same reliable path as CarMarker) with the Android map-bearing
-// compensation so it isn't sideways in heading-up. zIndex above the route ribbon.
-const TURN_ARROW_ICON = require("../assets/images/turn_arrow.png");
-function ManeuverArrow({ lat, lng, bearing, mapHeading = 0 }: { lat: number; lng: number; bearing: number; mapHeading?: number }) {
+// ===== ManeuverArrowhead =====
+// Small white arrowhead that caps the bending white shaft polyline at the end of
+// the maneuver slice, pointing the post-turn travel direction. Native image prop
+// + flat + rotation (reliable path) with Android map-bearing compensation so it
+// isn't sideways in heading-up.
+const TURN_ARROWHEAD_ICON = require("../assets/images/turn_arrowhead.png");
+function ManeuverArrowhead({ lat, lng, bearing, mapHeading = 0 }: { lat: number; lng: number; bearing: number; mapHeading?: number }) {
   const rotation = Platform.OS === "android"
     ? ((bearing - mapHeading) % 360 + 360) % 360
     : bearing;
@@ -386,9 +412,9 @@ function ManeuverArrow({ lat, lng, bearing, mapHeading = 0 }: { lat: number; lng
       anchor={{ x: 0.5, y: 0.5 }}
       flat
       rotation={rotation}
-      image={TURN_ARROW_ICON as any}
+      image={TURN_ARROWHEAD_ICON as any}
       tracksViewChanges={false}
-      zIndex={6}
+      zIndex={7}
     />
   );
 }
@@ -753,15 +779,13 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
     return { lat: user.lat, lng: user.lng };
   }, [user?.lat, user?.lng, activePolyPts]);
 
-  // Upcoming-turn arrow LOCKED to the corner: it sits on the maneuver coordinate
-  // (not a moving point ahead of the car) so it stays put on the corner and
-  // snaps to the next corner when the step completes (maneuverCoord changes).
-  // Bearing = the route's direction through that corner. null = no arrow.
+  // Upcoming-turn arrow LOCKED to the corner: a slice of the route polyline that
+  // bends THROUGH the corner (≈45 m before → 22 m after) so the white arrow
+  // follows the road instead of being a straight image. Stays on the corner and
+  // snaps to the next when the step completes (maneuverCoord changes). null = none.
   const maneuverArrow = useMemo(() => {
     if (!navigationActive || !maneuverCoord || !activePolyPts) return null;
-    const bearing = bearingAtPointOnRoute(activePolyPts, maneuverCoord.lat, maneuverCoord.lng);
-    if (bearing == null) return null;
-    return { lat: maneuverCoord.lat, lng: maneuverCoord.lng, bearing };
+    return routeSliceAround(activePolyPts, maneuverCoord.lat, maneuverCoord.lng, 45, 22);
   }, [navigationActive, maneuverCoord?.lat, maneuverCoord?.lng, activePolyPts]);
 
   // ===== Camera control =====
@@ -1011,13 +1035,13 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
             never showed even though the OTA shipped. The gray alternates above
             render because they're a plain array of <Polyline> — we match that.
             Dark casing first (wider, lower z), Google-blue core on top. */}
-        {/* Tiffany-blue cased ribbon: a darker teal-blue casing on the edges
-            fading to a bright Tiffany-blue core down the middle. */}
+        {/* Google-blue cased ribbon: darker-blue casing on the edges, brighter
+            blue core down the middle. */}
         {destination && (smoothedRouteCoords[selectedRouteIndex]?.length ?? 0) > 0 && (
           <Polyline
             key={`sel_casing_${selectedRouteIndex}`}
             coordinates={smoothedRouteCoords[selectedRouteIndex]}
-            strokeColor="#0C5A63"
+            strokeColor="#174EA6"
             strokeWidth={14}
             zIndex={2}
             lineCap="round"
@@ -1026,34 +1050,47 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
         )}
         {destination && (smoothedRouteCoords[selectedRouteIndex]?.length ?? 0) > 0 && (
           <Polyline
-            key={`sel_mid_${selectedRouteIndex}`}
+            key={`sel_core_${selectedRouteIndex}`}
             coordinates={smoothedRouteCoords[selectedRouteIndex]}
-            strokeColor="#2FA7A0"
-            strokeWidth={11}
+            strokeColor="#1A73E8"
+            strokeWidth={9}
             zIndex={3}
             lineCap="round"
             lineJoin="round"
           />
         )}
-        {destination && (smoothedRouteCoords[selectedRouteIndex]?.length ?? 0) > 0 && (
+
+        {/* Upcoming-turn arrow — a white line that BENDS through the corner
+            (follows the route slice) with a dark casing under it and a rounded
+            arrowhead at the end. Direct children of MapView (never a Fragment).
+            lineCap/Join round keeps the bend smooth. */}
+        {maneuverArrow && maneuverArrow.path.length >= 2 && (
           <Polyline
-            key={`sel_core_${selectedRouteIndex}`}
-            coordinates={smoothedRouteCoords[selectedRouteIndex]}
-            strokeColor="#81D8D0"
-            strokeWidth={8}
-            zIndex={4}
+            key="maneuver_arrow_casing"
+            coordinates={maneuverArrow.path}
+            strokeColor="#08234A"
+            strokeWidth={15}
+            zIndex={5}
             lineCap="round"
             lineJoin="round"
           />
         )}
-
-        {/* Upcoming-turn arrow ON the route line (Google-style). Direct child of
-            MapView — never wrapped in a Fragment. */}
+        {maneuverArrow && maneuverArrow.path.length >= 2 && (
+          <Polyline
+            key="maneuver_arrow_shaft"
+            coordinates={maneuverArrow.path}
+            strokeColor="#FFFFFF"
+            strokeWidth={10}
+            zIndex={6}
+            lineCap="round"
+            lineJoin="round"
+          />
+        )}
         {maneuverArrow && (
-          <ManeuverArrow
-            lat={maneuverArrow.lat}
-            lng={maneuverArrow.lng}
-            bearing={maneuverArrow.bearing}
+          <ManeuverArrowhead
+            lat={maneuverArrow.head.lat}
+            lng={maneuverArrow.head.lng}
+            bearing={maneuverArrow.head.bearing}
             mapHeading={mapHeadingDeg}
           />
         )}

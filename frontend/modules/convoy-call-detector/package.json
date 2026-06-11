@@ -1,0 +1,7 @@
+{
+  "name": "convoy-call-detector",
+  "version": "1.0.0",
+  "description": "Reports whether the user is on a phone call, for ducking Nova.",
+  "main": "index.ts",
+  "private": true
+}

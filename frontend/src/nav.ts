@@ -652,7 +652,6 @@ async function drainTtsQueue(): Promise<void> {
   const item = ttsQueue.shift()!;
   if (typeof item !== "string") {
     // Pre-synthesized greeting audio (prepared during preview, no /tts hop).
-    _duckMusicForSpeech();
     try { await playBase64Audio(item._greetAudio, item.mime); } catch {}
   } else if (item === GREETING_DONE_TOKEN) {
     // Greeting + pause finished — release the hold and replay the parked turn.
@@ -662,7 +661,6 @@ async function drainTtsQueue(): Promise<void> {
     const ms = parseInt(item.slice(PAUSE_TOKEN.length), 10) || 0;
     if (ms > 0) await new Promise((r) => setTimeout(r, ms));
   } else {
-    _duckMusicForSpeech();
     try { await speakOne(item); } catch {}
   }
   drainTtsQueue();
@@ -704,8 +702,20 @@ async function playBase64Audio(b64: string, mime: string): Promise<void> {
     // earpiece — that's what made the nav voice sound faint. Forcing playback
     // mode (the same helper comms uses) puts Nova back on the main speaker, and
     // volume:1.0 overrides expo-av's ~0.5 default (so it's markedly louder).
+    // Pause in-app Apple Music ONLY here — at actual playback — not back when the
+    // callout was queued. The /tts synthesis hop runs with music still playing,
+    // so there's no dead-air gap before Nova and the pause lasts only for her
+    // speech. (Apple Music exposes no volume API, so pause is the only lever;
+    // external apps like Spotify are smoothly dipped by the duck audio session.)
+    _duckMusicForSpeech();
     await setPlaybackAudioMode();
     return new Promise((resolve) => {
+      // Watchdog: resolve no matter what so a stalled/never-finishing clip can't
+      // wedge the queue and leave music paused for ages (the "music quit for no
+      // reason, came back a minute later" bug).
+      let done = false;
+      const finish = () => { if (done) return; done = true; resolve(); };
+      const watchdog = setTimeout(finish, 15000);
       Audio.Sound.createAsync({ uri: path }, { shouldPlay: true, rate: NAV_TTS_RATE, shouldCorrectPitch: true, volume: 1.0 })
         .then(({ sound }) => {
           _currentSound = sound;
@@ -715,11 +725,12 @@ async function playBase64Audio(b64: string, mime: string): Promise<void> {
               if (_currentSound === sound) _currentSound = null;
               sound.unloadAsync().catch(() => {});
               FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
-              resolve();
+              clearTimeout(watchdog);
+              finish();
             }
           });
         })
-        .catch(() => resolve());
+        .catch(() => { clearTimeout(watchdog); finish(); });
     });
   } catch { return; }
 }

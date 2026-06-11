@@ -318,7 +318,9 @@ export default function MapScreen() {
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
   // Turn-by-turn navigation state
   const [navMode, setNavMode] = useState<"preview" | "turn-by-turn">("preview");
-  const [navMuted, setNavMuted] = useState(false);
+  // Nova mute — the turn-by-turn banner's speaker button. Persisted so it sticks
+  // across drives/launches; synced if the stored value loads/changes after mount.
+  const [navMuted, setNavMuted] = useState<boolean>(() => getSettings().novaMuted ?? false);
   // ---- UI refinement state (post-field-test) ----
   // Search bar visibility — auto-hides when navigation starts so the destination
   // search field doesn't cover the map. A small magnifying-glass FAB appears in
@@ -753,6 +755,8 @@ export default function MapScreen() {
   useEffect(() => { activeRouteRef.current = activeRoute; }, [activeRoute]);
   const navMutedRef = useRef(navMuted);
   useEffect(() => { navMutedRef.current = navMuted; }, [navMuted]);
+  // Sync the mute from the persisted setting once it loads / changes elsewhere.
+  useEffect(() => { setNavMuted(settings.novaMuted ?? false); }, [settings.novaMuted]);
   const rerouteBusyRef = useRef(false);        // a check is in flight
   const rerouteShowingRef = useRef(false);     // a prompt is currently up
   const rerouteSuppressUntilRef = useRef(0);   // hush window after accept/decline
@@ -2183,7 +2187,7 @@ export default function MapScreen() {
             distanceRemaining={fmtDistanceM(tbt.distanceRemainingM)}
             arrival={fmtClock(new Date(Date.now() + tbt.etaSeconds * 1000))}
             muted={navMuted}
-            onToggleMute={() => setNavMuted((m) => !m)}
+            onToggleMute={() => setNavMuted((m) => { const nv = !m; void updateGlobalSettings({ novaMuted: nv }); return nv; })}
             onEnd={endNav}
           />
         );

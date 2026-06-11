@@ -20,6 +20,9 @@ mapDark: boolean;
 novaGreeting: boolean;
 novaSpeeding: boolean;
 novaMidDrive: boolean;
+// Master mute for all Nova nav/alert speech — toggled by the speaker button on
+// the turn-by-turn banner. Persisted so a muted drive stays muted next time.
+novaMuted: boolean;
 speedUnit: 'kmh' | 'mph';
 speedUnitManual: boolean;
 showWeatherLayer: boolean;
@@ -57,6 +60,7 @@ mapDark: false,
 novaGreeting: true,
 novaSpeeding: true,
 novaMidDrive: true,
+novaMuted: false,
 speedUnit: 'kmh',
 speedUnitManual: false,
 showWeatherLayer: true,

@@ -11,8 +11,11 @@ import {
   ActivityIndicator,
   Modal,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSettings, updateSettings } from "../../src/settings";
+import { startLogin } from "../../src/spotify";
+import SpotifyMusic from "../../src/SpotifyMusic";
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
 import { COLORS } from "../../src/theme";
@@ -46,6 +49,8 @@ import { shareInbox } from "../../src/shareInbox";
 
 // Apple Music brand red → pink.
 const AM_PINK: [string, string] = ["#FB5C74", "#FA2D48"];
+// Spotify brand green.
+const SP_GREEN = "#1DB954";
 
 /**
  * Deep-link into the Apple Music app — used as a fallback when on-device
@@ -132,6 +137,10 @@ export default function MusicScreen() {
   const MONTHS = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"];
   const today = `${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
 
+  // Chosen music source ('apple' | 'spotify' | null). null → show the picker.
+  const [settings] = useSettings();
+  const source = settings.musicSource ?? null;
+
   const [authorized, setAuthorized] = useState(false);
   // True only during the cold-start silent auth check, so we show a spinner
   // instead of briefly flashing the "Connect Apple Music" hero before the
@@ -210,6 +219,7 @@ export default function MusicScreen() {
       const ok = await authorize();
       setAuthorized(ok);
       if (ok) {
+        updateSettings({ musicSource: "apple" }); // switch the Music tab to Apple Music
         const sub = await checkSubscription();
         setCanPlay(sub.canPlay);
         loadLibrary();
@@ -312,6 +322,22 @@ export default function MusicScreen() {
     </TouchableOpacity>
   );
 
+  // ===== Spotify source — its own view (now-playing + Web API controls) =====
+  if (source === "spotify") {
+    return (
+      <SafeAreaView style={styles.c} edges={["top"]}>
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.dateOverline}>{today}</Text>
+            <Text style={styles.title}>Listen Now</Text>
+          </View>
+          <LogoMenu size={30} style={styles.logoBtn} align="right" />
+        </View>
+        <SpotifyMusic onSwitchSource={() => updateSettings({ musicSource: null })} />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.c} edges={["top"]}>
       <ScrollView
@@ -335,7 +361,7 @@ export default function MusicScreen() {
         )}
 
         {/* ===== Authorized: search + library dashboard ===== */}
-        {isMusicSupported && authorized && (
+        {isMusicSupported && authorized && source === "apple" && (
           <>
             {/* Search bar (catalog) */}
             <View style={styles.searchWrap}>
@@ -456,54 +482,79 @@ export default function MusicScreen() {
           </>
         )}
 
-        {/* ===== Connect hero (iOS, not yet authorized) ===== */}
-        {isMusicSupported && !authorized && !initializing && (
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={handleConnect}
-            disabled={connecting}
-            testID="apple-music-connect"
-            style={styles.heroWrap}
-          >
-            <LinearGradient colors={AM_PINK} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-              <View style={styles.heroLogo}>
-                <Ionicons name="musical-notes" size={30} color="#fff" />
+        {/* ===== First-time source picker — branded Apple Music + Spotify cards.
+            Whichever they connect sets settings.musicSource and switches the
+            tab to that player. Keeps Apple Music; adds Spotify (incl. Android). ===== */}
+        {source === null && !initializing && (
+          <>
+            <Text style={styles.pickerLead}>Choose your music</Text>
+
+            {/* Apple Music */}
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => { if (isMusicSupported) handleConnect(); else openAppleMusic(); }}
+              disabled={connecting}
+              testID="pick-apple-music"
+              style={styles.heroWrap}
+            >
+              <LinearGradient colors={AM_PINK} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+                <View style={styles.heroLogo}><Ionicons name="musical-notes" size={28} color="#fff" /></View>
+                <Text style={styles.heroTitle}>Apple Music</Text>
+                <Text style={styles.heroSub}>
+                  {isMusicSupported
+                    ? "Your playlists, library, and recently played — right inside Convoy."
+                    : "In-app playback is iPhone-only. Tap to open Apple Music on this device."}
+                </Text>
+                <View style={styles.heroBtn}>
+                  {connecting ? (
+                    <ActivityIndicator color={AM_PINK[1]} />
+                  ) : (
+                    <>
+                      <Ionicons name={isMusicSupported ? "link" : "open-outline"} size={16} color={AM_PINK[1]} />
+                      <Text style={styles.heroBtnText}>{isMusicSupported ? "Connect Apple Music" : "Open Apple Music"}</Text>
+                    </>
+                  )}
+                </View>
+                <Text style={styles.heroNote}>Apple Music subscription required</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {/* Spotify */}
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => { startLogin().catch(() => {}); }}
+              testID="pick-spotify"
+              style={[styles.heroWrap, { shadowColor: SP_GREEN }]}
+            >
+              <View style={[styles.hero, { backgroundColor: SP_GREEN }]}>
+                <View style={styles.heroLogo}><MaterialCommunityIcons name="spotify" size={32} color="#fff" /></View>
+                <Text style={styles.heroTitle}>Spotify</Text>
+                <Text style={styles.heroSub}>
+                  Control your Spotify and bring your playlists into Convoy — works on Android too.
+                </Text>
+                <View style={styles.heroBtn}>
+                  <MaterialCommunityIcons name="spotify" size={16} color={SP_GREEN} />
+                  <Text style={[styles.heroBtnText, { color: SP_GREEN }]}>Log in with Spotify</Text>
+                </View>
+                <Text style={styles.heroNote}>Spotify Premium required to control playback</Text>
               </View>
-              <Text style={styles.heroTitle}>Apple Music</Text>
-              <Text style={styles.heroSub}>
-                Connect your Apple Music account to bring your playlists, library, and recently played right into Convoy.
-              </Text>
-              <View style={styles.heroBtn}>
-                {connecting ? (
-                  <ActivityIndicator color={AM_PINK[1]} />
-                ) : (
-                  <>
-                    <Ionicons name="link" size={16} color={AM_PINK[1]} />
-                    <Text style={styles.heroBtnText}>Connect Apple Music</Text>
-                  </>
-                )}
-              </View>
-              <Text style={styles.heroNote}>Apple Music subscription required</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+            </TouchableOpacity>
+          </>
         )}
 
-        {/* ===== Non-iOS fallback: deep-link only ===== */}
-        {!isMusicSupported && (
-          <TouchableOpacity activeOpacity={0.9} onPress={() => openAppleMusic()} testID="apple-music-open" style={styles.heroWrap}>
+        {/* ===== Apple reconnect (source = apple but authorization lost) ===== */}
+        {source === "apple" && isMusicSupported && !authorized && !initializing && (
+          <TouchableOpacity activeOpacity={0.9} onPress={handleConnect} disabled={connecting} testID="apple-music-connect" style={styles.heroWrap}>
             <LinearGradient colors={AM_PINK} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-              <View style={styles.heroLogo}>
-                <Ionicons name="musical-notes" size={30} color="#fff" />
-              </View>
+              <View style={styles.heroLogo}><Ionicons name="musical-notes" size={30} color="#fff" /></View>
               <Text style={styles.heroTitle}>Apple Music</Text>
-              <Text style={styles.heroSub}>
-                In-app playback is available on iPhone. Tap to open Apple Music on this device.
-              </Text>
+              <Text style={styles.heroSub}>Reconnect your Apple Music account to keep listening in Convoy.</Text>
               <View style={styles.heroBtn}>
-                <Ionicons name="open-outline" size={16} color={AM_PINK[1]} />
-                <Text style={styles.heroBtnText}>Open Apple Music</Text>
+                {connecting ? <ActivityIndicator color={AM_PINK[1]} /> : (<><Ionicons name="link" size={16} color={AM_PINK[1]} /><Text style={styles.heroBtnText}>Connect Apple Music</Text></>)}
               </View>
-              <Text style={styles.heroNote}>Apple Music subscription required</Text>
+              <TouchableOpacity onPress={() => updateSettings({ musicSource: null })} style={{ marginTop: 12 }}>
+                <Text style={[styles.heroNote, { textDecorationLine: "underline" }]}>Switch source</Text>
+              </TouchableOpacity>
             </LinearGradient>
           </TouchableOpacity>
         )}
@@ -522,10 +573,17 @@ export default function MusicScreen() {
           </View>
         )}
 
-        <Text style={styles.footer}>
-          Convoy plays Apple Music through your own subscription. Your library, account, and billing
-          stay with Apple Music.
-        </Text>
+        {source === "apple" && (
+          <>
+            <Text style={styles.footer}>
+              Convoy plays Apple Music through your own subscription. Your library, account, and billing
+              stay with Apple Music.
+            </Text>
+            <TouchableOpacity onPress={() => updateSettings({ musicSource: null })} style={{ alignSelf: "center", marginTop: 10 }} testID="switch-source-apple">
+              <Text style={[styles.footer, { color: SP_GREEN, marginTop: 0 }]}>Switch music source</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </ScrollView>
 
       {/* ===== Now-playing bar ===== */}
@@ -703,6 +761,7 @@ const styles = StyleSheet.create({
   },
   heroBtnText: { color: "#FA2D48", fontSize: 14, fontWeight: "800", letterSpacing: 0.2 },
   heroNote: { color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: "600", marginTop: 14 },
+  pickerLead: { color: COLORS.text, fontSize: 18, fontWeight: "800", letterSpacing: -0.3, paddingHorizontal: 22, marginTop: 18, marginBottom: 2 },
 
   // ===== Diagnostics (temporary) =====
   diag: {

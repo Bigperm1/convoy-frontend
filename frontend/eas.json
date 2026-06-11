@@ -7,40 +7,56 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "ios": { "simulator": true },
+      "ios": {
+        "simulator": true
+      },
       "channel": "development",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://convoy-backend-j9q1.onrender.com",
         "EXPO_PUBLIC_ENV": "development",
         "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "AIzaSyDj69IfW8Dy7aeX-gaHIdHGsSL1WO7sD_M",
         "EXPO_PUBLIC_SUPABASE_URL": "https://pgtbjiszjglznjagolse.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBndGJqaXN6amdsem5qYWdvbHNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyOTE4NTYsImV4cCI6MjA5Mzg2Nzg1Nn0.ouxO8zCeFi6hjB0UJmDv_k8tPuz0NOWLAZdg91nhyt4"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBndGJqaXN6amdsem5qYWdvbHNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyOTE4NTYsImV4cCI6MjA5Mzg2Nzg1Nn0.ouxO8zCeFi6hjB0UJmDv_k8tPuz0NOWLAZdg91nhyt4",
+        "EXPO_PUBLIC_SPOTIFY_CLIENT_ID": "3be57d90d8bb4fd0b773b303eba47dbf"
       }
     },
     "preview": {
       "distribution": "internal",
-      "ios": { "simulator": false, "resourceClass": "m-medium" },
-      "android": { "buildType": "apk", "resourceClass": "large" },
+      "ios": {
+        "simulator": false,
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "buildType": "apk",
+        "resourceClass": "large"
+      },
       "channel": "preview",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://convoy-backend-j9q1.onrender.com",
         "EXPO_PUBLIC_ENV": "preview",
         "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "AIzaSyDj69IfW8Dy7aeX-gaHIdHGsSL1WO7sD_M",
         "EXPO_PUBLIC_SUPABASE_URL": "https://pgtbjiszjglznjagolse.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBndGJqaXN6amdsem5qYWdvbHNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyOTE4NTYsImV4cCI6MjA5Mzg2Nzg1Nn0.ouxO8zCeFi6hjB0UJmDv_k8tPuz0NOWLAZdg91nhyt4"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBndGJqaXN6amdsem5qYWdvbHNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyOTE4NTYsImV4cCI6MjA5Mzg2Nzg1Nn0.ouxO8zCeFi6hjB0UJmDv_k8tPuz0NOWLAZdg91nhyt4",
+        "EXPO_PUBLIC_SPOTIFY_CLIENT_ID": "3be57d90d8bb4fd0b773b303eba47dbf"
       }
     },
     "production": {
       "distribution": "store",
-      "ios": { "resourceClass": "m-medium" },
-      "android": { "buildType": "app-bundle", "resourceClass": "large" },
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "buildType": "app-bundle",
+        "resourceClass": "large"
+      },
       "channel": "production",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://convoy-backend-j9q1.onrender.com",
         "EXPO_PUBLIC_ENV": "production",
         "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "AIzaSyDj69IfW8Dy7aeX-gaHIdHGsSL1WO7sD_M",
         "EXPO_PUBLIC_SUPABASE_URL": "https://pgtbjiszjglznjagolse.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBndGJqaXN6amdsem5qYWdvbHNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyOTE4NTYsImV4cCI6MjA5Mzg2Nzg1Nn0.ouxO8zCeFi6hjB0UJmDv_k8tPuz0NOWLAZdg91nhyt4"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBndGJqaXN6amdsem5qYWdvbHNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyOTE4NTYsImV4cCI6MjA5Mzg2Nzg1Nn0.ouxO8zCeFi6hjB0UJmDv_k8tPuz0NOWLAZdg91nhyt4",
+        "EXPO_PUBLIC_SPOTIFY_CLIENT_ID": "3be57d90d8bb4fd0b773b303eba47dbf"
       }
     }
   },

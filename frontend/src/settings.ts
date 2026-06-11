@@ -42,6 +42,9 @@ carModel?: string;
 carColor?: string;
 topSpeed?: number;
 callSign?: string;
+// Which music source the user picked in the Music tab ('apple' | 'spotify').
+// null = not chosen yet → show the source-picker connect screen.
+musicSource?: 'apple' | 'spotify' | null;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -79,6 +82,7 @@ carModel: undefined,
 carColor: undefined,
 topSpeed: undefined,
 callSign: undefined,
+musicSource: null,
 };
 
 let cached: Settings = { ...DEFAULT_SETTINGS };

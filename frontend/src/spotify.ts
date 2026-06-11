@@ -8,7 +8,10 @@
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const CLIENT_ID = process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID as string;
+// Hardcoded fallback mirrors the PROD_* pattern in api.ts / supabase.ts — EAS
+// has historically failed to inject EXPO_PUBLIC_* at bundle time, which would
+// silently disable Spotify. This is the PUBLIC PKCE client id (no secret).
+const CLIENT_ID = (process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID || "3be57d90d8bb4fd0b773b303eba47dbf") as string;
 // Redirect target:
 //   - Web: same-origin /spotify-callback (handled by an Expo route)
 //   - Native: custom URL scheme (configured in app.json → expo.scheme).
@@ -24,6 +27,8 @@ const SCOPES = [
   "playlist-read-private",
   "user-read-currently-playing",
   "user-read-playback-state",
+  // Required to CONTROL playback (play/pause/skip/transfer) via the Web API.
+  "user-modify-playback-state",
 ].join(" ");
 
 const TOKEN_KEY = "spotify_access_token";
@@ -187,11 +192,56 @@ async function call<T>(path: string): Promise<T> {
   return res.json();
 }
 
+// GET that tolerates 204 No Content (Spotify returns it when nothing is playing
+// / no active device) — returns null instead of throwing on an empty body.
+async function callSafe<T>(path: string): Promise<T | null> {
+  try {
+    let token = await getStoredToken();
+    if (!token) token = await refreshAccessToken();
+    if (!token) return null;
+    const res = await fetch(`https://api.spotify.com/v1${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.status === 204 || res.status === 404) return null;
+    if (!res.ok) return null;
+    const text = await res.text();
+    return text ? (JSON.parse(text) as T) : null;
+  } catch { return null; }
+}
+
+// PUT/POST control call. Returns { ok, status } — status 404 = no active device
+// (open Spotify once), 403 = Premium required. 204 is the success code here.
+async function mutate(method: "PUT" | "POST", path: string, body?: any): Promise<{ ok: boolean; status: number }> {
+  let token = await getStoredToken();
+  if (!token) token = await refreshAccessToken();
+  if (!token) return { ok: false, status: 401 };
+  const doFetch = (tok: string) => fetch(`https://api.spotify.com/v1${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let res = await doFetch(token);
+  if (res.status === 401) {
+    const t = await refreshAccessToken();
+    if (t) res = await doFetch(t);
+  }
+  return { ok: res.ok || res.status === 204, status: res.status };
+}
+
 export const spotify = {
   me: () => call<any>("/me"),
-  topTracks: () => call<any>("/me/top/tracks?limit=20&time_range=short_term"),
-  myPlaylists: () => call<any>("/me/playlists?limit=20"),
-  currentlyPlaying: () => call<any>("/me/player/currently-playing"),
+  topTracks: () => call<any>("/me/top/tracks?limit=30&time_range=short_term"),
+  myPlaylists: () => call<any>("/me/playlists?limit=30"),
+  currentlyPlaying: () => callSafe<any>("/me/player/currently-playing"),
+  playbackState: () => callSafe<any>("/me/player"),
+  devices: () => callSafe<any>("/me/player/devices"),
+  playlistTracks: (id: string) => call<any>(`/playlists/${id}/tracks?limit=50`),
+  // ----- Playback controls (Web API; needs Premium + an active device) -----
+  resume: () => mutate("PUT", "/me/player/play"),
+  playContext: (contextUri: string) => mutate("PUT", "/me/player/play", { context_uri: contextUri }),
+  playUris: (uris: string[]) => mutate("PUT", "/me/player/play", { uris }),
+  pause: () => mutate("PUT", "/me/player/pause"),
+  next: () => mutate("POST", "/me/player/next"),
+  previous: () => mutate("POST", "/me/player/previous"),
+  transfer: (deviceId: string, play = true) => mutate("PUT", "/me/player", { device_ids: [deviceId], play }),
 };
 
 // ============================================================

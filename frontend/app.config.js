@@ -14,9 +14,12 @@ module.exports = ({ config }) => {
     [
       '@rnmapbox/maps',
       {
-        // Pin the native Mapbox Maps SDK to a stable v11 matching the installed
-        // @rnmapbox/maps 10.3.1 JS package (its documented iOS default).
-        RNMapboxMapsVersion: '11.16.2',
+        // No RNMapboxMapsVersion pin: defer to @rnmapbox/maps' built-in default
+        // native SDK (mapbox.android in the package's package.json — 11.20.1 for
+        // 10.3.1), the exact version its native Kotlin is compiled against. A
+        // hand-typed pin of 11.16.2 was too old and broke the release Kotlin
+        // compile, so we use the package's own tested default. The package
+        // version is locked in yarn.lock, so this stays reproducible.
         // SECRET download token — read from the environment, NEVER hardcoded or
         // committed. Set RNMAPBOX_DOWNLOAD_TOKEN in .env (local, untracked) and
         // as an EAS secret right before the build. The @rnmapbox plugin writes

@@ -94,6 +94,15 @@ export function useSpeedCameras(
   const centerRef = useRef<{ lat: number; lng: number } | null>(null);
   const lastFetchRef = useRef<number>(0);
   const inFlightRef = useRef(false);
+  // Mirrors the latest `enabled` so the async fetch below can re-check it at
+  // APPLY time. On a cold start the default settings (cameras ON) are live for a
+  // beat before the user's persisted "off" loads from AsyncStorage; if a slow
+  // Overpass fetch was kicked off in that window, it used to resolve and call
+  // setCameras() even though the user has cameras OFF — the "cameras flashed on
+  // then vanished while the toggle was off" bug. Guarding on this ref drops the
+  // stale result instead of showing it.
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
 
   useEffect(() => {
     if (!enabled) { setCameras([]); centerRef.current = null; return; }
@@ -111,7 +120,10 @@ export function useSpeedCameras(
     const fetchedAt = { lat, lng };
     (async () => {
       const cams = await fetchSpeedCamerasAround(lat, lng);
-      if (cams) {
+      // Re-check enabled at APPLY time: the user may have toggled cameras OFF
+      // (or the persisted "off" finished loading) while this slow fetch was in
+      // flight. Don't flash stale cameras onto a map that has them turned off.
+      if (cams && enabledRef.current) {
         // Success (even if zero cameras): lock this center so we don't re-query
         // until the driver leaves the radius.
         centerRef.current = fetchedAt;

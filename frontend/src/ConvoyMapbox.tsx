@@ -8,7 +8,7 @@
 //
 // PORTED SO FAR:
 //   • base Mapbox map — dark Standard/night (3D buildings) or satellite (hybrid)
-//   • follow / chase camera (free-roam follow + turn-by-turn zoom & 45° tilt)
+//   • follow / chase camera — Mapbox NATIVE course-follow (smooth glide; speed/corner zoom + 45° tilt)
 //   • self car puck + every peer car (rotated GR Corolla PNGs)
 //   • routes — gray alternates + the SELECTED cased blue ribbon, tap-to-select,
 //     ETA pills, dest pin, route-preview fit-to-bounds
@@ -31,7 +31,7 @@
 
 import React, { useEffect, useMemo, useRef } from "react";
 import { View, Text, Image, StyleSheet, Pressable } from "react-native";
-import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer } from "@rnmapbox/maps";
+import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
@@ -344,52 +344,31 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     if (typeof idx === "number") onSelectRoute?.(idx);
   };
 
-  // ===== Camera control (mirrors ConvoyMap.commitCamera) =====
-  const commitCamera = (force = false) => {
-    const cam = cameraRef.current;
-    if (!cam || !readyRef.current) return;
-    if (!followUser && !force) return; // honor a manual pan-away
-    const lat = user?.lat ?? center?.lat;
-    const lng = user?.lng ?? center?.lng;
-    if (typeof lat !== "number" || typeof lng !== "number") return;
+  // ===== Native follow camera =====
+  // The FOLLOW motion is handed to Mapbox's native course-follow camera — the
+  // same smooth, interpolated tracking Mapbox's own navigation uses — instead of
+  // pushing setCamera() on every GPS tick. That hand-rolled per-tick loop is what
+  // made the old chase-cam stutter. The follow props are declarative:
+  //   • followUserLocation = whether to track the driver (driven by `followUser`,
+  //     which the parent drops on a manual pan and restores on Recenter)
+  //   • followUserMode     = course-up while heading-up (rotates to direction of
+  //     travel — the Mapbox nav look), else north-up
+  //   • followZoomLevel    = speed- + corner-aware chase zoom while navigating, a
+  //     fixed follow zoom otherwise (native animates between them smoothly)
+  //   • followPitch        = 45° tilt while navigating heading-up, flat otherwise
+  // We keep imperative setCamera ONLY for the route-preview fit-to-bounds and the
+  // nav-end flatten — both run while NOT following. (rnmapbox IGNORES setCamera
+  // while followUserLocation is true, so the declarative follow and the two
+  // imperative moves never fight each other.)
+  const headingUp = mapView === "heading_up";
+  const followZoom = Math.round(
+    (navigationActive ? chaseZoom(kmhFromMs(userSpeedMs), distanceToManeuverM) : FOLLOW_ZOOM) * 10,
+  ) / 10;
+  const followPitchDeg = navigationActive && headingUp ? CHASE_PITCH_DEG : 0;
 
-    const heading = typeof user?.heading === "number" && Number.isFinite(user.heading) ? user.heading : 0;
-    const isHeadingUp = mapView === "heading_up";
-    let zoomLevel = FREE_ZOOM;
-    let pitch = 0;
-    let camHeading = 0;
-
-    if (navigationActive) {
-      zoomLevel = chaseZoom(kmhFromMs(userSpeedMs), distanceToManeuverM);
-      pitch = isHeadingUp ? CHASE_PITCH_DEG : 0;
-      camHeading = isHeadingUp ? heading : 0;
-    } else if (followUser) {
-      zoomLevel = FOLLOW_ZOOM;
-      camHeading = isHeadingUp ? heading : 0;
-    } else if (!force) {
-      return;
-    }
-
-    try {
-      cam.setCamera({
-        centerCoordinate: [lng, lat],
-        heading: camHeading,
-        pitch,
-        zoomLevel,
-        animationDuration: force ? 350 : 700,
-        animationMode: "easeTo",
-      });
-    } catch {}
-  };
-
-  // Drive the camera on every relevant change.
-  useEffect(() => {
-    commitCamera(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.lat, user?.lng, user?.heading, userSpeedMs, distanceToManeuverM, followUser, navigationActive, mapView]);
-
-  // When nav ends, flatten back to north-up free-roam (unless still following,
-  // which commitCamera already handles).
+  // When nav ends while NOT following, flatten the tilt/heading back to a calm
+  // north-up overview. (While still following, the declarative follow props above
+  // already drop the pitch — no imperative move needed.)
   useEffect(() => {
     if (navigationActive) return;
     const cam = cameraRef.current;
@@ -406,7 +385,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   useEffect(() => {
     const cam = cameraRef.current;
     if (!destination) { fittedDestRef.current = null; return; }
-    if (!cam || !readyRef.current || navigationActive || (routes?.length ?? 0) === 0) return;
+    if (!cam || !readyRef.current || navigationActive || followUser || (routes?.length ?? 0) === 0) return;
     const key = `${destination.lat.toFixed(5)},${destination.lng.toFixed(5)}`;
     if (fittedDestRef.current === key) return;
 
@@ -431,7 +410,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       });
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routes, destination, navigationActive]);
+  }, [routes, destination, navigationActive, followUser]);
 
   // ===== Build the car list (self + peers) =====
   const cars: CarPoint[] = [];
@@ -466,7 +445,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         attributionPosition={{ bottom: 8, right: 8 }}
         pitchEnabled
         rotateEnabled
-        onDidFinishLoadingMap={() => { readyRef.current = true; commitCamera(true); onMapReady?.(); }}
+        onDidFinishLoadingMap={() => { readyRef.current = true; onMapReady?.(); }}
         onPress={() => onMapPress?.()}
         onLongPress={(f: any) => {
           const c = f?.geometry?.coordinates;
@@ -492,6 +471,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
 
         <Camera
           ref={cameraRef}
+          followUserLocation={followUser}
+          followUserMode={headingUp ? UserTrackingMode.FollowWithCourse : UserTrackingMode.Follow}
+          followZoomLevel={followZoom}
+          followPitch={followPitchDeg}
           defaultSettings={
             typeof initLat === "number" && typeof initLng === "number"
               ? { centerCoordinate: [initLng, initLat], zoomLevel: FOLLOW_ZOOM }
@@ -510,19 +493,19 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               id="route-alts"
               slot="middle"
               filter={["!=", ["get", "index"], selectedRouteIndex] as any}
-              style={{ lineColor: "#9AA0A6", lineWidth: 4, lineCap: "round", lineJoin: "round" }}
+              style={{ lineColor: "#9AA0A6", lineWidth: 5, lineCap: "round", lineJoin: "round", lineOpacity: 0.85 }}
             />
             <LineLayer
               id="route-sel-casing"
               slot="middle"
               filter={["==", ["get", "index"], selectedRouteIndex] as any}
-              style={{ lineColor: "#174EA6", lineWidth: 14, lineCap: "round", lineJoin: "round" }}
+              style={{ lineColor: "#062B5E", lineWidth: 15, lineCap: "round", lineJoin: "round" }}
             />
             <LineLayer
               id="route-sel-core"
               slot="middle"
               filter={["==", ["get", "index"], selectedRouteIndex] as any}
-              style={{ lineColor: "#1A73E8", lineWidth: 9, lineCap: "round", lineJoin: "round" }}
+              style={{ lineColor: "#0A84FF", lineWidth: 9, lineCap: "round", lineJoin: "round" }}
             />
           </ShapeSource>
         )}

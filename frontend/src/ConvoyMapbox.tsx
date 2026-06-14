@@ -140,13 +140,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const gesturingRef = useRef(false);
 
   // ----- Base-map style -----
-  // "hybrid"  → satellite-with-streets imagery (matches Google satellite/hybrid)
-  // "roadmap" → dark vector when Dark is on, else the standard street style
+  // "hybrid"        → satellite-with-streets imagery (matches Google satellite).
+  // "roadmap"+Dark  → Mapbox STANDARD style with the "night" light preset: a dark
+  //                   vector basemap that renders extruded 3D buildings
+  //                   automatically — the tilted Mapbox nav look. The night
+  //                   lighting is applied via the <StyleImport> child below.
+  // "roadmap"+light → the standard street style.
+  const useStandard = mapType !== "hybrid" && mapDark;
   const styleURL =
     mapType === "hybrid"
       ? Mapbox.StyleURL.SatelliteStreet
-      : mapDark
-      ? Mapbox.StyleURL.Dark
+      : useStandard
+      ? "mapbox://styles/mapbox/standard"
       : Mapbox.StyleURL.Street;
 
   // Map bearing the camera is using right now (heading-up while following /
@@ -259,6 +264,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           else if (!active && gesturingRef.current) { gesturingRef.current = false; }
         }}
       >
+        {/* Mapbox Standard "night" config — turns on the dark 3D-building
+            basemap. Only mounted when the Standard style is active (roadmap +
+            dark); harmless no-op for the satellite/street styles. 3D buildings
+            are on by default in Standard, so only the light preset is set. */}
+        {useStandard && (
+          <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: "night" }} />
+        )}
+
         <Camera
           ref={cameraRef}
           defaultSettings={

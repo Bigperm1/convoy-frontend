@@ -263,9 +263,9 @@ export default function AppLayout() {
             backgroundColor: "rgba(34,35,38,0.96)",
             borderTopColor: "rgba(255,255,255,0.12)",
             borderTopWidth: StyleSheet.hairlineWidth,
-            height: 88 + navInset,
-            paddingBottom: 24 + navInset,
-            paddingTop: 10,
+            height: 94 + navInset,
+            paddingBottom: 18 + navInset,
+            paddingTop: 6,
             position: "absolute",
             // allow the elevated mic to overflow upward
             overflow: "visible",

@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 export const DRAWER_HEIGHT = 300;   // height of the slide-up step list
-const TAB_BAR_H = 88;               // matches app/(app)/_layout.tsx tab bar
+const TAB_BAR_H = 94;               // matches app/(app)/_layout.tsx tab bar height
 const BAR_H = 80;                   // approx height of the collapsed summary bar
 
 type Step = { html: string; distance_text: string; maneuver?: string };

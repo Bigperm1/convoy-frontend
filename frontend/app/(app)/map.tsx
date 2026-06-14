@@ -21,7 +21,7 @@ import { useCommunityRoutes, createCommunityRoute, CommunityRoute } from "../../
 import TurnByTurnNav, { SpeedPill } from "../../src/components/TurnByTurnNav";
 import { ReportToast, MusicToast, HailToast } from "../../src/components/AlertToast";
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
-import StepDrawer, { StepDrawerHandle } from "../../src/components/StepDrawer";
+import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/components/StepDrawer";
 import { hailBus } from "../../src/hailBus";
 import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
@@ -123,7 +123,7 @@ const SHOW_EXTRA_ROUTE_PILLS = false;
 // The bottom tab bar's fixed height (mirrors app/(app)/_layout.tsx). Banners
 // float just above it; the FABs + speedo + weather lift above the active
 // banner. The tab bar itself ALWAYS stays visible so the user can leave Maps.
-const TAB_BAR_H = 88;
+const TAB_BAR_H = 94;
 
 // Cold-start intro overlay state. Module-level so it persists across map
 // re-mounts within a single app launch — the logo cover only plays once, on a
@@ -338,6 +338,9 @@ export default function MapScreen() {
   const [placePins, setPlacePins] = useState<PlaceResult[]>([]);
   const [route, setRoute] = useState<RouteInfo | null>(null);
   const [showSteps, setShowSteps] = useState(false);
+  // Whether the turn-by-turn step list is expanded (slide-up). Lifts the FAB
+  // stack / speedo / weather above the expanded drawer so they aren't covered.
+  const [stepsExpanded, setStepsExpanded] = useState(false);
   // Slide-up "share route to members" sheet. Replaces the old Supabase
   // community-route write so route sharing works with no Supabase backend
   // config (shares the destination to specific members via /notifications/share).
@@ -2017,10 +2020,13 @@ export default function MapScreen() {
     return end ? { lat: end.lat, lng: end.lng } : null;
   })();
   const STEP_BAR_H = 84;
+  // When the step drawer is expanded, also clear the slide-up list (DRAWER_HEIGHT)
+  // so the FABs/speedo/weather sit ABOVE it instead of behind it.
+  const stepDrawerH = STEP_BAR_H + (stepsExpanded ? DRAWER_HEIGHT : 0);
   const controlsBottom = (bannerUp
     ? TAB_BAR_H + previewBannerH + 12
     : navBarUp
-    ? TAB_BAR_H + STEP_BAR_H + 12
+    ? TAB_BAR_H + stepDrawerH + 12
     : 90) + navInset;
   const weatherBottom = controlsBottom + 68;
 
@@ -2715,6 +2721,7 @@ export default function MapScreen() {
           distanceRemaining={fmtDistanceM(tbt.distanceRemainingM)}
           arrival={fmtClock(new Date(Date.now() + tbt.etaSeconds * 1000))}
           onEnd={endNav}
+          onVisibilityChange={setStepsExpanded}
         />
       )}
 

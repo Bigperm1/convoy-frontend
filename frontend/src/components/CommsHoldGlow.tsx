@@ -13,14 +13,16 @@ import { Animated, Easing, StyleSheet, View, Platform } from "react-native";
 const GREEN = "#2DEC86";
 const DURATION = 1800;
 
-// Slightly varied sizes + low opacities so no single circle reads as a ring —
-// they blend into a diffuse cloud. ~Double the previous spread (scale to 5.5).
+// Varied sizes + translucent fills blend into a diffuse cloud (no hard rings).
+// Brighter than before, plus one tight high-opacity near-core blob for a vivid
+// center while the rest spread wide (scale to 5.5).
 const BLOBS = [
-  { size: 34, fill: "rgba(45,236,134,0.12)" },
-  { size: 30, fill: "rgba(45,236,134,0.10)" },
-  { size: 38, fill: "rgba(45,236,134,0.08)" },
-  { size: 32, fill: "rgba(45,236,134,0.07)" },
-  { size: 36, fill: "rgba(45,236,134,0.05)" },
+  { size: 26, fill: "rgba(45,236,134,0.28)", maxScale: 2.6 }, // bright tight near-core
+  { size: 34, fill: "rgba(45,236,134,0.20)", maxScale: 5.5 },
+  { size: 30, fill: "rgba(45,236,134,0.17)", maxScale: 5.5 },
+  { size: 38, fill: "rgba(45,236,134,0.13)", maxScale: 5.5 },
+  { size: 32, fill: "rgba(45,236,134,0.11)", maxScale: 5.5 },
+  { size: 36, fill: "rgba(45,236,134,0.08)", maxScale: 5.5 },
 ];
 
 export default function CommsHoldGlow({ active }: { active: boolean }) {
@@ -56,7 +58,7 @@ export default function CommsHoldGlow({ active }: { active: boolean }) {
     <View pointerEvents="none" style={styles.wrap}>
       {BLOBS.map((b, i) => {
         const a = anims[i];
-        const scale = a.interpolate({ inputRange: [0, 1], outputRange: [0.5, 5.5] });
+        const scale = a.interpolate({ inputRange: [0, 1], outputRange: [0.5, b.maxScale] });
         // Fade in fast then out to nothing across the expansion; gated by `vis`
         // so releasing the hold dissolves the whole cloud smoothly.
         const opacity = Animated.multiply(

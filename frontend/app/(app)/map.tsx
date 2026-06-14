@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder, TextInput, AppState } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
@@ -305,6 +305,8 @@ function reportConfirmLine(label: string): string {
 export default function MapScreen() {
   const { user, token, refresh } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const navInset = Platform.OS === "android" ? insets.bottom : 0;
   const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number; speed?: number } | null>(null);
   // Cold-start intro overlay (logo on black until the first fix lands).
   const introFade = useRef(new Animated.Value(_introPlayed ? 0 : 1)).current;
@@ -693,7 +695,7 @@ export default function MapScreen() {
       // Cap at two options — fastest + best traffic-aware alternate.
       const results = sorted.slice(0, 2).map((r, i) => ({
         ...r,
-        color: i === 0 ? '#FFD60A' : '#9AA0A6',
+        color: i === 0 ? '#2DEC86' : '#9AA0A6',
       })) as any[];
       setRoutes(results);
       setSelectedRouteIndex(0);
@@ -2015,11 +2017,11 @@ export default function MapScreen() {
     return end ? { lat: end.lat, lng: end.lng } : null;
   })();
   const STEP_BAR_H = 84;
-  const controlsBottom = bannerUp
+  const controlsBottom = (bannerUp
     ? TAB_BAR_H + previewBannerH + 12
     : navBarUp
     ? TAB_BAR_H + STEP_BAR_H + 12
-    : 90;
+    : 90) + navInset;
   const weatherBottom = controlsBottom + 68;
 
   // Mapbox migration (Phase 2): pick the map engine behind the settings toggle.
@@ -2120,14 +2122,21 @@ export default function MapScreen() {
       <View style={styles.topBar} pointerEvents="box-none">
         {searchVisible && (
           <View pointerEvents="box-none">
-            <DestinationSearch
-              origin={coords}
-              onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
-              onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
-              onProfilePress={() => router.push("/(app)/hub" as any)}
-              onPressField={() => setNavSearchOpen(true)}
-              profileSlot={<LogoMenu size={28} />}
-            />
+            <View style={styles.searchLogoRow} pointerEvents="box-none">
+              <View style={{ flex: 1 }}>
+                <DestinationSearch
+                  origin={coords}
+                  onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
+                  onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
+                  onProfilePress={() => router.push("/(app)/hub" as any)}
+                  onPressField={() => setNavSearchOpen(true)}
+                  onCommsPress={() => router.push("/(app)/talk" as any)}
+                />
+              </View>
+              <View style={styles.mapLogoBacking}>
+                <LogoMenu size={40} align="right" />
+              </View>
+            </View>
             {/* Category quick-search pills (Gas / Food / Coffee / …) directly
                 under the search bar, Google-Maps style. Results drop as pins. */}
             <CategoryPills origin={coords} onResults={setPlacePins} />
@@ -2230,7 +2239,7 @@ export default function MapScreen() {
               <Text style={styles.bannerDrive}>Drive</Text>
               <View style={styles.bannerHeaderRight}>
                 <TouchableOpacity testID="save-destination" onPress={() => { if (savedMatch) { void removeSavedPlace(savedMatch.id); try { Haptics.selectionAsync(); } catch {} } else { saveCurrentDestination(); } }} hitSlop={10}>
-                  <Ionicons name={savedMatch ? "bookmark" : "bookmark-outline"} size={21} color={savedMatch ? "#FFD60A" : "#EBEBF5"} />
+                  <Ionicons name={savedMatch ? "bookmark" : "bookmark-outline"} size={21} color={savedMatch ? "#2DEC86" : "#EBEBF5"} />
                 </TouchableOpacity>
                 <TouchableOpacity testID="share-route" onPress={() => { Haptics.selectionAsync().catch(() => {}); setRouteShareOpen(true); }} hitSlop={10}>
                   <Ionicons name="share-outline" size={22} color="#EBEBF5" />
@@ -2249,7 +2258,7 @@ export default function MapScreen() {
               Math.abs(destination.lat - sharedRouteMeta.lat) < 1e-6 &&
               Math.abs(destination.lng - sharedRouteMeta.lng) < 1e-6 && (
                 <View style={styles.sharedByRow}>
-                  <Ionicons name="share-social" size={14} color="#FFD60A" />
+                  <Ionicons name="share-social" size={14} color="#2DEC86" />
                   <Text style={styles.sharedByText} numberOfLines={1}>
                     Shared by {sharedRouteMeta.handle || "a member"}
                     {sharedRouteMeta.at ? ` · ${shareRelTime(sharedRouteMeta.at)}` : ""} · from your location — press Start
@@ -2549,7 +2558,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Aerial imagery</Text>
                 </View>
                 <Switch value={mapType === "hybrid"} onValueChange={(v) => { void updateGlobalSettings(v ? { mapType: "hybrid", mapDark: false } : { mapType: "roadmap" }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>
@@ -2557,7 +2566,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Navy night styling — switches off Satellite</Text>
                 </View>
                 <Switch value={mapDark} onValueChange={(v) => { void updateGlobalSettings(v ? { mapDark: true, mapType: "roadmap" } : { mapDark: false }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>
@@ -2565,7 +2574,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Live congestion colors</Text>
                 </View>
                 <Switch value={showTraffic} onValueChange={setShowTraffic}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               {/* Weather layer */}
               <View style={styles.layerRow}>
@@ -2584,7 +2593,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Show community + Waze pins</Text>
                 </View>
                 <Switch value={showHazards} onValueChange={setShowHazards}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
 
               {/* ----- PRIVACY ----- */}
@@ -2595,7 +2604,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Hide your car from the map</Text>
                 </View>
                 <Switch value={settings.avatarLive !== false} onValueChange={(v) => { void updateGlobalSettings({ avatarLive: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>
@@ -2603,7 +2612,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Mute push-to-talk audio</Text>
                 </View>
                 <Switch value={settings.commsLive !== false} onValueChange={(v) => { void updateGlobalSettings({ commsLive: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
 
               {/* ----- MAP VIEW (radio, not toggle) ----- */}
@@ -2624,7 +2633,7 @@ export default function MapScreen() {
                     </Text>
                   </View>
                   {settings.mapView === mode && (
-                    <Ionicons name="checkmark" size={18} color="#FFD60A" />
+                    <Ionicons name="checkmark" size={18} color="#2DEC86" />
                   )}
                 </TouchableOpacity>
               ))}
@@ -2637,7 +2646,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Route around toll roads</Text>
                 </View>
                 <Switch value={!!settings.avoidTolls} onValueChange={(v) => { void updateGlobalSettings({ avoidTolls: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>
@@ -2645,7 +2654,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Prefer surface streets</Text>
                 </View>
                 <Switch value={!!settings.avoidHighways} onValueChange={(v) => { void updateGlobalSettings({ avoidHighways: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>
@@ -2653,7 +2662,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Skip water crossings</Text>
                 </View>
                 <Switch value={!!settings.avoidFerries} onValueChange={(v) => { void updateGlobalSettings({ avoidFerries: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
 
               {/* ----- ALERTS ----- */}
@@ -2664,7 +2673,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Chime on new hazard nearby</Text>
                 </View>
                 <Switch value={!!settings.alertSound} onValueChange={(v) => { void updateGlobalSettings({ alertSound: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={[styles.layerRow, { borderBottomWidth: 0 }]}>
                 <View style={{ flex: 1 }}>
@@ -2672,7 +2681,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Gold border on community pins</Text>
                 </View>
                 <Switch value={!!settings.highlightConvoy} onValueChange={(v) => { void updateGlobalSettings({ highlightConvoy: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#FFD60A' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
             </ScrollView>
             <TouchableOpacity onPress={() => setLayersOpen(false)} style={styles.sheetClose}>
@@ -2940,11 +2949,11 @@ const styles = StyleSheet.create({
   sheetGrabber: { width: 38, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.22)", alignSelf: "center", marginBottom: 12 },
   // ===== Route preview banner =====
   bannerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
-  bannerDrive: { color: "#FFD60A", fontSize: 22, fontWeight: "700", letterSpacing: -0.3 },
+  bannerDrive: { color: "#2DEC86", fontSize: 22, fontWeight: "700", letterSpacing: -0.3 },
   bannerHeaderRight: { flexDirection: "row", alignItems: "center", gap: 18 },
   bannerDivider: { height: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.14)", marginHorizontal: -16, marginBottom: 14 },
   sharedByRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: -2, marginBottom: 10 },
-  sharedByText: { color: "#FFD60A", fontSize: 12.5, fontWeight: "700", flex: 1 },
+  sharedByText: { color: "#2DEC86", fontSize: 12.5, fontWeight: "700", flex: 1 },
   bannerSummary: { flexDirection: "row", alignItems: "flex-start", gap: 18, marginBottom: 16 },
   bannerDurCol: { alignItems: "center" },
   bannerDurNum: { color: "#F4F4F4", fontSize: 30, fontWeight: "700", letterSpacing: -0.5, lineHeight: 32 },
@@ -2956,7 +2965,7 @@ const styles = StyleSheet.create({
   bannerBest: { color: "#30D158", fontSize: 14, fontWeight: "600", marginLeft: "auto" },
   bannerPills: { flexDirection: "row", gap: 10 },
   bannerPill: { flex: 1, height: 46, borderRadius: 23, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
-  bannerPillStart: { backgroundColor: "#FFD60A" },
+  bannerPillStart: { backgroundColor: "#2DEC86" },
   bannerPillStartText: { color: "#1C1C1E", fontSize: 16, fontWeight: "700" },
   bannerPillBlue: { backgroundColor: "#0A84FF" },
   bannerPillBlueText: { color: "#F4F4F4", fontSize: 14, fontWeight: "600" },
@@ -2966,15 +2975,15 @@ const styles = StyleSheet.create({
   sheetHeaderBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(118,118,128,0.22)" },
   routeOptsRow: { flexDirection: "row", gap: 10, paddingBottom: 12 },
   routeOpt: { flex: 1, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)" },
-  routeOptActive: { borderColor: "#FFD60A", backgroundColor: "rgba(255,214,10,0.12)" },
+  routeOptActive: { borderColor: "#2DEC86", backgroundColor: "rgba(45,236,134,0.12)" },
   routeOptEta: { color: COLORS.text, fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
-  routeOptEtaActive: { color: "#FFD60A" },
+  routeOptEtaActive: { color: "#2DEC86" },
   routeOptSum: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
-  routeOptSumActive: { color: "rgba(255,214,10,0.85)" },
+  routeOptSumActive: { color: "rgba(45,236,134,0.85)" },
   sheetActions: { flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 2 },
   sheetSecBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 13, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(255,255,255,0.05)" },
   sheetSecText: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
-  sheetStartBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 14, backgroundColor: "#FFD60A" },
+  sheetStartBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 14, backgroundColor: "#2DEC86" },
   sheetStartText: { color: "#0A0A0A", fontWeight: "800", fontSize: 16, letterSpacing: 0.2 },
   routeRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
   routeIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center" },
@@ -3081,13 +3090,14 @@ const styles = StyleSheet.create({
   // solid-dark Comms/Music headers it needs a backing to stay crisp over any
   // background. 40×40 circle mirrors the old profile-avatar footprint.
   mapLogoBacking: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 54, height: 54, borderRadius: 27,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(20,20,22,0.9)',
-    borderWidth: 1.5, borderColor: 'rgba(255,214,10,0.55)',
+    borderWidth: 1.5, borderColor: 'rgba(45,236,134,0.55)',
     shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 6,
   },
+  searchLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
 
   // Trip Summary pill — collapsed view of the route preview card. Renders at
   // the very top, single line, tappable to expand back into the full card.
@@ -3298,7 +3308,7 @@ const styles = StyleSheet.create({
   nameModalBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   nameModalCancel: { backgroundColor: "rgba(255,255,255,0.08)" },
   nameModalCancelText: { color: COLORS.text, fontWeight: "600", fontSize: 15 },
-  nameModalSave: { backgroundColor: "#FFD60A" },
+  nameModalSave: { backgroundColor: "#2DEC86" },
   nameModalSaveText: { color: "#1C1C1E", fontWeight: "800", fontSize: 15 },
   // Alerts sheet styles
   alertsGroup: { color: COLORS.textDim, fontSize: 11, fontWeight: "700", letterSpacing: 0.7, marginTop: 14, marginBottom: 4, textTransform: "uppercase" },
@@ -3315,5 +3325,5 @@ const styles = StyleSheet.create({
     gap: 18,
     zIndex: 100000,
   },
-  introWord: { color: "#FFD60A", fontSize: 22, fontWeight: "800", letterSpacing: 6, marginLeft: 6 },
+  introWord: { color: "#2DEC86", fontSize: 22, fontWeight: "800", letterSpacing: 6, marginLeft: 6 },
 });

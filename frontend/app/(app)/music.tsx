@@ -373,7 +373,7 @@ export default function MusicScreen() {
             <Text style={styles.dateOverline}>{today}</Text>
             <Text style={styles.title}>Listen Now</Text>
           </View>
-          <LogoMenu size={30} style={styles.logoBtn} align="right" />
+          <LogoMenu size={40} style={styles.logoBtn} align="right" />
         </View>
         <SourceSwitcher current="spotify" />
         <SpotifyMusic onSwitchSource={() => updateSettings({ musicSource: null })} />
@@ -394,7 +394,7 @@ export default function MusicScreen() {
             <Text style={styles.dateOverline}>{today}</Text>
             <Text style={styles.title}>Listen Now</Text>
           </View>
-          <LogoMenu size={30} style={styles.logoBtn} align="right" />
+          <LogoMenu size={40} style={styles.logoBtn} align="right" />
         </View>
 
         {source === "apple" && <SourceSwitcher current="apple" />}

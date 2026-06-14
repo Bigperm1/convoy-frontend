@@ -18,7 +18,7 @@ import { livePttBus, setCommsScreenFocused, acquireFloor, releaseFloor, getFloor
 import { commsRead } from '../../src/commsRead';
 import { setPlaybackAudioMode, setIdleAudioMode } from '../../src/audioMode';
 
-const YELLOW = '#FFD60A';
+const YELLOW = '#2DEC86';
 
 type Community = {
   id: string; name: string; member_count: number;
@@ -50,7 +50,7 @@ function fmtDur(ms: number): string {
 // close (<500m) → HD, mid (<2km) → Clear, far → Standard.
 const TIER_META: Record<ProximityTier, { label: string; color: string }> = {
   close: { label: 'HD', color: '#30D158' },
-  mid: { label: 'Clear', color: '#FFD60A' },
+  mid: { label: 'Clear', color: '#2DEC86' },
   far: { label: 'Standard', color: '#8E8E93' },
 };
 
@@ -543,7 +543,7 @@ export default function TalkScreen() {
             )}
           </Pressable>
         )}
-        <LogoMenu size={30} style={styles.garageBtn} align="right" />
+        <LogoMenu size={40} style={styles.garageBtn} align="right" />
       </View>
 
       {/* Tap anywhere outside the mic to dismiss the open switcher. Rendered
@@ -668,7 +668,7 @@ export default function TalkScreen() {
             style={[styles.pttOuter, pressed && styles.pttOuterActive, (!channelId || !!floorHolder) && styles.pttOuterDisabled]}
           >
             <View style={[styles.pttInner, pressed && styles.pttInnerActive]}>
-              <Ionicons name={floorHolder ? 'lock-closed' : 'mic'} size={112} color={pressed ? '#fff' : floorHolder ? '#8E8E93' : channelId ? YELLOW : 'rgba(255,214,10,0.5)'} />
+              <Ionicons name={floorHolder ? 'lock-closed' : 'mic'} size={112} color={pressed ? '#fff' : floorHolder ? '#8E8E93' : channelId ? YELLOW : 'rgba(45,236,134,0.5)'} />
             </View>
           </Pressable>
         </Animated.View>
@@ -818,7 +818,7 @@ const styles = StyleSheet.create({
   communityBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   avatar: {
     width: 42, height: 42, borderRadius: 21, backgroundColor: '#1c1c1e',
-    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,214,10,0.45)',
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(45,236,134,0.45)',
     overflow: 'hidden',
   },
   avatarImg: { width: 42, height: 42 },
@@ -876,7 +876,7 @@ const styles = StyleSheet.create({
   voxToggle: {
     flexDirection: 'row', alignItems: 'center', gap: 7,
     paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
-    backgroundColor: '#161618', borderWidth: 1, borderColor: 'rgba(255,214,10,0.4)',
+    backgroundColor: '#161618', borderWidth: 1, borderColor: 'rgba(45,236,134,0.4)',
     marginTop: 14,
   },
   voxToggleOn: { backgroundColor: YELLOW, borderColor: YELLOW },
@@ -893,7 +893,7 @@ const styles = StyleSheet.create({
   dropdownHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sendingText: { color: YELLOW, fontSize: 12, fontWeight: '600', marginBottom: 10 },
   emptyTx: { color: '#808080', fontSize: 13, lineHeight: 18, paddingVertical: 4 },
-  playingPill: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: 'rgba(255,214,10,0.12)' },
+  playingPill: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: 'rgba(45,236,134,0.12)' },
   convoRow: { paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#262629' },
   convoTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   playBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: YELLOW, alignItems: 'center', justifyContent: 'center' },
@@ -935,7 +935,7 @@ const styles = StyleSheet.create({
   chipNew: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18,
-    backgroundColor: 'rgba(255,214,10,0.12)', borderWidth: 1, borderColor: 'rgba(255,214,10,0.4)',
+    backgroundColor: 'rgba(45,236,134,0.12)', borderWidth: 1, borderColor: 'rgba(45,236,134,0.4)',
   },
   chipNewText: { color: YELLOW, fontSize: 13, fontWeight: '700' },
   chipDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: YELLOW, marginLeft: 1 },

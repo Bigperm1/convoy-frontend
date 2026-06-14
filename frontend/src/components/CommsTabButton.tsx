@@ -1,18 +1,18 @@
 // Bottom Comms tab button with press-and-hold walkie.
 //
 //   TAP   → open the Comms screen (normal tab navigation).
-//   HOLD  → transmit to your active channel WITHOUT leaving the current tab,
-//           using the global PTT recorder. Release to send.
+//   HOLD  → ask Claude for directions by voice — records via useVoice and
+//           transcribes on release (replaces the old walkie PTT).
 //
 // Hold-to-talk is intentionally disabled when Comms is already the focused tab
 // (accessibilityState.selected) — you have the full-size mic on screen there,
 // and gating it this way guarantees the screen recorder and this global one can
 // never run at the same time.
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef } from "react";
 import { Pressable, View, StyleSheet } from "react-native";
 import * as Haptics from "expo-haptics";
-import { pttDown, pttUp, globalPttBus } from "../globalPtt";
+import { useVoice } from "../useVoice";
 
 type Props = {
   children?: React.ReactNode;
@@ -25,35 +25,23 @@ type Props = {
 
 export default function CommsTabButton({ children, onPress, accessibilityState, style, selfId, ...rest }: Props) {
   const txRef = useRef(false);
-  const [txing, setTxing] = useState(false);
+  const voice = useVoice();
   const selected = !!accessibilityState?.selected;
-
-  // Reflect the global recorder's state (covers the 60s auto-cap closing it).
-  useEffect(() => globalPttBus.on(setTxing), []);
 
   const handleLongPress = async () => {
     // Only key up from OTHER tabs — on Comms itself the big mic is right there.
     if (selected) return;
-    const res = await pttDown(selfId);
-    if (res === "recording") {
-      txRef.current = true;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-    } else if (res === "no-channel") {
-      // Nothing to talk to yet — fall back to opening Comms so they can pick a crew.
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-      onPress?.();
-    } else if (res === "blocked") {
-      // Someone else holds the floor — buzz and do nothing.
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-    }
-    // "prompted" → mic permission was just requested; the next hold records.
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+    txRef.current = true;
+    await voice.start();
   };
 
-  const handlePressOut = () => {
+  const handlePressOut = async () => {
     if (txRef.current) {
       txRef.current = false;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      pttUp().catch(() => {});
+      const uri = await voice.stop();
+      if (uri) await voice.transcribe(uri);
     }
   };
 
@@ -69,7 +57,7 @@ export default function CommsTabButton({ children, onPress, accessibilityState, 
       delayLongPress={250}
     >
       {children}
-      {txing && <View style={styles.txDot} pointerEvents="none" />}
+      {voice.recording && <View style={styles.txDot} pointerEvents="none" />}
     </Pressable>
   );
 }

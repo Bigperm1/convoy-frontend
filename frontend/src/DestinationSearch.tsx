@@ -1,12 +1,11 @@
 // Cross-platform Places Autocomplete using the Places (New) REST endpoint on native,
 // and the JS Maps lib (already loaded by ConvoyMap) on web.
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform, ScrollView, Keyboard, PanResponder, Animated, Easing, Image, Vibration } from "react-native";
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform, ScrollView, Keyboard, PanResponder, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
 import { COLORS } from "./theme";
 import { geocodeQuery } from "./voiceBus";
-import { useVoice } from "./useVoice";
+import ConvoyWaveIcon from "./components/ConvoyWaveIcon";
 import { useAuth } from "./auth";
 import { GOOGLE_MAPS_KEY } from "./api";
 
@@ -29,6 +28,8 @@ type Props = {
   // instead of typing inline (the map uses it to open the full-screen search
   // screen). The mic + logo remain fully interactive.
   onPressField?: () => void;
+  // Tap the comms-wave icon (replaces the old mic) → open Comms.
+  onCommsPress?: () => void;
 };
 
 let _placesService: any = null;
@@ -113,7 +114,7 @@ async function placeDetailsRest(place_id: string): Promise<{ lat: number; lng: n
   } catch { return null; }
 }
 
-export default function DestinationSearch({ origin, onSelect, onClear, initialValue, onProfilePress, profileSlot, onPressField }: Props) {
+export default function DestinationSearch({ origin, onSelect, onClear, initialValue, onProfilePress, profileSlot, onPressField, onCommsPress }: Props) {
   const [text, setText] = useState(initialValue || "");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -179,39 +180,9 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
 
   const clear = () => { setText(""); setSuggestions([]); setOpen(false); onClear?.(); };
 
-  // --- In-bar mic (PTT) + profile avatar ---
-  // Press-and-hold the yellow mic to record a voice command. Same pipeline the
-  // old elevated tab-bar mic used: useVoice() → transcribe → voiceBus broadcast.
-  // The mic lives inside the search bar (Google Maps-style) and the round
-  // profile avatar sits at the very right of the bar.
-  const voice = useVoice();
+  // Profile avatar identity. The in-bar mic/voice machinery was removed — the
+  // comms-wave icon now opens Comms via onCommsPress.
   const { user } = useAuth();
-  const micPulse = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    if (voice.recording) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(micPulse, { toValue: 1.28, duration: 360, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-          Animated.timing(micPulse, { toValue: 1.06, duration: 360, easing: Easing.in(Easing.quad), useNativeDriver: true }),
-        ])
-      ).start();
-    } else {
-      micPulse.stopAnimation();
-      micPulse.setValue(1);
-    }
-  }, [voice.recording, micPulse]);
-  const onMicPressIn = async () => {
-    // Instant tactile feedback the moment you press — fired synchronously
-    // BEFORE awaiting the recorder, so it lands on touch rather than after
-    // the audio engine spins up (which is what made it feel like "no haptic").
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-    if (Platform.OS === "android") { try { Vibration.vibrate(35); } catch {} }
-    await voice.start();
-  };
-  const onMicPressOut = async () => {
-    const uri = await voice.stop();
-    if (uri) await voice.transcribe(uri); // result broadcast on voiceBus → VoiceController banner + routing
-  };
 
   // Profile avatar — for now everyone falls back to the generic person icon
   // (the user model doesn't yet ship a stored avatar field on the server).
@@ -303,24 +274,16 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
               <Ionicons name="close-circle" size={20} color="rgba(235,235,245,0.6)" />
             </TouchableOpacity>
           )}
-          {/* PTT mic — yellow circle, press-and-hold like Google Maps' voice
-              search. Pulses while recording so users have a clear visual cue. */}
-          <Animated.View style={{ transform: [{ scale: micPulse }] }}>
-            <TouchableOpacity
-              testID="search-mic"
-              onPressIn={onMicPressIn}
-              onPressOut={onMicPressOut}
-              activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              style={[styles.micBtn, voice.recording && styles.micBtnRecording]}
-            >
-              <Ionicons
-                name={voice.recording ? "radio" : "mic"}
-                size={24}
-                color={voice.recording ? "#fff" : "#FFD60A"}
-              />
-            </TouchableOpacity>
-          </Animated.View>
+          {/* Comms-wave icon (replaces the old mic) — tap to open Comms. */}
+          <TouchableOpacity
+            testID="search-comms"
+            onPress={onCommsPress}
+            activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            style={styles.micBtn}
+          >
+            <ConvoyWaveIcon size={26} color="#2DEC86" />
+          </TouchableOpacity>
         </View>
         {/* Logo/menu now lives on the LEFT inside the bar — no right-side control. */}
       </View>

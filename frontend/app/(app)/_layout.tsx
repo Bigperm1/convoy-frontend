@@ -8,7 +8,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
 import VoiceController from "../../src/VoiceController";
 import VoiceTabButton from "../../src/VoiceTabButton";
-import ConvoyWaveIcon from "../../src/components/ConvoyWaveIcon";
 import CommsTabButton from "../../src/components/CommsTabButton";
 import CommsTalkingToast from "../../src/components/CommsTalkingToast";
 import ShareToast from "../../src/ShareToast";
@@ -290,12 +289,12 @@ export default function AppLayout() {
         }} />
         <Tabs.Screen name="talk" options={{
           tabBarLabel: ({ color }) => (
-            <Text style={{ color: commsActive ? "#FFD60A" : color, fontSize: 12, fontWeight: "500" }}>Comms</Text>
+            <Text style={{ color: commsActive ? "#2DEC86" : color, fontSize: 12, fontWeight: "500" }}>Comms</Text>
           ),
-          tabBarActiveTintColor: "#FFD60A",
+          tabBarActiveTintColor: "#2DEC86",
           tabBarButtonTestID: "tab-talk",
           tabBarButton: (props) => <CommsTabButton {...props} selfId={user?.id} />,
-          tabBarIcon: ({ color }) => <ConvoyWaveIcon size={40} color={commsActive ? "#FFD60A" : color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="mic" size={30} color={commsActive ? "#2DEC86" : color} />,
         }} />
         {/* Voice screen is no longer represented in the bottom tab bar — the
             press-and-hold mic now lives inside the map's search bar (Google

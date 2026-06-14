@@ -306,7 +306,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginBottom: 4,
   },
-  rowOn: { backgroundColor: "rgba(255,214,10,0.16)" },
+  rowOn: { backgroundColor: "rgba(45,236,134,0.16)" },
   avatarWrap: {
     width: 46,
     height: 46,

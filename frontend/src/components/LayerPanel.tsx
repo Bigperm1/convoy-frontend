@@ -38,7 +38,7 @@ const LAYER_ROWS: LayerRow[] = [
     label: "Weather",
     subtitle: "Current conditions, temp & wind",
     icon: "partly-sunny",
-    iconColor: "#FFD60A",
+    iconColor: "#2DEC86",
   },
   {
     key: "show3DMap",
@@ -64,7 +64,7 @@ export default function LayerPanel({ visible, layers, onToggle, onClose }: Props
         <View style={styles.panel}>
           {/* Header */}
           <View style={styles.header}>
-            <Ionicons name="layers" size={18} color="#FFD60A" />
+            <Ionicons name="layers" size={18} color="#2DEC86" />
             <Text style={styles.headerText}>Map Layers</Text>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
               <Ionicons name="close" size={20} color="rgba(255,255,255,0.5)" />

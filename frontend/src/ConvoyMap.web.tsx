@@ -474,7 +474,7 @@ function RoutesLayer({ routes, selectedIndex, onSelect }: {
       // alternate = neutral grey. We deliberately IGNORE any per-route `color`
       // passed from map.tsx so web and native can never diverge again — that
       // divergence (web falling back to green/blue) is what this fixes.
-      const color = isSelected ? '#FFD60A' : '#9AA0A6';
+      const color = isSelected ? '#2DEC86' : '#9AA0A6';
       const pl = new G.Polyline({
         path,
         map,
@@ -507,7 +507,7 @@ function Directions({ origin, destination, onRoute, encodedPolyline }: { origin:
       renderer.current = new routesLib.DirectionsRenderer({
         map,
         suppressMarkers: true,
-        polylineOptions: { strokeColor: "#FFD60A", strokeOpacity: 0.95, strokeWeight: 6 },
+        polylineOptions: { strokeColor: "#2DEC86", strokeOpacity: 0.95, strokeWeight: 6 },
       });
     } else {
       renderer.current.setMap(map);

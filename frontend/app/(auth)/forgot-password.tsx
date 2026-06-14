@@ -85,7 +85,7 @@ export default function ForgotPasswordScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={12}>
-            <Ionicons name="chevron-back" size={24} color="#FFD60A" />
+            <Ionicons name="chevron-back" size={24} color="#2DEC86" />
             <Text style={styles.backText}>Back</Text>
           </TouchableOpacity>
 
@@ -164,7 +164,7 @@ export default function ForgotPasswordScreen() {
               activeOpacity={0.85}
             >
               <LinearGradient
-                colors={['#FFE45C', '#FFC700', '#FF9F0A']}
+                colors={['#7DF0B0', '#2DEC86', '#00C46A']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.buttonGradient}
@@ -196,7 +196,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingVertical: 40, paddingHorizontal: 20, justifyContent: 'center' },
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, marginBottom: 24 },
-  backText: { color: '#FFD60A', fontSize: 15, fontWeight: '600' },
+  backText: { color: '#2DEC86', fontSize: 15, fontWeight: '600' },
   head: { marginBottom: 24 },
   title: { color: '#F4F4F4', fontSize: 28, fontWeight: '800', marginBottom: 8 },
   subtitle: { color: '#808080', fontSize: 15, lineHeight: 21 },
@@ -211,5 +211,5 @@ const styles = StyleSheet.create({
   primaryBtn: { borderRadius: 10, overflow: 'hidden', marginTop: 4 },
   buttonGradient: { paddingVertical: 14, alignItems: 'center' },
   primaryBtnText: { color: '#1a1a1a', fontWeight: '700', fontSize: 15 },
-  resendLink: { color: '#FFD60A', fontSize: 13, fontWeight: '500', paddingVertical: 4 },
+  resendLink: { color: '#2DEC86', fontSize: 13, fontWeight: '500', paddingVertical: 4 },
 });

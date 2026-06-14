@@ -195,7 +195,7 @@ export default function LoginScreen() {
               activeOpacity={0.85}
             >
               <LinearGradient
-                colors={['#FFE45C', '#FFC700', '#FF9F0A']}
+                colors={['#7DF0B0', '#2DEC86', '#00C46A']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.buttonGradient}
@@ -240,7 +240,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingVertical: 40, paddingHorizontal: 20, justifyContent: 'center' },
   logoSection: { alignItems: 'center', marginBottom: 40 },
-  brandName: { fontSize: 40, fontWeight: '800', color: '#FFD60A', letterSpacing: 4, marginBottom: 4, textAlign: 'center' },
+  brandName: { fontSize: 40, fontWeight: '800', color: '#2DEC86', letterSpacing: 4, marginBottom: 4, textAlign: 'center' },
     logo: { width: 170, height: 170, marginBottom: 16 },
   tagline: { fontSize: 21, color: '#808080', textAlign: 'center', fontWeight: '600', letterSpacing: 0.3 },
   formCard: { backgroundColor: '#1a1a1a', borderRadius: 16, padding: 20, gap: 18, borderWidth: 1, borderColor: '#333' },
@@ -252,7 +252,7 @@ const styles = StyleSheet.create({
   eyeBtn: { padding: 8 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 2, borderColor: '#666', alignItems: 'center', justifyContent: 'center' },
-  checkboxChecked: { backgroundColor: '#FFD60A', borderColor: '#FFD60A' },
+  checkboxChecked: { backgroundColor: '#2DEC86', borderColor: '#2DEC86' },
   checkmark: { color: '#000', fontWeight: '700', fontSize: 12 },
   checkboxLabel: { color: '#808080', fontSize: 13 },
   signInButton: { borderRadius: 10, overflow: 'hidden', marginTop: 4 },
@@ -261,7 +261,7 @@ const styles = StyleSheet.create({
   wakingText: { color: '#1a1a1a', fontSize: 13, fontWeight: '700', marginLeft: 8 },
   linksSection: { gap: 12, alignItems: 'center', marginTop: 8 },
   linkText: { color: '#808080', fontSize: 13 },
-  linkHighlight: { color: '#FFD60A', fontWeight: '600' },
-  forgotLink: { color: '#FFD60A', fontSize: 13, fontWeight: '500', paddingVertical: 6 },
+  linkHighlight: { color: '#2DEC86', fontWeight: '600' },
+  forgotLink: { color: '#2DEC86', fontSize: 13, fontWeight: '500', paddingVertical: 6 },
   versionText: { color: '#808080', fontSize: 12, textAlign: 'center', paddingVertical: 10 },
 });

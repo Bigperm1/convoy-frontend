@@ -12,7 +12,7 @@ const SIZE = 72;          // a bit bigger so the icon never crops on the curve
 const ICON_SIZE = 30;     // glyph stays centered, well clear of the rounded edge
 
 // Convoy logo yellow â warm amber gradient. Switches to red while transmitting.
-const IDLE_COLORS = ["#FFE45C", "#FFC700", "#FF9F0A"];
+const IDLE_COLORS = ["#7DF0B0", "#2DEC86", "#00C46A"];
 const REC_COLORS = ["#FF6B35", "#FF3B30", "#A6201E"];
 
 export default function VoiceTabButton() {
@@ -111,9 +111,9 @@ const styles = StyleSheet.create({
     marginTop: -28,
     borderRadius: SIZE / 2,
     ...Platform.select({
-      ios: { shadowColor: "#FFC700", shadowOpacity: 0.7, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
+      ios: { shadowColor: "#00C46A", shadowOpacity: 0.7, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
       android: { elevation: 12 },
-      web: { boxShadow: "0 8px 22px rgba(255,199,0,0.65)" } as any,
+      web: { boxShadow: "0 8px 22px rgba(0,196,106,0.65)" } as any,
     }),
   },
   btn: {
@@ -133,6 +133,6 @@ const styles = StyleSheet.create({
     width: SIZE, height: SIZE, borderRadius: SIZE / 2,
     backgroundColor: "transparent",
     borderWidth: 2,
-    borderColor: "rgba(255,199,0,0.85)",
+    borderColor: "rgba(0,196,106,0.85)",
   },
 });

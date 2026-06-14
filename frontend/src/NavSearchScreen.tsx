@@ -182,7 +182,7 @@ export default function NavSearchScreen({
                     activeOpacity={0.7}
                   >
                     <View style={styles.pinWrap}>
-                      <Ionicons name="navigate-circle" size={18} color="#FFD60A" />
+                      <Ionicons name="navigate-circle" size={18} color="#2DEC86" />
                     </View>
                     <Text style={[styles.resultText, styles.predictiveText]} numberOfLines={1}>
                       {prediction.place.label}
@@ -296,7 +296,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   resultText: { color: COLORS.text, flex: 1, fontSize: 15 },
-  predictiveText: { color: "#FFD60A", fontWeight: "600" },
+  predictiveText: { color: "#2DEC86", fontWeight: "600" },
   swipeRow: { backgroundColor: "#0B0B0D" },
   swipeDelete: {
     backgroundColor: "#FF453A",

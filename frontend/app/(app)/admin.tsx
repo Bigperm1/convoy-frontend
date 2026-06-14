@@ -296,11 +296,11 @@ const styles = StyleSheet.create({
   deviceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
   deviceText: { color: '#7FA8FF', fontSize: 12, fontWeight: '600', flexShrink: 1 },
   codePill: {
-    color: '#FFD60A', fontSize: 14, fontWeight: '800', letterSpacing: 1,
+    color: '#2DEC86', fontSize: 14, fontWeight: '800', letterSpacing: 1,
     marginTop: 6,
   },
   resetBtn: {
-    backgroundColor: '#FFD60A', borderRadius: 10,
+    backgroundColor: '#2DEC86', borderRadius: 10,
     paddingHorizontal: 14, paddingVertical: 10, minWidth: 96, alignItems: 'center',
   },
   resetBtnText: { color: '#1a1a1a', fontWeight: '700', fontSize: 13 },
@@ -310,14 +310,14 @@ const styles = StyleSheet.create({
   },
   installTitle: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
   installHint: { color: COLORS.textDim, fontSize: 12, marginTop: 3, lineHeight: 17 },
-  installPerm: { color: '#FFD60A', fontSize: 13, fontWeight: '600', marginTop: 8 },
+  installPerm: { color: '#2DEC86', fontSize: 13, fontWeight: '600', marginTop: 8 },
   installLabel: { color: COLORS.textDim, fontSize: 11, marginTop: 12, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.6 },
   installInput: {
     backgroundColor: '#0A0A0A', borderRadius: 10, borderWidth: 1, borderColor: '#333',
     color: '#F4F4F4', fontSize: 13, paddingHorizontal: 12, paddingVertical: 9,
   },
   installSave: {
-    backgroundColor: '#FFD60A', borderRadius: 10, marginTop: 10,
+    backgroundColor: '#2DEC86', borderRadius: 10, marginTop: 10,
     paddingVertical: 11, alignItems: 'center',
   },
   installSaveText: { color: '#1a1a1a', fontWeight: '700', fontSize: 13 },

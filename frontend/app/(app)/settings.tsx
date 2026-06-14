@@ -83,8 +83,8 @@ export default function SettingsScreen() {
             activeOpacity={0.85}
             style={{ flexDirection: "row", alignItems: "center", padding: 14, gap: 12 }}
           >
-            <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: "rgba(255,199,0,0.18)", alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name="car-sport" size={18} color="#FFC700" />
+            <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: "rgba(0,196,106,0.18)", alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="car-sport" size={18} color="#00C46A" />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ color: COLORS.text, fontWeight: "600", fontSize: 15 }}>Garage</Text>
@@ -108,7 +108,7 @@ export default function SettingsScreen() {
           <View style={styles.divider} />
           <ToggleRow
             icon="car-sport-outline"
-            iconColor="#FFC700"
+            iconColor="#00C46A"
             title="Avatar Live"
             subtitle="Show your car on the community map. Off = invisible to crew and yourself."
             value={settings.avatarLive}
@@ -214,7 +214,7 @@ export default function SettingsScreen() {
           <View style={styles.divider} />
           <ToggleRow
             icon="location"
-            iconColor="#FFD60A"
+            iconColor="#2DEC86"
             title="Place pins"
             subtitle="Show the pin markers for category search results. Gas prices and place names always stay visible."
             value={settings.showPlacePins !== false}
@@ -286,7 +286,7 @@ export default function SettingsScreen() {
         <Glass radius={16} style={styles.card}>
           <RadioRow
             icon="speedometer"
-            iconColor="#FFD60A"
+            iconColor="#2DEC86"
             title="KM/H"
             subtitle="Kilometres per hour. Canada, Mexico, the EU, and most of the world"
             selected={settings.speedUnit === "kmh"}
@@ -311,7 +311,7 @@ export default function SettingsScreen() {
         <Glass radius={16} style={styles.card}>
           <ToggleRow
             icon="ribbon"
-            iconColor="#FFD60A"
+            iconColor="#2DEC86"
             title="Highlight Convoy reports"
             subtitle="Gold border around hazards reported by fellow Convoy drivers"
             value={settings.highlightConvoy}
@@ -473,7 +473,7 @@ function RadioRow({
         <Text style={styles.subtitle}>{subtitle}</Text>
       </View>
       {/* Radio ring — filled core when selected, hollow ring otherwise. */}
-      <View style={[styles.radioOuter, selected && { borderColor: "#FFC700" }]}>
+      <View style={[styles.radioOuter, selected && { borderColor: "#00C46A" }]}>
         {selected && <View style={styles.radioInner} />}
       </View>
     </TouchableOpacity>
@@ -499,14 +499,14 @@ const styles = StyleSheet.create({
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: COLORS.hairline, marginLeft: 60 },
   helpText: { color: COLORS.textMute || COLORS.textDim, fontSize: 11, lineHeight: 16, paddingHorizontal: 6, paddingTop: 8 },
   badge: {
-    backgroundColor: "#FFD60A22",
-    borderColor: "#FFD60A88",
+    backgroundColor: "#2DEC8622",
+    borderColor: "#2DEC8688",
     borderWidth: 1,
     borderRadius: 6,
     paddingHorizontal: 6,
     paddingVertical: 1,
   },
-  badgeText: { color: "#FFD60A", fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
+  badgeText: { color: "#2DEC86", fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
   // Radio button visuals — used by RadioRow for mutually-exclusive choices.
   // Hollow ring when unselected, filled yellow core when selected, matching
   // the Convoy brand accent so the active state pops without a Switch.
@@ -515,5 +515,5 @@ const styles = StyleSheet.create({
     borderWidth: 2, borderColor: COLORS.hairline,
     alignItems: "center", justifyContent: "center",
   },
-  radioInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: "#FFC700" },
+  radioInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: "#00C46A" },
 });

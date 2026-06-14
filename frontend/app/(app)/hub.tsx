@@ -64,7 +64,7 @@ export default function HubScreen() {
             onPress={() => router.push("/(app)/garage")}
             style={styles.iconBtn}
           >
-            <Ionicons name="car-sport" size={18} color="#FFC700" />
+            <Ionicons name="car-sport" size={18} color="#00C46A" />
           </TouchableOpacity>
         </View>
         <Text style={styles.sub}>{user?.handle} · {[user?.car_year, user?.car_make, user?.car_model].filter(Boolean).join(" ") || "Tap the car icon to set up your Garage"}</Text>
@@ -278,7 +278,7 @@ function CreateModal({ visible, onClose, onCreated }: any) {
             />
 
             <TouchableOpacity testID="cc-submit" onPress={submit} disabled={busy} style={styles.btn} activeOpacity={0.85}>
-              <LinearGradient colors={["#FFE45C", "#FFC700", "#FF9F0A"]} style={styles.btnGrad}>
+              <LinearGradient colors={["#7DF0B0", "#2DEC86", "#00C46A"]} style={styles.btnGrad}>
                 <Text style={[styles.btnText, { color: "#1a1a1a" }]}>{busy ? "Creating…" : "Create community"}</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -304,7 +304,7 @@ function FeatureToggle({ testID, icon, iconColor, title, sub, value, onChange }:
         testID={testID}
         value={value}
         onValueChange={onChange}
-        trackColor={{ false: "rgba(255,255,255,0.12)", true: "#FFC700" }}
+        trackColor={{ false: "rgba(255,255,255,0.12)", true: "#00C46A" }}
         thumbColor={value ? "#1a1a1a" : "#999"}
       />
     </View>
@@ -684,8 +684,8 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                       <Text style={styles.pendingName}>{m.handle || "anon"}{isSelf ? " (you)" : ""}</Text>
                       {m.is_owner ? (
-                        <View style={[styles.adminBadge, { backgroundColor: "#FFD60A22" }]}>
-                          <Text style={[styles.adminBadgeText, { color: "#FFD60A" }]}>OWNER</Text>
+                        <View style={[styles.adminBadge, { backgroundColor: "#2DEC8622" }]}>
+                          <Text style={[styles.adminBadgeText, { color: "#2DEC86" }]}>OWNER</Text>
                         </View>
                       ) : m.is_admin ? (
                         <View style={styles.adminBadge}>
@@ -703,7 +703,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                   {c?.is_owner && !isSelf && !m.is_owner && (
                     <>
                       <TouchableOpacity onPress={() => toggleAdmin(m)} hitSlop={8} style={styles.memberAction} testID={`toggle-admin-${m.id}`}>
-                        <Ionicons name={m.is_admin ? "star" : "star-outline"} size={18} color="#FFD60A" />
+                        <Ionicons name={m.is_admin ? "star" : "star-outline"} size={18} color="#2DEC86" />
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => transfer(m)} hitSlop={8} style={styles.memberAction} testID={`transfer-${m.id}`}>
                         <Ionicons name="ribbon-outline" size={18} color={COLORS.primary} />
@@ -921,8 +921,8 @@ const styles = StyleSheet.create({
   activeBtn: {
     flexDirection: "row", alignItems: "center", gap: 10,
     paddingVertical: 13, paddingHorizontal: 14, borderRadius: 14,
-    backgroundColor: "rgba(255,214,10,0.12)",
-    borderWidth: 1, borderColor: "rgba(255,214,10,0.4)",
+    backgroundColor: "rgba(45,236,134,0.12)",
+    borderWidth: 1, borderColor: "rgba(45,236,134,0.4)",
     marginBottom: 14,
   },
   activeBtnOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },

@@ -49,7 +49,7 @@ async function postBanner(title: string, body: string): Promise<void> {
         title,
         body,
         data: { nav: true },
-        color: "#FFD60A",
+        color: "#2DEC86",
         sticky: Platform.OS === "android",
         priority: Notifications.AndroidNotificationPriority.HIGH,
         // (no sound — Nova already speaks the turn; iOS shows a silent banner)
@@ -189,7 +189,7 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
           foregroundService: {
             notificationTitle: "Convoy navigation",
             notificationBody: "Turn-by-turn directions are active",
-            notificationColor: "#FFD60A",
+            notificationColor: "#2DEC86",
           },
         });
       }

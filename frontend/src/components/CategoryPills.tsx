@@ -201,9 +201,9 @@ export default function CategoryPills({ origin, onResults }: Props) {
         style={[styles.pill, active && styles.pillActive]}
       >
         {loading ? (
-          <ActivityIndicator size="small" color={active ? "#1C1C1E" : "#FFD60A"} />
+          <ActivityIndicator size="small" color={active ? "#1C1C1E" : "#2DEC86"} />
         ) : (
-          <MaterialCommunityIcons name={cat.icon} size={15} color={active ? "#1C1C1E" : "#FFD60A"} />
+          <MaterialCommunityIcons name={cat.icon} size={15} color={active ? "#1C1C1E" : "#2DEC86"} />
         )}
         <Text style={[styles.pillText, active && styles.pillTextActive]}>{cat.label}</Text>
       </TouchableOpacity>
@@ -221,7 +221,7 @@ export default function CategoryPills({ origin, onResults }: Props) {
         {PRIMARY.map(renderPill)}
         {/* More pill — always last, opens the overflow sheet. */}
         <TouchableOpacity testID="cat-pill-more" activeOpacity={0.8} onPress={() => setMoreOpen(true)} style={styles.pill}>
-          <MaterialCommunityIcons name="dots-horizontal" size={16} color="#FFD60A" />
+          <MaterialCommunityIcons name="dots-horizontal" size={16} color="#2DEC86" />
           <Text style={styles.pillText}>More</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -241,7 +241,7 @@ export default function CategoryPills({ origin, onResults }: Props) {
                   onPress={() => { setMoreOpen(false); run(cat); }}
                 >
                   <View style={styles.gridIcon}>
-                    <MaterialCommunityIcons name={cat.icon} size={22} color="#FFD60A" />
+                    <MaterialCommunityIcons name={cat.icon} size={22} color="#2DEC86" />
                   </View>
                   <Text style={styles.gridLabel} numberOfLines={1}>{cat.label}</Text>
                 </TouchableOpacity>
@@ -268,7 +268,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
     shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
-  pillActive: { backgroundColor: "#FFD60A", borderColor: "rgba(0,0,0,0.15)" },
+  pillActive: { backgroundColor: "#2DEC86", borderColor: "rgba(0,0,0,0.15)" },
   pillText: { color: "#F4F4F4", fontSize: 13, fontWeight: "600", letterSpacing: 0.1 },
   pillTextActive: { color: "#1C1C1E" },
   // ===== "More" bottom sheet =====
@@ -286,8 +286,8 @@ const styles = StyleSheet.create({
   gridIcon: {
     width: 52, height: 52, borderRadius: 26,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(255,214,10,0.14)",
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,214,10,0.35)",
+    backgroundColor: "rgba(45,236,134,0.14)",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(45,236,134,0.35)",
     marginBottom: 6,
   },
   gridLabel: { color: "#808080", fontSize: 11, fontWeight: "600", textAlign: "center" },

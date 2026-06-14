@@ -25,7 +25,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Animated } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-const YELLOW = "#FFD60A";
+const YELLOW = "#2DEC86";
 const OVER_RED = "#FF3B30";
 const HOLD_MS = 800;
 const EMA_ALPHA = 0.45;
@@ -179,7 +179,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,214,10,0.35)",
+    borderColor: "rgba(45,236,134,0.35)",
     shadowColor: "#000",
     shadowOpacity: 0.4,
     shadowRadius: 12,
@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
-    backgroundColor: "#FFD60A",
+    backgroundColor: "#2DEC86",
     borderRadius: 16,
     paddingVertical: 7,
     paddingLeft: 16,

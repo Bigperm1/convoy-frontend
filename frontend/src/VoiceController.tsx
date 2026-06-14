@@ -135,7 +135,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,214,10,0.35)",
+    borderColor: "rgba(45,236,134,0.35)",
     width: "100%",
     maxWidth: 460,
   },
@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
   bannerIcon: {
     width: 32, height: 32, borderRadius: 16,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(255,214,10,0.16)",
+    backgroundColor: "rgba(45,236,134,0.16)",
   },
   transcript: { color: COLORS.text, fontSize: 13, fontWeight: "500" },
   action: { fontSize: 12, marginTop: 2, fontWeight: "600", letterSpacing: 0.2 },

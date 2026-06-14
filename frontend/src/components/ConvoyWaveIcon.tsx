@@ -9,7 +9,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
  */
 export default function ConvoyWaveIcon({
   size = 24,
-  color = '#FFD60A',
+  color = '#2DEC86',
 }: {
   size?: number;
   color?: string;

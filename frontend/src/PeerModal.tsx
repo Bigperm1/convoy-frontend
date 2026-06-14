@@ -134,8 +134,8 @@ export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed
                     or no speed clocked), so it never disappears. Placeholder "—"
                     keeps the chip in place until a real PB comes through. */}
                 <View testID="peer-top-speed" style={[styles.metaCell, styles.metaCellAccent]}>
-                  <Ionicons name="speedometer" size={14} color="#FFC700" />
-                  <Text style={[styles.metaText, { color: "#FFC700" }]}>
+                  <Ionicons name="speedometer" size={14} color="#00C46A" />
+                  <Text style={[styles.metaText, { color: "#00C46A" }]}>
                     {typeof peer.topSpeed === "number" && peer.topSpeed > 0
                       ? `PB ${Math.round(peer.topSpeed)} km/h`
                       : "PB —"}
@@ -190,14 +190,14 @@ const styles = StyleSheet.create({
   },
   inner: { padding: 18 },
   header: { flexDirection: "row", alignItems: "center", gap: 12 },
-  avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 2, borderColor: "rgba(255,214,10,0.55)" },
+  avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 2, borderColor: "rgba(45,236,134,0.55)" },
   avatarImg: { width: 46, height: 46 },
   handle: { color: COLORS.text, fontSize: 18, fontWeight: "700", letterSpacing: -0.3 },
   car: { color: COLORS.textDim, fontSize: 13, marginTop: 2 },
   closeBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.10)" },
   metaRow: { flexDirection: "row", gap: 8, marginTop: 14, marginBottom: 14, flexWrap: "wrap" },
   metaCell: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)" },
-  metaCellAccent: { backgroundColor: "rgba(255,199,0,0.12)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,199,0,0.45)" },
+  metaCellAccent: { backgroundColor: "rgba(0,196,106,0.12)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,196,106,0.45)" },
   metaText: { color: COLORS.text, fontSize: 12, fontWeight: "600" },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: COLORS.success },
   hailBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: COLORS.brand, paddingVertical: 14, borderRadius: 14 },

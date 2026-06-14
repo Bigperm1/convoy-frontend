@@ -384,7 +384,7 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
 const styles = StyleSheet.create({
   surface: { flex: 1, backgroundColor: '#0B0B0C', alignItems: 'center', justifyContent: 'center', padding: 24 },
   center: { alignItems: 'center' },
-  brand: { color: '#FFD60A', fontSize: 44, fontWeight: '900', letterSpacing: 4 },
+  brand: { color: '#2DEC86', fontSize: 44, fontWeight: '900', letterSpacing: 4 },
   sub: { color: '#9AA0A6', fontSize: 18, marginTop: 8 },
   dist: { color: '#F4F4F4', fontSize: 48, fontWeight: '800', letterSpacing: -1 },
   inst: { color: '#F4F4F4', fontSize: 22, fontWeight: '600', marginTop: 4, textAlign: 'center' },

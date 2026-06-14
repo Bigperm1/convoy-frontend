@@ -96,7 +96,7 @@ export default function Onboarding() {
         </View>
         <TouchableOpacity onPress={goNext} style={styles.btn} activeOpacity={0.85}>
           <LinearGradient
-            colors={['#FFE45C', '#FFC700', '#FF9F0A']}
+            colors={['#7DF0B0', '#2DEC86', '#00C46A']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.btnGradient}
@@ -112,7 +112,7 @@ export default function Onboarding() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#000' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
-  logo: { color: '#FFD60A', fontSize: 16, fontWeight: '700', letterSpacing: 2 },
+  logo: { color: '#2DEC86', fontSize: 16, fontWeight: '700', letterSpacing: 2 },
   skip: { color: '#808080', fontSize: 14, fontWeight: '500' },
   scroller: { flex: 1 },
   slide: { flex: 1, justifyContent: 'flex-end' },
@@ -124,7 +124,7 @@ const styles = StyleSheet.create({
   footer: { paddingHorizontal: 20, paddingBottom: 32, gap: 16 },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 8 },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.3)' },
-  dotActive: { backgroundColor: '#FFD60A', width: 24 },
+  dotActive: { backgroundColor: '#2DEC86', width: 24 },
   btn: { borderRadius: 14, overflow: 'hidden' },
   btnGradient: { paddingVertical: 16, alignItems: 'center' },
   btnText: { color: '#1a1a1a', fontWeight: '700', fontSize: 16 },

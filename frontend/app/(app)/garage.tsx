@@ -16,7 +16,7 @@ import { getGarageImage } from '../../src/carImages';
 import { YEARS, getMakeNames, getModelsForMake, getColorsForModel } from '../../src/carDatabase';
 
 const { width: SCREEN_W } = Dimensions.get('window');
-const YELLOW = '#FFD60A';
+const YELLOW = '#2DEC86';
 
 // Enable LayoutAnimation on Android for the smooth dropdown expand/collapse.
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -404,7 +404,7 @@ const styles = StyleSheet.create({
   speedIcon:          { width: 44, height: 44, borderRadius: 12, backgroundColor: '#1A1A00', alignItems: 'center', justifyContent: 'center' },
   speedLabel:         { color: '#F4F4F4', fontSize: 15, fontWeight: '600' },
   speedSub:           { color: '#808080', fontSize: 12, marginTop: 2 },
-  speedValue:         { color: '#FFD60A', fontSize: 28, fontWeight: '700' },
+  speedValue:         { color: '#2DEC86', fontSize: 28, fontWeight: '700' },
   speedUnit:          { color: '#808080', fontSize: 12, alignSelf: 'flex-end', marginBottom: 4 },
 
   section:            { marginHorizontal: 16, marginBottom: 10 },
@@ -412,7 +412,7 @@ const styles = StyleSheet.create({
 
   // Collapsed field row (dropdown header + call-sign input share this)
   fieldRow:           { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderRadius: 16, backgroundColor: '#111', paddingHorizontal: 16, borderWidth: 1, borderColor: '#1E1E1E' },
-  fieldRowOpen:       { borderColor: 'rgba(255,214,10,0.4)', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
+  fieldRowOpen:       { borderColor: 'rgba(45,236,134,0.4)', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
   fieldRowDisabled:   { opacity: 0.5 },
   fieldValueRow:      { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   fieldValue:         { color: '#F4F4F4', fontSize: 17, fontWeight: '600' },
@@ -420,9 +420,9 @@ const styles = StyleSheet.create({
   swatchDot:          { width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
 
   // Expanded options
-  optionList:         { backgroundColor: '#0E0E0E', borderBottomLeftRadius: 16, borderBottomRightRadius: 16, borderWidth: 1, borderTopWidth: 0, borderColor: 'rgba(255,214,10,0.4)', overflow: 'hidden' },
+  optionList:         { backgroundColor: '#0E0E0E', borderBottomLeftRadius: 16, borderBottomRightRadius: 16, borderWidth: 1, borderTopWidth: 0, borderColor: 'rgba(45,236,134,0.4)', overflow: 'hidden' },
   optionRow:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 50, borderTopWidth: 1, borderTopColor: '#1A1A1A' },
-  optionRowSel:       { backgroundColor: 'rgba(255,214,10,0.08)' },
+  optionRowSel:       { backgroundColor: 'rgba(45,236,134,0.08)' },
   optionText:         { color: '#808080', fontSize: 16 },
   optionTextSel:      { color: '#F4F4F4', fontWeight: '600' },
 

@@ -155,7 +155,7 @@ export default function Signup() {
             >
               {/* Convoy yellow CTA — dark text for contrast. */}
               <LinearGradient
-                colors={["#FFE45C", "#FFC700", "#FF9F0A"]}
+                colors={["#7DF0B0", "#2DEC86", "#00C46A"]}
                 start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
                 style={styles.btnGrad}
               >
@@ -294,5 +294,5 @@ const styles = StyleSheet.create({
   btnInner: { flexDirection: "row", alignItems: "center", gap: 10 },
   // Dark, high-contrast text for the yellow CTA — matches the brand-mark glyph color.
   btnText: { color: "#1a1a1a", fontWeight: "700", fontSize: 16, letterSpacing: 0.2 },
-  signInLink: { color: "#FFC700", fontWeight: "600" },
+  signInLink: { color: "#00C46A", fontWeight: "600" },
 });

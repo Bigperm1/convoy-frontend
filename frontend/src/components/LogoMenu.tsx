@@ -8,7 +8,7 @@ import * as Haptics from 'expo-haptics';
 import ConvoyLogo from './ConvoyLogo';
 import { useAuth } from '../auth';
 
-const YELLOW = '#FFD60A';
+const YELLOW = '#2DEC86';
 const OWNER_EMAIL = 'jwellsmorton@gmail.com';
 const CARD_W = 230;
 const GAP = 8; // gap between the logo's bottom and the dropdown's top
@@ -157,7 +157,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#161618',
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: 'rgba(255,214,10,0.25)',
+    borderColor: 'rgba(45,236,134,0.25)',
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOpacity: 0.5,
@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
   rowLast: { borderBottomWidth: 0 },
   rowIcon: {
     width: 36, height: 36, borderRadius: 10,
-    backgroundColor: 'rgba(255,214,10,0.10)',
+    backgroundColor: 'rgba(45,236,134,0.10)',
     alignItems: 'center', justifyContent: 'center',
   },
   rowLabel: { flex: 1, color: '#F4F4F4', fontSize: 16, fontWeight: '600' },

@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderTopWidth: 2,
-    borderTopColor: "#FFD60A",
+    borderTopColor: "#2DEC86",
     // Symmetric top/bottom padding so the top headroom matches the gap under
     // the Exit circle (the row's tallest element).
     paddingTop: 10,

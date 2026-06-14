@@ -10,10 +10,14 @@
 // from crashing on this JS-only migration branch before the first Mapbox build.
 import Mapbox from '@rnmapbox/maps';
 
+// Exported so other first-party Mapbox calls (e.g. the Directions API used for the
+// route congestion gradient) reuse the SAME public token instead of duplicating
+// the literal. Public (pk.*) — safe in the client.
+export const MAPBOX_PUBLIC_TOKEN =
+  'pk.eyJ1IjoiY29udm95LWRyaXZldG9nZXRoZXIiLCJhIjoiY21xY3d4c2NwMHd4ejJycHI1dmMyaHBkdSJ9.GRbIfYU5BUoA_-Uo9sQhqA';
+
 try {
-  Mapbox.setAccessToken(
-    'pk.eyJ1IjoiY29udm95LWRyaXZldG9nZXRoZXIiLCJhIjoiY21xY3d4c2NwMHd4ejJycHI1dmMyaHBkdSJ9.GRbIfYU5BUoA_-Uo9sQhqA'
-  );
+  Mapbox.setAccessToken(MAPBOX_PUBLIC_TOKEN);
 } catch (e) {
   console.warn('[initMapbox] setAccessToken failed (native module not present yet?)', e);
 }

@@ -11,7 +11,8 @@
 //   • follow / chase camera — Mapbox NATIVE course-follow (smooth glide; speed/corner zoom + 45° tilt)
 //   • self car puck + every peer car (rotated GR Corolla PNGs)
 //   • routes — gray alternates + the SELECTED cased blue ribbon, tap-to-select,
-//     ETA pills, dest pin, route-preview fit-to-bounds
+//     ETA pills, dest pin, route-preview fit-to-bounds, plus a LIVE traffic-
+//     congestion gradient on the previewed route (Mapbox Directions)
 //   • map overlays — community hazard / police pins, ON-ROUTE speed cameras,
 //     category place pins (gas price chips / fuel badges / named places), and
 //     the destination arrival-weather chip
@@ -22,20 +23,22 @@
 // renders the real RN view. So all of that ceremony is gone here.
 //
 // NOT YET PORTED (each ships later as a FREE OTA increment; props still accepted
-// and ignored for now): the traffic-congestion GRADIENT on the route line, the
-// maneuver turn-arrow, avatar route-snapping, and live traffic.
+// and ignored for now): the maneuver turn-arrow, avatar route-snapping, and
+// carrying the congestion gradient THROUGH active navigation (today it's preview-
+// only — promoting it is part of the later, drive-tested Mapbox routing swap).
 //
 // COORDINATE ORDER: Mapbox uses [longitude, latitude] arrays (GeoJSON order) —
 // the OPPOSITE of react-native-maps' { latitude, longitude }. Every coordinate
 // handed to Mapbox below is [lng, lat].
 
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Image, StyleSheet, Pressable } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, UserLocation as MapboxUserLocation } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
 import type { WeatherKind } from "./weatherLayer";
+import { fetchMapboxCongestion, buildCongestionGradient } from "./mapboxDirections";
 
 type LatLng = { lat: number; lng: number };
 
@@ -314,10 +317,16 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
 
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
   const readyRef = useRef(false);
+  const [mapReady, setMapReady] = useState(false);
   const gesturingRef = useRef(false);
   // Tracks which destination we've already framed (preview fit-to-bounds) so we
   // don't re-fit on every route recompute / GPS tick.
   const fittedDestRef = useRef<string | null>(null);
+  // One-shot guard for the cold-start recenter (see the idle-recenter effect).
+  const idleCenteredRef = useRef(false);
+  // Live traffic-congestion gradient for the route preview (Mapbox Directions).
+  // Null unless we have a fetched congestion route to paint (preview-only).
+  const [congestionRoute, setCongestionRoute] = useState<{ coordinates: [number, number][]; gradient: any } | null>(null);
 
   // ----- Base-map style -----
   // "hybrid"        → satellite-with-streets imagery (matches Google satellite).
@@ -434,6 +443,58 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routes, destination, navigationActive, followUser]);
 
+  // ===== Cold-start / idle recenter =====
+  // `defaultSettings` sets the camera ONCE at mount — and on a cold start the
+  // user's location usually isn't known yet, so the map mounts at Mapbox's default
+  // (the whole world) and then never moves: followUserLocation is off while idle,
+  // and the preview / nav cameras only run once there's a destination. This snaps
+  // the map onto the user the first time we get a fix while idle, so a cold start
+  // lands on YOU, not the globe. One-shot (idleCenteredRef) so you can still freely
+  // pan afterwards; skipped whenever follow / nav / a destination owns the camera.
+  useEffect(() => {
+    if (idleCenteredRef.current) return;
+    if (followUser || navigationActive || destination) return;
+    const cam = cameraRef.current;
+    if (!cam || !mapReady) return;
+    const lat = center?.lat ?? user?.lat;
+    const lng = center?.lng ?? user?.lng;
+    if (typeof lat !== "number" || typeof lng !== "number") return;
+    idleCenteredRef.current = true;
+    try {
+      cam.setCamera({ centerCoordinate: [lng, lat], zoomLevel: FREE_ZOOM, heading: 0, pitch: 0, animationDuration: 0 });
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, center?.lat, center?.lng, user?.lat, user?.lng, followUser, navigationActive, destination]);
+
+  // ===== Route congestion gradient (Mapbox Directions) — PREVIEW only =====
+  // On a new destination (and while NOT navigating) fetch the live driving-traffic
+  // route from Mapbox and paint it as a congestion-coloured line. Keyed ONLY on
+  // the destination so a GPS tick never refetches; the origin is the user's spot
+  // at fetch time. Cleared when there's no destination or once navigation starts
+  // (during active guidance the chase cam + Google geometry own the screen —
+  // unifying that is the later, drive-tested routing swap). Fails soft to null.
+  useEffect(() => {
+    if (navigationActive || !destination) { setCongestionRoute(null); return; }
+    const oLat = center?.lat ?? user?.lat;
+    const oLng = center?.lng ?? user?.lng;
+    if (typeof oLat !== "number" || typeof oLng !== "number" ||
+        typeof destination.lat !== "number" || typeof destination.lng !== "number") {
+      setCongestionRoute(null);
+      return;
+    }
+    const ctrl = new AbortController();
+    let cancelled = false;
+    fetchMapboxCongestion({ lat: oLat, lng: oLng }, { lat: destination.lat, lng: destination.lng }, { signal: ctrl.signal })
+      .then((res) => {
+        if (cancelled) return;
+        if (!res) { setCongestionRoute(null); return; }
+        setCongestionRoute({ coordinates: res.coordinates, gradient: buildCongestionGradient(res.coordinates, res.congestion) });
+      })
+      .catch(() => { if (!cancelled) setCongestionRoute(null); });
+    return () => { cancelled = true; ctrl.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destination?.lat, destination?.lng, navigationActive]);
+
   // ===== Build the car list (self + peers) =====
   const cars: CarPoint[] = [];
   if (!hideSelfMarker && user && typeof user.lat === "number" && typeof user.lng === "number") {
@@ -474,6 +535,17 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     });
   }, [speedCameras, routes, selectedRouteIndex]);
 
+  // Preview congestion gradient is shown whenever we have a fetched congestion
+  // route, a destination, and we're not navigating. When on, it REPLACES the
+  // solid blue selected ribbon (so there's only one line for the active route).
+  const showCongestion = !!congestionRoute && !navigationActive && !!destination;
+  const congestionFeature: any = useMemo(
+    () => congestionRoute
+      ? { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: congestionRoute.coordinates } }
+      : null,
+    [congestionRoute],
+  );
+
   return (
     <View style={styles.container}>
       <MapView
@@ -488,7 +560,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         attributionPosition={{ bottom: 8, right: 8 }}
         pitchEnabled
         rotateEnabled
-        onDidFinishLoadingMap={() => { readyRef.current = true; onMapReady?.(); }}
+        onDidFinishLoadingMap={() => { readyRef.current = true; setMapReady(true); onMapReady?.(); }}
         onPress={() => onMapPress?.()}
         onLongPress={(f: any) => {
           const c = f?.geometry?.coordinates;
@@ -538,7 +610,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             blue ribbon (dark casing under, blue core on top). All in the
             "middle" slot so the Standard style's street labels stay legible on
             top of the line. Tap an alternate to select it (ShapeSource onPress).
-            Traffic-congestion gradient lands in a later OTA. */}
+            While previewing, the solid blue ribbon is REPLACED by the live
+            congestion gradient (the convoy-congestion source just below) — the
+            selected casing/core are hidden by filtering them to a non-existent
+            index rather than unmounting, since ShapeSource children must always
+            be elements (never a boolean). */}
         {showRoutes && (
           <ShapeSource id="convoy-routes" shape={routeFC} onPress={handleRoutePress}>
             <LineLayer
@@ -550,14 +626,34 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             <LineLayer
               id="route-sel-casing"
               slot="middle"
-              filter={["==", ["get", "index"], selectedRouteIndex] as any}
+              filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
               style={{ lineColor: "#062B5E", lineWidth: 15, lineCap: "round", lineJoin: "round" }}
             />
             <LineLayer
               id="route-sel-core"
               slot="middle"
-              filter={["==", ["get", "index"], selectedRouteIndex] as any}
+              filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
               style={{ lineColor: "#0A84FF", lineWidth: 9, lineCap: "round", lineJoin: "round" }}
+            />
+          </ShapeSource>
+        )}
+
+        {/* ===== Live traffic-congestion gradient (preview) ===== Mapbox
+            Directions driving-traffic, painted as a cased ribbon whose CORE is a
+            congestion gradient — blue when clear, warming to yellow / orange /
+            red where traffic slows. Replaces the solid blue selected ribbon
+            while previewing. `lineMetrics` enables the line-progress gradient. */}
+        {showCongestion && congestionFeature && (
+          <ShapeSource id="convoy-congestion" shape={congestionFeature} lineMetrics>
+            <LineLayer
+              id="cong-casing"
+              slot="middle"
+              style={{ lineColor: "#062B5E", lineWidth: 15, lineCap: "round", lineJoin: "round" }}
+            />
+            <LineLayer
+              id="cong-core"
+              slot="middle"
+              style={{ lineGradient: congestionRoute!.gradient, lineWidth: 9, lineCap: "round", lineJoin: "round" }}
             />
           </ShapeSource>
         )}

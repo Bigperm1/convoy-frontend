@@ -125,12 +125,16 @@ const CORNER_NEAR_M = 70;
 
 // ===== Route line styling (brand green, sampled from new_logo_icons.png) =====
 // The selected route is a glowing neon-green ribbon matching the app icon's route
-// line: a saturated green GLOW underlay (wide + blurred) beneath a bright green
-// CORE. Replaces the old blue/navy line. The congestion gradient (when shown)
-// uses the same CORE green for "clear", so a clear route looks identical whether
-// or not live traffic data is present.
+// line: a saturated green GLOW underlay (wide + blurred) beneath a thick bright
+// green CORE. Replaces the old blue/navy line.
+//
+// IMPORTANT — emissive: every route layer sets `lineEmissiveStrength: 1`. The
+// Mapbox Standard style applies its 3D SCENE LIGHTING to custom layers, so at the
+// "night" preset it DIMS them — which is why the line looked dark ("forest green",
+// and the old blue looked near-black). Emissive strength 1 makes the line self-lit
+// so it renders at full brightness regardless of the night lighting.
 const ROUTE_GREEN_CORE = "#2DEC86"; // bright neon-green core (the visible line)
-const ROUTE_GREEN_GLOW = "#00D070"; // saturated green halo (blurred underlay)
+const ROUTE_GREEN_GLOW = "#00E070"; // saturated green halo (blurred underlay)
 
 function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
 function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
@@ -600,19 +604,19 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               id="route-alts"
               slot="middle"
               filter={["!=", ["get", "index"], selectedRouteIndex] as any}
-              style={{ lineColor: "#9AA0A6", lineWidth: 5, lineCap: "round", lineJoin: "round", lineOpacity: 0.85 }}
+              style={{ lineColor: "#9AA0A6", lineWidth: 5, lineCap: "round", lineJoin: "round", lineOpacity: 0.85, lineEmissiveStrength: 1 }}
             />
             <LineLayer
               id="route-sel-casing"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineColor: ROUTE_GREEN_GLOW, lineWidth: 16, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round" }}
+              style={{ lineColor: ROUTE_GREEN_GLOW, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
             <LineLayer
               id="route-sel-core"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineColor: ROUTE_GREEN_CORE, lineWidth: 8, lineCap: "round", lineJoin: "round" }}
+              style={{ lineColor: ROUTE_GREEN_CORE, lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
           </ShapeSource>
         )}
@@ -627,12 +631,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             <LineLayer
               id="cong-casing"
               slot="middle"
-              style={{ lineColor: ROUTE_GREEN_GLOW, lineWidth: 16, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round" }}
+              style={{ lineColor: ROUTE_GREEN_GLOW, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
             <LineLayer
               id="cong-core"
               slot="middle"
-              style={{ lineGradient: congestionRoute!.gradient, lineWidth: 8, lineCap: "round", lineJoin: "round" }}
+              style={{ lineGradient: congestionRoute!.gradient, lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
           </ShapeSource>
         )}

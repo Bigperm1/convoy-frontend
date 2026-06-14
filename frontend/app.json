@@ -91,7 +91,7 @@
         "expo-notifications",
         {
           "icon": "./assets/images/brand-mark.png",
-          "color": "#FFD60A"
+          "color": "#2DEC86"
         }
       ],
       [

@@ -9,8 +9,8 @@ export const COLORS = {
   hairlineStrong: "rgba(255,255,255,0.16)",
   primary: "#0A84FF", // system blue
   primaryDim: "#0064D1",
-  brand: "#FFD60A", // Convoy yellow — the logo/mic accent, our signature color
-  brandDim: "#FFC700",
+  brand: "#2DEC86", // Convoy green — the logo/mic accent, our signature color (from new_logo_icons.png)
+  brandDim: "#00C46A",
   accent: "#5E5CE6", // indigo
   success: "#30D158",
   warning: "#FF9F0A",

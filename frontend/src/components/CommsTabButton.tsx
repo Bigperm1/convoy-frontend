@@ -13,6 +13,7 @@ import React, { useRef } from "react";
 import { Pressable, View, StyleSheet } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useVoice } from "../useVoice";
+import CommsHoldGlow from "./CommsHoldGlow";
 
 type Props = {
   children?: React.ReactNode;
@@ -56,6 +57,8 @@ export default function CommsTabButton({ children, onPress, accessibilityState, 
       onPressOut={handlePressOut}
       delayLongPress={250}
     >
+      {/* Smoky green haze behind the mic while holding-to-talk. */}
+      <CommsHoldGlow active={voice.recording} />
       {children}
       {voice.recording && <View style={styles.txDot} pointerEvents="none" />}
     </Pressable>

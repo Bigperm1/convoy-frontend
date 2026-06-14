@@ -2130,7 +2130,6 @@ export default function MapScreen() {
                   onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
                   onProfilePress={() => router.push("/(app)/hub" as any)}
                   onPressField={() => setNavSearchOpen(true)}
-                  onCommsPress={() => router.push("/(app)/talk" as any)}
                 />
               </View>
               <View style={styles.mapLogoBacking}>

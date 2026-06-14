@@ -570,11 +570,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         {/* Mapbox's native location layer — REQUIRED to power the Camera's
             followUserLocation. It must be VISIBLE to actually start the native
             location engine (a hidden location component does not start it, which
-            is what kept the camera from following). Rendered tiny (scale 0.01) so
-            it's effectively invisible — the GR Corolla MarkerView stays the
-            branded self-car on top — while still powering the native follow.
+            is what kept the camera from following) — so we keep `visible` but set
+            scale={0} to fully hide the blue dot under the car while still powering
+            the native follow. (visible={false} would stop the chase cam, per the
+            above.) The GR Corolla MarkerView stays the branded self-car on top.
             puckBearing="course" orients tracking to the direction of travel. */}
-        <LocationPuck visible scale={0.01} puckBearing="course" puckBearingEnabled />
+        <LocationPuck visible scale={0} puckBearing="course" puckBearingEnabled />
 
         <Camera
           ref={cameraRef}

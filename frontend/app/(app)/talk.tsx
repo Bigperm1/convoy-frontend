@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, Pressable, TouchableOpacity, Animated,
-  SafeAreaView, ScrollView, Easing, Image, Alert,
+  ScrollView, Easing, Image, Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
@@ -497,7 +498,7 @@ export default function TalkScreen() {
   const voxMode = voxOn && !!activeThread;
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={["top"]}>
       {/* Community header — live active convoy */}
       <View style={styles.header}>
         {active ? (
@@ -543,7 +544,7 @@ export default function TalkScreen() {
             )}
           </Pressable>
         )}
-        <LogoMenu size={40} style={styles.garageBtn} align="right" />
+        <View style={styles.logoBacking}><LogoMenu size={40} align="right" /></View>
       </View>
 
       {/* Tap anywhere outside the mic to dismiss the open switcher. Rendered
@@ -830,6 +831,14 @@ const styles = StyleSheet.create({
   tierText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
   chevBtn: { marginLeft: 4, padding: 2 },
   garageBtn: { padding: 4, marginLeft: 8 },
+  logoBacking: {
+    width: 54, height: 54, borderRadius: 27,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(20,20,22,0.9)',
+    borderWidth: 1.5, borderColor: 'rgba(45,236,134,0.55)',
+    shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
   shareCommBtn: { padding: 4, marginLeft: 4 },
 
   // Community switcher dropdown

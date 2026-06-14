@@ -373,7 +373,7 @@ export default function MusicScreen() {
             <Text style={styles.dateOverline}>{today}</Text>
             <Text style={styles.title}>Listen Now</Text>
           </View>
-          <LogoMenu size={40} style={styles.logoBtn} align="right" />
+          <View style={styles.logoBacking}><LogoMenu size={40} align="right" /></View>
         </View>
         <SourceSwitcher current="spotify" />
         <SpotifyMusic onSwitchSource={() => updateSettings({ musicSource: null })} />
@@ -394,7 +394,7 @@ export default function MusicScreen() {
             <Text style={styles.dateOverline}>{today}</Text>
             <Text style={styles.title}>Listen Now</Text>
           </View>
-          <LogoMenu size={40} style={styles.logoBtn} align="right" />
+          <View style={styles.logoBacking}><LogoMenu size={40} align="right" /></View>
         </View>
 
         {source === "apple" && <SourceSwitcher current="apple" />}
@@ -763,6 +763,14 @@ const styles = StyleSheet.create({
   dateOverline: { color: "#808080", fontSize: 13, fontWeight: "700", letterSpacing: 0.4 },
   title: { color: COLORS.text, fontSize: 34, fontWeight: "800", letterSpacing: -1, marginTop: 2 },
   logoBtn: { padding: 4 },
+  logoBacking: {
+    width: 54, height: 54, borderRadius: 27,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(20,20,22,0.9)',
+    borderWidth: 1.5, borderColor: 'rgba(45,236,134,0.55)',
+    shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
 
   // ===== Search =====
   searchWrap: {

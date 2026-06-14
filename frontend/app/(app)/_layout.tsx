@@ -135,10 +135,6 @@ export default function AppLayout() {
   // anchor so it stays flush on top of this now-taller bar.
   const navInset = Platform.OS === "android" ? insets.bottom : 0;
 
-  // Comms is "active" whenever a convoy or private thread is selected. Keep the
-  // Comms tab lit yellow from ANY tab as a persistent "you're connected" cue,
-  // instead of going dim like a normal unfocused tab.
-  const commsActive = !!(settings.activeThreadId || settings.activeCommunityId);
 
   // Mount the live walkie-talkie WebSocket listener once for the entire
   // (app) shell — incoming PTT transmissions auto-play even when the user is
@@ -276,25 +272,23 @@ export default function AppLayout() {
           },
           // Solid dark surface (no blur) so the color matches the search bar.
           tabBarBackground: () => null,
-          tabBarActiveTintColor: COLORS.primary,
-          tabBarInactiveTintColor: COLORS.textDim,
-          tabBarLabelStyle: { fontSize: 12, fontWeight: "500", letterSpacing: 0 },
+          tabBarActiveTintColor: "#2DEC86",
+          tabBarInactiveTintColor: "#808080",
+          tabBarLabelStyle: { fontSize: 13, fontWeight: "600", letterSpacing: 0 },
         }}
       >
         <Tabs.Screen name="map" options={{
           tabBarLabel: "Map",
-          tabBarActiveTintColor: "#00629b",
           tabBarButtonTestID: "tab-map",
-          tabBarIcon: ({ color }) => <Ionicons name="navigate" size={27} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="navigate" size={30} color={color} />,
         }} />
         <Tabs.Screen name="talk" options={{
           tabBarLabel: ({ color }) => (
-            <Text style={{ color: commsActive ? "#2DEC86" : color, fontSize: 12, fontWeight: "500" }}>Comms</Text>
+            <Text style={{ color, fontSize: 13, fontWeight: "600" }}>Comms</Text>
           ),
-          tabBarActiveTintColor: "#2DEC86",
           tabBarButtonTestID: "tab-talk",
           tabBarButton: (props) => <CommsTabButton {...props} selfId={user?.id} />,
-          tabBarIcon: ({ color }) => <Ionicons name="mic" size={30} color={commsActive ? "#2DEC86" : color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="mic" size={34} color={color} />,
         }} />
         {/* Voice screen is no longer represented in the bottom tab bar — the
             press-and-hold mic now lives inside the map's search bar (Google
@@ -303,9 +297,8 @@ export default function AppLayout() {
         <Tabs.Screen name="voice" options={{ href: null }} />
         <Tabs.Screen name="music" options={{
           tabBarLabel: "Music",
-          tabBarActiveTintColor: "#FF453A",
           tabBarButtonTestID: "tab-music",
-          tabBarIcon: ({ color }) => <Ionicons name="musical-notes" size={27} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="musical-notes" size={30} color={color} />,
         }} />
         {/* Hub is now reached via the circular profile avatar on the right
             edge of the map search bar (mirrors Google Maps). Hidden from the

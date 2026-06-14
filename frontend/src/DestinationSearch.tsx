@@ -5,7 +5,6 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform, ScrollVi
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
 import { geocodeQuery } from "./voiceBus";
-import ConvoyWaveIcon from "./components/ConvoyWaveIcon";
 import { useAuth } from "./auth";
 import { GOOGLE_MAPS_KEY } from "./api";
 
@@ -28,8 +27,6 @@ type Props = {
   // instead of typing inline (the map uses it to open the full-screen search
   // screen). The mic + logo remain fully interactive.
   onPressField?: () => void;
-  // Tap the comms-wave icon (replaces the old mic) → open Comms.
-  onCommsPress?: () => void;
 };
 
 let _placesService: any = null;
@@ -114,7 +111,7 @@ async function placeDetailsRest(place_id: string): Promise<{ lat: number; lng: n
   } catch { return null; }
 }
 
-export default function DestinationSearch({ origin, onSelect, onClear, initialValue, onProfilePress, profileSlot, onPressField, onCommsPress }: Props) {
+export default function DestinationSearch({ origin, onSelect, onClear, initialValue, onProfilePress, profileSlot, onPressField }: Props) {
   const [text, setText] = useState(initialValue || "");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -180,8 +177,8 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
 
   const clear = () => { setText(""); setSuggestions([]); setOpen(false); onClear?.(); };
 
-  // Profile avatar identity. The in-bar mic/voice machinery was removed — the
-  // comms-wave icon now opens Comms via onCommsPress.
+  // Profile avatar identity. The in-bar mic/voice machinery and the comms-wave
+  // control were both removed — the search bar no longer hosts a right-side icon.
   const { user } = useAuth();
 
   // Profile avatar — for now everyone falls back to the generic person icon
@@ -274,16 +271,6 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
               <Ionicons name="close-circle" size={20} color="rgba(235,235,245,0.6)" />
             </TouchableOpacity>
           )}
-          {/* Comms-wave icon (replaces the old mic) — tap to open Comms. */}
-          <TouchableOpacity
-            testID="search-comms"
-            onPress={onCommsPress}
-            activeOpacity={0.7}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            style={styles.micBtn}
-          >
-            <ConvoyWaveIcon size={26} color="#2DEC86" />
-          </TouchableOpacity>
         </View>
         {/* Logo/menu now lives on the LEFT inside the bar — no right-side control. */}
       </View>

@@ -189,6 +189,15 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
 
   // ---- connect / disconnect lifecycle ----
   useEffect(() => {
+    // iOS CarPlay is DORMANT. Skip the entire CarPlay connect path on iOS so that
+    // connecting to the car never fires the native template calls (createTemplate
+    // / setRootTemplate) that throw and crash the app. No registerOnConnect, no
+    // setRoot, no template building. CarPlay just shows its default blank screen —
+    // it's being rebuilt later on the new map engine. The downstream iOS effects
+    // all gate on `connected`, which now stays false, so they're inert too.
+    // Android Auto is UNAFFECTED: it runs in its own "AndroidAuto" AppRegistry
+    // root (registerAndroidAuto.ts / AndroidAutoRoot.tsx), not this hook.
+    if (isIOS) return;
     const lib = getLib();
     if (!lib) return;
     const { CarPlay, MapTemplate, ListTemplate, NowPlayingTemplate, TabBarTemplate } = lib;

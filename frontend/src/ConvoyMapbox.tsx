@@ -6,23 +6,26 @@
 // map.tsx spreads the SAME props into whichever engine the toggle selects, so
 // this is a literal drop-in for ConvoyMap.
 //
-// INCREMENT 1 (this version) renders:
-//   • the base Mapbox map (dark vector style, or satellite for "hybrid")
-//   • the follow / chase camera (free-roam follow + turn-by-turn zoom & 45° tilt)
-//   • the self car puck + every peer car (rotated GR Corolla PNGs)
+// PORTED SO FAR:
+//   • base Mapbox map — dark Standard/night (3D buildings) or satellite (hybrid)
+//   • follow / chase camera (free-roam follow + turn-by-turn zoom & 45° tilt)
+//   • self car puck + every peer car (rotated GR Corolla PNGs)
+//   • routes — gray alternates + the SELECTED cased blue ribbon (ShapeSource +
+//     LineLayers), tap-an-alternate to select, ETA pills, dest pin, and the
+//     route-preview fit-to-bounds
 //
-// NOT YET PORTED (each ships later as a FREE OTA increment; the props are still
-// accepted and simply ignored for now): routes / polylines, hazards, speed
-// cameras, place pins, destination + arrival-weather chip, the maneuver turn-
-// arrow, avatar route-snapping, live traffic, and route-preview fit-to-bounds.
+// NOT YET PORTED (each ships later as a FREE OTA increment; props still accepted
+// and ignored for now): the traffic-congestion GRADIENT on the route line,
+// hazards, speed cameras, place pins, the arrival-weather chip, the maneuver
+// turn-arrow, avatar route-snapping, and live traffic.
 //
 // COORDINATE ORDER: Mapbox uses [longitude, latitude] arrays (GeoJSON order) —
 // the OPPOSITE of react-native-maps' { latitude, longitude }. Every coordinate
 // handed to Mapbox below is [lng, lat].
 
-import React, { useEffect, useRef } from "react";
-import { View, Image, StyleSheet, Pressable } from "react-native";
-import Mapbox, { MapView, Camera, MarkerView } from "@rnmapbox/maps";
+import React, { useEffect, useMemo, useRef } from "react";
+import { View, Text, Image, StyleSheet, Pressable } from "react-native";
+import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer } from "@rnmapbox/maps";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
 import type { WeatherKind } from "./weatherLayer";
@@ -100,6 +103,29 @@ function chaseZoom(kmh: number, distToManeuverM?: number) {
   return Math.max(base, lerp(base, CORNER_ZOOM, t));
 }
 
+// Decode a Google encoded polyline → [{latitude, longitude}]. Engine-agnostic;
+// copied from ConvoyMap so this file stays self-contained during the migration.
+// Returns [] on bad input so a malformed polyline never crashes the map.
+function decodePolyline(encoded?: string | null): { latitude: number; longitude: number }[] {
+  if (!encoded) return [];
+  const points: { latitude: number; longitude: number }[] = [];
+  let index = 0, lat = 0, lng = 0;
+  try {
+    while (index < encoded.length) {
+      let b: number, shift = 0, result = 0;
+      do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+      lat += dlat;
+      shift = 0; result = 0;
+      do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+      lng += dlng;
+      points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
+    }
+  } catch { return points; }
+  return points;
+}
+
 type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer };
 
 // ===== CarMarker =====
@@ -133,11 +159,15 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     mapType = "hybrid", mapDark = false, leaderUserId,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
     distanceToManeuverM, onMapPress, onMapLongPress, onPeerPress, onMapReady,
+    routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
   } = props;
 
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
   const readyRef = useRef(false);
   const gesturingRef = useRef(false);
+  // Tracks which destination we've already framed (preview fit-to-bounds) so we
+  // don't re-fit on every route recompute / GPS tick.
+  const fittedDestRef = useRef<string | null>(null);
 
   // ----- Base-map style -----
   // "hybrid"        → satellite-with-streets imagery (matches Google satellite).
@@ -163,6 +193,28 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Initial camera target for first paint (avoids a flash at null-island).
   const initLat = center?.lat ?? user?.lat;
   const initLng = center?.lng ?? user?.lng;
+
+  // ===== Route geometry → GeoJSON =====
+  // One LineString feature per route, tagged with its index. The LineLayers
+  // below filter on that index to draw alternates vs. the selected ribbon.
+  // Typed loosely (any) to avoid GeoJSON tuple-type friction.
+  const routeFC: any = useMemo(() => ({
+    type: "FeatureCollection",
+    features: (routes || [])
+      .map((r, i) => {
+        const coords = decodePolyline(r.polyline).map((p) => [p.longitude, p.latitude]);
+        return coords.length >= 2
+          ? { type: "Feature", properties: { index: i }, geometry: { type: "LineString", coordinates: coords } }
+          : null;
+      })
+      .filter(Boolean),
+  }), [routes]);
+
+  // Tap an alternate route line → select it (same as tapping its ETA pill).
+  const handleRoutePress = (e: any) => {
+    const idx = e?.features?.[0]?.properties?.index;
+    if (typeof idx === "number") onSelectRoute?.(idx);
+  };
 
   // ===== Camera control (mirrors ConvoyMap.commitCamera) =====
   const commitCamera = (force = false) => {
@@ -218,6 +270,41 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigationActive]);
 
+  // ===== Preview: fit the camera to ALL route options =====
+  // When routes are computed and we're NOT navigating, frame the whole set of
+  // options (Google's route-overview behavior). Fires ONCE per destination
+  // (fittedDestRef), and only matters when not actively following — commitCamera
+  // owns the camera during follow/nav, so this won't fight the chase cam.
+  useEffect(() => {
+    const cam = cameraRef.current;
+    if (!destination) { fittedDestRef.current = null; return; }
+    if (!cam || !readyRef.current || navigationActive || (routes?.length ?? 0) === 0) return;
+    const key = `${destination.lat.toFixed(5)},${destination.lng.toFixed(5)}`;
+    if (fittedDestRef.current === key) return;
+
+    let minLat = Infinity, minLng = Infinity, maxLat = -Infinity, maxLng = -Infinity;
+    const add = (lat: number, lng: number) => {
+      if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
+      if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng;
+    };
+    (routes || []).forEach((r) => decodePolyline(r.polyline).forEach((p) => add(p.latitude, p.longitude)));
+    if (user && typeof user.lat === "number" && typeof user.lng === "number") add(user.lat, user.lng);
+    add(destination.lat, destination.lng);
+    if (!Number.isFinite(minLat)) return;
+
+    fittedDestRef.current = key;
+    try {
+      cam.setCamera({
+        bounds: { ne: [maxLng, maxLat], sw: [minLng, minLat], paddingTop: 140, paddingBottom: 340, paddingLeft: 60, paddingRight: 60 },
+        heading: 0,
+        pitch: 0,
+        animationDuration: 600,
+        animationMode: "easeTo",
+      });
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routes, destination, navigationActive]);
+
   // ===== Build the car list (self + peers) =====
   const cars: CarPoint[] = [];
   if (!hideSelfMarker && user && typeof user.lat === "number" && typeof user.lng === "number") {
@@ -233,6 +320,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       });
     }
   });
+
+  const showRoutes = !!destination && routeFC.features.length > 0;
 
   return (
     <View style={styles.container}>
@@ -281,6 +370,64 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           }
         />
 
+        {/* ===== Routes ===== gray alternates first, then the SELECTED cased
+            blue ribbon (dark casing under, blue core on top). All in the
+            "middle" slot so the Standard style's street labels stay legible on
+            top of the line. Tap an alternate to select it (ShapeSource onPress).
+            Traffic-congestion gradient lands in a later OTA. */}
+        {showRoutes && (
+          <ShapeSource id="convoy-routes" shape={routeFC} onPress={handleRoutePress}>
+            <LineLayer
+              id="route-alts"
+              slot="middle"
+              filter={["!=", ["get", "index"], selectedRouteIndex] as any}
+              style={{ lineColor: "#9AA0A6", lineWidth: 4, lineCap: "round", lineJoin: "round" }}
+            />
+            <LineLayer
+              id="route-sel-casing"
+              slot="middle"
+              filter={["==", ["get", "index"], selectedRouteIndex] as any}
+              style={{ lineColor: "#174EA6", lineWidth: 14, lineCap: "round", lineJoin: "round" }}
+            />
+            <LineLayer
+              id="route-sel-core"
+              slot="middle"
+              filter={["==", ["get", "index"], selectedRouteIndex] as any}
+              style={{ lineColor: "#1A73E8", lineWidth: 9, lineCap: "round", lineJoin: "round" }}
+            />
+          </ShapeSource>
+        )}
+
+        {/* Destination pin (red dot). */}
+        {destination && (
+          <MarkerView coordinate={[destination.lng, destination.lat]} anchor={{ x: 0.5, y: 0.5 }}>
+            <View style={styles.destPin} />
+          </MarkerView>
+        )}
+
+        {/* Route ETA pills — on each ALTERNATE route's midpoint, preview only.
+            The selected route's ETA already shows in the bottom Drive card, so
+            it's skipped here. Tap a pill to switch to that route. */}
+        {destination && !navigationActive && (routes || []).map((r: any, i: number) => {
+          if (i === selectedRouteIndex) return null;
+          const pts = decodePolyline(r.polyline);
+          if (pts.length === 0) return null;
+          const mid = pts[Math.floor(pts.length / 2)];
+          const label = r.duration_in_traffic_text || r.duration_text || "";
+          if (!label) return null;
+          return (
+            <MarkerView key={`eta_${i}_${selectedRouteIndex}`} coordinate={[mid.longitude, mid.latitude]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+              <Pressable onPress={() => onSelectRoute?.(i)} hitSlop={6}>
+                <View style={styles.etaPillAlt}>
+                  <Text style={styles.etaPillTextAlt}>{label}</Text>
+                </View>
+              </Pressable>
+            </MarkerView>
+          );
+        })}
+
+        {/* Car markers — self + peers. MarkerViews always render above the route
+            LineLayers, so the car correctly sits on top of the ribbon. */}
         {cars.map((c) => (
           <CarMarker key={c.id} car={c} mapHeading={mapHeadingDeg} onPress={() => { if (c.peer) onPeerPress?.(c.peer); }} />
         ))}
@@ -295,4 +442,19 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
   car: { width: 46, height: 46 },
+  // Route ETA pill (alternate routes, preview mode).
+  etaPillAlt: {
+    backgroundColor: "rgba(28,28,30,0.95)",
+    borderColor: "rgba(255,255,255,0.25)",
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 13,
+  },
+  etaPillTextAlt: { color: "#C9C9CE", fontSize: 12, fontWeight: "700" },
+  // Destination pin (red dot with white ring).
+  destPin: {
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: "#FF453A", borderWidth: 3, borderColor: "#FFFFFF",
+  },
 });

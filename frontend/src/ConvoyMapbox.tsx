@@ -12,7 +12,7 @@
 //   • self car puck + every peer car (rotated GR Corolla PNGs)
 //   • routes — gray alternates + the SELECTED cased blue ribbon, tap-to-select,
 //     ETA pills, dest pin, route-preview fit-to-bounds
-//   • map overlays — community hazard / police pins, fixed speed cameras,
+//   • map overlays — community hazard / police pins, ON-ROUTE speed cameras,
 //     category place pins (gas price chips / fuel badges / named places), and
 //     the destination arrival-weather chip
 //
@@ -155,6 +155,28 @@ function decodePolyline(encoded?: string | null): { latitude: number; longitude:
     }
   } catch { return points; }
   return points;
+}
+
+// Speed cameras are drawn ONLY within this corridor (metres) of the active route
+// so they don't clutter the rest of the map — keeps the ones on the road you're
+// routed along, drops ones on unrelated nearby streets.
+const ROUTE_CAMERA_CORRIDOR_M = 150;
+
+// Min distance (metres) from a point to a segment A→B, via a local
+// equirectangular projection centred on the point (accurate at street scale).
+function distPointToSegM(pLat: number, pLng: number, aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const cosLat = Math.cos(toRad(pLat));
+  const x = (lng: number) => toRad(lng - pLng) * cosLat * R;
+  const y = (lat: number) => toRad(lat - pLat) * R;
+  const ax = x(aLng), ay = y(aLat), bx = x(bLng), by = y(bLat);
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 > 0 ? ((0 - ax) * dx + (0 - ay) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * dx, cy = ay + t * dy;
+  return Math.hypot(cx, cy);
 }
 
 type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer };
@@ -431,6 +453,27 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const visibleHazards = (hazards || []).filter((h) => h && typeof h.lat === "number" && typeof h.lng === "number");
   const showRoutes = !!destination && routeFC.features.length > 0;
 
+  // Speed cameras render ONLY along the SELECTED route (within the corridor), so
+  // they don't clutter the rest of the map. No selected route → no camera pins.
+  // The OSM fetch is unchanged; this just picks the on-route subset to draw, and
+  // the proximity VOICE alert in map.tsx still uses the full set — so no camera
+  // warnings are lost, this is purely about decluttering the visual pins.
+  const onRouteCameras = useMemo(() => {
+    const cams = speedCameras || [];
+    if (cams.length === 0) return [];
+    const line = decodePolyline(routes?.[selectedRouteIndex]?.polyline);
+    if (line.length < 2) return [];
+    return cams.filter((c) => {
+      let best = Infinity;
+      for (let i = 0; i + 1 < line.length; i++) {
+        const d = distPointToSegM(c.lat, c.lng, line[i].latitude, line[i].longitude, line[i + 1].latitude, line[i + 1].longitude);
+        if (d < best) best = d;
+        if (best <= ROUTE_CAMERA_CORRIDOR_M) break;
+      }
+      return best <= ROUTE_CAMERA_CORRIDOR_M;
+    });
+  }, [speedCameras, routes, selectedRouteIndex]);
+
   return (
     <View style={styles.container}>
       <MapView
@@ -557,8 +600,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           />
         ))}
 
-        {/* Fixed speed cameras (pins only). */}
-        {(speedCameras || []).map((c) => (
+        {/* Speed cameras — only those along the active route (decluttered). */}
+        {onRouteCameras.map((c) => (
           <CameraMarker key={`cam_${c.id}`} lat={c.lat} lng={c.lng} />
         ))}
 

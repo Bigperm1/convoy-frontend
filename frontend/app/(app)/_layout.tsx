@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
 import { View, ActivityIndicator, Platform, StyleSheet, Text, AppState } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
 import VoiceController from "../../src/VoiceController";
 import VoiceTabButton from "../../src/VoiceTabButton";
@@ -127,6 +128,13 @@ export default function AppLayout() {
   const { user } = useAuth();
   const router = useRouter();
   const [settings] = useSettings();
+  const insets = useSafeAreaInsets();
+  // Android edge-to-edge (app.json edgeToEdgeEnabled) draws the tab bar BEHIND
+  // the system nav buttons. Lift it by the real device bottom inset so the tabs
+  // clear the nav bar. iOS keeps the original 88/24 exactly (contribution 0), so
+  // its layout is byte-for-byte unchanged. StepDrawer adds the SAME inset to its
+  // anchor so it stays flush on top of this now-taller bar.
+  const navInset = Platform.OS === "android" ? insets.bottom : 0;
 
   // Comms is "active" whenever a convoy or private thread is selected. Keep the
   // Comms tab lit yellow from ANY tab as a persistent "you're connected" cue,
@@ -260,8 +268,8 @@ export default function AppLayout() {
             backgroundColor: "rgba(34,35,38,0.96)",
             borderTopColor: "rgba(255,255,255,0.12)",
             borderTopWidth: StyleSheet.hairlineWidth,
-            height: 88,
-            paddingBottom: 24,
+            height: 88 + navInset,
+            paddingBottom: 24 + navInset,
             paddingTop: 10,
             position: "absolute",
             // allow the elevated mic to overflow upward

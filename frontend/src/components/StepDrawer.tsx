@@ -9,8 +9,9 @@
 
 import React, { useImperativeHandle, useRef, forwardRef } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, Animated, PanResponder, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, Animated, PanResponder, TouchableOpacity, Platform,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 export const DRAWER_HEIGHT = 300;   // height of the slide-up step list
@@ -50,6 +51,12 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
   // 0 = step list hidden (tucked behind the bar), 1 = fully open.
   const anim = useRef(new Animated.Value(0)).current;
   const [expanded, setExpanded] = React.useState(false);
+  // Android edge-to-edge draws behind the system nav buttons. Lift the drawer by
+  // the real device bottom inset — the SAME value the tab bar adds (see
+  // app/(app)/_layout.tsx) — so it stays flush on top of the now-taller tab bar
+  // instead of hiding behind the nav buttons. iOS contributes 0 → layout unchanged.
+  const insets = useSafeAreaInsets();
+  const navInset = Platform.OS === "android" ? insets.bottom : 0;
 
   const slideUp = React.useCallback(() => {
     setExpanded(true);
@@ -109,6 +116,7 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
           style={[
             styles.listPanel,
             {
+              bottom: TAB_BAR_H + BAR_H - 2 + navInset,
               opacity: anim,
               transform: [{
                 translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [DRAWER_HEIGHT, 0] }),
@@ -134,7 +142,7 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
       )}
 
       {/* Collapsed summary bar — always visible during nav, sits above the tab bar. */}
-      <View style={styles.bar}>
+      <View style={[styles.bar, { bottom: TAB_BAR_H + navInset }]}>
         <View {...openPan.panHandlers} style={styles.barGrabZone} testID="step-drawer-handle">
           <View style={styles.grabPill} />
         </View>

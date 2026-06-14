@@ -31,7 +31,7 @@
 
 import React, { useEffect, useMemo, useRef } from "react";
 import { View, Text, Image, StyleSheet, Pressable } from "react-native";
-import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode } from "@rnmapbox/maps";
+import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, UserLocation as MapboxUserLocation } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
@@ -468,6 +468,15 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         {useStandard && (
           <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: "night" }} />
         )}
+
+        {/* Native location engine — REQUIRED for the Camera's followUserLocation
+            to receive a position stream. The app draws the visible self-car via
+            its own MarkerView, so this puck stays hidden (visible=false); the
+            onUpdate handler is what actually STARTS the native location manager
+            (per rnmapbox, listening begins when onUpdate OR visible is set). The
+            app never mounted any location component before, so the follow camera
+            had nothing to track — which is exactly why it sat still. */}
+        <MapboxUserLocation visible={false} onUpdate={() => {}} />
 
         <Camera
           ref={cameraRef}

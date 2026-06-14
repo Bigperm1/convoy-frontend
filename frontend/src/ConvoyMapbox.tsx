@@ -8,7 +8,7 @@
 //
 // PORTED SO FAR:
 //   • base Mapbox map — dark Standard/night (3D buildings) or satellite (hybrid)
-//   • follow / chase camera — Mapbox NATIVE course-follow (smooth glide; speed/corner zoom + 45° tilt)
+//   • follow / chase camera — Mapbox NATIVE course-follow (smooth glide; speed/corner zoom + 45° tilt), powered by a visible LocationPuck
 //   • self car puck + every peer car (rotated GR Corolla PNGs)
 //   • routes — gray alternates + the SELECTED cased blue ribbon, tap-to-select,
 //     ETA pills, dest pin, route-preview fit-to-bounds, plus a LIVE traffic-
@@ -33,7 +33,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Image, StyleSheet, Pressable } from "react-native";
-import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, UserLocation as MapboxUserLocation } from "@rnmapbox/maps";
+import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
@@ -317,13 +317,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
 
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
   const readyRef = useRef(false);
-  const [mapReady, setMapReady] = useState(false);
   const gesturingRef = useRef(false);
   // Tracks which destination we've already framed (preview fit-to-bounds) so we
   // don't re-fit on every route recompute / GPS tick.
   const fittedDestRef = useRef<string | null>(null);
-  // One-shot guard for the cold-start recenter (see the idle-recenter effect).
-  const idleCenteredRef = useRef(false);
   // Live traffic-congestion gradient for the route preview (Mapbox Directions).
   // Null unless we have a fetched congestion route to paint (preview-only).
   const [congestionRoute, setCongestionRoute] = useState<{ coordinates: [number, number][]; gradient: any } | null>(null);
@@ -375,31 +372,27 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     if (typeof idx === "number") onSelectRoute?.(idx);
   };
 
-  // ===== Native follow camera =====
-  // The FOLLOW motion is handed to Mapbox's native course-follow camera — the
-  // same smooth, interpolated tracking Mapbox's own navigation uses — instead of
-  // pushing setCamera() on every GPS tick. That hand-rolled per-tick loop is what
-  // made the old chase-cam stutter. The follow props are declarative:
-  //   • followUserLocation = whether to track the driver (driven by `followUser`,
-  //     which the parent drops on a manual pan and restores on Recenter)
-  //   • followUserMode     = course-up while heading-up (rotates to direction of
-  //     travel — the Mapbox nav look), else north-up
-  //   • followZoomLevel    = speed- + corner-aware chase zoom while navigating, a
-  //     fixed follow zoom otherwise (native animates between them smoothly)
-  //   • followPitch        = 45° tilt while navigating heading-up, flat otherwise
-  // We keep imperative setCamera ONLY for the route-preview fit-to-bounds and the
-  // nav-end flatten — both run while NOT following. (rnmapbox IGNORES setCamera
-  // while followUserLocation is true, so the declarative follow and the two
-  // imperative moves never fight each other.)
+  // ===== Native follow / chase camera =====
+  // Mapbox's NATIVE course-follow camera — the smooth, interpolated tracking its
+  // own navigation uses — driven declaratively by the follow props below. The
+  // <LocationPuck> mounted in the map is what ACTIVATES Mapbox's native location
+  // layer that this camera tracks; that puck must be VISIBLE to start the layer (a
+  // hidden location component does NOT start it — which is exactly why the camera
+  // sat on the world at cold start and didn't chase). With the layer live, native
+  // follow both centres on cold start and glides during nav.
+  //   • followUserLocation = track the driver (followUser; parent drops it on a pan)
+  //   • followUserMode     = course-up while heading-up, else plain follow
+  //   • followZoomLevel    = speed/corner chase zoom while navigating, fixed follow zoom otherwise
+  //   • followPitch        = 45° while navigating heading-up, flat otherwise
   const headingUp = mapView === "heading_up";
   const followZoom = Math.round(
     (navigationActive ? chaseZoom(kmhFromMs(userSpeedMs), distanceToManeuverM) : FOLLOW_ZOOM) * 10,
   ) / 10;
   const followPitchDeg = navigationActive && headingUp ? CHASE_PITCH_DEG : 0;
 
-  // When nav ends while NOT following, flatten the tilt/heading back to a calm
-  // north-up overview. (While still following, the declarative follow props above
-  // already drop the pitch — no imperative move needed.)
+  // When nav ends while NOT following (the driver had panned away), flatten the
+  // tilt / heading back to a calm north-up overview. While following, the native
+  // follow props already drop the pitch — no imperative move needed.
   useEffect(() => {
     if (navigationActive) return;
     const cam = cameraRef.current;
@@ -411,8 +404,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // ===== Preview: fit the camera to ALL route options =====
   // When routes are computed and we're NOT navigating, frame the whole set of
   // options (Google's route-overview behavior). Fires ONCE per destination
-  // (fittedDestRef), and only matters when not actively following — commitCamera
-  // owns the camera during follow/nav, so this won't fight the chase cam.
+  // (fittedDestRef), and only matters when not actively following — the native
+  // follow owns the camera during follow/nav, so this won't fight the chase cam.
   useEffect(() => {
     const cam = cameraRef.current;
     if (!destination) { fittedDestRef.current = null; return; }
@@ -442,29 +435,6 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routes, destination, navigationActive, followUser]);
-
-  // ===== Cold-start / idle recenter =====
-  // `defaultSettings` sets the camera ONCE at mount — and on a cold start the
-  // user's location usually isn't known yet, so the map mounts at Mapbox's default
-  // (the whole world) and then never moves: followUserLocation is off while idle,
-  // and the preview / nav cameras only run once there's a destination. This snaps
-  // the map onto the user the first time we get a fix while idle, so a cold start
-  // lands on YOU, not the globe. One-shot (idleCenteredRef) so you can still freely
-  // pan afterwards; skipped whenever follow / nav / a destination owns the camera.
-  useEffect(() => {
-    if (idleCenteredRef.current) return;
-    if (followUser || navigationActive || destination) return;
-    const cam = cameraRef.current;
-    if (!cam || !mapReady) return;
-    const lat = center?.lat ?? user?.lat;
-    const lng = center?.lng ?? user?.lng;
-    if (typeof lat !== "number" || typeof lng !== "number") return;
-    idleCenteredRef.current = true;
-    try {
-      cam.setCamera({ centerCoordinate: [lng, lat], zoomLevel: FREE_ZOOM, heading: 0, pitch: 0, animationDuration: 0 });
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, center?.lat, center?.lng, user?.lat, user?.lng, followUser, navigationActive, destination]);
 
   // ===== Route congestion gradient (Mapbox Directions) — PREVIEW only =====
   // On a new destination (and while NOT navigating) fetch the live driving-traffic
@@ -560,7 +530,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         attributionPosition={{ bottom: 8, right: 8 }}
         pitchEnabled
         rotateEnabled
-        onDidFinishLoadingMap={() => { readyRef.current = true; setMapReady(true); onMapReady?.(); }}
+        onDidFinishLoadingMap={() => { readyRef.current = true; onMapReady?.(); }}
         onPress={() => onMapPress?.()}
         onLongPress={(f: any) => {
           const c = f?.geometry?.coordinates;
@@ -584,14 +554,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: "night" }} />
         )}
 
-        {/* Native location engine — REQUIRED for the Camera's followUserLocation
-            to receive a position stream. The app draws the visible self-car via
-            its own MarkerView, so this puck stays hidden (visible=false); the
-            onUpdate handler is what actually STARTS the native location manager
-            (per rnmapbox, listening begins when onUpdate OR visible is set). The
-            app never mounted any location component before, so the follow camera
-            had nothing to track — which is exactly why it sat still. */}
-        <MapboxUserLocation visible={false} onUpdate={() => {}} />
+        {/* Mapbox's native location layer — REQUIRED to power the Camera's
+            followUserLocation. It must be VISIBLE to actually start the native
+            location engine (a hidden location component does not start it, which
+            is what kept the camera from following). Rendered tiny (scale 0.01) so
+            it's effectively invisible — the GR Corolla MarkerView stays the
+            branded self-car on top — while still powering the native follow.
+            puckBearing="course" orients tracking to the direction of travel. */}
+        <LocationPuck visible scale={0.01} puckBearing="course" puckBearingEnabled />
 
         <Camera
           ref={cameraRef}

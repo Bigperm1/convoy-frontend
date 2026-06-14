@@ -34,14 +34,15 @@ export type CongestionRoute = {
 };
 
 // ---- Congestion → colour ----------------------------------------------------
-// Brand-cohesive scheme: a CLEAR route stays Convoy blue (matching the normal
-// route ribbon + the Mapbox nav look), and only WARMS toward red where traffic
-// actually slows. So the route reads blue end-to-end and reddens only at the
-// jams — premium and on-brand, rather than a fully green "traffic map" line.
-// (Swap LOW→green here if we ever want the classic green→red instead.)
+// Classic traffic palette (green → red). We render BOTH "unknown" (no live data)
+// and "low" as GREEN so a working gradient is unmistakably NON-blue — that makes
+// it obvious at a glance that the live route is the Mapbox congestion line and
+// not the plain blue fallback, even when there's no traffic to colour. Warm
+// colours appear only where Mapbox actually reports slow-downs. (If we later want
+// the brand blue-when-clear look, set unknown/low back to "#0A84FF".)
 const CONGESTION_COLOR: Record<CongestionLevel, string> = {
-  unknown: "#0A84FF", // brand blue — treat "no data" as a normal route
-  low: "#0A84FF",     // clear — stay blue
+  unknown: "#34C759", // no live data → treat as clear (green)
+  low: "#34C759",     // clear — green
   moderate: "#FFD60A", // slowing — yellow
   heavy: "#FF9500",    // congested — orange
   severe: "#FF3B30",   // jammed — red

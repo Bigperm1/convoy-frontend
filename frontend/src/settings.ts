@@ -17,6 +17,9 @@ avatarLive: boolean;
 mapView: "heading_up" | "north_up";
 mapType: "hybrid" | "roadmap";
 mapDark: boolean;
+// Mapbox migration (Phase 2): when true, the map screen renders the new
+// @rnmapbox/maps engine (ConvoyMapbox) instead of react-native-maps (ConvoyMap).
+mapboxEngine: boolean;
 novaGreeting: boolean;
 novaSpeeding: boolean;
 novaMidDrive: boolean;
@@ -60,6 +63,7 @@ avatarLive: true,
 mapView: "heading_up",
 mapType: "hybrid",
 mapDark: false,
+mapboxEngine: false,
 novaGreeting: true,
 novaSpeeding: true,
 novaMidDrive: true,

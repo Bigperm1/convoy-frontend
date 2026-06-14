@@ -435,6 +435,15 @@ export default function SettingsScreen() {
             </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.textDim} />
           </TouchableOpacity>
+          <View style={styles.divider} />
+          <ToggleRow
+            icon="layers-outline"
+            iconColor="#30D158"
+            title="Mapbox engine (beta)"
+            subtitle="Render the map with the new Mapbox engine instead of Google. Beta — reopen the Map tab after toggling."
+            value={settings.mapboxEngine}
+            onChange={(v) => setSettings({ mapboxEngine: v })}
+          />
         </Glass>
         {/* ===== END TEMP Mapbox test entry ===== */}
 

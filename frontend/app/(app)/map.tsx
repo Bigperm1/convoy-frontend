@@ -11,6 +11,7 @@ import { COLORS } from "../../src/theme";
 import { useRouter, useFocusEffect } from "expo-router";
 import Glass from "../../src/Glass";
 import ConvoyMap, { Hazard, Peer } from "../../src/ConvoyMap";
+import ConvoyMapbox from "../../src/ConvoyMapbox";
 import DestinationSearch from "../../src/DestinationSearch";
 import CategoryPills, { PlaceResult } from "../../src/components/CategoryPills";
 import LogoMenu from "../../src/components/LogoMenu";
@@ -2021,9 +2022,14 @@ export default function MapScreen() {
     : 90;
   const weatherBottom = controlsBottom + 68;
 
+  // Mapbox migration (Phase 2): pick the map engine behind the settings toggle.
+  // ConvoyMapbox and ConvoyMap accept identical props, so only the element type
+  // changes — the props block below stays exactly the same.
+  const MapEngine = settings.mapboxEngine ? ConvoyMapbox : ConvoyMap;
+
   return (
     <View style={styles.c}>
-      <ConvoyMap
+      <MapEngine
         center={coords}
         // user.car_type / user.car_color come from the Garage profile (Mongo,
         // hydrated by useAuth). Pass them as carBody/carColor so the "you"

@@ -422,6 +422,22 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </Glass>
 
+        {/* ===== TEMP — Mapbox migration Phase 1. Throwaway test map. STRIP BEFORE MERGE. ===== */}
+        <Text style={styles.sectionLabel}>MAPBOX TEST [DEV]</Text>
+        <Glass radius={16} style={styles.card}>
+          <TouchableOpacity testID="open-mapbox-test" onPress={() => router.push("/(app)/mapbox-test" as any)} style={styles.row} activeOpacity={0.85}>
+            <View style={[styles.iconWrap, { backgroundColor: "#30D15822" }]}>
+              <Ionicons name="map" size={20} color="#30D158" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.title}>Mapbox Test [DEV]</Text>
+              <Text style={styles.subtitle}>Bare Mapbox map to verify tiles render on a native build. Temporary — remove before merge.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textDim} />
+          </TouchableOpacity>
+        </Glass>
+        {/* ===== END TEMP Mapbox test entry ===== */}
+
         <View style={{ height: 120 }} />
       </ScrollView>
     </View>

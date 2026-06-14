@@ -316,6 +316,8 @@ export default function AppLayout() {
         <Tabs.Screen name="drive-mode" options={{ href: null }} />
         <Tabs.Screen name="garage" options={{ href: null }} />
         <Tabs.Screen name="admin" options={{ href: null }} />
+        {/* TEMP (Mapbox migration Phase 1) — throwaway test route, no tab. STRIP BEFORE MERGE. */}
+        <Tabs.Screen name="mapbox-test" options={{ href: null }} />
       </Tabs>
 
       {/* Global voice transcript banner (FAB removed — the elevated mic in the tab bar is the new CTA) */}

@@ -10,7 +10,7 @@
 //   • base Mapbox map — dark Standard/night (3D buildings) or satellite (hybrid)
 //   • follow / chase camera — Mapbox NATIVE course-follow (smooth glide; speed/corner zoom + 45° tilt), powered by a visible LocationPuck
 //   • self car puck + every peer car (rotated GR Corolla PNGs)
-//   • routes — gray alternates + the SELECTED cased blue ribbon, tap-to-select,
+//   • routes — gray alternates + the SELECTED glowing GREEN ribbon, tap-to-select,
 //     ETA pills, dest pin, route-preview fit-to-bounds, plus a LIVE traffic-
 //     congestion gradient on the previewed route (Mapbox Directions)
 //   • map overlays — community hazard / police pins, ON-ROUTE speed cameras,
@@ -122,6 +122,15 @@ const FOLLOW_ZOOM = 17;
 const CORNER_ZOOM = 18.5;
 const CORNER_FAR_M = 280;
 const CORNER_NEAR_M = 70;
+
+// ===== Route line styling (brand green, sampled from new_logo_icons.png) =====
+// The selected route is a glowing neon-green ribbon matching the app icon's route
+// line: a saturated green GLOW underlay (wide + blurred) beneath a bright green
+// CORE. Replaces the old blue/navy line. The congestion gradient (when shown)
+// uses the same CORE green for "clear", so a clear route looks identical whether
+// or not live traffic data is present.
+const ROUTE_GREEN_CORE = "#2DEC86"; // bright neon-green core (the visible line)
+const ROUTE_GREEN_GLOW = "#00D070"; // saturated green halo (blurred underlay)
 
 function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
 function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
@@ -576,8 +585,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           }
         />
 
-        {/* ===== Routes ===== gray alternates first, then the SELECTED cased
-            blue ribbon (dark casing under, blue core on top). All in the
+        {/* ===== Routes ===== gray alternates first, then the SELECTED glowing
+            green ribbon (green glow under, bright green core on top). All in the
             "middle" slot so the Standard style's street labels stay legible on
             top of the line. Tap an alternate to select it (ShapeSource onPress).
             While previewing, the solid blue ribbon is REPLACED by the live
@@ -597,13 +606,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               id="route-sel-casing"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineColor: "#062B5E", lineWidth: 15, lineCap: "round", lineJoin: "round" }}
+              style={{ lineColor: ROUTE_GREEN_GLOW, lineWidth: 16, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round" }}
             />
             <LineLayer
               id="route-sel-core"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineColor: "#0A84FF", lineWidth: 9, lineCap: "round", lineJoin: "round" }}
+              style={{ lineColor: ROUTE_GREEN_CORE, lineWidth: 8, lineCap: "round", lineJoin: "round" }}
             />
           </ShapeSource>
         )}
@@ -618,12 +627,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             <LineLayer
               id="cong-casing"
               slot="middle"
-              style={{ lineColor: "#062B5E", lineWidth: 15, lineCap: "round", lineJoin: "round" }}
+              style={{ lineColor: ROUTE_GREEN_GLOW, lineWidth: 16, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round" }}
             />
             <LineLayer
               id="cong-core"
               slot="middle"
-              style={{ lineGradient: congestionRoute!.gradient, lineWidth: 9, lineCap: "round", lineJoin: "round" }}
+              style={{ lineGradient: congestionRoute!.gradient, lineWidth: 8, lineCap: "round", lineJoin: "round" }}
             />
           </ShapeSource>
         )}

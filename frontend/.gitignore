@@ -24,6 +24,7 @@ expo-env.d.ts
 
 # secrets / credentials — NEVER commit
 .env
+.env.*
 play-store-service-account.json
 play-store-service-account.json.json
 *-service-account*.json

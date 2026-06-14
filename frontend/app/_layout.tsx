@@ -1,3 +1,6 @@
+// Set the Mapbox public access token before anything renders (side-effect import,
+// must stay first). No-op on web via initMapbox.web.ts.
+import '../src/initMapbox';
 import React from 'react';
 import { Stack } from 'expo-router';
 import { AuthProvider } from '../src/auth';

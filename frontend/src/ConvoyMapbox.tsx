@@ -40,6 +40,14 @@ import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient } from "./mapboxDirections";
 
+// 1×1 fully transparent PNG — a REAL bundled asset, not a data-URI (@rnmapbox's
+// Images may not load a data-URI at runtime, which would let the default dot fall
+// back). Registered as a Mapbox image and used as the LocationPuck's artwork so
+// the native location layer stays MOUNTED + VISIBLE (which powers
+// Camera.followUserLocation) while drawing NOTHING — the blue location dot under
+// the car is gone but the chase-cam still tracks.
+const EMPTY_PUCK_IMG = require("../assets/images/empty-puck.png");
+
 type LatLng = { lat: number; lng: number };
 
 // Mirrors ConvoyMapProps from ConvoyMap.tsx so the two engines are swappable.
@@ -568,14 +576,23 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         )}
 
         {/* Mapbox's native location layer — REQUIRED to power the Camera's
-            followUserLocation. It must be VISIBLE to actually start the native
-            location engine (a hidden location component does not start it, which
-            is what kept the camera from following) — so we keep `visible` but set
-            scale={0} to fully hide the blue dot under the car while still powering
-            the native follow. (visible={false} would stop the chase cam, per the
-            above.) The GR Corolla MarkerView stays the branded self-car on top.
-            puckBearing="course" orients tracking to the direction of travel. */}
-        <LocationPuck visible scale={0} puckBearing="course" puckBearingEnabled />
+            followUserLocation (a hidden/unmounted location component doesn't start
+            the native engine, which stops the chase cam). So we keep it VISIBLE
+            but give it fully TRANSPARENT artwork (top/bearing/shadow image = a 1×1
+            clear PNG) and disable the pulse: the engine runs and the camera
+            follows, but no blue dot is drawn under the car. `scale` only scales
+            the custom images, not the default native dot — which is why scale={0}
+            alone never hid it. The GR Corolla MarkerView stays the self-car on top. */}
+        <Mapbox.Images images={{ convoyEmptyPuck: EMPTY_PUCK_IMG }} />
+        <LocationPuck
+          visible
+          topImage="convoyEmptyPuck"
+          bearingImage="convoyEmptyPuck"
+          shadowImage="convoyEmptyPuck"
+          pulsing={{ isEnabled: false }}
+          puckBearing="course"
+          puckBearingEnabled
+        />
 
         <Camera
           ref={cameraRef}

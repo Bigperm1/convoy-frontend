@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, Pressable, TouchableOpacity, Animated,
-  ScrollView, Easing, Image, Alert,
+  ScrollView, Easing, Image, Alert, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -498,6 +498,7 @@ export default function TalkScreen() {
   const voxMode = voxOn && !!activeThread;
 
   return (
+    <>
     <SafeAreaView style={styles.safe} edges={["top"]}>
       {/* Community header — live active convoy */}
       <View style={styles.header}>
@@ -544,7 +545,6 @@ export default function TalkScreen() {
             )}
           </Pressable>
         )}
-        <View style={styles.logoBacking}><LogoMenu size={40} align="right" /></View>
       </View>
 
       {/* Tap anywhere outside the mic to dismiss the open switcher. Rendered
@@ -805,6 +805,10 @@ export default function TalkScreen() {
       )}
 
     </SafeAreaView>
+    {/* Top-right logo — absolute, pixel-identical to Map/Music (positions
+        relative to the full-screen tab container, no SafeArea padding offset). */}
+    <View style={styles.logoBacking}><LogoMenu size={40} align="right" /></View>
+    </>
   );
 }
 
@@ -832,6 +836,7 @@ const styles = StyleSheet.create({
   chevBtn: { marginLeft: 4, padding: 2 },
   garageBtn: { padding: 4, marginLeft: 8 },
   logoBacking: {
+    position: 'absolute', top: Platform.OS === 'ios' ? 52 : 28, right: 12, zIndex: 100,
     width: 54, height: 54, borderRadius: 27,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(20,20,22,0.9)',

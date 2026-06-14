@@ -367,21 +367,24 @@ export default function MusicScreen() {
   // ===== Spotify source — its own view (now-playing + Web API controls) =====
   if (source === "spotify") {
     return (
+      <>
       <SafeAreaView style={styles.c} edges={["top"]}>
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
             <Text style={styles.dateOverline}>{today}</Text>
             <Text style={styles.title}>Listen Now</Text>
           </View>
-          <View style={styles.logoBacking}><LogoMenu size={40} align="right" /></View>
         </View>
         <SourceSwitcher current="spotify" />
         <SpotifyMusic onSwitchSource={() => updateSettings({ musicSource: null })} />
       </SafeAreaView>
+      <View style={styles.logoBacking}><LogoMenu size={40} align="right" /></View>
+      </>
     );
   }
 
   return (
+    <>
     <SafeAreaView style={styles.c} edges={["top"]}>
       <ScrollView
         contentContainerStyle={{ paddingBottom: nowPlaying ? 200 : 130 }}
@@ -394,7 +397,6 @@ export default function MusicScreen() {
             <Text style={styles.dateOverline}>{today}</Text>
             <Text style={styles.title}>Listen Now</Text>
           </View>
-          <View style={styles.logoBacking}><LogoMenu size={40} align="right" /></View>
         </View>
 
         {source === "apple" && <SourceSwitcher current="apple" />}
@@ -753,6 +755,8 @@ export default function MusicScreen() {
         </View>
       </Modal>
     </SafeAreaView>
+    <View style={styles.logoBacking}><LogoMenu size={40} align="right" /></View>
+    </>
   );
 }
 
@@ -764,6 +768,7 @@ const styles = StyleSheet.create({
   title: { color: COLORS.text, fontSize: 34, fontWeight: "800", letterSpacing: -1, marginTop: 2 },
   logoBtn: { padding: 4 },
   logoBacking: {
+    position: 'absolute', top: Platform.OS === 'ios' ? 52 : 28, right: 12, zIndex: 100,
     width: 54, height: 54, borderRadius: 27,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(20,20,22,0.9)',

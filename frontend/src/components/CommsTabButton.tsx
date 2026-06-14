@@ -10,7 +10,7 @@
 // never run at the same time.
 
 import React, { useRef } from "react";
-import { Pressable, View, StyleSheet } from "react-native";
+import { Pressable, StyleSheet } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useVoice } from "../useVoice";
 import CommsHoldGlow from "./CommsHoldGlow";
@@ -60,7 +60,6 @@ export default function CommsTabButton({ children, onPress, accessibilityState, 
       {/* Smoky green haze behind the mic while holding-to-talk. */}
       <CommsHoldGlow active={voice.recording} />
       {children}
-      {voice.recording && <View style={styles.txDot} pointerEvents="none" />}
     </Pressable>
   );
 }
@@ -68,14 +67,4 @@ export default function CommsTabButton({ children, onPress, accessibilityState, 
 const styles = StyleSheet.create({
   // Fill the tab cell and center the icon/label like the default buttons.
   btn: { flex: 1, alignItems: "center", justifyContent: "center" },
-  // Small red "on air" dot near the top of the tab while transmitting.
-  txDot: {
-    position: "absolute",
-    top: 4,
-    alignSelf: "center",
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: "#FF3B30",
-  },
 });

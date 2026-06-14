@@ -2122,20 +2122,13 @@ export default function MapScreen() {
       <View style={styles.topBar} pointerEvents="box-none">
         {searchVisible && (
           <View pointerEvents="box-none">
-            <View style={styles.searchLogoRow} pointerEvents="box-none">
-              <View style={{ flex: 1 }}>
-                <DestinationSearch
-                  origin={coords}
-                  onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
-                  onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
-                  onProfilePress={() => router.push("/(app)/hub" as any)}
-                  onPressField={() => setNavSearchOpen(true)}
-                />
-              </View>
-              <View style={styles.mapLogoBacking}>
-                <LogoMenu size={40} align="right" />
-              </View>
-            </View>
+            <DestinationSearch
+              origin={coords}
+              onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
+              onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
+              onProfilePress={() => router.push("/(app)/hub" as any)}
+              onPressField={() => setNavSearchOpen(true)}
+            />
             {/* Category quick-search pills (Gas / Food / Coffee / …) directly
                 under the search bar, Google-Maps style. Results drop as pins. */}
             <CategoryPills origin={coords} onResults={setPlacePins} />
@@ -2152,6 +2145,11 @@ export default function MapScreen() {
           </View>
         )}
       </View>
+
+      {/* Top-right logo — absolutely positioned at the SAME screen spot as the
+          Comms/Music headers (top iOS52/Android28, right12) so it's pixel-identical
+          across tabs. Rendered after topBar so it overlays and stays tappable. */}
+      <View style={styles.mapLogoBacking}><LogoMenu size={40} align="right" /></View>
 
       {/* ===== Community Routes — horizontal chip strip (visible when there are shared cruises) ===== */}
       {communityRoutes.length > 0 && navMode === "preview" && !destination && (
@@ -3089,6 +3087,7 @@ const styles = StyleSheet.create({
   // solid-dark Comms/Music headers it needs a backing to stay crisp over any
   // background. 40×40 circle mirrors the old profile-avatar footprint.
   mapLogoBacking: {
+    position: 'absolute', top: Platform.OS === 'ios' ? 52 : 28, right: 12, zIndex: 100,
     width: 54, height: 54, borderRadius: 27,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(20,20,22,0.9)',
@@ -3096,7 +3095,6 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 6,
   },
-  searchLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
 
   // Trip Summary pill — collapsed view of the route preview card. Renders at
   // the very top, single line, tappable to expand back into the full card.

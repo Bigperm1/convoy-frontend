@@ -1,35 +1,36 @@
-// CommsHoldGlow.tsx — soft, smoky green haze that breathes outward around the
+// CommsHoldGlow.tsx — large, diffuse green smoke that breathes outward around the
 // Comms mic while holding-to-talk to Claude.
 //
-// NO hard-edged rings: three translucent green circles, each looping scale-up +
-// fade-out on a staggered phase (native driver), overlapping into a continuous
-// green fog that pushes out in all directions. A `vis` master value fades the
-// whole thing in on start and out on release. Absolutely centered in the tab
-// cell, pointerEvents="none" so it never blocks the press.
+// NO readable rings: FIVE very translucent green circles of slightly different
+// sizes, each looping a big scale-up + fade-out on a staggered phase (native
+// driver). Low opacity + a wide spread means they overlap into one soft green
+// cloud rather than distinct waves. A `vis` master value fades the whole haze in
+// on start and out on release. Absolutely centered in the tab cell,
+// pointerEvents="none" so it never blocks the press.
 import React, { useEffect, useRef } from "react";
 import { Animated, Easing, StyleSheet, View, Platform } from "react-native";
 
 const GREEN = "#2DEC86";
-const DURATION = 1500;
+const DURATION = 1800;
 
-// Base 30px circle, innermost most opaque. They all scale to the same max, but
-// the staggered phase + decreasing opacity reads as layered, breathing fog.
+// Slightly varied sizes + low opacities so no single circle reads as a ring —
+// they blend into a diffuse cloud. ~Double the previous spread (scale to 5.5).
 const BLOBS = [
-  "rgba(45,236,134,0.22)",
-  "rgba(45,236,134,0.15)",
-  "rgba(45,236,134,0.10)",
+  { size: 34, fill: "rgba(45,236,134,0.12)" },
+  { size: 30, fill: "rgba(45,236,134,0.10)" },
+  { size: 38, fill: "rgba(45,236,134,0.08)" },
+  { size: 32, fill: "rgba(45,236,134,0.07)" },
+  { size: 36, fill: "rgba(45,236,134,0.05)" },
 ];
-const BASE = 30;
 
 export default function CommsHoldGlow({ active }: { active: boolean }) {
-  // One driver per blob (staggered so the fog never gaps) + a master fade.
   const anims = useRef(BLOBS.map(() => new Animated.Value(0))).current;
   const vis = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     let loops: Animated.CompositeAnimation[] = [];
     if (active) {
-      Animated.timing(vis, { toValue: 1, duration: 160, useNativeDriver: true }).start();
+      Animated.timing(vis, { toValue: 1, duration: 180, useNativeDriver: true }).start();
       anims.forEach((a) => a.setValue(0));
       loops = anims.map((a, i) =>
         Animated.loop(
@@ -46,26 +47,36 @@ export default function CommsHoldGlow({ active }: { active: boolean }) {
       );
       loops.forEach((l) => l.start());
     } else {
-      Animated.timing(vis, { toValue: 0, duration: 260, useNativeDriver: true }).start();
+      Animated.timing(vis, { toValue: 0, duration: 300, useNativeDriver: true }).start();
     }
     return () => loops.forEach((l) => l.stop());
   }, [active, anims, vis]);
 
   return (
     <View pointerEvents="none" style={styles.wrap}>
-      {BLOBS.map((fill, i) => {
+      {BLOBS.map((b, i) => {
         const a = anims[i];
-        const scale = a.interpolate({ inputRange: [0, 1], outputRange: [0.6, 2.8] });
-        // Fade in quickly then out to nothing as it expands; gated by the master
-        // `vis` so releasing the hold fades the whole haze smoothly.
+        const scale = a.interpolate({ inputRange: [0, 1], outputRange: [0.5, 5.5] });
+        // Fade in fast then out to nothing across the expansion; gated by `vis`
+        // so releasing the hold dissolves the whole cloud smoothly.
         const opacity = Animated.multiply(
           vis,
-          a.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 1, 0] })
+          a.interpolate({ inputRange: [0, 0.12, 1], outputRange: [0, 1, 0] })
         );
         return (
           <Animated.View
             key={i}
-            style={[styles.blob, { backgroundColor: fill, opacity, transform: [{ scale }] }]}
+            style={[
+              styles.blob,
+              {
+                width: b.size,
+                height: b.size,
+                borderRadius: b.size / 2,
+                backgroundColor: b.fill,
+                opacity,
+                transform: [{ scale }],
+              },
+            ]}
           />
         );
       })}
@@ -74,18 +85,15 @@ export default function CommsHoldGlow({ active }: { active: boolean }) {
 }
 
 const styles = StyleSheet.create({
-  // Fills the tab cell and centers the blobs on the mic icon. Sits behind the
+  // Fills the tab cell and centers the cloud on the mic icon. Sits behind the
   // icon because CommsTabButton renders it before its children.
   wrap: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
   blob: {
     position: "absolute",
-    width: BASE,
-    height: BASE,
-    borderRadius: BASE / 2,
-    // Soft green glow rim so there's no hard circular edge (iOS). Android leans
-    // on the translucent stacked fills + scale for the same fog read.
+    // Soft green glow rim so edges stay diffuse (iOS). Android leans on the very
+    // low-opacity stacked fills + wide scale for the same smoke read.
     ...Platform.select({
-      ios: { shadowColor: GREEN, shadowOpacity: 0.7, shadowRadius: 10, shadowOffset: { width: 0, height: 0 } },
+      ios: { shadowColor: GREEN, shadowOpacity: 0.6, shadowRadius: 14, shadowOffset: { width: 0, height: 0 } },
       default: {},
     }),
   },

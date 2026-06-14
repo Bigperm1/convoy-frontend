@@ -230,7 +230,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           {profileSlot ? (
             <View style={styles.logoSlot}>{profileSlot}</View>
           ) : (
-            <Ionicons name="search" size={18} color="rgba(235,235,245,0.55)" />
+            <Ionicons name="search" size={18} color="#2DEC86" />
           )}
           {onPressField ? (
             <TouchableOpacity

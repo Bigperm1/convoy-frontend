@@ -794,6 +794,11 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
   const commitCamera = (force = false) => {
     const m = mapRef.current;
     if (!m || !readyRef.current) return;
+    // The driver has taken manual control of the map (panned away) — honor it
+    // EVEN during navigation. Don't yank the camera back to the car until follow
+    // resumes (the Recenter tap, or the auto-recenter timer flips followUser
+    // true again). `force` still wins for deliberate recenters / first paint.
+    if (!followUser && !force) return;
     const lat = selfDisplay?.lat ?? center?.lat;
     const lng = selfDisplay?.lng ?? center?.lng;
     if (typeof lat !== "number" || typeof lng !== "number") return;
@@ -844,8 +849,13 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
         { duration: force ? 350 : 700 }
       );
     } catch {}
-    // Release the self-moving guard after the animation window.
-    setTimeout(() => { selfMovingRef.current = false; }, (force ? 350 : 700) + 120);
+    // Release the self-moving guard quickly. This guard only exists to drop the
+    // ONE programmatic camera move from being mistaken for a user pan; holding it
+    // for the whole 700ms animation (as before) swallowed real finger-pans while
+    // moving — the camera commits every GPS tick, so the guard was up most of the
+    // time and the driver "couldn't pan." A short window still filters the
+    // programmatic move (it fires immediately) but lets genuine pans through.
+    setTimeout(() => { selfMovingRef.current = false; }, 200);
   };
 
   // Drive the camera on every relevant change.
@@ -959,7 +969,14 @@ const ConvoyMap = forwardRef<any, ConvoyMapProps>((props, ref) => {
           const co = e?.nativeEvent?.coordinate;
           if (co && typeof co.latitude === "number") onMapLongPress?.({ lat: co.latitude, lng: co.longitude });
         }}
-        onPanDrag={() => { if (!selfMovingRef.current) onUserPan?.(); }}
+        onPanDrag={() => {
+          if (selfMovingRef.current) return;
+          // Real finger-pan. Invalidate the camera-throttle baseline so that when
+          // follow resumes (Recenter / 10s auto-recenter) the snap-back ISN'T
+          // skipped as "barely moved" — the user moved the camera, not the car.
+          lastCamRef.current = null;
+          onUserPan?.();
+        }}
       >
         {/* Car markers — self + every peer. Each is a rotated top-down PNG of
             the GR Corolla in the driver's paint (default Heavy Metal).

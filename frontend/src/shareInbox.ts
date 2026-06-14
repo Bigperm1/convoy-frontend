@@ -11,7 +11,7 @@
 // is always gated on the user tapping the toast.
 type Listener = () => void;
 
-export type PendingRoute = { lat: number; lng: number; label: string };
+export type PendingRoute = { lat: number; lng: number; label: string; fromHandle?: string; sharedAt?: number };
 export type PendingMusic = { title?: string; artist?: string; url?: string };
 export type PendingComm = { id: string; channel?: string };
 

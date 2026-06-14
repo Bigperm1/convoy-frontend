@@ -10,11 +10,12 @@ import {
   TextInput,
   ActivityIndicator,
   Modal,
+  Alert,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSettings, updateSettings } from "../../src/settings";
-import { startLogin } from "../../src/spotify";
+import { startLogin, getStoredToken } from "../../src/spotify";
 import SpotifyMusic from "../../src/SpotifyMusic";
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
@@ -38,6 +39,7 @@ import {
   toggle,
   skipNext,
   skipPrev,
+  setShuffle,
   useCurrentSong,
   useIsPlaying,
   type AppleSong,
@@ -51,6 +53,42 @@ import { shareInbox } from "../../src/shareInbox";
 const AM_PINK: [string, string] = ["#FB5C74", "#FA2D48"];
 // Spotify brand green.
 const SP_GREEN = "#1DB954";
+
+// Segmented switcher to flip the active player directly (Apple Music ⇄ Spotify)
+// without going back to the first-run picker. Switching to Spotify when it isn't
+// linked yet kicks off its login (the callback flips the source on success).
+function SourceSwitcher({ current }: { current: "apple" | "spotify" }) {
+  const pill = (key: "apple" | "spotify", label: string, color: string) => {
+    const active = current === key;
+    return (
+      <TouchableOpacity
+        key={key}
+        activeOpacity={0.85}
+        onPress={async () => {
+          if (key === current) return;
+          if (key === "spotify" && !(await getStoredToken())) { startLogin().catch(() => {}); return; }
+          updateSettings({ musicSource: key });
+        }}
+        style={[swStyles.pill, active && { backgroundColor: color }]}
+      >
+        <MaterialCommunityIcons name={key === "apple" ? "apple" : "spotify"} size={14} color={active ? "#fff" : COLORS.textDim} />
+        <Text style={[swStyles.pillText, active && { color: "#fff" }]}>{label}</Text>
+      </TouchableOpacity>
+    );
+  };
+  return (
+    <View style={swStyles.wrap}>
+      {pill("apple", "Apple Music", "#FA2D48")}
+      {pill("spotify", "Spotify", SP_GREEN)}
+    </View>
+  );
+}
+
+const swStyles = StyleSheet.create({
+  wrap: { flexDirection: "row", gap: 6, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 12, padding: 4, alignSelf: "flex-start", marginHorizontal: 20, marginBottom: 6 },
+  pill: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 9 },
+  pillText: { color: COLORS.textDim, fontSize: 13, fontWeight: "700" },
+});
 
 /**
  * Deep-link into the Apple Music app — used as a fallback when on-device
@@ -148,6 +186,10 @@ export default function MusicScreen() {
   const [initializing, setInitializing] = useState(isMusicSupported);
   const [canPlay, setCanPlay] = useState<boolean | null>(null);
   const [connecting, setConnecting] = useState(false);
+  // Apple shuffle is write-only (MusicKit doesn't report it back), so track it
+  // locally and toggle optimistically.
+  const [appleShuffle, setAppleShuffle] = useState(false);
+  const toggleAppleShuffle = () => { const ns = !appleShuffle; setAppleShuffle(ns); setShuffle(ns); };
   // Slide-up "share to members" sheet for the now-playing track.
   const [shareOpen, setShareOpen] = useState(false);
   // Playlist detail sheet — tapping a playlist opens its track list instead of
@@ -333,6 +375,7 @@ export default function MusicScreen() {
           </View>
           <LogoMenu size={30} style={styles.logoBtn} align="right" />
         </View>
+        <SourceSwitcher current="spotify" />
         <SpotifyMusic onSwitchSource={() => updateSettings({ musicSource: null })} />
       </SafeAreaView>
     );
@@ -353,6 +396,8 @@ export default function MusicScreen() {
           </View>
           <LogoMenu size={30} style={styles.logoBtn} align="right" />
         </View>
+
+        {source === "apple" && <SourceSwitcher current="apple" />}
 
         {/* Cold-start: show a spinner while the silent auth check runs, so the
             Connect hero never flashes before the dashboard resolves. */}
@@ -522,7 +567,21 @@ export default function MusicScreen() {
             {/* Spotify */}
             <TouchableOpacity
               activeOpacity={0.9}
-              onPress={() => { startLogin().catch(() => {}); }}
+              onPress={async () => {
+                // Surface failures instead of swallowing them — a silent
+                // `.catch(() => {})` here is exactly why a broken login looked
+                // like "nothing happens". startLogin opens the Spotify auth page
+                // in the browser; the convoy://spotify-callback deep link then
+                // lands on app/spotify-callback.tsx to finish sign-in.
+                try {
+                  await startLogin();
+                } catch (e: any) {
+                  Alert.alert(
+                    "Couldn't open Spotify",
+                    e?.message || "Something went wrong starting Spotify sign-in. Please try again.",
+                  );
+                }
+              }}
               testID="pick-spotify"
               style={[styles.heroWrap, { shadowColor: SP_GREEN }]}
             >
@@ -606,6 +665,9 @@ export default function MusicScreen() {
           >
             <Ionicons name="share-outline" size={20} color={COLORS.text} />
           </TouchableOpacity>
+          <TouchableOpacity onPress={toggleAppleShuffle} hitSlop={8} testID="am-shuffle" style={{ marginRight: 12 }}>
+            <Ionicons name="shuffle" size={20} color={appleShuffle ? AM_PINK[1] : COLORS.textDim} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => skipPrev()} hitSlop={8} testID="am-prev">
             <Ionicons name="play-skip-back" size={22} color={COLORS.text} />
           </TouchableOpacity>
@@ -680,7 +742,10 @@ export default function MusicScreen() {
             ) : (
               <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
                 {detailSongs.map((s, i) =>
-                  SongRow(s, i, () => { playLibrarySong(s.id); setDetailPlaylist(null); }, i === detailSongs.length - 1)
+                  // Play the PLAYLIST starting at this track (not the lone song),
+                  // so the queue is the whole playlist — skip forward/back works
+                  // and it keeps playing instead of stopping after one song.
+                  SongRow(s, i, () => { if (detailPlaylist) playLibraryPlaylist(detailPlaylist.id, i); setDetailPlaylist(null); }, i === detailSongs.length - 1)
                 )}
               </ScrollView>
             )}

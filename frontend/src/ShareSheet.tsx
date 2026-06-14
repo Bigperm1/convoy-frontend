@@ -130,7 +130,9 @@ export default function ShareSheet({ visible, onClose, share }: Props) {
       await api.post("/notifications/share", {
         target_user_ids: Array.from(selected),
         kind,
-        payload,
+        // Stamp WHEN it was shared so recipients can show "shared X ago" (who
+        // comes from the sender identity the backend attaches to the event).
+        payload: { ...payload, shared_at: Date.now() },
         community_id: communityId,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});

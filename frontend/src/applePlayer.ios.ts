@@ -281,6 +281,12 @@ export const skipPrev = (): void => {
   try { Player.skipToPreviousEntry(); } catch (e) { console.warn("[applePlayer] skipPrev failed", e); }
 };
 
+// Shuffle on/off (iOS 16+). Added to @lomray/react-native-apple-music via
+// patch-package (it ships no shuffle control) — see patches/.
+export const setShuffle = (enabled: boolean): void => {
+  try { (Player as any).setShuffleMode(enabled); } catch (e) { console.warn("[applePlayer] setShuffle failed", e); }
+};
+
 // ---- Nova voice ducking --------------------------------------------------
 // The in-app Apple Music player (MusicKit) is an out-of-process system player,
 // so it is NOT ducked by Convoy's expo-av `.duckOthers` session — that only

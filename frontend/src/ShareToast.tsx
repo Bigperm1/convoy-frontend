@@ -25,6 +25,15 @@ const KIND_CTA: Record<ShareKind, string> = {
   comm: "Listen",
 };
 
+// Relative time for the "shared X ago" line on the toast.
+function relTime(ms?: number): string {
+  if (!ms) return "";
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return `${Math.round(s / 3600)}h ago`;
+}
+
 /**
  * Global toast for an incoming share (a member sent you a song / route / clip).
  * Mounted once in the (app) layout so it appears on any tab. Fed by `shareBus`,
@@ -92,7 +101,13 @@ export default function ShareToast() {
     // destination + Drive preview; music → search + play), then ping in case
     // that screen is already mounted, and navigate to its tab.
     if (k === "route" && typeof p.dest_lat === "number" && typeof p.dest_lng === "number") {
-      shareInbox.setRoute({ lat: p.dest_lat, lng: p.dest_lng, label: p.dest_label || p.name || "Shared route" });
+      shareInbox.setRoute({
+        lat: p.dest_lat,
+        lng: p.dest_lng,
+        label: p.dest_label || p.name || "Shared route",
+        fromHandle: event.fromHandle,
+        sharedAt: typeof p.shared_at === "number" ? p.shared_at : Date.now(),
+      });
     } else if (k === "music" && (p.title || p.url)) {
       shareInbox.setMusic({ title: p.title, artist: p.artist, url: p.url });
     } else if (k === "comm" && p.id) {
@@ -118,7 +133,7 @@ export default function ShareToast() {
         </View>
         <TouchableOpacity activeOpacity={0.85} style={{ flex: 1 }} onPress={open}>
           <Text style={styles.from} numberOfLines={1}>
-            {event.fromHandle || "A driver"} {verb}
+            {event.fromHandle || "A driver"} {verb}{p.shared_at ? `  ·  ${relTime(p.shared_at)}` : ""}
           </Text>
           <Text style={styles.what} numberOfLines={1}>{what}</Text>
         </TouchableOpacity>

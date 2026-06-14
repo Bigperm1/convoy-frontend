@@ -19,6 +19,12 @@ export type CarState = {
   distanceRemaining: string; // e.g. "33 km"
   destinationLabel: string;
   peers: CarPeer[];
+  // Raw numeric mirrors of the formatted strings above. Android Auto's
+  // NavigationTemplate needs real meters/seconds (it formats them itself), not
+  // the pre-formatted phone-banner strings. Populated alongside the strings.
+  distanceToTurnM: number; // meters to the next maneuver
+  distanceRemainingM: number; // meters to the destination
+  etaSeconds: number; // seconds remaining to the destination
 };
 
 const initial: CarState = {
@@ -30,6 +36,9 @@ const initial: CarState = {
   distanceRemaining: '',
   destinationLabel: '',
   peers: [],
+  distanceToTurnM: 0,
+  distanceRemainingM: 0,
+  etaSeconds: 0,
 };
 
 let state: CarState = initial;

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Convoy",
     "slug": "convoy",
-    "version": "1.1.11",
+    "version": "1.1.13",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "convoy",
@@ -12,7 +12,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
-      "buildNumber": "43",
+      "buildNumber": "46",
       "config": {
         "googleMapsApiKey": "AIzaSyC0w5LHgZ1ud3EmeAhUkr4aOAOf89bE09U"
       },
@@ -33,7 +33,7 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 43,
+      "versionCode": 46,
       "googleServicesFile": "./google-services.json",
       "config": {
         "googleMaps": {
@@ -108,7 +108,8 @@
           }
         }
       ],
-      "./plugins/withConvoyAndroidAuto.js"
+      "./plugins/withConvoyAndroidAuto.js",
+      "./plugins/withConvoyCarPlay.js"
     ],
     "experiments": {
       "typedRoutes": true

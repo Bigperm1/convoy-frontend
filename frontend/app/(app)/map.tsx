@@ -30,7 +30,7 @@ import PeerModal from "../../src/PeerModal";
 import ShareSheet from "../../src/ShareSheet";
 import {
   fetchRoutes, fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
-  fmtDistanceM, fmtEtaSec, announceReroute, stopSpeech, announce, haversineMeters,
+  fmtDistanceM, fmtEtaSec, stopSpeech, announce, haversineMeters,
 } from "../../src/nav";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import WeatherHUD from "../../src/components/WeatherHUD";
@@ -46,6 +46,7 @@ import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
 import { startNavBanner, stopNavBanner, updateNavBanner } from "../../src/navNotification";
+import RerouteCard from "../../src/RerouteCard";
 import { PoliceBadgeIcon, HazardIcon } from "../../src/components/MapControlIcons";
 
 type RouteInfo = {
@@ -224,6 +225,27 @@ const REROUTE_ACCEPT_LINES = [
   "Sure thing, jumping on the quicker route.",
 ];
 
+// Spoken when the DRIVER deliberately goes a different way than the planned
+// route (the off-route auto-reroute path) — playful, not a dry "recalculating".
+const SPLIT_DECISION_LINES = [
+  "Looks like you made a split decision. Recalculating.",
+  "I hope that gamble pays off. New route coming up.",
+  "Going rogue, huh? Let me catch up.",
+  "Bold move. Finding you a new line.",
+  "Off the beaten path — I like it. One sec.",
+  "Okay, your call. Sorting you a new route.",
+];
+
+// Relative time for the "shared X ago" credit on a received route.
+function shareRelTime(ms?: number): string {
+  if (!ms) return "";
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} hr ago`;
+  return `${Math.round(s / 86400)} d ago`;
+}
+
 const SPEED_CAMERA_LINES = [
   "Speed camera ahead.",
   "Heads up, speed camera coming up.",
@@ -304,6 +326,11 @@ export default function MapScreen() {
   const [showReport, setShowReport] = useState(false);
   const [selected, setSelected] = useState<Hazard | null>(null);
   const [destination, setDestination] = useState<{ lat: number; lng: number; label: string } | null>(null);
+  // When a crew member shares a route, the recipient gets this metadata so the
+  // preview can show WHO shared it + WHEN, and so we hold off auto-start (they
+  // press Start themselves). Matched to the active destination by coords, so it
+  // self-clears the moment they pick a different destination.
+  const [sharedRouteMeta, setSharedRouteMeta] = useState<{ handle?: string; at?: number; lat: number; lng: number } | null>(null);
   // Category-pill nearby-search results, shown as tappable pins on the map.
   const [placePins, setPlacePins] = useState<PlaceResult[]>([]);
   const [route, setRoute] = useState<RouteInfo | null>(null);
@@ -415,9 +442,14 @@ export default function MapScreen() {
     if (!destination || !route) return;
     if (navMode === "turn-by-turn") return;
     if (navAutoStartedRef.current) return;
+    // A SHARED route waits for the recipient to press Start themselves — never
+    // auto-start it out from under them.
+    if (sharedRouteMeta &&
+        Math.abs(destination.lat - sharedRouteMeta.lat) < 1e-6 &&
+        Math.abs(destination.lng - sharedRouteMeta.lng) < 1e-6) return;
     const kmh = (coords?.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
     if (kmh >= 5) startNav();
-  }, [coords?.speed, destination, route, navMode]);
+  }, [coords?.speed, destination, route, navMode, sharedRouteMeta]);
 
   // ---- Full-screen search wiring ----
   // A picked place behaves exactly like the inline bar's onSelect.
@@ -489,6 +521,10 @@ export default function MapScreen() {
     const r = shareInbox.takeRoute();
     if (!r) return;
     setDestination({ lat: r.lat, lng: r.lng, label: r.label });
+    // Remember who/when so the preview can credit the sharer and we hold off
+    // auto-start (the destination→routes effect still recomputes the route from
+    // THIS member's own GPS to the shared destination — see that effect).
+    setSharedRouteMeta({ handle: r.fromHandle, at: r.sharedAt, lat: r.lat, lng: r.lng });
     setShowSteps(true);
     setSearchVisible(false);
   }, []);
@@ -622,6 +658,8 @@ export default function MapScreen() {
   const coordsRef = useRef(coords);
   useEffect(() => { coordsRef.current = coords; }, [coords]);
 
+  // Dedupe key so Nova announces the route options at most once per destination.
+  const announcedRoutesForRef = useRef<string>("");
   // Unified multi-route directions (web + native). Fetches up to 3 alternates with `alternatives=true`.
   // Routes are SORTED by current traffic-aware ETA (fastest first) and tagged with
   // a rank-based color: green (fastest) / orange (2nd) / red (3rd+) so the user
@@ -664,6 +702,26 @@ export default function MapScreen() {
         duration_text: r0.duration_text,
         steps: r0.steps.map((s: any) => ({ html: s.html, distance_text: s.distance_text, maneuver: s.maneuver })),
       } : null);
+
+      // Nova announces the route options at plot time (C). Only when there's a
+      // real choice (>=2 routes), not muted, once per destination, and only while
+      // stopped/slow so it doesn't talk over the Start greeting on auto-start.
+      if (results.length >= 2 && !getSettings().novaMuted) {
+        const destKey = `${destination.lat.toFixed(5)},${destination.lng.toFixed(5)}`;
+        const slowEnough = ((coordsRef.current?.speed ?? 0) * 3.6) < 5;
+        if (announcedRoutesForRef.current !== destKey && slowEnough) {
+          announcedRoutesForRef.current = destKey;
+          const fastest = results[0].duration_in_traffic_s ?? results[0].duration_s ?? 0;
+          const second = results[1].duration_in_traffic_s ?? results[1].duration_s ?? 0;
+          const diffMin = Math.max(0, Math.round((second - fastest) / 60));
+          const cs = (getSettings().callSign || "").trim();
+          const hey = cs ? `Hey ${cs}, ` : "";
+          const line = diffMin >= 1
+            ? `${hey}I found ${results.length} routes. The fastest saves about ${diffMin} ${diffMin === 1 ? "minute" : "minutes"} — it's the one I've highlighted.`
+            : `${hey}I found ${results.length} routes — they're about the same time. I've picked the fastest.`;
+          try { announce(line); } catch {}
+        }
+      }
     })();
     return () => { cancelled = true; };
   }, [destination, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
@@ -720,8 +778,12 @@ export default function MapScreen() {
       setNavMode("preview");
     },
     onOffRoute: () => {
-      // Auto-reroute: refetch directions from the current GPS position (honoring user's avoid prefs)
       if (!coords || !destination) return;
+      // The driver deliberately went a different way. React IMMEDIATELY with a
+      // playful Nova quip (don't wait for the network fetch), then swap to the
+      // recomputed route — the turn engine re-anchors to the new line (nav.ts) so
+      // guidance picks it up at once.
+      if (!navMuted) { try { announce(pick(SPLIT_DECISION_LINES)); } catch {} }
       fetchRoutes(coords, destination, {
         tolls: settings.avoidTolls,
         highways: settings.avoidHighways,
@@ -730,7 +792,6 @@ export default function MapScreen() {
         if (res.length > 0) {
           setRoutes(res.slice(0, 2));
           setSelectedRouteIndex(0);
-          if (!navMuted) announceReroute();
         }
       });
     },
@@ -760,6 +821,8 @@ export default function MapScreen() {
   const rerouteBusyRef = useRef(false);        // a check is in flight
   const rerouteShowingRef = useRef(false);     // a prompt is currently up
   const rerouteSuppressUntilRef = useRef(0);   // hush window after accept/decline
+  // The visual reroute offer currently on screen (mini-map card). null = none.
+  const [rerouteOffer, setRerouteOffer] = useState<{ route: NavRoute; title: string; subtitle: string } | null>(null);
 
   const checkForFasterRoute = useCallback(async () => {
     if (!getSettings().novaMidDrive) return;
@@ -800,36 +863,42 @@ export default function MapScreen() {
 
       rerouteShowingRef.current = true;
       if (!navMutedRef.current) { try { announce(spoken); } catch {} }
-      Alert.alert(
-        hz ? hazardTitle(hz.kind) : "Faster route available",
-        `A faster route saves about ${minLabel}.`,
-        [
-          {
-            text: "No thanks", style: "cancel",
-            onPress: () => {
-              rerouteShowingRef.current = false;
-              rerouteSuppressUntilRef.current = Date.now() + 300000; // hush 5 min
-            },
-          },
-          {
-            text: "Take it",
-            onPress: () => {
-              rerouteShowingRef.current = false;
-              rerouteSuppressUntilRef.current = Date.now() + 120000; // settle 2 min
-              setRoutes([best]);            // same swap the off-route path uses
-              setSelectedRouteIndex(0);
-              if (!navMutedRef.current) { try { announce(pick(REROUTE_ACCEPT_LINES)); } catch {} }
-            },
-          },
-        ],
-        { cancelable: false }
-      );
+      // Show the visual reroute card (a mini-map preview of `best`) instead of a
+      // plain text alert. acceptReroute / declineReroute (below) handle the tap —
+      // accepting runs the SAME setRoutes([best]) swap the off-route path uses.
+      setRerouteOffer({
+        route: best,
+        title: hz ? hazardTitle(hz.kind) : "Faster route available",
+        subtitle: hz
+          ? `Reported ${hazardReason(hz.kind)} ahead · saves about ${minLabel}`
+          : `A faster route saves about ${minLabel} on current traffic`,
+      });
     } catch {
       // ignore — try again on the next interval
     } finally {
       rerouteBusyRef.current = false;
     }
   }, []);
+
+  // Reroute card accept / decline. Mirror the old Alert button handlers exactly:
+  // same hush windows + the setRoutes([best]) swap. Plain functions (recreated
+  // each render) so they always read the current offer, never a stale one.
+  const acceptReroute = () => {
+    const offer = rerouteOffer;
+    rerouteShowingRef.current = false;
+    rerouteSuppressUntilRef.current = Date.now() + 120000; // settle 2 min
+    setRerouteOffer(null);
+    if (offer?.route) {
+      setRoutes([offer.route]);     // same swap the off-route path uses
+      setSelectedRouteIndex(0);
+      if (!navMutedRef.current) { try { announce(pick(REROUTE_ACCEPT_LINES)); } catch {} }
+    }
+  };
+  const declineReroute = () => {
+    rerouteShowingRef.current = false;
+    rerouteSuppressUntilRef.current = Date.now() + 300000; // hush 5 min
+    setRerouteOffer(null);
+  };
 
   // Drive the check on a 60s interval, only while actively navigating.
   useEffect(() => {
@@ -861,9 +930,28 @@ export default function MapScreen() {
     }
   }, [coords, navMode]);
 
+  // ---- Map follow / manual-pan + auto-recenter ----
+  // The driver can pan the map freely even while moving or under guidance; after
+  // 10s of no further panning the camera snaps back to centre on their car.
+  const recenterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearRecenterTimer = () => {
+    if (recenterTimerRef.current) { clearTimeout(recenterTimerRef.current); recenterTimerRef.current = null; }
+  };
+  const handleUserPan = () => {
+    setIsFollowing(false);            // driver took control — stop chasing
+    clearRecenterTimer();
+    recenterTimerRef.current = setTimeout(() => { setIsFollowing(true); }, 10000); // auto-recenter after 10s idle
+  };
+  const recenterNow = () => { clearRecenterTimer(); setIsFollowing(true); };
+  useEffect(() => () => clearRecenterTimer(), []); // tidy on unmount
+
   const startNav = () => {
     if (!activeRoute) return;
     navAutoStartedRef.current = true;
+    // Begin guidance centred on the car (a destination pick had dropped follow to
+    // frame the route options).
+    clearRecenterTimer();
+    setIsFollowing(true);
     if (destination) addRecentRoute({ label: destination.label, lat: destination.lat, lng: destination.lng });
     // Clear any prior speech/state FIRST, then reserve + play the greeting. The
     // turn engine's activate path no longer resets the speech gate, so whatever
@@ -1879,6 +1967,9 @@ export default function MapScreen() {
         carColor: p.carColor,
         activeColor: p.activeColor,
         heading: p.heading,
+        // Carry the peer's personal-best top speed through the merge so the YOHB
+        // hail card can show their PB even when it's opened from the marker list.
+        topSpeed: p.topSpeed,
       } as Peer;
     });
     return Object.values(byId);
@@ -1971,14 +2062,13 @@ export default function MapScreen() {
         routes={routes}
         selectedRouteIndex={selectedRouteIndex}
         onSelectRoute={handleSelectRoute}
-        // Follow-mode logic: chase-cam during nav, otherwise driven by the
-        // explicit `isFollowing` state. When the user pans the map manually,
-        // ConvoyMap fires `onUserPan` and we flip off follow mode — the map
-        // stops tracking the user's position until they tap the Recenter FAB.
-        followUser={navMode === "turn-by-turn" || isFollowing}
-        onUserPan={() => {
-          if (isFollowing) setIsFollowing(false);
-        }}
+        // Follow-mode logic, driven by the single `isFollowing` flag (true even
+        // during nav). When the driver pans the map — including mid-guidance —
+        // ConvoyMap fires `onUserPan`; we drop follow so the camera stops chasing
+        // and let them roam, then auto-recenter after 10s idle (or a Recenter
+        // tap). startNav re-enables follow so guidance always begins centred.
+        followUser={isFollowing}
+        onUserPan={handleUserPan}
         // Chase-cam (3D, heading-rotated, dynamic-zoom) is on whenever turn-
         // by-turn nav is actively running. Pitch defaults to 45° in ConvoyMap.
         navigationActive={navMode === "turn-by-turn" && tbt.active}
@@ -1995,9 +2085,16 @@ export default function MapScreen() {
         onHazardPress={(h: any) => setSelected(h)}
         onHazardLongPress={handleHazardLongPress}
         onPeerPress={(p: any) => {
-          // Find the matching presence record (has online_at, etc.) — fallback to bare peer
+          // Find the matching presence record (freshest — has online_at, topSpeed,
+          // etc.). Always preserve the peer's PB: prefer the live presence value,
+          // else fall back to whatever the tapped marker carried, so the YOHB
+          // card's PB never drops to "—" when we actually have the number.
           const full = presence.peers.find((pp) => pp.user_id === p.user_id);
-          setSelectedPeer(full || { user_id: p.user_id, handle: p.handle, lat: p.lat, lng: p.lng, carType: p.carType });
+          setSelectedPeer(
+            full
+              ? { ...full, topSpeed: full.topSpeed ?? p.topSpeed }
+              : { user_id: p.user_id, handle: p.handle, lat: p.lat, lng: p.lng, carType: p.carType, topSpeed: p.topSpeed }
+          );
         }}
         onExternalAlertPress={(a: any) => Alert.alert(`${a.type}${a.subtype ? " · " + a.subtype : ""}`, "Live alert from Convoy feed.")}
         places={placePins}
@@ -2137,6 +2234,22 @@ export default function MapScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+
+            {/* Shared-route credit — who sent it + when. Shown only when this
+                destination arrived from a crew member's share. The route itself
+                is computed from THIS member's own GPS (the destination→routes
+                effect), so it's their route to the sharer's destination. */}
+            {sharedRouteMeta &&
+              Math.abs(destination.lat - sharedRouteMeta.lat) < 1e-6 &&
+              Math.abs(destination.lng - sharedRouteMeta.lng) < 1e-6 && (
+                <View style={styles.sharedByRow}>
+                  <Ionicons name="share-social" size={14} color="#FFD60A" />
+                  <Text style={styles.sharedByText} numberOfLines={1}>
+                    Shared by {sharedRouteMeta.handle || "a member"}
+                    {sharedRouteMeta.at ? ` · ${shareRelTime(sharedRouteMeta.at)}` : ""} · from your location — press Start
+                  </Text>
+                </View>
+              )}
 
             <View style={styles.bannerDivider} />
 
@@ -2313,6 +2426,17 @@ export default function MapScreen() {
         myTopSpeed={Math.max(user?.top_speed_record || 0, sessionMaxSpeed)}
       />
 
+      {/* Nova's mid-drive reroute offer — frosted card with a mini-map preview
+          of the suggested alternate route (replaces the old text alert). */}
+      <RerouteCard
+        visible={!!rerouteOffer}
+        route={rerouteOffer?.route ?? null}
+        title={rerouteOffer?.title ?? ""}
+        subtitle={rerouteOffer?.subtitle ?? ""}
+        onAccept={acceptReroute}
+        onDecline={declineReroute}
+      />
+
       {/* Share the current destination to specific community members (push +
           in-app toast via /notifications/share — no Supabase needed). */}
       <ShareSheet
@@ -2372,10 +2496,10 @@ export default function MapScreen() {
             GPS updates track the user, AND (b) fires an animateCamera() snap
             to the current coord for instant feedback. Active state is shown
             with a tinted accent so the user understands the toggle. */}
-        {!isFollowing && navMode !== "turn-by-turn" && (
+        {!isFollowing && (
           <TouchableOpacity
             testID="recenter-fab"
-            onPress={() => setIsFollowing(true)}
+            onPress={recenterNow}
             activeOpacity={0.85}
             style={styles.fab}
           >
@@ -2813,6 +2937,8 @@ const styles = StyleSheet.create({
   bannerDrive: { color: "#FFD60A", fontSize: 22, fontWeight: "700", letterSpacing: -0.3 },
   bannerHeaderRight: { flexDirection: "row", alignItems: "center", gap: 18 },
   bannerDivider: { height: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.14)", marginHorizontal: -16, marginBottom: 14 },
+  sharedByRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: -2, marginBottom: 10 },
+  sharedByText: { color: "#FFD60A", fontSize: 12.5, fontWeight: "700", flex: 1 },
   bannerSummary: { flexDirection: "row", alignItems: "flex-start", gap: 18, marginBottom: 16 },
   bannerDurCol: { alignItems: "center" },
   bannerDurNum: { color: "#F4F4F4", fontSize: 30, fontWeight: "700", letterSpacing: -0.5, lineHeight: 32 },

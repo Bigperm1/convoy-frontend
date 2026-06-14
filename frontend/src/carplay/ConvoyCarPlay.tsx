@@ -34,10 +34,6 @@ import { setCarState, getCarState, useCarStore, type CarPeer } from './carStore'
 const isIOS = Platform.OS === 'ios';
 const isAndroid = Platform.OS === 'android';
 
-// Android `Distance` unit enum (androidx.car.app): meters = 1, kilometers = 2.
-// TODO(DHU): confirm this constant renders correctly on the head unit.
-const AA_UNIT_METERS = 1;
-
 // react-native-carplay's Android checkForConnection() emits a spurious
 // `didConnect` at startup even with NO head unit attached (it calls
 // eventEmitter.didConnect() unconditionally). Building any template before a
@@ -174,6 +170,10 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
       distanceRemaining: tbt.active ? fmtDistanceM(tbt.distanceRemainingM) : '',
       destinationLabel: destination?.label || '',
       peers: toCarPeers(peers),
+      // Raw numerics for the Android Auto NavigationTemplate (AndroidAutoRoot).
+      distanceToTurnM: tbt.active ? tbt.distanceToManeuverM : 0,
+      distanceRemainingM: tbt.active ? tbt.distanceRemainingM : 0,
+      etaSeconds: tbt.active ? tbt.etaSeconds : 0,
     });
   }, [
     tbt.active,
@@ -191,7 +191,7 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
   useEffect(() => {
     const lib = getLib();
     if (!lib) return;
-    const { CarPlay, MapTemplate, NavigationTemplate, ListTemplate, NowPlayingTemplate, TabBarTemplate } = lib;
+    const { CarPlay, MapTemplate, ListTemplate, NowPlayingTemplate, TabBarTemplate } = lib;
 
     const setRoot = () => {
       try {
@@ -230,15 +230,13 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
             templates: [mapTemplate, commsTemplate, musicTemplate],
           });
           CarPlay.setRootTemplate(tabBar);
-        } else if (isAndroid) {
-          const t = new NavigationTemplate({
-            id: 'convoy-aa-nav',
-            component: CarSurface,
-            actions: [{ id: 'end', title: 'End' }],
-          });
-          navTemplateRef.current = t;
-          CarPlay.setRootTemplate(t);
         }
+        // Android Auto is NOT built here. The head unit can launch the car app
+        // even when this phone screen isn't mounted, so its UI is owned by the
+        // dedicated "AndroidAuto" AppRegistry root (src/carplay/AndroidAutoRoot
+        // + registerAndroidAuto), which react-native-carplay's CarPlaySession
+        // runs on connect. This hook still feeds that root live data via
+        // carStore (the mirror effect above).
       } catch (e) {
         console.warn('[CarPlay] setRoot failed', e);
       }
@@ -361,28 +359,8 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
           });
         } catch (e) { console.warn('[CarPlay] iOS trip ETA', e); }
       }
-    } else if (isAndroid) {
-      const navTemplate = navTemplateRef.current;
-      if (navTemplate) {
-        try {
-          navTemplate.updateTemplate({
-            component: CarSurface,
-            actions: [{ id: 'end', title: 'End' }],
-            navigationInfo: {
-              type: 'routingInfo',
-              nextStep: { cue: label },
-              distance: tbt.distanceToManeuverM,
-              distanceUnits: AA_UNIT_METERS,
-            },
-            travelEstimate: {
-              distanceRemaining: tbt.distanceRemainingM / 1000,
-              timeRemaining: tbt.etaSeconds,
-            },
-          });
-          lastStepRef.current = tbt.stepIndex;
-        } catch (e) { console.warn('[CarPlay] Android Auto update', e); }
-      }
     }
+    // Android Auto live updates are driven by AndroidAutoRoot off carStore.
   }, [
     connected,
     tbt.active,

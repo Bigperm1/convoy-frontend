@@ -26,9 +26,19 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
   const [playlists, setPlaylists] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [shuffle, setShuffleState] = useState(false);
   const pollRef = useRef<any>(null);
 
   const refreshNow = useCallback(async () => {
+    // /me/player carries shuffle_state too; fall back to currently-playing for
+    // the odd device that 204s on the full state endpoint.
+    const st = await spotify.playbackState();
+    if (st) {
+      setNow(st.item ?? null);
+      setIsPlaying(!!st.is_playing);
+      setShuffleState(!!st.shuffle_state);
+      return;
+    }
     const cur = await spotify.currentlyPlaying();
     setNow(cur?.item ?? null);
     setIsPlaying(!!cur?.is_playing);
@@ -76,9 +86,22 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
     } finally { setBusy(false); }
   }, [refreshNow]);
 
-  const playTrack = (uri: string) => { Haptics.selectionAsync().catch(() => {}); control(() => spotify.playUris([uri])); };
+  // Play the tapped top-track AND queue the rest of the list behind it (offset),
+  // so playback continues and skip-forward/back work instead of stopping after
+  // one song.
+  const playTrackAt = (i: number) => {
+    Haptics.selectionAsync().catch(() => {});
+    const uris = tracks.map((t) => t.uri).filter(Boolean);
+    control(() => spotify.playUris(uris, i));
+  };
   const playPlaylist = (uri: string) => { Haptics.selectionAsync().catch(() => {}); control(() => spotify.playContext(uri)); };
   const toggle = () => control(() => (isPlaying ? spotify.pause() : spotify.resume()));
+  const toggleShuffle = () => {
+    const ns = !shuffle;
+    setShuffleState(ns); // optimistic
+    Haptics.selectionAsync().catch(() => {});
+    control(() => spotify.setShuffle(ns));
+  };
 
   return (
     <View style={{ flex: 1 }}>
@@ -118,7 +141,7 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
               <Text style={styles.sectionTitle}>Your Top Tracks</Text>
               <View style={styles.list}>
                 {tracks.map((t, i) => (
-                  <TouchableOpacity key={t.id || i} style={[styles.row, i === tracks.length - 1 && styles.rowLast]} activeOpacity={0.7} onPress={() => playTrack(t.uri)}>
+                  <TouchableOpacity key={t.id || i} style={[styles.row, i === tracks.length - 1 && styles.rowLast]} activeOpacity={0.7} onPress={() => playTrackAt(i)}>
                     {img(t.album?.images) ? (
                       <Image source={{ uri: img(t.album?.images) }} style={styles.rowArt} contentFit="cover" />
                     ) : (
@@ -155,6 +178,9 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
             <Text style={styles.nowTitle} numberOfLines={1}>{now.name ?? "Now Playing"}</Text>
             <Text style={styles.nowSub} numberOfLines={1}>{(now.artists ?? []).map((a: any) => a.name).join(", ")}</Text>
           </View>
+          <TouchableOpacity onPress={toggleShuffle} hitSlop={8} disabled={busy} style={{ marginRight: 12 }}>
+            <Ionicons name="shuffle" size={20} color={shuffle ? SP_GREEN : COLORS.textDim} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => control(() => spotify.previous())} hitSlop={8} disabled={busy}>
             <Ionicons name="play-skip-back" size={22} color={COLORS.text} />
           </TouchableOpacity>

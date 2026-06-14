@@ -16,6 +16,7 @@ import { useLatestTier, type ProximityTier } from '../../src/proximityAudio';
 import { usePttChannel, type PTTMessage } from '../../src/pttChannel';
 import { livePttBus, setCommsScreenFocused, acquireFloor, releaseFloor, getFloorHolder, floorBus, threadBus } from '../../src/livePtt';
 import { commsRead } from '../../src/commsRead';
+import { setPlaybackAudioMode, setIdleAudioMode } from '../../src/audioMode';
 
 const YELLOW = '#FFD60A';
 
@@ -447,11 +448,16 @@ export default function TalkScreen() {
       try { await playerRef.current?.unloadAsync(); } catch {}
       playerRef.current = null;
       setPlayingId(null);
+      void setIdleAudioMode(); // release the duck → other apps back to full volume
       return;
     }
     try { await playerRef.current?.unloadAsync(); } catch {}
     playerRef.current = null;
     try {
+      // Duck all other apps (Spotify / Apple Music / YouTube / etc.) while the
+      // replayed transmission plays — same loudspeaker + .duckOthers session the
+      // live PTT and Nova use. Released on finish / toggle-off / unmount.
+      await setPlaybackAudioMode();
       const uri = `data:audio/mp4;base64,${m.audio_b64}`;
       const { sound } = await Audio.Sound.createAsync(
         { uri },
@@ -461,6 +467,7 @@ export default function TalkScreen() {
             sound.unloadAsync().catch(() => {});
             if (playerRef.current === sound) playerRef.current = null;
             setPlayingId((cur) => (cur === m.id ? null : cur));
+            void setIdleAudioMode(); // un-duck once the clip ends
           }
         }
       );
@@ -471,8 +478,8 @@ export default function TalkScreen() {
     }
   };
 
-  // Unload any playing clip on unmount.
-  useEffect(() => () => { playerRef.current?.unloadAsync().catch(() => {}); }, []);
+  // Unload any playing clip on unmount + release the duck so other apps recover.
+  useEffect(() => () => { playerRef.current?.unloadAsync().catch(() => {}); void setIdleAudioMode(); }, []);
 
   const glowOpacity = glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.95] });
   const glowRadius = glow.interpolate({ inputRange: [0, 1], outputRange: [22, 60] });

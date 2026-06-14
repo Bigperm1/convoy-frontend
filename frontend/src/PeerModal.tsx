@@ -129,14 +129,18 @@ export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed
                     <Text style={styles.metaText}>{lastSeen(peer.online_at)}</Text>
                   </View>
                 )}
-                {typeof peer.topSpeed === "number" && peer.topSpeed > 0 && (
-                  <View testID="peer-top-speed" style={[styles.metaCell, styles.metaCellAccent]}>
-                    <Ionicons name="speedometer" size={14} color="#FFC700" />
-                    <Text style={[styles.metaText, { color: "#FFC700" }]}>
-                      PB {Math.round(peer.topSpeed)} km/h
-                    </Text>
-                  </View>
-                )}
+                {/* Personal-best top speed — ALWAYS shown on the YOHB hail card,
+                    even when the peer hasn't broadcast a record yet (older build
+                    or no speed clocked), so it never disappears. Placeholder "—"
+                    keeps the chip in place until a real PB comes through. */}
+                <View testID="peer-top-speed" style={[styles.metaCell, styles.metaCellAccent]}>
+                  <Ionicons name="speedometer" size={14} color="#FFC700" />
+                  <Text style={[styles.metaText, { color: "#FFC700" }]}>
+                    {typeof peer.topSpeed === "number" && peer.topSpeed > 0
+                      ? `PB ${Math.round(peer.topSpeed)} km/h`
+                      : "PB —"}
+                  </Text>
+                </View>
               </View>
 
               <TouchableOpacity
@@ -163,11 +167,10 @@ export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed
                         ? `YOHB'd ${peer.handle || "driver"} 👊`
                         : `YOHB ${peer.handle || "driver"} 👊`}
                   </Text>
-                  {typeof myTopSpeed === "number" && myTopSpeed > 0 && (
-                    <Text style={[styles.hailSubText, { color: hailContent }]}>
-                      Your PB · {Math.round(myTopSpeed)} km/h
-                    </Text>
-                  )}
+                  {/* Your PB — always visible on the hail button (never hidden). */}
+                  <Text style={[styles.hailSubText, { color: hailContent }]}>
+                    Your PB · {typeof myTopSpeed === "number" && myTopSpeed > 0 ? `${Math.round(myTopSpeed)} km/h` : "—"}
+                  </Text>
                 </View>
               </TouchableOpacity>
             </View>

@@ -29,3 +29,81 @@ index fd92ce8..5a8b713 100644
      default:
        result["type"] = "unknown"
      }
+diff --git a/node_modules/@lomray/react-native-apple-music/ios/MusicModule.m b/node_modules/@lomray/react-native-apple-music/ios/MusicModule.m
+index 3ec62e2..603b8a7 100644
+--- a/node_modules/@lomray/react-native-apple-music/ios/MusicModule.m
++++ b/node_modules/@lomray/react-native-apple-music/ios/MusicModule.m
+@@ -27,6 +27,7 @@ RCT_EXTERN_METHOD(skipToNextEntry)
+ RCT_EXTERN_METHOD(skipToPreviousEntry)
+ RCT_EXTERN_METHOD(restartCurrentEntry)
+ RCT_EXTERN_METHOD(seekToTime:(double)time)
++RCT_EXTERN_METHOD(setShuffleMode:(BOOL)enabled)
+ RCT_EXTERN_METHOD(togglePlayerState)
+ RCT_EXTERN_METHOD(getCurrentState:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+ 
+diff --git a/node_modules/@lomray/react-native-apple-music/ios/MusicModule.swift b/node_modules/@lomray/react-native-apple-music/ios/MusicModule.swift
+index 6c1b18c..c595ea5 100644
+--- a/node_modules/@lomray/react-native-apple-music/ios/MusicModule.swift
++++ b/node_modules/@lomray/react-native-apple-music/ios/MusicModule.swift
+@@ -181,6 +181,11 @@ final class MusicModule: RCTEventEmitter {
+     playbackController.seek(to: time)
+   }
+ 
++  @objc(setShuffleMode:)
++  func setShuffleMode(_ enabled: Bool) {
++    playbackController.setShuffleMode(enabled)
++  }
++
+   // MARK: - Authorization
+ 
+   @objc(authorization:)
+diff --git a/node_modules/@lomray/react-native-apple-music/ios/PlaybackController.swift b/node_modules/@lomray/react-native-apple-music/ios/PlaybackController.swift
+index bc8133e..40c55b4 100644
+--- a/node_modules/@lomray/react-native-apple-music/ios/PlaybackController.swift
++++ b/node_modules/@lomray/react-native-apple-music/ios/PlaybackController.swift
+@@ -95,6 +95,13 @@ final class PlaybackController {
+     playbackTime = time
+   }
+ 
++  /// Turns shuffle on (.songs) or off on the application music player (iOS 16+).
++  func setShuffleMode(_ enabled: Bool) {
++    if #available(iOS 16.0, *) {
++      player.state.shuffleMode = enabled ? .songs : .off
++    }
++  }
++
+   // MARK: - Queue Management
+ 
+   func setQueue<T: PlayableMusicItem>(_ item: T) async throws {
+diff --git a/node_modules/@lomray/react-native-apple-music/modules/player.d.ts b/node_modules/@lomray/react-native-apple-music/modules/player.d.ts
+index a432d94..46cae6f 100644
+--- a/node_modules/@lomray/react-native-apple-music/modules/player.d.ts
++++ b/node_modules/@lomray/react-native-apple-music/modules/player.d.ts
+@@ -57,6 +57,10 @@ declare class Player {
+      * Toggles the playback state between play and pause.
+      */
+     static togglePlayerState(): void;
++    /**
++     * Turns shuffle on/off (iOS 16+).
++     */
++    static setShuffleMode(enabled: boolean): void;
+     /**
+      * Starts playback of the current song.
+      */
+diff --git a/node_modules/@lomray/react-native-apple-music/modules/player.js b/node_modules/@lomray/react-native-apple-music/modules/player.js
+index 59aa6f5..16fd0b4 100644
+--- a/node_modules/@lomray/react-native-apple-music/modules/player.js
++++ b/node_modules/@lomray/react-native-apple-music/modules/player.js
+@@ -36,6 +36,12 @@ class Player {
+     static togglePlayerState() {
+         MusicModule.togglePlayerState();
+     }
++    /**
++     * Turns shuffle on/off (iOS 16+).
++     */
++    static setShuffleMode(enabled) {
++        MusicModule.setShuffleMode(enabled);
++    }
+     /**
+      * Starts playback of the current song.
+      */

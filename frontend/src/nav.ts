@@ -266,7 +266,7 @@ const REROUTE_DISTANCE_M = 80; // PERPENDICULAR distance off the route line befo
 
 // Decode a Google encoded polyline → [{lat,lng}]. Used to measure how far off the
 // ROUTE LINE the driver actually is (perpendicular) — the correct off-route signal.
-function decodePolyline(encoded: string): LatLng[] {
+export function decodePolyline(encoded: string): LatLng[] {
   const pts: LatLng[] = [];
   let index = 0, lat = 0, lng = 0;
   try {
@@ -363,6 +363,9 @@ export function useTurnByTurn(
   const hasAnnouncedStartRef = useRef<boolean>(false);
   const routeRef = useRef<NavRoute | null>(route);
   useEffect(() => { routeRef.current = route; }, [route]);
+  // Tracks the active route's polyline so we can detect a mid-drive route SWAP
+  // (Nova reroute accept / off-route refetch) and re-anchor guidance onto it.
+  const routeKeyRef = useRef<string>("");
 
   useEffect(() => {
     if (!active) {
@@ -392,6 +395,26 @@ export function useTurnByTurn(
       hasAnnouncedStartRef.current = true;
     }
   }, [active]);
+
+  // Re-anchor on a mid-drive route SWAP. When the active route's polyline changes
+  // while navigating — a Nova reroute the driver accepted, or an off-route
+  // refetch — the new route is computed FROM the current GPS position, so its
+  // step 0 is exactly where the driver is now. Reset stepIndex to 0 (and clear
+  // spoken-cue dedupe) so guidance picks up the new line and actually calls out
+  // the turn ONTO it. Without this the engine kept the OLD route's stale step
+  // index and silently skipped the divergence — so accepting a reroute "did
+  // nothing" and the driver stayed on the original road.
+  useEffect(() => {
+    const key = route?.polyline || "";
+    if (!active || !key) { routeKeyRef.current = key; return; }
+    if (key !== routeKeyRef.current) {
+      routeKeyRef.current = key;
+      announcedRef.current.clear();
+      const reAnchored: TbtState = { ...stateRef.current, active: true, stepIndex: 0 };
+      stateRef.current = reAnchored;
+      setState(reAnchored);
+    }
+  }, [route?.polyline, active]);
 
   useEffect(() => {
     if (!active || !user) return;
@@ -464,7 +487,14 @@ export function useTurnByTurn(
       const dRoute = distToPolylineM(user.lat, user.lng, routePts);
       if (dRoute > REROUTE_DISTANCE_M) offRouteStreakRef.current += 1;
       else offRouteStreakRef.current = 0;
-      if (offRouteStreakRef.current >= 2) {
+      // Switch QUICKER when the driver has clearly taken a different road: a
+      // single tick well past the threshold (~2x) is enough to act on. Keep the
+      // ≥2-tick streak only for marginal distances, where GPS wobble under an
+      // underpass could false-trigger — that wobble spikes a few tens of metres,
+      // never ~2x the threshold, so a clearly-off fix is a real deviation.
+      const clearlyOff = dRoute > REROUTE_DISTANCE_M * 2;
+      const tripped = clearlyOff ? offRouteStreakRef.current >= 1 : offRouteStreakRef.current >= 2;
+      if (tripped) {
         const now = Date.now();
         if (now - lastOffRouteAtRef.current > 8000) {
           lastOffRouteAtRef.current = now;

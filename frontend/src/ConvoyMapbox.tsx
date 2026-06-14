@@ -203,9 +203,17 @@ function HazardMarker({ hazard, onPress, onLongPress }: { hazard: Hazard; onPres
 // Fixed speed-camera pin (OpenStreetMap). Pins only — the proximity voice alert
 // is handled in map.tsx. No press handler.
 function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
+  // The Image is wrapped in a sized View: MarkerView positions a child view at
+  // the coordinate and reads its measured size — a BARE <Image> child can
+  // measure 0×0 (before the bitmap loads) and render invisibly, which is why
+  // cameras alone didn't show. The explicit-size wrapper gives MarkerView a
+  // stable box to place immediately. (Every other marker already wraps its
+  // image in a View/Pressable, so only cameras were affected.)
   return (
     <MarkerView coordinate={[lng, lat]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
-      <Image source={CAMERA_ICON} style={styles.cameraIcon} resizeMode="contain" fadeDuration={0} />
+      <View style={styles.cameraIconWrap}>
+        <Image source={CAMERA_ICON} style={styles.cameraIcon} resizeMode="contain" fadeDuration={0} />
+      </View>
     </MarkerView>
   );
 }
@@ -606,6 +614,7 @@ const styles = StyleSheet.create({
   },
   // Hazard / camera icons.
   hazardIcon: { width: 40, height: 40 },
+  cameraIconWrap: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
   cameraIcon: { width: 28, height: 28 },
   // Place pins (gas price chips / fuel badges / named places).
   placePinWrap: { alignItems: "center", maxWidth: 150 },

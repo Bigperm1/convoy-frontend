@@ -10,14 +10,20 @@
 //   • base Mapbox map — dark Standard/night (3D buildings) or satellite (hybrid)
 //   • follow / chase camera (free-roam follow + turn-by-turn zoom & 45° tilt)
 //   • self car puck + every peer car (rotated GR Corolla PNGs)
-//   • routes — gray alternates + the SELECTED cased blue ribbon (ShapeSource +
-//     LineLayers), tap-an-alternate to select, ETA pills, dest pin, and the
-//     route-preview fit-to-bounds
+//   • routes — gray alternates + the SELECTED cased blue ribbon, tap-to-select,
+//     ETA pills, dest pin, route-preview fit-to-bounds
+//   • map overlays — community hazard / police pins, fixed speed cameras,
+//     category place pins (gas price chips / fuel badges / named places), and
+//     the destination arrival-weather chip
+//
+// MarkerView note: unlike react-native-maps (which captured each marker's child
+// view into a native bitmap — needing the Android "snapshot-settle" delay and
+// hard-coded text widths to avoid clipping "$2.07" → "$2."), Mapbox MarkerView
+// renders the real RN view. So all of that ceremony is gone here.
 //
 // NOT YET PORTED (each ships later as a FREE OTA increment; props still accepted
-// and ignored for now): the traffic-congestion GRADIENT on the route line,
-// hazards, speed cameras, place pins, the arrival-weather chip, the maneuver
-// turn-arrow, avatar route-snapping, and live traffic.
+// and ignored for now): the traffic-congestion GRADIENT on the route line, the
+// maneuver turn-arrow, avatar route-snapping, and live traffic.
 //
 // COORDINATE ORDER: Mapbox uses [longitude, latitude] arrays (GeoJSON order) —
 // the OPPOSITE of react-native-maps' { latitude, longitude }. Every coordinate
@@ -26,6 +32,7 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import { View, Text, Image, StyleSheet, Pressable } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer } from "@rnmapbox/maps";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
 import type { WeatherKind } from "./weatherLayer";
@@ -77,6 +84,30 @@ interface ConvoyMapboxProps {
 
 const SELF_ID = "self";
 
+// ----- Marker icon assets (shared with the Google engine) -----
+const HAZARD_ICONS: Record<string, any> = {
+  police: require("../assets/images/police.png"),
+};
+const HAZARD_ICON_DEFAULT = require("../assets/images/hazard.png");
+const CAMERA_ICON = require("../assets/images/speed_camera.png");
+
+// Destination arrival-weather chip icon: map a WeatherKind to an icon + tint.
+// `mci` selects MaterialCommunityIcons (fog) vs Ionicons (everything else).
+function destWxIcon(kind: WeatherKind): { name: string; color: string; mci: boolean } {
+  switch (kind) {
+    case "clear-day": return { name: "sunny", color: "#FFD60A", mci: false };
+    case "clear-night": return { name: "moon", color: "#DCE3F0", mci: false };
+    case "partly-day": return { name: "partly-sunny", color: "#FFD60A", mci: false };
+    case "partly-night": return { name: "cloudy-night", color: "#DCE3F0", mci: false };
+    case "cloudy": return { name: "cloud", color: "#AEB4BD", mci: false };
+    case "fog": return { name: "weather-fog", color: "#AEB4BD", mci: true };
+    case "rain": return { name: "rainy", color: "#5AC8FA", mci: false };
+    case "snow": return { name: "snow", color: "#EAF6FF", mci: false };
+    case "thunder": return { name: "thunderstorm", color: "#FFD60A", mci: false };
+    default: return { name: "partly-sunny", color: "#FFD60A", mci: false };
+  }
+}
+
 // ===== Chase-cam tuning — mirrors ConvoyMap.tsx =====
 const CHASE_PITCH_DEG = 45;
 const CHASE_ZOOM_CITY = 17;
@@ -127,6 +158,7 @@ function decodePolyline(encoded?: string | null): { latitude: number; longitude:
 }
 
 type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer };
+type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
 
 // ===== CarMarker =====
 // One car (self or peer) as a Mapbox MarkerView — a real RN view pinned to a
@@ -153,6 +185,92 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
   );
 }
 
+// ===== HazardMarker =====
+// Community hazard / police pin — a flat icon image (police.png for police,
+// hazard.png otherwise). Tap → details; long-press → the standard hazard menu.
+function HazardMarker({ hazard, onPress, onLongPress }: { hazard: Hazard; onPress?: () => void; onLongPress?: () => void }) {
+  const src = HAZARD_ICONS[hazard.kind] || HAZARD_ICON_DEFAULT;
+  return (
+    <MarkerView coordinate={[hazard.lng, hazard.lat]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+      <Pressable onPress={onPress} onLongPress={onLongPress} hitSlop={6}>
+        <Image source={src} style={styles.hazardIcon} resizeMode="contain" fadeDuration={0} />
+      </Pressable>
+    </MarkerView>
+  );
+}
+
+// ===== CameraMarker =====
+// Fixed speed-camera pin (OpenStreetMap). Pins only — the proximity voice alert
+// is handled in map.tsx. No press handler.
+function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
+  return (
+    <MarkerView coordinate={[lng, lat]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+      <Image source={CAMERA_ICON} style={styles.cameraIcon} resizeMode="contain" fadeDuration={0} />
+    </MarkerView>
+  );
+}
+
+// ===== PlaceMarker =====
+// Category quick-search result pin: gas price chip / fuel badge / named place.
+// The "Place pins" setting (showPins) hides the pure pin GLYPHS (teardrop under
+// a name, gas-pump badge) while ALWAYS keeping price chips and name labels. A
+// no-price gas station with pins off has nothing to draw → no marker at all.
+function PlaceMarker({ place, onPress, showPins = true }: { place: PlacePoint; onPress?: (p: PlacePoint) => void; showPins?: boolean }) {
+  let content: React.ReactNode = null;
+  if (place.isGas) {
+    if (place.price) {
+      content = (
+        <View style={[styles.placeLabel, styles.placePriceLabel, place.cheapest ? styles.placePriceCheapest : null]}>
+          <Text style={[styles.placeLabelText, styles.placePriceText, styles.placeTextCenter]} numberOfLines={1}>{place.price}</Text>
+        </View>
+      );
+    } else if (showPins) {
+      content = (
+        <View style={styles.gasGlyph}>
+          <MaterialCommunityIcons name="gas-station" size={20} color="#FFD60A" />
+        </View>
+      );
+    }
+  } else {
+    content = (
+      <View style={styles.placePinWrap}>
+        <View style={styles.placeLabel}>
+          <Text style={[styles.placeLabelText, styles.placeTextCenter]} numberOfLines={1}>{place.label}</Text>
+        </View>
+        {showPins && (
+          <View style={styles.locPin}>
+            {/* Black (larger) behind yellow (smaller) = a clean black outline. */}
+            <Ionicons name="location" size={32} color="#000000" />
+            <Ionicons name="location" size={25} color="#FFD60A" style={styles.locPinInner} />
+          </View>
+        )}
+      </View>
+    );
+  }
+  if (!content) return null;
+  return (
+    <MarkerView coordinate={[place.lng, place.lat]} anchor={place.isGas ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 1 }} allowOverlap>
+      <Pressable onPress={() => onPress?.(place)} hitSlop={6}>{content}</Pressable>
+    </MarkerView>
+  );
+}
+
+// ===== DestWeatherMarker =====
+// Arrival-weather chip floating just above the destination pin.
+function DestWeatherMarker({ lat, lng, weather }: { lat: number; lng: number; weather: { kind: WeatherKind; temp: string } }) {
+  const ic = destWxIcon(weather.kind);
+  return (
+    <MarkerView coordinate={[lng, lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
+      <View style={styles.destWxChip}>
+        {ic.mci
+          ? <MaterialCommunityIcons name={ic.name as any} size={14} color={ic.color} />
+          : <Ionicons name={ic.name as any} size={14} color={ic.color} />}
+        <Text style={styles.destWxText}>{weather.temp}</Text>
+      </View>
+    </MarkerView>
+  );
+}
+
 function ConvoyMapbox(props: ConvoyMapboxProps) {
   const {
     center, user, peers, hideSelfMarker, mapView = "heading_up",
@@ -160,6 +278,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
     distanceToManeuverM, onMapPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
+    hazards, speedCameras, places, showPlacePins = true, destWeather,
+    onHazardPress, onHazardLongPress, onPlacePress,
   } = props;
 
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
@@ -321,6 +441,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     }
   });
 
+  const visibleHazards = (hazards || []).filter((h) => h && typeof h.lat === "number" && typeof h.lng === "number");
   const showRoutes = !!destination && routeFC.features.length > 0;
 
   return (
@@ -426,8 +547,34 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           );
         })}
 
+        {/* Community hazard / police pins. */}
+        {visibleHazards.map((h) => (
+          <HazardMarker
+            key={`hz_${h.id}`}
+            hazard={h}
+            onPress={() => onHazardPress?.(h)}
+            onLongPress={() => onHazardLongPress?.(h)}
+          />
+        ))}
+
+        {/* Fixed speed cameras (pins only). */}
+        {(speedCameras || []).map((c) => (
+          <CameraMarker key={`cam_${c.id}`} lat={c.lat} lng={c.lng} />
+        ))}
+
+        {/* Category quick-search place pins. */}
+        {(places || []).map((p) => (
+          <PlaceMarker key={`place_${p.id}`} place={p} onPress={onPlacePress} showPins={showPlacePins} />
+        ))}
+
+        {/* Arrival-weather chip floating above the destination. */}
+        {destination && destWeather && (
+          <DestWeatherMarker lat={destination.lat} lng={destination.lng} weather={destWeather} />
+        )}
+
         {/* Car markers — self + peers. MarkerViews always render above the route
-            LineLayers, so the car correctly sits on top of the ribbon. */}
+            LineLayers, and we declare the cars LAST so they sit on top of the
+            other pins too. */}
         {cars.map((c) => (
           <CarMarker key={c.id} car={c} mapHeading={mapHeadingDeg} onPress={() => { if (c.peer) onPeerPress?.(c.peer); }} />
         ))}
@@ -457,4 +604,43 @@ const styles = StyleSheet.create({
     width: 22, height: 22, borderRadius: 11,
     backgroundColor: "#FF453A", borderWidth: 3, borderColor: "#FFFFFF",
   },
+  // Hazard / camera icons.
+  hazardIcon: { width: 40, height: 40 },
+  cameraIcon: { width: 28, height: 28 },
+  // Place pins (gas price chips / fuel badges / named places).
+  placePinWrap: { alignItems: "center", maxWidth: 150 },
+  placeLabel: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 6, paddingVertical: 2,
+    borderRadius: 6, marginBottom: 1,
+    maxWidth: 150,
+    borderWidth: 1, borderColor: "rgba(0,0,0,0.55)",
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  placeLabelText: { color: "#000000", fontSize: 11, fontWeight: "700" },
+  placeTextCenter: { textAlign: "center" },
+  locPin: { alignItems: "center", justifyContent: "center" },
+  locPinInner: { position: "absolute" },
+  placePriceLabel: { backgroundColor: "#FFD60A", borderWidth: 1, borderColor: "rgba(0,0,0,0.55)" },
+  placePriceCheapest: { backgroundColor: "#30D158", borderColor: "rgba(0,0,0,0.55)" },
+  placePriceText: { color: "#0A0A0A", fontSize: 13, fontWeight: "800" },
+  gasGlyph: {
+    width: 30, height: 30, borderRadius: 15,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(20,20,22,0.92)",
+    borderWidth: 1, borderColor: "rgba(255,214,10,0.6)",
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 2,
+  },
+  // Arrival-weather chip.
+  destWxChip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "rgba(22,22,24,0.92)",
+    borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4,
+    marginBottom: 8,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
+  },
+  destWxText: { color: "#fff", fontSize: 12, fontWeight: "700", letterSpacing: -0.2 },
 });

@@ -15,10 +15,14 @@
 // you MUST flip `allowsRecordingIOS: false` before playing back any audio.
 // We do that in `setPlaybackAudioMode()` below.
 //
-// For Bluetooth headsets, expo-av's underlying iOS `.playAndRecord` category
-// auto-includes `.allowBluetoothA2DP` so paired AirPods / car stereos light
-// up with zero extra config — provided `allowsRecordingIOS` is set correctly
-// during the SESSION (not just the recording step).
+// Bluetooth caveat (this is the mono/low-volume-in-car bug): iOS `.playAndRecord`
+// does NOT give you stereo A2DP. To have a mic input available it routes Bluetooth
+// to the hands-free profile (HFP) — mono, low-bitrate, quiet — for the WHOLE phone,
+// so paired car stereos / AirPods drop to one-speaker, low-volume output (and any
+// other app's music with them). Stereo A2DP only comes back in `.playback`
+// (`allowsRecordingIOS: false`). So a session left in `.playAndRecord` while NOT
+// actively recording is a bug: always flip back to `.playback` the moment the mic
+// stops (see setIdleAudioMode / setPlaybackAudioMode, and useVoice.ts's reset).
 
 import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from "expo-av";
 

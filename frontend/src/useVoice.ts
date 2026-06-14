@@ -6,6 +6,7 @@ import { Alert, Platform, Vibration } from "react-native";
 import { api, formatErr } from "./api";
 import { voiceBus } from "./voiceBus";
 import { getPttRecordingOptions, type ProximityTier } from "./proximityAudio";
+import { setIdleAudioMode } from "./audioMode";
 
 export type VoiceResult = { text: string; intent: string | null; query?: string };
 
@@ -56,22 +57,37 @@ export function useVoice(tier: ProximityTier = "far") {
       if (Platform.OS === "android") { try { Vibration.vibrate(35); } catch {} }
     } catch (e) {
       console.warn("record start", e);
+      // ensurePerm already flipped the iOS session into .playAndRecord, but the
+      // recording never actually started — flip it back so a failed start can't
+      // leave Bluetooth stuck on mono HFP / quiet earpiece routing.
+      void setIdleAudioMode();
     }
   }, [recording, ensurePerm, tier]);
 
   const stop = useCallback(async (): Promise<string | null> => {
     const rec = recRef.current;
-    if (!rec) return null;
     try {
-      await rec.stopAndUnloadAsync();
-      const uri = rec.getURI();
-      recRef.current = null;
-      setRecording(false);
-      return uri;
-    } catch (e) {
-      console.warn("record stop", e);
-      setRecording(false);
-      return null;
+      if (!rec) return null;
+      try {
+        await rec.stopAndUnloadAsync();
+        const uri = rec.getURI();
+        recRef.current = null;
+        setRecording(false);
+        return uri;
+      } catch (e) {
+        console.warn("record stop", e);
+        setRecording(false);
+        return null;
+      }
+    } finally {
+      // CRITICAL: the Nova voice mic flipped the iOS session into .playAndRecord
+      // (ensurePerm, allowsRecordingIOS:true). That category collapses the car's
+      // Bluetooth to mono hands-free (HFP) at low volume for the WHOLE phone —
+      // music included. Flip back to .playback the instant the mic stops, exactly
+      // like the PTT key-up path does (setIdleAudioMode → allowsRecordingIOS:false).
+      // In `finally` so it runs on success, stop-error, or early no-recording — a
+      // downstream transcription error can never leave the session stuck.
+      void setIdleAudioMode();
     }
   }, []);
 

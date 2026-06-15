@@ -35,7 +35,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Image, StyleSheet, Pressable } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck, Models, ModelLayer } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { getVehiclePngOrDefault } from "./vehicleAssets";
+import { getVehiclePngOrDefault, getVehicleTint } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient } from "./mapboxDirections";
@@ -103,6 +103,17 @@ const SELF_ID = "self";
 // presence. Both of these are OTA-tunable — adjust freely after first render.
 const CAR_MODEL_SCALE = 6;
 const CAR_MODEL_HEADING_OFFSET = 0; // deg; if the car faces wrong, try 90/180/270 (and/or negate heading)
+// Self-illumination for the 3D car per light preset. Dawn + night are dim, so
+// the tinted paint renders near-black with only scene light — lift those so the
+// color shows. Bright presets (day/dusk/satellite) already light it, so keep 0
+// to preserve real 3D shading. 0 = fully scene-lit, 1 = fully self-lit (flat).
+const CAR_EMISSIVE_BY_MODE: Record<string, number> = {
+  satellite: 0,
+  day: 0,
+  dusk: 0,
+  dawn: 0.55,
+  night: 0.85,
+};
 
 // ----- Marker icon assets (shared with the Google engine) -----
 const HAZARD_ICONS: Record<string, any> = {
@@ -509,6 +520,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // PNG; peers stay PNG MarkerViews. Pulled out here so the model layer below has
   // its live coordinate + heading.
   const selfCar = cars.find((c) => c.id === SELF_ID);
+  // Tint for the single white GLB → the user's chosen GRC paint (one render, 5 colors).
+  const selfTint = getVehicleTint(selfCar?.color);
+  // Lift the paint out of the dark on the dim light presets (dawn/night).
+  const selfEmissive = CAR_EMISSIVE_BY_MODE[mapMode] ?? 0;
 
   const visibleHazards = (hazards || []).filter((h) => h && typeof h.lat === "number" && typeof h.lng === "number");
   const showRoutes = !!destination && routeFC.features.length > 0;
@@ -739,6 +754,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               style={{
                 modelId: "convoyCar",
                 modelType: "location-indicator",
+                modelColor: selfTint.color,
+                modelColorMixIntensity: selfTint.mix,
+                modelEmissiveStrength: selfEmissive,
                 modelScale: [CAR_MODEL_SCALE, CAR_MODEL_SCALE, CAR_MODEL_SCALE],
                 modelRotation: [0, 0, ((selfCar.heading ?? 0) + CAR_MODEL_HEADING_OFFSET)],
                 modelCastShadows: true,

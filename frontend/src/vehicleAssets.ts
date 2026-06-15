@@ -129,3 +129,26 @@ export function getVehiclePngDataUri(color?: string | null): string | null {
 export function isGRCColor(color?: string | null): boolean {
   return resolveGRCKey(color) !== null;
 }
+
+// ===== 3D car tint =====
+// The single 3D GLB car render is Ice Cap white. A near-white base tints
+// cleanly to any paint via the Mapbox ModelLayer (white × color = that color),
+// so all 5 colors come from ONE render instead of 5 hosted models.
+//   color = modelColor (the paint hex)
+//   mix   = modelColorMixIntensity 0..1 (how strongly the paint replaces the
+//           white texture; 0 = keep original white, 1 = full paint)
+// Hexes are representative GRC paints (tweak live via OTA — one-line change).
+// Codes: Ice Cap 040 · Heavy Metal 1L5 · Supersonic Red 3U5 · Blue Flame 8W9 · Black 202
+export const VEHICLE_TINT: Record<GRCColorKey, { color: string; mix: number }> = {
+  ice_cap_white:        { color: "#FFFFFF", mix: 0.0 },  // 040 — keep factory white
+  heavy_metal:          { color: "#6B7075", mix: 0.85 }, // 1L5 — metallic gunmetal grey
+  supersonic_red:       { color: "#C8102E", mix: 1.0 },  // 3U5 — tricoat red
+  blue_flame:           { color: "#1B9DD9", mix: 1.0 },  // 8W9 — metallic cyan/blue
+  precious_black_pearl: { color: "#17191C", mix: 0.92 }, // 202 — gloss black
+};
+
+/** modelColor + mix for the 3D car. Falls back to the default GRC paint. */
+export function getVehicleTint(color?: string | null): { color: string; mix: number } {
+  const key = resolveGRCKey(color) || DEFAULT_GRC_KEY;
+  return VEHICLE_TINT[key];
+}

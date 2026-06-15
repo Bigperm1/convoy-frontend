@@ -258,23 +258,27 @@ export default function AppLayout() {
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
-            // Match the search pill's dark surface so the bar reads as the same
-            // material as the rest of the Google-style chrome.
-            backgroundColor: "rgba(34,35,38,0.96)",
+            // Solid #141416 — the SAME surface as the step drawer (StepDrawer.tsx)
+            // so the bottom chrome reads as one continuous dark material.
+            backgroundColor: "#141416",
             borderTopColor: "rgba(255,255,255,0.12)",
             borderTopWidth: StyleSheet.hairlineWidth,
-            height: 104 + navInset,
-            paddingBottom: 18 + navInset,
-            paddingTop: 4,
+            height: 88 + navInset,
+            paddingBottom: 10 + navInset,
+            paddingTop: 8,
             position: "absolute",
             // allow the elevated mic to overflow upward
             overflow: "visible",
           },
-          // Solid dark surface (no blur) so the color matches the search bar.
+          // Solid dark surface (no blur) so the color stays exactly #141416.
           tabBarBackground: () => null,
           tabBarActiveTintColor: "#2DEC86",
-          tabBarInactiveTintColor: "#808080",
-          tabBarLabelStyle: { fontSize: 15, fontWeight: "600", letterSpacing: 0 },
+          tabBarInactiveTintColor: "#FFFFFF",
+          // Center the icon+label block and give the word room: a small gap under
+          // the icon (marginTop), padding + lineHeight under the label so the text
+          // is never clipped at the bar's bottom edge.
+          tabBarItemStyle: { paddingVertical: 6 },
+          tabBarLabelStyle: { fontSize: 15, fontWeight: "600", letterSpacing: 0, marginTop: 3, paddingBottom: 2, lineHeight: 18 },
         }}
       >
         <Tabs.Screen name="map" options={{

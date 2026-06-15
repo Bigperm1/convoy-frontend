@@ -247,7 +247,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
               value={text}
               onChangeText={onChangeText}
               placeholder="Search here"
-              placeholderTextColor="#808080"
+              placeholderTextColor="#FFFFFF"
               style={styles.input}
               onFocus={() => setOpen(true)}
               returnKeyType="go"
@@ -338,7 +338,7 @@ const styles = StyleSheet.create({
   // Read-only tappable field — the map passes onPressField to open the
   // full-screen search. Mirrors the input's flex + font so the bar is identical.
   fieldTap: { flex: 1, justifyContent: 'center', paddingVertical: 2 },
-  fieldTapText: { fontSize: 16, color: '#808080' },
+  fieldTapText: { fontSize: 16, color: '#FFFFFF' },
   // The Go arrow stays in Convoy blue accent so the submit affordance is
   // unmistakable on the light bar.
   goBtn: {

@@ -93,6 +93,11 @@ interface ConvoyMapboxProps {
   onExternalAlertPress?: (a: any) => void;
   onRoute?: (info: any) => void;
   onMapReady?: () => void;
+  // Live map bearing readout (deg) — fired when the camera heading changes, for
+  // the on-map compass needle. resetNorthSignal is a monotonic counter; each
+  // increment animates the camera back to north-up (heading 0).
+  onHeading?: (deg: number) => void;
+  resetNorthSignal?: number;
   [key: string]: any;
 }
 
@@ -123,6 +128,28 @@ const CAR_MODEL_SCALE_BY_ZOOM: any = [
   18, [5, 5, 5],
   20, [1.3, 1.3, 1.3],
 ];
+// Continuous car scale driven from the LIVE camera zoom (see onCameraChanged),
+// instead of handing Mapbox the zoom-expression above — that snapped the model
+// size at integer zooms (not smooth). Geometric (log-space) interpolation
+// through the SAME stops: passes through every tuned value but ramps smoothly.
+const CAR_SCALE_STOPS: [number, number][] = [
+  [9, 3400], [10, 1700], [11, 820], [12, 400], [13, 195],
+  [14, 95], [15, 46], [16, 22], [17, 10], [18, 5], [20, 1.3],
+];
+function carScaleForZoom(z: number): number {
+  const s = CAR_SCALE_STOPS;
+  if (!Number.isFinite(z)) return 10;
+  if (z <= s[0][0]) return s[0][1];
+  if (z >= s[s.length - 1][0]) return s[s.length - 1][1];
+  for (let i = 0; i < s.length - 1; i++) {
+    const [z1, v1] = s[i]; const [z2, v2] = s[i + 1];
+    if (z >= z1 && z <= z2) {
+      const t = (z - z1) / (z2 - z1);
+      return v1 * Math.pow(v2 / v1, t); // geometric → smooth slope, no kinks
+    }
+  }
+  return s[s.length - 1][1];
+}
 const CAR_MODEL_HEADING_OFFSET = 0; // deg; if the car faces wrong, try 90/180/270 (and/or negate heading)
 // Self-illumination for the 3D car per light preset. Dawn + night are dim, so
 // the tinted paint renders near-black with only scene light — lift those so the
@@ -374,7 +401,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     distanceToManeuverM, onMapPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
     hazards, speedCameras, places, showPlacePins = true, destWeather,
-    onHazardPress, onHazardLongPress, onPlacePress,
+    onHazardPress, onHazardLongPress, onPlacePress, onHeading, resetNorthSignal,
   } = props;
 
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
@@ -386,6 +413,25 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Live traffic-congestion gradient for the route preview (Mapbox Directions).
   // Null unless we have a fetched congestion route to paint (preview-only).
   const [congestionRoute, setCongestionRoute] = useState<{ coordinates: [number, number][]; gradient: any } | null>(null);
+  // Live 3D-car scale, recomputed from the camera zoom so the car resizes
+  // smoothly (see carScaleForZoom + onCameraChanged). Throttled by zoom delta.
+  const [carScale, setCarScale] = useState<number>(() => carScaleForZoom(17));
+  const lastScaleZoomRef = useRef<number>(17);
+  // Last heading reported to onHeading — throttle so a ~constant bearing during
+  // nav doesn't spam the parent (same pattern as the car-scale zoom delta).
+  const lastHeadingRef = useRef<number>(0);
+
+  // North-reset: when the parent bumps resetNorthSignal (Compass FAB tap),
+  // animate the camera back to north-up. Skip the initial mount so we don't
+  // fight the follow/chase camera at startup.
+  const didMountNorthRef = useRef(false);
+  useEffect(() => {
+    if (!didMountNorthRef.current) { didMountNorthRef.current = true; return; }
+    try {
+      cameraRef.current?.setCamera({ heading: 0, animationDuration: 300, animationMode: "easeTo" });
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetNorthSignal]);
 
   // ----- Base-map style (one code path, driven by mapMode) -----
   // "satellite"              → satellite-with-streets imagery (matches Google sat).
@@ -609,6 +655,20 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           const active = !!state?.gestures?.isGestureActive;
           if (active && !gesturingRef.current) { gesturingRef.current = true; onUserPan?.(); }
           else if (!active && gesturingRef.current) { gesturingRef.current = false; }
+          // Resize the 3D car continuously from the live zoom (smooth, vs the
+          // integer-zoom stepping of a modelScale zoom-expression). Throttled by
+          // a small delta so steady-zoom nav does no extra work.
+          const z = state?.properties?.zoom;
+          if (typeof z === "number" && Math.abs(z - lastScaleZoomRef.current) > 0.03) {
+            lastScaleZoomRef.current = z;
+            setCarScale(carScaleForZoom(z));
+          }
+          // Report the live bearing for the on-map compass, throttled to ~0.5°.
+          const h = state?.properties?.heading;
+          if (typeof h === "number" && Math.abs(h - lastHeadingRef.current) > 0.5) {
+            lastHeadingRef.current = h;
+            onHeading?.(h);
+          }
         }}
       >
         {/* Mapbox Standard "night" config — turns on the dark 3D-building
@@ -776,9 +836,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
                 modelId: "convoyCar",
                 modelType: "location-indicator",
                 modelEmissiveStrength: selfEmissive,
-                modelScale: CAR_MODEL_SCALE_BY_ZOOM,
+                modelScale: [carScale, carScale, carScale],
                 modelRotation: [0, 0, ((selfCar.heading ?? 0) + CAR_MODEL_HEADING_OFFSET)],
-                modelCastShadows: true,
+                modelCastShadows: false,
                 modelReceiveShadows: false,
               }}
             />

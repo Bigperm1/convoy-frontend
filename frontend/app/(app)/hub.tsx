@@ -12,6 +12,8 @@ import { useAuth } from "../../src/auth";
 import { api, formatErr } from "../../src/api";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
+import LogoMenu from "../../src/components/LogoMenu";
+import { getGarageImage } from "../../src/carImages";
 import { useSettings, updateSettings } from "../../src/settings";
 
 type Community = {
@@ -28,6 +30,9 @@ export default function HubScreen() {
   const { user, logout, refresh } = useAuth();
   const router = useRouter();
   const [settings] = useSettings();
+  // The driver's Garage hero photo (their car) — used as their avatar in the
+  // My communities section. Falls back to the showroom image when no car is set.
+  const heroImg = getGarageImage(user?.car_make || "", user?.car_model || "", user?.car_color || "");
   const [mine, setMine] = useState<Community[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -44,6 +49,7 @@ export default function HubScreen() {
   useEffect(() => { load(); }, [load]);
 
   return (
+    <>
     <SafeAreaView style={styles.c} edges={["top"]}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={COLORS.primary} />}>
@@ -59,13 +65,6 @@ export default function HubScreen() {
             </TouchableOpacity>
             <Text style={styles.title}>Hub</Text>
           </View>
-          <TouchableOpacity
-            testID="profile-btn"
-            onPress={() => router.push("/(app)/garage")}
-            style={styles.iconBtn}
-          >
-            <Ionicons name="car-sport" size={18} color="#00C46A" />
-          </TouchableOpacity>
         </View>
         <Text style={styles.sub}>{user?.handle} · {[user?.car_year, user?.car_make, user?.car_model].filter(Boolean).join(" ") || "Tap the car icon to set up your Garage"}</Text>
 
@@ -76,11 +75,14 @@ export default function HubScreen() {
           <ActionCard testID="search-community" icon="search" label="Discover" onPress={() => setShowSearch(true)} />
         </View>
 
-        <Text style={styles.section}>My communities</Text>
+        <View style={styles.sectionRow}>
+          <Image source={heroImg} style={styles.userHero} resizeMode="cover" />
+          <Text style={[styles.section, { marginTop: 0, marginBottom: 0 }]}>My communities</Text>
+        </View>
         {mine.length === 0 && (
           <Glass radius={20}>
             <View style={{ padding: 22, alignItems: "center" }}>
-              <Image source={require("../../assets/images/brand-mark.png")} style={{ width: 64, height: 64, marginBottom: 4, opacity: 0.85 }} resizeMode="contain" />
+              <Image source={heroImg} style={styles.emptyHero} resizeMode="cover" />
               <Text style={styles.emptyTitle}>No communities yet</Text>
               <Text style={styles.emptyText}>Create your own crew or search public communities to join the convoy.</Text>
             </View>
@@ -102,6 +104,8 @@ export default function HubScreen() {
       <ProfileModal visible={showProfile} onClose={() => setShowProfile(false)} onSaved={async () => { await refresh(); setShowProfile(false); }} />
       <CommunityDetailModal community={showDetail} onClose={() => setShowDetail(null)} onChanged={load} />
     </SafeAreaView>
+    <View style={styles.logoBacking}><LogoMenu size={Platform.OS === 'ios' ? 34 : 40} align="right" /></View>
+    </>
   );
 }
 
@@ -111,7 +115,7 @@ function ActionCard({ icon, label, onPress, testID }: any) {
       <Glass radius={18} style={{ flex: 1 }}>
         <View style={{ padding: 18, alignItems: "center" }}>
           <View style={styles.actionIcon}>
-            <LinearGradient colors={[COLORS.primary, COLORS.accent]} style={StyleSheet.absoluteFill} />
+            <LinearGradient colors={["#7DF0B0", "#2DEC86", "#00C46A"]} style={StyleSheet.absoluteFill} />
             <Ionicons name={icon} size={24} color="#fff" />
           </View>
           <Text style={styles.actionLabel}>{label}</Text>
@@ -887,6 +891,17 @@ const styles = StyleSheet.create({
   title: { color: COLORS.text, fontSize: 34, fontWeight: "700", letterSpacing: -1 },
   sub: { color: COLORS.textDim, marginTop: 2, fontSize: 13 },
   iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(118,118,128,0.24)", alignItems: "center", justifyContent: "center" },
+  logoBacking: {
+    position: 'absolute', top: Platform.OS === 'ios' ? 47 : 28, right: 12, zIndex: 100,
+    width: Platform.OS === 'ios' ? 46 : 54,
+    height: Platform.OS === 'ios' ? 46 : 54,
+    borderRadius: Platform.OS === 'ios' ? 23 : 27,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(20,20,22,0.9)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
+    shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
 
   actionGrid: { flexDirection: "row", gap: 10, marginTop: 18 },
   actionCard: { flex: 1 },
@@ -894,6 +909,9 @@ const styles = StyleSheet.create({
   actionLabel: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
 
   section: { color: COLORS.textDim, marginTop: 24, marginBottom: 10, fontSize: 13, fontWeight: "500" },
+  sectionRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 24, marginBottom: 10 },
+  userHero: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)", backgroundColor: "#000" },
+  emptyHero: { width: 72, height: 72, borderRadius: 16, marginBottom: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", backgroundColor: "#000" },
   emptyTitle: { color: COLORS.text, fontWeight: "600", fontSize: 17, marginTop: 10 },
   emptyText: { color: COLORS.textDim, textAlign: "center", marginTop: 6, fontSize: 13 },
 

@@ -48,7 +48,8 @@ import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
 import { startNavBanner, stopNavBanner, updateNavBanner } from "../../src/navNotification";
 import RerouteCard from "../../src/RerouteCard";
-import { PoliceBadgeIcon, HazardIcon } from "../../src/components/MapControlIcons";
+import { PoliceBadgeIcon } from "../../src/components/MapControlIcons";
+import CompassNeedle from '../../src/components/CompassNeedle';
 
 type RouteInfo = {
   distance_text: string;
@@ -554,6 +555,11 @@ export default function MapScreen() {
   // mapMode directly; the Google/web engines use the derived mapType/mapDark.
   const mapMode = getMapMode(settings);
   const { mapType, mapDark } = mapModeToLegacy(mapMode);
+  // Live map bearing (deg) reported by the engine — drives the Compass FAB's
+  // needle rotation. northSignal is a monotonic counter the Compass FAB bumps to
+  // ask the engine to animate back to north-up (heading 0).
+  const [mapHeading, setMapHeading] = useState(0);
+  const [northSignal, setNorthSignal] = useState(0);
   const showWeatherLayer = (settings as any).showWeatherLayer ?? true;
   // Live weather for the on-map HUD — current conditions at the user's GPS
   // position, fetched only while the Weather layer is enabled (auto-refresh ~5 min).
@@ -2060,6 +2066,9 @@ export default function MapScreen() {
         // chase-cam tilt + bearing. Defaults to "heading_up" so nav feels like
         // Waze/Google out of the box.
         mapView={settings.mapView}
+        // Live bearing readout + north-reset signal for the Compass FAB.
+        onHeading={setMapHeading}
+        resetNorthSignal={northSignal}
         // Layer controls — driven by the bottom-right Layers FAB.
         mapMode={mapMode}
         show3dBuildings={settings.show3dBuildings !== false}
@@ -2160,7 +2169,7 @@ export default function MapScreen() {
       {/* Top-right logo — absolutely positioned at the SAME screen spot as the
           Comms/Music headers (top iOS52/Android28, right12) so it's pixel-identical
           across tabs. Rendered after topBar so it overlays and stays tappable. */}
-      <View style={styles.mapLogoBacking}><LogoMenu size={40} align="right" /></View>
+      <View style={styles.mapLogoBacking}><LogoMenu size={Platform.OS === 'ios' ? 34 : 40} align="right" /></View>
 
       {/* ===== Community Routes — horizontal chip strip (visible when there are shared cruises) ===== */}
       {communityRoutes.length > 0 && navMode === "preview" && !destination && (
@@ -2492,9 +2501,22 @@ export default function MapScreen() {
           (tap the logo in the search bar → "Map Layers"). */}
 
       <View pointerEvents="box-none" style={[styles.fabStack, { bottom: controlsBottom }]}>
-        {/* Police report button — top of stack. One-tap: posts a hazard with
-            kind='police' at the GPS sample closest to (now - 5s), shows a
-            success toast, and fires a haptic on native. */}
+        {/* Compass — top of stack. The needle rotates opposite the live map
+            bearing so North always points north as the map turns; tapping it
+            animates the map back to north-up (heading 0). */}
+        <TouchableOpacity
+          testID="compass-fab"
+          style={styles.fab}
+          onPress={() => setNorthSignal((n) => n + 1)}
+          activeOpacity={0.85}
+        >
+          <View style={{ transform: [{ rotate: `${-mapHeading}deg` }] }}>
+            <CompassNeedle size={54} />
+          </View>
+        </TouchableOpacity>
+        {/* Police report button. One-tap: posts a hazard with kind='police' at
+            the GPS sample closest to (now - 5s), shows a success toast, and
+            fires a haptic on native. */}
         <TouchableOpacity
           testID="report-police-fab"
           style={[styles.fab, styles.fabPolice]}
@@ -2502,15 +2524,6 @@ export default function MapScreen() {
           activeOpacity={0.8}
         >
           <PoliceBadgeIcon size={40} />
-        </TouchableOpacity>
-        {/* Road-hazard report button — same flow with kind='road'. */}
-        <TouchableOpacity
-          testID="report-hazard-fab"
-          style={[styles.fab, styles.fabHazard]}
-          onPress={() => reportAlert('road')}
-          activeOpacity={0.8}
-        >
-          <HazardIcon size={34} />
         </TouchableOpacity>
         {/* ===== Recenter FAB =====
             Only visible when follow-mode is OFF (the user has panned away from
@@ -3112,11 +3125,14 @@ const styles = StyleSheet.create({
   // solid-dark Comms/Music headers it needs a backing to stay crisp over any
   // background. 40×40 circle mirrors the old profile-avatar footprint.
   mapLogoBacking: {
-    position: 'absolute', top: Platform.OS === 'ios' ? 52 : 28, right: 12, zIndex: 100,
-    width: 54, height: 54, borderRadius: 27,
+    position: 'absolute', top: Platform.OS === 'ios' ? 47 : 28, right: 12, zIndex: 100,
+    width: Platform.OS === 'ios' ? 46 : 54,
+    height: Platform.OS === 'ios' ? 46 : 54,
+    borderRadius: Platform.OS === 'ios' ? 23 : 27,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(20,20,22,0.9)',
-    borderWidth: 1.5, borderColor: 'rgba(45,236,134,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
     shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 6,
   },

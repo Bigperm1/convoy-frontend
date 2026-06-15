@@ -1,6 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Modal, Pressable, Platform, Dimensions,
+  View, Text, StyleSheet, TouchableOpacity, Modal, Pressable, Platform, Dimensions, Animated, Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -57,6 +57,20 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
   const btnRef = useRef<any>(null);
   const [anchor, setAnchor] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
+  // Drop-down entrance: backdrop fades while the card slides + scales down from
+  // just under the logo (vs the old instant appear).
+  const drop = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (open) {
+      drop.setValue(0);
+      Animated.spring(drop, { toValue: 1, useNativeDriver: true, tension: 120, friction: 14 }).start();
+    }
+  }, [open, drop]);
+  const closeMenu = (after?: () => void) => {
+    Animated.timing(drop, { toValue: 0, duration: 130, easing: Easing.in(Easing.quad), useNativeDriver: true })
+      .start(({ finished }) => { if (finished) { setOpen(false); after?.(); } });
+  };
+
   // Owner-only Admin entry (roster + password resets). Appended to the menu
   // only for the app owner's account so regular drivers never see it.
   const isOwner = (user?.email || '').trim().toLowerCase() === OWNER_EMAIL;
@@ -82,10 +96,9 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
 
   const go = (route: string) => {
     Haptics.selectionAsync();
-    setOpen(false);
-    // Defer navigation a tick so the modal close animation doesn't fight the
-    // route transition on slower devices.
-    setTimeout(() => router.push(route as any), 10);
+    // Animate the menu out, then navigate so the close doesn't fight the route
+    // transition on slower devices.
+    closeMenu(() => setTimeout(() => router.push(route as any), 10));
   };
 
   const screenW = Dimensions.get('window').width;
@@ -112,34 +125,46 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
       <Modal
         visible={open}
         transparent
-        animationType="fade"
-        onRequestClose={() => setOpen(false)}
+        animationType="none"
+        onRequestClose={() => closeMenu()}
       >
         {/* Backdrop — tap anywhere outside the card to dismiss. */}
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          {/* Card — absolutely positioned under the logo; stop propagation so
-              taps inside don't close it. */}
-          <Pressable style={[styles.card, { top }, horiz]} onPress={() => {}}>
-            <View style={styles.cardHeader}>
-              <ConvoyLogo size={22} />
-              <Text style={styles.cardTitle}>Convoy</Text>
-            </View>
-            {items.map((item, i) => (
-              <TouchableOpacity
-                key={item.label}
-                style={[styles.row, i === items.length - 1 && styles.rowLast]}
-                activeOpacity={0.7}
-                onPress={() => go(item.route)}
-                testID={`logo-menu-${item.label.toLowerCase()}`}
-              >
-                <View style={styles.rowIcon}>
-                  <Ionicons name={item.icon} size={20} color={YELLOW} />
-                </View>
-                <Text style={styles.rowLabel}>{item.label}</Text>
-                <Ionicons name="chevron-forward" size={18} color="#555" />
-              </TouchableOpacity>
-            ))}
-          </Pressable>
+        <Pressable style={styles.backdrop} onPress={() => closeMenu()}>
+          <Animated.View pointerEvents="none" style={[styles.backdropFill, { opacity: drop }]} />
+          {/* Card — drops down from under the logo (slide + scale + fade). The
+              inner Pressable stops taps inside from closing the menu. */}
+          <Animated.View
+            style={[
+              styles.card,
+              { top },
+              horiz,
+              {
+                opacity: drop,
+                transform: [
+                  { translateY: drop.interpolate({ inputRange: [0, 1], outputRange: [-14, 0] }) },
+                  { scale: drop.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
+                ],
+              },
+            ]}
+          >
+            <Pressable onPress={() => {}}>
+              {items.map((item, i) => (
+                <TouchableOpacity
+                  key={item.label}
+                  style={[styles.row, i === items.length - 1 && styles.rowLast]}
+                  activeOpacity={0.7}
+                  onPress={() => go(item.route)}
+                  testID={`logo-menu-${item.label.toLowerCase()}`}
+                >
+                  <View style={styles.rowIcon}>
+                    <Ionicons name={item.icon} size={20} color={YELLOW} />
+                  </View>
+                  <Text style={styles.rowLabel}>{item.label}</Text>
+                  <Ionicons name="chevron-forward" size={18} color="#555" />
+                </TouchableOpacity>
+              ))}
+            </Pressable>
+          </Animated.View>
         </Pressable>
       </Modal>
     </>
@@ -149,6 +174,9 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
+  },
+  backdropFill: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
   card: {

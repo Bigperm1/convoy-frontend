@@ -15,8 +15,21 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 export const DRAWER_HEIGHT = 300;   // height of the slide-up step list
-const TAB_BAR_H = 94;               // matches app/(app)/_layout.tsx tab bar height
+const TAB_BAR_H = Platform.OS === 'ios' ? 88 : 94;  // iOS: tuck flush under the (taller) tab bar so no map sliver shows; Android unchanged
 const BAR_H = 80;                   // approx height of the collapsed summary bar
+
+// Parse a formatted distance ("42 km", "800 m", "2.2 mi") to meters for the live
+// progress bar. Returns null when it can't be parsed.
+function metersFromText(s?: string): number | null {
+  if (!s) return null;
+  const m = s.match(/([\d.]+)\s*(km|mi|ft|m)\b/i);
+  if (!m) return null;
+  const v = parseFloat(m[1]); const u = m[2].toLowerCase();
+  if (u === "km") return v * 1000;
+  if (u === "mi") return v * 1609.34;
+  if (u === "ft") return v * 0.3048;
+  return v; // m
+}
 
 type Step = { html: string; distance_text: string; maneuver?: string };
 type Route = {
@@ -40,12 +53,15 @@ type Props = {
   distanceRemaining?: string;   // e.g. "8.4 km"
   arrival?: string;             // arrival clock, e.g. "10:42 AM"
   onEnd?: () => void;           // red Exit button
+  // Live fraction of the route travelled (0..1). Optional precise override; when
+  // omitted it's derived from distanceRemaining vs the route total.
+  progress?: number;
   // Parent observes visibility transitions so it can clear timers etc.
   onVisibilityChange?: (visible: boolean) => void;
 };
 
 const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
-  { route, maneuverIcon, eta, distanceRemaining, arrival, onEnd, onVisibilityChange },
+  { route, maneuverIcon, eta, distanceRemaining, arrival, onEnd, progress, onVisibilityChange },
   ref
 ) {
   // 0 = step list hidden (tucked behind the bar), 1 = fully open.
@@ -107,6 +123,18 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
   // "6:24pm") to match the tightened nav bar layout.
   const compact = (s?: string) => (s ?? "").replace(/\s+/g, "");
 
+  // Live trip progress (fraction travelled) for the green progress bar in the
+  // collapsed summary. Precise `progress` prop wins; otherwise derive it from the
+  // remaining distance vs the route total.
+  const totalM = metersFromText(route.distance_text);
+  const remM = metersFromText(distanceRemaining);
+  const progressFrac =
+    progress != null
+      ? Math.max(0, Math.min(1, progress))
+      : totalM && remM != null && totalM > 0
+      ? Math.max(0, Math.min(1, 1 - remM / totalM))
+      : null;
+
   return (
     <>
       {/* Step list — slides up from behind the summary bar when expanded. */}
@@ -158,6 +186,14 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
             </TouchableOpacity>
           )}
         </View>
+        {progressFrac != null && (
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${progressFrac * 100}%` }]} />
+            <View style={[styles.progressTip, { left: `${progressFrac * 100}%` }]}>
+              <Ionicons name="caret-forward" size={16} color="#2DEC86" />
+            </View>
+          </View>
+        )}
       </View>
     </>
   );
@@ -202,10 +238,27 @@ const styles = StyleSheet.create({
     marginLeft: "auto",
     width: 60, height: 60, borderRadius: 30,
     backgroundColor: "#B22222",
-    borderWidth: 1.5, borderColor: "#000",
+    borderWidth: 1, borderColor: "#8E8E93",
     alignItems: "center", justifyContent: "center",
   },
   barExitText: { color: "#F4F4F4", fontSize: 15, fontWeight: "800", letterSpacing: 0.2 },
+
+  // Live distance-travelled bar under the summary row: faint full-width track,
+  // green fill to the current progress, green arrow tip at the leading edge.
+  progressTrack: {
+    height: 3, borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    marginTop: 9, marginHorizontal: 16,
+    position: "relative",
+  },
+  progressFill: {
+    position: "absolute", left: 0, top: 0, bottom: 0,
+    backgroundColor: "#2DEC86", borderRadius: 2,
+  },
+  progressTip: {
+    position: "absolute", top: -7, marginLeft: -8,
+    alignItems: "center", justifyContent: "center",
+  },
 
   // Slide-up step list — sits behind the bar (lower zIndex) so the bar reads as
   // its header when open.

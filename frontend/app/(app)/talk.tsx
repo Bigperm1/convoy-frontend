@@ -9,6 +9,7 @@ import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import LogoMenu from '../../src/components/LogoMenu';
+import CommsHoldGlow from '../../src/components/CommsHoldGlow';
 import { shareInbox } from '../../src/shareInbox';
 import { api } from '../../src/api';
 import { useAuth } from '../../src/auth';
@@ -645,6 +646,9 @@ export default function TalkScreen() {
             always perfectly centered on the mic (the absolute ring fills this
             box, and the mic fills it too, so they share the same center). */}
         <View style={styles.micWrap}>
+        {/* Smoky green hold-glow — the same cloud as the Comms tab mic, scaled up
+            and more dramatic. Breathes outward while holding-to-talk or hands-free. */}
+        <CommsHoldGlow active={pressed || ptt.voxActive} sizeScale={2.6} />
         {/* Expanding sonar ring while transmitting */}
         <Animated.View
           pointerEvents="none"
@@ -653,13 +657,9 @@ export default function TalkScreen() {
         <Animated.View
           style={[
             styles.glowWrap,
-            {
-              transform: [{ scale }],
-              shadowColor: YELLOW,
-              shadowOpacity: glowOpacity,
-              shadowRadius: glowRadius,
-              shadowOffset: { width: 0, height: 0 },
-            },
+            // Green smoke (CommsHoldGlow) is the only glow now — drop the yellow
+            // shadow halo so this matches the Comms tab mic's animation exactly.
+            { transform: [{ scale }] },
           ]}
         >
           <Pressable
@@ -669,7 +669,7 @@ export default function TalkScreen() {
             style={[styles.pttOuter, pressed && styles.pttOuterActive, (!channelId || !!floorHolder) && styles.pttOuterDisabled]}
           >
             <View style={[styles.pttInner, pressed && styles.pttInnerActive]}>
-              <Ionicons name={floorHolder ? 'lock-closed' : 'mic'} size={112} color={pressed ? '#fff' : floorHolder ? '#8E8E93' : channelId ? YELLOW : 'rgba(45,236,134,0.5)'} />
+              <Ionicons name={floorHolder ? 'lock-closed' : 'mic'} size={128} color={pressed ? '#fff' : floorHolder ? '#8E8E93' : channelId ? YELLOW : 'rgba(45,236,134,0.5)'} />
             </View>
           </Pressable>
         </Animated.View>
@@ -807,7 +807,7 @@ export default function TalkScreen() {
     </SafeAreaView>
     {/* Top-right logo — absolute, pixel-identical to Map/Music (positions
         relative to the full-screen tab container, no SafeArea padding offset). */}
-    <View style={styles.logoBacking}><LogoMenu size={40} align="right" /></View>
+    <View style={styles.logoBacking}><LogoMenu size={Platform.OS === 'ios' ? 34 : 40} align="right" /></View>
     </>
   );
 }
@@ -836,11 +836,13 @@ const styles = StyleSheet.create({
   chevBtn: { marginLeft: 4, padding: 2 },
   garageBtn: { padding: 4, marginLeft: 8 },
   logoBacking: {
-    position: 'absolute', top: Platform.OS === 'ios' ? 52 : 28, right: 12, zIndex: 100,
-    width: 54, height: 54, borderRadius: 27,
+    position: 'absolute', top: Platform.OS === 'ios' ? 47 : 28, right: 12, zIndex: 100,
+    width: Platform.OS === 'ios' ? 46 : 54,
+    height: Platform.OS === 'ios' ? 46 : 54,
+    borderRadius: Platform.OS === 'ios' ? 23 : 27,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(20,20,22,0.9)',
-    borderWidth: 1.5, borderColor: 'rgba(45,236,134,0.55)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
     shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 6,
   },
@@ -864,24 +866,24 @@ const styles = StyleSheet.create({
   switcherEmpty: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 2 },
   switcherEmptyText: { color: '#808080', fontSize: 13, flex: 1 },
 
-  body: { flex: 1, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  body: { flex: 1, alignItems: 'center', justifyContent: 'center', position: 'relative', paddingBottom: 100 },
 
-  micWrap: { width: 320, height: 320, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
-  glowWrap: { width: 320, height: 320, borderRadius: 160, alignItems: 'center', justifyContent: 'center', elevation: 18 },
+  micWrap: { width: 360, height: 360, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
+  glowWrap: { width: 360, height: 360, borderRadius: 180, alignItems: 'center', justifyContent: 'center', elevation: 18 },
   pttRing: {
     position: 'absolute',
     top: 0, left: 0, right: 0, bottom: 0,
-    width: 320, height: 320, borderRadius: 160,
+    width: 360, height: 360, borderRadius: 180,
     borderWidth: 3, borderColor: YELLOW,
   },
   pttOuter: {
-    width: 320, height: 320, borderRadius: 160, backgroundColor: '#0e0e10',
+    width: 360, height: 360, borderRadius: 180, backgroundColor: '#0e0e10',
     alignItems: 'center', justifyContent: 'center', borderWidth: 6, borderColor: '#2a2a2e',
   },
   pttOuterActive: { borderColor: YELLOW },
   pttOuterDisabled: { opacity: 0.5 },
   pttInner: {
-    width: 256, height: 256, borderRadius: 128, backgroundColor: '#141417',
+    width: 290, height: 290, borderRadius: 145, backgroundColor: '#141417',
     alignItems: 'center', justifyContent: 'center',
   },
   pttInnerActive: { backgroundColor: '#1f1b00' },

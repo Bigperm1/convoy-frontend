@@ -25,7 +25,7 @@ const BLOBS = [
   { size: 36, fill: "rgba(45,236,134,0.08)", maxScale: 5.5 },
 ];
 
-export default function CommsHoldGlow({ active }: { active: boolean }) {
+export default function CommsHoldGlow({ active, sizeScale = 1 }: { active: boolean; sizeScale?: number }) {
   const anims = useRef(BLOBS.map(() => new Animated.Value(0))).current;
   const vis = useRef(new Animated.Value(0)).current;
 
@@ -71,11 +71,12 @@ export default function CommsHoldGlow({ active }: { active: boolean }) {
             style={[
               styles.blob,
               {
-                width: b.size,
-                height: b.size,
-                borderRadius: b.size / 2,
+                width: b.size * sizeScale,
+                height: b.size * sizeScale,
+                borderRadius: (b.size * sizeScale) / 2,
                 backgroundColor: b.fill,
                 opacity,
+                shadowRadius: 14 * sizeScale,
                 transform: [{ scale }],
               },
             ]}

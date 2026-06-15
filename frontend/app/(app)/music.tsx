@@ -378,7 +378,7 @@ export default function MusicScreen() {
         <SourceSwitcher current="spotify" />
         <SpotifyMusic onSwitchSource={() => updateSettings({ musicSource: null })} />
       </SafeAreaView>
-      <View style={styles.logoBacking}><LogoMenu size={40} align="right" /></View>
+      <View style={styles.logoBacking}><LogoMenu size={Platform.OS === 'ios' ? 34 : 40} align="right" /></View>
       </>
     );
   }
@@ -755,7 +755,7 @@ export default function MusicScreen() {
         </View>
       </Modal>
     </SafeAreaView>
-    <View style={styles.logoBacking}><LogoMenu size={40} align="right" /></View>
+    <View style={styles.logoBacking}><LogoMenu size={Platform.OS === 'ios' ? 34 : 40} align="right" /></View>
     </>
   );
 }
@@ -768,11 +768,13 @@ const styles = StyleSheet.create({
   title: { color: COLORS.text, fontSize: 34, fontWeight: "800", letterSpacing: -1, marginTop: 2 },
   logoBtn: { padding: 4 },
   logoBacking: {
-    position: 'absolute', top: Platform.OS === 'ios' ? 52 : 28, right: 12, zIndex: 100,
-    width: 54, height: 54, borderRadius: 27,
+    position: 'absolute', top: Platform.OS === 'ios' ? 47 : 28, right: 12, zIndex: 100,
+    width: Platform.OS === 'ios' ? 46 : 54,
+    height: Platform.OS === 'ios' ? 46 : 54,
+    borderRadius: Platform.OS === 'ios' ? 23 : 27,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(20,20,22,0.9)',
-    borderWidth: 1.5, borderColor: 'rgba(45,236,134,0.55)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
     shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 6,
   },

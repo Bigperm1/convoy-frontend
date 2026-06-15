@@ -263,8 +263,8 @@ export default function AppLayout() {
             backgroundColor: "#141416",
             borderTopColor: "rgba(255,255,255,0.12)",
             borderTopWidth: StyleSheet.hairlineWidth,
-            height: 88 + navInset,
-            paddingBottom: 10 + navInset,
+            height: (Platform.OS === 'ios' ? 92 : 88) + navInset,
+            paddingBottom: (Platform.OS === 'ios' ? 16 : 10) + navInset,
             paddingTop: 8,
             position: "absolute",
             // allow the elevated mic to overflow upward
@@ -282,7 +282,7 @@ export default function AppLayout() {
           // overflowed and clipped the word at the bottom. Zero padding + the gap
           // below leaves the icon+label centered with room to spare.
           tabBarItemStyle: { paddingVertical: 0 },
-          tabBarLabelStyle: { fontSize: 15, fontWeight: "600", letterSpacing: 0, marginTop: 5, lineHeight: 18 },
+          tabBarLabelStyle: { fontSize: 15, fontWeight: "600", letterSpacing: 0, marginTop: Platform.OS === 'ios' ? 7 : 5, lineHeight: 18 },
         }}
       >
         <Tabs.Screen name="map" options={{
@@ -292,11 +292,11 @@ export default function AppLayout() {
         }} />
         <Tabs.Screen name="talk" options={{
           tabBarLabel: ({ color }) => (
-            <Text style={{ color, fontSize: 15, fontWeight: "600" }}>Comms</Text>
+            <Text style={{ color, fontSize: 15, fontWeight: "600", marginTop: Platform.OS === 'ios' ? 7 : 0, lineHeight: Platform.OS === 'ios' ? 18 : undefined }}>Comms</Text>
           ),
           tabBarButtonTestID: "tab-talk",
           tabBarButton: (props) => <CommsTabButton {...props} selfId={user?.id} />,
-          tabBarIcon: ({ color }) => <Ionicons name="mic" size={38} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="mic" size={Platform.OS === 'ios' ? 34 : 38} color={color} />,
         }} />
         {/* Voice screen is no longer represented in the bottom tab bar — the
             press-and-hold mic now lives inside the map's search bar (Google

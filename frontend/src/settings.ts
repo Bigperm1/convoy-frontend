@@ -64,7 +64,7 @@ musicSource?: 'apple' | 'spotify' | null;
 
 export const DEFAULT_SETTINGS: Settings = {
 highlightConvoy: true,
-alertSound: false,
+alertSound: true,
 avoidTolls: false,
 avoidHighways: false,
 avoidFerries: false,
@@ -75,6 +75,9 @@ avatarLive: true,
 mapView: "heading_up",
 mapType: "hybrid",
 mapDark: false,
+// Default base-map look is Dusk (mapMode is the source of truth for the Mapbox
+// engine; users who never picked a mode inherit this).
+mapMode: "dusk",
 mapboxEngine: true,
 show3dBuildings: true,
 novaGreeting: true,
@@ -88,9 +91,12 @@ weatherOnMigrated: true,
 speedCameras: true,
 showPlacePins: true,
 showNearby: true,
-gasBrands: undefined,
-gasOther: true,
-gasOctane: null,
+// Default Gas Jockey: only the four major BC chains shown; the rest (and
+// unbranded "Other") hidden until the driver re-enables them. Octane defaults
+// to premium (94 / "High Octane Premium").
+gasBrands: { shell: true, chevron: true, petrocan: true, esso: true, husky: false, mobil: false, coop: false, costco: false, canadiantire: false, ultramar: false, pioneer: false, circlek: false },
+gasOther: false,
+gasOctane: '94',
 feedNA: true,
 feedROW: false,
 carYear: undefined,

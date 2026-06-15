@@ -253,14 +253,14 @@ export default function SettingsScreen() {
         {/* Octane — mutually exclusive. Picking one turns the others off; tap
             the selected one again to clear back to showing every grade. */}
         <Glass radius={16} style={styles.card}>
-          {OCTANES.map((o, i) => (
+          {OCTANES.filter((o) => o === '94').map((o, i) => (
             <React.Fragment key={o}>
               {i > 0 && <View style={styles.divider} />}
               <RadioRow
                 icon="flame"
                 iconColor="#FF9F0A"
-                title={`${o} octane`}
-                subtitle={OCTANE_SUB[o]}
+                title="High Octane Premium"
+                subtitle="Ultra 94"
                 selected={settings.gasOctane === o}
                 onSelect={() => setSettings({ gasOctane: settings.gasOctane === o ? null : o })}
               />
@@ -415,31 +415,6 @@ export default function SettingsScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.textDim} />
           </TouchableOpacity>
         </Glass>
-
-        {/* ===== TEMP — Mapbox migration Phase 1. Throwaway test map. STRIP BEFORE MERGE. ===== */}
-        <Text style={styles.sectionLabel}>MAPBOX TEST [DEV]</Text>
-        <Glass radius={16} style={styles.card}>
-          <TouchableOpacity testID="open-mapbox-test" onPress={() => router.push("/(app)/mapbox-test" as any)} style={styles.row} activeOpacity={0.85}>
-            <View style={[styles.iconWrap, { backgroundColor: "#30D15822" }]}>
-              <Ionicons name="map" size={20} color="#30D158" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Mapbox Test [DEV]</Text>
-              <Text style={styles.subtitle}>Bare Mapbox map to verify tiles render on a native build. Temporary — remove before merge.</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textDim} />
-          </TouchableOpacity>
-          <View style={styles.divider} />
-          <ToggleRow
-            icon="layers-outline"
-            iconColor="#30D158"
-            title="Mapbox engine (beta)"
-            subtitle="Render the map with the new Mapbox engine instead of Google. Beta — reopen the Map tab after toggling."
-            value={settings.mapboxEngine}
-            onChange={(v) => setSettings({ mapboxEngine: v })}
-          />
-        </Glass>
-        {/* ===== END TEMP Mapbox test entry ===== */}
 
         <View style={{ height: 120 }} />
       </ScrollView>

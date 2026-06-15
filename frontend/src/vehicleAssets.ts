@@ -152,3 +152,22 @@ export function getVehicleTint(color?: string | null): { color: string; mix: num
   const key = resolveGRCKey(color) || DEFAULT_GRC_KEY;
   return VEHICLE_TINT[key];
 }
+
+// ===== 3D car model URLs (per color) =====
+// One render, recolored per paint: only the white BODY pixels are repainted in
+// the texture (wheels/glass/grille/lights untouched), textures downscaled to
+// 1024 so each model is ~3.7MB (was 13MB) for a fast load. The map swaps the
+// model by color instead of tinting the whole thing at runtime.
+export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
+  ice_cap_white:        "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/efc10867-8760-447d-ae2c-af6d26bddb27.glb",
+  heavy_metal:          "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/034ea3ec-dc97-4412-9c4c-203bc3c27701.glb",
+  supersonic_red:       "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/a548be19-3dd0-4954-9f6c-527160081f0f.glb",
+  blue_flame:           "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/a7d7e411-ad0e-4c80-88ed-d3852fe60035.glb",
+  precious_black_pearl: "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/1b1135eb-651c-40a9-b23c-2fa22bb06818.glb",
+};
+
+/** Hosted 3D car model URL for the chosen paint. Falls back to the default GRC. */
+export function getVehicleModelUrl(color?: string | null): string {
+  const key = resolveGRCKey(color) || DEFAULT_GRC_KEY;
+  return VEHICLE_MODEL_URL[key];
+}

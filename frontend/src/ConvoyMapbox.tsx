@@ -35,7 +35,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Image, StyleSheet, Pressable } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck, Models, ModelLayer } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { getVehiclePngOrDefault, getVehicleTint } from "./vehicleAssets";
+import { getVehiclePngOrDefault, getVehicleModelUrl } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient } from "./mapboxDirections";
@@ -520,8 +520,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // PNG; peers stay PNG MarkerViews. Pulled out here so the model layer below has
   // its live coordinate + heading.
   const selfCar = cars.find((c) => c.id === SELF_ID);
-  // Tint for the single white GLB → the user's chosen GRC paint (one render, 5 colors).
-  const selfTint = getVehicleTint(selfCar?.color);
+  // Per-color baked 3D model URL → the user's chosen GRC paint (body-only paint; 5 colors from one render).
+  const selfModelUrl = getVehicleModelUrl(selfCar?.color);
   // Lift the paint out of the dark on the dim light presets (dawn/night).
   const selfEmissive = CAR_EMISSIVE_BY_MODE[mapMode] ?? 0;
 
@@ -600,7 +600,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
 
         {/* Register the self-car 3D model once for the map. Referenced by id
             ("convoyCar") from the ModelLayer below. */}
-        <Models models={{ convoyCar: "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/6891a037-7cb1-4d7c-83f0-dd004ab46846.glb" }} />
+        <Models models={{ convoyCar: selfModelUrl }} />
 
         {/* Mapbox's native location layer — REQUIRED to power the Camera's
             followUserLocation (a hidden/unmounted location component doesn't start
@@ -754,8 +754,6 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               style={{
                 modelId: "convoyCar",
                 modelType: "location-indicator",
-                modelColor: selfTint.color,
-                modelColorMixIntensity: selfTint.mix,
                 modelEmissiveStrength: selfEmissive,
                 modelScale: [CAR_MODEL_SCALE, CAR_MODEL_SCALE, CAR_MODEL_SCALE],
                 modelRotation: [0, 0, ((selfCar.heading ?? 0) + CAR_MODEL_HEADING_OFFSET)],

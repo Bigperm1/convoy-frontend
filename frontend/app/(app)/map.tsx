@@ -2062,6 +2062,7 @@ export default function MapScreen() {
         mapView={settings.mapView}
         // Layer controls — driven by the bottom-right Layers FAB.
         mapMode={mapMode}
+        show3dBuildings={settings.show3dBuildings !== false}
         mapType={mapType}
         mapDark={mapDark}
         peers={peerList}
@@ -2601,6 +2602,18 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Show community + Waze pins</Text>
                 </View>
                 <Switch value={showHazards} onValueChange={setShowHazards}
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
+
+              {/* 3D Buildings (Mapbox Standard modes only). Toggle off to
+                  guarantee the self-car is never hidden behind a building. */}
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>3D Buildings</Text>
+                  <Text style={styles.layerRowSub}>Show buildings in 3D (may cover your car)</Text>
+                </View>
+                <Switch value={settings.show3dBuildings !== false}
+                  onValueChange={(v) => { void updateGlobalSettings({ show3dBuildings: v }); }}
                   trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
 

@@ -337,7 +337,7 @@ function DestWeatherMarker({ lat, lng, weather }: { lat: number; lng: number; we
 function ConvoyMapbox(props: ConvoyMapboxProps) {
   const {
     center, user, peers, hideSelfMarker, mapView = "heading_up",
-    mapMode = "satellite", leaderUserId,
+    mapMode = "satellite", leaderUserId, show3dBuildings = true,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
     distanceToManeuverM, onMapPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
@@ -580,7 +580,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             dark); harmless no-op for the satellite/street styles. 3D buildings
             are on by default in Standard, so only the light preset is set. */}
         {useStandard && (
-          <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: mapMode }} />
+          <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: mapMode, show3dObjects: show3dBuildings }} />
         )}
 
         {/* Register the self-car 3D model once for the map. Referenced by id

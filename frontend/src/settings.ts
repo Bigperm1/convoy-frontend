@@ -28,6 +28,10 @@ mapMode?: MapMode;
 // Mapbox migration (Phase 2): when true, the map screen renders the new
 // @rnmapbox/maps engine (ConvoyMapbox) instead of react-native-maps (ConvoyMap).
 mapboxEngine: boolean;
+// 3D buildings on the Standard (non-satellite) Mapbox modes. User toggle; when
+// false the self-car can never be hidden behind a building. Maps to the Mapbox
+// Standard style's show3dObjects config.
+show3dBuildings: boolean;
 novaGreeting: boolean;
 novaSpeeding: boolean;
 novaMidDrive: boolean;
@@ -72,6 +76,7 @@ mapView: "heading_up",
 mapType: "hybrid",
 mapDark: false,
 mapboxEngine: true,
+show3dBuildings: true,
 novaGreeting: true,
 novaSpeeding: true,
 novaMidDrive: true,

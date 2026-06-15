@@ -3,6 +3,7 @@
 import '../src/initMapbox';
 import React from 'react';
 import { Stack } from 'expo-router';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from '../src/auth';
 // NOTE: NavigationProvider (Google Navigation SDK) is temporarily NOT mounted while
 // the map runs on react-native-maps. The dependency has been removed; re-add
@@ -11,8 +12,10 @@ import { AuthProvider } from '../src/auth';
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <Stack screenOptions={{ headerShown: false }} />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <Stack screenOptions={{ headerShown: false }} />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }

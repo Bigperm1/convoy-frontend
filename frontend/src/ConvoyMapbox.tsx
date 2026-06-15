@@ -101,23 +101,27 @@ const SELF_ID = "self";
 // Self-car 3D model. GLB is ~1.9 units long in its own space; common-3d treats
 // units as meters, so a real GR Corolla (~4.37m) ≈ 2.3x. Bumped to 3 for map
 // presence. Both of these are OTA-tunable — adjust freely after first render.
-// Hold a ~constant ON-SCREEN car size as the camera zooms. The model is sized in
-// meters, so without a zoom curve it shrinks when the route zooms out. This roughly
-// doubles the needed world size per zoom level out, anchored ~7.5 at the nav/follow
-// zoom (~17) — a little bigger than the old flat 6. modelScale supports ['zoom']
-// expressions. Every stop is OTA-tunable: raise the whole column to enlarge overall,
-// or just the z17 row to change the close-up size.
+// Car size as a function of camera zoom. The model is sized in meters, so without
+// this it shrinks when the route zooms out. Smooth geometric ramp (~2× per zoom
+// level out) with dense 1-level stops so there are no abrupt jumps, anchored ~10 at
+// the nav/follow zoom (~17), and deliberately a bit LARGER than constant size at the
+// far-out end so the car reads big on the route overview. modelScale supports
+// ['zoom'] expressions. All stops OTA-tunable: scale the whole column for overall
+// size, raise the low-zoom (9–13) rows for "bigger when zoomed out", or the z17 row
+// for the close-up size.
 const CAR_MODEL_SCALE_BY_ZOOM: any = [
   "interpolate", ["linear"], ["zoom"],
-  11, [480, 480, 480],
-  12, [240, 240, 240],
-  13, [120, 120, 120],
-  14, [60, 60, 60],
-  15, [30, 30, 30],
-  16, [15, 15, 15],
-  17, [7.5, 7.5, 7.5],
-  18, [3.8, 3.8, 3.8],
-  20, [1.0, 1.0, 1.0],
+  9,  [3400, 3400, 3400],
+  10, [1700, 1700, 1700],
+  11, [820, 820, 820],
+  12, [400, 400, 400],
+  13, [195, 195, 195],
+  14, [95, 95, 95],
+  15, [46, 46, 46],
+  16, [22, 22, 22],
+  17, [10, 10, 10],
+  18, [5, 5, 5],
+  20, [1.3, 1.3, 1.3],
 ];
 const CAR_MODEL_HEADING_OFFSET = 0; // deg; if the car faces wrong, try 90/180/270 (and/or negate heading)
 // Self-illumination for the 3D car per light preset. Dawn + night are dim, so

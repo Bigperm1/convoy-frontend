@@ -157,13 +157,15 @@ export function getVehicleTint(color?: string | null): { color: string; mix: num
 // One render, recolored per paint: only the white BODY pixels are repainted in
 // the texture (wheels/glass/grille/lights untouched), textures downscaled to
 // 1024 so each model is ~3.7MB (was 13MB) for a fast load. The map swaps the
-// model by color instead of tinting the whole thing at runtime.
+// model by color instead of tinting the whole thing at runtime. The paint (body
+// only) is glossy/metallic via a body-masked metallic-roughness map; tires, glass,
+// grille and lights stay matte.
 export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
-  ice_cap_white:        "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/efc10867-8760-447d-ae2c-af6d26bddb27.glb",
-  heavy_metal:          "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/034ea3ec-dc97-4412-9c4c-203bc3c27701.glb",
-  supersonic_red:       "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/a548be19-3dd0-4954-9f6c-527160081f0f.glb",
-  blue_flame:           "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/a7d7e411-ad0e-4c80-88ed-d3852fe60035.glb",
-  precious_black_pearl: "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/1b1135eb-651c-40a9-b23c-2fa22bb06818.glb",
+  ice_cap_white:        "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/841618c8-5243-4967-b360-da80505b23b1.glb",
+  heavy_metal:          "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/0fcc0c3a-d161-41ed-b5a5-1d400e70cd91.glb",
+  supersonic_red:       "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/05332668-05b6-413d-8ca7-81d8893f000a.glb",
+  blue_flame:           "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/9ae47fc9-aab6-4073-865f-d6f9f8535a70.glb",
+  precious_black_pearl: "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/cc1aa16b-7d5a-437b-a01e-a7a0bca3f9ff.glb",
 };
 
 /** Hosted 3D car model URL for the chosen paint. Falls back to the default GRC. */

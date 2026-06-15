@@ -101,7 +101,7 @@ const SELF_ID = "self";
 // Self-car 3D model. GLB is ~1.9 units long in its own space; common-3d treats
 // units as meters, so a real GR Corolla (~4.37m) ≈ 2.3x. Bumped to 3 for map
 // presence. Both of these are OTA-tunable — adjust freely after first render.
-const CAR_MODEL_SCALE = 300;
+const CAR_MODEL_SCALE = 3;
 const CAR_MODEL_HEADING_OFFSET = 0; // deg; if the car faces wrong, try 90/180/270 (and/or negate heading)
 
 // ----- Marker icon assets (shared with the Google engine) -----
@@ -585,8 +585,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
 
         {/* Register the self-car 3D model once for the map. Referenced by id
             ("convoyCar") from the ModelLayer below. */}
-        {/* <Models models={{ convoyCar: require("../assets/vehicles/ice_cap_white.glb") }} /> */}
-        <Models models={{ convoyCar: "https://d3u0tzju9qaucj.cloudfront.net/7d051b5a-7bfe-49fe-a484-24e7b3a9458a/f2840c07-f8f0-4fb5-8381-b449c6c2dd98.glb" }} />
+        <Models models={{ convoyCar: require("../assets/vehicles/ice_cap_white.glb") }} />
 
         {/* Mapbox's native location layer — REQUIRED to power the Camera's
             followUserLocation (a hidden/unmounted location component doesn't start

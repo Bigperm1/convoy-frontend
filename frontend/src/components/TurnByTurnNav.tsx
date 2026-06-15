@@ -100,8 +100,53 @@ export function SpeedPill({ speedMs, unit, bottom, limitKmh }: { speedMs?: numbe
   const haloOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0, 0.6] });
   const haloScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.45] });
 
+  // ---- Posted speed-limit sign (slides out to the RIGHT of the speedo) ----
+  // Tucked behind the speedo at a standstill; once you're moving AND the road's
+  // limit is known, it slides out and shows the posted limit on a white sign.
+  // Snaps back behind the speedo at a complete stop. Limit is shown in the same
+  // unit as the speedo (km/h or mph).
+  const isMoving = displayKmh > 0;
+  const hasLimit = typeof limitKmh === "number" && limitKmh > 0;
+  const showLimit = isMoving && hasLimit;
+  const limitValue = hasLimit
+    ? (isMph ? Math.round((limitKmh as number) * 0.621371) : Math.round(limitKmh as number))
+    : 0;
+
+  const slide = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(slide, { toValue: showLimit ? 1 : 0, useNativeDriver: true, tension: 80, friction: 12 }).start();
+  }, [showLimit, slide]);
+  const slideX = slide.interpolate({ inputRange: [0, 1], outputRange: [0, 92] });
+
+  // Green "smoke" burst from behind the number whenever the posted limit changes
+  // (e.g. 50 → 80). Two staggered puffs scale up + fade for a smoky feel.
+  const smoke = useRef(new Animated.Value(0)).current;
+  const prevLimitRef = useRef<number | null>(null);
+  useEffect(() => {
+    const prev = prevLimitRef.current;
+    if (hasLimit && prev !== null && prev !== limitKmh) {
+      smoke.setValue(0);
+      Animated.timing(smoke, { toValue: 1, duration: 750, useNativeDriver: true }).start();
+    }
+    prevLimitRef.current = hasLimit ? (limitKmh as number) : null;
+  }, [limitKmh, hasLimit, smoke]);
+  const smokeAOpacity = smoke.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 0.55, 0] });
+  const smokeAScale = smoke.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.7] });
+  const smokeBOpacity = smoke.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0, 0.4, 0] });
+  const smokeBScale = smoke.interpolate({ inputRange: [0, 1], outputRange: [0.8, 2.2] });
+
   return (
     <View style={[styles.speedWrap, typeof bottom === "number" ? { bottom } : null]} pointerEvents="none">
+      {/* Posted speed-limit sign — rendered FIRST so it sits behind the speedo
+          when tucked away; slides out to the right when moving. */}
+      {hasLimit && (
+        <Animated.View style={[styles.limitBox, { opacity: slide, transform: [{ translateX: slideX }] }]} pointerEvents="none">
+          <Animated.View style={[styles.limitSmoke, { opacity: smokeAOpacity, transform: [{ scale: smokeAScale }] }]} pointerEvents="none" />
+          <Animated.View style={[styles.limitSmoke, styles.limitSmokeB, { opacity: smokeBOpacity, transform: [{ scale: smokeBScale }] }]} pointerEvents="none" />
+          <Text style={styles.limitValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{limitValue}</Text>
+          <Text style={styles.limitUnit} numberOfLines={1}>{isMph ? "mph" : "km/h"}</Text>
+        </Animated.View>
+      )}
       {speeding && (
         <Animated.View
           style={[styles.speedHalo, { opacity: haloOpacity, transform: [{ scale: haloScale }] }]}
@@ -268,4 +313,26 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: OVER_RED,
   },
+
+  // ----- Posted speed-limit sign (slides out to the right of the speedo) -----
+  limitBox: {
+    position: "absolute", left: 0, top: 0,
+    width: 84, height: 60, borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 2, borderColor: "#000",
+    alignItems: "center", justifyContent: "center",
+    overflow: "hidden",
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  limitValue: { color: "#000", fontSize: 24, fontWeight: "800", letterSpacing: -0.5, lineHeight: 26 },
+  limitUnit: { color: "#333", fontSize: 10, fontWeight: "700", letterSpacing: 0.3, marginTop: 1 },
+  // Green smoke puffs behind the number (clipped to the sign by overflow:hidden).
+  limitSmoke: {
+    position: "absolute",
+    top: -2, left: 10,
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: "#2DEC86",
+  },
+  limitSmokeB: { backgroundColor: "#00C46A" },
 });

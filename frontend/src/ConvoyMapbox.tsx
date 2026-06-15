@@ -33,7 +33,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Image, StyleSheet, Pressable } from "react-native";
-import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck } from "@rnmapbox/maps";
+import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck, Models, ModelLayer } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
@@ -97,6 +97,12 @@ interface ConvoyMapboxProps {
 }
 
 const SELF_ID = "self";
+
+// Self-car 3D model. GLB is ~1.9 units long in its own space; common-3d treats
+// units as meters, so a real GR Corolla (~4.37m) ≈ 2.3x. Bumped to 3 for map
+// presence. Both of these are OTA-tunable — adjust freely after first render.
+const CAR_MODEL_SCALE = 3;
+const CAR_MODEL_HEADING_OFFSET = 0; // deg; if the car faces wrong, try 90/180/270 (and/or negate heading)
 
 // ----- Marker icon assets (shared with the Google engine) -----
 const HAZARD_ICONS: Record<string, any> = {
@@ -499,6 +505,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       });
     }
   });
+  // The self car is rendered as a 3D GLB model (ModelLayer) instead of the flat
+  // PNG; peers stay PNG MarkerViews. Pulled out here so the model layer below has
+  // its live coordinate + heading.
+  const selfCar = cars.find((c) => c.id === SELF_ID);
 
   const visibleHazards = (hazards || []).filter((h) => h && typeof h.lat === "number" && typeof h.lng === "number");
   const showRoutes = !!destination && routeFC.features.length > 0;
@@ -572,6 +582,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         {useStandard && (
           <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: mapMode }} />
         )}
+
+        {/* Register the self-car 3D model once for the map. Referenced by id
+            ("convoyCar") from the ModelLayer below. */}
+        <Models models={{ convoyCar: require("../assets/vehicles/ice_cap_white.glb") }} />
 
         {/* Mapbox's native location layer — REQUIRED to power the Camera's
             followUserLocation (a hidden/unmounted location component doesn't start
@@ -710,10 +724,33 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           <DestWeatherMarker lat={destination.lat} lng={destination.lng} weather={destWeather} />
         )}
 
-        {/* Car markers — self + peers. MarkerViews always render above the route
-            LineLayers, and we declare the cars LAST so they sit on top of the
-            other pins too. */}
-        {cars.map((c) => (
+        {/* Self car as a 3D GLB model (ModelLayer). Lives in the map's geo space
+            (rotates/tilts with the world), unlike the screen-space PNG MarkerView.
+            modelRotation z = world heading + offset. Renders only if ModelLayer is
+            present in the running native build — this OTA is the test for that. */}
+        {selfCar && (
+          <ShapeSource
+            id="convoy-self-car"
+            shape={{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [selfCar.lng, selfCar.lat] } }}
+          >
+            <ModelLayer
+              id="convoy-self-car-model"
+              style={{
+                modelId: "convoyCar",
+                modelType: "common-3d",
+                modelScale: [CAR_MODEL_SCALE, CAR_MODEL_SCALE, CAR_MODEL_SCALE],
+                modelRotation: [0, 0, ((selfCar.heading ?? 0) + CAR_MODEL_HEADING_OFFSET)],
+                modelCastShadows: true,
+                modelReceiveShadows: false,
+              }}
+            />
+          </ShapeSource>
+        )}
+
+        {/* Car markers — PEERS only (self is the 3D model above). MarkerViews
+            always render above the route LineLayers, and we declare the cars LAST
+            so they sit on top of the other pins too. */}
+        {cars.filter((c) => c.id !== SELF_ID).map((c) => (
           <CarMarker key={c.id} car={c} mapHeading={mapHeadingDeg} onPress={() => { if (c.peer) onPeerPress?.(c.peer); }} />
         ))}
       </MapView>

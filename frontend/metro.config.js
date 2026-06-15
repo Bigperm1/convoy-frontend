@@ -5,6 +5,10 @@ const { FileStore } = require('metro-cache');
 
 const config = getDefaultConfig(__dirname);
 
+// Bundle 3D model files (GLB) as assets so require("...glb") resolves at runtime
+// (the self-car ModelLayer model).
+config.resolver.assetExts.push('glb');
+
 // Use a stable on-disk store (shared across web/android)
 const root = process.env.METRO_CACHE_ROOT || path.join(__dirname, '.metro-cache');
 config.cacheStores = [

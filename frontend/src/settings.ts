@@ -4,6 +4,11 @@ import { useEffect, useState } from "react";
 
 const KEY = "convoy.settings.v3";
 
+// Single source of truth for the base-map look (Mapbox light presets + satellite).
+// Legacy mapType/mapDark are kept only for migration + the dormant Google engine,
+// derived from mapMode via the helpers below.
+export type MapMode = "satellite" | "dawn" | "day" | "dusk" | "night";
+
 export type Settings = {
 highlightConvoy: boolean;
 alertSound: boolean;
@@ -17,6 +22,9 @@ avatarLive: boolean;
 mapView: "heading_up" | "north_up";
 mapType: "hybrid" | "roadmap";
 mapDark: boolean;
+// Base-map mode — the single source of truth. Optional/undefined for users
+// stored before it existed; getMapMode() migrates them from mapType/mapDark.
+mapMode?: MapMode;
 // Mapbox migration (Phase 2): when true, the map screen renders the new
 // @rnmapbox/maps engine (ConvoyMapbox) instead of react-native-maps (ConvoyMap).
 mapboxEngine: boolean;
@@ -88,6 +96,25 @@ topSpeed: undefined,
 callSign: undefined,
 musicSource: null,
 };
+
+// ---- Map mode helpers (single source of truth = settings.mapMode) ----
+// Migrate users stored before mapMode existed: hybrid → satellite, roadmap+dark
+// → night, roadmap+light → day.
+export function legacyToMapMode(mapType?: string, mapDark?: boolean): MapMode {
+  if (mapType === "hybrid") return "satellite";
+  return mapDark ? "night" : "day";
+}
+// The effective mode: explicit mapMode if set, else derived from legacy fields.
+// New default look (satellite) falls out of the legacy default (mapType "hybrid").
+export function getMapMode(s: Settings): MapMode {
+  return s.mapMode ?? legacyToMapMode(s.mapType, s.mapDark);
+}
+// Derive the legacy mapType/mapDark the Google/web engines still consume.
+// dawn/day render light, dusk/night render dark on the (non-preset) Google map.
+export function mapModeToLegacy(mode: MapMode): { mapType: "hybrid" | "roadmap"; mapDark: boolean } {
+  if (mode === "satellite") return { mapType: "hybrid", mapDark: false };
+  return { mapType: "roadmap", mapDark: mode === "dusk" || mode === "night" };
+}
 
 let cached: Settings = { ...DEFAULT_SETTINGS };
 let loaded = false;

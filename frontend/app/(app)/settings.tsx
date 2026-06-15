@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
-import { useSettings, DEFAULT_SETTINGS } from "../../src/settings";
+import { useSettings, DEFAULT_SETTINGS, getMapMode } from "../../src/settings";
 import { GAS_BRANDS, OCTANES } from "../../src/gasJockey";
 
 // Re-export for navigation
@@ -157,39 +157,33 @@ export default function SettingsScreen() {
         {/* Map Layers - persisted overlays that also appear on the map's
             in-context Layers sheet. Satellite/Traffic/Hazards stay map-only
             (they're view controls you flip while looking at the map). */}
-        {/* Map Style - satellite (aerial) vs the standard road map. Persisted
-            and synced with the map's own Layers sheet. */}
-        <Text style={styles.sectionLabel}>MAP STYLE</Text>
+        {/* Map Mode — single source of truth (settings.mapMode). Satellite =
+            aerial; dawn/day/dusk/night = Mapbox Standard with that light preset.
+            Synced with the map's own Layers sheet. */}
+        <Text style={styles.sectionLabel}>MAP MODE</Text>
         <Glass radius={16} style={styles.card}>
-          <RadioRow
-            icon="map"
-            iconColor="#34C759"
-            title="Default"
-            subtitle="Standard road map, light theme, clean labels"
-            selected={settings.mapType === "roadmap" && !settings.mapDark}
-            onSelect={() => setSettings({ mapType: "roadmap", mapDark: false })}
-          />
-          <View style={styles.divider} />
-          <RadioRow
-            icon="moon"
-            iconColor="#5E5CE6"
-            title="Dark"
-            subtitle="Standard road map in a navy night theme"
-            selected={settings.mapType === "roadmap" && settings.mapDark}
-            onSelect={() => setSettings({ mapType: "roadmap", mapDark: true })}
-          />
-          <View style={styles.divider} />
-          <RadioRow
-            icon="globe"
-            iconColor="#0A84FF"
-            title="Satellite"
-            subtitle="Aerial imagery with road labels"
-            selected={settings.mapType === "hybrid"}
-            onSelect={() => setSettings({ mapType: "hybrid", mapDark: false })}
-          />
+          {([
+            { key: "satellite", icon: "globe", color: "#0A84FF", title: "Satellite", sub: "Aerial imagery with road labels" },
+            { key: "dawn", icon: "partly-sunny", color: "#FF9F0A", title: "Dawn", sub: "Soft morning light" },
+            { key: "day", icon: "sunny", color: "#FFB300", title: "Day", sub: "Bright daytime" },
+            { key: "dusk", icon: "cloudy-night", color: "#FF6A00", title: "Dusk", sub: "Warm evening light" },
+            { key: "night", icon: "moon", color: "#5E5CE6", title: "Night", sub: "Dark 3D night map with buildings" },
+          ] as const).map((m, i) => (
+            <React.Fragment key={m.key}>
+              {i > 0 && <View style={styles.divider} />}
+              <RadioRow
+                icon={m.icon}
+                iconColor={m.color}
+                title={m.title}
+                subtitle={m.sub}
+                selected={getMapMode(settings) === m.key}
+                onSelect={() => setSettings({ mapMode: m.key })}
+              />
+            </React.Fragment>
+          ))}
         </Glass>
         <Text style={styles.helpText}>
-          Choose how the map looks. Dark uses the standard road map — satellite imagery can't be darkened — so picking Dark turns Satellite off. Stays in sync with the map's own Layers button.
+          Pick how the map looks. Satellite shows aerial imagery; Dawn / Day / Dusk / Night use the Mapbox vector map with time-of-day lighting and 3D buildings. Stays in sync with the map's own Layers button.
         </Text>
 
         <Text style={styles.sectionLabel}>MAP LAYERS</Text>

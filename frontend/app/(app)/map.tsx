@@ -23,7 +23,7 @@ import { ReportToast, MusicToast, HailToast } from "../../src/components/AlertTo
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
 import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/components/StepDrawer";
 import { hailBus } from "../../src/hailBus";
-import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings } from "../../src/settings";
+import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, mapModeToLegacy } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import { BearingTracker } from "../../src/bearing";
@@ -549,12 +549,11 @@ export default function MapScreen() {
   // Saved places (Home/Work/custom). The time-of-day prediction now surfaces as
   // the PREDICTIVE row in the search screen (NavSearchScreen), not an on-map banner.
   const [savedPlaces] = useSavedPlaces();
-  // Map base style (satellite vs default road map) is persisted in settings so
-  // it's controllable from the Settings screen AND the on-map Layers sheet.
-  const mapType: "hybrid" | "roadmap" = (settings as any).mapType ?? "hybrid";
-  // Dark base-map styling. Only visibly affects the standard (roadmap) map —
-  // satellite/hybrid ignore customMapStyle — so it reads best with Satellite off.
-  const mapDark = settings.mapDark === true;
+  // Base-map mode is the single source of truth (settings.mapMode), controllable
+  // from the Settings screen AND the on-map Layers sheet. The Mapbox engine uses
+  // mapMode directly; the Google/web engines use the derived mapType/mapDark.
+  const mapMode = getMapMode(settings);
+  const { mapType, mapDark } = mapModeToLegacy(mapMode);
   const showWeatherLayer = (settings as any).showWeatherLayer ?? true;
   // Live weather for the on-map HUD — current conditions at the user's GPS
   // position, fetched only while the Weather layer is enabled (auto-refresh ~5 min).
@@ -2027,7 +2026,7 @@ export default function MapScreen() {
     ? TAB_BAR_H + previewBannerH + 12
     : navBarUp
     ? TAB_BAR_H + stepDrawerH + 12
-    : 90) + navInset;
+    : TAB_BAR_H + 8) + navInset;
   const weatherBottom = controlsBottom + 68;
 
   // Mapbox migration (Phase 2): pick the map engine behind the settings toggle.
@@ -2062,6 +2061,7 @@ export default function MapScreen() {
         // Waze/Google out of the box.
         mapView={settings.mapView}
         // Layer controls — driven by the bottom-right Layers FAB.
+        mapMode={mapMode}
         mapType={mapType}
         mapDark={mapDark}
         peers={peerList}
@@ -2128,13 +2128,17 @@ export default function MapScreen() {
       <View style={styles.topBar} pointerEvents="box-none">
         {searchVisible && (
           <View pointerEvents="box-none">
-            <DestinationSearch
-              origin={coords}
-              onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
-              onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
-              onProfilePress={() => router.push("/(app)/hub" as any)}
-              onPressField={() => setNavSearchOpen(true)}
-            />
+            {/* marginRight clears the absolutely-positioned top-right logo (54 + gap)
+                so the search field ends to its left. Pills/overlay stay full-width. */}
+            <View style={{ marginRight: 64 }}>
+              <DestinationSearch
+                origin={coords}
+                onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
+                onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
+                onProfilePress={() => router.push("/(app)/hub" as any)}
+                onPressField={() => setNavSearchOpen(true)}
+              />
+            </View>
             {/* Category quick-search pills (Gas / Food / Coffee / …) directly
                 under the search bar, Google-Maps style. Results drop as pins. */}
             <CategoryPills origin={coords} onResults={setPlacePins} />
@@ -2231,7 +2235,7 @@ export default function MapScreen() {
         const distStr = ar?.distance_text ?? route.distance_text;
         const bestLabel = selectedRouteIndex === 0 ? "Best route" : (ar?.summary ? `via ${ar.summary}` : "Alternate");
         return (
-          <View style={styles.routeSheet} onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>
+          <View style={[styles.routeSheet, { bottom: TAB_BAR_H + navInset }]} onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>
             {/* Grabber — swipe down to collapse to the trip pill. */}
             <View {...sheetPan.panHandlers}>
               <View style={styles.sheetGrabber} />
@@ -2553,24 +2557,25 @@ export default function MapScreen() {
           <TouchableOpacity activeOpacity={1} style={[styles.sheetCard, { maxHeight: '70%' }]} onPress={() => {}}>
             <View style={styles.sheetGrip} />
             <ScrollView showsVerticalScrollIndicator={false}>
-              {/* ----- MAP LAYERS ----- */}
-              <Text style={styles.layerSectionHeader}>MAP LAYERS</Text>
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Satellite</Text>
-                  <Text style={styles.layerRowSub}>Aerial imagery</Text>
-                </View>
-                <Switch value={mapType === "hybrid"} onValueChange={(v) => { void updateGlobalSettings(v ? { mapType: "hybrid", mapDark: false } : { mapType: "roadmap" }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Dark map</Text>
-                  <Text style={styles.layerRowSub}>Navy night styling — switches off Satellite</Text>
-                </View>
-                <Switch value={mapDark} onValueChange={(v) => { void updateGlobalSettings(v ? { mapDark: true, mapType: "roadmap" } : { mapDark: false }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
+              {/* ----- MAP MODE (radio-style; writes settings.mapMode) ----- */}
+              <Text style={styles.layerSectionHeader}>MAP MODE</Text>
+              {([
+                { key: "satellite", label: "Satellite", sub: "Aerial imagery" },
+                { key: "dawn", label: "Dawn", sub: "Soft morning light" },
+                { key: "day", label: "Day", sub: "Bright daytime" },
+                { key: "dusk", label: "Dusk", sub: "Warm evening light" },
+                { key: "night", label: "Night", sub: "Dark 3D night map" },
+              ] as const).map((m) => (
+                <TouchableOpacity key={m.key} style={styles.layerRow} activeOpacity={0.7}
+                  onPress={() => { void updateGlobalSettings({ mapMode: m.key }); }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.layerRowLabel}>{m.label}</Text>
+                    <Text style={styles.layerRowSub}>{m.sub}</Text>
+                  </View>
+                  <Ionicons name={mapMode === m.key ? "radio-button-on" : "radio-button-off"} size={22}
+                    color={mapMode === m.key ? "#2DEC86" : "#808080"} />
+                </TouchableOpacity>
+              ))}
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.layerRowLabel}>Traffic overlay</Text>

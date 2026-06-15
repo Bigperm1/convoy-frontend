@@ -63,6 +63,9 @@ interface ConvoyMapProps {
   user?: UserLocation | null;
   hideSelfMarker?: boolean;
   mapView?: "heading_up" | "north_up";
+  // Accepted for prop-parity with the Mapbox engine; this (Google) engine uses
+  // the derived mapType/mapDark below instead of mapMode.
+  mapMode?: "satellite" | "dawn" | "day" | "dusk" | "night";
   mapType?: "hybrid" | "roadmap";
   mapDark?: boolean;
   peers?: Record<string, Peer> | Peer[] | null;

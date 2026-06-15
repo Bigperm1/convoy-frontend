@@ -47,6 +47,8 @@ type Props = {
   // bearing=0 for a classic flat top-down feel.
   mapView?: "heading_up" | "north_up";
   // Layer controls driven by the Layers FAB bottom sheet.
+  // mapMode accepted for prop-parity with the Mapbox engine; web uses mapType.
+  mapMode?: "satellite" | "dawn" | "day" | "dusk" | "night";
   mapType?: "hybrid" | "roadmap";
   showTraffic?: boolean;
   showTransit?: boolean;

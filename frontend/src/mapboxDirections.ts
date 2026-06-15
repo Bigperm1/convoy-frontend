@@ -63,11 +63,12 @@ function segMeters(a: [number, number], b: [number, number]): number {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-// Build a Mapbox `lineGradient` STEP expression that colours the line by
-// congestion along its length. Requires the LineLayer's source to have
-// `lineMetrics: true` (so `line-progress` 0..1 is available). Consecutive
-// same-colour segments are merged to keep the expression compact. Returns a
-// plain colour string when there's only one colour overall (no gradient needed).
+// Build a Mapbox `lineGradient` INTERPOLATE expression that colours the line by
+// congestion along its length, blending each colour change over a short band so
+// the result reads as a smooth gradient rather than hard blocks. Requires the
+// LineLayer's source to have `lineMetrics: true` (so `line-progress` 0..1 is
+// available). Returns a plain colour string when there's only one colour overall
+// (no gradient needed).
 export function buildCongestionGradient(
   coordinates: [number, number][],
   congestion: CongestionLevel[],
@@ -85,29 +86,67 @@ export function buildCongestionGradient(
   }
   if (total <= 0) return colorFor(congestion[0]);
 
-  // Walk the segments, emitting a new step stop only when the colour changes.
+  // Walk the segments, recording each colour CHANGE point (fraction along the
+  // line where the colour flips). A plain step expression here gives hard edges;
+  // below we expand each change into a short blend band so the gradient reads
+  // smoothly (green→yellow→orange→red) instead of as solid blocks.
   const baseColor = colorFor(congestion[0]);
-  const stops: Array<[number, string]> = [];
+  const changes: Array<[number, string]> = [];
   let cum = 0;
   let prevColor = baseColor;
   for (let i = 0; i < segCount; i++) {
     const frac = cum / total; // fraction at the START of segment i
     const color = colorFor(congestion[i]);
     if (i > 0 && color !== prevColor && frac > 0 && frac < 1) {
-      // Avoid duplicate / non-ascending stop inputs.
-      if (stops.length === 0 || frac > stops[stops.length - 1][0]) {
-        stops.push([frac, color]);
+      // Avoid duplicate / non-ascending change inputs.
+      if (changes.length === 0 || frac > changes[changes.length - 1][0]) {
+        changes.push([frac, color]);
         prevColor = color;
       }
     }
     cum += lengths[i];
   }
 
-  if (stops.length === 0) return baseColor; // single colour → solid
+  if (changes.length === 0) return baseColor; // single colour → solid
 
-  const expr: any[] = ["step", ["line-progress"], baseColor];
-  for (const [frac, color] of stops) {
-    expr.push(frac, color);
+  // Expand each colour change at fraction f into a blend band: hold the previous
+  // colour up to (f - HALF), then linearly blend to the new colour by (f + HALF),
+  // so each transition spans ~2.5% of the line. Where two changes are closer than
+  // a full band, the band is shrunk for that pair (and collapses to a near-hard
+  // edge if they nearly coincide) — inputs are kept clamped to [0,1] and strictly
+  // ascending, which `interpolate` requires.
+  const HALF = 0.0125; // ±1.25% → ~2.5% total blend width
+  const EPS = 1e-4;
+  const out: Array<[number, string]> = [[0, baseColor]];
+  let prevInput = 0;
+  let curColor = baseColor;
+  for (let k = 0; k < changes.length; k++) {
+    const [f, color] = changes[k];
+    const nextF = k + 1 < changes.length ? changes[k + 1][0] : 1;
+    // Limit the band so it never overruns the previous stop or the next change.
+    const band = Math.min(HALF, (f - prevInput) / 2, (nextF - f) / 2);
+    let lo = f - band;
+    let hi = f + band;
+    // Strict-ascension + [0,1] guards (handles colliding/clustered changes).
+    if (lo <= prevInput) lo = prevInput + EPS;
+    if (hi <= lo) hi = lo + EPS;
+    if (hi > 1) hi = 1;
+    if (lo >= hi) lo = hi - EPS;
+    if (lo <= prevInput) continue; // no room → merge into the prior transition
+    out.push([lo, curColor]);
+    out.push([hi, color]);
+    prevInput = hi;
+    curColor = color;
+  }
+  if (prevInput < 1) out.push([1, curColor]);
+
+  // Final defensive pass: guarantee strictly ascending inputs for interpolate.
+  const expr: any[] = ["interpolate", ["linear"], ["line-progress"]];
+  let lastInput = -1;
+  for (const [input, color] of out) {
+    const v = input > lastInput ? input : lastInput + 1e-6;
+    expr.push(v, color);
+    lastInput = v;
   }
   return expr;
 }

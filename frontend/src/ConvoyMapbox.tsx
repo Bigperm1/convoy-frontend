@@ -58,6 +58,9 @@ interface ConvoyMapboxProps {
   user?: UserLocation | null;
   hideSelfMarker?: boolean;
   mapView?: "heading_up" | "north_up";
+  // Base-map mode — drives the Mapbox style + light preset directly. mapType/
+  // mapDark are still accepted (shared MapEngine props) but unused by this engine.
+  mapMode?: "satellite" | "dawn" | "day" | "dusk" | "night";
   mapType?: "hybrid" | "roadmap";
   mapDark?: boolean;
   peers?: Record<string, Peer> | Peer[] | null;
@@ -328,7 +331,7 @@ function DestWeatherMarker({ lat, lng, weather }: { lat: number; lng: number; we
 function ConvoyMapbox(props: ConvoyMapboxProps) {
   const {
     center, user, peers, hideSelfMarker, mapView = "heading_up",
-    mapType = "hybrid", mapDark = false, leaderUserId,
+    mapMode = "satellite", leaderUserId,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
     distanceToManeuverM, onMapPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
@@ -346,20 +349,15 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Null unless we have a fetched congestion route to paint (preview-only).
   const [congestionRoute, setCongestionRoute] = useState<{ coordinates: [number, number][]; gradient: any } | null>(null);
 
-  // ----- Base-map style -----
-  // "hybrid"        → satellite-with-streets imagery (matches Google satellite).
-  // "roadmap"+Dark  → Mapbox STANDARD style with the "night" light preset: a dark
-  //                   vector basemap that renders extruded 3D buildings
-  //                   automatically — the tilted Mapbox nav look. The night
-  //                   lighting is applied via the <StyleImport> child below.
-  // "roadmap"+light → the standard street style.
-  const useStandard = mapType !== "hybrid" && mapDark;
-  const styleURL =
-    mapType === "hybrid"
-      ? Mapbox.StyleURL.SatelliteStreet
-      : useStandard
-      ? "mapbox://styles/mapbox/standard"
-      : Mapbox.StyleURL.Street;
+  // ----- Base-map style (one code path, driven by mapMode) -----
+  // "satellite"              → satellite-with-streets imagery (matches Google sat).
+  // dawn / day / dusk / night → Mapbox STANDARD style; the time-of-day lighting is
+  //   applied via the <StyleImport> child below (config.lightPreset = mapMode),
+  //   which gives the dark/tilted vector basemap with auto 3D buildings.
+  const useStandard = mapMode !== "satellite";
+  const styleURL = useStandard
+    ? "mapbox://styles/mapbox/standard"
+    : Mapbox.StyleURL.SatelliteStreet;
 
   // Map bearing the camera is using right now (heading-up while following /
   // navigating, else north). CarMarker subtracts this so every car rides
@@ -572,7 +570,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             dark); harmless no-op for the satellite/street styles. 3D buildings
             are on by default in Standard, so only the light preset is set. */}
         {useStandard && (
-          <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: "night" }} />
+          <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: mapMode }} />
         )}
 
         {/* Mapbox's native location layer — REQUIRED to power the Camera's

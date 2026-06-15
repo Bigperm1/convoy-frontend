@@ -101,7 +101,7 @@ const SELF_ID = "self";
 // Self-car 3D model. GLB is ~1.9 units long in its own space; common-3d treats
 // units as meters, so a real GR Corolla (~4.37m) ≈ 2.3x. Bumped to 3 for map
 // presence. Both of these are OTA-tunable — adjust freely after first render.
-const CAR_MODEL_SCALE = 3;
+const CAR_MODEL_SCALE = 30;
 const CAR_MODEL_HEADING_OFFSET = 0; // deg; if the car faces wrong, try 90/180/270 (and/or negate heading)
 
 // ----- Marker icon assets (shared with the Google engine) -----

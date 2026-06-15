@@ -585,7 +585,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
 
         {/* Register the self-car 3D model once for the map. Referenced by id
             ("convoyCar") from the ModelLayer below. */}
-        <Models models={{ convoyCar: require("../assets/vehicles/ice_cap_white.glb") }} />
+        <Models models={{ convoyCar: "https://d3u0tzju9qaucj.cloudfront.net/7d051b5a-7bfe-49fe-a484-24e7b3a9458a/f2840c07-f8f0-4fb5-8381-b449c6c2dd98.glb" }} />
 
         {/* Mapbox's native location layer — REQUIRED to power the Camera's
             followUserLocation (a hidden/unmounted location component doesn't start

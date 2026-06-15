@@ -277,8 +277,12 @@ export default function AppLayout() {
           // Center the icon+label block and give the word room: a small gap under
           // the icon (marginTop), padding + lineHeight under the label so the text
           // is never clipped at the bar's bottom edge.
-          tabBarItemStyle: { paddingVertical: 6 },
-          tabBarLabelStyle: { fontSize: 15, fontWeight: "600", letterSpacing: 0, marginTop: 3, paddingBottom: 2, lineHeight: 18 },
+          // paddingVertical 0: the items get the FULL content row (~70px). With
+          // paddingVertical:6 the usable height was 58px, but mic(38)+label(23)=61px
+          // overflowed and clipped the word at the bottom. Zero padding + the gap
+          // below leaves the icon+label centered with room to spare.
+          tabBarItemStyle: { paddingVertical: 0 },
+          tabBarLabelStyle: { fontSize: 15, fontWeight: "600", letterSpacing: 0, marginTop: 5, lineHeight: 18 },
         }}
       >
         <Tabs.Screen name="map" options={{

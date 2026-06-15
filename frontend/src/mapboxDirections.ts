@@ -194,3 +194,101 @@ export async function fetchMapboxCongestion(
     return null; // includes AbortError — a stale request was simply cancelled
   }
 }
+
+// ===== Lane guidance =========================================================
+// Convoy's turn-by-turn maneuvers come from Google (nav.ts), which returns NO
+// lane data. Mapbox Directions DOES (`banner_instructions`), so we fetch lane
+// guidance once per navigation session and anchor each maneuver's lanes to its
+// geographic location. At display time we match the upcoming GOOGLE maneuver to
+// the nearest Mapbox cue by location (pickLaneCue) and show lanes ONLY when the
+// two engines agree on where the turn is — a routing divergence yields no lanes
+// rather than wrong lanes. Fails soft everywhere: any error → null → no lanes.
+
+// One lane within an upcoming maneuver's guidance.
+export type LaneArrow = {
+  // Mapbox direction tokens this lane allows, e.g. ["straight"], ["left","straight"].
+  dirs: string[];
+  // True when this lane can be used for the upcoming maneuver.
+  active: boolean;
+  // When active, the specific direction to follow through this lane.
+  activeDir?: string;
+};
+
+// Lane guidance for one maneuver, anchored to that maneuver's location.
+export type LaneCue = { lat: number; lng: number; lanes: LaneArrow[] };
+
+// Fetch per-maneuver lane cues for a route. One Directions call per navigation
+// session (NOT per GPS tick). overview=false keeps the payload small — we only
+// need steps + banners, not geometry. Returns null on any failure.
+export async function fetchMapboxLaneCues(
+  origin: LatLng,
+  dest: LatLng,
+  opts?: { signal?: AbortSignal },
+): Promise<LaneCue[] | null> {
+  try {
+    if (
+      typeof origin?.lat !== "number" || typeof origin?.lng !== "number" ||
+      typeof dest?.lat !== "number" || typeof dest?.lng !== "number"
+    ) {
+      return null;
+    }
+    const coords = `${origin.lng},${origin.lat};${dest.lng},${dest.lat}`;
+    const url =
+      `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}` +
+      `?steps=true&banner_instructions=true&overview=false` +
+      `&access_token=${MAPBOX_PUBLIC_TOKEN}`;
+    const res = await fetch(url, { signal: opts?.signal });
+    if (!res.ok) return null;
+    const json: any = await res.json();
+    const steps: any[] = json?.routes?.[0]?.legs?.[0]?.steps || [];
+    const cues: LaneCue[] = [];
+    for (const s of steps) {
+      const loc = s?.maneuver?.location; // [lng, lat]
+      if (!Array.isArray(loc) || loc.length < 2) continue;
+      // Find a banner for this step that carries lane sub-components.
+      let lanes: LaneArrow[] | null = null;
+      for (const b of (s.bannerInstructions || [])) {
+        const comps = b?.sub?.components;
+        if (!Array.isArray(comps)) continue;
+        const laneComps = comps.filter((c: any) => c?.type === "lane");
+        if (!laneComps.length) continue;
+        lanes = laneComps.map((c: any): LaneArrow => ({
+          dirs: Array.isArray(c.directions) ? c.directions : [],
+          active: !!c.active,
+          activeDir: typeof c.active_direction === "string" ? c.active_direction : undefined,
+        }));
+        break; // first banner with lane data wins
+      }
+      if (lanes && lanes.length) cues.push({ lat: loc[1], lng: loc[0], lanes });
+    }
+    return cues;
+  } catch {
+    return null;
+  }
+}
+
+// How close the Google maneuver and a Mapbox cue must be to count as the same
+// turn, and how near the turn we start showing lanes.
+const LANE_MATCH_RADIUS_M = 30;
+const LANE_SHOW_WITHIN_M = 600;
+
+// Pick the lane set for the CURRENTLY upcoming maneuver. Matches the Google
+// maneuver location to the nearest Mapbox cue within a tight radius (fail-closed:
+// no close match → null) and only surfaces lanes once you're within ~600 m of
+// the turn, so the row doesn't sit up for the whole leg.
+export function pickLaneCue(
+  cues: LaneCue[] | null | undefined,
+  maneuver: LatLng | null | undefined,
+  distanceToManeuverM: number,
+): LaneArrow[] | null {
+  if (!cues || !cues.length || !maneuver) return null;
+  if (!(distanceToManeuverM <= LANE_SHOW_WITHIN_M)) return null;
+  let best: LaneCue | null = null;
+  let bestD = Infinity;
+  for (const c of cues) {
+    const d = segMeters([c.lng, c.lat], [maneuver.lng, maneuver.lat]);
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  if (!best || bestD > LANE_MATCH_RADIUS_M) return null;
+  return best.lanes;
+}

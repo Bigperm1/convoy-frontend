@@ -33,6 +33,7 @@ import {
   fetchRoutes, fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtEtaSec, stopSpeech, announce, haversineMeters,
 } from "../../src/nav";
+import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
@@ -807,6 +808,23 @@ export default function MapScreen() {
       });
     },
   });
+
+  // ===== Lane guidance (Mapbox) =====
+  // One Directions call per navigation session fetches per-maneuver lane cues;
+  // we match the upcoming Google maneuver to the nearest cue at render time and
+  // show lanes only when they agree (pickLaneCue is fail-closed).
+  const [laneCues, setLaneCues] = useState<LaneCue[] | null>(null);
+  useEffect(() => {
+    const steps = activeRoute?.steps;
+    if (!(navMode === "turn-by-turn") || !steps || steps.length === 0) { setLaneCues(null); return; }
+    const o = steps[0].start, d = steps[steps.length - 1].end;
+    let cancelled = false;
+    const ctrl = new AbortController();
+    fetchMapboxLaneCues(o, d, { signal: ctrl.signal })
+      .then((c) => { if (!cancelled) setLaneCues(c); })
+      .catch(() => {});
+    return () => { cancelled = true; ctrl.abort(); };
+  }, [activeRoute, navMode]);
 
   // ===== Proactive reroute recommendation (Nova) =====
   // While navigating, every 60s we re-check live traffic from the current
@@ -2151,7 +2169,7 @@ export default function MapScreen() {
             </View>
             {/* Category quick-search pills (Gas / Food / Coffee / …) directly
                 under the search bar, Google-Maps style. Results drop as pins. */}
-            <CategoryPills origin={coords} onResults={setPlacePins} />
+            <CategoryPills origin={coords} onResults={setPlacePins} onSelect={handlePlacePinPress} />
             {(() => {
               const selfLive = settings.avatarLive !== false && !!settings.activeCommunityId ? 1 : 0;
               const liveCount = selfLive + peerList.length;
@@ -2333,6 +2351,7 @@ export default function MapScreen() {
         const upcoming = activeRoute.steps[stepIdx];
         const verb = maneuverVerb(upcoming?.maneuver);
         const instruction = upcoming?.html ? upcoming.html : verb;
+        const lanes = pickLaneCue(laneCues, maneuverCoord, tbt.distanceToManeuverM);
         return (
           <TurnByTurnNav
             maneuverIcon={maneuverIcon(upcoming?.maneuver, upcoming?.html)}
@@ -2344,6 +2363,7 @@ export default function MapScreen() {
             muted={navMuted}
             onToggleMute={() => setNavMuted((m) => { const nv = !m; void updateGlobalSettings({ novaMuted: nv }); return nv; })}
             onEnd={endNav}
+            lanes={lanes}
           />
         );
       })()}

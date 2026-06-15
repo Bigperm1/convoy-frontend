@@ -9,14 +9,26 @@
 // family with the existing search bar. The active pill fills convoy-yellow so
 // it's obvious which category is currently showing; tapping it again clears
 // the pins (toggle off).
-import React, { useRef, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Pressable } from "react-native";
+import React, { useRef, useState, useEffect } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Pressable, Animated, Easing } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { GOOGLE_MAPS_KEY } from "../api";
 import { getSettings } from "../settings";
 import { passesGasFilters, type Octane } from "../gasJockey";
 
-export type PlaceResult = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
+export type PlaceResult = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean; address?: string; rating?: number; ratingCount?: number; distanceM?: number };
+
+// Format a straight-line distance (m) for the results dropdown, in the driver's unit.
+function fmtDist(m: number | undefined, unit: "kmh" | "mph"): string {
+  if (m == null) return "";
+  if (unit === "mph") { const mi = m / 1609.34; return (mi < 10 ? mi.toFixed(mi < 1 ? 2 : 1) : String(Math.round(mi))) + " mi"; }
+  const km = m / 1000; return (km < 10 ? km.toFixed(km < 1 ? 2 : 1) : String(Math.round(km))) + " km";
+}
+// Rough drive-time estimate from straight-line distance (~32 km/h city average).
+function fmtEta(m: number | undefined): string {
+  if (m == null) return "";
+  return `${Math.max(1, Math.round((m / 1000) / 32 * 60))} min`;
+}
 
 type Category = { key: string; label: string; icon: any; query: string };
 
@@ -73,7 +85,7 @@ async function textSearchNearby(query: string, origin: { lat: number; lng: numbe
   try {
     // fuelOptions is a higher-cost field (Enterprise SKU), so we only request it
     // for the Gas category — every other pill uses the cheap basic field mask.
-    const fieldMask = "places.id,places.location,places.displayName,places.formattedAddress"
+    const fieldMask = "places.id,places.location,places.displayName,places.formattedAddress,places.rating,places.userRatingCount"
       + (includeFuel ? ",places.fuelOptions" : "");
     const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
       method: "POST",
@@ -114,14 +126,19 @@ async function textSearchNearby(query: string, origin: { lat: number; lng: numbe
           : undefined;
         const v = premVal(prem?.price);
         const lat = p.location.latitude, lng = p.location.longitude;
+        const d = distM(origin.lat, origin.lng, lat, lng);
         return {
           v,
-          dist: distM(origin.lat, origin.lng, lat, lng),
+          dist: d,
           place: {
             id: p.id, lat, lng,
             label: p.displayName?.text || p.formattedAddress || query,
+            address: p.formattedAddress,
+            rating: typeof p.rating === "number" ? p.rating : undefined,
+            ratingCount: typeof p.userRatingCount === "number" ? p.userRatingCount : undefined,
             price: v != null ? "$" + v.toFixed(2) : undefined,
             isGas: includeFuel,
+            distanceM: d,
           } as PlaceResult,
         };
       });
@@ -154,21 +171,47 @@ async function textSearchNearby(query: string, origin: { lat: number; lng: numbe
 type Props = {
   origin?: { lat: number; lng: number } | null;
   onResults: (places: PlaceResult[]) => void;
+  // Tapping a result row routes there (same as tapping its map pin). Optional —
+  // wired from the map; when absent the dropdown is read-only.
+  onSelect?: (place: PlaceResult) => void;
 };
 
-export default function CategoryPills({ origin, onResults }: Props) {
+export default function CategoryPills({ origin, onResults, onSelect }: Props) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  // Results for the active category — drives the dropdown list (and the pins,
+  // via onResults). Kept in sync with what the map shows.
+  const [results, setResults] = useState<PlaceResult[]>([]);
   // Monotonic request id. Switching/clearing bumps it so a slower in-flight
   // search can't repopulate pins for a category the user has since left.
   const reqSeq = useRef(0);
+
+  // Results dropdown drop-in animation.
+  const dropAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (activeKey) {
+      dropAnim.setValue(0);
+      Animated.timing(dropAnim, { toValue: 1, duration: 180, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    }
+  }, [activeKey, dropAnim]);
+
+  const unit = getSettings().speedUnit;
+
+  const closeDropdown = () => {
+    reqSeq.current++;
+    setActiveKey(null);
+    setLoadingKey(null);
+    setResults([]);
+    onResults([]);
+  };
 
   const run = async (cat: Category) => {
     // Tapping the already-active pill clears the results (toggle off).
     if (activeKey === cat.key) {
       reqSeq.current++;            // cancel any in-flight search
       setActiveKey(null);
+      setResults([]);
       onResults([]);
       return;
     }
@@ -181,12 +224,14 @@ export default function CategoryPills({ origin, onResults }: Props) {
     // a stray "ghost" pin from the previous category sitting under a new one
     // (e.g. the green cheapest-gas chip lingering on the Food / Car Wash view).
     setActiveKey(cat.key);
+    setResults([]);
     onResults([]);
     setLoadingKey(cat.key);
-    const results = await textSearchNearby(cat.query, origin, cat.key === "gas");
+    const found = await textSearchNearby(cat.query, origin, cat.key === "gas");
     if (myReq !== reqSeq.current) return;  // a newer tap superseded this search
     setLoadingKey(null);
-    onResults(results);
+    setResults(found);
+    onResults(found);
   };
 
   const renderPill = (cat: Category) => {
@@ -225,6 +270,63 @@ export default function CategoryPills({ origin, onResults }: Props) {
           <Text style={styles.pillText}>More</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Results dropdown — animated panel listing the active category's hits
+          (name, address, rating + count or gas premium price, time · distance). */}
+      {activeKey && (
+        <Animated.View
+          style={[
+            styles.dropdown,
+            { opacity: dropAnim, transform: [{ translateY: dropAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] }) }] },
+          ]}
+        >
+          <View style={styles.dropHeader}>
+            <Text style={styles.dropTitle}>Results</Text>
+            <TouchableOpacity onPress={closeDropdown} hitSlop={10} testID="results-close">
+              <MaterialCommunityIcons name="close" size={20} color="#9A9A9E" />
+            </TouchableOpacity>
+          </View>
+          {loadingKey ? (
+            <View style={styles.dropLoading}>
+              <ActivityIndicator size="small" color="#2DEC86" />
+              <Text style={styles.dropLoadingText}>Searching…</Text>
+            </View>
+          ) : results.length === 0 ? (
+            <Text style={styles.dropEmpty}>No results nearby</Text>
+          ) : (
+            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {results.map((r, i) => (
+                <TouchableOpacity
+                  key={r.id}
+                  testID={`result-${i}`}
+                  activeOpacity={onSelect ? 0.7 : 1}
+                  onPress={() => onSelect?.(r)}
+                  style={styles.resultRow}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.resultName} numberOfLines={1}>{i + 1}. {r.label}</Text>
+                    {!!r.address && <Text style={styles.resultAddr} numberOfLines={1}>{r.address}</Text>}
+                    {r.isGas ? (
+                      <Text style={styles.gasPrice} numberOfLines={1}>
+                        {r.price ? `Premium ${r.price}` : "Premium —"}{r.cheapest ? "   ·  cheapest" : ""}
+                      </Text>
+                    ) : (
+                      <View style={styles.ratingRow}>
+                        {[0, 1, 2, 3, 4].map((d) => (
+                          <View key={d} style={[styles.dot, d < Math.round(r.rating ?? 0) ? styles.dotOn : styles.dotOff]} />
+                        ))}
+                        {typeof r.ratingCount === "number" && <Text style={styles.ratingCount}>{r.ratingCount}</Text>}
+                      </View>
+                    )}
+                    <Text style={styles.timeDist}>{fmtEta(r.distanceM)} · {fmtDist(r.distanceM, unit)}</Text>
+                  </View>
+                  {onSelect && <MaterialCommunityIcons name="chevron-right" size={20} color="#5A5A5E" style={{ alignSelf: "center" }} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+        </Animated.View>
+      )}
 
       <Modal visible={moreOpen} transparent animationType="slide" onRequestClose={() => setMoreOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setMoreOpen(false)}>
@@ -293,4 +395,36 @@ const styles = StyleSheet.create({
   gridLabel: { color: "#808080", fontSize: 11, fontWeight: "600", textAlign: "center" },
   doneBtn: { marginTop: 6, alignSelf: "center", paddingHorizontal: 22, paddingVertical: 10, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.10)" },
   doneText: { color: "#F4F4F4", fontWeight: "600", fontSize: 14 },
+
+  // ===== Results dropdown =====
+  dropdown: {
+    marginTop: 8,
+    alignSelf: "flex-start",
+    width: "92%", maxWidth: 380,
+    backgroundColor: "rgba(20,21,24,0.97)",
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.14)",
+    paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8,
+    shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: { width: 0, height: 8 },
+    elevation: 16, zIndex: 50,
+  },
+  dropHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
+  dropTitle: { color: "#F4F4F4", fontSize: 17, fontWeight: "700", letterSpacing: -0.2 },
+  dropLoading: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 18, justifyContent: "center" },
+  dropLoadingText: { color: "#9A9A9E", fontSize: 13 },
+  dropEmpty: { color: "#9A9A9E", fontSize: 13, textAlign: "center", paddingVertical: 18 },
+  resultRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.08)",
+  },
+  resultName: { color: "#F4F4F4", fontSize: 15, fontWeight: "700", letterSpacing: -0.1 },
+  resultAddr: { color: "#9A9A9E", fontSize: 12, marginTop: 1 },
+  ratingRow: { flexDirection: "row", alignItems: "center", marginTop: 5 },
+  dot: { width: 7, height: 7, borderRadius: 4, marginRight: 3 },
+  dotOn: { backgroundColor: "#2DEC86" },
+  dotOff: { backgroundColor: "rgba(255,255,255,0.18)" },
+  ratingCount: { color: "#9A9A9E", fontSize: 11, marginLeft: 4, fontWeight: "600" },
+  gasPrice: { color: "#2DEC86", fontSize: 13, fontWeight: "800", marginTop: 5, letterSpacing: -0.1 },
+  timeDist: { color: "#9A9A9E", fontSize: 12, marginTop: 4, fontWeight: "500" },
 });

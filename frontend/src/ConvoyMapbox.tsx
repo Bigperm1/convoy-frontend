@@ -337,42 +337,18 @@ function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
 // The "Place pins" setting (showPins) hides the pure pin GLYPHS (teardrop under
 // a name, gas-pump badge) while ALWAYS keeping price chips and name labels. A
 // no-price gas station with pins off has nothing to draw → no marker at all.
-function PlaceMarker({ place, onPress, showPins = true }: { place: PlacePoint; onPress?: (p: PlacePoint) => void; showPins?: boolean }) {
-  let content: React.ReactNode = null;
-  if (place.isGas) {
-    if (place.price) {
-      content = (
-        <View style={[styles.placeLabel, styles.placePriceLabel, place.cheapest ? styles.placePriceCheapest : null]}>
-          <Text style={[styles.placeLabelText, styles.placePriceText, styles.placeTextCenter]} numberOfLines={1}>{place.price}</Text>
-        </View>
-      );
-    } else if (showPins) {
-      content = (
-        <View style={styles.gasGlyph}>
-          <MaterialCommunityIcons name="gas-station" size={20} color="#FFD60A" />
-        </View>
-      );
-    }
-  } else {
-    content = (
-      <View style={styles.placePinWrap}>
-        <View style={styles.placeLabel}>
-          <Text style={[styles.placeLabelText, styles.placeTextCenter]} numberOfLines={1}>{place.label}</Text>
-        </View>
-        {showPins && (
-          <View style={styles.locPin}>
-            {/* Black (larger) behind yellow (smaller) = a clean black outline. */}
-            <Ionicons name="location" size={32} color="#000000" />
-            <Ionicons name="location" size={25} color="#FFD60A" style={styles.locPinInner} />
-          </View>
-        )}
-      </View>
-    );
-  }
-  if (!content) return null;
+function PlaceMarker({ place, index, onPress }: { place: PlacePoint; index: number; onPress?: (p: PlacePoint) => void }) {
+  // Unified numbered result pin — green background, thin grey border, Convoy
+  // font. The number matches the row order in the Results dropdown so the list
+  // and the map line up (1, 2, 3 …). Gas premium price + ratings live in the
+  // dropdown now, keeping the map itself clean.
   return (
-    <MarkerView coordinate={[place.lng, place.lat]} anchor={place.isGas ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 1 }} allowOverlap>
-      <Pressable onPress={() => onPress?.(place)} hitSlop={6}>{content}</Pressable>
+    <MarkerView coordinate={[place.lng, place.lat]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+      <Pressable onPress={() => onPress?.(place)} hitSlop={6}>
+        <View style={styles.placeNumPin}>
+          <Text style={styles.placeNumText}>{index + 1}</Text>
+        </View>
+      </Pressable>
     </MarkerView>
   );
 }
@@ -811,8 +787,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         ))}
 
         {/* Category quick-search place pins. */}
-        {(places || []).map((p) => (
-          <PlaceMarker key={`place_${p.id}`} place={p} onPress={onPlacePress} showPins={showPlacePins} />
+        {(places || []).map((p, i) => (
+          <PlaceMarker key={`place_${p.id}`} place={p} index={i} onPress={onPlacePress} />
         ))}
 
         {/* Arrival-weather chip floating above the destination. */}
@@ -894,6 +870,17 @@ const styles = StyleSheet.create({
   },
   placeLabelText: { color: "#000000", fontSize: 11, fontWeight: "700" },
   placeTextCenter: { textAlign: "center" },
+  // Unified numbered result pin (green bg, thin grey border, Convoy font).
+  placeNumPin: {
+    minWidth: 30, height: 30, borderRadius: 15,
+    paddingHorizontal: 7,
+    backgroundColor: "#2DEC86",
+    borderWidth: 1, borderColor: "#8E8E93",
+    alignItems: "center", justifyContent: "center",
+    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 3, shadowOffset: { width: 0, height: 1 },
+    elevation: 4,
+  },
+  placeNumText: { color: "#0A0A0A", fontSize: 14, fontWeight: "800" },
   locPin: { alignItems: "center", justifyContent: "center" },
   locPinInner: { position: "absolute" },
   placePriceLabel: { backgroundColor: "#FFD60A", borderWidth: 1, borderColor: "rgba(0,0,0,0.55)" },

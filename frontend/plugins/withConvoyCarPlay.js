@@ -79,16 +79,40 @@ class PhoneSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
 const CAR_DELEGATE_SWIFT = `import Foundation
 import CarPlay
+import UIKit
+import React
+import Expo
 
-// Forwards CarPlay scene lifecycle to react-native-carplay's RNCarPlay bridge.
-// 2-arg form (window taken from the scene) matches the library's example.
+// CarPlay scene delegate.
+//
+// 1) Forwards the CarPlay scene lifecycle to react-native-carplay (RNCarPlay),
+//    which owns the CPTemplate hierarchy (map template, maneuver cards, trip
+//    estimates). 2-arg connect form (window taken from the scene).
+//
+// 2) Mounts Convoy's React Native car dashboard (the "ConvoyCarSurface" JS root,
+//    registered at app start in src/carplay/registerCarSurface.ts) onto the
+//    CarPlay window OURSELVES, via Expo's bridgeless root-view factory.
+//    react-native-carplay's own MapTemplate \`component\` path mounts the window
+//    with RCTRootView(initWithBridge:), which renders NOTHING under the New
+//    Architecture (bridgeless, RN 0.81 / Expo SDK 54) -> blank car screen. The
+//    library's native render block is patched out (patches/react-native-carplay
+//    +2.4.1-beta.0.patch), and we instead create the surface on the ALREADY
+//    running React host with rootViewFactory.view(withModuleName:) and set it as
+//    the car window's root view controller. CarPlay draws this view beneath its
+//    template chrome (the standard CarPlay map-app layering).
 @objc(CarSceneDelegate)
 class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
   func templateApplicationScene(
     _ templateApplicationScene: CPTemplateApplicationScene,
     didConnect interfaceController: CPInterfaceController
   ) {
-    RNCarPlay.connect(with: interfaceController, window: templateApplicationScene.carWindow)
+    let carWindow = templateApplicationScene.carWindow
+
+    // Let react-native-carplay set up its interface controller + templates.
+    RNCarPlay.connect(with: interfaceController, window: carWindow)
+
+    // Mount the Convoy RN dashboard onto the CarPlay window (bridgeless-safe).
+    mountConvoyDashboard(on: carWindow)
   }
 
   func templateApplicationScene(
@@ -96,6 +120,55 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     didDisconnectInterfaceController interfaceController: CPInterfaceController
   ) {
     RNCarPlay.disconnect()
+  }
+
+  // MARK: - Convoy car-window mount
+
+  private func mountConvoyDashboard(on window: CPWindow) {
+    guard let appDelegate = UIApplication.shared.delegate as? AppDelegate,
+          let factory = appDelegate.reactNativeFactory else {
+      return
+    }
+
+    // Create a NEW root view for the "ConvoyCarSurface" module on the EXISTING
+    // React host. We MUST use ExpoReactRootViewFactory.superView(...), NOT the
+    // normal view(withModuleName:) path. The normal path re-runs Expo's
+    // react-delegate handlers, including ExpoUpdatesReactDelegateHandler, which
+    // calls expo-updates' EnabledAppController.start() a SECOND time -> a Swift
+    // precondition failure / crash (the phone window already started it on
+    // launch). superView(...) calls the base RCTRootViewFactory view creation
+    // directly, BYPASSING those one-time handlers, and just mints another
+    // surface on the already-running host. This mirrors Expo's own internal
+    // recreateRootView() code, which casts to ExpoReactRootViewFactory and calls
+    // superView for exactly this reason.
+    let rootView: UIView
+    if let expoFactory = factory.rootViewFactory as? ExpoReactRootViewFactory {
+      rootView = expoFactory.superView(
+        withModuleName: "ConvoyCarSurface",
+        initialProperties: nil,
+        launchOptions: [:]
+      )
+    } else {
+      // Fallback (should not happen in an Expo app): plain factory view. This
+      // path re-runs the handlers and can crash, so it is last-resort only.
+      rootView = factory.rootViewFactory.view(
+        withModuleName: "ConvoyCarSurface",
+        initialProperties: nil,
+        launchOptions: nil
+      )
+    }
+
+    let viewController = UIViewController()
+    rootView.translatesAutoresizingMaskIntoConstraints = false
+    viewController.view.addSubview(rootView)
+    NSLayoutConstraint.activate([
+      rootView.leadingAnchor.constraint(equalTo: viewController.view.leadingAnchor),
+      rootView.trailingAnchor.constraint(equalTo: viewController.view.trailingAnchor),
+      rootView.topAnchor.constraint(equalTo: viewController.view.topAnchor),
+      rootView.bottomAnchor.constraint(equalTo: viewController.view.bottomAnchor),
+    ])
+
+    window.rootViewController = viewController
   }
 }
 `;

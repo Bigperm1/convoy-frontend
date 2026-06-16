@@ -125,7 +125,7 @@ const SHOW_EXTRA_ROUTE_PILLS = false;
 // The bottom tab bar's fixed height (mirrors app/(app)/_layout.tsx). Banners
 // float just above it; the FABs + speedo + weather lift above the active
 // banner. The tab bar itself ALWAYS stays visible so the user can leave Maps.
-const TAB_BAR_H = 94;
+const TAB_BAR_H = Platform.OS === 'ios' ? 86 : 84;
 
 // Cold-start intro overlay state. Module-level so it persists across map
 // re-mounts within a single app launch — the logo cover only plays once, on a

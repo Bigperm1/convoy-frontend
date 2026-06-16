@@ -124,13 +124,12 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.logoSection}>
-            <Text style={styles.brandName}>CONVOY</Text>
+            {/* Branded hero (wordmark + logo + tagline are baked into the image). */}
             <Image
-              source={require('../../assets/images/brand-mark.png')}
-              style={styles.logo}
+              source={require('../../assets/log_in_screen.png')}
+              style={styles.hero}
               resizeMode="contain"
             />
-            <Text style={styles.tagline}>Drive together.</Text>
           </View>
 
           <View style={styles.formCard}>
@@ -239,10 +238,8 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0A0A0A' },
   container: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingVertical: 40, paddingHorizontal: 20, justifyContent: 'center' },
-  logoSection: { alignItems: 'center', marginBottom: 40 },
-  brandName: { fontSize: 40, fontWeight: '800', color: '#2DEC86', letterSpacing: 4, marginBottom: 4, textAlign: 'center' },
-    logo: { width: 170, height: 170, marginBottom: 16 },
-  tagline: { fontSize: 21, color: '#808080', textAlign: 'center', fontWeight: '600', letterSpacing: 0.3 },
+  logoSection: { alignItems: 'center', marginBottom: 32 },
+  hero: { width: 300, height: 300, borderRadius: 24 },
   formCard: { backgroundColor: '#1a1a1a', borderRadius: 16, padding: 20, gap: 18, borderWidth: 1, borderColor: '#333' },
   inputGroup: { gap: 8 },
   label: { color: '#808080', fontSize: 13, fontWeight: '500' },

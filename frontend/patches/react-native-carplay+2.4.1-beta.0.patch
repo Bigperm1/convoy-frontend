@@ -98,3 +98,24 @@ index 01dbabd..bacb6f0 100644
          }
        }
      }.build()
+diff --git a/node_modules/react-native-carplay/ios/RNCarPlay.m b/node_modules/react-native-carplay/ios/RNCarPlay.m
+index 153dbad..3e6f610 100644
+--- a/node_modules/react-native-carplay/ios/RNCarPlay.m
++++ b/node_modules/react-native-carplay/ios/RNCarPlay.m
+@@ -978,9 +978,13 @@ RCT_EXPORT_METHOD(updateMapTemplateMapButtons:(NSString*) templateId mapButtons:
+     }
+ 
+     if ([config objectForKey:@"render"]) {
+-        RCTRootView *rootView = [[RCTRootView alloc] initWithBridge:self.bridge moduleName:templateId initialProperties:@{}];
+-        RNCarPlayViewController *viewController = [[RNCarPlayViewController alloc] initWithRootView:rootView];
+-        store.window.rootViewController = viewController;
++        // Convoy patch: intentionally disabled. react-native-carplay mounts the
++        // CarPlay window with RCTRootView(initWithBridge:), which renders NOTHING
++        // under the New Architecture (bridgeless, RN 0.81 / Expo SDK 54) -> blank
++        // car screen. Convoy instead mounts the car window from CarSceneDelegate
++        // (plugins/withConvoyCarPlay.js) using Expo's bridgeless root-view factory
++        // (rootViewFactory viewWithModuleName:). Leaving this block empty stops the
++        // dead bridge path from clobbering that window's rootViewController.
+     }
+ }
+ 

@@ -150,7 +150,10 @@ function carScaleForZoom(z: number): number {
   }
   return s[s.length - 1][1];
 }
-const CAR_MODEL_HEADING_OFFSET = 0; // deg; if the car faces wrong, try 90/180/270 (and/or negate heading)
+const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° off (sideways across the road),
+// so we rotate it +90 to point along the direction of travel. If after this the car points exactly
+// BACKWARDS, flip to 270; if it's still sideways the other way, that means -90 didn't apply — but 90/270
+// are the two real candidates (the model is a constant 90° off, not a sign error).
 // Self-illumination for the 3D car per light preset. Dawn + night are dim, so
 // the tinted paint renders near-black with only scene light — lift those so the
 // color shows. Bright presets (day/dusk/satellite) already light it, so keep 0
@@ -389,10 +392,6 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Live traffic-congestion gradient for the route preview (Mapbox Directions).
   // Null unless we have a fetched congestion route to paint (preview-only).
   const [congestionRoute, setCongestionRoute] = useState<{ coordinates: [number, number][]; gradient: any } | null>(null);
-  // Live 3D-car scale, recomputed from the camera zoom so the car resizes
-  // smoothly (see carScaleForZoom + onCameraChanged). Throttled by zoom delta.
-  const [carScale, setCarScale] = useState<number>(() => carScaleForZoom(17));
-  const lastScaleZoomRef = useRef<number>(17);
   // Last heading reported to onHeading — throttle so a ~constant bearing during
   // nav doesn't spam the parent (same pattern as the car-scale zoom delta).
   const lastHeadingRef = useRef<number>(0);
@@ -469,6 +468,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   ) / 10;
   const followPitchDeg = navigationActive && headingUp ? CHASE_PITCH_DEG : 0;
 
+  // While category-search result pins are on the map (preview only), we frame
+  // ALL of them and HOLD that overview — native follow is suspended (see the
+  // Camera's followUserLocation below) until the pins clear (a result is tapped
+  // or the dropdown is closed).
+  const placesShown = (places?.length ?? 0) > 0 && !navigationActive;
+
   // When nav ends while NOT following (the driver had panned away), flatten the
   // tilt / heading back to a calm north-up overview. While following, the native
   // follow props already drop the pitch — no imperative move needed.
@@ -514,6 +519,35 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routes, destination, navigationActive, followUser]);
+
+  // ===== Preview: fit the camera to ALL category-search result pins =====
+  // When pins drop (a pill's results), frame every pin (plus the driver) and
+  // hold it — followUserLocation is suspended via `placesShown`, so the overview
+  // stays put until the pins clear. Refits whenever the pin set changes.
+  useEffect(() => {
+    const cam = cameraRef.current;
+    if (!cam || !readyRef.current || !placesShown) return;
+    let minLat = Infinity, minLng = Infinity, maxLat = -Infinity, maxLng = -Infinity;
+    const add = (lat: number, lng: number) => {
+      if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
+      if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng;
+    };
+    (places || []).forEach((p) => add(p.lat, p.lng));
+    if (user && typeof user.lat === "number" && typeof user.lng === "number") add(user.lat, user.lng);
+    if (!Number.isFinite(minLat)) return;
+    try {
+      cam.setCamera({
+        // Big top padding clears the search bar + pills + the results dropdown
+        // (which overlays the top-left) so no pin hides behind the panel.
+        bounds: { ne: [maxLng, maxLat], sw: [minLng, minLat], paddingTop: 340, paddingBottom: 110, paddingLeft: 50, paddingRight: 50 },
+        heading: 0,
+        pitch: 0,
+        animationDuration: 500,
+        animationMode: "easeTo",
+      });
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [places, placesShown]);
 
   // ===== Route congestion gradient (Mapbox Directions) — PREVIEW only =====
   // On a new destination (and while NOT navigating) fetch the live driving-traffic
@@ -631,14 +665,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           const active = !!state?.gestures?.isGestureActive;
           if (active && !gesturingRef.current) { gesturingRef.current = true; onUserPan?.(); }
           else if (!active && gesturingRef.current) { gesturingRef.current = false; }
-          // Resize the 3D car continuously from the live zoom (smooth, vs the
-          // integer-zoom stepping of a modelScale zoom-expression). Throttled by
-          // a small delta so steady-zoom nav does no extra work.
-          const z = state?.properties?.zoom;
-          if (typeof z === "number" && Math.abs(z - lastScaleZoomRef.current) > 0.03) {
-            lastScaleZoomRef.current = z;
-            setCarScale(carScaleForZoom(z));
-          }
+          // (3D car scale is driven natively by the modelScale zoom expression —
+          // CAR_MODEL_SCALE_BY_ZOOM — so it tracks the live zoom every frame with
+          // no JS lag; nothing to recompute here.)
           // Report the live bearing for the on-map compass, throttled to ~0.5°.
           const h = state?.properties?.heading;
           if (typeof h === "number" && Math.abs(h - lastHeadingRef.current) > 0.5) {
@@ -680,7 +709,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
 
         <Camera
           ref={cameraRef}
-          followUserLocation={followUser}
+          followUserLocation={followUser && !placesShown}
           followUserMode={headingUp ? UserTrackingMode.FollowWithCourse : UserTrackingMode.Follow}
           followZoomLevel={followZoom}
           followPitch={followPitchDeg}
@@ -812,7 +841,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
                 modelId: "convoyCar",
                 modelType: "location-indicator",
                 modelEmissiveStrength: selfEmissive,
-                modelScale: [carScale, carScale, carScale],
+                modelScale: CAR_MODEL_SCALE_BY_ZOOM,
                 modelRotation: [0, 0, ((selfCar.heading ?? 0) + CAR_MODEL_HEADING_OFFSET)],
                 modelCastShadows: false,
                 modelReceiveShadows: false,

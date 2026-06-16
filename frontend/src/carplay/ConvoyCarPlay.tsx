@@ -202,7 +202,11 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
         if (isIOS) {
           const mapTemplate = new MapTemplate({
             id: 'convoy-carplay-map',
-            component: CarSurface,
+            // NOTE: no `component` here. The car-window dashboard (CarSurface) is
+            // mounted natively by CarSceneDelegate via Expo's bridgeless root-view
+            // factory, registered under 'ConvoyCarSurface' (see registerCarSurface.ts).
+            // react-native-carplay's own `component` path uses RCTRootView(initWithBridge:)
+            // which renders nothing under the New Architecture, so we bypass it.
             tabTitle: 'Map',
             tabSystemImageName: 'map',
             guidanceBackgroundColor: '#0B0B0C',
@@ -211,29 +215,19 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
           });
           mapTemplateRef.current = mapTemplate;
 
-          const commsTemplate = new ListTemplate({
-            id: 'convoy-carplay-comms',
-            tabTitle: 'Comms',
-            tabSystemImageName: 'mic',
-            sections: buildCommsSections(getCarState().peers),
-            // TODO(PTT): wire tap-to-talk here; true hands-free PTT will use
-            // Apple's PushToTalk framework (separate entitlement) later.
-            onItemSelect: async () => {},
-          });
-          commsTemplateRef.current = commsTemplate;
-
-          try { CarPlay.enableNowPlaying(true); } catch {}
-          const musicTemplate = new NowPlayingTemplate({
-            id: 'convoy-carplay-music',
-            tabTitle: 'Music',
-            tabSystemImageName: 'music.note',
-          });
-
-          const tabBar = new TabBarTemplate({
-            id: 'convoy-carplay-tabs',
-            templates: [mapTemplate, commsTemplate, musicTemplate],
-          });
-          CarPlay.setRootTemplate(tabBar);
+          // ── CARPLAY CRASH ISOLATION (OTA, free) ───────────────────────
+          // Connecting to CarPlay was crashing the whole app — the phone
+          // scene died too (same process, killed by the CarPlay watchdog
+          // when nothing drew on the car screen in time). Stripped the root
+          // to ONLY the MapTemplate to (a) stop the crash taking the phone
+          // down and (b) isolate the cause. The Comms (ListTemplate), Music
+          // (NowPlayingTemplate + enableNowPlaying) and the TabBarTemplate
+          // wrapper are the most common CarPlay crashers, so they're out for
+          // now. If a single MapTemplate renders without crashing, one of
+          // those was the offender and we re-add them one at a time. If it
+          // STILL crashes, the fault is the native car-window RN bridge /
+          // scene setup, which needs a native rebuild (not an OTA).
+          CarPlay.setRootTemplate(mapTemplate);
         }
         // Android Auto is NOT built here. The head unit can launch the car app
         // even when this phone screen isn't mounted, so its UI is owned by the

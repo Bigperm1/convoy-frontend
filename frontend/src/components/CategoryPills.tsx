@@ -29,6 +29,15 @@ function fmtEta(m: number | undefined): string {
   if (m == null) return "";
   return `${Math.max(1, Math.round((m / 1000) / 32 * 60))} min`;
 }
+// Trim a Google formatted address to just street + city so the dropdown stays
+// compact — drops the province/state, postal code, and country tail. Google
+// returns e.g. "315 Linden St, San Francisco, CA 94102, USA" → keep the first
+// two comma parts ("315 Linden St, San Francisco").
+function shortAddr(s?: string): string | undefined {
+  if (!s) return undefined;
+  const parts = s.split(",").map((x) => x.trim()).filter(Boolean);
+  return parts.length <= 2 ? parts.join(", ") : parts.slice(0, 2).join(", ");
+}
 
 type Category = { key: string; label: string; icon: any; query: string };
 
@@ -133,7 +142,7 @@ async function textSearchNearby(query: string, origin: { lat: number; lng: numbe
           place: {
             id: p.id, lat, lng,
             label: p.displayName?.text || p.formattedAddress || query,
-            address: p.formattedAddress,
+            address: shortAddr(p.formattedAddress),
             rating: typeof p.rating === "number" ? p.rating : undefined,
             ratingCount: typeof p.userRatingCount === "number" ? p.userRatingCount : undefined,
             price: v != null ? "$" + v.toFixed(2) : undefined,
@@ -303,13 +312,13 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
                   onPress={() => onSelect?.(r)}
                   style={styles.resultRow}
                 >
-                  <View style={{ flex: 1 }}>
+                  <View style={styles.resultLeft}>
                     <Text style={styles.resultName} numberOfLines={1}>{i + 1}. {r.label}</Text>
                     {!!r.address && <Text style={styles.resultAddr} numberOfLines={1}>{r.address}</Text>}
+                  </View>
+                  <View style={styles.resultRight}>
                     {r.isGas ? (
-                      <Text style={styles.gasPrice} numberOfLines={1}>
-                        {r.price ? `Premium ${r.price}` : "Premium —"}{r.cheapest ? "   ·  cheapest" : ""}
-                      </Text>
+                      <Text style={styles.gasPrice} numberOfLines={1}>{r.price ? `Premium ${r.price}` : "Premium —"}</Text>
                     ) : (
                       <View style={styles.ratingRow}>
                         {[0, 1, 2, 3, 4].map((d) => (
@@ -318,7 +327,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
                         {typeof r.ratingCount === "number" && <Text style={styles.ratingCount}>{r.ratingCount}</Text>}
                       </View>
                     )}
-                    <Text style={styles.timeDist}>{fmtEta(r.distanceM)} · {fmtDist(r.distanceM, unit)}</Text>
+                    <Text style={styles.timeDist} numberOfLines={1}>{fmtEta(r.distanceM)} · {fmtDist(r.distanceM, unit)}</Text>
                   </View>
                   {onSelect && <MaterialCommunityIcons name="chevron-right" size={20} color="#5A5A5E" style={{ alignSelf: "center" }} />}
                 </TouchableOpacity>
@@ -414,17 +423,19 @@ const styles = StyleSheet.create({
   dropLoadingText: { color: "#9A9A9E", fontSize: 13 },
   dropEmpty: { color: "#9A9A9E", fontSize: 13, textAlign: "center", paddingVertical: 18 },
   resultRow: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    paddingVertical: 10,
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingVertical: 9,
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.08)",
   },
+  resultLeft: { flex: 1 },
+  resultRight: { alignItems: "flex-end", maxWidth: 140 },
   resultName: { color: "#F4F4F4", fontSize: 15, fontWeight: "700", letterSpacing: -0.1 },
-  resultAddr: { color: "#9A9A9E", fontSize: 12, marginTop: 1 },
-  ratingRow: { flexDirection: "row", alignItems: "center", marginTop: 5 },
-  dot: { width: 7, height: 7, borderRadius: 4, marginRight: 3 },
+  resultAddr: { color: "#9A9A9E", fontSize: 12, marginTop: 2 },
+  ratingRow: { flexDirection: "row", alignItems: "center" },
+  dot: { width: 7, height: 7, borderRadius: 4, marginLeft: 3 },
   dotOn: { backgroundColor: "#2DEC86" },
   dotOff: { backgroundColor: "rgba(255,255,255,0.18)" },
   ratingCount: { color: "#9A9A9E", fontSize: 11, marginLeft: 4, fontWeight: "600" },
-  gasPrice: { color: "#2DEC86", fontSize: 13, fontWeight: "800", marginTop: 5, letterSpacing: -0.1 },
-  timeDist: { color: "#9A9A9E", fontSize: 12, marginTop: 4, fontWeight: "500" },
+  gasPrice: { color: "#2DEC86", fontSize: 14, fontWeight: "800", letterSpacing: -0.1 },
+  timeDist: { color: "#9A9A9E", fontSize: 12, marginTop: 2, fontWeight: "500" },
 });

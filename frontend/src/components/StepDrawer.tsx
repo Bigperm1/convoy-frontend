@@ -15,7 +15,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 export const DRAWER_HEIGHT = 300;   // height of the slide-up step list
-const TAB_BAR_H = Platform.OS === 'ios' ? 88 : 94;  // iOS: tuck flush under the (taller) tab bar so no map sliver shows; Android unchanged
+// Must match the real tab bar in app/(app)/_layout.tsx EXACTLY: height (86 iOS / 84 Android)
+// + (Android-only) bottom safe-area inset. iOS adds NO inset there, so we must not either.
+const TAB_BAR_H = Platform.OS === 'ios' ? 86 : 84;
 const BAR_H = 80;                   // approx height of the collapsed summary bar
 
 // Parse a formatted distance ("42 km", "800 m", "2.2 mi") to meters for the live
@@ -67,10 +69,10 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
   // 0 = step list hidden (tucked behind the bar), 1 = fully open.
   const anim = useRef(new Animated.Value(0)).current;
   const [expanded, setExpanded] = React.useState(false);
-  // Android edge-to-edge draws behind the system nav buttons. Lift the drawer by
-  // the real device bottom inset — the SAME value the tab bar adds (see
-  // app/(app)/_layout.tsx) — so it stays flush on top of the now-taller tab bar
-  // instead of hiding behind the nav buttons. iOS contributes 0 → layout unchanged.
+  // Match _layout.tsx's tab bar: it adds the bottom safe-area inset on ANDROID ONLY
+  // (edge-to-edge nav buttons); iOS bakes the home-indicator room into its fixed 86pt
+  // height and adds nothing. Adding insets.bottom on iOS here double-counted the safe
+  // area and floated the drawer ~36px above the tab bar (a map sliver showed through).
   const insets = useSafeAreaInsets();
   const navInset = Platform.OS === "android" ? insets.bottom : 0;
 

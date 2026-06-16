@@ -11,3 +11,4 @@
 // src/carplay/AndroidAutoRoot.tsx for why "AndroidAuto" must be registered.
 import 'expo-router/entry';
 import './src/carplay/registerAndroidAuto';
+import './src/carplay/registerCarSurface';

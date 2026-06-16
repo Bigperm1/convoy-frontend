@@ -12,3 +12,9 @@
 import 'expo-router/entry';
 import './src/carplay/registerAndroidAuto';
 import './src/carplay/registerCarSurface';
+
+// Sets a CarPlay root template on a COLD connect (CarPlay opened while the phone
+// app isn't running), where the phone map screen's useConvoyCarPlay hook isn't
+// mounted to do it. No-op on web/Android and on the warm path. See carPlayBootstrap.ts.
+import { initCarPlayBootstrap } from './src/carplay/carPlayBootstrap';
+initCarPlayBootstrap();

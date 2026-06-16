@@ -30,6 +30,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform, View, Text, StyleSheet } from 'react-native';
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec } from '../nav';
 import { setCarState, getCarState, useCarStore, type CarPeer } from './carStore';
+import { setCarPlayHookOwnsRoot } from './carPlayShared';
 
 const isIOS = Platform.OS === 'ios';
 const isAndroid = Platform.OS === 'android';
@@ -158,6 +159,15 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
 
   const onEndRef = useRef(onEnd);
   onEndRef.current = onEnd;
+
+  // ---- claim CarPlay-root ownership while this (phone map) screen is mounted ----
+  // Tells the app-root bootstrap (carPlayBootstrap.ts) to stand down so it won't
+  // also set a root template — this hook owns the richer root + nav session here.
+  // On unmount (phone screen gone) the bootstrap takes back over for cold use.
+  useEffect(() => {
+    setCarPlayHookOwnsRoot(true);
+    return () => setCarPlayHookOwnsRoot(false);
+  }, []);
 
   // ---- mirror live state into the shared store (read by CarSurface) ----
   useEffect(() => {

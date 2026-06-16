@@ -277,6 +277,105 @@ function distPointToSegM(pLat: number, pLng: number, aLat: number, aLng: number,
 type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer };
 type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
 
+// ===== SelfCarModel =====
+// The self car as a 3D GLB model (ModelLayer), but with its drawn position +
+// heading INTERPOLATED between GPS fixes. Raw fixes land ~1–2×/sec, so binding the
+// model straight to them makes the car teleport a car-length at a time. Here we
+// ease the drawn point + rotation from where it currently is toward each new fix
+// over ~the inter-fix interval (shortest-arc on heading so it never swings the
+// long way), giving 60fps motion that matches the smooth native follow-camera.
+// Snaps instead of animating on the very first fix and on big jumps (initial
+// fix / recenter / GPS glitch) so the car never "drives" across the map.
+function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng: number; heading: number; emissive: number }) {
+  const render = useRef({ lat, lng, heading });
+  const anim = useRef<{ fromLat: number; fromLng: number; fromHdg: number; toLat: number; toLng: number; toHdg: number; start: number; dur: number } | null>(null);
+  const raf = useRef<number | null>(null);
+  const seeded = useRef(false);
+  const lastFixAt = useRef(0);
+  const fixGap = useRef(1000);
+  const [, setTick] = useState(0);
+
+  // Shortest signed angular delta a→b in degrees (−180…180].
+  const angDelta = (a: number, b: number) => ((((b - a) % 360) + 540) % 360) - 180;
+
+  const step = () => {
+    const a = anim.current;
+    if (!a) { raf.current = null; return; }
+    const t = Math.min(1, (Date.now() - a.start) / a.dur);
+    render.current = {
+      lat: a.fromLat + (a.toLat - a.fromLat) * t,
+      lng: a.fromLng + (a.toLng - a.fromLng) * t,
+      heading: a.fromHdg + (a.toHdg - a.fromHdg) * t,
+    };
+    setTick((n) => (n + 1) & 0xffff);
+    if (t < 1) {
+      raf.current = requestAnimationFrame(step);
+    } else {
+      anim.current = null;
+      raf.current = null;
+    }
+  };
+
+  useEffect(() => {
+    const now = Date.now();
+    if (lastFixAt.current) {
+      const gap = now - lastFixAt.current;
+      if (gap > 80) fixGap.current = Math.max(300, Math.min(1600, gap));
+    }
+    lastFixAt.current = now;
+
+    const prev = render.current;
+    // First fix, or a > ~1km jump (initial fix / recenter / GPS glitch) → snap.
+    const jumpDeg = Math.abs(lat - prev.lat) + Math.abs(lng - prev.lng);
+    if (!seeded.current || jumpDeg > 0.01) {
+      seeded.current = true;
+      render.current = { lat, lng, heading };
+      anim.current = null;
+      if (raf.current != null) { cancelAnimationFrame(raf.current); raf.current = null; }
+      setTick((n) => (n + 1) & 0xffff);
+      return;
+    }
+    // Ease from the current drawn pose to the new fix over ~the fix interval
+    // (compressed a touch so the car keeps pace instead of trailing the camera).
+    anim.current = {
+      fromLat: prev.lat, fromLng: prev.lng, fromHdg: prev.heading,
+      toLat: lat, toLng: lng, toHdg: prev.heading + angDelta(prev.heading, heading),
+      start: now, dur: Math.max(250, fixGap.current * 0.9),
+    };
+    if (raf.current == null) raf.current = requestAnimationFrame(step);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lat, lng, heading]);
+
+  // Stop the loop if the car unmounts mid-animation.
+  useEffect(() => () => { if (raf.current != null) cancelAnimationFrame(raf.current); }, []);
+
+  const r = render.current;
+  return (
+    <ShapeSource
+      id="convoy-self-car"
+      shape={{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [r.lng, r.lat] } }}
+    >
+      <ModelLayer
+        id="convoy-self-car-model"
+        slot="top"
+        style={{
+          modelId: "convoyCar",
+          // common-3d (not location-indicator): integrate the car into the 3D scene
+          // with depth testing so it sits ON the road ABOVE the flat route line.
+          // location-indicator draws over 3D buildings but UNDER 2D slot layers
+          // like the route LineLayer, which is what put the line over the car.
+          modelType: "common-3d",
+          modelEmissiveStrength: emissive,
+          modelScale: CAR_MODEL_SCALE_BY_ZOOM,
+          modelRotation: [0, 0, (r.heading ?? 0) + CAR_MODEL_HEADING_OFFSET],
+          modelCastShadows: false,
+          modelReceiveShadows: false,
+        }}
+      />
+    </ShapeSource>
+  );
+}
+
 // ===== CarMarker =====
 // One car (self or peer) as a Mapbox MarkerView — a real RN view pinned to a
 // coordinate. MarkerView draws in SCREEN space (it does not rotate with the
@@ -830,24 +929,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             modelRotation z = world heading + offset. Renders only if ModelLayer is
             present in the running native build — this OTA is the test for that. */}
         {selfCar && (
-          <ShapeSource
-            id="convoy-self-car"
-            shape={{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [selfCar.lng, selfCar.lat] } }}
-          >
-            <ModelLayer
-              id="convoy-self-car-model"
-              slot="top"
-              style={{
-                modelId: "convoyCar",
-                modelType: "location-indicator",
-                modelEmissiveStrength: selfEmissive,
-                modelScale: CAR_MODEL_SCALE_BY_ZOOM,
-                modelRotation: [0, 0, ((selfCar.heading ?? 0) + CAR_MODEL_HEADING_OFFSET)],
-                modelCastShadows: false,
-                modelReceiveShadows: false,
-              }}
-            />
-          </ShapeSource>
+          <SelfCarModel
+            lat={selfCar.lat}
+            lng={selfCar.lng}
+            heading={selfCar.heading ?? 0}
+            emissive={selfEmissive}
+          />
         )}
 
         {/* Car markers — PEERS only (self is the 3D model above). MarkerViews

@@ -1267,7 +1267,7 @@ export default function MapScreen() {
         // has its own bg-location task in navNotification.ts.)
         if (!appActive && !navActiveRef.current) return;
         sub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 0 },
+          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 0 },
           (pos) => {
             const h = pos.coords.heading;
             const heading = typeof h === "number" && h >= 0 ? h : undefined;

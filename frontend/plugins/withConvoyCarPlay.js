@@ -67,12 +67,14 @@ class PhoneSceneDelegate: UIResponder, UIWindowSceneDelegate {
     options connectionOptions: UIScene.ConnectionOptions
   ) {
     guard let windowScene = scene as? UIWindowScene else { return }
-    guard let appDelegate = UIApplication.shared.delegate as? AppDelegate,
-          let factory = appDelegate.reactNativeFactory else { return }
+    guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
     let window = UIWindow(windowScene: windowScene)
     self.window = window
     appDelegate.window = window
-    factory.startReactNative(withModuleName: "main", in: window, launchOptions: nil)
+    // Boot the RN host if this scene is first (normal cold phone launch), else
+    // mint the phone root on the already-running host (e.g. the app was woken by
+    // a cold CarPlay connect, which booted the host before the phone opened).
+    ConvoyRNHost.mount(moduleName: "main", in: window, appDelegate: appDelegate, makeVisible: true)
   }
 }
 `;
@@ -100,62 +102,40 @@ import Expo
 //    running React host with rootViewFactory.view(withModuleName:) and set it as
 //    the car window's root view controller. CarPlay draws this view beneath its
 //    template chrome (the standard CarPlay map-app layering).
-@objc(CarSceneDelegate)
-class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
-  func templateApplicationScene(
-    _ templateApplicationScene: CPTemplateApplicationScene,
-    didConnect interfaceController: CPInterfaceController
-  ) {
-    let carWindow = templateApplicationScene.carWindow
+// Boots the React Native host EXACTLY ONCE per process, whichever scene (phone
+// window or CarPlay) connects FIRST, then mounts a module into the given window.
+//
+// WHY: startReactNative(...) is what creates the host. On a COLD CarPlay connect
+// (phone app not running) the phone scene never runs, so the old car code, which
+// assumed the host was already up and only ever called superView(...), crashed
+// on a nil host. Now the first scene to connect boots the host itself.
+//
+// The first scene boots via the full Expo factory path (startReactNative), which
+// runs the one-time react-delegate handlers (incl. expo-updates' start) exactly
+// once. Every LATER scene mints its root via superView(...), which BYPASSES those
+// one-time handlers — calling the normal view(...) a second time would start
+// expo-updates twice and trap. (Same bypass Expo uses in recreateRootView().)
+enum ConvoyRNHost {
+  static var started = false
 
-    // Let react-native-carplay set up its interface controller + templates.
-    RNCarPlay.connect(with: interfaceController, window: carWindow)
+  static func mount(moduleName: String, in window: UIWindow, appDelegate: AppDelegate, makeVisible: Bool) {
+    guard let factory = appDelegate.reactNativeFactory else { return }
 
-    // Mount the Convoy RN dashboard onto the CarPlay window (bridgeless-safe).
-    mountConvoyDashboard(on: carWindow)
-  }
-
-  func templateApplicationScene(
-    _ templateApplicationScene: CPTemplateApplicationScene,
-    didDisconnectInterfaceController interfaceController: CPInterfaceController
-  ) {
-    RNCarPlay.disconnect()
-  }
-
-  // MARK: - Convoy car-window mount
-
-  private func mountConvoyDashboard(on window: CPWindow) {
-    guard let appDelegate = UIApplication.shared.delegate as? AppDelegate,
-          let factory = appDelegate.reactNativeFactory else {
+    if !started {
+      // First scene in this process: full boot + mount. startReactNative sets
+      // the window's root view controller (and makes it visible) itself.
+      started = true
+      factory.startReactNative(withModuleName: moduleName, in: window, launchOptions: nil)
       return
     }
 
-    // Create a NEW root view for the "ConvoyCarSurface" module on the EXISTING
-    // React host. We MUST use ExpoReactRootViewFactory.superView(...), NOT the
-    // normal view(withModuleName:) path. The normal path re-runs Expo's
-    // react-delegate handlers, including ExpoUpdatesReactDelegateHandler, which
-    // calls expo-updates' EnabledAppController.start() a SECOND time -> a Swift
-    // precondition failure / crash (the phone window already started it on
-    // launch). superView(...) calls the base RCTRootViewFactory view creation
-    // directly, BYPASSING those one-time handlers, and just mints another
-    // surface on the already-running host. This mirrors Expo's own internal
-    // recreateRootView() code, which casts to ExpoReactRootViewFactory and calls
-    // superView for exactly this reason.
+    // Host already running: mint another surface WITHOUT re-running the one-time
+    // handlers (superView), then attach it to this window ourselves.
     let rootView: UIView
     if let expoFactory = factory.rootViewFactory as? ExpoReactRootViewFactory {
-      rootView = expoFactory.superView(
-        withModuleName: "ConvoyCarSurface",
-        initialProperties: nil,
-        launchOptions: [:]
-      )
+      rootView = expoFactory.superView(withModuleName: moduleName, initialProperties: nil, launchOptions: [:])
     } else {
-      // Fallback (should not happen in an Expo app): plain factory view. This
-      // path re-runs the handlers and can crash, so it is last-resort only.
-      rootView = factory.rootViewFactory.view(
-        withModuleName: "ConvoyCarSurface",
-        initialProperties: nil,
-        launchOptions: nil
-      )
+      rootView = factory.rootViewFactory.view(withModuleName: moduleName, initialProperties: nil, launchOptions: nil)
     }
 
     let viewController = UIViewController()
@@ -167,9 +147,41 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
       rootView.topAnchor.constraint(equalTo: viewController.view.topAnchor),
       rootView.bottomAnchor.constraint(equalTo: viewController.view.bottomAnchor),
     ])
-
     window.rootViewController = viewController
+    // The phone window must be made key + visible (startReactNative would have
+    // done this in the boot branch). The CarPlay window must NOT — CarPlay owns
+    // its presentation; making it key can fight the template layer.
+    if makeVisible {
+      window.makeKeyAndVisible()
+    }
   }
+}
+
+@objc(CarSceneDelegate)
+class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
+  func templateApplicationScene(
+    _ templateApplicationScene: CPTemplateApplicationScene,
+    didConnect interfaceController: CPInterfaceController
+  ) {
+    let carWindow = templateApplicationScene.carWindow
+
+    // Let react-native-carplay set up its interface controller + templates.
+    RNCarPlay.connect(with: interfaceController, window: carWindow)
+
+    // Mount the Convoy RN dashboard onto the CarPlay window. Boots the RN host
+    // first if this is a COLD CarPlay connect (phone app not running) — the case
+    // that used to crash (superView on a host that was never started).
+    guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
+    ConvoyRNHost.mount(moduleName: "ConvoyCarSurface", in: carWindow, appDelegate: appDelegate, makeVisible: false)
+  }
+
+  func templateApplicationScene(
+    _ templateApplicationScene: CPTemplateApplicationScene,
+    didDisconnectInterfaceController interfaceController: CPInterfaceController
+  ) {
+    RNCarPlay.disconnect()
+  }
+
 }
 `;
 

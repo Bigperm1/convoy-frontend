@@ -123,13 +123,14 @@ export default function LoginScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.logoSection}>
-            {/* Branded hero (wordmark + logo + tagline are baked into the image). */}
+          <View style={styles.brandSection}>
+            <Text style={styles.wordmark}>Convoy</Text>
             <Image
-              source={require('../../assets/log_in_screen.png')}
-              style={styles.hero}
+              source={require('../../assets/final_icon.png')}
+              style={styles.logoMark}
               resizeMode="contain"
             />
+            <Text style={styles.tagline}>Drive Together</Text>
           </View>
 
           <View style={styles.formCard}>
@@ -235,30 +236,34 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#0A0A0A' },
+  safe: { flex: 1, backgroundColor: '#0B0B0C' },
   container: { flex: 1 },
-  scrollContent: { flexGrow: 1, paddingVertical: 40, paddingHorizontal: 20, justifyContent: 'center' },
-  logoSection: { alignItems: 'center', marginBottom: 32 },
-  hero: { width: 300, height: 300, borderRadius: 24 },
-  formCard: { backgroundColor: '#1a1a1a', borderRadius: 16, padding: 20, gap: 18, borderWidth: 1, borderColor: '#333' },
+  scrollContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 28 },
+  // Brand stack: green "Convoy" wordmark, the C-mark app icon, then the tagline —
+  // real text around the logo so it stays crisp and on-brand (#2DEC86 on #0B0B0C).
+  brandSection: { alignItems: 'center', marginBottom: 30 },
+  wordmark: { color: '#2DEC86', fontSize: 42, fontWeight: '800', fontStyle: 'italic', letterSpacing: 1, marginBottom: 18, textShadowColor: 'rgba(45,236,134,0.45)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 14 },
+  logoMark: { width: 140, height: 140, borderRadius: 32 },
+  tagline: { color: '#2DEC86', fontSize: 16, fontWeight: '600', fontStyle: 'italic', letterSpacing: 0.5, opacity: 0.92, marginTop: 16 },
+  formCard: { backgroundColor: '#141416', borderRadius: 18, padding: 20, gap: 18, borderWidth: 1, borderColor: '#26262B' },
   inputGroup: { gap: 8 },
-  label: { color: '#808080', fontSize: 13, fontWeight: '500' },
-  input: { backgroundColor: '#0A0A0A', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16, borderWidth: 1, borderColor: '#333' },
-  inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0A0A0A', borderRadius: 10, borderWidth: 1, borderColor: '#333', paddingRight: 8 },
-  inputFlex: { flex: 1, paddingVertical: 12, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16 },
+  label: { color: '#9A9A9A', fontSize: 13, fontWeight: '500' },
+  input: { backgroundColor: '#0B0B0C', borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16, borderWidth: 1, borderColor: '#2A2A2E' },
+  inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0B0B0C', borderRadius: 12, borderWidth: 1, borderColor: '#2A2A2E', paddingRight: 8 },
+  inputFlex: { flex: 1, paddingVertical: 13, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16 },
   eyeBtn: { padding: 8 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 2, borderColor: '#666', alignItems: 'center', justifyContent: 'center' },
   checkboxChecked: { backgroundColor: '#2DEC86', borderColor: '#2DEC86' },
   checkmark: { color: '#000', fontWeight: '700', fontSize: 12 },
-  checkboxLabel: { color: '#808080', fontSize: 13 },
-  signInButton: { borderRadius: 10, overflow: 'hidden', marginTop: 4 },
-  buttonGradient: { paddingVertical: 14, alignItems: 'center' },
-  signInButtonText: { color: '#1a1a1a', fontWeight: '700', fontSize: 15 },
-  wakingText: { color: '#1a1a1a', fontSize: 13, fontWeight: '700', marginLeft: 8 },
+  checkboxLabel: { color: '#9A9A9A', fontSize: 13 },
+  signInButton: { borderRadius: 12, overflow: 'hidden', marginTop: 4 },
+  buttonGradient: { paddingVertical: 15, alignItems: 'center' },
+  signInButtonText: { color: '#06281A', fontWeight: '800', fontSize: 16, letterSpacing: 0.3 },
+  wakingText: { color: '#06281A', fontSize: 13, fontWeight: '700', marginLeft: 8 },
   linksSection: { gap: 12, alignItems: 'center', marginTop: 8 },
-  linkText: { color: '#808080', fontSize: 13 },
+  linkText: { color: '#9A9A9A', fontSize: 13 },
   linkHighlight: { color: '#2DEC86', fontWeight: '600' },
   forgotLink: { color: '#2DEC86', fontSize: 13, fontWeight: '500', paddingVertical: 6 },
-  versionText: { color: '#808080', fontSize: 12, textAlign: 'center', paddingVertical: 10 },
+  versionText: { color: '#6A6A6A', fontSize: 12, textAlign: 'center', paddingVertical: 10 },
 });

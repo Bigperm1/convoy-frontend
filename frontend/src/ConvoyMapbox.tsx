@@ -274,6 +274,44 @@ function distPointToSegM(pLat: number, pLng: number, aLat: number, aLng: number,
   return Math.hypot(cx, cy);
 }
 
+// Projects (pLat,pLng) onto `coords` (origin→destination order): returns the
+// nearest point ON the route, the fraction along it (0..1), the perpendicular
+// distance in metres, and the total route length. Drives (a) trimming the route
+// line BEHIND the car so the 3D car reads on top, and (b) SNAPPING the drawn car
+// onto the line so it stays glued to the road instead of drifting on raw GPS.
+// Local equirectangular metres centred on the car (accurate at street scale).
+function projectOntoRoute(pLat: number, pLng: number, coords: { latitude: number; longitude: number }[]): { frac: number; lat: number; lng: number; distM: number; totalM: number } | null {
+  if (!coords || coords.length < 2) return null;
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const cosLat = Math.cos(toRad(pLat));
+  const X = (lng: number) => toRad(lng - pLng) * cosLat * R;
+  const Y = (lat: number) => toRad(lat - pLat) * R;
+  const invLng = (x: number) => pLng + (x / (cosLat * R)) * (180 / Math.PI); // local metres → lng
+  const invLat = (y: number) => pLat + (y / R) * (180 / Math.PI);            // local metres → lat
+  let acc = 0;            // cumulative length from origin up to prev vertex
+  let bestD2 = Infinity;  // nearest squared distance car→route
+  let bestArc = 0;        // arc length from origin to that nearest point
+  let bestX = 0, bestY = 0; // nearest point on the route, in local metres
+  let prevX = X(coords[0].longitude), prevY = Y(coords[0].latitude);
+  for (let i = 1; i < coords.length; i++) {
+    const cx = X(coords[i].longitude), cy = Y(coords[i].latitude);
+    const dx = cx - prevX, dy = cy - prevY;
+    const len = Math.hypot(dx, dy);
+    if (len > 0) {
+      let t = ((0 - prevX) * dx + (0 - prevY) * dy) / (len * len); // project car (origin) onto seg
+      t = Math.max(0, Math.min(1, t));
+      const projX = prevX + t * dx, projY = prevY + t * dy;
+      const d2 = projX * projX + projY * projY;
+      if (d2 < bestD2) { bestD2 = d2; bestArc = acc + t * len; bestX = projX; bestY = projY; }
+      acc += len;
+    }
+    prevX = cx; prevY = cy;
+  }
+  if (acc <= 0) return null;
+  return { frac: bestArc / acc, lat: invLat(bestY), lng: invLng(bestX), distM: Math.sqrt(bestD2), totalM: acc };
+}
+
 type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer };
 type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
 
@@ -701,6 +739,29 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Lift the paint out of the dark on the dim light presets (dawn/night).
   const selfEmissive = CAR_EMISSIVE_BY_MODE[mapMode] ?? 0;
 
+  // Project the car onto the selected route while navigating. Drives two things:
+  // (1) trimming the line behind the car (3D car reads on top), and (2) snapping
+  // the drawn car onto the line so it stays glued to the road. null in preview /
+  // free-drive → full line + raw GPS position.
+  const routeProj = useMemo(() => {
+    if (!navigationActive || !selfCar) return null;
+    const poly = routes?.[selectedRouteIndex]?.polyline;
+    if (!poly) return null;
+    return projectOntoRoute(selfCar.lat, selfCar.lng, decodePolyline(poly));
+  }, [navigationActive, selfCar?.lat, selfCar?.lng, routes, selectedRouteIndex]);
+
+  // Trim end: ~6 m ahead of the car so its nose clears the line head.
+  const routeTrimEndFrac = routeProj
+    ? Math.max(0, Math.min(0.999, routeProj.frac + 6 / routeProj.totalM))
+    : null;
+
+  // Snapped draw position: glue the car to the line, but ONLY within ~30 m of it
+  // — further off (wrong turn / pre-reroute) we show the real GPS so you can see
+  // you're off-route. SelfCarModel interpolates, so the snap eases in smoothly.
+  const selfDraw = (routeProj && routeProj.distM <= 30)
+    ? { lat: routeProj.lat, lng: routeProj.lng }
+    : (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null);
+
   const visibleHazards = (hazards || []).filter((h) => h && typeof h.lat === "number" && typeof h.lng === "number");
   const showRoutes = !!destination && routeFC.features.length > 0;
 
@@ -829,7 +890,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             index rather than unmounting, since ShapeSource children must always
             be elements (never a boolean). */}
         {showRoutes && (
-          <ShapeSource id="convoy-routes" shape={routeFC} onPress={handleRoutePress}>
+          <ShapeSource id="convoy-routes" shape={routeFC} onPress={handleRoutePress} lineMetrics>
             <LineLayer
               id="route-alts"
               slot="middle"
@@ -840,13 +901,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               id="route-sel-casing"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineColor: ROUTE_GREEN_GLOW, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
+              style={{ lineColor: ROUTE_GREEN_GLOW, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(routeTrimEndFrac != null ? { lineTrimOffset: [0, routeTrimEndFrac] } : {}) }}
             />
             <LineLayer
               id="route-sel-core"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineColor: ROUTE_GREEN_CORE, lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
+              style={{ lineColor: ROUTE_GREEN_CORE, lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(routeTrimEndFrac != null ? { lineTrimOffset: [0, routeTrimEndFrac] } : {}) }}
             />
           </ShapeSource>
         )}
@@ -930,8 +991,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             present in the running native build — this OTA is the test for that. */}
         {selfCar && (
           <SelfCarModel
-            lat={selfCar.lat}
-            lng={selfCar.lng}
+            lat={(selfDraw ?? selfCar).lat}
+            lng={(selfDraw ?? selfCar).lng}
             heading={selfCar.heading ?? 0}
             emissive={selfEmissive}
           />

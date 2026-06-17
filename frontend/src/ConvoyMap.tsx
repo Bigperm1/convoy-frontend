@@ -400,26 +400,13 @@ function routeSliceAround(
 }
 
 // ===== ManeuverArrowhead =====
-// Small white arrowhead that caps the bending white shaft polyline at the end of
-// the maneuver slice, pointing the post-turn travel direction. Native image prop
-// + flat + rotation (reliable path) with Android map-bearing compensation so it
-// isn't sideways in heading-up.
-const TURN_ARROWHEAD_ICON = require("../assets/images/turn_arrowhead.png");
-function ManeuverArrowhead({ lat, lng, bearing, mapHeading = 0 }: { lat: number; lng: number; bearing: number; mapHeading?: number }) {
-  const rotation = Platform.OS === "android"
-    ? ((bearing - mapHeading) % 360 + 360) % 360
-    : bearing;
-  return (
-    <Marker
-      coordinate={{ latitude: lat, longitude: lng }}
-      anchor={{ x: 0.5, y: 0.5 }}
-      flat
-      rotation={rotation}
-      image={TURN_ARROWHEAD_ICON as any}
-      tracksViewChanges={false}
-      zIndex={7}
-    />
-  );
+// Neutralized stub. Part of the DORMANT Google-Maps engine (replaced by the
+// Mapbox engine at runtime). Its arrowhead asset (turn_arrowhead.png) was deleted
+// as obsolete, so this no longer renders an image — it returns null purely to keep
+// the dormant engine compiling and bundling. Call site left intact so the engine's
+// structure is unchanged.
+function ManeuverArrowhead(_props: { lat: number; lng: number; bearing: number; mapHeading?: number }) {
+  return null;
 }
 
 // ===== CarMarker =====

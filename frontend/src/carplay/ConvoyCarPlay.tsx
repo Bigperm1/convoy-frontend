@@ -27,7 +27,7 @@
 // once the DHU confirms what the car surface can host — that's pure JS / OTA.
 
 import React, { useEffect, useRef, useState } from 'react';
-import { NativeModules, Platform, View, Text, StyleSheet } from 'react-native';
+import { NativeModules, Platform, View, Text, Image, StyleSheet } from 'react-native';
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec } from '../nav';
 import { setCarState, getCarState, useCarStore, type CarPeer } from './carStore';
 import { setCarPlayHookOwnsRoot } from './carPlayShared';
@@ -73,6 +73,18 @@ function stripTags(s: string): string {
   return (s || '').replace(/<[^>]*>/g, '').trim();
 }
 
+// Local clock formatter so the car dashboard's arrival matches the phone's nav
+// strip exactly (e.g. "9:05pm"). Mirrors map.tsx's fmtClock — kept local to avoid
+// coupling the CarPlay surface to the phone screen's module.
+function fmtClock(d: Date): string {
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const ap = h >= 12 ? 'pm' : 'am';
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${h}:${m < 10 ? '0' : ''}${m}${ap}`;
+}
+
 // ---- The component rendered onto the car screen ----
 // Shown the whole time a car is connected — idle (no route) AND during nav.
 // Reads the shared store so it shows live data despite being a separate root.
@@ -80,6 +92,13 @@ export function CarSurface() {
   const s = useCarStore();
   const kmh = Math.max(0, Math.round((s.speedMs || 0) * 3.6));
   const nearby = s.peers.length;
+  // Arrival CLOCK, computed the SAME way the phone banner does (now + remaining
+  // ETA). This is the number the driver compares to their phone — driving it from
+  // carStore here means the car dashboard matches the phone instead of relying on
+  // CarPlay's native estimate panel.
+  const arrival = (s.navigating && (s.etaSeconds || 0) > 0)
+    ? fmtClock(new Date(Date.now() + (s.etaSeconds || 0) * 1000))
+    : '';
   return (
     <View style={styles.surface}>
       <View style={styles.center}>
@@ -87,10 +106,11 @@ export function CarSurface() {
           <>
             <Text style={styles.dist}>{s.distanceToTurn || '—'}</Text>
             <Text style={styles.inst} numberOfLines={2}>{s.instruction || 'Continue'}</Text>
-            <Text style={styles.meta}>{[s.eta, s.distanceRemaining].filter(Boolean).join('   ·   ')}</Text>
+            <Text style={styles.meta}>{[arrival, s.eta, s.distanceRemaining].filter(Boolean).join('   ·   ')}</Text>
           </>
         ) : (
           <>
+            <Image source={require('../../assets/final_icon.png')} style={styles.carLogo} resizeMode="contain" />
             <Text style={styles.brand}>CONVOY</Text>
             <Text style={styles.sub}>{nearby ? `${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'Drive together'}</Text>
           </>
@@ -335,15 +355,32 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
       const mapTemplate = mapTemplateRef.current;
       const trip = tripRef.current;
 
+      // Sanitize the live numbers ONCE. tbt.* are the SAME values the phone
+      // banner renders correctly, but CarPlay's estimate panels are picky:
+      // feed them rounded, non-negative integers (seconds) and a clean km/m
+      // distance so a stray float / NaN can't blank the bar to "0 min / -- km".
+      const etaSec = Math.max(0, Math.round(Number(tbt.etaSeconds) || 0));
+      const remM = Math.max(0, Math.round(Number(tbt.distanceRemainingM) || 0));
+      const turnM = Math.max(0, Math.round(Number(tbt.distanceToManeuverM) || 0));
+      // Time to the NEXT maneuver (not the whole trip): a proportional slice of
+      // the remaining ETA by distance. Previously the whole-trip ETA was sent as
+      // the maneuver's time, which was wrong.
+      const turnSec = Math.max(0, Math.round(etaSec * (turnM / Math.max(remM, 1))));
+      // TEMP DIAGNOSTIC (remove once the bottom bar is confirmed): echo the raw
+      // remaining seconds + km onto the maneuver banner, which we KNOW renders.
+      // If these read real numbers but the bottom bar still says 0/--, the fault
+      // is the native trip-estimate panel, not our data.
+      const dbgLabel = `${label}  [${etaSec}s ${(remM / 1000).toFixed(1)}km]`;
+
       if (session) {
         try {
           if (stepChanged) {
             session.updateManeuvers([
               {
-                instructionVariants: [label],
+                instructionVariants: [dbgLabel],
                 initialTravelEstimates: {
-                  distanceRemaining: tbt.distanceToManeuverM,
-                  timeRemaining: 0,
+                  distanceRemaining: turnM,
+                  timeRemaining: turnSec,
                   distanceUnits: 'meters',
                 },
               },
@@ -351,8 +388,8 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
             lastStepRef.current = tbt.stepIndex;
           }
           session.updateTravelEstimates(0, {
-            distanceRemaining: tbt.distanceToManeuverM,
-            timeRemaining: tbt.etaSeconds,
+            distanceRemaining: turnM,
+            timeRemaining: turnSec,
             distanceUnits: 'meters',
           });
         } catch (e) { console.warn('[CarPlay] iOS maneuver update', e); }
@@ -361,10 +398,10 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
       if (mapTemplate && trip) {
         try {
           mapTemplate.updateTravelEstimates(trip, {
-            distanceRemaining: tbt.distanceRemainingM / 1000,
-            timeRemaining: tbt.etaSeconds,
+            distanceRemaining: remM / 1000,
+            timeRemaining: etaSec,
             distanceUnits: 'kilometers',
-          });
+          }, 0);
         } catch (e) { console.warn('[CarPlay] iOS trip ETA', e); }
       }
     }
@@ -383,6 +420,7 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
 const styles = StyleSheet.create({
   surface: { flex: 1, backgroundColor: '#0B0B0C', alignItems: 'center', justifyContent: 'center', padding: 24 },
   center: { alignItems: 'center' },
+  carLogo: { width: 104, height: 104, borderRadius: 22, marginBottom: 18 },
   brand: { color: '#2DEC86', fontSize: 44, fontWeight: '900', letterSpacing: 4 },
   sub: { color: '#9AA0A6', fontSize: 18, marginTop: 8 },
   dist: { color: '#F4F4F4', fontSize: 48, fontWeight: '800', letterSpacing: -1 },

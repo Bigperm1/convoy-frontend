@@ -124,7 +124,15 @@ enum ConvoyRNHost {
     if !started {
       // First scene in this process: full boot + mount. startReactNative sets
       // the window's root view controller (and makes it visible) itself.
+      //
+      // CRITICAL (cold CarPlay crash fix): point appDelegate.window at whichever
+      // window boots first BEFORE startReactNative. expo-updates' deferred startup
+      // calls getWindow() on completion, which fatalErrors unless it finds a key
+      // window OR appDelegate.window. On a cold CarPlay boot the car scene is
+      // first and the CarPlay window is not key, so without this the app traps in
+      // ExpoUpdatesReactDelegateHandler.getWindow() on the very first connect.
       started = true
+      appDelegate.window = window
       factory.startReactNative(withModuleName: moduleName, in: window, launchOptions: nil)
       return
     }
@@ -153,6 +161,17 @@ enum ConvoyRNHost {
     // its presentation; making it key can fight the template layer.
     if makeVisible {
       window.makeKeyAndVisible()
+    } else {
+      // CarPlay surface (makeVisible:false). Under the New Architecture the
+      // bridgeless Fabric surface only DRAWS once its hosting view has a real
+      // (non-zero) frame and lays out. CarPlay's window does not reliably trigger
+      // that layout on its own here, so the surface can stay 0x0 and the launch
+      // image shows through -> the dashboard never appears. Force the host view to
+      // the window bounds and lay out so the surface renders.
+      // (Build-5 hypothesis fix for the blank/launch-image car dashboard.)
+      viewController.view.frame = window.bounds
+      viewController.view.setNeedsLayout()
+      viewController.view.layoutIfNeeded()
     }
   }
 }

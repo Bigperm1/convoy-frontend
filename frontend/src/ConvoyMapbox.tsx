@@ -39,6 +39,7 @@ import { getVehiclePngOrDefault, getVehicleModelUrl } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient } from "./mapboxDirections";
+import { getLastLocation, setLastLocation } from "./settings";
 
 // 1×1 fully transparent PNG — a REAL bundled asset, not a data-URI (@rnmapbox's
 // Images may not load a data-URI at runtime, which would let the default dot fall
@@ -98,6 +99,8 @@ interface ConvoyMapboxProps {
   // increment animates the camera back to north-up (heading 0).
   onHeading?: (deg: number) => void;
   resetNorthSignal?: number;
+  // User zoom-button offset (in map-zoom steps) added on top of the follow zoom.
+  zoomOffset?: number;
   [key: string]: any;
 }
 
@@ -201,6 +204,20 @@ const FOLLOW_ZOOM = 17;
 const CORNER_ZOOM = 18.5;
 const CORNER_FAR_M = 280;
 const CORNER_NEAR_M = 70;
+// The user zoom-button offset is added to the computed follow zoom; clamp the
+// result so the minus button can widen the view well out (~10.5) without going
+// uselessly far, and the plus button can't over-zoom past ~20.
+const ZOOM_MIN = 10.5;
+const ZOOM_MAX = 20;
+
+// Heading-up camera bearing — we drive it ourselves instead of Mapbox's native
+// FollowWithCourse, which tracks raw GPS course and updates every frame, so its
+// noise makes the map WOBBLE while driving and SPIN while stopped. Instead we
+// feed the map the SAME heading the car uses (user.heading), low-pass smoothed
+// at the GPS rate, and FREEZE it below a creep speed. HEADING_SMOOTH_ALPHA: 1 =
+// instant/no smoothing, lower = smoother but laggier in turns (OTA-tunable).
+const COURSE_OFF_KMH = 3;
+const HEADING_SMOOTH_ALPHA = 0.6;
 
 // ===== Route line styling (brand green, sampled from new_logo_icons.png) =====
 // The selected route is a glowing neon-green ribbon matching the app icon's route
@@ -518,6 +535,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
     hazards, speedCameras, places, showPlacePins = true, destWeather,
     onHazardPress, onHazardLongPress, onPlacePress, onHeading, resetNorthSignal,
+    zoomOffset = 0,
   } = props;
 
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
@@ -532,6 +550,15 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Last heading reported to onHeading — throttle so a ~constant bearing during
   // nav doesn't spam the parent (same pattern as the car-scale zoom delta).
   const lastHeadingRef = useRef<number>(0);
+  // Smoothed, speed-gated map bearing we feed the follow camera (anti-wobble +
+  // anti-spin). null until the first GPS heading seeds it.
+  const camHeadingRef = useRef<number | null>(null);
+  // Last-known GPS spot, read ONCE at mount (synchronous; hydrated with settings).
+  // Lets the camera's first paint frame the driver's last location instead of
+  // flying in from the world view while we wait on the first GPS fix.
+  const [coldStartLoc] = useState(() => getLastLocation());
+  // Throttle clock for persisting the live location (see the effect below).
+  const lastLocPersistRef = useRef(0);
 
   // North-reset: when the parent bumps resetNorthSignal (Compass FAB tap),
   // animate the camera back to north-up. Skip the initial mount so we don't
@@ -544,6 +571,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetNorthSignal]);
+
+  // Persist the driver's location (throttled) so the NEXT cold start frames the
+  // map on them immediately (see coldStartLoc). Uses the dedicated last-location
+  // store, which does NOT notify settings listeners, so this frequent write never
+  // triggers a settings re-render anywhere in the app. First fix writes at once.
+  useEffect(() => {
+    if (!user || typeof user.lat !== "number" || typeof user.lng !== "number") return;
+    const now = Date.now();
+    if (now - lastLocPersistRef.current < 15000) return;
+    lastLocPersistRef.current = now;
+    setLastLocation(user.lat, user.lng);
+  }, [user?.lat, user?.lng]);
 
   // ----- Base-map style (one code path, driven by mapMode) -----
   // "satellite"              → satellite-with-streets imagery (matches Google sat).
@@ -561,9 +600,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const selfHeadingDeg = typeof user?.heading === "number" && Number.isFinite(user.heading) ? user.heading : 0;
   const mapHeadingDeg = mapView === "heading_up" && (navigationActive || followUser) ? selfHeadingDeg : 0;
 
-  // Initial camera target for first paint (avoids a flash at null-island).
-  const initLat = center?.lat ?? user?.lat;
-  const initLng = center?.lng ?? user?.lng;
+  // Initial camera target for first paint. Falls back to the last-known location
+  // (persisted) so a cold start opens framed on the driver instead of flying in
+  // from the world view; still avoids a flash at null-island if nothing is known.
+  const initLat = center?.lat ?? user?.lat ?? coldStartLoc?.lat;
+  const initLng = center?.lng ?? user?.lng ?? coldStartLoc?.lng;
 
   // ===== Route geometry → GeoJSON =====
   // One LineString feature per route, tagged with its index. The LineLayers
@@ -596,12 +637,38 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // sat on the world at cold start and didn't chase). With the layer live, native
   // follow both centres on cold start and glides during nav.
   //   • followUserLocation = track the driver (followUser; parent drops it on a pan)
-  //   • followUserMode     = course-up while heading-up, else plain follow
+  //   • followUserMode     = plain Follow (we supply the bearing ourselves via followHeading)
   //   • followZoomLevel    = speed/corner chase zoom while navigating, fixed follow zoom otherwise
   //   • followPitch        = 45° while navigating heading-up, flat otherwise
   const headingUp = mapView === "heading_up";
+
+  // Heading-up bearing — driven by US, not Mapbox's native FollowWithCourse.
+  // FollowWithCourse rotates to raw GPS course every frame, so its noise made the
+  // map WOBBLE while driving and SPIN while stopped. Instead we run plain Follow
+  // (native centring / zoom / tilt only; bearing left to us) and feed the bearing
+  // as the SAME heading the car uses (selfHeadingDeg = user.heading via the
+  // parent's BearingTracker), low-pass smoothed at the GPS rate. Below
+  // COURSE_OFF_KMH we FREEZE it (stop updating) so a stopped car holds its last
+  // heading instead of spinning on junk course. North-up feeds no bearing → north.
+  {
+    const spd = userSpeedMs;
+    const spdKnown = typeof spd === "number" && Number.isFinite(spd) && spd >= 0;
+    const moving = !spdKnown || spd * 3.6 > COURSE_OFF_KMH;
+    if (camHeadingRef.current == null && Number.isFinite(selfHeadingDeg)) {
+      camHeadingRef.current = selfHeadingDeg; // seed on first heading
+    }
+    if (moving && camHeadingRef.current != null && Number.isFinite(selfHeadingDeg)) {
+      const prev = camHeadingRef.current;
+      const arc = ((((selfHeadingDeg - prev) % 360) + 540) % 360) - 180; // shortest-arc
+      camHeadingRef.current = (prev + arc * HEADING_SMOOTH_ALPHA + 360) % 360;
+    }
+  }
+  const followHeadingDeg = headingUp && camHeadingRef.current != null ? camHeadingRef.current : undefined;
+
   const followZoom = Math.round(
-    (navigationActive ? chaseZoom(kmhFromMs(userSpeedMs), distanceToManeuverM) : FOLLOW_ZOOM) * 10,
+    Math.max(ZOOM_MIN, Math.min(ZOOM_MAX,
+      (navigationActive ? chaseZoom(kmhFromMs(userSpeedMs), distanceToManeuverM) : FOLLOW_ZOOM) + (zoomOffset || 0),
+    )) * 10,
   ) / 10;
   const followPitchDeg = navigationActive && headingUp ? CHASE_PITCH_DEG : 0;
 
@@ -610,6 +677,24 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Camera's followUserLocation below) until the pins clear (a result is tapped
   // or the dropdown is closed).
   const placesShown = (places?.length ?? 0) > 0 && !navigationActive;
+
+  // ===== User zoom buttons (+/-) =====
+  // While FOLLOWING, the offset rides on followZoomLevel above — Mapbox ignores
+  // imperative zoom under follow, so the offset is the only lever that works
+  // there. While NOT following (the driver panned away), apply the same offset
+  // imperatively. This effect fires only when the offset CHANGES (a button tap),
+  // so it never fights a pinch gesture (a pinch doesn't change zoomOffset).
+  const zoomOffsetRef = useRef(zoomOffset);
+  useEffect(() => {
+    const prev = zoomOffsetRef.current;
+    zoomOffsetRef.current = zoomOffset;
+    if (zoomOffset === prev) return;            // no-op on unrelated re-renders
+    if (followUser || placesShown) return;      // follow path handles it declaratively
+    const cam = cameraRef.current;
+    if (!cam || !readyRef.current) return;
+    const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, FREE_ZOOM + (zoomOffset || 0)));
+    try { cam.setCamera({ zoomLevel: z, animationDuration: 200, animationMode: "easeTo" }); } catch {}
+  }, [zoomOffset, followUser, placesShown]);
 
   // When nav ends while NOT following (the driver had panned away), flatten the
   // tilt / heading back to a calm north-up overview. While following, the native
@@ -870,8 +955,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         <Camera
           ref={cameraRef}
           followUserLocation={followUser && !placesShown}
-          followUserMode={headingUp ? UserTrackingMode.FollowWithCourse : UserTrackingMode.Follow}
+          followUserMode={UserTrackingMode.Follow}
           followZoomLevel={followZoom}
+          followHeading={followHeadingDeg}
           followPitch={followPitchDeg}
           defaultSettings={
             typeof initLat === "number" && typeof initLng === "number"

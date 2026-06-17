@@ -434,11 +434,15 @@ export default function MapScreen() {
   }, [navMode]);
 
   const navAutoStartedRef = useRef(false);
+  // Auto-start arms ONLY after we've seen the car essentially stopped (<=2 km/h)
+  // since the destination was set, so picking a recent/saved/search WHILE MOVING
+  // shows the preview instead of instantly starting nav + voicing the greeting.
+  const autoStartArmedRef = useRef(false);
   // One-shot guard so the Nova greeting fires once per destination (not on
   // every route recompute / reroute).
   const greetedDestRef = useRef<string | null>(null);
   // Reset the one-shot auto-start guard whenever the destination changes.
-  useEffect(() => { navAutoStartedRef.current = false; greetedDestRef.current = null; clearPreparedGreeting(); }, [destination]);
+  useEffect(() => { navAutoStartedRef.current = false; autoStartArmedRef.current = false; greetedDestRef.current = null; clearPreparedGreeting(); }, [destination]);
 
   // Auto-START turn-by-turn once the driver begins moving (≥ 5 km/h) with a route
   // set. Replaces the old "collapse to a trip-summary pill" flow — the new
@@ -456,7 +460,8 @@ export default function MapScreen() {
         Math.abs(destination.lat - sharedRouteMeta.lat) < 1e-6 &&
         Math.abs(destination.lng - sharedRouteMeta.lng) < 1e-6) return;
     const kmh = (coords?.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
-    if (kmh >= 5) startNav();
+    if (kmh <= 2) autoStartArmedRef.current = true;
+    if (autoStartArmedRef.current && kmh >= 5) startNav();
   }, [coords?.speed, destination, route, navMode, sharedRouteMeta]);
 
   // ---- Full-screen search wiring ----
@@ -973,6 +978,9 @@ export default function MapScreen() {
   };
   const recenterNow = () => { clearRecenterTimer(); setIsFollowing(true); };
   useEffect(() => () => clearRecenterTimer(), []); // tidy on unmount
+  // User map-zoom offset, driven by the +/- buttons on the left. Rides on the
+  // follow zoom inside ConvoyMapbox (clamped there too). Negative = wider, positive = closer.
+  const [zoomOffset, setZoomOffset] = useState(0);
 
   const startNav = () => {
     if (!activeRoute) return;
@@ -2110,6 +2118,7 @@ export default function MapScreen() {
         // and let them roam, then auto-recenter after 10s idle (or a Recenter
         // tap). startNav re-enables follow so guidance always begins centred.
         followUser={isFollowing}
+        zoomOffset={zoomOffset}
         onUserPan={handleUserPan}
         // Chase-cam (3D, heading-rotated, dynamic-zoom) is on whenever turn-
         // by-turn nav is actively running. Pitch defaults to 45° in ConvoyMap.
@@ -2470,6 +2479,19 @@ export default function MapScreen() {
           <WeatherHUD weather={weather} unit={settings.speedUnit} compact forecast={dailyForecast} />
         </View>
       )}
+
+      {/* ===== Zoom +/- buttons (left column, styled like the speedo/weather pills) ===== */}
+      <View style={[styles.zoomStack, { bottom: weatherBottom + 64 }]}>
+        <TouchableOpacity testID="zoom-in-fab" style={styles.zoomBtn} activeOpacity={0.8}
+          onPress={() => setZoomOffset((z) => Math.min(3, z + 1))}>
+          <Ionicons name="add" size={26} color="#fff" />
+        </TouchableOpacity>
+        <View style={styles.zoomDivider} />
+        <TouchableOpacity testID="zoom-out-fab" style={styles.zoomBtn} activeOpacity={0.8}
+          onPress={() => setZoomOffset((z) => Math.max(-5, z - 1))}>
+          <Ionicons name="remove" size={26} color="#fff" />
+        </TouchableOpacity>
+      </View>
       <PeerModal
         peer={selectedPeer ? { ...selectedPeer } as any : null}
         visible={!!selectedPeer}
@@ -3217,6 +3239,15 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 5,
   },
+  zoomStack: {
+    position: "absolute", left: 12, zIndex: 55, width: 60,
+    borderRadius: 16, overflow: "hidden",
+    backgroundColor: "rgba(22,22,24,0.92)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 5,
+  },
+  zoomBtn: { width: 58, height: 52, alignItems: "center", justifyContent: "center" },
+  zoomDivider: { height: 1, backgroundColor: "rgba(255,255,255,0.12)" },
   // Waze-style colored report buttons - the two primary "report" actions are
   // solid color fills (no border) so they pop against the white utility
   // buttons. Blue police matches the police pin; amber matches the road pin.

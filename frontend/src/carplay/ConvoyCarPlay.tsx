@@ -366,18 +366,17 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
       // the remaining ETA by distance. Previously the whole-trip ETA was sent as
       // the maneuver's time, which was wrong.
       const turnSec = Math.max(0, Math.round(etaSec * (turnM / Math.max(remM, 1))));
-      // TEMP DIAGNOSTIC (remove once the bottom bar is confirmed): echo the raw
-      // remaining seconds + km onto the maneuver banner, which we KNOW renders.
-      // If these read real numbers but the bottom bar still says 0/--, the fault
-      // is the native trip-estimate panel, not our data.
-      const dbgLabel = `${label}  [${etaSec}s ${(remM / 1000).toFixed(1)}km]`;
+      // Diagnostic confirmed (build 5): the data reaching CarPlay is correct
+      // (this banner showed the real remaining s/km), but CarPlay's native trip
+      // estimate panel refuses to display it. Banner is back to the clean
+      // instruction; the destination estimate path is a separate native issue.
 
       if (session) {
         try {
           if (stepChanged) {
             session.updateManeuvers([
               {
-                instructionVariants: [dbgLabel],
+                instructionVariants: [label],
                 initialTravelEstimates: {
                   distanceRemaining: turnM,
                   timeRemaining: turnSec,

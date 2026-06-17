@@ -3,6 +3,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useState } from "react";
 
 const KEY = "convoy.settings.v3";
+// Separate key for the last-known GPS location (see getLastLocation). Kept out of
+// the Settings object so writing it never broadcasts to settings listeners.
+const LAST_LOC_KEY = "convoy.lastlocation.v1";
 
 // Single source of truth for the base-map look (Mapbox light presets + satellite).
 // Legacy mapType/mapDark are kept only for migration + the dormant Google engine,
@@ -129,6 +132,10 @@ export function mapModeToLegacy(mode: MapMode): { mapType: "hybrid" | "roadmap";
 
 let cached: Settings = { ...DEFAULT_SETTINGS };
 let loaded = false;
+// Last-known GPS location (cold-start map framing). Declared HERE — above the
+// loadPromise IIFE that hydrates it — so it isn't used before declaration.
+// Getter/setter + docs live further below.
+let lastLocation: { lat: number; lng: number } | null = null;
 const listeners = new Set<(s: Settings) => void>();
 
 const loadPromise: Promise<Settings> = (async () => {
@@ -149,6 +156,9 @@ try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
 }
 }
 } catch {}
+// Hydrate the last-known location too (separate key) as part of this early load,
+// so the first map paint can frame the driver without waiting on a GPS fix.
+try { const lraw = await AsyncStorage.getItem(LAST_LOC_KEY); if (lraw) lastLocation = JSON.parse(lraw); } catch {}
 loaded = true;
 listeners.forEach((l) => l(cached));
 return cached;
@@ -159,6 +169,20 @@ return loaded ? cached : loadPromise;
 }
 
 export function getSettings(): Settings { return cached; }
+
+// ---- Last-known GPS location (cold-start map framing) ----
+// Persisted SEPARATELY from Settings and WITHOUT notifying listeners, so the
+// frequent position writes from the map never trigger a settings re-render. Read
+// synchronously at the first map paint so the map opens framed on the driver's
+// last spot instead of flying in from the world view. Hydrated in loadPromise.
+// (The `lastLocation` variable is declared up by `cached`/`loaded` so the
+// loadPromise hydration above doesn't reference it before declaration.)
+export function getLastLocation(): { lat: number; lng: number } | null { return lastLocation; }
+export function setLastLocation(lat: number, lng: number): void {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  lastLocation = { lat, lng };
+  AsyncStorage.setItem(LAST_LOC_KEY, JSON.stringify(lastLocation)).catch(() => {});
+}
 
 export async function updateSettings(patch: Partial<Settings>): Promise<Settings> {
 cached = { ...cached, ...patch };

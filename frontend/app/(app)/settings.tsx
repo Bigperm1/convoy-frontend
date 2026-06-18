@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
-import { useSettings, DEFAULT_SETTINGS, getMapMode } from "../../src/settings";
+import { useSettings, DEFAULT_SETTINGS, getMapMode, getAvatarMode, setAvatarMode } from "../../src/settings";
 import { GAS_BRANDS, OCTANES } from "../../src/gasJockey";
 
 // Re-export for navigation
@@ -107,15 +107,6 @@ export default function SettingsScreen() {
           />
           <View style={styles.divider} />
           <ToggleRow
-            icon="car-sport-outline"
-            iconColor="#00C46A"
-            title="Avatar Live"
-            subtitle="Show your car on the community map. Off = invisible to crew and yourself."
-            value={settings.avatarLive}
-            onChange={(v) => setSettings({ avatarLive: v })}
-          />
-          <View style={styles.divider} />
-          <ToggleRow
             icon="people-outline"
             iconColor="#30D158"
             title="Nearby"
@@ -125,7 +116,44 @@ export default function SettingsScreen() {
           />
         </Glass>
         <Text style={styles.helpText}>
-          Your car only ever appears on maps inside communities you've joined — strangers from outside the crew can never see you. Toggle Avatar Live off to vanish from the map entirely.
+          Your car only ever appears on maps inside communities you've joined — strangers from outside the crew can never see you. Choose how you appear with Avatar Live below.
+        </Text>
+
+        {/* Avatar Live — 3-way privacy ladder (Full / Partial / Ghost), replacing
+            the old on/off toggle. setAvatarMode writes settings.avatarMode and keeps
+            the legacy avatarLive boolean in sync. Full vs Partial diverge once the
+            car-connection gating ships; Ghost is fully invisible today. */}
+        <Text style={styles.sectionLabel}>AVATAR LIVE</Text>
+        <Glass radius={16} style={styles.card}>
+          <RadioRow
+            icon="car-sport"
+            iconColor="#00C46A"
+            title="Full"
+            subtitle="Always on your convoy's map: live while you drive, parked at your car when you're not. Your real location away from the car is never shared."
+            selected={getAvatarMode(settings) === "full"}
+            onSelect={() => setAvatarMode("full")}
+          />
+          <View style={styles.divider} />
+          <RadioRow
+            icon="car-outline"
+            iconColor="#0A84FF"
+            title="Partial"
+            subtitle="Visible only while you're connected to your car. Disconnect and you drop off the map until you reconnect."
+            selected={getAvatarMode(settings) === "partial"}
+            onSelect={() => setAvatarMode("partial")}
+          />
+          <View style={styles.divider} />
+          <RadioRow
+            icon="eye-off-outline"
+            iconColor="#8E8E93"
+            title="Ghost"
+            subtitle="Invisible — your convoy never sees you, driving or parked."
+            selected={getAvatarMode(settings) === "ghost"}
+            onSelect={() => setAvatarMode("ghost")}
+          />
+        </Glass>
+        <Text style={styles.helpText}>
+          Full keeps you on the map even when you step away — pinned to your car, never your real location. Partial shows you only while you're connected to the car. Ghost hides you completely.
         </Text>
 
         {/* Map View — exclusive radio choice. We render two RadioRows that

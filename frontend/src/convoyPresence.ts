@@ -32,6 +32,9 @@ export type ConvoyPresencePeer = {
   online_at?: string;
   // Personal best top cruise speed (km/h) â broadcast so peers can see each other's record.
   topSpeed?: number;
+  // "live" = actively driving; "parked" = full-mode user broadcasting last-known
+  // location while their CarPlay/AA head unit is disconnected.
+  status?: "live" | "parked";
 };
 
 export type ConvoyMe = {
@@ -44,6 +47,8 @@ export type ConvoyMe = {
   activeColor?: string;
   // Personal best top cruise speed (km/h). Sent every time we re-track the channel.
   topSpeed?: number;
+  // Presence status broadcast to peers — "live" (default) or "parked".
+  status?: "live" | "parked";
 };
 
 type Status = "idle" | "joining" | "subscribed" | "error" | "disabled";
@@ -105,6 +110,7 @@ export function useConvoyPresence(
             heading: p.heading,
             online_at: p.online_at,
             topSpeed: typeof p.topSpeed === "number" ? p.topSpeed : undefined,
+            status: p.status === "parked" ? "parked" : "live",
           });
         });
         setPeers(list);
@@ -123,6 +129,7 @@ export function useConvoyPresence(
               // Canonical GRC slug â auto-derived if caller didn't pre-resolve.
               activeColor: me.activeColor || toGRCSlug(me.carColor) || undefined,
               topSpeed: me.topSpeed,
+              status: me.status ?? "live",
               lat: coords.lat,
               lng: coords.lng,
               heading: coords.heading,
@@ -160,6 +167,7 @@ export function useConvoyPresence(
       carColor: me.carColor,
       activeColor: me.activeColor || toGRCSlug(me.carColor) || undefined,
       topSpeed: me.topSpeed,
+      status: me.status ?? "live",
       lat: coords.lat,
       lng: coords.lng,
       heading: coords.heading,

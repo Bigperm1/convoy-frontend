@@ -28,7 +28,8 @@
           "location",
           "fetch"
         ],
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CADisableMinimumFrameDurationOnPhone": true
       }
     },
     "android": {

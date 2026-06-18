@@ -23,7 +23,8 @@ import { ReportToast, MusicToast, HailToast } from "../../src/components/AlertTo
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
 import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/components/StepDrawer";
 import { hailBus } from "../../src/hailBus";
-import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, mapModeToLegacy } from "../../src/settings";
+import { subscribeAvatarHold } from "../../src/avatarHoldBus";
+import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, mapModeToLegacy, getAvatarMode, setAvatarMode } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import { BearingTracker } from "../../src/bearing";
@@ -189,6 +190,52 @@ function nearestHazardAhead(
   return { kind: best.kind, distKm: Math.max(1, Math.round(best.distM / 1000)) };
 }
 
+// Initial compass bearing (deg, 0..360) from point a to point b.
+function bearingDeg(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const lat1 = toRad(a.lat), lat2 = toRad(b.lat), dLng = toRad(b.lng - a.lng);
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+// The direction a route initially heads — bearing from its origin to the end of
+// the first step that's >=25 m away (skips a tiny DEPART step). null if unknown.
+function routeInitialBearing(r: any): number | null {
+  const steps = r?.steps;
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+  const start = steps[0]?.start;
+  if (!start || typeof start.lat !== "number") return null;
+  for (let i = 0; i < Math.min(steps.length, 4); i++) {
+    const end = steps[i]?.end;
+    if (end && typeof end.lat === "number" && haversineMeters(start, end) >= 25) return bearingDeg(start, end);
+  }
+  const end = steps[0]?.end;
+  return end && typeof end.lat === "number" ? bearingDeg(start, end) : null;
+}
+
+// Order reroute options so the FASTEST route that heads roughly the way the car
+// is already facing comes first (within +/-75 deg of current heading); options
+// that start with a U-turn fall to the back (also fastest-first). Falls back to
+// plain fastest-first when there's no heading. Keeps a wrong-way reroute from
+// being auto-selected the instant the driver goes off course.
+function orderReroutesForward(res: any[], heading?: number): any[] {
+  if (!Array.isArray(res) || res.length <= 1) return res;
+  const dur = (r: any) => r?.duration_in_traffic_s ?? r?.duration_s ?? Infinity;
+  if (typeof heading !== "number" || !Number.isFinite(heading)) {
+    return [...res].sort((a, b) => dur(a) - dur(b));
+  }
+  const offBy = (br: number) => Math.abs(((br - heading + 540) % 360) - 180); // 0..180
+  const scored = res.map((r) => {
+    const br = routeInitialBearing(r);
+    return { r, forward: br != null && offBy(br) <= 75, d: dur(r) };
+  });
+  const fwd = scored.filter((s) => s.forward).sort((a, b) => a.d - b.d);
+  const rest = scored.filter((s) => !s.forward).sort((a, b) => a.d - b.d);
+  return [...fwd, ...rest].map((s) => s.r);
+}
+
 // ===== Nova speeding-alert lines =====
 // tier 1 = light/humorous nudge (~20 over); tier 2 = firmer warning (~40 over).
 // `over` is the amount over the limit in the driver's own unit; `hey` is an
@@ -313,6 +360,9 @@ export default function MapScreen() {
   // Cold-start intro overlay (logo on black until the first fix lands).
   const introFade = useRef(new Animated.Value(_introPlayed ? 0 : 1)).current;
   const [introVisible, setIntroVisible] = useState(!_introPlayed);
+  // Guards the cold-start reveal so the 2 Hz GPS stream can't keep rescheduling
+  // the settle timer (the curtain lifts once, a beat after the first fix).
+  const introHandledRef = useRef(false);
 
   // ---- Personal Best speed tracking ----
   // sessionMaxSpeed: highest km/h seen since the screen mounted (in-memory only).
@@ -566,6 +616,19 @@ export default function MapScreen() {
   // ask the engine to animate back to north-up (heading 0).
   const [mapHeading, setMapHeading] = useState(0);
   const [northSignal, setNorthSignal] = useState(0);
+  // Hold-to-activate "Avatar" panel (opened by long-pressing the Map tab button,
+  // signalled via avatarHoldBus). Auto-dismisses ~5s after the last interaction.
+  const [avatarPanelOpen, setAvatarPanelOpen] = useState(false);
+  const avatarPanelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const armAvatarPanelDismiss = () => {
+    if (avatarPanelTimer.current) clearTimeout(avatarPanelTimer.current);
+    avatarPanelTimer.current = setTimeout(() => setAvatarPanelOpen(false), 5000);
+  };
+  // Map tab long-press → open the Avatar panel and start the auto-dismiss timer.
+  useEffect(() => {
+    const off = subscribeAvatarHold(() => { setAvatarPanelOpen(true); armAvatarPanelDismiss(); });
+    return () => { off(); if (avatarPanelTimer.current) clearTimeout(avatarPanelTimer.current); };
+  }, []);
   const showWeatherLayer = (settings as any).showWeatherLayer ?? true;
   // Live weather for the on-map HUD — current conditions at the user's GPS
   // position, fetched only while the Weather layer is enabled (auto-refresh ~5 min).
@@ -807,7 +870,10 @@ export default function MapScreen() {
         ferries: settings.avoidFerries,
       }).then((res) => {
         if (res.length > 0) {
-          setRoutes(res.slice(0, 2));
+          // Prefer the fastest reroute that continues in the direction the car is
+          // already facing, so going off-course never auto-selects a U-turn line.
+          const ordered = orderReroutesForward(res, coords?.heading);
+          setRoutes(ordered.slice(0, 2));
           setSelectedRouteIndex(0);
         }
       });
@@ -1011,7 +1077,7 @@ export default function MapScreen() {
   // Mirrors the active route + live turn-by-turn state onto the car display.
   // Consumes the SAME tbt/route the phone UI uses — no second engine, no double
   // voice. Safe no-op on web and on any build without the CarPlay native module.
-  useConvoyCarPlay({ route: activeRoute, tbt, user: coords, destination, peers, onEnd: endNav });
+  const { connected: carConnected } = useConvoyCarPlay({ route: activeRoute, tbt, user: coords, destination, peers, onEnd: endNav });
   // Delete a hazard (by id) — used by the long-press / right-click flow on
   // markers. Optimistically removes from local state on success so the pin
   // disappears immediately. Backend already authorizes (only the original
@@ -1225,14 +1291,22 @@ export default function MapScreen() {
   // last-known / fresh fix), or after a hard 7s cap so we never get stuck on
   // the logo. _introPlayed gates it to a single play per app launch.
   useEffect(() => {
-    if (_introPlayed) return;
+    if (_introPlayed || introHandledRef.current) return;
     const reveal = () => {
       if (_introPlayed) return;
       _introPlayed = true;
       Animated.timing(introFade, { toValue: 0, duration: 450, useNativeDriver: true })
         .start(() => setIntroVisible(false));
     };
-    if (coords) { reveal(); return; }
+    if (coords) {
+      // Hold the logo a beat AFTER the first fix so the follow camera settles
+      // ON the driver before we lift the curtain. The map is then revealed
+      // already centered on them (a snap) instead of visibly zooming/sliding in
+      // from the cold default position.
+      introHandledRef.current = true;
+      setTimeout(reveal, 700);
+      return;
+    }
     const t = setTimeout(reveal, 7000);
     return () => clearTimeout(t);
   }, [coords]);
@@ -1807,9 +1881,33 @@ export default function MapScreen() {
   // the map. The "Avatar Live" privacy toggle also disables presence entirely
   // — when off the user vanishes from every peer's map and the map shows no
   // own marker either.
-  const presenceChannel = (settings.activeCommunityId && settings.avatarLive !== false)
-    ? `convoy:community:${settings.activeCommunityId}`
-    : null;
+  // Avatar visibility mode (settings.avatarMode, legacy-synced with avatarLive):
+  //   ghost   → never broadcast (opt out, same as the old avatarLive=false)
+  //   partial → broadcast ONLY while a CarPlay/AA head unit is connected; on
+  //             disconnect we drop the channel so peers see us leave
+  //   full    → always broadcast; while the head unit is DISCONNECTED we fall back
+  //             to the last-known car location tagged "parked" instead of "live"
+  const avatarMode = getAvatarMode(settings);
+  const baseChannel = settings.activeCommunityId ? `convoy:community:${settings.activeCommunityId}` : null;
+  const presenceChannel =
+    avatarMode === "ghost" ? null
+    : avatarMode === "partial" ? (carConnected ? baseChannel : null)
+    : baseChannel; // full
+
+  // Last GPS sample seen WHILE the car head unit was connected — used as the
+  // "parked" fallback position in full mode after the unit disconnects.
+  const lastCarLocRef = useRef<{ lat: number; lng: number } | null>(null);
+  useEffect(() => {
+    if (carConnected && coords) lastCarLocRef.current = { lat: coords.lat, lng: coords.lng };
+  }, [carConnected, coords?.lat, coords?.lng]);
+
+  // Position + status we actually broadcast. Full-mode-while-disconnected →
+  // last-known car spot, status "parked"; everything else → live coords.
+  const presenceParked = avatarMode === "full" && !carConnected;
+  const presencePos = presenceParked
+    ? (lastCarLocRef.current ?? (coords ? { lat: coords.lat, lng: coords.lng } : null))
+    : (coords ? { lat: coords.lat, lng: coords.lng, heading: coords.heading || 0 } : null);
+  const presenceStatus: "live" | "parked" = presenceParked ? "parked" : "live";
 
   // ----- Throttled top_speed_record sync -----
   // Run whenever sessionMaxSpeed advances. If the new max beats the persisted
@@ -1850,8 +1948,11 @@ export default function MapScreen() {
       // Personal best — live max-of(sessionMaxSpeed, persisted) so peers see
       // an up-to-date number even before the throttled sync fires.
       topSpeed: Math.max(user.top_speed_record || 0, sessionMaxSpeed),
+      // "live" while driving / connected; "parked" when full-mode broadcasting a
+      // last-known spot after the car head unit disconnected.
+      status: presenceStatus,
     } : null,
-    coords ? { lat: coords.lat, lng: coords.lng, heading: coords.heading || 0 } : null
+    presencePos
   );
   const [selectedPeer, setSelectedPeer] = useState<ConvoyPresencePeer | null>(null);
 
@@ -2007,6 +2108,8 @@ export default function MapScreen() {
         // Carry the peer's personal-best top speed through the merge so the YOHB
         // hail card can show their PB even when it's opened from the marker list.
         topSpeed: p.topSpeed,
+        // "parked" peers render dimmed (full-mode user with head unit off).
+        status: p.status,
       } as Peer;
     });
     return Object.values(byId);
@@ -2087,7 +2190,7 @@ export default function MapScreen() {
         }}
         // Privacy: when Avatar Live is OFF we suppress the local "you" marker.
         // Presence channel is also nulled out above so peers don't see us at all.
-        hideSelfMarker={settings.avatarLive === false}
+        hideSelfMarker={getAvatarMode(settings) === "ghost"}
         // Map view mode (radio choice from Settings → MAP VIEW). Drives the
         // chase-cam tilt + bearing. Defaults to "heading_up" so nav feels like
         // Waze/Google out of the box.
@@ -2180,7 +2283,7 @@ export default function MapScreen() {
                 under the search bar, Google-Maps style. Results drop as pins. */}
             <CategoryPills origin={coords} onResults={setPlacePins} onSelect={handlePlacePinPress} />
             {(() => {
-              const selfLive = settings.avatarLive !== false && !!settings.activeCommunityId ? 1 : 0;
+              const selfLive = getAvatarMode(settings) !== "ghost" && !!settings.activeCommunityId ? 1 : 0;
               const liveCount = selfLive + peerList.length;
               return (
                 <View style={styles.liveOverlay} pointerEvents="none">
@@ -2475,13 +2578,14 @@ export default function MapScreen() {
       {/* Weather HUD — compact temp-only chip stacked just above the speedometer
           in the bottom-left HUD column (matches the speedo's box + opacity). */}
       {showWeatherLayer && weather && (
-        <View style={{ position: 'absolute', left: 12, bottom: weatherBottom, zIndex: 55 }}>
+        <View style={{ position: 'absolute', bottom: weatherBottom, zIndex: 55, ...(avatarPanelOpen ? { right: 12 } : { left: 12 }) }}>
           <WeatherHUD weather={weather} unit={settings.speedUnit} compact forecast={dailyForecast} />
         </View>
       )}
 
-      {/* ===== Zoom +/- buttons (left column, styled like the speedo/weather pills) ===== */}
-      <View style={[styles.zoomStack, { bottom: weatherBottom + 64 }]}>
+      {/* ===== Zoom +/- buttons (left column, styled like the speedo/weather pills) =====
+          Lift UP while the Avatar panel is open so it occupies the bottom-left. */}
+      <View style={[styles.zoomStack, { bottom: weatherBottom + 64 + (avatarPanelOpen ? 168 : 0) }]}>
         <TouchableOpacity testID="zoom-in-fab" style={styles.zoomBtn} activeOpacity={0.8}
           onPress={() => setZoomOffset((z) => Math.min(3, z + 1))}>
           <Ionicons name="add" size={26} color="#fff" />
@@ -2492,6 +2596,34 @@ export default function MapScreen() {
           <Ionicons name="remove" size={26} color="#fff" />
         </TouchableOpacity>
       </View>
+
+      {/* ===== Avatar visibility panel (hold the Map tab to open) =====
+          Bottom-left card with Full / Partial / Ghost rows in the same green-dot
+          radio style as Settings. Tap a row → setAvatarMode + reset the 5s auto-
+          dismiss. The weather chip shifts right and the zoom buttons lift up
+          (above) so this owns the bottom-left while open. */}
+      {avatarPanelOpen && (
+        <View style={[styles.avatarPanel, { bottom: weatherBottom + 64 }]}>
+          <Text style={styles.avatarPanelTitle}>Avatar</Text>
+          {([
+            { key: "full", label: "Full", sub: "Always visible to your crew" },
+            { key: "partial", label: "Partial", sub: "Visible only while connected to your car" },
+            { key: "ghost", label: "Ghost", sub: "Hidden — you don't appear to anyone" },
+          ] as const).map((m) => {
+            const active = getAvatarMode(settings) === m.key;
+            return (
+              <TouchableOpacity key={m.key} style={styles.avatarRow} activeOpacity={0.7}
+                onPress={() => { void setAvatarMode(m.key); armAvatarPanelDismiss(); }}>
+                <Ionicons name={active ? "radio-button-on" : "radio-button-off"} size={20} color={active ? "#2DEC86" : "#808080"} />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.avatarRowLabel}>{m.label}</Text>
+                  <Text style={styles.avatarRowSub}>{m.sub}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
       <PeerModal
         peer={selectedPeer ? { ...selectedPeer } as any : null}
         visible={!!selectedPeer}
@@ -2674,14 +2806,10 @@ export default function MapScreen() {
 
               {/* ----- PRIVACY ----- */}
               <Text style={styles.layerSectionHeader}>PRIVACY</Text>
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Avatar Live</Text>
-                  <Text style={styles.layerRowSub}>Hide your car from the map</Text>
-                </View>
-                <Switch value={settings.avatarLive !== false} onValueChange={(v) => { void updateGlobalSettings({ avatarLive: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
+              {/* Avatar visibility now lives in the 3-way Avatar control (Settings
+                  + the Map-tab hold panel), the single source of truth via
+                  avatarMode. The old binary "Avatar Live" switch was removed here
+                  so it can't desync from avatarMode. */}
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.layerRowLabel}>Comms Live</Text>
@@ -3248,6 +3376,19 @@ const styles = StyleSheet.create({
   },
   zoomBtn: { width: 58, height: 52, alignItems: "center", justifyContent: "center" },
   zoomDivider: { height: 1, backgroundColor: "rgba(255,255,255,0.12)" },
+  // Hold-to-activate Avatar panel (bottom-left). Dark card matching the other
+  // map glass; green-dot radio rows mirror the Settings MAP MODE selector.
+  avatarPanel: {
+    position: "absolute", left: 12, zIndex: 60, width: 232,
+    borderRadius: 16, paddingVertical: 8, paddingHorizontal: 12,
+    backgroundColor: "rgba(20,20,22,0.96)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 6,
+  },
+  avatarPanelTitle: { color: "#FFFFFF", fontSize: 13, fontWeight: "700", letterSpacing: 0.5, marginBottom: 6, marginLeft: 2 },
+  avatarRow: { flexDirection: "row", alignItems: "center", paddingVertical: 7 },
+  avatarRowLabel: { color: "#FFFFFF", fontSize: 15, fontWeight: "600" },
+  avatarRowSub: { color: "#9AA0A6", fontSize: 11, marginTop: 1 },
   // Waze-style colored report buttons - the two primary "report" actions are
   // solid color fills (no border) so they pop against the white utility
   // buttons. Blue police matches the police pin; amber matches the road pin.

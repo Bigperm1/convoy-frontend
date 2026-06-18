@@ -12,6 +12,18 @@ const LAST_LOC_KEY = "convoy.lastlocation.v1";
 // derived from mapMode via the helpers below.
 export type MapMode = "satellite" | "dawn" | "day" | "dusk" | "night";
 
+// Avatar Live privacy mode — replaces the old avatarLive boolean. Optional for
+// users stored before it existed; getAvatarMode() migrates them (avatarLive
+// true → "full", false → "ghost"). NOT added to DEFAULT_SETTINGS on purpose, so
+// an existing user who had Avatar Live OFF isn't silently flipped to visible by
+// the settings-spread — their intent is read from the legacy boolean instead.
+//   full    = always on the convoy map: live while car-connected, parked at your
+//             last car location when not (never your real non-driving spot).
+//   partial = visible only while connected to the car; disconnect drops you off
+//             peers' maps until you reconnect.
+//   ghost   = never visible to the convoy, driving or parked.
+export type AvatarMode = "full" | "partial" | "ghost";
+
 export type Settings = {
 highlightConvoy: boolean;
 alertSound: boolean;
@@ -22,6 +34,9 @@ activeCommunityId?: string | null;
 activeThreadId?: string | null;
 commsLive: boolean;
 avatarLive: boolean;
+// Avatar Live privacy mode (source of truth). avatarLive is kept in sync as a
+// legacy-compat mirror: full/partial → true, ghost → false. See AvatarMode.
+avatarMode?: AvatarMode;
 mapView: "heading_up" | "north_up";
 mapType: "hybrid" | "roadmap";
 mapDark: boolean;
@@ -128,6 +143,18 @@ export function getMapMode(s: Settings): MapMode {
 export function mapModeToLegacy(mode: MapMode): { mapType: "hybrid" | "roadmap"; mapDark: boolean } {
   if (mode === "satellite") return { mapType: "hybrid", mapDark: false };
   return { mapType: "roadmap", mapDark: mode === "dusk" || mode === "night" };
+}
+
+// ---- Avatar Live mode helpers (source of truth = settings.avatarMode) ----
+// Migrate users stored before avatarMode existed: avatarLive true → "full",
+// false → "ghost" (old installs only had the on/off boolean).
+export function getAvatarMode(s: Settings): AvatarMode {
+  return s.avatarMode ?? (s.avatarLive ? "full" : "ghost");
+}
+// Persist a new Avatar Live mode and keep the legacy avatarLive boolean in sync
+// (full/partial → true, ghost → false) so any older reader still behaves.
+export async function setAvatarMode(mode: AvatarMode): Promise<Settings> {
+  return updateSettings({ avatarMode: mode, avatarLive: mode !== "ghost" });
 }
 
 let cached: Settings = { ...DEFAULT_SETTINGS };

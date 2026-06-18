@@ -9,6 +9,7 @@ import { BlurView } from "expo-blur";
 import VoiceController from "../../src/VoiceController";
 import VoiceTabButton from "../../src/VoiceTabButton";
 import CommsTabButton from "../../src/components/CommsTabButton";
+import MapTabButton from "../../src/components/MapTabButton";
 import CommsTalkingToast from "../../src/components/CommsTalkingToast";
 import ShareToast from "../../src/ShareToast";
 import { useLiveWalkieListener } from "../../src/livePtt";
@@ -288,6 +289,7 @@ export default function AppLayout() {
         <Tabs.Screen name="map" options={{
           tabBarLabel: "Map",
           tabBarButtonTestID: "tab-map",
+          tabBarButton: (props) => <MapTabButton {...props} />,
           tabBarIcon: ({ color }) => <Ionicons name="navigate" size={34} color={color} />,
         }} />
         <Tabs.Screen name="talk" options={{

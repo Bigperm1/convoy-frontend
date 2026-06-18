@@ -414,6 +414,10 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
     tbt.etaSeconds,
     route,
   ]);
+
+  // Expose the live CarPlay / Android-Auto connection state so the phone screen
+  // can gate Avatar Live presence (Partial/Full) on whether the car is connected.
+  return { connected };
 }
 
 const styles = StyleSheet.create({

@@ -32,6 +32,8 @@ export interface Peer {
   activeColor?: string;
   topSpeed?: number;
   online_at?: string;
+  // "parked" peers (full-mode, head unit disconnected) render dimmed.
+  status?: "live" | "parked";
   onRoute?: React.Dispatch<any>;
 }
 

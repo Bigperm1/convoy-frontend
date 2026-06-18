@@ -33,7 +33,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Image, StyleSheet, Pressable } from "react-native";
-import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck, Models, ModelLayer } from "@rnmapbox/maps";
+import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getVehiclePngOrDefault, getVehicleModelUrl } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
@@ -124,12 +124,12 @@ const CAR_MODEL_SCALE_BY_ZOOM: any = [
   11, [820, 820, 820],
   12, [400, 400, 400],
   13, [195, 195, 195],
-  14, [95, 95, 95],
-  15, [46, 46, 46],
-  16, [22, 22, 22],
-  17, [10, 10, 10],
-  18, [5, 5, 5],
-  20, [1.3, 1.3, 1.3],
+  14, [120, 120, 120],
+  15, [60, 60, 60],
+  16, [29, 29, 29],
+  17, [13, 13, 13],
+  18, [6.5, 6.5, 6.5],
+  20, [1.6, 1.6, 1.6],
 ];
 // Continuous car scale driven from the LIVE camera zoom (see onCameraChanged),
 // instead of handing Mapbox the zoom-expression above — that snapped the model
@@ -137,7 +137,7 @@ const CAR_MODEL_SCALE_BY_ZOOM: any = [
 // through the SAME stops: passes through every tuned value but ramps smoothly.
 const CAR_SCALE_STOPS: [number, number][] = [
   [9, 3400], [10, 1700], [11, 820], [12, 400], [13, 195],
-  [14, 95], [15, 46], [16, 22], [17, 10], [18, 5], [20, 1.3],
+  [14, 120], [15, 60], [16, 29], [17, 13], [18, 6.5], [20, 1.6],
 ];
 function carScaleForZoom(z: number): number {
   const s = CAR_SCALE_STOPS;
@@ -194,7 +194,11 @@ function destWxIcon(kind: WeatherKind): { name: string; color: string; mci: bool
 }
 
 // ===== Chase-cam tuning — mirrors ConvoyMap.tsx =====
-const CHASE_PITCH_DEG = 45;
+// Chase-cam tilt is speed-aware: a touch flatter in the city, tilting further
+// down toward the horizon at highway speed so fast driving feels more dynamic
+// and shows more road ahead. OTA-tunable. (Mapbox Standard caps pitch at 60.)
+const CHASE_PITCH_CITY = 54;
+const CHASE_PITCH_HIGHWAY = 60;
 const CHASE_ZOOM_CITY = 17;
 const CHASE_ZOOM_HIGHWAY = 15;
 const CHASE_KMH_CITY = 30;
@@ -217,7 +221,13 @@ const ZOOM_MAX = 20;
 // at the GPS rate, and FREEZE it below a creep speed. HEADING_SMOOTH_ALPHA: 1 =
 // instant/no smoothing, lower = smoother but laggier in turns (OTA-tunable).
 const COURSE_OFF_KMH = 3;
-const HEADING_SMOOTH_ALPHA = 0.6;
+// Raised 0.6 → 0.72 so the heading-up bearing catches up faster through corners
+// (less rotational lag) while the speed-freeze below still kills stopped-car
+// spin. OTA-tunable: lower = smoother/laggier, higher = snappier/wobblier.
+const HEADING_SMOOTH_ALPHA = 0.72;
+// Lower-third chase framing: top padding as a fraction of map height shifts the
+// followed car DOWN the screen so the driver sees more road ahead. OTA-tunable.
+const FOLLOW_LOWER_PAD_FRAC = 0.4;
 
 // ===== Route line styling (brand green, sampled from new_logo_icons.png) =====
 // The selected route is a glowing neon-green ribbon matching the app icon's route
@@ -244,6 +254,13 @@ function chaseZoom(kmh: number, distToManeuverM?: number) {
   if (typeof distToManeuverM !== "number" || !Number.isFinite(distToManeuverM) || distToManeuverM <= 0) return base;
   const t = (CORNER_FAR_M - distToManeuverM) / (CORNER_FAR_M - CORNER_NEAR_M);
   return Math.max(base, lerp(base, CORNER_ZOOM, t));
+}
+// Speed-aware chase tilt: CITY pitch when slow, ramping to HIGHWAY pitch at speed
+// (same band as the zoom ramp). Mirrors chaseZoomForSpeed.
+function chasePitch(kmh: number) {
+  if (kmh <= CHASE_KMH_CITY) return CHASE_PITCH_CITY;
+  if (kmh >= CHASE_KMH_HIGHWAY) return CHASE_PITCH_HIGHWAY;
+  return lerp(CHASE_PITCH_CITY, CHASE_PITCH_HIGHWAY, (kmh - CHASE_KMH_CITY) / (CHASE_KMH_HIGHWAY - CHASE_KMH_CITY));
 }
 
 // Decode a Google encoded polyline → [{latitude, longitude}]. Engine-agnostic;
@@ -329,7 +346,7 @@ function projectOntoRoute(pLat: number, pLng: number, coords: { latitude: number
   return { frac: bestArc / acc, lat: invLat(bestY), lng: invLng(bestX), distM: Math.sqrt(bestD2), totalM: acc };
 }
 
-type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer };
+type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer; status?: "live" | "parked" };
 type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
 
 // ===== SelfCarModel =====
@@ -395,7 +412,10 @@ function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng: numbe
     anim.current = {
       fromLat: prev.lat, fromLng: prev.lng, fromHdg: prev.heading,
       toLat: lat, toLng: lng, toHdg: prev.heading + angDelta(prev.heading, heading),
-      start: now, dur: Math.max(250, fixGap.current * 0.9),
+      // Shorter ease (0.9 → 0.7 of the fix gap) so the interpolated point — which
+      // the chase camera follows via CustomLocationProvider — keeps tighter pace
+      // through corners and the camera recenters the car faster.
+      start: now, dur: Math.max(200, fixGap.current * 0.7),
     };
     if (raf.current == null) raf.current = requestAnimationFrame(step);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -406,6 +426,13 @@ function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng: numbe
 
   const r = render.current;
   return (
+    <>
+    {/* Feed the SMOOTH interpolated position to Mapbox's native user-location so
+        followUserLocation tracks the SAME eased track the car uses. Without this
+        the chase camera follows raw device GPS (~2 Hz steps) while the car
+        interpolates at 60fps, so the camera stutters and the car drifts off
+        centre. Now both ride the same smooth point: camera glides, car stays put. */}
+    <CustomLocationProvider coordinate={[r.lng, r.lat]} heading={r.heading ?? 0} />
     <ShapeSource
       id="convoy-self-car"
       shape={{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [r.lng, r.lat] } }}
@@ -428,6 +455,7 @@ function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng: numbe
         }}
       />
     </ShapeSource>
+    </>
   );
 }
 
@@ -447,7 +475,7 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
       <Pressable onPress={() => { if (car.peer) onPress?.(); }} hitSlop={8}>
         <Image
           source={src}
-          style={[styles.car, { transform: [{ rotate: `${rotation}deg` }] }]}
+          style={[styles.car, car.status === "parked" ? { opacity: 0.5 } : null, { transform: [{ rotate: `${rotation}deg` }] }]}
           resizeMode="contain"
           fadeDuration={0}
         />
@@ -557,6 +585,22 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Lets the camera's first paint frame the driver's last location instead of
   // flying in from the world view while we wait on the first GPS fix.
   const [coldStartLoc] = useState(() => getLastLocation());
+  // Map viewport height in points (set on layout) — drives lower-third chase framing.
+  const [mapH, setMapH] = useState(0);
+  // Cold-start camera: snap (no animation) for the first beat after the initial
+  // location arrives so the map opens ALREADY settled on the driver instead of a
+  // zoom-in / fly-in. After ~1.2s we restore the default animated follow (props
+  // back to undefined) so the in-drive chase transitions stay smooth.
+  const coldLockArmedRef = useRef(false);
+  const [coldLockDone, setColdLockDone] = useState(false);
+  useEffect(() => {
+    if (coldLockArmedRef.current) return;
+    if (user && typeof user.lat === "number" && typeof user.lng === "number") {
+      coldLockArmedRef.current = true;
+      const t = setTimeout(() => setColdLockDone(true), 1200);
+      return () => clearTimeout(t);
+    }
+  }, [user?.lat, user?.lng]);
   // Throttle clock for persisting the live location (see the effect below).
   const lastLocPersistRef = useRef(0);
 
@@ -670,7 +714,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       (navigationActive ? chaseZoom(kmhFromMs(userSpeedMs), distanceToManeuverM) : FOLLOW_ZOOM) + (zoomOffset || 0),
     )) * 10,
   ) / 10;
-  const followPitchDeg = navigationActive && headingUp ? CHASE_PITCH_DEG : 0;
+  const followPitchDeg = navigationActive && headingUp ? chasePitch(kmhFromMs(userSpeedMs)) : 0;
+
+  // Lower-third chase framing — top padding pushes the followed car DOWN the
+  // screen (heading-up only) so the driver sees more road ahead. Only takes
+  // effect while followUserLocation is active; north-up stays centred.
+  const followPadding = headingUp && mapH > 0
+    ? { paddingTop: Math.round(mapH * FOLLOW_LOWER_PAD_FRAC), paddingBottom: 0, paddingLeft: 0, paddingRight: 0 }
+    : undefined;
 
   // While category-search result pins are on the map (preview only), we frame
   // ALL of them and HOLD that overview — native follow is suspended (see the
@@ -812,6 +863,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         id: "peer_" + p.user_id, lat: p.lat, lng: p.lng,
         color: p.activeColor || p.carColor, heading: p.heading,
         leader: !!leaderUserId && p.user_id === leaderUserId, peer: p,
+        status: (p as any).status,
       });
     }
   });
@@ -835,10 +887,31 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     return projectOntoRoute(selfCar.lat, selfCar.lng, decodePolyline(poly));
   }, [navigationActive, selfCar?.lat, selfCar?.lng, routes, selectedRouteIndex]);
 
-  // Trim end: ~6 m ahead of the car so its nose clears the line head.
+  // Trim end: a speed-aware lead ahead of the car so the line vanishes just in
+  // front of its nose. The drawn car interpolates between fixes, so at speed the
+  // trim point (raw fix) can sit behind the moving car; leading it by ~8 m + a
+  // touch per m/s keeps the green line clearing the nose. OTA-tunable.
+  const _trimSpdMs = typeof userSpeedMs === "number" && userSpeedMs > 0 ? userSpeedMs : 0;
+  // Bigger buffer ahead of the nose (14 m base → up to 34 m at speed, was 8→24)
+  // so the green line never crowds the car.
+  const _trimLeadM = Math.max(14, Math.min(34, 14 + _trimSpdMs * 0.7));
   const routeTrimEndFrac = routeProj
-    ? Math.max(0, Math.min(0.999, routeProj.frac + 6 / routeProj.totalM))
+    ? Math.max(0, Math.min(0.999, routeProj.frac + _trimLeadM / routeProj.totalM))
     : null;
+  // Soft fade-in just past that buffer: the line ramps transparent → solid over
+  // ~20 m instead of hard-starting in front of the nose. Uses the route source's
+  // lineMetrics (already enabled). Only while navigating (a trim point exists);
+  // preview keeps the solid color. Built as a line-progress gradient anchored at
+  // the trim edge.
+  const _fadeSpanFrac = routeProj ? Math.max(0.0008, Math.min(0.06, 20 / routeProj.totalM)) : 0;
+  const buildLineFade = (solid: string, clear: string): any => {
+    if (routeTrimEndFrac == null) return null;
+    const s0 = Math.min(0.997, Math.max(0.0001, routeTrimEndFrac));
+    const s1 = Math.min(0.999, Math.max(s0 + 0.0006, s0 + _fadeSpanFrac));
+    return ["interpolate", ["linear"], ["line-progress"], 0, clear, s0, clear, s1, solid, 1, solid];
+  };
+  const selCoreGradient = buildLineFade("rgba(45,236,134,1)", "rgba(45,236,134,0)");
+  const selGlowGradient = buildLineFade("rgba(0,224,112,1)", "rgba(0,224,112,0)");
 
   // Snapped draw position: glue the car to the line, but ONLY within ~30 m of it
   // — further off (wrong turn / pre-reroute) we show the real GPS so you can see
@@ -883,7 +956,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   );
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      onLayout={(e: any) => {
+        const h = e?.nativeEvent?.layout?.height;
+        if (typeof h === "number" && h > 0 && Math.abs(h - mapH) > 1) setMapH(h);
+      }}
+    >
       <MapView
         style={styles.map}
         styleURL={styleURL}
@@ -959,6 +1038,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           followZoomLevel={followZoom}
           followHeading={followHeadingDeg}
           followPitch={followPitchDeg}
+          followPadding={followPadding}
+          // Cold-start: instant (no fly-in / zoom) until the first lock settles, then default animated follow.
+          animationMode={coldLockDone ? undefined : "none"}
+          animationDuration={coldLockDone ? undefined : 0}
           defaultSettings={
             typeof initLat === "number" && typeof initLng === "number"
               ? { centerCoordinate: [initLng, initLat], zoomLevel: FOLLOW_ZOOM }
@@ -987,13 +1070,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               id="route-sel-casing"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineColor: ROUTE_GREEN_GLOW, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(routeTrimEndFrac != null ? { lineTrimOffset: [0, routeTrimEndFrac] } : {}) }}
+              style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selGlowGradient ? { lineGradient: selGlowGradient, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: ROUTE_GREEN_GLOW }) }}
             />
             <LineLayer
               id="route-sel-core"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineColor: ROUTE_GREEN_CORE, lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(routeTrimEndFrac != null ? { lineTrimOffset: [0, routeTrimEndFrac] } : {}) }}
+              style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selCoreGradient ? { lineGradient: selCoreGradient, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: ROUTE_GREEN_CORE }) }}
             />
           </ShapeSource>
         )}

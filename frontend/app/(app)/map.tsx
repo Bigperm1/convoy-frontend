@@ -40,7 +40,6 @@ import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
 import { useSpeedCameras } from "../../src/speedCameras";
 import { useSpeedLimit } from "../../src/speedLimit";
-import ConvoyLogo from "../../src/components/ConvoyLogo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
 import { prepareRouteGreeting, playPreparedGreeting, clearPreparedGreeting } from "../../src/novaGreeting";
@@ -128,10 +127,6 @@ const SHOW_EXTRA_ROUTE_PILLS = false;
 // banner. The tab bar itself ALWAYS stays visible so the user can leave Maps.
 const TAB_BAR_H = Platform.OS === 'ios' ? 86 : 84;
 
-// Cold-start intro overlay state. Module-level so it persists across map
-// re-mounts within a single app launch — the logo cover only plays once, on a
-// true cold start, not every time you tab back to the map.
-let _introPlayed = false;
 const LAST_LOC_KEY = "convoy:lastLoc";
 
 // Format a Date as a 12-hour clock like "10:42 AM" without relying on Intl
@@ -357,12 +352,6 @@ export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const navInset = Platform.OS === "android" ? insets.bottom : 0;
   const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number; speed?: number } | null>(null);
-  // Cold-start intro overlay (logo on black until the first fix lands).
-  const introFade = useRef(new Animated.Value(_introPlayed ? 0 : 1)).current;
-  const [introVisible, setIntroVisible] = useState(!_introPlayed);
-  // Guards the cold-start reveal so the 2 Hz GPS stream can't keep rescheduling
-  // the settle timer (the curtain lifts once, a beat after the first fix).
-  const introHandledRef = useRef(false);
 
   // ---- Personal Best speed tracking ----
   // sessionMaxSpeed: highest km/h seen since the screen mounted (in-memory only).
@@ -1285,31 +1274,6 @@ export default function MapScreen() {
       loadPeers();
     })();
   }, []);
-
-  // ===== Cold-start intro overlay reveal =====
-  // Fade the logo cover the moment we have ANY location to show (cached / OS
-  // last-known / fresh fix), or after a hard 7s cap so we never get stuck on
-  // the logo. _introPlayed gates it to a single play per app launch.
-  useEffect(() => {
-    if (_introPlayed || introHandledRef.current) return;
-    const reveal = () => {
-      if (_introPlayed) return;
-      _introPlayed = true;
-      Animated.timing(introFade, { toValue: 0, duration: 450, useNativeDriver: true })
-        .start(() => setIntroVisible(false));
-    };
-    if (coords) {
-      // Hold the logo a beat AFTER the first fix so the follow camera settles
-      // ON the driver before we lift the curtain. The map is then revealed
-      // already centered on them (a snap) instead of visibly zooming/sliding in
-      // from the cold default position.
-      introHandledRef.current = true;
-      setTimeout(reveal, 700);
-      return;
-    }
-    const t = setTimeout(reveal, 7000);
-    return () => clearTimeout(t);
-  }, [coords]);
 
   // App foreground/background state — gates battery-hungry work (the 1 Hz GPS
   // watcher and the nearby-driver poll) so it pauses while the app is in the
@@ -2578,14 +2542,15 @@ export default function MapScreen() {
       {/* Weather HUD — compact temp-only chip stacked just above the speedometer
           in the bottom-left HUD column (matches the speedo's box + opacity). */}
       {showWeatherLayer && weather && (
-        <View style={{ position: 'absolute', bottom: weatherBottom, zIndex: 55, ...(avatarPanelOpen ? { right: 12 } : { left: 12 }) }}>
+        <View style={{ position: 'absolute', bottom: weatherBottom, left: 12, zIndex: 70 }}>
           <WeatherHUD weather={weather} unit={settings.speedUnit} compact forecast={dailyForecast} />
         </View>
       )}
 
       {/* ===== Zoom +/- buttons (left column, styled like the speedo/weather pills) =====
-          Lift UP while the Avatar panel is open so it occupies the bottom-left. */}
-      <View style={[styles.zoomStack, { bottom: weatherBottom + 64 + (avatarPanelOpen ? 168 : 0) }]}>
+          Hidden while the Avatar panel is open (the panel overlays this spot); the
+          weather chip stays put just below the panel, so nothing shuffles. */}
+      <View style={[styles.zoomStack, { bottom: weatherBottom + 68, display: avatarPanelOpen ? 'none' : 'flex' }]}>
         <TouchableOpacity testID="zoom-in-fab" style={styles.zoomBtn} activeOpacity={0.8}
           onPress={() => setZoomOffset((z) => Math.min(3, z + 1))}>
           <Ionicons name="add" size={26} color="#fff" />
@@ -2964,13 +2929,6 @@ export default function MapScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ===== Cold-start intro overlay — logo on black until first fix ===== */}
-      {introVisible && (
-        <Animated.View pointerEvents="auto" style={[styles.introOverlay, { opacity: introFade }]}>
-          <ConvoyLogo size={132} />
-          <Text style={styles.introWord}>CONVOY</Text>
-        </Animated.View>
-      )}
     </View>
   );
 }
@@ -3379,7 +3337,7 @@ const styles = StyleSheet.create({
   // Hold-to-activate Avatar panel (bottom-left). Dark card matching the other
   // map glass; green-dot radio rows mirror the Settings MAP MODE selector.
   avatarPanel: {
-    position: "absolute", left: 12, zIndex: 60, width: 232,
+    position: "absolute", left: 12, zIndex: 200, width: 232,
     borderRadius: 16, paddingVertical: 8, paddingHorizontal: 12,
     backgroundColor: "rgba(20,20,22,0.96)",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
@@ -3546,14 +3504,4 @@ const styles = StyleSheet.create({
   alertItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
   distPill: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, backgroundColor: "rgba(118,118,128,0.35)" },
   distPillText: { color: "#F4F4F4", fontSize: 11, fontWeight: "600" },
-  // Cold-start intro overlay — logo on black covering everything until the
-  // first location fix lands, then fades out.
-  introOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#000",
-    alignItems: "center", justifyContent: "center",
-    gap: 18,
-    zIndex: 100000,
-  },
-  introWord: { color: "#2DEC86", fontSize: 22, fontWeight: "800", letterSpacing: 6, marginLeft: 6 },
 });

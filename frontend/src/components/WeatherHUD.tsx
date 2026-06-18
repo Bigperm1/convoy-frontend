@@ -1,6 +1,6 @@
 // WeatherHUD â compact on-map weather chip shown when the weather layer is on.
 // Displays current temperature, conditions icon, wind and precip at a glance.
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, Platform, TouchableOpacity } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { WeatherCondition, ForecastDay } from "../weatherLayer";
@@ -105,6 +105,13 @@ function WeatherGlyph({ kind, size }: { kind: WeatherKind; size: number }) {
 export default function WeatherHUD({ weather, unit, compact, forecast }: Props) {
   const DEG = "\u00B0";
   const [open, setOpen] = useState(false);
+  // Auto-collapse the 7-day forecast back to the compact chip 5s after it opens.
+  // Keyed on `open`, so each (re)open restarts a fresh 5s timer.
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => setOpen(false), 5000);
+    return () => clearTimeout(t);
+  }, [open]);
   const temp = unit === 'mph'
     ? `${Math.round(weather.tempF)}${DEG}F`
     : `${Math.round(weather.tempC)}${DEG}C`;

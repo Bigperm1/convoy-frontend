@@ -117,19 +117,36 @@ const SELF_ID = "self";
 // ['zoom'] expressions. All stops OTA-tunable: scale the whole column for overall
 // size, raise the low-zoom (9–13) rows for "bigger when zoomed out", or the z17 row
 // for the close-up size.
+// DENSE half-step stops (was whole-zoom only, with a gap at 19): the model size
+// jumped/popped as the camera crossed each integer zoom because linear interp
+// over geometrically-spaced values kinks at every stop. Half-step stops follow
+// the same ~2x-per-zoom curve closely enough that scaling reads smooth through a
+// pinch. All OTA-tunable.
 const CAR_MODEL_SCALE_BY_ZOOM: any = [
   "interpolate", ["linear"], ["zoom"],
-  9,  [3400, 3400, 3400],
-  10, [1700, 1700, 1700],
-  11, [820, 820, 820],
-  12, [400, 400, 400],
-  13, [195, 195, 195],
-  14, [120, 120, 120],
-  15, [60, 60, 60],
-  16, [29, 29, 29],
-  17, [13, 13, 13],
-  18, [6.5, 6.5, 6.5],
-  20, [1.6, 1.6, 1.6],
+  9,    [3400, 3400, 3400],
+  9.5,  [2400, 2400, 2400],
+  10,   [1700, 1700, 1700],
+  10.5, [1180, 1180, 1180],
+  11,   [820, 820, 820],
+  11.5, [575, 575, 575],
+  12,   [400, 400, 400],
+  12.5, [280, 280, 280],
+  13,   [195, 195, 195],
+  13.5, [153, 153, 153],
+  14,   [120, 120, 120],
+  14.5, [85, 85, 85],
+  15,   [60, 60, 60],
+  15.5, [42, 42, 42],
+  16,   [29, 29, 29],
+  16.5, [19.5, 19.5, 19.5],
+  17,   [13, 13, 13],
+  17.5, [9.2, 9.2, 9.2],
+  18,   [6.5, 6.5, 6.5],
+  18.5, [4.6, 4.6, 4.6],
+  19,   [3.2, 3.2, 3.2],
+  19.5, [2.3, 2.3, 2.3],
+  20,   [1.6, 1.6, 1.6],
 ];
 // Continuous car scale driven from the LIVE camera zoom (see onCameraChanged),
 // instead of handing Mapbox the zoom-expression above — that snapped the model
@@ -1033,7 +1050,16 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
 
         <Camera
           ref={cameraRef}
-          followUserLocation={followUser && !placesShown}
+          // COLD-START FIX: keep follow OFF until the cold-lock window elapses.
+          // With followUserLocation true from the FIRST render, rnmapbox's native
+          // follow engine seizes the camera at frame 0 and IGNORES defaultSettings,
+          // flying in from the style's world-default to the user at followZoom —
+          // that was the cold-start zoom-in. While follow is off, defaultSettings
+          // (centerCoordinate + zoom 17) frames the driver statically; once
+          // coldLockDone flips (~1.2s) follow engages from that same pose, so there
+          // is no fly-in. (animationMode does NOT govern the follow engine's lock-on,
+          // which is why the earlier animationMode="none" attempt had no effect.)
+          followUserLocation={followUser && !placesShown && coldLockDone}
           followUserMode={UserTrackingMode.Follow}
           followZoomLevel={followZoom}
           followHeading={followHeadingDeg}

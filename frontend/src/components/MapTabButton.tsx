@@ -26,19 +26,32 @@ type Props = {
 export default function MapTabButton({ children, onPress, accessibilityState, style, ...rest }: Props) {
   const [holding, setHolding] = useState(false);
   const heldRef = useRef(false);
-  const selected = !!accessibilityState?.selected;
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleLongPress = () => {
-    // Only open the Avatar panel when Map is already the active screen — the
-    // panel renders there. From other tabs a hold just behaves like a tap.
-    if (!selected) return;
-    heldRef.current = true;
-    setHolding(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-    emitAvatarHold();
+  const clearHoldTimer = () => {
+    if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null; }
+  };
+
+  // Press-and-hold via a MANUAL onPressIn timer instead of Pressable's
+  // onLongPress. The Avatar hold only ever runs while Map is the ALREADY-focused
+  // tab, and onLongPress does not reliably fire on the focused tab button (React
+  // Navigation owns its press handling) — that was why the panel never opened.
+  // onPressIn fires on touch-down regardless of focus, so the hold opens the
+  // panel every time. A short tap clears the timer before it fires (-> plain
+  // navigation); a hold >=260ms fires the avatar signal + green glow.
+  const handlePressIn = () => {
+    heldRef.current = false;
+    clearHoldTimer();
+    holdTimer.current = setTimeout(() => {
+      heldRef.current = true;
+      setHolding(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+      emitAvatarHold();
+    }, 260);
   };
 
   const handlePressOut = () => {
+    clearHoldTimer();
     if (heldRef.current) {
       heldRef.current = false;
       setHolding(false);
@@ -51,10 +64,13 @@ export default function MapTabButton({ children, onPress, accessibilityState, st
       style={[styles.btn, style]}
       accessibilityState={accessibilityState}
       accessibilityRole="button"
+      onPressIn={handlePressIn}
       onPress={onPress}
-      onLongPress={handleLongPress}
       onPressOut={handlePressOut}
-      delayLongPress={250}
+      // Suppress React Navigation's spread-in onLongPress (tabLongPress emitter)
+      // so a long hold never "consumes" the press — onPress (navigate) still
+      // fires on release. The avatar hold is driven by the onPressIn timer above.
+      onLongPress={undefined}
     >
       {/* Same smoky green haze as the Comms hold, behind the Map icon. */}
       <CommsHoldGlow active={holding} />

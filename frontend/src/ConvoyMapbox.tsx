@@ -148,6 +148,20 @@ const CAR_MODEL_SCALE_BY_ZOOM: any = [
   19.5, [2.3, 2.3, 2.3],
   20,   [1.6, 1.6, 1.6],
 ];
+// SELF-CAR SIZE KNOB (OTA). The switch to modelType "common-3d" renders the car
+// visibly larger on-screen than the old "location-indicator" did, so the table
+// above now reads too big. Rather than re-tune every stop, scale the whole curve
+// by one factor: lower = smaller. 1.0 == the (too-big) table above. The map uses
+// CAR_MODEL_SCALE_SIZED below — adjust CAR_SIZE and OTA to resize.
+const CAR_SIZE = 0.80;
+const CAR_MODEL_SCALE_SIZED: any = CAR_MODEL_SCALE_BY_ZOOM.map((v: any) =>
+  // Only the [x,y,z] scale tuples are all-number arrays; the expression's own
+  // sub-arrays (["linear"], ["zoom"]) contain strings and must pass through
+  // untouched, as must the bare zoom-stop numbers (9, 9.5, …).
+  Array.isArray(v) && v.every((n: any) => typeof n === "number")
+    ? v.map((n: number) => Math.round(n * CAR_SIZE * 100) / 100)
+    : v,
+);
 // Continuous car scale driven from the LIVE camera zoom (see onCameraChanged),
 // instead of handing Mapbox the zoom-expression above — that snapped the model
 // size at integer zooms (not smooth). Geometric (log-space) interpolation
@@ -181,9 +195,9 @@ const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° off (si
 const CAR_EMISSIVE_BY_MODE: Record<string, number> = {
   satellite: 0,
   day: 0,
-  dusk: 0,
+  dusk: 0.55,
   dawn: 0.55,
-  night: 0.85,
+  night: 1.0,
 };
 
 // ----- Marker icon assets (shared with the Google engine) -----
@@ -432,7 +446,7 @@ function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng: numbe
       // Shorter ease (0.9 → 0.7 of the fix gap) so the interpolated point — which
       // the chase camera follows via CustomLocationProvider — keeps tighter pace
       // through corners and the camera recenters the car faster.
-      start: now, dur: Math.max(200, fixGap.current * 0.7),
+      start: now, dur: Math.max(200, fixGap.current * 0.6),
     };
     if (raf.current == null) raf.current = requestAnimationFrame(step);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -465,7 +479,7 @@ function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng: numbe
           // like the route LineLayer, which is what put the line over the car.
           modelType: "common-3d",
           modelEmissiveStrength: emissive,
-          modelScale: CAR_MODEL_SCALE_BY_ZOOM,
+          modelScale: CAR_MODEL_SCALE_SIZED,
           modelRotation: [0, 0, (r.heading ?? 0) + CAR_MODEL_HEADING_OFFSET],
           modelCastShadows: false,
           modelReceiveShadows: false,
@@ -610,14 +624,23 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // back to undefined) so the in-drive chase transitions stay smooth.
   const coldLockArmedRef = useRef(false);
   const [coldLockDone, setColdLockDone] = useState(false);
+  const [dbgCamHdg, setDbgCamHdg] = useState(0);
+  // True the moment we have ANY GPS fix. Kept as a STABLE boolean so the arm
+  // effect below runs EXACTLY ONCE (on the first fix) and is not re-run on every
+  // subsequent GPS tick.
+  const hasFirstFix = !!(user && typeof user.lat === "number" && typeof user.lng === "number");
   useEffect(() => {
-    if (coldLockArmedRef.current) return;
-    if (user && typeof user.lat === "number" && typeof user.lng === "number") {
-      coldLockArmedRef.current = true;
-      const t = setTimeout(() => setColdLockDone(true), 1200);
-      return () => clearTimeout(t);
-    }
-  }, [user?.lat, user?.lng]);
+    if (coldLockArmedRef.current || !hasFirstFix) return;
+    // Arm ONCE. This effect previously depended on user.lat/user.lng, so every
+    // GPS update (~2 Hz) re-ran it and its cleanup CLEARED the 1.2s timer before
+    // it could fire — coldLockDone never flipped true, which left the Camera's
+    // followUserLocation permanently OFF (dead Recenter + no zoom-in when nav
+    // starts + no chase). Keying on the stable hasFirstFix boolean lets the timer
+    // run to completion; the cleanup now only fires on unmount.
+    coldLockArmedRef.current = true;
+    const t = setTimeout(() => setColdLockDone(true), 1200);
+    return () => clearTimeout(t);
+  }, [hasFirstFix]);
   // Throttle clock for persisting the live location (see the effect below).
   const lastLocPersistRef = useRef(0);
 
@@ -734,9 +757,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const followPitchDeg = navigationActive && headingUp ? chasePitch(kmhFromMs(userSpeedMs)) : 0;
 
   // Lower-third chase framing — top padding pushes the followed car DOWN the
-  // screen (heading-up only) so the driver sees more road ahead. Only takes
-  // effect while followUserLocation is active; north-up stays centred.
-  const followPadding = headingUp && mapH > 0
+  // screen so the driver sees more road ahead. Applies ONLY during active
+  // navigation (heading-up); otherwise — free drive / north-up — the car sits
+  // centred.
+  const followPadding = navigationActive && headingUp && mapH > 0
     ? { paddingTop: Math.round(mapH * FOLLOW_LOWER_PAD_FRAC), paddingBottom: 0, paddingLeft: 0, paddingRight: 0 }
     : undefined;
 
@@ -827,9 +851,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     if (!Number.isFinite(minLat)) return;
     try {
       cam.setCamera({
-        // Big top padding clears the search bar + pills + the results dropdown
-        // (which overlays the top-left) so no pin hides behind the panel.
-        bounds: { ne: [maxLng, maxLat], sw: [minLng, minLat], paddingTop: 340, paddingBottom: 110, paddingLeft: 50, paddingRight: 50 },
+        // Balanced top/bottom padding centers the pins. (The old 340 top was
+        // reserved for the results dropdown, which no longer opens on a tap.)
+        bounds: { ne: [maxLng, maxLat], sw: [minLng, minLat], paddingTop: 150, paddingBottom: 150, paddingLeft: 50, paddingRight: 50 },
         heading: 0,
         pitch: 0,
         animationDuration: 500,
@@ -1014,6 +1038,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           if (typeof h === "number" && Math.abs(h - lastHeadingRef.current) > 0.5) {
             lastHeadingRef.current = h;
             onHeading?.(h);
+            setDbgCamHdg(h);
           }
         }}
       >
@@ -1200,6 +1225,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           <CarMarker key={c.id} car={c} mapHeading={mapHeadingDeg} onPress={() => { if (c.peer) onPeerPress?.(c.peer); }} />
         ))}
       </MapView>
+
+      {/* TEMP heading-up debug readout — remove before release. */}
+      <View pointerEvents="none" style={{ position: 'absolute', top: 120, left: 8, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 3, paddingHorizontal: 6, borderRadius: 6 }}>
+        <Text style={{ color: '#00FF88', fontSize: 11, fontWeight: '600' }}>
+          {`HDG mode:${mapView} feed:${followHeadingDeg != null ? Math.round(followHeadingDeg) : '-'} cam:${Math.round(dbgCamHdg)} gps:${Math.round(selfHeadingDeg)} foll:${followUser ? 'Y' : 'N'} lock:${coldLockDone ? 'Y' : 'N'}`}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -1208,7 +1240,7 @@ export default ConvoyMapbox;
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  map: { flex: 1 },
+  map: { flex: 1, backgroundColor: "#0B0B0C" },
   car: { width: 46, height: 46 },
   // Route ETA pill (alternate routes, preview mode).
   etaPillAlt: {

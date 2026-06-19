@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder, TextInput, AppState } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder, TextInput, AppState, Pressable } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -24,6 +24,7 @@ import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButton
 import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/components/StepDrawer";
 import { hailBus } from "../../src/hailBus";
 import { subscribeAvatarHold } from "../../src/avatarHoldBus";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, mapModeToLegacy, getAvatarMode, setAvatarMode } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
@@ -1291,6 +1292,19 @@ export default function MapScreen() {
   const navActiveRef = useRef(false);
   useEffect(() => { navActiveRef.current = navMode === "turn-by-turn"; }, [navMode]);
 
+  // Keep the screen awake while actively navigating (turn-by-turn) so the phone
+  // never dims/locks mid-drive. Same boolean that drives the map engine's
+  // `navigationActive` prop. Released when nav ends or the screen unmounts.
+  useEffect(() => {
+    const active = navMode === "turn-by-turn" && tbt.active;
+    if (active) {
+      activateKeepAwakeAsync('convoy-nav').catch(() => {});
+    } else {
+      deactivateKeepAwake('convoy-nav').catch(() => {});
+    }
+    return () => { deactivateKeepAwake('convoy-nav').catch(() => {}); };
+  }, [navMode, tbt.active]);
+
   // ----- Continuous heading + position watcher -----
   // BestForNavigation accuracy + 1s tick + 0m distance gate so the speedometer
   // updates every second instead of every ~4s/8m. Battery cost is acceptable
@@ -2263,7 +2277,7 @@ export default function MapScreen() {
       {/* Top-right logo — absolutely positioned at the SAME screen spot as the
           Comms/Music headers (top iOS52/Android28, right12) so it's pixel-identical
           across tabs. Rendered after topBar so it overlays and stays tappable. */}
-      <View style={styles.mapLogoBacking}><LogoMenu size={Platform.OS === 'ios' ? 34 : 40} align="right" /></View>
+      <View style={styles.mapLogoBacking}><LogoMenu size={34} align="right" /></View>
 
       {/* ===== Community Routes — horizontal chip strip (visible when there are shared cruises) ===== */}
       {communityRoutes.length > 0 && navMode === "preview" && !destination && (
@@ -2568,6 +2582,12 @@ export default function MapScreen() {
           dismiss. The weather chip shifts right and the zoom buttons lift up
           (above) so this owns the bottom-left while open. */}
       {avatarPanelOpen && (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={() => setAvatarPanelOpen(false)}
+        />
+      )}
+      {avatarPanelOpen && (
         <View style={[styles.avatarPanel, { bottom: weatherBottom + 64 }]}>
           <Text style={styles.avatarPanelTitle}>Avatar</Text>
           {([
@@ -2642,11 +2662,11 @@ export default function MapScreen() {
       <View pointerEvents="box-none" style={[styles.fabStack, { bottom: controlsBottom }]}>
         {/* Compass — top of stack. The needle rotates opposite the live map
             bearing so North always points north as the map turns; tapping it
-            animates the map back to north-up (heading 0). */}
+            snaps back to the car (recenter) AND faces the map north (heading 0). */}
         <TouchableOpacity
           testID="compass-fab"
           style={styles.fab}
-          onPress={() => setNorthSignal((n) => n + 1)}
+          onPress={() => { setNorthSignal((n) => n + 1); recenterNow(); }}
           activeOpacity={0.85}
         >
           <View style={{ transform: [{ rotate: `${-mapHeading}deg` }] }}>
@@ -2664,23 +2684,8 @@ export default function MapScreen() {
         >
           <PoliceBadgeIcon size={40} />
         </TouchableOpacity>
-        {/* ===== Recenter FAB =====
-            Only visible when follow-mode is OFF (the user has panned away from
-            their position). Tap → flips `isFollowing` back to true which both
-            (a) re-binds the map's `region` prop in ConvoyMap so subsequent
-            GPS updates track the user, AND (b) fires an animateCamera() snap
-            to the current coord for instant feedback. Active state is shown
-            with a tinted accent so the user understands the toggle. */}
-        {!isFollowing && (
-          <TouchableOpacity
-            testID="recenter-fab"
-            onPress={recenterNow}
-            activeOpacity={0.85}
-            style={styles.fab}
-          >
-            <Ionicons name="locate" size={40} color="#fff" />
-          </TouchableOpacity>
-        )}
+        {/* Recenter FAB removed — recentering now lives in the compass tap
+            (which both recenters on the car and faces north). */}
         {/* Bottom search/arrow FAB removed entirely — the destination search
             bar stays pinned at the top until a route is selected (then the
             guidance banner overlaps it), so a re-summon FAB isn't needed. */}
@@ -3253,10 +3258,10 @@ const styles = StyleSheet.create({
   // solid-dark Comms/Music headers it needs a backing to stay crisp over any
   // background. 40×40 circle mirrors the old profile-avatar footprint.
   mapLogoBacking: {
-    position: 'absolute', top: Platform.OS === 'ios' ? 47 : 28, right: 12, zIndex: 100,
-    width: Platform.OS === 'ios' ? 46 : 54,
-    height: Platform.OS === 'ios' ? 46 : 54,
-    borderRadius: Platform.OS === 'ios' ? 23 : 27,
+    position: 'absolute', top: Platform.OS === 'ios' ? 47 : 23, right: 12, zIndex: 100,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(20,20,22,0.9)',
     borderWidth: 1,

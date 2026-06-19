@@ -162,6 +162,7 @@ enum ConvoyRNHost {
     if makeVisible {
       window.makeKeyAndVisible()
     } else {
+      viewController.view.backgroundColor = UIColor.magenta
       // CarPlay surface (makeVisible:false). Under the New Architecture the
       // bridgeless Fabric surface only DRAWS once its hosting view has a real
       // (non-zero) frame and lays out. CarPlay's window does not reliably trigger
@@ -172,6 +173,7 @@ enum ConvoyRNHost {
       viewController.view.frame = window.bounds
       viewController.view.setNeedsLayout()
       viewController.view.layoutIfNeeded()
+      window.layoutIfNeeded()
     }
   }
 }

@@ -290,7 +290,7 @@ export default function AppLayout() {
           tabBarLabel: "Map",
           tabBarButtonTestID: "tab-map",
           tabBarButton: (props) => <MapTabButton {...props} />,
-          tabBarIcon: ({ color }) => <Ionicons name="navigate" size={34} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="navigate" size={30} color={color} />,
         }} />
         <Tabs.Screen name="talk" options={{
           tabBarLabel: ({ color }) => (
@@ -298,7 +298,7 @@ export default function AppLayout() {
           ),
           tabBarButtonTestID: "tab-talk",
           tabBarButton: (props) => <CommsTabButton {...props} selfId={user?.id} />,
-          tabBarIcon: ({ color }) => <Ionicons name="mic" size={Platform.OS === 'ios' ? 34 : 38} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="mic" size={Platform.OS === 'ios' ? 30 : 32} color={color} />,
         }} />
         {/* Voice screen is no longer represented in the bottom tab bar — the
             press-and-hold mic now lives inside the map's search bar (Google
@@ -308,7 +308,7 @@ export default function AppLayout() {
         <Tabs.Screen name="music" options={{
           tabBarLabel: "Music",
           tabBarButtonTestID: "tab-music",
-          tabBarIcon: ({ color }) => <Ionicons name="musical-notes" size={34} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="musical-notes" size={30} color={color} />,
         }} />
         {/* Hub is now reached via the circular profile avatar on the right
             edge of the map search bar (mirrors Google Maps). Hidden from the

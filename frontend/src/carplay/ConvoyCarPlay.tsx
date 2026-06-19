@@ -22,15 +22,20 @@
 // on web (a ConvoyCarPlay.web.tsx stub keeps it out of the web bundle entirely)
 // and on any build without the native module — it can never crash at import.
 //
-// The car's map AREA (CarSurface) is currently a live DASHBOARD (speed, nearby
-// convoy, maneuver). A real street <MapView> on the surface is the next upgrade
-// once the DHU confirms what the car surface can host — that's pure JS / OTA.
+// The car's map AREA (CarSurface) renders a REAL street map: a Mapbox Static
+// Images frame centered on the driver (route line overlaid), refreshed as the
+// car moves, with the maneuver / nearby / speed read-outs floated on top. It is
+// a static <Image> (no GL <MapView>) on purpose — see the note above CarSurface
+// — so it always draws on the CarPlay window, can't trip the CarPlay watchdog,
+// and ships as a free OTA. Falls back to the original dashboard until a GPS fix
+// arrives or if a frame ever fails to load, so the car screen is never blank.
 
 import React, { useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform, View, Text, Image, StyleSheet } from 'react-native';
-import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec } from '../nav';
+import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
 import { setCarState, getCarState, useCarStore, type CarPeer } from './carStore';
 import { setCarPlayHookOwnsRoot } from './carPlayShared';
+import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 
 const isIOS = Platform.OS === 'ios';
 const isAndroid = Platform.OS === 'android';
@@ -85,9 +90,54 @@ function fmtClock(d: Date): string {
   return `${h}:${m < 10 ? '0' : ''}${m}${ap}`;
 }
 
+// ---- Mapbox Static Images: live street map for the car surface ----
+// Renders a REAL dark street map centered on the driver as a plain <Image>
+// (Mapbox Static Images API) — deliberately NOT a live GL <MapView>. On the
+// secondary CarPlay window a GL/Metal map risks failing to get a render context
+// and, worse, tripping the CarPlay watchdog (the same watchdog that caused the
+// original connect crash when nothing drew in time). A static <Image> has no GL
+// context, can't trip the watchdog, always draws, and is 100% OTA-able. The map
+// is fetched NORTH-UP; the car marker is drawn in RN on top and rotated to
+// heading, so constant heading changes cost no new image fetch — only movement
+// does. If we ever confirm a live MapView is safe on a head unit, it slots in
+// here behind the same fallback.
+const CAR_MAP_STYLE = 'mapbox/dark-v11'; // standard, always-valid dark style
+const CAR_MAP_ZOOM = 15;
+const CAR_MAP_W = 800;
+const CAR_MAP_H = 480;
+const CAR_ROUTE_COLOR = '2dec86'; // brand green, no '#'
+// Refresh the street map when the car moves this far OR this long passes —
+// whichever first. Keeps Static Images API request volume modest while staying
+// current enough for a glanceable dashboard.
+const CAR_MAP_MOVE_M = 70;
+const CAR_MAP_MAX_AGE_MS = 5000;
+// Hard ceiling on the whole URL; if a long route polyline would blow past it the
+// route overlay is dropped (the map still renders, centered on the car).
+const CAR_MAP_URL_MAX = 7500;
+
+function buildStaticMapUrl(lat: number, lng: number, polyline: string): string {
+  const tail =
+    `${lng},${lat},${CAR_MAP_ZOOM},0/${CAR_MAP_W}x${CAR_MAP_H}@2x` +
+    `?access_token=${MAPBOX_PUBLIC_TOKEN}`;
+  let overlay = '';
+  if (polyline) {
+    // Google's overview polyline is precision-5 — a drop-in for Mapbox's `path`
+    // overlay. URL-encode it (it can contain \\, ?, @, etc.).
+    const withPath = `path-5+${CAR_ROUTE_COLOR}-1(${encodeURIComponent(polyline)})/`;
+    const probe = `https://api.mapbox.com/styles/v1/${CAR_MAP_STYLE}/static/${withPath}${tail}`;
+    if (probe.length <= CAR_MAP_URL_MAX) overlay = withPath;
+  }
+  return `https://api.mapbox.com/styles/v1/${CAR_MAP_STYLE}/static/${overlay}${tail}`;
+}
+
 // ---- The component rendered onto the car screen ----
 // Shown the whole time a car is connected — idle (no route) AND during nav.
 // Reads the shared store so it shows live data despite being a separate root.
+//
+// With a GPS fix it shows a real street map (centered on the driver, route line
+// overlaid) with the maneuver / nearby / speed read-outs floated on top. Until a
+// fix arrives (or if the map image ever fails to load) it falls back to the
+// original dashboard, so the car screen is never worse than before.
 export function CarSurface() {
   const s = useCarStore();
   const kmh = Math.max(0, Math.round((s.speedMs || 0) * 3.6));
@@ -99,26 +149,109 @@ export function CarSurface() {
   const arrival = (s.navigating && (s.etaSeconds || 0) > 0)
     ? fmtClock(new Date(Date.now() + (s.etaSeconds || 0) * 1000))
     : '';
+  const metaLine = [arrival, s.eta, s.distanceRemaining].filter(Boolean).join('   ·   ');
+
+  const hasFix = typeof s.selfLat === 'number' && typeof s.selfLng === 'number';
+
+  // Static-map URL loaded straight into the visible full-size <Image>. The old
+  // off-screen 1x1/opacity-0 preloader never decoded on the CarPlay surface, so
+  // its onLoad never fired and the map never showed.
+  const [mapUrl, setMapUrl] = useState<string | null>(null);
+  const [dbgErr, setDbgErr] = useState<string>('');
+  const lastRef = useRef<{ lat: number; lng: number; at: number; poly: string }>({ lat: 0, lng: 0, at: 0, poly: '' });
+
+  useEffect(() => {
+    if (!hasFix) return;
+    const lat = s.selfLat as number;
+    const lng = s.selfLng as number;
+    const now = Date.now();
+    const last = lastRef.current;
+    const movedM = (last.lat || last.lng)
+      ? haversineMeters({ lat: last.lat, lng: last.lng }, { lat, lng })
+      : Infinity;
+    const polyChanged = last.poly !== s.routePolyline;
+    const stale = now - last.at > CAR_MAP_MAX_AGE_MS;
+    const everFetched = last.at !== 0;
+    if (everFetched && !polyChanged && movedM < CAR_MAP_MOVE_M && !stale) return;
+
+    lastRef.current = { lat, lng, at: now, poly: s.routePolyline };
+    // Set the visible map URL directly — the full-size <Image> loads it the same
+    // way the logo PNG does (which the hidden preloader did not on CarPlay).
+    setMapUrl(buildStaticMapUrl(lat, lng, s.routePolyline));
+  }, [hasFix, s.selfLat, s.selfLng, s.routePolyline]);
+
+  const showMap = hasFix && !!mapUrl;
+
   return (
     <View style={styles.surface}>
-      <View style={styles.center}>
-        {s.navigating ? (
-          <>
-            <Text style={styles.dist}>{s.distanceToTurn || '—'}</Text>
-            <Text style={styles.inst} numberOfLines={2}>{s.instruction || 'Continue'}</Text>
-            <Text style={styles.meta}>{[arrival, s.eta, s.distanceRemaining].filter(Boolean).join('   ·   ')}</Text>
-          </>
-        ) : (
-          <>
-            <Image source={require('../../assets/final_icon.png')} style={styles.carLogo} resizeMode="contain" />
-            <Text style={styles.brand}>CONVOY</Text>
-            <Text style={styles.sub}>{nearby ? `${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'Drive together'}</Text>
-          </>
-        )}
-      </View>
-      <View style={styles.speedPill}>
+      {showMap ? (
+        <>
+          <Image
+            source={{ uri: mapUrl as string }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+            onError={(e: any) => { setMapUrl(null); lastRef.current = { lat: 0, lng: 0, at: 0, poly: '' }; setDbgErr(String(e?.nativeEvent?.error || 'map-img-err')); }}
+          />
+
+          {/* Car marker pinned to the map centre, rotated to heading (north-up map). */}
+          <View style={styles.markerCenter} pointerEvents="none">
+            <View style={styles.markerHalo} />
+            <View style={[styles.markerChevron, { transform: [{ rotate: `${s.heading ?? 0}deg` }] }]} />
+          </View>
+
+          {/* Top: maneuver while navigating, else a small CONVOY / nearby chip. */}
+          {s.navigating ? (
+            <View style={styles.topStrip} pointerEvents="none">
+              <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
+              <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
+            </View>
+          ) : (
+            <View style={styles.topChip} pointerEvents="none">
+              <Text style={styles.topChipText}>
+                {nearby ? `CONVOY   ·   ${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'CONVOY'}
+              </Text>
+            </View>
+          )}
+
+          {/* Bottom-right: arrival / eta / remaining while navigating. */}
+          {s.navigating && metaLine ? (
+            <View style={styles.bottomMeta} pointerEvents="none">
+              <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
+            </View>
+          ) : null}
+        </>
+      ) : (
+        /* ---- Fallback: no GPS fix yet (or image failed) → original dashboard ---- */
+        <View style={styles.center}>
+          {s.navigating ? (
+            <>
+              <Text style={styles.dist}>{s.distanceToTurn || '—'}</Text>
+              <Text style={styles.inst} numberOfLines={2}>{s.instruction || 'Continue'}</Text>
+              <Text style={styles.meta}>{metaLine}</Text>
+            </>
+          ) : (
+            <>
+              <Image source={require('../../assets/final_icon.png')} style={styles.carLogo} resizeMode="contain" />
+              <Text style={styles.brand}>CONVOY</Text>
+              <Text style={styles.sub}>{nearby ? `${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'Drive together'}</Text>
+            </>
+          )}
+        </View>
+      )}
+
+      {/* Speed pill — always shown, both map and fallback. */}
+      <View style={styles.speedPill} pointerEvents="none">
         <Text style={styles.speedNum}>{kmh}</Text>
         <Text style={styles.speedUnit}>km/h</Text>
+      </View>
+
+      {/* TEMP debug readout — remove before release. Centered so the native CarPlay banner can't hide it. */}
+      <View pointerEvents="none" style={{ position: 'absolute', top: '44%', left: 0, right: 0, alignItems: 'center', zIndex: 9999 }}>
+        <View style={{ backgroundColor: 'rgba(0,0,0,0.75)', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 }}>
+          <Text style={{ color: '#00FF88', fontSize: 12, fontWeight: '700' }}>
+            {`DBG fix:${hasFix ? 'Y' : 'N'}  map:${mapUrl ? 'Y' : 'N'}  err:${dbgErr || '-'}  @${typeof s.selfLat === 'number' ? s.selfLat.toFixed(3) : '-'},${typeof s.selfLng === 'number' ? s.selfLng.toFixed(3) : '-'}`}
+          </Text>
+        </View>
       </View>
     </View>
   );
@@ -204,6 +337,13 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
       distanceToTurnM: tbt.active ? tbt.distanceToManeuverM : 0,
       distanceRemainingM: tbt.active ? tbt.distanceRemainingM : 0,
       etaSeconds: tbt.active ? tbt.etaSeconds : 0,
+      // Live map background (CarPlay static map). Mirrored every GPS tick so the
+      // car surface can center the map on the driver and draw the route. Route
+      // polyline is shown whenever a route is active (preview or nav).
+      selfLat: typeof user?.lat === 'number' ? user.lat : null,
+      selfLng: typeof user?.lng === 'number' ? user.lng : null,
+      heading: typeof user?.heading === 'number' ? user.heading : null,
+      routePolyline: route?.polyline || '',
     });
   }, [
     tbt.active,
@@ -215,6 +355,9 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
     destination?.label,
     peers,
     user?.speed,
+    user?.lat,
+    user?.lng,
+    user?.heading,
   ]);
 
   // ---- connect / disconnect lifecycle ----
@@ -429,7 +572,23 @@ const styles = StyleSheet.create({
   dist: { color: '#F4F4F4', fontSize: 48, fontWeight: '800', letterSpacing: -1 },
   inst: { color: '#F4F4F4', fontSize: 22, fontWeight: '600', marginTop: 4, textAlign: 'center' },
   meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },
-  speedPill: { position: 'absolute', left: 20, bottom: 20, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 16, paddingHorizontal: 16, paddingVertical: 8 },
+  speedPill: { position: 'absolute', left: 20, bottom: 20, alignItems: 'center', backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 16, paddingHorizontal: 16, paddingVertical: 8 },
   speedNum: { color: '#F4F4F4', fontSize: 30, fontWeight: '800' },
   speedUnit: { color: '#9AA0A6', fontSize: 12, fontWeight: '600' },
+  // --- live static-map mode ---
+  preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },
+  markerCenter: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  markerHalo: { position: 'absolute', width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(11,11,12,0.55)', borderWidth: 2, borderColor: 'rgba(45,236,134,0.55)' },
+  markerChevron: {
+    width: 0, height: 0, backgroundColor: 'transparent',
+    borderLeftWidth: 10, borderRightWidth: 10, borderBottomWidth: 18,
+    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#2DEC86',
+  },
+  topStrip: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 18, backgroundColor: 'rgba(11,11,12,0.74)' },
+  topDist: { color: '#2DEC86', fontSize: 26, fontWeight: '800', marginRight: 14 },
+  topInst: { color: '#F4F4F4', fontSize: 20, fontWeight: '600', flexShrink: 1 },
+  topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 14 },
+  topChipText: { color: '#2DEC86', fontSize: 15, fontWeight: '800', letterSpacing: 1 },
+  bottomMeta: { position: 'absolute', right: 16, bottom: 18, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 12 },
+  bottomText: { color: '#C7CCD1', fontSize: 16, fontWeight: '600' },
 });

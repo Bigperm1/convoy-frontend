@@ -189,6 +189,8 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  // Results dropdown is only shown on a LONG-press (tap just drops pins).
+  const [listOpen, setListOpen] = useState(false);
   // Results for the active category — drives the dropdown list (and the pins,
   // via onResults). Kept in sync with what the map shows.
   const [results, setResults] = useState<PlaceResult[]>([]);
@@ -213,6 +215,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
     setLoadingKey(null);
     setResults([]);
     onResults([]);
+    setListOpen(false);
   };
 
   const run = async (cat: Category) => {
@@ -251,7 +254,9 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         key={cat.key}
         testID={`cat-pill-${cat.key}`}
         activeOpacity={0.8}
-        onPress={() => run(cat)}
+        onPress={() => { setListOpen(false); run(cat); }}
+        onLongPress={() => { setListOpen(true); if (activeKey !== cat.key) run(cat); }}
+        delayLongPress={250}
         style={[styles.pill, active && styles.pillActive]}
       >
         {loading ? (
@@ -282,7 +287,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
 
       {/* Results dropdown — animated panel listing the active category's hits
           (name, address, rating + count or gas premium price, time · distance). */}
-      {activeKey && (
+      {activeKey && listOpen && (
         <Animated.View
           style={[
             styles.dropdown,

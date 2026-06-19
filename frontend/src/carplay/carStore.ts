@@ -25,6 +25,17 @@ export type CarState = {
   distanceToTurnM: number; // meters to the next maneuver
   distanceRemainingM: number; // meters to the destination
   etaSeconds: number; // seconds remaining to the destination
+  // --- Live map (CarPlay static-map background) ---
+  // Self position + heading for centering the car map and rotating the car
+  // marker, plus the encoded route geometry. routePolyline is Google's
+  // precision-5 overview polyline, which is a drop-in for the Mapbox Static
+  // Images API `path` overlay (same encoding). selfLat/selfLng are null until
+  // GPS is acquired; heading is null when unknown/stationary; routePolyline is
+  // '' when there is no active route.
+  selfLat: number | null;
+  selfLng: number | null;
+  heading: number | null; // degrees, 0 = north
+  routePolyline: string;
 };
 
 const initial: CarState = {
@@ -39,6 +50,10 @@ const initial: CarState = {
   distanceToTurnM: 0,
   distanceRemainingM: 0,
   etaSeconds: 0,
+  selfLat: null,
+  selfLng: null,
+  heading: null,
+  routePolyline: '',
 };
 
 let state: CarState = initial;

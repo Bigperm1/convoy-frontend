@@ -443,10 +443,12 @@ function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng: numbe
     anim.current = {
       fromLat: prev.lat, fromLng: prev.lng, fromHdg: prev.heading,
       toLat: lat, toLng: lng, toHdg: prev.heading + angDelta(prev.heading, heading),
-      // Shorter ease (0.9 → 0.7 of the fix gap) so the interpolated point — which
-      // the chase camera follows via CustomLocationProvider — keeps tighter pace
-      // through corners and the camera recenters the car faster.
-      start: now, dur: Math.max(200, fixGap.current * 0.6),
+      // Ease over ~the FULL inter-fix interval so the car moves CONTINUOUSLY instead
+      // of reaching each fix early and pausing (the move-pause-move stutter that read
+      // as "jittery"). Camera + car both ride render.current (the CustomLocationProvider
+      // below), so a longer ease keeps them in lockstep — it does NOT make the car
+      // trail the camera. OTA-tunable: lower = snappier but stutters, higher = smoother.
+      start: now, dur: Math.max(220, fixGap.current * 1.1),
     };
     if (raf.current == null) raf.current = requestAnimationFrame(step);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -946,7 +948,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const _trimSpdMs = typeof userSpeedMs === "number" && userSpeedMs > 0 ? userSpeedMs : 0;
   // Bigger buffer ahead of the nose (14 m base → up to 34 m at speed, was 8→24)
   // so the green line never crowds the car.
-  const _trimLeadM = Math.max(14, Math.min(34, 14 + _trimSpdMs * 0.7));
+  const _trimLeadM = Math.max(6, Math.min(16, 6 + _trimSpdMs * 0.34));
   const routeTrimEndFrac = routeProj
     ? Math.max(0, Math.min(0.999, routeProj.frac + _trimLeadM / routeProj.totalM))
     : null;

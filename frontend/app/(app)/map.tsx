@@ -1292,18 +1292,15 @@ export default function MapScreen() {
   const navActiveRef = useRef(false);
   useEffect(() => { navActiveRef.current = navMode === "turn-by-turn"; }, [navMode]);
 
-  // Keep the screen awake while actively navigating (turn-by-turn) so the phone
-  // never dims/locks mid-drive. Same boolean that drives the map engine's
-  // `navigationActive` prop. Released when nav ends or the screen unmounts.
+  // Keep the screen awake the WHOLE time the map screen is open — not just during
+  // active turn-by-turn. In the car the phone is plugged in and the driver needs the
+  // map visible whether navigating, in convoy mode, or just watching the route, so the
+  // old tbt-only gate let it dim mid-drive. Released on unmount; iOS still locks once
+  // backgrounded. (Trade-off: foregrounded + parked + unplugged won't auto-dim.)
   useEffect(() => {
-    const active = navMode === "turn-by-turn" && tbt.active;
-    if (active) {
-      activateKeepAwakeAsync('convoy-nav').catch(() => {});
-    } else {
-      deactivateKeepAwake('convoy-nav').catch(() => {});
-    }
+    activateKeepAwakeAsync('convoy-nav').catch(() => {});
     return () => { deactivateKeepAwake('convoy-nav').catch(() => {}); };
-  }, [navMode, tbt.active]);
+  }, []);
 
   // ----- Continuous heading + position watcher -----
   // BestForNavigation accuracy + 1s tick + 0m distance gate so the speedometer

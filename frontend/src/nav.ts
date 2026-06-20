@@ -745,7 +745,10 @@ function resetSpeakGate() {
   _restoreMusicNow();
   // ...and release the ducking audio session so external music (Spotify etc.)
   // returns to full volume the moment nav ends, not just when the queue drains.
-  void setIdleAudioMode();
+  // BUT only when Nova voice is actually on: with the readout toggled off we never
+  // play anything here, so grabbing the audio session just needlessly re-routes the
+  // user's own music. Leaving it untouched keeps their stereo (A2DP) intact.
+  if (getSettings().novaVoice !== false) void setIdleAudioMode();
 }
 
 // Reroute is intentionally SILENT. Convoy used to speak "Recalculating route."

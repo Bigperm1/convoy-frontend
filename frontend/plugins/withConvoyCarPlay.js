@@ -146,35 +146,60 @@ enum ConvoyRNHost {
       rootView = factory.rootViewFactory.view(withModuleName: moduleName, initialProperties: nil, launchOptions: nil)
     }
 
-    let viewController = UIViewController()
-    rootView.translatesAutoresizingMaskIntoConstraints = false
-    viewController.view.addSubview(rootView)
-    NSLayoutConstraint.activate([
-      rootView.leadingAnchor.constraint(equalTo: viewController.view.leadingAnchor),
-      rootView.trailingAnchor.constraint(equalTo: viewController.view.trailingAnchor),
-      rootView.topAnchor.constraint(equalTo: viewController.view.topAnchor),
-      rootView.bottomAnchor.constraint(equalTo: viewController.view.bottomAnchor),
-    ])
-    window.rootViewController = viewController
     // The phone window must be made key + visible (startReactNative would have
     // done this in the boot branch). The CarPlay window must NOT — CarPlay owns
     // its presentation; making it key can fight the template layer.
     if makeVisible {
+      // PHONE window (unchanged): pin the RN root with constraints and present.
+      let viewController = UIViewController()
+      rootView.translatesAutoresizingMaskIntoConstraints = false
+      viewController.view.addSubview(rootView)
+      NSLayoutConstraint.activate([
+        rootView.leadingAnchor.constraint(equalTo: viewController.view.leadingAnchor),
+        rootView.trailingAnchor.constraint(equalTo: viewController.view.trailingAnchor),
+        rootView.topAnchor.constraint(equalTo: viewController.view.topAnchor),
+        rootView.bottomAnchor.constraint(equalTo: viewController.view.bottomAnchor),
+      ])
+      window.rootViewController = viewController
       window.makeKeyAndVisible()
     } else {
-      viewController.view.backgroundColor = UIColor.magenta
-      // CarPlay surface (makeVisible:false). Under the New Architecture the
-      // bridgeless Fabric surface only DRAWS once its hosting view has a real
-      // (non-zero) frame and lays out. CarPlay's window does not reliably trigger
-      // that layout on its own here, so the surface can stay 0x0 and the launch
-      // image shows through -> the dashboard never appears. Force the host view to
-      // the window bounds and lay out so the surface renders.
-      // (Build-5 hypothesis fix for the blank/launch-image car dashboard.)
+      // CARPLAY window: host the RN surface in a controller that re-asserts the
+      // surface's frame + layout on every layout pass. CarPlay can hand us the window
+      // before it has a real size and doesn't reliably trigger the layout the
+      // bridgeless Fabric surface needs, so a one-time layout at connect can mount the
+      // dashboard at 0x0 and leave it blank. viewDidLayoutSubviews fires whenever the
+      // window finally gets its size, so the surface can't stay stuck at 0x0. Do NOT
+      // make this window key — CarPlay owns its presentation.
+      let viewController = ConvoyCarRootViewController(hosted: rootView)
+      window.rootViewController = viewController
       viewController.view.frame = window.bounds
       viewController.view.setNeedsLayout()
       viewController.view.layoutIfNeeded()
-      window.layoutIfNeeded()
     }
+  }
+}
+
+// Hosts the CarPlay RN surface and keeps it sized to the window. CarPlay sizes its
+// window LATE and doesn't reliably trigger the layout the bridgeless Fabric surface
+// needs to draw, so we re-assert the hosted view's frame + layout on EVERY layout
+// pass — a 0x0 mount then self-heals the moment the real size arrives, instead of
+// staying blank (the recurring CarPlay bug).
+final class ConvoyCarRootViewController: UIViewController {
+  private let hosted: UIView
+  init(hosted: UIView) { self.hosted = hosted; super.init(nibName: nil, bundle: nil) }
+  required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    view.backgroundColor = .black
+    hosted.frame = view.bounds
+    hosted.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    view.addSubview(hosted)
+  }
+  override func viewDidLayoutSubviews() {
+    super.viewDidLayoutSubviews()
+    if !hosted.bounds.equalTo(view.bounds) { hosted.frame = view.bounds }
+    hosted.setNeedsLayout()
+    hosted.layoutIfNeeded()
   }
 }
 

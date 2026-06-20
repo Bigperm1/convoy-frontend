@@ -437,6 +437,19 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </Glass>
 
+        {/* Developer */}
+        <Text style={styles.sectionLabel}>DEVELOPER</Text>
+        <Glass radius={16} style={styles.card}>
+          <ToggleRow
+            icon="bug-outline"
+            iconColor="#8E8E93"
+            title="Debug overlays"
+            subtitle="Show diagnostic readouts on the map and CarPlay — off keeps the screen clean"
+            value={settings.debugOverlays === true}
+            onChange={(v) => setSettings({ debugOverlays: v })}
+          />
+        </Glass>
+
         <View style={{ height: 120 }} />
       </ScrollView>
     </View>

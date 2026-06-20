@@ -2232,11 +2232,12 @@ export default function MapScreen() {
         onRoute={setRoute}
       />
 
-      {/* TEMP speed-limit debug — same style as ConvoyMapbox's HDG strip (top 120),
-          positioned just below it. Remove before release. */}
+      {/* Speed-limit diagnostic — gated by the Debug toggle in Settings. */}
+      {settings.debugOverlays === true && (
       <View pointerEvents="none" style={{ position: 'absolute', top: 146, left: 8, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 3, paddingHorizontal: 6, borderRadius: 6 }}>
         <Text style={{ color: '#00FF88', fontSize: 11, fontWeight: '600' }}>{`SL ${getSpeedLimitDebug()}`}</Text>
       </View>
+      )}
 
       {/* ===== Minimal top bar — Google Maps style =====
           The map extends edge-to-edge behind this. We render JUST the floating

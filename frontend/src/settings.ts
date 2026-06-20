@@ -84,6 +84,9 @@ callSign?: string;
 // Which music source the user picked in the Music tab ('apple' | 'spotify').
 // null = not chosen yet → show the source-picker connect screen.
 musicSource?: 'apple' | 'spotify' | null;
+// Developer: show on-screen diagnostic overlays (map HDG/SL + CarPlay DBG strip).
+// Off by default so the screen is clean; toggled in Settings.
+debugOverlays: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -132,6 +135,7 @@ carColor: undefined,
 topSpeed: undefined,
 callSign: undefined,
 musicSource: null,
+debugOverlays: false,
 };
 
 // ---- Map mode helpers (single source of truth = settings.mapMode) ----

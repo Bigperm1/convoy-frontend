@@ -260,7 +260,8 @@ export function CarSurface() {
         <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
       </View>
 
-      {/* TEMP debug readout — remove before release. Centered so the native CarPlay banner can't hide it. */}
+      {/* Mount diagnostic readout — gated by the Debug toggle in Settings. */}
+      {getSettings().debugOverlays && (
       <View pointerEvents="none" style={{ position: 'absolute', top: '44%', left: 0, right: 0, alignItems: 'center', zIndex: 9999 }}>
         <View style={{ backgroundColor: 'rgba(0,0,0,0.75)', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 }}>
           <Text style={{ color: '#00FF88', fontSize: 12, fontWeight: '700' }}>
@@ -268,6 +269,7 @@ export function CarSurface() {
           </Text>
         </View>
       </View>
+      )}
     </View>
   );
 }

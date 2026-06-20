@@ -39,7 +39,7 @@ import { getVehiclePngOrDefault, getVehicleModelUrl } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient } from "./mapboxDirections";
-import { getLastLocation, setLastLocation } from "./settings";
+import { getLastLocation, setLastLocation, getSettings } from "./settings";
 
 // 1×1 fully transparent PNG — a REAL bundled asset, not a data-URI (@rnmapbox's
 // Images may not load a data-URI at runtime, which would let the default dot fall
@@ -1239,12 +1239,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         ))}
       </MapView>
 
-      {/* TEMP heading-up debug readout — remove before release. */}
+      {/* Heading-up diagnostic readout — gated by the Debug toggle in Settings. */}
+      {getSettings().debugOverlays && (
       <View pointerEvents="none" style={{ position: 'absolute', top: 120, left: 8, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 3, paddingHorizontal: 6, borderRadius: 6 }}>
         <Text style={{ color: '#00FF88', fontSize: 11, fontWeight: '600' }}>
           {`HDG mode:${mapView} feed:${followHeadingDeg != null ? Math.round(followHeadingDeg) : '-'} cam:${Math.round(dbgCamHdg)} gps:${Math.round(selfHeadingDeg)} foll:${followUser ? 'Y' : 'N'} lock:${coldLockDone ? 'Y' : 'N'}`}
         </Text>
       </View>
+      )}
     </View>
   );
 }

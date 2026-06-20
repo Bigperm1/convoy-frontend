@@ -25,7 +25,7 @@ import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/component
 import { hailBus } from "../../src/hailBus";
 import { subscribeAvatarHold } from "../../src/avatarHoldBus";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, mapModeToLegacy, getAvatarMode, setAvatarMode } from "../../src/settings";
+import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, mapModeToLegacy, getAvatarMode, setAvatarMode, unitForCountry } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import { BearingTracker } from "../../src/bearing";
@@ -40,7 +40,7 @@ import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
 import { useSpeedCameras } from "../../src/speedCameras";
-import { useSpeedLimit } from "../../src/speedLimit";
+import { useSpeedLimit, getSpeedLimitDebug } from "../../src/speedLimit";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
 import { prepareRouteGreeting, playPreparedGreeting, clearPreparedGreeting } from "../../src/novaGreeting";
@@ -853,7 +853,7 @@ export default function MapScreen() {
       // playful Nova quip (don't wait for the network fetch), then swap to the
       // recomputed route — the turn engine re-anchors to the new line (nav.ts) so
       // guidance picks it up at once.
-      if (!navMuted) { try { announce(pick(SPLIT_DECISION_LINES)); } catch {} }
+      if (!navMuted && settings.novaReroute !== false) { try { announce(pick(SPLIT_DECISION_LINES)); } catch {} }
       fetchRoutes(coords, destination, {
         tolls: settings.avoidTolls,
         highways: settings.avoidHighways,
@@ -1378,12 +1378,12 @@ export default function MapScreen() {
             //   * Runs ONCE immediately (lastUnitCheckRef===0), then every
             //     60s while the watcher is active so a road-trip from BC
             //     into Washington flips KM/H → MPH within ~1 minute.
-            //   * US → MPH, everywhere else (Canada/Mexico/EU/etc) → KM/H.
-            //   * Reads from getSettings() (module-level, always-fresh) to
-            //     avoid the stale-closure trap that the React state copy
-            //     would create inside this useEffect([]).
-            const liveSettings = getSettings();
-            if (!liveSettings.speedUnitManual && (lastUnitCheckRef.current === 0 || now - lastUnitCheckRef.current > 60000)) {
+            //   * Worldwide via unitForCountry(): mph list (US/UK/Caribbean/
+            //     territories) → MPH, everything else → KM/H.
+            //   * Fully automatic — no manual override (the SPEED UNITS toggle
+            //     was removed); re-checks the country with getSettings() inside
+            //     the network callback to avoid the stale-closure trap.
+            if (lastUnitCheckRef.current === 0 || now - lastUnitCheckRef.current > 60000) {
               lastUnitCheckRef.current = now;
               const GKEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
               if (GKEY) {
@@ -1393,11 +1393,11 @@ export default function MapScreen() {
                     const country = data?.results?.[0]?.address_components?.find(
                       (c: any) => c.types?.includes('country')
                     )?.short_name;
-                    const detected: 'kmh' | 'mph' = country === 'US' ? 'mph' : 'kmh';
+                    const detected = unitForCountry(country);
                     // Race-safety re-check: settings may have changed while
                     // the network round-trip was in flight.
                     const cur = getSettings();
-                    if (!cur.speedUnitManual && detected !== cur.speedUnit) {
+                    if (detected !== cur.speedUnit) {
                       updateGlobalSettings({ speedUnit: detected }).catch(() => {});
                     }
                   })
@@ -2234,6 +2234,12 @@ export default function MapScreen() {
         onPlacePress={handlePlacePinPress}
         onRoute={setRoute}
       />
+
+      {/* TEMP speed-limit debug — same style as ConvoyMapbox's HDG strip (top 120),
+          positioned just below it. Remove before release. */}
+      <View pointerEvents="none" style={{ position: 'absolute', top: 146, left: 8, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 3, paddingHorizontal: 6, borderRadius: 6 }}>
+        <Text style={{ color: '#00FF88', fontSize: 11, fontWeight: '600' }}>{`SL ${getSpeedLimitDebug()}`}</Text>
+      </View>
 
       {/* ===== Minimal top bar — Google Maps style =====
           The map extends edge-to-edge behind this. We render JUST the floating

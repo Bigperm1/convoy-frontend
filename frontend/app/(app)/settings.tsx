@@ -299,34 +299,9 @@ export default function SettingsScreen() {
           Show only stations that carry your fuel. Choosing an octane turns the others off; tap it again to clear and show all grades. Stations that don't publish fuel data stay visible.
         </Text>
 
-        {/* Speed Units — radio choice between metric and imperial. The map's
-            location watcher reverse-geocodes the user's country every 60s
-            and auto-flips this setting (US -> MPH, everywhere else -> KM/H)
-            until the user taps a button here, which sets `speedUnitManual`
-            and suppresses further auto-detect writes. */}
-        <Text style={styles.sectionLabel}>SPEED UNITS</Text>
-        <Glass radius={16} style={styles.card}>
-          <RadioRow
-            icon="speedometer"
-            iconColor="#2DEC86"
-            title="KM/H"
-            subtitle="Kilometres per hour. Canada, Mexico, the EU, and most of the world"
-            selected={settings.speedUnit === "kmh"}
-            onSelect={() => setSettings({ speedUnit: "kmh", speedUnitManual: true })}
-          />
-          <View style={styles.divider} />
-          <RadioRow
-            icon="speedometer-outline"
-            iconColor="#FF9500"
-            title="MPH"
-            subtitle="Miles per hour. United States only"
-            selected={settings.speedUnit === "mph"}
-            onSelect={() => setSettings({ speedUnit: "mph", speedUnitManual: true })}
-          />
-        </Glass>
-        <Text style={styles.helpText}>
-          Auto-switches at the USA/Canada border based on your GPS location. Tap KM/H or MPH to lock your preference — you won't be auto-flipped again until you tap a unit button.
-        </Text>
+        {/* SPEED UNITS section removed — units are now fully GPS-automatic
+            worldwide (map.tsx reverse-geocodes the country and applies
+            unitForCountry), with no manual override. */}
 
         {/* Convoy Community */}
         <Text style={styles.sectionLabel}>CONVOY COMMUNITY</Text>
@@ -360,6 +335,15 @@ export default function SettingsScreen() {
         <Text style={styles.sectionLabel}>NOVA VOICE</Text>
         <Glass radius={16} style={styles.card}>
           <ToggleRow
+            icon="volume-high"
+            iconColor="#BF5AF2"
+            title="Nova voice"
+            subtitle="Master switch for all of Nova's voice"
+            value={settings.novaVoice !== false}
+            onChange={(v) => setSettings({ novaVoice: v })}
+          />
+          <View style={styles.divider} />
+          <ToggleRow
             icon="sparkles"
             iconColor="#BF5AF2"
             title="Route greeting"
@@ -384,6 +368,15 @@ export default function SettingsScreen() {
             subtitle="Proactive faster-route and hazard-ahead suggestions while navigating"
             value={settings.novaMidDrive !== false}
             onChange={(v) => setSettings({ novaMidDrive: v })}
+          />
+          <View style={styles.divider} />
+          <ToggleRow
+            icon="git-compare-outline"
+            iconColor="#0A84FF"
+            title="Reroute announcements"
+            subtitle="Nova's spoken reaction when the route recomputes"
+            value={settings.novaReroute !== false}
+            onChange={(v) => setSettings({ novaReroute: v })}
           />
         </Glass>
         <Text style={styles.helpText}>

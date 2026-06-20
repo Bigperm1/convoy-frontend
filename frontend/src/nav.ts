@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 import { api, GOOGLE_MAPS_KEY } from "./api";
+import { getSettings } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
 import { isOnCall } from "./callState";
@@ -228,6 +229,14 @@ function latLngFromRoutes(loc: any): LatLng {
 }
 
 export function formatDistance(m: number): string {
+  // Imperial regions (mph): feet under ~1000 ft, else miles. Metric otherwise.
+  // Reads the live unit so every distance readout — banner, ETA, spoken cues,
+  // CarPlay — follows the driver's country with no call-site changes.
+  if (getSettings().speedUnit === 'mph') {
+    const mi = m / 1609.344;
+    if (mi < 0.19) return `${Math.round((m * 3.28084) / 10) * 10} ft`;
+    return `${mi.toFixed(mi < 10 ? 1 : 0)} mi`;
+  }
   if (m < 1000) return `${Math.round(m)} m`;
   return `${(m / 1000).toFixed(m < 10000 ? 1 : 0)} km`;
 }
@@ -263,6 +272,12 @@ const PREPARE_MIN_M = 150;
 const PREPARE_MAX_M = 1200;
 const ADVANCE_THRESHOLD_M = 25;
 const REROUTE_DISTANCE_M = 80; // PERPENDICULAR distance off the route line before off-route
+// Heading gate for off-route: a big perpendicular distance only counts as a real
+// departure if the car's heading ALSO diverges from the route's local direction
+// by more than this. Driving straight along a highway while GPS multipath off an
+// overpass/bridge throws the fix sideways keeps the heading aligned — so those
+// spikes no longer trigger a phantom reroute.
+const OFFROUTE_HEADING_TOL_DEG = 55;
 
 // Decode a Google encoded polyline → [{lat,lng}]. Used to measure how far off the
 // ROUTE LINE the driver actually is (perpendicular) — the correct off-route signal.
@@ -283,14 +298,28 @@ export function decodePolyline(encoded: string): LatLng[] {
   return pts;
 }
 
-// Min perpendicular distance (m) from a point to the route polyline. Mid-segment
-// on a straight highway this is ~0, so it does NOT false-flag off-route the way
-// distance-to-step-endpoints did (which caused the underpass/bridge detours).
-function distToPolylineM(lat: number, lng: number, pts: LatLng[]): number {
-  if (!pts || pts.length < 2) return Infinity;
+// Initial bearing (deg, 0=N, clockwise) from point a to point b.
+function bearingBetween(a: LatLng, b: LatLng): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const p1 = toRad(a.lat), p2 = toRad(b.lat);
+  const dL = toRad(b.lng - a.lng);
+  const y = Math.sin(dL) * Math.cos(p2);
+  const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dL);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+// Nearest point on the route polyline: its perpendicular distance (m) AND the
+// bearing of the segment it falls on (the direction the route runs there).
+// Mid-segment on a straight highway the distance is ~0, so it does NOT false-flag
+// off-route. The segment bearing lets the caller gate off-route on heading, so
+// GPS multipath off an overpass/bridge — a big sideways jump while still heading
+// down the road — no longer triggers a phantom reroute.
+function nearestRouteInfo(lat: number, lng: number, pts: LatLng[]): { distM: number; bearingDeg: number } {
+  if (!pts || pts.length < 2) return { distM: Infinity, bearingDeg: NaN };
   const kx = Math.cos((lat * Math.PI) / 180);
   const px = lng * kx, py = lat;
-  let best = Infinity;
+  let best = Infinity, bi = 0;
   for (let i = 0; i < pts.length - 1; i++) {
     const ax = pts[i].lng * kx, ay = pts[i].lat;
     const bx = pts[i + 1].lng * kx, by = pts[i + 1].lat;
@@ -301,9 +330,9 @@ function distToPolylineM(lat: number, lng: number, pts: LatLng[]): number {
     const cx = ax + t * dx, cy = ay + t * dy;
     const ex = px - cx, ey = py - cy;
     const d = ex * ex + ey * ey;
-    if (d < best) best = d;
+    if (d < best) { best = d; bi = i; }
   }
-  return Math.sqrt(best) * 111320;
+  return { distM: Math.sqrt(best) * 111320, bearingDeg: bearingBetween(pts[bi], pts[bi + 1]) };
 }
 
 // Arrival lines — varied so Nova doesn't say the exact same thing every trip.
@@ -345,7 +374,9 @@ export function useTurnByTurn(
   // `speed` (m/s, from GPS) rides along on the position the caller already
   // passes (map.tsx hands us `coords`, which carries it) — used to scale the
   // voice lead distance with speed. Optional so other callers stay compatible.
-  user: (LatLng & { speed?: number }) | null,
+  // `heading` (deg, course over ground) rides along too — used to gate off-route
+  // detection so GPS multipath off an overpass can't fake a departure.
+  user: (LatLng & { speed?: number; heading?: number }) | null,
   active: boolean,
   options?: { mute?: boolean; onArrive?: () => void; onOffRoute?: () => void }
 ) {
@@ -484,16 +515,29 @@ export function useTurnByTurn(
     // ticks so a transient spike under an underpass doesn't trigger a reroute.
     const routePts = polyCacheRef.current.pts;
     if (routePts.length >= 2) {
-      const dRoute = distToPolylineM(user.lat, user.lng, routePts);
-      if (dRoute > REROUTE_DISTANCE_M) offRouteStreakRef.current += 1;
+      const info = nearestRouteInfo(user.lat, user.lng, routePts);
+      const dRoute = info.distM;
+      // Heading gate: a big perpendicular distance only counts as a real
+      // departure when the car's heading ALSO diverges from the route's local
+      // direction. Driving straight down a highway while GPS multipath off an
+      // overpass throws the fix sideways keeps the heading aligned — so it no
+      // longer counts as off-route. With no heading we can't disprove a
+      // departure, so we fall back to distance-only (headingOff = true).
+      const hdg = user.heading;
+      let headingOff = true;
+      if (typeof hdg === "number" && hdg >= 0 && !Number.isNaN(info.bearingDeg)) {
+        let dHdg = Math.abs(hdg - info.bearingDeg) % 360;
+        if (dHdg > 180) dHdg = 360 - dHdg;
+        headingOff = dHdg > OFFROUTE_HEADING_TOL_DEG;
+      }
+      if (dRoute > REROUTE_DISTANCE_M && headingOff) offRouteStreakRef.current += 1;
       else offRouteStreakRef.current = 0;
-      // Switch QUICKER when the driver has clearly taken a different road: a
-      // single tick well past the threshold (~2x) is enough to act on. Keep the
-      // ≥2-tick streak only for marginal distances, where GPS wobble under an
-      // underpass could false-trigger — that wobble spikes a few tens of metres,
-      // never ~2x the threshold, so a clearly-off fix is a real deviation.
+      // With the heading gate filtering multipath, require a slightly longer
+      // streak to act: a clearly-off fix (~2x the threshold) needs >=2 ticks, a
+      // marginal one >=3. A real wrong turn grows distance AND diverges heading,
+      // so it still trips within a couple of seconds.
       const clearlyOff = dRoute > REROUTE_DISTANCE_M * 2;
-      const tripped = clearlyOff ? offRouteStreakRef.current >= 1 : offRouteStreakRef.current >= 2;
+      const tripped = clearlyOff ? offRouteStreakRef.current >= 2 : offRouteStreakRef.current >= 3;
       if (tripped) {
         const now = Date.now();
         if (now - lastOffRouteAtRef.current > 8000) {
@@ -638,6 +682,7 @@ export function reserveGreeting(): void {
 export function deliverGreeting(text: string): void {
   if (_greetingTimer) { clearTimeout(_greetingTimer); _greetingTimer = null; }
   if (!_greetingInFlight) return;             // already cancelled / timed out
+  if (getSettings().novaVoice === false) { cancelGreeting(); return; }  // master Nova off
   const t = (text || "").trim();
   if (!t) { cancelGreeting(); return; }
   // Lead the queue: greeting, then a pause, then the hold-clear sentinel.
@@ -651,6 +696,7 @@ export function deliverGreeting(text: string): void {
 export function deliverGreetingAudio(b64: string, mime: string): void {
   if (_greetingTimer) { clearTimeout(_greetingTimer); _greetingTimer = null; }
   if (!_greetingInFlight) return;
+  if (getSettings().novaVoice === false) { cancelGreeting(); return; }  // master Nova off
   if (!b64) { cancelGreeting(); return; }
   ttsQueue.unshift({ _greetAudio: b64, mime: mime || "audio/mp3" }, PAUSE_TOKEN + GREETING_PAUSE_MS, GREETING_DONE_TOKEN);
   _lastSpoke = Date.now();
@@ -674,6 +720,8 @@ function _flushHeldSpeech(): void {
 
 function speak(text: string) {
   if (!text || !text.trim()) return;
+  // Master Nova voice switch (settings). Off → nothing speaks at all.
+  if (getSettings().novaVoice === false) return;
   // While the route-start greeting is in flight, park the latest turn callout
   // so the greeting always leads (it's replayed once the greeting + pause end).
   if (_greetingInFlight) { _heldSpeech = text; return; }

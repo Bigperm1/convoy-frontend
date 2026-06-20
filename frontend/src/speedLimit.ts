@@ -17,11 +17,33 @@ import { useEffect, useRef, useState } from "react";
 type LimitWay = { maxspeedKmh: number; geom: { lat: number; lng: number }[] };
 
 // ---- Tunables ----
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+// Multiple Overpass mirrors. overpass-api.de intermittently rejects requests
+// under load (we've seen 406/429) and returns no data; a less-loaded mirror
+// usually answers. fetchSpeedLimitWaysAround tries them in order.
+const OVERPASS_URLS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+];
 const FETCH_RADIUS_M = 1500;    // pull maxspeed ways within ~1.5 km of the driver
 const REFETCH_MOVE_M = 1000;    // re-query once they've driven > ~1 km from the last pull
 const MIN_REFETCH_MS = 30000;   // and never more than once per 30s
 const SNAP_TOLERANCE_M = 30;    // how close a road must be to count as "the road you're on"
+const FETCH_TIMEOUT_MS = 10000; // hard per-attempt timeout so a stalled mirror can't wedge the in-flight flag
+
+// ---- TEMP debug (remove before release) — diagnose Android no-limit ----
+// Captures the last Overpass HTTP status, ways-parsed count, and snap result so
+// an on-screen readout can show whether Android is failing at the network, the
+// data, or the snap stage. getSpeedLimitDebug() returns one short string.
+let _dbgHttp = "-";
+let _dbgWays = 0;
+let _dbgSnap = "no-snap";
+// Nearest cached-road distance (metres) from the last resolve, so the hook can
+// detect a stale cache and force a refetch. Infinity when nothing is cached.
+let _lastNearestM = Infinity;
+export function getSpeedLimitDebug(): string {
+  return `${_dbgHttp} ways:${_dbgWays} ${_dbgSnap}`;
+}
 
 function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const R = 6371000;
@@ -80,30 +102,56 @@ export async function fetchSpeedLimitWaysAround(
 ): Promise<LimitWay[] | null> {
   const query =
     `[out:json][timeout:25];way(around:${Math.round(radiusM)},${lat},${lng})[maxspeed][highway];out tags geom;`;
-  try {
-    const res = await fetch(OVERPASS_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "data=" + encodeURIComponent(query),
-    });
-    if (!res.ok) return null;                            // 429/504 etc — keep the cache, retry later
-    const json: any = await res.json();
-    const els: any[] = Array.isArray(json?.elements) ? json.elements : [];
-    const ways: LimitWay[] = [];
-    for (const e of els) {
-      const sp = parseMaxspeedKmh(e?.tags?.maxspeed);
-      if (sp == null) continue;
-      const geom = Array.isArray(e.geometry)
-        ? e.geometry
-            .filter((p: any) => typeof p.lat === "number" && typeof p.lon === "number")
-            .map((p: any) => ({ lat: p.lat, lng: p.lon }))
-        : [];
-      if (geom.length) ways.push({ maxspeedKmh: sp, geom });
+  const body = "data=" + encodeURIComponent(query);
+  let lastStatus = "";
+  // Try each Overpass mirror in turn. overpass-api.de intermittently rejects
+  // requests under load (406/429/504) and returns no data; a less-loaded mirror
+  // usually answers. Each attempt gets its own hard timeout so one stalled mirror
+  // can't eat the whole budget or wedge the hook's inFlight flag.
+  for (const url of OVERPASS_URLS) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          // A descriptive User-Agent is good Overpass citizenship and dodges
+          // anti-abuse layers that 403/406 a missing or generic agent (Android's
+          // default OkHttp UA is the most likely cause of the 406 we saw).
+          "User-Agent": "Convoy/2.0 (navigation app)",
+        },
+        body,
+        signal: ctrl.signal,
+      });
+      lastStatus = "http:" + res.status;
+      if (!res.ok) { continue; }                          // this mirror rejected — try the next
+      const json: any = await res.json();
+      const els: any[] = Array.isArray(json?.elements) ? json.elements : [];
+      const ways: LimitWay[] = [];
+      for (const e of els) {
+        const sp = parseMaxspeedKmh(e?.tags?.maxspeed);
+        if (sp == null) continue;
+        const geom = Array.isArray(e.geometry)
+          ? e.geometry
+              .filter((p: any) => typeof p.lat === "number" && typeof p.lon === "number")
+              .map((p: any) => ({ lat: p.lat, lng: p.lon }))
+          : [];
+        if (geom.length) ways.push({ maxspeedKmh: sp, geom });
+      }
+      _dbgHttp = lastStatus;                              // TEMP debug
+      _dbgWays = ways.length;                             // TEMP debug
+      return ways;
+    } catch {
+      lastStatus = "fetch-fail";                          // timeout/abort/network — try the next mirror
+    } finally {
+      clearTimeout(timer);
     }
-    return ways;
-  } catch {
-    return null;
   }
+  // Every mirror failed — surface the last status, keep the cache, retry later.
+  _dbgHttp = lastStatus || "fetch-fail";                 // TEMP debug
+  _dbgWays = 0;
+  return null;
 }
 
 // Nearest road's limit to a point, or null if the closest road is farther than
@@ -123,7 +171,14 @@ function nearestLimit(lat: number, lng: number, ways: LimitWay[]): number | null
       if (d < best) { best = d; bestSpeed = w.maxspeedKmh; }
     }
   }
-  return best <= SNAP_TOLERANCE_M ? bestSpeed : null;
+  const snapped = best <= SNAP_TOLERANCE_M ? bestSpeed : null;
+  _lastNearestM = Number.isFinite(best) ? best : Infinity;   // for stale-cache self-heal
+  // TEMP debug — nearest-road distance + resolved limit, or no-snap (with the
+  // nearest distance when ways exist but none are within tolerance).
+  _dbgSnap = Number.isFinite(best)
+    ? (snapped != null ? `snap:${Math.round(best)}m=${snapped}` : `no-snap@${Math.round(best)}m`)
+    : "no-snap";
+  return snapped;
 }
 
 /**
@@ -176,6 +231,20 @@ export function useSpeedLimit(
 
     // Resolve against whatever is cached right now (instant; no network).
     setLimit(nearestLimit(lat, lng, waysRef.current));
+
+    // Self-heal a stale cache: if the nearest cached road is implausibly far
+    // (beyond the fetch radius), the cached ways are stale — e.g. a wedged or
+    // aborted fetch left the centre kilometres behind. Drop the centre so the
+    // next tick refetches around the current position. The 30s throttle still
+    // applies, so this can never hammer Overpass.
+    if (
+      waysRef.current.length &&
+      Number.isFinite(_lastNearestM) &&
+      _lastNearestM > FETCH_RADIUS_M &&
+      !inFlightRef.current
+    ) {
+      centerRef.current = null;
+    }
   }, [lat, lng, enabled]);
 
   return limit;

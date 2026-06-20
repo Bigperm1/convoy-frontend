@@ -36,6 +36,7 @@ import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, have
 import { setCarState, getCarState, useCarStore, type CarPeer } from './carStore';
 import { setCarPlayHookOwnsRoot } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
+import { formatSpeed, getSettings } from '../settings';
 
 const isIOS = Platform.OS === 'ios';
 const isAndroid = Platform.OS === 'android';
@@ -97,10 +98,12 @@ function fmtClock(d: Date): string {
 // and, worse, tripping the CarPlay watchdog (the same watchdog that caused the
 // original connect crash when nothing drew in time). A static <Image> has no GL
 // context, can't trip the watchdog, always draws, and is 100% OTA-able. The map
-// is fetched NORTH-UP; the car marker is drawn in RN on top and rotated to
-// heading, so constant heading changes cost no new image fetch — only movement
-// does. If we ever confirm a live MapView is safe on a head unit, it slots in
-// here behind the same fallback.
+// is fetched HEADING-UP — the heading is baked into the Static Images URL as the
+// bearing, so Mapbox renders it rotated with upright labels and correct framing;
+// the car marker sits at centre pointing straight up. New frames are fetched on
+// movement, on route change, or when the car turns >= CAR_MAP_HEADING_DEG, so
+// small heading jitter costs nothing. If we ever confirm a live MapView is safe
+// on a head unit, it slots in here behind the same fallback.
 const CAR_MAP_STYLE = 'mapbox/dark-v11'; // standard, always-valid dark style
 const CAR_MAP_ZOOM = 15;
 const CAR_MAP_W = 800;
@@ -111,13 +114,18 @@ const CAR_ROUTE_COLOR = '2dec86'; // brand green, no '#'
 // current enough for a glanceable dashboard.
 const CAR_MAP_MOVE_M = 70;
 const CAR_MAP_MAX_AGE_MS = 5000;
+// Heading-up: re-fetch the frame when the car's heading turns at least this many
+// degrees (the bearing is baked into the static image, so a turn needs a new
+// frame). Jitter below this costs no request.
+const CAR_MAP_HEADING_DEG = 12;
 // Hard ceiling on the whole URL; if a long route polyline would blow past it the
 // route overlay is dropped (the map still renders, centered on the car).
 const CAR_MAP_URL_MAX = 7500;
 
-function buildStaticMapUrl(lat: number, lng: number, polyline: string): string {
+function buildStaticMapUrl(lat: number, lng: number, polyline: string, bearing = 0): string {
+  const b = (((Math.round(bearing) % 360) + 360) % 360); // heading-up bearing, 0-359
   const tail =
-    `${lng},${lat},${CAR_MAP_ZOOM},0/${CAR_MAP_W}x${CAR_MAP_H}@2x` +
+    `${lng},${lat},${CAR_MAP_ZOOM},${b}/${CAR_MAP_W}x${CAR_MAP_H}@2x` +
     `?access_token=${MAPBOX_PUBLIC_TOKEN}`;
   let overlay = '';
   if (polyline) {
@@ -140,7 +148,7 @@ function buildStaticMapUrl(lat: number, lng: number, polyline: string): string {
 // original dashboard, so the car screen is never worse than before.
 export function CarSurface() {
   const s = useCarStore();
-  const kmh = Math.max(0, Math.round((s.speedMs || 0) * 3.6));
+  const spd = formatSpeed(s.speedMs || 0, getSettings().speedUnit);
   const nearby = s.peers.length;
   // Arrival CLOCK, computed the SAME way the phone banner does (now + remaining
   // ETA). This is the number the driver compares to their phone — driving it from
@@ -158,12 +166,13 @@ export function CarSurface() {
   // its onLoad never fired and the map never showed.
   const [mapUrl, setMapUrl] = useState<string | null>(null);
   const [dbgErr, setDbgErr] = useState<string>('');
-  const lastRef = useRef<{ lat: number; lng: number; at: number; poly: string }>({ lat: 0, lng: 0, at: 0, poly: '' });
+  const lastRef = useRef<{ lat: number; lng: number; at: number; poly: string; hdg: number }>({ lat: 0, lng: 0, at: 0, poly: '', hdg: 0 });
 
   useEffect(() => {
     if (!hasFix) return;
     const lat = s.selfLat as number;
     const lng = s.selfLng as number;
+    const hdg = (((Math.round(s.heading ?? 0) % 360) + 360) % 360);
     const now = Date.now();
     const last = lastRef.current;
     const movedM = (last.lat || last.lng)
@@ -172,13 +181,18 @@ export function CarSurface() {
     const polyChanged = last.poly !== s.routePolyline;
     const stale = now - last.at > CAR_MAP_MAX_AGE_MS;
     const everFetched = last.at !== 0;
-    if (everFetched && !polyChanged && movedM < CAR_MAP_MOVE_M && !stale) return;
+    // Heading-up: also re-fetch when the car has turned enough that the frame's
+    // baked-in bearing is visibly stale (shortest angular gap >= threshold).
+    let dHdg = Math.abs(hdg - last.hdg) % 360;
+    if (dHdg > 180) dHdg = 360 - dHdg;
+    const turned = dHdg >= CAR_MAP_HEADING_DEG;
+    if (everFetched && !polyChanged && movedM < CAR_MAP_MOVE_M && !stale && !turned) return;
 
-    lastRef.current = { lat, lng, at: now, poly: s.routePolyline };
+    lastRef.current = { lat, lng, at: now, poly: s.routePolyline, hdg };
     // Set the visible map URL directly — the full-size <Image> loads it the same
     // way the logo PNG does (which the hidden preloader did not on CarPlay).
-    setMapUrl(buildStaticMapUrl(lat, lng, s.routePolyline));
-  }, [hasFix, s.selfLat, s.selfLng, s.routePolyline]);
+    setMapUrl(buildStaticMapUrl(lat, lng, s.routePolyline, hdg));
+  }, [hasFix, s.selfLat, s.selfLng, s.routePolyline, s.heading]);
 
   const showMap = hasFix && !!mapUrl;
 
@@ -190,13 +204,14 @@ export function CarSurface() {
             source={{ uri: mapUrl as string }}
             style={StyleSheet.absoluteFill}
             resizeMode="cover"
-            onError={(e: any) => { setMapUrl(null); lastRef.current = { lat: 0, lng: 0, at: 0, poly: '' }; setDbgErr(String(e?.nativeEvent?.error || 'map-img-err')); }}
+            onError={(e: any) => { setMapUrl(null); lastRef.current = { lat: 0, lng: 0, at: 0, poly: '', hdg: 0 }; setDbgErr(String(e?.nativeEvent?.error || 'map-img-err')); }}
           />
 
-          {/* Car marker pinned to the map centre, rotated to heading (north-up map). */}
+          {/* Car marker pinned to the map centre. The map is now heading-up, so the
+              car always points straight up (its travel direction). */}
           <View style={styles.markerCenter} pointerEvents="none">
             <View style={styles.markerHalo} />
-            <View style={[styles.markerChevron, { transform: [{ rotate: `${s.heading ?? 0}deg` }] }]} />
+            <View style={styles.markerChevron} />
           </View>
 
           {/* Top: maneuver while navigating, else a small CONVOY / nearby chip. */}
@@ -241,8 +256,8 @@ export function CarSurface() {
 
       {/* Speed pill — always shown, both map and fallback. */}
       <View style={styles.speedPill} pointerEvents="none">
-        <Text style={styles.speedNum}>{kmh}</Text>
-        <Text style={styles.speedUnit}>km/h</Text>
+        <Text style={styles.speedNum}>{spd.value}</Text>
+        <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
       </View>
 
       {/* TEMP debug readout — remove before release. Centered so the native CarPlay banner can't hide it. */}

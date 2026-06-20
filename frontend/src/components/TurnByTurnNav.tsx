@@ -259,10 +259,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
-    // iOS: reserve right-side room for the floating Convoy logo so the banner
-    // (and its mute button at the right end) never sits under it. Mirrors the
-    // search bar's logo clearance. Android unchanged.
-    marginRight: Platform.OS === "ios" ? 64 : 0,
+    // Reserve right-side room for the floating Convoy logo on BOTH platforms so
+    // the banner (and its mute button at the right end) never sits under it.
+    // Mirrors the search bar's logo clearance.
+    marginRight: 64,
     backgroundColor: "#161618",
     borderRadius: 18,
     paddingVertical: 14,

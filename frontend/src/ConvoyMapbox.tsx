@@ -32,7 +32,7 @@
 // handed to Mapbox below is [lng, lat].
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Image, StyleSheet, Pressable } from "react-native";
+import { View, Text, Image, StyleSheet, Pressable, Platform } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getVehiclePngOrDefault, getVehicleModelUrl } from "./vehicleAssets";
@@ -749,6 +749,17 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   }
   const followHeadingDeg = headingUp && camHeadingRef.current != null ? camHeadingRef.current : undefined;
 
+  // Android heading-up via the NATIVE engine. Under UserTrackingMode.Follow,
+  // Android ignores `followHeading` AND overrides our imperative setCamera bearing
+  // on every follow frame, so the map stayed frozen north-up. FollowWithCourse
+  // rotates the camera to the GPS course natively (heading-up) and the follow
+  // engine can't fight it. iOS honors followHeading under Follow, so it stays on
+  // the smoothed path. (Trade-off: FollowWithCourse uses raw course — watch for
+  // wobble; fallback is feeding the smoothed heading via CustomLocationProvider.)
+  const followMode = (Platform.OS === "android" && headingUp)
+    ? UserTrackingMode.FollowWithCourse
+    : UserTrackingMode.Follow;
+
   const followZoom = Math.round(
     Math.max(ZOOM_MIN, Math.min(ZOOM_MAX,
       (navigationActive ? chaseZoom(kmhFromMs(userSpeedMs), distanceToManeuverM) : FOLLOW_ZOOM) + (zoomOffset || 0),
@@ -1085,7 +1096,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           // is no fly-in. (animationMode does NOT govern the follow engine's lock-on,
           // which is why the earlier animationMode="none" attempt had no effect.)
           followUserLocation={followUser && !placesShown && coldLockDone}
-          followUserMode={UserTrackingMode.Follow}
+          followUserMode={followMode}
           followZoomLevel={followZoom}
           followHeading={followHeadingDeg}
           followPitch={followPitchDeg}

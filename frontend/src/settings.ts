@@ -56,6 +56,12 @@ novaMidDrive: boolean;
 // Master mute for all Nova nav/alert speech — toggled by the speaker button on
 // the turn-by-turn banner. Persisted so a muted drive stays muted next time.
 novaMuted: boolean;
+// Master on/off for ALL Nova voice (settings-screen switch, above the granular
+// toggles). When false nothing speaks — greeting, callouts, quips, alerts.
+novaVoice: boolean;
+// Spoken reroute reaction (the "split decision" quip on recompute). Off →
+// reroutes are silent; turn-by-turn guidance is unaffected.
+novaReroute: boolean;
 speedUnit: 'kmh' | 'mph';
 speedUnitManual: boolean;
 showWeatherLayer: boolean;
@@ -102,6 +108,8 @@ novaGreeting: true,
 novaSpeeding: true,
 novaMidDrive: true,
 novaMuted: false,
+novaVoice: true,
+novaReroute: true,
 speedUnit: 'kmh',
 speedUnitManual: false,
 showWeatherLayer: true,
@@ -262,4 +270,18 @@ return { value: Math.round(speedMs * 3.6), label: 'KM/H' };
 export function kmhToDisplay(kmh: number, unit: 'kmh' | 'mph'): number {
 if (unit === 'mph') return Math.round(kmh * 0.621371);
 return Math.round(kmh);
+}
+
+// Road-speed unit by ISO-3166-1 alpha-2 country code. The world is metric (km/h)
+// except a short list that posts mph — the US, the UK, and a handful of mostly
+// Caribbean / British-legacy / US territories. Anything not in the set is km/h.
+const MPH_COUNTRIES = new Set([
+  "US", "GB", "LR",
+  "AG", "BS", "BZ", "DM", "GD", "KN", "LC", "VC",
+  "AI", "FK", "GG", "IM", "JE", "KY", "MS", "SH", "TC", "VG",
+  "AS", "GU", "MP", "PR", "VI",
+]);
+export function unitForCountry(cc?: string | null): 'kmh' | 'mph' {
+  if (!cc) return 'kmh';
+  return MPH_COUNTRIES.has(cc.toUpperCase()) ? 'mph' : 'kmh';
 }

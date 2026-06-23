@@ -134,6 +134,31 @@ enum ConvoyRNHost {
       started = true
       appDelegate.window = window
       factory.startReactNative(withModuleName: moduleName, in: window, launchOptions: nil)
+      // startReactNative mounts moduleName into the given window with Expo's
+      // DEFAULT root view controller - one-time layout, NO self-healing relayout.
+      // Fine for the PHONE window (real size at launch); for the CARPLAY window it
+      // is the recurring 0x0-blank bug (CarPlay sizes its window LATE). On a COLD
+      // CarPlay connect the car scene is the FIRST scene, so it hits THIS boot
+      // branch (not the superView branch below) - which is exactly why cold
+      // connects came up blank while warm connects (app already open) rendered.
+      // Re-host the car surface in ConvoyCarRootViewController (the same self-heal
+      // the warm path uses) so the car window cannot stay stuck at 0x0. Deferred
+      // one runloop so the freshly started host can mint the surface.
+      if !makeVisible {
+        DispatchQueue.main.async {
+          let carRoot: UIView
+          if let expoFactory = factory.rootViewFactory as? ExpoReactRootViewFactory {
+            carRoot = expoFactory.superView(withModuleName: moduleName, initialProperties: nil, launchOptions: [:])
+          } else {
+            carRoot = factory.rootViewFactory.view(withModuleName: moduleName, initialProperties: nil, launchOptions: nil)
+          }
+          let carVC = ConvoyCarRootViewController(hosted: carRoot)
+          window.rootViewController = carVC
+          carVC.view.frame = window.bounds
+          carVC.view.setNeedsLayout()
+          carVC.view.layoutIfNeeded()
+        }
+      }
       return
     }
 
@@ -186,6 +211,11 @@ enum ConvoyRNHost {
 // staying blank (the recurring CarPlay bug).
 final class ConvoyCarRootViewController: UIViewController {
   private let hosted: UIView
+  // TEMP mount diagnostic (remove next native build once CarPlay is confirmed):
+  // shows whether THIS controller is on screen and at what size. Real numbers +
+  // no map => the surface mounted and any gap is JS (OTA-fixable). 0x0 => still
+  // the size bug. No label at all => this controller was never presented.
+  private let dbg = UILabel()
   init(hosted: UIView) { self.hosted = hosted; super.init(nibName: nil, bundle: nil) }
   required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
   override func viewDidLoad() {
@@ -194,12 +224,24 @@ final class ConvoyCarRootViewController: UIViewController {
     hosted.frame = view.bounds
     hosted.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     view.addSubview(hosted)
+    dbg.textColor = UIColor(red: 0, green: 1, blue: 0.53, alpha: 1)
+    dbg.font = .boldSystemFont(ofSize: 13)
+    dbg.backgroundColor = UIColor(white: 0, alpha: 0.7)
+    dbg.text = "car: booting"
+    dbg.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(dbg)
+    NSLayoutConstraint.activate([
+      dbg.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
+      dbg.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+    ])
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     if !hosted.bounds.equalTo(view.bounds) { hosted.frame = view.bounds }
     hosted.setNeedsLayout()
     hosted.layoutIfNeeded()
+    dbg.text = "car: " + String(Int(view.bounds.width)) + "x" + String(Int(view.bounds.height))
+    view.bringSubviewToFront(dbg)
   }
 }
 

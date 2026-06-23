@@ -1,14 +1,20 @@
 // Tiny shared flag so the app-root CarPlay bootstrap (carPlayBootstrap.ts) and
 // the phone map screen's useConvoyCarPlay hook don't fight over the CarPlay root
-// template.
-//
-// When the phone map screen is mounted, its useConvoyCarPlay hook OWNS the
-// CarPlay root (richer template + live nav session). The bootstrap then stands
-// down. The bootstrap only sets its minimal idle root when the hook is NOT
-// mounted — i.e. a COLD CarPlay connect where the phone UI hasn't started, which
-// is exactly the case the hook can't cover (it lives inside the phone screen).
+// template — and so the bootstrap's idle GPS feed stands down the moment the
+// phone hook takes over (the hook feeds richer state: route + live nav).
 export let carPlayHookOwnsRoot = false;
 
+const ownerListeners = new Set<(v: boolean) => void>();
+
 export function setCarPlayHookOwnsRoot(v: boolean): void {
+  if (carPlayHookOwnsRoot === v) return;
   carPlayHookOwnsRoot = v;
+  ownerListeners.forEach((l) => { try { l(v); } catch {} });
+}
+
+// Subscribe to ownership changes. Returns an unsubscribe fn. The bootstrap uses
+// this to run its idle GPS feed only while the hook is NOT in charge.
+export function onCarPlayRootOwnerChange(l: (v: boolean) => void): () => void {
+  ownerListeners.add(l);
+  return () => { ownerListeners.delete(l); };
 }

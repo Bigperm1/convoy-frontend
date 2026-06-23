@@ -1,32 +1,62 @@
 // src/carplay/carPlayBootstrap.ts
 //
-// App-root CarPlay bootstrap (iOS only).
+// App-root CarPlay bootstrap (iOS only). Run at startup from index.js.
 //
-// THE PROBLEM IT SOLVES — COLD CARPLAY CONNECT.
-// All the rich CarPlay template/nav logic lives in useConvoyCarPlay(), which
-// only runs while the phone's map screen (app/(app)/map.tsx) is mounted. On a
-// COLD connect — the head unit opens Convoy while the phone app isn't running —
-// that hook never mounts, so nothing would set a CarPlay root template and the
-// car screen would sit blank (the native CarSceneDelegate boots the RN host and
-// mounts the dashboard view, but CarPlay still needs a root CPTemplate to show
-// anything).
-//
-// This module runs at app startup (called from index.js), listens for the
-// CarPlay connection, and sets a MINIMAL idle root MapTemplate so the Convoy
-// dashboard (ConvoyCarSurface, mounted natively) shows. The instant the phone
-// map screen mounts, useConvoyCarPlay takes ownership (sets its own root with a
-// live nav session) and this bootstrap stands down — coordinated through the
-// carPlayHookOwnsRoot flag so the two never fight over the root.
-//
-// Fully guarded: no-op on web/Android and on any build without the native
-// RNCarPlay module, and every CarPlay call is wrapped so it can never crash at
-// startup. Behaviour for the WARM path (phone app already open) is unchanged —
-// the hook owns the root, so this never sets one.
+// COLD CARPLAY CONNECT — the rich template/nav logic in useConvoyCarPlay() only
+// runs while the phone map screen (app/(app)/map.tsx) is mounted. On a cold
+// connect (head unit opens Convoy with the phone not on the map screen) that
+// hook never mounts, so (1) no CPTemplate is set and (2) nothing feeds
+// carStore.selfLat/selfLng — so CarSurface has no GPS fix and shows the static
+// dashboard instead of a live map. This bootstrap fixes BOTH: it sets a minimal
+// idle root MapTemplate AND runs its own lightweight GPS watcher that pushes the
+// driver's live position into carStore, so the car shows a real map centered on
+// the car the instant CarPlay connects — no phone screen required. The moment
+// the phone screen mounts, useConvoyCarPlay takes ownership (richer root + live
+// nav + route) and this idle feed stands down (carPlayHookOwnsRoot), so only one
+// GPS watcher ever runs. iOS background-location is already configured in
+// app.json, so the idle feed delivers with the phone locked — pure OTA.
 
 import { NativeModules, Platform } from 'react-native';
-import { carPlayHookOwnsRoot } from './carPlayShared';
+import * as Location from 'expo-location';
+import { carPlayHookOwnsRoot, onCarPlayRootOwnerChange } from './carPlayShared';
+import { setCarState } from './carStore';
 
 let booted = false;
+let connected = false;
+let locSub: Location.LocationSubscription | null = null;
+
+async function startIdleLocationFeed(): Promise<void> {
+  // Don't run while the phone hook owns the root — it already feeds richer state.
+  if (locSub || carPlayHookOwnsRoot) return;
+  try {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    if (status !== 'granted') return; // phone screen requests it in normal use
+    if (locSub || carPlayHookOwnsRoot) return; // re-check after await
+    locSub = await Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 0 },
+      (pos) => {
+        if (carPlayHookOwnsRoot) return; // hand off the moment the hook is live
+        const h = pos.coords.heading;
+        const heading = typeof h === 'number' && h >= 0 ? h : null;
+        const sRaw = pos.coords.speed;
+        const speed = typeof sRaw === 'number' && sRaw >= 0 ? sRaw : 0;
+        setCarState({
+          selfLat: pos.coords.latitude,
+          selfLng: pos.coords.longitude,
+          heading,
+          speedMs: speed,
+        });
+      },
+    );
+  } catch {
+    // expo-location not ready / denied — leave the dashboard fallback in place.
+  }
+}
+
+function stopIdleLocationFeed(): void {
+  try { locSub?.remove(); } catch {}
+  locSub = null;
+}
 
 export function initCarPlayBootstrap(): void {
   if (Platform.OS !== 'ios' || booted) return;
@@ -44,7 +74,6 @@ export function initCarPlayBootstrap(): void {
   if (!CarPlay || !MapTemplate) return;
 
   const setIdleRoot = () => {
-    // The phone map screen owns the root whenever it's mounted — don't fight it.
     if (carPlayHookOwnsRoot) return;
     try {
       const t = new MapTemplate({
@@ -60,12 +89,29 @@ export function initCarPlayBootstrap(): void {
     }
   };
 
+  const onConnect = () => {
+    connected = true;
+    setIdleRoot();
+    void startIdleLocationFeed();
+  };
+
+  const onDisconnect = () => {
+    connected = false;
+    stopIdleLocationFeed();
+    setCarState({ selfLat: null, selfLng: null, heading: null, speedMs: 0 });
+  };
+
   try {
-    CarPlay.registerOnConnect(setIdleRoot);
-    // Cold launch: the native scene may have already connected before this JS
-    // ran, so honour an existing connection right away.
-    if (CarPlay.connected) setIdleRoot();
+    CarPlay.registerOnConnect(onConnect);
+    CarPlay.registerOnDisconnect(onDisconnect);
+    if (CarPlay.connected) onConnect();
   } catch {
     // react-native-carplay not ready yet — ignore; the hook covers the warm path.
   }
+
+  // Hook takes over -> stop idle feed; hook releases while still connected -> resume.
+  onCarPlayRootOwnerChange((owns) => {
+    if (owns) stopIdleLocationFeed();
+    else if (connected) void startIdleLocationFeed();
+  });
 }

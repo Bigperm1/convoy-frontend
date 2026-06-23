@@ -669,7 +669,7 @@ export default function TalkScreen() {
             style={[styles.pttOuter, pressed && styles.pttOuterActive, (!channelId || !!floorHolder) && styles.pttOuterDisabled]}
           >
             <View style={[styles.pttInner, pressed && styles.pttInnerActive]}>
-              <Ionicons name={floorHolder ? 'lock-closed' : 'mic'} size={128} color={pressed ? '#fff' : floorHolder ? '#8E8E93' : channelId ? YELLOW : 'rgba(45,236,134,0.5)'} />
+              <Ionicons name={floorHolder ? 'lock-closed' : 'mic'} size={MIC_ICON_SIZE} color={pressed ? '#fff' : floorHolder ? '#8E8E93' : channelId ? YELLOW : 'rgba(45,236,134,0.5)'} />
             </View>
           </Pressable>
         </Animated.View>
@@ -812,6 +812,14 @@ export default function TalkScreen() {
   );
 }
 
+// Comms mic sizing — on Android the mic + label + Hands-free + Recent Transmissions
+// stack ran long enough that the Recent Transmissions pill hid behind the bottom
+// tab bar. Shrink the mic on Android (and lift the stack via body.paddingBottom)
+// so it clears the bar. iOS keeps the original 360. Tunable.
+const MIC_D = Platform.OS === 'android' ? 300 : 360;
+const MIC_INNER_D = Platform.OS === 'android' ? 242 : 290;
+const MIC_ICON_SIZE = Platform.OS === 'android' ? 106 : 128;
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#000' },
 
@@ -866,24 +874,24 @@ const styles = StyleSheet.create({
   switcherEmpty: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 2 },
   switcherEmptyText: { color: '#808080', fontSize: 13, flex: 1 },
 
-  body: { flex: 1, alignItems: 'center', justifyContent: 'center', position: 'relative', paddingBottom: 100 },
+  body: { flex: 1, alignItems: 'center', justifyContent: 'center', position: 'relative', paddingBottom: Platform.OS === 'android' ? 150 : 100 },
 
-  micWrap: { width: 360, height: 360, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
-  glowWrap: { width: 360, height: 360, borderRadius: 180, alignItems: 'center', justifyContent: 'center', elevation: 18 },
+  micWrap: { width: MIC_D, height: MIC_D, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
+  glowWrap: { width: MIC_D, height: MIC_D, borderRadius: MIC_D / 2, alignItems: 'center', justifyContent: 'center', elevation: 18 },
   pttRing: {
     position: 'absolute',
     top: 0, left: 0, right: 0, bottom: 0,
-    width: 360, height: 360, borderRadius: 180,
+    width: MIC_D, height: MIC_D, borderRadius: MIC_D / 2,
     borderWidth: 3, borderColor: YELLOW,
   },
   pttOuter: {
-    width: 360, height: 360, borderRadius: 180, backgroundColor: '#0e0e10',
+    width: MIC_D, height: MIC_D, borderRadius: MIC_D / 2, backgroundColor: '#0e0e10',
     alignItems: 'center', justifyContent: 'center', borderWidth: 6, borderColor: '#2a2a2e',
   },
   pttOuterActive: { borderColor: YELLOW },
   pttOuterDisabled: { opacity: 0.5 },
   pttInner: {
-    width: 290, height: 290, borderRadius: 145, backgroundColor: '#141417',
+    width: MIC_INNER_D, height: MIC_INNER_D, borderRadius: MIC_INNER_D / 2, backgroundColor: '#141417',
     alignItems: 'center', justifyContent: 'center',
   },
   pttInnerActive: { backgroundColor: '#1f1b00' },

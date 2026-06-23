@@ -18,6 +18,7 @@ import * as Notifications from "expo-notifications";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import { NavRoute, haversineMeters, maneuverVerb, fmtDistanceM } from "./nav";
+import { setCarState } from "./carplay/carStore";
 
 const NAV_TASK = "convoy-nav-location";
 const NAV_NOTIF_ID = "convoy-nav-banner";
@@ -131,8 +132,61 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   const locs = data?.locations;
   const loc = locs && locs.length ? locs[locs.length - 1] : null;
   if (!loc?.coords) return;
+  // Feed the CarPlay surface too: this is the SAME background-location task the
+  // car map now relies on (acquireBgLocation). Cheap no-op when CarPlay isn't up.
+  const _h = loc.coords.heading;
+  const _sp = loc.coords.speed;
+  setCarState({
+    selfLat: loc.coords.latitude,
+    selfLng: loc.coords.longitude,
+    heading: typeof _h === "number" && _h >= 0 ? _h : null,
+    speedMs: typeof _sp === "number" && _sp >= 0 ? _sp : 0,
+  });
   await updateNavBanner(loc.coords.latitude, loc.coords.longitude);
 });
+
+// ===== Shared background-location task (nav banner + CarPlay map) =====
+// iOS/expo-location run ONE background location task. Both the nav banner and
+// the CarPlay car-map need it, so refcount: it runs while EITHER consumer holds
+// it and stops only when BOTH release. This fixes the blank CarPlay map (its old
+// feed used FOREGROUND location, which iOS starves when the app is backgrounded
+// behind the head unit). Needs "Always" location permission.
+const _locConsumers = new Set<string>();
+
+export async function acquireBgLocation(tag: string): Promise<boolean> {
+  _locConsumers.add(tag);
+  try {
+    const already = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
+    if (already) return true;
+    let canBg = false;
+    try { canBg = (await Location.requestBackgroundPermissionsAsync()).granted; } catch {}
+    if (!canBg) return false;
+    await Location.startLocationUpdatesAsync(NAV_TASK, {
+      accuracy: Location.Accuracy.High,
+      timeInterval: 3000,
+      distanceInterval: 20,
+      showsBackgroundLocationIndicator: true,
+      pausesUpdatesAutomatically: false,
+      foregroundService: {
+        notificationTitle: "Convoy navigation",
+        notificationBody: "Turn-by-turn directions are active",
+        notificationColor: "#2DEC86",
+      },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function releaseBgLocation(tag: string): Promise<void> {
+  _locConsumers.delete(tag);
+  if (_locConsumers.size > 0) return; // another consumer still needs it
+  try {
+    const started = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
+    if (started) await Location.stopLocationUpdatesAsync(NAV_TASK);
+  } catch {}
+}
 
 // Begin the nav banner for a route. Returns true if the background location task
 // started (banner will keep updating while backgrounded); false means it'll
@@ -173,30 +227,7 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
 
     // Background location keeps the banner updating while backgrounded. Needs
     // "Always" on iOS / background permission on Android — best-effort.
-    let canBackground = false;
-    try { canBackground = (await Location.requestBackgroundPermissionsAsync()).granted; } catch {}
-    if (!canBackground) return false;
-
-    try {
-      const already = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
-      if (!already) {
-        await Location.startLocationUpdatesAsync(NAV_TASK, {
-          accuracy: Location.Accuracy.High,
-          timeInterval: 3000,
-          distanceInterval: 20,
-          showsBackgroundLocationIndicator: true,
-          pausesUpdatesAutomatically: false,
-          foregroundService: {
-            notificationTitle: "Convoy navigation",
-            notificationBody: "Turn-by-turn directions are active",
-            notificationColor: "#2DEC86",
-          },
-        });
-      }
-      return true;
-    } catch {
-      return false;
-    }
+    return await acquireBgLocation("nav");
   } catch {
     return false;
   }
@@ -210,10 +241,8 @@ export async function stopNavBanner(): Promise<void> {
     await AsyncStorage.removeItem(ROUTE_KEY);
     await AsyncStorage.removeItem(PROGRESS_KEY);
   } catch {}
-  try {
-    const started = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
-    if (started) await Location.stopLocationUpdatesAsync(NAV_TASK);
-  } catch {}
+  // Release our hold; the shared task keeps running if CarPlay still needs it.
+  await releaseBgLocation("nav");
   try { await Notifications.dismissNotificationAsync(NAV_NOTIF_ID); } catch {}
   try { await Notifications.cancelScheduledNotificationAsync(NAV_NOTIF_ID); } catch {}
 }

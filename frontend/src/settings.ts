@@ -62,6 +62,10 @@ novaVoice: boolean;
 // Spoken reroute reaction (the "split decision" quip on recompute). Off →
 // reroutes are silent; turn-by-turn guidance is unaffected.
 novaReroute: boolean;
+// One-time migration flag: when absent from stored settings, flip the three
+// chatty Nova toggles (speeding / mid-drive / reroute) OFF once so the new
+// quieter defaults reach existing installs too, then never repeat.
+novaQuietMigrated: boolean;
 speedUnit: 'kmh' | 'mph';
 speedUnitManual: boolean;
 showWeatherLayer: boolean;
@@ -108,11 +112,12 @@ mapMode: "dusk",
 mapboxEngine: true,
 show3dBuildings: true,
 novaGreeting: true,
-novaSpeeding: true,
-novaMidDrive: true,
+novaSpeeding: false,
+novaMidDrive: false,
 novaMuted: false,
 novaVoice: true,
-novaReroute: true,
+novaReroute: false,
+novaQuietMigrated: true,
 speedUnit: 'kmh',
 speedUnitManual: false,
 showWeatherLayer: true,
@@ -191,6 +196,15 @@ cached = { ...DEFAULT_SETTINGS, ...parsed };
 if (parsed.weatherOnMigrated === undefined) {
 cached.showWeatherLayer = true;
 cached.weatherOnMigrated = true;
+try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
+}
+// One-time: adopt the quieter Nova defaults (speed alerts / mid-drive / reroute
+// quip OFF) for installs stored before novaQuietMigrated existed.
+if (parsed.novaQuietMigrated === undefined) {
+cached.novaSpeeding = false;
+cached.novaMidDrive = false;
+cached.novaReroute = false;
+cached.novaQuietMigrated = true;
 try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
 }
 }

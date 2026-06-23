@@ -654,6 +654,31 @@ function _restoreMusicNow(): void {
   void unduckForSpeech();
 }
 
+// ===== Duck safety watchdog =====
+// The ducking audio session (setPlaybackAudioMode dips external music) is
+// released only when the TTS queue fully drains. If the drain loop stalls
+// between clips (a slow/stalled /tts synth, multiple queued items, or a reroute
+// that never fires) the duck has NO independent release and the user's music
+// stays quiet for minutes. This gives the duck its own release valve: armed
+// only AFTER a clip finishes (never during active speech, so it cannot misfire
+// mid-callout) and force-restores music if no new clip starts within
+// DUCK_MAX_MS. Normal back-to-back callouts re-arm it; a normal drain clears it,
+// so it is inert during ordinary navigation and only fires on a genuine stall.
+let _duckWatchdog: ReturnType<typeof setTimeout> | null = null;
+const DUCK_MAX_MS = 12000;
+function _armDuckWatchdog(): void {
+  if (_duckWatchdog) clearTimeout(_duckWatchdog);
+  _duckWatchdog = setTimeout(() => {
+    _duckWatchdog = null;
+    // Held too long with nothing playing — force music back to full volume.
+    _restoreMusicNow();
+    void setIdleAudioMode();
+  }, DUCK_MAX_MS);
+}
+function _clearDuckWatchdog(): void {
+  if (_duckWatchdog) { clearTimeout(_duckWatchdog); _duckWatchdog = null; }
+}
+
 // ---- Route-start greeting coordination ----
 // The personable Nova greeting must ALWAYS play before the first turn callout,
 // with a clear pause between them. The greeting text is fetched async, so the
@@ -742,6 +767,7 @@ function resetSpeakGate() {
   _heldSpeech = null;
   if (_greetingTimer) { clearTimeout(_greetingTimer); _greetingTimer = null; }
   // Nav stopped/cleared — let any ducked in-app music come back immediately.
+  _clearDuckWatchdog();
   _restoreMusicNow();
   // ...and release the ducking audio session so external music (Spotify etc.)
   // returns to full volume the moment nav ends, not just when the queue drains.
@@ -782,6 +808,7 @@ export function stopSpeech() {
 async function drainTtsQueue(): Promise<void> {
   if (ttsQueue.length === 0) {
     ttsPlaying = false;
+    _clearDuckWatchdog();
     _restoreMusicSoon();
     // Queue fully drained — release the ducking audio session so EXTERNAL music
     // (Spotify, podcasts) returns to full volume. Without this the session stays
@@ -855,7 +882,7 @@ async function playBase64Audio(b64: string, mime: string): Promise<void> {
       // wedge the queue and leave music paused for ages (the "music quit for no
       // reason, came back a minute later" bug).
       let done = false;
-      const finish = () => { if (done) return; done = true; resolve(); };
+      const finish = () => { if (done) return; done = true; _armDuckWatchdog(); resolve(); };
       const watchdog = setTimeout(finish, 15000);
       // On a phone call, duck Nova WAY down so she isn't loud over the call —
       // applies to every callout during the call. Start near-silent and ease up

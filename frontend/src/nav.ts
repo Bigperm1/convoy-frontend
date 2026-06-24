@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
-import { api, GOOGLE_MAPS_KEY } from "./api";
+import { api } from "./api";
 import { fetchMapboxRoutes, type MapboxRoute, type MapboxRouteStep } from "./mapboxDirections";
 import { getSettings } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
@@ -146,18 +146,6 @@ export async function fetchRoutes(
   }
   if (!mbRoutes.length) return [];
 
-  // TEMP diagnostic: confirm which duration fields Mapbox returns on this account
-  // (esp. duration_typical, the free-flow signal). Remove once verified.
-  try {
-    const r0: any = mbRoutes[0];
-    console.log("[nav] mapbox route keys:", {
-      duration_s: r0?.duration_s,
-      freeflow_s: r0?.freeflow_s,
-      steps: r0?.steps?.length,
-      segs: r0?.coordinates?.length,
-    });
-  } catch {}
-
   return mbRoutes.map((r: MapboxRoute): NavRoute => {
     const durS = r.duration_s;
     // freeflow_s carries Mapbox's typical (historical) duration. When it differs
@@ -209,24 +197,6 @@ export async function fetchRoutes(
 // Keep the old name as an alias so any remaining legacy callsites still compile.
 // New code should call fetchRoutes() directly.
 export const fetchDirections = fetchRoutes;
-
-// ---- Routes API helpers ----
-function parseDurationSeconds(dur: string | undefined): number {
-  if (!dur) return 0;
-  // Routes API returns durations as "NNNs" e.g. "1234s"
-  const match = dur.match(/^(\d+)s$/);
-  if (match) return parseInt(match[1], 10);
-  // Fallback: treat as numeric string
-  const n = parseFloat(dur);
-  return isFinite(n) ? n : 0;
-}
-
-function latLngFromRoutes(loc: any): LatLng {
-  return {
-    lat: loc?.latLng?.latitude ?? loc?.lat ?? 0,
-    lng: loc?.latLng?.longitude ?? loc?.lng ?? 0,
-  };
-}
 
 export function formatDistance(m: number): string {
   // Imperial regions (mph): feet under ~1000 ft, else miles. Metric otherwise.

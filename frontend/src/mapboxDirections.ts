@@ -407,12 +407,16 @@ export async function fetchMapboxRoutes(
             duration: typeof s?.duration === "number" ? s.duration : 0,
             name: typeof s?.name === "string" ? s.name : undefined,
             geometry: typeof s?.geometry === "string" ? s.geometry : undefined,
-            maneuver: s?.maneuver ? {
-              type: s.maneuver.type,
-              modifier: s.maneuver.modifier,
-              instruction: s.maneuver.instruction,
-              location: Array.isArray(s.maneuver.location) ? s.maneuver.location : undefined,
-            } : undefined,
+            maneuver: (() => {
+              if (!s?.maneuver) return undefined;
+              try { console.log("[nav] raw mapbox maneuver:", JSON.stringify({ type: s.maneuver.type, modifier: s.maneuver.modifier, instruction: s.maneuver.instruction })); } catch {}
+              return {
+                type: s.maneuver.type,
+                modifier: s.maneuver.modifier,
+                instruction: s.maneuver.instruction,
+                location: Array.isArray(s.maneuver.location) ? s.maneuver.location : undefined,
+              };
+            })(),
           }))
         : [];
 

@@ -260,15 +260,13 @@ export function CarSurface() {
         <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
       </View>
 
-      {/* TEMP un-gateable mount/fix readout. Does NOT read getSettings() — if the
-          React CarSurface is painting AT ALL, this strip MUST appear on the car
-          screen. Absent strip => React surface not rendering (native shell only).
-          Present strip => read fix:/map: to localize the issue. Remove once CarPlay
-          is confirmed working. */}
-      <View pointerEvents="none" style={{ position: 'absolute', top: 6, left: 0, right: 0, alignItems: 'center', zIndex: 99999 }}>
-        <View style={{ backgroundColor: 'rgba(0,0,0,0.8)', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 }}>
-          <Text style={{ color: '#00FF88', fontSize: 13, fontWeight: '800' }}>
-            {`RN-OK fix:${hasFix ? 'Y' : 'N'} map:${mapUrl ? 'Y' : 'N'} err:${dbgErr || '-'} @${typeof s.selfLat === 'number' ? s.selfLat.toFixed(3) : '-'},${typeof s.selfLng === 'number' ? s.selfLng.toFixed(3) : '-'}`}
+      {/* TEMP un-gateable readout, RE-CENTERED so the CarPlay dock + maneuver
+          banner can't cover it. If this appears AT ALL, the React CarSurface is
+          painting. Remove once CarPlay is confirmed. */}
+      <View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center', zIndex: 99999 }}>
+        <View style={{ backgroundColor: 'rgba(0,0,0,0.95)', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, borderWidth: 2, borderColor: '#00FF88' }}>
+          <Text style={{ color: '#00FF88', fontSize: 20, fontWeight: '900', textAlign: 'center' }}>
+            {`RN-OK\nfix:${hasFix ? 'Y' : 'N'}  map:${mapUrl ? 'Y' : 'N'}\nerr:${dbgErr || '-'}\n@${typeof s.selfLat === 'number' ? s.selfLat.toFixed(3) : '-'},${typeof s.selfLng === 'number' ? s.selfLng.toFixed(3) : '-'}`}
           </Text>
         </View>
       </View>

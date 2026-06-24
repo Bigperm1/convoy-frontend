@@ -39,6 +39,7 @@ import { getVehiclePngOrDefault, getVehicleModelUrl } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient } from "./mapboxDirections";
+import { getCarState } from "./carplay/carStore";
 import { getLastLocation, setLastLocation, getSettings } from "./settings";
 
 // 1×1 fully transparent PNG — a REAL bundled asset, not a data-URI (@rnmapbox's
@@ -1245,6 +1246,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         <Text style={{ color: '#00FF88', fontSize: 11, fontWeight: '600' }}>
           {`HDG mode:${mapView} feed:${followHeadingDeg != null ? Math.round(followHeadingDeg) : '-'} cam:${Math.round(dbgCamHdg)} gps:${Math.round(selfHeadingDeg)} foll:${followUser ? 'Y' : 'N'} lock:${coldLockDone ? 'Y' : 'N'}`}
         </Text>
+        <Text style={{ color: '#00FF88', fontSize: 11, fontWeight: '600' }}>{`CAR store fix:${typeof getCarState().selfLat === 'number' ? 'Y' : 'N'} @${typeof getCarState().selfLat === 'number' ? getCarState().selfLat!.toFixed(3) : '-'},${typeof getCarState().selfLng === 'number' ? getCarState().selfLng!.toFixed(3) : '-'} spd:${(getCarState().speedMs || 0).toFixed(0)}`}</Text>
       </View>
       )}
     </View>

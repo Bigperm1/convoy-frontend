@@ -292,3 +292,142 @@ export function pickLaneCue(
   if (!best || bestD > LANE_MATCH_RADIUS_M) return null;
   return best.lanes;
 }
+
+// ===== Full route source (Google Routes API replacement) =====================
+// The THIRD query variant of this module (after congestion + lane cues): the
+// complete driving-traffic route used to DRIVE turn-by-turn, replacing Google.
+// Returns geometry + steps + per-segment congestion + a real traffic vs free-flow
+// duration split in ONE call. geometries=polyline (precision-5) is deliberate so
+// nav.ts's existing decodePolyline (/1e5) keeps working unchanged.
+
+export type MapboxManeuver = {
+  type?: string;       // "turn" | "merge" | "fork" | "roundabout" | "depart" | ...
+  modifier?: string;   // "left" | "right" | "slight left" | "uturn" | ...
+  instruction?: string;
+  location?: [number, number]; // [lng, lat]
+};
+
+export type MapboxRouteStep = {
+  distance: number;            // metres
+  duration: number;            // seconds (traffic-aware)
+  name?: string;
+  maneuver?: MapboxManeuver;
+  geometry?: string;           // encoded polyline (precision-5)
+};
+
+export type MapboxRoute = {
+  polyline: string;                  // encoded precision-5 (whole route)
+  coordinates: [number, number][];   // [lng,lat] decoded geometry (for congestion paint)
+  congestion: CongestionLevel[];     // one per segment (coordinates.length - 1)
+  distance_m: number;
+  duration_s: number;                // traffic-aware
+  freeflow_s: number;                // typical/no-traffic (annotation duration sum)
+  summary: string;
+  steps: MapboxRouteStep[];
+};
+
+// Decode a precision-5 polyline to [lng,lat] (GeoJSON order for Mapbox paint).
+function decodePolyline5LngLat(encoded: string): [number, number][] {
+  const pts: [number, number][] = [];
+  let index = 0, lat = 0, lng = 0;
+  try {
+    while (index < encoded.length) {
+      let b: number, shift = 0, result = 0;
+      do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+      shift = 0; result = 0;
+      do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+      pts.push([lng / 1e5, lat / 1e5]);
+    }
+  } catch { return []; }
+  return pts;
+}
+
+export type MapboxAvoid = { tolls?: boolean; highways?: boolean; ferries?: boolean };
+
+// Fetch up to `alternatives` driving-traffic routes from origin->dest with steps,
+// congestion, and a traffic/free-flow duration split. Returns [] on any failure
+// (caller decides fallback). One leg (no waypoints) so annotations cover the whole
+// geometry.
+export async function fetchMapboxRoutes(
+  origin: LatLng,
+  dest: LatLng,
+  avoid?: MapboxAvoid,
+  opts?: { signal?: AbortSignal },
+): Promise<MapboxRoute[]> {
+  try {
+    if (
+      typeof origin?.lat !== "number" || typeof origin?.lng !== "number" ||
+      typeof dest?.lat !== "number" || typeof dest?.lng !== "number"
+    ) return [];
+
+    const coords = `${origin.lng},${origin.lat};${dest.lng},${dest.lat}`;
+    const exclude: string[] = [];
+    if (avoid?.tolls) exclude.push("toll");
+    if (avoid?.highways) exclude.push("motorway");
+    if (avoid?.ferries) exclude.push("ferry");
+
+    const qs =
+      `?alternatives=true&steps=true&overview=full&geometries=polyline` +
+      `&annotations=congestion,duration,distance&banner_instructions=false` +
+      (exclude.length ? `&exclude=${exclude.join(",")}` : ``) +
+      `&access_token=${MAPBOX_PUBLIC_TOKEN}`;
+
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}${qs}`;
+    const res = await fetch(url, { signal: opts?.signal });
+    if (!res.ok) return [];
+    const json: any = await res.json();
+    const routes: any[] = Array.isArray(json?.routes) ? json.routes : [];
+    if (!routes.length) return [];
+
+    return routes.map((route: any): MapboxRoute => {
+      const polyline: string = typeof route?.geometry === "string" ? route.geometry : "";
+      const coordinates = decodePolyline5LngLat(polyline);
+      const leg = route?.legs?.[0] || {};
+      const ann = leg?.annotation || {};
+
+      const segCount = Math.max(0, coordinates.length - 1);
+      const rawC: any[] = Array.isArray(ann.congestion) ? ann.congestion : [];
+      const congestion: CongestionLevel[] = new Array(segCount);
+      for (let i = 0; i < segCount; i++) {
+        const v = rawC[i];
+        congestion[i] = (v === "low" || v === "moderate" || v === "heavy" || v === "severe") ? v : "unknown";
+      }
+
+      // Traffic-aware duration = route.duration. Free-flow ~= sum of per-segment
+      // annotation durations is ALSO traffic-aware on driving-traffic, so use the
+      // route's `duration_typical` when present, else fall back to route.duration.
+      const durationS = typeof route?.duration === "number" ? route.duration : 0;
+      const freeflowS = typeof route?.duration_typical === "number" ? route.duration_typical : durationS;
+
+      const steps: MapboxRouteStep[] = Array.isArray(leg?.steps)
+        ? leg.steps.map((s: any): MapboxRouteStep => ({
+            distance: typeof s?.distance === "number" ? s.distance : 0,
+            duration: typeof s?.duration === "number" ? s.duration : 0,
+            name: typeof s?.name === "string" ? s.name : undefined,
+            geometry: typeof s?.geometry === "string" ? s.geometry : undefined,
+            maneuver: s?.maneuver ? {
+              type: s.maneuver.type,
+              modifier: s.maneuver.modifier,
+              instruction: s.maneuver.instruction,
+              location: Array.isArray(s.maneuver.location) ? s.maneuver.location : undefined,
+            } : undefined,
+          }))
+        : [];
+
+      return {
+        polyline,
+        coordinates,
+        congestion,
+        distance_m: typeof route?.distance === "number" ? route.distance : (leg?.distance ?? 0),
+        duration_s: durationS,
+        freeflow_s: freeflowS,
+        summary: typeof leg?.summary === "string" ? leg.summary : "",
+        steps,
+      };
+    }).filter((r) => r.polyline);
+  } catch {
+    return []; // includes AbortError
+  }
+}

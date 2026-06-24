@@ -177,10 +177,18 @@ export async function fetchRoutes(
       freeflow_s: freeflowS || undefined,
       duration_in_traffic_text: hasTraffic ? formatDuration(durS) : undefined,
       duration_in_traffic_s: hasTraffic ? durS : undefined,
-      steps: r.steps.map((s: MapboxRouteStep): NavStep => {
-        const loc = s.maneuver?.location; // [lng, lat]
+      steps: r.steps.map((s: MapboxRouteStep, i: number, arr: MapboxRouteStep[]): NavStep => {
+        const loc = s.maneuver?.location; // [lng, lat] — START of this step (the turn point)
         const here: LatLng = Array.isArray(loc) && loc.length >= 2
           ? { lat: loc[1], lng: loc[0] } : { lat: 0, lng: 0 };
+        // The turn-by-turn machine (Google-shaped) treats step.end as the NEXT
+        // maneuver's location: it measures distance to cur.end and announces the
+        // following step. Mapbox gives one point per step, so set end = the NEXT
+        // step's maneuver point. Without this, callouts run one turn ahead (the
+        // "lefts/rights reversed" bug). Last step keeps end = here (arrival).
+        const nLoc = arr[i + 1]?.maneuver?.location;
+        const end: LatLng = Array.isArray(nLoc) && nLoc.length >= 2
+          ? { lat: nLoc[1], lng: nLoc[0] } : here;
         const verbKey = mapboxManeuverKey(s.maneuver?.type, s.maneuver?.modifier);
         const html = s.maneuver?.instruction || maneuverVerb(verbKey);
         return {
@@ -191,7 +199,7 @@ export async function fetchRoutes(
           // Store the joined Mapbox key so maneuverVerb / isSpokenManeuver resolve it.
           maneuver: verbKey,
           start: here,
-          end: here,
+          end,
         };
       }),
     };

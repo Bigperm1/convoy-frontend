@@ -260,16 +260,18 @@ export function CarSurface() {
         <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
       </View>
 
-      {/* Mount diagnostic readout — gated by the Debug toggle in Settings. */}
-      {getSettings().debugOverlays && (
-      <View pointerEvents="none" style={{ position: 'absolute', top: '44%', left: 0, right: 0, alignItems: 'center', zIndex: 9999 }}>
-        <View style={{ backgroundColor: 'rgba(0,0,0,0.75)', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 }}>
-          <Text style={{ color: '#00FF88', fontSize: 12, fontWeight: '700' }}>
-            {`DBG fix:${hasFix ? 'Y' : 'N'}  map:${mapUrl ? 'Y' : 'N'}  err:${dbgErr || '-'}  @${typeof s.selfLat === 'number' ? s.selfLat.toFixed(3) : '-'},${typeof s.selfLng === 'number' ? s.selfLng.toFixed(3) : '-'}`}
+      {/* TEMP un-gateable mount/fix readout. Does NOT read getSettings() — if the
+          React CarSurface is painting AT ALL, this strip MUST appear on the car
+          screen. Absent strip => React surface not rendering (native shell only).
+          Present strip => read fix:/map: to localize the issue. Remove once CarPlay
+          is confirmed working. */}
+      <View pointerEvents="none" style={{ position: 'absolute', top: 6, left: 0, right: 0, alignItems: 'center', zIndex: 99999 }}>
+        <View style={{ backgroundColor: 'rgba(0,0,0,0.8)', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 }}>
+          <Text style={{ color: '#00FF88', fontSize: 13, fontWeight: '800' }}>
+            {`RN-OK fix:${hasFix ? 'Y' : 'N'} map:${mapUrl ? 'Y' : 'N'} err:${dbgErr || '-'} @${typeof s.selfLat === 'number' ? s.selfLat.toFixed(3) : '-'},${typeof s.selfLng === 'number' ? s.selfLng.toFixed(3) : '-'}`}
           </Text>
         </View>
       </View>
-      )}
     </View>
   );
 }

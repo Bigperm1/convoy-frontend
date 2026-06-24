@@ -1,11 +1,42 @@
-// Weather Layer — Google Weather API integration for Convoy map overlay.
+// Weather Layer — OpenWeather API integration for Convoy map overlay.
 // Fetches current conditions (temperature, precipitation, wind, description)
 // for the user's current GPS location and exposes them via a React hook.
 // The data is displayed as a compact HUD chip on the map when the
-// "showWeatherLayer" setting is enabled.
+// "showWeatherLayer" setting is enabled. (Migrated off the Google Weather API:
+// current = /data/2.5/weather, hourly + daily = /data/2.5/forecast, both on the
+// free OpenWeather tier. Daily is aggregated from the 3-hour forecast blocks, so
+// it spans up to 5 days. The WeatherCondition shape is unchanged, so
+// weatherKind() and every consumer keep working untouched.)
 
 import { useEffect, useRef, useState } from "react";
-import { GOOGLE_MAPS_KEY } from "./api";
+import { OPENWEATHER_KEY } from "./api";
+
+const OW_BASE = "https://api.openweathermap.org/data/2.5";
+
+// OpenWeather condition id -> a canonical phrase the existing weatherKind() /
+// weatherIconName() classifiers already understand (they substring-match the
+// description text). Keeps the two-tone HUD glyphs accurate without touching the
+// classifier. id ranges: 2xx thunder, 3xx drizzle, 5xx rain, 6xx snow, 7xx
+// atmosphere (mist/haze/fog), 800 clear, 801/802 partly, 803 broken, 804 overcast.
+function owDesc(id: number): string {
+  if (id >= 200 && id < 300) return "Thunderstorm";
+  if (id >= 300 && id < 400) return "Drizzle";
+  if (id >= 500 && id < 600) return "Rain";
+  if (id >= 600 && id < 700) return "Snow";
+  if (id >= 700 && id < 800) return "Fog";
+  if (id === 800) return "Clear";
+  if (id === 801 || id === 802) return "Partly cloudy";
+  if (id === 803) return "Cloudy";
+  if (id === 804) return "Overcast";
+  return "Clear";
+}
+// OpenWeather marks day/night with a trailing d/n on the icon code (e.g. "04d").
+function owIsDay(icon: any): boolean {
+  return typeof icon === "string" ? icon.endsWith("d") : true;
+}
+function owIconUrl(icon: any): string {
+  return typeof icon === "string" && icon ? `https://openweathermap.org/img/wn/${icon}@2x.png` : "";
+}
 
 export type WeatherCondition = {
   tempC: number;
@@ -13,7 +44,7 @@ export type WeatherCondition = {
   feelsLikeC: number;
   feelsLikeF: number;
   description: string;          // e.g. "Partly cloudy"
-  icon: string;                 // icon code from Google weather API
+  icon: string;                 // OpenWeather icon URL (HUD draws its own glyph; kept for any consumer)
   humidity: number;             // 0–100 %
   windSpeedKph: number;
   windSpeedMph: number;
@@ -25,56 +56,52 @@ export type WeatherCondition = {
   fetchedAt: number;            // Date.now()
 };
 
-const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const STALE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+const REFRESH_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes (stationary refresh cadence)
+const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
-// ---- Fetch from Google Weather API ----
-// The Weather API endpoint returns current conditions at a lat/lng.
-// Note: requires the "Weather API" to be enabled in your Google Cloud project.
+// ---- Fetch current conditions from OpenWeather (/data/2.5/weather) ----
 export async function fetchWeatherConditions(
   lat: number,
   lng: number
 ): Promise<WeatherCondition | null> {
-  const KEY = GOOGLE_MAPS_KEY;
-  if (!KEY) return null;
+  const KEY = OPENWEATHER_KEY;
+  if (!KEY || KEY === "PASTE_YOUR_OPENWEATHER_KEY_HERE") return null;
 
   try {
-    // Google Weather API — Current Conditions endpoint
-    const url = new URL("https://weather.googleapis.com/v1/currentConditions:lookup");
-    url.searchParams.set("key", KEY);
-    url.searchParams.set("location.latitude", lat.toFixed(6));
-    url.searchParams.set("location.longitude", lng.toFixed(6));
+    const url = new URL(`${OW_BASE}/weather`);
+    url.searchParams.set("lat", lat.toFixed(6));
+    url.searchParams.set("lon", lng.toFixed(6));
+    url.searchParams.set("units", "metric"); // temp °C, wind m/s
+    url.searchParams.set("appid", KEY);
 
     const res = await fetch(url.toString());
     if (!res.ok) return null;
     const data = await res.json();
 
-    // The Weather API returns all fields at the TOP LEVEL of the response
-    // (NOT nested under a `currentConditions` key — that was the bug). Guard on
-    // a core field so a bad/empty payload returns null cleanly.
-    if (!data || !data.weatherCondition) return null;
+    const w0 = Array.isArray(data?.weather) ? data.weather[0] : null;
+    if (!w0) return null;
 
-    const tempC = data.temperature?.degrees ?? 0;
-    const feelsLikeC = data.feelsLikeTemperature?.degrees ?? tempC;
-    const wind = data.wind;
-    const windKph = wind?.speed?.value ?? 0;
-    const precipProb = data.precipitation?.probability?.percent ?? 0;
+    const tempC = data?.main?.temp ?? 0;
+    const feelsLikeC = data?.main?.feels_like ?? tempC;
+    const windKph = (data?.wind?.speed ?? 0) * 3.6; // m/s -> km/h
 
     return {
       tempC,
       tempF: (tempC * 9) / 5 + 32,
       feelsLikeC,
       feelsLikeF: (feelsLikeC * 9) / 5 + 32,
-      description: data.weatherCondition?.description?.text ?? data.weatherCondition?.type ?? "Unknown",
-      icon: data.weatherCondition?.iconBaseUri ?? "",
-      humidity: data.relativeHumidity ?? 0,
+      description: owDesc(w0?.id ?? 800),
+      icon: owIconUrl(w0?.icon),
+      humidity: data?.main?.humidity ?? 0,
       windSpeedKph: windKph,
       windSpeedMph: windKph * 0.621371,
-      windDirectionDeg: wind?.direction?.degrees ?? 0,
-      precipProbability: precipProb,
-      visibility: data.visibility?.distance ?? 0,
-      uvIndex: data.uvIndex ?? 0,
-      isDaytime: data.isDaytime ?? true,
+      windDirectionDeg: data?.wind?.deg ?? 0,
+      // /weather has no precip probability (that lives in /forecast); leave 0 so
+      // the HUD simply omits the precip line for current conditions.
+      precipProbability: 0,
+      visibility: (data?.visibility ?? 0) / 1000, // m -> km
+      uvIndex: 0, // UV needs One Call 3.0; not surfaced in the HUD anyway
+      isDaytime: owIsDay(w0?.icon),
       fetchedAt: Date.now(),
     };
   } catch {
@@ -104,10 +131,13 @@ export function useWeatherLayer(
     const shouldRefetch = () => {
       if (!weather) return true;
       if (Date.now() - weather.fetchedAt > STALE_THRESHOLD_MS) return true;
-      // Re-fetch if the user has moved more than ~1 km
+      // Re-fetch once the driver has moved ~300 m so the on-map conditions track
+      // the drive live, instead of only updating every ~1 km (the old gate, which
+      // read as "weather never changes while driving"). OpenWeather's free tier
+      // (60 calls/min) easily absorbs this even at highway speed.
       const dlat = Math.abs((lat ?? 0) - (lastLatRef.current ?? 0));
       const dlng = Math.abs((lng ?? 0) - (lastLngRef.current ?? 0));
-      return dlat > 0.009 || dlng > 0.009; // ~1 km in degrees
+      return dlat > 0.003 || dlng > 0.003; // ~300 m in degrees
     };
 
     const doFetch = async () => {
@@ -137,7 +167,7 @@ export function useWeatherLayer(
 }
 
 // ---- Weather icon helpers ----
-// Returns a Ionicons name that best matches the Google Weather icon code
+// Returns a Ionicons name that best matches the current condition
 export function weatherIconName(condition: WeatherCondition | null): string {
   if (!condition) return "partly-sunny";
   const desc = condition.description.toLowerCase();
@@ -151,7 +181,7 @@ export function weatherIconName(condition: WeatherCondition | null): string {
 }
 
 // ---- Dynamic weather glyph kind ----
-// Collapses Google's free-text description (+ day/night) into a small set of
+// Collapses the free-text description (+ day/night) into a small set of
 // glyph kinds the WeatherHUD renders as two-tone icons: sun yellow + cloud
 // grey, grey cloud + blue rain, grey cloud + yellow lightning, etc.
 export type WeatherKind =
@@ -182,8 +212,8 @@ export function windDirectionLabel(deg: number): string {
 
 // ---- Destination arrival forecast (hourly) ----
 // Hourly forecast at a point, used to show "weather when you arrive" on the
-// route's destination pin. Same Google Weather API as currentConditions, but
-// the forecast/hours endpoint. Each hour reuses the WeatherCondition shape so
+// route's destination pin. Same OpenWeather /forecast feed as the daily outlook,
+// exposed as 3-hour blocks. Each block reuses the WeatherCondition shape so
 // weatherKind()/the glyph code works unchanged.
 export type ForecastHour = { startMs: number; endMs: number; condition: WeatherCondition };
 
@@ -192,34 +222,32 @@ export async function fetchHourlyForecast(
   lng: number,
   hours = 24
 ): Promise<ForecastHour[] | null> {
-  const KEY = GOOGLE_MAPS_KEY;
-  if (!KEY) return null;
+  const KEY = OPENWEATHER_KEY;
+  if (!KEY || KEY === "PASTE_YOUR_OPENWEATHER_KEY_HERE") return null;
   try {
-    const url = new URL("https://weather.googleapis.com/v1/forecast/hours:lookup");
-    url.searchParams.set("key", KEY);
-    url.searchParams.set("location.latitude", lat.toFixed(6));
-    url.searchParams.set("location.longitude", lng.toFixed(6));
-    url.searchParams.set("hours", String(hours));
+    // OpenWeather's free forecast is 3-hour blocks over 5 days. Each block maps
+    // to one ForecastHour spanning its 3-hour interval; pickForecastAt() finds
+    // the block containing the arrival time.
+    const url = new URL(`${OW_BASE}/forecast`);
+    url.searchParams.set("lat", lat.toFixed(6));
+    url.searchParams.set("lon", lng.toFixed(6));
+    url.searchParams.set("units", "metric");
+    url.searchParams.set("appid", KEY);
     const res = await fetch(url.toString());
     if (!res.ok) return null;
     const data = await res.json();
-    const arr: any[] = Array.isArray(data?.forecastHours) ? data.forecastHours : [];
+    const list: any[] = Array.isArray(data?.list) ? data.list : [];
+    // Cover at least the requested window (3-hour blocks -> ceil(hours/3)).
+    const maxBlocks = Math.max(1, Math.ceil(hours / 3));
     const out: ForecastHour[] = [];
-    for (const h of arr) {
-      const startMs = h?.interval?.startTime ? Date.parse(h.interval.startTime) : NaN;
-      if (!Number.isFinite(startMs)) continue;
-      const endMs = h?.interval?.endTime ? Date.parse(h.interval.endTime) : startMs + 3600000;
-      const tempC = h?.temperature?.degrees ?? 0;
-      const feelsC = h?.feelsLikeTemperature?.degrees ?? tempC;
-      const wind = h?.wind;
-      const windKph = wind?.speed?.value ?? 0;
-      // Some hours omit isDaytime; fall back to the local clock hour from
-      // displayDateTime so the day/night icon is still right.
-      const localHour = h?.displayDateTime?.hours;
-      const isDay =
-        typeof h?.isDaytime === "boolean"
-          ? h.isDaytime
-          : (typeof localHour === "number" ? localHour >= 6 && localHour < 20 : true);
+    for (const h of list.slice(0, maxBlocks)) {
+      const startMs = (h?.dt ?? 0) * 1000;
+      if (!startMs) continue;
+      const endMs = startMs + 3 * 3600 * 1000;
+      const tempC = h?.main?.temp ?? 0;
+      const feelsC = h?.main?.feels_like ?? tempC;
+      const windKph = (h?.wind?.speed ?? 0) * 3.6;
+      const w0 = Array.isArray(h?.weather) ? h.weather[0] : null;
       out.push({
         startMs,
         endMs,
@@ -228,16 +256,16 @@ export async function fetchHourlyForecast(
           tempF: (tempC * 9) / 5 + 32,
           feelsLikeC: feelsC,
           feelsLikeF: (feelsC * 9) / 5 + 32,
-          description: h?.weatherCondition?.description?.text ?? h?.weatherCondition?.type ?? "Unknown",
-          icon: h?.weatherCondition?.iconBaseUri ?? "",
-          humidity: h?.relativeHumidity ?? 0,
+          description: owDesc(w0?.id ?? 800),
+          icon: owIconUrl(w0?.icon),
+          humidity: h?.main?.humidity ?? 0,
           windSpeedKph: windKph,
           windSpeedMph: windKph * 0.621371,
-          windDirectionDeg: wind?.direction?.degrees ?? 0,
-          precipProbability: h?.precipitation?.probability?.percent ?? 0,
-          visibility: h?.visibility?.distance ?? 0,
-          uvIndex: h?.uvIndex ?? 0,
-          isDaytime: isDay,
+          windDirectionDeg: h?.wind?.deg ?? 0,
+          precipProbability: Math.round(((h?.pop ?? 0) as number) * 100),
+          visibility: (h?.visibility ?? 0) / 1000,
+          uvIndex: 0,
+          isDaytime: owIsDay(w0?.icon),
           fetchedAt: Date.now(),
         },
       });
@@ -299,10 +327,11 @@ export function useDestinationWeather(
   return forecast;
 }
 
-// ---- 7-day daily forecast (Google Weather API forecast/days) ----
-// Used by the tappable weather chip on the map to pop a 7-day outlook for the
-// driver's current location. Each day carries a glyph `kind` (reusing the same
-// WeatherGlyph the HUD draws) plus hi/lo temps and a precip chance.
+// ---- Daily forecast (aggregated from OpenWeather /forecast 3-hour blocks) ----
+// Used by the tappable weather chip on the map to pop a multi-day outlook (up to
+// 5 days on the free tier) for the driver's current location. Each day carries a
+// glyph `kind` (reusing the same WeatherGlyph the HUD draws) plus hi/lo temps and
+// a precip chance.
 export type ForecastDay = {
   startMs: number;
   label: string;            // "Today", "Mon", "Tue", ...
@@ -319,56 +348,67 @@ export async function fetchDailyForecast(
   lng: number,
   days = 7
 ): Promise<ForecastDay[] | null> {
-  const KEY = GOOGLE_MAPS_KEY;
-  if (!KEY) return null;
+  const KEY = OPENWEATHER_KEY;
+  if (!KEY || KEY === "PASTE_YOUR_OPENWEATHER_KEY_HERE") return null;
   try {
-    const url = new URL("https://weather.googleapis.com/v1/forecast/days:lookup");
-    url.searchParams.set("key", KEY);
-    url.searchParams.set("location.latitude", lat.toFixed(6));
-    url.searchParams.set("location.longitude", lng.toFixed(6));
-    url.searchParams.set("days", String(days));
-    // Without pageSize the API returns a 5-day page (+ nextPageToken). Setting
-    // pageSize = days returns the full window in one response, so the 7-day
-    // card isn't silently truncated to 5.
-    url.searchParams.set("pageSize", String(days));
+    // No daily endpoint on the free tier — aggregate the 3-hour /forecast blocks
+    // into per-day hi/lo + a midday-representative glyph. Spans up to 5 days.
+    const url = new URL(`${OW_BASE}/forecast`);
+    url.searchParams.set("lat", lat.toFixed(6));
+    url.searchParams.set("lon", lng.toFixed(6));
+    url.searchParams.set("units", "metric");
+    url.searchParams.set("appid", KEY);
     const res = await fetch(url.toString());
     if (!res.ok) return null;
     const data = await res.json();
-    const arr: any[] = Array.isArray(data?.forecastDays) ? data.forecastDays : [];
+    const list: any[] = Array.isArray(data?.list) ? data.list : [];
+    if (list.length === 0) return [];
+
+    // Group blocks by local calendar day, preserving order.
+    const order: string[] = [];
+    const byDay = new Map<string, any[]>();
+    for (const e of list) {
+      const ms = (e?.dt ?? 0) * 1000;
+      if (!ms) continue;
+      const dt = new Date(ms);
+      const key = `${dt.getFullYear()}-${dt.getMonth()}-${dt.getDate()}`;
+      if (!byDay.has(key)) { byDay.set(key, []); order.push(key); }
+      byDay.get(key)!.push(e);
+    }
+
     const now = new Date();
     const out: ForecastDay[] = [];
-    arr.forEach((d, i) => {
-      const startMs = d?.interval?.startTime ? Date.parse(d.interval.startTime) : NaN;
-      // Prefer the API's local calendar date for the weekday label so a UTC
-      // interval boundary near midnight doesn't shift the day name.
-      const dd = d?.displayDate;
-      let label: string;
-      if (dd?.year && dd?.month && dd?.day) {
-        const dt = new Date(dd.year, dd.month - 1, dd.day);
-        const isToday =
-          dt.getFullYear() === now.getFullYear() &&
-          dt.getMonth() === now.getMonth() &&
-          dt.getDate() === now.getDate();
-        label = isToday ? "Today" : DOW_SHORT[dt.getDay()];
-      } else if (Number.isFinite(startMs)) {
-        label = i === 0 ? "Today" : DOW_SHORT[new Date(startMs).getDay()];
-      } else {
-        label = i === 0 ? "Today" : `Day ${i + 1}`;
+    for (const key of order.slice(0, days)) {
+      const entries = byDay.get(key)!;
+      let hiC = -Infinity, loC = Infinity, precip = 0;
+      let rep = entries[0]; let bestNoon = Infinity;
+      for (const e of entries) {
+        const t = e?.main?.temp ?? 0;
+        const tmax = e?.main?.temp_max ?? t;
+        const tmin = e?.main?.temp_min ?? t;
+        if (tmax > hiC) hiC = tmax;
+        if (tmin < loC) loC = tmin;
+        const pop = Math.round(((e?.pop ?? 0) as number) * 100);
+        if (pop > precip) precip = pop;
+        // Representative block = closest to local noon (drives the day glyph).
+        const hr = new Date((e?.dt ?? 0) * 1000).getHours();
+        const dist = Math.abs(hr - 12);
+        if (dist < bestNoon) { bestNoon = dist; rep = e; }
       }
-      // Daytime part drives the icon; fall back to nighttime if absent.
-      const part = d?.daytimeForecast || d?.nighttimeForecast || {};
-      const desc =
-        part?.weatherCondition?.description?.text ??
-        part?.weatherCondition?.type ??
-        "Unknown";
-      const hiC = d?.maxTemperature?.degrees ?? 0;
-      const loC = d?.minTemperature?.degrees ?? 0;
-      const precip = part?.precipitation?.probability?.percent ?? 0;
-      // Minimal daytime condition just so weatherKind() resolves the glyph.
-      const cond = { description: desc, isDaytime: true } as WeatherCondition;
+      if (!Number.isFinite(hiC)) hiC = 0;
+      if (!Number.isFinite(loC)) loC = 0;
+      const startMs = (entries[0]?.dt ?? 0) * 1000;
+      const d0 = new Date(startMs);
+      const isToday =
+        d0.getFullYear() === now.getFullYear() &&
+        d0.getMonth() === now.getMonth() &&
+        d0.getDate() === now.getDate();
+      const repId = Array.isArray(rep?.weather) ? (rep.weather[0]?.id ?? 800) : 800;
+      // Daytime glyph for the day card (matches the old daily behavior).
+      const cond = { description: owDesc(repId), isDaytime: true } as WeatherCondition;
       out.push({
-        startMs: Number.isFinite(startMs) ? startMs : Date.now() + i * 86400000,
-        label,
+        startMs,
+        label: isToday ? "Today" : DOW_SHORT[d0.getDay()],
         kind: weatherKind(cond),
         hiC,
         loC,
@@ -376,7 +416,7 @@ export async function fetchDailyForecast(
         loF: (loC * 9) / 5 + 32,
         precipProbability: precip,
       });
-    });
+    }
     return out;
   } catch {
     return null;

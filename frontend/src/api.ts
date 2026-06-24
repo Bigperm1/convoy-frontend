@@ -26,6 +26,16 @@ export const API_BASE = `${BACKEND_URL}/api`;
 const PROD_MAPS_KEY = "AIzaSyDj69IfW8Dy7aeX-gaHIdHGsSL1WO7sD_M";
 export const GOOGLE_MAPS_KEY = PROD_MAPS_KEY;
 
+// OpenWeather API key (current conditions + 5-day/3-hour forecast). Replaces the
+// Google Weather API. Read ONLY from the environment (.env, which is gitignored)
+// — deliberately NOT hardcoded, because this repo is PUBLIC and a committed key
+// would be scraped within minutes. Set EXPO_PUBLIC_OPENWEATHER_KEY in .env. The
+// empty fallback means weather degrades gracefully (returns null) if the env var
+// is ever missing, rather than shipping a literal key in the bundle source.
+const PROD_OPENWEATHER_KEY = "";
+export const OPENWEATHER_KEY =
+  (process.env.EXPO_PUBLIC_OPENWEATHER_KEY as string) || PROD_OPENWEATHER_KEY;
+
 const TOKEN_KEY = "convoy_token";
 
 export async function saveToken(token: string) {

@@ -592,8 +592,8 @@ function DestWeatherMarker({ lat, lng, weather }: { lat: number; lng: number; we
     <MarkerView coordinate={[lng, lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
       <View style={styles.destWxChip}>
         {ic.mci
-          ? <MaterialCommunityIcons name={ic.name as any} size={14} color={ic.color} />
-          : <Ionicons name={ic.name as any} size={14} color={ic.color} />}
+          ? <MaterialCommunityIcons name={ic.name as any} size={18} color={ic.color} />
+          : <Ionicons name={ic.name as any} size={18} color={ic.color} />}
         <Text style={styles.destWxText}>{weather.temp}</Text>
       </View>
     </MarkerView>
@@ -1330,13 +1330,13 @@ const styles = StyleSheet.create({
   },
   // Arrival-weather chip.
   destWxChip: {
-    flexDirection: "row", alignItems: "center", gap: 4,
+    flexDirection: "row", alignItems: "center", gap: 5,
     backgroundColor: "rgba(22,22,24,0.92)",
-    borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4,
+    borderRadius: 13, paddingHorizontal: 9, paddingVertical: 5,
     marginBottom: 8,
     borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
     elevation: 5,
   },
-  destWxText: { color: "#fff", fontSize: 12, fontWeight: "700", letterSpacing: -0.2 },
+  destWxText: { color: "#fff", fontSize: 14, fontWeight: "700", letterSpacing: -0.2 },
 });

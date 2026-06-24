@@ -32,7 +32,7 @@
 // handed to Mapbox below is [lng, lat].
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Image, StyleSheet, Pressable, Platform } from "react-native";
+import { View, Text, Image, StyleSheet, Pressable, Platform, AppState } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getVehiclePngOrDefault, getVehicleModelUrl } from "./vehicleAssets";
@@ -154,7 +154,7 @@ const CAR_MODEL_SCALE_BY_ZOOM: any = [
 // above now reads too big. Rather than re-tune every stop, scale the whole curve
 // by one factor: lower = smaller. 1.0 == the (too-big) table above. The map uses
 // CAR_MODEL_SCALE_SIZED below — adjust CAR_SIZE and OTA to resize.
-const CAR_SIZE = 0.80;
+const CAR_SIZE = 1.00;
 const CAR_MODEL_SCALE_SIZED: any = CAR_MODEL_SCALE_BY_ZOOM.map((v: any) =>
   // Only the [x,y,z] scale tuples are all-number arrays; the expression's own
   // sub-arrays (["linear"], ["zoom"]) contain strings and must pass through
@@ -457,6 +457,18 @@ function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng: numbe
 
   // Stop the loop if the car unmounts mid-animation.
   useEffect(() => () => { if (raf.current != null) cancelAnimationFrame(raf.current); }, []);
+
+  // Snap (not ease) to the next fix after the app returns to the foreground.
+  // Backgrounding freezes the RAF loop, so render.current goes stale; clearing
+  // `seeded` here makes the very next fix HARD-SNAP the drawn car (and the puck
+  // the chase camera rides) straight to the live position instead of easing up
+  // from the frozen pose — the "snap to the car when I come back" behavior.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (st) => {
+      if (st === "active") seeded.current = false;
+    });
+    return () => sub.remove();
+  }, []);
 
   const r = render.current;
   return (
@@ -968,10 +980,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const selCoreGradient = buildLineFade("rgba(45,236,134,1)", "rgba(45,236,134,0)");
   const selGlowGradient = buildLineFade("rgba(0,224,112,1)", "rgba(0,224,112,0)");
 
-  // Snapped draw position: glue the car to the line, but ONLY within ~30 m of it
+  // Snapped draw position: glue the car to the line, but ONLY within ~45 m of it
   // — further off (wrong turn / pre-reroute) we show the real GPS so you can see
   // you're off-route. SelfCarModel interpolates, so the snap eases in smoothly.
-  const selfDraw = (routeProj && routeProj.distM <= 30)
+  // (Was 30 m, which left the car drawn off the line on normal urban GPS drift
+  // that landed just past the cutoff — e.g. ~32 m beside a parallel street.)
+  const selfDraw = (routeProj && routeProj.distM <= 45)
     ? { lat: routeProj.lat, lng: routeProj.lng }
     : (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null);
 

@@ -1282,8 +1282,38 @@ export default function MapScreen() {
   // background (for PTT + nav voice), which keeps JS timers alive — so without
   // this, GPS + polling would otherwise keep running on the home/lock screen.
   const [appActive, setAppActive] = useState(true);
+  const wasActiveRef = useRef(true);
   useEffect(() => {
-    const s = AppState.addEventListener("change", (st) => setAppActive(st === "active"));
+    const s = AppState.addEventListener("change", (st) => {
+      const active = st === "active";
+      setAppActive(active);
+      // Returning to the foreground (e.g. switching back from another app
+      // mid-drive): recenter and pull an immediate fresh fix so the car snaps to
+      // where you are NOW. While backgrounded the RAF render loop is frozen and
+      // (when not navigating) the GPS watcher is paused, so without this the
+      // camera "takes forever to find the car" — it eases up from the stale pose
+      // and waits on the watcher's first tick. ConvoyMapbox clears its seed on the
+      // same foreground event, so this fresh fix hard-snaps the car + chase cam.
+      if (active && !wasActiveRef.current) {
+        recenterNow();
+        (async () => {
+          try {
+            const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+            if (pos?.coords) {
+              const h = pos.coords.heading;
+              const sp = pos.coords.speed;
+              setCoords((cur) => ({
+                lat: pos.coords.latitude,
+                lng: pos.coords.longitude,
+                heading: typeof h === "number" && h >= 0 ? h : cur?.heading,
+                speed: typeof sp === "number" && sp >= 0 ? sp : (cur?.speed ?? 0),
+              }));
+            }
+          } catch {}
+        })();
+      }
+      wasActiveRef.current = active;
+    });
     return () => s.remove();
   }, []);
   // Live nav flag the watcher can read WITHOUT re-subscribing on every nav

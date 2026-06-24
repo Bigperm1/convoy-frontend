@@ -356,6 +356,15 @@ const SILENT_MANEUVERS = new Set([
 // on "Continue on Main St" filler.
 function isSpokenManeuver(maneuver?: string, html?: string): boolean {
   const m = (maneuver || "").toLowerCase();
+  // maneuver may be a joined Mapbox key ("type|modifier", e.g. "continue|straight",
+  // "depart|left", "turn|straight") or a bare legacy token ("straight"). Split so
+  // the SILENT set matches on the TYPE half regardless of modifier.
+  const type = m.split("|")[0];
+  const modifier = m.split("|")[1] || "";
+  // A "straight" modifier means no real turn (e.g. "turn|straight", "merge|straight"
+  // continuing ahead) — treat as non-actionable filler, same as continue/straight.
+  if (modifier === "straight") return false;
+  if (type && SILENT_MANEUVERS.has(type)) return false;
   if (m && !SILENT_MANEUVERS.has(m)) return true;
   const h = (html || "").toLowerCase();
   return /\b(turn|merge|exit|ramp|fork|u-?turn|roundabout|keep (?:left|right))\b/.test(h);

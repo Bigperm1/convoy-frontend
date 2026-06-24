@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 import { api, GOOGLE_MAPS_KEY } from "./api";
+import { fetchMapboxRoutes, type MapboxRoute, type MapboxRouteStep } from "./mapboxDirections";
 import { getSettings } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
@@ -76,8 +77,41 @@ export function maneuverVerb(m?: string): string {
     "roundabout-right": "At the roundabout, turn right",
     "roundabout-left": "At the roundabout, turn left",
     "ferry": "Take the ferry", "straight": "Continue straight",
+    // Mapbox vocabulary (type|modifier joined by mapboxManeuverKey below).
+    "turn|left": "Turn left", "turn|right": "Turn right",
+    "turn|slight left": "Slight left", "turn|slight right": "Slight right",
+    "turn|sharp left": "Sharp left", "turn|sharp right": "Sharp right",
+    "turn|uturn": "Make a U-turn", "turn|straight": "Continue straight",
+    "merge|left": "Merge left", "merge|right": "Merge right", "merge|straight": "Merge",
+    "merge|slight left": "Merge left", "merge|slight right": "Merge right",
+    "fork|left": "Keep left", "fork|right": "Keep right",
+    "fork|slight left": "Keep left", "fork|slight right": "Keep right",
+    "on ramp|left": "Take the ramp on the left", "on ramp|right": "Take the ramp on the right",
+    "on ramp|slight left": "Take the ramp on the left", "on ramp|slight right": "Take the ramp on the right",
+    "off ramp|left": "Take the exit on the left", "off ramp|right": "Take the exit on the right",
+    "off ramp|slight left": "Take the exit on the left", "off ramp|slight right": "Take the exit on the right",
+    "roundabout|left": "At the roundabout, turn left", "roundabout|right": "At the roundabout, turn right",
+    "roundabout|straight": "At the roundabout, continue straight",
+    "rotary|left": "At the roundabout, turn left", "rotary|right": "At the roundabout, turn right",
+    "exit roundabout|left": "Exit the roundabout", "exit roundabout|right": "Exit the roundabout",
+    "exit rotary|left": "Exit the roundabout", "exit rotary|right": "Exit the roundabout",
+    "end of road|left": "Turn left", "end of road|right": "Turn right",
+    "continue|left": "Keep left", "continue|right": "Keep right",
+    "continue|straight": "Continue straight", "continue|uturn": "Make a U-turn",
+    "depart|left": "Head out", "depart|right": "Head out", "depart|straight": "Head out",
+    "arrive|left": "Arrive on the left", "arrive|right": "Arrive on the right",
+    "arrive|straight": "You have arrived",
   };
   return map[m] || "Continue";
+}
+
+// Join Mapbox's split maneuver (type + modifier) into a single lookup key for
+// maneuverVerb, e.g. {type:"turn",modifier:"left"} -> "turn|left". Falls back to
+// the bare type so a missing modifier still resolves ("merge" -> "merge|").
+export function mapboxManeuverKey(type?: string, modifier?: string): string {
+  const t = (type || "").toLowerCase().trim();
+  const mod = (modifier || "").toLowerCase().trim();
+  return mod ? `${t}|${mod}` : t;
 }
 
 // ---- Route preferences ----
@@ -97,109 +131,67 @@ export async function fetchRoutes(
   destination: LatLng,
   avoid?: AvoidPrefs
 ): Promise<NavRoute[]> {
-  let routes: any[] = [];
+  // Routing now comes from Mapbox Directions (driving-traffic), replacing Google
+  // Routes API. Same signature + NavRoute/NavStep shape, so every caller (map.tsx,
+  // the turn-by-turn machine, the greeting, CarPlay formatters) is unchanged.
+  let mbRoutes: MapboxRoute[] = [];
   try {
-    if (Platform.OS === "web") {
-      // Backend proxy mirrors the Routes API computeRoutes request
-      const params = {
-        origin_lat: origin.lat, origin_lng: origin.lng,
-        dest_lat: destination.lat, dest_lng: destination.lng,
-        avoid_tolls: !!avoid?.tolls,
-        avoid_highways: !!avoid?.highways,
-        avoid_ferries: !!avoid?.ferries,
-      };
-      const res = await api.get("/routes", { params });
-      routes = res.data?.routes ?? [];
-    } else {
-      const KEY = GOOGLE_MAPS_KEY;
-      if (!KEY) return [];
-
-      const avoidTolls = avoid?.tolls ?? false;
-      const avoidHighways = avoid?.highways ?? false;
-      const avoidFerries = avoid?.ferries ?? false;
-
-      // Routes API request body
-      const body: any = {
-        origin: { location: { latLng: { latitude: origin.lat, longitude: origin.lng } } },
-        destination: { location: { latLng: { latitude: destination.lat, longitude: destination.lng } } },
-        travelMode: "DRIVE",
-        computeAlternativeRoutes: true,
-        routingPreference: "TRAFFIC_AWARE",
-        routeModifiers: {
-          avoidTolls, avoidHighways, avoidFerries,
-        },
-        languageCode: "en-US",
-        units: "METRIC",
-      };
-
-      const res = await fetch(
-        "https://routes.googleapis.com/directions/v2:computeRoutes",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": KEY,
-            // Field mask — only request the fields we actually use to minimize
-            // response size and avoid unnecessary billing for unused fields.
-            "X-Goog-FieldMask": [
-              "routes.duration",
-              "routes.staticDuration",
-              "routes.distanceMeters",
-              "routes.polyline.encodedPolyline",
-              "routes.description",
-              "routes.legs.duration",
-              "routes.legs.distanceMeters",
-              "routes.legs.steps.navigationInstruction",
-              "routes.legs.steps.distanceMeters",
-              "routes.legs.steps.staticDuration",
-              "routes.legs.steps.startLocation",
-              "routes.legs.steps.endLocation",
-              "routes.travelAdvisory.tollInfo",
-              "routes.routeLabels",
-            ].join(","),
-          },
-          body: JSON.stringify(body),
-        }
-      );
-      const data = await res.json();
-      routes = data?.routes ?? [];
-    }
+    mbRoutes = await fetchMapboxRoutes(
+      origin,
+      destination,
+      { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
+    );
   } catch {
     return [];
   }
+  if (!mbRoutes.length) return [];
 
-  if (!routes.length) return [];
+  // TEMP diagnostic: confirm which duration fields Mapbox returns on this account
+  // (esp. duration_typical, the free-flow signal). Remove once verified.
+  try {
+    const r0: any = mbRoutes[0];
+    console.log("[nav] mapbox route keys:", {
+      duration_s: r0?.duration_s,
+      freeflow_s: r0?.freeflow_s,
+      steps: r0?.steps?.length,
+      segs: r0?.coordinates?.length,
+    });
+  } catch {}
 
-  return routes.map((r: any): NavRoute => {
-    const leg = r?.legs?.[0];
-    const distM = r.distanceMeters ?? leg?.distanceMeters ?? 0;
-    const durS = parseDurationSeconds(r.duration ?? leg?.duration);
-    const trafficDurS = parseDurationSeconds(r.duration ?? leg?.duration);
-    const freeflowS = parseDurationSeconds(r.staticDuration ?? leg?.staticDuration);
+  return mbRoutes.map((r: MapboxRoute): NavRoute => {
+    const durS = r.duration_s;
+    // freeflow_s carries Mapbox's typical (historical) duration. When it differs
+    // from the live traffic-aware duration we surface a real traffic ETA — the
+    // old Google parser always left this undefined (it parsed the same field
+    // twice), so this also fixes that latent bug.
+    const freeflowS = r.freeflow_s > 0 ? r.freeflow_s : durS;
+    const hasTraffic = durS > 0 && freeflowS > 0 && Math.abs(durS - freeflowS) >= 30;
 
     return {
-      polyline: r.polyline?.encodedPolyline ?? "",
-      summary: r.description ?? r.routeLabels?.[0] ?? "",
-      distance_text: formatDistance(distM),
+      polyline: r.polyline,
+      summary: r.summary,
+      distance_text: formatDistance(r.distance_m),
       duration_text: formatDuration(durS),
-      distance_m: distM,
+      distance_m: r.distance_m,
       duration_s: durS,
       freeflow_s: freeflowS || undefined,
-      duration_in_traffic_text: trafficDurS !== durS ? formatDuration(trafficDurS) : undefined,
-      duration_in_traffic_s: trafficDurS !== durS ? trafficDurS : undefined,
-      steps: (leg?.steps ?? []).map((s: any): NavStep => {
-        const sDistM = s.distanceMeters ?? 0;
-        const sDurS = parseDurationSeconds(s.staticDuration);
-        const maneuver = s.navigationInstruction?.maneuver ?? "";
-        const html = s.navigationInstruction?.instructions ?? "";
+      duration_in_traffic_text: hasTraffic ? formatDuration(durS) : undefined,
+      duration_in_traffic_s: hasTraffic ? durS : undefined,
+      steps: r.steps.map((s: MapboxRouteStep): NavStep => {
+        const loc = s.maneuver?.location; // [lng, lat]
+        const here: LatLng = Array.isArray(loc) && loc.length >= 2
+          ? { lat: loc[1], lng: loc[0] } : { lat: 0, lng: 0 };
+        const verbKey = mapboxManeuverKey(s.maneuver?.type, s.maneuver?.modifier);
+        const html = s.maneuver?.instruction || maneuverVerb(verbKey);
         return {
           html,
-          distance_text: formatDistance(sDistM),
-          distance_m: sDistM,
-          duration_text: formatDuration(sDurS),
-          maneuver,
-          start: latLngFromRoutes(s.startLocation),
-          end: latLngFromRoutes(s.endLocation),
+          distance_text: formatDistance(s.distance),
+          distance_m: s.distance,
+          duration_text: formatDuration(s.duration),
+          // Store the joined Mapbox key so maneuverVerb / isSpokenManeuver resolve it.
+          maneuver: verbKey,
+          start: here,
+          end: here,
         };
       }),
     };

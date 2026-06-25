@@ -153,27 +153,77 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
 // behind the head unit). Needs "Always" location permission.
 const _locConsumers = new Set<string>();
 
+// ===== Foreground fallback feed for the CarPlay car-map =====
+// The background task (NAV_TASK) only starts with "Always" location permission.
+// Most users grant only "When In Use", so without a fallback carStore never gets
+// a GPS fix once the phone backgrounds behind the head unit OR whenever the
+// phone map screen (whose mirror writes coords into carStore) isn't the
+// foreground screen — which is exactly why the CarPlay map sat on the logo
+// fallback instead of drawing. This foreground watch feeds carStore DIRECTLY so
+// the car map draws whenever the Convoy app is foreground (the phone-in-the-
+// mount case), on plain "When In Use". It runs only while a consumer (CarPlay /
+// nav banner) holds the shared location lock, and is released with it.
+let _fgCarWatch: Location.LocationSubscription | null = null;
+
+async function startForegroundCarFeed(): Promise<void> {
+  if (_fgCarWatch) return;
+  try {
+    const fg = await Location.getForegroundPermissionsAsync();
+    if (!fg.granted) return;
+    _fgCarWatch = await Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.High, timeInterval: 2000, distanceInterval: 15 },
+      (loc) => {
+        const h = loc.coords.heading;
+        const sp = loc.coords.speed;
+        setCarState({
+          selfLat: loc.coords.latitude,
+          selfLng: loc.coords.longitude,
+          heading: typeof h === "number" && h >= 0 ? h : null,
+          speedMs: typeof sp === "number" && sp >= 0 ? sp : 0,
+        });
+      }
+    );
+  } catch {}
+}
+
+function stopForegroundCarFeed(): void {
+  try { _fgCarWatch?.remove(); } catch {}
+  _fgCarWatch = null;
+}
+
 export async function acquireBgLocation(tag: string): Promise<boolean> {
   _locConsumers.add(tag);
   try {
     const already = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
-    if (already) return true;
+    if (already) { void startForegroundCarFeed(); return true; }
+    // Try for "Always" (keeps the car map fed while the phone is FULLY
+    // backgrounded behind the head unit). If it isn't granted we no longer give
+    // up: start a foreground feed (covers the app-foreground / phone-in-mount
+    // case on "When In Use") AND still attempt the background updates — a nav app
+    // with the location background mode + the background-location indicator can
+    // keep them flowing without "Always" on many devices.
     let canBg = false;
     try { canBg = (await Location.requestBackgroundPermissionsAsync()).granted; } catch {}
-    if (!canBg) return false;
-    await Location.startLocationUpdatesAsync(NAV_TASK, {
-      accuracy: Location.Accuracy.High,
-      timeInterval: 3000,
-      distanceInterval: 20,
-      showsBackgroundLocationIndicator: true,
-      pausesUpdatesAutomatically: false,
-      foregroundService: {
-        notificationTitle: "Convoy navigation",
-        notificationBody: "Turn-by-turn directions are active",
-        notificationColor: "#2DEC86",
-      },
-    });
-    return true;
+    if (!canBg) await startForegroundCarFeed();
+    try {
+      await Location.startLocationUpdatesAsync(NAV_TASK, {
+        accuracy: Location.Accuracy.High,
+        timeInterval: 3000,
+        distanceInterval: 20,
+        showsBackgroundLocationIndicator: true,
+        pausesUpdatesAutomatically: false,
+        foregroundService: {
+          notificationTitle: "Convoy navigation",
+          notificationBody: "Turn-by-turn directions are active",
+          notificationColor: "#2DEC86",
+        },
+      });
+      return true;
+    } catch {
+      // Background updates couldn't start (likely needs "Always"). The foreground
+      // feed above still keeps the car map alive while the app is foregrounded.
+      return canBg;
+    }
   } catch {
     return false;
   }
@@ -182,6 +232,7 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
 export async function releaseBgLocation(tag: string): Promise<void> {
   _locConsumers.delete(tag);
   if (_locConsumers.size > 0) return; // another consumer still needs it
+  stopForegroundCarFeed();
   try {
     const started = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
     if (started) await Location.stopLocationUpdatesAsync(NAV_TASK);

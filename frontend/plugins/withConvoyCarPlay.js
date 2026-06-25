@@ -122,42 +122,56 @@ enum ConvoyRNHost {
     guard let factory = appDelegate.reactNativeFactory else { return }
 
     if !started {
-      // First scene in this process: full boot + mount. startReactNative sets
-      // the window's root view controller (and makes it visible) itself.
-      //
-      // CRITICAL (cold CarPlay crash fix): point appDelegate.window at whichever
-      // window boots first BEFORE startReactNative. expo-updates' deferred startup
-      // calls getWindow() on completion, which fatalErrors unless it finds a key
-      // window OR appDelegate.window. On a cold CarPlay boot the car scene is
-      // first and the CarPlay window is not key, so without this the app traps in
-      // ExpoUpdatesReactDelegateHandler.getWindow() on the very first connect.
       started = true
-      appDelegate.window = window
-      factory.startReactNative(withModuleName: moduleName, in: window, launchOptions: nil)
-      // startReactNative mounts moduleName into the given window with Expo's
-      // DEFAULT root view controller - one-time layout, NO self-healing relayout.
-      // Fine for the PHONE window (real size at launch); for the CARPLAY window it
-      // is the recurring 0x0-blank bug (CarPlay sizes its window LATE). On a COLD
-      // CarPlay connect the car scene is the FIRST scene, so it hits THIS boot
-      // branch (not the superView branch below) - which is exactly why cold
-      // connects came up blank while warm connects (app already open) rendered.
-      // Re-host the car surface in ConvoyCarRootViewController (the same self-heal
-      // the warm path uses) so the car window cannot stay stuck at 0x0. Deferred
-      // one runloop so the freshly started host can mint the surface.
-      if !makeVisible {
-        DispatchQueue.main.async {
-          let carRoot: UIView
-          if let expoFactory = factory.rootViewFactory as? ExpoReactRootViewFactory {
-            carRoot = expoFactory.superView(withModuleName: moduleName, initialProperties: nil, launchOptions: [:])
-          } else {
-            carRoot = factory.rootViewFactory.view(withModuleName: moduleName, initialProperties: nil, launchOptions: nil)
-          }
-          let carVC = ConvoyCarRootViewController(hosted: carRoot)
-          window.rootViewController = carVC
-          carVC.view.frame = window.bounds
-          carVC.view.setNeedsLayout()
-          carVC.view.layoutIfNeeded()
+
+      // ── PHONE cold boot (UNCHANGED) ───────────────────────────────
+      // Start RN directly into the phone window. startReactNative sets that
+      // window's root view controller AND makes it key+visible - which is exactly
+      // right for the phone window (it SHOULD own the app's key window).
+      // appDelegate.window is pointed at it FIRST so expo-updates' deferred
+      // getWindow() (which fatalErrors without a key window OR appDelegate.window)
+      // is satisfied on the very first connect.
+      if makeVisible {
+        appDelegate.window = window
+        factory.startReactNative(withModuleName: moduleName, in: window, launchOptions: nil)
+        return
+      }
+
+      // ── CARPLAY cold boot (THE 70x264 FIX) ──────────────────────
+      // On a COLD CarPlay connect the car scene is the FIRST scene, so the host
+      // has to boot here. The OLD code booted by calling startReactNative ON THE
+      // CARPLAY WINDOW - and startReactNative internally calls makeKeyAndVisible()
+      // on whatever window it is handed. Making a CarPlay CPWindow key fights
+      // CarPlay's own presentation and leaves the window pinned at a degenerate
+      // size (the measured car: 70x264 portrait sliver) that never heals, so the
+      // RN map physically cannot draw. There is no public way to un-key a window
+      // afterward, so the only fix is to never key the carWindow in the first place.
+      //
+      // Boot the host on a DETACHED window instead - this is the stock Expo SDK 54
+      // didFinishLaunching boot (a frame UIWindow + startReactNative). That window
+      // has no scene, so it is never shown; it exists only to boot the JS host
+      // (which evaluates index.js, registering ConvoyCarSurface and the CarPlay
+      // bootstrap) and to satisfy expo-updates' getWindow(). The real carWindow is
+      // then mounted the SAME clean way the warm path mounts it: rootViewController
+      // only, NEVER made key, so CarPlay keeps ownership and hands it the full
+      // head-unit size. ConvoyCarRootViewController re-asserts the hosted surface's
+      // frame on every layout pass, so it tracks the real size as it arrives.
+      let bootWindow = UIWindow(frame: UIScreen.main.bounds)
+      appDelegate.window = bootWindow
+      factory.startReactNative(withModuleName: moduleName, in: bootWindow, launchOptions: nil)
+      // Deferred one runloop so the freshly started host can mint the car surface.
+      DispatchQueue.main.async {
+        let carRoot: UIView
+        if let expoFactory = factory.rootViewFactory as? ExpoReactRootViewFactory {
+          carRoot = expoFactory.superView(withModuleName: moduleName, initialProperties: nil, launchOptions: [:])
+        } else {
+          carRoot = factory.rootViewFactory.view(withModuleName: moduleName, initialProperties: nil, launchOptions: nil)
         }
+        let carVC = ConvoyCarRootViewController(hosted: carRoot)
+        window.rootViewController = carVC
+        carVC.view.frame = window.bounds
+        carVC.view.setNeedsLayout()
+        carVC.view.layoutIfNeeded()
       }
       return
     }

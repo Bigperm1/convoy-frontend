@@ -839,13 +839,19 @@ export default function MapScreen() {
   const tbt = useTurnByTurn(activeRoute, coords, navMode === "turn-by-turn", {
     mute: navMuted,
     onArrive: () => {
-      // The engine already spoke the (varied) arrival line. End navigation here
-      // WITHOUT endNav()/stopSpeech() — that would cut the arrival line off
-      // mid-word. Mirror endNav's state changes minus the speech kill; flipping
-      // navMode runs the engine's teardown (clears the queue) but leaves the
-      // in-flight arrival clip playing to the end.
+      // Auto-finish the trip on arrival. The engine already spoke the (varied)
+      // arrival line, so do NOT call stopSpeech() here — that would cut it off
+      // mid-word. Otherwise run the SAME full teardown the Clear button does
+      // (drop destination, route line, step drawer) so reaching the destination
+      // ends the route on its own, with no Exit tap. navMode→preview clears the
+      // TTS queue but leaves the in-flight arrival clip playing to the end.
       navAutoStartedRef.current = true;  // stay stopped until a new destination is set
+      setDestination(null);
+      setRoutes([]);
+      setRoute(null);
+      setShowSteps(false);
       setNavMode("preview");
+      slideStepDrawerDown();
     },
     onOffRoute: () => {
       if (!coords || !destination) return;

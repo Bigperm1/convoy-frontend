@@ -38,7 +38,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getVehiclePngOrDefault, getVehicleModelUrl } from "./vehicleAssets";
 import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
 import type { WeatherKind } from "./weatherLayer";
-import { fetchMapboxCongestion, buildCongestionGradient } from "./mapboxDirections";
+import { fetchMapboxCongestion, buildCongestionGradient, type CongestionLevel } from "./mapboxDirections";
 import { getCarState } from "./carplay/carStore";
 import { getLastLocation, setLastLocation, getSettings } from "./settings";
 
@@ -76,7 +76,7 @@ interface ConvoyMapboxProps {
   destination?: LatLng | null;
   destWeather?: { kind: WeatherKind; temp: string } | null;
   encodedPolyline?: string | null;
-  routes?: { polyline: string; color?: string }[];
+  routes?: { polyline: string; color?: string; congestion?: CongestionLevel[]; coordinates?: [number, number][] }[];
   selectedRouteIndex?: number;
   onSelectRoute?: (index: number) => void;
   followUser?: boolean;
@@ -984,6 +984,28 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const selCoreGradient = buildLineFade("rgba(45,236,134,1)", "rgba(45,236,134,0)");
   const selGlowGradient = buildLineFade("rgba(0,224,112,1)", "rgba(0,224,112,0)");
 
+  // ===== Live congestion on the ACTIVE route (DURING navigation) =====
+  // The route we're driving already carries per-segment congestion (nav.ts gets
+  // it from fetchMapboxRoutes). Build a green→red line-progress gradient from it
+  // so the selected route's core shows live traffic WHILE navigating — not just
+  // in preview. buildCongestionGradient returns a plain colour string when the
+  // whole route is a single level; wrap that as a constant gradient so it's
+  // always usable as lineGradient alongside the behind-car trim. null when
+  // navigating without congestion data → falls back to the green fade core.
+  const navCongestionGradient = useMemo(() => {
+    if (!navigationActive) return null;
+    const sel: any = routes?.[selectedRouteIndex];
+    const coords = sel?.coordinates as [number, number][] | undefined;
+    const cong = sel?.congestion as CongestionLevel[] | undefined;
+    if (!coords || coords.length < 2 || !cong || cong.length === 0) return null;
+    const g = buildCongestionGradient(coords, cong);
+    return Array.isArray(g) ? g : (["interpolate", ["linear"], ["line-progress"], 0, g, 1, g] as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigationActive, routes, selectedRouteIndex]);
+  // The selected core paints congestion during nav (preferred), else the soft
+  // green fade-in. Both ride the same behind-car trim.
+  const selCoreGrad = navCongestionGradient || selCoreGradient;
+
   // Snapped draw position: glue the car to the line, but ONLY within ~45 m of it
   // — further off (wrong turn / pre-reroute) we show the real GPS so you can see
   // you're off-route. SelfCarModel interpolates, so the snap eases in smoothly.
@@ -1168,7 +1190,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               id="route-sel-core"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selCoreGradient ? { lineGradient: selCoreGradient, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: ROUTE_GREEN_CORE }) }}
+              style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selCoreGrad ? { lineGradient: selCoreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: ROUTE_GREEN_CORE }) }}
             />
           </ShapeSource>
         )}

@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 import { api } from "./api";
-import { fetchMapboxRoutes, type MapboxRoute, type MapboxRouteStep } from "./mapboxDirections";
+import { fetchMapboxRoutes, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
 import { getSettings } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
@@ -37,6 +37,12 @@ export type NavRoute = {
   // only to gauge congestion for the route-start greeting; duration_s stays the
   // traffic-aware ETA the UI shows.
   freeflow_s?: number;
+  // Per-segment live congestion + decoded [lng,lat] geometry, carried straight
+  // through from Mapbox so the map can paint the live traffic gradient on the
+  // ACTIVE route DURING navigation (not just in preview). Optional: absent for
+  // any legacy/cached route shape.
+  congestion?: CongestionLevel[];
+  coordinates?: [number, number][];
   steps: NavStep[];
 };
 
@@ -165,6 +171,8 @@ export async function fetchRoutes(
       freeflow_s: freeflowS || undefined,
       duration_in_traffic_text: hasTraffic ? formatDuration(durS) : undefined,
       duration_in_traffic_s: hasTraffic ? durS : undefined,
+      congestion: r.congestion,
+      coordinates: r.coordinates,
       steps: r.steps.map((s: MapboxRouteStep, i: number, arr: MapboxRouteStep[]): NavStep => {
         const loc = s.maneuver?.location; // [lng, lat] — START of this step (the turn point)
         const here: LatLng = Array.isArray(loc) && loc.length >= 2
@@ -348,6 +356,27 @@ function isSpokenManeuver(maneuver?: string, html?: string): boolean {
   return /\b(turn|merge|exit|ramp|fork|u-?turn|roundabout|keep (?:left|right))\b/.test(h);
 }
 
+// Ordinal word for a small exit number (roundabouts). Falls back to "Nth".
+function ordinalWord(n: number): string {
+  const words = ["", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"];
+  return words[n] || `${n}th`;
+}
+
+// Roundabout / rotary → a clean exit-based spoken cue with NO road names
+// ("take the second exit"), which is what a driver actually needs mid-roundabout.
+// The exit number is parsed from Mapbox's OWN instruction text (e.g. "Take the
+// 2nd exit onto Maplewood Dr"). Returns null when the maneuver is NOT a roundabout
+// so the caller uses the normal verb path. If the number can't be parsed it still
+// returns a generic, road-name-free roundabout cue rather than nothing.
+function roundaboutExitCue(maneuverKey?: string, html?: string): string | null {
+  const type = (maneuverKey || "").split("|")[0];
+  if (type !== "roundabout" && type !== "rotary") return null;
+  const m = (html || "").match(/\b(\d+)\s*(?:st|nd|rd|th)?\s+exit\b/i);
+  const n = m ? parseInt(m[1], 10) : NaN;
+  if (Number.isFinite(n) && n >= 1) return `Take the ${ordinalWord(n)} exit`;
+  return "Take your exit at the roundabout";
+}
+
 export function useTurnByTurn(
   route: NavRoute | null,
   // `speed` (m/s, from GPS) rides along on the position the caller already
@@ -474,14 +503,19 @@ export function useTurnByTurn(
         // Less-intrusive filter: only speak for actual maneuvers, not "continue
         // straight" filler. (#6)
         if (isSpokenManeuver(nextStep.maneuver, nextStep.html)) {
+          // Roundabouts: speak the EXIT ("take the second exit") with NO road
+          // names. Everything else keeps the normal verb (+ onto street) phrasing.
+          const roundabout = roundaboutExitCue(nextStep.maneuver, nextStep.html);
           const verb = maneuverVerb(nextStep.maneuver);
           const inst = stripDirections(nextStep.html);
           if (dManeuver <= imminentM && !announcedRef.current.has(immKey)) {
-            speak(`${verb}.`);
+            speak(roundabout ? `${roundabout}.` : `${verb}.`);
             announcedRef.current.add(immKey);
             announcedRef.current.add(prepKey); // a "prepare" this late would be noise
           } else if (dManeuver <= prepareM && !announcedRef.current.has(prepKey)) {
-            speak(`In ${fmtDistanceM(dManeuver)}, ${verb.toLowerCase()}${inst ? " onto " + inst : ""}.`);
+            speak(roundabout
+              ? `In ${fmtDistanceM(dManeuver)}, ${roundabout.toLowerCase()}.`
+              : `In ${fmtDistanceM(dManeuver)}, ${verb.toLowerCase()}${inst ? " onto " + inst : ""}.`);
             announcedRef.current.add(prepKey);
           }
         }

@@ -25,7 +25,7 @@ import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/component
 import { hailBus } from "../../src/hailBus";
 import { subscribeAvatarHold } from "../../src/avatarHoldBus";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, mapModeToLegacy, getAvatarMode, setAvatarMode, unitForCountry } from "../../src/settings";
+import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, mapModeToLegacy, getAvatarMode, setAvatarMode, unitForCountry, getSpeedAlertMode } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import { BearingTracker } from "../../src/bearing";
@@ -41,6 +41,7 @@ import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
 import { useSpeedCameras } from "../../src/speedCameras";
 import { useSpeedLimit, getSpeedLimitDebug } from "../../src/speedLimit";
+import { playSpeedDing } from "../../src/speedDing";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
 import { prepareRouteGreeting, playPreparedGreeting, clearPreparedGreeting } from "../../src/novaGreeting";
@@ -648,47 +649,51 @@ export default function MapScreen() {
   // no maxspeed tag, in which case the pill simply stays neutral.
   const speedLimitKmh = useSpeedLimit(coords?.lat ?? null, coords?.lng ?? null, true);
 
-  // ===== Nova speeding alerts =====
-  // Humorous nudge at ~20 km/h over the posted limit; a firmer warning at ~40
-  // over. Posted limit comes from useSpeedLimit (OpenStreetMap). Honors the nav
-  // mute. Each tier speaks at most once per ~45s, escalates immediately when you
-  // cross into the warning tier, and re-arms only after you drop back under the
-  // nudge line — so it never nags continuously. Thresholds are in km/h (per the
-  // spec); the spoken amount is converted to the driver's unit.
-  const SPEED_NUDGE_OVER_KMH = 20;
-  const SPEED_WARN_OVER_KMH = 40;
-  const speedAlertLastRef = useRef(0);
-  const speedAlertTierRef = useRef<0 | 1 | 2>(0);
-  const speedAlertCountRef = useRef(0);
+  // ===== Speed alerts (Nova / Ding / Off) =====
+  // Mode from settings: 'nova' speaks a humorous nudge, 'ding' plays a chime
+  // (single ~21 km/h over, double ~41 over), 'off' is silent. Posted limit comes
+  // from useSpeedLimit (OpenStreetMap). Each threshold has its OWN independent
+  // 5-minute cooldown and re-arms the instant you drop back under it: it fires
+  // once on crossing, won't nag while you sit above the line, but alerts again on
+  // a fresh transgression — and the +41 warning can fire even if the +21 nudge
+  // just did (they're tracked separately). Thresholds are km/h; the spoken amount
+  // is converted to the driver's unit. navMuted silences the SPOKEN mode only —
+  // the ding is a non-voice alert the driver explicitly opted into, so it keeps
+  // playing even when Nova's voice is muted.
+  const SPEED_TIER1_OVER_KMH = 21;
+  const SPEED_TIER2_OVER_KMH = 41;
+  const SPEED_ALERT_COOLDOWN_MS = 300000; // 5 min, per threshold
+  const speedTier1Ref = useRef({ last: 0, armed: true });
+  const speedTier2Ref = useRef({ last: 0, armed: true });
   useEffect(() => {
-    if (navMuted) return;
-    if (!settings.novaSpeeding) return;
+    const mode = getSpeedAlertMode(settings);
+    if (mode === "off") return;
     if (!speedLimitKmh || speedLimitKmh <= 0) return;
     const kmh = (coords?.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
     if (kmh < 5) return;
     const overKmh = kmh - speedLimitKmh;
-    if (overKmh < SPEED_NUDGE_OVER_KMH) { speedAlertTierRef.current = 0; return; } // sensible — re-arm
-    const tier: 1 | 2 = overKmh >= SPEED_WARN_OVER_KMH ? 2 : 1;
     const now = Date.now();
-    // Speak when we cross INTO a higher tier, or after the per-tier cooldown.
-    if (tier <= speedAlertTierRef.current && now - speedAlertLastRef.current < 45000) return;
-    const escalated = tier > speedAlertTierRef.current;
-    speedAlertTierRef.current = tier;
-    speedAlertLastRef.current = now;
-    // Every-3rd throttle (#7): on top of the 45s-per-tier cooldown, only every
-    // 3rd qualifying trigger actually speaks, so sustained speeding nags far
-    // less. Crossing into a HIGHER tier (the serious-warning band) resets the
-    // counter so that more urgent alert always speaks immediately rather than
-    // being swallowed by the throttle.
-    if (escalated) speedAlertCountRef.current = 0;
-    const speak3rd = speedAlertCountRef.current % 3 === 0;
-    speedAlertCountRef.current += 1;
-    if (!speak3rd) return;
+    // Re-arm each threshold the moment you drop back under it.
+    if (overKmh < SPEED_TIER1_OVER_KMH) speedTier1Ref.current.armed = true;
+    if (overKmh < SPEED_TIER2_OVER_KMH) speedTier2Ref.current.armed = true;
+    // Fire the HIGHEST crossed threshold whose own cooldown currently allows it.
+    let tier: 0 | 1 | 2 = 0;
+    if (overKmh >= SPEED_TIER2_OVER_KMH) {
+      const t = speedTier2Ref.current;
+      if (t.armed || now - t.last >= SPEED_ALERT_COOLDOWN_MS) { t.last = now; t.armed = false; tier = 2; }
+    } else if (overKmh >= SPEED_TIER1_OVER_KMH) {
+      const t = speedTier1Ref.current;
+      if (t.armed || now - t.last >= SPEED_ALERT_COOLDOWN_MS) { t.last = now; t.armed = false; tier = 1; }
+    }
+    if (tier === 0) return;
+    if (mode === "ding") { void playSpeedDing(tier === 2); return; }
+    // mode === "nova": spoken nudge (announce() also honors the Nova master switch).
+    if (navMuted) return;
     const mph = settings.speedUnit === "mph";
     const overDisp = Math.max(1, Math.round(mph ? overKmh / 1.60934 : overKmh));
     const cs = (getSettings().callSign || "").trim();
     try { announce(speedingLine(tier, overDisp, cs ? `${cs}, ` : "")); } catch {}
-  }, [coords?.speed, speedLimitKmh, navMuted, settings.speedUnit, settings.novaSpeeding]);
+  }, [coords?.speed, speedLimitKmh, navMuted, settings.speedUnit, settings.speedAlertMode, settings.novaSpeeding]);
 
   // Optional Convoy alert sound — chime when a NEW community hazard appears
   const prevHazardIdsRef = useRef<Set<string>>(new Set());

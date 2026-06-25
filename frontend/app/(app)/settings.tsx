@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
-import { useSettings, DEFAULT_SETTINGS, getMapMode, getAvatarMode, setAvatarMode } from "../../src/settings";
+import { useSettings, DEFAULT_SETTINGS, getMapMode, getAvatarMode, setAvatarMode, getSpeedAlertMode } from "../../src/settings";
 import { GAS_BRANDS, OCTANES } from "../../src/gasJockey";
 
 // Re-export for navigation
@@ -352,13 +352,34 @@ export default function SettingsScreen() {
             onChange={(v) => setSettings({ novaGreeting: v })}
           />
           <View style={styles.divider} />
-          <ToggleRow
+          {/* Speed alert — three-way: Nova speaks / Ding chimes / Off.
+              getSpeedAlertMode() migrates the legacy novaSpeeding boolean; we
+              keep novaSpeeding synced (nova → true, else false) for back-compat. */}
+          <RadioRow
             icon="speedometer"
             iconColor="#FF453A"
-            title="Speeding alerts"
-            subtitle="Nova warns you when you're well over the posted limit"
-            value={settings.novaSpeeding !== false}
-            onChange={(v) => setSettings({ novaSpeeding: v })}
+            title="Speed alert — Nova"
+            subtitle="Nova speaks up when you're well over the limit (~21 over), firmer at ~41 over"
+            selected={getSpeedAlertMode(settings) === "nova"}
+            onSelect={() => setSettings({ speedAlertMode: "nova", novaSpeeding: true })}
+          />
+          <View style={styles.divider} />
+          <RadioRow
+            icon="notifications"
+            iconColor="#FF9F0A"
+            title="Speed alert — Ding"
+            subtitle="A chime instead of a voice: one ding ~21 over, a double ding ~41 over"
+            selected={getSpeedAlertMode(settings) === "ding"}
+            onSelect={() => setSettings({ speedAlertMode: "ding", novaSpeeding: false })}
+          />
+          <View style={styles.divider} />
+          <RadioRow
+            icon="speedometer-outline"
+            iconColor="#8E8E93"
+            title="Speed alert — Off"
+            subtitle="No speed warnings"
+            selected={getSpeedAlertMode(settings) === "off"}
+            onSelect={() => setSettings({ speedAlertMode: "off", novaSpeeding: false })}
           />
           <View style={styles.divider} />
           <ToggleRow

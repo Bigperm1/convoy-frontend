@@ -52,6 +52,13 @@ mapboxEngine: boolean;
 show3dBuildings: boolean;
 novaGreeting: boolean;
 novaSpeeding: boolean;
+// Speed-alert mode (settings selector): 'off' | 'nova' (Nova speaks the nudge)
+// | 'ding' (chime: single ~21 over, double ~41 over). Optional/undefined for
+// installs stored before it existed — getSpeedAlertMode() migrates them from the
+// legacy novaSpeeding boolean (true → 'nova', false → 'off'). Deliberately NOT in
+// DEFAULT_SETTINGS so the default-spread can't silently override a pre-existing
+// novaSpeeding choice on upgrade.
+speedAlertMode?: 'off' | 'nova' | 'ding';
 novaMidDrive: boolean;
 // Master mute for all Nova nav/alert speech — toggled by the speaker button on
 // the turn-by-turn banner. Persisted so a muted drive stays muted next time.
@@ -302,4 +309,11 @@ const MPH_COUNTRIES = new Set([
 export function unitForCountry(cc?: string | null): 'kmh' | 'mph' {
   if (!cc) return 'kmh';
   return MPH_COUNTRIES.has(cc.toUpperCase()) ? 'mph' : 'kmh';
+}
+
+// Effective speed-alert mode (source of truth = settings.speedAlertMode), with
+// migration from the legacy novaSpeeding boolean for installs stored before the
+// 3-way selector existed: novaSpeeding true → 'nova', false → 'off'.
+export function getSpeedAlertMode(s: Settings): 'off' | 'nova' | 'ding' {
+  return s.speedAlertMode ?? (s.novaSpeeding ? 'nova' : 'off');
 }

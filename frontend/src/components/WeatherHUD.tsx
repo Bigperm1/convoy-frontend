@@ -10,7 +10,7 @@ type Props = {
   weather: WeatherCondition;
   unit: 'kmh' | 'mph';
   compact?: boolean;
-  // 7-day outlook for the tappable compact chip popup (driver's location).
+  // 5-day outlook for the tappable compact chip popup (driver's location).
   forecast?: ForecastDay[] | null;
 };
 
@@ -105,7 +105,7 @@ function WeatherGlyph({ kind, size }: { kind: WeatherKind; size: number }) {
 export default function WeatherHUD({ weather, unit, compact, forecast }: Props) {
   const DEG = "\u00B0";
   const [open, setOpen] = useState(false);
-  // Auto-collapse the 7-day forecast back to the compact chip 5s after it opens.
+  // Auto-collapse the 5-day forecast back to the compact chip 5s after it opens.
   // Keyed on `open`, so each (re)open restarts a fresh 5s timer.
   useEffect(() => {
     if (!open) return;
@@ -125,9 +125,9 @@ export default function WeatherHUD({ weather, unit, compact, forecast }: Props) 
       <View style={styles.compactWrap}>
         {open && (
           <View style={styles.forecastCard}>
-            <Text style={styles.forecastTitle}>7-Day Forecast</Text>
+            <Text style={styles.forecastTitle}>5-Day Forecast</Text>
             {forecast && forecast.length > 0 ? (
-              forecast.slice(0, 7).map((d) => (
+              forecast.slice(0, 5).map((d) => (
                 <View key={d.startMs} style={styles.forecastRow}>
                   <Text style={styles.forecastDay} numberOfLines={1}>{d.label}</Text>
                   <View style={styles.forecastGlyph}>

@@ -640,6 +640,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const coldLockArmedRef = useRef(false);
   const [coldLockDone, setColdLockDone] = useState(false);
   const [dbgCamHdg, setDbgCamHdg] = useState(0);
+  // Live camera zoom, surfaced in the debug strip so the car-size curve can be
+  // tuned against actual zoom values (read "too small at zoom X" instead of guessing).
+  const [dbgZoom, setDbgZoom] = useState(0);
+  const lastZoomRef = useRef<number>(0);
   // True the moment we have ANY GPS fix. Kept as a STABLE boolean so the arm
   // effect below runs EXACTLY ONCE (on the first fix) and is not re-run on every
   // subsequent GPS tick.
@@ -1068,6 +1072,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             onHeading?.(h);
             setDbgCamHdg(h);
           }
+          // Live zoom for the debug strip (throttled so it doesn't re-render every frame).
+          const z = state?.properties?.zoom;
+          if (typeof z === "number" && Math.abs(z - lastZoomRef.current) > 0.05) {
+            lastZoomRef.current = z;
+            setDbgZoom(z);
+          }
         }}
       >
         {/* Mapbox Standard "night" config — turns on the dark 3D-building
@@ -1142,7 +1152,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             <LineLayer
               id="route-alts"
               slot="middle"
-              filter={["!=", ["get", "index"], selectedRouteIndex] as any}
+              // Show alternate routes ONLY in preview. During active navigation, hide
+              // them (filter to a non-existent index) so the grey alternate line stops
+              // drawing straight through the car — you only want the one route you're on.
+              filter={(navigationActive ? ["==", ["get", "index"], -1] : ["!=", ["get", "index"], selectedRouteIndex]) as any}
               style={{ lineColor: "#9AA0A6", lineWidth: 5, lineCap: "round", lineJoin: "round", lineOpacity: 0.85, lineEmissiveStrength: 1 }}
             />
             <LineLayer
@@ -1258,7 +1271,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       {getSettings().debugOverlays && (
       <View pointerEvents="none" style={{ position: 'absolute', top: 120, left: 8, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 3, paddingHorizontal: 6, borderRadius: 6 }}>
         <Text style={{ color: '#00FF88', fontSize: 11, fontWeight: '600' }}>
-          {`HDG mode:${mapView} feed:${followHeadingDeg != null ? Math.round(followHeadingDeg) : '-'} cam:${Math.round(dbgCamHdg)} gps:${Math.round(selfHeadingDeg)} foll:${followUser ? 'Y' : 'N'} lock:${coldLockDone ? 'Y' : 'N'}`}
+          {`HDG mode:${mapView} feed:${followHeadingDeg != null ? Math.round(followHeadingDeg) : '-'} cam:${Math.round(dbgCamHdg)} gps:${Math.round(selfHeadingDeg)} foll:${followUser ? 'Y' : 'N'} lock:${coldLockDone ? 'Y' : 'N'} zoom:${dbgZoom.toFixed(1)}`}
         </Text>
         <Text style={{ color: '#00FF88', fontSize: 11, fontWeight: '600' }}>{`CAR store fix:${typeof getCarState().selfLat === 'number' ? 'Y' : 'N'} @${typeof getCarState().selfLat === 'number' ? getCarState().selfLat!.toFixed(3) : '-'},${typeof getCarState().selfLng === 'number' ? getCarState().selfLng!.toFixed(3) : '-'} spd:${(getCarState().speedMs || 0).toFixed(0)}`}</Text>
       </View>

@@ -121,12 +121,40 @@ enum ConvoyRNHost {
   static weak var carWindowRef: UIWindow?
   static var carRepaintBudget = 0
   static var carSceneState = "?"
+  static var carConnectAt: Date?
+  static var carLastPaintAt: Date?
+  static var carActivatedOnce = false
 
   static func armCarRepaints(in window: UIWindow) {
     carWindowRef = window
-    carRepaintBudget = 8
-    for delay in [0.5, 1.2, 2.5] {
-      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { repaintCarSurface() }
+    carConnectAt = Date()
+    carActivatedOnce = false
+    carLastPaintAt = nil
+    carRepaintBudget = 30
+    scheduleCarRepaintTick()
+  }
+
+  // Blind safety net during the head unit's boot/handshake (a Toyota TAMM unit can
+  // take 20-30s from engine-on to present CarPlay). These fire while our scene is not
+  // yet active (invisible, harmless) and STOP the moment it first goes active, after
+  // which activation drives the repaint. Fallback only — for the rare no-activation case.
+  static func scheduleCarRepaintTick() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+      guard carWindowRef != nil, !carActivatedOnce, let t0 = carConnectAt,
+            Date().timeIntervalSince(t0) < 34.0 else { return }
+      repaintCarSurface()
+      scheduleCarRepaintTick()
+    }
+  }
+
+  // The scene going active/foreground is the reliable "paint now" signal, and on a slow
+  // Toyota boot it can land anywhere in 5-30s. Burst a few re-mints right then so the
+  // surface commits while active.
+  static func burstCarRepaints() {
+    carActivatedOnce = true
+    if carRepaintBudget < 6 { carRepaintBudget = 6 }
+    for d in [0.0, 0.25, 0.6] {
+      DispatchQueue.main.asyncAfter(deadline: .now() + d) { repaintCarSurface() }
     }
   }
 
@@ -135,6 +163,8 @@ enum ConvoyRNHost {
           let window = carWindowRef,
           let appDelegate = UIApplication.shared.delegate as? AppDelegate,
           let factory = appDelegate.reactNativeFactory else { return }
+    if let last = carLastPaintAt, Date().timeIntervalSince(last) < 0.15 { return }
+    carLastPaintAt = Date()
     carRepaintBudget -= 1
     let fresh: UIView
     if let expoFactory = factory.rootViewFactory as? ExpoReactRootViewFactory {
@@ -331,10 +361,12 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     ConvoyRNHost.carRepaintBudget = 0
     ConvoyRNHost.carWindowRef = nil
     ConvoyRNHost.carSceneState = "disc"
+    ConvoyRNHost.carConnectAt = nil
+    ConvoyRNHost.carActivatedOnce = false
   }
 
-  func sceneDidBecomeActive(_ scene: UIScene) { ConvoyRNHost.carSceneState = "active"; ConvoyRNHost.repaintCarSurface() }
-  func sceneWillEnterForeground(_ scene: UIScene) { ConvoyRNHost.carSceneState = "fg"; ConvoyRNHost.repaintCarSurface() }
+  func sceneDidBecomeActive(_ scene: UIScene) { ConvoyRNHost.carSceneState = "active"; ConvoyRNHost.burstCarRepaints() }
+  func sceneWillEnterForeground(_ scene: UIScene) { ConvoyRNHost.carSceneState = "fg"; ConvoyRNHost.burstCarRepaints() }
   func sceneWillResignActive(_ scene: UIScene) { ConvoyRNHost.carSceneState = "inactive" }
   func sceneDidEnterBackground(_ scene: UIScene) { ConvoyRNHost.carSceneState = "bg" }
 

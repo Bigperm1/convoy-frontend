@@ -118,6 +118,40 @@ import Expo
 enum ConvoyRNHost {
   static var started = false
 
+  static weak var carWindowRef: UIWindow?
+  static var carRepaintBudget = 0
+  static var carSceneState = "?"
+
+  static func armCarRepaints(in window: UIWindow) {
+    carWindowRef = window
+    carRepaintBudget = 8
+    for delay in [0.5, 1.2, 2.5] {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { repaintCarSurface() }
+    }
+  }
+
+  static func repaintCarSurface() {
+    guard started, carRepaintBudget > 0,
+          let window = carWindowRef,
+          let appDelegate = UIApplication.shared.delegate as? AppDelegate,
+          let factory = appDelegate.reactNativeFactory else { return }
+    carRepaintBudget -= 1
+    let fresh: UIView
+    if let expoFactory = factory.rootViewFactory as? ExpoReactRootViewFactory {
+      fresh = expoFactory.superView(withModuleName: "ConvoyCarSurface", initialProperties: nil, launchOptions: [:])
+    } else {
+      fresh = factory.rootViewFactory.view(withModuleName: "ConvoyCarSurface", initialProperties: nil, launchOptions: nil)
+    }
+    if let carVC = window.rootViewController as? ConvoyCarRootViewController {
+      carVC.swapHosted(fresh)
+    } else {
+      let carVC = ConvoyCarRootViewController(hosted: fresh)
+      window.rootViewController = carVC
+      carVC.view.frame = window.bounds
+      carVC.view.setNeedsLayout(); carVC.view.layoutIfNeeded()
+    }
+  }
+
   static func mount(moduleName: String, in window: UIWindow, appDelegate: AppDelegate, makeVisible: Bool) {
     guard let factory = appDelegate.reactNativeFactory else { return }
 
@@ -224,7 +258,7 @@ enum ConvoyRNHost {
 // pass — a 0x0 mount then self-heals the moment the real size arrives, instead of
 // staying blank (the recurring CarPlay bug).
 final class ConvoyCarRootViewController: UIViewController {
-  private let hosted: UIView
+  private var hosted: UIView
   // TEMP mount diagnostic (remove next native build once CarPlay is confirmed):
   // shows whether THIS controller is on screen and at what size. Real numbers +
   // no map => the surface mounted and any gap is JS (OTA-fixable). 0x0 => still
@@ -254,7 +288,18 @@ final class ConvoyCarRootViewController: UIViewController {
     if !hosted.bounds.equalTo(view.bounds) { hosted.frame = view.bounds }
     hosted.setNeedsLayout()
     hosted.layoutIfNeeded()
-    dbg.text = "car: " + String(Int(view.bounds.width)) + "x" + String(Int(view.bounds.height))
+    dbg.text = "car: " + String(Int(view.bounds.width)) + "x" + String(Int(view.bounds.height)) + " [" + ConvoyRNHost.carSceneState + "] rp" + String(ConvoyRNHost.carRepaintBudget)
+    view.bringSubviewToFront(dbg)
+  }
+
+  func swapHosted(_ newHosted: UIView) {
+    newHosted.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    newHosted.frame = view.bounds
+    view.addSubview(newHosted)
+    let old = hosted
+    hosted = newHosted
+    old.removeFromSuperview()
+    view.setNeedsLayout(); view.layoutIfNeeded()
     view.bringSubviewToFront(dbg)
   }
 }
@@ -275,6 +320,7 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     // that used to crash (superView on a host that was never started).
     guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
     ConvoyRNHost.mount(moduleName: "ConvoyCarSurface", in: carWindow, appDelegate: appDelegate, makeVisible: false)
+    ConvoyRNHost.armCarRepaints(in: carWindow)
   }
 
   func templateApplicationScene(
@@ -282,7 +328,15 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     didDisconnectInterfaceController interfaceController: CPInterfaceController
   ) {
     RNCarPlay.disconnect()
+    ConvoyRNHost.carRepaintBudget = 0
+    ConvoyRNHost.carWindowRef = nil
+    ConvoyRNHost.carSceneState = "disc"
   }
+
+  func sceneDidBecomeActive(_ scene: UIScene) { ConvoyRNHost.carSceneState = "active"; ConvoyRNHost.repaintCarSurface() }
+  func sceneWillEnterForeground(_ scene: UIScene) { ConvoyRNHost.carSceneState = "fg"; ConvoyRNHost.repaintCarSurface() }
+  func sceneWillResignActive(_ scene: UIScene) { ConvoyRNHost.carSceneState = "inactive" }
+  func sceneDidEnterBackground(_ scene: UIScene) { ConvoyRNHost.carSceneState = "bg" }
 
 }
 `;

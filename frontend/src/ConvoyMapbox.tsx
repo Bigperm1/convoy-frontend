@@ -155,7 +155,7 @@ const CAR_MODEL_SCALE_BY_ZOOM: any = [
 // by one factor: lower = smaller. 1.0 == the (too-big) table above. The map uses
 // CAR_MODEL_SCALE_SIZED below — adjust CAR_SIZE and OTA to resize.
 const CAR_SIZE = 1.00;
-const CAR_MODEL_SCALE_SIZED: any = CAR_MODEL_SCALE_BY_ZOOM.map((v: any) =>
+export const CAR_MODEL_SCALE_SIZED: any = CAR_MODEL_SCALE_BY_ZOOM.map((v: any) =>
   // Only the [x,y,z] scale tuples are all-number arrays; the expression's own
   // sub-arrays (["linear"], ["zoom"]) contain strings and must pass through
   // untouched, as must the bare zoom-stop numbers (9, 9.5, …).
@@ -185,7 +185,7 @@ function carScaleForZoom(z: number): number {
   }
   return s[s.length - 1][1];
 }
-const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° off (sideways across the road),
+export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° off (sideways across the road),
 // so we rotate it +90 to point along the direction of travel. If after this the car points exactly
 // BACKWARDS, flip to 270; if it's still sideways the other way, that means -90 didn't apply — but 90/270
 // are the two real candidates (the model is a constant 90° off, not a sign error).
@@ -193,7 +193,7 @@ const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° off (si
 // the tinted paint renders near-black with only scene light — lift those so the
 // color shows. Bright presets (day/dusk/satellite) already light it, so keep 0
 // to preserve real 3D shading. 0 = fully scene-lit, 1 = fully self-lit (flat).
-const CAR_EMISSIVE_BY_MODE: Record<string, number> = {
+export const CAR_EMISSIVE_BY_MODE: Record<string, number> = {
   satellite: 0,
   day: 0,
   dusk: 0.55,
@@ -236,7 +236,7 @@ const CHASE_ZOOM_HIGHWAY = 15;
 const CHASE_KMH_CITY = 30;
 const CHASE_KMH_HIGHWAY = 100;
 const FREE_ZOOM = 15;
-const FOLLOW_ZOOM = 17;
+export const FOLLOW_ZOOM = 17;
 const CORNER_ZOOM = 18.5;
 const CORNER_FAR_M = 280;
 const CORNER_NEAR_M = 70;
@@ -271,8 +271,8 @@ const FOLLOW_LOWER_PAD_FRAC = 0.4;
 // "night" preset it DIMS them — which is why the line looked dark ("forest green",
 // and the old blue looked near-black). Emissive strength 1 makes the line self-lit
 // so it renders at full brightness regardless of the night lighting.
-const ROUTE_GREEN_CORE = "#2DEC86"; // bright neon-green core (the visible line)
-const ROUTE_GREEN_GLOW = "#00E070"; // saturated green halo (blurred underlay)
+export const ROUTE_GREEN_CORE = "#2DEC86"; // bright neon-green core (the visible line)
+export const ROUTE_GREEN_GLOW = "#00E070"; // saturated green halo (blurred underlay)
 
 function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
 function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
@@ -298,7 +298,7 @@ function chasePitch(kmh: number) {
 // Decode a Google encoded polyline → [{latitude, longitude}]. Engine-agnostic;
 // copied from ConvoyMap so this file stays self-contained during the migration.
 // Returns [] on bad input so a malformed polyline never crashes the map.
-function decodePolyline(encoded?: string | null): { latitude: number; longitude: number }[] {
+export function decodePolyline(encoded?: string | null): { latitude: number; longitude: number }[] {
   if (!encoded) return [];
   const points: { latitude: number; longitude: number }[] = [];
   let index = 0, lat = 0, lng = 0;

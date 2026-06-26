@@ -34,6 +34,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform, View, Text, Image, StyleSheet } from 'react-native';
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
 import { setCarState, getCarState, useCarStore, type CarPeer } from './carStore';
+import CarMapView from './CarMapView';
 import { setCarPlayHookOwnsRoot } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 import { formatSpeed, getSettings } from '../settings';
@@ -166,6 +167,12 @@ export function CarSurface() {
   // its onLoad never fired and the map never showed.
   const [mapUrl, setMapUrl] = useState<string | null>(null);
   const [dbgErr, setDbgErr] = useState<string>('');
+  // Live-vs-static gate (Path A scaffold). When the live @rnmapbox MapView lands
+  // next pass it mounts under `showLive`; a GL/load failure flips `glFailed` true
+  // and the surface drops back to the static <Image> branch below. This commit
+  // ships NO live map yet — the placeholder branch renders the static surface, so
+  // behavior is unchanged.
+  const [glFailed, setGlFailed] = useState(false);
   const lastRef = useRef<{ lat: number; lng: number; at: number; poly: string; hdg: number }>({ lat: 0, lng: 0, at: 0, poly: '', hdg: 0 });
 
   useEffect(() => {
@@ -195,63 +202,112 @@ export function CarSurface() {
   }, [hasFix, s.selfLat, s.selfLng, s.routePolyline, s.heading]);
 
   const showMap = hasFix && !!mapUrl;
+  // Path A scaffold: `showLive` will gate the live @rnmapbox MapView next pass.
+  // THIS commit ships no live map — the placeholder branch below renders the same
+  // `staticSurface`, so behavior is unchanged. `setGlFailed` is wired now so next
+  // pass only has to mount <CarMapView/> in the live arm and call it onError.
+  const showLive = hasFix && !glFailed;
+
+  // The static-map surface: the live map background as a plain <Image> with the
+  // maneuver/chip/meta overlays, falling back to the dashboard/logo when there's
+  // no GPS fix (or the image failed). Extracted to a const so the `showLive`
+  // placeholder arm can render it without duplicating the markup.
+  const staticSurface = showMap ? (
+    <>
+      <Image
+        source={{ uri: mapUrl as string }}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+        onError={(e: any) => { setMapUrl(null); lastRef.current = { lat: 0, lng: 0, at: 0, poly: '', hdg: 0 }; setDbgErr(String(e?.nativeEvent?.error || 'map-img-err')); }}
+      />
+
+      {/* Car marker pinned to the map centre. The map is now heading-up, so the
+          car always points straight up (its travel direction). */}
+      <View style={styles.markerCenter} pointerEvents="none">
+        <View style={styles.markerHalo} />
+        <View style={styles.markerChevron} />
+      </View>
+
+      {/* Top: maneuver while navigating, else a small CONVOY / nearby chip. */}
+      {s.navigating ? (
+        <View style={styles.topStrip} pointerEvents="none">
+          <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
+          <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
+        </View>
+      ) : (
+        <View style={styles.topChip} pointerEvents="none">
+          <Text style={styles.topChipText}>
+            {nearby ? `CONVOY   ·   ${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'CONVOY'}
+          </Text>
+        </View>
+      )}
+
+      {/* Bottom-right: arrival / eta / remaining while navigating. */}
+      {s.navigating && metaLine ? (
+        <View style={styles.bottomMeta} pointerEvents="none">
+          <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
+        </View>
+      ) : null}
+    </>
+  ) : (
+    /* ---- Fallback: no GPS fix yet (or image failed) → original dashboard ---- */
+    <View style={styles.center}>
+      {s.navigating ? (
+        <>
+          <Text style={styles.dist}>{s.distanceToTurn || '—'}</Text>
+          <Text style={styles.inst} numberOfLines={2}>{s.instruction || 'Continue'}</Text>
+          <Text style={styles.meta}>{metaLine}</Text>
+        </>
+      ) : (
+        <>
+          <Image source={require('../../assets/final_icon.png')} style={styles.carLogo} resizeMode="contain" />
+          <Text style={styles.brand}>CONVOY</Text>
+          <Text style={styles.sub}>{nearby ? `${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'Drive together'}</Text>
+        </>
+      )}
+    </View>
+  );
+
+  // Maneuver/chip + meta overlays that float on top of the MAP (live or static).
+  // Mirrors the overlays inside staticSurface's map branch so they read the same
+  // over the live CarMapView. The center chevron is NOT here — the live map draws
+  // the real 3D car (ModelLayer), so only the static image needs the chevron.
+  const mapOverlays = (
+    <>
+      {/* Top: maneuver while navigating, else a small CONVOY / nearby chip. */}
+      {s.navigating ? (
+        <View style={styles.topStrip} pointerEvents="none">
+          <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
+          <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
+        </View>
+      ) : (
+        <View style={styles.topChip} pointerEvents="none">
+          <Text style={styles.topChipText}>
+            {nearby ? `CONVOY   ·   ${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'CONVOY'}
+          </Text>
+        </View>
+      )}
+
+      {/* Bottom-right: arrival / eta / remaining while navigating. */}
+      {s.navigating && metaLine ? (
+        <View style={styles.bottomMeta} pointerEvents="none">
+          <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
+        </View>
+      ) : null}
+    </>
+  );
 
   return (
     <View style={styles.surface}>
-      {showMap ? (
+      {showLive ? (
+        // Live @rnmapbox map on the CarPlay window. A GL/load failure flips
+        // glFailed -> showLive false -> the static surface below takes over.
         <>
-          <Image
-            source={{ uri: mapUrl as string }}
-            style={StyleSheet.absoluteFill}
-            resizeMode="cover"
-            onError={(e: any) => { setMapUrl(null); lastRef.current = { lat: 0, lng: 0, at: 0, poly: '', hdg: 0 }; setDbgErr(String(e?.nativeEvent?.error || 'map-img-err')); }}
-          />
-
-          {/* Car marker pinned to the map centre. The map is now heading-up, so the
-              car always points straight up (its travel direction). */}
-          <View style={styles.markerCenter} pointerEvents="none">
-            <View style={styles.markerHalo} />
-            <View style={styles.markerChevron} />
-          </View>
-
-          {/* Top: maneuver while navigating, else a small CONVOY / nearby chip. */}
-          {s.navigating ? (
-            <View style={styles.topStrip} pointerEvents="none">
-              <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
-              <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
-            </View>
-          ) : (
-            <View style={styles.topChip} pointerEvents="none">
-              <Text style={styles.topChipText}>
-                {nearby ? `CONVOY   ·   ${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'CONVOY'}
-              </Text>
-            </View>
-          )}
-
-          {/* Bottom-right: arrival / eta / remaining while navigating. */}
-          {s.navigating && metaLine ? (
-            <View style={styles.bottomMeta} pointerEvents="none">
-              <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
-            </View>
-          ) : null}
+          <CarMapView onGLError={() => setGlFailed(true)} />
+          {mapOverlays}
         </>
       ) : (
-        /* ---- Fallback: no GPS fix yet (or image failed) → original dashboard ---- */
-        <View style={styles.center}>
-          {s.navigating ? (
-            <>
-              <Text style={styles.dist}>{s.distanceToTurn || '—'}</Text>
-              <Text style={styles.inst} numberOfLines={2}>{s.instruction || 'Continue'}</Text>
-              <Text style={styles.meta}>{metaLine}</Text>
-            </>
-          ) : (
-            <>
-              <Image source={require('../../assets/final_icon.png')} style={styles.carLogo} resizeMode="contain" />
-              <Text style={styles.brand}>CONVOY</Text>
-              <Text style={styles.sub}>{nearby ? `${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'Drive together'}</Text>
-            </>
-          )}
-        </View>
+        staticSurface
       )}
 
       {/* Speed pill — bottom-center so the CarPlay side bar never covers it. */}
@@ -352,6 +408,10 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
       selfLng: typeof user?.lng === 'number' ? user.lng : null,
       heading: typeof user?.heading === 'number' ? user.heading : null,
       routePolyline: route?.polyline || '',
+      // Self car paint → lets the car root pick the matching 3D model. Read from
+      // local settings (the Garage persists carColor there, same source the phone
+      // self-marker uses).
+      selfCarColor: getSettings().carColor,
     });
   }, [
     tbt.active,

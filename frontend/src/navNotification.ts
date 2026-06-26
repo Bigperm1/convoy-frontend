@@ -19,6 +19,7 @@ import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import { NavRoute, haversineMeters, maneuverVerb, fmtDistanceM } from "./nav";
 import { setCarState } from "./carplay/carStore";
+import { getSettings } from "./settings";
 
 const NAV_TASK = "convoy-nav-location";
 const NAV_NOTIF_ID = "convoy-nav-banner";
@@ -141,6 +142,9 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
     selfLng: loc.coords.longitude,
     heading: typeof _h === "number" && _h >= 0 ? _h : null,
     speedMs: typeof _sp === "number" && _sp >= 0 ? _sp : 0,
+    // Best-effort on the cold/background path (cache may be unhydrated in a
+    // separate bg JS context → undefined → car root uses the default model).
+    selfCarColor: getSettings().carColor,
   });
   await updateNavBanner(loc.coords.latitude, loc.coords.longitude);
 });
@@ -180,6 +184,7 @@ async function startForegroundCarFeed(): Promise<void> {
           selfLng: loc.coords.longitude,
           heading: typeof h === "number" && h >= 0 ? h : null,
           speedMs: typeof sp === "number" && sp >= 0 ? sp : 0,
+          selfCarColor: getSettings().carColor,
         });
       }
     );

@@ -36,6 +36,11 @@ export type CarState = {
   selfLng: number | null;
   heading: number | null; // degrees, 0 = north
   routePolyline: string;
+  // Self car paint (mirror of the phone's settings.carColor). Lets the car root
+  // pick the right 3D vehicle model (getVehicleModelUrl). undefined → car root
+  // falls back to the default GRC model. Set from the phone mirror feed and the
+  // background/foreground location feeds (best-effort on the cold-connect path).
+  selfCarColor?: string;
 };
 
 const initial: CarState = {

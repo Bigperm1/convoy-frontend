@@ -131,7 +131,7 @@ function buildStaticMapUrl(lat: number, lng: number, polyline: string, bearing =
   if (polyline) {
     // Google's overview polyline is precision-5 — a drop-in for Mapbox's `path`
     // overlay. URL-encode it (it can contain \\, ?, @, etc.).
-    const withPath = `path-5+${CAR_ROUTE_COLOR}-1(${encodeURIComponent(polyline)})/`;
+    const withPath = `path-9+${CAR_ROUTE_COLOR}-1(${encodeURIComponent(polyline)})/`;
     const probe = `https://api.mapbox.com/styles/v1/${CAR_MAP_STYLE}/static/${withPath}${tail}`;
     if (probe.length <= CAR_MAP_URL_MAX) overlay = withPath;
   }
@@ -254,20 +254,11 @@ export function CarSurface() {
         </View>
       )}
 
-      {/* Speed pill — always shown, both map and fallback. */}
-      <View style={styles.speedPill} pointerEvents="none">
-        <Text style={styles.speedNum}>{spd.value}</Text>
-        <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
-      </View>
-
-      {/* TEMP un-gateable readout, RE-CENTERED so the CarPlay dock + maneuver
-          banner can't cover it. If this appears AT ALL, the React CarSurface is
-          painting. Remove once CarPlay is confirmed. */}
-      <View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center', zIndex: 99999 }}>
-        <View style={{ backgroundColor: 'rgba(0,0,0,0.95)', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, borderWidth: 2, borderColor: '#00FF88' }}>
-          <Text style={{ color: '#00FF88', fontSize: 20, fontWeight: '900', textAlign: 'center' }}>
-            {`RN-OK\nfix:${hasFix ? 'Y' : 'N'}  map:${mapUrl ? 'Y' : 'N'}\nerr:${dbgErr || '-'}\n@${typeof s.selfLat === 'number' ? s.selfLat.toFixed(3) : '-'},${typeof s.selfLng === 'number' ? s.selfLng.toFixed(3) : '-'}`}
-          </Text>
+      {/* Speed pill — bottom-center so the CarPlay side bar never covers it. */}
+      <View style={styles.speedDock} pointerEvents="none">
+        <View style={styles.speedPill}>
+          <Text style={styles.speedNum}>{spd.value}</Text>
+          <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
         </View>
       </View>
     </View>
@@ -589,7 +580,8 @@ const styles = StyleSheet.create({
   dist: { color: '#F4F4F4', fontSize: 48, fontWeight: '800', letterSpacing: -1 },
   inst: { color: '#F4F4F4', fontSize: 22, fontWeight: '600', marginTop: 4, textAlign: 'center' },
   meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },
-  speedPill: { position: 'absolute', left: 20, bottom: 20, alignItems: 'center', backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 16, paddingHorizontal: 16, paddingVertical: 8 },
+  speedDock: { position: 'absolute', left: 0, right: 0, bottom: 18, alignItems: 'center' },
+  speedPill: { alignItems: 'center', backgroundColor: 'rgba(11,11,12,0.82)', borderRadius: 16, paddingHorizontal: 18, paddingVertical: 8 },
   speedNum: { color: '#F4F4F4', fontSize: 30, fontWeight: '800' },
   speedUnit: { color: '#9AA0A6', fontSize: 12, fontWeight: '600' },
   // --- live static-map mode ---
@@ -601,7 +593,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 10, borderRightWidth: 10, borderBottomWidth: 18,
     borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#2DEC86',
   },
-  topStrip: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 18, backgroundColor: 'rgba(11,11,12,0.74)' },
+  topStrip: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingLeft: 100, paddingRight: 18, backgroundColor: 'rgba(11,11,12,0.74)' },
   topDist: { color: '#2DEC86', fontSize: 26, fontWeight: '800', marginRight: 14 },
   topInst: { color: '#F4F4F4', fontSize: 20, fontWeight: '600', flexShrink: 1 },
   topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 14 },

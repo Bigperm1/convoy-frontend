@@ -386,15 +386,41 @@ final class ConvoyCarRootViewController: UIViewController, ConvoyHostedVC {
       dbg.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
     ])
   }
+  // The REAL head-unit size. CarPlay can hand the carWindow a degenerate placeholder
+  // (the measured 70x264 sliver) for window.bounds and never re-report a real one — but
+  // carWindow is a CPWindow whose .screen is the head unit's UIScreen, and screen.bounds
+  // IS the real size. Prefer the larger of the two so a stuck window.bounds can't pin the
+  // surface to the sliver. (Guarded experiment: if screen.bounds is also degenerate on a
+  // given unit, target falls back to window.bounds — the dbg "scr" field reveals which.)
+  private func targetBounds() -> CGRect {
+    let wb = view.bounds
+    let sb = (ConvoyRNHost.carWindowRef?.screen.bounds) ?? .zero
+    if sb.width * sb.height > wb.width * wb.height { return CGRect(origin: .zero, size: sb.size) }
+    return wb
+  }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
-    if !hosted.bounds.equalTo(view.bounds) { hosted.frame = view.bounds }
+    let target = targetBounds()
+    // Pin the hosted RN (Fabric) surface to the real size — the bridgeless surface is
+    // rigidly constrained to its hosting view's bounds, so this is what actually sizes
+    // the map. Also nudge the VC view (UIKit may override it back to window.bounds).
+    if !view.bounds.equalTo(target) { view.frame = target }
+    if !hosted.bounds.equalTo(target) { hosted.frame = target }
     hosted.setNeedsLayout()
     hosted.layoutIfNeeded()
-    // Real size reached → mark painted so the repaint loop stops re-minting (the
-    // single stable mount lets the live MapView's style finish loading).
-    if view.bounds.width > 0 && view.bounds.height > 0 { ConvoyRNHost.carPainted = true }
-    dbg.text = "car: " + String(Int(view.bounds.width)) + "x" + String(Int(view.bounds.height)) + " [" + ConvoyRNHost.carSceneState + "] rp" + String(ConvoyRNHost.carRepaintBudget)
+    // Latch carPainted ONLY at a real head-unit size (>=320x120) — never at the 70x264
+    // sliver. So the repaint loop keeps re-laying-out until a real size arrives, but
+    // stops churning once genuinely sized (lets the live MapView's style settle). This
+    // repairs the build-56 freeze (was: any non-zero size, which latched at 70x264).
+    if target.width >= 320 && target.height >= 120 { ConvoyRNHost.carPainted = true }
+    // Self-diagnosing label (so the next build is conclusive with no Mac/logs):
+    //   "car: <rawWxH> scr<targetWxH> [<state>] rp<budget>"
+    // If scr shows a real size while raw stays 70x264 -> the screen-pin is the fix and
+    // the map fills (unless CarPlay clips to its window). If scr is ALSO 70x264 -> the
+    // unit isn't reporting a real size yet and only a CarPlay-timing fix remains.
+    dbg.text = "car: " + String(Int(view.bounds.width)) + "x" + String(Int(view.bounds.height))
+      + " scr" + String(Int(target.width)) + "x" + String(Int(target.height))
+      + " [" + ConvoyRNHost.carSceneState + "] rp" + String(ConvoyRNHost.carRepaintBudget)
     view.bringSubviewToFront(dbg)
   }
 
@@ -475,7 +501,17 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     ConvoyRNHost.carActivatedOnce = false
   }
 
-  func sceneDidBecomeActive(_ scene: UIScene) { ConvoyRNHost.carSceneState = "active"; ConvoyRNHost.burstCarRepaints() }
+  func sceneDidBecomeActive(_ scene: UIScene) {
+    ConvoyRNHost.carSceneState = "active"
+    ConvoyRNHost.burstCarRepaints()
+    // Force the screen-sized layout through on activation — CarPlay may never re-deliver
+    // a real window.bounds, so re-assert the carWindow root's frame to the head-unit
+    // screen size and relayout. viewDidLayoutSubviews then re-pins the hosted surface.
+    if let w = ConvoyRNHost.carWindowRef, let vc = w.rootViewController {
+      vc.view.frame = w.screen.bounds
+      vc.view.setNeedsLayout(); vc.view.layoutIfNeeded()
+    }
+  }
   func sceneWillEnterForeground(_ scene: UIScene) { ConvoyRNHost.carSceneState = "fg"; ConvoyRNHost.burstCarRepaints() }
   func sceneWillResignActive(_ scene: UIScene) { ConvoyRNHost.carSceneState = "inactive" }
   func sceneDidEnterBackground(_ scene: UIScene) { ConvoyRNHost.carSceneState = "bg" }

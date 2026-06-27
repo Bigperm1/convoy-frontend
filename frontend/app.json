@@ -8,11 +8,11 @@
     "scheme": "convoy",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "runtimeVersion": "1.11.0",
+    "runtimeVersion": "1.12.0",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
-      "buildNumber": "56",
+      "buildNumber": "57",
       "config": {
         "googleMapsApiKey": "AIzaSyC0w5LHgZ1ud3EmeAhUkr4aOAOf89bE09U"
       },
@@ -34,7 +34,7 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 56,
+      "versionCode": 57,
       "googleServicesFile": "./google-services.json",
       "config": {
         "googleMaps": {

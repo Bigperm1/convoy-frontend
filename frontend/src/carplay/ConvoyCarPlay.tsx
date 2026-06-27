@@ -37,7 +37,7 @@ import { setCarState, getCarState, useCarStore, type CarPeer } from './carStore'
 import CarMapView from './CarMapView';
 import { setCarPlayHookOwnsRoot } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
-import { formatSpeed, getSettings } from '../settings';
+import { formatSpeed, getSettings, getMapMode } from '../settings';
 
 const isIOS = Platform.OS === 'ios';
 const isAndroid = Platform.OS === 'android';
@@ -151,6 +151,11 @@ export function CarSurface() {
   const s = useCarStore();
   const spd = formatSpeed(s.speedMs || 0, getSettings().speedUnit);
   const nearby = s.peers.length;
+  // Posted speed limit (PART 5), shown in the driver's unit. carStore.speedLimitKmh
+  // is km/h; convert to mph if that's their setting. null → no badge.
+  const limitVal = s.speedLimitKmh
+    ? (getSettings().speedUnit === 'mph' ? Math.round(s.speedLimitKmh / 1.609344) : Math.round(s.speedLimitKmh))
+    : null;
   // Arrival CLOCK, computed the SAME way the phone banner does (now + remaining
   // ETA). This is the number the driver compares to their phone — driving it from
   // carStore here means the car dashboard matches the phone instead of relying on
@@ -294,6 +299,14 @@ export function CarSurface() {
           <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
         </View>
       ) : null}
+
+      {/* Posted speed-limit sign — RIGHT edge (never over the CarPlay left bar). */}
+      {limitVal != null ? (
+        <View style={styles.speedLimitBadge} pointerEvents="none">
+          <Text style={styles.speedLimitCap}>LIMIT</Text>
+          <Text style={styles.speedLimitNum}>{limitVal}</Text>
+        </View>
+      ) : null}
     </>
   );
 
@@ -412,6 +425,8 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
       // local settings (the Garage persists carColor there, same source the phone
       // self-marker uses).
       selfCarColor: getSettings().carColor,
+      // Base-map mode → car map matches the phone's style choice.
+      mapMode: getMapMode(getSettings()),
     });
   }, [
     tbt.active,
@@ -644,6 +659,10 @@ const styles = StyleSheet.create({
   speedPill: { alignItems: 'center', backgroundColor: 'rgba(11,11,12,0.82)', borderRadius: 16, paddingHorizontal: 18, paddingVertical: 8 },
   speedNum: { color: '#F4F4F4', fontSize: 30, fontWeight: '800' },
   speedUnit: { color: '#9AA0A6', fontSize: 12, fontWeight: '600' },
+  // Posted speed-limit sign — white plate, red border, on the RIGHT edge.
+  speedLimitBadge: { position: 'absolute', right: 18, top: '38%', alignItems: 'center', backgroundColor: '#FFFFFF', borderColor: '#D11', borderWidth: 3, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, minWidth: 54 },
+  speedLimitCap: { color: '#6B7075', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
+  speedLimitNum: { color: '#0B0B0C', fontSize: 24, fontWeight: '900' },
   // --- live static-map mode ---
   preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   markerCenter: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },

@@ -11,7 +11,7 @@
 
 import { NativeModules, Platform } from 'react-native';
 import { carPlayHookOwnsRoot } from './carPlayShared';
-import { acquireBgLocation, releaseBgLocation } from '../navNotification';
+import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk } from '../navNotification';
 
 let booted = false;
 
@@ -49,6 +49,9 @@ export function initCarPlayBootstrap(): void {
   const onConnect = () => {
     setIdleRoot();
     void acquireBgLocation('carplay');
+    // Cold connect: pull the persisted active-route polyline into carStore so the
+    // car map draws the real ribbon even though the phone map isn't mounted.
+    void hydrateCarRouteFromDisk();
   };
 
   const onDisconnect = () => {

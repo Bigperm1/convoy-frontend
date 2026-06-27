@@ -115,6 +115,12 @@ import Expo
 // once. Every LATER scene mints its root via superView(...), which BYPASSES those
 // one-time handlers — calling the normal view(...) a second time would start
 // expo-updates twice and trap. (Same bypass Expo uses in recreateRootView().)
+// Adopted by the hosted root VCs (car + phone) so the generic re-mint helper can
+// swap a fresh surface into whichever one is presented.
+protocol ConvoyHostedVC: AnyObject {
+  func swapHosted(_ newHosted: UIView)
+}
+
 enum ConvoyRNHost {
   static var started = false
 
@@ -124,6 +130,13 @@ enum ConvoyRNHost {
   static var carConnectAt: Date?
   static var carLastPaintAt: Date?
   static var carActivatedOnce = false
+
+  // Phone "main" second-surface rescue (cold-CarPlay-first). Mirrors the car vars.
+  static weak var phoneWindowRef: UIWindow?
+  static var phoneRepaintBudget = 0
+  static var phoneConnectAt: Date?
+  static var phoneLastPaintAt: Date?
+  static var phonePainted = false
 
   static func armCarRepaints(in window: UIWindow) {
     carWindowRef = window
@@ -162,23 +175,71 @@ enum ConvoyRNHost {
     guard started, carRepaintBudget > 0,
           let window = carWindowRef,
           let appDelegate = UIApplication.shared.delegate as? AppDelegate,
-          let factory = appDelegate.reactNativeFactory else { return }
+          appDelegate.reactNativeFactory != nil else { return }
     if let last = carLastPaintAt, Date().timeIntervalSince(last) < 0.15 { return }
     carLastPaintAt = Date()
     carRepaintBudget -= 1
+    remintHostedSurface(moduleName: "ConvoyCarSurface", in: window) { ConvoyCarRootViewController(hosted: $0) }
+  }
+
+  // ── PHONE surface rescue (mirror of the car rescue) ─────────────────────
+  // When "main" is the SECOND surface (cold-CarPlay-first: the host booted with
+  // ConvoyCarSurface, then the phone opens), Expo's superView second-surface mount
+  // can fail to commit a frame, leaving the phone window on the native launch logo.
+  // armPhoneRepaints forces it to paint. UNLIKE the car (a stateless dashboard we
+  // can re-mint freely), the phone is the FULL app, so we STOP at first paint
+  // (phonePainted) to avoid thrashing the React tree / app + nav state.
+  static func armPhoneRepaints(in window: UIWindow) {
+    phoneWindowRef = window
+    phoneConnectAt = Date()
+    phoneLastPaintAt = nil
+    phonePainted = false
+    phoneRepaintBudget = 30
+    schedulePhoneRepaintTick()
+  }
+
+  static func schedulePhoneRepaintTick() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+      // Usually a no-op: the phone VC lays out on makeKeyAndVisible within the first
+      // tick → phonePainted true → we never re-mint. Re-mint only fires for a
+      // genuinely stuck second surface, and stops the moment it paints (or at 34s).
+      guard phoneWindowRef != nil, !phonePainted, let t0 = phoneConnectAt,
+            Date().timeIntervalSince(t0) < 34.0 else { return }
+      repaintPhoneSurface()
+      schedulePhoneRepaintTick()
+    }
+  }
+
+  static func repaintPhoneSurface() {
+    guard started, phoneRepaintBudget > 0,
+          let window = phoneWindowRef,
+          let appDelegate = UIApplication.shared.delegate as? AppDelegate,
+          appDelegate.reactNativeFactory != nil else { return }
+    if let last = phoneLastPaintAt, Date().timeIntervalSince(last) < 0.15 { return }
+    phoneLastPaintAt = Date()
+    phoneRepaintBudget -= 1
+    remintHostedSurface(moduleName: "main", in: window) { ConvoyPhoneRootViewController(hosted: $0) }
+  }
+
+  // Generic re-mint: create a fresh moduleName surface on the running host (via
+  // superView so the one-time handlers don't re-run) and either swap it into the
+  // existing hosted VC or create one via the make closure. Used by car + phone.
+  static func remintHostedSurface(moduleName: String, in window: UIWindow, make: (UIView) -> (UIViewController & ConvoyHostedVC)) {
+    guard let appDelegate = UIApplication.shared.delegate as? AppDelegate,
+          let factory = appDelegate.reactNativeFactory else { return }
     let fresh: UIView
     if let expoFactory = factory.rootViewFactory as? ExpoReactRootViewFactory {
-      fresh = expoFactory.superView(withModuleName: "ConvoyCarSurface", initialProperties: nil, launchOptions: [:])
+      fresh = expoFactory.superView(withModuleName: moduleName, initialProperties: nil, launchOptions: [:])
     } else {
-      fresh = factory.rootViewFactory.view(withModuleName: "ConvoyCarSurface", initialProperties: nil, launchOptions: nil)
+      fresh = factory.rootViewFactory.view(withModuleName: moduleName, initialProperties: nil, launchOptions: nil)
     }
-    if let carVC = window.rootViewController as? ConvoyCarRootViewController {
-      carVC.swapHosted(fresh)
+    if let vc = window.rootViewController as? ConvoyHostedVC {
+      vc.swapHosted(fresh)
     } else {
-      let carVC = ConvoyCarRootViewController(hosted: fresh)
-      window.rootViewController = carVC
-      carVC.view.frame = window.bounds
-      carVC.view.setNeedsLayout(); carVC.view.layoutIfNeeded()
+      let vc = make(fresh)
+      window.rootViewController = vc
+      vc.view.frame = window.bounds
+      vc.view.setNeedsLayout(); vc.view.layoutIfNeeded()
     }
   }
 
@@ -253,18 +314,20 @@ enum ConvoyRNHost {
     // done this in the boot branch). The CarPlay window must NOT — CarPlay owns
     // its presentation; making it key can fight the template layer.
     if makeVisible {
-      // PHONE window (unchanged): pin the RN root with constraints and present.
-      let viewController = UIViewController()
-      rootView.translatesAutoresizingMaskIntoConstraints = false
-      viewController.view.addSubview(rootView)
-      NSLayoutConstraint.activate([
-        rootView.leadingAnchor.constraint(equalTo: viewController.view.leadingAnchor),
-        rootView.trailingAnchor.constraint(equalTo: viewController.view.trailingAnchor),
-        rootView.topAnchor.constraint(equalTo: viewController.view.topAnchor),
-        rootView.bottomAnchor.constraint(equalTo: viewController.view.bottomAnchor),
-      ])
+      // PHONE window: this branch is reached ONLY when the host is already running
+      // and the phone opens as the SECOND surface — i.e. the cold-CarPlay-first case
+      // (normal phone cold boot returns from the startReactNative path above). Host
+      // "main" in ConvoyPhoneRootViewController, which re-asserts the surface's frame
+      // + layout on every pass; Expo's superView second-surface mount can otherwise
+      // stall at 0x0 on the launch logo. armPhoneRepaints then forces it to commit a
+      // frame (no-op once it paints). Do NOT touch the normal-phone-boot path above.
+      let viewController = ConvoyPhoneRootViewController(hosted: rootView)
       window.rootViewController = viewController
+      viewController.view.frame = window.bounds
+      viewController.view.setNeedsLayout()
+      viewController.view.layoutIfNeeded()
       window.makeKeyAndVisible()
+      armPhoneRepaints(in: window)
     } else {
       // CARPLAY window: host the RN surface in a controller that re-asserts the
       // surface's frame + layout on every layout pass. CarPlay can hand us the window
@@ -287,7 +350,7 @@ enum ConvoyRNHost {
 // needs to draw, so we re-assert the hosted view's frame + layout on EVERY layout
 // pass — a 0x0 mount then self-heals the moment the real size arrives, instead of
 // staying blank (the recurring CarPlay bug).
-final class ConvoyCarRootViewController: UIViewController {
+final class ConvoyCarRootViewController: UIViewController, ConvoyHostedVC {
   private var hosted: UIView
   // TEMP mount diagnostic (remove next native build once CarPlay is confirmed):
   // shows whether THIS controller is on screen and at what size. Real numbers +
@@ -331,6 +394,40 @@ final class ConvoyCarRootViewController: UIViewController {
     old.removeFromSuperview()
     view.setNeedsLayout(); view.layoutIfNeeded()
     view.bringSubviewToFront(dbg)
+  }
+}
+
+// Phone equivalent of ConvoyCarRootViewController: hosts the "main" RN surface and
+// re-asserts its frame + layout on every pass so a SECOND-surface mount can't stay
+// stuck at 0x0 on the launch logo. No dbg label (this is the real app UI).
+final class ConvoyPhoneRootViewController: UIViewController, ConvoyHostedVC {
+  private var hosted: UIView
+  init(hosted: UIView) { self.hosted = hosted; super.init(nibName: nil, bundle: nil) }
+  required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    view.backgroundColor = .black
+    hosted.frame = view.bounds
+    hosted.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    view.addSubview(hosted)
+  }
+  override func viewDidLayoutSubviews() {
+    super.viewDidLayoutSubviews()
+    if !hosted.bounds.equalTo(view.bounds) { hosted.frame = view.bounds }
+    hosted.setNeedsLayout()
+    hosted.layoutIfNeeded()
+    // Once the phone surface has a real size, mark it painted so the rescue loop
+    // stops re-minting (don't thrash the full app tree).
+    if view.bounds.width > 0 && view.bounds.height > 0 { ConvoyRNHost.phonePainted = true }
+  }
+  func swapHosted(_ newHosted: UIView) {
+    newHosted.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    newHosted.frame = view.bounds
+    view.addSubview(newHosted)
+    let old = hosted
+    hosted = newHosted
+    old.removeFromSuperview()
+    view.setNeedsLayout(); view.layoutIfNeeded()
   }
 }
 

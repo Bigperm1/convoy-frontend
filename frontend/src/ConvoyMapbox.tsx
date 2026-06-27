@@ -259,7 +259,7 @@ const COURSE_OFF_KMH = 3;
 const HEADING_SMOOTH_ALPHA = 0.72;
 // Lower-third chase framing: top padding as a fraction of map height shifts the
 // followed car DOWN the screen so the driver sees more road ahead. OTA-tunable.
-const FOLLOW_LOWER_PAD_FRAC = 0.4;
+export const FOLLOW_LOWER_PAD_FRAC = 0.4;
 
 // ===== Route line styling (brand green, sampled from new_logo_icons.png) =====
 // The selected route is a glowing neon-green ribbon matching the app icon's route
@@ -275,13 +275,13 @@ export const ROUTE_GREEN_CORE = "#2DEC86"; // bright neon-green core (the visibl
 export const ROUTE_GREEN_GLOW = "#00E070"; // saturated green halo (blurred underlay)
 
 function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
-function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
+export function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
 function chaseZoomForSpeed(kmh: number) {
   if (kmh <= CHASE_KMH_CITY) return CHASE_ZOOM_CITY;
   if (kmh >= CHASE_KMH_HIGHWAY) return CHASE_ZOOM_HIGHWAY;
   return lerp(CHASE_ZOOM_CITY, CHASE_ZOOM_HIGHWAY, (kmh - CHASE_KMH_CITY) / (CHASE_KMH_HIGHWAY - CHASE_KMH_CITY));
 }
-function chaseZoom(kmh: number, distToManeuverM?: number) {
+export function chaseZoom(kmh: number, distToManeuverM?: number) {
   const base = chaseZoomForSpeed(kmh);
   if (typeof distToManeuverM !== "number" || !Number.isFinite(distToManeuverM) || distToManeuverM <= 0) return base;
   const t = (CORNER_FAR_M - distToManeuverM) / (CORNER_FAR_M - CORNER_NEAR_M);
@@ -289,7 +289,7 @@ function chaseZoom(kmh: number, distToManeuverM?: number) {
 }
 // Speed-aware chase tilt: CITY pitch when slow, ramping to HIGHWAY pitch at speed
 // (same band as the zoom ramp). Mirrors chaseZoomForSpeed.
-function chasePitch(kmh: number) {
+export function chasePitch(kmh: number) {
   if (kmh <= CHASE_KMH_CITY) return CHASE_PITCH_CITY;
   if (kmh >= CHASE_KMH_HIGHWAY) return CHASE_PITCH_HIGHWAY;
   return lerp(CHASE_PITCH_CITY, CHASE_PITCH_HIGHWAY, (kmh - CHASE_KMH_CITY) / (CHASE_KMH_HIGHWAY - CHASE_KMH_CITY));

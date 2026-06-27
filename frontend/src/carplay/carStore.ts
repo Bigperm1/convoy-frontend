@@ -7,6 +7,7 @@
 // with useCarStore(). Plain pub/sub, platform-agnostic, safe on web.
 
 import { useEffect, useState } from 'react';
+import type { MapMode } from '../settings';
 
 export type CarPeer = { id: string; handle: string };
 
@@ -41,6 +42,13 @@ export type CarState = {
   // falls back to the default GRC model. Set from the phone mirror feed and the
   // background/foreground location feeds (best-effort on the cold-connect path).
   selfCarColor?: string;
+  // Base-map mode (mirror of the phone's getMapMode(settings)). Lets the car map
+  // match the phone's style: 'satellite' → SatelliteStreet, else Standard with the
+  // matching light preset. undefined → car falls back to the phone default 'dusk'.
+  mapMode?: MapMode;
+  // Posted speed limit (km/h) for the road the driver is on (OSM/Overpass, fed by
+  // the navNotification location feed). undefined/0 → no badge shown.
+  speedLimitKmh?: number;
 };
 
 const initial: CarState = {

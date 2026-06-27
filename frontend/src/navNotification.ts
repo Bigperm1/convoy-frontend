@@ -19,13 +19,18 @@ import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import { NavRoute, haversineMeters, maneuverVerb, fmtDistanceM } from "./nav";
 import { setCarState } from "./carplay/carStore";
-import { getSettings } from "./settings";
+import { getSettings, getMapMode } from "./settings";
+import { fetchSpeedLimitWaysAround, nearestLimit } from "./speedLimit";
 
 const NAV_TASK = "convoy-nav-location";
 const NAV_NOTIF_ID = "convoy-nav-banner";
 const NAV_CHANNEL = "navigation";
 const ROUTE_KEY = "convoy:navRoute";
 const PROGRESS_KEY = "convoy:navProgress";
+// Full encoded overview polyline of the active route, persisted so a COLD CarPlay
+// connect (phone map not mounted) can draw the real green ribbon on the car map.
+// The slim ROUTE_KEY only holds per-step end-points; this holds the smooth line.
+const NAV_POLY_KEY = "convoy:navPolyline";
 // Only pop the off-screen banner once the next maneuver is this close — so it
 // reads as "your turn is coming up", not a constant ping the whole drive.
 const ANNOUNCE_DISTANCE_M = 500;
@@ -126,6 +131,48 @@ export async function updateNavBanner(lat: number, lng: number): Promise<void> {
   await postBanner(title, body);
 }
 
+// ===== Speed-limit feed for the car map (PART 5) =====
+// Module-scope mirror of useSpeedLimit's logic (no React): cache a radius of
+// maxspeed ways + the fetch center, throttle Overpass to ~30s, resolve the nearest
+// road locally on every tick, and push the result into carStore.speedLimitKmh.
+let _slWays: NonNullable<Awaited<ReturnType<typeof fetchSpeedLimitWaysAround>>> = [];
+let _slCenter: { lat: number; lng: number } | null = null;
+let _slLastFetch = 0;
+let _slInFlight = false;
+const SL_REFETCH_MOVE_M = 1000;
+const SL_MIN_REFETCH_MS = 30000;
+
+function _slHaversineM(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371000;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLng = ((bLng - aLng) * Math.PI) / 180;
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+function maybeUpdateSpeedLimit(lat: number, lng: number): void {
+  const now = Date.now();
+  const moved = _slCenter ? _slHaversineM(_slCenter.lat, _slCenter.lng, lat, lng) : Infinity;
+  const needArea = !_slCenter || moved > SL_REFETCH_MOVE_M;
+  const throttleOk = now - _slLastFetch > SL_MIN_REFETCH_MS;
+  if (needArea && throttleOk && !_slInFlight) {
+    _slInFlight = true;
+    _slLastFetch = now;
+    _slCenter = { lat, lng };
+    fetchSpeedLimitWaysAround(lat, lng)
+      .then((ways) => {
+        _slInFlight = false;
+        if (ways) { _slWays = ways; setCarState({ speedLimitKmh: nearestLimit(lat, lng, ways) ?? undefined }); }
+        else { _slCenter = null; } // fetch failed — allow a retry after the throttle window
+      })
+      .catch(() => { _slInFlight = false; _slCenter = null; });
+  }
+  // Resolve against whatever is cached right now (instant; no network).
+  setCarState({ speedLimitKmh: nearestLimit(lat, lng, _slWays) ?? undefined });
+}
+
 // Background location task — fires on each location update (foreground AND
 // background) and drives the banner. Registered at module load.
 TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
@@ -145,7 +192,9 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
     // Best-effort on the cold/background path (cache may be unhydrated in a
     // separate bg JS context → undefined → car root uses the default model).
     selfCarColor: getSettings().carColor,
+    mapMode: getMapMode(getSettings()),
   });
+  maybeUpdateSpeedLimit(loc.coords.latitude, loc.coords.longitude);
   await updateNavBanner(loc.coords.latitude, loc.coords.longitude);
 });
 
@@ -185,7 +234,9 @@ async function startForegroundCarFeed(): Promise<void> {
           heading: typeof h === "number" && h >= 0 ? h : null,
           speedMs: typeof sp === "number" && sp >= 0 ? sp : 0,
           selfCarColor: getSettings().carColor,
+          mapMode: getMapMode(getSettings()),
         });
+        maybeUpdateSpeedLimit(loc.coords.latitude, loc.coords.longitude);
       }
     );
   } catch {}
@@ -194,6 +245,17 @@ async function startForegroundCarFeed(): Promise<void> {
 function stopForegroundCarFeed(): void {
   try { _fgCarWatch?.remove(); } catch {}
   _fgCarWatch = null;
+}
+
+// Cold-connect route hydration (PART 4). On a cold CarPlay connect the phone map
+// isn't mounted, so nothing mirrors the active route into carStore. Read the
+// persisted overview polyline from disk and push it so CarMapView's route layers
+// draw the real ribbon. No-op (clears nothing) when there's no persisted route.
+export async function hydrateCarRouteFromDisk(): Promise<void> {
+  try {
+    const poly = await AsyncStorage.getItem(NAV_POLY_KEY);
+    if (poly) setCarState({ routePolyline: poly });
+  } catch {}
 }
 
 export async function acquireBgLocation(tag: string): Promise<boolean> {
@@ -275,6 +337,11 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
     try {
       await AsyncStorage.setItem(ROUTE_KEY, JSON.stringify(slim));
       await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx: 0, notified: -1 }));
+      // Persist the full overview polyline for the cold-CarPlay car map (PART 4).
+      await AsyncStorage.setItem(NAV_POLY_KEY, route.polyline || "");
+      // Feed it into carStore immediately too, so a car already connected draws it
+      // without waiting for the next cold read.
+      setCarState({ routePolyline: route.polyline || "" });
     } catch {}
 
     // No "Navigation started" banner — the off-screen banner should appear ONLY
@@ -296,7 +363,10 @@ export async function stopNavBanner(): Promise<void> {
   try {
     await AsyncStorage.removeItem(ROUTE_KEY);
     await AsyncStorage.removeItem(PROGRESS_KEY);
+    await AsyncStorage.removeItem(NAV_POLY_KEY);
   } catch {}
+  // Clear the car map's route too so the ribbon disappears on nav end.
+  setCarState({ routePolyline: "" });
   // Release our hold; the shared task keeps running if CarPlay still needs it.
   await releaseBgLocation("nav");
   try { await Notifications.dismissNotificationAsync(NAV_NOTIF_ID); } catch {}

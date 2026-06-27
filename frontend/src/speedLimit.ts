@@ -156,7 +156,7 @@ export async function fetchSpeedLimitWaysAround(
 
 // Nearest road's limit to a point, or null if the closest road is farther than
 // SNAP_TOLERANCE_M (i.e. we're not confidently on any tagged road).
-function nearestLimit(lat: number, lng: number, ways: LimitWay[]): number | null {
+export function nearestLimit(lat: number, lng: number, ways: LimitWay[]): number | null {
   let best = Infinity;
   let bestSpeed: number | null = null;
   for (const w of ways) {

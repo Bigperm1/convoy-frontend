@@ -55,6 +55,9 @@ export type CarState = {
   // WeatherKind string the car maps to a glyph. undefined → no weather chip.
   weatherTemp?: string;
   weatherKind?: string;
+  // Glyph (unicode arrow) for the upcoming maneuver, shown in the car banner's green
+  // arrow box (mirrors the phone's maneuver icon). undefined when not navigating.
+  maneuverIcon?: string;
   // On-screen diagnostic breadcrumb for the CarPlay surface (which feed last wrote a
   // position, or which call failed). Shown in the logo fallback so the head-unit screen
   // self-reports why hasFix is false — no Mac/device log needed. e.g. 'fgfeed',

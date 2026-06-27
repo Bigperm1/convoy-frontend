@@ -54,6 +54,9 @@ const CRUISE_PITCH = 45;
 // wide head-unit screen. Subtracted from the phone's zoom (Mapbox zoom is log2, so 0.7
 // ≈ 1.6x more area) for both nav and cruise.
 const CAR_ZOOM_OUT = 0.7;
+// Pull back MORE during active nav — the phone's tight chase zoom read "way too close"
+// on the head unit. Larger = more road ahead while routing. OTA-tunable.
+const CAR_ZOOM_OUT_NAV = 1.5;
 // Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';
@@ -114,14 +117,24 @@ export default function CarMapView({ onGLError }: Props) {
   const styleURL = useStandard ? 'mapbox://styles/mapbox/standard' : Mapbox.StyleURL.SatelliteStreet;
   const emissive = CAR_EMISSIVE_BY_MODE[mode] ?? 0;
 
-  // Chase camera (phone math): speed-aware zoom + pitch while navigating, calm
-  // cruise framing otherwise. Heading-up via FollowWithCourse.
+  // Chase camera (phone math): speed-aware zoom + pitch while navigating, calm cruise
+  // framing otherwise. Pulled back vs the phone's raw chase so more road reads on the
+  // wide head-unit — MORE during nav (the tight chase zoom was too close).
   const kmh = kmhFromMs(s.speedMs);
-  const followZoom = (s.navigating ? chaseZoom(kmh, s.distanceToTurnM) : FOLLOW_ZOOM) - CAR_ZOOM_OUT;
+  const followZoom = s.navigating
+    ? chaseZoom(kmh, s.distanceToTurnM) - CAR_ZOOM_OUT_NAV
+    : FOLLOW_ZOOM - CAR_ZOOM_OUT;
   const followPitch = s.navigating ? chasePitch(kmh) : CRUISE_PITCH;
   const followPadding = (s.navigating && mapH > 0)
     ? { paddingTop: Math.round(mapH * FOLLOW_LOWER_PAD_FRAC), paddingBottom: 0, paddingLeft: 0, paddingRight: 0 }
     : undefined;
+
+  // MANDATORY heading-up — mirror the phone: plain Follow + a HELD heading, NOT
+  // FollowWithCourse (which wobbles on raw GPS course and spins when stopped). Holding
+  // the last good heading keeps the map heading-up even at a standstill.
+  const camHdgRef = useRef(hdg);
+  if (typeof s.heading === 'number') camHdgRef.current = s.heading;
+  const followHeadingDeg = camHdgRef.current;
 
   // Active route → GeoJSON. Only drawn when the polyline decodes to a real line.
   const routeCoords = decodePolyline(s.routePolyline).map((p) => [p.longitude, p.latitude]);
@@ -169,11 +182,12 @@ export default function CarMapView({ onGLError }: Props) {
           below (the smooth interpolated track), not raw GPS. */}
       <Camera
         followUserLocation={hasFix}
-        followUserMode={UserTrackingMode.FollowWithCourse}
+        followUserMode={UserTrackingMode.Follow}
         followZoomLevel={followZoom}
+        followHeading={followHeadingDeg}
         followPitch={followPitch}
         followPadding={followPadding}
-        defaultSettings={hasFix ? { centerCoordinate: [lng, lat], zoomLevel: followZoom } : undefined}
+        defaultSettings={hasFix ? { centerCoordinate: [lng, lat], zoomLevel: followZoom, heading: followHeadingDeg } : undefined}
       />
 
       {/* Register the self-car 3D model for the chosen paint. */}

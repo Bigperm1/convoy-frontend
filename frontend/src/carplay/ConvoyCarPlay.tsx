@@ -57,6 +57,20 @@ const WEATHER_GLYPH: Record<string, string> = {
   cloudy: '☁️', fog: '🌫️', rain: '🌧️', snow: '❄️', thunder: '⛈️',
 };
 
+// Upcoming-maneuver glyph for the car banner's green arrow box (mirrors the phone's
+// maneuver icon). Derived from the instruction text — Routes API verbs land in it.
+function maneuverArrow(instruction: string): string {
+  const t = (instruction || '').toLowerCase();
+  if (/\bu[- ]?turn\b/.test(t)) return '⟲';
+  if (/\bslight left\b/.test(t)) return '↖';
+  if (/\bslight right\b/.test(t)) return '↗';
+  if (/\bleft\b/.test(t)) return '↰';
+  if (/\bright\b/.test(t)) return '↱';
+  if (/\bmerge\b/.test(t)) return '⤵';
+  if (/\b(ramp|exit|take)\b/.test(t)) return '↗';
+  return '↑';
+}
+
 // react-native-carplay's Android checkForConnection() emits a spurious
 // `didConnect` at startup even with NO head unit attached (it calls
 // eventEmitter.didConnect() unconditionally). Building any template before a
@@ -366,8 +380,13 @@ export function CarSurface() {
           off-nav the map speaks for itself. */}
       {s.navigating ? (
         <View style={styles.topStrip} pointerEvents="none">
-          <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
-          <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
+          <View style={styles.maneuverBox}>
+            <Text style={styles.maneuverArrow}>{s.maneuverIcon || '↑'}</Text>
+          </View>
+          <View style={styles.topTextCol}>
+            <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
+            <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
+          </View>
         </View>
       ) : null}
 
@@ -545,6 +564,8 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd, 
         ? `${Math.round(getSettings().speedUnit === 'mph' ? weather.tempF : weather.tempC)}°`
         : undefined,
       weatherKind: weather ? weatherKind(weather) : undefined,
+      // Arrow glyph for the car banner's maneuver box.
+      maneuverIcon: tbt.active ? maneuverArrow(upcomingInstruction(route, tbt.stepIndex)) : undefined,
     });
   }, [
     tbt.active,
@@ -786,8 +807,10 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd, 
 }
 
 const styles = StyleSheet.create({
-  surface: { flex: 1, backgroundColor: '#0B0B0C', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  center: { alignItems: 'center' },
+  // padding 0 → overlays sit at the true screen edges (the CarPlay side bar still
+  // covers the far left, so left-side elements keep a ~68pt offset).
+  surface: { flex: 1, backgroundColor: '#0B0B0C', alignItems: 'center', justifyContent: 'center', padding: 0 },
+  center: { alignItems: 'center', paddingHorizontal: 20 },
   carLogo: { width: 104, height: 104, borderRadius: 22, marginBottom: 18 },
   brand: { color: '#2DEC86', fontSize: 44, fontWeight: '900', letterSpacing: 4 },
   sub: { color: '#9AA0A6', fontSize: 18, marginTop: 8 },
@@ -795,21 +818,21 @@ const styles = StyleSheet.create({
   dist: { color: '#F4F4F4', fontSize: 48, fontWeight: '800', letterSpacing: -1 },
   inst: { color: '#F4F4F4', fontSize: 22, fontWeight: '600', marginTop: 4, textAlign: 'center' },
   meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },
-  // Bottom-LEFT, tucked just right of the CarPlay side bar (~64pt).
-  speedDock: { position: 'absolute', left: 72, bottom: 18, alignItems: 'flex-start' },
-  speedPill: { alignItems: 'center', backgroundColor: 'rgba(11,11,12,0.82)', borderRadius: 16, paddingHorizontal: 18, paddingVertical: 8 },
-  speedNum: { color: '#F4F4F4', fontSize: 30, fontWeight: '800' },
-  speedUnit: { color: '#9AA0A6', fontSize: 12, fontWeight: '600' },
-  // Posted speed-limit sign — white plate, red border. Bottom-LEFT, stacked right
-  // above the speedo (same left edge) so the two read together.
-  speedLimitBadge: { position: 'absolute', left: 72, bottom: 82, alignItems: 'center', backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 3, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, minWidth: 54 },
-  speedLimitCap: { color: '#6B7075', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
-  speedLimitNum: { color: '#0B0B0C', fontSize: 24, fontWeight: '900' },
-  // Compass — top-right, below the maneuver strip, clear of the speed-limit badge.
-  compassDock: { position: 'absolute', right: 20, top: 70, width: 52, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,12,0.55)', borderRadius: 26 },
-  // Weather chip — top-left (clear of the CarPlay side bar), glyph + temp.
-  weatherChip: { position: 'absolute', left: 72, top: 14, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 14 },
-  weatherText: { color: '#F4F4F4', fontSize: 16, fontWeight: '700' },
+  // Bottom-LEFT, tucked just right of the CarPlay side bar (~64pt). Smaller pill.
+  speedDock: { position: 'absolute', left: 68, bottom: 10, alignItems: 'flex-start' },
+  speedPill: { alignItems: 'center', backgroundColor: 'rgba(11,11,12,0.82)', borderRadius: 11, paddingHorizontal: 11, paddingVertical: 4 },
+  speedNum: { color: '#F4F4F4', fontSize: 21, fontWeight: '800' },
+  speedUnit: { color: '#9AA0A6', fontSize: 9, fontWeight: '600' },
+  // Posted speed-limit sign — white plate, black border. Bottom-LEFT, stacked right
+  // above the speedo (same left edge). Smaller plate.
+  speedLimitBadge: { position: 'absolute', left: 68, bottom: 52, alignItems: 'center', backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 3, minWidth: 40 },
+  speedLimitCap: { color: '#6B7075', fontSize: 8, fontWeight: '800', letterSpacing: 0.5 },
+  speedLimitNum: { color: '#0B0B0C', fontSize: 17, fontWeight: '900' },
+  // Compass — top-right, below the maneuver banner. Smaller, closer to the edge.
+  compassDock: { position: 'absolute', right: 8, top: 58, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,12,0.55)', borderRadius: 22 },
+  // Weather chip — top-left (clear of the CarPlay side bar), glyph + temp. Smaller.
+  weatherChip: { position: 'absolute', left: 68, top: 8, paddingHorizontal: 9, paddingVertical: 3, backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 11 },
+  weatherText: { color: '#F4F4F4', fontSize: 13, fontWeight: '700' },
   // --- live static-map mode ---
   preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   markerCenter: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
@@ -819,13 +842,17 @@ const styles = StyleSheet.create({
     borderLeftWidth: 10, borderRightWidth: 10, borderBottomWidth: 18,
     borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#2DEC86',
   },
-  // Rounded maneuver CARD (mirrors the phone banner) — not a full-bleed strip. Sits
-  // top, clear of the CarPlay side bar on the left and the compass below it.
-  topStrip: { position: 'absolute', top: 12, left: 84, right: 18, flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 16, backgroundColor: 'rgba(11,11,12,0.92)', borderRadius: 16 },
-  topDist: { color: '#2DEC86', fontSize: 26, fontWeight: '800', marginRight: 14 },
-  topInst: { color: '#F4F4F4', fontSize: 20, fontWeight: '600', flexShrink: 1 },
+  // Compact maneuver CARD (mirrors the phone banner), tucked TOP-RIGHT: a green arrow
+  // box + a [meters / instruction] column. Smaller than the old full-bleed strip.
+  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(11,11,12,0.94)', borderRadius: 12 },
+  maneuverBox: { width: 36, height: 36, borderRadius: 9, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
+  maneuverArrow: { color: '#0B0B0C', fontSize: 24, fontWeight: '900', lineHeight: 28, marginTop: -1 },
+  topTextCol: { flexShrink: 1 },
+  topDist: { color: '#2DEC86', fontSize: 17, fontWeight: '800' },
+  topInst: { color: '#F4F4F4', fontSize: 12, fontWeight: '600', flexShrink: 1 },
   topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 14 },
   topChipText: { color: '#2DEC86', fontSize: 15, fontWeight: '800', letterSpacing: 1 },
-  bottomMeta: { position: 'absolute', right: 16, bottom: 18, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 12 },
-  bottomText: { color: '#C7CCD1', fontSize: 16, fontWeight: '600' },
+  // ETA / arrival — tucked into the BOTTOM-RIGHT corner, small.
+  bottomMeta: { position: 'absolute', right: 8, bottom: 8, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(11,11,12,0.72)', borderRadius: 10 },
+  bottomText: { color: '#C7CCD1', fontSize: 12, fontWeight: '600' },
 });

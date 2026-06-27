@@ -1901,16 +1901,14 @@ export default function MapScreen() {
   // own marker either.
   // Avatar visibility mode (settings.avatarMode, legacy-synced with avatarLive):
   //   ghost   → never broadcast (opt out, same as the old avatarLive=false)
-  //   partial → broadcast ONLY while a CarPlay/AA head unit is connected; on
-  //             disconnect we drop the channel so peers see us leave
-  //   full    → always broadcast; while the head unit is DISCONNECTED we fall back
-  //             to the last-known car location tagged "parked" instead of "live"
+  //   partial → ALWAYS broadcast: LIVE (follows the car) while a CarPlay/AA head unit
+  //             is connected, and PINNED to the last car spot (status "parked") on
+  //             disconnect — so your REAL location away from the car is never shared,
+  //             only the car's last position. Reconnect resumes live tracking.
+  //   full    → same broadcast + pin-on-disconnect behavior.
   const avatarMode = getAvatarMode(settings);
   const baseChannel = settings.activeCommunityId ? `convoy:community:${settings.activeCommunityId}` : null;
-  const presenceChannel =
-    avatarMode === "ghost" ? null
-    : avatarMode === "partial" ? (carConnected ? baseChannel : null)
-    : baseChannel; // full
+  const presenceChannel = avatarMode === "ghost" ? null : baseChannel;
 
   // Last GPS sample seen WHILE the car head unit was connected — used as the
   // "parked" fallback position in full mode after the unit disconnects.
@@ -1919,9 +1917,10 @@ export default function MapScreen() {
     if (carConnected && coords) lastCarLocRef.current = { lat: coords.lat, lng: coords.lng };
   }, [carConnected, coords?.lat, coords?.lng]);
 
-  // Position + status we actually broadcast. Full-mode-while-disconnected →
-  // last-known car spot, status "parked"; everything else → live coords.
-  const presenceParked = avatarMode === "full" && !carConnected;
+  // Position + status we actually broadcast. PARTIAL or FULL while DISCONNECTED →
+  // pinned at the last car spot, status "parked" (real location hidden); connected
+  // (or any other state) → live coords.
+  const presenceParked = avatarMode !== "ghost" && !carConnected;
   const presencePos = presenceParked
     ? (lastCarLocRef.current ?? (coords ? { lat: coords.lat, lng: coords.lng } : null))
     : (coords ? { lat: coords.lat, lng: coords.lng, heading: coords.heading || 0 } : null);

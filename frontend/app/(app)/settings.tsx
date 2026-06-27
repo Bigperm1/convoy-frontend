@@ -138,7 +138,7 @@ export default function SettingsScreen() {
             icon="car-outline"
             iconColor="#0A84FF"
             title="Partial"
-            subtitle="Visible only while you're connected to your car. Disconnect and you drop off the map until you reconnect."
+            subtitle="Live while you're connected to your car; disconnect and you stay pinned at your car's last spot — your real location away from the car is never shared. Reconnect to go live."
             selected={getAvatarMode(settings) === "partial"}
             onSelect={() => setAvatarMode("partial")}
           />
@@ -153,7 +153,7 @@ export default function SettingsScreen() {
           />
         </Glass>
         <Text style={styles.helpText}>
-          Full keeps you on the map even when you step away — pinned to your car, never your real location. Partial shows you only while you're connected to the car. Ghost hides you completely.
+          Full and Partial both keep you on the map at your car — live while you drive, pinned at your car's spot when you disconnect, never your real location away from it. Ghost hides you completely.
         </Text>
 
         {/* Map View — exclusive radio choice. We render two RadioRows that

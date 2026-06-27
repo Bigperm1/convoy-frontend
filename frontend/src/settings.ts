@@ -121,7 +121,7 @@ mapDark: false,
 mapMode: "auto",
 mapboxEngine: true,
 show3dBuildings: true,
-novaGreeting: true,
+novaGreeting: false,
 novaSpeeding: false,
 novaMidDrive: false,
 novaMuted: false,
@@ -243,6 +243,7 @@ try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
 // getAvatarMode (privacy-safe — a ghost/OFF user stays invisible).
 if (parsed.baselineMigrated === undefined) {
 cached.speedCameras = false;
+cached.novaGreeting = false;
 if (parsed.mapMode === undefined || parsed.mapMode === "dusk") cached.mapMode = "auto";
 cached.baselineMigrated = true;
 try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}

@@ -21,7 +21,7 @@ export const CAR_LIVE_MAP_ENABLED = false;
 // React tree renders and the bug is in CarSurface's content; if it stays the bare
 // CONVOY logo (the iOS splash), the bridgeless Fabric surface is not committing a
 // tree and the fix is native. Flip back to FALSE once the question is settled.
-export const CAR_DIAG_MODE = true;
+export const CAR_DIAG_MODE = false;
 
 const ownerListeners = new Set<(v: boolean) => void>();
 

@@ -130,10 +130,12 @@ enum ConvoyRNHost {
   static var carConnectAt: Date?
   static var carLastPaintAt: Date?
   static var carActivatedOnce = false
-  // Once the car surface has a real (non-zero) size, STOP re-minting it. The live
-  // @rnmapbox MapView takes 1-3s to load its style; re-minting it mid-load (the
-  // boot burst) tears the GL map down before it can paint. One stable mount lets
-  // the map converge; the JS frame watchdog still demotes to static if it fails.
+  // TRUE only once an ACTUAL Fabric frame has committed on the car window
+  // (ConvoyCarRootViewController.forceCarCommit -> RCTFabricSurface.synchronouslyWaitFor).
+  // NOT a size flag — latching on VC size (old build 56/57) froze the commit loop
+  // before the deferred [surface start] ran, so the surface never committed and the
+  // window stayed on the splash loadingView (the "logo"). Gating on a real commit lets
+  // the bounded tick retry until start() lands.
   static var carPainted = false
 
   // Phone "main" second-surface rescue (cold-CarPlay-first). Mirrors the car vars.
@@ -149,7 +151,7 @@ enum ConvoyRNHost {
     carActivatedOnce = false
     carPainted = false
     carLastPaintAt = nil
-    carRepaintBudget = 30
+    carRepaintBudget = 120
     scheduleCarRepaintTick()
   }
 
@@ -158,9 +160,14 @@ enum ConvoyRNHost {
   // yet active (invisible, harmless) and STOP the moment it first goes active, after
   // which activation drives the repaint. Fallback only — for the rare no-activation case.
   static func scheduleCarRepaintTick() {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-      guard carWindowRef != nil, !carPainted, !carActivatedOnce, let t0 = carConnectAt,
-            Date().timeIntervalSince(t0) < 34.0 else { return }
+    // Runs continuously (pre AND post activation) every 0.4s until a real frame
+    // commits (carPainted) or the connect ages out. The async [surface start] can
+    // land anywhere in the first few seconds on a slow head unit, so we must keep
+    // retrying the commit on the SAME surface well past scene activation — not just
+    // in a 3-shot burst. Self-terminates on carPainted / empty budget / 40s.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+      guard carWindowRef != nil, !carPainted, let t0 = carConnectAt,
+            Date().timeIntervalSince(t0) < 40.0 else { return }
       repaintCarSurface()
       scheduleCarRepaintTick()
     }
@@ -170,26 +177,28 @@ enum ConvoyRNHost {
   // Toyota boot it can land anywhere in 5-30s. Burst a few re-mints right then so the
   // surface commits while active.
   static func burstCarRepaints() {
+    // Scene went active/foreground — top up the budget and take an immediate commit
+    // attempt. The continuous tick (armed at connect) keeps retrying after this.
     carActivatedOnce = true
-    if carRepaintBudget < 6 { carRepaintBudget = 6 }
-    for d in [0.0, 0.25, 0.6] {
-      DispatchQueue.main.asyncAfter(deadline: .now() + d) { repaintCarSurface() }
-    }
+    if carRepaintBudget < 60 { carRepaintBudget = 60 }
+    repaintCarSurface()
   }
 
   static func repaintCarSurface() {
-    // Surface already mounted at a real size — don't tear it down again (this is
-    // what kept re-creating the live MapView mid style-load). carPainted is set by
-    // ConvoyCarRootViewController.viewDidLayoutSubviews once it has non-zero bounds.
+    // FORCE A FABRIC COMMIT on the EXISTING car surface — do NOT re-mint. Re-minting
+    // builds a fresh surface whose [surface start] is dispatched async all over again,
+    // discarding the one that was about to commit (the old bursts only painted by luck).
+    // carPainted flips ONLY when a real frame commits (forceCarCommit ->
+    // RCTFabricSurface.synchronouslyWaitFor == true), so this bounded tick retries the
+    // commit on the one surface until the deferred start() has run and JS rendered.
     if carPainted { return }
     guard started, carRepaintBudget > 0,
           let window = carWindowRef,
-          let appDelegate = UIApplication.shared.delegate as? AppDelegate,
-          appDelegate.reactNativeFactory != nil else { return }
-    if let last = carLastPaintAt, Date().timeIntervalSince(last) < 0.15 { return }
+          let vc = window.rootViewController as? ConvoyCarRootViewController else { return }
+    if let last = carLastPaintAt, Date().timeIntervalSince(last) < 0.1 { return }
     carLastPaintAt = Date()
     carRepaintBudget -= 1
-    remintHostedSurface(moduleName: "ConvoyCarSurface", in: window) { ConvoyCarRootViewController(hosted: $0) }
+    vc.forceCarCommit()
   }
 
   // ── PHONE surface rescue (mirror of the car rescue) ─────────────────────
@@ -375,16 +384,53 @@ final class ConvoyCarRootViewController: UIViewController, ConvoyHostedVC {
     hosted.frame = view.bounds
     hosted.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     view.addSubview(hosted)
+    clearCarSplash()
     dbg.textColor = UIColor(red: 0, green: 1, blue: 0.53, alpha: 1)
     dbg.font = .boldSystemFont(ofSize: 13)
     dbg.backgroundColor = UIColor(white: 0, alpha: 0.7)
+    dbg.numberOfLines = 0
+    dbg.textAlignment = .center
     dbg.text = "car: booting"
     dbg.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(dbg)
+    // CENTERED (was pinned top-left, hidden behind the CarPlay side bar) so the full
+    // diagnostic line is readable on the head unit.
     NSLayoutConstraint.activate([
-      dbg.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
-      dbg.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+      dbg.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+      dbg.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+      dbg.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -24),
     ])
+  }
+
+  // expo-splash-screen sets the car surface's loadingView (the CONVOY logo) with
+  // auto-hide DISABLED, and hideAsync() already fired for the phone before this
+  // surface ever existed — so the splash would otherwise stay pinned on this window
+  // forever, even after the surface commits. Clear it so the window shows the real
+  // surface (or a black backstop + this label), never a misleading logo.
+  func clearCarSplash() {
+    if let proxy = hosted as? RCTSurfaceHostingProxyRootView {
+      proxy.loadingView = nil
+    }
+  }
+
+  // Force a real Fabric commit on the EXISTING car surface at the real head-unit size.
+  // setSize stores the constraints; synchronouslyWaitFor drives a mount transaction
+  // regardless of the unchanged-size dedup (it waits on the mounting coordinator's
+  // revision, then schedules the transaction — the same primitive RN uses to force
+  // first paint of RCTLogBoxView). Returns true via carPainted only on a genuine
+  // committed frame, which stops the retry tick.
+  func forceCarCommit() {
+    if ConvoyRNHost.carPainted { return }
+    let target = targetBounds()
+    guard target.width >= 320, target.height >= 120 else { return }
+    if !hosted.bounds.equalTo(target) { hosted.frame = target; hosted.setNeedsLayout(); hosted.layoutIfNeeded() }
+    if let proxy = hosted as? RCTSurfaceHostingProxyRootView,
+       let surface = proxy.surface as? RCTFabricSurface {
+      surface.setSize(target.size)
+      if surface.synchronouslyWaitFor(0.3) {
+        ConvoyRNHost.carPainted = true
+      }
+    }
   }
   // The REAL head-unit size. CarPlay can hand the carWindow a degenerate placeholder
   // (the measured 70x264 sliver) for window.bounds and never re-report a real one — but
@@ -408,19 +454,15 @@ final class ConvoyCarRootViewController: UIViewController, ConvoyHostedVC {
     if !hosted.bounds.equalTo(target) { hosted.frame = target }
     hosted.setNeedsLayout()
     hosted.layoutIfNeeded()
-    // Latch carPainted ONLY at a real head-unit size (>=320x120) — never at the 70x264
-    // sliver. So the repaint loop keeps re-laying-out until a real size arrives, but
-    // stops churning once genuinely sized (lets the live MapView's style settle). This
-    // repairs the build-56 freeze (was: any non-zero size, which latched at 70x264).
-    if target.width >= 320 && target.height >= 120 { ConvoyRNHost.carPainted = true }
-    // Self-diagnosing label (so the next build is conclusive with no Mac/logs):
-    //   "car: <rawWxH> scr<targetWxH> [<state>] rp<budget>"
-    // If scr shows a real size while raw stays 70x264 -> the screen-pin is the fix and
-    // the map fills (unless CarPlay clips to its window). If scr is ALSO 70x264 -> the
-    // unit isn't reporting a real size yet and only a CarPlay-timing fix remains.
-    dbg.text = "car: " + String(Int(view.bounds.width)) + "x" + String(Int(view.bounds.height))
+    // NO carPainted size-latch here — carPainted is set ONLY by forceCarCommit() when a
+    // real Fabric frame commits. Latching on VC size was the build-56/57 bug that froze
+    // the commit loop before the async [surface start] ran, so the surface never painted.
+    // Self-diagnosing label: "car <rawWxH> scr<targetWxH> [<state>] rp<budget> p<painted>".
+    //   p1 = a real frame committed (fix worked); p0 = still waiting on the commit.
+    dbg.text = "car " + String(Int(view.bounds.width)) + "x" + String(Int(view.bounds.height))
       + " scr" + String(Int(target.width)) + "x" + String(Int(target.height))
       + " [" + ConvoyRNHost.carSceneState + "] rp" + String(ConvoyRNHost.carRepaintBudget)
+      + " p" + (ConvoyRNHost.carPainted ? "1" : "0")
     view.bringSubviewToFront(dbg)
   }
 
@@ -646,17 +688,27 @@ function withBridgingImport(config) {
     'ios',
     (cfg) => {
       const { projectName, platformProjectRoot } = cfg.modRequest;
-      const importLine = '#import <react-native-carplay/RNCarPlay.h>';
+      // RNCarPlay (Obj-C) PLUS the Fabric surface types we drive directly to force a
+      // commit on the CarPlay window (RCTSurfaceHostingProxyRootView.surface ->
+      // RCTFabricSurface setSize/synchronouslyWaitFor). All three are PUBLIC React
+      // headers (RCTRootViewFactory + react-native-screens import the same paths).
+      const importLines = [
+        '#import <react-native-carplay/RNCarPlay.h>',
+        '#import <React/RCTSurfaceHostingProxyRootView.h>',
+        '#import <React/RCTFabricSurface.h>',
+      ];
       const candidates = [
         path.join(platformProjectRoot, projectName, `${projectName}-Bridging-Header.h`),
         path.join(platformProjectRoot, projectName, 'noop-Bridging-Header.h'),
       ];
       for (const p of candidates) {
         if (fs.existsSync(p)) {
-          const cur = fs.readFileSync(p, 'utf8');
-          if (!cur.includes(importLine)) {
-            fs.writeFileSync(p, `${cur.trimEnd()}\n${importLine}\n`, 'utf8');
+          let cur = fs.readFileSync(p, 'utf8');
+          let changed = false;
+          for (const line of importLines) {
+            if (!cur.includes(line)) { cur = `${cur.trimEnd()}\n${line}`; changed = true; }
           }
+          if (changed) fs.writeFileSync(p, `${cur.trimEnd()}\n`, 'utf8');
           break;
         }
       }

@@ -18,7 +18,7 @@
 // GL safety: onDidFailLoadingMap -> onGLError(), which the CarPlay surface uses to
 // drop back to the static-image fallback (ConvoyCarPlay's showLive/glFailed).
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { StyleSheet } from 'react-native';
 import Mapbox, {
   MapView,
@@ -56,16 +56,49 @@ const CRUISE_PITCH = 45;
 // Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';
+// Positive-frame watchdog: if the GL map hasn't painted a real frame within this
+// window after mount, demote to the static surface. The secondary CarPlay window
+// can leave the Metal map silently blank, and rnmapbox's onDidFailLoadingMap is a
+// DEAD event on iOS — so we trust a POSITIVE paint signal (onDidFinishRenderingFrameFully)
+// and treat its absence as failure, rather than waiting for an error that never comes.
+const PAINT_WATCHDOG_MS = 6000;
 
 type Props = {
-  // Called when the GL map fails to load on the CarPlay window, so the surface
-  // can fall back to the static <Image>. Wired to MapView.onDidFailLoadingMap.
+  // Called when the GL map fails or never paints on the CarPlay window, so the
+  // surface can fall back to the static <Image>. Driven by onMapLoadingError AND
+  // the positive-frame watchdog below (NOT onDidFailLoadingMap — dead on iOS).
   onGLError?: () => void;
 };
 
 export default function CarMapView({ onGLError }: Props) {
   const s = useCarStore();
   const [mapH, setMapH] = useState(0);
+
+  // Frame watchdog state. paintedRef flips on the first real rendered frame;
+  // firedRef ensures onGLError fires at most once. The map can never get stuck
+  // blank: either it paints (watchdog cleared) or the timeout demotes to static.
+  const paintedRef = useRef(false);
+  const firedRef = useRef(false);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fail = () => {
+    if (firedRef.current || paintedRef.current) return;
+    firedRef.current = true;
+    onGLError?.();
+  };
+  const markPainted = () => {
+    paintedRef.current = true;
+    if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
+  };
+
+  useEffect(() => {
+    // Start the watchdog from MOUNT (after the CarPlay handshake), not connect.
+    watchdogRef.current = setTimeout(() => {
+      if (!paintedRef.current) fail();
+    }, PAINT_WATCHDOG_MS);
+    return () => { if (watchdogRef.current) clearTimeout(watchdogRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const hasFix = typeof s.selfLat === 'number' && typeof s.selfLng === 'number';
   const lat = s.selfLat ?? 0;
@@ -114,7 +147,10 @@ export default function CarMapView({ onGLError }: Props) {
         const h = e?.nativeEvent?.layout?.height;
         if (typeof h === 'number' && h > 0 && Math.abs(h - mapH) > 1) setMapH(h);
       }}
-      onDidFailLoadingMap={() => onGLError?.()}
+      // Real native iOS events (onDidFailLoadingMap is a no-op on iOS — do NOT use):
+      // a rendered frame clears the watchdog; a style/tile load error demotes now.
+      onDidFinishRenderingFrameFully={markPainted}
+      onMapLoadingError={() => fail()}
     >
       {/* Standard basemap with the phone's light preset (3D buildings on). Only
           mounted for Standard; harmless to omit on satellite. `config` is cast to

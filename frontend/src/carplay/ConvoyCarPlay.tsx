@@ -35,7 +35,7 @@ import { NativeModules, Platform, View, Text, Image, StyleSheet } from 'react-na
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
 import { setCarState, getCarState, useCarStore, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
-import { setCarPlayHookOwnsRoot } from './carPlayShared';
+import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 import { formatSpeed, getSettings, getMapMode } from '../settings';
 
@@ -207,11 +207,15 @@ export function CarSurface() {
   }, [hasFix, s.selfLat, s.selfLng, s.routePolyline, s.heading]);
 
   const showMap = hasFix && !!mapUrl;
-  // Path A scaffold: `showLive` will gate the live @rnmapbox MapView next pass.
-  // THIS commit ships no live map — the placeholder branch below renders the same
-  // `staticSurface`, so behavior is unchanged. `setGlFailed` is wired now so next
-  // pass only has to mount <CarMapView/> in the live arm and call it onError.
-  const showLive = hasFix && !glFailed;
+  // Live @rnmapbox MapView gate. Three conditions, all required:
+  //   - CAR_LIVE_MAP_ENABLED: master kill-switch (carPlayShared). Currently FALSE,
+  //     so the car always uses the proven static surface until a native build
+  //     confirms the live GL map paints on the secondary CarPlay window.
+  //   - hasFix: we have a GPS position.
+  //   - !glFailed: CarMapView's frame watchdog hasn't demoted us to static.
+  // When the live arm IS active, <CarMapView/> mounts; its watchdog flips glFailed
+  // (-> showLive false -> static) if it never paints, so the car can't stay blank.
+  const showLive = CAR_LIVE_MAP_ENABLED && hasFix && !glFailed;
 
   // The static-map surface: the live map background as a plain <Image> with the
   // maneuver/chip/meta overlays, falling back to the dashboard/logo when there's

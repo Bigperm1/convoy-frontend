@@ -49,6 +49,12 @@ export type CarState = {
   // Posted speed limit (km/h) for the road the driver is on (OSM/Overpass, fed by
   // the navNotification location feed). undefined/0 → no badge shown.
   speedLimitKmh?: number;
+  // Live weather at the driver (mirror of the phone's WeatherHUD), fed from
+  // useConvoyCarPlay only while the phone's weather layer is on. weatherTemp is the
+  // pre-formatted reading in the driver's unit (e.g. '18°'); weatherKind is a
+  // WeatherKind string the car maps to a glyph. undefined → no weather chip.
+  weatherTemp?: string;
+  weatherKind?: string;
   // On-screen diagnostic breadcrumb for the CarPlay surface (which feed last wrote a
   // position, or which call failed). Shown in the logo fallback so the head-unit screen
   // self-reports why hasFix is false — no Mac/device log needed. e.g. 'fgfeed',

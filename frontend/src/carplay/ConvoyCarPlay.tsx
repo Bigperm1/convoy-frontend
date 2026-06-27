@@ -32,7 +32,7 @@
 // (forced natively in withConvoyCarPlay.js).
 
 import React, { useEffect, useRef, useState } from 'react';
-import { NativeModules, Platform, View, Text, Image, StyleSheet } from 'react-native';
+import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated } from 'react-native';
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
 import { setCarState, getCarState, useCarStore, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
@@ -40,6 +40,7 @@ import CompassNeedle from '../components/CompassNeedle';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 import { formatSpeed, getSettings, getMapMode } from '../settings';
+import { weatherKind, type WeatherCondition } from '../weatherLayer';
 
 const isIOS = Platform.OS === 'ios';
 const isAndroid = Platform.OS === 'android';
@@ -49,6 +50,12 @@ const isAndroid = Platform.OS === 'android';
 // bottomMeta ETA, speed-limit, compass) provide guidance, matching the phone — the
 // native CarPlay UI duplicated and covered them. Flip TRUE to restore native guidance.
 const CAR_NATIVE_GUIDANCE = false;
+
+// WeatherKind → glyph for the CarPlay weather chip (mirrors the phone HUD's conditions).
+const WEATHER_GLYPH: Record<string, string> = {
+  'clear-day': '☀️', 'clear-night': '🌙', 'partly-day': '⛅', 'partly-night': '☁️',
+  cloudy: '☁️', fog: '🌫️', rain: '🌧️', snow: '❄️', thunder: '⛈️',
+};
 
 // react-native-carplay's Android checkForConnection() emits a spurious
 // `didConnect` at startup even with NO head unit attached (it calls
@@ -238,6 +245,27 @@ export function CarSurface() {
     return () => clearInterval(id);
   }, []);
 
+  // Speedo over-limit state — mirrors the phone Speedometer thresholds: dark normally,
+  // ORANGE once over the posted limit, RED at +20km/h (+12mph). speedNum + limitVal are
+  // already in the driver's unit. While over, the pill PULSES (opacity loop) so it grabs
+  // the eye — the "premium" version of the phone's flat color flip.
+  const speedNum = Number(spd.value) || 0;
+  const overStep = getSettings().speedUnit === 'mph' ? 12 : 20;
+  const speedoOver = limitVal != null && speedNum > limitVal;
+  const speedoBg = !speedoOver
+    ? 'rgba(11,11,12,0.82)'
+    : speedNum <= (limitVal as number) + overStep ? '#FF9500' : '#FF3B30';
+  const speedPulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!speedoOver) { speedPulse.setValue(1); return; }
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(speedPulse, { toValue: 0.45, duration: 450, useNativeDriver: true }),
+      Animated.timing(speedPulse, { toValue: 1, duration: 450, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => { loop.stop(); speedPulse.setValue(1); };
+  }, [speedoOver]);
+
   const showMap = hasFix && !!mapUrl;
   // Live @rnmapbox MapView gate. Three conditions, all required:
   //   - CAR_LIVE_MAP_ENABLED: master kill-switch (carPlayShared). Currently TRUE for
@@ -369,19 +397,30 @@ export function CarSurface() {
 
       {/* ---- Shared overlays: render on top of EITHER surface (live or static) ---- */}
 
-      {/* Speed pill — bottom-LEFT, offset right of the CarPlay side bar. */}
+      {/* Speed pill — bottom-LEFT, offset right of the CarPlay side bar. Pulses
+          orange/red over the posted limit (mirrors the phone speedo). */}
       <View style={styles.speedDock} pointerEvents="none">
-        <View style={styles.speedPill}>
+        <Animated.View style={[styles.speedPill, { backgroundColor: speedoBg, opacity: speedPulse }]}>
           <Text style={styles.speedNum}>{spd.value}</Text>
           <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
-        </View>
+        </Animated.View>
       </View>
 
-      {/* Posted speed-limit sign — RIGHT edge (never over the CarPlay left bar). */}
+      {/* Posted speed-limit sign — bottom-left, stacked above the speedo. */}
       {limitVal != null ? (
         <View style={styles.speedLimitBadge} pointerEvents="none">
           <Text style={styles.speedLimitCap}>LIMIT</Text>
           <Text style={styles.speedLimitNum}>{limitVal}</Text>
+        </View>
+      ) : null}
+
+      {/* Live weather chip — top-left, mirrors the phone HUD (glyph + temp). Only
+          shows while the phone's weather layer is feeding carStore. */}
+      {s.weatherTemp ? (
+        <View style={styles.weatherChip} pointerEvents="none">
+          <Text style={styles.weatherText}>
+            {`${s.weatherKind && WEATHER_GLYPH[s.weatherKind] ? WEATHER_GLYPH[s.weatherKind] + '  ' : ''}${s.weatherTemp}`}
+          </Text>
         </View>
       ) : null}
 
@@ -436,13 +475,16 @@ type CarPlayArgs = {
   destination: (LatLng & { label?: string }) | null;
   peers?: Record<string, any> | null;
   onEnd?: () => void;
+  // Live weather at the driver (only while the phone's weather layer is on). Mirrored
+  // into carStore so CarSurface can show the same temp + glyph as the phone HUD.
+  weather?: WeatherCondition | null;
 };
 
 /**
  * Mount ONCE from map.tsx. Mirrors live route + turn-by-turn + nearby-convoy
  * state onto CarPlay (iOS, tabbed) / Android Auto (nav only). No-op on web.
  */
-export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }: CarPlayArgs) {
+export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd, weather }: CarPlayArgs) {
   const [connected, setConnected] = useState(false);
 
   const mapTemplateRef = useRef<any>(null);
@@ -491,6 +533,12 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
       selfCarColor: getSettings().carColor,
       // Base-map mode → car map matches the phone's style choice.
       mapMode: getMapMode(getSettings()),
+      // Live weather (only while the phone's weather layer feeds it). Temp pre-formatted
+      // in the driver's unit; CarSurface maps weatherKind to a glyph.
+      weatherTemp: weather
+        ? `${Math.round(getSettings().speedUnit === 'mph' ? weather.tempF : weather.tempC)}°`
+        : undefined,
+      weatherKind: weather ? weatherKind(weather) : undefined,
     });
   }, [
     tbt.active,
@@ -502,6 +550,7 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
     destination?.label,
     peers,
     user?.speed,
+    weather,
   ]);
 
   // ---- position mirror: ADDITIVE ONLY ----
@@ -738,11 +787,14 @@ const styles = StyleSheet.create({
   speedUnit: { color: '#9AA0A6', fontSize: 12, fontWeight: '600' },
   // Posted speed-limit sign — white plate, red border. Bottom-LEFT, stacked right
   // above the speedo (same left edge) so the two read together.
-  speedLimitBadge: { position: 'absolute', left: 72, bottom: 82, alignItems: 'center', backgroundColor: '#FFFFFF', borderColor: '#D11', borderWidth: 3, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, minWidth: 54 },
+  speedLimitBadge: { position: 'absolute', left: 72, bottom: 82, alignItems: 'center', backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 3, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, minWidth: 54 },
   speedLimitCap: { color: '#6B7075', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
   speedLimitNum: { color: '#0B0B0C', fontSize: 24, fontWeight: '900' },
   // Compass — top-right, below the maneuver strip, clear of the speed-limit badge.
   compassDock: { position: 'absolute', right: 20, top: 70, width: 52, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,12,0.55)', borderRadius: 26 },
+  // Weather chip — top-left (clear of the CarPlay side bar), glyph + temp.
+  weatherChip: { position: 'absolute', left: 72, top: 14, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 14 },
+  weatherText: { color: '#F4F4F4', fontSize: 16, fontWeight: '700' },
   // --- live static-map mode ---
   preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   markerCenter: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },

@@ -1078,7 +1078,7 @@ export default function MapScreen() {
   // Mirrors the active route + live turn-by-turn state onto the car display.
   // Consumes the SAME tbt/route the phone UI uses — no second engine, no double
   // voice. Safe no-op on web and on any build without the CarPlay native module.
-  const { connected: carConnected } = useConvoyCarPlay({ route: activeRoute, tbt, user: coords, destination, peers, onEnd: endNav });
+  const { connected: carConnected } = useConvoyCarPlay({ route: activeRoute, tbt, user: coords, destination, peers, onEnd: endNav, weather });
   // Delete a hazard (by id) — used by the long-press / right-click flow on
   // markers. Optimistically removes from local state on success so the pin
   // disappears immediately. Backend already authorizes (only the original

@@ -121,6 +121,16 @@ protocol ConvoyHostedVC: AnyObject {
   func swapHosted(_ newHosted: UIView)
 }
 
+// Lets Swift call RCTFabricSurface's synchronouslyWaitFor: WITHOUT importing
+// <React/RCTFabricSurface.h> (that header is C++ and cannot live in an Obj-C
+// bridging header). The real surface responds to this selector at runtime; we
+// dispatch dynamically through @objc optional on AnyObject. synchronouslyWaitFor:
+// blocks up to the timeout for a render revision then schedules the mount — the same
+// primitive RN uses to force first paint of RCTLogBoxView.
+@objc protocol ConvoyFabricWait {
+  @objc optional func synchronouslyWaitFor(_ timeout: TimeInterval) -> Bool
+}
+
 enum ConvoyRNHost {
   static var started = false
 
@@ -409,6 +419,7 @@ final class ConvoyCarRootViewController: UIViewController, ConvoyHostedVC {
   // surface (or a black backstop + this label), never a misleading logo.
   func clearCarSplash() {
     if let proxy = hosted as? RCTSurfaceHostingProxyRootView {
+      proxy.loadingView?.removeFromSuperview()
       proxy.loadingView = nil
     }
   }
@@ -424,10 +435,13 @@ final class ConvoyCarRootViewController: UIViewController, ConvoyHostedVC {
     let target = targetBounds()
     guard target.width >= 320, target.height >= 120 else { return }
     if !hosted.bounds.equalTo(target) { hosted.frame = target; hosted.setNeedsLayout(); hosted.layoutIfNeeded() }
-    if let proxy = hosted as? RCTSurfaceHostingProxyRootView,
-       let surface = proxy.surface as? RCTFabricSurface {
-      surface.setSize(target.size)
-      if surface.synchronouslyWaitFor(0.3) {
+    if let proxy = hosted as? RCTSurfaceHostingProxyRootView, let surface = proxy.surface {
+      // setMinimumSize == maximumSize == real size stores the constraints (pure-ObjC
+      // RCTSurfaceProtocol). synchronouslyWaitFor (Fabric-only, reached via the @objc
+      // shim) then forces a mount transaction regardless of the unchanged-size dedup,
+      // returning true once a real frame committed.
+      surface.setMinimumSize(target.size, maximumSize: target.size)
+      if (surface as AnyObject).synchronouslyWaitFor?(0.3) == true {
         ConvoyRNHost.carPainted = true
       }
     }
@@ -688,14 +702,17 @@ function withBridgingImport(config) {
     'ios',
     (cfg) => {
       const { projectName, platformProjectRoot } = cfg.modRequest;
-      // RNCarPlay (Obj-C) PLUS the Fabric surface types we drive directly to force a
-      // commit on the CarPlay window (RCTSurfaceHostingProxyRootView.surface ->
-      // RCTFabricSurface setSize/synchronouslyWaitFor). All three are PUBLIC React
-      // headers (RCTRootViewFactory + react-native-screens import the same paths).
+      // RNCarPlay PLUS the PURE-OBJC surface types we use to force a commit on the
+      // CarPlay window: RCTSurfaceHostingProxyRootView (its .surface / .loadingView)
+      // and RCTSurfaceProtocol (setMinimumSize:maximumSize:). We deliberately do NOT
+      // import <React/RCTFabricSurface.h> — it pulls in C++ (react/renderer + a
+      // facebook::react:: method) and a Swift bridging header is compiled as Obj-C,
+      // not Obj-C++, so importing it would break the build. The Fabric-only
+      // synchronouslyWaitFor: is reached via an @objc dynamic shim instead.
       const importLines = [
         '#import <react-native-carplay/RNCarPlay.h>',
         '#import <React/RCTSurfaceHostingProxyRootView.h>',
-        '#import <React/RCTFabricSurface.h>',
+        '#import <React/RCTSurfaceProtocol.h>',
       ];
       const candidates = [
         path.join(platformProjectRoot, projectName, `${projectName}-Bridging-Header.h`),

@@ -184,16 +184,21 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   // car map now relies on (acquireBgLocation). Cheap no-op when CarPlay isn't up.
   const _h = loc.coords.heading;
   const _sp = loc.coords.speed;
+  // CRITICAL: position lands first, unconditionally, depends on nothing new. A
+  // throw while reading settings/mapMode (cold/headless context) must NEVER skip
+  // this write — otherwise selfLat/selfLng stay null, hasFix is false, and the car
+  // surface falls back to the CONVOY logo (the build-55 regression).
   setCarState({
     selfLat: loc.coords.latitude,
     selfLng: loc.coords.longitude,
     heading: typeof _h === "number" && _h >= 0 ? _h : null,
     speedMs: typeof _sp === "number" && _sp >= 0 ? _sp : 0,
-    // Best-effort on the cold/background path (cache may be unhydrated in a
-    // separate bg JS context → undefined → car root uses the default model).
-    selfCarColor: getSettings().carColor,
-    mapMode: getMapMode(getSettings()),
   });
+  // Best-effort metadata — wrapped so it can never block the position write above.
+  // (cache may be unhydrated in a separate bg JS context → defaults, which is fine.)
+  try {
+    setCarState({ selfCarColor: getSettings().carColor, mapMode: getMapMode(getSettings()) });
+  } catch {}
   maybeUpdateSpeedLimit(loc.coords.latitude, loc.coords.longitude);
   await updateNavBanner(loc.coords.latitude, loc.coords.longitude);
 });
@@ -228,14 +233,17 @@ async function startForegroundCarFeed(): Promise<void> {
       (loc) => {
         const h = loc.coords.heading;
         const sp = loc.coords.speed;
+        // CRITICAL: position lands first, unconditionally (see the bg task above).
         setCarState({
           selfLat: loc.coords.latitude,
           selfLng: loc.coords.longitude,
           heading: typeof h === "number" && h >= 0 ? h : null,
           speedMs: typeof sp === "number" && sp >= 0 ? sp : 0,
-          selfCarColor: getSettings().carColor,
-          mapMode: getMapMode(getSettings()),
         });
+        // Best-effort metadata — wrapped so it can never block the position write.
+        try {
+          setCarState({ selfCarColor: getSettings().carColor, mapMode: getMapMode(getSettings()) });
+        } catch {}
         maybeUpdateSpeedLimit(loc.coords.latitude, loc.coords.longitude);
       }
     );

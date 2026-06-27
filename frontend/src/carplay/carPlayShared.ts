@@ -4,15 +4,15 @@
 // phone hook takes over (the hook feeds richer state: route + live nav).
 export let carPlayHookOwnsRoot = false;
 
-// Master kill-switch for the LIVE @rnmapbox MapView on the CarPlay window.
-// FALSE: render the PROVEN static Mapbox Static-Images map on CarPlay (heading-up
-// street map + car marker + route + the overlays). The live @rnmapbox GL MapView
-// does NOT render on this head unit even on MapboxMaps 11.25.0 — it crashes the
-// CarPlay surface (React tree throws → blank → the iOS splash logo shows through),
-// and because the throw happens during render the frame watchdog can't catch it.
-// Forcing static gives a reliable, working dashboard. Re-enabling live needs an
-// error boundary around CarMapView + a head unit where GL actually paints.
-export const CAR_LIVE_MAP_ENABLED = false;
+// Master kill-switch for the LIVE @rnmapbox MapView (the Mapbox SDK 3D map) on the
+// CarPlay window — the SAME engine the phone uses. TRUE = render the live SDK map.
+// (It was briefly flipped FALSE on a wrong theory that the live map was crashing the
+// surface; the magenta probe disproved that — the real blocker was that the bridgeless
+// Fabric surface never committed a frame, fixed natively in withConvoyCarPlay.js.)
+// CarMapView is now wrapped in an error boundary in ConvoyCarPlay.tsx, so a render
+// throw demotes to the static map instead of blanking; the frame watchdog still
+// demotes on a GL load failure. Flip FALSE via OTA only as an instant rollback.
+export const CAR_LIVE_MAP_ENABLED = true;
 
 // DIAGNOSTIC: when TRUE, CarSurface short-circuits to a dependency-free full-screen
 // magenta panel with a live ticking counter — NO map, NO GPS, NO store-derived

@@ -22,13 +22,14 @@
 // on web (a ConvoyCarPlay.web.tsx stub keeps it out of the web bundle entirely)
 // and on any build without the native module — it can never crash at import.
 //
-// The car's map AREA (CarSurface) renders a REAL street map: a Mapbox Static
-// Images frame centered on the driver (route line overlaid), refreshed as the
-// car moves, with the maneuver / nearby / speed read-outs floated on top. It is
-// a static <Image> (no GL <MapView>) on purpose — see the note above CarSurface
-// — so it always draws on the CarPlay window, can't trip the CarPlay watchdog,
-// and ships as a free OTA. Falls back to the original dashboard until a GPS fix
-// arrives or if a frame ever fails to load, so the car screen is never blank.
+// The car's map AREA (CarSurface) renders the LIVE Mapbox SDK 3D map (the same
+// @rnmapbox engine as the phone) via <CarMapView>, with the maneuver / nearby /
+// speed read-outs floated on top. CAR_LIVE_MAP_ENABLED gates it; CarMapView is
+// wrapped in CarMapBoundary and self-demotes (glFailed) to a Mapbox Static Images
+// frame if the GL map throws or never paints, which in turn falls back to the
+// dashboard until a GPS fix arrives — so the car screen is never blank. The live
+// surface only paints once the bridgeless Fabric surface actually commits a frame
+// (forced natively in withConvoyCarPlay.js).
 
 import React, { useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform, View, Text, Image, StyleSheet } from 'react-native';
@@ -148,6 +149,21 @@ function buildStaticMapUrl(lat: number, lng: number, polyline: string, bearing =
 // overlaid) with the maneuver / nearby / speed read-outs floated on top. Until a
 // fix arrives (or if the map image ever fails to load) it falls back to the
 // original dashboard, so the car screen is never worse than before.
+// Catches a RENDER throw from the live <CarMapView> on the CarPlay window (distinct
+// from a GL *load* failure, which CarMapView already reports via onGLError). Without
+// this, a throw would unwind the whole CarSurface tree → nothing commits → blank. The
+// boundary renders null and fires onFail → glFailed → the static map takes over, so
+// the surface still commits and the car screen is never empty.
+class CarMapBoundary extends React.Component<
+  { onFail: () => void; children: React.ReactNode },
+  { dead: boolean }
+> {
+  state = { dead: false };
+  static getDerivedStateFromError() { return { dead: true }; }
+  componentDidCatch() { this.props.onFail(); }
+  render() { return this.state.dead ? null : this.props.children; }
+}
+
 export function CarSurface() {
   const s = useCarStore();
   const spd = formatSpeed(s.speedMs || 0, getSettings().speedUnit);
@@ -341,7 +357,9 @@ export function CarSurface() {
         // Live @rnmapbox map on the CarPlay window. A GL/load failure flips
         // glFailed -> showLive false -> the static surface below takes over.
         <>
-          <CarMapView onGLError={() => setGlFailed(true)} />
+          <CarMapBoundary onFail={() => setGlFailed(true)}>
+            <CarMapView onGLError={() => setGlFailed(true)} />
+          </CarMapBoundary>
           {mapOverlays}
         </>
       ) : (

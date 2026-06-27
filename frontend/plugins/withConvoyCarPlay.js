@@ -130,6 +130,11 @@ enum ConvoyRNHost {
   static var carConnectAt: Date?
   static var carLastPaintAt: Date?
   static var carActivatedOnce = false
+  // Once the car surface has a real (non-zero) size, STOP re-minting it. The live
+  // @rnmapbox MapView takes 1-3s to load its style; re-minting it mid-load (the
+  // boot burst) tears the GL map down before it can paint. One stable mount lets
+  // the map converge; the JS frame watchdog still demotes to static if it fails.
+  static var carPainted = false
 
   // Phone "main" second-surface rescue (cold-CarPlay-first). Mirrors the car vars.
   static weak var phoneWindowRef: UIWindow?
@@ -142,6 +147,7 @@ enum ConvoyRNHost {
     carWindowRef = window
     carConnectAt = Date()
     carActivatedOnce = false
+    carPainted = false
     carLastPaintAt = nil
     carRepaintBudget = 30
     scheduleCarRepaintTick()
@@ -153,7 +159,7 @@ enum ConvoyRNHost {
   // which activation drives the repaint. Fallback only — for the rare no-activation case.
   static func scheduleCarRepaintTick() {
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-      guard carWindowRef != nil, !carActivatedOnce, let t0 = carConnectAt,
+      guard carWindowRef != nil, !carPainted, !carActivatedOnce, let t0 = carConnectAt,
             Date().timeIntervalSince(t0) < 34.0 else { return }
       repaintCarSurface()
       scheduleCarRepaintTick()
@@ -172,6 +178,10 @@ enum ConvoyRNHost {
   }
 
   static func repaintCarSurface() {
+    // Surface already mounted at a real size — don't tear it down again (this is
+    // what kept re-creating the live MapView mid style-load). carPainted is set by
+    // ConvoyCarRootViewController.viewDidLayoutSubviews once it has non-zero bounds.
+    if carPainted { return }
     guard started, carRepaintBudget > 0,
           let window = carWindowRef,
           let appDelegate = UIApplication.shared.delegate as? AppDelegate,
@@ -381,6 +391,9 @@ final class ConvoyCarRootViewController: UIViewController, ConvoyHostedVC {
     if !hosted.bounds.equalTo(view.bounds) { hosted.frame = view.bounds }
     hosted.setNeedsLayout()
     hosted.layoutIfNeeded()
+    // Real size reached → mark painted so the repaint loop stops re-minting (the
+    // single stable mount lets the live MapView's style finish loading).
+    if view.bounds.width > 0 && view.bounds.height > 0 { ConvoyRNHost.carPainted = true }
     dbg.text = "car: " + String(Int(view.bounds.width)) + "x" + String(Int(view.bounds.height)) + " [" + ConvoyRNHost.carSceneState + "] rp" + String(ConvoyRNHost.carRepaintBudget)
     view.bringSubviewToFront(dbg)
   }

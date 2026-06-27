@@ -14,12 +14,16 @@ module.exports = ({ config }) => {
     [
       '@rnmapbox/maps',
       {
-        // No RNMapboxMapsVersion pin: defer to @rnmapbox/maps' built-in default
-        // native SDK (mapbox.android in the package's package.json — 11.20.1 for
-        // 10.3.1), the exact version its native Kotlin is compiled against. A
-        // hand-typed pin of 11.16.2 was too old and broke the release Kotlin
-        // compile, so we use the package's own tested default. The package
-        // version is locked in yarn.lock, so this stays reproducible.
+        // Pin the native MapboxMaps SDK to 11.25.0 (was: unpinned → package default
+        // 11.20.1). REASON: Mapbox maps-ios fixed "MapView rendering blank when
+        // attached to an already-active CarPlay scene" in 11.24.0 — the exact bug
+        // that left Convoy's live CarPlay map blank on the secondary window. 11.25.0
+        // is the latest stable 11.x carrying that fix; 11.24.0 itself is flagged
+        // "should not be used" by Mapbox, hence .25. This single string drives BOTH
+        // the iOS pod and the Android Maven dependency. Stay on 11.x (rnmapbox 10.3.1
+        // is not written against 12.x). Validate on a dev-client build before the
+        // paid production build — see the CarPlay live-map work order.
+        RNMapboxMapsVersion: '11.25.0',
         // SECRET download token — read from the environment, NEVER hardcoded or
         // committed. Set RNMAPBOX_DOWNLOAD_TOKEN in .env (local, untracked) and
         // as an EAS secret right before the build. The @rnmapbox plugin writes

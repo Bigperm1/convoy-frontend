@@ -49,6 +49,11 @@ export type CarState = {
   // Posted speed limit (km/h) for the road the driver is on (OSM/Overpass, fed by
   // the navNotification location feed). undefined/0 → no badge shown.
   speedLimitKmh?: number;
+  // On-screen diagnostic breadcrumb for the CarPlay surface (which feed last wrote a
+  // position, or which call failed). Shown in the logo fallback so the head-unit screen
+  // self-reports why hasFix is false — no Mac/device log needed. e.g. 'fgfeed',
+  // 'navtask#3', 'seed:ok#0', 'seed:err#1:…', 'seed:no-fg-perm', 'bgstart:err:…'.
+  carDbg?: string;
 };
 
 const initial: CarState = {

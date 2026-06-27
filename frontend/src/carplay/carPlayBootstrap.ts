@@ -12,8 +12,8 @@
 import { NativeModules, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import { carPlayHookOwnsRoot } from './carPlayShared';
-import { setCarState } from './carStore';
-import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk } from '../navNotification';
+import { setCarState, getCarState } from './carStore';
+import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 
 let booted = false;
 
@@ -51,32 +51,42 @@ export function initCarPlayBootstrap(): void {
   const onConnect = () => {
     setIdleRoot();
     void acquireBgLocation('carplay');
+    // ALSO start the continuous foreground feed directly on connect — independent of
+    // map.tsx (which may be unmounted behind CarPlay) and of acquireBgLocation's
+    // permission branch. It self-guards (idempotent) and is released with the shared
+    // lock on disconnect. This is the main-context writer that keeps the car's GPS
+    // fix alive while the phone is in the mount / foreground.
+    void startForegroundCarFeed();
     // Cold connect: pull the persisted active-route polyline into carStore so the
     // car map draws the real ribbon even though the phone map isn't mounted.
     void hydrateCarRouteFromDisk();
-    // One-shot position seed so hasFix flips true IMMEDIATELY on a cold connect,
-    // instead of waiting for the first watch tick (which can be ~2s, or never if the
-    // app is backgrounded behind the head unit without "Always" permission). setCarState
-    // only ADDS — a later streaming tick overwrites this. Last-known is instant; a
-    // live one-shot is the fallback. NOTE: this does NOT fix a fully-backgrounded
-    // "When In Use" device (iOS won't stream then) — that needs "Always" granted.
+    // Seed an immediate fix so hasFix flips true at once (instead of waiting for the
+    // first watch tick). BOUNDED RETRY: race past a single cold-GPS miss; stop as soon
+    // as any feed has landed a fix. Errors are surfaced to carDbg (shown on the car
+    // overlay) instead of being silently swallowed — so a failure self-reports on screen.
     void (async () => {
-      try {
-        const fg = await Location.getForegroundPermissionsAsync();
-        if (!fg.granted) return;
-        const p = (await Location.getLastKnownPositionAsync())
-          ?? (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
-        if (p?.coords) {
-          const h = p.coords.heading;
-          const sp = p.coords.speed;
-          setCarState({
-            selfLat: p.coords.latitude,
-            selfLng: p.coords.longitude,
-            heading: typeof h === 'number' && h >= 0 ? h : null,
-            speedMs: typeof sp === 'number' && sp >= 0 ? sp : 0,
-          });
-        }
-      } catch {}
+      const fg = await Location.getForegroundPermissionsAsync().catch(() => ({ granted: false }));
+      if (!fg.granted) { setCarState({ carDbg: 'seed:no-fg-perm' }); return; }
+      const acc = Location.Accuracy.Balanced; // read enum ONCE, outside the catch
+      for (let i = 0; i < 8 && CarPlay.connected && getCarState().selfLat == null; i++) {
+        try {
+          const p = (await Location.getLastKnownPositionAsync())
+            ?? (await Location.getCurrentPositionAsync({ accuracy: acc }));
+          if (p?.coords) {
+            const h = p.coords.heading;
+            const sp = p.coords.speed;
+            setCarState({
+              selfLat: p.coords.latitude,
+              selfLng: p.coords.longitude,
+              heading: typeof h === 'number' && h >= 0 ? h : null,
+              speedMs: typeof sp === 'number' && sp >= 0 ? sp : 0,
+              carDbg: 'seed:ok#' + i,
+            });
+            break;
+          }
+        } catch (e) { setCarState({ carDbg: 'seed:err#' + i + ':' + String(e).slice(0, 40) }); }
+        await new Promise((r) => setTimeout(r, 1500));
+      }
     })();
   };
 

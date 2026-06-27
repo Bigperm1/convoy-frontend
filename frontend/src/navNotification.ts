@@ -195,6 +195,7 @@ function maybeUpdateSpeedLimit(lat: number, lng: number): void {
 
 // Background location task — fires on each location update (foreground AND
 // background) and drives the banner. Registered at module load.
+let _navTaskTicks = 0;
 TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   if (error) return;
   const locs = data?.locations;
@@ -213,6 +214,7 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
     selfLng: loc.coords.longitude,
     heading: typeof _h === "number" && _h >= 0 ? _h : null,
     speedMs: typeof _sp === "number" && _sp >= 0 ? _sp : 0,
+    carDbg: "navtask#" + (++_navTaskTicks), // on-screen proof bg ticks are arriving
   });
   // Best-effort metadata — wrapped so it can never block the position write above.
   // (cache may be unhydrated in a separate bg JS context → defaults, which is fine.)
@@ -243,7 +245,7 @@ const _locConsumers = new Set<string>();
 // nav banner) holds the shared location lock, and is released with it.
 let _fgCarWatch: Location.LocationSubscription | null = null;
 
-async function startForegroundCarFeed(): Promise<void> {
+export async function startForegroundCarFeed(): Promise<void> {
   if (_fgCarWatch) return;
   try {
     const fg = await Location.getForegroundPermissionsAsync();
@@ -259,6 +261,7 @@ async function startForegroundCarFeed(): Promise<void> {
           selfLng: loc.coords.longitude,
           heading: typeof h === "number" && h >= 0 ? h : null,
           speedMs: typeof sp === "number" && sp >= 0 ? sp : 0,
+          carDbg: "fgfeed",
         });
         // Best-effort metadata — wrapped so it can never block the position write.
         try {
@@ -299,7 +302,12 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
     // keep them flowing without "Always" on many devices.
     let canBg = false;
     try { canBg = (await Location.requestBackgroundPermissionsAsync()).granted; } catch {}
-    if (!canBg) await startForegroundCarFeed();
+    // ALWAYS start the foreground feed (self-guards via _fgCarWatch; released with the
+    // shared lock). It is the only CONTINUOUS main-context writer that lands selfLat in
+    // the carStore the CarPlay surface reads. Previously this ran only `if (!canBg)`, so
+    // on "Always" it was skipped — leaving the car surface with no fix (CONVOY logo)
+    // whenever the phone backgrounded behind the head unit while idle (not navigating).
+    await startForegroundCarFeed();
     try {
       await Location.startLocationUpdatesAsync(NAV_TASK, {
         accuracy: Location.Accuracy.High,
@@ -314,9 +322,11 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
         },
       });
       return true;
-    } catch {
-      // Background updates couldn't start (likely needs "Always"). The foreground
-      // feed above still keeps the car map alive while the app is foregrounded.
+    } catch (e) {
+      // Background updates couldn't start (likely needs "Always"). Surface the reason
+      // on the car overlay instead of swallowing it. The foreground feed above still
+      // keeps the car map alive while the app is foregrounded.
+      setCarState({ carDbg: "bgstart:err:" + String(e).slice(0, 40) });
       return canBg;
     }
   } catch {

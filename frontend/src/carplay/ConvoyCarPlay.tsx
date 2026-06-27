@@ -272,6 +272,13 @@ export function CarSurface() {
           <Image source={require('../../assets/final_icon.png')} style={styles.carLogo} resizeMode="contain" />
           <Text style={styles.brand}>CONVOY</Text>
           <Text style={styles.sub}>{nearby ? `${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'Drive together'}</Text>
+          {/* Self-diagnosing readout (no Mac/logs needed): shows whether the car surface
+              has a GPS fix, the actual lat/lng it reads, and which feed last wrote
+              (fgfeed / navtask#N / seed:ok / seed:err / seed:no-fg-perm / bgstart:err). */}
+          <Text style={styles.carDbgLine} numberOfLines={2}>
+            {`fix=${hasFix} lat=${typeof s.selfLat === 'number' ? s.selfLat.toFixed(4) : 'null'} `
+              + `lng=${typeof s.selfLng === 'number' ? s.selfLng.toFixed(4) : 'null'}\nfeed=${s.carDbg ?? '-'}`}
+          </Text>
         </>
       )}
     </View>
@@ -679,6 +686,7 @@ const styles = StyleSheet.create({
   carLogo: { width: 104, height: 104, borderRadius: 22, marginBottom: 18 },
   brand: { color: '#2DEC86', fontSize: 44, fontWeight: '900', letterSpacing: 4 },
   sub: { color: '#9AA0A6', fontSize: 18, marginTop: 8 },
+  carDbgLine: { color: '#77FF88', fontSize: 11, fontWeight: '700', marginTop: 14, textAlign: 'center' },
   dist: { color: '#F4F4F4', fontSize: 48, fontWeight: '800', letterSpacing: -1 },
   inst: { color: '#F4F4F4', fontSize: 22, fontWeight: '600', marginTop: 4, textAlign: 'center' },
   meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },

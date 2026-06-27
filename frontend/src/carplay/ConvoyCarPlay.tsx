@@ -415,8 +415,9 @@ export function CarSurface() {
       ) : null}
 
       {/* Live weather chip — top-left, mirrors the phone HUD (glyph + temp). Only
-          shows while the phone's weather layer is feeding carStore. */}
-      {s.weatherTemp ? (
+          shows while the phone's weather layer is feeding carStore, and hidden while
+          navigating so it doesn't collide with the maneuver card. */}
+      {s.weatherTemp && !s.navigating ? (
         <View style={styles.weatherChip} pointerEvents="none">
           <Text style={styles.weatherText}>
             {`${s.weatherKind && WEATHER_GLYPH[s.weatherKind] ? WEATHER_GLYPH[s.weatherKind] + '  ' : ''}${s.weatherTemp}`}
@@ -478,13 +479,16 @@ type CarPlayArgs = {
   // Live weather at the driver (only while the phone's weather layer is on). Mirrored
   // into carStore so CarSurface can show the same temp + glyph as the phone HUD.
   weather?: WeatherCondition | null;
+  // Tapped from the CarPlay native map button — one-tap "report police" at the
+  // driver's current spot. Wired to the phone's reportAlert('police').
+  onReportPolice?: () => void;
 };
 
 /**
  * Mount ONCE from map.tsx. Mirrors live route + turn-by-turn + nearby-convoy
  * state onto CarPlay (iOS, tabbed) / Android Auto (nav only). No-op on web.
  */
-export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd, weather }: CarPlayArgs) {
+export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd, weather, onReportPolice }: CarPlayArgs) {
   const [connected, setConnected] = useState(false);
 
   const mapTemplateRef = useRef<any>(null);
@@ -496,6 +500,8 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd, 
 
   const onEndRef = useRef(onEnd);
   onEndRef.current = onEnd;
+  const onReportPoliceRef = useRef(onReportPolice);
+  onReportPoliceRef.current = onReportPolice;
 
   // ---- claim CarPlay-root ownership while this (phone map) screen is mounted ----
   // Tells the app-root bootstrap (carPlayBootstrap.ts) to stand down so it won't
@@ -592,6 +598,15 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd, 
             guidanceBackgroundColor: '#0B0B0C',
             tripEstimateStyle: 'dark',
             onDidCancelNavigation: () => onEndRef.current?.(),
+            // Native CarPlay map button (the ONLY reliably-touchable element on the
+            // head unit — custom RN overlays don't receive CarPlay touches). One tap
+            // reports police at the driver's current spot via the phone's reportAlert.
+            mapButtons: [
+              { id: 'police', image: require('../../assets/images/police.png') },
+            ],
+            onMapButtonPressed: (e: { id: string }) => {
+              if (e?.id === 'police') onReportPoliceRef.current?.();
+            },
           });
           mapTemplateRef.current = mapTemplate;
 
@@ -804,7 +819,9 @@ const styles = StyleSheet.create({
     borderLeftWidth: 10, borderRightWidth: 10, borderBottomWidth: 18,
     borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#2DEC86',
   },
-  topStrip: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingLeft: 100, paddingRight: 18, backgroundColor: 'rgba(11,11,12,0.74)' },
+  // Rounded maneuver CARD (mirrors the phone banner) — not a full-bleed strip. Sits
+  // top, clear of the CarPlay side bar on the left and the compass below it.
+  topStrip: { position: 'absolute', top: 12, left: 84, right: 18, flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 16, backgroundColor: 'rgba(11,11,12,0.92)', borderRadius: 16 },
   topDist: { color: '#2DEC86', fontSize: 26, fontWeight: '800', marginRight: 14 },
   topInst: { color: '#F4F4F4', fontSize: 20, fontWeight: '600', flexShrink: 1 },
   topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 14 },

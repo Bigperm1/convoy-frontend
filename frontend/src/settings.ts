@@ -10,7 +10,8 @@ const LAST_LOC_KEY = "convoy.lastlocation.v1";
 // Single source of truth for the base-map look (Mapbox light presets + satellite).
 // Legacy mapType/mapDark are kept only for migration + the dormant Google engine,
 // derived from mapMode via the helpers below.
-export type MapMode = "satellite" | "dawn" | "day" | "dusk" | "night";
+// "auto" follows the time of day — getMapMode() resolves it to dawn/day/dusk/night.
+export type MapMode = "satellite" | "dawn" | "day" | "dusk" | "night" | "auto";
 
 // Avatar Live privacy mode — replaces the old avatarLive boolean. Optional for
 // users stored before it existed; getAvatarMode() migrates them (avatarLive
@@ -157,16 +158,33 @@ export function legacyToMapMode(mapType?: string, mapDark?: boolean): MapMode {
   if (mapType === "hybrid") return "satellite";
   return mapDark ? "night" : "day";
 }
-// The effective mode: explicit mapMode if set, else derived from legacy fields.
-// New default look (satellite) falls out of the legacy default (mapType "hybrid").
-export function getMapMode(s: Settings): MapMode {
+// "auto" → a Mapbox light preset by LOCAL time of day. Rough sun-phase bands (no
+// location/date math): night → dawn → day → dusk → night. Picked on each call so the
+// look advances with the clock (the map re-resolves this on its frequent re-renders).
+export function autoMapMode(): Exclude<MapMode, "auto"> {
+  const d = new Date();
+  const h = d.getHours() + d.getMinutes() / 60;
+  if (h >= 5.5 && h < 7.5) return "dawn";
+  if (h >= 7.5 && h < 17.5) return "day";
+  if (h >= 17.5 && h < 20) return "dusk";
+  return "night";
+}
+// The user's CHOSEN mode (raw — may be "auto"). For the settings UI's selected state.
+export function getMapModeChoice(s: Settings): MapMode {
   return s.mapMode ?? legacyToMapMode(s.mapType, s.mapDark);
+}
+// The effective RENDER mode: the chosen mode, with "auto" resolved to a concrete light
+// preset by time of day. Used by the Mapbox engine (phone) + mirrored to CarPlay.
+export function getMapMode(s: Settings): Exclude<MapMode, "auto"> {
+  const choice = getMapModeChoice(s);
+  return choice === "auto" ? autoMapMode() : choice;
 }
 // Derive the legacy mapType/mapDark the Google/web engines still consume.
 // dawn/day render light, dusk/night render dark on the (non-preset) Google map.
 export function mapModeToLegacy(mode: MapMode): { mapType: "hybrid" | "roadmap"; mapDark: boolean } {
-  if (mode === "satellite") return { mapType: "hybrid", mapDark: false };
-  return { mapType: "roadmap", mapDark: mode === "dusk" || mode === "night" };
+  const m = mode === "auto" ? autoMapMode() : mode;
+  if (m === "satellite") return { mapType: "hybrid", mapDark: false };
+  return { mapType: "roadmap", mapDark: m === "dusk" || m === "night" };
 }
 
 // ---- Avatar Live mode helpers (source of truth = settings.avatarMode) ----

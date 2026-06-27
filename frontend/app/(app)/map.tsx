@@ -25,7 +25,7 @@ import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/component
 import { hailBus } from "../../src/hailBus";
 import { subscribeAvatarHold } from "../../src/avatarHoldBus";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, mapModeToLegacy, getAvatarMode, setAvatarMode, unitForCountry, getSpeedAlertMode } from "../../src/settings";
+import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, getMapModeChoice, mapModeToLegacy, getAvatarMode, setAvatarMode, unitForCountry, getSpeedAlertMode } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import { BearingTracker } from "../../src/bearing";
@@ -601,6 +601,8 @@ export default function MapScreen() {
   // from the Settings screen AND the on-map Layers sheet. The Mapbox engine uses
   // mapMode directly; the Google/web engines use the derived mapType/mapDark.
   const mapMode = getMapMode(settings);
+  // The RAW chosen mode (may be "auto") — for the Layers sheet's radio selection.
+  const mapModeChoice = getMapModeChoice(settings);
   const { mapType, mapDark } = mapModeToLegacy(mapMode);
   // Live map bearing (deg) reported by the engine — drives the Compass FAB's
   // needle rotation. northSignal is a monotonic counter the Compass FAB bumps to
@@ -2763,6 +2765,7 @@ export default function MapScreen() {
               {/* ----- MAP MODE (radio-style; writes settings.mapMode) ----- */}
               <Text style={styles.layerSectionHeader}>MAP MODE</Text>
               {([
+                { key: "auto", label: "Auto", sub: "Follows the time of day" },
                 { key: "satellite", label: "Satellite", sub: "Aerial imagery" },
                 { key: "dawn", label: "Dawn", sub: "Soft morning light" },
                 { key: "day", label: "Day", sub: "Bright daytime" },
@@ -2775,8 +2778,8 @@ export default function MapScreen() {
                     <Text style={styles.layerRowLabel}>{m.label}</Text>
                     <Text style={styles.layerRowSub}>{m.sub}</Text>
                   </View>
-                  <Ionicons name={mapMode === m.key ? "radio-button-on" : "radio-button-off"} size={22}
-                    color={mapMode === m.key ? "#2DEC86" : "#808080"} />
+                  <Ionicons name={mapModeChoice === m.key ? "radio-button-on" : "radio-button-off"} size={22}
+                    color={mapModeChoice === m.key ? "#2DEC86" : "#808080"} />
                 </TouchableOpacity>
               ))}
               <View style={styles.layerRow}>

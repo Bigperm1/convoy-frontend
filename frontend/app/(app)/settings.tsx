@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
-import { useSettings, DEFAULT_SETTINGS, getMapMode, getAvatarMode, setAvatarMode, getSpeedAlertMode } from "../../src/settings";
+import { useSettings, DEFAULT_SETTINGS, getMapModeChoice, getAvatarMode, setAvatarMode, getSpeedAlertMode } from "../../src/settings";
 import { GAS_BRANDS, OCTANES } from "../../src/gasJockey";
 
 // Re-export for navigation
@@ -191,6 +191,7 @@ export default function SettingsScreen() {
         <Text style={styles.sectionLabel}>MAP MODE</Text>
         <Glass radius={16} style={styles.card}>
           {([
+            { key: "auto", icon: "time", color: "#2DEC86", title: "Auto", sub: "Follows the time of day — dawn / day / dusk / night" },
             { key: "satellite", icon: "globe", color: "#0A84FF", title: "Satellite", sub: "Aerial imagery with road labels" },
             { key: "dawn", icon: "partly-sunny", color: "#FF9F0A", title: "Dawn", sub: "Soft morning light" },
             { key: "day", icon: "sunny", color: "#FFB300", title: "Day", sub: "Bright daytime" },
@@ -204,7 +205,7 @@ export default function SettingsScreen() {
                 iconColor={m.color}
                 title={m.title}
                 subtitle={m.sub}
-                selected={getMapMode(settings) === m.key}
+                selected={getMapModeChoice(settings) === m.key}
                 onSelect={() => setSettings({ mapMode: m.key })}
               />
             </React.Fragment>

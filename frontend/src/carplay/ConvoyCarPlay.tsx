@@ -209,9 +209,8 @@ export function CarSurface() {
 
   const showMap = hasFix && !!mapUrl;
   // Live @rnmapbox MapView gate. Three conditions, all required:
-  //   - CAR_LIVE_MAP_ENABLED: master kill-switch (carPlayShared). Currently FALSE,
-  //     so the car always uses the proven static surface until a native build
-  //     confirms the live GL map paints on the secondary CarPlay window.
+  //   - CAR_LIVE_MAP_ENABLED: master kill-switch (carPlayShared). Currently TRUE for
+  //     the MapboxMaps 11.25.0 build; flip FALSE via OTA to force the static surface.
   //   - hasFix: we have a GPS position.
   //   - !glFailed: CarMapView's frame watchdog hasn't demoted us to static.
   // When the live arm IS active, <CarMapView/> mounts; its watchdog flips glFailed
@@ -432,12 +431,11 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
       distanceToTurnM: tbt.active ? tbt.distanceToManeuverM : 0,
       distanceRemainingM: tbt.active ? tbt.distanceRemainingM : 0,
       etaSeconds: tbt.active ? tbt.etaSeconds : 0,
-      // Live map background (CarPlay static map). Mirrored every GPS tick so the
-      // car surface can center the map on the driver and draw the route. Route
-      // polyline is shown whenever a route is active (preview or nav).
-      selfLat: typeof user?.lat === 'number' ? user.lat : null,
-      selfLng: typeof user?.lng === 'number' ? user.lng : null,
-      heading: typeof user?.heading === 'number' ? user.heading : null,
+      // Route polyline (preview or nav) for the car map ribbon. NOTE: position
+      // (selfLat/selfLng/heading) is mirrored in a SEPARATE additive effect below —
+      // it must NEVER be written here, because this metadata effect re-runs on ticks
+      // where `user` is null (peers/route changes), and a null position would clobber
+      // a good fix landed by the cold/foreground feed -> hasFix false -> CONVOY logo.
       routePolyline: route?.polyline || '',
       // Self car paint → lets the car root pick the matching 3D model. Read from
       // local settings (the Garage persists carColor there, same source the phone
@@ -456,10 +454,21 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
     destination?.label,
     peers,
     user?.speed,
-    user?.lat,
-    user?.lng,
-    user?.heading,
   ]);
+
+  // ---- position mirror: ADDITIVE ONLY ----
+  // Writes selfLat/selfLng/heading ONLY when the phone has a real fix. carStore is a
+  // shallow merge, so this can never null out a fix that the cold/foreground location
+  // feed (navNotification) already landed — which is what was bouncing the warm car
+  // surface back to the CONVOY logo. speedMs stays in the metadata effect above.
+  useEffect(() => {
+    if (typeof user?.lat !== 'number' || typeof user?.lng !== 'number') return;
+    setCarState({
+      selfLat: user.lat,
+      selfLng: user.lng,
+      heading: typeof user?.heading === 'number' ? user.heading : null,
+    });
+  }, [user?.lat, user?.lng, user?.heading]);
 
   // ---- connect / disconnect lifecycle ----
   useEffect(() => {

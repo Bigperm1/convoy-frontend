@@ -53,6 +53,10 @@ const SELECTED_INDEX = 0;
 // car we want the Standard 3D buildings to read, so we hold a gentle tilt. During
 // nav we use the phone's speed-aware chasePitch instead.
 const CRUISE_PITCH = 45;
+// Pull the car camera back a touch vs the phone so more of the road ahead reads on the
+// wide head-unit screen. Subtracted from the phone's zoom (Mapbox zoom is log2, so 0.7
+// ≈ 1.6x more area) for both nav and cruise.
+const CAR_ZOOM_OUT = 0.7;
 // Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';
@@ -116,7 +120,7 @@ export default function CarMapView({ onGLError }: Props) {
   // Chase camera (phone math): speed-aware zoom + pitch while navigating, calm
   // cruise framing otherwise. Heading-up via FollowWithCourse.
   const kmh = kmhFromMs(s.speedMs);
-  const followZoom = s.navigating ? chaseZoom(kmh, s.distanceToTurnM) : FOLLOW_ZOOM;
+  const followZoom = (s.navigating ? chaseZoom(kmh, s.distanceToTurnM) : FOLLOW_ZOOM) - CAR_ZOOM_OUT;
   const followPitch = s.navigating ? chasePitch(kmh) : CRUISE_PITCH;
   const followPadding = (s.navigating && mapH > 0)
     ? { paddingTop: Math.round(mapH * FOLLOW_LOWER_PAD_FRAC), paddingBottom: 0, paddingLeft: 0, paddingRight: 0 }

@@ -44,6 +44,12 @@ import { formatSpeed, getSettings, getMapMode } from '../settings';
 const isIOS = Platform.OS === 'ios';
 const isAndroid = Platform.OS === 'android';
 
+// FALSE: do NOT drive CarPlay's NATIVE navigation session (no native maneuver banner,
+// no native trip-estimate bar). The live CarMapView + our own overlays (topStrip TBT,
+// bottomMeta ETA, speed-limit, compass) provide guidance, matching the phone — the
+// native CarPlay UI duplicated and covered them. Flip TRUE to restore native guidance.
+const CAR_NATIVE_GUIDANCE = false;
+
 // react-native-carplay's Android checkForConnection() emits a spurious
 // `didConnect` at startup even with NO head unit attached (it calls
 // eventEmitter.didConnect() unconditionally). Building any template before a
@@ -615,7 +621,7 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd }
     const mapTemplate = mapTemplateRef.current;
     if (!mapTemplate) return;
 
-    if (tbt.active && route && user && destination && !sessionRef.current) {
+    if (CAR_NATIVE_GUIDANCE && tbt.active && route && user && destination && !sessionRef.current) {
       const trip = new lib.Trip({
         origin: { latitude: user.lat, longitude: user.lng, name: 'Start' },
         destination: {
@@ -725,8 +731,8 @@ const styles = StyleSheet.create({
   dist: { color: '#F4F4F4', fontSize: 48, fontWeight: '800', letterSpacing: -1 },
   inst: { color: '#F4F4F4', fontSize: 22, fontWeight: '600', marginTop: 4, textAlign: 'center' },
   meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },
-  // Bottom-LEFT, offset right of the CarPlay side bar (~64pt) so the pill clears it.
-  speedDock: { position: 'absolute', left: 92, bottom: 18, alignItems: 'flex-start' },
+  // Bottom-LEFT, tucked just right of the CarPlay side bar (~64pt).
+  speedDock: { position: 'absolute', left: 72, bottom: 18, alignItems: 'flex-start' },
   speedPill: { alignItems: 'center', backgroundColor: 'rgba(11,11,12,0.82)', borderRadius: 16, paddingHorizontal: 18, paddingVertical: 8 },
   speedNum: { color: '#F4F4F4', fontSize: 30, fontWeight: '800' },
   speedUnit: { color: '#9AA0A6', fontSize: 12, fontWeight: '600' },

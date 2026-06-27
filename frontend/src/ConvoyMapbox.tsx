@@ -390,7 +390,7 @@ type PlacePoint = { id: string; lat: number; lng: number; label: string; price?:
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng: number; heading: number; emissive: number }) {
+export function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng: number; heading: number; emissive: number }) {
   const render = useRef({ lat, lng, heading });
   const anim = useRef<{ fromLat: number; fromLng: number; fromHdg: number; toLat: number; toLng: number; toHdg: number; start: number; dur: number } | null>(null);
   const raf = useRef<number | null>(null);

@@ -736,8 +736,9 @@ const styles = StyleSheet.create({
   speedPill: { alignItems: 'center', backgroundColor: 'rgba(11,11,12,0.82)', borderRadius: 16, paddingHorizontal: 18, paddingVertical: 8 },
   speedNum: { color: '#F4F4F4', fontSize: 30, fontWeight: '800' },
   speedUnit: { color: '#9AA0A6', fontSize: 12, fontWeight: '600' },
-  // Posted speed-limit sign — white plate, red border, on the RIGHT edge.
-  speedLimitBadge: { position: 'absolute', right: 18, top: '38%', alignItems: 'center', backgroundColor: '#FFFFFF', borderColor: '#D11', borderWidth: 3, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, minWidth: 54 },
+  // Posted speed-limit sign — white plate, red border. Bottom-LEFT, stacked right
+  // above the speedo (same left edge) so the two read together.
+  speedLimitBadge: { position: 'absolute', left: 72, bottom: 82, alignItems: 'center', backgroundColor: '#FFFFFF', borderColor: '#D11', borderWidth: 3, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, minWidth: 54 },
   speedLimitCap: { color: '#6B7075', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
   speedLimitNum: { color: '#0B0B0C', fontSize: 24, fontWeight: '900' },
   // Compass — top-right, below the maneuver strip, clear of the speed-limit badge.

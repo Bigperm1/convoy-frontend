@@ -26,15 +26,11 @@ import Mapbox, {
   ShapeSource,
   LineLayer,
   Models,
-  ModelLayer,
-  CustomLocationProvider,
   UserTrackingMode,
 } from '@rnmapbox/maps';
 import { useCarStore } from './carStore';
 import { getVehicleModelUrl } from '../vehicleAssets';
 import {
-  CAR_MODEL_SCALE_SIZED,
-  CAR_MODEL_HEADING_OFFSET,
   CAR_EMISSIVE_BY_MODE,
   FOLLOW_ZOOM,
   FOLLOW_LOWER_PAD_FRAC,
@@ -44,6 +40,7 @@ import {
   chasePitch,
   kmhFromMs,
   decodePolyline,
+  SelfCarModel,
 } from '../ConvoyMapbox';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
@@ -141,6 +138,10 @@ export default function CarMapView({ onGLError }: Props) {
       style={StyleSheet.absoluteFill}
       styleURL={styleURL}
       projection="mercator"
+      // Let the GL map present at the head unit's full refresh (clamped by the panel,
+      // ~60Hz max — a car display can't do 120). Only meaningful WITH the SelfCarModel
+      // interpolation above; on a raw 1Hz feed it just re-renders a stale pose.
+      preferredFramesPerSecond={60}
       scaleBarEnabled={false}
       compassEnabled={false}
       rotateEnabled={false}
@@ -163,12 +164,9 @@ export default function CarMapView({ onGLError }: Props) {
         <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: mode, show3dObjects: true } as any} />
       )}
 
-      {/* Feed the carStore position into Mapbox's native location source so the
-          follow camera tracks it on the CarPlay window — the car scene has no
-          device GPS of its own. Mirrors the phone's SelfCarModel provider. */}
-      <CustomLocationProvider coordinate={[lng, lat]} heading={hdg} />
-
-      {/* Heading-up chase camera. Zoom/pitch/padding mirror the phone during nav. */}
+      {/* Heading-up chase camera. Zoom/pitch/padding mirror the phone during nav.
+          It follows the eased CustomLocationProvider that <SelfCarModel/> emits
+          below (the smooth interpolated track), not raw GPS. */}
       <Camera
         followUserLocation={hasFix}
         followUserMode={UserTrackingMode.FollowWithCourse}
@@ -181,27 +179,14 @@ export default function CarMapView({ onGLError }: Props) {
       {/* Register the self-car 3D model for the chosen paint. */}
       <Models models={{ convoyCar: getVehicleModelUrl(s.selfCarColor) }} />
 
-      {/* 3D self car at the live position, rotated to the travel direction.
-          Style object is the phone's verbatim, using the imported constants. */}
+      {/* 3D self car + the native location feed, BOTH driven off ONE rAF-eased pose
+          (SelfCarModel, reused verbatim from the phone). This is THE smoothness fix:
+          it tweens selfLat/selfLng/heading between ~1Hz GPS ticks at ~60fps and feeds
+          the eased point to its own <CustomLocationProvider> AND the car ModelLayer,
+          so the follow camera and the 3D car glide in lockstep instead of teleporting
+          per tick. Requires <Models/> above (model registration) — keep it. */}
       {hasFix && (
-        <ShapeSource
-          id="car-self"
-          shape={{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [lng, lat] } }}
-        >
-          <ModelLayer
-            id="car-self-model"
-            slot="top"
-            style={{
-              modelId: 'convoyCar',
-              modelType: 'common-3d',
-              modelEmissiveStrength: emissive,
-              modelScale: CAR_MODEL_SCALE_SIZED,
-              modelRotation: [0, 0, hdg + CAR_MODEL_HEADING_OFFSET],
-              modelCastShadows: false,
-              modelReceiveShadows: false,
-            }}
-          />
-        </ShapeSource>
+        <SelfCarModel lat={lat} lng={lng} heading={hdg} emissive={emissive} />
       )}
 
       {/* Route — gray alternates (filtered out for the single active route),

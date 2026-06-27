@@ -328,19 +328,14 @@ export function CarSurface() {
   // the real 3D car (ModelLayer), so only the static image needs the chevron.
   const mapOverlays = (
     <>
-      {/* Top: maneuver while navigating, else a small CONVOY / nearby chip. */}
+      {/* Top: the turn-by-turn maneuver strip while navigating. No CONVOY/idle chip —
+          off-nav the map speaks for itself. */}
       {s.navigating ? (
         <View style={styles.topStrip} pointerEvents="none">
           <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
           <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
         </View>
-      ) : (
-        <View style={styles.topChip} pointerEvents="none">
-          <Text style={styles.topChipText}>
-            {nearby ? `CONVOY   ·   ${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'CONVOY'}
-          </Text>
-        </View>
-      )}
+      ) : null}
 
       {/* Bottom-right: arrival / eta / remaining while navigating. */}
       {s.navigating && metaLine ? (
@@ -368,7 +363,7 @@ export function CarSurface() {
 
       {/* ---- Shared overlays: render on top of EITHER surface (live or static) ---- */}
 
-      {/* Speed pill — bottom-center so the CarPlay side bar never covers it. */}
+      {/* Speed pill — bottom-LEFT, offset right of the CarPlay side bar. */}
       <View style={styles.speedDock} pointerEvents="none">
         <View style={styles.speedPill}>
           <Text style={styles.speedNum}>{spd.value}</Text>
@@ -730,7 +725,8 @@ const styles = StyleSheet.create({
   dist: { color: '#F4F4F4', fontSize: 48, fontWeight: '800', letterSpacing: -1 },
   inst: { color: '#F4F4F4', fontSize: 22, fontWeight: '600', marginTop: 4, textAlign: 'center' },
   meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },
-  speedDock: { position: 'absolute', left: 0, right: 0, bottom: 18, alignItems: 'center' },
+  // Bottom-LEFT, offset right of the CarPlay side bar (~64pt) so the pill clears it.
+  speedDock: { position: 'absolute', left: 92, bottom: 18, alignItems: 'flex-start' },
   speedPill: { alignItems: 'center', backgroundColor: 'rgba(11,11,12,0.82)', borderRadius: 16, paddingHorizontal: 18, paddingVertical: 8 },
   speedNum: { color: '#F4F4F4', fontSize: 30, fontWeight: '800' },
   speedUnit: { color: '#9AA0A6', fontSize: 12, fontWeight: '600' },

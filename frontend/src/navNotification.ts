@@ -98,6 +98,26 @@ export async function updateNavBanner(lat: number, lng: number): Promise<void> {
   const arriving = idx >= steps.length - 1 && d < 60;
   const stepKey = arriving ? steps.length : idx;
 
+  // Feed the CAR turn-by-turn strip every tick. On a COLD CarPlay connect the phone
+  // map isn't mounted, so the warm useConvoyCarPlay mirror never runs — this is the
+  // only source of the upcoming maneuver + distance on the car. Done BEFORE the
+  // banner-incoming gate below so the car shows the turn even while still far from
+  // it. (ETA/distance-remaining stay blank cold — the slim route has no duration.)
+  let carInstruction: string;
+  if (arriving) {
+    carInstruction = route.destLabel ? `Arrive at ${route.destLabel}` : "Arriving";
+  } else {
+    const upNext = steps[Math.min(idx + 1, steps.length - 1)];
+    carInstruction = strip(upNext.html) || maneuverVerb(upNext.maneuver);
+  }
+  setCarState({
+    navigating: true,
+    instruction: carInstruction,
+    distanceToTurn: fmtDistanceM(d),
+    distanceToTurnM: Math.round(d),
+    destinationLabel: route.destLabel || "",
+  });
+
   // ONLY surface the banner when the next maneuver is actually incoming (within
   // ANNOUNCE_DISTANCE) or we're arriving. Previously it popped on every step
   // change — often a turn that's still kilometres away — so it re-banner-ed the
@@ -373,8 +393,8 @@ export async function stopNavBanner(): Promise<void> {
     await AsyncStorage.removeItem(PROGRESS_KEY);
     await AsyncStorage.removeItem(NAV_POLY_KEY);
   } catch {}
-  // Clear the car map's route too so the ribbon disappears on nav end.
-  setCarState({ routePolyline: "" });
+  // Clear the car map's route + TBT strip so the ribbon and maneuver disappear on nav end.
+  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0 });
   // Release our hold; the shared task keeps running if CarPlay still needs it.
   await releaseBgLocation("nav");
   try { await Notifications.dismissNotificationAsync(NAV_NOTIF_ID); } catch {}

@@ -35,6 +35,7 @@ import { NativeModules, Platform, View, Text, Image, StyleSheet } from 'react-na
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
 import { setCarState, getCarState, useCarStore, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
+import CompassNeedle from '../components/CompassNeedle';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 import { formatSpeed, getSettings, getMapMode } from '../settings';
@@ -303,14 +304,6 @@ export function CarSurface() {
           <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
         </View>
       ) : null}
-
-      {/* Posted speed-limit sign — RIGHT edge (never over the CarPlay left bar). */}
-      {limitVal != null ? (
-        <View style={styles.speedLimitBadge} pointerEvents="none">
-          <Text style={styles.speedLimitCap}>LIMIT</Text>
-          <Text style={styles.speedLimitNum}>{limitVal}</Text>
-        </View>
-      ) : null}
     </>
   );
 
@@ -327,6 +320,8 @@ export function CarSurface() {
         staticSurface
       )}
 
+      {/* ---- Shared overlays: render on top of EITHER surface (live or static) ---- */}
+
       {/* Speed pill — bottom-center so the CarPlay side bar never covers it. */}
       <View style={styles.speedDock} pointerEvents="none">
         <View style={styles.speedPill}>
@@ -334,6 +329,25 @@ export function CarSurface() {
           <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
         </View>
       </View>
+
+      {/* Posted speed-limit sign — RIGHT edge (never over the CarPlay left bar). */}
+      {limitVal != null ? (
+        <View style={styles.speedLimitBadge} pointerEvents="none">
+          <Text style={styles.speedLimitCap}>LIMIT</Text>
+          <Text style={styles.speedLimitNum}>{limitVal}</Text>
+        </View>
+      ) : null}
+
+      {/* Compass — north-needle, RIGHT edge. The car map is heading-up, so rotate
+          the needle by -heading to keep North pointing at true north. (Flip the
+          sign here if it reads mirrored on the head unit.) */}
+      {typeof s.heading === 'number' ? (
+        <View style={styles.compassDock} pointerEvents="none">
+          <View style={{ transform: [{ rotate: `${-(s.heading || 0)}deg` }] }}>
+            <CompassNeedle size={40} />
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -667,6 +681,8 @@ const styles = StyleSheet.create({
   speedLimitBadge: { position: 'absolute', right: 18, top: '38%', alignItems: 'center', backgroundColor: '#FFFFFF', borderColor: '#D11', borderWidth: 3, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, minWidth: 54 },
   speedLimitCap: { color: '#6B7075', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
   speedLimitNum: { color: '#0B0B0C', fontSize: 24, fontWeight: '900' },
+  // Compass — top-right, below the maneuver strip, clear of the speed-limit badge.
+  compassDock: { position: 'absolute', right: 20, top: 70, width: 52, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,12,0.55)', borderRadius: 26 },
   // --- live static-map mode ---
   preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   markerCenter: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },

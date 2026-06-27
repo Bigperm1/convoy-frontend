@@ -74,6 +74,9 @@ novaReroute: boolean;
 // chatty Nova toggles (speeding / mid-drive / reroute) OFF once so the new
 // quieter defaults reach existing installs too, then never repeat.
 novaQuietMigrated: boolean;
+// One-time flag: when absent, push the Jun-2026 baseline (Auto map mode + Speed
+// Cameras off) onto existing installs once, then never repeat.
+baselineMigrated: boolean;
 speedUnit: 'kmh' | 'mph';
 speedUnitManual: boolean;
 showWeatherLayer: boolean;
@@ -114,9 +117,8 @@ avatarLive: true,
 mapView: "heading_up",
 mapType: "hybrid",
 mapDark: false,
-// Default base-map look is Dusk (mapMode is the source of truth for the Mapbox
-// engine; users who never picked a mode inherit this).
-mapMode: "dusk",
+// Default base-map look is AUTO — follows the time of day (dawn/day/dusk/night).
+mapMode: "auto",
 mapboxEngine: true,
 show3dBuildings: true,
 novaGreeting: true,
@@ -126,11 +128,12 @@ novaMuted: false,
 novaVoice: true,
 novaReroute: false,
 novaQuietMigrated: true,
+baselineMigrated: true,
 speedUnit: 'kmh',
 speedUnitManual: false,
 showWeatherLayer: true,
 weatherOnMigrated: true,
-speedCameras: true,
+speedCameras: false,
 showPlacePins: true,
 showNearby: true,
 // Default Gas Jockey: only the four major BC chains shown; the rest (and
@@ -188,10 +191,12 @@ export function mapModeToLegacy(mode: MapMode): { mapType: "hybrid" | "roadmap";
 }
 
 // ---- Avatar Live mode helpers (source of truth = settings.avatarMode) ----
-// Migrate users stored before avatarMode existed: avatarLive true → "full",
-// false → "ghost" (old installs only had the on/off boolean).
+// Default when no explicit mode is stored: avatarLive true → "partial" (the new
+// default — visible while car-connected), false → "ghost". PRIVACY-SAFE: a user who
+// turned Avatar Live OFF (avatarLive=false) stays invisible; only the "on" default
+// changed from full → partial. An explicit avatarMode always wins.
 export function getAvatarMode(s: Settings): AvatarMode {
-  return s.avatarMode ?? (s.avatarLive ? "full" : "ghost");
+  return s.avatarMode ?? (s.avatarLive ? "partial" : "ghost");
 }
 // Persist a new Avatar Live mode and keep the legacy avatarLive boolean in sync
 // (full/partial → true, ghost → false) so any older reader still behaves.
@@ -230,6 +235,16 @@ cached.novaSpeeding = false;
 cached.novaMidDrive = false;
 cached.novaReroute = false;
 cached.novaQuietMigrated = true;
+try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
+}
+// One-time: adopt the new baseline on existing installs — Speed Cameras OFF, and Auto
+// map mode IF they were still on the old default 'dusk' (a deliberate satellite/day/
+// night/dawn pick is preserved). Avatar Live → Partial default is handled in
+// getAvatarMode (privacy-safe — a ghost/OFF user stays invisible).
+if (parsed.baselineMigrated === undefined) {
+cached.speedCameras = false;
+if (parsed.mapMode === undefined || parsed.mapMode === "dusk") cached.mapMode = "auto";
+cached.baselineMigrated = true;
 try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
 }
 }

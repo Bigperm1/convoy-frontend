@@ -14,6 +14,15 @@ export let carPlayHookOwnsRoot = false;
 // error boundary around CarMapView + a head unit where GL actually paints.
 export const CAR_LIVE_MAP_ENABLED = false;
 
+// DIAGNOSTIC: when TRUE, CarSurface short-circuits to a dependency-free full-screen
+// magenta panel with a live ticking counter — NO map, NO GPS, NO store-derived
+// content. It is the ground-truth test for "does the CarPlay React surface paint at
+// all on this head unit?" If the head unit turns MAGENTA with a counting number, the
+// React tree renders and the bug is in CarSurface's content; if it stays the bare
+// CONVOY logo (the iOS splash), the bridgeless Fabric surface is not committing a
+// tree and the fix is native. Flip back to FALSE once the question is settled.
+export const CAR_DIAG_MODE = true;
+
 const ownerListeners = new Set<(v: boolean) => void>();
 
 export function setCarPlayHookOwnsRoot(v: boolean): void {

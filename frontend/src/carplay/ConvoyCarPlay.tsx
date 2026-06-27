@@ -36,7 +36,7 @@ import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, have
 import { setCarState, getCarState, useCarStore, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
-import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED } from './carPlayShared';
+import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 import { formatSpeed, getSettings, getMapMode } from '../settings';
 
@@ -207,6 +207,15 @@ export function CarSurface() {
     setMapUrl(buildStaticMapUrl(lat, lng, s.routePolyline, hdg));
   }, [hasFix, s.selfLat, s.selfLng, s.routePolyline, s.heading]);
 
+  // DIAGNOSTIC tick (CAR_DIAG_MODE). Independent of the store/GPS so it proves the
+  // React tree is not just mounted but actively re-rendering on the CarPlay window.
+  const [diagTick, setDiagTick] = useState(0);
+  useEffect(() => {
+    if (!CAR_DIAG_MODE) return;
+    const id = setInterval(() => setDiagTick((t) => t + 1), 500);
+    return () => clearInterval(id);
+  }, []);
+
   const showMap = hasFix && !!mapUrl;
   // Live @rnmapbox MapView gate. Three conditions, all required:
   //   - CAR_LIVE_MAP_ENABLED: master kill-switch (carPlayShared). Currently TRUE for
@@ -216,6 +225,19 @@ export function CarSurface() {
   // When the live arm IS active, <CarMapView/> mounts; its watchdog flips glFailed
   // (-> showLive false -> static) if it never paints, so the car can't stay blank.
   const showLive = CAR_LIVE_MAP_ENABLED && hasFix && !glFailed;
+
+  // GROUND-TRUTH RENDER TEST. If this paints, the CarPlay React surface is alive and
+  // the bug is downstream (content/layout); if the head unit stays the bare logo, the
+  // Fabric surface never commits a tree (native). Zero deps on map/GPS/store content.
+  if (CAR_DIAG_MODE) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FF00AA', alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ color: '#000000', fontSize: 56, fontWeight: '900', letterSpacing: 3 }}>CS LIVE</Text>
+        <Text style={{ color: '#000000', fontSize: 30, fontWeight: '800', marginTop: 10 }}>{`tick ${diagTick}`}</Text>
+        <Text style={{ color: '#000000', fontSize: 20, fontWeight: '700', marginTop: 10 }}>{`fix=${hasFix}`}</Text>
+      </View>
+    );
+  }
 
   // The static-map surface: the live map background as a plain <Image> with the
   // maneuver/chip/meta overlays, falling back to the dashboard/logo when there's

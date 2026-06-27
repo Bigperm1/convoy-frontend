@@ -346,7 +346,7 @@ function distPointToSegM(pLat: number, pLng: number, aLat: number, aLng: number,
 // line BEHIND the car so the 3D car reads on top, and (b) SNAPPING the drawn car
 // onto the line so it stays glued to the road instead of drifting on raw GPS.
 // Local equirectangular metres centred on the car (accurate at street scale).
-function projectOntoRoute(pLat: number, pLng: number, coords: { latitude: number; longitude: number }[]): { frac: number; lat: number; lng: number; distM: number; totalM: number } | null {
+export function projectOntoRoute(pLat: number, pLng: number, coords: { latitude: number; longitude: number }[]): { frac: number; lat: number; lng: number; distM: number; totalM: number } | null {
   if (!coords || coords.length < 2) return null;
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;

@@ -41,6 +41,7 @@ import {
   kmhFromMs,
   decodePolyline,
   SelfCarModel,
+  projectOntoRoute,
 } from '../ConvoyMapbox';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
@@ -137,8 +138,28 @@ export default function CarMapView({ onGLError }: Props) {
   const followHeadingDeg = camHdgRef.current;
 
   // Active route → GeoJSON. Only drawn when the polyline decodes to a real line.
-  const routeCoords = decodePolyline(s.routePolyline).map((p) => [p.longitude, p.latitude]);
+  const routeLL = decodePolyline(s.routePolyline);
+  const routeCoords = routeLL.map((p) => [p.longitude, p.latitude]);
   const hasRoute = routeCoords.length >= 2;
+
+  // BUFFER the green line off the car (mirror the phone): project the car onto the
+  // route and TRIM the line so it starts a speed-aware lead AHEAD of the nose, with a
+  // soft transparent→solid fade just past the trim so it doesn't hard-start into the
+  // car. Navigating only; preview/cruise keeps the solid line.
+  const routeProj = (s.navigating && hasFix && hasRoute) ? projectOntoRoute(lat, lng, routeLL) : null;
+  const trimLeadM = Math.max(6, Math.min(16, 6 + (s.speedMs > 0 ? s.speedMs : 0) * 0.34));
+  const routeTrimEndFrac = routeProj
+    ? Math.max(0, Math.min(0.999, routeProj.frac + trimLeadM / routeProj.totalM))
+    : null;
+  const fadeSpanFrac = routeProj ? Math.max(0.0008, Math.min(0.06, 20 / routeProj.totalM)) : 0;
+  const buildLineFade = (solid: string, clear: string): any => {
+    if (routeTrimEndFrac == null) return null;
+    const s0 = Math.min(0.997, Math.max(0.0001, routeTrimEndFrac));
+    const s1 = Math.min(0.999, Math.max(s0 + 0.0006, s0 + fadeSpanFrac));
+    return ['interpolate', ['linear'], ['line-progress'], 0, clear, s0, clear, s1, solid, 1, solid];
+  };
+  const coreGrad = buildLineFade('rgba(45,236,134,1)', 'rgba(45,236,134,0)');
+  const glowGrad = buildLineFade('rgba(0,224,112,1)', 'rgba(0,224,112,0)');
   const routeFC: any = {
     type: 'FeatureCollection',
     features: hasRoute
@@ -218,13 +239,13 @@ export default function CarMapView({ onGLError }: Props) {
             id="car-route-sel-casing"
             slot="middle"
             filter={['==', ['get', 'index'], SELECTED_INDEX] as any}
-            style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, lineColor: ROUTE_GREEN_GLOW }}
+            style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(glowGrad ? { lineGradient: glowGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: ROUTE_GREEN_GLOW }) }}
           />
           <LineLayer
             id="car-route-sel-core"
             slot="middle"
             filter={['==', ['get', 'index'], SELECTED_INDEX] as any}
-            style={{ lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, lineColor: ROUTE_GREEN_CORE }}
+            style={{ lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(coreGrad ? { lineGradient: coreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: ROUTE_GREEN_CORE }) }}
           />
         </ShapeSource>
       )}

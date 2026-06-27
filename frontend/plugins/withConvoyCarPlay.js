@@ -418,9 +418,16 @@ final class ConvoyCarRootViewController: UIViewController, ConvoyHostedVC {
   // forever, even after the surface commits. Clear it so the window shows the real
   // surface (or a black backstop + this label), never a misleading logo.
   func clearCarSplash() {
+    // loadingView is a non-optional UIView in Swift (NS_ASSUME_NONNULL) but may be
+    // absent at runtime, and re-enabling auto-hide is the supported way to drop it on
+    // commit. Reach it via KVC (nil-safe) to hide + detach the splash now, and re-enable
+    // auto-hide so it can never re-cover the committed content.
     if let proxy = hosted as? RCTSurfaceHostingProxyRootView {
-      proxy.loadingView?.removeFromSuperview()
-      proxy.loadingView = nil
+      proxy.disableActivityIndicatorAutoHide(false)
+      if let lv = proxy.value(forKey: "loadingView") as? UIView {
+        lv.isHidden = true
+        lv.removeFromSuperview()
+      }
     }
   }
 
@@ -435,11 +442,13 @@ final class ConvoyCarRootViewController: UIViewController, ConvoyHostedVC {
     let target = targetBounds()
     guard target.width >= 320, target.height >= 120 else { return }
     if !hosted.bounds.equalTo(target) { hosted.frame = target; hosted.setNeedsLayout(); hosted.layoutIfNeeded() }
-    if let proxy = hosted as? RCTSurfaceHostingProxyRootView, let surface = proxy.surface {
-      // setMinimumSize == maximumSize == real size stores the constraints (pure-ObjC
-      // RCTSurfaceProtocol). synchronouslyWaitFor (Fabric-only, reached via the @objc
-      // shim) then forces a mount transaction regardless of the unchanged-size dedup,
-      // returning true once a real frame committed.
+    if let proxy = hosted as? RCTSurfaceHostingProxyRootView {
+      // proxy.surface is non-optional (NS_ASSUME_NONNULL). setMinimumSize == maximumSize
+      // == real size stores the constraints (pure-ObjC RCTSurfaceProtocol).
+      // synchronouslyWaitFor (Fabric-only, reached via the @objc shim) then forces a
+      // mount transaction regardless of the unchanged-size dedup, returning true once a
+      // real frame committed.
+      let surface = proxy.surface
       surface.setMinimumSize(target.size, maximumSize: target.size)
       if (surface as AnyObject).synchronouslyWaitFor?(0.3) == true {
         ConvoyRNHost.carPainted = true

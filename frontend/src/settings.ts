@@ -44,9 +44,6 @@ mapDark: boolean;
 // Base-map mode — the single source of truth. Optional/undefined for users
 // stored before it existed; getMapMode() migrates them from mapType/mapDark.
 mapMode?: MapMode;
-// Mapbox migration (Phase 2): when true, the map screen renders the new
-// @rnmapbox/maps engine (ConvoyMapbox) instead of react-native-maps (ConvoyMap).
-mapboxEngine: boolean;
 // 3D buildings on the Standard (non-satellite) Mapbox modes. User toggle; when
 // false the self-car can never be hidden behind a building. Maps to the Mapbox
 // Standard style's show3dObjects config.
@@ -119,7 +116,6 @@ mapType: "hybrid",
 mapDark: false,
 // Default base-map look is AUTO — follows the time of day (dawn/day/dusk/night).
 mapMode: "auto",
-mapboxEngine: true,
 show3dBuildings: true,
 novaGreeting: false,
 novaSpeeding: false,

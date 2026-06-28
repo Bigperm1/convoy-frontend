@@ -7,7 +7,7 @@ import { COLORS } from "./theme";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
 import { api } from "./api";
 import { getSettings } from "./settings";
-import type { Peer } from "./ConvoyMap";
+import type { Peer } from "./ConvoyMapbox";
 
 type Props = {
   peer: (Peer & { online_at?: string; heading?: number; topSpeed?: number }) | null;

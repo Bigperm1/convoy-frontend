@@ -36,7 +36,6 @@ import { View, Text, Image, StyleSheet, Pressable, Platform, AppState } from "re
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getVehiclePngOrDefault, getVehicleModelUrl } from "./vehicleAssets";
-import type { Peer, Hazard, UserLocation } from "./ConvoyMap";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient, type CongestionLevel } from "./mapboxDirections";
 import { getCarState } from "./carplay/carStore";
@@ -52,9 +51,50 @@ const EMPTY_PUCK_IMG = require("../assets/images/empty-puck.png");
 
 type LatLng = { lat: number; lng: number };
 
-// Mirrors ConvoyMapProps from ConvoyMap.tsx so the two engines are swappable.
-// Kept as a separate copy during the migration; once Mapbox is the only engine,
-// ConvoyMap.tsx is deleted and this becomes the single source of truth.
+// Peer / Hazard / UserLocation — the canonical shared map types. Relocated here from
+// the retired react-native-maps engine (ConvoyMap.tsx) so this Mapbox engine is the
+// single source of truth. Imported type-only by PeerModal + map.tsx.
+export interface Peer {
+  user_id: string;
+  handle?: string;
+  lat: number;
+  lng: number;
+  heading?: number;
+  speed?: number;
+  carType?: string;
+  carBody?: string;
+  carColor?: string;
+  activeColor?: string;
+  topSpeed?: number;
+  online_at?: string;
+  // "parked" peers (full-mode, head unit disconnected) render dimmed.
+  status?: "live" | "parked";
+  onRoute?: React.Dispatch<any>;
+}
+
+export interface Hazard {
+  id: string;
+  kind: string;
+  lat: number;
+  lng: number;
+  subtype?: string;
+  confirms?: number;
+  disputes?: number;
+  reporter_handle?: string;
+  reportedAt?: string;
+}
+
+export interface UserLocation {
+  heading?: number;
+  carBody?: string;
+  carColor?: string;
+  lat?: number;
+  lng?: number;
+  speed?: number;
+}
+
+// Mapbox is now the only engine. This is the single source of truth for the map
+// props (the old react-native-maps ConvoyMap.tsx has been retired).
 interface ConvoyMapboxProps {
   center?: { lat: number; lng: number; heading?: number } | null;
   user?: UserLocation | null;

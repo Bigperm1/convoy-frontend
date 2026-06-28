@@ -40,7 +40,8 @@ import CompassNeedle from '../components/CompassNeedle';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 import { formatSpeed, getSettings, getMapMode } from '../settings';
-import { weatherKind, type WeatherCondition } from '../weatherLayer';
+import { weatherKind, type WeatherCondition, type WeatherKind } from '../weatherLayer';
+import { WeatherGlyph } from '../components/WeatherHUD';
 
 const isIOS = Platform.OS === 'ios';
 const isAndroid = Platform.OS === 'android';
@@ -50,12 +51,6 @@ const isAndroid = Platform.OS === 'android';
 // bottomMeta ETA, speed-limit, compass) provide guidance, matching the phone — the
 // native CarPlay UI duplicated and covered them. Flip TRUE to restore native guidance.
 const CAR_NATIVE_GUIDANCE = false;
-
-// WeatherKind → glyph for the CarPlay weather chip (mirrors the phone HUD's conditions).
-const WEATHER_GLYPH: Record<string, string> = {
-  'clear-day': '☀️', 'clear-night': '🌙', 'partly-day': '⛅', 'partly-night': '☁️',
-  cloudy: '☁️', fog: '🌫️', rain: '🌧️', snow: '❄️', thunder: '⛈️',
-};
 
 // Upcoming-maneuver glyph for the car banner's green arrow box (mirrors the phone's
 // maneuver icon). Derived from the instruction text — Routes API verbs land in it.
@@ -442,14 +437,13 @@ export function CarSurface() {
         </Animated.View>
       </View>
 
-      {/* Live weather chip — top-LEFT (the maneuver card is top-RIGHT, so they don't
-          collide). Shows whenever the phone's weather layer is feeding carStore,
-          including while navigating. */}
+      {/* Live weather chip — BOTTOM-LEFT, just above the speedo with a small gap, to
+          mirror the phone HUD's weather-over-speed column (same vector glyph + temp).
+          Shows whenever the phone's weather layer is feeding carStore, incl. nav. */}
       {s.weatherTemp ? (
         <View style={styles.weatherChip} pointerEvents="none">
-          <Text style={styles.weatherText}>
-            {`${s.weatherKind && WEATHER_GLYPH[s.weatherKind] ? WEATHER_GLYPH[s.weatherKind] + '  ' : ''}${s.weatherTemp}`}
-          </Text>
+          {s.weatherKind ? <WeatherGlyph kind={s.weatherKind as WeatherKind} size={24} /> : null}
+          <Text style={styles.weatherText}>{s.weatherTemp}</Text>
         </View>
       ) : null}
 
@@ -839,9 +833,10 @@ const styles = StyleSheet.create({
   speedLimitNum: { color: '#0B0B0C', fontSize: 17, fontWeight: '900' },
   // Compass — top-right, below the maneuver banner. Smaller, closer to the edge.
   compassDock: { position: 'absolute', right: 8, top: 58, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,12,0.55)', borderRadius: 22 },
-  // Weather chip — top-left (clear of the CarPlay side bar), glyph + temp. Smaller.
-  weatherChip: { position: 'absolute', left: 68, top: 8, paddingHorizontal: 9, paddingVertical: 3, backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 11 },
-  weatherText: { color: '#F4F4F4', fontSize: 13, fontWeight: '700' },
+  // Weather chip — BOTTOM-left, just above the speedo (left edge aligned, small gap),
+  // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
+  weatherChip: { position: 'absolute', left: 68, bottom: 56, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(22,22,24,0.92)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  weatherText: { color: '#F4F4F4', fontSize: 14, fontWeight: '800', marginTop: 1 },
   // --- live static-map mode ---
   preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   markerCenter: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },

@@ -1,7 +1,7 @@
 // WeatherHUD â compact on-map weather chip shown when the weather layer is on.
 // Displays current temperature, conditions icon, wind and precip at a glance.
-import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, Platform, TouchableOpacity } from "react-native";
+import React, { useState, useEffect, useRef } from "react";
+import { View, Text, StyleSheet, Platform, TouchableOpacity, Animated } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { WeatherCondition, ForecastDay } from "../weatherLayer";
 import { weatherKind, windDirectionLabel, type WeatherKind } from "../weatherLayer";
@@ -27,7 +27,7 @@ const WX = {
   snow: "#EAF6FF",
 };
 
-function WeatherGlyph({ kind, size }: { kind: WeatherKind; size: number }) {
+export function WeatherGlyph({ kind, size }: { kind: WeatherKind; size: number }) {
   const S = size;
   const layer = (
     align: "flex-start" | "center" | "flex-end",
@@ -112,6 +112,29 @@ export default function WeatherHUD({ weather, unit, compact, forecast }: Props) 
     const t = setTimeout(() => setOpen(false), 5000);
     return () => clearTimeout(t);
   }, [open]);
+
+  // Animated reveal for the forecast card (pop-out): spring up + scale/opacity in,
+  // quick fade out. Kept mounted through the close animation via `cardMounted`.
+  // Reused verbatim on CarPlay (see the car weather pop-out) so both surfaces match.
+  const [cardMounted, setCardMounted] = useState(false);
+  const cardAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (open) {
+      setCardMounted(true);
+      Animated.spring(cardAnim, { toValue: 1, useNativeDriver: true, tension: 150, friction: 13 }).start();
+    } else {
+      Animated.timing(cardAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(({ finished }) => {
+        if (finished) setCardMounted(false);
+      });
+    }
+  }, [open, cardAnim]);
+  const cardStyle = {
+    opacity: cardAnim,
+    transform: [
+      { translateY: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) },
+      { scale: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) },
+    ],
+  };
   const temp = unit === 'mph'
     ? `${Math.round(weather.tempF)}${DEG}F`
     : `${Math.round(weather.tempC)}${DEG}C`;
@@ -123,8 +146,8 @@ export default function WeatherHUD({ weather, unit, compact, forecast }: Props) 
     const tempVal = (c: number, f: number) => (unit === 'mph' ? Math.round(f) : Math.round(c));
     return (
       <View style={styles.compactWrap}>
-        {open && (
-          <View style={styles.forecastCard}>
+        {cardMounted && (
+          <Animated.View style={[styles.forecastCard, cardStyle]}>
             <Text style={styles.forecastTitle}>5-Day Forecast</Text>
             {forecast && forecast.length > 0 ? (
               forecast.slice(0, 5).map((d) => (
@@ -143,7 +166,7 @@ export default function WeatherHUD({ weather, unit, compact, forecast }: Props) 
             ) : (
               <Text style={styles.forecastLoading}>Loading forecast…</Text>
             )}
-          </View>
+          </Animated.View>
         )}
         <TouchableOpacity
           activeOpacity={0.8}

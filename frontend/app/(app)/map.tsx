@@ -2272,10 +2272,17 @@ export default function MapScreen() {
         onRoute={setRoute}
       />
 
-      {/* Speed-limit diagnostic — gated by the Debug toggle in Settings. */}
+      {/* Speed-limit + avatar/CarPlay diagnostics — gated by the Debug toggle in Settings. */}
       {settings.debugOverlays === true && (
       <View pointerEvents="none" style={{ position: 'absolute', top: 146, left: 8, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 3, paddingHorizontal: 6, borderRadius: 6 }}>
         <Text style={{ color: '#00FF88', fontSize: 11, fontWeight: '600' }}>{`SL ${getSpeedLimitDebug()}`}</Text>
+        {/* Partial-avatar / CarPlay-connection probe. Watch `car` flip Y->N when you
+            UNPLUG the head unit: if it stays Y, carConnected isn't flipping (the bug).
+            prk = parked mode engaged, bc = what we broadcast (live/parked), spot =
+            whether a last-car location is known to pin to. */}
+        <Text style={{ color: '#FFD60A', fontSize: 11, fontWeight: '600' }}>
+          {`AV car=${carConnected ? 'Y' : 'N'} ${avatarMode} prk=${presenceParked ? 'Y' : 'N'} bc=${presenceStatus} spot=${lastCarLocRef.current ? 'Y' : 'N'}`}
+        </Text>
       </View>
       )}
 

@@ -259,16 +259,14 @@ export function CarSurface() {
     return () => clearInterval(id);
   }, []);
 
-  // Speedo over-limit state — mirrors the phone Speedometer thresholds: dark normally,
-  // ORANGE once over the posted limit, RED at +20km/h (+12mph). speedNum + limitVal are
-  // already in the driver's unit. While over, the pill PULSES (opacity loop) so it grabs
-  // the eye — the "premium" version of the phone's flat color flip.
+  // Speedo over-limit state — dark normally, RED only when WELL over the posted limit.
+  // speedNum + limitVal are already in the driver's unit. While over, the pill PULSES
+  // (opacity loop) so it grabs the eye — the "premium" version of the phone's color flip.
   const speedNum = Number(spd.value) || 0;
-  const overStep = getSettings().speedUnit === 'mph' ? 12 : 20;
-  const speedoOver = limitVal != null && speedNum > limitVal;
-  const speedoBg = !speedoOver
-    ? 'rgba(11,11,12,0.82)'
-    : speedNum <= (limitVal as number) + overStep ? '#FF9500' : '#FF3B30';
+  // RED pulse ONLY when 21+ km/h (13+ mph) over the posted limit — no orange tier.
+  const overBy = getSettings().speedUnit === 'mph' ? 13 : 21;
+  const speedoOver = limitVal != null && speedNum >= (limitVal as number) + overBy;
+  const speedoBg = speedoOver ? '#FF3B30' : 'rgba(11,11,12,0.82)';
   const speedPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!speedoOver) { speedPulse.setValue(1); return; }
@@ -279,6 +277,15 @@ export function CarSurface() {
     loop.start();
     return () => { loop.stop(); speedPulse.setValue(1); };
   }, [speedoOver]);
+
+  // Posted speed-limit sign slides out to the RIGHT from behind the speedo once moving
+  // with a known limit — exactly like the phone. Tucked back behind the pill at a stop.
+  const showLimit = limitVal != null && speedNum > 0;
+  const limitSlide = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(limitSlide, { toValue: showLimit ? 1 : 0, useNativeDriver: true, tension: 80, friction: 12 }).start();
+  }, [showLimit]);
+  const limitSlideX = limitSlide.interpolate({ inputRange: [0, 1], outputRange: [0, 54] });
 
   const showMap = hasFix && !!mapUrl;
   // Live @rnmapbox MapView gate. Three conditions, all required:
@@ -416,27 +423,29 @@ export function CarSurface() {
 
       {/* ---- Shared overlays: render on top of EITHER surface (live or static) ---- */}
 
-      {/* Speed pill — bottom-LEFT, offset right of the CarPlay side bar. Pulses
-          orange/red over the posted limit (mirrors the phone speedo). */}
+      {/* Speed pill — bottom-LEFT, offset right of the CarPlay side bar. Pulses RED
+          when well over the posted limit. The posted-limit sign is rendered FIRST so
+          it sits BEHIND the pill, then springs out to the right when moving (phone-style). */}
       <View style={styles.speedDock} pointerEvents="none">
+        {limitVal != null ? (
+          <Animated.View
+            style={[styles.speedLimitBadge, { opacity: limitSlide, transform: [{ translateX: limitSlideX }] }]}
+            pointerEvents="none"
+          >
+            <Text style={styles.speedLimitCap}>LIMIT</Text>
+            <Text style={styles.speedLimitNum}>{limitVal}</Text>
+          </Animated.View>
+        ) : null}
         <Animated.View style={[styles.speedPill, { backgroundColor: speedoBg, opacity: speedPulse }]}>
           <Text style={styles.speedNum}>{spd.value}</Text>
           <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
         </Animated.View>
       </View>
 
-      {/* Posted speed-limit sign — bottom-left, stacked above the speedo. */}
-      {limitVal != null ? (
-        <View style={styles.speedLimitBadge} pointerEvents="none">
-          <Text style={styles.speedLimitCap}>LIMIT</Text>
-          <Text style={styles.speedLimitNum}>{limitVal}</Text>
-        </View>
-      ) : null}
-
-      {/* Live weather chip — top-left, mirrors the phone HUD (glyph + temp). Only
-          shows while the phone's weather layer is feeding carStore, and hidden while
-          navigating so it doesn't collide with the maneuver card. */}
-      {s.weatherTemp && !s.navigating ? (
+      {/* Live weather chip — top-LEFT (the maneuver card is top-RIGHT, so they don't
+          collide). Shows whenever the phone's weather layer is feeding carStore,
+          including while navigating. */}
+      {s.weatherTemp ? (
         <View style={styles.weatherChip} pointerEvents="none">
           <Text style={styles.weatherText}>
             {`${s.weatherKind && WEATHER_GLYPH[s.weatherKind] ? WEATHER_GLYPH[s.weatherKind] + '  ' : ''}${s.weatherTemp}`}
@@ -823,9 +832,9 @@ const styles = StyleSheet.create({
   speedPill: { alignItems: 'center', backgroundColor: 'rgba(11,11,12,0.82)', borderRadius: 11, paddingHorizontal: 11, paddingVertical: 4 },
   speedNum: { color: '#F4F4F4', fontSize: 21, fontWeight: '800' },
   speedUnit: { color: '#9AA0A6', fontSize: 9, fontWeight: '600' },
-  // Posted speed-limit sign — white plate, black border. Bottom-LEFT, stacked right
-  // above the speedo (same left edge). Smaller plate.
-  speedLimitBadge: { position: 'absolute', left: 68, bottom: 52, alignItems: 'center', backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 3, minWidth: 40 },
+  // Posted speed-limit sign — white plate, black border. Tucked BEHIND the speedo (same
+  // bottom baseline, left:0 within speedDock) and slid out to the right when moving.
+  speedLimitBadge: { position: 'absolute', left: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 3, minWidth: 46 },
   speedLimitCap: { color: '#6B7075', fontSize: 8, fontWeight: '800', letterSpacing: 0.5 },
   speedLimitNum: { color: '#0B0B0C', fontSize: 17, fontWeight: '900' },
   // Compass — top-right, below the maneuver banner. Smaller, closer to the edge.

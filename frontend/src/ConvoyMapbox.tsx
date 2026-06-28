@@ -155,14 +155,19 @@ const CAR_MODEL_SCALE_BY_ZOOM: any = [
 // by one factor: lower = smaller. 1.0 == the (too-big) table above. The map uses
 // CAR_MODEL_SCALE_SIZED below — adjust CAR_SIZE and OTA to resize.
 const CAR_SIZE = 1.00;
-export const CAR_MODEL_SCALE_SIZED: any = CAR_MODEL_SCALE_BY_ZOOM.map((v: any) =>
-  // Only the [x,y,z] scale tuples are all-number arrays; the expression's own
-  // sub-arrays (["linear"], ["zoom"]) contain strings and must pass through
-  // untouched, as must the bare zoom-stop numbers (9, 9.5, …).
-  Array.isArray(v) && v.every((n: any) => typeof n === "number")
-    ? v.map((n: number) => Math.round(n * CAR_SIZE * 100) / 100)
-    : v,
-);
+// Build the model-scale zoom curve at a given size multiplier (lower = smaller). The
+// phone uses CAR_SIZE; CarPlay passes a smaller value (carModelScale(0.8)) so the car
+// reads a touch smaller on the head unit. Only the [x,y,z] numeric tuples are scaled —
+// the expression's own sub-arrays (["linear"], ["zoom"]) and bare zoom-stop numbers
+// (9, 9.5, …) pass through untouched.
+export function carModelScale(size: number): any {
+  return CAR_MODEL_SCALE_BY_ZOOM.map((v: any) =>
+    Array.isArray(v) && v.every((n: any) => typeof n === "number")
+      ? v.map((n: number) => Math.round(n * size * 100) / 100)
+      : v,
+  );
+}
+export const CAR_MODEL_SCALE_SIZED: any = carModelScale(CAR_SIZE);
 // Continuous car scale driven from the LIVE camera zoom (see onCameraChanged),
 // instead of handing Mapbox the zoom-expression above — that snapped the model
 // size at integer zooms (not smooth). Geometric (log-space) interpolation
@@ -390,7 +395,18 @@ type PlacePoint = { id: string; lat: number; lng: number; label: string; price?:
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-export function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng: number; heading: number; emissive: number }) {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, scale }: {
+  lat: number; lng: number; heading: number; emissive: number;
+  // LOCKSTEP camera (optional): when all three are passed, SelfCarModel drives the
+  // camera from the SAME 60fps tween that eases the car, so camera-center == car-pose
+  // every frame and the car is pinned to a fixed screen spot (map rotates around it).
+  // Omitted (e.g. the phone today) → no-op, camera unchanged. scale overrides the 3D
+  // car's modelScale (CarPlay passes a smaller curve).
+  cameraRef?: React.RefObject<any>;
+  getCam?: () => { zoomLevel: number; pitch: number; heading: number; padding: any };
+  readyRef?: React.RefObject<boolean>;
+  scale?: any;
+}) {
   const render = useRef({ lat, lng, heading });
   const anim = useRef<{ fromLat: number; fromLng: number; fromHdg: number; toLat: number; toLng: number; toHdg: number; start: number; dur: number } | null>(null);
   const raf = useRef<number | null>(null);
@@ -402,6 +418,29 @@ export function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng
   // Shortest signed angular delta a→b in degrees (−180…180].
   const angDelta = (a: number, b: number) => ((((b - a) % 360) + 540) % 360) - 180;
 
+  // Pin the camera to the eased pose with ZERO native easing. animationMode:'none' →
+  // mapboxMap.setCamera(to:) (instant state-set, no second interpolator), so camera-
+  // center == car-pose on EVERY frame → the car never deviates, the world rotates/
+  // translates around it. Gated on readyRef so 60fps calls never queue into a not-yet-
+  // ready surface (the CarPlay blank-with-bounds hazard). No-op unless wired.
+  const pushCam = (la: number, ln: number, hdg?: number) => {
+    if (!cameraRef?.current || !getCam || !(readyRef?.current)) return;
+    const c = getCam();
+    try {
+      cameraRef.current.setCamera({
+        centerCoordinate: [ln, la],
+        // Ride the EASED heading (render.current.heading) so the map rotates as smoothly
+        // as the car turns; getCam's heading is only a fallback when none is passed.
+        heading: typeof hdg === 'number' ? hdg : c.heading,
+        zoomLevel: c.zoomLevel,
+        pitch: c.pitch,
+        padding: c.padding,
+        animationDuration: 0,
+        animationMode: 'none',
+      });
+    } catch {}
+  };
+
   const step = () => {
     const a = anim.current;
     if (!a) { raf.current = null; return; }
@@ -411,6 +450,7 @@ export function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng
       lng: a.fromLng + (a.toLng - a.fromLng) * t,
       heading: a.fromHdg + (a.toHdg - a.fromHdg) * t,
     };
+    pushCam(render.current.lat, render.current.lng, render.current.heading); // LOCKSTEP: camera rides the eased pose
     setTick((n) => (n + 1) & 0xffff);
     if (t < 1) {
       raf.current = requestAnimationFrame(step);
@@ -436,6 +476,7 @@ export function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng
       render.current = { lat, lng, heading };
       anim.current = null;
       if (raf.current != null) { cancelAnimationFrame(raf.current); raf.current = null; }
+      pushCam(lat, lng, heading); // hard-snap the camera with the car (first fix / recenter / resume)
       setTick((n) => (n + 1) & 0xffff);
       return;
     }
@@ -494,7 +535,7 @@ export function SelfCarModel({ lat, lng, heading, emissive }: { lat: number; lng
           // like the route LineLayer, which is what put the line over the car.
           modelType: "common-3d",
           modelEmissiveStrength: emissive,
-          modelScale: CAR_MODEL_SCALE_SIZED,
+          modelScale: scale ?? CAR_MODEL_SCALE_SIZED,
           modelRotation: [0, 0, (r.heading ?? 0) + CAR_MODEL_HEADING_OFFSET],
           modelCastShadows: false,
           modelReceiveShadows: false,

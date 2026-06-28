@@ -18,7 +18,7 @@
 // GL safety: onDidFailLoadingMap -> onGLError(), which the CarPlay surface uses to
 // drop back to the static-image fallback (ConvoyCarPlay's showLive/glFailed).
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { StyleSheet } from 'react-native';
 import Mapbox, {
   MapView,
@@ -26,14 +26,11 @@ import Mapbox, {
   ShapeSource,
   LineLayer,
   Models,
-  UserTrackingMode,
 } from '@rnmapbox/maps';
 import { useCarStore } from './carStore';
 import { getVehicleModelUrl } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
-  FOLLOW_ZOOM,
-  FOLLOW_LOWER_PAD_FRAC,
   ROUTE_GREEN_CORE,
   ROUTE_GREEN_GLOW,
   chaseZoom,
@@ -42,6 +39,7 @@ import {
   decodePolyline,
   SelfCarModel,
   projectOntoRoute,
+  carModelScale,
 } from '../ConvoyMapbox';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
@@ -54,10 +52,14 @@ const CRUISE_PITCH = 45;
 // Pull the car camera back a touch vs the phone so more of the road ahead reads on the
 // wide head-unit screen. Subtracted from the phone's zoom (Mapbox zoom is log2, so 0.7
 // ≈ 1.6x more area) for both nav and cruise.
-const CAR_ZOOM_OUT = 0.7;
-// Pull back MORE during active nav — the phone's tight chase zoom read "way too close"
-// on the head unit. Larger = more road ahead while routing. OTA-tunable.
-const CAR_ZOOM_OUT_NAV = 1.5;
+// Pull the camera back from the phone's chase zoom so more road reads on the wide
+// head-unit screen. Applied to BOTH nav AND cruise (which is now speed-aware too).
+// Larger = more zoomed out. OTA-tunable.
+const CAR_ZOOM_OUT = 1.3;
+
+// Top padding as a fraction of map height — pins the car near the BOTTOM-MIDDLE of the
+// head unit (larger = lower on screen). Applied every frame via getCam, nav AND cruise.
+const CAR_LOWER_PAD_FRAC = 0.42;
 // Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';
@@ -118,17 +120,12 @@ export default function CarMapView({ onGLError }: Props) {
   const styleURL = useStandard ? 'mapbox://styles/mapbox/standard' : Mapbox.StyleURL.SatelliteStreet;
   const emissive = CAR_EMISSIVE_BY_MODE[mode] ?? 0;
 
-  // Chase camera (phone math): speed-aware zoom + pitch while navigating, calm cruise
-  // framing otherwise. Pulled back vs the phone's raw chase so more road reads on the
-  // wide head-unit — MORE during nav (the tight chase zoom was too close).
+  // Speed-aware zoom for BOTH nav AND cruise — chaseZoom with no turn distance is a pure
+  // speed→zoom curve (city tighter, highway wider), so cruise now dynamically zooms in/out
+  // with speed too. Pulled back by CAR_ZOOM_OUT so more road reads on the wide screen.
   const kmh = kmhFromMs(s.speedMs);
-  const followZoom = s.navigating
-    ? chaseZoom(kmh, s.distanceToTurnM) - CAR_ZOOM_OUT_NAV
-    : FOLLOW_ZOOM - CAR_ZOOM_OUT;
+  const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined) - CAR_ZOOM_OUT;
   const followPitch = s.navigating ? chasePitch(kmh) : CRUISE_PITCH;
-  const followPadding = (s.navigating && mapH > 0)
-    ? { paddingTop: Math.round(mapH * FOLLOW_LOWER_PAD_FRAC), paddingBottom: 0, paddingLeft: 0, paddingRight: 0 }
-    : undefined;
 
   // MANDATORY heading-up — mirror the phone: plain Follow + a HELD heading, NOT
   // FollowWithCourse (which wobbles on raw GPS course and spins when stopped). Holding
@@ -136,6 +133,21 @@ export default function CarMapView({ onGLError }: Props) {
   const camHdgRef = useRef(hdg);
   if (typeof s.heading === 'number') camHdgRef.current = s.heading;
   const followHeadingDeg = camHdgRef.current;
+
+  // LOCKSTEP camera (see SelfCarModel): a cameraRef on THIS car-window map + a per-frame
+  // getCam closure. The car is pinned to a fixed screen spot (near bottom-middle) and the
+  // map rotates/translates around it. paintedRef (first rendered frame) + hasFix gate it
+  // so we never queue 60fps setCamera calls before the surface is live.
+  const cameraRef = useRef<React.ElementRef<typeof Camera> | null>(null);
+  const lockReadyRef = useRef(false);
+  lockReadyRef.current = paintedRef.current && hasFix;
+  const getCam = useCallback(() => ({
+    zoomLevel: followZoom,
+    pitch: followPitch,
+    heading: camHdgRef.current,
+    // Bottom-middle: a large paddingTop pushes the pinned car DOWN the wide head-unit.
+    padding: { paddingTop: mapH > 0 ? Math.round(mapH * CAR_LOWER_PAD_FRAC) : 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 },
+  }), [followZoom, followPitch, mapH]);
 
   // Active route → GeoJSON. Only drawn when the polyline decodes to a real line.
   const routeLL = decodePolyline(s.routePolyline);
@@ -198,17 +210,18 @@ export default function CarMapView({ onGLError }: Props) {
         <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: mode, show3dObjects: true } as any} />
       )}
 
-      {/* Heading-up chase camera. Zoom/pitch/padding mirror the phone during nav.
-          It follows the eased CustomLocationProvider that <SelfCarModel/> emits
-          below (the smooth interpolated track), not raw GPS. */}
+      {/* LOCKSTEP camera — NO followUserLocation. SelfCarModel drives this camera
+          imperatively (cameraRef.setCamera) on the SAME rAF tick that moves the 3D car,
+          with animationMode="none" so each frame is an instant state-set (no second
+          native interpolator fighting the JS tween). That pins the car to a fixed screen
+          spot (bottom-middle via getCam's padding) and rotates/translates the map AROUND
+          it — killing the camera stutter. defaultSettings only seeds the first frame. */}
       <Camera
-        followUserLocation={hasFix}
-        followUserMode={UserTrackingMode.Follow}
-        followZoomLevel={followZoom}
-        followHeading={followHeadingDeg}
-        followPitch={followPitch}
-        followPadding={followPadding}
-        defaultSettings={hasFix ? { centerCoordinate: [lng, lat], zoomLevel: followZoom, heading: followHeadingDeg } : undefined}
+        ref={cameraRef}
+        followUserLocation={false}
+        animationMode="none"
+        animationDuration={0}
+        defaultSettings={hasFix ? { centerCoordinate: [lng, lat], zoomLevel: followZoom, heading: followHeadingDeg, pitch: followPitch } : undefined}
       />
 
       {/* Register the self-car 3D model for the chosen paint. */}
@@ -221,7 +234,16 @@ export default function CarMapView({ onGLError }: Props) {
           so the follow camera and the 3D car glide in lockstep instead of teleporting
           per tick. Requires <Models/> above (model registration) — keep it. */}
       {hasFix && (
-        <SelfCarModel lat={lat} lng={lng} heading={hdg} emissive={emissive} />
+        <SelfCarModel
+          lat={lat}
+          lng={lng}
+          heading={hdg}
+          emissive={emissive}
+          cameraRef={cameraRef}
+          getCam={getCam}
+          readyRef={lockReadyRef}
+          scale={carModelScale(0.8)}
+        />
       )}
 
       {/* Route — gray alternates (filtered out for the single active route),

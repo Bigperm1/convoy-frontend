@@ -69,6 +69,10 @@ export function useConvoyPresence(
   const [status, setStatus] = useState<Status>("idle");
   const channelRef = useRef<RealtimeChannel | null>(null);
   const lastTrackRef = useRef<number>(0);
+  // Last status we actually broadcast — lets a live<->parked flip (CarPlay connect/
+  // disconnect) bypass the position throttle so the parked pin reaches peers even when
+  // the pinned coords don't change.
+  const lastStatusRef = useRef<string | undefined>(undefined);
 
   // Join / leave channel when channelName or me.user_id changes
   useEffect(() => {
@@ -136,6 +140,7 @@ export function useConvoyPresence(
               online_at: new Date().toISOString(),
             });
             lastTrackRef.current = Date.now();
+            lastStatusRef.current = me.status ?? "live";
           }
         } else if (s === "CHANNEL_ERROR" || s === "TIMED_OUT" || s === "CLOSED") {
           setStatus("error");
@@ -152,13 +157,18 @@ export function useConvoyPresence(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelName, me?.user_id]);
 
-  // Re-broadcast our position as it changes (throttled to ~1 update / 1.5s)
+  // Re-broadcast our position as it changes (throttled to ~1 update / 1.5s). A STATUS
+  // change (live <-> parked, e.g. CarPlay connect/disconnect) ALWAYS re-tracks and
+  // bypasses the throttle — otherwise a parked flip whose pinned coords didn't change
+  // would never reach peers (the position deps wouldn't fire, the throttle would eat it).
   useEffect(() => {
     const ch = channelRef.current;
     if (!ch || status !== "subscribed" || !coords || !me) return;
     const now = Date.now();
-    if (now - lastTrackRef.current < 1500) return;
+    const statusChanged = (me.status ?? "live") !== lastStatusRef.current;
+    if (!statusChanged && now - lastTrackRef.current < 1500) return;
     lastTrackRef.current = now;
+    lastStatusRef.current = me.status ?? "live";
     ch.track({
       user_id: me.user_id,
       handle: me.handle,
@@ -173,7 +183,7 @@ export function useConvoyPresence(
       heading: coords.heading,
       online_at: new Date().toISOString(),
     }).catch(() => {});
-  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed]);
+  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status]);
 
   return { peers, status };
 }

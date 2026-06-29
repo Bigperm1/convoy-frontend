@@ -476,6 +476,15 @@ export default function SettingsScreen() {
           />
           <View style={styles.divider} />
           <ToggleRow
+            icon="bulb"
+            iconColor="#BF5AF2"
+            title="Departure IQ"
+            subtitle="When you're parked at a saved place, offer a one-tap drive to where you usually head next"
+            value={settings.departureIQ !== false}
+            onChange={(v) => setSettings({ departureIQ: v })}
+          />
+          <View style={styles.divider} />
+          <ToggleRow
             icon="sparkles"
             iconColor="#BF5AF2"
             title="Route greeting"
@@ -512,6 +521,15 @@ export default function SettingsScreen() {
             subtitle="No speed warnings"
             selected={getSpeedAlertMode(settings) === "off"}
             onSelect={() => setSettings({ speedAlertMode: "off", novaSpeeding: false })}
+          />
+          <View style={styles.divider} />
+          <ToggleRow
+            icon="trending-up"
+            iconColor="#FF9F0A"
+            title="Adaptive alerts"
+            subtitle="Learn your usual pace so the first nudge stops nagging at speeds you always drive (the firmer alert stays fixed)"
+            value={settings.adaptiveSpeedAlerts !== false}
+            onChange={(v) => setSettings({ adaptiveSpeedAlerts: v })}
           />
           <View style={styles.divider} />
           <ToggleRow

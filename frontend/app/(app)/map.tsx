@@ -44,9 +44,10 @@ import { playSpeedDing } from "../../src/speedDing";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
 import { prepareRouteGreeting, playPreparedGreeting, clearPreparedGreeting } from "../../src/novaGreeting";
-import { useSavedPlaces, saveSavedPlace, removeSavedPlace, resolveTarget, ensureSavedPlacesLoaded, matchSavedPlace } from "../../src/savedPlaces";
+import { useSavedPlaces, saveSavedPlace, removeSavedPlace, resolveTarget, ensureSavedPlacesLoaded, matchSavedPlace, predictDestination, type SavedPlace } from "../../src/savedPlaces";
 import { recordDrive, matchAiRoute, viaPointsFor, ensureAiRoutesLoaded } from "../../src/aiRoutes";
 import { askScout } from "../../src/askScout";
+import { recordOver, habitualOverKmh } from "../../src/speedProfile";
 import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
@@ -772,15 +773,24 @@ export default function MapScreen() {
     if (kmh < 5) return;
     const overKmh = kmh - speedLimitKmh;
     const now = Date.now();
+    // Learn the habitual over-margin, then (if adaptive is on) raise ONLY the tier-1
+    // nudge toward it — buffered + hard-capped at 35 over so a habitual speeder still
+    // gets nudged, and tier-2 (the firmer alert) is untouched.
+    recordOver(overKmh);
+    let tier1Over = SPEED_TIER1_OVER_KMH;
+    if (getSettings().adaptiveSpeedAlerts !== false) {
+      const hab = habitualOverKmh();
+      if (hab != null) tier1Over = Math.max(SPEED_TIER1_OVER_KMH, Math.min(35, Math.round(hab) + 5));
+    }
     // Re-arm each threshold the moment you drop back under it.
-    if (overKmh < SPEED_TIER1_OVER_KMH) speedTier1Ref.current.armed = true;
+    if (overKmh < tier1Over) speedTier1Ref.current.armed = true;
     if (overKmh < SPEED_TIER2_OVER_KMH) speedTier2Ref.current.armed = true;
     // Fire the HIGHEST crossed threshold whose own cooldown currently allows it.
     let tier: 0 | 1 | 2 = 0;
     if (overKmh >= SPEED_TIER2_OVER_KMH) {
       const t = speedTier2Ref.current;
       if (t.armed || now - t.last >= SPEED_ALERT_COOLDOWN_MS) { t.last = now; t.armed = false; tier = 2; }
-    } else if (overKmh >= SPEED_TIER1_OVER_KMH) {
+    } else if (overKmh >= tier1Over) {
       const t = speedTier1Ref.current;
       if (t.armed || now - t.last >= SPEED_ALERT_COOLDOWN_MS) { t.last = now; t.armed = false; tier = 1; }
     }
@@ -1285,6 +1295,49 @@ export default function MapScreen() {
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ===== Departure IQ (Scout) =====
+  // When you're parked AT a saved place at a predictable time, proactively offer a one-tap
+  // drive to where you're probably headed (predictDestination's time-of-day heuristic). A
+  // dismissible top banner, NOT spoken. One shot per parked session — re-arms only after
+  // you actually drive away, and a dismiss hushes it for a while.
+  const [departSuggest, setDepartSuggest] = useState<{ place: SavedPlace; reason: string; etaText?: string } | null>(null);
+  const departPromptedRef = useRef(false);
+  const departHushRef = useRef(0);
+  const departBusyRef = useRef(false);
+  useEffect(() => {
+    const c = coords;
+    if (!c) return;
+    if ((c.speed ?? 0) > 2.5) { // ~9 km/h → you've driven off; re-arm + clear
+      departPromptedRef.current = false;
+      if (departSuggest) setDepartSuggest(null);
+      return;
+    }
+    if (getSettings().departureIQ === false) return;
+    if (navMode === "turn-by-turn" || destination) return;        // already going somewhere
+    if (departPromptedRef.current || departBusyRef.current) return;
+    if (Date.now() < departHushRef.current) return;
+    if ((c.speed ?? 0) > 1.5) return;                              // must be parked
+    const here = matchSavedPlace(c.lat, c.lng);                   // parked at a saved place?
+    if (!here) return;
+    const pred = predictDestination(new Date(), c.lat, c.lng);    // where you usually go from here, now
+    if (!pred || pred.place.id === here.id) return;
+    departBusyRef.current = true;
+    departPromptedRef.current = true;                              // one shot per parked session
+    (async () => {
+      let etaText: string | undefined;
+      try {
+        const r = await fetchRoutes({ lat: c.lat, lng: c.lng }, { lat: pred.place.lat, lng: pred.place.lng }, {
+          tolls: settings.avoidTolls, highways: settings.avoidHighways, ferries: settings.avoidFerries,
+        });
+        const best = r[0];
+        if (best) etaText = best.duration_in_traffic_text || best.duration_text;
+      } catch {}
+      setDepartSuggest({ place: pred.place, reason: pred.reason, etaText });
+      departBusyRef.current = false;
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coords, navMode, destination]);
 
   // System nav-notification banner — keeps the current turn on screen as a
   // heads-up notification even when Convoy is backgrounded (home/lock screen).
@@ -2738,6 +2791,42 @@ export default function MapScreen() {
                 <Text style={styles.routeToastBtnText}>Load</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setRouteToast(null)} style={{ padding: 6 }}>
+                <Ionicons name="close" size={18} color={COLORS.textDim} />
+              </TouchableOpacity>
+            </View>
+          </Glass>
+        </SafeAreaView>
+      )}
+
+      {/* ===== Departure IQ — proactive "ready to go?" when parked at a saved place ===== */}
+      {departSuggest && navMode === "preview" && !destination && (
+        <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.routeToastWrap}>
+          <Glass radius={16} style={styles.routeToast}>
+            <View style={styles.routeToastRow}>
+              <View style={styles.routeToastIcon}>
+                <Ionicons name="car-sport" size={20} color="#2DEC86" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.routeToastTitle}>
+                  {departSuggest.reason.charAt(0).toUpperCase() + departSuggest.reason.slice(1)}?
+                </Text>
+                <Text style={styles.routeToastSub} numberOfLines={1}>
+                  {departSuggest.place.label}{departSuggest.etaText ? ` · ${departSuggest.etaText}` : ""}
+                </Text>
+              </View>
+              <TouchableOpacity
+                testID="depart-go"
+                onPress={() => {
+                  const p = departSuggest.place;
+                  setDepartSuggest(null);
+                  setDestination({ lat: p.lat, lng: p.lng, label: p.label });
+                  setShowSteps(true);
+                }}
+                style={styles.routeToastBtn}
+              >
+                <Text style={styles.routeToastBtnText}>Let's go</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => { setDepartSuggest(null); departHushRef.current = Date.now() + 1800000; }} style={{ padding: 6 }}>
                 <Ionicons name="close" size={18} color={COLORS.textDim} />
               </TouchableOpacity>
             </View>

@@ -79,6 +79,13 @@ scoutHandsFree?: boolean;
 // Convoy alerts — Scout speaks up when the crew is spreading out (a live peer falls
 // well behind). Only with 2+ live peers; edge-triggered + hushed. undefined → on.
 convoyAlerts?: boolean;
+// Adaptive speed alerts — learn the driver's habitual over-the-limit margin and raise
+// the FIRST nudge toward it (bounded; the firmer second alert stays fixed) so it stops
+// nagging at speeds they always drive. undefined → on. See src/speedProfile.ts.
+adaptiveSpeedAlerts?: boolean;
+// Departure IQ — when parked at a saved place at a predictable time, proactively offer a
+// one-tap drive to the predicted destination (e.g. "Heading to Work?"). undefined → on.
+departureIQ?: boolean;
 // Spoken reroute reaction (the "split decision" quip on recompute). Off →
 // reroutes are silent; turn-by-turn guidance is unaffected.
 novaReroute: boolean;
@@ -142,6 +149,8 @@ novaVoice: true,
 novaVoiceName: "nova",
 scoutHandsFree: true,
 convoyAlerts: true,
+adaptiveSpeedAlerts: true,
+departureIQ: true,
 novaReroute: false,
 novaQuietMigrated: true,
 baselineMigrated: true,

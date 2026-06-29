@@ -29,6 +29,10 @@ export const NOVA_VOICES: NovaVoice[] = [
   { id: "echo", label: "Echo", blurb: "Calm & measured" },
   { id: "fable", label: "Fable", blurb: "Expressive storyteller" },
   { id: "onyx", label: "Onyx", blurb: "Deep & authoritative" },
+  // TEST: a gpt-4o-mini-tts-only voice. If its preview SPEAKS on this backend, the
+  // backend supports the newer expressive voices and we add the full set (ash,
+  // ballad, sage, verse); if it's silent, the backend is on tts-1 and this is removed.
+  { id: "coral", label: "Coral", blurb: "Newer voice — tap to test" },
 ];
 
 // Each audition line names the VOICE itself (not a fixed "Nova"), so you can tell

@@ -313,7 +313,7 @@ export default function SettingsScreen() {
             icon="camera"
             iconColor="#FF453A"
             title="Speed cameras"
-            subtitle="Show fixed speed cameras and get a Nova voice alert as you approach (OpenStreetMap)"
+            subtitle="Show fixed speed cameras and get a Scout voice alert as you approach (OpenStreetMap)"
             value={settings.speedCameras !== false}
             onChange={(v) => setSettings({ speedCameras: v })}
           />
@@ -413,21 +413,21 @@ export default function SettingsScreen() {
           Convoy-originated reports are prioritized: they appear with a distinct gold border so you can tell at a glance which alerts came from your crew vs. the general feed.
         </Text>
 
-        {/* Nova Voice — toggle Nova's spoken extras. Turn-by-turn directions are
+        {/* Scout Voice — toggle Scout's spoken extras. Turn-by-turn directions are
             NOT gated here (use the map mute button for those); these control the
             personable greeting, speeding nudges, and proactive mid-drive callouts. */}
-        <Text style={styles.sectionLabel}>NOVA VOICE</Text>
+        <Text style={styles.sectionLabel}>SCOUT VOICE</Text>
         <Glass radius={16} style={styles.card}>
           <ToggleRow
             icon="volume-high"
             iconColor="#BF5AF2"
-            title="Nova voice"
-            subtitle="Master switch for all of Nova's voice"
+            title="Scout voice"
+            subtitle="Master switch for all of Scout's voice"
             value={settings.novaVoice !== false}
             onChange={(v) => setSettings({ novaVoice: v })}
           />
           <View style={styles.divider} />
-          {/* Voice picker — which OpenAI voice Nova speaks in. Tap a chip to select
+          {/* Voice picker — which OpenAI voice Scout speaks in. Tap a chip to select
               it AND hear a short sample (cached per voice). */}
           <View style={styles.voicePicker}>
             <View style={styles.voicePickerHeader}>
@@ -461,19 +461,19 @@ export default function SettingsScreen() {
             icon="sparkles"
             iconColor="#BF5AF2"
             title="Route greeting"
-            subtitle="Nova's personable hello when you tap Start on a drive"
+            subtitle="Scout's personable hello when you tap Start on a drive"
             value={settings.novaGreeting !== false}
             onChange={(v) => setSettings({ novaGreeting: v })}
           />
           <View style={styles.divider} />
-          {/* Speed alert — three-way: Nova speaks / Ding chimes / Off.
+          {/* Speed alert — three-way: Scout speaks / Ding chimes / Off.
               getSpeedAlertMode() migrates the legacy novaSpeeding boolean; we
               keep novaSpeeding synced (nova → true, else false) for back-compat. */}
           <RadioRow
             icon="speedometer"
             iconColor="#FF453A"
-            title="Speed alert — Nova"
-            subtitle="Nova speaks up when you're well over the limit (~21 over), firmer at ~41 over"
+            title="Speed alert — Scout"
+            subtitle="Scout speaks up when you're well over the limit (~21 over), firmer at ~41 over"
             selected={getSpeedAlertMode(settings) === "nova"}
             onSelect={() => setSettings({ speedAlertMode: "nova", novaSpeeding: true })}
           />
@@ -509,13 +509,13 @@ export default function SettingsScreen() {
             icon="git-compare-outline"
             iconColor="#0A84FF"
             title="Reroute announcements"
-            subtitle="Nova's spoken reaction when the route recomputes"
+            subtitle="Scout's spoken reaction when the route recomputes"
             value={settings.novaReroute !== false}
             onChange={(v) => setSettings({ novaReroute: v })}
           />
         </Glass>
         <Text style={styles.helpText}>
-          These control Nova's extra spoken touches. Turn-by-turn directions aren't affected — silence those with the mute button on the map.
+          These control Scout's extra spoken touches. Turn-by-turn directions aren't affected — silence those with the mute button on the map.
         </Text>
 
         {/* Route Preferences */}

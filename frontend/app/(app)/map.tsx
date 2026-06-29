@@ -1173,7 +1173,7 @@ export default function MapScreen() {
   const handleMapLongPress = (c: { lat: number; lng: number }) => {
     Alert.alert(
       "Save this spot",
-      "Set it as a quick destination for predictions and your Nova greeting.",
+      "Set it as a quick destination for predictions and your Scout greeting.",
       [
         { text: "Cancel", style: "cancel" },
         {

@@ -458,6 +458,15 @@ export default function SettingsScreen() {
           </View>
           <View style={styles.divider} />
           <ToggleRow
+            icon="chatbubbles"
+            iconColor="#BF5AF2"
+            title="Hands-free replies"
+            subtitle="Answer Scout out loud — say “yes” / “no” to her prompts (e.g. a faster route) instead of tapping"
+            value={settings.scoutHandsFree !== false}
+            onChange={(v) => setSettings({ scoutHandsFree: v })}
+          />
+          <View style={styles.divider} />
+          <ToggleRow
             icon="sparkles"
             iconColor="#BF5AF2"
             title="Route greeting"

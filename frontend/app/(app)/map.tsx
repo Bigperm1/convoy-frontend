@@ -46,6 +46,7 @@ import { addRecentRoute } from "../../src/recentRoutes";
 import { prepareRouteGreeting, playPreparedGreeting, clearPreparedGreeting } from "../../src/novaGreeting";
 import { useSavedPlaces, saveSavedPlace, removeSavedPlace, resolveTarget, ensureSavedPlacesLoaded, matchSavedPlace } from "../../src/savedPlaces";
 import { recordDrive, matchAiRoute, viaPointsFor, ensureAiRoutesLoaded } from "../../src/aiRoutes";
+import { askScout } from "../../src/askScout";
 import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
@@ -978,7 +979,7 @@ export default function MapScreen() {
       maybeLearnDrive(destination);
       tripBaselineRef.current = null;
       pendingRerouteRef.current = null;
-      setRerouteOffer(null);
+      clearOffer();
       setDestination(null);
       setRoutes([]);
       setRoute(null);
@@ -1068,10 +1069,14 @@ export default function MapScreen() {
     divLat: number; divLng: number; cause: string; maneuver: string | null;
   } | null>(null);
   // The visual reroute offer currently on screen (mini-map card). null = none.
-  const [rerouteOffer, setRerouteOffer] = useState<{
-    route: NavRoute; title: string; subtitle: string;
-    savedMin: number; etaMin: number; arrival: string; lateMin: number;
-  } | null>(null);
+  type RerouteOffer = { route: NavRoute; title: string; subtitle: string; savedMin: number; etaMin: number; arrival: string; lateMin: number };
+  const [rerouteOffer, setRerouteOffer] = useState<RerouteOffer | null>(null);
+  // Mirror of the on-screen offer in a ref, so the hands-free voice callback (which
+  // resolves seconds later from a stale render closure) reads the CURRENT offer, not a
+  // captured one. Kept in sync by showOffer()/clearOffer().
+  const rerouteOfferRef = useRef<RerouteOffer | null>(null);
+  const showOffer = (o: RerouteOffer) => { rerouteOfferRef.current = o; setRerouteOffer(o); };
+  const clearOffer = () => { rerouteOfferRef.current = null; setRerouteOffer(null); };
 
   const checkForFasterRoute = useCallback(async () => {
     if (!getSettings().novaMidDrive) return;
@@ -1158,11 +1163,11 @@ export default function MapScreen() {
   // same hush windows + the setRoutes([best]) swap. Plain functions (recreated
   // each render) so they always read the current offer, never a stale one.
   const acceptReroute = () => {
-    const offer = rerouteOffer;
+    const offer = rerouteOfferRef.current; // ref, so the voice path reads the live offer
     rerouteShowingRef.current = false;
     rerouteSuppressUntilRef.current = Date.now() + 120000; // settle 2 min
     pendingRerouteRef.current = null;
-    setRerouteOffer(null);
+    clearOffer();
     if (offer?.route) {
       setRoutes([offer.route]);     // same swap the off-route path uses
       setSelectedRouteIndex(0);
@@ -1176,7 +1181,7 @@ export default function MapScreen() {
     rerouteShowingRef.current = false;
     rerouteSuppressUntilRef.current = Date.now() + 300000; // hush 5 min
     pendingRerouteRef.current = null;
-    setRerouteOffer(null);
+    clearOffer();
   };
 
   // Drive the check on a 60s interval, only while actively navigating.
@@ -1216,13 +1221,26 @@ export default function MapScreen() {
     const line = pend.maneuver
       ? `${hey}In ${distText}, ${pend.maneuver}. That route saves about ${savedLabel}. Want to switch?`
       : `${hey}${pend.cause}. A faster route's coming up in ${distText}, saves about ${savedLabel}. Want to switch?`;
-    if (!navMutedRef.current) { try { announce(line); } catch {} }
-    setRerouteOffer({
+    // Card always shows (the tap fallback). When hands-free is on + not muted, Scout
+    // SPEAKS the prompt and listens for a spoken yes/no — answering by voice mirrors the
+    // card buttons. We ignore the voice result if the driver already tapped (offer gone).
+    showOffer({
       route: pend.route,
       title: pend.title,
       subtitle: pend.maneuver ? `${pend.maneuver} · in ${distText}` : `${pend.subtitle} · in ${distText}`,
       savedMin: pend.savedMin, etaMin, arrival, lateMin: pend.lateMin,
     });
+    const handsFree = getSettings().scoutHandsFree !== false && !navMutedRef.current;
+    if (handsFree) {
+      void askScout(line).then((r) => {
+        if (!r || !rerouteShowingRef.current) return; // already tapped / dismissed
+        if (r.yes) acceptReroute();
+        else if (r.no) declineReroute();
+        // anything else → leave the card up for a tap
+      });
+    } else if (!navMutedRef.current) {
+      try { announce(line); } catch {}
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coords, navMode]);
 
@@ -1311,7 +1329,7 @@ export default function MapScreen() {
     maybeLearnDrive();
     tripBaselineRef.current = null;
     pendingRerouteRef.current = null;
-    setRerouteOffer(null);
+    clearOffer();
     navAutoStartedRef.current = true;  // stay stopped until a new destination is set
     setNavMode("preview");
   };
@@ -1350,7 +1368,7 @@ export default function MapScreen() {
     stopSpeech();
     tripBaselineRef.current = null;
     pendingRerouteRef.current = null;
-    setRerouteOffer(null);
+    clearOffer();
     setDestination(null);
     setRoutes([]);
     setRoute(null);

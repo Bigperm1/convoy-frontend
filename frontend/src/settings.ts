@@ -72,6 +72,10 @@ novaVoice: boolean;
 // One of the OpenAI voice ids (alloy / echo / fable / nova / onyx / shimmer …).
 // undefined/absent → "nova" (the original default). See src/novaVoices.ts.
 novaVoiceName?: string;
+// Hands-free voice replies — when on, Scout SPEAKS prompts (e.g. "faster route, want
+// to switch?") and listens for a spoken yes/no so you never tap while driving. The
+// on-screen card is always the fallback. undefined → on. See src/askScout.ts.
+scoutHandsFree?: boolean;
 // Spoken reroute reaction (the "split decision" quip on recompute). Off →
 // reroutes are silent; turn-by-turn guidance is unaffected.
 novaReroute: boolean;
@@ -133,6 +137,7 @@ novaMidDrive: false,
 novaMuted: false,
 novaVoice: true,
 novaVoiceName: "nova",
+scoutHandsFree: true,
 novaReroute: false,
 novaQuietMigrated: true,
 baselineMigrated: true,

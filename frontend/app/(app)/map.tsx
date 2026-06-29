@@ -187,6 +187,32 @@ function nearestHazardAhead(
   return { kind: best.kind, distKm: Math.max(1, Math.round(best.distM / 1000)) };
 }
 
+// Sample a handful of [lng,lat] waypoints along the part of `coords` (a route's full
+// decoded geometry) that lies AHEAD of `origin`. Feeding these to fetchAiRoute pins a
+// fresh Directions request to YOUR current route, so it returns your route's LIVE
+// traffic-aware remaining time — the thing tbt.etaSeconds (a static proportional
+// estimate) can't tell us. Returns [] when there isn't enough road left to sample.
+function routeAheadViaPoints(
+  coords: [number, number][] | undefined,
+  origin: { lat: number; lng: number },
+  maxVia = 8
+): [number, number][] {
+  if (!coords || coords.length < 4) return [];
+  let ni = 0, bestD = Infinity;
+  for (let i = 0; i < coords.length; i++) {
+    const dLng = coords[i][0] - origin.lng, dLat = coords[i][1] - origin.lat;
+    const d = dLng * dLng + dLat * dLat;
+    if (d < bestD) { bestD = d; ni = i; }
+  }
+  const interior = coords.slice(ni + 1, coords.length - 1); // ahead of the car, exclude dest
+  if (interior.length < 2) return [];
+  if (interior.length <= maxVia) return interior;
+  const out: [number, number][] = [];
+  const step = interior.length / maxVia;
+  for (let i = 0; i < maxVia; i++) out.push(interior[Math.floor(i * step + step / 2)]);
+  return out;
+}
+
 // Initial compass bearing (deg, 0..360) from point a to point b.
 function bearingDeg(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -885,6 +911,8 @@ export default function MapScreen() {
       navAutoStartedRef.current = true;  // stay stopped until a new destination is set
       // Learn the habitual path to this place BEFORE we drop the destination.
       maybeLearnDrive(destination);
+      tripBaselineRef.current = null;
+      setRerouteOffer(null);
       setDestination(null);
       setRoutes([]);
       setRoute(null);
@@ -910,6 +938,9 @@ export default function MapScreen() {
           const ordered = orderReroutesForward(res, coords?.heading);
           setRoutes(ordered.slice(0, 2));
           setSelectedRouteIndex(0);
+          // Re-baseline to the new route: the driver deliberately changed path, so the
+          // "running late vs plan" check must measure the route they're now on, not the old one.
+          tripBaselineRef.current = { startedAt: Date.now(), plannedSec: ordered[0]?.duration_in_traffic_s ?? ordered[0]?.duration_s ?? (tbtEtaRef.current || 0) };
         }
       });
     },
@@ -956,8 +987,16 @@ export default function MapScreen() {
   const rerouteBusyRef = useRef(false);        // a check is in flight
   const rerouteShowingRef = useRef(false);     // a prompt is currently up
   const rerouteSuppressUntilRef = useRef(0);   // hush window after accept/decline
+  // Trip baseline for the "is my route running late?" check: set at Start to the launch
+  // time + the route's planned (traffic-aware) total duration, so mid-drive we can tell
+  // whether the route is now taking LONGER than originally promised (an accident /
+  // construction appeared). Cleared on arrival / clear / end.
+  const tripBaselineRef = useRef<{ startedAt: number; plannedSec: number } | null>(null);
   // The visual reroute offer currently on screen (mini-map card). null = none.
-  const [rerouteOffer, setRerouteOffer] = useState<{ route: NavRoute; title: string; subtitle: string } | null>(null);
+  const [rerouteOffer, setRerouteOffer] = useState<{
+    route: NavRoute; title: string; subtitle: string;
+    savedMin: number; etaMin: number; arrival: string; lateMin: number;
+  } | null>(null);
 
   const checkForFasterRoute = useCallback(async () => {
     if (!getSettings().novaMidDrive) return;
@@ -967,46 +1006,71 @@ export default function MapScreen() {
     const origin = coordsRef.current;
     const dest = destRef.current;
     const cur = activeRouteRef.current;
-    if (!origin || !dest || !cur) return;
-    const curEta = tbtEtaRef.current;
-    if (!curEta || curEta < 240) return; // almost there — don't bother
+    const baseline = tripBaselineRef.current;
+    if (!origin || !dest || !cur || !baseline) return;
+    if (tbtEtaRef.current && tbtEtaRef.current < 240) return; // almost there — don't bother
 
     rerouteBusyRef.current = true;
     try {
       const s = getSettings();
-      const fresh = await fetchRoutes(origin, dest, {
-        tolls: s.avoidTolls, highways: s.avoidHighways, ferries: s.avoidFerries,
-      });
+      const avoid = { tolls: s.avoidTolls, highways: s.avoidHighways, ferries: s.avoidFerries };
+      // (1) MY route's LIVE remaining — replay my own geometry ahead through traffic.
+      // tbt.etaSeconds is a STATIC proportional estimate (nav.ts) that can't see a new
+      // jam, so we pin a fresh Directions request to my route via its own waypoints.
+      const via = routeAheadViaPoints(cur.coordinates as any, origin);
+      if (via.length < 3) return; // not enough road left to measure my route reliably
+      const [mine, fresh] = await Promise.all([
+        fetchAiRoute(origin, via, dest, avoid),
+        fetchRoutes(origin, dest, avoid),
+      ]);
       if (!fresh.length) return;
-      // Fastest live option from where we are right now.
-      const best = fresh.reduce((a, b) => (b.duration_s < a.duration_s ? b : a));
+      // MY route's LIVE remaining. Do NOT fall back to tbtEtaRef here — that's the
+      // STATIC proportional estimate (nav.ts) that can't see a new jam, i.e. the exact
+      // bug this rework fixes. If the live replay failed, skip and retry next interval.
+      const mineRemain = mine?.duration_in_traffic_s ?? mine?.duration_s;
+      if (!mineRemain) return;
+      // (2) Best fresh alternative from here.
+      const best = fresh.reduce((a, b) =>
+        ((b.duration_in_traffic_s ?? b.duration_s) < (a.duration_in_traffic_s ?? a.duration_s) ? b : a));
+      const bestEta = best.duration_in_traffic_s ?? best.duration_s;
       if (best.polyline && cur.polyline && best.polyline === cur.polyline) return; // same line
-      const savedSec = curEta - best.duration_s;
-      const hz = nearestHazardAhead(origin, dest, hazardsRef.current);
-      const bigSaving = savedSec >= 300;            // >=5 min on its own
-      const hazardSaving = !!hz && savedSec >= 120;  // >=2 min + a known incident ahead
-      if (!bigSaving && !hazardSaving) return;
 
-      const mins = Math.max(1, Math.round(savedSec / 60));
-      const minLabel = `${mins} ${mins === 1 ? "minute" : "minutes"}`;
+      // (3) Is my trip running LATE vs the plan I started with, AND does the alternative
+      // meaningfully beat my LIVE remaining? Both compared on traffic-aware times.
+      const elapsedSec = (now - baseline.startedAt) / 1000;
+      const lateSec = (elapsedSec + mineRemain) - baseline.plannedSec; // projected vs planned arrival
+      const savedSec = mineRemain - bestEta;                            // alt vs staying
+      const hz = nearestHazardAhead(origin, dest, hazardsRef.current);
+      const DELAY_MIN = 180, SAVE_MIN = 120;
+      const degraded = lateSec >= DELAY_MIN;
+      const worthwhile = savedSec >= SAVE_MIN;
+      // Fire when the route degraded AND a better one exists; also on a big standalone
+      // saving (>=5 min) or a known incident ahead with a worthwhile saving.
+      if (!((degraded && worthwhile) || savedSec >= 300 || (!!hz && worthwhile))) return;
+
+      const savedMin = Math.max(1, Math.round(savedSec / 60));
+      const lateMin = Math.max(0, Math.round(lateSec / 60));
+      const etaMin = Math.max(1, Math.round(bestEta / 60));
+      const arrival = fmtClock(new Date(now + bestEta * 1000));
+      const minLabel = `${savedMin} ${savedMin === 1 ? "minute" : "minutes"}`;
       const cs = (s.callSign || "").trim();
       const hey = cs ? `Hey ${cs}, ` : "";
-      const where = hz
+      const cause = hz
         ? `there's ${hazardReason(hz.kind)} about ${hz.distKm} ${hz.distKm === 1 ? "kilometer" : "kilometers"} ahead`
-        : "traffic is building ahead";
-      const spoken = `${hey}${where}. A faster route saves about ${minLabel}. Want me to switch?`;
+        : (degraded ? `your route's running about ${Math.max(1, lateMin)} ${lateMin === 1 ? "minute" : "minutes"} behind` : "traffic shifted ahead");
+      const spoken = `${hey}${cause}. I found a route that saves about ${minLabel}. Want to switch?`;
 
       rerouteShowingRef.current = true;
       if (!navMutedRef.current) { try { announce(spoken); } catch {} }
-      // Show the visual reroute card (a mini-map preview of `best`) instead of a
-      // plain text alert. acceptReroute / declineReroute (below) handle the tap —
-      // accepting runs the SAME setRoutes([best]) swap the off-route path uses.
+      // Show the visual reroute card (a mini-map of `best` + live stats). accept/decline
+      // (below) handle the tap — accepting runs the SAME setRoutes([best]) swap.
       setRerouteOffer({
         route: best,
-        title: hz ? hazardTitle(hz.kind) : "Faster route available",
+        title: hz ? hazardTitle(hz.kind) : (degraded ? "Your route slowed down" : "Faster route found"),
         subtitle: hz
-          ? `Reported ${hazardReason(hz.kind)} ahead · saves about ${minLabel}`
-          : `A faster route saves about ${minLabel} on current traffic`,
+          ? `Reported ${hazardReason(hz.kind)} ahead`
+          : (degraded ? `About ${Math.max(1, lateMin)} min behind your start estimate` : "Live traffic shifted in your favor"),
+        savedMin, etaMin, arrival, lateMin,
       });
     } catch {
       // ignore — try again on the next interval
@@ -1026,6 +1090,9 @@ export default function MapScreen() {
     if (offer?.route) {
       setRoutes([offer.route]);     // same swap the off-route path uses
       setSelectedRouteIndex(0);
+      // Re-baseline to the route we just switched to — otherwise we keep measuring
+      // "late" against the OLD plan and re-fire the offer after the suppress expires.
+      tripBaselineRef.current = { startedAt: Date.now(), plannedSec: offer.route.duration_in_traffic_s ?? offer.route.duration_s };
       if (!navMutedRef.current) { try { announce(pick(REROUTE_ACCEPT_LINES)); } catch {} }
     }
   };
@@ -1088,6 +1155,9 @@ export default function MapScreen() {
     navAutoStartedRef.current = true;
     // Fresh AI-route trace for this trip (learn the path we actually drive this time).
     driveTraceRef.current = [];
+    // Capture the trip baseline (start time + planned traffic-aware duration) so the
+    // proactive-reroute check can tell if the route later runs LONGER than promised.
+    tripBaselineRef.current = { startedAt: Date.now(), plannedSec: activeRoute.duration_in_traffic_s ?? activeRoute.duration_s };
     // Begin guidance centred on the car (a destination pick had dropped follow to
     // frame the route options).
     clearRecenterTimer();
@@ -1124,6 +1194,8 @@ export default function MapScreen() {
   const endNav = () => {
     stopSpeech();
     maybeLearnDrive();
+    tripBaselineRef.current = null;
+    setRerouteOffer(null);
     navAutoStartedRef.current = true;  // stay stopped until a new destination is set
     setNavMode("preview");
   };
@@ -1160,6 +1232,8 @@ export default function MapScreen() {
   };
   const clearRoute = () => {
     stopSpeech();
+    tripBaselineRef.current = null;
+    setRerouteOffer(null);
     setDestination(null);
     setRoutes([]);
     setRoute(null);
@@ -2790,13 +2864,18 @@ export default function MapScreen() {
         myTopSpeed={Math.max(user?.top_speed_record || 0, sessionMaxSpeed)}
       />
 
-      {/* Nova's mid-drive reroute offer — frosted card with a mini-map preview
-          of the suggested alternate route (replaces the old text alert). */}
+      {/* Scout's mid-drive reroute offer — frosted card with a live mini-map of the
+          suggested alternate (congestion-colored) + its ETA, time saved, and how far
+          behind your start estimate you've fallen. */}
       <RerouteCard
         visible={!!rerouteOffer}
         route={rerouteOffer?.route ?? null}
         title={rerouteOffer?.title ?? ""}
         subtitle={rerouteOffer?.subtitle ?? ""}
+        savedMin={rerouteOffer?.savedMin}
+        etaMin={rerouteOffer?.etaMin}
+        arrival={rerouteOffer?.arrival}
+        lateMin={rerouteOffer?.lateMin}
         onAccept={acceptReroute}
         onDecline={declineReroute}
       />

@@ -57,6 +57,13 @@ function colorFor(level: CongestionLevel | string | undefined, baseColor?: strin
   return baseColor || DEFAULT_COLOR; // unknown / low / undefined → the route base color
 }
 
+// Public: the color for one congestion level (clear → base color, warming through
+// yellow/orange/red). Used to paint congestion-colored route segments outside the
+// Mapbox-expression world (e.g. the reroute card's react-native-maps mini-map).
+export function congestionColor(level: CongestionLevel | string | undefined, baseColor?: string): string {
+  return colorFor(level, baseColor);
+}
+
 // Haversine metres between two [lng, lat] points (for segment fractions).
 function segMeters(a: [number, number], b: [number, number]): number {
   const R = 6371000;

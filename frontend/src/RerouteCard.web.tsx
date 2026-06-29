@@ -15,11 +15,21 @@ type Props = {
   route: NavRoute | null;
   title: string;
   subtitle: string;
+  savedMin?: number;
+  etaMin?: number;
+  arrival?: string;
+  lateMin?: number;
   onAccept: () => void;
   onDecline: () => void;
 };
 
-export default function RerouteCard({ visible, title, subtitle, onAccept, onDecline }: Props) {
+export default function RerouteCard({ visible, title, subtitle, savedMin, etaMin, arrival, lateMin, onAccept, onDecline }: Props) {
+  const stats = [
+    typeof etaMin === "number" ? `${etaMin} min` : null,
+    arrival ? `arrive ${arrival}` : null,
+    typeof savedMin === "number" ? `saves ${savedMin} min` : null,
+    typeof lateMin === "number" && lateMin >= 1 ? `${lateMin} min behind` : null,
+  ].filter(Boolean).join(" · ");
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onDecline}>
       <View style={styles.backdrop}>
@@ -30,6 +40,7 @@ export default function RerouteCard({ visible, title, subtitle, onAccept, onDecl
               <Text style={styles.title} numberOfLines={1}>{title}</Text>
             </View>
             <Text style={styles.sub} numberOfLines={2}>{subtitle}</Text>
+            {!!stats && <Text style={styles.stats}>{stats}</Text>}
             <View style={styles.btnRow}>
               <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={onDecline} activeOpacity={0.85}>
                 <Text style={styles.btnGhostText}>No thanks</Text>
@@ -52,7 +63,8 @@ const styles = StyleSheet.create({
   card: { borderRadius: 22, padding: 16, backgroundColor: "rgba(18,19,22,0.98)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)" },
   headerRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   title: { color: COLORS.text, fontSize: 18, fontWeight: "800", letterSpacing: -0.3, flex: 1 },
-  sub: { color: COLORS.textDim, fontSize: 13, marginTop: 4, marginBottom: 14 },
+  sub: { color: COLORS.textDim, fontSize: 13, marginTop: 4, marginBottom: 8 },
+  stats: { color: COLORS.text, fontSize: 14, fontWeight: "700", marginBottom: 14 },
   btnRow: { flexDirection: "row", gap: 10 },
   btn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 13, borderRadius: 13 },
   btnGhost: { backgroundColor: "rgba(255,255,255,0.10)" },

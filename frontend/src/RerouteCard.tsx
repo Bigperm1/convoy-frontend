@@ -16,17 +16,25 @@ import { BlurView } from "expo-blur";
 import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import { COLORS } from "./theme";
 import { decodePolyline, type NavRoute } from "./nav";
+import { congestionColor } from "./mapboxDirections";
+import { getSettings, getRouteColor } from "./settings";
 
 type Props = {
   visible: boolean;
   route: NavRoute | null;   // the alternate route to preview
-  title: string;            // e.g. "Accident ahead" / "Faster route available"
-  subtitle: string;         // e.g. "Reported accident ahead · saves ~4 min"
+  title: string;            // e.g. "Your route slowed down" / "Faster route found"
+  subtitle: string;         // e.g. "About 8 min behind your start estimate"
+  // Live stats for the alternate (all optional so older callers still compile).
+  savedMin?: number;        // minutes this route saves vs staying
+  etaMin?: number;          // alternate's total remaining minutes
+  arrival?: string;         // arrival clock, e.g. "5:42 PM"
+  lateMin?: number;         // how far behind the original plan you've fallen
   onAccept: () => void;
   onDecline: () => void;
 };
 
 type LL = { latitude: number; longitude: number };
+type Seg = { coords: LL[]; color: string };
 
 function regionFor(pts: LL[]) {
   if (pts.length === 0) return undefined;
@@ -44,13 +52,34 @@ function regionFor(pts: LL[]) {
   };
 }
 
-export default function RerouteCard({ visible, route, title, subtitle, onAccept, onDecline }: Props) {
+export default function RerouteCard({ visible, route, title, subtitle, savedMin, etaMin, arrival, lateMin, onAccept, onDecline }: Props) {
   const mapRef = useRef<MapView | null>(null);
   const pts = useMemo<LL[]>(
     () => (route?.polyline ? decodePolyline(route.polyline).map((p) => ({ latitude: p.lat, longitude: p.lng })) : []),
     [route?.polyline]
   );
   const region = useMemo(() => regionFor(pts), [pts]);
+  // Congestion-colored segments: group consecutive same-level pieces into runs and draw
+  // each as its own Polyline (robust on react-native-maps), so the preview shows the
+  // SAME green→yellow→orange→red live traffic as the main map. Falls back to one solid
+  // line in the user's route color when a route has no congestion data.
+  const segments = useMemo<Seg[]>(() => {
+    const base = getRouteColor(getSettings());
+    const coords = route?.coordinates;
+    const cong = route?.congestion;
+    if (!coords || coords.length < 2) return pts.length >= 2 ? [{ coords: pts, color: base }] : [];
+    const runs: Seg[] = [];
+    for (let i = 0; i < coords.length - 1; i++) {
+      const a = { latitude: coords[i][1], longitude: coords[i][0] };
+      const b = { latitude: coords[i + 1][1], longitude: coords[i + 1][0] };
+      const color = congestionColor(cong?.[i], base);
+      const last = runs[runs.length - 1];
+      if (last && last.color === color) last.coords.push(b);
+      else runs.push({ coords: [a, b], color });
+    }
+    return runs;
+  }, [route?.coordinates, route?.congestion, pts]);
+  const showStats = typeof etaMin === "number" || typeof savedMin === "number";
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onDecline}>
@@ -69,10 +98,32 @@ export default function RerouteCard({ visible, route, title, subtitle, onAccept,
               </View>
               <Text style={styles.sub} numberOfLines={2}>{subtitle}</Text>
 
+              {showStats && (
+                <View style={styles.stats}>
+                  <View style={styles.etaCol}>
+                    <Text style={styles.etaNum}>{etaMin ?? "—"}</Text>
+                    <Text style={styles.etaUnit}>min</Text>
+                  </View>
+                  {!!arrival && (
+                    <View>
+                      <Text style={styles.statLabel}>Arrive</Text>
+                      <Text style={styles.statVal}>{arrival}</Text>
+                    </View>
+                  )}
+                  <View style={styles.saveCol}>
+                    {typeof savedMin === "number" && <Text style={styles.saveBig}>{`−${savedMin} min`}</Text>}
+                    {typeof lateMin === "number" && lateMin >= 1 && (
+                      <Text style={styles.lateText}>{`${lateMin} min behind`}</Text>
+                    )}
+                  </View>
+                </View>
+              )}
+
               <View style={styles.mapBox}>
                 {pts.length >= 2 && region ? (
                   <MapView
                     ref={mapRef}
+                    key={route?.polyline}
                     style={StyleSheet.absoluteFill}
                     provider={PROVIDER_GOOGLE}
                     initialRegion={region}
@@ -91,13 +142,11 @@ export default function RerouteCard({ visible, route, title, subtitle, onAccept,
                       } catch {}
                     }}
                   >
-                    <Polyline
-                      coordinates={pts}
-                      strokeColor={COLORS.brand}
-                      strokeWidth={6}
-                      lineCap="round"
-                      lineJoin="round"
-                    />
+                    {/* Dark casing under the colored runs for contrast on the preview. */}
+                    <Polyline coordinates={pts} strokeColor="rgba(0,0,0,0.35)" strokeWidth={9} lineCap="round" lineJoin="round" />
+                    {segments.map((seg, i) => (
+                      <Polyline key={i} coordinates={seg.coords} strokeColor={seg.color} strokeWidth={6} lineCap="round" lineJoin="round" />
+                    ))}
                     <Marker coordinate={pts[0]} anchor={{ x: 0.5, y: 0.5 }}>
                       <View style={styles.startDot} />
                     </Marker>
@@ -137,6 +186,15 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   title: { color: COLORS.text, fontSize: 18, fontWeight: "800", letterSpacing: -0.3, flex: 1 },
   sub: { color: COLORS.textDim, fontSize: 13, marginTop: 4, marginBottom: 12 },
+  stats: { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 12 },
+  etaCol: { alignItems: "center" },
+  etaNum: { color: COLORS.text, fontSize: 26, fontWeight: "800", lineHeight: 28, letterSpacing: -0.5 },
+  etaUnit: { color: COLORS.textDim, fontSize: 12 },
+  statLabel: { color: COLORS.textDim, fontSize: 12 },
+  statVal: { color: COLORS.text, fontSize: 15, fontWeight: "700" },
+  saveCol: { marginLeft: "auto", alignItems: "flex-end" },
+  saveBig: { color: "#2DEC86", fontSize: 17, fontWeight: "800" },
+  lateText: { color: "#FF9F0A", fontSize: 12, fontWeight: "700", marginTop: 1 },
   mapBox: { height: 180, borderRadius: 14, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.05)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.10)" },
   mapFallback: { alignItems: "center", justifyContent: "center" },
   startDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: "#fff", borderWidth: 3, borderColor: COLORS.brand },

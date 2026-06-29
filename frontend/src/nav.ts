@@ -4,7 +4,7 @@
 // forward-looking Google-recommended routing endpoint.
 
 import { useEffect, useRef, useState } from "react";
-import { Platform } from "react-native";
+import { Platform, AppState } from "react-native";
 import { api } from "./api";
 import { fetchMapboxRoutes, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
 import { getSettings } from "./settings";
@@ -691,6 +691,22 @@ function _armDuckWatchdog(): void {
 function _clearDuckWatchdog(): void {
   if (_duckWatchdog) { clearTimeout(_duckWatchdog); _duckWatchdog = null; }
 }
+
+// ===== Background restore =====
+// If a Nova callout ducked the music (Apple Music paused + the .duckOthers session)
+// and the app is backgrounded/locked BEFORE the 800ms/12s restore timers fire, iOS
+// suspends the JS runtime and those timers never run — Apple Music stays paused +
+// external audio ducked until the app is reopened. Flush the restore synchronously
+// on the way to background, BUT only when we're ducked AND nothing is actively
+// speaking (`!ttsPlaying`), so we never un-duck over an in-flight background callout
+// (which keeps the runtime alive and self-restores normally anyway). Registered once.
+AppState.addEventListener("change", (s) => {
+  if (s === "active") return;
+  if (_musicDucked && !ttsPlaying) {
+    _restoreMusicNow();
+    void setIdleAudioMode();
+  }
+});
 
 // ---- Route-start greeting coordination ----
 // The personable Nova greeting must ALWAYS play before the first turn callout,

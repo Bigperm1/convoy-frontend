@@ -165,6 +165,12 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
       // now. This was the cause of the 13-minute recording.
       if (!wantRef.current) {
         try { await rec.stopAndUnloadAsync(); } catch {}
+        // RESTORE the session: setRecordingAudioMode() already armed the ducked
+        // .playAndRecord session (mono HFP on Bluetooth, Apple Music interrupted), but
+        // we never kept this recording — flip back to idle/.playback or the music stays
+        // quiet/mono until the next clean stop or an app restart. (The Nova mic does this
+        // in useVoice; the PTT recorder didn't — the "music stuck quiet after PTT" bug.)
+        void setIdleAudioMode();
         setRecording(false);
         return;
       }
@@ -177,6 +183,10 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
       maxTimerRef.current = setTimeout(() => { stopAndSendRef.current?.(); }, 60000);
     } catch {
       recRef.current = null;
+      // Recording start threw AFTER setRecordingAudioMode() armed the ducked
+      // .playAndRecord session — restore idle so external/Apple-Music audio + Bluetooth
+      // stereo aren't left stuck quiet/mono. This path had no restore + no watchdog.
+      void setIdleAudioMode();
       setRecording(false);
     }
   }, [channel, ensurePerm, tier]);

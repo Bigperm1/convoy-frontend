@@ -477,6 +477,7 @@ export default function TalkScreen() {
       setPlayingId(m.id);
     } catch {
       setPlayingId(null);
+      void setIdleAudioMode(); // replay failed AFTER ducking → release so music recovers
     }
   };
 

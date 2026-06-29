@@ -40,6 +40,7 @@ import CompassNeedle from '../components/CompassNeedle';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 import { formatSpeed, getSettings, getMapMode, getRouteColor } from '../settings';
+import { routeKindFor, routeColorsFor } from '../ConvoyMapbox';
 import { weatherKind, type WeatherCondition, type WeatherKind } from '../weatherLayer';
 import { WeatherGlyph } from '../components/WeatherHUD';
 
@@ -493,6 +494,11 @@ type Tbt = {
 
 type CarPlayArgs = {
   route: NavRoute | null;
+  // All current route options (Best / Scenic / AI alternates) + which is selected, so the
+  // CarPlay preview can mirror the phone's 3-route display. `route` stays the SELECTED one
+  // (used for nav). Selection is phone-driven; CarPlay route lines are display-only.
+  routes?: NavRoute[];
+  selectedRouteIndex?: number;
   tbt: Tbt;
   user: (LatLng & { speed?: number; heading?: number }) | null;
   destination: (LatLng & { label?: string }) | null;
@@ -510,7 +516,7 @@ type CarPlayArgs = {
  * Mount ONCE from map.tsx. Mirrors live route + turn-by-turn + nearby-convoy
  * state onto CarPlay (iOS, tabbed) / Android Auto (nav only). No-op on web.
  */
-export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd, weather, onReportPolice }: CarPlayArgs) {
+export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, user, destination, peers, onEnd, weather, onReportPolice }: CarPlayArgs) {
   const [connected, setConnected] = useState(false);
 
   const mapTemplateRef = useRef<any>(null);
@@ -555,6 +561,21 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd, 
       // where `user` is null (peers/route changes), and a null position would clobber
       // a good fix landed by the cold/foreground feed -> hasFix false -> CONVOY logo.
       routePolyline: route?.polyline || '',
+      // All display routes (Best / Scenic / AI) with per-kind colors precomputed, so the
+      // CarPlay preview mirrors the phone's 3-route fan-out. Drop "alt" routes (index >= 2,
+      // unless explicitly tagged) — we only ever show the three. Empty during nav OR when
+      // there's a single route, so the car draws just the selected ribbon then.
+      routes: (tbt.active || !routes || routes.length < 2)
+        ? []
+        : routes
+            .map((r, i) => {
+              const kind = routeKindFor(i, r);
+              if (kind === 'alt') return null;
+              const { color, edge } = routeColorsFor(kind, getRouteColor(getSettings()));
+              return r?.polyline ? { index: i, polyline: r.polyline, kind, color, edge } : null;
+            })
+            .filter(Boolean) as { index: number; polyline: string; kind: string; color: string; edge: string }[],
+      selectedRouteIndex,
       // Self car paint → lets the car root pick the matching 3D model. Read from
       // local settings (the Garage persists carColor there, same source the phone
       // self-marker uses).
@@ -579,6 +600,8 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd, 
     tbt.etaSeconds,
     tbt.distanceRemainingM,
     route,
+    routes,
+    selectedRouteIndex,
     destination?.label,
     peers,
     user?.speed,

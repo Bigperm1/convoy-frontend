@@ -1,6 +1,10 @@
 # Three-Route System + Greeting Flow — Design
 
-Status: PLAN (approved scope: AI route = auto-learn; build top-to-bottom). Author: Nova/Claude, 2026-06-29.
+Status: IN PROGRESS (approved scope: AI route = auto-learn; build top-to-bottom). Author: Nova/Claude, 2026-06-29.
+- ✅ **P1** greeting fix — shipped (commit 392eb49).
+- ✅ **P2** 3-route display on phone — shipped (commit 21ca9e3): Best/Scenic/AI line styling + Drive-banner chip selector, AI stubbed.
+- ✅ **P2.5** 3-route on CarPlay — built: carStore mirrors display routes + selectedIndex; CarMapView draws them per-kind in preview with an extra zoom-out (the lockstep chase is untouched — no fit-to-bounds overview, deferred as a device-test item). Kind/color logic now a single source of truth (`routeKindFor`/`routeColorsFor` exported from ConvoyMapbox, used by both surfaces).
+- ⏳ **P3** AI-route memory subsystem — next.
 
 ## Goal
 When a destination is chosen (search / recents / saved), offer **three** route options, drawn together and styled distinctly:

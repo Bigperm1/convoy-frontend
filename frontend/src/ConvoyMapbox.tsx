@@ -375,6 +375,21 @@ export function contrastingRouteColor(hex: string): string {
   return _hslToHex((h + 160) % 360, 0.82, 0.56);
 }
 
+export type RouteKind = "best" | "scenic" | "ai" | "alt";
+// Which slot a route occupies. An explicit `kind` (set by the AI-memory subsystem, P3)
+// wins; otherwise positional — fastest=Best(0), first alternate=Scenic(1), the rest=alt.
+export function routeKindFor(i: number, r: any): RouteKind {
+  return (r?.kind as RouteKind) || (i === 0 ? "best" : i === 1 ? "scenic" : "alt");
+}
+// Core + edge (casing) colors for a kind, given the user's route color. Best = solid user
+// color; Scenic = the contrasting hue; AI = BLACK core with user-color edges. ONE source of
+// truth for both the phone map (routeFC) and the CarPlay mirror — keep them identical.
+export function routeColorsFor(kind: RouteKind, routeColor: string): { color: string; edge: string } {
+  const color = kind === "scenic" ? contrastingRouteColor(routeColor) : kind === "ai" ? ROUTE_AI_CORE : routeColor;
+  const edge = kind === "ai" ? routeColor : color;
+  return { color, edge };
+}
+
 function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
 export function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
 function chaseZoomForSpeed(kmh: number) {
@@ -859,11 +874,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // alternate → an auto-contrasting hue. AI = a learned habitual route (tagged
   // kind:"ai" by map.tsx in P3) → BLACK core with the user color on the EDGES. Extra
   // alternates (index >= 2) are NOT drawn — we only ever show these three.
-  const scenicColor = useMemo(() => contrastingRouteColor(routeColor), [routeColor]);
-  const routeKindOf = (i: number, r: any): "best" | "scenic" | "ai" | "alt" =>
-    (r?.kind as any) || (i === 0 ? "best" : i === 1 ? "scenic" : "alt");
-  const coreColorOf = (k: string): string => (k === "scenic" ? scenicColor : k === "ai" ? ROUTE_AI_CORE : routeColor);
-  const edgeColorOf = (k: string): string => (k === "ai" ? routeColor : coreColorOf(k));
+  const routeKindOf = routeKindFor;
+  const coreColorOf = (k: RouteKind): string => routeColorsFor(k, routeColor).color;
+  const edgeColorOf = (k: RouteKind): string => routeColorsFor(k, routeColor).edge;
   const selKind = routeKindOf(selectedRouteIndex, (routes as any)?.[selectedRouteIndex]);
   const selColor = coreColorOf(selKind);
   const selEdge = edgeColorOf(selKind);
@@ -885,7 +898,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       })
       .filter(Boolean),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [routes, routeColor, scenicColor]);
+  }), [routes, routeColor]);
 
   // Tap an alternate route line → select it (same as tapping its ETA pill).
   const handleRoutePress = (e: any) => {

@@ -58,6 +58,15 @@ export type CarState = {
   // User-chosen route-line color (base hex, mirror of settings.routeColor). Lets the
   // CarPlay live route match the phone. undefined → CarMapView falls back to green.
   routeColor?: string;
+  // Up to three DISPLAY routes (Best / Scenic / AI) for the CarPlay preview, mirrored
+  // from the phone. Each carries its precomputed core `color` + casing `edge` (AI = black
+  // core, user-color edge) so CarMapView paints them per-kind without re-deriving, plus
+  // the route's original `index` so it can match `selectedRouteIndex`. Empty/undefined when
+  // there's no route or only one option. `routePolyline` (above) stays the SELECTED route
+  // used for nav trim + the static-map fallback. Route SELECTION is phone-driven (CarPlay
+  // route lines are display-only) — CarPlay just mirrors whichever the phone picked.
+  routes?: { index: number; polyline: string; kind: string; color: string; edge: string }[];
+  selectedRouteIndex?: number;
   // Glyph (unicode arrow) for the upcoming maneuver, shown in the car banner's green
   // arrow box (mirrors the phone's maneuver icon). undefined when not navigating.
   maneuverIcon?: string;

@@ -56,6 +56,10 @@ const CRUISE_PITCH = 45;
 // head-unit screen. Applied to BOTH nav AND cruise (which is now speed-aware too).
 // Larger = more zoomed out. OTA-tunable.
 const CAR_ZOOM_OUT = 1.8;
+// EXTRA pull-back while previewing 2+ route options (not navigating), so the Best/Scenic/AI
+// fan-out reads on the head unit. Added to CAR_ZOOM_OUT only in multi-route preview; the
+// car stays pinned (the proven lockstep chase is untouched — this is purely a zoom value).
+const PREVIEW_ZOOM_OUT = 2.2;
 
 // Top padding as a fraction of map height — pins the car near the BOTTOM-MIDDLE of the
 // head unit (larger = lower on screen). Applied every frame via getCam, nav AND cruise.
@@ -112,6 +116,12 @@ export default function CarMapView({ onGLError }: Props) {
   const lng = s.selfLng ?? 0;
   const hdg = s.heading ?? 0;
 
+  // Multi-route PREVIEW mode: the phone mirrors 2+ display routes (Best/Scenic/AI) only
+  // while NOT navigating. In nav (or a single route) s.routes is empty → we fall back to
+  // the single selected ribbon below (with its trim), exactly as before.
+  const previewMulti = !s.navigating && Array.isArray(s.routes) && s.routes.length >= 2;
+  const selIdx = s.selectedRouteIndex ?? SELECTED_INDEX;
+
   // Base-map style — mirror the phone's useStandard logic so the car matches the
   // driver's chosen look. satellite → SatelliteStreet imagery; everything else →
   // Standard with the matching light preset (set via <StyleImport> below).
@@ -127,7 +137,7 @@ export default function CarMapView({ onGLError }: Props) {
   // speed→zoom curve (city tighter, highway wider), so cruise now dynamically zooms in/out
   // with speed too. Pulled back by CAR_ZOOM_OUT so more road reads on the wide screen.
   const kmh = kmhFromMs(s.speedMs);
-  const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined) - CAR_ZOOM_OUT;
+  const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined) - CAR_ZOOM_OUT - (previewMulti ? PREVIEW_ZOOM_OUT : 0);
   const followPitch = s.navigating ? chasePitch(kmh) : CRUISE_PITCH;
 
   // MANDATORY heading-up — mirror the phone: plain Follow + a HELD heading, NOT
@@ -182,6 +192,23 @@ export default function CarMapView({ onGLError }: Props) {
     type: 'FeatureCollection',
     features: hasRoute
       ? [{ type: 'Feature', properties: { index: SELECTED_INDEX }, geometry: { type: 'LineString', coordinates: routeCoords } }]
+      : [],
+  };
+
+  // Multi-route PREVIEW geometry → one feature per display route, carrying its precomputed
+  // per-kind core `color` + casing `edge` (AI = black core, user-color edge) so a single
+  // data-driven layer pair paints all three. lineSortKey floats the SELECTED route on top.
+  const previewFC: any = {
+    type: 'FeatureCollection',
+    features: previewMulti
+      ? (s.routes || [])
+          .map((r) => {
+            const coords = decodePolyline(r.polyline).map((p) => [p.longitude, p.latitude]);
+            return coords.length >= 2
+              ? { type: 'Feature', properties: { index: r.index, color: r.color, edge: r.edge }, geometry: { type: 'LineString', coordinates: coords } }
+              : null;
+          })
+          .filter(Boolean)
       : [],
   };
 
@@ -253,10 +280,37 @@ export default function CarMapView({ onGLError }: Props) {
         />
       )}
 
-      {/* Route — gray alternates (filtered out for the single active route),
-          then the green glow casing + bright core. Imported route colors keep
-          this in lockstep with the phone's selected ribbon. */}
-      {hasRoute && (
+      {/* Routes. PREVIEW (not navigating, 2+ options): all display routes (Best/Scenic/AI)
+          drawn together per-kind via ONE data-driven casing+core pair — the SELECTED route
+          full + wide, the others dimmed + thin (lineSortKey floats the selected on top).
+          NAV / single route: the existing single selected ribbon below, with the speed-aware
+          trim + near-car fade, exactly as before (the proven path is untouched). */}
+      {previewMulti ? (
+        <ShapeSource id="car-routes-preview" shape={previewFC}>
+          <LineLayer
+            id="car-preview-casing"
+            slot="middle"
+            style={{
+              lineColor: ['get', 'edge'] as any,
+              lineWidth: ['case', ['==', ['get', 'index'], selIdx], 22, 16] as any,
+              lineOpacity: ['case', ['==', ['get', 'index'], selIdx], 0.55, 0.4] as any,
+              lineSortKey: ['case', ['==', ['get', 'index'], selIdx], 1, 0] as any,
+              lineBlur: 6, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1,
+            }}
+          />
+          <LineLayer
+            id="car-preview-core"
+            slot="middle"
+            style={{
+              lineColor: ['get', 'color'] as any,
+              lineWidth: ['case', ['==', ['get', 'index'], selIdx], 11, 7] as any,
+              lineOpacity: ['case', ['==', ['get', 'index'], selIdx], 1, 0.7] as any,
+              lineSortKey: ['case', ['==', ['get', 'index'], selIdx], 1, 0] as any,
+              lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1,
+            }}
+          />
+        </ShapeSource>
+      ) : hasRoute ? (
         <ShapeSource id="car-route" shape={routeFC} lineMetrics>
           <LineLayer
             id="car-route-alts"
@@ -277,7 +331,7 @@ export default function CarMapView({ onGLError }: Props) {
             style={{ lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(coreGrad ? { lineGradient: coreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: carRouteColor }) }}
           />
         </ShapeSource>
-      )}
+      ) : null}
     </MapView>
   );
 }

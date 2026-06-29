@@ -213,6 +213,71 @@ function routeAheadViaPoints(
   return out;
 }
 
+// Meters from point p to segment a–b, all [lng,lat]. Local equirectangular projection
+// (accurate at the short distances used here). Used to tell if an alt point still lies
+// ON the current route.
+function distPointToSegM(p: [number, number], a: [number, number], b: [number, number]): number {
+  const latRef = ((p[1] + a[1] + b[1]) / 3) * Math.PI / 180;
+  const mLat = 111320, mLng = 111320 * Math.cos(latRef);
+  const px = p[0] * mLng, py = p[1] * mLat, ax = a[0] * mLng, ay = a[1] * mLat, bx = b[0] * mLng, by = b[1] * mLat;
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * dx, cy = ay + t * dy;
+  return Math.hypot(px - cx, py - cy);
+}
+function minDistToPathM(p: [number, number], path: [number, number][], tol: number): number {
+  let best = Infinity;
+  for (let i = 0; i + 1 < path.length; i++) {
+    const d = distPointToSegM(p, path[i], path[i + 1]);
+    if (d < best) best = d;
+    if (best <= tol) break;
+  }
+  return best;
+}
+
+// Where an alternative route DIVERGES from the current one — the last point the two share
+// before the alt peels off (the exit / turn you'd need to take). Returns that point + the
+// distance to it along the alt (≈ how far ahead the decision is), so the offer can be
+// timed to give lane-change notice. null if they don't split within the search window
+// (decision still too far ahead to surface).
+const DIVERGE_TOL_M = 35;          // within this of the current path = still "together"
+const DIVERGE_SEARCH_M = 14000;    // give up looking past this far ahead
+function routeDivergence(
+  cur: [number, number][] | undefined,
+  alt: [number, number][] | undefined
+): { lat: number; lng: number; distM: number } | null {
+  if (!cur || !alt || cur.length < 2 || alt.length < 2) return null;
+  let distM = 0;
+  let prev = alt[0];
+  for (let i = 1; i < alt.length; i++) {
+    // Accumulate BEFORE the split test, so an early divergence reports the real distance
+    // to the split (not 0). Return the first point that LEFT the route ≈ the exit/turn.
+    distM += haversineMeters({ lat: prev[1], lng: prev[0] }, { lat: alt[i][1], lng: alt[i][0] });
+    if (minDistToPathM(alt[i], cur, DIVERGE_TOL_M) > DIVERGE_TOL_M) {
+      return { lat: alt[i][1], lng: alt[i][0], distM };
+    }
+    prev = alt[i];
+    if (distM > DIVERGE_SEARCH_M) break;
+  }
+  return null;
+}
+
+// The alt route step nearest a point (its spoken instruction, e.g. "Take exit 12 toward …"),
+// so the offer can name the maneuver + lane the driver should get ready for.
+function maneuverNear(route: NavRoute | null, lat: number, lng: number): string | null {
+  const steps = route?.steps;
+  if (!steps?.length) return null;
+  let best: string | null = null, bestD = Infinity;
+  for (const s of steps) {
+    const st = s.start; if (!st) continue;
+    const d = haversineMeters({ lat, lng }, { lat: st.lat, lng: st.lng });
+    if (d < bestD) { bestD = d; best = (s.html || "").replace(/<[^>]+>/g, "").trim() || null; }
+  }
+  return bestD <= 250 ? best : null;
+}
+
 // Initial compass bearing (deg, 0..360) from point a to point b.
 function bearingDeg(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -912,6 +977,7 @@ export default function MapScreen() {
       // Learn the habitual path to this place BEFORE we drop the destination.
       maybeLearnDrive(destination);
       tripBaselineRef.current = null;
+      pendingRerouteRef.current = null;
       setRerouteOffer(null);
       setDestination(null);
       setRoutes([]);
@@ -992,6 +1058,15 @@ export default function MapScreen() {
   // whether the route is now taking LONGER than originally promised (an accident /
   // construction appeared). Cleared on arrival / clear / end.
   const tripBaselineRef = useRef<{ startedAt: number; plannedSec: number } | null>(null);
+  // An ARMED reroute candidate, validated by the 60s check but HELD until the driver is
+  // approaching the point where the alt peels off the current route (the exit/turn), so
+  // the offer lands with lane-change notice — not 8 km early or already past the ramp. The
+  // coords monitor below pops it when within the lead window. null = nothing armed.
+  const pendingRerouteRef = useRef<{
+    route: NavRoute; title: string; subtitle: string;
+    savedMin: number; lateMin: number; etaSec: number;
+    divLat: number; divLng: number; cause: string; maneuver: string | null;
+  } | null>(null);
   // The visual reroute offer currently on screen (mini-map card). null = none.
   const [rerouteOffer, setRerouteOffer] = useState<{
     route: NavRoute; title: string; subtitle: string;
@@ -1046,32 +1121,32 @@ export default function MapScreen() {
       const worthwhile = savedSec >= SAVE_MIN;
       // Fire when the route degraded AND a better one exists; also on a big standalone
       // saving (>=5 min) or a known incident ahead with a worthwhile saving.
-      if (!((degraded && worthwhile) || savedSec >= 300 || (!!hz && worthwhile))) return;
+      const shouldOffer = (degraded && worthwhile) || savedSec >= 300 || (!!hz && worthwhile);
+      if (!shouldOffer) { pendingRerouteRef.current = null; return; } // situation resolved
+
+      // Where does the alt peel off the current route? We HOLD the offer until the driver
+      // is approaching that split, so it lands with lane-change notice. If the split is
+      // still too far to find, wait — the next checks will catch it as we close in.
+      const div = routeDivergence(cur.coordinates as any, best.coordinates as any);
+      if (!div) { pendingRerouteRef.current = null; return; }
 
       const savedMin = Math.max(1, Math.round(savedSec / 60));
       const lateMin = Math.max(0, Math.round(lateSec / 60));
-      const etaMin = Math.max(1, Math.round(bestEta / 60));
-      const arrival = fmtClock(new Date(now + bestEta * 1000));
-      const minLabel = `${savedMin} ${savedMin === 1 ? "minute" : "minutes"}`;
-      const cs = (s.callSign || "").trim();
-      const hey = cs ? `Hey ${cs}, ` : "";
       const cause = hz
         ? `there's ${hazardReason(hz.kind)} about ${hz.distKm} ${hz.distKm === 1 ? "kilometer" : "kilometers"} ahead`
         : (degraded ? `your route's running about ${Math.max(1, lateMin)} ${lateMin === 1 ? "minute" : "minutes"} behind` : "traffic shifted ahead");
-      const spoken = `${hey}${cause}. I found a route that saves about ${minLabel}. Want to switch?`;
 
-      rerouteShowingRef.current = true;
-      if (!navMutedRef.current) { try { announce(spoken); } catch {} }
-      // Show the visual reroute card (a mini-map of `best` + live stats). accept/decline
-      // (below) handle the tap — accepting runs the SAME setRoutes([best]) swap.
-      setRerouteOffer({
+      // ARM it — the coords monitor pops the card when within lead range of the split.
+      pendingRerouteRef.current = {
         route: best,
         title: hz ? hazardTitle(hz.kind) : (degraded ? "Your route slowed down" : "Faster route found"),
         subtitle: hz
           ? `Reported ${hazardReason(hz.kind)} ahead`
           : (degraded ? `About ${Math.max(1, lateMin)} min behind your start estimate` : "Live traffic shifted in your favor"),
-        savedMin, etaMin, arrival, lateMin,
-      });
+        savedMin, lateMin, etaSec: bestEta,
+        divLat: div.lat, divLng: div.lng,
+        cause, maneuver: maneuverNear(best, div.lat, div.lng),
+      };
     } catch {
       // ignore — try again on the next interval
     } finally {
@@ -1086,6 +1161,7 @@ export default function MapScreen() {
     const offer = rerouteOffer;
     rerouteShowingRef.current = false;
     rerouteSuppressUntilRef.current = Date.now() + 120000; // settle 2 min
+    pendingRerouteRef.current = null;
     setRerouteOffer(null);
     if (offer?.route) {
       setRoutes([offer.route]);     // same swap the off-route path uses
@@ -1099,6 +1175,7 @@ export default function MapScreen() {
   const declineReroute = () => {
     rerouteShowingRef.current = false;
     rerouteSuppressUntilRef.current = Date.now() + 300000; // hush 5 min
+    pendingRerouteRef.current = null;
     setRerouteOffer(null);
   };
 
@@ -1106,10 +1183,48 @@ export default function MapScreen() {
   useEffect(() => {
     if (navMode !== "turn-by-turn") return;
     rerouteShowingRef.current = false; // fresh drive starts clean
+    pendingRerouteRef.current = null;
     const id = setInterval(() => { void checkForFasterRoute(); }, 60000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navMode]);
+
+  // Pop the ARMED reroute the instant the driver is within lane-change notice of the split
+  // (the exit/turn where the alt leaves the current route). Speed-aware so the lead time is
+  // roughly constant — a fixed distance would warn too early in town / too late on the
+  // highway. Runs on every GPS tick (the 60s check only re-arms the candidate).
+  useEffect(() => {
+    if (navMode !== "turn-by-turn" || rerouteShowingRef.current) return;
+    if (Date.now() < rerouteSuppressUntilRef.current) return;
+    const pend = pendingRerouteRef.current;
+    if (!pend || !coords) return;
+    const distM = haversineMeters({ lat: coords.lat, lng: coords.lng }, { lat: pend.divLat, lng: pend.divLng });
+    const spd = Math.max(coords.speed ?? 0, 8);                    // m/s floor: pops even when stopped
+    const passedRampM = Math.max(180, spd * 8);                    // ~8s past-ramp guard (speed-aware)
+    if (distM < passedRampM) { pendingRerouteRef.current = null; return; } // too late for this split — drop it
+    const showWithinM = Math.max(400, Math.min(3000, spd * 75));   // ~75s of lead, clamped
+    if (distM > showWithinM) return;                               // not yet — keep waiting
+    // Within the lead window → pop the card + speak it now.
+    pendingRerouteRef.current = null;
+    rerouteShowingRef.current = true;
+    const distText = fmtDistanceM(distM);
+    const etaMin = Math.max(1, Math.round(pend.etaSec / 60));
+    const arrival = fmtClock(new Date(Date.now() + pend.etaSec * 1000));
+    const savedLabel = `${pend.savedMin} ${pend.savedMin === 1 ? "minute" : "minutes"}`;
+    const cs = (getSettings().callSign || "").trim();
+    const hey = cs ? `Hey ${cs}, ` : "";
+    const line = pend.maneuver
+      ? `${hey}In ${distText}, ${pend.maneuver}. That route saves about ${savedLabel}. Want to switch?`
+      : `${hey}${pend.cause}. A faster route's coming up in ${distText}, saves about ${savedLabel}. Want to switch?`;
+    if (!navMutedRef.current) { try { announce(line); } catch {} }
+    setRerouteOffer({
+      route: pend.route,
+      title: pend.title,
+      subtitle: pend.maneuver ? `${pend.maneuver} · in ${distText}` : `${pend.subtitle} · in ${distText}`,
+      savedMin: pend.savedMin, etaMin, arrival, lateMin: pend.lateMin,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coords, navMode]);
 
   // System nav-notification banner — keeps the current turn on screen as a
   // heads-up notification even when Convoy is backgrounded (home/lock screen).
@@ -1195,6 +1310,7 @@ export default function MapScreen() {
     stopSpeech();
     maybeLearnDrive();
     tripBaselineRef.current = null;
+    pendingRerouteRef.current = null;
     setRerouteOffer(null);
     navAutoStartedRef.current = true;  // stay stopped until a new destination is set
     setNavMode("preview");
@@ -1233,6 +1349,7 @@ export default function MapScreen() {
   const clearRoute = () => {
     stopSpeech();
     tripBaselineRef.current = null;
+    pendingRerouteRef.current = null;
     setRerouteOffer(null);
     setDestination(null);
     setRoutes([]);

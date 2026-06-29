@@ -1204,6 +1204,16 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // The selected core paints congestion during nav (preferred), else the soft
   // green fade-in. Both ride the same behind-car trim.
   const selCoreGrad = navCongestionGradient || selCoreGradient;
+  // True while we're navigating AND have a real congestion gradient to draw. When set,
+  // the congestion is painted on a DEDICATED, NON-TRIMMED core layer (route-sel-cong,
+  // a clone of the proven preview cong-core) instead of the trimmed route-sel-core.
+  // WHY: combining a multi-colour lineGradient with lineTrimOffset on the SAME layer
+  // does not render the colour transitions in @rnmapbox (the trimmed single-colour
+  // green fade hid this — alpha-only gradients survive the trim, multi-colour ones get
+  // flattened to solid). Decoupling colour from trim makes the transitions show on the
+  // route during nav exactly as they do in preview; the glow casing keeps the trim so
+  // the behind-car vanish is preserved.
+  const navCongActive = navigationActive && !!navCongestionGradient;
 
   // Snapped draw position: glue the car to the line, but ONLY within ~45 m of it
   // — further off (wrong turn / pre-reroute) we show the real GPS so you can see
@@ -1401,8 +1411,22 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             <LineLayer
               id="route-sel-core"
               slot="middle"
-              filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
+              // Hidden in preview-congestion AND while the dedicated congestion core
+              // (below) is active, so we never double-draw or let the trimmed green core
+              // paint over the congestion colours.
+              filter={((showCongestion || navCongActive) ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
               style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selCoreGrad ? { lineGradient: selCoreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: selColor }) }}
+            />
+            {/* CONGESTION core (DURING NAV) — a dedicated, NON-TRIMMED clone of the proven
+                preview cong-core: the live traffic gradient over the full active route, so
+                the green→yellow→orange→red transitions render while navigating (the trimmed
+                route-sel-core flattened them). The wide glow casing above keeps the trim, so
+                the behind-car vanish still reads. Hidden unless navigating with real data. */}
+            <LineLayer
+              id="route-sel-cong"
+              slot="middle"
+              filter={(navCongActive ? ["==", ["get", "index"], selectedRouteIndex] : ["==", ["get", "index"], -1]) as any}
+              style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(navCongestionGradient ? { lineGradient: navCongestionGradient } : { lineColor: selColor }) }}
             />
           </ShapeSource>
         )}

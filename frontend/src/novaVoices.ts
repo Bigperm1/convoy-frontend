@@ -30,12 +30,12 @@ export const NOVA_VOICES: NovaVoice[] = [
   { id: "echo", label: "Echo", blurb: "Calm & measured" },
   { id: "fable", label: "Fable", blurb: "Expressive storyteller" },
   { id: "onyx", label: "Onyx", blurb: "Deep & authoritative" },
-  // Newer expressive voices (gpt-4o-mini-tts).
+  // Newer expressive voices (gpt-4o-mini-tts). NOTE: "ballad" and "verse" were
+  // removed — they returned no audio on this backend (the TTS endpoint rejects them
+  // even though Coral/Ash/Sage synthesize). Re-add only if confirmed working.
   { id: "coral", label: "Coral", blurb: "Warm & upbeat" },
   { id: "ash", label: "Ash", blurb: "Clear & direct" },
-  { id: "ballad", label: "Ballad", blurb: "Expressive & lyrical" },
   { id: "sage", label: "Sage", blurb: "Calm & soothing" },
-  { id: "verse", label: "Verse", blurb: "Dynamic & versatile" },
 ];
 
 // Each audition line names the VOICE itself (not a fixed "Nova"), so you can tell

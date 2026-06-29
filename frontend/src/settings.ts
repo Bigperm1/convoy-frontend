@@ -192,7 +192,10 @@ export function getRouteColor(s: Settings): string {
 // Reads live settings when no arg is passed, so non-React callers (nav.ts /tts,
 // novaGreeting.ts) always pick up the user's latest choice.
 export function getNovaVoice(s: Settings = cached): string {
-  return (s?.novaVoiceName && s.novaVoiceName.trim()) || "nova";
+  const v = (s?.novaVoiceName && s.novaVoiceName.trim()) || "nova";
+  // Heal a stored selection of a voice we removed for producing no audio on this
+  // backend (ballad / verse) so Scout never goes silent — fall back to the default.
+  return (v === "ballad" || v === "verse") ? "nova" : v;
 }
 // The effective RENDER mode: the chosen mode, with "auto" resolved to a concrete light
 // preset by time of day. Used by the Mapbox engine (phone) + mirrored to CarPlay.

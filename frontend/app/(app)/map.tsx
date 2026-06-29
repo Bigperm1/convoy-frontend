@@ -1244,6 +1244,44 @@ export default function MapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coords, navMode]);
 
+  // ===== Convoy health monitor (Scout) =====
+  // Speak up when the crew spreads out — a live peer falls well behind the pack. Edge-
+  // triggered (fires once when the gap opens, re-arms when back together) + hushed 5 min,
+  // and only with 2+ live peers so a solo drive is silent. Read-only over presence.
+  const peerListRef = useRef<Peer[]>([]);
+  const convoySpreadHushRef = useRef(0);
+  const convoyWasSpreadRef = useRef(false);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const s = getSettings();
+      if (s.novaVoice === false || s.convoyAlerts === false || navMutedRef.current) return;
+      if (Date.now() < convoySpreadHushRef.current) return;
+      const me = coordsRef.current;
+      const live = (peerListRef.current || []).filter(
+        (p) => p && p.status !== "parked" && typeof p.lat === "number" && typeof p.lng === "number"
+      );
+      if (!me || live.length < 2) { convoyWasSpreadRef.current = false; return; }
+      let far: Peer | null = null, farD = 0;
+      for (const p of live) {
+        const d = haversineMeters({ lat: me.lat, lng: me.lng }, { lat: p.lat as number, lng: p.lng as number });
+        if (d > farD) { farD = d; far = p; }
+      }
+      const SPREAD_M = 2500;
+      if (farD >= SPREAD_M && !convoyWasSpreadRef.current && far) {
+        convoyWasSpreadRef.current = true;
+        convoySpreadHushRef.current = Date.now() + 300000; // 5 min hush
+        const distStr = s.speedUnit === "mph"
+          ? `${(farD / 1609.34).toFixed(1)} miles`
+          : `${(farD / 1000).toFixed(farD < 10000 ? 1 : 0)} kilometers`;
+        try { announce(`Heads up — the convoy's spreading out. ${far.handle || "Someone"} is about ${distStr} away.`); } catch {}
+      } else if (farD < SPREAD_M * 0.7) {
+        convoyWasSpreadRef.current = false; // back together → re-arm
+      }
+    }, 30000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // System nav-notification banner — keeps the current turn on screen as a
   // heads-up notification even when Convoy is backgrounded (home/lock screen).
   // A background location task drives it. iOS works on the current build;
@@ -2405,6 +2443,7 @@ export default function MapScreen() {
     });
     return Object.values(byId);
   })();
+  peerListRef.current = peerList; // keep the convoy-health monitor reading the live crew
   const liveDot = live === "live" ? COLORS.success : live === "connecting" ? COLORS.warning : COLORS.danger;
   const liveText = live === "live" ? "Live" : live === "connecting" ? "Connecting" : "Offline";
 

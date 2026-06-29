@@ -467,6 +467,15 @@ export default function SettingsScreen() {
           />
           <View style={styles.divider} />
           <ToggleRow
+            icon="car-sport"
+            iconColor="#BF5AF2"
+            title="Convoy alerts"
+            subtitle="Scout speaks up when the crew spreads out and someone falls behind"
+            value={settings.convoyAlerts !== false}
+            onChange={(v) => setSettings({ convoyAlerts: v })}
+          />
+          <View style={styles.divider} />
+          <ToggleRow
             icon="sparkles"
             iconColor="#BF5AF2"
             title="Route greeting"

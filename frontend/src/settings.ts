@@ -76,6 +76,9 @@ novaVoiceName?: string;
 // to switch?") and listens for a spoken yes/no so you never tap while driving. The
 // on-screen card is always the fallback. undefined → on. See src/askScout.ts.
 scoutHandsFree?: boolean;
+// Convoy alerts — Scout speaks up when the crew is spreading out (a live peer falls
+// well behind). Only with 2+ live peers; edge-triggered + hushed. undefined → on.
+convoyAlerts?: boolean;
 // Spoken reroute reaction (the "split decision" quip on recompute). Off →
 // reroutes are silent; turn-by-turn guidance is unaffected.
 novaReroute: boolean;
@@ -138,6 +141,7 @@ novaMuted: false,
 novaVoice: true,
 novaVoiceName: "nova",
 scoutHandsFree: true,
+convoyAlerts: true,
 novaReroute: false,
 novaQuietMigrated: true,
 baselineMigrated: true,

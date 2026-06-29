@@ -472,6 +472,8 @@ export default function MapScreen() {
   const [sharedRouteMeta, setSharedRouteMeta] = useState<{ handle?: string; at?: number; lat: number; lng: number } | null>(null);
   // Category-pill nearby-search results, shown as tappable pins on the map.
   const [placePins, setPlacePins] = useState<PlaceResult[]>([]);
+  // Category pills hidden by default; toggled by the green icon on the search bar.
+  const [pillsVisible, setPillsVisible] = useState(false);
   const [route, setRoute] = useState<RouteInfo | null>(null);
   const [showSteps, setShowSteps] = useState(false);
   // Whether the turn-by-turn step list is expanded (slide-up). Lifts the FAB
@@ -2716,11 +2718,24 @@ export default function MapScreen() {
                 onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
                 onProfilePress={() => router.push("/(app)/hub" as any)}
                 onPressField={() => setNavSearchOpen(true)}
+                // Departure IQ now lives IN the bar: an "AI" pre-fill + green "Let's go".
+                aiSuggest={departSuggest ? { label: `${departSuggest.reason.charAt(0).toUpperCase()}${departSuggest.reason.slice(1)}?`, eta: departSuggest.etaText } : null}
+                onAiGo={() => {
+                  const p = departSuggest?.place;
+                  setDepartSuggest(null);
+                  if (p) { setDestination({ lat: p.lat, lng: p.lng, label: p.label }); setShowSteps(true); }
+                }}
+                onAiDismiss={() => { setDepartSuggest(null); departHushRef.current = Date.now() + 1800000; }}
+                // Category pills are hidden by default; the green icon on the right toggles them.
+                pillsVisible={pillsVisible}
+                onPillsToggle={() => setPillsVisible((v) => { if (v) setPlacePins([]); return !v; })}
               />
             </View>
-            {/* Category quick-search pills (Gas / Food / Coffee / …) directly
-                under the search bar, Google-Maps style. Results drop as pins. */}
-            <CategoryPills origin={coords} onResults={setPlacePins} onSelect={handlePlacePinPress} />
+            {/* Category quick-search pills (Gas / Food / Coffee / …) — hidden until the
+                driver taps the green pills icon on the right of the search bar. */}
+            {pillsVisible && (
+              <CategoryPills origin={coords} onResults={setPlacePins} onSelect={handlePlacePinPress} />
+            )}
             {(() => {
               const selfLive = getAvatarMode(settings) !== "ghost" && !!settings.activeCommunityId ? 1 : 0;
               const liveCount = selfLive + peerList.length;
@@ -2738,7 +2753,7 @@ export default function MapScreen() {
       {/* Top-right logo — absolutely positioned at the SAME screen spot as the
           Comms/Music headers (top iOS52/Android28, right12) so it's pixel-identical
           across tabs. Rendered after topBar so it overlays and stays tappable. */}
-      <View style={styles.mapLogoBacking}><LogoMenu size={34} align="right" /></View>
+      <View style={styles.mapLogoBacking}><LogoMenu size={38} align="right" /></View>
 
       {/* ===== Community Routes — horizontal chip strip (visible when there are shared cruises) ===== */}
       {communityRoutes.length > 0 && navMode === "preview" && !destination && (
@@ -2798,41 +2813,8 @@ export default function MapScreen() {
         </SafeAreaView>
       )}
 
-      {/* ===== Departure IQ — proactive "ready to go?" when parked at a saved place ===== */}
-      {departSuggest && navMode === "preview" && !destination && (
-        <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.routeToastWrap}>
-          <Glass radius={16} style={styles.routeToast}>
-            <View style={styles.routeToastRow}>
-              <View style={styles.routeToastIcon}>
-                <Ionicons name="car-sport" size={20} color="#2DEC86" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.routeToastTitle}>
-                  {departSuggest.reason.charAt(0).toUpperCase() + departSuggest.reason.slice(1)}?
-                </Text>
-                <Text style={styles.routeToastSub} numberOfLines={1}>
-                  {departSuggest.place.label}{departSuggest.etaText ? ` · ${departSuggest.etaText}` : ""}
-                </Text>
-              </View>
-              <TouchableOpacity
-                testID="depart-go"
-                onPress={() => {
-                  const p = departSuggest.place;
-                  setDepartSuggest(null);
-                  setDestination({ lat: p.lat, lng: p.lng, label: p.label });
-                  setShowSteps(true);
-                }}
-                style={styles.routeToastBtn}
-              >
-                <Text style={styles.routeToastBtnText}>Let's go</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => { setDepartSuggest(null); departHushRef.current = Date.now() + 1800000; }} style={{ padding: 6 }}>
-                <Ionicons name="close" size={18} color={COLORS.textDim} />
-              </TouchableOpacity>
-            </View>
-          </Glass>
-        </SafeAreaView>
-      )}
+      {/* Departure IQ now renders INSIDE the search bar (DestinationSearch aiSuggest)
+          instead of a separate banner — see the topBar above. */}
 
       {/* Old collapsed "trip-summary" pill removed — it sat where the new
           turn-by-turn UI belongs and blocked it from showing. Driving off now
@@ -3823,10 +3805,11 @@ const styles = StyleSheet.create({
   // solid-dark Comms/Music headers it needs a backing to stay crisp over any
   // background. 40×40 circle mirrors the old profile-avatar footprint.
   mapLogoBacking: {
-    position: 'absolute', top: Platform.OS === 'ios' ? 47 : 23, right: 12, zIndex: 100,
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    // Sized to match the taller search bar + vertically centered with it.
+    position: 'absolute', top: Platform.OS === 'ios' ? 51 : 27, right: 12, zIndex: 100,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(20,20,22,0.9)',
     borderWidth: 1,

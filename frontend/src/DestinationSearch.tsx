@@ -27,6 +27,14 @@ type Props = {
   // instead of typing inline (the map uses it to open the full-screen search
   // screen). The mic + logo remain fully interactive.
   onPressField?: () => void;
+  // Departure IQ: when set, the bar shows a premium "AI" suggestion pre-filled in
+  // place of "Search here" (e.g. "Heading to work?") with a green "Let's go" button.
+  aiSuggest?: { label: string; eta?: string } | null;
+  onAiGo?: () => void;       // tap "Let's go" → route to the suggestion
+  onAiDismiss?: () => void;  // tap × → dismiss the suggestion, back to normal search
+  // Category-pills toggle: render a green show/hide icon on the RIGHT of the bar.
+  pillsVisible?: boolean;
+  onPillsToggle?: () => void;
 };
 
 let _placesService: any = null;
@@ -111,7 +119,7 @@ async function placeDetailsRest(place_id: string): Promise<{ lat: number; lng: n
   } catch { return null; }
 }
 
-export default function DestinationSearch({ origin, onSelect, onClear, initialValue, onProfilePress, profileSlot, onPressField }: Props) {
+export default function DestinationSearch({ origin, onSelect, onClear, initialValue, onProfilePress, profileSlot, onPressField, aiSuggest, onAiGo, onAiDismiss, pillsVisible, onPillsToggle }: Props) {
   const [text, setText] = useState(initialValue || "");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -232,7 +240,15 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           ) : (
             <Ionicons name="search" size={18} color="#2DEC86" />
           )}
-          {onPressField ? (
+          {aiSuggest ? (
+            // Departure IQ pre-fill — premium "AI" badge + the suggestion text.
+            <View style={styles.aiRow}>
+              <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>
+              <Text style={styles.aiText} numberOfLines={1}>
+                {aiSuggest.label}{aiSuggest.eta ? `  ·  ${aiSuggest.eta}` : ""}
+              </Text>
+            </View>
+          ) : onPressField ? (
             <TouchableOpacity
               testID="destination-open-search"
               style={styles.fieldTap}
@@ -255,22 +271,34 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
               blurOnSubmit={false}
             />
           )}
-          {/* Submit / clear — only shown when there's text in the field, so the
-              mic occupies a stable position on the right at all times. */}
-          {!!text.trim() && (
-            <TouchableOpacity
-              testID="destination-go"
-              onPress={submit}
-              style={styles.goBtn}
-            >
-              <Ionicons name="arrow-forward" size={18} color="#fff" />
+          {/* Right control: AI "Let's go" + dismiss · Go/clear while typing · or the
+              green pills show/hide toggle in the idle read-only state. */}
+          {aiSuggest ? (
+            <>
+              <TouchableOpacity testID="ai-lets-go" onPress={onAiGo} style={styles.letsGoBtn} activeOpacity={0.85}>
+                <Ionicons name="navigate" size={14} color="#06281A" />
+                <Text style={styles.letsGoText}>Let's go</Text>
+              </TouchableOpacity>
+              <TouchableOpacity testID="ai-dismiss" onPress={onAiDismiss} hitSlop={8} style={{ paddingLeft: 2 }}>
+                <Ionicons name="close" size={18} color="rgba(235,235,245,0.6)" />
+              </TouchableOpacity>
+            </>
+          ) : text ? (
+            <>
+              {!!text.trim() && (
+                <TouchableOpacity testID="destination-go" onPress={submit} style={styles.goBtn}>
+                  <Ionicons name="arrow-forward" size={18} color="#fff" />
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity testID="destination-clear" onPress={clear}>
+                <Ionicons name="close-circle" size={20} color="rgba(235,235,245,0.6)" />
+              </TouchableOpacity>
+            </>
+          ) : onPillsToggle ? (
+            <TouchableOpacity testID="pills-toggle" onPress={onPillsToggle} hitSlop={6} style={styles.pillsToggle}>
+              <Ionicons name={pillsVisible ? "apps" : "apps-outline"} size={20} color="#2DEC86" />
             </TouchableOpacity>
-          )}
-          {!!text && (
-            <TouchableOpacity testID="destination-clear" onPress={clear}>
-              <Ionicons name="close-circle" size={20} color="rgba(235,235,245,0.6)" />
-            </TouchableOpacity>
-          )}
+          ) : null}
         </View>
         {/* Logo/menu now lives on the LEFT inside the bar — no right-side control. */}
       </View>
@@ -321,9 +349,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     backgroundColor: 'rgba(34,35,38,0.96)',
-    paddingLeft: 8,
-    paddingRight: 14,
-    paddingVertical: 7,
+    paddingLeft: 12,
+    paddingRight: 12,
+    paddingVertical: 12,
     borderRadius: 28,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.12)',
@@ -334,11 +362,25 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   // Dark charcoal text on white surface — high contrast for readability.
-  input: { flex: 1, fontSize: 16, color: '#F4F4F4', paddingVertical: 0 },
+  input: { flex: 1, fontSize: 17, color: '#F4F4F4', paddingVertical: 0 },
   // Read-only tappable field — the map passes onPressField to open the
   // full-screen search. Mirrors the input's flex + font so the bar is identical.
   fieldTap: { flex: 1, justifyContent: 'center', paddingVertical: 2 },
-  fieldTapText: { fontSize: 16, color: '#FFFFFF' },
+  fieldTapText: { fontSize: 17, color: '#FFFFFF' },
+  // ===== Departure IQ (AI suggestion in the bar) =====
+  aiRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // Premium little "AI" chip before the suggestion text.
+  aiBadge: { backgroundColor: '#2DEC86', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  aiBadgeText: { color: '#06281A', fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+  aiText: { flex: 1, fontSize: 16, color: '#FFFFFF', fontWeight: '600' },
+  // Green "Let's go" action on the right of the AI suggestion.
+  letsGoBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: '#2DEC86', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7,
+  },
+  letsGoText: { color: '#06281A', fontSize: 14, fontWeight: '800' },
+  // Green category-pills show/hide toggle on the right of the idle bar.
+  pillsToggle: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   // The Go arrow stays in Convoy blue accent so the submit affordance is
   // unmistakable on the light bar.
   goBtn: {

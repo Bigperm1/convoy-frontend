@@ -400,6 +400,9 @@ export function useTurnByTurn(
     active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0,
   });
   const hasAnnouncedStartRef = useRef<boolean>(false);
+  // One-shot: announce the next maneuver from the CURRENT position once guidance is
+  // free (after the greeting), instead of a stale step-0 "Starting navigation" readout.
+  const pendingStartCueRef = useRef<boolean>(false);
   const routeRef = useRef<NavRoute | null>(route);
   useEffect(() => { routeRef.current = route; }, [route]);
   // Tracks the active route's polyline so we can detect a mid-drive route SWAP
@@ -427,10 +430,11 @@ export function useTurnByTurn(
     setState(fresh);
     const r = routeRef.current;
     if (r?.steps?.[0] && !options?.mute && !hasAnnouncedStartRef.current) {
-      const verb = maneuverVerb(r.steps[0].maneuver);
-      const inst = r.steps[0].html;
-      speak(`Starting navigation. ${verb} ${inst.length > 80 ? "" : "to " + stripDirections(inst)}. Total ${r.duration_text}.`);
-      lastSpokeRef.current = Date.now();
+      // Don't speak a static "Starting navigation. {step0}. Total X." here — by the
+      // time the greeting finishes the car may have rolled forward. Instead arm a
+      // one-shot cue that the location effect fires from the LIVE position once the
+      // greeting clears, announcing whatever maneuver is actually next.
+      pendingStartCueRef.current = true;
       hasAnnouncedStartRef.current = true;
     }
   }, [active]);
@@ -491,6 +495,28 @@ export function useTurnByTurn(
       const prepKey = `${stepIdx}-prep`;
       const immKey = `${stepIdx}-imm`;
       const isFinal = stepIdx >= steps.length - 1;
+      // ONE-SHOT START CUE — the first thing Nova says once guidance is free (the
+      // greeting finished, or there was none): whatever maneuver is next from the
+      // CURRENT position, regardless of the distance threshold. Marked announced so
+      // the normal "prepare" callout for the same step doesn't immediately repeat it.
+      if (pendingStartCueRef.current && !isAudioBusy()) {
+        pendingStartCueRef.current = false;
+        if (!announcedRef.current.has(prepKey)) {
+          if (isFinal) {
+            speak(`In ${fmtDistanceM(dManeuver)}, you will arrive at your destination.`);
+          } else {
+            const ns = steps[stepIdx + 1];
+            const ra = roundaboutExitCue(ns.maneuver, ns.html);
+            const v = maneuverVerb(ns.maneuver);
+            const street = stripDirections(ns.html);
+            speak(ra
+              ? `In ${fmtDistanceM(dManeuver)}, ${ra.toLowerCase()}.`
+              : `In ${fmtDistanceM(dManeuver)}, ${v.toLowerCase()}${street ? " onto " + street : ""}.`);
+          }
+          announcedRef.current.add(prepKey);
+          lastSpokeRef.current = Date.now();
+        }
+      }
       if (isFinal) {
         // Final leg → arrival heads-up only; the actual "You have arrived" +
         // onArrive fire from the dManeuver < 20 block below.
@@ -632,6 +658,10 @@ let ttsPlaying = false;
 // The currently-playing TTS Sound (native) so nav teardown can stop a
 // half-spoken instruction. Web playback is fire-and-forget.
 let _currentSound: any = null;
+// Serialize ALL clip playback so two clips can never sound at once (the confirmed
+// "two voices at the same time" bug). Every playBase64Audio call awaits the prior
+// one's completion before it starts; the speed ding yields via isAudioBusy() too.
+let _audioChain: Promise<void> = Promise.resolve();
 
 // ===== In-app music ducking (Apple Music / MusicKit) =====
 // expo-av's `.duckOthers` already dips OTHER apps (Spotify, podcasts) while Nova
@@ -723,6 +753,14 @@ const GREETING_PAUSE_MS = 1200;               // gap between greeting and 1st tu
 let _greetingInFlight = false;
 let _greetingTimer: ReturnType<typeof setTimeout> | null = null;
 let _heldSpeech: string | null = null;        // latest parked turn callout (raw)
+
+// True while any Nova/greeting clip is sounding (or a greeting is being prepared).
+// The turn engine's start cue waits on this (so it speaks AFTER the greeting), and
+// the speed ding waits on it too so a chime never sounds on top of a clip. A `function`
+// so it's hoisted/callable from the earlier turn engine.
+export function isAudioBusy(): boolean {
+  return _greetingInFlight || ttsPlaying || _currentSound != null;
+}
 
 export function reserveGreeting(): void {
   _greetingInFlight = true;
@@ -876,6 +914,22 @@ async function speakOne(text: string): Promise<void> {
 }
 
 async function playBase64Audio(b64: string, mime: string): Promise<void> {
+  // Serialize: wait for any in-flight clip to finish before starting this one, so two
+  // clips can NEVER sound at the same time (the confirmed two-voices bug). Even if a
+  // stale/re-entrant caller races the drain, the second clip queues behind the first
+  // instead of overlapping it.
+  const prev = _audioChain;
+  let release: () => void = () => {};
+  _audioChain = new Promise<void>((r) => { release = r; });
+  try { await prev; } catch {}
+  try {
+    await _playClip(b64, mime);
+  } finally {
+    release();
+  }
+}
+
+async function _playClip(b64: string, mime: string): Promise<void> {
   if (Platform.OS === "web") {
     return new Promise((resolve) => {
       try {

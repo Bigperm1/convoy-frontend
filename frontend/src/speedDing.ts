@@ -14,6 +14,7 @@
 
 import { Platform } from "react-native";
 import { setIdleAudioMode } from "./audioMode";
+import { isAudioBusy } from "./nav";
 
 // 16 kHz mono 16-bit WAV, 160 ms — bright D6 bell (fundamental + 2 harmonics,
 // fast attack, exponential decay). ~5 KB raw → ~6.9 KB base64.
@@ -63,6 +64,13 @@ function playOnceWeb(): Promise<void> {
 // Play the speed-alert chime. `double` plays it twice (the +41-over warning);
 // otherwise once (the +21-over nudge). Always resolves; never throws.
 export async function playSpeedDing(double: boolean): Promise<void> {
+  // Yield to Nova: never sound a ding ON TOP of a greeting / turn callout (the
+  // confirmed "two sounds at once" overlap — the ding bypasses the speech queue).
+  // Briefly wait for the voice to clear, then ding; give up after ~3s so a long
+  // callout can't swallow a real speed alert entirely.
+  for (let i = 0; i < 8 && isAudioBusy(); i++) {
+    await new Promise((r) => setTimeout(r, 400));
+  }
   if (Platform.OS === "web") {
     try { await playOnceWeb(); } catch {}
     if (double) setTimeout(() => { void playOnceWeb(); }, GAP_MS);

@@ -647,12 +647,12 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         slot="top"
         style={{
           modelId: modelId,
-          // location-indicator: render the car like a nav puck — ON TOP of the 3D
-          // building extrusions (no depth occlusion), so it never disappears "inside"
-          // a house. common-3d depth-tests against buildings, which let a taller
-          // building draw in front of the car. The route LineLayers are slot="middle"
-          // and this model is slot="top", so the car still sits above the line too.
-          modelType: "location-indicator",
+          // common-3d: integrate the car into the 3D scene with depth testing so it sits
+          // ON the road ABOVE the flat route line. (Tried "location-indicator" to fix the
+          // car being occluded by 3D buildings — on @rnmapbox 10.3.1 it did NOT render the
+          // car over the buildings AND it drew the route line over the car, so it was
+          // strictly worse. Reverted; the building-occlusion fix is tracked separately.)
+          modelType: "common-3d",
           modelEmissiveStrength: emissive,
           modelScale: scale ?? CAR_MODEL_SCALE_SIZED,
           modelRotation: [0, 0, (r.heading ?? 0) + CAR_MODEL_HEADING_OFFSET],

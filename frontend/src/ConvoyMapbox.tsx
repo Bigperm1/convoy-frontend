@@ -122,6 +122,8 @@ interface ConvoyMapboxProps {
   followUser?: boolean;
   onUserPan?: () => void;
   navigationActive?: boolean;
+  // User-chosen route-line color (base hex). Defaults to brand green.
+  routeColor?: string;
   userSpeedMs?: number;
   distanceToManeuverM?: number;
   maneuverCoord?: { lat: number; lng: number } | null;
@@ -318,6 +320,24 @@ export const FOLLOW_LOWER_PAD_FRAC = 0.4;
 // so it renders at full brightness regardless of the night lighting.
 export const ROUTE_GREEN_CORE = "#2DEC86"; // bright neon-green core (the visible line)
 export const ROUTE_GREEN_GLOW = "#00E070"; // saturated green halo (blurred underlay)
+export const DEFAULT_ROUTE_COLOR = ROUTE_GREEN_CORE; // settings.routeColor default
+
+// The route line color is ONE user-chosen base hex (settings.routeColor). The core,
+// the blurred glow halo, and the near-car fade gradient are all derived from it —
+// glow uses the same hue (the casing is blurred + 55% opacity, so it reads as a halo
+// of the core in any color). Shared by the phone map AND the CarPlay map.
+export function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  let h = (hex || "").replace("#", "").trim();
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  const n = parseInt(h, 16);
+  if (!Number.isFinite(n)) return { r: 45, g: 236, b: 134 }; // fallback to brand green
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+// "rgba(r,g,b,a)" from a hex — used to feed the near-car fade gradient (solid + clear).
+export function routeRgba(hex: string, a: number): string {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
+}
 
 function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
 export function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
@@ -686,6 +706,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     center, user, peers, hideSelfMarker, mapView = "heading_up",
     mapMode = "satellite", leaderUserId, show3dBuildings = true,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
+    routeColor = DEFAULT_ROUTE_COLOR,
     distanceToManeuverM, onMapPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
     hazards, speedCameras, places, showPlacePins = true, destWeather,
@@ -1015,7 +1036,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       .then((res) => {
         if (cancelled) return;
         if (!res) { setCongestionRoute(null); return; }
-        setCongestionRoute({ coordinates: res.coordinates, gradient: buildCongestionGradient(res.coordinates, res.congestion) });
+        setCongestionRoute({ coordinates: res.coordinates, gradient: buildCongestionGradient(res.coordinates, res.congestion, routeColor) });
       })
       .catch(() => { if (!cancelled) setCongestionRoute(null); });
     return () => { cancelled = true; ctrl.abort(); };
@@ -1081,8 +1102,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     const s1 = Math.min(0.999, Math.max(s0 + 0.0006, s0 + _fadeSpanFrac));
     return ["interpolate", ["linear"], ["line-progress"], 0, clear, s0, clear, s1, solid, 1, solid];
   };
-  const selCoreGradient = buildLineFade("rgba(45,236,134,1)", "rgba(45,236,134,0)");
-  const selGlowGradient = buildLineFade("rgba(0,224,112,1)", "rgba(0,224,112,0)");
+  const selCoreGradient = buildLineFade(routeRgba(routeColor, 1), routeRgba(routeColor, 0));
+  const selGlowGradient = buildLineFade(routeRgba(routeColor, 1), routeRgba(routeColor, 0));
 
   // ===== Live congestion on the ACTIVE route (DURING navigation) =====
   // The route we're driving already carries per-segment congestion (nav.ts gets
@@ -1098,10 +1119,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     const coords = sel?.coordinates as [number, number][] | undefined;
     const cong = sel?.congestion as CongestionLevel[] | undefined;
     if (!coords || coords.length < 2 || !cong || cong.length === 0) return null;
-    const g = buildCongestionGradient(coords, cong);
+    const g = buildCongestionGradient(coords, cong, routeColor);
     return Array.isArray(g) ? g : (["interpolate", ["linear"], ["line-progress"], 0, g, 1, g] as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigationActive, routes, selectedRouteIndex]);
+  }, [navigationActive, routes, selectedRouteIndex, routeColor]);
   // The selected core paints congestion during nav (preferred), else the soft
   // green fade-in. Both ride the same behind-car trim.
   const selCoreGrad = navCongestionGradient || selCoreGradient;
@@ -1287,13 +1308,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               id="route-sel-casing"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selGlowGradient ? { lineGradient: selGlowGradient, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: ROUTE_GREEN_GLOW }) }}
+              style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selGlowGradient ? { lineGradient: selGlowGradient, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: routeColor }) }}
             />
             <LineLayer
               id="route-sel-core"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selCoreGrad ? { lineGradient: selCoreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: ROUTE_GREEN_CORE }) }}
+              style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selCoreGrad ? { lineGradient: selCoreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: routeColor }) }}
             />
           </ShapeSource>
         )}
@@ -1308,7 +1329,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             <LineLayer
               id="cong-casing"
               slot="middle"
-              style={{ lineColor: ROUTE_GREEN_GLOW, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
+              style={{ lineColor: routeColor, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
             <LineLayer
               id="cong-core"

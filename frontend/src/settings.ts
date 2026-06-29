@@ -44,6 +44,10 @@ mapDark: boolean;
 // Base-map mode — the single source of truth. Optional/undefined for users
 // stored before it existed; getMapMode() migrates them from mapType/mapDark.
 mapMode?: MapMode;
+// Route-line color — a user-chosen base hex (e.g. "#2DEC86" green, "#0A84FF" Waze
+// blue). The route core, glow + near-car fade are all derived from this one color.
+// Optional; getRouteColor() defaults to brand green.
+routeColor?: string;
 // 3D buildings on the Standard (non-satellite) Mapbox modes. User toggle; when
 // false the self-car can never be hidden behind a building. Maps to the Mapbox
 // Standard style's show3dObjects config.
@@ -116,6 +120,8 @@ mapType: "hybrid",
 mapDark: false,
 // Default base-map look is AUTO — follows the time of day (dawn/day/dusk/night).
 mapMode: "auto",
+// Default route color — brand neon green.
+routeColor: "#2DEC86",
 show3dBuildings: true,
 novaGreeting: false,
 novaSpeeding: false,
@@ -171,6 +177,10 @@ export function autoMapMode(): Exclude<MapMode, "auto"> {
 // The user's CHOSEN mode (raw — may be "auto"). For the settings UI's selected state.
 export function getMapModeChoice(s: Settings): MapMode {
   return s.mapMode ?? legacyToMapMode(s.mapType, s.mapDark);
+}
+// The user's chosen route-line color (base hex). Defaults to brand neon green.
+export function getRouteColor(s: Settings): string {
+  return s.routeColor ?? "#2DEC86";
 }
 // The effective RENDER mode: the chosen mode, with "auto" resolved to a concrete light
 // preset by time of day. Used by the Mapbox engine (phone) + mirrored to CarPlay.

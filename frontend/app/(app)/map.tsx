@@ -24,7 +24,7 @@ import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/component
 import { hailBus } from "../../src/hailBus";
 import { subscribeAvatarHold } from "../../src/avatarHoldBus";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, getMapModeChoice, mapModeToLegacy, getAvatarMode, setAvatarMode, unitForCountry, getSpeedAlertMode } from "../../src/settings";
+import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, getMapModeChoice, mapModeToLegacy, getAvatarMode, setAvatarMode, unitForCountry, getSpeedAlertMode, getRouteColor } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import { BearingTracker } from "../../src/bearing";
@@ -2188,6 +2188,8 @@ export default function MapScreen() {
     <View style={styles.c}>
       <MapEngine
         center={coords}
+        // User-chosen route-line color (live; recolors the route core/glow/fade).
+        routeColor={getRouteColor(settings)}
         // user.car_type / user.car_color come from the Garage profile (Mongo,
         // hydrated by useAuth). Pass them as carBody/carColor so the "you"
         // marker uses the same SVG silhouette + paint other drivers see.

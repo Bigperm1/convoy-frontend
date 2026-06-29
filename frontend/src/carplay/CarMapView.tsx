@@ -32,7 +32,7 @@ import { getVehicleModelUrl } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
   ROUTE_GREEN_CORE,
-  ROUTE_GREEN_GLOW,
+  routeRgba,
   chaseZoom,
   chasePitch,
   kmhFromMs,
@@ -170,8 +170,11 @@ export default function CarMapView({ onGLError }: Props) {
     const s1 = Math.min(0.999, Math.max(s0 + 0.0006, s0 + fadeSpanFrac));
     return ['interpolate', ['linear'], ['line-progress'], 0, clear, s0, clear, s1, solid, 1, solid];
   };
-  const coreGrad = buildLineFade('rgba(45,236,134,1)', 'rgba(45,236,134,0)');
-  const glowGrad = buildLineFade('rgba(0,224,112,1)', 'rgba(0,224,112,0)');
+  // User-chosen route color (mirrored from the phone via carStore). Core + glow + the
+  // near-car fade all derive from it; falls back to brand green.
+  const carRouteColor = s.routeColor || ROUTE_GREEN_CORE;
+  const coreGrad = buildLineFade(routeRgba(carRouteColor, 1), routeRgba(carRouteColor, 0));
+  const glowGrad = buildLineFade(routeRgba(carRouteColor, 1), routeRgba(carRouteColor, 0));
   const routeFC: any = {
     type: 'FeatureCollection',
     features: hasRoute
@@ -261,13 +264,13 @@ export default function CarMapView({ onGLError }: Props) {
             id="car-route-sel-casing"
             slot="middle"
             filter={['==', ['get', 'index'], SELECTED_INDEX] as any}
-            style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(glowGrad ? { lineGradient: glowGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: ROUTE_GREEN_GLOW }) }}
+            style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(glowGrad ? { lineGradient: glowGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: carRouteColor }) }}
           />
           <LineLayer
             id="car-route-sel-core"
             slot="middle"
             filter={['==', ['get', 'index'], SELECTED_INDEX] as any}
-            style={{ lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(coreGrad ? { lineGradient: coreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: ROUTE_GREEN_CORE }) }}
+            style={{ lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(coreGrad ? { lineGradient: coreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: carRouteColor }) }}
           />
         </ShapeSource>
       )}

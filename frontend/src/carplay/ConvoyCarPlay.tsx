@@ -39,7 +39,7 @@ import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
-import { formatSpeed, getSettings, getMapMode } from '../settings';
+import { formatSpeed, getSettings, getMapMode, getRouteColor } from '../settings';
 import { weatherKind, type WeatherCondition, type WeatherKind } from '../weatherLayer';
 import { WeatherGlyph } from '../components/WeatherHUD';
 
@@ -561,6 +561,8 @@ export function useConvoyCarPlay({ route, tbt, user, destination, peers, onEnd, 
       selfCarColor: getSettings().carColor,
       // Base-map mode → car map matches the phone's style choice.
       mapMode: getMapMode(getSettings()),
+      // Route-line color → car route matches the phone's chosen color.
+      routeColor: getRouteColor(getSettings()),
       // Live weather (only while the phone's weather layer feeds it). Temp pre-formatted
       // in the driver's unit; CarSurface maps weatherKind to a glyph.
       weatherTemp: weather

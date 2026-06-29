@@ -47,8 +47,14 @@ const CONGESTION_COLOR: Record<CongestionLevel, string> = {
 };
 const DEFAULT_COLOR = CONGESTION_COLOR.unknown;
 
-function colorFor(level: CongestionLevel | string | undefined): string {
-  return (level && (CONGESTION_COLOR as any)[level]) || DEFAULT_COLOR;
+// `baseColor` (the user's chosen route color) overrides the clear-traffic color
+// (unknown / low) so a recolored route stays that color where traffic is moving;
+// the warm slow-down stops (yellow / orange / red) keep their traffic meaning.
+function colorFor(level: CongestionLevel | string | undefined, baseColor?: string): string {
+  if (level === "moderate" || level === "heavy" || level === "severe") {
+    return (CONGESTION_COLOR as any)[level];
+  }
+  return baseColor || DEFAULT_COLOR; // unknown / low / undefined → the route base color
 }
 
 // Haversine metres between two [lng, lat] points (for segment fractions).
@@ -72,9 +78,10 @@ function segMeters(a: [number, number], b: [number, number]): number {
 export function buildCongestionGradient(
   coordinates: [number, number][],
   congestion: CongestionLevel[],
+  routeBase?: string,
 ): any {
   const segCount = Math.max(0, coordinates.length - 1);
-  if (segCount === 0) return DEFAULT_COLOR;
+  if (segCount === 0) return routeBase || DEFAULT_COLOR;
 
   // Segment lengths + total, for fractional positions along the line.
   const lengths: number[] = new Array(segCount);
@@ -84,19 +91,19 @@ export function buildCongestionGradient(
     lengths[i] = len;
     total += len;
   }
-  if (total <= 0) return colorFor(congestion[0]);
+  if (total <= 0) return colorFor(congestion[0], routeBase);
 
   // Walk the segments, recording each colour CHANGE point (fraction along the
   // line where the colour flips). A plain step expression here gives hard edges;
   // below we expand each change into a short blend band so the gradient reads
   // smoothly (green→yellow→orange→red) instead of as solid blocks.
-  const baseColor = colorFor(congestion[0]);
+  const baseColor = colorFor(congestion[0], routeBase);
   const changes: Array<[number, string]> = [];
   let cum = 0;
   let prevColor = baseColor;
   for (let i = 0; i < segCount; i++) {
     const frac = cum / total; // fraction at the START of segment i
-    const color = colorFor(congestion[i]);
+    const color = colorFor(congestion[i], routeBase);
     if (i > 0 && color !== prevColor && frac > 0 && frac < 1) {
       // Avoid duplicate / non-ascending change inputs.
       if (changes.length === 0 || frac > changes[changes.length - 1][0]) {

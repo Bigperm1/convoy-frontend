@@ -55,6 +55,9 @@ export type CarState = {
   // WeatherKind string the car maps to a glyph. undefined → no weather chip.
   weatherTemp?: string;
   weatherKind?: string;
+  // User-chosen route-line color (base hex, mirror of settings.routeColor). Lets the
+  // CarPlay live route match the phone. undefined → CarMapView falls back to green.
+  routeColor?: string;
   // Glyph (unicode arrow) for the upcoming maneuver, shown in the car banner's green
   // arrow box (mirrors the phone's maneuver icon). undefined when not navigating.
   maneuverIcon?: string;

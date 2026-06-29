@@ -2468,6 +2468,11 @@ export default function MapScreen() {
         const savedMatch = savedPlaces.find((p) => distanceKm(p.lat, p.lng, destination.lat, destination.lng) <= 0.16);
         const durSec = ar?.duration_in_traffic_s ?? ar?.duration_s ?? 0;
         const durMin = Math.max(1, Math.round(durSec / 60));
+        // Big trip-time readout: hours + minutes for trips >= 1h (e.g. "1h 23m"), else
+        // the plain minute count with a "min" unit beneath. Keeps the new routes' times
+        // consistent with the chips + on-map pills.
+        const durHrs = Math.floor(durMin / 60);
+        const durBig = durHrs >= 1 ? `${durHrs}h ${durMin % 60}m` : `${durMin}`;
         const arriveStr = fmtClock(new Date(Date.now() + durSec * 1000));
         const distStr = ar?.distance_text ?? route.distance_text;
         const bestLabel = selectedRouteIndex === 0 ? "Best route" : (ar?.summary ? `via ${ar.summary}` : "Alternate");
@@ -2478,16 +2483,19 @@ export default function MapScreen() {
         const userColor = getRouteColor(settings);
         const scenicColor = contrastingRouteColor(userColor);
         const aiIdx = routes.findIndex((r: any) => r?.kind === "ai");
-        const fmtChipMin = (r: NavRoute | null | undefined) =>
-          r ? `${Math.max(1, Math.round((r.duration_in_traffic_s ?? r.duration_s ?? 0) / 60))} min` : null;
+        // Per-route ETA — use the route's pre-formatted duration (formatDuration →
+        // hours/min, e.g. "1h 23m" / "45 min"), not a raw minute count, so long trips
+        // read as hours + minutes.
+        const fmtChipDur = (r: NavRoute | null | undefined) =>
+          r ? (r.duration_in_traffic_text || r.duration_text || null) : null;
         const routeChips: { key: string; label: string; idx: number; color: string; sub: string | null; disabled?: boolean }[] = [
-          { key: "best", label: "Best", idx: 0, color: userColor, sub: fmtChipMin(routes[0]) },
+          { key: "best", label: "Best", idx: 0, color: userColor, sub: fmtChipDur(routes[0]) },
         ];
-        if (routes[1] && aiIdx !== 1) routeChips.push({ key: "scenic", label: "Scenic", idx: 1, color: scenicColor, sub: fmtChipMin(routes[1]) });
+        if (routes[1] && aiIdx !== 1) routeChips.push({ key: "scenic", label: "Scenic", idx: 1, color: scenicColor, sub: fmtChipDur(routes[1]) });
         // AI chip: a real learned route if we have one; otherwise a disabled "Learning…"
         // stub ONLY when the destination is a saved place (so it's discoverable that
         // Convoy will learn this trip), hidden for one-off destinations.
-        if (aiIdx >= 0) routeChips.push({ key: "ai", label: "AI", idx: aiIdx, color: userColor, sub: fmtChipMin(routes[aiIdx]) });
+        if (aiIdx >= 0) routeChips.push({ key: "ai", label: "AI", idx: aiIdx, color: userColor, sub: fmtChipDur(routes[aiIdx]) });
         else if (savedMatch) routeChips.push({ key: "ai", label: "AI", idx: -1, color: "#9AA0A6", sub: "Learning…", disabled: true });
         return (
           <View style={[styles.routeSheet, { bottom: TAB_BAR_H + navInset }]} onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>
@@ -2561,8 +2569,8 @@ export default function MapScreen() {
             {/* Summary — duration · arrive time · distance · best-route label */}
             <View style={styles.bannerSummary}>
               <View style={styles.bannerDurCol}>
-                <Text style={styles.bannerDurNum}>{durMin}</Text>
-                <Text style={styles.bannerDurUnit}>min</Text>
+                <Text style={styles.bannerDurNum}>{durBig}</Text>
+                {durHrs < 1 && <Text style={styles.bannerDurUnit}>min</Text>}
               </View>
               <View>
                 <View style={styles.bannerArriveRow}>

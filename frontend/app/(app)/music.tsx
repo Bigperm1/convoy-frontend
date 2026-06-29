@@ -755,7 +755,7 @@ export default function MusicScreen() {
         </View>
       </Modal>
     </SafeAreaView>
-    <View style={styles.logoBacking}><LogoMenu size={Platform.OS === 'ios' ? 34 : 40} align="right" /></View>
+    <View style={styles.logoBacking}><LogoMenu size={38} align="right" /></View>
     </>
   );
 }

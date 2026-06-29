@@ -653,6 +653,13 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           // car over the buildings AND it drew the route line over the car, so it was
           // strictly worse. Reverted; the building-occlusion fix is tracked separately.)
           modelType: "common-3d",
+          // Lift the car ~10m so it clears typical (residential) building heights and
+          // isn't eaten by the 3D extrusions' depth test. Mapbox shares one depth buffer
+          // between models + Standard buildings, and `slot`/location-indicator can't
+          // override it (rnmapbox #13049/#13428) — this vertical lift is the only OTA
+          // lever. [lng_m, lat_m, altitude_m]. Tradeoff: mild float at high camera tilt;
+          // OTA-tunable (raise if taller buildings still occlude, lower if it floats).
+          modelTranslation: [0, 0, 10],
           modelEmissiveStrength: emissive,
           modelScale: scale ?? CAR_MODEL_SCALE_SIZED,
           modelRotation: [0, 0, (r.heading ?? 0) + CAR_MODEL_HEADING_OFFSET],

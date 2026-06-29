@@ -881,6 +881,25 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // or the dropdown is closed).
   const placesShown = (places?.length ?? 0) > 0 && !navigationActive;
 
+  // ===== LOCKSTEP camera (heading-up chase only) — the CarPlay smoothness fix, ported =====
+  // In heading-up follow, drive the camera imperatively from SelfCarModel's 60fps rAF
+  // (cameraRef.setCamera, animationMode:'none') instead of the native follow engine —
+  // which moved on its own cadence and desynced from the eased car (the shudder, and the
+  // car drifting off-center instead of sticking). The car pins to the padded center and
+  // the world rotates/translates around it. Gated to heading-up + actively-following +
+  // post-cold-lock + no place pins, so route-preview / places / north-up / free-roam all
+  // keep their EXISTING camera paths (the imperative fits + native follow) untouched.
+  const lockReadyRef = useRef(false);
+  lockReadyRef.current = readyRef.current && coldLockDone && followUser && !placesShown && headingUp;
+  const getCam = () => ({
+    zoomLevel: followZoom,
+    pitch: followPitchDeg,
+    // Fallback only — pushCam rides the EASED car heading (render.current.heading) so the
+    // map rotates as smoothly as the car turns. Heading-up is the only mode that locksteps.
+    heading: followHeadingDeg ?? 0,
+    padding: followPadding ?? { paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 },
+  });
+
   // ===== User zoom buttons (+/-) =====
   // While FOLLOWING, the offset rides on followZoomLevel above — Mapbox ignores
   // imperative zoom under follow, so the offset is the only lever that works
@@ -1225,7 +1244,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           // coldLockDone flips (~1.2s) follow engages from that same pose, so there
           // is no fly-in. (animationMode does NOT govern the follow engine's lock-on,
           // which is why the earlier animationMode="none" attempt had no effect.)
-          followUserLocation={followUser && !placesShown && coldLockDone}
+          // HEADING-UP is now driven by the imperative LOCKSTEP camera (SelfCarModel /
+          // lockReadyRef) instead of this native engine — so native follow is left ON
+          // only for NORTH-UP, where there's no per-frame heading to lockstep.
+          followUserLocation={followUser && !placesShown && coldLockDone && !headingUp}
           followUserMode={followMode}
           followZoomLevel={followZoom}
           followHeading={followHeadingDeg}
@@ -1359,6 +1381,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             lng={(selfDraw ?? selfCar).lng}
             heading={selfCar.heading ?? 0}
             emissive={selfEmissive}
+            cameraRef={cameraRef}
+            getCam={getCam}
+            readyRef={lockReadyRef}
           />
         )}
 

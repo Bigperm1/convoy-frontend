@@ -55,7 +55,7 @@ const CRUISE_PITCH = 45;
 // Pull the camera back from the phone's chase zoom so more road reads on the wide
 // head-unit screen. Applied to BOTH nav AND cruise (which is now speed-aware too).
 // Larger = more zoomed out. OTA-tunable.
-const CAR_ZOOM_OUT = 1.3;
+const CAR_ZOOM_OUT = 1.8;
 
 // Top padding as a fraction of map height — pins the car near the BOTTOM-MIDDLE of the
 // head unit (larger = lower on screen). Applied every frame via getCam, nav AND cruise.
@@ -242,7 +242,7 @@ export default function CarMapView({ onGLError }: Props) {
           cameraRef={cameraRef}
           getCam={getCam}
           readyRef={lockReadyRef}
-          scale={carModelScale(0.8)}
+          scale={carModelScale(0.7)}
         />
       )}
 

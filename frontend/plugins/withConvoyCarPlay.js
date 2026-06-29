@@ -449,6 +449,18 @@ final class ConvoyCarRootViewController: UIViewController, ConvoyHostedVC {
       // mount transaction regardless of the unchanged-size dedup, returning true once a
       // real frame committed.
       let surface = proxy.surface
+      // COLD-CONNECT CRASH GUARD (the warm/cold pipeline fix). On a cold CarPlay-first
+      // connect the car surface is minted ASYNC (mount, one runloop after boot) while
+      // this 0.4s repaint tick AND the scene-activation burst are ALREADY firing — so
+      // forceCarCommit can run BEFORE the surface registered its ShadowTree. The next
+      // call, synchronouslyWaitFor, calls getMountingCoordinator() before its own null
+      // check -> EXC_BAD_ACCESS on an Unregistered (or stopped-after-reconnect) surface.
+      // RCTSurfaceStageIsRunning is true ONLY once the surface reached InitialLayout and
+      // is not stopped (i.e. it has a live mounting coordinator), so skip until then —
+      // the bounded retry tick (0.4s, budget 120, 40s) just tries again for free. On the
+      // WARM path the surface is already Running by the first attempt, so this guard
+      // falls straight through and the commit sequence below is byte-for-byte unchanged.
+      guard RCTSurfaceStageIsRunning(surface.stage) else { return }
       surface.setMinimumSize(target.size, maximumSize: target.size)
       if (surface as AnyObject).synchronouslyWaitFor?(0.3) == true {
         ConvoyRNHost.carPainted = true
@@ -713,8 +725,12 @@ function withBridgingImport(config) {
       const { projectName, platformProjectRoot } = cfg.modRequest;
       // RNCarPlay PLUS the PURE-OBJC surface types we use to force a commit on the
       // CarPlay window: RCTSurfaceHostingProxyRootView (its .surface / .loadingView)
-      // and RCTSurfaceProtocol (setMinimumSize:maximumSize:). We deliberately do NOT
-      // import <React/RCTFabricSurface.h> — it pulls in C++ (react/renderer + a
+      // and RCTSurfaceProtocol (setMinimumSize:maximumSize: + the `stage` property).
+      // RCTSurfaceStage.h gives the RCTSurfaceStageIsRunning() readiness check used to
+      // guard the cold-connect commit (it's already pulled in transitively by
+      // RCTSurfaceProtocol.h, but import it explicitly so the C function symbol is
+      // unambiguously visible to Swift — both are pure-ObjC, no C++). We deliberately do
+      // NOT import <React/RCTFabricSurface.h> — it pulls in C++ (react/renderer + a
       // facebook::react:: method) and a Swift bridging header is compiled as Obj-C,
       // not Obj-C++, so importing it would break the build. The Fabric-only
       // synchronouslyWaitFor: is reached via an @objc dynamic shim instead.
@@ -722,6 +738,7 @@ function withBridgingImport(config) {
         '#import <react-native-carplay/RNCarPlay.h>',
         '#import <React/RCTSurfaceHostingProxyRootView.h>',
         '#import <React/RCTSurfaceProtocol.h>',
+        '#import <React/RCTSurfaceStage.h>',
       ];
       const candidates = [
         path.join(platformProjectRoot, projectName, `${projectName}-Bridging-Header.h`),

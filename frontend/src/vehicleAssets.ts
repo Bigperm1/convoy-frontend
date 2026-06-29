@@ -173,3 +173,11 @@ export function getVehicleModelUrl(color?: string | null): string {
   const key = resolveGRCKey(color) || DEFAULT_GRC_KEY;
   return VEHICLE_MODEL_URL[key];
 }
+
+// The resolved model KEY for a color (e.g. "grc_heavy_metal"). Used to build a
+// color-specific Mapbox model id so changing the car color swaps the 3D model LIVE:
+// Mapbox caches a registered model by its id, so re-pointing a fixed id at a new .glb
+// won't reload until remount — a per-color id forces the new model to load.
+export function getVehicleModelKey(color?: string | null): string {
+  return resolveGRCKey(color) || DEFAULT_GRC_KEY;
+}

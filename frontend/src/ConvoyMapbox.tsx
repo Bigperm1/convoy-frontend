@@ -35,7 +35,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Image, StyleSheet, Pressable, Platform, AppState } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { getVehiclePngOrDefault, getVehicleModelUrl } from "./vehicleAssets";
+import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey } from "./vehicleAssets";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient, type CongestionLevel } from "./mapboxDirections";
 import { getCarState } from "./carplay/carStore";
@@ -455,8 +455,11 @@ type PlacePoint = { id: string; lat: number; lng: number; label: string; price?:
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, scale }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, scale, modelId = "convoyCar" }: {
   lat: number; lng: number; heading: number; emissive: number;
+  // Mapbox model id this layer renders. Color-specific (e.g. "convoyCar_grc_heavy_metal")
+  // so a car-color change swaps the 3D model live. Default keeps the legacy fixed id.
+  modelId?: string;
   // LOCKSTEP camera (optional): when all three are passed, SelfCarModel drives the
   // camera from the SAME 60fps tween that eases the car, so camera-center == car-pose
   // every frame and the car is pinned to a fixed screen spot (map rotates around it).
@@ -588,7 +591,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         id="convoy-self-car-model"
         slot="top"
         style={{
-          modelId: "convoyCar",
+          modelId: modelId,
           // common-3d (not location-indicator): integrate the car into the 3D scene
           // with depth testing so it sits ON the road ABOVE the flat route line.
           // location-indicator draws over 3D buildings but UNDER 2D slot layers
@@ -1065,6 +1068,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const selfCar = cars.find((c) => c.id === SELF_ID);
   // Per-color baked 3D model URL → the user's chosen GRC paint (body-only paint; 5 colors from one render).
   const selfModelUrl = getVehicleModelUrl(selfCar?.color);
+  // Color-specific model id so changing the car color swaps the model LIVE (Mapbox
+  // caches a model by id — a fixed id won't reload a new .glb until remount).
+  const selfModelId = "convoyCar_" + getVehicleModelKey(selfCar?.color);
   // Lift the paint out of the dark on the dim light presets (dawn/night).
   const selfEmissive = CAR_EMISSIVE_BY_MODE[mapMode] ?? 0;
 
@@ -1233,7 +1239,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
 
         {/* Register the self-car 3D model once for the map. Referenced by id
             ("convoyCar") from the ModelLayer below. */}
-        <Models models={{ convoyCar: selfModelUrl }} />
+        <Models models={{ [selfModelId]: selfModelUrl }} />
 
         {/* Mapbox's native location layer — REQUIRED to power the Camera's
             followUserLocation (a hidden/unmounted location component doesn't start
@@ -1402,6 +1408,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             lng={(selfDraw ?? selfCar).lng}
             heading={selfCar.heading ?? 0}
             emissive={selfEmissive}
+            modelId={selfModelId}
             cameraRef={cameraRef}
             getCam={getCam}
             readyRef={lockReadyRef}

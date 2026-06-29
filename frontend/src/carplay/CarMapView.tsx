@@ -28,7 +28,7 @@ import Mapbox, {
   Models,
 } from '@rnmapbox/maps';
 import { useCarStore } from './carStore';
-import { getVehicleModelUrl } from '../vehicleAssets';
+import { getVehicleModelUrl, getVehicleModelKey } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
   ROUTE_GREEN_CORE,
@@ -119,6 +119,9 @@ export default function CarMapView({ onGLError }: Props) {
   const useStandard = mode !== 'satellite';
   const styleURL = useStandard ? 'mapbox://styles/mapbox/standard' : Mapbox.StyleURL.SatelliteStreet;
   const emissive = CAR_EMISSIVE_BY_MODE[mode] ?? 0;
+  // Color-specific model id so a car-color change swaps the 3D model live (Mapbox
+  // caches a model by id; a fixed id won't reload a new .glb until remount).
+  const carModelId = 'convoyCar_' + getVehicleModelKey(s.selfCarColor);
 
   // Speed-aware zoom for BOTH nav AND cruise — chaseZoom with no turn distance is a pure
   // speed→zoom curve (city tighter, highway wider), so cruise now dynamically zooms in/out
@@ -228,7 +231,7 @@ export default function CarMapView({ onGLError }: Props) {
       />
 
       {/* Register the self-car 3D model for the chosen paint. */}
-      <Models models={{ convoyCar: getVehicleModelUrl(s.selfCarColor) }} />
+      <Models models={{ [carModelId]: getVehicleModelUrl(s.selfCarColor) }} />
 
       {/* 3D self car + the native location feed, BOTH driven off ONE rAF-eased pose
           (SelfCarModel, reused verbatim from the phone). This is THE smoothness fix:
@@ -242,6 +245,7 @@ export default function CarMapView({ onGLError }: Props) {
           lng={lng}
           heading={hdg}
           emissive={emissive}
+          modelId={carModelId}
           cameraRef={cameraRef}
           getCam={getCam}
           readyRef={lockReadyRef}

@@ -272,12 +272,18 @@ export default function CarMapView({ onGLError }: Props) {
           native interpolator fighting the JS tween). That pins the car to a fixed screen
           spot (bottom-middle via getCam's padding) and rotates/translates the map AROUND
           it — killing the camera stutter. defaultSettings only seeds the first frame. */}
+      {/* NO defaultSettings. It previously flipped undefined→{close camera} when the fix
+          landed, and @rnmapbox animates that change as a fly-in from the zoomed-out default
+          — the "zoom in from far away" on cold start. With none, there is nothing to
+          animate: the camera sits at the style default (hidden behind the CarPlay splash)
+          until SelfCarModel's FIRST move HARD-SNAPS it to the car (pushCam, animationMode
+          'none' → instant, no fly-in). followUserLocation stays off; the lockstep owns the
+          camera exactly as before. */}
       <Camera
         ref={cameraRef}
         followUserLocation={false}
         animationMode="none"
         animationDuration={0}
-        defaultSettings={hasFix ? { centerCoordinate: [lng, lat], zoomLevel: followZoom, heading: followHeadingDeg, pitch: followPitch } : undefined}
       />
 
       {/* Register the self-car 3D model for the chosen paint. */}

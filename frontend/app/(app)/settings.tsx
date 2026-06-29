@@ -1,11 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
-import { useSettings, DEFAULT_SETTINGS, getMapModeChoice, getAvatarMode, setAvatarMode, getSpeedAlertMode, getRouteColor } from "../../src/settings";
+import { useSettings, DEFAULT_SETTINGS, getMapModeChoice, getAvatarMode, setAvatarMode, getSpeedAlertMode, getRouteColor, getNovaVoice } from "../../src/settings";
+import { NOVA_VOICES, previewNovaVoice, stopNovaPreview } from "../../src/novaVoices";
 import { GAS_BRANDS, OCTANES } from "../../src/gasJockey";
 
 // Re-export for navigation
@@ -91,6 +92,9 @@ export default function SettingsScreen() {
   // Measured width of the route-color spectrum bar (for tap→hue mapping).
   const [spectrumW, setSpectrumW] = useState(0);
   const routeColor = getRouteColor(settings);
+  const novaVoiceSel = getNovaVoice(settings);
+  // Stop any voice-preview sample if the user leaves Settings mid-playback.
+  useEffect(() => () => { void stopNovaPreview(); }, []);
 
   return (
     <View style={styles.container}>
@@ -423,6 +427,36 @@ export default function SettingsScreen() {
             onChange={(v) => setSettings({ novaVoice: v })}
           />
           <View style={styles.divider} />
+          {/* Voice picker — which OpenAI voice Nova speaks in. Tap a chip to select
+              it AND hear a short sample (cached per voice). */}
+          <View style={styles.voicePicker}>
+            <View style={styles.voicePickerHeader}>
+              <Ionicons name="mic" size={18} color="#BF5AF2" />
+              <Text style={styles.voicePickerTitle}>Voice</Text>
+              <Text style={styles.voicePickerHint}>Tap to hear</Text>
+            </View>
+            <View style={styles.voiceChipWrap}>
+              {NOVA_VOICES.map((v) => {
+                const active = novaVoiceSel === v.id;
+                return (
+                  <TouchableOpacity
+                    key={v.id}
+                    testID={`nova-voice-${v.id}`}
+                    activeOpacity={0.85}
+                    onPress={() => { setSettings({ novaVoiceName: v.id }); void previewNovaVoice(v.id); }}
+                    style={[styles.voiceChip, active && styles.voiceChipActive]}
+                  >
+                    <View style={styles.voiceChipTop}>
+                      <Ionicons name={active ? "volume-high" : "volume-medium-outline"} size={14} color={active ? "#BF5AF2" : "#8E8E93"} />
+                      <Text style={[styles.voiceChipLabel, active && styles.voiceChipLabelActive]}>{v.label}</Text>
+                    </View>
+                    <Text style={styles.voiceChipBlurb} numberOfLines={1}>{v.blurb}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+          <View style={styles.divider} />
           <ToggleRow
             icon="sparkles"
             iconColor="#BF5AF2"
@@ -581,6 +615,17 @@ const styles = StyleSheet.create({
   title: { color: COLORS.text, fontSize: 15, fontWeight: "500" },
   subtitle: { color: COLORS.textDim, fontSize: 12, marginTop: 2, lineHeight: 16 },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: COLORS.hairline, marginLeft: 60 },
+  voicePicker: { paddingHorizontal: 14, paddingVertical: 12 },
+  voicePickerHeader: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
+  voicePickerTitle: { color: COLORS.text, fontSize: 15, fontWeight: "500", flex: 1 },
+  voicePickerHint: { color: COLORS.textDim, fontSize: 12 },
+  voiceChipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  voiceChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", minWidth: 104 },
+  voiceChipActive: { backgroundColor: "rgba(191,90,242,0.18)", borderColor: "#BF5AF2" },
+  voiceChipTop: { flexDirection: "row", alignItems: "center", gap: 6 },
+  voiceChipLabel: { color: "#C7C7CC", fontSize: 14, fontWeight: "700" },
+  voiceChipLabelActive: { color: "#F4F4F4" },
+  voiceChipBlurb: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
   helpText: { color: COLORS.textMute || COLORS.textDim, fontSize: 11, lineHeight: 16, paddingHorizontal: 6, paddingTop: 8 },
   badge: {
     backgroundColor: "#2DEC8622",

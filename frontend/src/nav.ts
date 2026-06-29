@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Platform, AppState } from "react-native";
 import { api } from "./api";
 import { fetchMapboxRoutes, fetchMapboxRouteVia, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
-import { getSettings } from "./settings";
+import { getSettings, getNovaVoice } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
 import { isOnCall } from "./callState";
@@ -936,7 +936,7 @@ async function drainTtsQueue(): Promise<void> {
 
 async function speakOne(text: string): Promise<void> {
   try {
-    const { data } = await api.post("/tts", { text, voice: "nova" });
+    const { data } = await api.post("/tts", { text, voice: getNovaVoice() });
     if (data?.audio_b64) {
       await playBase64Audio(data.audio_b64, data.mime ?? "audio/mp3");
     }

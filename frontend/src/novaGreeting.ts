@@ -15,7 +15,7 @@
 import { api } from "./api";
 import { reserveGreeting, deliverGreetingAudio, cancelGreeting } from "./nav";
 import type { NavRoute } from "./nav";
-import { getSettings } from "./settings";
+import { getSettings, getNovaVoice } from "./settings";
 import { matchSavedPlace } from "./savedPlaces";
 import type { WeatherKind } from "./weatherLayer";
 
@@ -116,7 +116,7 @@ export function prepareRouteGreeting(ctx: GreetingContext, key: string): void {
       if (!text) return;
 
       // Pre-synthesize so Start -> instant playback (no /tts round-trip then).
-      const tts = await api.post("/tts", { text, voice: "nova" });
+      const tts = await api.post("/tts", { text, voice: getNovaVoice(s) });
       const b64 = tts?.data?.audio_b64;
       if (b64) _preparedAudio = { b64, mime: tts?.data?.mime || "audio/mp3" };
     } catch {

@@ -68,6 +68,10 @@ novaMuted: boolean;
 // Master on/off for ALL Nova voice (settings-screen switch, above the granular
 // toggles). When false nothing speaks — greeting, callouts, quips, alerts.
 novaVoice: boolean;
+// Which OpenAI TTS voice Nova speaks in (passed as `voice` to the backend /tts).
+// One of the OpenAI voice ids (alloy / echo / fable / nova / onyx / shimmer …).
+// undefined/absent → "nova" (the original default). See src/novaVoices.ts.
+novaVoiceName?: string;
 // Spoken reroute reaction (the "split decision" quip on recompute). Off →
 // reroutes are silent; turn-by-turn guidance is unaffected.
 novaReroute: boolean;
@@ -128,6 +132,7 @@ novaSpeeding: false,
 novaMidDrive: false,
 novaMuted: false,
 novaVoice: true,
+novaVoiceName: "nova",
 novaReroute: false,
 novaQuietMigrated: true,
 baselineMigrated: true,
@@ -181,6 +186,13 @@ export function getMapModeChoice(s: Settings): MapMode {
 // The user's chosen route-line color (base hex). Defaults to brand neon green.
 export function getRouteColor(s: Settings): string {
   return s.routeColor ?? "#2DEC86";
+}
+
+// The OpenAI TTS voice Nova speaks in. Falls back to "nova" (original default).
+// Reads live settings when no arg is passed, so non-React callers (nav.ts /tts,
+// novaGreeting.ts) always pick up the user's latest choice.
+export function getNovaVoice(s: Settings = cached): string {
+  return (s?.novaVoiceName && s.novaVoiceName.trim()) || "nova";
 }
 // The effective RENDER mode: the chosen mode, with "auto" resolved to a concrete light
 // preset by time of day. Used by the Mapbox engine (phone) + mirrored to CarPlay.

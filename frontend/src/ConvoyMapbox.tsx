@@ -588,6 +588,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       shape={{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [r.lng, r.lat] } }}
     >
       <ModelLayer
+        // key on modelId → remount when the car color changes. @rnmapbox's <Models>
+        // only registers the GLB at MOUNT (RNMBXModels.addToMap; setModels is a no-op),
+        // so a live color change needs BOTH <Models> and this layer to remount to swap.
+        key={modelId}
         id="convoy-self-car-model"
         slot="top"
         style={{
@@ -1239,7 +1243,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
 
         {/* Register the self-car 3D model once for the map. Referenced by id
             ("convoyCar") from the ModelLayer below. */}
-        <Models models={{ [selfModelId]: selfModelUrl }} />
+        <Models key={selfModelId} models={{ [selfModelId]: selfModelUrl }} />
 
         {/* Mapbox's native location layer — REQUIRED to power the Camera's
             followUserLocation (a hidden/unmounted location component doesn't start

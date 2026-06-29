@@ -231,7 +231,7 @@ export default function CarMapView({ onGLError }: Props) {
       />
 
       {/* Register the self-car 3D model for the chosen paint. */}
-      <Models models={{ [carModelId]: getVehicleModelUrl(s.selfCarColor) }} />
+      <Models key={carModelId} models={{ [carModelId]: getVehicleModelUrl(s.selfCarColor) }} />
 
       {/* 3D self car + the native location feed, BOTH driven off ONE rAF-eased pose
           (SelfCarModel, reused verbatim from the phone). This is THE smoothness fix:

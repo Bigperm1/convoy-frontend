@@ -351,8 +351,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(34,35,38,0.96)',
     paddingLeft: 12,
     paddingRight: 12,
-    paddingVertical: 12,
-    borderRadius: 28,
+    // Fixed height (not paddingVertical) so the bar is ALWAYS exactly this tall —
+    // matching the 50px logo button regardless of which right-side control shows.
+    height: 50,
+    borderRadius: 25,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.12)',
     shadowColor: '#000',

@@ -3805,8 +3805,9 @@ const styles = StyleSheet.create({
   // solid-dark Comms/Music headers it needs a backing to stay crisp over any
   // background. 40×40 circle mirrors the old profile-avatar footprint.
   mapLogoBacking: {
-    // Sized to match the taller search bar + vertically centered with it.
-    position: 'absolute', top: Platform.OS === 'ios' ? 51 : 27, right: 12, zIndex: 100,
+    // EXACTLY matches the search bar: same 50px size, and top === topBar.paddingTop
+    // (52 iOS / 28 Android) so it shares the bar's exact top edge → perfectly centered.
+    position: 'absolute', top: Platform.OS === 'ios' ? 52 : 28, right: 12, zIndex: 100,
     width: 50,
     height: 50,
     borderRadius: 25,

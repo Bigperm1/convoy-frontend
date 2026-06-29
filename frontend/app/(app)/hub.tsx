@@ -104,7 +104,7 @@ export default function HubScreen() {
       <ProfileModal visible={showProfile} onClose={() => setShowProfile(false)} onSaved={async () => { await refresh(); setShowProfile(false); }} />
       <CommunityDetailModal community={showDetail} onClose={() => setShowDetail(null)} onChanged={load} />
     </SafeAreaView>
-    <View style={styles.logoBacking}><LogoMenu size={Platform.OS === 'ios' ? 34 : 40} align="right" /></View>
+    <View style={styles.logoBacking}><LogoMenu size={38} align="right" /></View>
     </>
   );
 }
@@ -892,10 +892,11 @@ const styles = StyleSheet.create({
   sub: { color: COLORS.textDim, marginTop: 2, fontSize: 13 },
   iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(118,118,128,0.24)", alignItems: "center", justifyContent: "center" },
   logoBacking: {
-    position: 'absolute', top: Platform.OS === 'ios' ? 47 : 28, right: 12, zIndex: 100,
-    width: Platform.OS === 'ios' ? 46 : 54,
-    height: Platform.OS === 'ios' ? 46 : 54,
-    borderRadius: Platform.OS === 'ios' ? 23 : 27,
+    // Identical to the map's logo button (mapLogoBacking) so it never jumps between tabs.
+    position: 'absolute', top: Platform.OS === 'ios' ? 52 : 28, right: 12, zIndex: 100,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(20,20,22,0.9)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',

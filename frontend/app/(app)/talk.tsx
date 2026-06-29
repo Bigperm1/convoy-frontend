@@ -808,7 +808,7 @@ export default function TalkScreen() {
     </SafeAreaView>
     {/* Top-right logo — absolute, pixel-identical to Map/Music (positions
         relative to the full-screen tab container, no SafeArea padding offset). */}
-    <View style={styles.logoBacking}><LogoMenu size={Platform.OS === 'ios' ? 34 : 40} align="right" /></View>
+    <View style={styles.logoBacking}><LogoMenu size={38} align="right" /></View>
     </>
   );
 }
@@ -845,10 +845,11 @@ const styles = StyleSheet.create({
   chevBtn: { marginLeft: 4, padding: 2 },
   garageBtn: { padding: 4, marginLeft: 8 },
   logoBacking: {
-    position: 'absolute', top: Platform.OS === 'ios' ? 47 : 28, right: 12, zIndex: 100,
-    width: Platform.OS === 'ios' ? 46 : 54,
-    height: Platform.OS === 'ios' ? 46 : 54,
-    borderRadius: Platform.OS === 'ios' ? 23 : 27,
+    // Identical to the map's logo button (mapLogoBacking) so it never jumps between tabs.
+    position: 'absolute', top: Platform.OS === 'ios' ? 52 : 28, right: 12, zIndex: 100,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(20,20,22,0.9)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',

@@ -86,9 +86,6 @@ adaptiveSpeedAlerts?: boolean;
 // Departure IQ — when parked at a saved place at a predictable time, proactively offer a
 // one-tap drive to the predicted destination (e.g. "Heading to Work?"). undefined → on.
 departureIQ?: boolean;
-// Spoken reroute reaction (the "split decision" quip on recompute). Off →
-// reroutes are silent; turn-by-turn guidance is unaffected.
-novaReroute: boolean;
 // One-time migration flag: when absent from stored settings, flip the three
 // chatty Nova toggles (speeding / mid-drive / reroute) OFF once so the new
 // quieter defaults reach existing installs too, then never repeat.
@@ -151,7 +148,6 @@ scoutHandsFree: true,
 convoyAlerts: true,
 adaptiveSpeedAlerts: true,
 departureIQ: true,
-novaReroute: false,
 novaQuietMigrated: true,
 baselineMigrated: true,
 speedUnit: 'kmh',
@@ -272,7 +268,6 @@ try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
 if (parsed.novaQuietMigrated === undefined) {
 cached.novaSpeeding = false;
 cached.novaMidDrive = false;
-cached.novaReroute = false;
 cached.novaQuietMigrated = true;
 try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
 }

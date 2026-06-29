@@ -365,17 +365,6 @@ const REROUTE_ACCEPT_LINES = [
   "Sure thing, jumping on the quicker route.",
 ];
 
-// Spoken when the DRIVER deliberately goes a different way than the planned
-// route (the off-route auto-reroute path) — playful, not a dry "recalculating".
-const SPLIT_DECISION_LINES = [
-  "Looks like you made a split decision. Recalculating.",
-  "I hope that gamble pays off. New route coming up.",
-  "Going rogue, huh? Let me catch up.",
-  "Bold move. Finding you a new line.",
-  "Off the beaten path — I like it. One sec.",
-  "Okay, your call. Sorting you a new route.",
-];
-
 // Relative time for the "shared X ago" credit on a received route.
 function shareRelTime(ms?: number): string {
   if (!ms) return "";
@@ -1001,11 +990,8 @@ export default function MapScreen() {
     },
     onOffRoute: () => {
       if (!coords || !destination) return;
-      // The driver deliberately went a different way. React IMMEDIATELY with a
-      // playful Nova quip (don't wait for the network fetch), then swap to the
-      // recomputed route — the turn engine re-anchors to the new line (nav.ts) so
-      // guidance picks it up at once.
-      if (!navMuted && settings.novaReroute !== false) { try { announce(pick(SPLIT_DECISION_LINES)); } catch {} }
+      // The driver deliberately went a different way — recompute silently and let the
+      // turn engine re-anchor to the new line (nav.ts) so guidance picks it up at once.
       fetchRoutes(coords, destination, {
         tolls: settings.avoidTolls,
         highways: settings.avoidHighways,

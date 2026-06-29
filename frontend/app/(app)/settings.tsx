@@ -540,15 +540,6 @@ export default function SettingsScreen() {
             value={settings.novaMidDrive !== false}
             onChange={(v) => setSettings({ novaMidDrive: v })}
           />
-          <View style={styles.divider} />
-          <ToggleRow
-            icon="git-compare-outline"
-            iconColor="#0A84FF"
-            title="Reroute announcements"
-            subtitle="Scout's spoken reaction when the route recomputes"
-            value={settings.novaReroute !== false}
-            onChange={(v) => setSettings({ novaReroute: v })}
-          />
         </Glass>
         <Text style={styles.helpText}>
           These control Scout's extra spoken touches. Turn-by-turn directions aren't affected — silence those with the mute button on the map.

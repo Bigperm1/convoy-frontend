@@ -913,22 +913,37 @@ async function playBase64Audio(b64: string, mime: string): Promise<void> {
       let done = false;
       const finish = () => { if (done) return; done = true; _armDuckWatchdog(); resolve(); };
       const watchdog = setTimeout(finish, 15000);
-      // On a phone call, duck Nova WAY down so she isn't loud over the call —
-      // applies to every callout during the call. Start near-silent and ease up
-      // to the ducked level (gentle fade, no jarring blast); full volume
-      // otherwise. (Call detection is native — inert until that module ships.)
+      // Gentle volume FADE so Nova eases IN and OUT instead of snapping on/off
+      // over the music (the "abrupt ducking" complaint). On a phone call she also
+      // sits at a lower ducked level (0.22) so she isn't loud over the call.
+      // NOTE: Apple Music itself can't be volume-faded (MusicKit gives apps no
+      // volume control — it's a hard pause), so this fades NOVA's voice; external
+      // apps (Spotify/podcasts) are already ramped by iOS's duck session.
       const onCall = isOnCall();
-      const targetVol = onCall ? 0.22 : 1.0;
-      const startVol = onCall ? 0.05 : 1.0;
-      Audio.Sound.createAsync({ uri: path }, { shouldPlay: true, rate: NAV_TTS_RATE, shouldCorrectPitch: true, volume: startVol })
-        .then(({ sound }) => {
+      const target = onCall ? 0.22 : 1.0;
+      const startV = Math.min(target, 0.05);     // ease in from near-silent
+      const FADE_IN_MS = 180, FADE_OUT_MS = 240, STEPS = 4;
+      Audio.Sound.createAsync({ uri: path }, { shouldPlay: true, rate: NAV_TTS_RATE, shouldCorrectPitch: true, volume: startV })
+        .then(({ sound, status: initStatus }) => {
           _currentSound = sound;
-          sound.setVolumeAsync(startVol).catch(() => {});
-          if (onCall) {
-            // Fire-and-forget ramp up to the ducked level (~0.3s). If the clip
-            // finishes first, these setVolume calls just no-op on the unloaded sound.
-            setTimeout(() => { sound.setVolumeAsync(0.13).catch(() => {}); }, 120);
-            setTimeout(() => { sound.setVolumeAsync(targetVol).catch(() => {}); }, 280);
+          sound.setVolumeAsync(startV).catch(() => {});
+          // Fade IN to the target over ~FADE_IN_MS. Fire-and-forget; if the clip
+          // ends first these no-op on the unloaded sound.
+          for (let i = 1; i <= STEPS; i++) {
+            const v = startV + (target - startV) * (i / STEPS);
+            setTimeout(() => { sound.setVolumeAsync(v).catch(() => {}); }, Math.round((FADE_IN_MS / STEPS) * i));
+          }
+          // Fade OUT just before the clip ends (when the duration is known and the
+          // clip is long enough that in+out won't overlap). Account for the TTS rate
+          // since the clip finishes faster than the source durationMillis at rate>1.
+          const durMs = typeof (initStatus as any)?.durationMillis === "number" ? (initStatus as any).durationMillis : 0;
+          const effDur = durMs / (NAV_TTS_RATE || 1);
+          if (effDur > FADE_IN_MS + FADE_OUT_MS + 200) {
+            const outAt = effDur - FADE_OUT_MS;
+            for (let i = 1; i <= STEPS; i++) {
+              const v = target * (1 - i / STEPS);
+              setTimeout(() => { sound.setVolumeAsync(Math.max(0, v)).catch(() => {}); }, Math.round(outAt + (FADE_OUT_MS / STEPS) * i));
+            }
           }
           sound.setOnPlaybackStatusUpdate((status: any) => {
             if (!status?.isLoaded || status?.didJustFinish) {

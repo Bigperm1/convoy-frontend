@@ -31,7 +31,13 @@ export const NOVA_VOICES: NovaVoice[] = [
   { id: "onyx", label: "Onyx", blurb: "Deep & authoritative" },
 ];
 
-const SAMPLE_TEXT = "Hey, I'm Nova. Take the next right and I'll get you there.";
+// Each audition line names the VOICE itself (not a fixed "Nova"), so you can tell
+// the voices apart while picking — e.g. tapping Onyx says "Hey, I'm Onyx…".
+function sampleTextFor(voiceId: string): string {
+  const v = NOVA_VOICES.find((x) => x.id === voiceId);
+  const name = v?.label || "your guide";
+  return `Hey, I'm ${name}. Take the next right and I'll get you there.`;
+}
 const _cache: Record<string, { b64: string; mime: string }> = {};
 let _sound: Audio.Sound | null = null;
 let _token = 0; // bumped per request so a newer tap supersedes an in-flight one
@@ -45,7 +51,7 @@ export async function previewNovaVoice(voiceId: string): Promise<void> {
   try {
     let clip = _cache[voiceId];
     if (!clip) {
-      const { data } = await api.post("/tts", { text: SAMPLE_TEXT, voice: voiceId });
+      const { data } = await api.post("/tts", { text: sampleTextFor(voiceId), voice: voiceId });
       const b64 = data?.audio_b64;
       if (!b64) { void setIdleAudioMode(); return; } // backend unavailable / no quota
       clip = { b64, mime: data?.mime || "audio/mp3" };

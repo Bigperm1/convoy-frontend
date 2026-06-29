@@ -67,6 +67,12 @@ export type CarState = {
   // route lines are display-only) — CarPlay just mirrors whichever the phone picked.
   routes?: { index: number; polyline: string; kind: string; color: string; edge: string }[];
   selectedRouteIndex?: number;
+  // Selected route's decoded [lng,lat] geometry + per-segment congestion (mirror of
+  // routes[selectedRouteIndex].coordinates/.congestion). Lets the CarPlay map paint the
+  // SAME live traffic gradient as the phone — clear in the route color, warming to
+  // yellow/orange/red where it slows. undefined → CarMapView falls back to the flat color.
+  routeCoordinates?: [number, number][];
+  routeCongestion?: string[];
   // Glyph (unicode arrow) for the upcoming maneuver, shown in the car banner's green
   // arrow box (mirrors the phone's maneuver icon). undefined when not navigating.
   maneuverIcon?: string;

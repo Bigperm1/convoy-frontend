@@ -18,7 +18,7 @@
 // GL safety: onDidFailLoadingMap -> onGLError(), which the CarPlay surface uses to
 // drop back to the static-image fallback (ConvoyCarPlay's showLive/glFailed).
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { StyleSheet } from 'react-native';
 import Mapbox, {
   MapView,
@@ -28,6 +28,7 @@ import Mapbox, {
   Models,
 } from '@rnmapbox/maps';
 import { useCarStore } from './carStore';
+import { buildCongestionGradient } from '../mapboxDirections';
 import { getVehicleModelUrl, getVehicleModelKey } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
@@ -195,6 +196,28 @@ export default function CarMapView({ onGLError }: Props) {
       : [],
   };
 
+  // ===== Live congestion gradient (mirror of the phone) =====
+  // The selected route's per-segment congestion + geometry are mirrored from the phone
+  // via carStore. Build the SAME green->yellow->orange->red line-progress gradient and
+  // paint it on a DEDICATED, NON-TRIMMED layer (a clone of the phone's route-sel-cong) —
+  // built from the SAME coordinates the gradient indexes, so line-progress stays aligned.
+  // NOTE: like the phone, the gradient must NOT share a layer with lineTrimOffset (a
+  // multi-colour gradient flattens to solid when trimmed); the trimmed glow casing below
+  // keeps the behind-car vanish, this untrimmed core supplies the colours.
+  const carCongGradient = useMemo(() => {
+    const coords = s.routeCoordinates;
+    const cong = s.routeCongestion as any;
+    if (!coords || coords.length < 2 || !cong || cong.length === 0) return null;
+    const g = buildCongestionGradient(coords, cong, carRouteColor);
+    return Array.isArray(g) ? g : (['interpolate', ['linear'], ['line-progress'], 0, g, 1, g] as any);
+  }, [s.routeCoordinates, s.routeCongestion, carRouteColor]);
+  const carCongFC: any = {
+    type: 'FeatureCollection',
+    features: (carCongGradient && s.routeCoordinates && s.routeCoordinates.length >= 2)
+      ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: s.routeCoordinates } }]
+      : [],
+  };
+
   // Multi-route PREVIEW geometry → one feature per display route, carrying its precomputed
   // per-kind core `color` + casing `edge` (AI = black core, user-color edge) so a single
   // data-driven layer pair paints all three. lineSortKey floats the SELECTED route on top.
@@ -327,11 +350,27 @@ export default function CarMapView({ onGLError }: Props) {
           <LineLayer
             id="car-route-sel-core"
             slot="middle"
-            filter={['==', ['get', 'index'], SELECTED_INDEX] as any}
+            // Hidden when the congestion core (below) is active, so it can't paint over
+            // the colours; the casing above keeps the trim/vanish.
+            filter={(carCongGradient ? ['==', ['get', 'index'], -1] : ['==', ['get', 'index'], SELECTED_INDEX]) as any}
             style={{ lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(coreGrad ? { lineGradient: coreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: carRouteColor }) }}
           />
         </ShapeSource>
       ) : null}
+
+      {/* CONGESTION core — the selected route's live traffic gradient, NON-TRIMMED, drawn
+          ON TOP of whichever route branch is active (preview or nav). Mirrors the phone's
+          route-sel-cong; the glow casing in the branches above keeps the behind-car vanish.
+          Built from the SAME mirrored coordinates the gradient indexes, so it stays aligned. */}
+      {carCongGradient && (
+        <ShapeSource id="car-congestion" shape={carCongFC} lineMetrics>
+          <LineLayer
+            id="car-cong-core"
+            slot="middle"
+            style={{ lineGradient: carCongGradient, lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
+          />
+        </ShapeSource>
+      )}
     </MapView>
   );
 }

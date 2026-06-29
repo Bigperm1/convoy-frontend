@@ -561,6 +561,10 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       // where `user` is null (peers/route changes), and a null position would clobber
       // a good fix landed by the cold/foreground feed -> hasFix false -> CONVOY logo.
       routePolyline: route?.polyline || '',
+      // Selected route's geometry + per-segment congestion → lets the CarPlay map paint
+      // the live traffic gradient (same as the phone). Mirrored in preview AND nav.
+      routeCoordinates: (route as any)?.coordinates || undefined,
+      routeCongestion: (route as any)?.congestion || undefined,
       // All display routes (Best / Scenic / AI) with per-kind colors precomputed, so the
       // CarPlay preview mirrors the phone's 3-route fan-out. Drop "alt" routes (index >= 2,
       // unless explicitly tagged) — we only ever show the three. Empty during nav OR when

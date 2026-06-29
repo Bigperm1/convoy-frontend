@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform, AppState } from "react-native";
 import { api } from "./api";
-import { fetchMapboxRoutes, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
+import { fetchMapboxRoutes, fetchMapboxRouteVia, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
 import { getSettings } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
@@ -44,6 +44,12 @@ export type NavRoute = {
   congestion?: CongestionLevel[];
   coordinates?: [number, number][];
   steps: NavStep[];
+  // Route SLOT for the 3-route system. "best" (fastest) / "scenic" (alternate) are
+  // assigned positionally by the map; "ai" is set here by fetchAiRoute for a learned
+  // habitual route (drawn black-core + user-edges). Absent = positional default.
+  kind?: "best" | "scenic" | "ai" | "alt";
+  // Optional per-route preview color (legacy field, still set by map.tsx's rank-color).
+  color?: string;
 };
 
 export type NavMode = "preview" | "turn-by-turn";
@@ -152,54 +158,81 @@ export async function fetchRoutes(
   }
   if (!mbRoutes.length) return [];
 
-  return mbRoutes.map((r: MapboxRoute): NavRoute => {
-    const durS = r.duration_s;
-    // freeflow_s carries Mapbox's typical (historical) duration. When it differs
-    // from the live traffic-aware duration we surface a real traffic ETA — the
-    // old Google parser always left this undefined (it parsed the same field
-    // twice), so this also fixes that latent bug.
-    const freeflowS = r.freeflow_s > 0 ? r.freeflow_s : durS;
-    const hasTraffic = durS > 0 && freeflowS > 0 && Math.abs(durS - freeflowS) >= 30;
+  return mbRoutes.map(mapboxToNavRoute).filter((r: NavRoute) => r.polyline);
+}
 
-    return {
-      polyline: r.polyline,
-      summary: r.summary,
-      distance_text: formatDistance(r.distance_m),
-      duration_text: formatDuration(durS),
-      distance_m: r.distance_m,
-      duration_s: durS,
-      freeflow_s: freeflowS || undefined,
-      duration_in_traffic_text: hasTraffic ? formatDuration(durS) : undefined,
-      duration_in_traffic_s: hasTraffic ? durS : undefined,
-      congestion: r.congestion,
-      coordinates: r.coordinates,
-      steps: r.steps.map((s: MapboxRouteStep, i: number, arr: MapboxRouteStep[]): NavStep => {
-        const loc = s.maneuver?.location; // [lng, lat] — START of this step (the turn point)
-        const here: LatLng = Array.isArray(loc) && loc.length >= 2
-          ? { lat: loc[1], lng: loc[0] } : { lat: 0, lng: 0 };
-        // The turn-by-turn machine (Google-shaped) treats step.end as the NEXT
-        // maneuver's location: it measures distance to cur.end and announces the
-        // following step. Mapbox gives one point per step, so set end = the NEXT
-        // step's maneuver point. Without this, callouts run one turn ahead (the
-        // "lefts/rights reversed" bug). Last step keeps end = here (arrival).
-        const nLoc = arr[i + 1]?.maneuver?.location;
-        const end: LatLng = Array.isArray(nLoc) && nLoc.length >= 2
-          ? { lat: nLoc[1], lng: nLoc[0] } : here;
-        const verbKey = mapboxManeuverKey(s.maneuver?.type, s.maneuver?.modifier);
-        const html = s.maneuver?.instruction || maneuverVerb(verbKey);
-        return {
-          html,
-          distance_text: formatDistance(s.distance),
-          distance_m: s.distance,
-          duration_text: formatDuration(s.duration),
-          // Store the joined Mapbox key so maneuverVerb / isSpokenManeuver resolve it.
-          maneuver: verbKey,
-          start: here,
-          end,
-        };
-      }),
-    };
-  }).filter((r: NavRoute) => r.polyline);
+// Map one Mapbox route to the shared NavRoute shape. Extracted so both fetchRoutes and
+// the AI route (via-waypoint replay) produce identical NavRoutes — all the downstream
+// stats / gradient / turn-engine code then treats the AI route like any other.
+export function mapboxToNavRoute(r: MapboxRoute): NavRoute {
+  const durS = r.duration_s;
+  // freeflow_s carries Mapbox's typical (historical) duration. When it differs
+  // from the live traffic-aware duration we surface a real traffic ETA — the
+  // old Google parser always left this undefined (it parsed the same field
+  // twice), so this also fixes that latent bug.
+  const freeflowS = r.freeflow_s > 0 ? r.freeflow_s : durS;
+  const hasTraffic = durS > 0 && freeflowS > 0 && Math.abs(durS - freeflowS) >= 30;
+
+  return {
+    polyline: r.polyline,
+    summary: r.summary,
+    distance_text: formatDistance(r.distance_m),
+    duration_text: formatDuration(durS),
+    distance_m: r.distance_m,
+    duration_s: durS,
+    freeflow_s: freeflowS || undefined,
+    duration_in_traffic_text: hasTraffic ? formatDuration(durS) : undefined,
+    duration_in_traffic_s: hasTraffic ? durS : undefined,
+    congestion: r.congestion,
+    coordinates: r.coordinates,
+    steps: r.steps.map((s: MapboxRouteStep, i: number, arr: MapboxRouteStep[]): NavStep => {
+      const loc = s.maneuver?.location; // [lng, lat] — START of this step (the turn point)
+      const here: LatLng = Array.isArray(loc) && loc.length >= 2
+        ? { lat: loc[1], lng: loc[0] } : { lat: 0, lng: 0 };
+      // The turn-by-turn machine (Google-shaped) treats step.end as the NEXT
+      // maneuver's location: it measures distance to cur.end and announces the
+      // following step. Mapbox gives one point per step, so set end = the NEXT
+      // step's maneuver point. Without this, callouts run one turn ahead (the
+      // "lefts/rights reversed" bug). Last step keeps end = here (arrival).
+      const nLoc = arr[i + 1]?.maneuver?.location;
+      const end: LatLng = Array.isArray(nLoc) && nLoc.length >= 2
+        ? { lat: nLoc[1], lng: nLoc[0] } : here;
+      const verbKey = mapboxManeuverKey(s.maneuver?.type, s.maneuver?.modifier);
+      const html = s.maneuver?.instruction || maneuverVerb(verbKey);
+      return {
+        html,
+        distance_text: formatDistance(s.distance),
+        distance_m: s.distance,
+        duration_text: formatDuration(s.duration),
+        // Store the joined Mapbox key so maneuverVerb / isSpokenManeuver resolve it.
+        maneuver: verbKey,
+        start: here,
+        end,
+      };
+    }),
+  };
+}
+
+// Replay a learned habitual path (aiRoutes.ts) as a real traffic-aware NavRoute by
+// pinning it to its via-waypoints. Returns a NavRoute tagged kind:"ai" so the map +
+// CarPlay style it as the AI slot, or null on failure (caller hides the AI slot).
+export async function fetchAiRoute(
+  origin: LatLng,
+  via: [number, number][],
+  destination: LatLng,
+  avoid?: AvoidPrefs,
+): Promise<NavRoute | null> {
+  let mb: MapboxRoute | null = null;
+  try {
+    mb = await fetchMapboxRouteVia(
+      origin, via, destination,
+      { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
+    );
+  } catch {
+    return null;
+  }
+  if (!mb || !mb.polyline) return null;
+  return { ...mapboxToNavRoute(mb), kind: "ai" };
 }
 
 // Keep the old name as an alias so any remaining legacy callsites still compile.

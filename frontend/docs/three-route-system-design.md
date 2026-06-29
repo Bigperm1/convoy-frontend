@@ -4,7 +4,13 @@ Status: IN PROGRESS (approved scope: AI route = auto-learn; build top-to-bottom)
 - ✅ **P1** greeting fix — shipped (commit 392eb49).
 - ✅ **P2** 3-route display on phone — shipped (commit 21ca9e3): Best/Scenic/AI line styling + Drive-banner chip selector, AI stubbed.
 - ✅ **P2.5** 3-route on CarPlay — built: carStore mirrors display routes + selectedIndex; CarMapView draws them per-kind in preview with an extra zoom-out (the lockstep chase is untouched — no fit-to-bounds overview, deferred as a device-test item). Kind/color logic now a single source of truth (`routeKindFor`/`routeColorsFor` exported from ConvoyMapbox, used by both surfaces).
-- ⏳ **P3** AI-route memory subsystem — next.
+- ✅ **P3** AI-route memory subsystem — built (auto-learn):
+  - `src/aiRoutes.ts` — local store (AsyncStorage `convoy.aiRoutes.v1`), distance-decimated trace per saved place, `recordDrive`/`matchAiRoute`/`viaPointsFor`.
+  - Capture: `driveTraceRef` in map.tsx accumulates the whole driven path during nav; on arrival (or manual end) near a saved-place destination, the path is decimated + persisted.
+  - Replay: `fetchMapboxRouteVia` (driving-traffic, via-waypoints, multi-leg concat, interior arrive/depart steps stripped) → `fetchAiRoute` returns a NavRoute tagged `kind:"ai"`.
+  - Inject: the route-fetch effect appends the AI route (preview only) when the destination is a learned saved place and the origin is near the learned trace's start; deduped vs Best.
+  - AI chip shows the learned route's live ETA, or a disabled "Learning…" stub for not-yet-learned saved places (hidden for one-off destinations).
+  - Known v1 limits: last-good aggregation (no most-frequent clustering yet); background-only drives may have trace gaps (foreground GPS watcher). Both fine for the habitual-shape memory.
 
 ## Goal
 When a destination is chosen (search / recents / saved), offer **three** route options, drawn together and styled distinctly:

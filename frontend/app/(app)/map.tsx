@@ -31,7 +31,7 @@ import { BearingTracker } from "../../src/bearing";
 import PeerModal from "../../src/PeerModal";
 import ShareSheet from "../../src/ShareSheet";
 import {
-  fetchRoutes, fetchDirections, NavRoute, useTurnByTurn, maneuverVerb,
+  fetchRoutes, fetchDirections, fetchAiRoute, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtEtaSec, stopSpeech, announce, haversineMeters,
 } from "../../src/nav";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
@@ -44,7 +44,8 @@ import { playSpeedDing } from "../../src/speedDing";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
 import { prepareRouteGreeting, playPreparedGreeting, clearPreparedGreeting } from "../../src/novaGreeting";
-import { useSavedPlaces, saveSavedPlace, removeSavedPlace, resolveTarget, ensureSavedPlacesLoaded } from "../../src/savedPlaces";
+import { useSavedPlaces, saveSavedPlace, removeSavedPlace, resolveTarget, ensureSavedPlacesLoaded, matchSavedPlace } from "../../src/savedPlaces";
+import { recordDrive, matchAiRoute, viaPointsFor, ensureAiRoutesLoaded } from "../../src/aiRoutes";
 import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
@@ -420,6 +421,11 @@ export default function MapScreen() {
   // can report a hazard "5 seconds ago" (matches Waze-style flow where the
   // driver passes the hazard before they react and tap the button).
   const posHistoryRef = useRef<{ lat: number; lng: number; ts: number }[]>([]);
+  // FULL driven-path trace for the current turn-by-turn trip (AI-route learning). Unlike
+  // posHistoryRef (a 30s ring), this accumulates the WHOLE drive while navigating; on
+  // arrival, if the destination is a saved place, it's decimated + persisted (aiRoutes.ts)
+  // as the habitual path. Reset at each Start; appended in the location watcher.
+  const driveTraceRef = useRef<{ lat: number; lng: number; ts: number }[]>([]);
   // Map follow-mode flag (Bug 7 fix). Default ON so the map auto-centers on
   // the user when the screen first loads. The instant the user pans the map
   // with a finger gesture, `onUserPan` callback flips this to false and the
@@ -798,6 +804,31 @@ export default function MapScreen() {
           try { announce(line); } catch {}
         }
       }
+
+      // ===== AI route (P3) — the habitual path to a saved place. =====
+      // If this destination is a saved place we've driven to before AND we're starting
+      // from near that learned trace's origin, replay the stored path through Mapbox so
+      // it comes back as a real traffic-aware route, then append it as the AI slot. Async
+      // + best-effort: Best/Scenic already showed above; this just adds a 3rd option. Only
+      // appended while still previewing (never clobbers an active-nav / rerouted set).
+      try {
+        await ensureSavedPlacesLoaded();
+        await ensureAiRoutesLoaded();
+        if (cancelled) return;
+        const place = matchSavedPlace(destination.lat, destination.lng);
+        const ai = place ? matchAiRoute(place.id, origin.lat, origin.lng) : undefined;
+        if (ai) {
+          const aiRoute = await fetchAiRoute(
+            { lat: origin.lat, lng: origin.lng },
+            viaPointsFor(ai),
+            { lat: destination.lat, lng: destination.lng },
+            { tolls: settings.avoidTolls, highways: settings.avoidHighways, ferries: settings.avoidFerries },
+          );
+          if (!cancelled && !navActiveRef.current && aiRoute?.polyline && aiRoute.polyline !== results[0]?.polyline) {
+            setRoutes([...results, aiRoute as any]);
+          }
+        }
+      } catch {}
     })();
     return () => { cancelled = true; };
   }, [destination, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
@@ -852,6 +883,8 @@ export default function MapScreen() {
       // ends the route on its own, with no Exit tap. navMode→preview clears the
       // TTS queue but leaves the in-flight arrival clip playing to the end.
       navAutoStartedRef.current = true;  // stay stopped until a new destination is set
+      // Learn the habitual path to this place BEFORE we drop the destination.
+      maybeLearnDrive(destination);
       setDestination(null);
       setRoutes([]);
       setRoute(null);
@@ -1053,6 +1086,8 @@ export default function MapScreen() {
   const startNav = () => {
     if (!activeRoute) return;
     navAutoStartedRef.current = true;
+    // Fresh AI-route trace for this trip (learn the path we actually drive this time).
+    driveTraceRef.current = [];
     // Begin guidance centred on the car (a destination pick had dropped follow to
     // frame the route options).
     clearRecenterTimer();
@@ -1069,8 +1104,26 @@ export default function MapScreen() {
     setShowSteps(false);
     setNavMode("turn-by-turn");
   };
+  // AI-route LEARNING: when a trip finishes, if the destination is a saved place AND we
+  // actually drove to it (the trace ends near the destination), persist the decimated
+  // driven path as the habitual route to that place. Consumes the trace either way so a
+  // new trip starts clean. Pass the destination explicitly (onArrive clears it first).
+  const maybeLearnDrive = (dest?: { lat: number; lng: number } | null) => {
+    const d = dest ?? destination;
+    const trace = driveTraceRef.current;
+    driveTraceRef.current = [];
+    if (!d || trace.length < 4) return;
+    const place = matchSavedPlace(d.lat, d.lng);
+    if (!place) return;
+    const last = trace[trace.length - 1];
+    // Only learn a REAL completion — the path must end near the destination.
+    if (haversineMeters({ lat: last.lat, lng: last.lng }, { lat: d.lat, lng: d.lng }) > 250) return;
+    void recordDrive({ placeId: place.id, trace });
+  };
+
   const endNav = () => {
     stopSpeech();
+    maybeLearnDrive();
     navAutoStartedRef.current = true;  // stay stopped until a new destination is set
     setNavMode("preview");
   };
@@ -1376,6 +1429,19 @@ export default function MapScreen() {
             // driver was 5s ago (when they tap a hazard/police report button).
             posHistoryRef.current.push({ lat: pos.coords.latitude, lng: pos.coords.longitude, ts: Date.now() });
             posHistoryRef.current = posHistoryRef.current.filter(p => Date.now() - p.ts < 30000);
+            // While navigating, accumulate the WHOLE driven path for AI-route learning.
+            // Sampled lightly (skip points <25m from the last) to bound growth on a long
+            // drive; recordDrive decimates again on save. Capped so a marathon trip can't
+            // grow unbounded in memory.
+            if (navActiveRef.current) {
+              const t = driveTraceRef.current;
+              const lp = t[t.length - 1];
+              const far = !lp || haversineMeters({ lat: lp.lat, lng: lp.lng }, { lat: pos.coords.latitude, lng: pos.coords.longitude }) >= 25;
+              if (far) {
+                t.push({ lat: pos.coords.latitude, lng: pos.coords.longitude, ts: Date.now() });
+                if (t.length > 5000) t.splice(0, t.length - 5000);
+              }
+            }
             setCoords((cur) => ({
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,
@@ -2418,11 +2484,11 @@ export default function MapScreen() {
           { key: "best", label: "Best", idx: 0, color: userColor, sub: fmtChipMin(routes[0]) },
         ];
         if (routes[1] && aiIdx !== 1) routeChips.push({ key: "scenic", label: "Scenic", idx: 1, color: scenicColor, sub: fmtChipMin(routes[1]) });
-        routeChips.push(
-          aiIdx >= 0
-            ? { key: "ai", label: "AI", idx: aiIdx, color: userColor, sub: fmtChipMin(routes[aiIdx]) }
-            : { key: "ai", label: "AI", idx: -1, color: "#9AA0A6", sub: "Learning…", disabled: true }
-        );
+        // AI chip: a real learned route if we have one; otherwise a disabled "Learning…"
+        // stub ONLY when the destination is a saved place (so it's discoverable that
+        // Convoy will learn this trip), hidden for one-off destinations.
+        if (aiIdx >= 0) routeChips.push({ key: "ai", label: "AI", idx: aiIdx, color: userColor, sub: fmtChipMin(routes[aiIdx]) });
+        else if (savedMatch) routeChips.push({ key: "ai", label: "AI", idx: -1, color: "#9AA0A6", sub: "Learning…", disabled: true });
         return (
           <View style={[styles.routeSheet, { bottom: TAB_BAR_H + navInset }]} onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>
             {/* Grabber — swipe down to collapse to the trip pill. */}

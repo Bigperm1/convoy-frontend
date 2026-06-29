@@ -438,3 +438,106 @@ export async function fetchMapboxRoutes(
     return []; // includes AbortError
   }
 }
+
+// Replay a HABITUAL path through driving-traffic by pinning the route to a chain of
+// via-waypoints (origin -> via... -> dest). Forces the route along the learned geometry
+// while still returning a live traffic-aware ETA + congestion. Single result, multi-leg:
+// route.duration/distance are already totals; we concat each leg's steps + congestion.
+// Used by the AI route (aiRoutes.ts). Returns null on any failure (caller falls back).
+export async function fetchMapboxRouteVia(
+  origin: LatLng,
+  via: [number, number][],     // interior [lng,lat] waypoints
+  dest: LatLng,
+  avoid?: MapboxAvoid,
+  opts?: { signal?: AbortSignal },
+): Promise<MapboxRoute | null> {
+  try {
+    if (
+      typeof origin?.lat !== "number" || typeof origin?.lng !== "number" ||
+      typeof dest?.lat !== "number" || typeof dest?.lng !== "number"
+    ) return null;
+
+    // origin;via1;...;viaN;dest — Mapbox allows up to 25 coordinates; caller caps `via`.
+    const pts: string[] = [`${origin.lng},${origin.lat}`];
+    for (const v of via) {
+      if (Array.isArray(v) && v.length >= 2) pts.push(`${v[0]},${v[1]}`);
+    }
+    pts.push(`${dest.lng},${dest.lat}`);
+    if (pts.length < 2) return null;
+
+    const exclude: string[] = [];
+    if (avoid?.tolls) exclude.push("toll");
+    if (avoid?.highways) exclude.push("motorway");
+    if (avoid?.ferries) exclude.push("ferry");
+
+    const qs =
+      `?alternatives=false&steps=true&overview=full&geometries=polyline` +
+      `&annotations=congestion,duration,distance&banner_instructions=false` +
+      (exclude.length ? `&exclude=${exclude.join(",")}` : ``) +
+      `&access_token=${MAPBOX_PUBLIC_TOKEN}`;
+
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${pts.join(";")}${qs}`;
+    const res = await fetch(url, { signal: opts?.signal });
+    if (!res.ok) return null;
+    const json: any = await res.json();
+    const route: any = Array.isArray(json?.routes) ? json.routes[0] : null;
+    if (!route) return null;
+
+    const polyline: string = typeof route?.geometry === "string" ? route.geometry : "";
+    if (!polyline) return null;
+    const coordinates = decodePolyline5LngLat(polyline);
+    const legs: any[] = Array.isArray(route?.legs) ? route.legs : [];
+
+    // Concat per-leg congestion across all legs (each leg annotates its own segments).
+    const congestion: CongestionLevel[] = [];
+    for (const leg of legs) {
+      const rawC: any[] = Array.isArray(leg?.annotation?.congestion) ? leg.annotation.congestion : [];
+      for (const v of rawC) {
+        congestion.push((v === "low" || v === "moderate" || v === "heavy" || v === "severe") ? v : "unknown");
+      }
+    }
+
+    // Concat per-leg steps for turn-by-turn guidance along the whole habitual path.
+    // Mapbox emits an `arrive` + `depart` step at EVERY via-waypoint; keep only the very
+    // first `depart` and the very last `arrive` so driving the AI route doesn't trigger
+    // a spurious "you have arrived" at each interior waypoint.
+    const steps: MapboxRouteStep[] = [];
+    const lastLeg = legs.length - 1;
+    for (let li = 0; li < legs.length; li++) {
+      const leg = legs[li];
+      if (!Array.isArray(leg?.steps)) continue;
+      for (const s of leg.steps) {
+        const t = s?.maneuver?.type;
+        if (t === "depart" && li > 0) continue;        // interior waypoint re-departure
+        if (t === "arrive" && li < lastLeg) continue;  // interior waypoint arrival
+        steps.push({
+          distance: typeof s?.distance === "number" ? s.distance : 0,
+          duration: typeof s?.duration === "number" ? s.duration : 0,
+          name: typeof s?.name === "string" ? s.name : undefined,
+          geometry: typeof s?.geometry === "string" ? s.geometry : undefined,
+          maneuver: s?.maneuver ? {
+            type: s.maneuver.type,
+            modifier: s.maneuver.modifier,
+            instruction: s.maneuver.instruction,
+            location: Array.isArray(s.maneuver.location) ? s.maneuver.location : undefined,
+          } : undefined,
+        });
+      }
+    }
+
+    const durationS = typeof route?.duration === "number" ? route.duration : 0;
+    const freeflowS = typeof route?.duration_typical === "number" ? route.duration_typical : durationS;
+    return {
+      polyline,
+      coordinates,
+      congestion,
+      distance_m: typeof route?.distance === "number" ? route.distance : 0,
+      duration_s: durationS,
+      freeflow_s: freeflowS,
+      summary: legs[0]?.summary && typeof legs[0].summary === "string" ? legs[0].summary : "Your usual way",
+      steps,
+    };
+  } catch {
+    return null; // includes AbortError
+  }
+}

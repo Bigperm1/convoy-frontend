@@ -18,10 +18,11 @@ import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 
 export type NovaVoice = { id: string; label: string; blurb: string };
 
-// The six voices supported by every OpenAI TTS model (tts-1 / tts-1-hd /
-// gpt-4o-mini-tts), so a selection is guaranteed to synthesize. Newer expressive
-// voices (ash, ballad, coral, sage, verse) only exist on gpt-4o-mini-tts — add
-// them here only once the backend is confirmed on that model.
+// The full OpenAI voice set. The backend was confirmed on gpt-4o-mini-tts (the Coral
+// preview spoke on production, 2026-06-29), so the newer expressive voices below
+// (coral / ash / ballad / sage / verse) all synthesize. The first six also work on
+// tts-1 / tts-1-hd; the rest are gpt-4o-mini-tts-only — if the backend's TTS model is
+// ever downgraded, trim back to the first six.
 export const NOVA_VOICES: NovaVoice[] = [
   { id: "nova", label: "Nova", blurb: "Bright & friendly" },
   { id: "shimmer", label: "Shimmer", blurb: "Soft & warm" },
@@ -29,10 +30,12 @@ export const NOVA_VOICES: NovaVoice[] = [
   { id: "echo", label: "Echo", blurb: "Calm & measured" },
   { id: "fable", label: "Fable", blurb: "Expressive storyteller" },
   { id: "onyx", label: "Onyx", blurb: "Deep & authoritative" },
-  // TEST: a gpt-4o-mini-tts-only voice. If its preview SPEAKS on this backend, the
-  // backend supports the newer expressive voices and we add the full set (ash,
-  // ballad, sage, verse); if it's silent, the backend is on tts-1 and this is removed.
-  { id: "coral", label: "Coral", blurb: "Newer voice — tap to test" },
+  // Newer expressive voices (gpt-4o-mini-tts).
+  { id: "coral", label: "Coral", blurb: "Warm & upbeat" },
+  { id: "ash", label: "Ash", blurb: "Clear & direct" },
+  { id: "ballad", label: "Ballad", blurb: "Expressive & lyrical" },
+  { id: "sage", label: "Sage", blurb: "Calm & soothing" },
+  { id: "verse", label: "Verse", blurb: "Dynamic & versatile" },
 ];
 
 // Each audition line names the VOICE itself (not a fixed "Nova"), so you can tell

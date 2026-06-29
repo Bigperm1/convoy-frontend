@@ -10,7 +10,7 @@ import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
 import { useRouter, useFocusEffect } from "expo-router";
 import Glass from "../../src/Glass";
-import ConvoyMapbox, { type Hazard, type Peer } from "../../src/ConvoyMapbox";
+import ConvoyMapbox, { type Hazard, type Peer, contrastingRouteColor } from "../../src/ConvoyMapbox";
 import DestinationSearch from "../../src/DestinationSearch";
 import CategoryPills, { PlaceResult } from "../../src/components/CategoryPills";
 import LogoMenu from "../../src/components/LogoMenu";
@@ -2405,6 +2405,24 @@ export default function MapScreen() {
         const arriveStr = fmtClock(new Date(Date.now() + durSec * 1000));
         const distStr = ar?.distance_text ?? route.distance_text;
         const bestLabel = selectedRouteIndex === 0 ? "Best route" : (ar?.summary ? `via ${ar.summary}` : "Alternate");
+        // ===== Route options (Best / Scenic / AI) — chip selector. =====
+        // Best = fastest (index 0, user color). Scenic = the first alternate (auto-contrasting
+        // color). AI = a learned habitual route tagged kind:"ai" (P3) — until then a disabled
+        // "Learning…" stub. Tapping a chip selects that route; the summary above updates.
+        const userColor = getRouteColor(settings);
+        const scenicColor = contrastingRouteColor(userColor);
+        const aiIdx = routes.findIndex((r: any) => r?.kind === "ai");
+        const fmtChipMin = (r: NavRoute | null | undefined) =>
+          r ? `${Math.max(1, Math.round((r.duration_in_traffic_s ?? r.duration_s ?? 0) / 60))} min` : null;
+        const routeChips: { key: string; label: string; idx: number; color: string; sub: string | null; disabled?: boolean }[] = [
+          { key: "best", label: "Best", idx: 0, color: userColor, sub: fmtChipMin(routes[0]) },
+        ];
+        if (routes[1] && aiIdx !== 1) routeChips.push({ key: "scenic", label: "Scenic", idx: 1, color: scenicColor, sub: fmtChipMin(routes[1]) });
+        routeChips.push(
+          aiIdx >= 0
+            ? { key: "ai", label: "AI", idx: aiIdx, color: userColor, sub: fmtChipMin(routes[aiIdx]) }
+            : { key: "ai", label: "AI", idx: -1, color: "#9AA0A6", sub: "Learning…", disabled: true }
+        );
         return (
           <View style={[styles.routeSheet, { bottom: TAB_BAR_H + navInset }]} onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>
             {/* Grabber — swipe down to collapse to the trip pill. */}
@@ -2445,6 +2463,34 @@ export default function MapScreen() {
               )}
 
             <View style={styles.bannerDivider} />
+
+            {/* Route options — Best / Scenic / AI. Tap to select; summary below updates. */}
+            <View style={styles.routeOptChips}>
+              {routeChips.map((c) => {
+                const active = c.idx === selectedRouteIndex && !c.disabled;
+                return (
+                  <TouchableOpacity
+                    key={c.key}
+                    testID={`route-chip-${c.key}`}
+                    activeOpacity={c.disabled ? 1 : 0.85}
+                    disabled={c.disabled}
+                    onPress={() => { if (!c.disabled) { handleSelectRoute(c.idx); Haptics.selectionAsync().catch(() => {}); } }}
+                    style={[styles.routeOptChip, active && styles.routeOptChipActive, c.disabled && styles.routeOptChipDisabled]}
+                  >
+                    <View style={[
+                      styles.routeOptChipSwatch,
+                      c.key === "ai"
+                        ? { backgroundColor: "#000", borderColor: c.disabled ? "#5A5A5E" : userColor, borderWidth: 2 }
+                        : { backgroundColor: c.color },
+                    ]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.routeOptChipLabel, active && styles.routeOptChipLabelActive]} numberOfLines={1}>{c.label}</Text>
+                      {c.sub ? <Text style={styles.routeOptChipSub} numberOfLines={1}>{c.sub}</Text> : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
             {/* Summary — duration · arrive time · distance · best-route label */}
             <View style={styles.bannerSummary}>
@@ -3176,6 +3222,14 @@ const styles = StyleSheet.create({
   bannerDivider: { height: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.14)", marginHorizontal: -16, marginBottom: 14 },
   sharedByRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: -2, marginBottom: 10 },
   sharedByText: { color: "#2DEC86", fontSize: 12.5, fontWeight: "700", flex: 1 },
+  routeOptChips: { flexDirection: "row", gap: 8, marginBottom: 14 },
+  routeOptChip: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  routeOptChipActive: { borderColor: "#2DEC86", backgroundColor: "rgba(45,236,134,0.12)" },
+  routeOptChipDisabled: { opacity: 0.5 },
+  routeOptChipSwatch: { width: 14, height: 14, borderRadius: 7 },
+  routeOptChipLabel: { color: "#C7C7CC", fontSize: 13, fontWeight: "700" },
+  routeOptChipLabelActive: { color: "#F4F4F4" },
+  routeOptChipSub: { color: "#808080", fontSize: 11, marginTop: 1, fontWeight: "600" },
   bannerSummary: { flexDirection: "row", alignItems: "flex-start", gap: 18, marginBottom: 16 },
   bannerDurCol: { alignItems: "center" },
   bannerDurNum: { color: "#F4F4F4", fontSize: 30, fontWeight: "700", letterSpacing: -0.5, lineHeight: 32 },

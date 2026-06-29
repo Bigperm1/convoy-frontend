@@ -339,6 +339,42 @@ export function routeRgba(hex: string, a: number): string {
   return `rgba(${r},${g},${b},${a})`;
 }
 
+// ===== 3-route palette (Best / Scenic / AI) =====
+// AI route core is black; its EDGES (casing) are the user color.
+export const ROUTE_AI_CORE = "#000000";
+function _rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0; const l = (max + min) / 2;
+  const d = max - min;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60; if (h < 0) h += 360;
+  }
+  return [h, s, l];
+}
+function _hslToHex(h: number, s: number, l: number): string {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; } else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; } else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; } else { r = c; b = x; }
+  const to = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+  return `#${to(r)}${to(g)}${to(b)}`;
+}
+// The "Scenic" route color — auto-derived to CONTRAST the user's route color (rotate the
+// hue ~160°, force a vivid S/L) so it never clashes no matter what color the user picks.
+export function contrastingRouteColor(hex: string): string {
+  const { r, g, b } = hexToRgb(hex);
+  const [h] = _rgbToHsl(r, g, b);
+  return _hslToHex((h + 160) % 360, 0.82, 0.56);
+}
+
 function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
 export function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
 function chaseZoomForSpeed(kmh: number) {
@@ -818,21 +854,38 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const initLat = center?.lat ?? user?.lat ?? coldStartLoc?.lat;
   const initLng = center?.lng ?? user?.lng ?? coldStartLoc?.lng;
 
+  // ===== 3-route kinds + colors (Best / Scenic / AI) =====
+  // Best = fastest (the engine's index 0) → the user's route color. Scenic = the first
+  // alternate → an auto-contrasting hue. AI = a learned habitual route (tagged
+  // kind:"ai" by map.tsx in P3) → BLACK core with the user color on the EDGES. Extra
+  // alternates (index >= 2) are NOT drawn — we only ever show these three.
+  const scenicColor = useMemo(() => contrastingRouteColor(routeColor), [routeColor]);
+  const routeKindOf = (i: number, r: any): "best" | "scenic" | "ai" | "alt" =>
+    (r?.kind as any) || (i === 0 ? "best" : i === 1 ? "scenic" : "alt");
+  const coreColorOf = (k: string): string => (k === "scenic" ? scenicColor : k === "ai" ? ROUTE_AI_CORE : routeColor);
+  const edgeColorOf = (k: string): string => (k === "ai" ? routeColor : coreColorOf(k));
+  const selKind = routeKindOf(selectedRouteIndex, (routes as any)?.[selectedRouteIndex]);
+  const selColor = coreColorOf(selKind);
+  const selEdge = edgeColorOf(selKind);
+
   // ===== Route geometry → GeoJSON =====
-  // One LineString feature per route, tagged with its index. The LineLayers
-  // below filter on that index to draw alternates vs. the selected ribbon.
-  // Typed loosely (any) to avoid GeoJSON tuple-type friction.
+  // One LineString feature per DISPLAYED route (Best/Scenic/AI; "alt" routes dropped),
+  // tagged with index + kind + its core/edge colors so the LineLayers paint each
+  // distinctly via data-driven expressions.
   const routeFC: any = useMemo(() => ({
     type: "FeatureCollection",
     features: (routes || [])
       .map((r, i) => {
+        const kind = routeKindOf(i, r);
+        if (kind === "alt") return null;          // only ever draw Best / Scenic / AI
         const coords = decodePolyline(r.polyline).map((p) => [p.longitude, p.latitude]);
         return coords.length >= 2
-          ? { type: "Feature", properties: { index: i }, geometry: { type: "LineString", coordinates: coords } }
+          ? { type: "Feature", properties: { index: i, kind, color: coreColorOf(kind), edge: edgeColorOf(kind) }, geometry: { type: "LineString", coordinates: coords } }
           : null;
       })
       .filter(Boolean),
-  }), [routes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [routes, routeColor, scenicColor]);
 
   // Tap an alternate route line → select it (same as tapping its ETA pill).
   const handleRoutePress = (e: any) => {
@@ -1112,8 +1165,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     const s1 = Math.min(0.999, Math.max(s0 + 0.0006, s0 + _fadeSpanFrac));
     return ["interpolate", ["linear"], ["line-progress"], 0, clear, s0, clear, s1, solid, 1, solid];
   };
-  const selCoreGradient = buildLineFade(routeRgba(routeColor, 1), routeRgba(routeColor, 0));
-  const selGlowGradient = buildLineFade(routeRgba(routeColor, 1), routeRgba(routeColor, 0));
+  // Selected route renders in ITS kind color (Best = user color, Scenic = contrasting,
+  // AI = black core). selColor === routeColor for Best, so the common case is unchanged.
+  const selCoreGradient = buildLineFade(routeRgba(selColor, 1), routeRgba(selColor, 0));
+  const selGlowGradient = buildLineFade(routeRgba(selEdge, 1), routeRgba(selEdge, 0));
 
   // ===== Live congestion on the ACTIVE route (DURING navigation) =====
   // The route we're driving already carries per-segment congestion (nav.ts gets
@@ -1129,10 +1184,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     const coords = sel?.coordinates as [number, number][] | undefined;
     const cong = sel?.congestion as CongestionLevel[] | undefined;
     if (!coords || coords.length < 2 || !cong || cong.length === 0) return null;
-    const g = buildCongestionGradient(coords, cong, routeColor);
+    const g = buildCongestionGradient(coords, cong, selColor);
     return Array.isArray(g) ? g : (["interpolate", ["linear"], ["line-progress"], 0, g, 1, g] as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigationActive, routes, selectedRouteIndex, routeColor]);
+  }, [navigationActive, routes, selectedRouteIndex, selColor]);
   // The selected core paints congestion during nav (preferred), else the soft
   // green fade-in. Both ride the same behind-car trim.
   const selCoreGrad = navCongestionGradient || selCoreGradient;
@@ -1305,26 +1360,36 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             be elements (never a boolean). */}
         {showRoutes && (
           <ShapeSource id="convoy-routes" shape={routeFC} onPress={handleRoutePress} lineMetrics>
+            {/* Non-selected preview routes (Best / Scenic / AI), dimmed. Each route carries
+                its own `edge` + `color` so ONE data-driven casing+core pair renders all
+                three kinds — including AI's inverted look (user-color edges, black core).
+                Shown ONLY in preview; during active navigation they're filtered to a
+                non-existent index so no alternate draws straight through the car. */}
             <LineLayer
-              id="route-alts"
+              id="route-alt-casing"
               slot="middle"
-              // Show alternate routes ONLY in preview. During active navigation, hide
-              // them (filter to a non-existent index) so the grey alternate line stops
-              // drawing straight through the car — you only want the one route you're on.
               filter={(navigationActive ? ["==", ["get", "index"], -1] : ["!=", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineColor: "#9AA0A6", lineWidth: 5, lineCap: "round", lineJoin: "round", lineOpacity: 0.85, lineEmissiveStrength: 1 }}
+              style={{ lineColor: ["get", "edge"] as any, lineWidth: 17, lineBlur: 5, lineOpacity: 0.4, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
+            <LineLayer
+              id="route-alt-core"
+              slot="middle"
+              filter={(navigationActive ? ["==", ["get", "index"], -1] : ["!=", ["get", "index"], selectedRouteIndex]) as any}
+              style={{ lineColor: ["get", "color"] as any, lineWidth: 7, lineOpacity: 0.7, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
+            />
+            {/* Selected route ribbon — casing (edges) + core, in the selected kind's colors
+                (Best = user color, Scenic = contrasting, AI = user-color edges + black core). */}
             <LineLayer
               id="route-sel-casing"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selGlowGradient ? { lineGradient: selGlowGradient, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: routeColor }) }}
+              style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selGlowGradient ? { lineGradient: selGlowGradient, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: selEdge }) }}
             />
             <LineLayer
               id="route-sel-core"
               slot="middle"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selCoreGrad ? { lineGradient: selCoreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: routeColor }) }}
+              style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selCoreGrad ? { lineGradient: selCoreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: selColor }) }}
             />
           </ShapeSource>
         )}
@@ -1339,7 +1404,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             <LineLayer
               id="cong-casing"
               slot="middle"
-              style={{ lineColor: routeColor, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
+              style={{ lineColor: selEdge, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
             <LineLayer
               id="cong-core"

@@ -1041,6 +1041,10 @@ export default function MapScreen() {
   // so the interval closure never goes stale.
   const tbtEtaRef = useRef(0);
   useEffect(() => { tbtEtaRef.current = tbt.etaSeconds; }, [tbt.etaSeconds]);
+  // Full live turn-by-turn snapshot for the in-drive voice Q&A handler (reads it from a
+  // ref so the voiceBus subscription never answers from a stale closure).
+  const tbtRef = useRef(tbt);
+  useEffect(() => { tbtRef.current = tbt; }, [tbt]);
   const hazardsRef = useRef<Hazard[]>([]);
   useEffect(() => { hazardsRef.current = hazards; }, [hazards]);
   const destRef = useRef(destination);
@@ -2078,6 +2082,43 @@ export default function MapScreen() {
   useEffect(() => {
     const unsub = voiceBus.subscribe(async (cmd) => {
       const intent = cmd.intent;
+
+      // ===== In-drive Q&A (Scout) =====
+      // Answer spoken questions about the trip, hands-free, via the proven announce path.
+      // Runs ONLY when the input isn't a recognized action command (so "navigate to…" /
+      // "clear route" / hazard reports always win), and only while navigating.
+      const ACTION_INTENTS = new Set([
+        "navigate_to", "clear_route", "report_police", "report_accident", "report_road", "report_traffic",
+      ]);
+      if (navActiveRef.current && getSettings().novaVoice !== false && !ACTION_INTENTS.has(intent ?? "")) {
+        const q = (cmd.text || "").toLowerCase();
+        const tb = tbtRef.current;
+        if (q && tb?.active) {
+          if (/\b(when|how long|eta|arriv|get there|reach)\b/.test(q)) {
+            announce(`You'll arrive around ${fmtClock(new Date(Date.now() + tb.etaSeconds * 1000))}, about ${fmtEtaSec(tb.etaSeconds)} from now.`);
+            return;
+          }
+          if (/\b(next turn|next exit|which way|what.?s next|turn coming)\b/.test(q)) {
+            const ar = activeRouteRef.current;
+            const up = ar?.steps?.[Math.min(tb.stepIndex + 1, (ar?.steps?.length ?? 1) - 1)];
+            const instr = (up?.html || "").replace(/<[^>]+>/g, "").trim() || "continue straight";
+            announce(`In ${fmtDistanceM(tb.distanceToManeuverM)}, ${instr}.`);
+            return;
+          }
+          if (/\b(how far|how much (further|longer)|distance|left to go)\b/.test(q)) {
+            announce(`About ${fmtDistanceM(tb.distanceRemainingM)} to go.`);
+            return;
+          }
+          if (/\b(ahead|anything|hazard|police|accident|traffic)\b/.test(q)) {
+            const me = coordsRef.current, d = destRef.current;
+            const hz = (me && d) ? nearestHazardAhead(me, d, hazardsRef.current) : null;
+            if (hz) announce(`Yes — ${hazardReason(hz.kind)} about ${hz.distKm} ${hz.distKm === 1 ? "kilometer" : "kilometers"} ahead.`);
+            else announce("Nothing reported ahead — you're clear.");
+            return;
+          }
+        }
+      }
+
       if (!intent) return;
 
       if (intent === "report_police") return reportHazard("police", { fromVoice: true });

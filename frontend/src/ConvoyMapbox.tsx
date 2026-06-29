@@ -647,11 +647,12 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         slot="top"
         style={{
           modelId: modelId,
-          // common-3d (not location-indicator): integrate the car into the 3D scene
-          // with depth testing so it sits ON the road ABOVE the flat route line.
-          // location-indicator draws over 3D buildings but UNDER 2D slot layers
-          // like the route LineLayer, which is what put the line over the car.
-          modelType: "common-3d",
+          // location-indicator: render the car like a nav puck — ON TOP of the 3D
+          // building extrusions (no depth occlusion), so it never disappears "inside"
+          // a house. common-3d depth-tests against buildings, which let a taller
+          // building draw in front of the car. The route LineLayers are slot="middle"
+          // and this model is slot="top", so the car still sits above the line too.
+          modelType: "location-indicator",
           modelEmissiveStrength: emissive,
           modelScale: scale ?? CAR_MODEL_SCALE_SIZED,
           modelRotation: [0, 0, (r.heading ?? 0) + CAR_MODEL_HEADING_OFFSET],

@@ -4,7 +4,7 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { COLORS } from "../theme";
-import { useCurrentSong, useIsPlaying, toggle } from "../applePlayer";
+import { useNowPlaying } from "../nowPlaying";
 
 /**
  * Now-playing banner that lives on the map, beside the speedometer.
@@ -78,8 +78,7 @@ export function MapNowPlaying({
   shifted: boolean;
   onOpen?: () => void;
 }) {
-  const { song } = useCurrentSong() as { song: any };
-  const { isPlaying } = useIsPlaying();
+  const { song, isPlaying, toggle } = useNowPlaying();
   const nowPlaying = song && (song.title || song.name);
 
   const shift = useRef(new Animated.Value(shifted ? 1 : 0)).current;

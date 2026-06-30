@@ -41,6 +41,7 @@ import {
   SelfCarModel,
   projectOntoRoute,
   carModelScale,
+  applyCarGapGradient,
 } from '../ConvoyMapbox';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
@@ -173,7 +174,7 @@ export default function CarMapView({ onGLError }: Props) {
   // soft transparent→solid fade just past the trim so it doesn't hard-start into the
   // car. Navigating only; preview/cruise keeps the solid line.
   const routeProj = (s.navigating && hasFix && hasRoute) ? projectOntoRoute(lat, lng, routeLL) : null;
-  const trimLeadM = Math.max(6, Math.min(16, 6 + (s.speedMs > 0 ? s.speedMs : 0) * 0.34));
+  const trimLeadM = Math.max(10, Math.min(55, 10 + (s.speedMs > 0 ? s.speedMs : 0) * 1.1));
   const routeTrimEndFrac = routeProj
     ? Math.max(0, Math.min(0.999, routeProj.frac + trimLeadM / routeProj.totalM))
     : null;
@@ -217,6 +218,16 @@ export default function CarMapView({ onGLError }: Props) {
       ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: s.routeCoordinates } }]
       : [],
   };
+  // While navigating, gap the (non-trimmed) congestion core off the car too — bake
+  // the behind-car vanish + soft front fade into the gradient alpha (same s0/s1 as
+  // the plain core) so the coloured line clears the nose instead of running through it.
+  const carCongGapped = (carCongGradient && s.navigating && routeTrimEndFrac != null)
+    ? applyCarGapGradient(
+        carCongGradient,
+        Math.min(0.997, Math.max(0.0001, routeTrimEndFrac)),
+        Math.min(0.999, Math.max(routeTrimEndFrac + 0.0006, routeTrimEndFrac + fadeSpanFrac)),
+      )
+    : carCongGradient;
 
   // Multi-route PREVIEW geometry → one feature per display route, carrying its precomputed
   // per-kind core `color` + casing `edge` (AI = black core, user-color edge) so a single
@@ -373,7 +384,7 @@ export default function CarMapView({ onGLError }: Props) {
           <LineLayer
             id="car-cong-core"
             slot="middle"
-            style={{ lineGradient: carCongGradient, lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
+            style={{ lineGradient: carCongGapped, lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
           />
         </ShapeSource>
       )}

@@ -339,6 +339,48 @@ export function routeRgba(hex: string, a: number): string {
   return `rgba(${r},${g},${b},${a})`;
 }
 
+// Fully-transparent version of a colour string (hex / rgb / rgba) — used as the
+// "clear" end of a fade so the line vanishes to nothing rather than to a grey or
+// black tint.
+function transparentColor(c: string): string {
+  if (typeof c !== "string") return "rgba(0,0,0,0)";
+  const s = c.trim();
+  if (s[0] === "#") { const { r, g, b } = hexToRgb(s); return `rgba(${r},${g},${b},0)`; }
+  const m = s.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i);
+  if (m) return `rgba(${m[1]},${m[2]},${m[3]},0)`;
+  return "rgba(0,0,0,0)";
+}
+
+// Bake a speed-aware "car gap" into a line-progress COLOUR gradient: fully
+// transparent from the line start to s0, a soft transparent→colour ramp to s1,
+// then the gradient's ORIGINAL colours from s1 onward. This vanishes the line
+// behind/at the car and fades it in just ahead of the nose — WITHOUT
+// lineTrimOffset, because a multi-colour gradient flattens to solid when trimmed
+// in @rnmapbox 10.3.1 (the congestion core can't be trimmed, so we gap it here
+// in the gradient instead). s0/s1 are line-progress fractions (0..1). Pass-through
+// for a non-gradient (constant colour) input. See [[rnmapbox-gradient-trim-conflict]].
+export function applyCarGapGradient(grad: any, s0: number, s1: number): any {
+  if (!Array.isArray(grad) || grad.length < 5) return grad;
+  const head = grad.slice(0, 3); // ['interpolate', ['linear'], ['line-progress']]
+  const body = grad.slice(3);    // [pos0, color0, pos1, color1, ...]
+  const pairs: Array<[number, string]> = [];
+  for (let i = 0; i + 1 < body.length; i += 2) pairs.push([Number(body[i]), body[i + 1]]);
+  if (pairs.length === 0) return grad;
+  const a0 = Math.max(0.0001, Math.min(0.997, s0));
+  const a1 = Math.max(a0 + 1e-3, Math.min(0.999, s1));
+  // Colour the source gradient shows at the fade-in edge (last stop at/below a1).
+  let colorAtS1 = pairs[0][1];
+  for (const [p, c] of pairs) { if (p <= a1) colorAtS1 = c; else break; }
+  const clear = transparentColor(colorAtS1);
+  const out: any[] = [...head, 0, clear, a0, clear, a1, colorAtS1];
+  let last = a1;
+  for (const [p, c] of pairs) {
+    if (p > a1) { const v = p > last ? p : last + 1e-6; out.push(v, c); last = v; }
+  }
+  if (last < 1) out.push(1, pairs[pairs.length - 1][1]);
+  return out;
+}
+
 // ===== 3-route palette (Best / Scenic / AI) =====
 // AI route core is black; its EDGES (casing) are the user color.
 export const ROUTE_AI_CORE = "#000000";
@@ -1168,9 +1210,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // trim point (raw fix) can sit behind the moving car; leading it by ~8 m + a
   // touch per m/s keeps the green line clearing the nose. OTA-tunable.
   const _trimSpdMs = typeof userSpeedMs === "number" && userSpeedMs > 0 ? userSpeedMs : 0;
-  // Bigger buffer ahead of the nose (14 m base → up to 34 m at speed, was 8→24)
-  // so the green line never crowds the car.
-  const _trimLeadM = Math.max(6, Math.min(16, 6 + _trimSpdMs * 0.34));
+  // Speed-aware buffer ahead of the nose: the drawn car interpolates between 1 Hz
+  // fixes, so at speed it travels well past the raw fix the trim is computed from.
+  // Lead it by ~1.1× a second of travel so the line never crowds the fast-moving
+  // car: 10 m @ 0, ~32 m @ 72 km/h, ~46 m @ 120 km/h, capped 55 m (keeps clearance
+  // through the inter-fix tween even at autobahn speed).
+  const _trimLeadM = Math.max(10, Math.min(55, 10 + _trimSpdMs * 1.1));
   const routeTrimEndFrac = routeProj
     ? Math.max(0, Math.min(0.999, routeProj.frac + _trimLeadM / routeProj.totalM))
     : null;
@@ -1222,6 +1267,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // route during nav exactly as they do in preview; the glow casing keeps the trim so
   // the behind-car vanish is preserved.
   const navCongActive = navigationActive && !!navCongestionGradient;
+  // Gap the congestion core off the car the same way. It's NON-trimmed (a trimmed
+  // multi-colour gradient flattens), so it previously ran straight THROUGH the car.
+  // Bake the behind-car vanish + soft front fade into the gradient's alpha using the
+  // same s0/s1 the plain core uses, so colour transitions still render but the line
+  // clears the nose. null routeProj (off-route) → unchanged full gradient.
+  const navCongGapped = (navCongestionGradient && routeTrimEndFrac != null)
+    ? applyCarGapGradient(
+        navCongestionGradient,
+        Math.min(0.997, Math.max(0.0001, routeTrimEndFrac)),
+        Math.min(0.999, Math.max(routeTrimEndFrac + 0.0006, routeTrimEndFrac + _fadeSpanFrac)),
+      )
+    : navCongestionGradient;
 
   // Snapped draw position: glue the car to the line, but ONLY within ~45 m of it
   // — further off (wrong turn / pre-reroute) we show the real GPS so you can see
@@ -1434,7 +1491,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               id="route-sel-cong"
               slot="middle"
               filter={(navCongActive ? ["==", ["get", "index"], selectedRouteIndex] : ["==", ["get", "index"], -1]) as any}
-              style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(navCongestionGradient ? { lineGradient: navCongestionGradient } : { lineColor: selColor }) }}
+              style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(navCongGapped ? { lineGradient: navCongGapped } : { lineColor: selColor }) }}
             />
           </ShapeSource>
         )}

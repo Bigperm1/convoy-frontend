@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, Pressable, TouchableOpacity, Animated,
   ScrollView, Easing, Image, Alert, Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
@@ -99,6 +99,16 @@ export default function TalkScreen() {
   const [, setReadTick] = useState(0);
   const focusedRef = useRef(false);
   useEffect(() => commsRead.subscribe(() => setReadTick((n) => n + 1)), []);
+
+  // The tab bar is position:absolute (see (app)/_layout.tsx) with height
+  // (ios 86 / android 84) + the android system-nav inset, so it overlays the
+  // bottom of this screen. The Recent Transmissions sheet is bottom-anchored, so
+  // it must clear that bar or it hides behind it on Android (where the nav-bar
+  // inset makes the bar taller than the old fixed 96). iOS resolves to 96 as
+  // before; Android adds insets.bottom.
+  const insets = useSafeAreaInsets();
+  const txSheetBottom =
+    (Platform.OS === 'ios' ? 86 : 84) + (Platform.OS === 'android' ? insets.bottom : 0) + 10;
 
   // The active community = the one whose id matches settings.activeCommunityId.
   const active = communities.find((c) => c.id === settings.activeCommunityId);
@@ -731,7 +741,7 @@ export default function TalkScreen() {
         {active && !dropdownOpen && txOpen && (
           <>
             <Pressable style={styles.txBackdrop} onPress={() => { setTxOpen(false); }} />
-            <View style={styles.txSheet}>
+            <View style={[styles.txSheet, { bottom: txSheetBottom }]}>
               <Text style={styles.txSheetTitle}>Recent Transmissions</Text>
               {ptt.history.length === 0 ? (
                 <Text style={styles.emptyTx}>No transmissions yet. Hold the mic to talk to your crew.</Text>

@@ -54,7 +54,7 @@ File-based routing under `app/`. `typedRoutes` is on. Three groups:
 
 ### Event buses (pub/sub)
 
-Cross-screen coordination uses lightweight module-level `Set<Listener>` buses instead of global state: `voiceBus`, `hailBus`, `shareBus`, `shareInbox`, `globalPtt`, `livePtt`, `commsRead`. Pattern is always `emit(x)` + `subscribe(fn): () => void`. `voiceBus` is how recognized voice intents reach whichever screen handles them (e.g. `map.tsx` subscribes to act on "navigate to …").
+Cross-screen coordination uses lightweight module-level `Set<Listener>` buses instead of global state: `voiceBus`, `hailBus`, `shareBus`, `shareInbox`, `livePtt`, `commsRead`. Pattern is always `emit(x)` + `subscribe(fn): () => void`. `voiceBus` is how recognized voice intents reach whichever screen handles them (e.g. `map.tsx` subscribes to act on "navigate to …").
 
 ### Navigation engine
 
@@ -62,11 +62,11 @@ Cross-screen coordination uses lightweight module-level `Set<Listener>` buses in
 
 ### Voice / Nova
 
-`src/useVoice.ts` records audio (quality scales with convoy proximity tier, see `src/proximityAudio.ts`), sends it to the backend for transcription + intent, and emits onto `voiceBus`. TTS is `expo-speech` / Nova. `VoiceController`, `VoiceFAB`, `VoiceTabButton` are the UI entry points.
+`src/useVoice.ts` records audio (quality scales with convoy proximity tier, see `src/proximityAudio.ts`), sends it to the backend for transcription + intent, and emits onto `voiceBus`. TTS is `expo-speech` / Nova. `VoiceController`, `VoiceTabButton` are the UI entry points.
 
 ### Map rendering
 
-`src/ConvoyMap.tsx` (native, `react-native-maps`) and `src/ConvoyMap.web.tsx` (`@vis.gl/react-google-maps`) are platform variants behind one import. **`react-native-maps` is pinned and excluded from `expo install` reconciliation** (`package.json` `expo.install.exclude`) — don't let a tool bump it.
+`src/ConvoyMapbox.tsx` (`@rnmapbox/maps`) is the map engine on every platform — the 3D drive view, peers, hazards, and the route line all render through it. The legacy `react-native-maps` / `@vis.gl/react-google-maps` engine (`ConvoyMap.tsx` / `ConvoyMap.web.tsx`) was fully retired and those deps removed (RerouteCard's preview now uses a Mapbox static image; the `react-native-maps`/`expo-symbols`/`expo-background-fetch` dep + native Google-Maps-plugin removal is staged for the next native build).
 
 ### CarPlay / Android Auto
 
@@ -85,7 +85,7 @@ Native deps are patched at install time via `patch-package` (postinstall hook): 
 - TypeScript `strict`. Path aliases: `@/*` → repo root, `~/*` → `src/*` (though most code uses relative imports).
 - Dark UI only (`userInterfaceStyle: "dark"`). Shared colors in `src/theme.ts` (`COLORS`); frosted panels via `src/Glass.tsx` (`expo-blur`).
 - User preferences persist through `src/settings.ts` (`useSettings` / `getSettings` / `updateSettings`, AsyncStorage key `convoy.settings.v3` — bump the key version on breaking shape changes).
-- Platform-specific files use the `.ios.ts` / `.web.tsx` suffix convention (e.g. `applePlayer.ios.ts` vs `applePlayer.ts`, `ConvoyMap.web.tsx`).
+- Platform-specific files use the `.ios.ts` / `.web.tsx` suffix convention (e.g. `applePlayer.ios.ts` vs `applePlayer.ts`, `RerouteCard.web.tsx`).
 - Many native APIs throw on web — guard with `Platform.OS !== "web"` (push notifications, CarPlay, audio recording all do this).
 
 ## Release Discipline

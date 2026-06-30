@@ -4,19 +4,26 @@
 // to pop — that dialog can't show an image, and the driver wanted to SEE the
 // suggested route before accepting. This is a frosted card with a small
 // non-interactive map preview of the alternate line, the time it saves, and
-// Take it / No thanks. The map reuses react-native-maps (the same stack the main
-// map already runs on device), so the preview is guaranteed to render.
+// Take it / No thanks.
 //
-// Web has no react-native-maps — see RerouteCard.web.tsx for the no-map fallback.
+// The preview is a Mapbox STATIC image (same public token + `path` overlay the
+// CarPlay static fallback uses), NOT a live GL map: a 180px non-interactive
+// thumbnail doesn't need a GL surface, and a GL map inside a React Native <Modal>
+// is a known second-surface attach hazard (it can render blank). A static <Image>
+// renders reliably, spins up nothing, and lets the app drop both react-native-maps
+// AND the in-modal GL dependency. (Live congestion colours still show on the main
+// nav map; the preview uses the route's solid colour.)
+//
+// Web: RerouteCard.web.tsx is the platform variant.
 
-import React, { useMemo, useRef } from "react";
+import React, { useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { BlurView } from "expo-blur";
-import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import { COLORS } from "./theme";
 import { decodePolyline, type NavRoute } from "./nav";
-import { congestionColor } from "./mapboxDirections";
+import { MAPBOX_PUBLIC_TOKEN } from "./initMapbox";
 import { getSettings, getRouteColor } from "./settings";
 
 type Props = {
@@ -33,52 +40,42 @@ type Props = {
   onDecline: () => void;
 };
 
-type LL = { latitude: number; longitude: number };
-type Seg = { coords: LL[]; color: string };
+// Dark style to match the frosted card; @2x for crisp lines on a small box.
+const STATIC_STYLE = "mapbox/dark-v11";
+const STATIC_W = 640;
+const STATIC_H = 320;
+const STATIC_URL_MAX = 8000; // Mapbox static URL ceiling; drop the end pin if over.
 
-function regionFor(pts: LL[]) {
-  if (pts.length === 0) return undefined;
-  let minLat = pts[0].latitude, maxLat = pts[0].latitude;
-  let minLng = pts[0].longitude, maxLng = pts[0].longitude;
-  for (const p of pts) {
-    minLat = Math.min(minLat, p.latitude); maxLat = Math.max(maxLat, p.latitude);
-    minLng = Math.min(minLng, p.longitude); maxLng = Math.max(maxLng, p.longitude);
+// Build a Mapbox Static Images URL: the encoded route polyline as a coloured
+// `path` overlay + an end pin, auto-framed to the route. Google's precision-5
+// overview polyline is a drop-in for Mapbox `path` (same as the CarPlay fallback).
+function buildStaticUrl(polyline: string, hex: string, end: [number, number] | null): string | null {
+  if (!polyline) return null;
+  const col = hex.replace("#", "");
+  const path = `path-6+${col}-1(${encodeURIComponent(polyline)})`;
+  const tail = `/auto/${STATIC_W}x${STATIC_H}@2x?padding=22&access_token=${MAPBOX_PUBLIC_TOKEN}`;
+  const stem = `https://api.mapbox.com/styles/v1/${STATIC_STYLE}/static/`;
+  if (end) {
+    const withPin = `${path},pin-s+${col}(${end[0].toFixed(5)},${end[1].toFixed(5)})`;
+    const url = `${stem}${withPin}${tail}`;
+    if (url.length <= STATIC_URL_MAX) return url;
   }
-  return {
-    latitude: (minLat + maxLat) / 2,
-    longitude: (minLng + maxLng) / 2,
-    latitudeDelta: Math.max(0.01, (maxLat - minLat) * 1.5),
-    longitudeDelta: Math.max(0.01, (maxLng - minLng) * 1.5),
-  };
+  const pathOnly = `${stem}${path}${tail}`;
+  return pathOnly.length <= STATIC_URL_MAX ? pathOnly : null;
 }
 
 export default function RerouteCard({ visible, route, title, subtitle, savedMin, etaMin, arrival, lateMin, onAccept, onDecline }: Props) {
-  const mapRef = useRef<MapView | null>(null);
-  const pts = useMemo<LL[]>(
-    () => (route?.polyline ? decodePolyline(route.polyline).map((p) => ({ latitude: p.lat, longitude: p.lng })) : []),
-    [route?.polyline]
+  const end = useMemo<[number, number] | null>(() => {
+    if (route?.coordinates && route.coordinates.length) return route.coordinates[route.coordinates.length - 1] as [number, number];
+    if (route?.polyline) { const d = decodePolyline(route.polyline); const last = d[d.length - 1]; return last ? [last.lng, last.lat] : null; }
+    return null;
+  }, [route?.coordinates, route?.polyline]);
+
+  const mapUrl = useMemo(
+    () => (route?.polyline ? buildStaticUrl(route.polyline, getRouteColor(getSettings()), end) : null),
+    [route?.polyline, end]
   );
-  const region = useMemo(() => regionFor(pts), [pts]);
-  // Congestion-colored segments: group consecutive same-level pieces into runs and draw
-  // each as its own Polyline (robust on react-native-maps), so the preview shows the
-  // SAME green→yellow→orange→red live traffic as the main map. Falls back to one solid
-  // line in the user's route color when a route has no congestion data.
-  const segments = useMemo<Seg[]>(() => {
-    const base = getRouteColor(getSettings());
-    const coords = route?.coordinates;
-    const cong = route?.congestion;
-    if (!coords || coords.length < 2) return pts.length >= 2 ? [{ coords: pts, color: base }] : [];
-    const runs: Seg[] = [];
-    for (let i = 0; i < coords.length - 1; i++) {
-      const a = { latitude: coords[i][1], longitude: coords[i][0] };
-      const b = { latitude: coords[i + 1][1], longitude: coords[i + 1][0] };
-      const color = congestionColor(cong?.[i], base);
-      const last = runs[runs.length - 1];
-      if (last && last.color === color) last.coords.push(b);
-      else runs.push({ coords: [a, b], color });
-    }
-    return runs;
-  }, [route?.coordinates, route?.congestion, pts]);
+
   const showStats = typeof etaMin === "number" || typeof savedMin === "number";
 
   return (
@@ -120,40 +117,8 @@ export default function RerouteCard({ visible, route, title, subtitle, savedMin,
               )}
 
               <View style={styles.mapBox}>
-                {pts.length >= 2 && region ? (
-                  <MapView
-                    ref={mapRef}
-                    key={route?.polyline}
-                    style={StyleSheet.absoluteFill}
-                    provider={PROVIDER_GOOGLE}
-                    initialRegion={region}
-                    scrollEnabled={false}
-                    zoomEnabled={false}
-                    rotateEnabled={false}
-                    pitchEnabled={false}
-                    toolbarEnabled={false}
-                    pointerEvents="none"
-                    onMapReady={() => {
-                      try {
-                        mapRef.current?.fitToCoordinates(pts, {
-                          edgePadding: { top: 26, right: 26, bottom: 26, left: 26 },
-                          animated: false,
-                        });
-                      } catch {}
-                    }}
-                  >
-                    {/* Dark casing under the colored runs for contrast on the preview. */}
-                    <Polyline coordinates={pts} strokeColor="rgba(0,0,0,0.35)" strokeWidth={9} lineCap="round" lineJoin="round" />
-                    {segments.map((seg, i) => (
-                      <Polyline key={i} coordinates={seg.coords} strokeColor={seg.color} strokeWidth={6} lineCap="round" lineJoin="round" />
-                    ))}
-                    <Marker coordinate={pts[0]} anchor={{ x: 0.5, y: 0.5 }}>
-                      <View style={styles.startDot} />
-                    </Marker>
-                    <Marker coordinate={pts[pts.length - 1]} anchor={{ x: 0.5, y: 1 }}>
-                      <Ionicons name="location" size={26} color={COLORS.brand} />
-                    </Marker>
-                  </MapView>
+                {mapUrl ? (
+                  <Image source={{ uri: mapUrl }} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} cachePolicy="memory-disk" />
                 ) : (
                   <View style={[StyleSheet.absoluteFill, styles.mapFallback]}>
                     <Ionicons name="map" size={28} color={COLORS.textDim} />
@@ -197,7 +162,6 @@ const styles = StyleSheet.create({
   lateText: { color: "#FF9F0A", fontSize: 12, fontWeight: "700", marginTop: 1 },
   mapBox: { height: 180, borderRadius: 14, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.05)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.10)" },
   mapFallback: { alignItems: "center", justifyContent: "center" },
-  startDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: "#fff", borderWidth: 3, borderColor: COLORS.brand },
   btnRow: { flexDirection: "row", gap: 10, marginTop: 14 },
   btn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 13, borderRadius: 13 },
   btnGhost: { backgroundColor: "rgba(255,255,255,0.10)" },

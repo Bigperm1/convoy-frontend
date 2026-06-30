@@ -570,6 +570,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const lastFixAt = useRef(0);
   const fixGap = useRef(1000);
   const rafDead = useRef(false); // latched true while the rAF loop is paused (phone display asleep)
+  const resumeSnapUntil = useRef(0); // snap-track (don't ease) until this wall-clock after foreground
+  const wasBackgrounded = useRef(false); // true once the app actually hit 'background' since last 'active'
   const [, setTick] = useState(0);
 
   // Shortest signed angular delta a→b in degrees (−180…180].
@@ -647,7 +649,13 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       rafDead.current = true;
     }
     const rafStale = rafDead.current;
-    if (!seeded.current || jumpDeg > 0.01 || rafStale) {
+    // Post-foreground snap window: after returning from another app, iOS often
+    // delivers a STALE cached fix first, then the fresh one. Easing between them is
+    // the visible "camera plays catch-up to find the car." So for a short window
+    // after foreground, SNAP every fix (camera jumps straight to the latest) instead
+    // of easing through the stale→fresh pair; smooth easing resumes after.
+    const inResumeSnap = now < resumeSnapUntil.current;
+    if (!seeded.current || jumpDeg > 0.01 || rafStale || inResumeSnap) {
       seeded.current = true;
       render.current = { lat, lng, heading };
       anim.current = null;
@@ -680,14 +688,25 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // Stop the loop if the car unmounts mid-animation.
   useEffect(() => () => { if (raf.current != null) cancelAnimationFrame(raf.current); }, []);
 
-  // Snap (not ease) to the next fix after the app returns to the foreground.
-  // Backgrounding freezes the RAF loop, so render.current goes stale; clearing
-  // `seeded` here makes the very next fix HARD-SNAP the drawn car (and the puck
-  // the chase camera rides) straight to the live position instead of easing up
-  // from the frozen pose — the "snap to the car when I come back" behavior.
+  // Snap (not ease) to the live position after the app returns to the foreground.
+  // Backgrounding (switching to another app) suspends the JS thread, so render.current
+  // goes stale. Clearing `seeded` hard-snaps the FIRST fix; the ~2 s `resumeSnapUntil`
+  // window then keeps snapping the next few fixes too, so a stale cached fix followed
+  // by the fresh one doesn't ease (the "camera plays catch-up" the user saw). After
+  // the window, smooth easing resumes.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (st) => {
-      if (st === "active") seeded.current = false;
+      if (st === "background") wasBackgrounded.current = true;
+      if (st === "active") {
+        seeded.current = false;
+        // Arm the snap window ONLY after a REAL background (switching apps), not a
+        // brief inactive→active (Control Center / notification shade), so normal
+        // mid-drive use never snaps choppily. iOS resumes via background→inactive→
+        // active, so the immediate prior state is 'inactive' — track a "was actually
+        // backgrounded" flag rather than the previous state.
+        if (wasBackgrounded.current) resumeSnapUntil.current = Date.now() + 2000;
+        wasBackgrounded.current = false;
+      }
     });
     return () => sub.remove();
   }, []);

@@ -13,9 +13,6 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
       "buildNumber": "60",
-      "config": {
-        "googleMapsApiKey": "AIzaSyC0w5LHgZ1ud3EmeAhUkr4aOAOf89bE09U"
-      },
       "infoPlist": {
         "NSAppleMusicUsageDescription": "Play and control Apple Music right inside Convoy",
         "NSLocationWhenInUseUsageDescription": "Show nearby drivers and hazards on the map",
@@ -36,11 +33,6 @@
       "package": "com.sw0rdfisch.convoy",
       "versionCode": 60,
       "googleServicesFile": "./google-services.json",
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyC0w5LHgZ1ud3EmeAhUkr4aOAOf89bE09U"
-        }
-      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#000000"
@@ -64,13 +56,6 @@
     },
     "plugins": [
       "expo-router",
-      [
-        "react-native-maps",
-        {
-          "iosGoogleMapsApiKey": "AIzaSyC0w5LHgZ1ud3EmeAhUkr4aOAOf89bE09U",
-          "androidGoogleMapsApiKey": "AIzaSyC0w5LHgZ1ud3EmeAhUkr4aOAOf89bE09U"
-        }
-      ],
       [
         "expo-location",
         {

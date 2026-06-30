@@ -699,6 +699,12 @@ export default function MapScreen() {
   // ask the engine to animate back to north-up (heading 0).
   const [mapHeading, setMapHeading] = useState(0);
   const [northSignal, setNorthSignal] = useState(0);
+  // Transient north-up override. The Compass FAB sets this so a tap faces TRUE
+  // NORTH (and recenters on the car) even while in heading-up chase: it routes the
+  // camera through the engine's north-up follow path, which has no lockstep
+  // fighting the heading. Cleared on a manual pan or when nav starts, so the
+  // user's heading-up setting resumes naturally.
+  const [northUpHold, setNorthUpHold] = useState(false);
   // Hold-to-activate "Avatar" panel (opened by long-pressing the Map tab button,
   // signalled via avatarHoldBus). Auto-dismisses ~5s after the last interaction.
   const [avatarPanelOpen, setAvatarPanelOpen] = useState(false);
@@ -1358,6 +1364,7 @@ export default function MapScreen() {
   };
   const handleUserPan = () => {
     setIsFollowing(false);            // driver took control — stop chasing
+    setNorthUpHold(false);            // a manual pan releases the compass north-up hold
     clearRecenterTimer();
     recenterTimerRef.current = setTimeout(() => { setIsFollowing(true); }, 10000); // auto-recenter after 10s idle
   };
@@ -1379,6 +1386,7 @@ export default function MapScreen() {
     // frame the route options).
     clearRecenterTimer();
     setIsFollowing(true);
+    setNorthUpHold(false);            // guidance is heading-up chase, not the compass north-up hold
     if (destination) addRecentRoute({ label: destination.label, lat: destination.lat, lng: destination.lng });
     // Clear any prior speech/state FIRST, then reserve + play the greeting. The
     // turn engine's activate path no longer resets the speech gate, so whatever
@@ -2610,7 +2618,7 @@ export default function MapScreen() {
         // Map view mode (radio choice from Settings → MAP VIEW). Drives the
         // chase-cam tilt + bearing. Defaults to "heading_up" so nav feels like
         // Waze/Google out of the box.
-        mapView={settings.mapView}
+        mapView={northUpHold ? 'north_up' : settings.mapView}
         // Live bearing readout + north-reset signal for the Compass FAB.
         onHeading={setMapHeading}
         resetNorthSignal={northSignal}
@@ -3200,7 +3208,7 @@ export default function MapScreen() {
         <TouchableOpacity
           testID="compass-fab"
           style={styles.fab}
-          onPress={() => { setNorthSignal((n) => n + 1); recenterNow(); }}
+          onPress={() => { setNorthUpHold(true); setNorthSignal((n) => n + 1); recenterNow(); }}
           activeOpacity={0.85}
         >
           <View style={{ transform: [{ rotate: `${-mapHeading}deg` }] }}>

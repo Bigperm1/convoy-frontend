@@ -564,11 +564,12 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   scale?: any;
 }) {
   const render = useRef({ lat, lng, heading });
-  const anim = useRef<{ fromLat: number; fromLng: number; fromHdg: number; toLat: number; toLng: number; toHdg: number; start: number; dur: number } | null>(null);
+  const anim = useRef<{ fromLat: number; fromLng: number; fromHdg: number; toLat: number; toLng: number; toHdg: number; start: number; dur: number; armedAt: number; stepped: boolean } | null>(null);
   const raf = useRef<number | null>(null);
   const seeded = useRef(false);
   const lastFixAt = useRef(0);
   const fixGap = useRef(1000);
+  const rafDead = useRef(false); // latched true while the rAF loop is paused (phone display asleep)
   const [, setTick] = useState(0);
 
   // Shortest signed angular delta a→b in degrees (−180…180].
@@ -598,8 +599,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   };
 
   const step = () => {
+    rafDead.current = false; // the loop ticked → the display is awake; smooth easing is live
     const a = anim.current;
     if (!a) { raf.current = null; return; }
+    a.stepped = true; // this ease has rendered ≥1 frame → the loop is alive for it
     const t = Math.min(1, (Date.now() - a.start) / a.dur);
     render.current = {
       lat: a.fromLat + (a.toLat - a.fromLat) * t,
@@ -627,13 +630,34 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     const prev = render.current;
     // First fix, or a > ~1km jump (initial fix / recenter / GPS glitch) → snap.
     const jumpDeg = Math.abs(lat - prev.lat) + Math.abs(lng - prev.lng);
-    if (!seeded.current || jumpDeg > 0.01) {
+    // rAF-STALL fallback (the "CarPlay map stops tracking with the phone screen
+    // off" regression): the lockstep camera + 3D car ride requestAnimationFrame,
+    // which iOS PAUSES when the phone display sleeps even while CarPlay is active —
+    // freezing both. This effect still fires on every GPS fix regardless of rAF.
+    // Detector: a PENDING ease that step() has NOT advanced a single frame
+    // (`!stepped`) for longer than a few frames (`armedAt` guard) means the loop is
+    // paused — step() sets stepped=true on its first tick, so on an awake screen
+    // this never trips, even for a stationary car (zero-length ease still gets a
+    // tick) or a same-frame GPS burst (excluded by the time guard, since step() may
+    // not have ticked yet within ~16 ms). Latch it so EVERY following fix keeps
+    // snapping; the probed rAF below clears the latch (via step()) the instant the
+    // display wakes, resuming smooth easing.
+    const pend = anim.current;
+    if (pend && !pend.stepped && now - pend.armedAt > 120) {
+      rafDead.current = true;
+    }
+    const rafStale = rafDead.current;
+    if (!seeded.current || jumpDeg > 0.01 || rafStale) {
       seeded.current = true;
       render.current = { lat, lng, heading };
       anim.current = null;
       if (raf.current != null) { cancelAnimationFrame(raf.current); raf.current = null; }
-      pushCam(lat, lng, heading); // hard-snap the camera with the car (first fix / recenter / resume)
+      pushCam(lat, lng, heading); // hard-snap the camera with the car (first fix / recenter / resume / screen-off)
       setTick((n) => (n + 1) & 0xffff);
+      // Probe: a live display ticks step() → rafDead clears → the next fix eases
+      // smoothly again. While asleep the probe never fires, so the latch holds and
+      // every fix keeps snapping (tracking continues, just without interpolation).
+      if (rafStale) raf.current = requestAnimationFrame(step);
       return;
     }
     // Ease from the current drawn pose to the new fix over ~the fix interval
@@ -647,6 +671,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       // below), so a longer ease keeps them in lockstep — it does NOT make the car
       // trail the camera. OTA-tunable: lower = snappier but stutters, higher = smoother.
       start: now, dur: Math.max(220, fixGap.current * 1.1),
+      armedAt: now, stepped: false,
     };
     if (raf.current == null) raf.current = requestAnimationFrame(step);
     // eslint-disable-next-line react-hooks/exhaustive-deps

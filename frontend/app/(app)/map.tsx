@@ -1709,7 +1709,9 @@ export default function MapScreen() {
         // backgrounded AND we're not navigating — there's no visible map and no
         // route to follow, so it would just drain the battery. Foreground OR an
         // active turn-by-turn route keeps it on. (Backgrounded navigation also
-        // has its own bg-location task in navNotification.ts.)
+        // has its own bg-location task in navNotification.ts. CarPlay-with-screen-off
+        // is fed independently by carPlayBootstrap's acquireBgLocation +
+        // startForegroundCarFeed → carStore, so the car map tracks without this watcher.)
         if (!appActive && !navActiveRef.current) return;
         sub = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 0 },

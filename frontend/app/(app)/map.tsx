@@ -18,6 +18,7 @@ import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
 import { voiceBus, geocodeQuery } from "../../src/voiceBus";
 import { useCommunityRoutes, createCommunityRoute, CommunityRoute } from "../../src/communityRoutes";
 import TurnByTurnNav, { SpeedPill } from "../../src/components/TurnByTurnNav";
+import { MapNowPlaying } from "../../src/components/MapNowPlaying";
 import { ReportToast, MusicToast, HailToast } from "../../src/components/AlertToast";
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
 import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/components/StepDrawer";
@@ -3072,6 +3073,13 @@ export default function MapScreen() {
           Pulls live speed from coords.speed (m/s) → km/h. Floors small values
           to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
       <SpeedPill speedMs={coords?.speed} unit={settings.speedUnit} bottom={controlsBottom} limitKmh={speedLimitKmh} />
+      {/* Now-playing banner — beside the speedo, shifts right when the speed-limit
+          sign slides out, ends before the police FAB. Shows only when music plays. */}
+      <MapNowPlaying
+        bottom={controlsBottom}
+        shifted={((coords?.speed ?? 0) * 3.6) > 0.5 && (speedLimitKmh ?? 0) > 0}
+        onOpen={() => router.push("/(app)/music")}
+      />
       {/* Weather HUD — compact temp-only chip stacked just above the speedometer
           in the bottom-left HUD column (matches the speedo's box + opacity). */}
       {showWeatherLayer && weather && (

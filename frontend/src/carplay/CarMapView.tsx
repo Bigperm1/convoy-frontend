@@ -93,6 +93,9 @@ export default function CarMapView({ onGLError }: Props) {
   const paintedRef = useRef(false);
   const firedRef = useRef(false);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // `painted` (state, not just the ref) so the FIRST rendered frame forces a
+  // re-render — the cold-start snap effect below + lockReadyRef both re-derive.
+  const [painted, setPainted] = useState(false);
 
   const fail = () => {
     if (firedRef.current || paintedRef.current) return;
@@ -100,8 +103,10 @@ export default function CarMapView({ onGLError }: Props) {
     onGLError?.();
   };
   const markPainted = () => {
+    if (paintedRef.current) return; // first frame only
     paintedRef.current = true;
     if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
+    setPainted(true);
   };
 
   useEffect(() => {
@@ -163,6 +168,29 @@ export default function CarMapView({ onGLError }: Props) {
     // Bottom-middle: a large paddingTop pushes the pinned car DOWN the wide head-unit.
     padding: { paddingTop: mapH > 0 ? Math.round(mapH * CAR_LOWER_PAD_FRAC) : 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 },
   }), [followZoom, followPitch, mapH]);
+
+  // COLD-START SNAP (fixes the "map opens on Europe" case). SelfCarModel's own
+  // first-fix hard-snap is gated on paint AND fix; if those land in either order
+  // the one-shot snap can be dropped, and a STATIONARY car emits no second fix to
+  // retry it — so the camera stays at the map style's default world view. Fire an
+  // instant snap here the moment BOTH paint and fix are ready (whichever lands
+  // second re-runs this). animationMode 'none' = no fly-in; idempotent with
+  // SelfCarModel's snap (same pose). Does NOT touch the native commit path.
+  useEffect(() => {
+    if (!painted || !hasFix || !cameraRef.current) return;
+    try {
+      cameraRef.current.setCamera({
+        centerCoordinate: [lng, lat],
+        heading: camHdgRef.current,
+        zoomLevel: followZoom,
+        pitch: followPitch,
+        padding: getCam().padding,
+        animationDuration: 0,
+        animationMode: 'none',
+      });
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [painted, hasFix]);
 
   // Active route → GeoJSON. Only drawn when the polyline decodes to a real line.
   const routeLL = decodePolyline(s.routePolyline);
@@ -360,13 +388,13 @@ export default function CarMapView({ onGLError }: Props) {
           />
           <LineLayer
             id="car-route-sel-casing"
-            slot="middle"
+            slot="top"
             filter={['==', ['get', 'index'], SELECTED_INDEX] as any}
             style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(glowGrad ? { lineGradient: glowGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: carRouteColor }) }}
           />
           <LineLayer
             id="car-route-sel-core"
-            slot="middle"
+            slot="top"
             // Hidden when the congestion core (below) is active, so it can't paint over
             // the colours; the casing above keeps the trim/vanish.
             filter={(carCongGradient ? ['==', ['get', 'index'], -1] : ['==', ['get', 'index'], SELECTED_INDEX]) as any}
@@ -383,7 +411,7 @@ export default function CarMapView({ onGLError }: Props) {
         <ShapeSource id="car-congestion" shape={carCongFC} lineMetrics>
           <LineLayer
             id="car-cong-core"
-            slot="middle"
+            slot="top"
             style={{ lineGradient: carCongGapped, lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
           />
         </ShapeSource>

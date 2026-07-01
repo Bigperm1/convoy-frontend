@@ -262,7 +262,7 @@ export function CarSurface() {
   // RED pulse ONLY when 21+ km/h (13+ mph) over the posted limit — no orange tier.
   const overBy = getSettings().speedUnit === 'mph' ? 13 : 21;
   const speedoOver = limitVal != null && speedNum >= (limitVal as number) + overBy;
-  const speedoBg = speedoOver ? '#FF3B30' : 'rgba(11,11,12,0.82)';
+  const speedoBg = speedoOver ? '#FF3B30' : 'rgba(22,22,24,0.92)';
   const speedPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!speedoOver) { speedPulse.setValue(1); return; }
@@ -281,7 +281,7 @@ export function CarSurface() {
   useEffect(() => {
     Animated.spring(limitSlide, { toValue: showLimit ? 1 : 0, useNativeDriver: true, tension: 80, friction: 12 }).start();
   }, [showLimit]);
-  const limitSlideX = limitSlide.interpolate({ inputRange: [0, 1], outputRange: [0, 54] });
+  const limitSlideX = limitSlide.interpolate({ inputRange: [0, 1], outputRange: [0, 92] });
 
   const showMap = hasFix && !!mapUrl;
   // Live @rnmapbox MapView gate. Three conditions, all required:
@@ -428,8 +428,8 @@ export function CarSurface() {
             style={[styles.speedLimitBadge, { opacity: limitSlide, transform: [{ translateX: limitSlideX }] }]}
             pointerEvents="none"
           >
-            <Text style={styles.speedLimitCap}>LIMIT</Text>
-            <Text style={styles.speedLimitNum}>{limitVal}</Text>
+            <Text style={styles.speedLimitNum} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{limitVal}</Text>
+            <Text style={styles.speedLimitUnit} numberOfLines={1}>{spd.label.toLowerCase()}</Text>
           </Animated.View>
         ) : null}
         <Animated.View style={[styles.speedPill, { backgroundColor: speedoBg, opacity: speedPulse }]}>
@@ -591,7 +591,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       // Live weather (only while the phone's weather layer feeds it). Temp pre-formatted
       // in the driver's unit; CarSurface maps weatherKind to a glyph.
       weatherTemp: weather
-        ? `${Math.round(getSettings().speedUnit === 'mph' ? weather.tempF : weather.tempC)}°`
+        ? `${Math.round(getSettings().speedUnit === 'mph' ? weather.tempF : weather.tempC)}°${getSettings().speedUnit === 'mph' ? 'F' : 'C'}`
         : undefined,
       weatherKind: weather ? weatherKind(weather) : undefined,
       // Arrow glyph for the car banner's maneuver box.
@@ -852,19 +852,19 @@ const styles = StyleSheet.create({
   meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },
   // Bottom-LEFT, tucked just right of the CarPlay side bar (~64pt). Smaller pill.
   speedDock: { position: 'absolute', left: 68, bottom: 10, alignItems: 'flex-start' },
-  speedPill: { alignItems: 'center', backgroundColor: 'rgba(11,11,12,0.82)', borderRadius: 11, paddingHorizontal: 11, paddingVertical: 4 },
-  speedNum: { color: '#F4F4F4', fontSize: 21, fontWeight: '800' },
-  speedUnit: { color: '#9AA0A6', fontSize: 9, fontWeight: '600' },
+  speedPill: { width: 84, height: 60, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
+  speedNum: { color: '#F4F4F4', fontSize: 24, fontWeight: '800', letterSpacing: -0.5, lineHeight: 26 },
+  speedUnit: { color: '#808080', fontSize: 10, fontWeight: '600', letterSpacing: 0.3, marginTop: 1 },
   // Posted speed-limit sign — white plate, black border. Tucked BEHIND the speedo (same
   // bottom baseline, left:0 within speedDock) and slid out to the right when moving.
-  speedLimitBadge: { position: 'absolute', left: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 3, minWidth: 46 },
-  speedLimitCap: { color: '#6B7075', fontSize: 8, fontWeight: '800', letterSpacing: 0.5 },
-  speedLimitNum: { color: '#0B0B0C', fontSize: 17, fontWeight: '900' },
+  speedLimitBadge: { position: 'absolute', left: 0, bottom: 0, width: 84, height: 60, borderRadius: 16, backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  speedLimitNum: { color: '#000', fontSize: 24, fontWeight: '800', letterSpacing: -0.5, lineHeight: 26 },
+  speedLimitUnit: { color: '#333', fontSize: 10, fontWeight: '700', letterSpacing: 0.3, marginTop: 1 },
   // Compass — top-right, below the maneuver banner. Smaller, closer to the edge.
   compassDock: { position: 'absolute', right: 8, top: 58, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,12,0.55)', borderRadius: 22 },
   // Weather chip — BOTTOM-left, just above the speedo (left edge aligned, small gap),
   // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
-  weatherChip: { position: 'absolute', left: 68, bottom: 56, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(22,22,24,0.92)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  weatherChip: { position: 'absolute', left: 68, bottom: 78, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(22,22,24,0.92)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
   weatherText: { color: '#F4F4F4', fontSize: 14, fontWeight: '800', marginTop: 1 },
   // --- live static-map mode ---
   preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },

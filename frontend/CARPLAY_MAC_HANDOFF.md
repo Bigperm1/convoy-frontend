@@ -38,6 +38,12 @@ tests + docs — not needed for the CarPlay work.)
   (read `README.md` first).
 - Local-build gotcha found this session: CocoaPods aborts unless `LANG=en_US.UTF-8` (and
   `LC_ALL`) are exported before `expo run:ios` / `pod install`.
+- **CarPlay simulator now WORKS — use the iOS 18.6 runtime.** The iOS-26.x sim crash is Apple's
+  iOS-26.1 destination-sharing bug; the **iOS 18.6 simulator opens Convoy CarPlay clean** (verified
+  2026-07-03 — "Convoy iOS18 CarPlay" device, map renders, no crash). Install older runtimes with
+  `xcodebuild -downloadPlatform iOS -buildVersion 18.6`. Use iOS 18.6 for CarPlay dev/test, iOS 26.5
+  for iOS-26-only work, real device for the pinch gesture. (On the sim's secondary CarPlay display the
+  live GL map may demote to the 2D static fallback — by design; full 3D works on real devices.)
 
 ---
 

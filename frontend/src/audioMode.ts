@@ -25,9 +25,10 @@
 // stops (see setIdleAudioMode / setPlaybackAudioMode, and useVoice.ts's reset).
 
 import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from "expo-av";
+import { AppState } from "react-native";
 
 /** RECORDING state — mic is hot. Call BEFORE `Recording.startAsync()`. */
-export async function setRecordingAudioMode() {
+async function _applyRecordingMode() {
   try {
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: true,
@@ -60,7 +61,7 @@ export async function setRecordingAudioMode() {
  * ON to the loudspeaker (or any active Bluetooth route). Without this flip
  * after a recording, playback comes out quiet from the top earpiece — this
  * is the exact bug behind the "Comms volume too low" report. */
-export async function setPlaybackAudioMode() {
+async function _applyPlaybackMode() {
   try {
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
@@ -104,7 +105,7 @@ export async function setPlaybackAudioMode() {
  * is set for completeness. (Android has no MixWithOthers interruption mode — the
  * enum only exposes DoNotMix/DuckOthers — and the idle value is inert while
  * nothing is playing, since active clips set `setPlaybackAudioMode()` first.) */
-export async function setIdleAudioMode() {
+async function _applyIdleMode() {
   try {
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
@@ -120,3 +121,41 @@ export async function setIdleAudioMode() {
     });
   } catch {}
 }
+
+// ===== Centralized duck self-healing (the "music stays quiet for minutes" fix) =====
+// Every voice/comms path already calls setIdleAudioMode() when its clip or recording
+// ends, so in the FOREGROUND the duck lifts within a beat. The failure mode this
+// guards is the CAR case: the phone is backgrounded behind CarPlay when a callout
+// ends, iOS suspends the JS runtime before the idle-mode call actually lands, and the
+// .duckOthers session lingers — the user's music stays dipped for minutes until the
+// next audio event or the app resumes. Two independent backstops catch EVERY path:
+//   1) Watchdog — entering any DUCKING mode arms a timer that force-restores idle
+//      after DUCK_BACKSTOP_MS unless a fresh duck refreshes it or an explicit idle
+//      clears it first. Bounds a stranded duck to seconds in the foreground. (A
+//      single clip longer than the window just un-ducks other apps a touch early —
+//      harmless.) Back-to-back callouts each re-arm it, so it's inert normally.
+//   2) Resume self-heal — re-assert idle the instant the app becomes active again,
+//      so a duck stranded during a background suspension lifts on resume rather than
+//      lingering until iOS deactivates the session minutes later.
+// The three exported names are unchanged, so every existing caller gets this for free.
+type _DuckMode = "idle" | "playback" | "recording";
+let _desiredMode: _DuckMode = "idle";
+let _duckBackstop: ReturnType<typeof setTimeout> | null = null;
+const DUCK_BACKSTOP_MS = 10000;
+
+function _clearDuckBackstop() { if (_duckBackstop) { clearTimeout(_duckBackstop); _duckBackstop = null; } }
+function _armDuckBackstop() {
+  _clearDuckBackstop();
+  _duckBackstop = setTimeout(() => {
+    _duckBackstop = null;
+    if (_desiredMode !== "idle") { _desiredMode = "idle"; void _applyIdleMode(); }
+  }, DUCK_BACKSTOP_MS);
+}
+
+export async function setRecordingAudioMode() { _desiredMode = "recording"; _armDuckBackstop(); await _applyRecordingMode(); }
+export async function setPlaybackAudioMode() { _desiredMode = "playback"; _armDuckBackstop(); await _applyPlaybackMode(); }
+export async function setIdleAudioMode() { _desiredMode = "idle"; _clearDuckBackstop(); await _applyIdleMode(); }
+
+// Resume self-heal: if we intend to be idle but a background suspension may have
+// stranded a duck, re-apply idle the moment we're active again. Registered once.
+AppState.addEventListener("change", (s) => { if (s === "active" && _desiredMode === "idle") void _applyIdleMode(); });

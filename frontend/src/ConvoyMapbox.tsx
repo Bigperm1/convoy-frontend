@@ -1511,15 +1511,23 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             />
             {/* Selected route ribbon — casing (edges) + core, in the selected kind's colors
                 (Best = user color, Scenic = contrasting, AI = user-color edges + black core). */}
+            {/* slot="top" (was "middle") so the 3D self-car ModelLayer (also slot="top",
+                +10m lift) renders OVER the active route ribbon — matching the CarPlay
+                surface (car-route-sel-* are slot="top" there and the car sits on top,
+                which is the desired look). Mapbox's shared model/line depth buffer makes
+                a "middle" route paint OVER the top-slot car (rnmapbox #13049/#13428); the
+                car only wins when the route shares its "top" slot. Only the ACTIVE route
+                (sel casing/core + nav congestion) moves up — the dimmed alternates stay
+                at "middle", exactly as CarPlay does. */}
             <LineLayer
               id="route-sel-casing"
-              slot="middle"
+              slot="top"
               filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
               style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selGlowGradient ? { lineGradient: selGlowGradient, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: selEdge }) }}
             />
             <LineLayer
               id="route-sel-core"
-              slot="middle"
+              slot="top"
               // Hidden in preview-congestion AND while the dedicated congestion core
               // (below) is active, so we never double-draw or let the trimmed green core
               // paint over the congestion colours.
@@ -1533,7 +1541,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
                 the behind-car vanish still reads. Hidden unless navigating with real data. */}
             <LineLayer
               id="route-sel-cong"
-              slot="middle"
+              slot="top"
               filter={(navCongActive ? ["==", ["get", "index"], selectedRouteIndex] : ["==", ["get", "index"], -1]) as any}
               style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(navCongGapped ? { lineGradient: navCongGapped } : { lineColor: selColor }) }}
             />

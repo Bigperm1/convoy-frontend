@@ -168,6 +168,19 @@ export default function CarMapView({ onGLError }: Props) {
   if (typeof s.heading === 'number') camHdgRef.current = s.heading;
   const followHeadingDeg = camHdgRef.current;
 
+  // Seed the FIRST rendered frame at the driver's location so the GL map never
+  // paints the world/default view before the lockstep snap lands — that's the
+  // "opens on the world map, then jumps to me" cold-start flash. This is now safe
+  // (the old code deliberately omitted defaultSettings to dodge a fly-in): CarMapView
+  // mounts ONLY when showLive is true, which REQUIRES hasFix, so lat/lng are already
+  // valid at first render and this seed is set once — it never toggles undefined→set,
+  // so there's nothing for @rnmapbox to animate. The lockstep + cold-start snap own
+  // every frame after this initial seed.
+  const initialCamRef = useRef<{ centerCoordinate: [number, number]; zoomLevel: number; pitch: number; heading: number } | null>(null);
+  if (initialCamRef.current == null && hasFix) {
+    initialCamRef.current = { centerCoordinate: [lng, lat], zoomLevel: followZoom, pitch: followPitch, heading: hdg };
+  }
+
   // LOCKSTEP camera (see SelfCarModel): a cameraRef on THIS car-window map + a per-frame
   // getCam closure. The car is pinned to a fixed screen spot (near bottom-middle) and the
   // map rotates/translates around it. paintedRef (first rendered frame) + hasFix gate it
@@ -362,15 +375,16 @@ export default function CarMapView({ onGLError }: Props) {
           native interpolator fighting the JS tween). That pins the car to a fixed screen
           spot (bottom-middle via getCam's padding) and rotates/translates the map AROUND
           it — killing the camera stutter. defaultSettings only seeds the first frame. */}
-      {/* NO defaultSettings. It previously flipped undefined→{close camera} when the fix
-          landed, and @rnmapbox animates that change as a fly-in from the zoomed-out default
-          — the "zoom in from far away" on cold start. With none, there is nothing to
-          animate: the camera sits at the style default (hidden behind the CarPlay splash)
-          until SelfCarModel's FIRST move HARD-SNAPS it to the car (pushCam, animationMode
-          'none' → instant, no fly-in). followUserLocation stays off; the lockstep owns the
-          camera exactly as before. */}
+      {/* defaultSettings SEEDS the first frame at the driver (initialCamRef, captured
+          once at mount). This kills the "opens on the world map, then snaps to me" flash:
+          the GL map's very first paint is already centred on the car instead of the style
+          default (Atlantic/zoom-0). Safe because CarMapView only mounts with hasFix, so the
+          seed is a valid location from frame 1 and never toggles undefined→set — @rnmapbox
+          has nothing to fly in. followUserLocation stays off; the lockstep + cold-start snap
+          own every frame after this seed (animationMode 'none' = instant, no interpolation). */}
       <Camera
         ref={cameraRef}
+        defaultSettings={initialCamRef.current ?? undefined}
         followUserLocation={false}
         animationMode="none"
         animationDuration={0}

@@ -262,7 +262,9 @@ export function CarSurface() {
   // RED pulse ONLY when 21+ km/h (13+ mph) over the posted limit — no orange tier.
   const overBy = getSettings().speedUnit === 'mph' ? 13 : 21;
   const speedoOver = limitVal != null && speedNum >= (limitVal as number) + overBy;
-  const speedoBg = speedoOver ? '#FF3B30' : 'rgba(22,22,24,0.92)';
+  // Dark HUD panels a little transparent (0.8) so the map reads through them; the
+  // over-limit RED stays solid as an alert. OTA-tunable.
+  const speedoBg = speedoOver ? '#FF3B30' : 'rgba(22,22,24,0.8)';
   const speedPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!speedoOver) { speedPulse.setValue(1); return; }
@@ -897,7 +899,7 @@ const styles = StyleSheet.create({
   compassDock: { position: 'absolute', right: 8, top: 58, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,12,0.55)', borderRadius: 22 },
   // Weather chip — BOTTOM-left, just above the speedo (left edge aligned, small gap),
   // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
-  weatherChip: { position: 'absolute', left: 68, bottom: 78, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(22,22,24,0.92)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  weatherChip: { position: 'absolute', left: 68, bottom: 78, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(22,22,24,0.8)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
   weatherText: { color: '#F4F4F4', fontSize: 14, fontWeight: '800', marginTop: 1 },
   // --- live static-map mode ---
   preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },
@@ -910,7 +912,7 @@ const styles = StyleSheet.create({
   },
   // Compact maneuver CARD (mirrors the phone banner), tucked TOP-RIGHT: a green arrow
   // box + a [meters / instruction] column. Smaller than the old full-bleed strip.
-  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(11,11,12,0.94)', borderRadius: 12 },
+  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(11,11,12,0.8)', borderRadius: 12 },
   maneuverBox: { width: 36, height: 36, borderRadius: 9, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
   maneuverArrow: { color: '#0B0B0C', fontSize: 24, fontWeight: '900', lineHeight: 28, marginTop: -1 },
   topTextCol: { flexShrink: 1 },

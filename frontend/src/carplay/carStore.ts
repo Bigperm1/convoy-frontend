@@ -123,3 +123,28 @@ export function useCarStore(): CarState {
   }, []);
   return s;
 }
+
+// ── CarPlay map gestures ───────────────────────────────────────────────────
+// Transient touch commands (NOT persistent state), so they ride a tiny pub/sub
+// bus rather than CarState — same pattern as voiceBus/hailBus. ConvoyCarPlay's
+// CPMapTemplate gesture callbacks (wired via the react-native-carplay patch)
+// emit here; CarMapView subscribes and folds them into its camera. Only zoom is
+// consumed today (it adds a bias to the lockstep's follow-zoom without touching
+// SelfCarModel); pan/rotate/pitch are carried for future use. `scale` is the
+// CarPlay pinch scale factor relative to the gesture start (1.0 at begin).
+export type CarGesture =
+  | { kind: 'zoomBegin' }
+  | { kind: 'zoom'; scale: number; velocity: number }
+  | { kind: 'zoomEnd'; velocity: number }
+  | { kind: 'recenter' };
+
+const gestureListeners = new Set<(g: CarGesture) => void>();
+
+export function emitCarGesture(g: CarGesture) {
+  gestureListeners.forEach((l) => l(g));
+}
+
+export function subscribeCarGesture(fn: (g: CarGesture) => void): () => void {
+  gestureListeners.add(fn);
+  return () => { gestureListeners.delete(fn); };
+}

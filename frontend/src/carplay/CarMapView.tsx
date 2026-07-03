@@ -27,7 +27,7 @@ import Mapbox, {
   LineLayer,
   Models,
 } from '@rnmapbox/maps';
-import { useCarStore } from './carStore';
+import { useCarStore, subscribeCarGesture, type CarGesture } from './carStore';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { getVehicleModelUrl, getVehicleModelKey } from '../vehicleAssets';
 import {
@@ -51,6 +51,13 @@ const SELECTED_INDEX = 0;
 // car we want the Standard 3D buildings to read, so we hold a gentle tilt. During
 // nav we use the phone's speed-aware chasePitch instead.
 const CRUISE_PITCH = 45;
+// Extra head-unit tilt toward the horizon (a few degrees) on top of the cruise /
+// nav pitch — the driver asked for a more horizon-forward view that shows more road
+// ahead and taller 3D buildings. Clamped to Mapbox Standard's 60° pitch cap in
+// getCam so nav-at-speed (already 60°) never exceeds it. OTA-tunable.
+const CAR_PITCH_BONUS = 3;
+// Mapbox Standard hard-caps camera pitch at 60°.
+const CAR_PITCH_MAX = 60;
 // Pull the car camera back a touch vs the phone so more of the road ahead reads on the
 // wide head-unit screen. Subtracted from the phone's zoom (Mapbox zoom is log2, so 0.7
 // ≈ 1.6x more area) for both nav and cruise.
@@ -62,6 +69,13 @@ const CAR_ZOOM_OUT = 1.8;
 // fan-out reads on the head unit. Added to CAR_ZOOM_OUT only in multi-route preview; the
 // car stays pinned (the proven lockstep chase is untouched — this is purely a zoom value).
 const PREVIEW_ZOOM_OUT = 2.2;
+// iOS-26 pinch/zoom: how far (in Mapbox zoom levels, log2) the driver's pinch may
+// bias the auto follow-zoom, and the absolute clamp on the resulting camera zoom.
+// The bias is ADDED to followZoom inside getCam, so the speed-aware chase still
+// modulates around wherever the driver pinched to. Holds until 'recenter'.
+const CAR_USER_ZOOM_BIAS_LIMIT = 4;
+const CAR_ZOOM_MIN = 3;
+const CAR_ZOOM_MAX = 20;
 
 // Top padding as a fraction of map height — pins the car near the BOTTOM-MIDDLE of the
 // head unit (larger = lower on screen). Applied every frame via getCam, nav AND cruise.
@@ -145,7 +159,7 @@ export default function CarMapView({ onGLError }: Props) {
   // with speed too. Pulled back by CAR_ZOOM_OUT so more road reads on the wide screen.
   const kmh = kmhFromMs(s.speedMs);
   const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined) - CAR_ZOOM_OUT - (previewMulti ? PREVIEW_ZOOM_OUT : 0);
-  const followPitch = s.navigating ? chasePitch(kmh) : CRUISE_PITCH;
+  const followPitch = Math.min(CAR_PITCH_MAX, (s.navigating ? chasePitch(kmh) : CRUISE_PITCH) + CAR_PITCH_BONUS);
 
   // MANDATORY heading-up — mirror the phone: plain Follow + a HELD heading, NOT
   // FollowWithCourse (which wobbles on raw GPS course and spins when stopped). Holding
@@ -161,8 +175,16 @@ export default function CarMapView({ onGLError }: Props) {
   const cameraRef = useRef<React.ElementRef<typeof Camera> | null>(null);
   const lockReadyRef = useRef(false);
   lockReadyRef.current = paintedRef.current && hasFix;
+  // Driver pinch-zoom bias (in Mapbox zoom levels), applied ON TOP of the auto
+  // follow-zoom. A ref (not state) so the ~60fps lockstep reads the live value
+  // each frame with no re-render; zoomBaseRef snapshots it at gesture start
+  // because CarPlay's pinch `scale` is cumulative from the gesture's begin.
+  const userZoomRef = useRef(0);
+  const zoomBaseRef = useRef(0);
   const getCam = useCallback(() => ({
-    zoomLevel: followZoom,
+    // followZoom + driver pinch bias, clamped. userZoomRef is read live (a ref,
+    // deliberately not a dep) so a pinch takes effect on the very next frame.
+    zoomLevel: Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, followZoom + userZoomRef.current)),
     pitch: followPitch,
     heading: camHdgRef.current,
     // Bottom-middle: a large paddingTop pushes the pinned car DOWN the wide head-unit.
@@ -191,6 +213,35 @@ export default function CarMapView({ onGLError }: Props) {
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [painted, hasFix]);
+
+  // Driver pinch-zoom from the CarPlay map (iOS 26). ConvoyCarPlay forwards the
+  // CPMapTemplate zoom gesture onto the gesture bus; we translate the pinch scale
+  // into a follow-zoom bias. SelfCarModel's per-frame getCam() reads userZoomRef
+  // live, so mutating the ref is all that's needed — no imperative setCamera that
+  // would fight the lockstep. `scale` is cumulative from the gesture start, so we
+  // rebase on 'zoomBegin' and set bias = base + log2(scale) (Mapbox zoom is log2).
+  useEffect(() => {
+    return subscribeCarGesture((g: CarGesture) => {
+      switch (g.kind) {
+        case 'zoomBegin':
+          zoomBaseRef.current = userZoomRef.current;
+          break;
+        case 'zoom': {
+          const delta = Math.log2(Math.max(0.01, g.scale));
+          userZoomRef.current = Math.max(
+            -CAR_USER_ZOOM_BIAS_LIMIT,
+            Math.min(CAR_USER_ZOOM_BIAS_LIMIT, zoomBaseRef.current + delta),
+          );
+          break;
+        }
+        case 'recenter':
+          userZoomRef.current = 0;
+          zoomBaseRef.current = 0;
+          break;
+        // 'zoomEnd': no fling/momentum for now — the pinched zoom simply holds.
+      }
+    });
+  }, []);
 
   // Active route → GeoJSON. Only drawn when the polyline decodes to a real line.
   const routeLL = decodePolyline(s.routePolyline);

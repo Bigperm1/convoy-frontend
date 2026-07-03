@@ -313,6 +313,16 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
         accuracy: Location.Accuracy.High,
         timeInterval: 3000,
         distanceInterval: 20,
+        // AutomotiveNavigation tells iOS these updates are for driving, so it keeps
+        // the location session alive through a locked screen instead of throttling/
+        // pausing it as it does for the generic (Other) type. This is the CarPlay
+        // "car marker freezes when the phone sleeps" fix — the car feed is this bg
+        // task, and the generic activity type let iOS suspend it once the screen
+        // locked. (allowsBackgroundLocationUpdates is already forced YES by
+        // expo-location's EXLocationTaskConsumer for this API; only foreground
+        // permission + the UIBackgroundModes "location" entitlement are required,
+        // both present — so this is OTA-safe, no native/permission change.)
+        activityType: Location.LocationActivityType.AutomotiveNavigation,
         showsBackgroundLocationIndicator: true,
         pausesUpdatesAutomatically: false,
         foregroundService: {

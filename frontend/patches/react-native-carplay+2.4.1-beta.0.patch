@@ -99,10 +99,28 @@ index 01dbabd..bacb6f0 100644
        }
      }.build()
 diff --git a/node_modules/react-native-carplay/ios/RNCarPlay.m b/node_modules/react-native-carplay/ios/RNCarPlay.m
-index 153dbad..3e6f610 100644
+index 153dbad..5f4449a 100644
 --- a/node_modules/react-native-carplay/ios/RNCarPlay.m
 +++ b/node_modules/react-native-carplay/ios/RNCarPlay.m
-@@ -978,9 +978,13 @@ RCT_EXPORT_METHOD(updateMapTemplateMapButtons:(NSString*) templateId mapButtons:
+@@ -103,6 +103,17 @@ + (id)allocWithZone:(NSZone *)zone {
+         @"panEndedWithDirection",
+         @"panWithDirection",
+         @"didBeginPanGesture",
++        // Convoy: iOS-26 multitouch map gestures (pinch/zoom, rotate, pitch).
++        // Verified against CarPlay/CPMapTemplate.h (iOS 26.0 SDK, Xcode 26.6).
++        @"didBeginZoomGesture",
++        @"didUpdateZoomGestureWithCenter",
++        @"didEndZoomGestureWithVelocity",
++        @"didBeginRotationGesture",
++        @"didRotateWithCenter",
++        @"rotationDidEndWithVelocity",
++        @"didBeginPitchGesture",
++        @"pitchWithCenter",
++        @"pitchEndedWithCenter",
+         @"didDismissPanningInterface",
+         @"willDismissPanningInterface",
+         @"didShowPanningInterface",
+@@ -978,9 +989,13 @@ - (void) applyConfigForMapTemplate:(CPMapTemplate*)mapTemplate templateId:(NSStr
      }
  
      if ([config objectForKey:@"render"]) {
@@ -119,3 +137,143 @@ index 153dbad..3e6f610 100644
      }
  }
  
+@@ -1460,6 +1475,43 @@ - (void)mapTemplate:(CPMapTemplate *)mapTemplate didUpdatePanGestureWithTranslat
+     [self sendTemplateEventWithName:mapTemplate name:@"didUpdatePanGestureWithTranslation" json:@{ @"translation": @{ @"x": @(translation.x), @"y": @(translation.y) }, @"velocity": @{ @"x": @(velocity.x), @"y": @(velocity.y) }}];
+ }
+ 
++// Convoy: iOS-26 multitouch map gestures (pinch/zoom, rotate, pitch).
++// Signatures verified against CarPlay/CPMapTemplate.h in the iOS 26.0 SDK
++// (Xcode 26.6). All CPMapTemplateDelegate gesture callbacks below are
++// API_AVAILABLE(ios(26.0)); the SDK-max compile guard keeps this file building
++// on older Xcode toolchains (the selectors simply won't be compiled in).
++// NOTE (from Apple's header): like the pan gesture, these "may not be called
++// when connected to some CarPlay systems" — real head units can gate raw touch.
++#if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 260000
++- (void)mapTemplateDidBeginZoomGesture:(CPMapTemplate *)mapTemplate API_AVAILABLE(ios(26.0)) {
++    [self sendTemplateEventWithName:mapTemplate name:@"didBeginZoomGesture"];
++}
++- (void)mapTemplate:(CPMapTemplate *)mapTemplate didUpdateZoomGestureWithCenter:(CGPoint)center scale:(CGFloat)scale velocity:(CGFloat)velocity API_AVAILABLE(ios(26.0)) {
++    [self sendTemplateEventWithName:mapTemplate name:@"didUpdateZoomGestureWithCenter" json:@{ @"center": @{ @"x": @(center.x), @"y": @(center.y) }, @"scale": @(scale), @"velocity": @(velocity) }];
++}
++- (void)mapTemplate:(CPMapTemplate *)mapTemplate didEndZoomGestureWithVelocity:(CGFloat)velocity API_AVAILABLE(ios(26.0)) {
++    [self sendTemplateEventWithName:mapTemplate name:@"didEndZoomGestureWithVelocity" json:@{ @"velocity": @(velocity) }];
++}
++- (void)mapTemplateDidBeginRotationGesture:(CPMapTemplate *)mapTemplate API_AVAILABLE(ios(26.0)) {
++    [self sendTemplateEventWithName:mapTemplate name:@"didBeginRotationGesture"];
++}
++- (void)mapTemplate:(CPMapTemplate *)mapTemplate didRotateWithCenter:(CGPoint)center rotation:(CGFloat)rotation velocity:(CGFloat)velocity API_AVAILABLE(ios(26.0)) {
++    [self sendTemplateEventWithName:mapTemplate name:@"didRotateWithCenter" json:@{ @"center": @{ @"x": @(center.x), @"y": @(center.y) }, @"rotation": @(rotation), @"velocity": @(velocity) }];
++}
++- (void)mapTemplate:(CPMapTemplate *)mapTemplate rotationDidEndWithVelocity:(CGFloat)velocity API_AVAILABLE(ios(26.0)) {
++    [self sendTemplateEventWithName:mapTemplate name:@"rotationDidEndWithVelocity" json:@{ @"velocity": @(velocity) }];
++}
++- (void)mapTemplateDidBeginPitchGesture:(CPMapTemplate *)mapTemplate API_AVAILABLE(ios(26.0)) {
++    [self sendTemplateEventWithName:mapTemplate name:@"didBeginPitchGesture"];
++}
++- (void)mapTemplate:(CPMapTemplate *)mapTemplate pitchWithCenter:(CGPoint)center API_AVAILABLE(ios(26.0)) {
++    [self sendTemplateEventWithName:mapTemplate name:@"pitchWithCenter" json:@{ @"center": @{ @"x": @(center.x), @"y": @(center.y) } }];
++}
++- (void)mapTemplate:(CPMapTemplate *)mapTemplate pitchEndedWithCenter:(CGPoint)center API_AVAILABLE(ios(26.0)) {
++    [self sendTemplateEventWithName:mapTemplate name:@"pitchEndedWithCenter" json:@{ @"center": @{ @"x": @(center.x), @"y": @(center.y) } }];
++}
++#endif
++
+ 
+ 
+ # pragma SearchTemplate
+diff --git a/node_modules/react-native-carplay/lib/templates/MapTemplate.d.ts b/node_modules/react-native-carplay/lib/templates/MapTemplate.d.ts
+index 442b0a5..7f21320 100644
+--- a/node_modules/react-native-carplay/lib/templates/MapTemplate.d.ts
++++ b/node_modules/react-native-carplay/lib/templates/MapTemplate.d.ts
+@@ -95,6 +95,46 @@ export interface MapTemplateConfig extends TemplateConfig {
+     onPanEndedWithDirection?(e: {
+         direction: string;
+     }): void;
++    /**
++     * Convoy: raw multitouch map gestures.
++     * Pan-translation is available since iOS 12; zoom/rotate/pitch require iOS 26.
++     * `center` is in screen points on the CarPlay display. `scale` is the pinch
++     * scale factor (relative), `rotation` is in radians, velocities are per-second.
++     * Apple gates raw touch on some head units, so these may not fire everywhere.
++     */
++    onDidBeginPanGesture?(): void;
++    onDidUpdatePanGesture?(e: {
++        translation: { x: number; y: number };
++        velocity: { x: number; y: number };
++    }): void;
++    onDidEndPanGesture?(e: {
++        velocity: { x: number; y: number };
++    }): void;
++    onDidBeginZoomGesture?(): void;
++    onDidUpdateZoomGesture?(e: {
++        center: { x: number; y: number };
++        scale: number;
++        velocity: number;
++    }): void;
++    onDidEndZoomGesture?(e: {
++        velocity: number;
++    }): void;
++    onDidBeginRotationGesture?(): void;
++    onDidRotate?(e: {
++        center: { x: number; y: number };
++        rotation: number;
++        velocity: number;
++    }): void;
++    onDidEndRotation?(e: {
++        velocity: number;
++    }): void;
++    onDidBeginPitchGesture?(): void;
++    onDidPitch?(e: {
++        center: { x: number; y: number };
++    }): void;
++    onDidEndPitch?(e: {
++        center: { x: number; y: number };
++    }): void;
+     onSelectedPreviewForTrip?(e: {
+         tripId: string;
+         routeIndex: number;
+@@ -125,6 +165,18 @@ export declare class MapTemplate extends Template<MapTemplateConfig> {
+         panWithDirection: string;
+         panBeganWithDirection: string;
+         panEndedWithDirection: string;
++        didBeginPanGesture: string;
++        didUpdatePanGestureWithTranslation: string;
++        didEndPanGestureWithVelocity: string;
++        didBeginZoomGesture: string;
++        didUpdateZoomGestureWithCenter: string;
++        didEndZoomGestureWithVelocity: string;
++        didBeginRotationGesture: string;
++        didRotateWithCenter: string;
++        rotationDidEndWithVelocity: string;
++        didBeginPitchGesture: string;
++        pitchWithCenter: string;
++        pitchEndedWithCenter: string;
+         selectedPreviewForTrip: string;
+         didCancelNavigation: string;
+         startedTrip: string;
+diff --git a/node_modules/react-native-carplay/lib/templates/MapTemplate.js b/node_modules/react-native-carplay/lib/templates/MapTemplate.js
+index 839b590..1a0b7ca 100644
+--- a/node_modules/react-native-carplay/lib/templates/MapTemplate.js
++++ b/node_modules/react-native-carplay/lib/templates/MapTemplate.js
+@@ -28,6 +28,21 @@ class MapTemplate extends Template_1.Template {
+             panWithDirection: 'onPanWithDirection',
+             panBeganWithDirection: 'onPanBeganWithDirection',
+             panEndedWithDirection: 'onPanEndedWithDirection',
++            // Convoy: raw multitouch map gestures. The pan-translation gesture is
++            // emitted natively but was never mapped to a callback; the zoom/rotate/
++            // pitch events are iOS-26 (see RNCarPlay.m + CPMapTemplate.h).
++            didBeginPanGesture: 'onDidBeginPanGesture',
++            didUpdatePanGestureWithTranslation: 'onDidUpdatePanGesture',
++            didEndPanGestureWithVelocity: 'onDidEndPanGesture',
++            didBeginZoomGesture: 'onDidBeginZoomGesture',
++            didUpdateZoomGestureWithCenter: 'onDidUpdateZoomGesture',
++            didEndZoomGestureWithVelocity: 'onDidEndZoomGesture',
++            didBeginRotationGesture: 'onDidBeginRotationGesture',
++            didRotateWithCenter: 'onDidRotate',
++            rotationDidEndWithVelocity: 'onDidEndRotation',
++            didBeginPitchGesture: 'onDidBeginPitchGesture',
++            pitchWithCenter: 'onDidPitch',
++            pitchEndedWithCenter: 'onDidEndPitch',
+             selectedPreviewForTrip: 'onSelectedPreviewForTrip',
+             didCancelNavigation: 'onDidCancelNavigation',
+             startedTrip: 'onStartedTrip',

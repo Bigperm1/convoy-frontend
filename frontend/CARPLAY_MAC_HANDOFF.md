@@ -16,6 +16,31 @@ tests + docs — not needed for the CarPlay work.)
 
 ---
 
+## ⚠️ SESSION UPDATE 2026-07-03 (Mac): pinch code DONE, but CarPlay crashes on iOS 26
+- **Step 1 (verify selectors) = DONE.** The iOS-26 gesture selectors were confirmed against
+  `CarPlay/CPMapTemplate.h` in the **iOS 26.5 SDK** and they match the patch exactly:
+  `didUpdateZoomGestureWithCenter:scale:velocity:`, `didRotateWithCenter:rotation:velocity:`,
+  `pitchWithCenter:` (all `API_AVAILABLE(ios(26.0))`). The raw pinch path is real — the button
+  FALLBACK is not needed for the API's sake.
+- **Pinch/zoom feature = code-complete & builds clean** (native patch + carStore + ConvoyCarPlay +
+  CarMapView all present; `yarn typecheck` passes; local Xcode build succeeds and runs on the
+  iOS 26.5 simulator).
+- **iOS-26 Simulator CarPlay crash (RESOLVED as simulator-only):** In the **iOS 26.5 Simulator**,
+  opening Convoy CarPlay aborts `CarPlayTemplateUIHost` in
+  `-[CPSMapTemplateViewController _updateShareButtonVisibility]` (iOS-26.1 destination-sharing;
+  unrecognized selector `vehicleSupportsDestinationSharing`). **Confirmed 2026-07-03 to be an Apple
+  Simulator bug, NOT a real-world issue:** build 60 on a real **iPhone (iOS 26.6)** over wireless
+  CarPlay opened the map fine, no crash. So CarPlay is OK on real iOS-26 cars; the crash only blocks
+  Simulator-based CarPlay testing on iOS 26.
+- **Consequence for pinch:** live-test pinch on a **real device** (build 61 + a **touchscreen** head
+  unit) — NOT in the Simulator (CarPlay won't open there on iOS 26). Code is done & SDK-verified.
+- **Full write-up + real-device result + reports + crash .ips:** `docs/carplay-ios26-crash/`
+  (read `README.md` first).
+- Local-build gotcha found this session: CocoaPods aborts unless `LANG=en_US.UTF-8` (and
+  `LC_ALL`) are exported before `expo run:ios` / `pod install`.
+
+---
+
 ## PRIMARY TASK: iOS-26 CarPlay multitouch (pinch / zoom / pan / rotate)
 Goal: raw-touch pinch/zoom/pan on the CarPlay map. This was BLOCKED on Windows because the exact
 iOS-26 `CPMapTemplateDelegate` gesture-callback **selector names were unverifiable without the Xcode

@@ -34,7 +34,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated } from 'react-native';
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
-import { setCarState, getCarState, useCarStore, type CarPeer } from './carStore';
+import { setCarState, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
@@ -281,7 +281,10 @@ export function CarSurface() {
   useEffect(() => {
     Animated.spring(limitSlide, { toValue: showLimit ? 1 : 0, useNativeDriver: true, tension: 80, friction: 12 }).start();
   }, [showLimit]);
-  const limitSlideX = limitSlide.interpolate({ inputRange: [0, 1], outputRange: [0, 92] });
+  // Slide the posted-limit sign clear of the 84pt-wide speedo pill PLUS a comfortable
+  // gap, so the red over-limit pulse never crowds/overlaps the white sign (84 pill +
+  // 20 gap = 104). Keeps the two HUD tiles visually separated and premium.
+  const limitSlideX = limitSlide.interpolate({ inputRange: [0, 1], outputRange: [0, 104] });
 
   const showMap = hasFix && !!mapUrl;
   // Live @rnmapbox MapView gate. Three conditions, all required:
@@ -399,6 +402,16 @@ export function CarSurface() {
           <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
         </View>
       ) : null}
+
+      {/* TEMP diagnostic for the CarPlay connection / background-location work:
+          which feed last wrote a fix, and its tick. `navtask#N` = the background
+          task is delivering (N keeps climbing even with the phone screen off);
+          `fgfeed` = only the foreground watch is running (freezes on screen-lock).
+          Shown on the LIVE map so a mid-drive freeze is diagnosable on the head
+          unit itself. Remove once the background-location fix is verified. */}
+      <View style={styles.mapFeedDiag} pointerEvents="none">
+        <Text style={styles.mapFeedDiagText} numberOfLines={1}>{`feed=${s.carDbg ?? '-'}`}</Text>
+      </View>
     </>
   );
 
@@ -656,10 +669,27 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // reports police at the driver's current spot via the phone's reportAlert.
             mapButtons: [
               { id: 'police', image: require('../../assets/images/police.png') },
+              // Recenter: the only reliably-touchable "compass/recenter" affordance on
+              // CarPlay (overlays can't receive taps). Resets the driver's pinch-zoom
+              // bias back to the speed-aware auto follow-zoom via the gesture bus →
+              // CarMapView's 'recenter' handler. (The chase camera already keeps the
+              // car centered every frame, so recenter == drop the manual zoom.)
+              { id: 'recenter', image: require('../../assets/images/recenter.png') },
             ],
             onMapButtonPressed: (e: { id: string }) => {
               if (e?.id === 'police') onReportPoliceRef.current?.();
+              else if (e?.id === 'recenter') emitCarGesture({ kind: 'recenter' });
             },
+            // iOS-26 raw pinch/zoom on the CarPlay map (react-native-carplay patch +
+            // CPMapTemplate.h gesture delegate). Forwarded to CarMapView via the
+            // gesture bus, which biases the lockstep follow-zoom. Apple gates raw
+            // touch on some head units, so these may not fire on every car — the
+            // native map buttons remain the guaranteed-touchable fallback.
+            onDidBeginZoomGesture: () => emitCarGesture({ kind: 'zoomBegin' }),
+            onDidUpdateZoomGesture: (e: { scale: number; velocity: number }) =>
+              emitCarGesture({ kind: 'zoom', scale: e.scale, velocity: e.velocity }),
+            onDidEndZoomGesture: (e: { velocity: number }) =>
+              emitCarGesture({ kind: 'zoomEnd', velocity: e.velocity }),
           });
           mapTemplateRef.current = mapTemplate;
 
@@ -847,6 +877,9 @@ const styles = StyleSheet.create({
   brand: { color: '#2DEC86', fontSize: 44, fontWeight: '900', letterSpacing: 4 },
   sub: { color: '#9AA0A6', fontSize: 18, marginTop: 8 },
   carDbgLine: { color: '#77FF88', fontSize: 11, fontWeight: '700', marginTop: 14, textAlign: 'center' },
+  // TEMP: live-map feed indicator for the CarPlay background-location work (remove after verify).
+  mapFeedDiag: { position: 'absolute', top: 6, right: 12, backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
+  mapFeedDiagText: { color: '#77FF88', fontSize: 11, fontWeight: '700' },
   dist: { color: '#F4F4F4', fontSize: 48, fontWeight: '800', letterSpacing: -1 },
   inst: { color: '#F4F4F4', fontSize: 22, fontWeight: '600', marginTop: 4, textAlign: 'center' },
   meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },

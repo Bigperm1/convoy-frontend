@@ -82,6 +82,15 @@ zoom/recenter/pan BUTTONS instead — JS-only, works on every head unit.
   money — LOCAL Xcode builds are free; prefer local for iteration.
 - Commits end with: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 
+## Git auth (for pushing your build-61 work back up):
+The repo is **PUBLIC**, so `git clone` needs NO token. But **pushing needs a valid
+GitHub PAT** (classic, `repo` scope — from github.com/settings/tokens/new). Ask the
+maintainer for one; do NOT hardcode any token in a committed file (public repo).
+To avoid a non-interactive hang, push with the token in the remote URL + credential
+helper disabled: `git remote set-url origin https://<TOKEN>@github.com/Bigperm1/convoy-frontend.git`
+then `git -c credential.helper= push origin mapbox-migration`. (The prior token expired
+2026-07 — that was the whole reason pushes hung on Windows; the maintainer knows to issue a fresh one.)
+
 ## Also worth nailing with live Mapbox tools (couldn't fix blind on Windows):
 The nav route line runs SOLID through the car (no gap/vanish) on phone + CarPlay, even though the
 `applyCarGapGradient` + `lineTrimOffset` code is logically correct (reviewed multiple times) and

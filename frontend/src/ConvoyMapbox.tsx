@@ -1557,12 +1557,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           <ShapeSource id="convoy-congestion" shape={congestionFeature} lineMetrics>
             <LineLayer
               id="cong-casing"
-              slot="middle"
+              slot="top"
               style={{ lineColor: selEdge, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
             <LineLayer
               id="cong-core"
-              slot="middle"
+              slot="top"
               style={{ lineGradient: congestionRoute!.gradient, lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
           </ShapeSource>

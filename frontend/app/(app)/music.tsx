@@ -19,6 +19,7 @@ import { startLogin, getStoredToken } from "../../src/spotify";
 import SpotifyMusic from "../../src/SpotifyMusic";
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
+import { BlurView } from "expo-blur";
 import { COLORS } from "../../src/theme";
 import LogoMenu from "../../src/components/LogoMenu";
 import * as Haptics from "expo-haptics";
@@ -647,38 +648,60 @@ export default function MusicScreen() {
         )}
       </ScrollView>
 
-      {/* ===== Now-playing bar ===== */}
+      {/* ===== Now-playing player — art-tinted Liquid Glass ===== */}
+      {/* The current album art is rendered blurred BEHIND a dark BlurView so the
+          cover's colours glow through a frosted panel (Apple's now-playing look),
+          with a light hairline + drop shadow for the floating "glass" feel. Shadow
+          lives on an outer wrapper (overflow visible); the inner wrapper clips the
+          blur/art to the rounded corners. */}
       {nowPlaying && (
-        <View style={styles.nowBar}>
-          {artURL(song?.artworkUrl ?? song?.artwork?.url, 96) ? (
-            <Image source={{ uri: artURL(song?.artworkUrl ?? song?.artwork?.url, 96) }} style={styles.nowArt} contentFit="cover" />
-          ) : (
-            <ArtFallback seed={song?.title ?? song?.name ?? "?"} size={44} radius={8} />
-          )}
-          <View style={{ flex: 1 }}>
-            <Text style={styles.nowTitle} numberOfLines={1}>{song?.title ?? song?.name ?? "Now Playing"}</Text>
-            <Text style={styles.nowSub} numberOfLines={1}>{song?.artistName ?? song?.artist ?? ""}</Text>
+        <View style={styles.nowShadow} pointerEvents="box-none">
+          <View style={styles.nowWrap}>
+            {artURL(song?.artworkUrl ?? song?.artwork?.url, 300) ? (
+              <Image
+                source={{ uri: artURL(song?.artworkUrl ?? song?.artwork?.url, 300) }}
+                style={StyleSheet.absoluteFill}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+              />
+            ) : (
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: "#1C1C1E" }]} />
+            )}
+            <BlurView intensity={64} tint="dark" style={StyleSheet.absoluteFill} />
+            <View style={[StyleSheet.absoluteFill, styles.nowScrim]} pointerEvents="none" />
+
+            <View style={styles.nowRow}>
+              {artURL(song?.artworkUrl ?? song?.artwork?.url, 96) ? (
+                <Image source={{ uri: artURL(song?.artworkUrl ?? song?.artwork?.url, 96) }} style={styles.nowArt} contentFit="cover" />
+              ) : (
+                <ArtFallback seed={song?.title ?? song?.name ?? "?"} size={46} radius={10} />
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.nowTitle} numberOfLines={1}>{song?.title ?? song?.name ?? "Now Playing"}</Text>
+                <Text style={styles.nowSub} numberOfLines={1}>{song?.artistName ?? song?.artist ?? ""}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => { Haptics.selectionAsync().catch(() => {}); setShareOpen(true); }}
+                hitSlop={8}
+                testID="am-share"
+                style={{ marginRight: 2 }}
+              >
+                <Ionicons name="share-outline" size={20} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={toggleAppleShuffle} hitSlop={8} testID="am-shuffle" style={{ marginRight: 12 }}>
+                <Ionicons name="shuffle" size={20} color={appleShuffle ? AM_PINK[1] : "rgba(235,235,245,0.6)"} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => skipPrev()} hitSlop={8} testID="am-prev">
+                <Ionicons name="play-skip-back" size={22} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => toggle()} hitSlop={8} style={{ marginHorizontal: 14 }} testID="am-toggle">
+                <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => skipNext()} hitSlop={8} testID="am-next">
+                <Ionicons name="play-skip-forward" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
           </View>
-          <TouchableOpacity
-            onPress={() => { Haptics.selectionAsync().catch(() => {}); setShareOpen(true); }}
-            hitSlop={8}
-            testID="am-share"
-            style={{ marginRight: 2 }}
-          >
-            <Ionicons name="share-outline" size={20} color={COLORS.text} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={toggleAppleShuffle} hitSlop={8} testID="am-shuffle" style={{ marginRight: 12 }}>
-            <Ionicons name="shuffle" size={20} color={appleShuffle ? AM_PINK[1] : COLORS.textDim} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => skipPrev()} hitSlop={8} testID="am-prev">
-            <Ionicons name="play-skip-back" size={22} color={COLORS.text} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => toggle()} hitSlop={8} style={{ marginHorizontal: 14 }} testID="am-toggle">
-            <Ionicons name={isPlaying ? "pause" : "play"} size={26} color={COLORS.text} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => skipNext()} hitSlop={8} testID="am-next">
-            <Ionicons name="play-skip-forward" size={22} color={COLORS.text} />
-          </TouchableOpacity>
         </View>
       )}
 
@@ -855,18 +878,27 @@ const styles = StyleSheet.create({
 
   footer: { color: "#808080", fontSize: 12, lineHeight: 18, textAlign: "center", paddingHorizontal: 24, marginTop: 26 },
 
-  // ===== Now-playing bar =====
-  nowBar: {
+  // ===== Now-playing player — art-tinted Liquid Glass =====
+  // Outer wrapper carries the drop shadow (needs overflow visible); inner wrapper
+  // clips the blurred art + BlurView to the rounded corners (needs overflow hidden).
+  nowShadow: {
     position: "absolute", left: 12, right: 12, bottom: 96,
+    borderRadius: 20,
+    shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 16,
+  },
+  nowWrap: {
+    borderRadius: 20, overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
+  },
+  // Dark scrim over the blurred art so title/controls stay legible on bright covers.
+  nowScrim: { backgroundColor: "rgba(10,10,12,0.42)" },
+  nowRow: {
     flexDirection: "row", alignItems: "center", gap: 12,
     paddingHorizontal: 12, paddingVertical: 10,
-    backgroundColor: "rgba(34,35,38,0.98)", borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)",
-    shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 12,
   },
-  nowArt: { width: 44, height: 44, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.06)" },
-  nowTitle: { color: COLORS.text, fontSize: 14, fontWeight: "700" },
-  nowSub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
+  nowArt: { width: 46, height: 46, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)" },
+  nowTitle: { color: "#fff", fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
+  nowSub: { color: "rgba(235,235,245,0.72)", fontSize: 12.5, marginTop: 1 },
 
   // ===== Playlist detail sheet =====
   plRoot: { flex: 1, justifyContent: "flex-end" },

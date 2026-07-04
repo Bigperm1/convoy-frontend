@@ -9,7 +9,7 @@ import { api, formatErr, wsUrl } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
 import { useRouter, useFocusEffect } from "expo-router";
-import Glass from "../../src/Glass";
+import Glass, { GlassFill } from "../../src/Glass";
 import ConvoyMapbox, { type Hazard, type Peer, contrastingRouteColor } from "../../src/ConvoyMapbox";
 import DestinationSearch from "../../src/DestinationSearch";
 import CategoryPills, { PlaceResult } from "../../src/components/CategoryPills";
@@ -2856,6 +2856,8 @@ export default function MapScreen() {
         else if (savedMatch) routeChips.push({ key: "ai", label: "AI", idx: -1, color: "#9AA0A6", sub: "Learning…", disabled: true });
         return (
           <View style={[styles.routeSheet, { bottom: TAB_BAR_H + navInset }]} onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>
+            {/* Liquid Glass behind the drive sheet, clipped to the rounded top. */}
+            <GlassFill style={{ borderTopLeftRadius: 22, borderTopRightRadius: 22, overflow: "hidden" }} />
             {/* Grabber — swipe down to collapse to the trip pill. */}
             <View {...sheetPan.panHandlers}>
               <View style={styles.sheetGrabber} />
@@ -3648,7 +3650,7 @@ const styles = StyleSheet.create({
   // (driven by the banner's measured height) so nothing sits underneath it.
   routeSheet: {
     position: "absolute", left: 0, right: 0, bottom: TAB_BAR_H,
-    backgroundColor: "#141416",
+    backgroundColor: "transparent",
     borderTopLeftRadius: 22, borderTopRightRadius: 22,
     borderTopWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)",
     paddingTop: 8, paddingHorizontal: 16,

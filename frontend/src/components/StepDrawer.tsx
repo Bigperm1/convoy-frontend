@@ -187,6 +187,8 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
           </View>
           {onEnd && (
             <TouchableOpacity onPress={onEnd} style={styles.barExit} activeOpacity={0.85} testID="end-nav">
+              {/* Red-tinted Liquid Glass, clipped to the circle. */}
+              <GlassFill tintColor="#B22222" style={{ borderRadius: 30, overflow: "hidden" }} />
               <Text style={styles.barExitText}>Exit</Text>
             </TouchableOpacity>
           )}
@@ -242,7 +244,7 @@ const styles = StyleSheet.create({
   barExit: {
     marginLeft: "auto",
     width: 60, height: 60, borderRadius: 30,
-    backgroundColor: "#B22222",
+    backgroundColor: "transparent",
     borderWidth: 1, borderColor: "#8E8E93",
     alignItems: "center", justifyContent: "center",
   },

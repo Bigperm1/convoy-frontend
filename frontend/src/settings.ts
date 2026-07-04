@@ -118,6 +118,10 @@ musicSource?: 'apple' | 'spotify' | null;
 // Developer: show on-screen diagnostic overlays (map HDG/SL + CarPlay DBG strip).
 // Off by default so the screen is clean; toggled in Settings.
 debugOverlays: boolean;
+// Developer: show CarPlay-specific diagnostic readouts (the feed= breadcrumb on
+// the head unit). Separate from debugOverlays so the car screen can stay clean
+// while phone diagnostics are on. Off by default.
+carplayDebug: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -173,6 +177,7 @@ topSpeed: undefined,
 callSign: undefined,
 musicSource: null,
 debugOverlays: false,
+carplayDebug: false,
 };
 
 // ---- Map mode helpers (single source of truth = settings.mapMode) ----

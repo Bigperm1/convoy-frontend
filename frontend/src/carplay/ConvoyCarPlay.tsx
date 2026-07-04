@@ -374,10 +374,12 @@ export function CarSurface() {
           {/* Self-diagnosing readout (no Mac/logs needed): shows whether the car surface
               has a GPS fix, the actual lat/lng it reads, and which feed last wrote
               (fgfeed / navtask#N / seed:ok / seed:err / seed:no-fg-perm / bgstart:err). */}
-          <Text style={styles.carDbgLine} numberOfLines={2}>
-            {`fix=${hasFix} lat=${typeof s.selfLat === 'number' ? s.selfLat.toFixed(4) : 'null'} `
-              + `lng=${typeof s.selfLng === 'number' ? s.selfLng.toFixed(4) : 'null'}\nfeed=${s.carDbg ?? '-'}`}
-          </Text>
+          {getSettings().carplayDebug === true ? (
+            <Text style={styles.carDbgLine} numberOfLines={2}>
+              {`fix=${hasFix} lat=${typeof s.selfLat === 'number' ? s.selfLat.toFixed(4) : 'null'} `
+                + `lng=${typeof s.selfLng === 'number' ? s.selfLng.toFixed(4) : 'null'}\nfeed=${s.carDbg ?? '-'}`}
+            </Text>
+          ) : null}
         </>
       )}
     </View>
@@ -417,9 +419,11 @@ export function CarSurface() {
           `fgfeed` = only the foreground watch is running (freezes on screen-lock).
           Shown on the LIVE map so a mid-drive freeze is diagnosable on the head
           unit itself. Remove once the background-location fix is verified. */}
-      <View style={styles.mapFeedDiag} pointerEvents="none">
-        <Text style={styles.mapFeedDiagText} numberOfLines={1}>{`feed=${s.carDbg ?? '-'}`}</Text>
-      </View>
+      {getSettings().carplayDebug === true ? (
+        <View style={styles.mapFeedDiag} pointerEvents="none">
+          <Text style={styles.mapFeedDiagText} numberOfLines={1}>{`feed=${s.carDbg ?? '-'}`}</Text>
+        </View>
+      ) : null}
     </>
   );
 

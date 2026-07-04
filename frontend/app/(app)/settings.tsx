@@ -590,6 +590,14 @@ export default function SettingsScreen() {
             value={settings.debugOverlays === true}
             onChange={(v) => setSettings({ debugOverlays: v })}
           />
+          <ToggleRow
+            icon="car-sport-outline"
+            iconColor="#8E8E93"
+            title="CarPlay debug"
+            subtitle="Show the feed breadcrumb + readouts on the CarPlay screen — off by default"
+            value={settings.carplayDebug === true}
+            onChange={(v) => setSettings({ carplayDebug: v })}
+          />
         </Glass>
 
         <View style={{ height: 120 }} />

@@ -38,7 +38,6 @@ import {
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import WeatherHUD from "../../src/components/WeatherHUD";
-import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
 import { useSpeedCameras } from "../../src/speedCameras";
 import { useSpeedLimit, getSpeedLimitDebug } from "../../src/speedLimit";
@@ -2743,7 +2742,7 @@ export default function MapScreen() {
               return (
                 <View style={styles.liveOverlay} pointerEvents="none">
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts · v3 · {isLiquidGlassAvailable() ? "LG:ON" : "LG:off"} · W:{showWeatherLayer ? (weather ? "Y" : "…") : "off"}</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts · v3</Text>
                 </View>
               );
             })()}

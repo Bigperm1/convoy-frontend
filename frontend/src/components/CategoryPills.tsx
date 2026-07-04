@@ -383,12 +383,10 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 6,
     paddingHorizontal: 12, paddingVertical: 8,
     borderRadius: 999,
-    // Translucent frosted floor (renders instantly + uniformly). The row of pills
-    // are adjacent iOS-26 glass elements that morph + re-sample on tab-return, so
-    // per-pill adaptive glass settled at different rates (the leftmost "Gas" pill
-    // lagged dark). This floor gives every pill the SAME frosted base regardless of
-    // that settling; the GlassFill still adds real glass sheen on top.
-    backgroundColor: "rgba(28,28,32,0.55)",
+    // Transparent so the CLEAR glass bends the map at the pill edges. Stability now
+    // comes from the GlassContainer inside GlassFill (not an opaque floor, which
+    // would give the edges a flat colour to refract instead of the live map).
+    backgroundColor: "transparent",
     borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
     shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },

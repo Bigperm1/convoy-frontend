@@ -1,7 +1,7 @@
 import React from "react";
 import { View, StyleSheet, ViewProps, Platform } from "react-native";
 import { BlurView } from "expo-blur";
-import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
+import { GlassView, GlassContainer, isLiquidGlassAvailable } from "expo-glass-effect";
 import { COLORS } from "./theme";
 import { getMapMode, getSettings } from "./settings";
 
@@ -116,7 +116,16 @@ export function GlassFill({
     return <View style={[fill, { backgroundColor: tintColor ?? "rgba(28,28,30,0.72)", opacity: tintColor ? 0.85 : 1 }]} />;
   }
   if (LIQUID_GLASS) {
-    return <GlassView glassEffectStyle="clear" colorScheme="dark" tintColor={tintColor} style={fill} />;
+    // Wrap the glass in a GlassContainer (iOS-26 GlassEffectContainer). It renders
+    // the glass as a STABLE grouped layer — it no longer re-samples/flickers when
+    // the map tab reappears — while the CLEAR material keeps the refractive edge-
+    // lensing that bends the map behind it (the premium "rounded-3D-edge" look).
+    // pointerEvents none so taps fall through to the button content on top.
+    return (
+      <GlassContainer style={fill} pointerEvents="none">
+        <GlassView glassEffectStyle="clear" colorScheme="dark" tintColor={tintColor} style={StyleSheet.absoluteFill} />
+      </GlassContainer>
+    );
   }
   return (
     <>

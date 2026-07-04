@@ -15,7 +15,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { GOOGLE_MAPS_KEY } from "../api";
 import { getSettings } from "../settings";
 import { passesGasFilters, type Octane } from "../gasJockey";
-import { GlassFill, drawerTint } from "../Glass";
+import { GlassFill, hudTint, drawerTint } from "../Glass";
 
 export type PlaceResult = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean; address?: string; rating?: number; ratingCount?: number; distanceM?: number };
 
@@ -260,7 +260,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         delayLongPress={250}
         style={[styles.pill, active && styles.pillActive]}
       >
-        {!active && <GlassFill style={{ borderRadius: 999, overflow: "hidden" }} />}
+        {!active && <GlassFill tintColor={hudTint()} style={{ borderRadius: 999, overflow: "hidden" }} />}
         {loading ? (
           <ActivityIndicator size="small" color={active ? "#1C1C1E" : "#2DEC86"} />
         ) : (
@@ -282,7 +282,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         {PRIMARY.map(renderPill)}
         {/* More pill — always last, opens the overflow sheet. */}
         <TouchableOpacity testID="cat-pill-more" activeOpacity={0.8} onPress={() => setMoreOpen(true)} style={styles.pill}>
-          <GlassFill style={{ borderRadius: 999, overflow: "hidden" }} />
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 999, overflow: "hidden" }} />
           <MaterialCommunityIcons name="dots-horizontal" size={16} color="#2DEC86" />
           <Text style={styles.pillText}>More</Text>
         </TouchableOpacity>

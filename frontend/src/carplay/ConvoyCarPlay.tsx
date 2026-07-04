@@ -37,7 +37,7 @@ import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, have
 import { setCarState, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
-import { GlassFill } from '../Glass';
+import { GlassFill, HUD_TINT } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 import { formatSpeed, getSettings, getMapMode, getRouteColor } from '../settings';
@@ -265,11 +265,11 @@ export function CarSurface() {
   const speedoOver = limitVal != null && speedNum >= (limitVal as number) + overBy;
   // Dark HUD panels a little transparent (0.8) so the map reads through them; the
   // over-limit RED stays solid as an alert. OTA-tunable.
-  // Floor under the GlassFill. UIGlassEffect does not render on the CarPlay scene,
-  // so on the head unit this floor IS the pill — make it solid enough to read on a
-  // BRIGHT (day) basemap too. Speeding = solid candy red (safety: must read as red,
-  // not the faint pink a translucent floor gave over a light map).
-  const speedoBg = speedoOver ? '#E4002B' : 'rgba(22,22,24,0.72)';
+  // Transparent — the pill's look comes from the GlassFill (real UIGlassEffect,
+  // which DOES render on the CarPlay Fabric surface). Over-limit red is carried by
+  // the GlassFill's red tintColor, not a floor, so it's red-tinted glass; the
+  // normal state is dark HUD_TINT glass. A floor here would mute the glass flat.
+  const speedoBg = 'transparent';
   const speedPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!speedoOver) { speedPulse.setValue(1); return; }
@@ -339,13 +339,13 @@ export function CarSurface() {
       {/* Top: maneuver while navigating, else a small CONVOY / nearby chip. */}
       {s.navigating ? (
         <View style={styles.topStrip} pointerEvents="none">
-          <GlassFill style={{ borderRadius: 12, overflow: 'hidden' }} />
+          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 12, overflow: 'hidden' }} />
           <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
           <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
         </View>
       ) : (
         <View style={styles.topChip} pointerEvents="none">
-          <GlassFill style={{ borderRadius: 14, overflow: 'hidden' }} />
+          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 14, overflow: 'hidden' }} />
           <Text style={styles.topChipText}>
             {nearby ? `CONVOY   ·   ${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'CONVOY'}
           </Text>
@@ -355,6 +355,7 @@ export function CarSurface() {
       {/* Bottom-right: arrival / eta / remaining while navigating. */}
       {s.navigating && metaLine ? (
         <View style={styles.bottomMeta} pointerEvents="none">
+          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 10, overflow: 'hidden' }} />
           <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
         </View>
       ) : null}
@@ -397,7 +398,7 @@ export function CarSurface() {
           off-nav the map speaks for itself. */}
       {s.navigating ? (
         <View style={styles.topStrip} pointerEvents="none">
-          <GlassFill style={{ borderRadius: 12, overflow: 'hidden' }} />
+          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 12, overflow: 'hidden' }} />
           <View style={styles.maneuverBox}>
             <Text style={styles.maneuverArrow}>{s.maneuverIcon || '↑'}</Text>
           </View>
@@ -411,6 +412,7 @@ export function CarSurface() {
       {/* Bottom-right: arrival / eta / remaining while navigating. */}
       {s.navigating && metaLine ? (
         <View style={styles.bottomMeta} pointerEvents="none">
+          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 10, overflow: 'hidden' }} />
           <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
         </View>
       ) : null}
@@ -460,7 +462,7 @@ export function CarSurface() {
           </Animated.View>
         ) : null}
         <Animated.View style={[styles.speedPill, { backgroundColor: speedoBg, opacity: speedPulse }]}>
-          <GlassFill tintColor={speedoOver ? '#E4002B' : undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
+          <GlassFill tintColor={speedoOver ? '#E4002B' : HUD_TINT} style={{ borderRadius: 16, overflow: 'hidden' }} />
           <Text style={styles.speedNum}>{spd.value}</Text>
           <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
         </Animated.View>
@@ -471,7 +473,7 @@ export function CarSurface() {
           Shows whenever the phone's weather layer is feeding carStore, incl. nav. */}
       {s.weatherTemp ? (
         <View style={styles.weatherChip} pointerEvents="none">
-          <GlassFill style={{ borderRadius: 12, overflow: 'hidden' }} />
+          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 12, overflow: 'hidden' }} />
           {s.weatherKind ? <WeatherGlyph kind={s.weatherKind as WeatherKind} size={20} /> : null}
           <Text style={styles.weatherText}>{s.weatherTemp}</Text>
         </View>
@@ -482,7 +484,7 @@ export function CarSurface() {
           sign here if it reads mirrored on the head unit.) */}
       {typeof s.heading === 'number' ? (
         <View style={styles.compassDock} pointerEvents="none">
-          <GlassFill style={{ borderRadius: 22, overflow: 'hidden' }} />
+          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 19, overflow: 'hidden' }} />
           <View style={{ transform: [{ rotate: `${-(s.heading || 0)}deg` }] }}>
             <CompassNeedle size={30} />
           </View>
@@ -904,10 +906,10 @@ const styles = StyleSheet.create({
   speedLimitNum: { color: '#000', fontSize: 21, fontWeight: '800', letterSpacing: -0.5, lineHeight: 23 },
   speedLimitUnit: { color: '#333', fontSize: 9, fontWeight: '700', letterSpacing: 0.3, marginTop: 1 },
   // Compass — top-right, below the maneuver banner. Smaller, closer to the edge.
-  compassDock: { position: 'absolute', right: 8, top: 58, width: 38, height: 38, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,12,0.6)', borderRadius: 19, overflow: 'hidden' },
+  compassDock: { position: 'absolute', right: 8, top: 58, width: 38, height: 38, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', borderRadius: 19, overflow: 'hidden' },
   // Weather chip — BOTTOM-left, just above the speedo (left edge aligned, small gap),
   // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
-  weatherChip: { position: 'absolute', left: 56, bottom: 66, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7, paddingVertical: 3, backgroundColor: 'rgba(22,22,24,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
+  weatherChip: { position: 'absolute', left: 56, bottom: 66, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7, paddingVertical: 3, backgroundColor: 'transparent', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
   weatherText: { color: '#F4F4F4', fontSize: 13, fontWeight: '800', marginTop: 1 },
   // --- live static-map mode ---
   preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },
@@ -920,15 +922,15 @@ const styles = StyleSheet.create({
   },
   // Compact maneuver CARD (mirrors the phone banner), tucked TOP-RIGHT: a green arrow
   // box + a [meters / instruction] column. Smaller than the old full-bleed strip.
-  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(11,11,12,0.72)', borderRadius: 12, overflow: 'hidden' },
+  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'transparent', borderRadius: 12, overflow: 'hidden' },
   maneuverBox: { width: 36, height: 36, borderRadius: 9, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
   maneuverArrow: { color: '#0B0B0C', fontSize: 24, fontWeight: '900', lineHeight: 28, marginTop: -1 },
   topTextCol: { flexShrink: 1 },
   topDist: { color: '#2DEC86', fontSize: 17, fontWeight: '800' },
   topInst: { color: '#F4F4F4', fontSize: 12, fontWeight: '600', flexShrink: 1 },
-  topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'rgba(11,11,12,0.72)', borderRadius: 14, overflow: 'hidden' },
+  topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'transparent', borderRadius: 14, overflow: 'hidden' },
   topChipText: { color: '#2DEC86', fontSize: 15, fontWeight: '800', letterSpacing: 1 },
   // ETA / arrival — tucked into the BOTTOM-RIGHT corner, small.
-  bottomMeta: { position: 'absolute', right: 8, bottom: 8, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(11,11,12,0.72)', borderRadius: 10 },
+  bottomMeta: { position: 'absolute', right: 8, bottom: 8, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'transparent', borderRadius: 10, overflow: 'hidden' },
   bottomText: { color: '#C7CCD1', fontSize: 12, fontWeight: '600' },
 });

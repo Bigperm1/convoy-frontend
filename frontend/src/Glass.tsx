@@ -3,17 +3,29 @@ import { View, StyleSheet, ViewProps, Platform } from "react-native";
 import { BlurView } from "expo-blur";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { COLORS } from "./theme";
+import { getMapMode, getSettings } from "./settings";
 
 // iOS 26+ ships the real Liquid Glass material (UIGlassEffect). Everything below
 // (and every screen that uses <Glass/>) gets it automatically there; iOS < 26 and
 // Android fall back to the expo-blur frosted panel, web to a translucent surface.
 const LIQUID_GLASS = isLiquidGlassAvailable();
 
-// Shared dark tint for the map/nav HUD glass (banner, speedo, weather, zoom, FABs,
-// search bar). iOS-26 "regular" glass adapts to the backdrop, so over a bright/day
-// basemap the controls wash out light + unreadable; this pins them dark so they
-// read on any map. NOT used on the music player (which wants clean art-tinted glass).
-export const HUD_TINT = "#1C1C1E";
+// Theme-adaptive tint for the map/nav HUD glass (banner, speedo, weather, zoom,
+// FABs, search bar, pills — phone AND CarPlay). iOS-26 "regular" glass adapts to
+// the backdrop, so it needs help to stay readable AND translucent (like the route
+// drawer / tab bar) on every basemap:
+//   • dawn / day / satellite (LIGHT maps): a TRANSLUCENT dark wash — dark enough to
+//     read, sheer enough that the map still shows through (never the opaque black a
+//     solid hex gave). dawn + day share this.
+//   • dusk / night (DARK maps): NO tint — the clear adaptive glass already reads as
+//     dark frosted there. dusk + night share this.
+// Called at render, so it re-resolves as the auto map mode advances with the clock.
+// NOT used on the music player (which wants clean art-tinted glass).
+export function hudTint(): string | undefined {
+  const mode = getMapMode(getSettings());
+  const darkMap = mode === "dusk" || mode === "night";
+  return darkMap ? undefined : "rgba(20,20,22,0.42)";
+}
 
 type Props = ViewProps & {
   intensity?: number;

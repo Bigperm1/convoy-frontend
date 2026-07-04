@@ -37,7 +37,7 @@ import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, have
 import { setCarState, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
-import { GlassFill, HUD_TINT } from '../Glass';
+import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 import { formatSpeed, getSettings, getMapMode, getRouteColor } from '../settings';
@@ -268,7 +268,7 @@ export function CarSurface() {
   // Transparent — the pill's look comes from the GlassFill (real UIGlassEffect,
   // which DOES render on the CarPlay Fabric surface). Over-limit red is carried by
   // the GlassFill's red tintColor, not a floor, so it's red-tinted glass; the
-  // normal state is dark HUD_TINT glass. A floor here would mute the glass flat.
+  // normal state is dark hudTint glass. A floor here would mute the glass flat.
   const speedoBg = 'transparent';
   const speedPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -339,13 +339,13 @@ export function CarSurface() {
       {/* Top: maneuver while navigating, else a small CONVOY / nearby chip. */}
       {s.navigating ? (
         <View style={styles.topStrip} pointerEvents="none">
-          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 12, overflow: 'hidden' }} />
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 12, overflow: 'hidden' }} />
           <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
           <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
         </View>
       ) : (
         <View style={styles.topChip} pointerEvents="none">
-          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 14, overflow: 'hidden' }} />
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 14, overflow: 'hidden' }} />
           <Text style={styles.topChipText}>
             {nearby ? `CONVOY   ·   ${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'CONVOY'}
           </Text>
@@ -355,7 +355,7 @@ export function CarSurface() {
       {/* Bottom-right: arrival / eta / remaining while navigating. */}
       {s.navigating && metaLine ? (
         <View style={styles.bottomMeta} pointerEvents="none">
-          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 10, overflow: 'hidden' }} />
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 10, overflow: 'hidden' }} />
           <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
         </View>
       ) : null}
@@ -398,7 +398,7 @@ export function CarSurface() {
           off-nav the map speaks for itself. */}
       {s.navigating ? (
         <View style={styles.topStrip} pointerEvents="none">
-          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 12, overflow: 'hidden' }} />
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 12, overflow: 'hidden' }} />
           <View style={styles.maneuverBox}>
             <Text style={styles.maneuverArrow}>{s.maneuverIcon || '↑'}</Text>
           </View>
@@ -412,7 +412,7 @@ export function CarSurface() {
       {/* Bottom-right: arrival / eta / remaining while navigating. */}
       {s.navigating && metaLine ? (
         <View style={styles.bottomMeta} pointerEvents="none">
-          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 10, overflow: 'hidden' }} />
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 10, overflow: 'hidden' }} />
           <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
         </View>
       ) : null}
@@ -462,7 +462,7 @@ export function CarSurface() {
           </Animated.View>
         ) : null}
         <Animated.View style={[styles.speedPill, { backgroundColor: speedoBg, opacity: speedPulse }]}>
-          <GlassFill tintColor={speedoOver ? '#E4002B' : HUD_TINT} style={{ borderRadius: 16, overflow: 'hidden' }} />
+          <GlassFill tintColor={speedoOver ? '#E4002B' : hudTint()} style={{ borderRadius: 16, overflow: 'hidden' }} />
           <Text style={styles.speedNum}>{spd.value}</Text>
           <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
         </Animated.View>
@@ -473,7 +473,7 @@ export function CarSurface() {
           Shows whenever the phone's weather layer is feeding carStore, incl. nav. */}
       {s.weatherTemp ? (
         <View style={styles.weatherChip} pointerEvents="none">
-          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 12, overflow: 'hidden' }} />
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 12, overflow: 'hidden' }} />
           {s.weatherKind ? <WeatherGlyph kind={s.weatherKind as WeatherKind} size={20} /> : null}
           <Text style={styles.weatherText}>{s.weatherTemp}</Text>
         </View>
@@ -484,7 +484,7 @@ export function CarSurface() {
           sign here if it reads mirrored on the head unit.) */}
       {typeof s.heading === 'number' ? (
         <View style={styles.compassDock} pointerEvents="none">
-          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 19, overflow: 'hidden' }} />
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 19, overflow: 'hidden' }} />
           <View style={{ transform: [{ rotate: `${-(s.heading || 0)}deg` }] }}>
             <CompassNeedle size={30} />
           </View>

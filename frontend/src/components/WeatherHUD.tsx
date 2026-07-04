@@ -5,7 +5,7 @@ import { View, Text, StyleSheet, Platform, TouchableOpacity, Animated } from "re
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { WeatherCondition, ForecastDay } from "../weatherLayer";
 import { weatherKind, windDirectionLabel, type WeatherKind } from "../weatherLayer";
-import { GlassFill, HUD_TINT } from "../Glass";
+import { GlassFill, hudTint } from "../Glass";
 
 type Props = {
   weather: WeatherCondition;
@@ -155,7 +155,7 @@ export default function WeatherHUD({ weather, unit, compact, forecast, onOpenCha
       <View style={styles.compactWrap}>
         {cardMounted && (
           <Animated.View style={[styles.forecastCard, cardStyle]}>
-            <GlassFill tintColor={HUD_TINT} style={StyleSheet.absoluteFill} />
+            <GlassFill tintColor={hudTint()} style={StyleSheet.absoluteFill} />
             <Text style={styles.forecastTitle}>5-Day Forecast</Text>
             {forecast && forecast.length > 0 ? (
               forecast.slice(0, 5).map((d) => (
@@ -182,7 +182,7 @@ export default function WeatherHUD({ weather, unit, compact, forecast, onOpenCha
           style={styles.compactChip}
           testID="weather-chip"
         >
-          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 16, overflow: "hidden" }} />
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 16, overflow: "hidden" }} />
           <WeatherGlyph kind={weatherKind(weather)} size={26} />
           <Text style={styles.compactTemp} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{temp}</Text>
         </TouchableOpacity>

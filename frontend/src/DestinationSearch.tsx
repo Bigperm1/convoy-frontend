@@ -7,7 +7,7 @@ import { COLORS } from "./theme";
 import { geocodeQuery } from "./voiceBus";
 import { useAuth } from "./auth";
 import { GOOGLE_MAPS_KEY } from "./api";
-import { GlassFill, HUD_TINT } from "./Glass";
+import { GlassFill, hudTint } from "./Glass";
 
 const KEY = GOOGLE_MAPS_KEY;
 
@@ -233,7 +233,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           own content without affecting avatar placement. */}
       <View style={styles.searchRow} pointerEvents="box-none">
         <View style={styles.bar} {...dismissPan.panHandlers}>
-          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 25, overflow: "hidden" }} />
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 25, overflow: "hidden" }} />
           {/* Convoy logo on the LEFT = the menu button (Google puts its 'G'
               here). Tapping opens the Convoy menu, which drops below the bar.
               Falls back to a search glyph if no logo slot was provided. */}

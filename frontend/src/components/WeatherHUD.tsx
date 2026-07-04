@@ -5,6 +5,7 @@ import { View, Text, StyleSheet, Platform, TouchableOpacity, Animated } from "re
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { WeatherCondition, ForecastDay } from "../weatherLayer";
 import { weatherKind, windDirectionLabel, type WeatherKind } from "../weatherLayer";
+import { GlassFill } from "../Glass";
 
 type Props = {
   weather: WeatherCondition;
@@ -148,6 +149,7 @@ export default function WeatherHUD({ weather, unit, compact, forecast }: Props) 
       <View style={styles.compactWrap}>
         {cardMounted && (
           <Animated.View style={[styles.forecastCard, cardStyle]}>
+            <GlassFill style={StyleSheet.absoluteFill} />
             <Text style={styles.forecastTitle}>5-Day Forecast</Text>
             {forecast && forecast.length > 0 ? (
               forecast.slice(0, 5).map((d) => (
@@ -231,7 +233,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 16,
-    backgroundColor: "rgba(12,12,16,0.95)",
+    overflow: "hidden",
+    backgroundColor: "transparent",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.14)",
     ...Platform.select({

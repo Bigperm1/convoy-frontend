@@ -2740,7 +2740,7 @@ export default function MapScreen() {
               return (
                 <View style={styles.liveOverlay} pointerEvents="none">
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts · v3 · {isLiquidGlassAvailable() ? "LG:ON" : "LG:off"}</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts · v3 · {isLiquidGlassAvailable() ? "LG:ON" : "LG:off"} · W:{showWeatherLayer ? (weather ? "Y" : "…") : "off"}</Text>
                 </View>
               );
             })()}

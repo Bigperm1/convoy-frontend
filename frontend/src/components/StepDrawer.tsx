@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassFill } from "../Glass";
+import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 
 export const DRAWER_HEIGHT = 300;   // height of the slide-up step list
@@ -187,7 +188,15 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
           </View>
           {onEnd && (
             <TouchableOpacity onPress={onEnd} style={styles.barExit} activeOpacity={0.85} testID="end-nav">
-              {/* Candy-apple-red Liquid Glass, clipped to the circle. */}
+              {/* Candy-apple button: a glossy red gradient base (bright top → deep
+                  bottom) gives real candy dimension, and a red-tinted GlassFill on
+                  top refracts THAT gradient (not the dark map) for a liquid-glass
+                  sheen. Both clipped to the circle. */}
+              <LinearGradient
+                colors={["#FF3B5C", "#E4002B", "#B00020"]}
+                locations={[0, 0.5, 1]}
+                style={[StyleSheet.absoluteFill, { borderRadius: 30 }]}
+              />
               <GlassFill tintColor="#E4002B" style={{ borderRadius: 30, overflow: "hidden" }} />
               <Text style={styles.barExitText}>Exit</Text>
             </TouchableOpacity>
@@ -244,9 +253,10 @@ const styles = StyleSheet.create({
   barExit: {
     marginLeft: "auto",
     width: 60, height: 60, borderRadius: 30,
-    // Candy-apple red backing carries the color (glass tint alone is too subtle
-    // over the dark map); the GlassView red tint on top adds the glossy sheen.
-    backgroundColor: "rgba(228,0,43,0.55)",
+    // Color comes from the candy-red LinearGradient child; keep the container
+    // transparent + clip so the gradient + glass render as a clean red circle.
+    backgroundColor: "transparent",
+    overflow: "hidden",
     borderWidth: 1, borderColor: "rgba(255,90,120,0.9)",
     alignItems: "center", justifyContent: "center",
   },

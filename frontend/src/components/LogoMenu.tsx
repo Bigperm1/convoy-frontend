@@ -6,7 +6,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import ConvoyLogo from './ConvoyLogo';
-import { GlassFill } from '../Glass';
 import { useAuth } from '../auth';
 
 const YELLOW = '#2DEC86';
@@ -120,9 +119,10 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
         style={style}
         testID="logo-menu-btn"
       >
-        {/* Liquid Glass behind the Convoy logo button (all pages), clipped circular —
-            clean glass (no dark backing) to match the map FABs. */}
-        <GlassFill style={{ borderRadius: 999, overflow: 'hidden' }} />
+        {/* The glass for this button is provided by the page-level backing that
+            wraps LogoMenu (e.g. mapLogoBacking on the map) — NOT here. A GlassFill
+            inside would stack a second glass layer under the outer one and render
+            a darker inner disc. So the logo mark sits directly on the backing glass. */}
         <ConvoyLogo size={size} />
       </TouchableOpacity>
 

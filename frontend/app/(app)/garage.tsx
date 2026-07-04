@@ -250,6 +250,19 @@ export default function GarageScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      {/* Ambient backdrop — soft color glows over a faint gradient so the Liquid
+          Glass pickers have something to refract. Glass over pure #000 is
+          invisible (it bends whatever is behind it, and black has nothing to
+          bend), so this is what actually makes the glass read on a dark page. */}
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <LinearGradient
+          colors={['#0C1017', '#000000', '#0A0D14']}
+          locations={[0, 0.5, 1]}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.ambientGreen} />
+        <View style={styles.ambientBlue} />
+      </View>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* Header */}
@@ -387,6 +400,9 @@ export default function GarageScreen() {
 
 const styles = StyleSheet.create({
   safe:               { flex: 1, backgroundColor: '#000' },
+  // Soft ambient glows behind the glass pickers (see the backdrop comment above).
+  ambientGreen:       { position: 'absolute', top: 250, left: -90, width: 360, height: 360, borderRadius: 180, backgroundColor: 'rgba(45,236,134,0.16)' },
+  ambientBlue:        { position: 'absolute', bottom: -70, right: -100, width: 380, height: 380, borderRadius: 190, backgroundColor: 'rgba(10,132,255,0.15)' },
   scroll:             { paddingBottom: 60 },
   header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
   backBtn:            { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },

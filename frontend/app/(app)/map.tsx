@@ -2751,7 +2751,10 @@ export default function MapScreen() {
       {/* Top-right logo — absolutely positioned at the SAME screen spot as the
           Comms/Music headers (top iOS52/Android28, right12) so it's pixel-identical
           across tabs. Rendered after topBar so it overlays and stays tappable. */}
-      <View style={styles.mapLogoBacking}><LogoMenu size={38} align="right" /></View>
+      <View style={styles.mapLogoBacking}>
+        <GlassFill style={{ borderRadius: 25, overflow: "hidden" }} />
+        <LogoMenu size={38} align="right" />
+      </View>
 
       {/* ===== Community Routes — horizontal chip strip (visible when there are shared cruises) ===== */}
       {communityRoutes.length > 0 && navMode === "preview" && !destination && (
@@ -3822,7 +3825,7 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 25,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(20,20,22,0.9)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
     shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
@@ -4023,7 +4026,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 5,
     paddingHorizontal: 9, paddingVertical: 3,
     borderRadius: 999,
-    backgroundColor: "rgba(28,28,30,0.78)",
+    backgroundColor: "rgba(120,120,128,0.32)",
     borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
     zIndex: 5,
   },

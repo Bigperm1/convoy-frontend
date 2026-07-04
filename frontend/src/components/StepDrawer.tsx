@@ -244,10 +244,10 @@ const styles = StyleSheet.create({
   barExit: {
     marginLeft: "auto",
     width: 60, height: 60, borderRadius: 30,
-    // Light candy-red backing; the candy look comes mainly from the GlassView's
-    // red tintColor (glossy tinted glass), with this as a subtle floor + the border.
-    backgroundColor: "rgba(228,0,43,0.18)",
-    borderWidth: 1, borderColor: "rgba(228,0,43,0.75)",
+    // Candy-apple red backing carries the color (glass tint alone is too subtle
+    // over the dark map); the GlassView red tint on top adds the glossy sheen.
+    backgroundColor: "rgba(228,0,43,0.55)",
+    borderWidth: 1, borderColor: "rgba(255,90,120,0.9)",
     alignItems: "center", justifyContent: "center",
   },
   barExitText: { color: "#F4F4F4", fontSize: 15, fontWeight: "800", letterSpacing: 0.2 },

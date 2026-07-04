@@ -1703,7 +1703,15 @@ export default function MapScreen() {
   // backgrounded. (Trade-off: foregrounded + parked + unplugged won't auto-dim.)
   useEffect(() => {
     activateKeepAwakeAsync('convoy-nav').catch(() => {});
-    return () => { deactivateKeepAwake('convoy-nav').catch(() => {}); };
+    // Re-assert on every return to foreground. iOS clears isIdleTimerDisabled when
+    // the app backgrounds (phone locked / CarPlay took over), so without this the
+    // screen would start auto-locking again after the first background — which is
+    // exactly the "screen sleeps → CarPlay freezes" the tester hit. Re-disabling it
+    // here keeps the phone awake for the whole drive, wired or wireless.
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') activateKeepAwakeAsync('convoy-nav').catch(() => {});
+    });
+    return () => { sub.remove(); deactivateKeepAwake('convoy-nav').catch(() => {}); };
   }, []);
 
   // ----- Continuous heading + position watcher -----

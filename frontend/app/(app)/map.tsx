@@ -71,10 +71,14 @@ const maneuverIcon = (m?: string, html?: string): any => {
   // arrow. Check the COMPOUND maneuvers (uturn/merge/ramp) before the bare
   // left/right tests, since their names also contain "left"/"right" and would
   // otherwise be drawn as a plain turn arrow.
+  // Keep this DIRECTIONALLY consistent with the CarPlay banner's maneuverArrow()
+  // (ConvoyCarPlay.tsx) so the phone + head unit never show a different arrow for
+  // the same turn. Ramp/exit was "swap-horizontal" (a ⇄) — wrong; it's a rightward
+  // exit like CarPlay's ↗.
   const fromCode = (s: string): string | null => {
-    if (s.includes("uturn") || s.includes("u-turn")) return "refresh";
+    if (s.includes("uturn") || s.includes("u-turn")) return "arrow-undo";
     if (s.includes("merge")) return "git-merge";
-    if (s.includes("ramp")) return "swap-horizontal";
+    if (s.includes("ramp") || s.includes("exit") || s.includes("fork")) return "arrow-redo";
     if (s.includes("left")) return "arrow-back";
     if (s.includes("right")) return "arrow-forward";
     return null;
@@ -86,8 +90,9 @@ const maneuverIcon = (m?: string, html?: string): any => {
   // word boundaries so street names ("Wright St", "Leftbank Ave") don't trip a
   // false turn.
   const h = (html || "").toLowerCase();
-  if (/\bu-?turn\b/.test(h)) return "refresh";
+  if (/\bu-?turn\b/.test(h)) return "arrow-undo";
   if (/\bmerge\b/.test(h)) return "git-merge";
+  if (/\b(exit|ramp|fork)\b/.test(h)) return "arrow-redo";
   if (/\bleft\b/.test(h)) return "arrow-back";
   if (/\bright\b/.test(h)) return "arrow-forward";
   return "arrow-up";

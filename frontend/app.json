@@ -8,11 +8,11 @@
     "scheme": "convoy",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "runtimeVersion": "1.13.1",
+    "runtimeVersion": "1.13.2",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
-      "buildNumber": "60",
+      "buildNumber": "61",
       "infoPlist": {
         "NSAppleMusicUsageDescription": "Play and control Apple Music right inside Convoy",
         "NSLocationWhenInUseUsageDescription": "Show nearby drivers and hazards on the map",
@@ -31,7 +31,7 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 60,
+      "versionCode": 61,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

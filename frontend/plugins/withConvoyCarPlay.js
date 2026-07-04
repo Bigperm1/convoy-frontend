@@ -403,6 +403,11 @@ final class ConvoyCarRootViewController: UIViewController, ConvoyHostedVC {
     dbg.text = "car: booting"
     dbg.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(dbg)
+    // Build 61: the green cold-connect diagnostic label is HIDDEN for release (its
+    // job — verifying cold-connect reaches p1 — is done). Kept in the tree (still
+    // updated/constrained, just not visible) so the load-bearing commit path around
+    // it is untouched; flip to false to bring it back for native debugging.
+    dbg.isHidden = true
     // CENTERED (was pinned top-left, hidden behind the CarPlay side bar) so the full
     // diagnostic line is readable on the head unit.
     NSLayoutConstraint.activate([

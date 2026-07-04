@@ -2685,16 +2685,13 @@ export default function MapScreen() {
         onHazardPress={(h: any) => setSelected(h)}
         onHazardLongPress={handleHazardLongPress}
         onPeerPress={(p: any) => {
-          // Find the matching presence record (freshest — has online_at, topSpeed,
-          // etc.). Always preserve the peer's PB: prefer the live presence value,
-          // else fall back to whatever the tapped marker carried, so the YOHB
-          // card's PB never drops to "—" when we actually have the number.
-          const full = presence.peers.find((pp) => pp.user_id === p.user_id);
-          setSelectedPeer(
-            full
-              ? { ...full, topSpeed: full.topSpeed ?? p.topSpeed }
-              : { user_id: p.user_id, handle: p.handle, lat: p.lat, lng: p.lng, carType: p.carType, topSpeed: p.topSpeed }
-          );
+          // Open the card with the FULLY-MERGED peer (presence + /users/nearby): car
+          // paint + body, PB, heading, online status — the SAME object the marker
+          // renders from (which is why the pin is correctly coloured). The old code
+          // rebuilt a thin object on the non-presence path, dropping carColor/
+          // activeColor (card showed the default dark GRC, not the peer's real paint)
+          // and topSpeed (PB showed "—"). livePeerById carries every field.
+          setSelectedPeer((livePeerById.get(p.user_id) || p) as any);
         }}
         onExternalAlertPress={(a: any) => Alert.alert(`${a.type}${a.subtype ? " · " + a.subtype : ""}`, "Live alert from Convoy feed.")}
         places={placePins}

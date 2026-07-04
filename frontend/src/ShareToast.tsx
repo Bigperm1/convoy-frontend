@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Animated, StyleSheet, Text, TouchableOpacity, View, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
+import { GlassFill } from "./Glass";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -124,7 +124,7 @@ export default function ShareToast() {
     >
       <View style={styles.card}>
         {Platform.OS !== "web" ? (
-          <BlurView tint="dark" intensity={64} style={StyleSheet.absoluteFill} />
+          <GlassFill intensity={64} />
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(20,20,24,0.96)" }]} />
         )}

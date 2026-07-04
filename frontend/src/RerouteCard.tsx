@@ -20,7 +20,7 @@ import React, { useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { BlurView } from "expo-blur";
+import { GlassFill } from "./Glass";
 import { COLORS } from "./theme";
 import { decodePolyline, type NavRoute } from "./nav";
 import { MAPBOX_PUBLIC_TOKEN } from "./initMapbox";
@@ -84,7 +84,7 @@ export default function RerouteCard({ visible, route, title, subtitle, savedMin,
         <View style={styles.cardWrap}>
           <View style={styles.card}>
             {Platform.OS !== "web" ? (
-              <BlurView tint="dark" intensity={75} style={StyleSheet.absoluteFill} />
+              <GlassFill intensity={75} />
             ) : (
               <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(18,19,22,0.96)" }]} />
             )}

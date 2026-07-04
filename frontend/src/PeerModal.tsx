@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
+import { GlassFill } from "./Glass";
 import { Image } from "expo-image";
 import { COLORS } from "./theme";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
@@ -92,7 +92,7 @@ export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed
         <TouchableOpacity activeOpacity={1} onPress={() => {}} style={styles.cardWrap}>
           <View style={styles.card}>
             {Platform.OS !== "web" ? (
-              <BlurView tint="dark" intensity={70} style={StyleSheet.absoluteFill} />
+              <GlassFill intensity={70} />
             ) : (
               <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(20,20,24,0.92)" }]} />
             )}

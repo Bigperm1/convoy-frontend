@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, Animated, Easing, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
+import { GlassFill } from "./Glass";
 import { useRouter, usePathname } from "expo-router";
 import { COLORS } from "./theme";
 import { voiceBus, VoiceCommand } from "./voiceBus";
@@ -92,7 +92,7 @@ export default function VoiceController() {
         >
           <View style={styles.banner}>
             {Platform.OS === "ios" ? (
-              <BlurView tint="dark" intensity={70} style={StyleSheet.absoluteFill} />
+              <GlassFill intensity={70} />
             ) : (
               <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(20,20,22,0.92)" }]} />
             )}

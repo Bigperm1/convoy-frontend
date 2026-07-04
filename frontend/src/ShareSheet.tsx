@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
+import { GlassFill } from "./Glass";
 import * as Haptics from "expo-haptics";
 import { COLORS } from "./theme";
 import { api, formatErr } from "./api";
@@ -161,7 +161,7 @@ export default function ShareSheet({ visible, onClose, share }: Props) {
         <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
         <View style={styles.sheet}>
           {Platform.OS !== "web" ? (
-            <BlurView tint="dark" intensity={60} style={StyleSheet.absoluteFill} />
+            <GlassFill intensity={60} />
           ) : (
             <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(18,18,22,0.97)" }]} />
           )}

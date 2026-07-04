@@ -72,3 +72,23 @@ export default function Glass({
     </View>
   );
 }
+
+// Absolute-fill glass LAYER for surfaces that already manage their own rounded/
+// clipped container (modals, sheets, toasts) and just want the material behind
+// their content. Real iOS-26 Liquid Glass; BlurView fallback below; translucent
+// surface on web. Drop-in replacement for a `<BlurView style={absoluteFill} />`.
+export function GlassFill({
+  intensity = 64,
+  tint = "dark",
+}: {
+  intensity?: number;
+  tint?: "light" | "dark" | "default";
+}) {
+  if (Platform.OS === "web") {
+    return <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(28,28,30,0.72)" }]} />;
+  }
+  if (LIQUID_GLASS) {
+    return <GlassView glassEffectStyle="regular" colorScheme="dark" style={StyleSheet.absoluteFill} />;
+  }
+  return <BlurView intensity={intensity} tint={tint} style={StyleSheet.absoluteFill} />;
+}

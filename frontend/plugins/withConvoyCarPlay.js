@@ -137,6 +137,7 @@ enum ConvoyRNHost {
   static weak var carWindowRef: UIWindow?
   static var carRepaintBudget = 0
   static var carSceneState = "?"
+  static var carBgTask: UIBackgroundTaskIdentifier = .invalid
   static var carConnectAt: Date?
   static var carLastPaintAt: Date?
   static var carActivatedOnce = false
@@ -162,7 +163,29 @@ enum ConvoyRNHost {
     carPainted = false
     carLastPaintAt = nil
     carRepaintBudget = 120
+    beginCarBgTask()
     scheduleCarRepaintTick()
+  }
+
+  // Hold a background task for the cold-connect commit window so the FIRST Fabric
+  // frame can commit even while the phone app is backgrounded (CarPlay-first cold
+  // start, or the phone locked when CarPlay comes up). Without it iOS can suspend
+  // the app before the retry tick lands the commit, so the map only paints once the
+  // user foregrounds the phone — the "Drive together placeholder until foreground"
+  // bug. Ended the instant a real frame commits (carPainted) or on disconnect. This
+  // is bounded by iOS's ~30s task budget (which covers the connect/commit window) —
+  // it is NOT a continuous-render keep-alive for a whole backgrounded drive.
+  static func beginCarBgTask() {
+    if carBgTask != .invalid { return }
+    carBgTask = UIApplication.shared.beginBackgroundTask(withName: "convoy-car-commit") {
+      endCarBgTask()
+    }
+  }
+  static func endCarBgTask() {
+    if carBgTask != .invalid {
+      UIApplication.shared.endBackgroundTask(carBgTask)
+      carBgTask = .invalid
+    }
   }
 
   // Blind safety net during the head unit's boot/handshake (a Toyota TAMM unit can
@@ -469,6 +492,7 @@ final class ConvoyCarRootViewController: UIViewController, ConvoyHostedVC {
       surface.setMinimumSize(target.size, maximumSize: target.size)
       if (surface as AnyObject).synchronouslyWaitFor?(0.3) == true {
         ConvoyRNHost.carPainted = true
+        ConvoyRNHost.endCarBgTask()   // first frame committed — release the hold
       }
     }
   }
@@ -581,6 +605,7 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     ConvoyRNHost.carSceneState = "disc"
     ConvoyRNHost.carConnectAt = nil
     ConvoyRNHost.carActivatedOnce = false
+    ConvoyRNHost.endCarBgTask()
   }
 
   func sceneDidBecomeActive(_ scene: UIScene) {

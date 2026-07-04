@@ -9,6 +9,12 @@ import { COLORS } from "./theme";
 // Android fall back to the expo-blur frosted panel, web to a translucent surface.
 const LIQUID_GLASS = isLiquidGlassAvailable();
 
+// Shared dark tint for the map/nav HUD glass (banner, speedo, weather, zoom, FABs,
+// search bar). iOS-26 "regular" glass adapts to the backdrop, so over a bright/day
+// basemap the controls wash out light + unreadable; this pins them dark so they
+// read on any map. NOT used on the music player (which wants clean art-tinted glass).
+export const HUD_TINT = "#1C1C1E";
+
 type Props = ViewProps & {
   intensity?: number;
   tint?: "light" | "dark" | "default";

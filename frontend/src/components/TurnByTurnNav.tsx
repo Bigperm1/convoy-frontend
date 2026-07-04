@@ -25,7 +25,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Animated } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { LaneArrow } from "../mapboxDirections";
-import { GlassFill } from "../Glass";
+import { GlassFill, HUD_TINT } from "../Glass";
 
 const YELLOW = "#2DEC86";
 const OVER_RED = "#E4002B"; // candy-apple red for the speeding halo + pill tint
@@ -157,7 +157,7 @@ export function SpeedPill({ speedMs, unit, bottom, limitKmh }: { speedMs?: numbe
       )}
       <View style={[styles.speedPill, speeding && styles.speedPillOver]}>
         {/* Glass speedo; red-tinted glass when over the limit. */}
-        <GlassFill tintColor={speeding ? OVER_RED : undefined} style={{ borderRadius: 16, overflow: "hidden" }} />
+        <GlassFill tintColor={speeding ? OVER_RED : HUD_TINT} style={{ borderRadius: 16, overflow: "hidden" }} />
         <Text style={styles.speedValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{value}</Text>
         <Text style={[styles.speedUnit, speeding && styles.speedUnitOver]} numberOfLines={1}>{isMph ? "mph" : "km/h"}</Text>
       </View>
@@ -209,8 +209,10 @@ export default function TurnByTurnNav({
       {/* ===== Top maneuver banner — always visible during nav ===== */}
       <View style={styles.bannerWrap} pointerEvents="box-none">
         <View style={styles.banner}>
-          {/* Liquid Glass behind the turn-by-turn banner. */}
-          <GlassFill style={{ borderRadius: 18, overflow: "hidden" }} />
+          {/* Liquid Glass behind the turn-by-turn banner. Dark tint so it stays
+              readable over bright/day basemaps (regular glass otherwise adapts to
+              the backdrop and washes out light). */}
+          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 18, overflow: "hidden" }} />
           <View style={styles.maneuverIconWrap}>
             <Ionicons name={maneuverIcon} size={34} color="#000" />
           </View>

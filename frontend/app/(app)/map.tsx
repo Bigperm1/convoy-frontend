@@ -9,7 +9,7 @@ import { api, formatErr, wsUrl } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
 import { useRouter, useFocusEffect } from "expo-router";
-import Glass, { GlassFill } from "../../src/Glass";
+import Glass, { GlassFill, HUD_TINT } from "../../src/Glass";
 import ConvoyMapbox, { type Hazard, type Peer, contrastingRouteColor } from "../../src/ConvoyMapbox";
 import DestinationSearch from "../../src/DestinationSearch";
 import CategoryPills, { PlaceResult } from "../../src/components/CategoryPills";
@@ -2754,7 +2754,7 @@ export default function MapScreen() {
           Comms/Music headers (top iOS52/Android28, right12) so it's pixel-identical
           across tabs. Rendered after topBar so it overlays and stays tappable. */}
       <View style={styles.mapLogoBacking}>
-        <GlassFill style={{ borderRadius: 25, overflow: "hidden" }} />
+        <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 25, overflow: "hidden" }} />
         <LogoMenu size={38} align="right" />
       </View>
 
@@ -3110,7 +3110,7 @@ export default function MapScreen() {
           Hidden while the Avatar panel is open (the panel overlays this spot); the
           weather chip stays put just below the panel, so nothing shuffles. */}
       <View style={[styles.zoomStack, { bottom: weatherBottom + 68, display: (avatarPanelOpen || (weatherForecastOpen && !!weather && showWeatherLayer)) ? 'none' : 'flex' }]}>
-        <GlassFill style={StyleSheet.absoluteFill} />
+        <GlassFill tintColor={HUD_TINT} style={StyleSheet.absoluteFill} />
         <TouchableOpacity testID="zoom-in-fab" style={styles.zoomBtn} activeOpacity={0.8}
           onPress={() => setZoomOffset((z) => Math.min(3, z + 1))}>
           <Ionicons name="add" size={26} color="#fff" />
@@ -3220,7 +3220,7 @@ export default function MapScreen() {
           onPress={() => { setNorthUpHold(true); setNorthSignal((n) => n + 1); recenterNow(); }}
           activeOpacity={0.85}
         >
-          <GlassFill style={{ borderRadius: 30, overflow: "hidden" }} />
+          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 30, overflow: "hidden" }} />
           <View style={{ transform: [{ rotate: `${-mapHeading}deg` }] }}>
             <CompassNeedle size={54} />
           </View>
@@ -3234,7 +3234,7 @@ export default function MapScreen() {
           onPress={() => reportAlert('police')}
           activeOpacity={0.8}
         >
-          <GlassFill style={{ borderRadius: 30, overflow: "hidden" }} />
+          <GlassFill tintColor={HUD_TINT} style={{ borderRadius: 30, overflow: "hidden" }} />
           <PoliceBadgeIcon size={40} />
         </TouchableOpacity>
         {/* Recenter FAB removed — recentering now lives in the compass tap

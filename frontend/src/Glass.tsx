@@ -80,15 +80,20 @@ export default function Glass({
 export function GlassFill({
   intensity = 64,
   tint = "dark",
+  style,
 }: {
   intensity?: number;
   tint?: "light" | "dark" | "default";
+  // Extra style (e.g. borderRadius + overflow) so callers with rounded corners can
+  // clip the glass. Merged on top of absoluteFill.
+  style?: any;
 }) {
+  const fill = [StyleSheet.absoluteFill, style];
   if (Platform.OS === "web") {
-    return <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(28,28,30,0.72)" }]} />;
+    return <View style={[fill, { backgroundColor: "rgba(28,28,30,0.72)" }]} />;
   }
   if (LIQUID_GLASS) {
-    return <GlassView glassEffectStyle="regular" colorScheme="dark" style={StyleSheet.absoluteFill} />;
+    return <GlassView glassEffectStyle="regular" colorScheme="dark" style={fill} />;
   }
-  return <BlurView intensity={intensity} tint={tint} style={StyleSheet.absoluteFill} />;
+  return <BlurView intensity={intensity} tint={tint} style={fill} />;
 }

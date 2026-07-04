@@ -12,6 +12,7 @@ import {
   View, Text, StyleSheet, ScrollView, Animated, PanResponder, TouchableOpacity, Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GlassFill } from "../Glass";
 import { Ionicons } from "@expo/vector-icons";
 
 export const DRAWER_HEIGHT = 300;   // height of the slide-up step list
@@ -173,6 +174,8 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
 
       {/* Collapsed summary bar — always visible during nav, sits above the tab bar. */}
       <View style={[styles.bar, { bottom: TAB_BAR_H + navInset }]}>
+        {/* Liquid Glass behind the nav bar — clipped to the rounded top. */}
+        <GlassFill style={{ borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: "hidden" }} />
         <View {...openPan.panHandlers} style={styles.barGrabZone} testID="step-drawer-handle">
           <View style={styles.grabPill} />
         </View>
@@ -210,7 +213,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: TAB_BAR_H,
     left: 0, right: 0,
-    backgroundColor: "#141416",
+    backgroundColor: "transparent",
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderTopWidth: 2,

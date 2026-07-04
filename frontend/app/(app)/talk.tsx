@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import LogoMenu from '../../src/components/LogoMenu';
 import CommsHoldGlow from '../../src/components/CommsHoldGlow';
+import { GlassFill } from '../../src/Glass';
 import { shareInbox } from '../../src/shareInbox';
 import { api } from '../../src/api';
 import { useAuth } from '../../src/auth';
@@ -679,6 +680,9 @@ export default function TalkScreen() {
             onPress={voxMode ? onMicTap : undefined}
             style={[styles.pttOuter, pressed && styles.pttOuterActive, (!channelId || !!floorHolder) && styles.pttOuterDisabled]}
           >
+            {/* Liquid Glass mic — the outer circle is real glass; the inner disc keeps
+                contrast for the mic glyph. */}
+            <GlassFill style={{ borderRadius: MIC_D / 2, overflow: 'hidden' }} />
             <View style={[styles.pttInner, pressed && styles.pttInnerActive]}>
               <Ionicons name={floorHolder ? 'lock-closed' : 'mic'} size={MIC_ICON_SIZE} color={pressed ? '#fff' : floorHolder ? '#8E8E93' : channelId ? YELLOW : 'rgba(45,236,134,0.5)'} />
             </View>
@@ -897,7 +901,7 @@ const styles = StyleSheet.create({
     borderWidth: 3, borderColor: YELLOW,
   },
   pttOuter: {
-    width: MIC_D, height: MIC_D, borderRadius: MIC_D / 2, backgroundColor: '#0e0e10',
+    width: MIC_D, height: MIC_D, borderRadius: MIC_D / 2, backgroundColor: 'transparent',
     alignItems: 'center', justifyContent: 'center', borderWidth: 6, borderColor: '#2a2a2e',
   },
   pttOuterActive: { borderColor: YELLOW },

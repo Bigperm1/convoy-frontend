@@ -1,8 +1,35 @@
 diff --git a/node_modules/@lomray/react-native-apple-music/ios/MusicItemMapper.swift b/node_modules/@lomray/react-native-apple-music/ios/MusicItemMapper.swift
-index fd92ce8..5a8b713 100644
+index fd92ce8..3cc1bb2 100644
 --- a/node_modules/@lomray/react-native-apple-music/ios/MusicItemMapper.swift
 +++ b/node_modules/@lomray/react-native-apple-music/ios/MusicItemMapper.swift
-@@ -63,15 +63,23 @@ enum MusicItemMapper {
+@@ -33,11 +33,24 @@ enum MusicItemMapper {
+   // MARK: - Playlist
+ 
+   static func map(_ playlist: Playlist) -> [String: Any] {
+-    [
++    // Auto-collage playlists (no custom cover) expose NIL artwork — Apple builds the
++    // 2x2 collage client-side, so MusicKit hands us nothing. Fall back to the first
++    // track's cover so the playlist shows real art in Convoy instead of a gradient
++    // placeholder. Needs the playlist fetched `.with([.tracks])` (LibraryService does).
++    // (Convoy patch.)
++    var art = extractArtworkURL(playlist.artwork)
++    if art.isEmpty, let first = playlist.tracks?.first {
++      switch first {
++      case .song(let s): art = extractArtworkURL(s.artwork)
++      case .musicVideo(let v): art = extractArtworkURL(v.artwork)
++      @unknown default: break
++      }
++    }
++    return [
+       "id": String(describing: playlist.id),
+       "name": playlist.name,
+       "description": playlist.standardDescription ?? "",
+-      "artworkUrl": extractArtworkURL(playlist.artwork),
++      "artworkUrl": art,
+       "trackCount": playlist.tracks?.count ?? 0,
+     ]
+   }
+@@ -63,15 +76,23 @@ enum MusicItemMapper {
        "id": String(describing: item.id),
        "title": item.title,
        "subtitle": String(describing: item.subtitle ?? ""),
@@ -33,7 +60,7 @@ diff --git a/node_modules/@lomray/react-native-apple-music/ios/MusicModule.m b/n
 index 3ec62e2..603b8a7 100644
 --- a/node_modules/@lomray/react-native-apple-music/ios/MusicModule.m
 +++ b/node_modules/@lomray/react-native-apple-music/ios/MusicModule.m
-@@ -27,6 +27,7 @@ RCT_EXTERN_METHOD(skipToNextEntry)
+@@ -27,6 +27,7 @@ @interface RCT_EXTERN_MODULE(MusicModule, RCTEventEmitter)
  RCT_EXTERN_METHOD(skipToPreviousEntry)
  RCT_EXTERN_METHOD(restartCurrentEntry)
  RCT_EXTERN_METHOD(seekToTime:(double)time)

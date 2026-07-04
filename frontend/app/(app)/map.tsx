@@ -2040,6 +2040,12 @@ export default function MapScreen() {
               carType: [u.car_make, u.car_model].filter(Boolean).join(" ").trim() || next[u.id]?.carType,
               carBody: u.car_type || next[u.id]?.carBody,
               carColor: u.car_color || next[u.id]?.carColor,
+              // Carry the peer's persisted personal-best speed so the YOHB hail card
+              // shows THEIR PB. /users/nearby returns the full profile (incl.
+              // top_speed_record), but this mapping never extracted it — so any peer
+              // seen via this REST backstop (the common case) always showed "PB —".
+              // Long-standing bug. Keep a live presence value if we already have one.
+              topSpeed: typeof u.top_speed_record === "number" ? u.top_speed_record : next[u.id]?.topSpeed,
             } as Peer;
           }
         });

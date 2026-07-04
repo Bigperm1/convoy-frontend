@@ -37,6 +37,7 @@ import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, have
 import { setCarState, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
+import { GlassFill } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 import { formatSpeed, getSettings, getMapMode, getRouteColor } from '../settings';
@@ -264,7 +265,9 @@ export function CarSurface() {
   const speedoOver = limitVal != null && speedNum >= (limitVal as number) + overBy;
   // Dark HUD panels a little transparent (0.8) so the map reads through them; the
   // over-limit RED stays solid as an alert. OTA-tunable.
-  const speedoBg = speedoOver ? '#FF3B30' : 'rgba(22,22,24,0.8)';
+  // Dimmed floor under the GlassFill (glass shows through); kept non-zero so the
+  // safety-critical speedo never vanishes if glass doesn't render on the CarPlay scene.
+  const speedoBg = speedoOver ? 'rgba(228,0,43,0.5)' : 'rgba(22,22,24,0.45)';
   const speedPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!speedoOver) { speedPulse.setValue(1); return; }
@@ -448,6 +451,7 @@ export function CarSurface() {
           </Animated.View>
         ) : null}
         <Animated.View style={[styles.speedPill, { backgroundColor: speedoBg, opacity: speedPulse }]}>
+          <GlassFill tintColor={speedoOver ? '#E4002B' : undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
           <Text style={styles.speedNum}>{spd.value}</Text>
           <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
         </Animated.View>
@@ -458,6 +462,7 @@ export function CarSurface() {
           Shows whenever the phone's weather layer is feeding carStore, incl. nav. */}
       {s.weatherTemp ? (
         <View style={styles.weatherChip} pointerEvents="none">
+          <GlassFill style={{ borderRadius: 12, overflow: 'hidden' }} />
           {s.weatherKind ? <WeatherGlyph kind={s.weatherKind as WeatherKind} size={24} /> : null}
           <Text style={styles.weatherText}>{s.weatherTemp}</Text>
         </View>
@@ -468,6 +473,7 @@ export function CarSurface() {
           sign here if it reads mirrored on the head unit.) */}
       {typeof s.heading === 'number' ? (
         <View style={styles.compassDock} pointerEvents="none">
+          <GlassFill style={{ borderRadius: 22, overflow: 'hidden' }} />
           <View style={{ transform: [{ rotate: `${-(s.heading || 0)}deg` }] }}>
             <CompassNeedle size={40} />
           </View>
@@ -896,10 +902,10 @@ const styles = StyleSheet.create({
   speedLimitNum: { color: '#000', fontSize: 24, fontWeight: '800', letterSpacing: -0.5, lineHeight: 26 },
   speedLimitUnit: { color: '#333', fontSize: 10, fontWeight: '700', letterSpacing: 0.3, marginTop: 1 },
   // Compass — top-right, below the maneuver banner. Smaller, closer to the edge.
-  compassDock: { position: 'absolute', right: 8, top: 58, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,12,0.55)', borderRadius: 22 },
+  compassDock: { position: 'absolute', right: 8, top: 58, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,12,0.4)', borderRadius: 22, overflow: 'hidden' },
   // Weather chip — BOTTOM-left, just above the speedo (left edge aligned, small gap),
   // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
-  weatherChip: { position: 'absolute', left: 68, bottom: 78, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(22,22,24,0.8)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  weatherChip: { position: 'absolute', left: 68, bottom: 78, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(22,22,24,0.45)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
   weatherText: { color: '#F4F4F4', fontSize: 14, fontWeight: '800', marginTop: 1 },
   // --- live static-map mode ---
   preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },

@@ -260,7 +260,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         delayLongPress={250}
         style={[styles.pill, active && styles.pillActive]}
       >
-        {!active && <GlassFill style={{ borderRadius: 999, overflow: "hidden" }} />}
+        {!active && <GlassFill tintColor={hudTint()} style={{ borderRadius: 999, overflow: "hidden" }} />}
         {loading ? (
           <ActivityIndicator size="small" color={active ? "#1C1C1E" : "#2DEC86"} />
         ) : (

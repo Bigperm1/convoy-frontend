@@ -24,7 +24,9 @@ const LIQUID_GLASS = isLiquidGlassAvailable();
 export function hudTint(): string | undefined {
   const mode = getMapMode(getSettings());
   const darkMap = mode === "dusk" || mode === "night";
-  return darkMap ? undefined : "rgba(20,20,22,0.42)";
+  // Sheer with the CLEAR (refractive) material so the map still bends through —
+  // just enough dark wash on light basemaps to keep white content legible.
+  return darkMap ? undefined : "rgba(18,18,22,0.28)";
 }
 
 type Props = ViewProps & {
@@ -73,7 +75,7 @@ export default function Glass({
     // pinned dark (Convoy is a dark-only UI) so the glass never flips light.
     return (
       <GlassView
-        glassEffectStyle="regular"
+        glassEffectStyle="clear"
         colorScheme="dark"
         style={[base, style]}
         {...rest}
@@ -114,7 +116,7 @@ export function GlassFill({
     return <View style={[fill, { backgroundColor: tintColor ?? "rgba(28,28,30,0.72)", opacity: tintColor ? 0.85 : 1 }]} />;
   }
   if (LIQUID_GLASS) {
-    return <GlassView glassEffectStyle="regular" colorScheme="dark" tintColor={tintColor} style={fill} />;
+    return <GlassView glassEffectStyle="clear" colorScheme="dark" tintColor={tintColor} style={fill} />;
   }
   return (
     <>

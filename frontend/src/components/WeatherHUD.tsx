@@ -5,7 +5,6 @@ import { View, Text, StyleSheet, Platform, TouchableOpacity, Animated } from "re
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { WeatherCondition, ForecastDay } from "../weatherLayer";
 import { weatherKind, windDirectionLabel, type WeatherKind } from "../weatherLayer";
-import { GlassFill } from "../Glass";
 
 type Props = {
   weather: WeatherCondition;
@@ -184,8 +183,6 @@ export default function WeatherHUD({ weather, unit, compact, forecast }: Props) 
 
   return (
     <View style={styles.chip}>
-      {/* Liquid Glass behind the weather chip. */}
-      <GlassFill style={{ borderRadius: 22, overflow: "hidden" }} />
       <WeatherGlyph kind={weatherKind(weather)} size={20} />
       <Text style={styles.temp}>{temp}</Text>
       <View style={styles.divider} />
@@ -207,7 +204,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    backgroundColor: "transparent",
+    backgroundColor: "rgba(12,12,16,0.88)",
     borderRadius: 22,
     paddingHorizontal: 12,
     paddingVertical: 7,

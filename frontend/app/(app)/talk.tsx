@@ -907,7 +907,7 @@ const styles = StyleSheet.create({
   pttOuterActive: { borderColor: YELLOW },
   pttOuterDisabled: { opacity: 0.5 },
   pttInner: {
-    width: MIC_INNER_D, height: MIC_INNER_D, borderRadius: MIC_INNER_D / 2, backgroundColor: '#141417',
+    width: MIC_INNER_D, height: MIC_INNER_D, borderRadius: MIC_INNER_D / 2, backgroundColor: 'transparent',
     alignItems: 'center', justifyContent: 'center',
   },
   pttInnerActive: { backgroundColor: '#1f1b00' },

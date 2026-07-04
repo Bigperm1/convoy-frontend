@@ -28,7 +28,7 @@ import type { LaneArrow } from "../mapboxDirections";
 import { GlassFill } from "../Glass";
 
 const YELLOW = "#2DEC86";
-const OVER_RED = "#FF3B30";
+const OVER_RED = "#E4002B"; // candy-apple red for the speeding halo + pill tint
 const HOLD_MS = 800;
 const EMA_ALPHA = 0.45;
 // Grace buffer (km/h) before the speedometer flags you as speeding, so a GPS
@@ -157,7 +157,7 @@ export function SpeedPill({ speedMs, unit, bottom, limitKmh }: { speedMs?: numbe
       )}
       <View style={[styles.speedPill, speeding && styles.speedPillOver]}>
         {/* Glass speedo; red-tinted glass when over the limit. */}
-        <GlassFill tintColor={speeding ? "#FF3B30" : undefined} style={{ borderRadius: 16, overflow: "hidden" }} />
+        <GlassFill tintColor={speeding ? OVER_RED : undefined} style={{ borderRadius: 16, overflow: "hidden" }} />
         <Text style={styles.speedValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{value}</Text>
         <Text style={[styles.speedUnit, speeding && styles.speedUnitOver]} numberOfLines={1}>{isMph ? "mph" : "km/h"}</Text>
       </View>

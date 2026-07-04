@@ -120,7 +120,9 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
         style={style}
         testID="logo-menu-btn"
       >
-        {/* Liquid Glass behind the Convoy logo button (all pages). Clipped circular. */}
+        {/* Liquid Glass behind the Convoy logo button (all pages), over a faint dark
+            backing (like the map FABs) so the button stays visible if glass no-ops. */}
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(22,22,24,0.4)', borderRadius: 999 }]} />
         <GlassFill style={{ borderRadius: 999, overflow: 'hidden' }} />
         <ConvoyLogo size={size} />
       </TouchableOpacity>

@@ -187,8 +187,8 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
           </View>
           {onEnd && (
             <TouchableOpacity onPress={onEnd} style={styles.barExit} activeOpacity={0.85} testID="end-nav">
-              {/* Red-tinted Liquid Glass, clipped to the circle. */}
-              <GlassFill tintColor="#B22222" style={{ borderRadius: 30, overflow: "hidden" }} />
+              {/* Candy-apple-red Liquid Glass, clipped to the circle. */}
+              <GlassFill tintColor="#E4002B" style={{ borderRadius: 30, overflow: "hidden" }} />
               <Text style={styles.barExitText}>Exit</Text>
             </TouchableOpacity>
           )}
@@ -244,8 +244,10 @@ const styles = StyleSheet.create({
   barExit: {
     marginLeft: "auto",
     width: 60, height: 60, borderRadius: 30,
-    backgroundColor: "transparent",
-    borderWidth: 1, borderColor: "#8E8E93",
+    // Faint candy-red backing under the glass so the button reads red (and stays
+    // visible) even on the odd surface where the iOS-26 glass layer no-ops.
+    backgroundColor: "rgba(228,0,43,0.4)",
+    borderWidth: 1, borderColor: "rgba(228,0,43,0.75)",
     alignItems: "center", justifyContent: "center",
   },
   barExitText: { color: "#F4F4F4", fontSize: 15, fontWeight: "800", letterSpacing: 0.2 },

@@ -6,7 +6,12 @@ import { COLORS } from "../../src/theme";
 import { View, ActivityIndicator, Platform, StyleSheet, Text, AppState } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import VoiceController from "../../src/VoiceController";
+
+// iOS 26+ → the tab bar floats on real Liquid Glass; older iOS/Android keep the
+// solid dark surface.
+const LIQUID_GLASS = isLiquidGlassAvailable();
 import VoiceTabButton from "../../src/VoiceTabButton";
 import CommsTabButton from "../../src/components/CommsTabButton";
 import MapTabButton from "../../src/components/MapTabButton";
@@ -259,9 +264,10 @@ export default function AppLayout() {
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
-            // Solid #141416 — the SAME surface as the step drawer (StepDrawer.tsx)
-            // so the bottom chrome reads as one continuous dark material.
-            backgroundColor: "#141416",
+            // iOS 26: transparent so the Liquid Glass background (below) shows through;
+            // otherwise solid #141416 — the SAME surface as the step drawer
+            // (StepDrawer.tsx) so the bottom chrome reads as one continuous material.
+            backgroundColor: LIQUID_GLASS ? "transparent" : "#141416",
             borderTopColor: "rgba(255,255,255,0.12)",
             borderTopWidth: StyleSheet.hairlineWidth,
             height: (Platform.OS === 'ios' ? 86 : 84) + navInset,
@@ -271,8 +277,11 @@ export default function AppLayout() {
             // allow the elevated mic to overflow upward
             overflow: "visible",
           },
-          // Solid dark surface (no blur) so the color stays exactly #141416.
-          tabBarBackground: () => null,
+          // iOS 26: real Liquid Glass under the tab bar (floating, translucent — the
+          // Apple look). Older iOS/Android: solid dark surface (no background layer).
+          tabBarBackground: LIQUID_GLASS
+            ? () => <GlassView glassEffectStyle="regular" colorScheme="dark" style={StyleSheet.absoluteFill} />
+            : () => null,
           tabBarActiveTintColor: "#2DEC86",
           tabBarInactiveTintColor: "#FFFFFF",
           // Center the icon+label block and give the word room: a small gap under

@@ -20,7 +20,12 @@ import SpotifyMusic from "../../src/SpotifyMusic";
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
 import { BlurView } from "expo-blur";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { COLORS } from "../../src/theme";
+
+// iOS 26+ ships the real Liquid Glass material (UIGlassEffect); older iOS / Android
+// fall back to the expo-blur frosted panel. Resolved once at module load.
+const LIQUID_GLASS = isLiquidGlassAvailable();
 import LogoMenu from "../../src/components/LogoMenu";
 import * as Haptics from "expo-haptics";
 import ShareSheet from "../../src/ShareSheet";
@@ -667,8 +672,16 @@ export default function MusicScreen() {
             ) : (
               <View style={[StyleSheet.absoluteFill, { backgroundColor: "#1C1C1E" }]} />
             )}
-            <BlurView intensity={64} tint="dark" style={StyleSheet.absoluteFill} />
-            <View style={[StyleSheet.absoluteFill, styles.nowScrim]} pointerEvents="none" />
+            {LIQUID_GLASS ? (
+              /* Real iOS-26 Liquid Glass — refracts the blurred album art behind it,
+                 with the system's live specular/edge lighting. */
+              <GlassView glassEffectStyle="regular" isInteractive style={StyleSheet.absoluteFill} />
+            ) : (
+              /* iOS < 26 / Android fallback: frosted blur. */
+              <BlurView intensity={64} tint="dark" style={StyleSheet.absoluteFill} />
+            )}
+            {/* Lighter scrim under real glass so the material reads; heavier under plain blur. */}
+            <View style={[StyleSheet.absoluteFill, LIQUID_GLASS ? styles.nowScrimGlass : styles.nowScrim]} pointerEvents="none" />
 
             <View style={styles.nowRow}>
               {artURL(song?.artworkUrl ?? song?.artwork?.url, 96) ? (
@@ -892,6 +905,8 @@ const styles = StyleSheet.create({
   },
   // Dark scrim over the blurred art so title/controls stay legible on bright covers.
   nowScrim: { backgroundColor: "rgba(10,10,12,0.42)" },
+  // Much lighter under real Liquid Glass — the glass material carries the legibility.
+  nowScrimGlass: { backgroundColor: "rgba(10,10,12,0.14)" },
   nowRow: {
     flexDirection: "row", alignItems: "center", gap: 12,
     paddingHorizontal: 12, paddingVertical: 10,

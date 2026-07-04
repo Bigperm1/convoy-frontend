@@ -684,16 +684,9 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // reports police at the driver's current spot via the phone's reportAlert.
             mapButtons: [
               { id: 'police', image: require('../../assets/images/police.png') },
-              // Recenter: the only reliably-touchable "compass/recenter" affordance on
-              // CarPlay (overlays can't receive taps). Resets the driver's pinch-zoom
-              // bias back to the speed-aware auto follow-zoom via the gesture bus →
-              // CarMapView's 'recenter' handler. (The chase camera already keeps the
-              // car centered every frame, so recenter == drop the manual zoom.)
-              { id: 'recenter', image: require('../../assets/images/recenter.png') },
             ],
             onMapButtonPressed: (e: { id: string }) => {
               if (e?.id === 'police') onReportPoliceRef.current?.();
-              else if (e?.id === 'recenter') emitCarGesture({ kind: 'recenter' });
             },
             // iOS-26 raw pinch/zoom on the CarPlay map (react-native-carplay patch +
             // CPMapTemplate.h gesture delegate). Forwarded to CarMapView via the

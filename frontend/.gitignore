@@ -52,3 +52,7 @@ tonight-batch.md
 # Unoptimized GLB car models — kept local, not tracked (one optimized model
 # replaces all 5 at the puck increment). See chore(assets) commit.
 assets/vehicles/*.glb
+
+# Generated native projects (CNG) — force EAS to prebuild fresh so config plugins + version bumps apply
+/ios/
+/android/

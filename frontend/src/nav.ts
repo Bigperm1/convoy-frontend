@@ -684,6 +684,11 @@ function toSpeech(s: string): string {
 
 let _speakLock = false;
 let _lastSpoke = 0;
+// Same-phrase dedupe (see speak()): drop an EXACT-identical callout within this
+// window so a split maneuver can't say "Turn left, turn left" a beat apart.
+let _lastText = "";
+let _lastTextAt = 0;
+const SAME_TEXT_DEDUPE_MS = 6000;
 let _lastRerouteSpoke = 0;
 type TtsItem = string | { _greetAudio: string; mime: string };
 const ttsQueue: TtsItem[] = [];
@@ -852,6 +857,15 @@ function speak(text: string) {
   if (_greetingInFlight) { _heldSpeech = text; return; }
   const now = Date.now();
   if (now - _lastSpoke < 1500) return;
+  // Same-phrase dedupe: kills the "Turn left, turn left" double that happens when
+  // the Routes API splits one maneuver into two adjacent same-direction steps and
+  // each fires the identical bare verb a couple seconds apart. Only EXACT repeats
+  // within the window are dropped — prepare callouts ("In 300 m, turn left onto X")
+  // and opposite turns differ as strings, so real guidance is untouched. Window is
+  // short enough that two genuinely distinct identical turns can't fall inside it.
+  if (text === _lastText && now - _lastTextAt < SAME_TEXT_DEDUPE_MS) return;
+  _lastText = text;
+  _lastTextAt = now;
   _lastSpoke = now;
   ttsQueue.push(toSpeech(text));
   if (!ttsPlaying) drainTtsQueue();
@@ -860,6 +874,8 @@ function speak(text: string) {
 function resetSpeakGate() {
   _speakLock = false;
   _lastSpoke = 0;
+  _lastText = "";
+  _lastTextAt = 0;
   ttsQueue.length = 0;
   ttsPlaying = false;
   // Clear any in-flight greeting hold so a fresh nav session starts clean.

@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: 'rgba(34,35,38,0.4)',
+    backgroundColor: 'transparent',
     paddingLeft: 12,
     paddingRight: 12,
     // Fixed height (not paddingVertical) so the bar is ALWAYS exactly this tall —

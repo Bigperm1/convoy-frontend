@@ -244,9 +244,9 @@ const styles = StyleSheet.create({
   barExit: {
     marginLeft: "auto",
     width: 60, height: 60, borderRadius: 30,
-    // Faint candy-red backing under the glass so the button reads red (and stays
-    // visible) even on the odd surface where the iOS-26 glass layer no-ops.
-    backgroundColor: "rgba(228,0,43,0.4)",
+    // Light candy-red backing; the candy look comes mainly from the GlassView's
+    // red tintColor (glossy tinted glass), with this as a subtle floor + the border.
+    backgroundColor: "rgba(228,0,43,0.18)",
     borderWidth: 1, borderColor: "rgba(228,0,43,0.75)",
     alignItems: "center", justifyContent: "center",
   },

@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
   sectionLabel:       { color: '#808080', fontSize: 13, fontWeight: '500', marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.8 },
 
   // Collapsed field row (dropdown header + call-sign input share this)
-  fieldRow:           { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderRadius: 16, backgroundColor: 'rgba(17,17,17,0.45)', paddingHorizontal: 16, borderWidth: 1, borderColor: '#1E1E1E' },
+  fieldRow:           { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderRadius: 16, backgroundColor: 'transparent', paddingHorizontal: 16, borderWidth: 1, borderColor: '#1E1E1E' },
   fieldRowOpen:       { borderColor: 'rgba(45,236,134,0.4)', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
   fieldRowDisabled:   { opacity: 0.5 },
   fieldValueRow:      { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -423,7 +423,7 @@ const styles = StyleSheet.create({
   swatchDot:          { width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
 
   // Expanded options
-  optionList:         { backgroundColor: 'rgba(14,14,14,0.5)', borderBottomLeftRadius: 16, borderBottomRightRadius: 16, borderWidth: 1, borderTopWidth: 0, borderColor: 'rgba(45,236,134,0.4)', overflow: 'hidden' },
+  optionList:         { backgroundColor: 'transparent', borderBottomLeftRadius: 16, borderBottomRightRadius: 16, borderWidth: 1, borderTopWidth: 0, borderColor: 'rgba(45,236,134,0.4)', overflow: 'hidden' },
   optionRow:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 50, borderTopWidth: 1, borderTopColor: '#1A1A1A' },
   optionRowSel:       { backgroundColor: 'rgba(45,236,134,0.08)' },
   optionText:         { color: '#808080', fontSize: 16 },

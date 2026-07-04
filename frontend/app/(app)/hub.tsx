@@ -12,6 +12,7 @@ import { useAuth } from "../../src/auth";
 import { api, formatErr } from "../../src/api";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
+import GlassBackdrop from "../../src/components/GlassBackdrop";
 import LogoMenu from "../../src/components/LogoMenu";
 import { getGarageImage } from "../../src/carImages";
 import { useSettings, updateSettings } from "../../src/settings";
@@ -51,17 +52,9 @@ export default function HubScreen() {
   return (
     <>
     <SafeAreaView style={styles.c} edges={["top"]}>
-      {/* Ambient backdrop so the Glass cards refract something instead of pure
-          #000 (glass over black is invisible). Faint gradient + soft glows. */}
-      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-        <LinearGradient
-          colors={["#0C1017", "#000000", "#0A0D14"]}
-          locations={[0, 0.5, 1]}
-          style={StyleSheet.absoluteFill}
-        />
-        <View style={styles.ambientGreen} />
-        <View style={styles.ambientBlue} />
-      </View>
+      {/* Wallpaper backdrop so the Glass cards refract a rich image instead of
+          pure #000 (glass over black is invisible). */}
+      <GlassBackdrop />
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={COLORS.primary} />}>
         <View style={styles.headerRow}>
@@ -898,9 +891,6 @@ function ProfileField({ label, value, onChange, keyboard, testID }: any) {
 
 const styles = StyleSheet.create({
   c: { flex: 1, backgroundColor: COLORS.bg },
-  // Soft ambient glows so the Glass cards have something to refract over #000.
-  ambientGreen: { position: "absolute", top: 120, left: -90, width: 360, height: 360, borderRadius: 180, backgroundColor: "rgba(45,236,134,0.16)" },
-  ambientBlue: { position: "absolute", bottom: 40, right: -100, width: 380, height: 380, borderRadius: 190, backgroundColor: "rgba(10,132,255,0.15)" },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { color: COLORS.text, fontSize: 34, fontWeight: "700", letterSpacing: -1 },
   sub: { color: COLORS.textDim, marginTop: 2, fontSize: 13 },

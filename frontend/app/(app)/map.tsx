@@ -9,7 +9,7 @@ import { api, formatErr, wsUrl } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
 import { useRouter, useFocusEffect } from "expo-router";
-import Glass, { GlassFill, hudTint } from "../../src/Glass";
+import Glass, { GlassFill, hudTint, drawerTint } from "../../src/Glass";
 import ConvoyMapbox, { type Hazard, type Peer, contrastingRouteColor } from "../../src/ConvoyMapbox";
 import DestinationSearch from "../../src/DestinationSearch";
 import CategoryPills, { PlaceResult } from "../../src/components/CategoryPills";
@@ -2868,7 +2868,7 @@ export default function MapScreen() {
         return (
           <View style={[styles.routeSheet, { bottom: TAB_BAR_H + navInset }]} onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>
             {/* Liquid Glass behind the drive sheet, clipped to the rounded top. */}
-            <GlassFill style={{ borderTopLeftRadius: 22, borderTopRightRadius: 22, overflow: "hidden" }} />
+            <GlassFill tintColor={drawerTint()} style={{ borderTopLeftRadius: 22, borderTopRightRadius: 22, overflow: "hidden" }} />
             {/* Grabber — swipe down to collapse to the trip pill. */}
             <View {...sheetPan.panHandlers}>
               <View style={styles.sheetGrabber} />
@@ -3140,6 +3140,7 @@ export default function MapScreen() {
       )}
       {avatarPanelOpen && (
         <View style={[styles.avatarPanel, { bottom: weatherBottom + 64 }]}>
+          <GlassFill tintColor={drawerTint()} style={StyleSheet.absoluteFill} />
           <Text style={styles.avatarPanelTitle}>Avatar</Text>
           {([
             { key: "full", label: "Full", sub: "Always visible to your crew" },
@@ -3912,8 +3913,8 @@ const styles = StyleSheet.create({
   // map glass; green-dot radio rows mirror the Settings MAP MODE selector.
   avatarPanel: {
     position: "absolute", left: 12, zIndex: 200, width: 232,
-    borderRadius: 16, paddingVertical: 8, paddingHorizontal: 12,
-    backgroundColor: "rgba(20,20,22,0.96)",
+    borderRadius: 16, paddingVertical: 8, paddingHorizontal: 12, overflow: "hidden",
+    backgroundColor: "transparent",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 6,
   },

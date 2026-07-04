@@ -15,7 +15,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { GOOGLE_MAPS_KEY } from "../api";
 import { getSettings } from "../settings";
 import { passesGasFilters, type Octane } from "../gasJockey";
-import { GlassFill } from "../Glass";
+import { GlassFill, drawerTint } from "../Glass";
 
 export type PlaceResult = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean; address?: string; rating?: number; ratingCount?: number; distanceM?: number };
 
@@ -297,6 +297,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
             { opacity: dropAnim, transform: [{ translateY: dropAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] }) }] },
           ]}
         >
+          <GlassFill tintColor={drawerTint()} style={StyleSheet.absoluteFill} />
           <View style={styles.dropHeader}>
             <Text style={styles.dropTitle}>Results</Text>
             <TouchableOpacity onPress={closeDropdown} hitSlop={10} testID="results-close">
@@ -421,8 +422,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
     alignSelf: "flex-start",
     width: "92%", maxWidth: 380,
-    backgroundColor: "rgba(20,21,24,0.97)",
-    borderRadius: 16,
+    // Lighter translucent floor (was 0.97 opaque) so it reads as frosted glass; it
+    // pops in inside an animated view where the real GlassView can't composite, so
+    // this floor + a hairline is the panel. overflow clips the GlassFill.
+    backgroundColor: "rgba(20,21,24,0.72)",
+    borderRadius: 16, overflow: "hidden",
     borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.14)",
     paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8,
     shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: { width: 0, height: 8 },

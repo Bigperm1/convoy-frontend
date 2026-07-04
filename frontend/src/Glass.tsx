@@ -24,9 +24,19 @@ const LIQUID_GLASS = isLiquidGlassAvailable();
 export function hudTint(): string | undefined {
   const mode = getMapMode(getSettings());
   const darkMap = mode === "dusk" || mode === "night";
-  // Sheer with the CLEAR (refractive) material so the map still bends through —
-  // just enough dark wash on light basemaps to keep white content legible.
-  return darkMap ? undefined : "rgba(18,18,22,0.28)";
+  // Light basemaps (dawn/day/satellite): a real-but-light dark wash so content
+  // reads, while the CLEAR material still bends the map through. Dark basemaps
+  // (dusk/night): NO tint — fully clear, which reads great over the dark map.
+  return darkMap ? undefined : "rgba(18,18,22,0.42)";
+}
+
+// Slightly DARKER theme-adaptive tint for the big DRAWER surfaces (drive-preview
+// sheet + nav step-drawer) so they read as the base layer beneath the lighter HUD
+// items — but still fully CLEAR on dusk/night like everything else.
+export function drawerTint(): string | undefined {
+  const mode = getMapMode(getSettings());
+  const darkMap = mode === "dusk" || mode === "night";
+  return darkMap ? undefined : "rgba(16,16,20,0.55)";
 }
 
 type Props = ViewProps & {

@@ -12,7 +12,7 @@ import {
   View, Text, StyleSheet, ScrollView, Animated, PanResponder, TouchableOpacity, Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { GlassFill } from "../Glass";
+import { GlassFill, drawerTint } from "../Glass";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -176,7 +176,7 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
       {/* Collapsed summary bar — always visible during nav, sits above the tab bar. */}
       <View style={[styles.bar, { bottom: TAB_BAR_H + navInset }]}>
         {/* Liquid Glass behind the nav bar — clipped to the rounded top. */}
-        <GlassFill style={{ borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: "hidden" }} />
+        <GlassFill tintColor={drawerTint()} style={{ borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: "hidden" }} />
         <View {...openPan.panHandlers} style={styles.barGrabZone} testID="step-drawer-handle">
           <View style={styles.grabPill} />
         </View>

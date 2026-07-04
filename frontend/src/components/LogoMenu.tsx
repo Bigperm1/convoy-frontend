@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import ConvoyLogo from './ConvoyLogo';
+import { GlassFill } from '../Glass';
 import { useAuth } from '../auth';
 
 const YELLOW = '#2DEC86';
@@ -119,6 +120,8 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
         style={style}
         testID="logo-menu-btn"
       >
+        {/* Liquid Glass behind the Convoy logo button (all pages). Clipped circular. */}
+        <GlassFill style={{ borderRadius: 999, overflow: 'hidden' }} />
         <ConvoyLogo size={size} />
       </TouchableOpacity>
 

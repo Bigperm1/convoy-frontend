@@ -25,6 +25,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Animated } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { LaneArrow } from "../mapboxDirections";
+import { GlassFill } from "../Glass";
 
 const YELLOW = "#2DEC86";
 const OVER_RED = "#FF3B30";
@@ -155,6 +156,8 @@ export function SpeedPill({ speedMs, unit, bottom, limitKmh }: { speedMs?: numbe
         />
       )}
       <View style={[styles.speedPill, speeding && styles.speedPillOver]}>
+        {/* Glass speedo; red-tinted glass when over the limit. */}
+        <GlassFill tintColor={speeding ? "#FF3B30" : undefined} style={{ borderRadius: 16, overflow: "hidden" }} />
         <Text style={styles.speedValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{value}</Text>
         <Text style={[styles.speedUnit, speeding && styles.speedUnitOver]} numberOfLines={1}>{isMph ? "mph" : "km/h"}</Text>
       </View>
@@ -206,6 +209,8 @@ export default function TurnByTurnNav({
       {/* ===== Top maneuver banner — always visible during nav ===== */}
       <View style={styles.bannerWrap} pointerEvents="box-none">
         <View style={styles.banner}>
+          {/* Liquid Glass behind the turn-by-turn banner. */}
+          <GlassFill style={{ borderRadius: 18, overflow: "hidden" }} />
           <View style={styles.maneuverIconWrap}>
             <Ionicons name={maneuverIcon} size={34} color="#000" />
           </View>
@@ -263,7 +268,7 @@ const styles = StyleSheet.create({
     // the banner (and its mute button at the right end) never sits under it.
     // Mirrors the search bar's logo clearance.
     marginRight: 64,
-    backgroundColor: "#161618",
+    backgroundColor: "transparent",
     borderRadius: 18,
     paddingVertical: 14,
     paddingHorizontal: 16,
@@ -343,7 +348,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 8,
     borderRadius: 16,
-    backgroundColor: "rgba(22,22,24,0.92)",
+    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,

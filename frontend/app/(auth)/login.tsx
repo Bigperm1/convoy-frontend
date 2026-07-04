@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/auth';
 import { api } from '../../src/api';
 import Constants from 'expo-constants';
+import GlassBackdrop from '../../src/components/GlassBackdrop';
 
 const CREDS_KEY = 'convoy.saved.credentials';
 const SAVE_CREDS_KEY = 'convoy.save.credentials';
@@ -114,6 +115,7 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <GlassBackdrop />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}

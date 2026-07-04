@@ -11,7 +11,7 @@ import { useRouter } from "expo-router";
 import { useAuth } from "../../src/auth";
 import { api, formatErr } from "../../src/api";
 import { COLORS } from "../../src/theme";
-import Glass from "../../src/Glass";
+import Glass, { GlassFill } from "../../src/Glass";
 import GlassBackdrop from "../../src/components/GlassBackdrop";
 import LogoMenu from "../../src/components/LogoMenu";
 import { getGarageImage } from "../../src/carImages";
@@ -94,8 +94,12 @@ export default function HubScreen() {
           <CommunityCard key={c.id} c={c} active={c.id === settings.activeCommunityId} onPress={() => setShowDetail(c)} />
         ))}
 
-        <TouchableOpacity testID="logout-btn" style={styles.logoutBtn} onPress={logout}>
-          <Ionicons name="log-out" size={18} color={COLORS.danger} />
+        <TouchableOpacity testID="logout-btn" style={styles.logoutBtn} onPress={logout} activeOpacity={0.85}>
+          {/* Candy-apple-red glossy fill (matches the nav Exit button): a red
+              gradient base + red-tinted Liquid Glass on top, white content. */}
+          <LinearGradient colors={["#FF3B5C", "#E4002B", "#B00020"]} locations={[0, 0.5, 1]} style={[StyleSheet.absoluteFill, { borderRadius: 14 }]} />
+          <GlassFill tintColor="#E4002B" style={{ borderRadius: 14, overflow: "hidden" }} />
+          <Ionicons name="log-out" size={18} color="#fff" />
           <Text style={styles.logoutText}>Sign out</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -969,8 +973,8 @@ const styles = StyleSheet.create({
   adminIdentityName: { color: COLORS.text, fontSize: 18, fontWeight: "700", letterSpacing: -0.3 },
   adminIdentityHint: { color: COLORS.textDim, fontSize: 11, marginTop: 3 },
 
-  logoutBtn: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 32, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,69,58,0.3)" },
-  logoutText: { color: COLORS.danger, fontWeight: "600", fontSize: 15 },
+  logoutBtn: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 32, padding: 14, borderRadius: 14, overflow: "hidden", backgroundColor: "transparent", borderWidth: 1, borderColor: "rgba(255,90,120,0.9)" },
+  logoutText: { color: "#fff", fontWeight: "700", fontSize: 15 },
 
   modalRoot: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   sheet: { backgroundColor: "#1A1A1C", borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, maxHeight: "92%" },

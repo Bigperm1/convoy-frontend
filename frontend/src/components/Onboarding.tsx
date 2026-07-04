@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { GlassFill } from '../Glass';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -81,6 +82,8 @@ export default function Onboarding() {
               />
             </ImageBackground>
             <View style={styles.content}>
+              {/* Liquid Glass card behind the intro copy — refracts the slide image. */}
+              <GlassFill tintColor="rgba(8,10,12,0.4)" style={StyleSheet.absoluteFill} />
               <Text style={styles.title}>{screen.title}</Text>
               <Text style={styles.description}>{screen.description}</Text>
             </View>
@@ -95,14 +98,17 @@ export default function Onboarding() {
           ))}
         </View>
         <TouchableOpacity onPress={goNext} style={styles.btn} activeOpacity={0.85}>
+          {/* Green gradient base + green-tinted Liquid Glass sheen, copy on top. */}
           <LinearGradient
             colors={['#7DF0B0', '#2DEC86', '#00C46A']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={styles.btnGradient}
-          >
+            style={StyleSheet.absoluteFill}
+          />
+          <GlassFill tintColor="#2DEC86" style={StyleSheet.absoluteFill} />
+          <View style={styles.btnGradient}>
             <Text style={styles.btnText}>{current.btnText}</Text>
-          </LinearGradient>
+          </View>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -118,7 +124,7 @@ const styles = StyleSheet.create({
   slide: { flex: 1, justifyContent: 'flex-end' },
   image: { ...StyleSheet.absoluteFillObject },
   gradient: { ...StyleSheet.absoluteFillObject },
-  content: { paddingHorizontal: 20, paddingBottom: 160 },
+  content: { marginHorizontal: 16, marginBottom: 150, paddingHorizontal: 20, paddingVertical: 22, borderRadius: 20, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.16)' },
   title: { color: '#F4F4F4', fontSize: 32, fontWeight: '700', marginBottom: 12, lineHeight: 40 },
   description: { color: '#808080', fontSize: 16, lineHeight: 24 },
   footer: { paddingHorizontal: 20, paddingBottom: 32, gap: 16 },

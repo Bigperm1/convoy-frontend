@@ -21,6 +21,7 @@ import { useAuth } from '../../src/auth';
 import { api } from '../../src/api';
 import Constants from 'expo-constants';
 import GlassBackdrop from '../../src/components/GlassBackdrop';
+import { GlassFill } from '../../src/Glass';
 
 const CREDS_KEY = 'convoy.saved.credentials';
 const SAVE_CREDS_KEY = 'convoy.save.credentials';
@@ -136,6 +137,7 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.formCard}>
+            <GlassFill tintColor="rgba(14,14,18,0.5)" style={StyleSheet.absoluteFill} />
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Email</Text>
               <TextInput
@@ -247,7 +249,7 @@ const styles = StyleSheet.create({
   wordmark: { color: '#2DEC86', fontSize: 42, fontWeight: '800', fontStyle: 'italic', letterSpacing: 1, marginBottom: 18, textShadowColor: 'rgba(45,236,134,0.45)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 14 },
   logoMark: { width: 140, height: 140, borderRadius: 32 },
   tagline: { color: '#2DEC86', fontSize: 16, fontWeight: '600', fontStyle: 'italic', letterSpacing: 0.5, opacity: 0.92, marginTop: 16 },
-  formCard: { backgroundColor: '#141416', borderRadius: 18, padding: 20, gap: 18, borderWidth: 1, borderColor: '#26262B' },
+  formCard: { backgroundColor: 'transparent', overflow: 'hidden', borderRadius: 18, padding: 20, gap: 18, borderWidth: 1, borderColor: '#26262B' },
   inputGroup: { gap: 8 },
   label: { color: '#9A9A9A', fontSize: 13, fontWeight: '500' },
   input: { backgroundColor: '#0B0B0C', borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16, borderWidth: 1, borderColor: '#2A2A2E' },

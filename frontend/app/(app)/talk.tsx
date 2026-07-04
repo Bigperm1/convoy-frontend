@@ -11,6 +11,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import LogoMenu from '../../src/components/LogoMenu';
 import CommsHoldGlow from '../../src/components/CommsHoldGlow';
 import { GlassFill } from '../../src/Glass';
+import GlassBackdrop from '../../src/components/GlassBackdrop';
 import { shareInbox } from '../../src/shareInbox';
 import { api } from '../../src/api';
 import { useAuth } from '../../src/auth';
@@ -513,6 +514,7 @@ export default function TalkScreen() {
   return (
     <>
     <SafeAreaView style={styles.safe} edges={["top"]}>
+      <GlassBackdrop />
       {/* Community header — live active convoy */}
       <View style={styles.header}>
         {active ? (

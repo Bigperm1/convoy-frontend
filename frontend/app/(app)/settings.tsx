@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
+import GlassBackdrop from "../../src/components/GlassBackdrop";
 import { useSettings, DEFAULT_SETTINGS, getMapModeChoice, getAvatarMode, setAvatarMode, getSpeedAlertMode, getRouteColor, getNovaVoice } from "../../src/settings";
 import { NOVA_VOICES, previewNovaVoice, stopNovaPreview } from "../../src/novaVoices";
 import { GAS_BRANDS, OCTANES } from "../../src/gasJockey";
@@ -98,6 +99,7 @@ export default function SettingsScreen() {
 
   return (
     <View style={styles.container}>
+      <GlassBackdrop />
       <SafeAreaView edges={["top"]} style={styles.headerWrap}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn} testID="settings-back">

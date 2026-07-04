@@ -12,6 +12,7 @@ import { useAuth } from "../../src/auth";
 import { api, formatErr } from "../../src/api";
 import { COLORS } from "../../src/theme";
 import Glass from "../../src/Glass";
+import GlassBackdrop from "../../src/components/GlassBackdrop";
 import LogoMenu from "../../src/components/LogoMenu";
 import { getGarageImage } from "../../src/carImages";
 import { useSettings, updateSettings } from "../../src/settings";
@@ -51,6 +52,7 @@ export default function HubScreen() {
   return (
     <>
     <SafeAreaView style={styles.c} edges={["top"]}>
+      <GlassBackdrop />
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={COLORS.primary} />}>
         <View style={styles.headerRow}>

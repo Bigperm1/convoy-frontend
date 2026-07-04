@@ -137,7 +137,7 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.formCard}>
-            <GlassFill tintColor="rgba(14,14,18,0.5)" style={StyleSheet.absoluteFill} />
+            <GlassFill tintColor="rgba(14,14,18,0.34)" style={StyleSheet.absoluteFill} />
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Email</Text>
               <TextInput
@@ -252,8 +252,8 @@ const styles = StyleSheet.create({
   formCard: { backgroundColor: 'transparent', overflow: 'hidden', borderRadius: 18, padding: 20, gap: 18, borderWidth: 1, borderColor: '#26262B' },
   inputGroup: { gap: 8 },
   label: { color: '#9A9A9A', fontSize: 13, fontWeight: '500' },
-  input: { backgroundColor: '#0B0B0C', borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16, borderWidth: 1, borderColor: '#2A2A2E' },
-  inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0B0B0C', borderRadius: 12, borderWidth: 1, borderColor: '#2A2A2E', paddingRight: 8 },
+  input: { backgroundColor: 'rgba(6,8,12,0.4)', borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
+  inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(6,8,12,0.4)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', paddingRight: 8 },
   inputFlex: { flex: 1, paddingVertical: 13, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16 },
   eyeBtn: { padding: 8 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },

@@ -7,6 +7,7 @@ import { COLORS } from "./theme";
 import { geocodeQuery } from "./voiceBus";
 import { useAuth } from "./auth";
 import { GOOGLE_MAPS_KEY } from "./api";
+import { GlassFill } from "./Glass";
 
 const KEY = GOOGLE_MAPS_KEY;
 
@@ -232,6 +233,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           own content without affecting avatar placement. */}
       <View style={styles.searchRow} pointerEvents="box-none">
         <View style={styles.bar} {...dismissPan.panHandlers}>
+          <GlassFill style={{ borderRadius: 25, overflow: "hidden" }} />
           {/* Convoy logo on the LEFT = the menu button (Google puts its 'G'
               here). Tapping opens the Convoy menu, which drops below the bar.
               Falls back to a search glyph if no logo slot was provided. */}
@@ -348,7 +350,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: 'rgba(34,35,38,0.96)',
+    backgroundColor: 'rgba(34,35,38,0.4)',
     paddingLeft: 12,
     paddingRight: 12,
     // Fixed height (not paddingVertical) so the bar is ALWAYS exactly this tall —

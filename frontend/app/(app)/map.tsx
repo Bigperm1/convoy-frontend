@@ -3104,6 +3104,7 @@ export default function MapScreen() {
           Hidden while the Avatar panel is open (the panel overlays this spot); the
           weather chip stays put just below the panel, so nothing shuffles. */}
       <View style={[styles.zoomStack, { bottom: weatherBottom + 68, display: avatarPanelOpen ? 'none' : 'flex' }]}>
+        <GlassFill style={StyleSheet.absoluteFill} />
         <TouchableOpacity testID="zoom-in-fab" style={styles.zoomBtn} activeOpacity={0.8}
           onPress={() => setZoomOffset((z) => Math.min(3, z + 1))}>
           <Ionicons name="add" size={26} color="#fff" />
@@ -3213,6 +3214,7 @@ export default function MapScreen() {
           onPress={() => { setNorthUpHold(true); setNorthSignal((n) => n + 1); recenterNow(); }}
           activeOpacity={0.85}
         >
+          <GlassFill style={{ borderRadius: 30, overflow: "hidden" }} />
           <View style={{ transform: [{ rotate: `${-mapHeading}deg` }] }}>
             <CompassNeedle size={54} />
           </View>
@@ -3226,6 +3228,7 @@ export default function MapScreen() {
           onPress={() => reportAlert('police')}
           activeOpacity={0.8}
         >
+          <GlassFill style={{ borderRadius: 30, overflow: "hidden" }} />
           <PoliceBadgeIcon size={40} />
         </TouchableOpacity>
         {/* Recenter FAB removed — recentering now lives in the compass tap
@@ -3879,7 +3882,7 @@ const styles = StyleSheet.create({
   fab: {
     width: 60, height: 60,
     borderRadius: 30,
-    backgroundColor: "rgba(28,28,30,0.92)",
+    backgroundColor: "rgba(22,22,24,0.4)",
     alignItems: "center", justifyContent: "center",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
@@ -3888,7 +3891,7 @@ const styles = StyleSheet.create({
   zoomStack: {
     position: "absolute", left: 12, zIndex: 55, width: 60,
     borderRadius: 16, overflow: "hidden",
-    backgroundColor: "rgba(22,22,24,0.92)",
+    backgroundColor: "rgba(22,22,24,0.4)",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 5,
   },

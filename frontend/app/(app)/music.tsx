@@ -662,26 +662,31 @@ export default function MusicScreen() {
       {nowPlaying && (
         <View style={styles.nowShadow} pointerEvents="box-none">
           <View style={styles.nowWrap}>
-            {artURL(song?.artworkUrl ?? song?.artwork?.url, 300) ? (
-              <Image
-                source={{ uri: artURL(song?.artworkUrl ?? song?.artwork?.url, 300) }}
-                style={StyleSheet.absoluteFill}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-              />
-            ) : (
-              <View style={[StyleSheet.absoluteFill, { backgroundColor: "#1C1C1E" }]} />
-            )}
             {LIQUID_GLASS ? (
-              /* Real iOS-26 Liquid Glass — refracts the blurred album art behind it,
-                 with the system's live specular/edge lighting. */
+              /* Real iOS-26 Liquid Glass: a CLEAN material that refracts the content
+                 BEHIND the player (the song list / the map) — bright, translucent and
+                 floating, exactly like Apple's now-playing bar. No blurred-art backing
+                 and no dark scrim — those buried the glass and made it read as a flat
+                 dark bar. Content sits on top (nowRow). */
               <GlassView glassEffectStyle="regular" isInteractive style={StyleSheet.absoluteFill} />
             ) : (
-              /* iOS < 26 / Android fallback: frosted blur. */
-              <BlurView intensity={64} tint="dark" style={StyleSheet.absoluteFill} />
+              /* iOS < 26 / Android fallback: art-tinted frosted blur (blurred cover
+                 behind a dark BlurView + a legibility scrim). */
+              <>
+                {artURL(song?.artworkUrl ?? song?.artwork?.url, 300) ? (
+                  <Image
+                    source={{ uri: artURL(song?.artworkUrl ?? song?.artwork?.url, 300) }}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                  />
+                ) : (
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: "#1C1C1E" }]} />
+                )}
+                <BlurView intensity={64} tint="dark" style={StyleSheet.absoluteFill} />
+                <View style={[StyleSheet.absoluteFill, styles.nowScrim]} pointerEvents="none" />
+              </>
             )}
-            {/* Lighter scrim under real glass so the material reads; heavier under plain blur. */}
-            <View style={[StyleSheet.absoluteFill, LIQUID_GLASS ? styles.nowScrimGlass : styles.nowScrim]} pointerEvents="none" />
 
             <View style={styles.nowRow}>
               {artURL(song?.artworkUrl ?? song?.artwork?.url, 96) ? (

@@ -14,7 +14,6 @@ import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
 import { getGarageImage } from '../../src/carImages';
 import { GlassFill } from '../../src/Glass';
-import GlassBackdrop from '../../src/components/GlassBackdrop';
 import { YEARS, getMakeNames, getModelsForMake, getColorsForModel } from '../../src/carDatabase';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -251,9 +250,6 @@ export default function GarageScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      {/* Wallpaper backdrop so the Liquid Glass pickers refract a rich image
-          instead of pure #000 (glass over black is invisible). */}
-      <GlassBackdrop />
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* Header */}

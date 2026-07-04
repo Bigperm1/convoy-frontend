@@ -241,7 +241,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 16,
     overflow: "hidden",
-    backgroundColor: "transparent",
+    // Translucent frosted floor. The card pops out inside an animated (transform +
+    // opacity) view, where the iOS-26 GlassView won't composite — so this View bg
+    // is what actually renders the frosted panel (readable), with the GlassFill
+    // adding real glass on top wherever it does paint.
+    backgroundColor: "rgba(24,24,28,0.66)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.14)",
     ...Platform.select({

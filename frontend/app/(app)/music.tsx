@@ -85,6 +85,7 @@ function SourceSwitcher({ current }: { current: "apple" | "spotify" }) {
   };
   return (
     <View style={swStyles.wrap}>
+      <GlassFill style={{ borderRadius: 12, overflow: "hidden" }} />
       {pill("apple", "Apple Music", "#FA2D48")}
       {pill("spotify", "Spotify", SP_GREEN)}
     </View>
@@ -92,7 +93,7 @@ function SourceSwitcher({ current }: { current: "apple" | "spotify" }) {
 }
 
 const swStyles = StyleSheet.create({
-  wrap: { flexDirection: "row", gap: 6, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 12, padding: 4, alignSelf: "flex-start", marginHorizontal: 20, marginBottom: 6 },
+  wrap: { flexDirection: "row", gap: 6, backgroundColor: "transparent", borderRadius: 12, padding: 4, alignSelf: "flex-start", marginHorizontal: 20, marginBottom: 6, overflow: "hidden" },
   pill: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 9 },
   pillText: { color: COLORS.textDim, fontSize: 13, fontWeight: "700" },
 });

@@ -4,6 +4,7 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { COLORS } from "../theme";
+import { GlassFill } from "../Glass";
 import { useNowPlaying } from "../nowPlaying";
 
 /**
@@ -97,6 +98,7 @@ export function MapNowPlaying({
   return (
     <Animated.View style={[styles.wrap, { bottom, left }]} pointerEvents="box-none">
       <Pressable style={styles.bar} onPress={onOpen} hitSlop={4}>
+        <GlassFill style={{ borderRadius: 16, overflow: "hidden" }} />
         {art ? (
           <Image source={{ uri: art }} style={styles.art} contentFit="cover" />
         ) : (
@@ -124,7 +126,7 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
     paddingRight: 6,
     borderRadius: 16,
-    backgroundColor: "rgba(22,22,24,0.92)",
+    backgroundColor: "transparent",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     shadowColor: "#000",

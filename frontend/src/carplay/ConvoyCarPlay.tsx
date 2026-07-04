@@ -286,10 +286,10 @@ export function CarSurface() {
   useEffect(() => {
     Animated.spring(limitSlide, { toValue: showLimit ? 1 : 0, useNativeDriver: true, tension: 80, friction: 12 }).start();
   }, [showLimit]);
-  // Slide the posted-limit sign clear of the 84pt-wide speedo pill PLUS a comfortable
-  // gap, so the red over-limit pulse never crowds/overlaps the white sign (84 pill +
-  // 20 gap = 104). Keeps the two HUD tiles visually separated and premium.
-  const limitSlideX = limitSlide.interpolate({ inputRange: [0, 1], outputRange: [0, 104] });
+  // Slide the posted-limit sign clear of the 68pt-wide speedo pill PLUS a comfortable
+  // gap, so the red over-limit pulse never crowds/overlaps the white sign (68 pill +
+  // 20 gap = 88). Keeps the two HUD tiles visually separated and premium.
+  const limitSlideX = limitSlide.interpolate({ inputRange: [0, 1], outputRange: [0, 88] });
 
   const showMap = hasFix && !!mapUrl;
   // Live @rnmapbox MapView gate. Three conditions, all required:
@@ -337,11 +337,13 @@ export function CarSurface() {
       {/* Top: maneuver while navigating, else a small CONVOY / nearby chip. */}
       {s.navigating ? (
         <View style={styles.topStrip} pointerEvents="none">
+          <GlassFill style={{ borderRadius: 12, overflow: 'hidden' }} />
           <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
           <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
         </View>
       ) : (
         <View style={styles.topChip} pointerEvents="none">
+          <GlassFill style={{ borderRadius: 14, overflow: 'hidden' }} />
           <Text style={styles.topChipText}>
             {nearby ? `CONVOY   ·   ${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'CONVOY'}
           </Text>
@@ -391,6 +393,7 @@ export function CarSurface() {
           off-nav the map speaks for itself. */}
       {s.navigating ? (
         <View style={styles.topStrip} pointerEvents="none">
+          <GlassFill style={{ borderRadius: 12, overflow: 'hidden' }} />
           <View style={styles.maneuverBox}>
             <Text style={styles.maneuverArrow}>{s.maneuverIcon || '↑'}</Text>
           </View>
@@ -463,7 +466,7 @@ export function CarSurface() {
       {s.weatherTemp ? (
         <View style={styles.weatherChip} pointerEvents="none">
           <GlassFill style={{ borderRadius: 12, overflow: 'hidden' }} />
-          {s.weatherKind ? <WeatherGlyph kind={s.weatherKind as WeatherKind} size={24} /> : null}
+          {s.weatherKind ? <WeatherGlyph kind={s.weatherKind as WeatherKind} size={20} /> : null}
           <Text style={styles.weatherText}>{s.weatherTemp}</Text>
         </View>
       ) : null}
@@ -475,7 +478,7 @@ export function CarSurface() {
         <View style={styles.compassDock} pointerEvents="none">
           <GlassFill style={{ borderRadius: 22, overflow: 'hidden' }} />
           <View style={{ transform: [{ rotate: `${-(s.heading || 0)}deg` }] }}>
-            <CompassNeedle size={40} />
+            <CompassNeedle size={30} />
           </View>
         </View>
       ) : null}
@@ -892,21 +895,21 @@ const styles = StyleSheet.create({
   inst: { color: '#F4F4F4', fontSize: 22, fontWeight: '600', marginTop: 4, textAlign: 'center' },
   meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },
   // Bottom-LEFT, tucked just right of the CarPlay side bar (~64pt). Smaller pill.
-  speedDock: { position: 'absolute', left: 68, bottom: 10, alignItems: 'flex-start' },
-  speedPill: { width: 84, height: 60, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
-  speedNum: { color: '#F4F4F4', fontSize: 24, fontWeight: '800', letterSpacing: -0.5, lineHeight: 26 },
-  speedUnit: { color: '#808080', fontSize: 10, fontWeight: '600', letterSpacing: 0.3, marginTop: 1 },
+  speedDock: { position: 'absolute', left: 56, bottom: 10, alignItems: 'flex-start' },
+  speedPill: { width: 68, height: 50, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
+  speedNum: { color: '#F4F4F4', fontSize: 21, fontWeight: '800', letterSpacing: -0.5, lineHeight: 23 },
+  speedUnit: { color: '#808080', fontSize: 9, fontWeight: '600', letterSpacing: 0.3, marginTop: 1 },
   // Posted speed-limit sign — white plate, black border. Tucked BEHIND the speedo (same
   // bottom baseline, left:0 within speedDock) and slid out to the right when moving.
-  speedLimitBadge: { position: 'absolute', left: 0, bottom: 0, width: 84, height: 60, borderRadius: 16, backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  speedLimitNum: { color: '#000', fontSize: 24, fontWeight: '800', letterSpacing: -0.5, lineHeight: 26 },
-  speedLimitUnit: { color: '#333', fontSize: 10, fontWeight: '700', letterSpacing: 0.3, marginTop: 1 },
+  speedLimitBadge: { position: 'absolute', left: 0, bottom: 0, width: 68, height: 50, borderRadius: 14, backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  speedLimitNum: { color: '#000', fontSize: 21, fontWeight: '800', letterSpacing: -0.5, lineHeight: 23 },
+  speedLimitUnit: { color: '#333', fontSize: 9, fontWeight: '700', letterSpacing: 0.3, marginTop: 1 },
   // Compass — top-right, below the maneuver banner. Smaller, closer to the edge.
-  compassDock: { position: 'absolute', right: 8, top: 58, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,12,0.4)', borderRadius: 22, overflow: 'hidden' },
+  compassDock: { position: 'absolute', right: 8, top: 58, width: 38, height: 38, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,12,0.4)', borderRadius: 19, overflow: 'hidden' },
   // Weather chip — BOTTOM-left, just above the speedo (left edge aligned, small gap),
   // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
-  weatherChip: { position: 'absolute', left: 68, bottom: 78, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(22,22,24,0.45)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
-  weatherText: { color: '#F4F4F4', fontSize: 14, fontWeight: '800', marginTop: 1 },
+  weatherChip: { position: 'absolute', left: 56, bottom: 66, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7, paddingVertical: 3, backgroundColor: 'rgba(22,22,24,0.45)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
+  weatherText: { color: '#F4F4F4', fontSize: 13, fontWeight: '800', marginTop: 1 },
   // --- live static-map mode ---
   preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   markerCenter: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
@@ -918,13 +921,13 @@ const styles = StyleSheet.create({
   },
   // Compact maneuver CARD (mirrors the phone banner), tucked TOP-RIGHT: a green arrow
   // box + a [meters / instruction] column. Smaller than the old full-bleed strip.
-  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(11,11,12,0.8)', borderRadius: 12 },
+  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(11,11,12,0.45)', borderRadius: 12, overflow: 'hidden' },
   maneuverBox: { width: 36, height: 36, borderRadius: 9, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
   maneuverArrow: { color: '#0B0B0C', fontSize: 24, fontWeight: '900', lineHeight: 28, marginTop: -1 },
   topTextCol: { flexShrink: 1 },
   topDist: { color: '#2DEC86', fontSize: 17, fontWeight: '800' },
   topInst: { color: '#F4F4F4', fontSize: 12, fontWeight: '600', flexShrink: 1 },
-  topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'rgba(11,11,12,0.66)', borderRadius: 14 },
+  topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'rgba(11,11,12,0.45)', borderRadius: 14, overflow: 'hidden' },
   topChipText: { color: '#2DEC86', fontSize: 15, fontWeight: '800', letterSpacing: 1 },
   // ETA / arrival — tucked into the BOTTOM-RIGHT corner, small.
   bottomMeta: { position: 'absolute', right: 8, bottom: 8, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(11,11,12,0.72)', borderRadius: 10 },

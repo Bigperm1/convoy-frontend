@@ -709,6 +709,9 @@ export default function MapScreen() {
   // Hold-to-activate "Avatar" panel (opened by long-pressing the Map tab button,
   // signalled via avatarHoldBus). Auto-dismisses ~5s after the last interaction.
   const [avatarPanelOpen, setAvatarPanelOpen] = useState(false);
+  // True while the weather chip's 5-day forecast pop-out is showing — used to hide
+  // the zoom stack (which sits right where the forecast card expands).
+  const [weatherForecastOpen, setWeatherForecastOpen] = useState(false);
   const avatarPanelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const armAvatarPanelDismiss = () => {
     if (avatarPanelTimer.current) clearTimeout(avatarPanelTimer.current);
@@ -3100,14 +3103,14 @@ export default function MapScreen() {
           in the bottom-left HUD column (matches the speedo's box + opacity). */}
       {showWeatherLayer && weather && (
         <View style={{ position: 'absolute', bottom: weatherBottom, left: 12, zIndex: 70 }}>
-          <WeatherHUD weather={weather} unit={settings.speedUnit} compact forecast={dailyForecast} />
+          <WeatherHUD weather={weather} unit={settings.speedUnit} compact forecast={dailyForecast} onOpenChange={setWeatherForecastOpen} />
         </View>
       )}
 
       {/* ===== Zoom +/- buttons (left column, styled like the speedo/weather pills) =====
           Hidden while the Avatar panel is open (the panel overlays this spot); the
           weather chip stays put just below the panel, so nothing shuffles. */}
-      <View style={[styles.zoomStack, { bottom: weatherBottom + 68, display: avatarPanelOpen ? 'none' : 'flex' }]}>
+      <View style={[styles.zoomStack, { bottom: weatherBottom + 68, display: (avatarPanelOpen || (weatherForecastOpen && !!weather && showWeatherLayer)) ? 'none' : 'flex' }]}>
         <GlassFill style={StyleSheet.absoluteFill} />
         <TouchableOpacity testID="zoom-in-fab" style={styles.zoomBtn} activeOpacity={0.8}
           onPress={() => setZoomOffset((z) => Math.min(3, z + 1))}>

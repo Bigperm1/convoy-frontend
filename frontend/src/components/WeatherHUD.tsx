@@ -13,6 +13,9 @@ type Props = {
   compact?: boolean;
   // 5-day outlook for the tappable compact chip popup (driver's location).
   forecast?: ForecastDay[] | null;
+  // Fires when the 5-day forecast pop-out opens/closes, so the map can hide
+  // controls that would collide with it (e.g. the zoom stack).
+  onOpenChange?: (open: boolean) => void;
 };
 
 // Two-tone weather glyph — composes layered vector icons so each condition
@@ -103,7 +106,7 @@ export function WeatherGlyph({ kind, size }: { kind: WeatherKind; size: number }
   return <View style={{ width: S, height: S }}>{body}</View>;
 }
 
-export default function WeatherHUD({ weather, unit, compact, forecast }: Props) {
+export default function WeatherHUD({ weather, unit, compact, forecast, onOpenChange }: Props) {
   const DEG = "\u00B0";
   const [open, setOpen] = useState(false);
   // Auto-collapse the 5-day forecast back to the compact chip 5s after it opens.
@@ -113,6 +116,9 @@ export default function WeatherHUD({ weather, unit, compact, forecast }: Props) 
     const t = setTimeout(() => setOpen(false), 5000);
     return () => clearTimeout(t);
   }, [open]);
+
+  // Let the parent (map) know when the forecast pop-out is showing.
+  useEffect(() => { onOpenChange?.(open); }, [open, onOpenChange]);
 
   // Animated reveal for the forecast card (pop-out): spring up + scale/opacity in,
   // quick fade out. Kept mounted through the close animation via `cardMounted`.
@@ -176,6 +182,7 @@ export default function WeatherHUD({ weather, unit, compact, forecast }: Props) 
           style={styles.compactChip}
           testID="weather-chip"
         >
+          <GlassFill style={{ borderRadius: 16, overflow: "hidden" }} />
           <WeatherGlyph kind={weatherKind(weather)} size={26} />
           <Text style={styles.compactTemp} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{temp}</Text>
         </TouchableOpacity>
@@ -261,7 +268,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 8,
     borderRadius: 16,
-    backgroundColor: "rgba(22,22,24,0.92)",
+    overflow: "hidden",
+    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,

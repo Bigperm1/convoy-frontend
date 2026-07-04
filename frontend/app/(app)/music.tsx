@@ -21,6 +21,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
 import { BlurView } from "expo-blur";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
+import { GlassFill } from "../../src/Glass";
 import { COLORS } from "../../src/theme";
 
 // iOS 26+ ships the real Liquid Glass material (UIGlassEffect); older iOS / Android
@@ -418,6 +419,7 @@ export default function MusicScreen() {
           <>
             {/* Search bar (catalog) */}
             <View style={styles.searchWrap}>
+              <GlassFill style={{ borderRadius: 12, overflow: "hidden" }} />
               <Ionicons name="search" size={18} color={COLORS.textDim} />
               <TextInput
                 value={query}
@@ -825,7 +827,7 @@ const styles = StyleSheet.create({
   searchWrap: {
     flexDirection: "row", alignItems: "center", gap: 8,
     marginHorizontal: 20, marginTop: 14, paddingHorizontal: 14, height: 44,
-    backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 12,
+    backgroundColor: "transparent", borderRadius: 12,
   },
   searchInput: { flex: 1, color: COLORS.text, fontSize: 16, paddingVertical: 0 },
   hint: { color: COLORS.textDim, fontSize: 14, lineHeight: 20, paddingHorizontal: 22, marginTop: 22 },

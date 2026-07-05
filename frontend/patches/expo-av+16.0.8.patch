@@ -1,0 +1,41 @@
+diff --git a/node_modules/expo-av/ios/EXAV/EXAudioSessionManager.m b/node_modules/expo-av/ios/EXAV/EXAudioSessionManager.m
+index 3e768d1..5dce1d3 100644
+--- a/node_modules/expo-av/ios/EXAV/EXAudioSessionManager.m
++++ b/node_modules/expo-av/ios/EXAV/EXAudioSessionManager.m
+@@ -219,22 +219,23 @@ - (NSError *)_updateSessionConfiguration
+   // See https://github.com/expo/expo/issues/15873
+   
+   if (!shouldBeActive && _sessionIsActive) {
++    // Convoy patch — actually deactivate the session with NotifyOthersOnDeactivation.
++    // Upstream expo-av (issue #15873) only flips this flag and skips the real
++    // [session setActive:NO] to avoid frame drops on rapid pauseAsync. But without a
++    // true deactivation iOS NEVER tells other apps (Spotify / YouTube / the Music app)
++    // that our .duckOthers session has ended, so their audio stays stuck at ~half
++    // volume for minutes after a Nova/comms clip finishes. NotifyOthersOnDeactivation
++    // is the signal that pops them back to full volume the instant we go idle. Convoy
++    // only deactivates a handful of times per drive (once per voice clip), so the
++    // synchronous-deactivate cost the upstream tweak avoided is a non-issue here.
++    NSError *deactivateError = nil;
++    [session setActive:NO
++           withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
++                 error:&deactivateError];
++    // Honor the flag regardless of a reported error so we don't spin re-deactivating.
+     _sessionIsActive = NO;
+   }
+ 
+-  /*
+-  if (!shouldBeActive && _sessionIsActive) {
+-    [session setActive:NO error:&error];
+-    if (!error) {
+-      _sessionIsActive = NO;
+-    }
+-  }
+-
+-  if (error) {
+-    return error;
+-  }
+-  */
+-
+   if (!_activeCategory || ![category isEqualToString:_activeCategory] || options != _activeOptions) {
+     [session setCategory:category withOptions:options error:&error];
+     if (!error) {

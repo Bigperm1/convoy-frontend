@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { api, saveToken, getToken, clearToken } from "./api";
 import * as AppleAuthentication from "expo-apple-authentication";
+import { signInWithGoogle } from "./googleAuth";
 
 export type User = {
   id: string;
@@ -21,6 +22,7 @@ type AuthCtx = {
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
   loginWithApple: () => Promise<void>;
+  loginWithGoogle: () => Promise<boolean>;
   register: (data: any) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -83,6 +85,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(data.user);
   };
 
+  // Returns true when signed in, false if the user cancelled the Google sheet.
+  const loginWithGoogle = async (): Promise<boolean> => {
+    const idToken = await signInWithGoogle();
+    if (!idToken) return false;
+    const { data } = await api.post("/auth/google", { id_token: idToken });
+    await saveToken(data.token);
+    setToken(data.token);
+    setUser(data.user);
+    return true;
+  };
+
   const register = async (payload: any) => {
     const { data } = await api.post("/auth/register", payload);
     await saveToken(data.token);
@@ -96,7 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   };
 
-  return <Ctx.Provider value={{ user, token, login, loginWithApple, register, logout, refresh }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, token, login, loginWithApple, loginWithGoogle, register, logout, refresh }}>{children}</Ctx.Provider>;
 }
 
 export const useAuth = () => useContext(Ctx);

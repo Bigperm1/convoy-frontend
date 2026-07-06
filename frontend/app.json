@@ -58,6 +58,12 @@
     "plugins": [
       "expo-router",
       [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.661488764764-6t8fkojm7gnkdjfp6k83dbnbnrjchtt3"
+        }
+      ],
+      [
         "expo-location",
         {
           "isAndroidBackgroundLocationEnabled": true,

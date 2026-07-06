@@ -36,7 +36,7 @@ export default function LoginScreen() {
   const [waking, setWaking] = useState(false);
   const [appleAvailable, setAppleAvailable] = useState(false);
   const router = useRouter();
-  const { login, loginWithApple } = useAuth();
+  const { login, loginWithApple, loginWithGoogle } = useAuth();
 
   const appVersion = Constants.expoConfig?.version ?? '?';
   const buildNumber =
@@ -134,6 +134,18 @@ export default function LoginScreen() {
       setLoading(false);
     }
   }, [loginWithApple, router]);
+
+  const handleGoogle = useCallback(async () => {
+    setLoading(true);
+    try {
+      const ok = await loginWithGoogle();
+      if (ok) router.replace('/(app)/map');
+    } catch {
+      Alert.alert('Google sign in failed', 'Please try again, or use email and password.');
+    } finally {
+      setLoading(false);
+    }
+  }, [loginWithGoogle, router]);
 
   const handleForgotPassword = useCallback(() => {
     router.push('/(auth)/forgot-password' as any);
@@ -242,23 +254,24 @@ export default function LoginScreen() {
               </LinearGradient>
             </TouchableOpacity>
 
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or continue with</Text>
+              <View style={styles.dividerLine} />
+            </View>
             {appleAvailable && (
-              <>
-                <View style={styles.dividerRow}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>or continue with</Text>
-                  <View style={styles.dividerLine} />
-                </View>
-                <AppleAuthentication.AppleAuthenticationButton
-                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-                  cornerRadius={12}
-                  style={styles.appleBtn}
-                  onPress={handleApple}
-                />
-                {/* Google button lands here once its OAuth client IDs exist. */}
-              </>
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                cornerRadius={12}
+                style={styles.appleBtn}
+                onPress={handleApple}
+              />
             )}
+            <TouchableOpacity style={styles.googleBtn} onPress={handleGoogle} disabled={loading} activeOpacity={0.85}>
+              <Ionicons name="logo-google" size={19} color="#4285F4" />
+              <Text style={styles.googleBtnText}>Continue with Google</Text>
+            </TouchableOpacity>
 
             <View style={styles.linksSection}>
               <Text style={styles.linkText}>
@@ -324,6 +337,8 @@ const styles = StyleSheet.create({
   dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.18)' },
   dividerText: { color: '#9A9A9A', fontSize: 12, fontWeight: '500' },
   appleBtn: { height: 50, width: '100%', marginTop: 12 },
+  googleBtn: { height: 50, marginTop: 12, borderRadius: 12, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  googleBtnText: { color: '#1F1F1F', fontSize: 16, fontWeight: '600' },
   termsText: { color: '#7A7A7A', fontSize: 12, lineHeight: 17, textAlign: 'center', marginTop: 18, paddingHorizontal: 8 },
   termsLink: { color: '#2DEC86', fontWeight: '600' },
 });

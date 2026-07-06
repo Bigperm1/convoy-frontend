@@ -3126,7 +3126,8 @@ export default function MapScreen() {
           Hidden while the Avatar panel is open (the panel overlays this spot); the
           weather chip stays put just below the panel, so nothing shuffles. */}
       <View style={[styles.zoomStack, { bottom: weatherBottom + 68, display: (avatarPanelOpen || (weatherForecastOpen && !!weather && showWeatherLayer)) ? 'none' : 'flex' }]}>
-        <GlassFill tintColor={hudTint()} style={StyleSheet.absoluteFill} />
+        {/* radius matches zoomStack (16) so the GlassView shapes round — no diamond creases */}
+        <GlassFill tintColor={hudTint()} style={{ borderRadius: 16, overflow: "hidden" }} />
         <TouchableOpacity testID="zoom-in-fab" style={styles.zoomBtn} activeOpacity={0.8}
           onPress={() => setZoomOffset((z) => Math.min(3, z + 1))}>
           <Ionicons name="add" size={26} color="#fff" />

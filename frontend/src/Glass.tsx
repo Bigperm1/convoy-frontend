@@ -24,13 +24,11 @@ const LIQUID_GLASS = isLiquidGlassAvailable();
 export function hudTint(): string | undefined {
   const mode = getMapMode(getSettings());
   const darkMap = mode === "dusk" || mode === "night";
-  // Every small HUD chip gets a LITTLE body so the CLEAR material stops bending the
-  // map's road/building lines into visible "diamond" refraction streaks (worst on the
-  // small tight-cornered chips, where the lensing converges). Still translucent and
-  // refractive — just enough tint to read like a finished glass chip, not a raw lens.
-  // Light basemaps need a heavier wash for legibility; dark basemaps only a touch.
-  // (The big DRAWER surfaces use drawerTint and stay clearer — they read clean at size.)
-  return darkMap ? "rgba(10,10,14,0.30)" : "rgba(18,18,22,0.44)";
+  // Light basemaps (dawn/day/satellite): a real-but-light dark wash so content
+  // reads, while the CLEAR material still bends the map through. Dark basemaps
+  // (dusk/night): NO tint — fully clear, which reads great over the dark map. (The
+  // "diamond" was a glass-SHAPE bug, not the tint — see GlassFill's GlassView radius.)
+  return darkMap ? undefined : "rgba(18,18,22,0.42)";
 }
 
 // Slightly DARKER theme-adaptive tint for the big DRAWER surfaces (drive-preview
@@ -132,15 +130,19 @@ export function GlassFill({
     return <View style={[fill, { backgroundColor: tintColor ?? "rgba(28,28,30,0.72)", opacity: tintColor ? 0.85 : 1 }]} />;
   }
   if (LIQUID_GLASS) {
-    // Wrap the glass in a GlassContainer (iOS-26 GlassEffectContainer). It renders
-    // the glass as a STABLE grouped layer — it no longer re-samples/flickers when
-    // the map tab reappears — while the CLEAR material keeps the refractive edge-
-    // lensing that bends the map behind it (the premium look the user wants). The
-    // "diamond lines / unfinished edges" complaint is a separate edge issue, not the
-    // material. pointerEvents none so taps fall through to the button content on top.
+    // GlassContainer (iOS-26 GlassEffectContainer) renders the glass as a STABLE
+    // grouped layer (no re-sample/flicker when the map tab reappears).
+    // CRITICAL: the GlassView must carry the SAME borderRadius as its container. With
+    // only absoluteFill the glass shape stays a sharp RECTANGLE that the round container
+    // then CLIPS — so the material's edge-lensing is computed for square corners and
+    // shows as diagonal "diamond" creases, and on a circle the straight rect edges get
+    // sliced at top/bottom/left/right (the "cut-off" look). Passing `fill` (absoluteFill
+    // + the caller's radius) shapes the ACTUAL glass round/circular, so the refraction
+    // follows the rounded edge cleanly. pointerEvents none so taps fall through to the
+    // button content on top.
     return (
       <GlassContainer style={fill} pointerEvents="none">
-        <GlassView glassEffectStyle="clear" colorScheme="dark" tintColor={tintColor} style={StyleSheet.absoluteFill} />
+        <GlassView glassEffectStyle="clear" colorScheme="dark" tintColor={tintColor} style={fill} />
       </GlassContainer>
     );
   }

@@ -514,7 +514,7 @@ export default function TalkScreen() {
   return (
     <>
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <GlassBackdrop />
+      <GlassBackdrop source={require("../../assets/images/glass-bgt.png")} />
       {/* Community header — live active convoy */}
       <View style={styles.header}>
         {active ? (

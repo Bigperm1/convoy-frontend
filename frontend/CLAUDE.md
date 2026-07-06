@@ -90,7 +90,7 @@ Native deps are patched at install time via `patch-package` (postinstall hook): 
 
 ## Release Discipline
 
-- **OTAs always ship from the `preview` branch**: `eas update --branch preview`. Both the production and preview channels track the `preview` branch, so a single publish reaches both.
+- **Publish each OTA to the branch that matches the INSTALLED build's channel — verify, don't assume.** Run `eas build:list --platform ios` and read the `Channel` of the build testers are on, then `eas update --branch <that-channel>`. The `mapbox-migration` builds (current: build 61, runtime 1.13.2) listen to the **`mapbox-migration`** channel, so their OTAs go to `eas update --branch mapbox-migration` — publishing to `preview` does NOT reach them (this silently ate three updates on 2026-07-05). The historical `preview`/`production` channels both track the `preview` branch; only use `--branch preview` when the target build was actually built on one of those channels.
 - **`yarn typecheck` must pass clean before every publish.** This is a required gate — do not publish on a failing or skipped typecheck.
 - **Never run `eas submit`** (TestFlight or production) without the maintainer's explicit go-ahead.
 - **EAS native builds cost money.** Batch scope before recommending one, and verify `yarn typecheck` passes, the lockfile (`yarn.lock`) is consistent, and references resolve first.

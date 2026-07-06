@@ -99,7 +99,7 @@ export default function SettingsScreen() {
 
   return (
     <View style={styles.container}>
-      <GlassBackdrop />
+      <GlassBackdrop source={require("../../assets/images/glass-bgt.png")} />
       <SafeAreaView edges={["top"]} style={styles.headerWrap}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn} testID="settings-back">

@@ -251,7 +251,7 @@ export default function GarageScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <GlassBackdrop />
+      <GlassBackdrop source={require("../../assets/images/glass-bgt.png")} />
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* Header */}

@@ -1,5 +1,5 @@
 import React from "react";
-import { ImageBackground, View, StyleSheet } from "react-native";
+import { ImageBackground, View, StyleSheet, type ImageSourcePropType } from "react-native";
 
 /**
  * Full-screen wallpaper shown behind the app's dark pages (Comms, Garage, Hub,
@@ -8,14 +8,21 @@ import { ImageBackground, View, StyleSheet } from "react-native";
  * grid/road wallpaper so the glass cards, pills, and mic actually pick up the
  * refraction, then a light scrim keeps content legible over the bright bits.
  *
- * The image lives at assets/images/glass-bg.png — swap that one file to re-skin
- * every page at once.
+ * Default image: assets/images/glass-bg.png. Pass `source` to override per-page
+ * (e.g. Comms/Settings/Garage use glass-bgt.png) — the require() must live in the
+ * CALLER so Metro can bundle it statically.
  */
-export default function GlassBackdrop({ scrim = 0.4 }: { scrim?: number }) {
+export default function GlassBackdrop({
+  scrim = 0.4,
+  source,
+}: {
+  scrim?: number;
+  source?: ImageSourcePropType;
+}) {
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
       <ImageBackground
-        source={require("../../assets/images/glass-bg.png")}
+        source={source ?? require("../../assets/images/glass-bg.png")}
         style={StyleSheet.absoluteFill}
         resizeMode="cover"
       >

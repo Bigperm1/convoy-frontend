@@ -25,8 +25,8 @@ export function hudTint(): string | undefined {
   const mode = getMapMode(getSettings());
   const darkMap = mode === "dusk" || mode === "night";
   // Light basemaps (dawn/day/satellite): a real-but-light dark wash so content
-  // reads, while the CLEAR material still bends the map through. Dark basemaps
-  // (dusk/night): NO tint — fully clear, which reads great over the dark map.
+  // reads through the frosted material. Dark basemaps (dusk/night): NO tint — the
+  // frosted glass already reads as dark over the dark map.
   return darkMap ? undefined : "rgba(18,18,22,0.42)";
 }
 
@@ -83,9 +83,12 @@ export default function Glass({
   if (LIQUID_GLASS) {
     // The glass material IS the background — children render on top. colorScheme
     // pinned dark (Convoy is a dark-only UI) so the glass never flips light.
+    // "regular" = the clean FROSTED Liquid Glass (uniform, finished edges) that the
+    // tab bar + music page already use — NOT "clear", whose refractive edge-lensing
+    // showed faceted "diamond" artifacts and ragged edges over the busy 3D map.
     return (
       <GlassView
-        glassEffectStyle="clear"
+        glassEffectStyle="regular"
         colorScheme="dark"
         style={[base, style]}
         {...rest}
@@ -128,12 +131,14 @@ export function GlassFill({
   if (LIQUID_GLASS) {
     // Wrap the glass in a GlassContainer (iOS-26 GlassEffectContainer). It renders
     // the glass as a STABLE grouped layer — it no longer re-samples/flickers when
-    // the map tab reappears — while the CLEAR material keeps the refractive edge-
-    // lensing that bends the map behind it (the premium "rounded-3D-edge" look).
-    // pointerEvents none so taps fall through to the button content on top.
+    // the map tab reappears. "regular" = the clean FROSTED material (uniform, finished
+    // edges), matching the tab bar + music page. We moved OFF "clear": its refractive
+    // edge-lensing showed faceted "diamond" refraction lines and unfinished edges over
+    // the busy 3D map (competitor "Velox" reads cleaner precisely because it's frosted,
+    // not refractive). pointerEvents none so taps fall through to the content on top.
     return (
       <GlassContainer style={fill} pointerEvents="none">
-        <GlassView glassEffectStyle="clear" colorScheme="dark" tintColor={tintColor} style={StyleSheet.absoluteFill} />
+        <GlassView glassEffectStyle="regular" colorScheme="dark" tintColor={tintColor} style={StyleSheet.absoluteFill} />
       </GlassContainer>
     );
   }

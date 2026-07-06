@@ -288,10 +288,10 @@ export function CarSurface() {
   useEffect(() => {
     Animated.spring(limitSlide, { toValue: showLimit ? 1 : 0, useNativeDriver: true, tension: 80, friction: 12 }).start();
   }, [showLimit]);
-  // Slide the posted-limit sign clear of the 68pt-wide speedo pill PLUS a comfortable
-  // gap, so the red over-limit pulse never crowds/overlaps the white sign (68 pill +
-  // 20 gap = 88). Keeps the two HUD tiles visually separated and premium.
-  const limitSlideX = limitSlide.interpolate({ inputRange: [0, 1], outputRange: [0, 100] });
+  // Slide the posted-limit SIGN just clear of the 68pt-wide speedo pill plus a SMALL
+  // gap so the two tiles sit close together (68 pill + 8 gap = 76). Tightened from 100
+  // — the sign was drifting too far to the right of the speedo.
+  const limitSlideX = limitSlide.interpolate({ inputRange: [0, 1], outputRange: [0, 76] });
 
   const showMap = hasFix && !!mapUrl;
   // Live @rnmapbox MapView gate. Three conditions, all required:

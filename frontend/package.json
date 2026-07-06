@@ -28,6 +28,7 @@
     "@supabase/supabase-js": "^2.105.4",
     "axios": "^1.16.0",
     "expo": "~54.0.34",
+    "expo-apple-authentication": "~8.0.8",
     "expo-av": "^16.0.8",
     "expo-blur": "~15.0.8",
     "expo-build-properties": "~1.0.10",

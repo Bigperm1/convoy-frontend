@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/auth';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { api } from '../../src/api';
 import Constants from 'expo-constants';
 import GlassBackdrop from '../../src/components/GlassBackdrop';
@@ -33,8 +34,9 @@ export default function LoginScreen() {
   const [saveCredentials, setSaveCredentials] = useState(false);
   const [loading, setLoading] = useState(false);
   const [waking, setWaking] = useState(false);
+  const [appleAvailable, setAppleAvailable] = useState(false);
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, loginWithApple } = useAuth();
 
   const appVersion = Constants.expoConfig?.version ?? '?';
   const buildNumber =
@@ -109,6 +111,29 @@ export default function LoginScreen() {
       setLoading(false);
     }
   }, [email, password, saveCredentials, login, router]);
+
+  // Sign in with Apple is iOS-26/native only — show the button just when the OS
+  // reports it available, so Android / older iOS never render a dead control.
+  useEffect(() => {
+    if (Platform.OS === 'ios') {
+      AppleAuthentication.isAvailableAsync().then(setAppleAvailable).catch(() => setAppleAvailable(false));
+    }
+  }, []);
+
+  const handleApple = useCallback(async () => {
+    setLoading(true);
+    try {
+      await loginWithApple();
+      router.replace('/(app)/map');
+    } catch (e: any) {
+      // The user tapping "Cancel" on the Apple sheet is not an error.
+      if (e?.code !== 'ERR_REQUEST_CANCELED') {
+        Alert.alert('Apple sign in failed', 'Please try again, or use email and password.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [loginWithApple, router]);
 
   const handleForgotPassword = useCallback(() => {
     router.push('/(auth)/forgot-password' as any);
@@ -217,6 +242,24 @@ export default function LoginScreen() {
               </LinearGradient>
             </TouchableOpacity>
 
+            {appleAvailable && (
+              <>
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or continue with</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                  cornerRadius={12}
+                  style={styles.appleBtn}
+                  onPress={handleApple}
+                />
+                {/* Google button lands here once its OAuth client IDs exist. */}
+              </>
+            )}
+
             <View style={styles.linksSection}>
               <Text style={styles.linkText}>
                 New here?{' '}
@@ -231,6 +274,13 @@ export default function LoginScreen() {
                 <Text style={styles.forgotLink}>Forgot password?</Text>
               </TouchableOpacity>
             </View>
+
+            <Text style={styles.termsText}>
+              By continuing, you agree to our{' '}
+              <Text style={styles.termsLink} onPress={() => router.push('/(auth)/terms' as any)}>Terms of Service</Text>
+              {' '}and{' '}
+              <Text style={styles.termsLink} onPress={() => router.push('/(auth)/privacy-policy' as any)}>Privacy Policy</Text>.
+            </Text>
           </View>
         </ScrollView>
         <Text style={styles.versionText}>v{appVersion} ({buildNumber})</Text>
@@ -270,4 +320,10 @@ const styles = StyleSheet.create({
   linkHighlight: { color: '#2DEC86', fontWeight: '600' },
   forgotLink: { color: '#2DEC86', fontSize: 13, fontWeight: '500', paddingVertical: 6 },
   versionText: { color: '#6A6A6A', fontSize: 12, textAlign: 'center', paddingVertical: 10 },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 18, marginBottom: 6 },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.18)' },
+  dividerText: { color: '#9A9A9A', fontSize: 12, fontWeight: '500' },
+  appleBtn: { height: 50, width: '100%', marginTop: 12 },
+  termsText: { color: '#7A7A7A', fontSize: 12, lineHeight: 17, textAlign: 'center', marginTop: 18, paddingHorizontal: 8 },
+  termsLink: { color: '#2DEC86', fontWeight: '600' },
 });

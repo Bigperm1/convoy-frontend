@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { api, saveToken, getToken, clearToken } from "./api";
+import * as AppleAuthentication from "expo-apple-authentication";
 
 export type User = {
   id: string;
@@ -19,6 +20,7 @@ type AuthCtx = {
   user: User | null | undefined; // undefined = loading
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
+  loginWithApple: () => Promise<void>;
   register: (data: any) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -59,6 +61,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(data.user);
   };
 
+  const loginWithApple = async () => {
+    const cred = await AppleAuthentication.signInAsync({
+      requestedScopes: [
+        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+      ],
+    });
+    // Apple returns name/email ONLY on the first authorization — forward them so the
+    // backend can seed the profile; later sign-ins rely on the stable apple `sub`.
+    const fullName = cred.fullName
+      ? [cred.fullName.givenName, cred.fullName.familyName].filter(Boolean).join(" ") || undefined
+      : undefined;
+    const { data } = await api.post("/auth/apple", {
+      identity_token: cred.identityToken,
+      email: cred.email ?? undefined,
+      full_name: fullName,
+    });
+    await saveToken(data.token);
+    setToken(data.token);
+    setUser(data.user);
+  };
+
   const register = async (payload: any) => {
     const { data } = await api.post("/auth/register", payload);
     await saveToken(data.token);
@@ -72,7 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   };
 
-  return <Ctx.Provider value={{ user, token, login, register, logout, refresh }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, token, login, loginWithApple, register, logout, refresh }}>{children}</Ctx.Provider>;
 }
 
 export const useAuth = () => useContext(Ctx);

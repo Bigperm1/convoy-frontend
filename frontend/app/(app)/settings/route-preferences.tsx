@@ -1,0 +1,20 @@
+import React from "react";
+import { useSettings } from "../../../src/settings";
+import { SettingsPage, SectionLabel, SettingsCard, ToggleRow, Divider, HelpText } from "../../../src/components/settingsKit";
+
+export default function RoutePreferencesPage() {
+  const [settings, setSettings] = useSettings();
+  return (
+    <SettingsPage title="Route Preferences">
+      <SectionLabel>AVOID</SectionLabel>
+      <SettingsCard>
+        <ToggleRow icon="cash-outline" iconColor="#30D158" title="Avoid tolls" subtitle="Skip toll roads when possible" value={settings.avoidTolls} onChange={(v) => setSettings({ avoidTolls: v })} />
+        <Divider />
+        <ToggleRow icon="speedometer-outline" iconColor="#FF9F0A" title="Avoid highways" subtitle="Prefer surface streets over freeways" value={settings.avoidHighways} onChange={(v) => setSettings({ avoidHighways: v })} />
+        <Divider />
+        <ToggleRow icon="boat-outline" iconColor="#5AC8FA" title="Avoid ferries" subtitle="Don't route over water crossings" value={settings.avoidFerries} onChange={(v) => setSettings({ avoidFerries: v })} />
+      </SettingsCard>
+      <HelpText>Applied to every directions request — including auto-reroute when you go off-route. Routes refresh automatically when you toggle a preference.</HelpText>
+    </SettingsPage>
+  );
+}

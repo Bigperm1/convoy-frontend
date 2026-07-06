@@ -14,7 +14,7 @@ import { COLORS } from "../../src/theme";
 import Glass, { GlassFill } from "../../src/Glass";
 import GlassBackdrop from "../../src/components/GlassBackdrop";
 import LogoMenu from "../../src/components/LogoMenu";
-import { getGarageImage } from "../../src/carImages";
+import { getGarageImage, getTopDownImage } from "../../src/carImages";
 import { useSettings, updateSettings } from "../../src/settings";
 
 type Community = {
@@ -869,8 +869,8 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
               // anyone except themselves. The owner row never shows actions.
               const canRemove = c?.is_admin && !isSelf && !m.is_owner && (c?.is_owner || !m.is_admin);
               return (
-                <View key={m.id} style={styles.pendingRow}>
-                  <View style={styles.pendingAvatar}><Ionicons name="person" size={16} color="#fff" /></View>
+                <View key={m.id} style={styles.memberRow}>
+                  <Image source={getTopDownImage(m.car_color || "")} style={styles.memberCarAvatar} resizeMode="contain" />
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                       <Text style={styles.pendingName}>{m.handle || "anon"}{isSelf ? " (you)" : ""}</Text>
@@ -927,8 +927,8 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                 <Text style={[styles.label, { marginTop: 18 }]}>Pending requests ({c?.pending_users?.length || 0})</Text>
                 {(!c?.pending_users || c.pending_users.length === 0) && <Text style={{ color: COLORS.textMute }}>No pending requests</Text>}
                 {c?.pending_users?.map((u: any) => (
-                  <View key={u.id} style={styles.pendingRow}>
-                    <View style={styles.pendingAvatar}><Ionicons name="person" size={16} color="#fff" /></View>
+                  <View key={u.id} style={styles.memberRow}>
+                    <Image source={getTopDownImage(u.car_color || "")} style={styles.memberCarAvatar} resizeMode="contain" />
                     <Text style={styles.pendingName}>{u.handle || u.email}</Text>
                     <TouchableOpacity testID={`approve-${u.id}`} onPress={() => approve(u.id)} style={[styles.smallBtn, { backgroundColor: COLORS.success }]}>
                       <Text style={styles.smallBtnText}>Approve</Text>
@@ -979,8 +979,8 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
             {searchResults.map((r: any) => {
               const already = memberIds.includes(r.id);
               return (
-                <View key={r.id} style={styles.pendingRow}>
-                  <View style={styles.pendingAvatar}><Ionicons name="person" size={16} color="#fff" /></View>
+                <View key={r.id} style={styles.memberRow}>
+                  <Image source={getTopDownImage(r.car_color || "")} style={styles.memberCarAvatar} resizeMode="contain" />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.pendingName}>{r.handle || "anon"}</Text>
                     {(r.car_make || r.car_model || r.car_color) ? (
@@ -1209,6 +1209,9 @@ const styles = StyleSheet.create({
 
   pendingRow: { flexDirection: "row", alignItems: "center", padding: 10, borderRadius: 12, backgroundColor: "rgba(118,118,128,0.16)", marginTop: 8, gap: 8 },
   pendingAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: COLORS.accent, alignItems: "center", justifyContent: "center" },
+  // Roster row using the member's top-down CAR MARKER as their avatar (matches the map).
+  memberRow: { flexDirection: "row", alignItems: "center", padding: 10, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.08)", marginTop: 8, gap: 10 },
+  memberCarAvatar: { width: 42, height: 42, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.35)" },
   pendingName: { flex: 1, color: COLORS.text, fontWeight: "500" },
 
   dangerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,69,58,0.3)", marginTop: 18 },

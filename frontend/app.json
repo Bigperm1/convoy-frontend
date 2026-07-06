@@ -95,7 +95,10 @@
             "extraPods": [
               { "name": "AppAuth", "modular_headers": true },
               { "name": "GTMAppAuth", "modular_headers": true },
-              { "name": "GTMSessionFetcher", "modular_headers": true }
+              { "name": "GTMSessionFetcher", "modular_headers": true },
+              { "name": "GoogleUtilities", "modular_headers": true },
+              { "name": "RecaptchaInterop", "modular_headers": true },
+              { "name": "AppCheckCore", "modular_headers": true }
             ]
           },
           "android": {

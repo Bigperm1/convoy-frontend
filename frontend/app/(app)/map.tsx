@@ -3907,7 +3907,8 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     backgroundColor: "transparent",
     alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
+    // No hard white stroke — the clear glass draws its own clean edge; a 1px stroke
+    // on top fought it and read as an "unfinished" double edge. Shadow keeps it lifted.
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 5,
   },
@@ -3915,11 +3916,12 @@ const styles = StyleSheet.create({
     position: "absolute", left: 12, zIndex: 55, width: 60,
     borderRadius: 16, overflow: "hidden",
     backgroundColor: "transparent",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+    // No hard stroke — let the clear glass edge stand alone (see fab). Shadow lifts it.
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 5,
   },
   zoomBtn: { width: 58, height: 52, alignItems: "center", justifyContent: "center" },
-  zoomDivider: { height: 1, backgroundColor: "rgba(255,255,255,0.12)" },
+  // Faint divider between + / − — a hint of separation, not a hard white line.
+  zoomDivider: { height: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.06)" },
   // Hold-to-activate Avatar panel (bottom-left). Dark card matching the other
   // map glass; green-dot radio rows mirror the Settings MAP MODE selector.
   avatarPanel: {

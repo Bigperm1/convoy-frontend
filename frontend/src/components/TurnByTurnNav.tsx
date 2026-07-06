@@ -353,8 +353,8 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    // No hard stroke on the clear-glass state — it read as an unfinished double edge.
+    // The over-limit state below is a SOLID red fill, where a bright stroke reads fine.
     shadowColor: "#000",
     shadowOpacity: 0.3,
     shadowRadius: 5,
@@ -365,7 +365,7 @@ const styles = StyleSheet.create({
   speedUnit: { color: "#808080", fontSize: 10, fontWeight: "600", letterSpacing: 0.3, marginTop: 1 },
   // Over-the-limit state: pill turns solid red with a brighter border; the unit
   // label lightens so it stays legible on red.
-  speedPillOver: { backgroundColor: OVER_RED, borderColor: "rgba(255,255,255,0.55)" },
+  speedPillOver: { backgroundColor: OVER_RED, borderWidth: 1, borderColor: "rgba(255,255,255,0.55)" },
   speedUnitOver: { color: "rgba(255,255,255,0.85)" },
   // Pulsing glow ring behind the pill (same red), scaled out by the animation.
   speedHalo: {

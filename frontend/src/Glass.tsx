@@ -24,10 +24,13 @@ const LIQUID_GLASS = isLiquidGlassAvailable();
 export function hudTint(): string | undefined {
   const mode = getMapMode(getSettings());
   const darkMap = mode === "dusk" || mode === "night";
-  // Light basemaps (dawn/day/satellite): a real-but-light dark wash so content
-  // reads through the frosted material. Dark basemaps (dusk/night): NO tint — the
-  // frosted glass already reads as dark over the dark map.
-  return darkMap ? undefined : "rgba(18,18,22,0.42)";
+  // Every small HUD chip gets a LITTLE body so the CLEAR material stops bending the
+  // map's road/building lines into visible "diamond" refraction streaks (worst on the
+  // small tight-cornered chips, where the lensing converges). Still translucent and
+  // refractive — just enough tint to read like a finished glass chip, not a raw lens.
+  // Light basemaps need a heavier wash for legibility; dark basemaps only a touch.
+  // (The big DRAWER surfaces use drawerTint and stay clearer — they read clean at size.)
+  return darkMap ? "rgba(10,10,14,0.30)" : "rgba(18,18,22,0.44)";
 }
 
 // Slightly DARKER theme-adaptive tint for the big DRAWER surfaces (drive-preview
@@ -83,12 +86,12 @@ export default function Glass({
   if (LIQUID_GLASS) {
     // The glass material IS the background — children render on top. colorScheme
     // pinned dark (Convoy is a dark-only UI) so the glass never flips light.
-    // "regular" = the clean FROSTED Liquid Glass (uniform, finished edges) that the
-    // tab bar + music page already use — NOT "clear", whose refractive edge-lensing
-    // showed faceted "diamond" artifacts and ragged edges over the busy 3D map.
+    // "clear" = the refractive material the user wants (edge-lensing that bends the
+    // map through). The "diamond lines / unfinished edges" complaint is a separate
+    // edge-treatment issue, NOT the material — kept clear per request.
     return (
       <GlassView
-        glassEffectStyle="regular"
+        glassEffectStyle="clear"
         colorScheme="dark"
         style={[base, style]}
         {...rest}
@@ -131,14 +134,13 @@ export function GlassFill({
   if (LIQUID_GLASS) {
     // Wrap the glass in a GlassContainer (iOS-26 GlassEffectContainer). It renders
     // the glass as a STABLE grouped layer — it no longer re-samples/flickers when
-    // the map tab reappears. "regular" = the clean FROSTED material (uniform, finished
-    // edges), matching the tab bar + music page. We moved OFF "clear": its refractive
-    // edge-lensing showed faceted "diamond" refraction lines and unfinished edges over
-    // the busy 3D map (competitor "Velox" reads cleaner precisely because it's frosted,
-    // not refractive). pointerEvents none so taps fall through to the content on top.
+    // the map tab reappears — while the CLEAR material keeps the refractive edge-
+    // lensing that bends the map behind it (the premium look the user wants). The
+    // "diamond lines / unfinished edges" complaint is a separate edge issue, not the
+    // material. pointerEvents none so taps fall through to the button content on top.
     return (
       <GlassContainer style={fill} pointerEvents="none">
-        <GlassView glassEffectStyle="regular" colorScheme="dark" tintColor={tintColor} style={StyleSheet.absoluteFill} />
+        <GlassView glassEffectStyle="clear" colorScheme="dark" tintColor={tintColor} style={StyleSheet.absoluteFill} />
       </GlassContainer>
     );
   }

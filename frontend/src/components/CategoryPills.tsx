@@ -388,10 +388,11 @@ const styles = StyleSheet.create({
     // comes from the GlassContainer inside GlassFill (not an opaque floor, which
     // would give the edges a flat colour to refract instead of the live map).
     backgroundColor: "transparent",
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
+    // No hard stroke — the clear glass draws its own clean edge; a hairline on top
+    // read as an unfinished double edge. Shadow keeps the pill lifted off the map.
     shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
-  pillActive: { backgroundColor: "#2DEC86", borderColor: "rgba(0,0,0,0.15)" },
+  pillActive: { backgroundColor: "#2DEC86", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.15)" },
   pillText: { color: "#F4F4F4", fontSize: 13, fontWeight: "600", letterSpacing: 0.1 },
   pillTextActive: { color: "#1C1C1E" },
   // ===== "More" bottom sheet =====

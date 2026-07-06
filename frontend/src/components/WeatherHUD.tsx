@@ -276,8 +276,8 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    // No hard stroke — the clear glass draws its own clean edge (see map fab/zoom);
+    // a 1px stroke on top read as an unfinished double edge. Shadow keeps it lifted.
     ...Platform.select({
       ios: { shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
       android: { elevation: 5 },

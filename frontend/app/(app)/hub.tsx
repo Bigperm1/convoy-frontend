@@ -22,10 +22,19 @@ type Community = {
   pending_count: number; is_admin: boolean; is_member: boolean; is_pending: boolean;
   is_public: boolean; admin_handle?: string; invite_code?: string;
   logo_b64?: string | null;
+  banner_b64?: string | null;
+  tags?: string[];
   walkie_enabled?: boolean;
   music_enabled?: boolean;
   map_enabled?: boolean;
 };
+
+// Curated category chips admins pick from (Velox-style). Kept as a flat list so a
+// tapped chip maps 1:1 to a stored tag string.
+const SUGGESTED_TAGS = [
+  "Just for Fun", "Meetup", "Weekend Runs", "Cars & Coffee", "Beginner-Friendly",
+  "JDM", "Euro", "Domestic", "Trucks", "Track Days", "Show & Shine", "Cruises", "Organization",
+];
 
 export default function HubScreen() {
   const { user, logout, refresh } = useAuth();
@@ -47,7 +56,25 @@ export default function HubScreen() {
     setLoading(false);
   }, []);
 
+  // Explore tab — browse PUBLIC clubs (empty search query returns all public).
+  const [tab, setTab] = useState<"mine" | "explore">("mine");
+  const [explore, setExplore] = useState<Community[]>([]);
+  const [exploreLoading, setExploreLoading] = useState(false);
+  const loadExplore = useCallback(async () => {
+    setExploreLoading(true);
+    try { const { data } = await api.get("/communities/search", { params: { q: "" } }); setExplore(data); } catch {}
+    setExploreLoading(false);
+  }, []);
+  const joinCommunity = useCallback(async (c: Community) => {
+    try {
+      await api.post(`/communities/${c.id}/request`);
+      Alert.alert("Request sent", "The admin will review your request.");
+      loadExplore();
+    } catch (e) { Alert.alert("Failed", formatErr(e)); }
+  }, [loadExplore]);
+
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (tab === "explore" && explore.length === 0) loadExplore(); }, [tab, explore.length, loadExplore]);
 
   return (
     <>
@@ -77,22 +104,41 @@ export default function HubScreen() {
           <ActionCard testID="search-community" icon="search" label="Discover" onPress={() => setShowSearch(true)} />
         </View>
 
-        <View style={styles.sectionRow}>
-          <Image source={heroImg} style={styles.userHero} resizeMode="cover" />
-          <Text style={[styles.section, { marginTop: 0, marginBottom: 0 }]}>My communities</Text>
+        {/* Explore / My Clubs segmented control (Velox-style) */}
+        <View style={styles.segment}>
+          <TouchableOpacity testID="tab-explore" onPress={() => setTab("explore")} style={[styles.segmentBtn, tab === "explore" && styles.segmentBtnOn]}>
+            <Text style={[styles.segmentText, tab === "explore" && styles.segmentTextOn]}>Explore</Text>
+          </TouchableOpacity>
+          <TouchableOpacity testID="tab-mine" onPress={() => setTab("mine")} style={[styles.segmentBtn, tab === "mine" && styles.segmentBtnOn]}>
+            <Text style={[styles.segmentText, tab === "mine" && styles.segmentTextOn]}>My Clubs</Text>
+          </TouchableOpacity>
         </View>
-        {mine.length === 0 && (
-          <Glass radius={20}>
-            <View style={{ padding: 22, alignItems: "center" }}>
-              <Image source={heroImg} style={styles.emptyHero} resizeMode="cover" />
-              <Text style={styles.emptyTitle}>No communities yet</Text>
-              <Text style={styles.emptyText}>Create your own crew or search public communities to join the convoy.</Text>
-            </View>
-          </Glass>
+
+        {tab === "mine" ? (
+          <>
+            {mine.length === 0 && (
+              <Glass radius={20}>
+                <View style={{ padding: 22, alignItems: "center" }}>
+                  <Image source={heroImg} style={styles.emptyHero} resizeMode="cover" />
+                  <Text style={styles.emptyTitle}>No clubs yet</Text>
+                  <Text style={styles.emptyText}>Create your own crew, or tap Explore to find public clubs to join.</Text>
+                </View>
+              </Glass>
+            )}
+            {mine.map((c) => (
+              <CommunityCard key={c.id} c={c} active={c.id === settings.activeCommunityId} onPress={() => setShowDetail(c)} />
+            ))}
+          </>
+        ) : (
+          <>
+            {explore.length === 0 && !exploreLoading && (
+              <Text style={styles.emptyText}>No public clubs found yet. Be the first — tap Create.</Text>
+            )}
+            {explore.map((c) => (
+              <CommunityCard key={c.id} c={c} mode="explore" onJoin={joinCommunity} onPress={() => setShowDetail(c)} />
+            ))}
+          </>
         )}
-        {mine.map((c) => (
-          <CommunityCard key={c.id} c={c} active={c.id === settings.activeCommunityId} onPress={() => setShowDetail(c)} />
-        ))}
 
         <TouchableOpacity testID="logout-btn" style={styles.logoutBtn} onPress={logout} activeOpacity={0.85}>
           {/* Candy-apple-red glossy fill (matches the nav Exit button): a red
@@ -131,41 +177,73 @@ function ActionCard({ icon, label, onPress, testID }: any) {
   );
 }
 
-function CommunityCard({ c, onPress, active }: { c: Community; onPress: () => void; active?: boolean }) {
-  // Tiny on-row indicators showing which sub-systems this community has enabled.
-  const features = [
-    { on: c.walkie_enabled !== false, icon: "flash", color: "#FF6A00" },
-    { on: c.music_enabled !== false, icon: "musical-notes", color: "#FF453A" },
-    { on: c.map_enabled !== false, icon: "map", color: "#0A84FF" },
-  ];
+// Velox-style club card: full-width cover banner → logo + name + member count →
+// description → category tag chips. `mode` swaps the trailing control: a chevron on
+// "My Clubs" (opens detail) vs a Join / Joined / Pending state on "Explore".
+function CommunityCard({ c, onPress, active, mode = "mine", onJoin }: {
+  c: Community; onPress: () => void; active?: boolean;
+  mode?: "mine" | "explore"; onJoin?: (c: Community) => void;
+}) {
+  const tags = (c.tags || []).slice(0, 4);
   return (
-    <TouchableOpacity testID={`community-${c.id}`} onPress={onPress} activeOpacity={0.85} style={{ marginBottom: 8 }}>
-      <Glass radius={18}>
-        <View style={styles.commCard}>
-          {c.logo_b64 ? (
-            <Image source={{ uri: c.logo_b64 }} style={styles.commLogo} />
+    <TouchableOpacity testID={`community-${c.id}`} onPress={onPress} activeOpacity={0.9} style={{ marginBottom: 14 }}>
+      <Glass radius={20}>
+        <View style={styles.clubCardInner}>
+          {/* Cover banner (falls back to a branded gradient when none is set) */}
+          {c.banner_b64 ? (
+            <Image source={{ uri: c.banner_b64 }} style={styles.clubBanner} resizeMode="cover" />
           ) : (
-            <View style={styles.commIcon}>
-              <Ionicons name="people" size={22} color={COLORS.primary} />
+            <LinearGradient colors={["#0F2A22", "#12352A", "#0B0B0C"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.clubBanner}>
+              <Ionicons name="car-sport" size={40} color="rgba(45,236,134,0.35)" />
+            </LinearGradient>
+          )}
+          {active && (
+            <View style={styles.clubActivePill}>
+              <Ionicons name="radio" size={11} color="#0A0A0A" />
+              <Text style={styles.clubActivePillText}>ACTIVE</Text>
             </View>
           )}
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <Text style={styles.commName}>{c.name}</Text>
-              {active && <View style={styles.activeBadge}><Text style={styles.activeBadgeText}>ACTIVE</Text></View>}
-              {c.is_admin && <View style={styles.adminBadge}><Text style={styles.adminBadgeText}>ADMIN</Text></View>}
-            </View>
-            <Text style={styles.commMeta}>{c.member_count} members{c.pending_count > 0 && c.is_admin ? ` · ${c.pending_count} pending` : ""}</Text>
-            {/* Feature pills — show only the ones that are ON to keep the row uncluttered */}
-            <View style={styles.featurePills}>
-              {features.filter((f) => f.on).map((f) => (
-                <View key={f.icon} style={[styles.featurePill, { backgroundColor: f.color + "1F" }]}>
-                  <Ionicons name={f.icon as any} size={11} color={f.color} />
+
+          <View style={styles.clubBody}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              {c.logo_b64 ? (
+                <Image source={{ uri: c.logo_b64 }} style={styles.clubLogo} />
+              ) : (
+                <View style={styles.clubLogoPlaceholder}><Ionicons name="people" size={20} color={COLORS.primary} /></View>
+              )}
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Text style={styles.clubName} numberOfLines={1}>{c.name}</Text>
+                  {c.is_admin && <View style={styles.adminBadge}><Text style={styles.adminBadgeText}>ADMIN</Text></View>}
                 </View>
-              ))}
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
+                  <Ionicons name="people" size={13} color={COLORS.textDim} />
+                  <Text style={styles.clubMeta}>{c.member_count} member{c.member_count === 1 ? "" : "s"}{c.pending_count > 0 && c.is_admin ? ` · ${c.pending_count} pending` : ""}</Text>
+                </View>
+              </View>
+              {mode === "explore" ? (
+                c.is_member ? (
+                  <View style={styles.joinedPill}><Text style={styles.joinedPillText}>Joined</Text></View>
+                ) : c.is_pending ? (
+                  <View style={styles.pendingPill}><Text style={styles.pendingPillText}>Pending</Text></View>
+                ) : (
+                  <TouchableOpacity testID={`join-${c.id}`} onPress={() => onJoin?.(c)} style={styles.joinBtn}>
+                    <Text style={styles.joinBtnText}>Join</Text>
+                  </TouchableOpacity>
+                )
+              ) : (
+                <Ionicons name="chevron-forward" size={20} color={COLORS.textDim} />
+              )}
             </View>
+            {!!c.description && <Text style={styles.clubDesc} numberOfLines={2}>{c.description}</Text>}
+            {tags.length > 0 && (
+              <View style={styles.clubTags}>
+                {tags.map((t) => (
+                  <View key={t} style={styles.clubTag}><Text style={styles.clubTagText}>{t}</Text></View>
+                ))}
+              </View>
+            )}
           </View>
-          <Ionicons name="chevron-forward" size={20} color={COLORS.textDim} />
         </View>
       </Glass>
     </TouchableOpacity>
@@ -182,6 +260,9 @@ function CreateModal({ visible, onClose, onCreated }: any) {
   const [mapEnabled, setMapEnabled] = useState(true);
   // Optional logo as a base64 data URL (kept tiny — we resize on import).
   const [logo, setLogo] = useState<string | null>(null);
+  // Optional wide cover/banner image + category tags (Velox-style card).
+  const [banner, setBanner] = useState<string | null>(null);
+  const [tags, setTags] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
   const pickLogo = async () => {
@@ -205,6 +286,22 @@ function CreateModal({ visible, onClose, onCreated }: any) {
     } catch (e) { Alert.alert("Pick failed", formatErr(e)); }
   };
 
+  const pickBanner = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== "granted") return Alert.alert("Permission needed", "We need photo access to set a cover image.");
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true, aspect: [16, 9], quality: 0.5, base64: true,
+      });
+      if (res.canceled) return;
+      const a = res.assets?.[0];
+      if (!a?.base64) return;
+      setBanner(`data:${a.mimeType || "image/jpeg"};base64,${a.base64}`);
+    } catch (e) { Alert.alert("Pick failed", formatErr(e)); }
+  };
+  const toggleTag = (t: string) => setTags((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]);
+
   const submit = async () => {
     if (!name.trim()) return Alert.alert("Name required");
     try {
@@ -214,11 +311,13 @@ function CreateModal({ visible, onClose, onCreated }: any) {
         description: desc,
         is_public: isPublic,
         logo_b64: logo,
+        banner_b64: banner,
+        tags,
         walkie_enabled: walkie,
         music_enabled: music,
         map_enabled: mapEnabled,
       });
-      setName(""); setDesc(""); setLogo(null);
+      setName(""); setDesc(""); setLogo(null); setBanner(null); setTags([]);
       setWalkie(true); setMusic(true); setMapEnabled(true);
       onCreated();
     } catch (e) { Alert.alert("Create failed", formatErr(e)); }
@@ -234,6 +333,18 @@ function CreateModal({ visible, onClose, onCreated }: any) {
               <Text style={styles.sheetTitle}>Create community</Text>
               <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={COLORS.textDim} /></TouchableOpacity>
             </View>
+
+            {/* Cover image — wide banner across the top of the card. */}
+            <TouchableOpacity testID="cc-banner" onPress={pickBanner} activeOpacity={0.85} style={styles.bannerPicker}>
+              {banner ? (
+                <Image source={{ uri: banner }} style={styles.bannerImg} resizeMode="cover" />
+              ) : (
+                <View style={styles.bannerPlaceholder}>
+                  <Ionicons name="image-outline" size={26} color={COLORS.textDim} />
+                  <Text style={styles.logoHint}>Add cover image</Text>
+                </View>
+              )}
+            </TouchableOpacity>
 
             {/* Logo picker — large round avatar at the top, tappable. */}
             <View style={{ alignItems: "center", marginVertical: 6 }}>
@@ -253,6 +364,18 @@ function CreateModal({ visible, onClose, onCreated }: any) {
             <TextInput testID="cc-name" value={name} onChangeText={setName} style={styles.input} placeholder="Sunday Drivers" placeholderTextColor={COLORS.textMute} />
             <Text style={styles.label}>Description</Text>
             <TextInput testID="cc-desc" value={desc} onChangeText={setDesc} style={[styles.input, { height: 80 }]} multiline placeholder="What's this community about?" placeholderTextColor={COLORS.textMute} />
+
+            <Text style={[styles.label, { marginTop: 14 }]}>Tags</Text>
+            <View style={styles.tagWrap}>
+              {SUGGESTED_TAGS.map((t) => {
+                const on = tags.includes(t);
+                return (
+                  <TouchableOpacity key={t} onPress={() => toggleTag(t)} style={[styles.tagChip, on && styles.tagChipOn]}>
+                    <Text style={[styles.tagChipText, on && styles.tagChipTextOn]}>{t}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
             <TouchableOpacity testID="cc-public" onPress={() => setIsPublic((v) => !v)} style={styles.toggleRow}>
               <View style={[styles.toggleBox, isPublic && { backgroundColor: COLORS.primary, borderColor: COLORS.primary }]}>
@@ -410,6 +533,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
   const [nameDraft, setNameDraft] = useState("");
   const [nameSaving, setNameSaving] = useState(false);
   const [logoSaving, setLogoSaving] = useState(false);
+  const [bannerSaving, setBannerSaving] = useState(false);
   useEffect(() => {
     if (!community) { setC(null); setEditingDesc(false); setEditingName(false); return; }
     (async () => {
@@ -465,6 +589,35 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
       onChanged();
     } catch (e) { Alert.alert("Failed", formatErr(e)); }
     finally { setLogoSaving(false); }
+  };
+
+  // Admin: change the wide cover/banner image (backend PUT accepts `banner_b64`).
+  const pickAndSaveBanner = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== "granted") return Alert.alert("Permission needed", "We need photo access to set a cover image.");
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [16, 9], quality: 0.5, base64: true,
+      });
+      if (res.canceled) return;
+      const a = res.assets?.[0];
+      if (!a?.base64) return;
+      const banner_b64 = `data:${a.mimeType || "image/jpeg"};base64,${a.base64}`;
+      setBannerSaving(true);
+      const { data } = await api.put(`/communities/${c.id}`, { banner_b64 });
+      setC({ ...c, ...data });
+      onChanged();
+    } catch (e) { Alert.alert("Failed", formatErr(e)); }
+    finally { setBannerSaving(false); }
+  };
+
+  // Admin: toggle a category tag, saving immediately.
+  const toggleTagSave = async (t: string) => {
+    if (!c?.id) return;
+    const cur: string[] = c.tags || [];
+    const next = cur.includes(t) ? cur.filter((x: string) => x !== t) : [...cur, t];
+    try { const { data } = await api.put(`/communities/${c.id}`, { tags: next }); setC({ ...c, ...data }); onChanged(); }
+    catch (e) { Alert.alert("Failed", formatErr(e)); }
   };
 
   const saveDescription = async () => {
@@ -620,6 +773,34 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                     </TouchableOpacity>
                   )}
                   <Text style={styles.adminIdentityHint}>Tap the photo or name to edit</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Admin: wide cover image + category tags (the Velox-style card). */}
+            {c?.is_admin && (
+              <View style={{ marginBottom: 14 }}>
+                <TouchableOpacity onPress={pickAndSaveBanner} activeOpacity={0.85} style={styles.detailBannerEdit} testID="edit-community-banner">
+                  {c?.banner_b64 ? (
+                    <Image source={{ uri: c.banner_b64 }} style={styles.detailBannerImg} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.detailBannerPlaceholder}>
+                      <Ionicons name={bannerSaving ? "hourglass" : "image-outline"} size={22} color={COLORS.textDim} />
+                      <Text style={styles.logoHint}>Add cover image</Text>
+                    </View>
+                  )}
+                  <View style={styles.detailBannerBadge}><Ionicons name="camera" size={12} color="#0A0A0A" /></View>
+                </TouchableOpacity>
+                <Text style={[styles.label, { marginTop: 12 }]}>Tags</Text>
+                <View style={styles.tagWrap}>
+                  {SUGGESTED_TAGS.map((t) => {
+                    const on = (c.tags || []).includes(t);
+                    return (
+                      <TouchableOpacity key={t} onPress={() => toggleTagSave(t)} style={[styles.tagChip, on && styles.tagChipOn]}>
+                        <Text style={[styles.tagChipText, on && styles.tagChipTextOn]}>{t}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               </View>
             )}
@@ -1032,4 +1213,47 @@ const styles = StyleSheet.create({
 
   dangerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,69,58,0.3)", marginTop: 18 },
   dangerText: { color: COLORS.danger, fontWeight: "600" },
+
+  // ===== Velox-style club cards =====
+  segment: { flexDirection: "row", backgroundColor: "rgba(118,118,128,0.20)", borderRadius: 12, padding: 4, marginTop: 22, marginBottom: 14 },
+  segmentBtn: { flex: 1, paddingVertical: 9, borderRadius: 9, alignItems: "center" },
+  segmentBtnOn: { backgroundColor: COLORS.primary },
+  segmentText: { color: COLORS.textDim, fontWeight: "700", fontSize: 14 },
+  segmentTextOn: { color: "#06281A" },
+
+  clubCardInner: { borderRadius: 20, overflow: "hidden" },
+  clubBanner: { width: "100%", height: 130, alignItems: "center", justifyContent: "center", backgroundColor: "#0F1512" },
+  clubActivePill: { position: "absolute", top: 10, right: 10, flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: COLORS.primary, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  clubActivePillText: { color: "#0A0A0A", fontSize: 9, fontWeight: "800", letterSpacing: 0.5 },
+  clubBody: { padding: 14 },
+  clubLogo: { width: 42, height: 42, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.15)" },
+  clubLogoPlaceholder: { width: 42, height: 42, borderRadius: 12, backgroundColor: COLORS.primary + "22", alignItems: "center", justifyContent: "center" },
+  clubName: { color: COLORS.text, fontWeight: "700", fontSize: 17, letterSpacing: -0.3, flexShrink: 1 },
+  clubMeta: { color: COLORS.textDim, fontSize: 12, fontWeight: "500" },
+  clubDesc: { color: COLORS.textDim, fontSize: 13, lineHeight: 18, marginTop: 10 },
+  clubTags: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 12 },
+  clubTag: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  clubTagText: { color: "#D8D8DC", fontSize: 11, fontWeight: "600" },
+
+  joinBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  joinBtnText: { color: "#06281A", fontWeight: "800", fontSize: 13 },
+  joinedPill: { backgroundColor: COLORS.success + "33", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 },
+  joinedPillText: { color: COLORS.success, fontWeight: "700", fontSize: 12 },
+  pendingPill: { backgroundColor: COLORS.warning + "33", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 },
+  pendingPillText: { color: COLORS.warning, fontWeight: "700", fontSize: 12 },
+
+  // Create/edit: cover picker + tag chips
+  bannerPicker: { width: "100%", height: 120, borderRadius: 16, overflow: "hidden", marginTop: 4, marginBottom: 8 },
+  bannerImg: { width: "100%", height: "100%" },
+  bannerPlaceholder: { flex: 1, backgroundColor: "rgba(118,118,128,0.18)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: COLORS.hairline, borderStyle: "dashed", borderRadius: 16 },
+  tagWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  tagChip: { backgroundColor: "rgba(118,118,128,0.20)", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: "transparent" },
+  tagChipOn: { backgroundColor: "rgba(45,236,134,0.18)", borderColor: COLORS.primary },
+  tagChipText: { color: COLORS.textDim, fontSize: 12, fontWeight: "600" },
+  tagChipTextOn: { color: COLORS.primary },
+
+  detailBannerEdit: { width: "100%", height: 120, borderRadius: 16, overflow: "hidden" },
+  detailBannerImg: { width: "100%", height: "100%" },
+  detailBannerPlaceholder: { flex: 1, backgroundColor: "rgba(118,118,128,0.18)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: COLORS.hairline, borderStyle: "dashed", borderRadius: 16 },
+  detailBannerBadge: { position: "absolute", right: 8, bottom: 8, width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#1A1A1C" },
 });

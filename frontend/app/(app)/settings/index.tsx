@@ -1,6 +1,7 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useState } from "react";
 import { Text, StyleSheet, TouchableOpacity, Linking, Alert } from "react-native";
 import { useRouter } from "expo-router";
+import * as Updates from "expo-updates";
 import { GlassFill } from "../../../src/Glass";
 import { useAuth } from "../../../src/auth";
 import {
@@ -38,6 +39,38 @@ export default function SettingsMenu() {
     );
   }, []);
 
+  // ===== Software update (force-pull the latest OTA) =====
+  // Convoy runs background audio + location, so iOS often keeps it alive and it never
+  // truly cold-starts — which means expo-updates' default "apply on next launch" can
+  // sit on a stale bundle for a long time. This makes the running bundle VISIBLE and
+  // lets the user force the newest one in one tap (fetch → reload), no cold-start dance.
+  const [updating, setUpdating] = useState(false);
+  const otaShort = Updates.isEmbeddedLaunch ? "build-bundled" : (Updates.updateId || "unknown").slice(0, 8);
+  const otaWhen = (() => {
+    try { return Updates.createdAt ? new Date(Updates.createdAt).toLocaleString() : ""; } catch { return ""; }
+  })();
+  const otaSubtitle = `${Updates.isEmbeddedLaunch ? "No OTA yet — bundled with the build" : "OTA " + otaShort}${otaWhen ? " · " + otaWhen : ""}`;
+  const checkForUpdate = useCallback(async () => {
+    if (updating) return;
+    setUpdating(true);
+    try {
+      const res = await Updates.checkForUpdateAsync();
+      if (!res.isAvailable) {
+        Alert.alert("You're up to date", `Running the latest update.\n\n${Updates.isEmbeddedLaunch ? "build-bundled" : "OTA " + otaShort}`);
+        return;
+      }
+      await Updates.fetchUpdateAsync();
+      Alert.alert("Update downloaded", "Reload Convoy now to apply the latest version?", [
+        { text: "Later", style: "cancel" },
+        { text: "Reload now", onPress: () => { void Updates.reloadAsync(); } },
+      ]);
+    } catch (e: any) {
+      Alert.alert("Couldn't check for updates", e?.message || "Check your connection and try again.");
+    } finally {
+      setUpdating(false);
+    }
+  }, [updating, otaShort]);
+
   const confirmSignOut = useCallback(() => {
     Alert.alert("Sign out", "Sign out of Convoy on this device?", [
       { text: "Cancel", style: "cancel" },
@@ -54,6 +87,17 @@ export default function SettingsMenu() {
           icon="car-sport" iconColor="#00C46A" title="Garage"
           subtitle="Year, make, model, color & car icon"
           onPress={() => go("/(app)/garage")} testID="settings-garage"
+        />
+      </SettingsCard>
+
+      {/* SOFTWARE UPDATE — force-pull the latest OTA + show which one is running */}
+      <SectionLabel>SOFTWARE UPDATE</SectionLabel>
+      <SettingsCard>
+        <MenuRow
+          icon={updating ? "sync" : "cloud-download"} iconColor="#0A84FF"
+          title={updating ? "Checking…" : "Check for Updates"}
+          subtitle={otaSubtitle}
+          onPress={checkForUpdate} testID="settings-check-update"
         />
       </SettingsCard>
 

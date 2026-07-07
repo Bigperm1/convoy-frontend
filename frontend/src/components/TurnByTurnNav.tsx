@@ -290,8 +290,10 @@ const styles = StyleSheet.create({
   },
   // Dark turn glyph on the green tile — shared shape with the CarPlay strip (Option A).
   maneuverGlyph: { color: "#0B0B0C", fontSize: 34, fontWeight: "900", lineHeight: 38 },
-  distanceToTurn: { color: "#F4F4F4", fontSize: 28, fontWeight: "800", letterSpacing: -0.5, lineHeight: 32 },
-  instruction: { color: "#808080", fontSize: 15, fontWeight: "500", marginTop: 1 },
+  // Distance green + instruction white to match the CarPlay maneuver strip (topDist /
+  // topInst) so the two banners read identically.
+  distanceToTurn: { color: "#2DEC86", fontSize: 28, fontWeight: "800", letterSpacing: -0.5, lineHeight: 32 },
+  instruction: { color: "#F4F4F4", fontSize: 15, fontWeight: "500", marginTop: 1 },
   muteBtn: {
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: "rgba(255,255,255,0.08)",

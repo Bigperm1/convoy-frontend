@@ -96,6 +96,14 @@ export const skipNext = (): void => {};
 export const skipPrev = (): void => {};
 export const setShuffle = (_enabled: boolean): void => {};
 
+export async function duckMusicFor(_reason: string): Promise<void> {
+  /* no-op off iOS — external apps duck via the audio session */
+}
+
+export async function unduckMusicFor(_reason: string): Promise<void> {
+  /* no-op off iOS */
+}
+
 export async function duckForSpeech(): Promise<void> {
   /* no-op off iOS — external apps duck via the audio session */
 }

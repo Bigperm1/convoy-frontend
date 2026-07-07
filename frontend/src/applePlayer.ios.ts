@@ -287,20 +287,33 @@ export const setShuffle = (enabled: boolean): void => {
   try { (Player as any).setShuffleMode(enabled); } catch (e) { console.warn("[applePlayer] setShuffle failed", e); }
 };
 
-// ---- Nova voice ducking --------------------------------------------------
+// ---- In-app Apple Music ducking (Nova voice + walkie comms) ---------------
 // The in-app Apple Music player (MusicKit) is an out-of-process system player,
 // so it is NOT ducked by Convoy's expo-av `.duckOthers` session — that only
-// ducks OTHER apps (e.g. Spotify), never same-app audio. So while Nova speaks
-// we explicitly pause Apple Music and resume it afterwards. We only pause when
-// it's actually playing, and only resume if WE paused it, so we never start
-// playback the user had paused themselves.
-let _duckedByNova = false;
+// ducks OTHER apps (e.g. Spotify), never same-app audio. And MusicKit's system
+// player exposes NO app-settable volume — we can only play()/pause() it, there's
+// no "play at 25%". So to keep it out of the way of speech/comms we pause it and
+// resume afterwards.
+//
+// Multiple things want it paused at once (a Nova callout can land while a crew
+// transmission is coming in, or while you're holding the mic). A single boolean
+// flag would let whichever finishes FIRST resume the music while the other still
+// needs it silent. So we track a SET of active duck reasons: the music pauses when
+// the first reason arrives and only resumes when the LAST reason clears. Each
+// reason is idempotent (a queue of 3 incoming clips all pass "comms" → one entry),
+// and we only resume if WE actually paused it (never start playback the user had
+// paused themselves).
+const _duckReasons = new Set<string>();
+let _weReallyPaused = false;
 
-export async function duckForSpeech(): Promise<void> {
+export async function duckMusicFor(reason: string): Promise<void> {
+  const wasIdle = _duckReasons.size === 0;
+  _duckReasons.add(reason);
+  if (!wasIdle) return; // already paused by another reason
   try {
     const st = await Player.getCurrentState();
     if (String(st?.playbackStatus) === "playing") {
-      _duckedByNova = true;
+      _weReallyPaused = true;
       Player.pause();
     }
   } catch {
@@ -308,11 +321,17 @@ export async function duckForSpeech(): Promise<void> {
   }
 }
 
-export async function unduckForSpeech(): Promise<void> {
-  if (!_duckedByNova) return;
-  _duckedByNova = false;
+export async function unduckMusicFor(reason: string): Promise<void> {
+  if (!_duckReasons.delete(reason)) return; // wasn't holding this reason
+  if (_duckReasons.size > 0) return;         // someone else still needs silence
+  if (!_weReallyPaused) return;              // we never paused it — don't start it
+  _weReallyPaused = false;
   try { Player.play(); } catch {}
 }
+
+// Nova/nav TTS ducking — thin wrappers over the reason-set (reason "nova").
+export const duckForSpeech = (): Promise<void> => duckMusicFor("nova");
+export const unduckForSpeech = (): Promise<void> => unduckMusicFor("nova");
 
 // ---- Reactive hooks (re-exported straight from the native module) --------
 

@@ -23,6 +23,7 @@ import { getSettings } from "./settings";
 import { hailBus } from "./hailBus";
 import { shareBus } from "./shareBus";
 import { setIdleAudioMode, setPlaybackAudioMode } from "./audioMode";
+import { duckMusicFor, unduckMusicFor } from "./applePlayer";
 import { showTransmitNotification } from "./pttNotification";
 import { AppState } from "react-native";
 
@@ -119,6 +120,11 @@ async function playOne(m: PTTMessage) {
     // Important even if we already set it at boot — recording may have flipped
     // us back into .playAndRecord which mutes incoming clips to earpiece-only.
     await setPlaybackAudioMode();
+    // The session-level duck only dips OTHER apps (Spotify) — it does NOT touch
+    // the in-app Apple Music system player, so without this it kept playing over
+    // the transmission ("comms still had music in the background"). Pause it for
+    // the duration of the incoming clip(s); drain() resumes when the queue empties.
+    void duckMusicFor("comms");
 
     // Background notification — fire a local notification ONLY when the app
     // is backgrounded so the driver knows someone is transmitting even when
@@ -175,6 +181,8 @@ function drain() {
     // external music (Spotify, podcasts) returns to full volume instead of
     // staying quiet until the next clip or an app restart.
     void setIdleAudioMode();
+    // ...and resume the in-app Apple Music we paused for the transmission.
+    void unduckMusicFor("comms");
     return;
   }
   playing = true;

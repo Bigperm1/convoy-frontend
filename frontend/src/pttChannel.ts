@@ -21,6 +21,7 @@ import { api } from "./api";
 import { getPttRecordingOptions, type ProximityTier } from "./proximityAudio";
 import { livePttBus, type PTTMessage } from "./livePtt";
 import { setRecordingAudioMode, setIdleAudioMode } from "./audioMode";
+import { duckMusicFor, unduckMusicFor } from "./applePlayer";
 
 export type { PTTMessage };
 
@@ -177,6 +178,13 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
       recRef.current = rec;
       startedAtRef.current = Date.now();
       setRecording(true);
+      // Hold-to-talk: fully silence the in-app Apple Music while the mic is hot.
+      // The recording session ducks OTHER apps but never the same-app system
+      // player, so the driver's own music would otherwise play over their own
+      // transmission. Resumed in stopAndSend / cancel. ("ptt-tx" is a distinct
+      // reason from incoming "comms" so an overlap keeps the music paused until
+      // BOTH clear — see applePlayer's duck-reason set.)
+      void duckMusicFor("ptt-tx");
       // Belt-and-suspenders: hard-cap a single transmission at 60s so a missed
       // release can never record indefinitely again.
       if (maxTimerRef.current) clearTimeout(maxTimerRef.current);
@@ -217,6 +225,8 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
       // external music (Spotify, podcasts) returns to full volume right away
       // instead of staying quiet until the next clip / app restart.
       void setIdleAudioMode();
+      // ...and resume the in-app Apple Music we paused for the transmission.
+      void unduckMusicFor("ptt-tx");
     }
     if (!uri) return false;
     // Ignore accidental sub-300ms taps — nothing meaningful was said.
@@ -251,6 +261,7 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
     // Cancelled recording — release the ducking session so external music
     // returns to full volume immediately.
     void setIdleAudioMode();
+    void unduckMusicFor("ptt-tx");
   }, []);
 
   // ===== Hands-free VOX (voice-activated transmit) =====

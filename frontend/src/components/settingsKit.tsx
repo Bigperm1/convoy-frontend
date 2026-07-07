@@ -60,7 +60,7 @@ export function SectionLabel({ children }: { children: React.ReactNode }) {
 
 export function SettingsCard({ children }: { children: React.ReactNode }) {
   return (
-    <Glass radius={16} style={styles.card}>
+    <Glass radius={16} frost style={styles.card}>
       {children}
     </Glass>
   );
@@ -149,7 +149,7 @@ export function ToggleRow({
       <Switch
         value={value}
         onValueChange={onChange}
-        trackColor={{ false: "#3A3A3C", true: COLORS.primary }}
+        trackColor={{ false: "#3A3A3C", true: COLORS.brand }}
         thumbColor="#FFFFFF"
         ios_backgroundColor="#3A3A3C"
       />

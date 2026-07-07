@@ -48,6 +48,11 @@ type Props = ViewProps & {
   tint?: "light" | "dark" | "default";
   radius?: number;
   border?: boolean;
+  // frost = a MORE-BLURRED, less-refractive variant. iOS 26 uses the "regular"
+  // frosted material instead of "clear"; older tiers get a stronger BlurView +
+  // darker fill. Opt-in per surface (e.g. Settings section cards want the extra
+  // blur for legibility) so the map HUD keeps the clean "clear" glass.
+  frost?: boolean;
 };
 
 // Liquid-glass card. Real UIGlassEffect on iOS 26; BlurView on older iOS/Android;
@@ -57,6 +62,7 @@ export default function Glass({
   tint = "dark",
   radius = 20,
   border = true,
+  frost = false,
   style,
   children,
   ...rest
@@ -74,7 +80,7 @@ export default function Glass({
       <View
         style={[
           base,
-          { backgroundColor: "rgba(28,28,30,0.72)" },
+          { backgroundColor: frost ? "rgba(20,20,24,0.82)" : "rgba(28,28,30,0.72)" },
           style,
         ]}
         {...rest}
@@ -90,9 +96,10 @@ export default function Glass({
     // "clear" = the refractive material the user wants (edge-lensing that bends the
     // map through). The "diamond lines / unfinished edges" complaint is a separate
     // edge-treatment issue, NOT the material — kept clear per request.
+    // frost → "regular" is the MORE-BLURRED frosted material (Settings cards).
     return (
       <GlassView
-        glassEffectStyle="clear"
+        glassEffectStyle={frost ? "regular" : "clear"}
         colorScheme="dark"
         style={[base, style]}
         {...rest}
@@ -104,8 +111,8 @@ export default function Glass({
 
   return (
     <View style={[base, style]} {...rest}>
-      <BlurView intensity={intensity} tint={tint} style={StyleSheet.absoluteFill} />
-      <View style={{ backgroundColor: "rgba(28,28,30,0.45)", flex: 1 }}>{children}</View>
+      <BlurView intensity={frost ? Math.min(100, intensity + 40) : intensity} tint={tint} style={StyleSheet.absoluteFill} />
+      <View style={{ backgroundColor: frost ? "rgba(20,20,24,0.6)" : "rgba(28,28,30,0.45)", flex: 1 }}>{children}</View>
     </View>
   );
 }

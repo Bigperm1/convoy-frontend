@@ -1374,7 +1374,7 @@ export default function MapScreen() {
     setIsFollowing(false);            // driver took control — stop chasing
     setNorthUpHold(false);            // a manual pan releases the compass north-up hold
     clearRecenterTimer();
-    recenterTimerRef.current = setTimeout(() => { setIsFollowing(true); }, 10000); // auto-recenter after 10s idle
+    recenterTimerRef.current = setTimeout(() => { setIsFollowing(true); }, 20000); // auto-recenter after 20s idle
   };
   const recenterNow = () => { clearRecenterTimer(); setIsFollowing(true); };
   useEffect(() => () => clearRecenterTimer(), []); // tidy on unmount
@@ -3323,7 +3323,7 @@ export default function MapScreen() {
                 <Switch
                   value={showWeatherLayer}
                   onValueChange={(v) => { void updateSettings({ showWeatherLayer: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#5AC8FA' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>

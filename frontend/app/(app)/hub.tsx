@@ -79,7 +79,7 @@ export default function HubScreen() {
   return (
     <>
     <SafeAreaView style={styles.c} edges={["top"]}>
-      <GlassBackdrop />
+      <GlassBackdrop source={require("../../assets/images/glass-bgt.png")} />
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={COLORS.primary} />}>
         <View style={styles.headerRow}>
@@ -437,7 +437,7 @@ function FeatureToggle({ testID, icon, iconColor, title, sub, value, onChange }:
         testID={testID}
         value={value}
         onValueChange={onChange}
-        trackColor={{ false: "rgba(255,255,255,0.12)", true: "#00C46A" }}
+        trackColor={{ false: "rgba(255,255,255,0.12)", true: "#2DEC86" }}
         thumbColor={value ? "#1a1a1a" : "#999"}
       />
     </View>
@@ -493,24 +493,10 @@ function SearchModal({ visible, onClose, onChanged }: any) {
 
           <ScrollView style={{ marginTop: 12 }} contentContainerStyle={{ paddingBottom: 30 }}>
             {results.length === 0 && <Text style={{ color: COLORS.textMute, textAlign: "center", marginTop: 12 }}>No communities found</Text>}
+            {/* Same Velox club card as Explore / My Clubs (cover banner, logo, tags,
+                Join / Joined / Pending) — discovery now matches the rest of the app. */}
             {results.map((c) => (
-              <View key={c.id} style={[styles.commCard, { marginBottom: 8, backgroundColor: "rgba(118,118,128,0.16)", borderRadius: 16 }]}>
-                <View style={styles.commIcon}><Ionicons name="people" size={20} color={COLORS.primary} /></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.commName}>{c.name}</Text>
-                  <Text style={styles.commMeta} numberOfLines={1}>{c.description || `Admin: ${c.admin_handle || "anon"}`}</Text>
-                  <Text style={[styles.commMeta, { fontSize: 11, marginTop: 2 }]}>{c.member_count} members</Text>
-                </View>
-                {c.is_member ? (
-                  <View style={styles.statusBadge}><Text style={styles.statusText}>Joined</Text></View>
-                ) : c.is_pending ? (
-                  <View style={[styles.statusBadge, { backgroundColor: COLORS.warning + "33" }]}><Text style={[styles.statusText, { color: COLORS.warning }]}>Pending</Text></View>
-                ) : (
-                  <TouchableOpacity testID={`request-${c.id}`} onPress={() => requestJoin(c)} style={styles.smallBtn}>
-                    <Text style={styles.smallBtnText}>Request</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+              <CommunityCard key={c.id} c={c} mode="explore" onJoin={requestJoin} onPress={() => {}} />
             ))}
           </ScrollView>
         </View>

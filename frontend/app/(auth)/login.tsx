@@ -153,7 +153,7 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <GlassBackdrop />
+      <GlassBackdrop source={require('../../assets/images/glass-bgt.png')} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
@@ -262,14 +262,15 @@ export default function LoginScreen() {
             {appleAvailable && (
               <AppleAuthentication.AppleAuthenticationButton
                 buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
                 cornerRadius={12}
                 style={styles.appleBtn}
                 onPress={handleApple}
               />
             )}
             <TouchableOpacity style={styles.googleBtn} onPress={handleGoogle} disabled={loading} activeOpacity={0.85}>
-              <Ionicons name="logo-google" size={19} color="#4285F4" />
+              <GlassFill tintColor="rgba(14,14,18,0.34)" style={StyleSheet.absoluteFill} />
+              <Ionicons name="logo-google" size={19} color="#F4F4F4" />
               <Text style={styles.googleBtnText}>Continue with Google</Text>
             </TouchableOpacity>
 
@@ -337,8 +338,11 @@ const styles = StyleSheet.create({
   dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.18)' },
   dividerText: { color: '#9A9A9A', fontSize: 12, fontWeight: '500' },
   appleBtn: { height: 50, width: '100%', marginTop: 12 },
-  googleBtn: { height: 50, marginTop: 12, borderRadius: 12, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
-  googleBtnText: { color: '#1F1F1F', fontSize: 16, fontWeight: '600' },
+  // Google: dark frosted-glass button to match the Apple BLACK button + the glass
+  // form card — the two social buttons now read as one cohesive dark set under the
+  // green primary "Sign in", instead of two stark white slabs.
+  googleBtn: { height: 50, marginTop: 12, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', backgroundColor: 'rgba(20,20,24,0.55)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  googleBtnText: { color: '#F4F4F4', fontSize: 16, fontWeight: '600' },
   termsText: { color: '#7A7A7A', fontSize: 12, lineHeight: 17, textAlign: 'center', marginTop: 18, paddingHorizontal: 8 },
   termsLink: { color: '#2DEC86', fontWeight: '600' },
 });

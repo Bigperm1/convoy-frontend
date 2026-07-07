@@ -1262,16 +1262,32 @@ export default function MapScreen() {
   }, [coords, navMode]);
 
   // ===== Convoy health monitor (Scout) =====
-  // Speak up when the crew spreads out — a live peer falls well behind the pack. Edge-
-  // triggered (fires once when the gap opens, re-arms when back together) + hushed 5 min,
-  // and only with 2+ live peers so a solo drive is silent. Read-only over presence.
+  // Two crew-proximity callouts, both read-only over community-scoped presence (so
+  // every live peer is a fellow club member), both edge-triggered + hushed, and both
+  // respecting novaVoice + the convoyAlerts setting:
+  //   A) SPREADING OUT — ONLY while the crew is driving a SHARED CONVOY ROUTE together
+  //      (onConvoyRouteRef). Each member's phone runs this locally, so everyone on the
+  //      route hears it when a peer falls well behind. Silent on solo/ad-hoc drives.
+  //   B) CLOSING IN — whenever a club member comes within 5 km of you (no route needed):
+  //      a positive "the crew's closing in" heads-up.
   const peerListRef = useRef<Peer[]>([]);
+  const onConvoyRouteRef = useRef(false);
   const convoySpreadHushRef = useRef(0);
   const convoyWasSpreadRef = useRef(false);
+  const nearPeersRef = useRef<Map<string, boolean>>(new Map());
+  const proximityHushRef = useRef(0);
+  // Format a metres distance in the driver's chosen unit.
+  const fmtDist = (m: number, mph?: boolean) => mph
+    ? `${(m / 1609.34).toFixed(m < 16093 ? 1 : 0)} miles`
+    : `${(m / 1000).toFixed(m < 10000 ? 1 : 0)} kilometers`;
+
+  // A) Spreading out — SHARED CONVOY ROUTE only.
   useEffect(() => {
     const id = setInterval(() => {
       const s = getSettings();
       if (s.novaVoice === false || s.convoyAlerts === false || navMutedRef.current) return;
+      // Gate: only while the crew is actually driving a shared convoy route together.
+      if (!onConvoyRouteRef.current) { convoyWasSpreadRef.current = false; return; }
       if (Date.now() < convoySpreadHushRef.current) return;
       const me = coordsRef.current;
       const live = (peerListRef.current || []).filter(
@@ -1287,13 +1303,46 @@ export default function MapScreen() {
       if (farD >= SPREAD_M && !convoyWasSpreadRef.current && far) {
         convoyWasSpreadRef.current = true;
         convoySpreadHushRef.current = Date.now() + 300000; // 5 min hush
-        const distStr = s.speedUnit === "mph"
-          ? `${(farD / 1609.34).toFixed(1)} miles`
-          : `${(farD / 1000).toFixed(farD < 10000 ? 1 : 0)} kilometers`;
-        try { announce(`Heads up — the convoy's spreading out. ${far.handle || "Someone"} is about ${distStr} away.`); } catch {}
+        try { announce(`Heads up — the convoy's spreading out. ${far.handle || "Someone"} is about ${fmtDist(farD, s.speedUnit === "mph")} away.`); } catch {}
       } else if (farD < SPREAD_M * 0.7) {
         convoyWasSpreadRef.current = false; // back together → re-arm
       }
+    }, 30000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // B) Closing in — a club member comes within 5 km. Per-peer edge trigger with
+  // hysteresis (re-arms past 6.5 km) + a 90 s global hush so a clustering crew doesn't
+  // chatter. No route required — this is the everyday "your crew is nearby" heads-up.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const s = getSettings();
+      if (s.novaVoice === false || s.convoyAlerts === false || navMutedRef.current) return;
+      const me = coordsRef.current;
+      if (!me) return;
+      const live = (peerListRef.current || []).filter(
+        (p) => p && p.status !== "parked" && typeof p.lat === "number" && typeof p.lng === "number" && p.user_id
+      );
+      const NEAR_M = 5000, REARM_M = 6500;
+      const seen = new Set<string>();
+      for (const p of live) {
+        const pid = p.user_id as string;
+        seen.add(pid);
+        const d = haversineMeters({ lat: me.lat, lng: me.lng }, { lat: p.lat as number, lng: p.lng as number });
+        const wasNear = nearPeersRef.current.get(pid) === true;
+        if (!wasNear && d <= NEAR_M) {
+          nearPeersRef.current.set(pid, true);
+          if (Date.now() >= proximityHushRef.current) {
+            proximityHushRef.current = Date.now() + 90000;
+            try { announce(`${p.handle || "A club member"} is within ${fmtDist(d, s.speedUnit === "mph")} — the crew's closing in.`); } catch {}
+          }
+        } else if (wasNear && d >= REARM_M) {
+          nearPeersRef.current.set(pid, false); // moved off → re-arm for the next approach
+        }
+      }
+      // Forget peers who dropped out of presence so a later rejoin can alert again.
+      for (const k of Array.from(nearPeersRef.current.keys())) if (!seen.has(k)) nearPeersRef.current.delete(k);
     }, 30000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2402,6 +2451,24 @@ export default function MapScreen() {
 
   // ---- Community Routes (admin-shared destinations / cruises) ----
   const { routes: communityRoutes } = useCommunityRoutes(settings.activeCommunityId || null);
+
+  // Is the local driver actively on a SHARED convoy route? True when navigating
+  // (turn-by-turn) to a destination that came from a community route (admin cruise
+  // share) or was shared to us 1:1 (sharedRouteMeta). Kept in a ref for the 30 s
+  // convoy-health monitor so the "spreading out" callout is silent unless the crew
+  // is genuinely driving a shared route together.
+  useEffect(() => {
+    let on = false;
+    const dest = destination;
+    if (navMode === "turn-by-turn" && dest) {
+      const near = (bLat: number, bLng: number) =>
+        haversineMeters({ lat: dest.lat, lng: dest.lng }, { lat: bLat, lng: bLng }) < 200;
+      if (sharedRouteMeta && near(sharedRouteMeta.lat, sharedRouteMeta.lng)) on = true;
+      else if (communityRoutes.some((r) => near(r.dest_lat, r.dest_lng))) on = true;
+    }
+    onConvoyRouteRef.current = on;
+  }, [navMode, destination, sharedRouteMeta, communityRoutes]);
+
   const [isAdminOfActive, setIsAdminOfActive] = useState(false);
   const [savingRoute, setSavingRoute] = useState(false);
   const [routeToast, setRouteToast] = useState<CommunityRoute | null>(null);

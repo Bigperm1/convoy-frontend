@@ -33,7 +33,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated } from 'react-native';
-import { type NavRoute, type LatLng, maneuverVerb, maneuverArrow, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
+import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
+import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
 import { setCarState, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
@@ -387,9 +388,9 @@ export function CarSurface() {
           off-nav the map speaks for itself. */}
       {s.navigating ? (
         <View style={styles.topStrip} pointerEvents="none">
-          <GlassFill tintColor="rgba(16,16,20,0.66)" style={{ borderRadius: 12, overflow: 'hidden' }} />
+          <GlassFill tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
           <View style={styles.maneuverBox}>
-            <Text style={styles.maneuverArrow}>{s.maneuverIcon || '↑'}</Text>
+            <ManeuverArrow dir={(s.maneuverIcon as ManeuverDir) || 'straight'} size={24} color="#0B0B0C" />
           </View>
           <View style={styles.topTextCol}>
             <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
@@ -616,7 +617,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
         : undefined,
       weatherKind: weather ? weatherKind(weather) : undefined,
       // Arrow glyph for the car banner's maneuver box.
-      maneuverIcon: tbt.active ? maneuverArrow(upcomingInstruction(route, tbt.stepIndex)) : undefined,
+      maneuverIcon: tbt.active ? maneuverDir(upcomingInstruction(route, tbt.stepIndex)) : undefined,
     });
   }, [
     tbt.active,
@@ -911,10 +912,10 @@ const styles = StyleSheet.create({
   },
   // Compact maneuver CARD (mirrors the phone banner), tucked TOP-RIGHT: a green arrow
   // box + a [meters / instruction] column. Smaller than the old full-bleed strip.
-  // Solid dark tint floor + green border to match the phone banner EXACTLY — same
-  // rgba(16,16,20,0.66) floor so the tint reads identical regardless of the basemap
-  // behind the clear glass (which otherwise washes light over the pale day map).
-  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(16,16,20,0.66)', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(45,236,134,0.35)', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
+  // Single solid dark tint floor (GlassFill above is clear/untinted) at 0.5 — matches
+  // the phone banner EXACTLY and is backdrop-independent, so no washout on the pale day
+  // map and no near-black double-darkening. Green border + shadow frame it like the phone.
+  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(45,236,134,0.35)', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   maneuverBox: { width: 36, height: 36, borderRadius: 9, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
   maneuverArrow: { color: '#0B0B0C', fontSize: 24, fontWeight: '900', lineHeight: 28, marginTop: -1 },
   topTextCol: { flexShrink: 1 },

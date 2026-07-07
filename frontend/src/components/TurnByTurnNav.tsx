@@ -26,7 +26,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Platform, Animated } from "re
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { LaneArrow } from "../mapboxDirections";
 import { GlassFill, hudTint } from "../Glass";
-import { maneuverArrow } from "../nav";
+import { ManeuverArrow, maneuverDir } from "./ManeuverArrow";
 
 const YELLOW = "#2DEC86";
 const OVER_RED = "#E4002B"; // candy-apple red for the speeding halo + pill tint
@@ -213,9 +213,9 @@ export default function TurnByTurnNav({
           {/* Liquid Glass behind the turn-by-turn banner. Dark tint so it stays
               readable over bright/day basemaps (regular glass otherwise adapts to
               the backdrop and washes out light). */}
-          <GlassFill tintColor="rgba(16,16,20,0.66)" style={{ borderRadius: 18, overflow: "hidden" }} />
+          <GlassFill tintColor={undefined} style={{ borderRadius: 18, overflow: "hidden" }} />
           <View style={styles.maneuverIconWrap}>
-            <Text style={styles.maneuverGlyph}>{maneuverArrow(instruction)}</Text>
+            <ManeuverArrow dir={maneuverDir(instruction)} size={34} color="#0B0B0C" />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.distanceToTurn}>{distanceToTurn}</Text>
@@ -271,10 +271,10 @@ const styles = StyleSheet.create({
     // the banner (and its mute button at the right end) never sits under it.
     // Mirrors the search bar's logo clearance.
     marginRight: 64,
-    // Solid dark tint floor (behind the glass sheen) so the banner reads the SAME
-    // on phone + CarPlay regardless of the map behind it — the clear glass alone
-    // refracts the basemap and washes light over pale/day maps. White fonts on top.
-    backgroundColor: "rgba(16,16,20,0.66)",
+    // Single solid dark tint floor (the GlassFill above is now clear/untinted) — this
+    // one backdrop-independent layer is the banner's tint, identical on phone + CarPlay.
+    // Was double-darkened (floor 0.66 + glass tint 0.66 ≈ near-black); one layer at 0.5.
+    backgroundColor: "rgba(18,18,22,0.5)",
     borderRadius: 18,
     paddingVertical: 14,
     paddingHorizontal: 16,
@@ -370,7 +370,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   speedValue: { color: "#F4F4F4", fontSize: 24, fontWeight: "800", letterSpacing: -0.5, lineHeight: 26 },
-  speedUnit: { color: "#808080", fontSize: 10, fontWeight: "600", letterSpacing: 0.3, marginTop: 1 },
+  speedUnit: { color: "#F4F4F4", fontSize: 10, fontWeight: "600", letterSpacing: 0.3, marginTop: 1 },
   // Over-the-limit state: pill turns solid red with a brighter border; the unit
   // label lightens so it stays legible on red.
   speedPillOver: { backgroundColor: OVER_RED, borderWidth: 1, borderColor: "rgba(255,255,255,0.55)" },

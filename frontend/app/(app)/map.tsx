@@ -3435,6 +3435,16 @@ export default function MapScreen() {
                 <Switch value={showHazards} onValueChange={setShowHazards}
                   trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
+              {/* Official BC road events (DriveBC Open511). BC-only; auto-gated by location. */}
+              <View style={styles.layerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.layerRowLabel}>Road incidents</Text>
+                  <Text style={styles.layerRowSub}>Official BC accidents, construction & closures (DriveBC)</Text>
+                </View>
+                <Switch value={settings.roadIncidents !== false}
+                  onValueChange={(v) => { void updateGlobalSettings({ roadIncidents: v }); }}
+                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+              </View>
 
               {/* 3D Buildings (Mapbox Standard modes only). Toggle off to
                   guarantee the self-car is never hidden behind a building. */}

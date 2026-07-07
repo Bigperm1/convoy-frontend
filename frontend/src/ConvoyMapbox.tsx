@@ -1087,7 +1087,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       camHeadingRef.current = (prev + arc * HEADING_SMOOTH_ALPHA + 360) % 360;
     }
   }
-  const followHeadingDeg = headingUp && camHeadingRef.current != null ? camHeadingRef.current : undefined;
+  // In NORTH-UP (the ONLY state where native followUserLocation runs — see the Camera
+  // below), force the follow engine's bearing to 0 so a Compass tap actually snaps the
+  // map to true north. Leaving it undefined let the native engine KEEP the user's
+  // gesture-rotated bearing and silently override the imperative heading:0 reset — the
+  // "compass recenters but never flips north" bug. Heading-up keeps the smoothed bearing.
+  const followHeadingDeg = headingUp ? (camHeadingRef.current ?? undefined) : 0;
 
   // Android heading-up via the NATIVE engine. Under UserTrackingMode.Follow,
   // Android ignores `followHeading` AND overrides our imperative setCamera bearing

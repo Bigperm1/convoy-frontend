@@ -13,7 +13,7 @@
 // two prompts never fight the mic. Best-effort everywhere: any failure → null, and the
 // caller keeps its visual fallback (the tap card).
 
-import { Platform } from "react-native";
+import { Platform, AppState } from "react-native";
 import { Audio } from "expo-av";
 import { api } from "./api";
 import { getNovaVoice } from "./settings";
@@ -42,6 +42,12 @@ export function scoutIsAsking(): boolean { return _busy; }
 // the caller should fall back to its on-screen control.
 export async function askScout(prompt: string, opts?: { listenMs?: number }): Promise<AskResult | null> {
   if (Platform.OS === "web" || _busy) return null;
+  // Scout is a FOREGROUND-only assistant: it speaks a prompt and opens the mic.
+  // It must never fire while the app is backgrounded (screen locked, another app,
+  // or driving on CarPlay — Scout isn't a CarPlay feature) or after a force-quit.
+  // Turn-by-turn nav directions are separate (nav.ts) and DO continue backgrounded;
+  // this guard is only for Scout's interactive voice loop. ("active" = foreground.)
+  if (AppState.currentState !== "active") return null;
   // Don't talk over an in-flight nav callout — wait briefly for the lane to clear.
   for (let i = 0; i < 6 && isAudioBusy(); i++) await new Promise((r) => setTimeout(r, 250));
   // Need the mic already granted; we never prompt for permission mid-drive.
@@ -106,8 +112,11 @@ async function speakAndWait(text: string): Promise<void> {
     if (!b64) return;
     const { sound } = await Audio.Sound.createAsync(
       { uri: `data:${data?.mime || "audio/mp3"};base64,${b64}` },
-      { shouldPlay: true },
+      // volume:1.0 — expo-av defaults to ~0.5, which made Scout sound faint next
+      // to the nav callouts (nav.ts sets 1.0 for the same reason). Max it out.
+      { shouldPlay: true, volume: 1.0 },
     );
+    try { await sound.setVolumeAsync(1.0); } catch {}
     await new Promise<void>((resolve) => {
       let done = false;
       const finish = () => { if (done) return; done = true; sound.unloadAsync().catch(() => {}); resolve(); };

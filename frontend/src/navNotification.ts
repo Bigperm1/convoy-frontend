@@ -17,7 +17,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
-import { NavRoute, haversineMeters, maneuverVerb, fmtDistanceM } from "./nav";
+import { NavRoute, haversineMeters, maneuverVerb, fmtDistanceM, fmtManeuverDist } from "./nav";
 import { setCarState } from "./carplay/carStore";
 import { getSettings, getMapMode } from "./settings";
 import { fetchSpeedLimitWaysAround, nearestLimit } from "./speedLimit";
@@ -113,7 +113,7 @@ export async function updateNavBanner(lat: number, lng: number): Promise<void> {
   setCarState({
     navigating: true,
     instruction: carInstruction,
-    distanceToTurn: fmtDistanceM(d),
+    distanceToTurn: fmtManeuverDist(d),
     distanceToTurnM: Math.round(d),
     destinationLabel: route.destLabel || "",
   });

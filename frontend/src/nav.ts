@@ -1092,6 +1092,17 @@ export function fmtDistanceM(m: number): string {
   return formatDistance(m);
 }
 
+// Maneuver-banner distance. Testers want KILOMETRES, not "800 m", so show km from
+// 300 m up and metres only on the final approach (<300 m) where the exact figure
+// matters. mph regions keep the standard feet/miles readout. Used by BOTH the phone
+// banner AND the CarPlay strip so the two read identically.
+export function fmtManeuverDist(m: number): string {
+  if (getSettings().speedUnit === "mph") return fmtDistanceM(m);
+  if (m < 1) return "now";
+  if (m < 300) return `${Math.max(10, Math.round(m / 10) * 10)} m`;
+  return `${(m / 1000).toFixed(m < 10000 ? 1 : 0)} km`;
+}
+
 export function fmtEtaSec(s: number): string {
   return formatDuration(s);
 }

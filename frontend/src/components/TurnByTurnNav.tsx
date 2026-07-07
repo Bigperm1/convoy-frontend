@@ -213,7 +213,7 @@ export default function TurnByTurnNav({
           {/* Liquid Glass behind the turn-by-turn banner. Dark tint so it stays
               readable over bright/day basemaps (regular glass otherwise adapts to
               the backdrop and washes out light). */}
-          <GlassFill tintColor={hudTint()} style={{ borderRadius: 18, overflow: "hidden" }} />
+          <GlassFill tintColor="rgba(16,16,20,0.66)" style={{ borderRadius: 18, overflow: "hidden" }} />
           <View style={styles.maneuverIconWrap}>
             <Text style={styles.maneuverGlyph}>{maneuverArrow(instruction)}</Text>
           </View>
@@ -271,7 +271,10 @@ const styles = StyleSheet.create({
     // the banner (and its mute button at the right end) never sits under it.
     // Mirrors the search bar's logo clearance.
     marginRight: 64,
-    backgroundColor: "transparent",
+    // Solid dark tint floor (behind the glass sheen) so the banner reads the SAME
+    // on phone + CarPlay regardless of the map behind it — the clear glass alone
+    // refracts the basemap and washes light over pale/day maps. White fonts on top.
+    backgroundColor: "rgba(16,16,20,0.66)",
     borderRadius: 18,
     paddingVertical: 14,
     paddingHorizontal: 16,
@@ -290,9 +293,9 @@ const styles = StyleSheet.create({
   },
   // Dark turn glyph on the green tile — shared shape with the CarPlay strip (Option A).
   maneuverGlyph: { color: "#0B0B0C", fontSize: 34, fontWeight: "900", lineHeight: 38 },
-  // Distance green + instruction white to match the CarPlay maneuver strip (topDist /
-  // topInst) so the two banners read identically.
-  distanceToTurn: { color: "#2DEC86", fontSize: 28, fontWeight: "800", letterSpacing: -0.5, lineHeight: 32 },
+  // White distance + instruction over the banner's solid dark tint — matched exactly to
+  // the CarPlay strip (topDist / topInst), which are also white on the same dark tint.
+  distanceToTurn: { color: "#F4F4F4", fontSize: 28, fontWeight: "800", letterSpacing: -0.5, lineHeight: 32 },
   instruction: { color: "#F4F4F4", fontSize: 15, fontWeight: "500", marginTop: 1 },
   muteBtn: {
     width: 40, height: 40, borderRadius: 20,

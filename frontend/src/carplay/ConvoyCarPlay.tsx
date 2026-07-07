@@ -387,7 +387,7 @@ export function CarSurface() {
           off-nav the map speaks for itself. */}
       {s.navigating ? (
         <View style={styles.topStrip} pointerEvents="none">
-          <GlassFill tintColor={hudTint()} style={{ borderRadius: 12, overflow: 'hidden' }} />
+          <GlassFill tintColor="rgba(16,16,20,0.66)" style={{ borderRadius: 12, overflow: 'hidden' }} />
           <View style={styles.maneuverBox}>
             <Text style={styles.maneuverArrow}>{s.maneuverIcon || '↑'}</Text>
           </View>
@@ -911,13 +911,14 @@ const styles = StyleSheet.create({
   },
   // Compact maneuver CARD (mirrors the phone banner), tucked TOP-RIGHT: a green arrow
   // box + a [meters / instruction] column. Smaller than the old full-bleed strip.
-  // Green border + shadow to match the phone maneuver banner's framing, so the glass
-  // reads as the same defined dark card instead of blending lighter into the day map.
-  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'transparent', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(45,236,134,0.35)', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
+  // Solid dark tint floor + green border to match the phone banner EXACTLY — same
+  // rgba(16,16,20,0.66) floor so the tint reads identical regardless of the basemap
+  // behind the clear glass (which otherwise washes light over the pale day map).
+  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(16,16,20,0.66)', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(45,236,134,0.35)', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   maneuverBox: { width: 36, height: 36, borderRadius: 9, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
   maneuverArrow: { color: '#0B0B0C', fontSize: 24, fontWeight: '900', lineHeight: 28, marginTop: -1 },
   topTextCol: { flexShrink: 1 },
-  topDist: { color: '#2DEC86', fontSize: 17, fontWeight: '800' },
+  topDist: { color: '#F4F4F4', fontSize: 17, fontWeight: '800' },
   topInst: { color: '#F4F4F4', fontSize: 12, fontWeight: '600', flexShrink: 1 },
   topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'transparent', borderRadius: 14, overflow: 'hidden' },
   topChipText: { color: '#2DEC86', fontSize: 15, fontWeight: '800', letterSpacing: 1 },

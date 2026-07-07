@@ -33,7 +33,7 @@ import PeerModal from "../../src/PeerModal";
 import ShareSheet from "../../src/ShareSheet";
 import {
   fetchRoutes, fetchDirections, fetchAiRoute, NavRoute, useTurnByTurn, maneuverVerb,
-  fmtDistanceM, fmtEtaSec, stopSpeech, announce, haversineMeters,
+  fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
 } from "../../src/nav";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
@@ -3066,7 +3066,7 @@ export default function MapScreen() {
         return (
           <TurnByTurnNav
             maneuverIcon={maneuverIcon(upcoming?.maneuver, upcoming?.html)}
-            distanceToTurn={fmtDistanceM(tbt.distanceToManeuverM)}
+            distanceToTurn={fmtManeuverDist(tbt.distanceToManeuverM)}
             instruction={instruction}
             eta={fmtEtaSec(tbt.etaSeconds)}
             distanceRemaining={fmtDistanceM(tbt.distanceRemainingM)}

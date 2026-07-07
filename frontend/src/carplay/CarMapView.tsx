@@ -55,7 +55,9 @@ const CRUISE_PITCH = 45;
 // nav pitch — the driver asked for a more horizon-forward view that shows more road
 // ahead and taller 3D buildings. Clamped to Mapbox Standard's 60° pitch cap in
 // getCam so nav-at-speed (already 60°) never exceeds it. OTA-tunable.
-const CAR_PITCH_BONUS = 3;
+// Was +3° toward the horizon; zeroed so the CarPlay nav pitch equals the phone's
+// speed-aware chasePitch exactly (tester: "phone is correct for zoom and angle").
+const CAR_PITCH_BONUS = 0;
 // Mapbox Standard hard-caps camera pitch at 60°.
 const CAR_PITCH_MAX = 60;
 // Pull the car camera back a touch vs the phone so more of the road ahead reads on the
@@ -64,7 +66,10 @@ const CAR_PITCH_MAX = 60;
 // Pull the camera back from the phone's chase zoom so more road reads on the wide
 // head-unit screen. Applied to BOTH nav AND cruise (which is now speed-aware too).
 // Larger = more zoomed out. OTA-tunable.
-const CAR_ZOOM_OUT = 1.8;
+// Was 1.8 (~3.5× more area than the phone) — testers wanted the CarPlay view to MATCH
+// the phone's zoom, which they call correct. Cut to a hair (0.3) so it's effectively the
+// same close chase; the tiny residual just accounts for the wider head-unit aspect.
+const CAR_ZOOM_OUT = 0.3;
 // EXTRA pull-back while previewing 2+ route options (not navigating), so the Best/Scenic/AI
 // fan-out reads on the head unit. Added to CAR_ZOOM_OUT only in multi-route preview; the
 // car stays pinned (the proven lockstep chase is untouched — this is purely a zoom value).

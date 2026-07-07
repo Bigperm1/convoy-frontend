@@ -278,8 +278,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingVertical: 14,
     paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: "rgba(45,236,134,0.35)",
+    // No border — matches the other HUD chips (speed / weather / FAB): the clear glass
+    // + tint draw their own clean edge; a stroke reads as an "unfinished double edge".
     shadowColor: "#000",
     shadowOpacity: 0.4,
     shadowRadius: 12,

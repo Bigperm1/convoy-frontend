@@ -914,8 +914,8 @@ const styles = StyleSheet.create({
   // box + a [meters / instruction] column. Smaller than the old full-bleed strip.
   // Single solid dark tint floor (GlassFill above is clear/untinted) at 0.5 — matches
   // the phone banner EXACTLY and is backdrop-independent, so no washout on the pale day
-  // map and no near-black double-darkening. Green border + shadow frame it like the phone.
-  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(45,236,134,0.35)', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
+  // map. NO border (like the phone banner + other chips); shadow lifts it.
+  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   maneuverBox: { width: 36, height: 36, borderRadius: 9, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
   maneuverArrow: { color: '#0B0B0C', fontSize: 24, fontWeight: '900', lineHeight: 28, marginTop: -1 },
   topTextCol: { flexShrink: 1 },

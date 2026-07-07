@@ -27,6 +27,7 @@ export const TERMS_OF_SERVICE: { title: string; updated: string; intro: string; 
     { heading: "Accounts", body: "You’re responsible for your account and the accuracy of your profile, however you sign in (email, Apple, or Google). [Placeholder.]" },
     { heading: "Acceptable Use", body: "Don’t misuse comms, share hazardous or unlawful content, or interfere with other drivers. [Placeholder.]" },
     { heading: "Location & Navigation", body: "Routing, ETAs, hazards, and speed data may be inaccurate or delayed. Always rely on real-world conditions and road signs. [Placeholder.]" },
+    { heading: "Data Attribution", body: "Road-incident data for British Columbia contains information licensed under the Open Government Licence – British Columbia, © Province of British Columbia (DriveBC Open511). Fixed speed-camera and speed-limit data © OpenStreetMap contributors, under the Open Database Licence (ODbL)." },
     { heading: "Disclaimers & Liability", body: "The app is provided “as is”. Add your warranty disclaimers and liability limits here. [Placeholder.]" },
     { heading: "Changes & Contact", body: "We may update these terms; continued use means acceptance. Questions: support@convoy.app. [Placeholder.]" },
   ],

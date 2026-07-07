@@ -40,6 +40,7 @@ import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
 import { useSpeedCameras } from "../../src/speedCameras";
+import { useDriveBcEvents } from "../../src/driveBcEvents";
 import { useSpeedLimit, getSpeedLimitDebug } from "../../src/speedLimit";
 import { playSpeedDing } from "../../src/speedDing";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -750,6 +751,9 @@ export default function MapScreen() {
   // Drives both the map pins and the Nova proximity voice alert below.
   const speedCamerasEnabled = (settings as any).speedCameras !== false;
   const speedCameras = useSpeedCameras(coords?.lat ?? null, coords?.lng ?? null, speedCamerasEnabled);
+  // Official BC road events (DriveBC Open511) — accidents/construction/closures.
+  const roadIncidentsEnabled = (settings as any).roadIncidents !== false;
+  const roadEvents = useDriveBcEvents(coords?.lat ?? null, coords?.lng ?? null, roadIncidentsEnabled);
   // Posted speed limit for the road you're on (OpenStreetMap maxspeed via
   // Overpass). Feeds the speedometer's over-limit pulse; null when the road has
   // no maxspeed tag, in which case the pill simply stays neutral.
@@ -2346,6 +2350,36 @@ export default function MapScreen() {
     }
   }, [coords?.lat, coords?.lng, hazards, showHazards, navMuted]);
 
+  // ----- DriveBC road-event proximity voice alert (Nova) -----
+  // Official incidents from the Open511 feed. Same distance/re-arm shape as the
+  // hazard alert, but ONLY the meaningful ones speak: MAJOR/MODERATE within ~800 m
+  // while moving. MINOR/UNKNOWN stay silent map pins (no spam for a lane-marking
+  // crew 2 km away). Names the road when the feed provides one.
+  const announcedIncidentsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!coords || !roadIncidentsEnabled || roadEvents.length === 0) return;
+    const kmh = (coords.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
+    const announced = announcedIncidentsRef.current;
+    for (const e of roadEvents) {
+      if (!e || !e.id) continue;
+      const dM = distanceKm(coords.lat, coords.lng, e.lat, e.lng) * 1000;
+      if (dM > 1200) { announced.delete(e.id); continue; }       // re-arm once well past
+      if (e.severity !== "MAJOR" && e.severity !== "MODERATE") continue; // minor = pin only
+      if (dM <= 800 && kmh >= 20 && !announced.has(e.id)) {
+        announced.add(e.id);
+        if (!navMuted) {
+          const what = e.kind === "construction" ? "Roadwork"
+            : e.kind === "road" ? "A road closure"
+            : e.kind === "weather" ? "A weather hazard"
+            : e.kind === "event" ? "A road event"
+            : "An incident";
+          const where = e.road ? ` on ${e.road}` : "";
+          try { announce(`Heads up — ${what.toLowerCase()} reported ahead${where}.`); } catch {}
+        }
+      }
+    }
+  }, [coords?.lat, coords?.lng, roadEvents, roadIncidentsEnabled, navMuted]);
+
 
   // ----- Deep link: convoy://go?to=work -----
   // Opens straight into a route to a saved place (powers the iOS Shortcuts
@@ -2720,6 +2754,7 @@ export default function MapScreen() {
         leaderUserId={leaderUserId}
         hazards={visibleHazards}
         speedCameras={speedCameras}
+        roadEvents={roadEvents}
         externalAlerts={[]}
         highlightConvoy={settings.highlightConvoy}
         destination={destination}

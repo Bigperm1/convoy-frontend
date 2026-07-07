@@ -32,9 +32,10 @@
 // handed to Mapbox below is [lng, lat].
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Image, StyleSheet, Pressable, Platform, AppState } from "react-native";
+import { View, Text, Image, StyleSheet, Pressable, Platform, AppState, Alert } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey } from "./vehicleAssets";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient, type CongestionLevel } from "./mapboxDirections";
@@ -109,6 +110,8 @@ interface ConvoyMapboxProps {
   leaderUserId?: string | null;
   hazards?: Hazard[] | null;
   speedCameras?: { id: string; lat: number; lng: number }[];
+  // Official BC road events (DriveBC Open511) — rendered as distinct incident pins.
+  roadEvents?: RoadEvent[];
   places?: { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean }[];
   showPlacePins?: boolean;
   externalAlerts?: any[];
@@ -826,6 +829,45 @@ function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
   );
 }
 
+// ===== IncidentMarker =====
+// Official DriveBC road event (Open511) — a severity-tinted badge with a kind
+// glyph, visually distinct from crew hazard PNGs so drivers can tell an official
+// incident from a member report. Proximity voice alert lives in map.tsx.
+const INCIDENT_ICON: Record<RoadEventKind, string> = {
+  incident: "warning",
+  construction: "construct",
+  road: "close-circle",
+  weather: "rainy",
+  event: "flag",
+};
+function incidentColor(sev: RoadEventSeverity): string {
+  if (sev === "MAJOR") return "#FF453A";     // red
+  if (sev === "MODERATE") return "#FF9F0A";   // amber
+  return "#8E8E93";                           // minor / unknown — grey
+}
+const INCIDENT_TITLE: Record<RoadEventKind, string> = {
+  incident: "Incident", construction: "Roadwork", road: "Road closure",
+  weather: "Weather hazard", event: "Road event",
+};
+function IncidentMarker({ event }: { event: RoadEvent }) {
+  const color = incidentColor(event.severity);
+  // Official event — tap shows the headline. Deliberately NOT the crew-hazard sheet
+  // (no report/delete actions on a government feed item).
+  const showDetail = () => {
+    const title = `${INCIDENT_TITLE[event.kind] || "Road event"}${event.road ? ` · ${event.road}` : ""}`;
+    Alert.alert(title, event.headline, [{ text: "OK" }]);
+  };
+  return (
+    <MarkerView coordinate={[event.lng, event.lat]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+      <Pressable onPress={showDetail} hitSlop={8}>
+        <View style={[styles.incidentBadge, { backgroundColor: color }]}>
+          <Ionicons name={(INCIDENT_ICON[event.kind] || "warning") as any} size={16} color="#0B0B0C" />
+        </View>
+      </Pressable>
+    </MarkerView>
+  );
+}
+
 // ===== PlaceMarker =====
 // Category quick-search result pin: gas price chip / fuel badge / named place.
 // The "Place pins" setting (showPins) hides the pure pin GLYPHS (teardrop under
@@ -871,7 +913,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     routeColor = DEFAULT_ROUTE_COLOR,
     distanceToManeuverM, onMapPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
-    hazards, speedCameras, places, showPlacePins = true, destWeather,
+    hazards, speedCameras, roadEvents, places, showPlacePins = true, destWeather,
     onHazardPress, onHazardLongPress, onPlacePress, onHeading, resetNorthSignal,
     zoomOffset = 0,
   } = props;
@@ -1622,6 +1664,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           <CameraMarker key={`cam_${c.id}`} lat={c.lat} lng={c.lng} />
         ))}
 
+        {/* Official DriveBC road events (Open511) — incidents / construction / closures. */}
+        {(roadEvents || []).map((e) => (
+          <IncidentMarker key={`inc_${e.id}`} event={e} />
+        ))}
+
         {/* Category quick-search place pins. */}
         {(places || []).map((p, i) => (
           <PlaceMarker key={`place_${p.id}`} place={p} index={i} onPress={onPlacePress} />
@@ -1695,6 +1742,11 @@ const styles = StyleSheet.create({
   hazardIcon: { width: 40, height: 40 },
   cameraIconWrap: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
   cameraIcon: { width: 28, height: 28 },
+  incidentBadge: {
+    width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "rgba(11,11,12,0.85)",
+    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 4,
+  },
   // Place pins (gas price chips / fuel badges / named places).
   placePinWrap: { alignItems: "center", maxWidth: 150 },
   placeLabel: {

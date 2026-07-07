@@ -98,6 +98,10 @@ speedUnitManual: boolean;
 showWeatherLayer: boolean;
 weatherOnMigrated: boolean;
 speedCameras: boolean;
+// Official BC road events (DriveBC Open511): accidents, construction, closures,
+// weather. Map pins + a Scout callout for major/moderate. BC-only; auto-gated by
+// location. undefined → on.
+roadIncidents: boolean;
 showPlacePins: boolean;
 showNearby: boolean;
 // Gas Jockey — declutter the map's Gas pins by favorite brand + octane.
@@ -159,6 +163,7 @@ speedUnitManual: false,
 showWeatherLayer: true,
 weatherOnMigrated: true,
 speedCameras: false,
+roadIncidents: true,
 showPlacePins: true,
 showNearby: true,
 // Default Gas Jockey: only the four major BC chains shown; the rest (and

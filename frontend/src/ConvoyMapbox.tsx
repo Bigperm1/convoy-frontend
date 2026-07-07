@@ -276,12 +276,20 @@ function destWxIcon(kind: WeatherKind): { name: string; color: string; mci: bool
 // Chase-cam tilt is speed-aware: a touch flatter in the city, tilting further
 // down toward the horizon at highway speed so fast driving feels more dynamic
 // and shows more road ahead. OTA-tunable. (Mapbox Standard caps pitch at 60.)
-const CHASE_PITCH_CITY = 54;
-const CHASE_PITCH_HIGHWAY = 60;
-const CHASE_ZOOM_CITY = 17;
-const CHASE_ZOOM_HIGHWAY = 15;
-const CHASE_KMH_CITY = 30;
-const CHASE_KMH_HIGHWAY = 100;
+// Speed→camera curve (testers at 80-100 km/h couldn't see far enough ahead for
+// upcoming turns). Slow = higher angle (more top-down) + closer; faster = lower
+// angle (toward the horizon, capped at Mapbox's 60) + progressively zoomed OUT so
+// there's plenty of road ahead. Extended past 100 km/h up to ~180 for a THIRD tier
+// (100-200 km/h keeps widening). chaseZoom/chasePitch are exported → CarPlay's
+// CarMapView imports them, so phone + CarPlay stay in sync automatically.
+const CHASE_PITCH_CITY = 48;      // higher angle / more top-down when slow
+const CHASE_PITCH_HIGHWAY = 60;   // lower angle (horizon) at speed = more road ahead
+const CHASE_ZOOM_CITY = 17;       // closest, slow
+const CHASE_ZOOM_HIGHWAY = 14;    // ~100 km/h — wider than before (was 15)
+const CHASE_ZOOM_FAST = 12.8;     // ~180 km/h — widest, for 100-200 cruising
+const CHASE_KMH_CITY = 45;        // ≤45 km/h = closest/highest angle
+const CHASE_KMH_HIGHWAY = 95;
+const CHASE_KMH_FAST = 180;
 const FREE_ZOOM = 15;
 export const FOLLOW_ZOOM = 17;
 const CORNER_ZOOM = 18.5;
@@ -436,8 +444,10 @@ function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(
 export function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
 function chaseZoomForSpeed(kmh: number) {
   if (kmh <= CHASE_KMH_CITY) return CHASE_ZOOM_CITY;
-  if (kmh >= CHASE_KMH_HIGHWAY) return CHASE_ZOOM_HIGHWAY;
-  return lerp(CHASE_ZOOM_CITY, CHASE_ZOOM_HIGHWAY, (kmh - CHASE_KMH_CITY) / (CHASE_KMH_HIGHWAY - CHASE_KMH_CITY));
+  if (kmh <= CHASE_KMH_HIGHWAY) return lerp(CHASE_ZOOM_CITY, CHASE_ZOOM_HIGHWAY, (kmh - CHASE_KMH_CITY) / (CHASE_KMH_HIGHWAY - CHASE_KMH_CITY));
+  // Third tier: 95-180 km/h keeps widening so 100-200 cruising shows more road ahead.
+  if (kmh >= CHASE_KMH_FAST) return CHASE_ZOOM_FAST;
+  return lerp(CHASE_ZOOM_HIGHWAY, CHASE_ZOOM_FAST, (kmh - CHASE_KMH_HIGHWAY) / (CHASE_KMH_FAST - CHASE_KMH_HIGHWAY));
 }
 export function chaseZoom(kmh: number, distToManeuverM?: number) {
   const base = chaseZoomForSpeed(kmh);

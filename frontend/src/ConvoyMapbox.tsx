@@ -1266,10 +1266,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const _trimSpdMs = typeof userSpeedMs === "number" && userSpeedMs > 0 ? userSpeedMs : 0;
   // Speed-aware buffer ahead of the nose: the drawn car interpolates between 1 Hz
   // fixes, so at speed it travels well past the raw fix the trim is computed from.
-  // Lead it by ~1.1× a second of travel so the line never crowds the fast-moving
-  // car: 10 m @ 0, ~32 m @ 72 km/h, ~46 m @ 120 km/h, capped 55 m (keeps clearance
-  // through the inter-fix tween even at autobahn speed).
-  const _trimLeadM = Math.max(10, Math.min(55, 10 + _trimSpdMs * 1.1));
+  // Testers cruising 80–200 km/h saw the green line trail under the car's tail —
+  // the old 1.1×/m/s lead (cap 55 m) couldn't keep the clear-point ahead of the
+  // fast tween. Lead harder: ~1.6× a second of travel, cap 90 m.
+  //   12 m @ 0 · ~44 m @ 72 km/h · ~65 m @ 120 km/h · 90 m @ 160+ km/h.
+  const _trimLeadM = Math.max(12, Math.min(90, 12 + _trimSpdMs * 1.6));
   const routeTrimEndFrac = routeProj
     ? Math.max(0, Math.min(0.999, routeProj.frac + _trimLeadM / routeProj.totalM))
     : null;

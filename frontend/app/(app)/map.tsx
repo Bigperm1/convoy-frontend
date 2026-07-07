@@ -41,6 +41,7 @@ import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
 import { useSpeedCameras } from "../../src/speedCameras";
 import { useDriveBcEvents } from "../../src/driveBcEvents";
+import { usePowerMode } from "../../src/powerMode";
 import { useSpeedLimit, getSpeedLimitDebug } from "../../src/speedLimit";
 import { playSpeedDing } from "../../src/speedDing";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -1709,6 +1710,10 @@ export default function MapScreen() {
   // background (for PTT + nav voice), which keeps JS timers alive — so without
   // this, GPS + polling would otherwise keep running on the home/lock screen.
   const [appActive, setAppActive] = useState(true);
+  // Premium (plugged) vs eco (unplugged) power profile. Drives the battery/heat gates
+  // below (3D buildings, GPS accuracy). Always "premium" on a build without expo-battery
+  // (build 62), so this is a no-op until build 63 — the premium path never changes.
+  const powerMode = usePowerMode();
   const wasActiveRef = useRef(true);
   useEffect(() => {
     const s = AppState.addEventListener("change", (st) => {
@@ -1790,8 +1795,15 @@ export default function MapScreen() {
         // is fed independently by carPlayBootstrap's acquireBgLocation +
         // startForegroundCarFeed → carStore, so the car map tracks without this watcher.)
         if (!appActive && !navActiveRef.current) return;
+        // PREMIUM (plugged): BestForNavigation @ 500ms / 0 m — the smoothest feed.
+        // ECO (unplugged, build 63+): High @ 1 s + an 8 m distance gate — still solid
+        // nav-grade GPS (the ConvoyMapbox ease loop interpolates between fixes so the car
+        // stays smooth) but far less GPS/radio cycling and no callback thrash when stopped.
+        // Re-subscribes on plug/unplug via the powerMode dep on this effect.
         sub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 0 },
+          powerMode === "eco"
+            ? { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 8 }
+            : { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 0 },
           (pos) => {
             const h = pos.coords.heading;
             const heading = typeof h === "number" && h >= 0 ? h : undefined;
@@ -1888,7 +1900,7 @@ export default function MapScreen() {
     return () => { try { sub?.remove?.(); } catch {} };
     // Re-subscribe only on foreground/background change (not on every nav
     // start/stop — that's read via navActiveRef to avoid GPS blips mid-drive).
-  }, [appActive]);
+  }, [appActive, powerMode]);
 
   // ----- Hazard/Police reporting (Waze-style "5s ago" anchor) -----
   // Drivers usually notice a hazard a beat after they pass it. Snapping the
@@ -2754,7 +2766,7 @@ export default function MapScreen() {
         resetNorthSignal={northSignal}
         // Layer controls — driven by the bottom-right Layers FAB.
         mapMode={mapMode}
-        show3dBuildings={settings.show3dBuildings !== false}
+        show3dBuildings={settings.show3dBuildings !== false && powerMode === "premium"}
         mapType={mapType}
         mapDark={mapDark}
         peers={peerList}

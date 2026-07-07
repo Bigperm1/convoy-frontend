@@ -29,6 +29,7 @@ import Mapbox, {
 } from '@rnmapbox/maps';
 import { useCarStore, subscribeCarGesture, type CarGesture } from './carStore';
 import { buildCongestionGradient } from '../mapboxDirections';
+import { usePowerMode } from '../powerMode';
 import { getVehicleModelUrl, getVehicleModelKey } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
@@ -104,6 +105,7 @@ type Props = {
 
 export default function CarMapView({ onGLError }: Props) {
   const s = useCarStore();
+  const powerMode = usePowerMode(); // premium (plugged) → 60fps; eco (unplugged) → 30fps
   const [mapH, setMapH] = useState(0);
 
   // Frame watchdog state. paintedRef flips on the first real rendered frame;
@@ -351,7 +353,7 @@ export default function CarMapView({ onGLError }: Props) {
       // Let the GL map present at the head unit's full refresh (clamped by the panel,
       // ~60Hz max — a car display can't do 120). Only meaningful WITH the SelfCarModel
       // interpolation above; on a raw 1Hz feed it just re-renders a stale pose.
-      preferredFramesPerSecond={60}
+      preferredFramesPerSecond={powerMode === 'premium' ? 60 : 30}
       scaleBarEnabled={false}
       compassEnabled={false}
       rotateEnabled={false}

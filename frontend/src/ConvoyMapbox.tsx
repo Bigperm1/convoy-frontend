@@ -36,6 +36,7 @@ import { View, Text, Image, StyleSheet, Pressable, Platform, AppState, Alert } f
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
+import { getPowerMode } from "./powerMode";
 import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey } from "./vehicleAssets";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient, type CongestionLevel } from "./mapboxDirections";
@@ -586,6 +587,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const resumeSnapUntil = useRef(0); // snap-track (don't ease) until this wall-clock after foreground
   const wasBackgrounded = useRef(false); // true once the app actually hit 'background' since last 'active'
   const [, setTick] = useState(0);
+  const lastFrameRef = useRef(0); // wall-clock of the last RENDERED ease frame (eco fps cap)
 
   // Shortest signed angular delta a→b in degrees (−180…180].
   const angDelta = (a: number, b: number) => ((((b - a) % 360) + 540) % 360) - 180;
@@ -618,7 +620,18 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     const a = anim.current;
     if (!a) { raf.current = null; return; }
     a.stepped = true; // this ease has rendered ≥1 frame → the loop is alive for it
-    const t = Math.min(1, (Date.now() - a.start) / a.dur);
+    const now = Date.now();
+    const t = Math.min(1, (now - a.start) / a.dur);
+    // ECO (unplugged, build 63+): cap the smooth ease to ~30fps — halves the per-frame
+    // setCamera + full-component re-render (the app's single biggest thermal load) while
+    // on battery. PREMIUM (plugged, and every build without expo-battery) renders every
+    // frame exactly as before. The FINAL frame (t>=1) is never skipped, so the camera
+    // always lands precisely and the ease completes.
+    if (t < 1 && getPowerMode() === "eco" && now - lastFrameRef.current < 32) {
+      raf.current = requestAnimationFrame(step);
+      return;
+    }
+    lastFrameRef.current = now;
     render.current = {
       lat: a.fromLat + (a.toLat - a.fromLat) * t,
       lng: a.fromLng + (a.toLng - a.fromLng) * t,

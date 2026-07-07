@@ -47,6 +47,19 @@ const CONGESTION_COLOR: Record<CongestionLevel, string> = {
 };
 const DEFAULT_COLOR = CONGESTION_COLOR.unknown;
 
+// Mapbox `congestion_numeric` is a 0–100 score per segment (null = no data) and is
+// far more accurate + granular than the coarse categorical `congestion`, which
+// rarely reports heavy/severe — the "only ever yellow, never orange/red" bug. Bucket
+// it so genuinely slow / near-stopped traffic warms all the way through orange to red.
+export function levelFromNumeric(n: any): CongestionLevel {
+  const v = typeof n === "number" ? n : Number(n);
+  if (!Number.isFinite(v) || v < 0) return "unknown";
+  if (v < 35) return "low";       // free-flowing → green
+  if (v < 55) return "moderate";  // slowing → yellow
+  if (v < 75) return "heavy";     // congested → orange
+  return "severe";                // near-stopped / stopped → red
+}
+
 // `baseColor` (the user's chosen route color) overrides the clear-traffic color
 // (unknown / low) so a recolored route stays that color where traffic is moving;
 // the warm slow-down stops (yellow / orange / red) keep their traffic meaning.
@@ -184,7 +197,7 @@ export async function fetchMapboxCongestion(
     const coords = `${origin.lng},${origin.lat};${dest.lng},${dest.lat}`;
     const url =
       `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}` +
-      `?annotations=congestion&overview=full&geometries=geojson&steps=false` +
+      `?annotations=congestion_numeric&overview=full&geometries=geojson&steps=false` +
       `&access_token=${MAPBOX_PUBLIC_TOKEN}`;
 
     const res = await fetch(url, { signal: opts?.signal });
@@ -195,14 +208,10 @@ export async function fetchMapboxCongestion(
     if (!Array.isArray(coordinates) || coordinates.length < 2) return null;
 
     // Congestion lives on the leg annotation; with no waypoints there's one leg.
-    const rawCongestion: any[] = route?.legs?.[0]?.annotation?.congestion || [];
+    const rawCongestion: any[] = route?.legs?.[0]?.annotation?.congestion_numeric || [];
     const segCount = coordinates.length - 1;
     const congestion: CongestionLevel[] = new Array(segCount);
-    for (let i = 0; i < segCount; i++) {
-      const v = rawCongestion[i];
-      congestion[i] =
-        v === "low" || v === "moderate" || v === "heavy" || v === "severe" ? v : "unknown";
-    }
+    for (let i = 0; i < segCount; i++) congestion[i] = levelFromNumeric(rawCongestion[i]);
     return { coordinates, congestion };
   } catch {
     return null; // includes AbortError — a stale request was simply cancelled
@@ -384,7 +393,7 @@ export async function fetchMapboxRoutes(
 
     const qs =
       `?alternatives=true&steps=true&overview=full&geometries=polyline` +
-      `&annotations=congestion,duration,distance&banner_instructions=false` +
+      `&annotations=congestion_numeric,duration,distance&banner_instructions=false` +
       (exclude.length ? `&exclude=${exclude.join(",")}` : ``) +
       `&access_token=${MAPBOX_PUBLIC_TOKEN}`;
 
@@ -402,12 +411,9 @@ export async function fetchMapboxRoutes(
       const ann = leg?.annotation || {};
 
       const segCount = Math.max(0, coordinates.length - 1);
-      const rawC: any[] = Array.isArray(ann.congestion) ? ann.congestion : [];
+      const rawC: any[] = Array.isArray(ann.congestion_numeric) ? ann.congestion_numeric : [];
       const congestion: CongestionLevel[] = new Array(segCount);
-      for (let i = 0; i < segCount; i++) {
-        const v = rawC[i];
-        congestion[i] = (v === "low" || v === "moderate" || v === "heavy" || v === "severe") ? v : "unknown";
-      }
+      for (let i = 0; i < segCount; i++) congestion[i] = levelFromNumeric(rawC[i]);
 
       // Traffic-aware duration = route.duration. Free-flow ~= sum of per-segment
       // annotation durations is ALSO traffic-aware on driving-traffic, so use the
@@ -479,7 +485,7 @@ export async function fetchMapboxRouteVia(
 
     const qs =
       `?alternatives=false&steps=true&overview=full&geometries=polyline` +
-      `&annotations=congestion,duration,distance&banner_instructions=false` +
+      `&annotations=congestion_numeric,duration,distance&banner_instructions=false` +
       (exclude.length ? `&exclude=${exclude.join(",")}` : ``) +
       `&access_token=${MAPBOX_PUBLIC_TOKEN}`;
 
@@ -498,10 +504,8 @@ export async function fetchMapboxRouteVia(
     // Concat per-leg congestion across all legs (each leg annotates its own segments).
     const congestion: CongestionLevel[] = [];
     for (const leg of legs) {
-      const rawC: any[] = Array.isArray(leg?.annotation?.congestion) ? leg.annotation.congestion : [];
-      for (const v of rawC) {
-        congestion.push((v === "low" || v === "moderate" || v === "heavy" || v === "severe") ? v : "unknown");
-      }
+      const rawC: any[] = Array.isArray(leg?.annotation?.congestion_numeric) ? leg.annotation.congestion_numeric : [];
+      for (const v of rawC) congestion.push(levelFromNumeric(v));
     }
 
     // Concat per-leg steps for turn-by-turn guidance along the whole habitual path.

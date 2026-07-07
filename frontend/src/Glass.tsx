@@ -28,7 +28,10 @@ export function hudTint(): string | undefined {
   // reads, while the CLEAR material still bends the map through. Dark basemaps
   // (dusk/night): NO tint — fully clear, which reads great over the dark map. (The
   // "diamond" was a glass-SHAPE bug, not the tint — see GlassFill's GlassView radius.)
-  return darkMap ? undefined : "rgba(18,18,22,0.42)";
+  // Dawn/day/satellite: deepened 0.42 → 0.52 so the near-white HUD readouts
+  // (speed, temp, ETA) stay legible against a bright basemap — testers couldn't
+  // read the white font on the day map. Dusk/night unchanged (fully clear).
+  return darkMap ? undefined : "rgba(18,18,22,0.52)";
 }
 
 // Slightly DARKER theme-adaptive tint for the big DRAWER surfaces (drive-preview

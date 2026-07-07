@@ -1934,6 +1934,13 @@ export default function MapScreen() {
     let cancelled = false;
 
     const fetchHazards = async () => {
+      // Battery: skip the 30s fallback network poll while backgrounded AND not
+      // navigating — no visible map and no active drive, so it would just wake the
+      // cellular radio. During backgrounded NAV we keep polling so new hazard-ahead
+      // alerts still refresh; the Supabase Realtime channel (below) covers the live
+      // case regardless. Foreground always polls, and the initial mount fetch runs
+      // (the map screen only mounts foreground). Refs = live values, no stale closure.
+      if (!wasActiveRef.current && !navActiveRef.current) return;
       if (SUPABASE_ENABLED && supabase) {
         const { data, error } = await supabase
           .from("hazards")

@@ -67,6 +67,22 @@ export function haversineMeters(a: LatLng, b: LatLng): number {
 }
 
 // ---- Maneuver → human verb ----
+// Shared turn glyph for the maneuver tile — used by BOTH the phone banner
+// (TurnByTurnNav) and the CarPlay strip so they render the SAME dark arrow on the
+// green tile (Option A). Unicode text renders reliably on the CarPlay Fabric
+// surface, where the vector-icon font is flaky — hence glyphs, not <Ionicons>.
+export function maneuverArrow(instruction: string): string {
+  const t = (instruction || "").toLowerCase();
+  if (/\bu[- ]?turn\b/.test(t)) return "⟲";       // ⟲
+  if (/\bslight left\b/.test(t)) return "↖";      // ↖
+  if (/\bslight right\b/.test(t)) return "↗";     // ↗
+  if (/\bleft\b/.test(t)) return "↰";             // ↰
+  if (/\bright\b/.test(t)) return "↱";            // ↱
+  if (/\bmerge\b/.test(t)) return "⤵";            // ⤵
+  if (/\b(ramp|exit|take)\b/.test(t)) return "↗"; // ↗
+  return "↑";                                     // ↑
+}
+
 export function maneuverVerb(m?: string): string {
   if (!m) return "Continue";
   const map: Record<string, string> = {

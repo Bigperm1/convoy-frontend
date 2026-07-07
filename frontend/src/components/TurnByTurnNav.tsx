@@ -26,6 +26,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Platform, Animated } from "re
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { LaneArrow } from "../mapboxDirections";
 import { GlassFill, hudTint } from "../Glass";
+import { maneuverArrow } from "../nav";
 
 const YELLOW = "#2DEC86";
 const OVER_RED = "#E4002B"; // candy-apple red for the speeding halo + pill tint
@@ -214,7 +215,7 @@ export default function TurnByTurnNav({
               the backdrop and washes out light). */}
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 18, overflow: "hidden" }} />
           <View style={styles.maneuverIconWrap}>
-            <Ionicons name={maneuverIcon} size={34} color="#000" />
+            <Text style={styles.maneuverGlyph}>{maneuverArrow(instruction)}</Text>
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.distanceToTurn}>{distanceToTurn}</Text>
@@ -287,6 +288,8 @@ const styles = StyleSheet.create({
     backgroundColor: YELLOW,
     alignItems: "center", justifyContent: "center",
   },
+  // Dark turn glyph on the green tile — shared shape with the CarPlay strip (Option A).
+  maneuverGlyph: { color: "#0B0B0C", fontSize: 34, fontWeight: "900", lineHeight: 38 },
   distanceToTurn: { color: "#F4F4F4", fontSize: 28, fontWeight: "800", letterSpacing: -0.5, lineHeight: 32 },
   instruction: { color: "#808080", fontSize: 15, fontWeight: "500", marginTop: 1 },
   muteBtn: {

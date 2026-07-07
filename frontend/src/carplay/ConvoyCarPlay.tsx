@@ -33,7 +33,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated } from 'react-native';
-import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
+import { type NavRoute, type LatLng, maneuverVerb, maneuverArrow, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
 import { setCarState, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
@@ -54,19 +54,8 @@ const isAndroid = Platform.OS === 'android';
 // native CarPlay UI duplicated and covered them. Flip TRUE to restore native guidance.
 const CAR_NATIVE_GUIDANCE = false;
 
-// Upcoming-maneuver glyph for the car banner's green arrow box (mirrors the phone's
-// maneuver icon). Derived from the instruction text — Routes API verbs land in it.
-function maneuverArrow(instruction: string): string {
-  const t = (instruction || '').toLowerCase();
-  if (/\bu[- ]?turn\b/.test(t)) return '⟲';
-  if (/\bslight left\b/.test(t)) return '↖';
-  if (/\bslight right\b/.test(t)) return '↗';
-  if (/\bleft\b/.test(t)) return '↰';
-  if (/\bright\b/.test(t)) return '↱';
-  if (/\bmerge\b/.test(t)) return '⤵';
-  if (/\b(ramp|exit|take)\b/.test(t)) return '↗';
-  return '↑';
-}
+// (maneuverArrow now lives in ../nav — shared with the phone banner so the arrow
+// glyph is identical on phone + CarPlay.)
 
 // react-native-carplay's Android checkForConnection() emits a spurious
 // `didConnect` at startup even with NO head unit attached (it calls

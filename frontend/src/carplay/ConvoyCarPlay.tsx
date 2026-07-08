@@ -950,7 +950,7 @@ const styles = StyleSheet.create({
   // --- BOTTOM-RIGHT nav stack (live map): ETA pill above the maneuver banner, same width ---
   // width is the shared "length" of both banners — OTA-tunable. alignItems:'stretch' makes
   // the ETA + maneuver banner fill it equally so they line up.
-  navStack: { position: 'absolute', right: 8, bottom: 8, width: 250, alignItems: 'stretch', gap: 6 },
+  navStack: { position: 'absolute', right: 8, bottom: 8, width: 180, alignItems: 'stretch', gap: 6 },
   navBannerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   navEta: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
 });

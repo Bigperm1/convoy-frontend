@@ -85,7 +85,9 @@ const CAR_ZOOM_MAX = 20;
 
 // Top padding as a fraction of map height — pins the car near the BOTTOM-MIDDLE of the
 // head unit (larger = lower on screen). Applied every frame via getCam, nav AND cruise.
-const CAR_LOWER_PAD_FRAC = 0.42;
+// Bumped 0.42 → 0.52 (CarPlay only, tilt unchanged): drops the car a bit lower on the wide
+// head-unit so more road/horizon reads ahead of it, matching the phone's forward view.
+const CAR_LOWER_PAD_FRAC = 0.52;
 // Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';

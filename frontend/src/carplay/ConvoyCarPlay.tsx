@@ -42,6 +42,18 @@ import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 import { formatSpeed, getSettings, getMapMode, getRouteColor } from '../settings';
+
+// CarPlay HUD floor — a solid dark tint ONLY on light basemaps (dawn / day / satellite),
+// where clear glass over the bright map would wash out. On DARK basemaps (dusk / night)
+// it's transparent, so the chips render as pure clear Liquid Glass — glassy, matching the
+// phone HUD exactly (the phone chips use hudTint(), which is likewise clear on dark maps).
+// Keeps dawn/day readable AND dusk/night glassy. Re-evaluated each render as the auto map
+// mode advances with the clock.
+function carHudFloor(): string {
+  const mode = getMapMode(getSettings());
+  const darkMap = mode === 'dusk' || mode === 'night';
+  return darkMap ? 'transparent' : 'rgba(18,18,22,0.5)';
+}
 import { routeKindFor, routeColorsFor } from '../ConvoyMapbox';
 import { weatherKind, type WeatherCondition, type WeatherKind } from '../weatherLayer';
 import { WeatherGlyph } from '../components/WeatherHUD';
@@ -250,9 +262,13 @@ export function CarSurface() {
   // speedNum + limitVal are already in the driver's unit. While over, the pill PULSES
   // (opacity loop) so it grabs the eye — the "premium" version of the phone's color flip.
   const speedNum = Number(spd.value) || 0;
-  // RED pulse ONLY when 21+ km/h (13+ mph) over the posted limit — no orange tier.
-  const overBy = getSettings().speedUnit === 'mph' ? 13 : 21;
-  const speedoOver = limitVal != null && speedNum >= (limitVal as number) + overBy;
+  // Match the PHONE speedo EXACTLY: flash red when over the posted limit by >2 km/h
+  // (the phone's SpeedPill uses OVER_BUFFER_KMH = 2 on its smoothed speed). Compare in
+  // km/h off the raw carStore values so the display unit can't shift the threshold. Was
+  // +21 km/h (13 mph) — far more lenient than the phone, so the two flashed red at
+  // completely different times ("not synced"). Speed-limit sign shares s.speedLimitKmh.
+  const speedoOver = typeof s.speedLimitKmh === 'number' && s.speedLimitKmh > 0
+    && (s.speedMs || 0) * 3.6 > s.speedLimitKmh + 2;
   // Dark HUD panels a little transparent (0.8) so the map reads through them; the
   // over-limit RED stays solid as an alert. OTA-tunable.
   // Transparent — the pill's look comes from the GlassFill (real UIGlassEffect,
@@ -262,7 +278,7 @@ export function CarSurface() {
   // Solid dark tint floor matching the maneuver banner (rgba(18,18,22,0.5)) so every
   // CarPlay HUD chip reads the SAME on the pale map; red floor when over the limit. The
   // GlassFill on top stays CLEAR (real Liquid Glass sheen) — floor gives the tint.
-  const speedoBg = speedoOver ? '#E4002B' : 'rgba(18,18,22,0.5)';
+  const speedoBg = speedoOver ? '#E4002B' : carHudFloor();
   const speedPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!speedoOver) { speedPulse.setValue(1); return; }
@@ -347,7 +363,7 @@ export function CarSurface() {
 
       {/* Bottom-right: arrival / eta / remaining while navigating. */}
       {s.navigating && metaLine ? (
-        <View style={styles.bottomMeta} pointerEvents="none">
+        <View style={[styles.bottomMeta, { backgroundColor: carHudFloor() }]} pointerEvents="none">
           <GlassFill tintColor={undefined} style={{ borderRadius: 10, overflow: 'hidden' }} />
           <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
         </View>
@@ -390,7 +406,7 @@ export function CarSurface() {
       {/* Top: the turn-by-turn maneuver strip while navigating. No CONVOY/idle chip —
           off-nav the map speaks for itself. */}
       {s.navigating ? (
-        <View style={styles.topStrip} pointerEvents="none">
+        <View style={[styles.topStrip, { backgroundColor: carHudFloor() }]} pointerEvents="none">
           <GlassFill tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
           <View style={styles.maneuverBox}>
             <ManeuverArrow dir={(s.maneuverIcon as ManeuverDir) || 'straight'} size={24} color="#0B0B0C" />
@@ -404,7 +420,7 @@ export function CarSurface() {
 
       {/* Bottom-right: arrival / eta / remaining while navigating. */}
       {s.navigating && metaLine ? (
-        <View style={styles.bottomMeta} pointerEvents="none">
+        <View style={[styles.bottomMeta, { backgroundColor: carHudFloor() }]} pointerEvents="none">
           <GlassFill tintColor={undefined} style={{ borderRadius: 10, overflow: 'hidden' }} />
           <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
         </View>
@@ -465,7 +481,7 @@ export function CarSurface() {
           mirror the phone HUD's weather-over-speed column (same vector glyph + temp).
           Shows whenever the phone's weather layer is feeding carStore, incl. nav. */}
       {s.weatherTemp ? (
-        <View style={styles.weatherChip} pointerEvents="none">
+        <View style={[styles.weatherChip, { backgroundColor: carHudFloor() }]} pointerEvents="none">
           <GlassFill tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
           {s.weatherKind ? <WeatherGlyph kind={s.weatherKind as WeatherKind} size={20} /> : null}
           <Text style={styles.weatherText}>{s.weatherTemp}</Text>
@@ -476,7 +492,7 @@ export function CarSurface() {
           the needle by -heading to keep North pointing at true north. (Flip the
           sign here if it reads mirrored on the head unit.) */}
       {typeof s.heading === 'number' ? (
-        <View style={styles.compassDock} pointerEvents="none">
+        <View style={[styles.compassDock, { backgroundColor: carHudFloor() }]} pointerEvents="none">
           <GlassFill tintColor={undefined} style={{ borderRadius: 19, overflow: 'hidden' }} />
           <View style={{ transform: [{ rotate: `${-(s.heading || 0)}deg` }] }}>
             <CompassNeedle size={30} />

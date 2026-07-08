@@ -95,6 +95,15 @@ function segMeters(a: [number, number], b: [number, number]): number {
 // LineLayer's source to have `lineMetrics: true` (so `line-progress` 0..1 is
 // available). Returns a plain colour string when there's only one colour overall
 // (no gradient needed).
+// Mapbox emits "Take exit EXIT 90 toward McCallum Road" for signed exits — its verb
+// ("Take exit") plus the road's OWN exit signage ("EXIT 90") = a redundant double "exit"
+// that shows in the banner AND gets read aloud. Collapse "exit EXIT" → "exit" (and the
+// rarer "exit Exit") so it reads "Take exit 90 toward McCallum Road", like Google/Apple.
+export function cleanManeuverInstruction(s?: string): string | undefined {
+  if (!s) return s;
+  return s.replace(/\bexit\s+exit\b/gi, "exit").replace(/\s{2,}/g, " ").trim();
+}
+
 export function buildCongestionGradient(
   coordinates: [number, number][],
   congestion: CongestionLevel[],
@@ -430,7 +439,7 @@ export async function fetchMapboxRoutes(
             maneuver: s?.maneuver ? {
               type: s.maneuver.type,
               modifier: s.maneuver.modifier,
-              instruction: s.maneuver.instruction,
+              instruction: cleanManeuverInstruction(s.maneuver.instruction),
               location: Array.isArray(s.maneuver.location) ? s.maneuver.location : undefined,
             } : undefined,
           }))
@@ -529,7 +538,7 @@ export async function fetchMapboxRouteVia(
           maneuver: s?.maneuver ? {
             type: s.maneuver.type,
             modifier: s.maneuver.modifier,
-            instruction: s.maneuver.instruction,
+            instruction: cleanManeuverInstruction(s.maneuver.instruction),
             location: Array.isArray(s.maneuver.location) ? s.maneuver.location : undefined,
           } : undefined,
         });

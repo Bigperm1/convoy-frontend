@@ -403,26 +403,28 @@ export function CarSurface() {
   // the real 3D car (ModelLayer), so only the static image needs the chevron.
   const mapOverlays = (
     <>
-      {/* Top: the turn-by-turn maneuver strip while navigating. No CONVOY/idle chip —
-          off-nav the map speaks for itself. */}
+      {/* BOTTOM-RIGHT nav stack (out of the route line's way): the ETA pill sits just
+          ABOVE the turn-by-turn maneuver banner, and both share the same width. */}
       {s.navigating ? (
-        <View style={[styles.topStrip, { backgroundColor: carHudFloor() }]} pointerEvents="none">
-          <GlassFill tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
-          <View style={styles.maneuverBox}>
-            <ManeuverArrow dir={(s.maneuverIcon as ManeuverDir) || 'straight'} size={24} color="#0B0B0C" />
+        <View style={styles.navStack} pointerEvents="none">
+          {/* ETA — just above the maneuver banner. */}
+          {metaLine ? (
+            <View style={[styles.navEta, { backgroundColor: carHudFloor() }]}>
+              <GlassFill tintColor={undefined} style={{ borderRadius: 10, overflow: 'hidden' }} />
+              <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
+            </View>
+          ) : null}
+          {/* Maneuver banner — bottom of the stack. */}
+          <View style={[styles.navBannerRow, { backgroundColor: carHudFloor() }]}>
+            <GlassFill tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
+            <View style={styles.maneuverBox}>
+              <ManeuverArrow dir={(s.maneuverIcon as ManeuverDir) || 'straight'} size={24} color="#0B0B0C" />
+            </View>
+            <View style={styles.topTextCol}>
+              <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
+              <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
+            </View>
           </View>
-          <View style={styles.topTextCol}>
-            <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
-            <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
-          </View>
-        </View>
-      ) : null}
-
-      {/* Bottom-right: arrival / eta / remaining while navigating. */}
-      {s.navigating && metaLine ? (
-        <View style={[styles.bottomMeta, { backgroundColor: carHudFloor() }]} pointerEvents="none">
-          <GlassFill tintColor={undefined} style={{ borderRadius: 10, overflow: 'hidden' }} />
-          <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
         </View>
       ) : null}
 
@@ -945,4 +947,10 @@ const styles = StyleSheet.create({
   // ETA / arrival — tucked into the BOTTOM-RIGHT corner, small.
   bottomMeta: { position: 'absolute', right: 8, bottom: 8, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 10, overflow: 'hidden' },
   bottomText: { color: '#C7CCD1', fontSize: 12, fontWeight: '600' },
+  // --- BOTTOM-RIGHT nav stack (live map): ETA pill above the maneuver banner, same width ---
+  // width is the shared "length" of both banners — OTA-tunable. alignItems:'stretch' makes
+  // the ETA + maneuver banner fill it equally so they line up.
+  navStack: { position: 'absolute', right: 8, bottom: 8, width: 250, alignItems: 'stretch', gap: 6 },
+  navBannerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
+  navEta: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
 });

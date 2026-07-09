@@ -280,6 +280,15 @@ export default function CarMapView({ onGLError }: Props) {
     ? Math.max(0, Math.min(0.999, routeProj.frac + trimLeadM / routeProj.totalM))
     : null;
   const fadeSpanFrac = routeProj ? Math.max(0.0008, Math.min(0.06, 20 / routeProj.totalM)) : 0;
+  // Snap the car to the line + lock its heading to the route bearing when on-route (≤60 m),
+  // matching the phone — stops the low-speed position drift + heading spin. Steer the
+  // camera by the SAME bearing (getCam reads camHdgRef live) so the map doesn't rotate
+  // around a locked car. Off-route (> 60 m) → real GPS so you can see you've left the route.
+  const carSnapped = routeProj != null && routeProj.distM <= 60;
+  const drawLat = carSnapped ? routeProj!.lat : lat;
+  const drawLng = carSnapped ? routeProj!.lng : lng;
+  const drawHdg = carSnapped ? routeProj!.bearing : hdg;
+  if (carSnapped) camHdgRef.current = routeProj!.bearing;
   const buildLineFade = (solid: string, clear: string): any => {
     if (routeTrimEndFrac == null) return null;
     const s0 = Math.min(0.997, Math.max(0.0001, routeTrimEndFrac));
@@ -410,9 +419,9 @@ export default function CarMapView({ onGLError }: Props) {
           per tick. Requires <Models/> above (model registration) — keep it. */}
       {hasFix && (
         <SelfCarModel
-          lat={lat}
-          lng={lng}
-          heading={hdg}
+          lat={drawLat}
+          lng={drawLng}
+          heading={drawHdg}
           emissive={emissive}
           modelId={carModelId}
           cameraRef={cameraRef}

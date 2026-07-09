@@ -3120,6 +3120,7 @@ export default function MapScreen() {
         return (
           <TurnByTurnNav
             maneuverIcon={maneuverIcon(upcoming?.maneuver, upcoming?.html)}
+            maneuverKey={upcoming?.maneuver}
             distanceToTurn={fmtManeuverDist(tbt.distanceToManeuverM)}
             instruction={instruction}
             eta={fmtEtaSec(tbt.etaSeconds)}

@@ -187,6 +187,7 @@ function laneIcon(dir: string): any {
 type Props = {
   // Upcoming maneuver
   maneuverIcon: any;            // Ionicons name
+  maneuverKey?: string;        // Mapbox "type|modifier" — carries the roundabout exit dir
   distanceToTurn: string;      // e.g. "200 m"
   instruction: string;         // e.g. "Turn left onto Main St"
   // Trip progress
@@ -202,7 +203,7 @@ type Props = {
 };
 
 export default function TurnByTurnNav({
-  maneuverIcon, distanceToTurn, instruction, eta, distanceRemaining, arrival,
+  maneuverIcon, maneuverKey, distanceToTurn, instruction, eta, distanceRemaining, arrival,
   muted, onToggleMute, onEnd, lanes,
 }: Props) {
   return (
@@ -215,7 +216,7 @@ export default function TurnByTurnNav({
               the backdrop and washes out light). */}
           <GlassFill tintColor={undefined} style={{ borderRadius: 18, overflow: "hidden" }} />
           <View style={styles.maneuverIconWrap}>
-            <ManeuverArrow dir={maneuverDir(instruction)} size={34} color="#0B0B0C" />
+            <ManeuverArrow dir={maneuverDir(instruction, maneuverKey)} size={34} color="#0B0B0C" />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.distanceToTurn}>{distanceToTurn}</Text>

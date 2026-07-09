@@ -518,7 +518,7 @@ function distPointToSegM(pLat: number, pLng: number, aLat: number, aLng: number,
 // line BEHIND the car so the 3D car reads on top, and (b) SNAPPING the drawn car
 // onto the line so it stays glued to the road instead of drifting on raw GPS.
 // Local equirectangular metres centred on the car (accurate at street scale).
-export function projectOntoRoute(pLat: number, pLng: number, coords: { latitude: number; longitude: number }[]): { frac: number; lat: number; lng: number; distM: number; totalM: number } | null {
+export function projectOntoRoute(pLat: number, pLng: number, coords: { latitude: number; longitude: number }[]): { frac: number; lat: number; lng: number; distM: number; totalM: number; bearing: number } | null {
   if (!coords || coords.length < 2) return null;
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -531,6 +531,7 @@ export function projectOntoRoute(pLat: number, pLng: number, coords: { latitude:
   let bestD2 = Infinity;  // nearest squared distance car→route
   let bestArc = 0;        // arc length from origin to that nearest point
   let bestX = 0, bestY = 0; // nearest point on the route, in local metres
+  let bestDx = 0, bestDy = 0; // direction of the segment the projection landed on (east, north)
   let prevX = X(coords[0].longitude), prevY = Y(coords[0].latitude);
   for (let i = 1; i < coords.length; i++) {
     const cx = X(coords[i].longitude), cy = Y(coords[i].latitude);
@@ -541,13 +542,16 @@ export function projectOntoRoute(pLat: number, pLng: number, coords: { latitude:
       t = Math.max(0, Math.min(1, t));
       const projX = prevX + t * dx, projY = prevY + t * dy;
       const d2 = projX * projX + projY * projY;
-      if (d2 < bestD2) { bestD2 = d2; bestArc = acc + t * len; bestX = projX; bestY = projY; }
+      if (d2 < bestD2) { bestD2 = d2; bestArc = acc + t * len; bestX = projX; bestY = projY; bestDx = dx; bestDy = dy; }
       acc += len;
     }
     prevX = cx; prevY = cy;
   }
   if (acc <= 0) return null;
-  return { frac: bestArc / acc, lat: invLat(bestY), lng: invLng(bestX), distM: Math.sqrt(bestD2), totalM: acc };
+  // bearing of the route AT the projected point (compass degrees, 0..360). Lets the car
+  // point ALONG the line instead of spinning with jittery low-speed GPS heading.
+  const bearing = (Math.atan2(bestDx, bestDy) * 180 / Math.PI + 360) % 360;
+  return { frac: bestArc / acc, lat: invLat(bestY), lng: invLng(bestX), distM: Math.sqrt(bestD2), totalM: acc, bearing };
 }
 
 type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer; status?: "live" | "parked" };
@@ -1395,14 +1399,23 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       )
     : navCongestionGradient;
 
-  // Snapped draw position: glue the car to the line, but ONLY within ~45 m of it
-  // — further off (wrong turn / pre-reroute) we show the real GPS so you can see
-  // you're off-route. SelfCarModel interpolates, so the snap eases in smoothly.
-  // (Was 30 m, which left the car drawn off the line on normal urban GPS drift
-  // that landed just past the cutoff — e.g. ~32 m beside a parallel street.)
-  const selfDraw = (routeProj && routeProj.distM <= 45)
-    ? { lat: routeProj.lat, lng: routeProj.lng }
+  // Snapped draw POSITION + heading: glue the car to the line within ~60 m of it —
+  // further off (wrong turn / pre-reroute) we show the real GPS so you can see you're
+  // off-route. SelfCarModel interpolates, so the snap eases in smoothly. (Widened
+  // 45 → 60 m so a car a couple lanes off a parallel street still locks to the line.)
+  const SELF_SNAP_M = 60;
+  const selfSnapped = navigationActive && routeProj != null && routeProj.distM <= SELF_SNAP_M;
+  const selfDraw = selfSnapped
+    ? { lat: routeProj!.lat, lng: routeProj!.lng }
     : (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null);
+  // Heading LOCK — the "car drifting/spinning around" fix. The camera heading is already
+  // smoothed + held when stopped (camHeadingRef); the car model was still riding RAW GPS
+  // heading, which spins at low speed. When snapped, point the car along the route's
+  // bearing at that spot (stable + line-aligned); else fall back to the smoothed camera
+  // heading; else raw. So the car sits ON the line pointing down it, never wandering.
+  const selfHeadingLocked = selfSnapped
+    ? routeProj!.bearing
+    : (camHeadingRef.current != null ? camHeadingRef.current : (selfCar?.heading ?? 0));
 
   const visibleHazards = (hazards || []).filter((h) => h && typeof h.lat === "number" && typeof h.lng === "number");
   const showRoutes = !!destination && routeFC.features.length > 0;
@@ -1705,7 +1718,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           <SelfCarModel
             lat={(selfDraw ?? selfCar).lat}
             lng={(selfDraw ?? selfCar).lng}
-            heading={selfCar.heading ?? 0}
+            heading={selfHeadingLocked}
             emissive={selfEmissive}
             modelId={selfModelId}
             cameraRef={cameraRef}

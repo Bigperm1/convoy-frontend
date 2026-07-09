@@ -515,6 +515,15 @@ function upcomingInstruction(route: NavRoute | null, stepIndex: number): string 
   return stripTags(step.html) || maneuverVerb(step.maneuver);
 }
 
+// The Mapbox "type|modifier" key for the SAME upcoming step — carries the roundabout
+// exit direction so the arrow can leave the circle at the real angle.
+function upcomingManeuverKey(route: NavRoute | null, stepIndex: number): string | undefined {
+  const steps = route?.steps ?? [];
+  if (!steps.length) return undefined;
+  const idx = Math.min(stepIndex + 1, steps.length - 1);
+  return (steps[idx] ?? steps[steps.length - 1])?.maneuver;
+}
+
 function toCarPeers(peers?: Record<string, any> | null): CarPeer[] {
   if (!peers) return [];
   return Object.values(peers)
@@ -638,7 +647,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
         : undefined,
       weatherKind: weather ? weatherKind(weather) : undefined,
       // Arrow glyph for the car banner's maneuver box.
-      maneuverIcon: tbt.active ? maneuverDir(upcomingInstruction(route, tbt.stepIndex)) : undefined,
+      maneuverIcon: tbt.active ? maneuverDir(upcomingInstruction(route, tbt.stepIndex), upcomingManeuverKey(route, tbt.stepIndex)) : undefined,
     });
   }, [
     tbt.active,
@@ -950,7 +959,7 @@ const styles = StyleSheet.create({
   // --- BOTTOM-RIGHT nav stack (live map): ETA pill above the maneuver banner, same width ---
   // width is the shared "length" of both banners — OTA-tunable. alignItems:'stretch' makes
   // the ETA + maneuver banner fill it equally so they line up.
-  navStack: { position: 'absolute', right: 8, bottom: 8, width: 180, alignItems: 'stretch', gap: 6 },
+  navStack: { position: 'absolute', right: 8, bottom: 8, width: 210, alignItems: 'stretch', gap: 6 },
   navBannerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   navEta: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
 });

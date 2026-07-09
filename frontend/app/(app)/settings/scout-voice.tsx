@@ -4,7 +4,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../../../src/theme";
 import { useSettings, getSpeedAlertMode, getNovaVoice } from "../../../src/settings";
 import { NOVA_VOICES, previewNovaVoice, stopNovaPreview } from "../../../src/novaVoices";
+import { playSpeedDing } from "../../../src/speedDing";
 import { SettingsPage, SectionLabel, SettingsCard, ToggleRow, RadioRow, Divider, HelpText } from "../../../src/components/settingsKit";
+import * as Haptics from "expo-haptics";
 
 export default function ScoutVoicePage() {
   const [settings, setSettings] = useSettings();
@@ -72,6 +74,18 @@ export default function ScoutVoicePage() {
         <RadioRow icon="speedometer" iconColor="#FF453A" title="Scout" subtitle="Scout speaks up when you're well over the limit (~21 over), firmer at ~41 over" selected={getSpeedAlertMode(settings) === "nova"} onSelect={() => setSettings({ speedAlertMode: "nova", novaSpeeding: true })} />
         <Divider />
         <RadioRow icon="notifications" iconColor="#FF9F0A" title="Ding" subtitle="A chime instead of a voice: one ding ~21 over, a double ding ~41 over" selected={getSpeedAlertMode(settings) === "ding"} onSelect={() => setSettings({ speedAlertMode: "ding", novaSpeeding: false })} />
+        {/* Preview the ding without having to go speed — single tap, plus the double
+            (the +41-over warning) so both patterns can be heard here. */}
+        <View style={styles.sampleRow}>
+          <TouchableOpacity style={styles.sampleBtn} activeOpacity={0.8} testID="ding-sample" onPress={() => { Haptics.selectionAsync().catch(() => {}); void playSpeedDing(false); }}>
+            <Ionicons name="play-circle" size={18} color="#FF9F0A" />
+            <Text style={styles.sampleBtnText}>Play sample</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.sampleBtn} activeOpacity={0.8} testID="ding-sample-double" onPress={() => { Haptics.selectionAsync().catch(() => {}); void playSpeedDing(true); }}>
+            <Ionicons name="play-circle" size={18} color="#FF9F0A" />
+            <Text style={styles.sampleBtnText}>Double</Text>
+          </TouchableOpacity>
+        </View>
         <Divider />
         <RadioRow icon="speedometer-outline" iconColor="#8E8E93" title="Off" subtitle="No speed warnings" selected={getSpeedAlertMode(settings) === "off"} onSelect={() => setSettings({ speedAlertMode: "off", novaSpeeding: false })} />
         <Divider />
@@ -94,4 +108,7 @@ const styles = StyleSheet.create({
   voiceChipLabel: { color: "#C7C7CC", fontSize: 14, fontWeight: "700" },
   voiceChipLabelActive: { color: "#F4F4F4" },
   voiceChipBlurb: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
+  sampleRow: { flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingBottom: 12, marginTop: -2 },
+  sampleBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(255,159,10,0.14)", borderWidth: 1, borderColor: "rgba(255,159,10,0.35)" },
+  sampleBtnText: { color: "#FF9F0A", fontSize: 13, fontWeight: "700" },
 });

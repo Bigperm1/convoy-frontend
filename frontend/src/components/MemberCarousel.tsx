@@ -57,12 +57,15 @@ export default function MemberCarousel({ members, mode, selected, onSelect, empt
         return (
           <TouchableOpacity
             key={m.id}
-            style={[styles.chip, !enabled && styles.chipDisabled]}
+            style={styles.chip}
             activeOpacity={enabled ? 0.7 : 1}
             onPress={() => { if (enabled) onSelect(m); }}
           >
             <View style={[styles.avatarWrap, sel && styles.avatarWrapSel]}>
-              <Image source={getVehiclePngOrDefault(m.car_color)} style={styles.avatar} contentFit="contain" />
+              {/* Offline cars stay readable (85%) so a white paint still reads white —
+                  the missing green live-dot + greyed handle carry the "offline" signal
+                  instead. (A 38% whole-chip fade used to wash white cars out to grey.) */}
+              <Image source={getVehiclePngOrDefault(m.car_color)} style={[styles.avatar, !enabled && styles.avatarOffline]} contentFit="contain" />
               {m.isLive && <View style={styles.liveDot} />}
               {sel && (
                 <View style={styles.check}>
@@ -83,7 +86,7 @@ export default function MemberCarousel({ members, mode, selected, onSelect, empt
 const styles = StyleSheet.create({
   row: { gap: 14, paddingHorizontal: 14, paddingVertical: 8 },
   chip: { width: 64, alignItems: "center", gap: 6 },
-  chipDisabled: { opacity: 0.38 },
+  avatarOffline: { opacity: 0.85 },
   avatarWrap: {
     width: 56, height: 56, borderRadius: 28,
     backgroundColor: "rgba(255,255,255,0.08)",

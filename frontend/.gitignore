@@ -56,3 +56,4 @@ assets/vehicles/*.glb
 # Generated native projects (CNG) — force EAS to prebuild fresh so config plugins + version bumps apply
 /ios/
 /android/
+.claude/settings.local.json

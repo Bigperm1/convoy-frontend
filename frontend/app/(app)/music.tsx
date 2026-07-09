@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Modal,
   Alert,
+  Dimensions,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -58,6 +59,22 @@ import { shareInbox } from "../../src/shareInbox";
 
 // Apple Music brand red → pink.
 const AM_PINK: [string, string] = ["#FB5C74", "#FA2D48"];
+const SCREEN_H = Dimensions.get("window").height;
+
+// Apple's library bridge returns a flat song feed (no artist/album endpoints), so
+// the Artists / Albums categories are grouped from the library songs client-side.
+export type SongGroup = { name: string; songs: AppleSong[]; artworkUrl?: string };
+function groupSongsBy(songs: AppleSong[], key: "artistName" | "albumName"): SongGroup[] {
+  const map = new Map<string, SongGroup>();
+  for (const s of songs) {
+    const name = (s[key] || "").trim() || "Unknown";
+    let g = map.get(name);
+    if (!g) { g = { name, songs: [] }; map.set(name, g); }
+    g.songs.push(s);
+    if (!g.artworkUrl && s.artworkUrl) g.artworkUrl = s.artworkUrl;
+  }
+  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
 // Spotify brand green.
 const SP_GREEN = "#1DB954";
 
@@ -220,6 +237,13 @@ export default function MusicScreen() {
   const [recent, setRecent] = useState<RecentItem[]>([]);
   const [libErrors, setLibErrors] = useState<{ playlists?: string; songs?: string; recent?: string }>({});
 
+  // Apple-Music-style library browser: a category menu (Playlists/Artists/Albums/
+  // Songs) that drills into lists. Artists/Albums are grouped from library songs.
+  const libraryArtists = useMemo(() => groupSongsBy(librarySongs, "artistName"), [librarySongs]);
+  const libraryAlbums = useMemo(() => groupSongsBy(librarySongs, "albumName"), [librarySongs]);
+  const [libCat, setLibCat] = useState<null | "playlists" | "artists" | "albums" | "songs">(null);
+  const [libGroup, setLibGroup] = useState<SongGroup | null>(null); // an open artist/album
+
   // Reactive now-playing state from the native player (no-ops off iOS).
   const { song } = useCurrentSong() as { song: any };
   const { isPlaying } = useIsPlaying();
@@ -229,7 +253,7 @@ export default function MusicScreen() {
     try {
       const [p, s, r] = await Promise.all([
         getUserPlaylists(50),
-        getLibrarySongs(60),
+        getLibrarySongs(200),
         getRecentlyPlayed(),
       ]);
       setPlaylists(p.playlists);
@@ -515,17 +539,35 @@ export default function MusicScreen() {
                   </View>
                 )}
 
-                {/* From Your Library */}
-                {librarySongs.length > 0 && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>From Your Library</Text>
-                    <View style={styles.list}>
-                      {librarySongs.slice(0, 25).map((s, i) =>
-                        SongRow(s, i, () => playLibrarySong(s.id), i === Math.min(librarySongs.length, 25) - 1)
-                      )}
+                {/* Library — Apple-Music-style category menu (drills into lists). */}
+                {(librarySongs.length > 0 || playlists.length > 0) && (() => {
+                  const menu = ([
+                    playlists.length > 0 && { key: "playlists", icon: "list", label: "Playlists" },
+                    libraryArtists.length > 0 && { key: "artists", icon: "mic-outline", label: "Artists" },
+                    libraryAlbums.length > 0 && { key: "albums", icon: "albums-outline", label: "Albums" },
+                    librarySongs.length > 0 && { key: "songs", icon: "musical-notes-outline", label: "Songs" },
+                  ].filter(Boolean) as { key: "playlists" | "artists" | "albums" | "songs"; icon: any; label: string }[]);
+                  return (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>Library</Text>
+                      <View style={styles.list}>
+                        {menu.map((m, i) => (
+                          <TouchableOpacity
+                            key={m.key}
+                            style={[styles.libRow, i === menu.length - 1 && styles.rowLast]}
+                            activeOpacity={0.7}
+                            onPress={() => { Haptics.selectionAsync().catch(() => {}); setLibGroup(null); setLibCat(m.key); }}
+                            testID={`am-lib-${m.key}`}
+                          >
+                            <Ionicons name={m.icon} size={22} color={AM_PINK[1]} />
+                            <Text style={styles.libRowLabel} numberOfLines={1}>{m.label}</Text>
+                            <Ionicons name="chevron-forward" size={18} color={COLORS.textDim} />
+                          </TouchableOpacity>
+                        ))}
+                      </View>
                     </View>
-                  </View>
-                )}
+                  );
+                })()}
 
                 {/* Empty library (authorized but nothing came back) */}
                 {!libLoading && playlists.length === 0 && librarySongs.length === 0 && recent.length === 0 && (
@@ -798,6 +840,102 @@ export default function MusicScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Library browser — Apple-Music drill-down: category → (artist/album) → songs. */}
+      <Modal
+        visible={libCat !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => { if (libGroup) setLibGroup(null); else setLibCat(null); }}
+      >
+        <View style={styles.plRoot}>
+          <TouchableOpacity style={styles.plBackdrop} activeOpacity={1} onPress={() => { setLibCat(null); setLibGroup(null); }} />
+          <View style={[styles.plSheet, styles.libSheet]}>
+            <View style={styles.plGrabber} />
+            <View style={styles.libHeader}>
+              <TouchableOpacity
+                onPress={() => { if (libGroup) setLibGroup(null); else setLibCat(null); }}
+                style={styles.plClose}
+                hitSlop={8}
+                testID="am-lib-back"
+              >
+                <Ionicons name={libGroup ? "chevron-back" : "close"} size={20} color={COLORS.text} />
+              </TouchableOpacity>
+              <Text style={styles.libHeaderTitle} numberOfLines={1}>
+                {libGroup ? libGroup.name
+                  : libCat === "playlists" ? "Playlists"
+                  : libCat === "artists" ? "Artists"
+                  : libCat === "albums" ? "Albums"
+                  : "Songs"}
+              </Text>
+              <View style={{ width: 32 }} />
+            </View>
+
+            <ScrollView style={styles.libScroll} showsVerticalScrollIndicator={false}>
+              {libGroup ? (
+                /* An artist/album is open → its songs */
+                <View style={styles.list}>
+                  {libGroup.songs.map((s, i) =>
+                    SongRow(s, i, () => { playLibrarySong(s.id); setLibCat(null); setLibGroup(null); }, i === libGroup.songs.length - 1)
+                  )}
+                </View>
+              ) : libCat === "songs" ? (
+                <View style={styles.list}>
+                  {librarySongs.map((s, i) =>
+                    SongRow(s, i, () => { playLibrarySong(s.id); setLibCat(null); }, i === librarySongs.length - 1)
+                  )}
+                </View>
+              ) : libCat === "playlists" ? (
+                <View style={styles.list}>
+                  {playlists.map((p, i) => (
+                    <TouchableOpacity
+                      key={p.id || String(i)}
+                      style={[styles.row, i === playlists.length - 1 && styles.rowLast]}
+                      activeOpacity={0.7}
+                      onPress={() => { setLibCat(null); openPlaylistDetail(p); }}
+                    >
+                      {artURL(p.artworkUrl, 100) ? (
+                        <Image source={{ uri: artURL(p.artworkUrl, 100) }} style={styles.rowArt} contentFit="cover" />
+                      ) : (
+                        <ArtFallback seed={p.name ?? p.id} size={48} radius={6} />
+                      )}
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rowTitle} numberOfLines={1}>{p.name}</Text>
+                        {!!p.trackCount && <Text style={styles.rowSub}>{p.trackCount} songs</Text>}
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color={COLORS.textDim} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                /* Artists / Albums → the list of grouped names */
+                <View style={styles.list}>
+                  {(libCat === "artists" ? libraryArtists : libraryAlbums).map((g, i, arr) => (
+                    <TouchableOpacity
+                      key={g.name}
+                      style={[styles.row, i === arr.length - 1 && styles.rowLast]}
+                      activeOpacity={0.7}
+                      onPress={() => setLibGroup(g)}
+                    >
+                      {artURL(g.artworkUrl, 100) ? (
+                        <Image source={{ uri: artURL(g.artworkUrl, 100) }} style={[styles.rowArt, libCat === "artists" && styles.rowArtRound]} contentFit="cover" />
+                      ) : (
+                        <ArtFallback seed={g.name} size={48} radius={libCat === "artists" ? 24 : 6} />
+                      )}
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rowTitle} numberOfLines={1}>{g.name}</Text>
+                        <Text style={styles.rowSub}>{g.songs.length} song{g.songs.length === 1 ? "" : "s"}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color={COLORS.textDim} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              <View style={{ height: 24 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
     <View style={styles.logoBacking}><LogoMenu size={38} align="right" /></View>
     </>
@@ -867,6 +1005,19 @@ const styles = StyleSheet.create({
   artPlaceholder: { alignItems: "center", justifyContent: "center" },
   rowTitle: { color: COLORS.text, fontSize: 15, fontWeight: "600" },
   rowSub: { color: COLORS.textDim, fontSize: 13, marginTop: 1 },
+  rowArtRound: { borderRadius: 24 },
+
+  // ===== Apple-Music-style library menu + drill-down browser =====
+  libRow: {
+    flexDirection: "row", alignItems: "center", gap: 14,
+    paddingHorizontal: 14, paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.08)",
+  },
+  libRowLabel: { flex: 1, color: COLORS.text, fontSize: 16, fontWeight: "600" },
+  libSheet: { maxHeight: SCREEN_H * 0.86 },
+  libScroll: { maxHeight: SCREEN_H * 0.72 },
+  libHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 },
+  libHeaderTitle: { flex: 1, color: COLORS.text, fontSize: 18, fontWeight: "800", letterSpacing: -0.3, textAlign: "center" },
 
   // ===== Apple Music connect hero =====
   heroWrap: {

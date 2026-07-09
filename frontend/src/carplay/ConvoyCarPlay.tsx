@@ -35,6 +35,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated } from 'react-native';
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
 import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
+import { MarqueeText } from '../components/MarqueeText';
 import { setCarState, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
@@ -422,7 +423,7 @@ export function CarSurface() {
             </View>
             <View style={styles.topTextCol}>
               <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
-              <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
+              <MarqueeText text={s.instruction || 'Continue'} style={styles.topInst} />
             </View>
           </View>
         </View>
@@ -949,7 +950,7 @@ const styles = StyleSheet.create({
   topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   maneuverBox: { width: 36, height: 36, borderRadius: 9, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
   maneuverArrow: { color: '#0B0B0C', fontSize: 24, fontWeight: '900', lineHeight: 28, marginTop: -1 },
-  topTextCol: { flexShrink: 1 },
+  topTextCol: { flex: 1, minWidth: 0 },
   topDist: { color: '#F4F4F4', fontSize: 17, fontWeight: '800' },
   topInst: { color: '#F4F4F4', fontSize: 12, fontWeight: '600', flexShrink: 1 },
   topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'transparent', borderRadius: 14, overflow: 'hidden' },

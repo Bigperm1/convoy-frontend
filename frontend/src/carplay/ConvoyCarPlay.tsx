@@ -474,7 +474,7 @@ export function CarSurface() {
         ) : null}
         <Animated.View style={[styles.speedPill, { backgroundColor: speedoBg, opacity: speedPulse }]}>
           <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
-          <Text style={styles.speedNum}>{spd.value}</Text>
+          <Text style={styles.speedNum} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{spd.value}</Text>
           <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
         </Animated.View>
       </View>
@@ -917,19 +917,20 @@ const styles = StyleSheet.create({
   meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },
   // Bottom-LEFT, tucked just right of the CarPlay side bar (~64pt). Smaller pill.
   speedDock: { position: 'absolute', left: 56, bottom: 10, alignItems: 'flex-start' },
-  speedPill: { width: 68, height: 50, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
+  // 58×48 — narrower (just fits "299") + the SAME height as the banner/weather/limit chips.
+  speedPill: { width: 58, height: 48, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
   speedNum: { color: '#F4F4F4', fontSize: 21, fontWeight: '800', letterSpacing: -0.5, lineHeight: 23 },
   speedUnit: { color: '#808080', fontSize: 9, fontWeight: '600', letterSpacing: 0.3, marginTop: 1 },
   // Posted speed-limit sign — white plate, black border. Tucked BEHIND the speedo (same
   // bottom baseline, left:0 within speedDock) and slid out to the right when moving.
-  speedLimitBadge: { position: 'absolute', left: 0, bottom: 0, width: 68, height: 50, borderRadius: 14, backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  speedLimitBadge: { position: 'absolute', left: 0, bottom: 0, width: 58, height: 48, borderRadius: 14, backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   speedLimitNum: { color: '#000', fontSize: 21, fontWeight: '800', letterSpacing: -0.5, lineHeight: 23 },
   speedLimitUnit: { color: '#333', fontSize: 9, fontWeight: '700', letterSpacing: 0.3, marginTop: 1 },
   // Compass — top-right, below the maneuver banner. Smaller, closer to the edge.
   compassDock: { position: 'absolute', right: 8, top: 58, width: 38, height: 38, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 19, overflow: 'hidden' },
   // Weather chip — BOTTOM-left, just above the speedo (left edge aligned, small gap),
   // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
-  weatherChip: { position: 'absolute', left: 56, bottom: 66, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7, paddingVertical: 3, backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
+  weatherChip: { position: 'absolute', left: 56, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
   weatherText: { color: '#F4F4F4', fontSize: 13, fontWeight: '800', marginTop: 1 },
   // --- live static-map mode ---
   preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },

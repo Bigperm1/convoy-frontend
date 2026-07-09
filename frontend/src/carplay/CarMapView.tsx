@@ -88,6 +88,10 @@ const CAR_ZOOM_MAX = 20;
 // Bumped 0.42 → 0.52 (CarPlay only, tilt unchanged): drops the car a bit lower on the wide
 // head-unit so more road/horizon reads ahead of it, matching the phone's forward view.
 const CAR_LOWER_PAD_FRAC = 0.52;
+// Shift the pinned car LEFT of center (fraction of map width, applied as camera
+// paddingRight → the car moves left by ~half this). Keeps it clear of the bottom-right
+// nav stack so they never collide. OTA-tunable.
+const CAR_LEFT_PAD_FRAC = 0.22;
 // Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';
@@ -109,6 +113,7 @@ export default function CarMapView({ onGLError }: Props) {
   const s = useCarStore();
   const powerMode = usePowerMode(); // premium (plugged) → 60fps; eco (unplugged) → 30fps
   const [mapH, setMapH] = useState(0);
+  const [mapW, setMapW] = useState(0);
 
   // Frame watchdog state. paintedRef flips on the first real rendered frame;
   // firedRef ensures onGLError fires at most once. The map can never get stuck
@@ -209,9 +214,15 @@ export default function CarMapView({ onGLError }: Props) {
     zoomLevel: Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, followZoom + userZoomRef.current)),
     pitch: followPitch,
     heading: camHdgRef.current,
-    // Bottom-middle: a large paddingTop pushes the pinned car DOWN the wide head-unit.
-    padding: { paddingTop: mapH > 0 ? Math.round(mapH * CAR_LOWER_PAD_FRAC) : 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 },
-  }), [followZoom, followPitch, mapH]);
+    // paddingTop drops the car DOWN the wide head-unit; paddingRight shifts it LEFT of
+    // center so the bottom-RIGHT nav stack (banner/ETA) never collides with the car.
+    padding: {
+      paddingTop: mapH > 0 ? Math.round(mapH * CAR_LOWER_PAD_FRAC) : 0,
+      paddingBottom: 0,
+      paddingLeft: 0,
+      paddingRight: mapW > 0 ? Math.round(mapW * CAR_LEFT_PAD_FRAC) : 0,
+    },
+  }), [followZoom, followPitch, mapH, mapW]);
 
   // COLD-START SNAP (fixes the "map opens on Europe" case). SelfCarModel's own
   // first-fix hard-snap is gated on paint AND fix; if those land in either order
@@ -374,6 +385,8 @@ export default function CarMapView({ onGLError }: Props) {
       onLayout={(e: any) => {
         const h = e?.nativeEvent?.layout?.height;
         if (typeof h === 'number' && h > 0 && Math.abs(h - mapH) > 1) setMapH(h);
+        const w = e?.nativeEvent?.layout?.width;
+        if (typeof w === 'number' && w > 0 && Math.abs(w - mapW) > 1) setMapW(w);
       }}
       // Real native iOS events (onDidFailLoadingMap is a no-op on iOS — do NOT use):
       // a rendered frame clears the watchdog; a style/tile load error demotes now.

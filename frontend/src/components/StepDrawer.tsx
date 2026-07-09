@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
   // Time remaining — big, system green. Distance + arrival sit beside it a notch
   // smaller. No custom fontFamily → renders in the OS system font.
   barTime: { color: "#30D158", fontSize: 24, fontWeight: "800", letterSpacing: -0.4 },
-  barMeta: { color: "#808080", fontSize: 16, fontWeight: "600" },
+  barMeta: { color: "#F4F4F4", fontSize: 16, fontWeight: "600" },
   barExit: {
     marginLeft: "auto",
     width: 60, height: 60, borderRadius: 30,
@@ -303,5 +303,5 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   text: { color: "#F4F4F4", fontSize: 14, fontWeight: "500", flexShrink: 1 },
-  dist: { color: "#808080", fontSize: 12, marginTop: 2 },
+  dist: { color: "#E5E5EA", fontSize: 12, marginTop: 2 },
 });

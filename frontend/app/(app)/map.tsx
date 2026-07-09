@@ -19,7 +19,7 @@ import { voiceBus, geocodeQuery } from "../../src/voiceBus";
 import { useCommunityRoutes, createCommunityRoute, CommunityRoute } from "../../src/communityRoutes";
 import TurnByTurnNav, { SpeedPill } from "../../src/components/TurnByTurnNav";
 import { MapNowPlaying } from "../../src/components/MapNowPlaying";
-import { ReportToast, MusicToast, HailToast } from "../../src/components/AlertToast";
+import { ReportToast, MusicToast, HailToast, InfoToast } from "../../src/components/AlertToast";
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
 import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/components/StepDrawer";
 import { hailBus } from "../../src/hailBus";
@@ -540,6 +540,14 @@ export default function MapScreen() {
   // via Music screen → "🎵 jeff: Smooth Operator — Sade". Auto-dismisses 5s.
   const [musicToast, setMusicToast] = useState<string | null>(null);
   const musicToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Generic info toast (e.g. tapping the still-learning AI route chip). Auto-dismisses.
+  const [infoToast, setInfoToast] = useState<string | null>(null);
+  const infoToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showInfoToast = (msg: string) => {
+    setInfoToast(msg);
+    if (infoToastTimer.current) clearTimeout(infoToastTimer.current);
+    infoToastTimer.current = setTimeout(() => setInfoToast(null), 4500);
+  };
   // Hail toast — surfaced when a peer pushes us via POST /api/notifications/hail.
   // Two delivery paths feed this:
   //   - OS push notification while app is foregrounded (via hailBus from _layout)
@@ -2975,7 +2983,6 @@ export default function MapScreen() {
         const durBig = durHrs >= 1 ? `${durHrs}h ${durMin % 60}m` : `${durMin}`;
         const arriveStr = fmtClock(new Date(Date.now() + durSec * 1000));
         const distStr = ar?.distance_text ?? route.distance_text;
-        const bestLabel = selectedRouteIndex === 0 ? "Best route" : (ar?.summary ? `via ${ar.summary}` : "Alternate");
         // ===== Route options (Best / Scenic / AI) — chip selector. =====
         // Best = fastest (index 0, user color). Scenic = the first alternate (auto-contrasting
         // color). AI = a learned habitual route tagged kind:"ai" (P3) — until then a disabled
@@ -2997,6 +3004,15 @@ export default function MapScreen() {
         // Convoy will learn this trip), hidden for one-off destinations.
         if (aiIdx >= 0) routeChips.push({ key: "ai", label: "AI", idx: aiIdx, color: userColor, sub: fmtChipDur(routes[aiIdx]) });
         else if (savedMatch) routeChips.push({ key: "ai", label: "AI", idx: -1, color: "#9AA0A6", sub: "Learning…", disabled: true });
+        // Green summary label — NAME the selected route by its kind ("Best route" /
+        // "Scenic route" / "AI route") so it mirrors the chip you picked, falling back to
+        // the via-street summary for any unnamed alternate.
+        const selChip = routeChips.find((c) => c.idx === selectedRouteIndex);
+        const bestLabel =
+          selChip?.key === "best" ? "Best route"
+          : selChip?.key === "scenic" ? "Scenic route"
+          : selChip?.key === "ai" ? "AI route"
+          : ar?.summary ? `via ${ar.summary}` : "Alternate";
         return (
           <View style={[styles.routeSheet, { bottom: TAB_BAR_H + navInset }]} onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>
             {/* Liquid Glass behind the drive sheet, clipped to the rounded top. */}
@@ -3048,9 +3064,17 @@ export default function MapScreen() {
                   <TouchableOpacity
                     key={c.key}
                     testID={`route-chip-${c.key}`}
-                    activeOpacity={c.disabled ? 1 : 0.85}
-                    disabled={c.disabled}
-                    onPress={() => { if (!c.disabled) { handleSelectRoute(c.idx); Haptics.selectionAsync().catch(() => {}); } }}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      Haptics.selectionAsync().catch(() => {});
+                      if (c.disabled) {
+                        // The AI route only appears once Convoy has learned your habitual
+                        // path to this saved place — explain that instead of a dead tap.
+                        showInfoToast("AI route learns your usual way here — drive it a few times and it'll appear automatically.");
+                      } else {
+                        handleSelectRoute(c.idx);
+                      }
+                    }}
                     style={[styles.routeOptChip, active && styles.routeOptChipActive, c.disabled && styles.routeOptChipDisabled]}
                   >
                     <View style={[
@@ -3580,6 +3604,9 @@ export default function MapScreen() {
       {/* Peer hail toast — bright red, pinned highest so it never gets buried
           under the music broadcast pill. Fed by `hailBus` (push + WS). */}
       <HailToast message={hailToast} />
+      {/* Info toast (e.g. the still-learning AI route chip). Floated ABOVE the open
+          drive drawer so it isn't hidden behind the sheet. */}
+      <InfoToast message={infoToast} bottom={TAB_BAR_H + navInset + previewBannerH + 12} />
 
       {/* ===== Step Drawer — slide-up turn list =====
           Appears the moment a user taps a route. The active route's maneuvers
@@ -3831,15 +3858,15 @@ const styles = StyleSheet.create({
   routeOptChipActive: { borderColor: "#2DEC86", backgroundColor: "rgba(45,236,134,0.12)" },
   routeOptChipDisabled: { opacity: 0.5 },
   routeOptChipSwatch: { width: 14, height: 14, borderRadius: 7 },
-  routeOptChipLabel: { color: "#C7C7CC", fontSize: 13, fontWeight: "700" },
+  routeOptChipLabel: { color: "#F4F4F4", fontSize: 13, fontWeight: "700" },
   routeOptChipLabelActive: { color: "#F4F4F4" },
-  routeOptChipSub: { color: "#808080", fontSize: 11, marginTop: 1, fontWeight: "600" },
+  routeOptChipSub: { color: "#E5E5EA", fontSize: 11, marginTop: 1, fontWeight: "600" },
   bannerSummary: { flexDirection: "row", alignItems: "flex-start", gap: 18, marginBottom: 16 },
   bannerDurCol: { alignItems: "center" },
   bannerDurNum: { color: "#F4F4F4", fontSize: 30, fontWeight: "700", letterSpacing: -0.5, lineHeight: 32 },
-  bannerDurUnit: { color: "#808080", fontSize: 13, marginTop: 2 },
+  bannerDurUnit: { color: "#E5E5EA", fontSize: 13, marginTop: 2 },
   bannerArriveRow: { flexDirection: "row", alignItems: "baseline", gap: 8 },
-  bannerArriveLabel: { color: "#808080", fontSize: 13 },
+  bannerArriveLabel: { color: "#E5E5EA", fontSize: 13 },
   bannerArriveTime: { color: "#F4F4F4", fontSize: 16, fontWeight: "600" },
   bannerDist: { color: "#F4F4F4", fontSize: 16, fontWeight: "600", marginTop: 3 },
   bannerBest: { color: "#30D158", fontSize: 14, fontWeight: "600", marginLeft: "auto" },

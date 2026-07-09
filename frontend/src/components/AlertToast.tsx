@@ -47,6 +47,18 @@ export function HailToast({ message }: { message: string | null }) {
   );
 }
 
+// InfoToast — generic dark explanatory pill (e.g. "AI route is still learning…").
+// Wraps over up to 3 lines and accepts a `bottom` so callers can float it ABOVE an
+// open sheet instead of behind it.
+export function InfoToast({ message, bottom = 160 }: { message: string | null; bottom?: number }) {
+  if (!message) return null;
+  return (
+    <View pointerEvents="none" style={[styles.toast, styles.infoToast, { bottom }]}>
+      <Text style={[styles.toastText, styles.infoToastText]} numberOfLines={3}>{message}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   toast: {
     position: "absolute",
@@ -59,4 +71,6 @@ const styles = StyleSheet.create({
     zIndex: 9999,
   },
   toastText: { color: "#F4F4F4", fontSize: 14, fontWeight: "600" },
+  infoToast: { maxWidth: 340 },
+  infoToastText: { textAlign: "center", fontWeight: "500", lineHeight: 19 },
 });

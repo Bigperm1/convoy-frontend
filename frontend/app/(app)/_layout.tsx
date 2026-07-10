@@ -17,6 +17,7 @@ import CommsTabButton from "../../src/components/CommsTabButton";
 import MapTabButton from "../../src/components/MapTabButton";
 import CommsTalkingToast from "../../src/components/CommsTalkingToast";
 import ShareToast from "../../src/ShareToast";
+import { GlobalListeningGlow } from "../../src/components/ListeningEdgeGlow";
 import { useLiveWalkieListener } from "../../src/livePtt";
 import { useSettings, hydrateCarFromProfile } from "../../src/settings";
 import { api } from "../../src/api";
@@ -340,6 +341,11 @@ export default function AppLayout() {
 
       {/* Global "a member shared a song / route / clip with you" toast. */}
       <ShareToast />
+
+      {/* Siri-style green screen-edge glow while Scout is listening (fed by
+          useVoice via the glow bus — covers Comms hold-to-talk AND the CarPlay
+          mic button). pointerEvents:none, so it never blocks a tap. */}
+      <GlobalListeningGlow />
     </View>
   );
 }

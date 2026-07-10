@@ -36,6 +36,7 @@ import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated } from
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
 import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
 import { MarqueeText } from '../components/MarqueeText';
+import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
 import { setCarState, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
@@ -490,6 +491,10 @@ export function CarSurface() {
           <Text style={styles.weatherText}>{s.weatherTemp}</Text>
         </View>
       ) : null}
+
+      {/* Siri-style green edge glow on the CAR screen while Scout listens —
+          same component as the phone, driven by the carStore mirror flag. */}
+      <ListeningEdgeGlow active={!!s.scoutListening} />
 
       {/* Scout mic feedback — TOP-CENTER pill. The native mic map button has no
           pressed/active state and the head unit has no haptics, so this is the

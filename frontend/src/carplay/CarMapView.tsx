@@ -89,9 +89,11 @@ const CAR_ZOOM_MAX = 20;
 // head-unit so more road/horizon reads ahead of it, matching the phone's forward view.
 const CAR_LOWER_PAD_FRAC = 0.52;
 // Shift the pinned car LEFT of center (fraction of map width, applied as camera
-// paddingRight → the car moves left by ~half this). Keeps it clear of the bottom-right
-// nav stack so they never collide. OTA-tunable.
-const CAR_LEFT_PAD_FRAC = 0.22;
+// paddingRight → the car moves left by ~half this). 0.22 sat it near the left
+// speed-limit chip; 0.08 centres it in the open gap BETWEEN the bottom-left HUD
+// (speed/limit) and the bottom-right nav banner — still biased just enough left
+// that it never collides with the banner. OTA-tunable.
+const CAR_LEFT_PAD_FRAC = 0.08;
 // Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';

@@ -81,7 +81,8 @@
       "channel": "mapbox-migration",
       "environment": "preview",
       "ios": {
-        "resourceClass": "m-medium"
+        "resourceClass": "m-medium",
+        "image": "latest"
       },
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://convoy-backend-j9q1.onrender.com",

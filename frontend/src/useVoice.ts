@@ -3,10 +3,12 @@ import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
 import * as SecureStore from "expo-secure-store";
 import { Alert, Platform, Vibration } from "react-native";
+import * as Location from "expo-location";
 import { api, formatErr } from "./api";
 import { voiceBus } from "./voiceBus";
 import { getPttRecordingOptions, type ProximityTier } from "./proximityAudio";
 import { setIdleAudioMode } from "./audioMode";
+import { announce } from "./nav";
 
 export type VoiceResult = { text: string; intent: string | null; query?: string };
 
@@ -105,6 +107,39 @@ export function useVoice(tier: ProximityTier = "far") {
         reader.onerror = reject;
         reader.readAsDataURL(blob);
       });
+      // ----- Agentic Scout first: /voice/agent lets Claude chain lookups
+      // (convoy status, hazards) and queue multiple actions, replying with
+      // spoken text. Falls back to the legacy /voice/transcribe classifier on
+      // ANY failure (including 404 from a backend that predates the agent), so
+      // the mic can never regress.
+      let lat: number | undefined, lng: number | undefined;
+      try {
+        // Last-known fix is instant and never prompts (permission was granted
+        // when the map started). Best-effort — tools degrade without it.
+        const p = await Location.getLastKnownPositionAsync();
+        if (p) { lat = p.coords.latitude; lng = p.coords.longitude; }
+      } catch {}
+      try {
+        const { data } = await api.post("/voice/agent", { audio_b64: b64, mime: "audio/m4a", lat, lng });
+        const actions: { intent: string | null; query?: string }[] = Array.isArray(data?.actions) ? data.actions : [];
+        if (data?.speech) announce(String(data.speech));
+        if (actions.length > 0) {
+          // Execute via the existing voiceBus handlers. When Scout already
+          // SPOKE a reply, emit with empty text so map.tsx's in-drive Q&A
+          // regexes can't double-answer the same utterance; when silent, let
+          // the first action carry the transcript for the VoiceController banner.
+          actions.forEach((a, i) =>
+            voiceBus.emit({ text: data?.speech ? "" : (i === 0 ? data?.text || "" : ""), intent: a.intent ?? null, query: a.query, ts: Date.now() }),
+          );
+        } else if (!data?.speech) {
+          // Nothing actionable and nothing spoken — legacy banner behavior.
+          voiceBus.emit({ text: data?.text || "", intent: null, ts: Date.now() });
+        }
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        return { text: data?.text || "", intent: actions[0]?.intent ?? null, query: actions[0]?.query };
+      } catch {
+        // fall through to the legacy classifier below
+      }
       const { data } = await api.post("/voice/transcribe", { audio_b64: b64, mime: "audio/m4a" });
       const result = data as VoiceResult;
       // Broadcast to any subscribed screens

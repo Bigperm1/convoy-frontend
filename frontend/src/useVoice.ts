@@ -54,7 +54,7 @@ export function useVoice(tier: ProximityTier = "far") {
       // Siri-style green edge glow while Scout listens (GlobalListeningGlow in
       // the (app) layout). Flipped here — not per-caller — so the Comms
       // hold-to-talk AND the CarPlay mic button both light the phone edges.
-      setListeningGlow(true);
+      setListeningGlow("listening");
       // Tactile confirmation that the mic is live. Lives in the hook so every
       // Gemini voice button (tab-bar mic + search-bar mic) gets it for free.
       // iOS gets the Taptic engine; Android's impactAsync is faint and often
@@ -68,7 +68,7 @@ export function useVoice(tier: ProximityTier = "far") {
       // recording never actually started — flip it back so a failed start can't
       // leave Bluetooth stuck on mono HFP / quiet earpiece routing.
       void setIdleAudioMode();
-      setListeningGlow(false);
+      setListeningGlow("off");
     }
   }, [recording, ensurePerm, tier]);
 
@@ -97,13 +97,15 @@ export function useVoice(tier: ProximityTier = "far") {
       // downstream transcription error can never leave the session stuck.
       void setIdleAudioMode();
       // Same guarantee for the edge glow — key-up always dissolves it.
-      setListeningGlow(false);
+      setListeningGlow("off");
     }
   }, []);
 
   const transcribe = useCallback(async (uri: string): Promise<VoiceResult | null> => {
     try {
       setBusy(true);
+      // Amber "thinking" edge glow while the clip uploads + the agent works.
+      setListeningGlow("thinking");
       const res = await fetch(uri);
       const blob = await res.blob();
       const b64: string = await new Promise((resolve, reject) => {
@@ -161,6 +163,8 @@ export function useVoice(tier: ProximityTier = "far") {
       return null;
     } finally {
       setBusy(false);
+      // Always dissolve the amber "thinking" glow, success or failure.
+      setListeningGlow("off");
     }
   }, []);
 

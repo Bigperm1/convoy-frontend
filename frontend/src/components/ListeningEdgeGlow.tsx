@@ -18,23 +18,27 @@ import { Animated, Easing, StyleSheet, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 
 const GREEN = "#2DEC86";
+const AMBER = "#FF9F0A";     // "Thinking…" — agent turn in flight
 const EDGE = 110;            // how far the glow bleeds in from each edge (px)
 const PULSE_MS = 1500;       // one breathe direction (in or out)
 
 // ---- glow bus (module-level, same Set pattern as voiceBus) ----
-type Listener = (on: boolean) => void;
+// Tri-state: 'listening' = green breathe (mic open), 'thinking' = amber breathe
+// (clip sent, agent working), 'off' = fade out.
+export type GlowState = "off" | "listening" | "thinking";
+type Listener = (s: GlowState) => void;
 const listeners = new Set<Listener>();
-let glowOn = false;
-export function setListeningGlow(on: boolean) {
-  glowOn = on;
-  listeners.forEach((fn) => { try { fn(on); } catch {} });
+let glowState: GlowState = "off";
+export function setListeningGlow(s: GlowState) {
+  glowState = s;
+  listeners.forEach((fn) => { try { fn(s); } catch {} });
 }
 export function subscribeListeningGlow(fn: Listener): () => void {
   listeners.add(fn);
   return () => { listeners.delete(fn); };
 }
 
-export function ListeningEdgeGlow({ active }: { active: boolean }) {
+export function ListeningEdgeGlow({ active, color = GREEN }: { active: boolean; color?: string }) {
   const vis = useRef(new Animated.Value(0)).current;    // master fade in/out
   const pulse = useRef(new Animated.Value(1)).current;  // breathing loop
   const [mounted, setMounted] = useState(active);       // unmount when fully faded
@@ -61,7 +65,7 @@ export function ListeningEdgeGlow({ active }: { active: boolean }) {
 
   if (!mounted) return null;
   const opacity = Animated.multiply(vis, pulse);
-  const c = [`${GREEN}8C`, `${GREEN}33`, `${GREEN}00`] as const; // 55% → 20% → 0
+  const c = [`${color}8C`, `${color}33`, `${color}00`] as const; // 55% → 20% → 0
   return (
     <Animated.View pointerEvents="none" style={[styles.fill, { opacity }]}>
       <LinearGradient colors={c} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={[styles.edge, { top: 0, left: 0, right: 0, height: EDGE }]} />
@@ -74,11 +78,11 @@ export function ListeningEdgeGlow({ active }: { active: boolean }) {
 
 /** Global phone overlay — mounted once in the (app) layout, driven by the bus. */
 export function GlobalListeningGlow() {
-  const [on, setOn] = useState(glowOn);
-  useEffect(() => subscribeListeningGlow(setOn), []);
+  const [state, setState] = useState<GlowState>(glowState);
+  useEffect(() => subscribeListeningGlow(setState), []);
   return (
     <View pointerEvents="none" style={styles.fill}>
-      <ListeningEdgeGlow active={on} />
+      <ListeningEdgeGlow active={state !== "off"} color={state === "thinking" ? AMBER : GREEN} />
     </View>
   );
 }

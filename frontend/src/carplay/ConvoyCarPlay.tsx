@@ -302,7 +302,9 @@ export function CarSurface() {
   // Slide the posted-limit SIGN just clear of the 68pt-wide speedo pill plus a SMALL
   // gap so the two tiles sit close together (68 pill + 8 gap = 76). Tightened from 100
   // — the sign was drifting too far to the right of the speedo.
-  const limitSlideX = limitSlide.interpolate({ inputRange: [0, 1], outputRange: [0, 76] });
+  // Slide-out distance = pill width (58) + 4px — the SAME 4px gap the weather
+  // chip keeps above the speedo, so the bottom-left cluster reads as one unit.
+  const limitSlideX = limitSlide.interpolate({ inputRange: [0, 1], outputRange: [0, 62] });
 
   const showMap = hasFix && !!mapUrl;
   // Live @rnmapbox MapView gate. Three conditions, all required:
@@ -492,9 +494,13 @@ export function CarSurface() {
         </View>
       ) : null}
 
-      {/* Siri-style green edge glow on the CAR screen while Scout listens —
-          same component as the phone, driven by the carStore mirror flag. */}
-      <ListeningEdgeGlow active={!!s.scoutListening} />
+      {/* Siri-style edge glow on the CAR screen — green while Scout listens,
+          amber while the agent turn is in flight. Same component as the phone,
+          driven by the carStore mirror flags. */}
+      <ListeningEdgeGlow
+        active={!!s.scoutListening || !!s.scoutThinking}
+        color={s.scoutListening ? '#2DEC86' : '#FF9F0A'}
+      />
 
       {/* Scout mic feedback — TOP-CENTER pill. The native mic map button has no
           pressed/active state and the head unit has no haptics, so this is the

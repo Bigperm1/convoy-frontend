@@ -491,6 +491,18 @@ export function CarSurface() {
         </View>
       ) : null}
 
+      {/* Scout mic feedback — TOP-CENTER pill. The native mic map button has no
+          pressed/active state and the head unit has no haptics, so this is the
+          only "she's listening" signal. Green dot while recording; dimmed
+          "Thinking…" while the agent turn is in flight. */}
+      {(s.scoutListening || s.scoutThinking) ? (
+        <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]} pointerEvents="none">
+          <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
+          <View style={[styles.scoutDot, { backgroundColor: s.scoutListening ? '#2DEC86' : '#8E8E93' }]} />
+          <Text style={styles.scoutPillText}>{s.scoutListening ? 'Listening…' : 'Thinking…'}</Text>
+        </View>
+      ) : null}
+
       {/* Compass — north-needle, RIGHT edge. The car map is heading-up, so rotate
           the needle by -heading to keep North pointing at true north. (Flip the
           sign here if it reads mirrored on the head unit.) */}
@@ -563,13 +575,17 @@ type CarPlayArgs = {
   // Tapped from the CarPlay native map button — one-tap "report police" at the
   // driver's current spot. Wired to the phone's reportAlert('police').
   onReportPolice?: () => void;
+  // Tapped from the CarPlay native mic map button — toggles the agentic Scout
+  // listener (tap to start, tap again to stop + send). Wired to map.tsx's
+  // useVoice instance; listening/thinking feedback renders via carStore flags.
+  onScoutMic?: () => void;
 };
 
 /**
  * Mount ONCE from map.tsx. Mirrors live route + turn-by-turn + nearby-convoy
  * state onto CarPlay (iOS, tabbed) / Android Auto (nav only). No-op on web.
  */
-export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, user, destination, peers, onEnd, weather, onReportPolice }: CarPlayArgs) {
+export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, user, destination, peers, onEnd, weather, onReportPolice, onScoutMic }: CarPlayArgs) {
   const [connected, setConnected] = useState(false);
 
   const mapTemplateRef = useRef<any>(null);
@@ -583,6 +599,8 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
   onEndRef.current = onEnd;
   const onReportPoliceRef = useRef(onReportPolice);
   onReportPoliceRef.current = onReportPolice;
+  const onScoutMicRef = useRef(onScoutMic);
+  onScoutMicRef.current = onScoutMic;
 
   // ---- claim CarPlay-root ownership while this (phone map) screen is mounted ----
   // Tells the app-root bootstrap (carPlayBootstrap.ts) to stand down so it won't
@@ -709,9 +727,14 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // reports police at the driver's current spot via the phone's reportAlert.
             mapButtons: [
               { id: 'police', image: require('../../assets/images/police.png') },
+              // Agentic Scout mic — tap to start listening, tap again to stop +
+              // send. Feedback ("Listening…"/"Thinking…") renders on the car
+              // surface via carStore since map buttons have no pressed state.
+              { id: 'scout', image: require('../../assets/images/scout-mic.png') },
             ],
             onMapButtonPressed: (e: { id: string }) => {
               if (e?.id === 'police') onReportPoliceRef.current?.();
+              if (e?.id === 'scout') onScoutMicRef.current?.();
             },
             // iOS-26 raw pinch/zoom on the CarPlay map (react-native-carplay patch +
             // CPMapTemplate.h gesture delegate). Forwarded to CarMapView via the
@@ -932,6 +955,9 @@ const styles = StyleSheet.create({
   // Weather chip — BOTTOM-left, just above the speedo (left edge aligned, small gap),
   // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
   weatherChip: { position: 'absolute', left: 56, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
+  scoutPill: { position: 'absolute', top: 10, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
+  scoutDot: { width: 10, height: 10, borderRadius: 5 },
+  scoutPillText: { color: '#F4F4F4', fontSize: 14, fontWeight: '700' },
   weatherText: { color: '#F4F4F4', fontSize: 13, fontWeight: '800', marginTop: 1 },
   // --- live static-map mode ---
   preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },

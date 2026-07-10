@@ -37,6 +37,8 @@ import {
 } from "../../src/nav";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
+import { setCarState } from "../../src/carplay/carStore";
+import { useVoice } from "../../src/useVoice";
 import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
 import { useSpeedCameras } from "../../src/speedCameras";
@@ -1500,7 +1502,30 @@ export default function MapScreen() {
   // Mirrors the active route + live turn-by-turn state onto the car display.
   // Consumes the SAME tbt/route the phone UI uses — no second engine, no double
   // voice. Safe no-op on web and on any build without the CarPlay native module.
-  const { connected: carConnected } = useConvoyCarPlay({ route: activeRoute, routes, selectedRouteIndex, tbt, user: coords, destination, peers, onEnd: endNav, weather, onReportPolice: () => reportAlert('police') });
+  // ----- Agentic Scout on CarPlay: mic map-button → tap-to-talk toggle -----
+  // Uses the same useVoice pipeline as the phone's hold-to-talk (agent endpoint
+  // + legacy fallback). Tap starts listening, second tap stops + sends. The
+  // recording/busy state mirrors into carStore so the car surface can show the
+  // "Listening…/Thinking…" pill (a native map button has no pressed state).
+  const scoutVoice = useVoice();
+  const scoutVoiceRef = useRef(scoutVoice);
+  scoutVoiceRef.current = scoutVoice;
+  const toggleScoutMic = useCallback(async () => {
+    const v = scoutVoiceRef.current;
+    try {
+      if (v.recording) {
+        const uri = await v.stop();
+        if (uri) await v.transcribe(uri);
+      } else if (!v.busy) {
+        await v.start();
+      }
+    } catch {}
+  }, []);
+  useEffect(() => {
+    setCarState({ scoutListening: scoutVoice.recording, scoutThinking: !scoutVoice.recording && scoutVoice.busy });
+  }, [scoutVoice.recording, scoutVoice.busy]);
+
+  const { connected: carConnected } = useConvoyCarPlay({ route: activeRoute, routes, selectedRouteIndex, tbt, user: coords, destination, peers, onEnd: endNav, weather, onReportPolice: () => reportAlert('police'), onScoutMic: toggleScoutMic });
   // Delete a hazard (by id) — used by the long-press / right-click flow on
   // markers. Optimistically removes from local state on success so the pin
   // disappears immediately. Backend already authorizes (only the original

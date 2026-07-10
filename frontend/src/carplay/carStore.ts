@@ -55,6 +55,11 @@ export type CarState = {
   // WeatherKind string the car maps to a glyph. undefined → no weather chip.
   weatherTemp?: string;
   weatherKind?: string;
+  // Agentic Scout mic state (mirror of the phone's useVoice instance, fed by
+  // map.tsx). Drives the "Listening… / Thinking…" pill on the car surface so a
+  // native map-button tap gets visible feedback — the head unit has no haptics.
+  scoutListening?: boolean;
+  scoutThinking?: boolean;
   // User-chosen route-line color (base hex, mirror of settings.routeColor). Lets the
   // CarPlay live route match the phone. undefined → CarMapView falls back to green.
   routeColor?: string;

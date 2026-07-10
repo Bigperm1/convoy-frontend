@@ -8,11 +8,11 @@
     "scheme": "convoy",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "runtimeVersion": "1.14.0",
+    "runtimeVersion": "1.15.0",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
-      "buildNumber": "62",
+      "buildNumber": "63",
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSAppleMusicUsageDescription": "Play and control Apple Music right inside Convoy",
@@ -32,7 +32,7 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 62,
+      "versionCode": 63,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -93,12 +93,30 @@
           "ios": {
             "deploymentTarget": "16.0",
             "extraPods": [
-              { "name": "AppAuth", "modular_headers": true },
-              { "name": "GTMAppAuth", "modular_headers": true },
-              { "name": "GTMSessionFetcher", "modular_headers": true },
-              { "name": "GoogleUtilities", "modular_headers": true },
-              { "name": "RecaptchaInterop", "modular_headers": true },
-              { "name": "AppCheckCore", "modular_headers": true }
+              {
+                "name": "AppAuth",
+                "modular_headers": true
+              },
+              {
+                "name": "GTMAppAuth",
+                "modular_headers": true
+              },
+              {
+                "name": "GTMSessionFetcher",
+                "modular_headers": true
+              },
+              {
+                "name": "GoogleUtilities",
+                "modular_headers": true
+              },
+              {
+                "name": "RecaptchaInterop",
+                "modular_headers": true
+              },
+              {
+                "name": "AppCheckCore",
+                "modular_headers": true
+              }
             ]
           },
           "android": {
@@ -110,7 +128,8 @@
         }
       ],
       "./plugins/withConvoyAndroidAuto.js",
-      "./plugins/withConvoyCarPlay.js"
+      "./plugins/withConvoyCarPlay.js",
+      "./plugins/withScoutSiri.js"
     ],
     "experiments": {
       "typedRoutes": true
@@ -123,7 +142,9 @@
     },
     "owner": "sw0rdfisch",
     "updates": {
-      "url": "https://u.expo.dev/1e72b32e-e0c5-4126-b590-ea2ec6e596e1"
+      "url": "https://u.expo.dev/1e72b32e-e0c5-4126-b590-ea2ec6e596e1",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 15000
     },
     "splash": {
       "image": "./assets/splash.png",

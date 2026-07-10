@@ -37,7 +37,7 @@ import {
 } from "../../src/nav";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
-import { setCarState } from "../../src/carplay/carStore";
+import { setCarState, subscribeCarGesture } from "../../src/carplay/carStore";
 import { useVoice } from "../../src/useVoice";
 import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
@@ -1524,6 +1524,9 @@ export default function MapScreen() {
   useEffect(() => {
     setCarState({ scoutListening: scoutVoice.recording, scoutThinking: !scoutVoice.recording && scoutVoice.busy });
   }, [scoutVoice.recording, scoutVoice.busy]);
+  // Tap on the RN-surface Scout mic button (in the CarPlay car window) rides the
+  // carStore gesture bus back to here — same JS context — and toggles the mic.
+  useEffect(() => subscribeCarGesture((g) => { if (g.kind === "scoutMic") void toggleScoutMic(); }), [toggleScoutMic]);
 
   const { connected: carConnected } = useConvoyCarPlay({ route: activeRoute, routes, selectedRouteIndex, tbt, user: coords, destination, peers, onEnd: endNav, weather, onReportPolice: () => reportAlert('police'), onScoutMic: toggleScoutMic });
   // Delete a hazard (by id) — used by the long-press / right-click flow on

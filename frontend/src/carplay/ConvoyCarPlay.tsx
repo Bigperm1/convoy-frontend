@@ -32,7 +32,7 @@
 // (forced natively in withConvoyCarPlay.js).
 
 import React, { useEffect, useRef, useState } from 'react';
-import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated } from 'react-native';
+import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated, TouchableOpacity } from 'react-native';
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
 import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
 import { MarqueeText } from '../components/MarqueeText';
@@ -501,6 +501,25 @@ export function CarSurface() {
         active={!!s.scoutListening || !!s.scoutThinking}
         color={s.scoutListening ? '#2DEC86' : '#FF9F0A'}
       />
+
+      {/* Scout mic — RN-SURFACE button (EXPERIMENT). The native map buttons are
+          covered by this surface, so this tests whether the surface receives
+          CarPlay taps. Renders for sure (like the HUD chips). Tap emits a
+          carStore action that map.tsx (same JS context) turns into tap-to-talk.
+          Green while listening, amber while thinking, white idle. */}
+      <TouchableOpacity
+        style={styles.scoutMicBtn}
+        activeOpacity={0.7}
+        onPress={() => emitCarGesture({ kind: 'scoutMic' })}
+        testID="car-scout-mic"
+      >
+        <GlassFill tintColor={undefined} style={{ borderRadius: 26, overflow: 'hidden' }} />
+        <Image
+          source={require('../../assets/images/scout-mic.png')}
+          style={{ width: 28, height: 28, tintColor: s.scoutListening ? '#2DEC86' : (s.scoutThinking ? '#FF9F0A' : '#F4F4F4') }}
+          resizeMode="contain"
+        />
+      </TouchableOpacity>
 
       {/* Scout mic feedback — TOP-CENTER pill. The native mic map button has no
           pressed/active state and the head unit has no haptics, so this is the
@@ -974,6 +993,7 @@ const styles = StyleSheet.create({
   // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
   weatherChip: { position: 'absolute', left: 56, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
   scoutPill: { position: 'absolute', top: 10, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
+  scoutMicBtn: { position: 'absolute', left: 56, top: 10, width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(18,18,22,0.5)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   scoutDot: { width: 10, height: 10, borderRadius: 5 },
   scoutPillText: { color: '#F4F4F4', fontSize: 14, fontWeight: '700' },
   weatherText: { color: '#F4F4F4', fontSize: 13, fontWeight: '800', marginTop: 1 },

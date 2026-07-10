@@ -141,7 +141,11 @@ export type CarGesture =
   | { kind: 'zoomBegin' }
   | { kind: 'zoom'; scale: number; velocity: number }
   | { kind: 'zoomEnd'; velocity: number }
-  | { kind: 'recenter' };
+  | { kind: 'recenter' }
+  // RN-surface Scout mic tap → map.tsx (same JS context) toggles the voice agent.
+  // EXPERIMENT: native map buttons are covered by our RN car surface, so this
+  // tests whether the surface ITSELF receives CarPlay taps.
+  | { kind: 'scoutMic' };
 
 const gestureListeners = new Set<(g: CarGesture) => void>();
 

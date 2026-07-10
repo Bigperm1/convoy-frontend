@@ -732,6 +732,13 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             tabSystemImageName: 'map',
             guidanceBackgroundColor: '#0B0B0C',
             tripEstimateStyle: 'dark',
+            // KEEP the map buttons (police + Scout mic) on screen. CPMapTemplate's
+            // defaults auto-hide the navigation bar after a few idle seconds and
+            // hide the map buttons WITH it — which is why the police button was
+            // "never seen" on the head unit: it only existed for the first moments
+            // after the template appeared. Pin both so the buttons are always there.
+            automaticallyHidesNavigationBar: false,
+            hidesButtonsWithNavigationBar: false,
             onDidCancelNavigation: () => onEndRef.current?.(),
             // Native CarPlay map button (the ONLY reliably-touchable element on the
             // head unit — custom RN overlays don't receive CarPlay touches). One tap

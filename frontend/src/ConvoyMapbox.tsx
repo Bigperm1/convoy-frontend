@@ -248,12 +248,16 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 // The user can choose a 3D green arrow instead of their car (Garage → Map Appearance).
 // Hosted on the Hairpin marketing CDN so it loads OTA, exactly like the car GLBs
 // (ModelLayer + a remote model URL — no native change). The arrow GLB is modelled
-// pointing +Y (north/forward), so it needs NO heading offset. Scale is a first-pass
-// guess (the arrow mesh is ~23× a car-GLB unit) — tune on-device.
+// pointing +Y (north/forward), so it needs NO heading offset. Sized from MEASURED
+// mesh extents: the arrow GLB's max extent is ~1.70 units vs the car GLB's ~1.91 —
+// i.e. about the SAME size, NOT 23× as first guessed (that made it a microscopic
+// speck). So it reuses the car's zoom curve at ~car scale, not 1/23 of it.
 export const GREEN_ARROW_MODEL_URL = "https://hairpin-site.pages.dev/green-arrow.glb";
 export const ARROW_MODEL_ID = "convoyArrow";
 export const ARROW_MODEL_HEADING_OFFSET = 0; // GLB already points forward; flip to 180 if it points backwards.
-export const ARROW_MODEL_SCALE: any = carModelScale(0.045); // ~1/23 of the car curve. Tune on-device.
+// 1.12 ≈ the car's on-screen footprint (car 1.91 / arrow 1.70); 1.4 renders it ~25%
+// bigger so the "you-are-here" chevron reads prominently. OTA-tunable.
+export const ARROW_MODEL_SCALE: any = carModelScale(1.4);
 // Self-illumination for the 3D car per light preset. Dawn + night are dim, so
 // the tinted paint renders near-black with only scene light — lift those so the
 // color shows. Bright presets (day/dusk/satellite) already light it, so keep 0

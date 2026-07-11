@@ -305,19 +305,19 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0B0B0C' },
   container: { flex: 1 },
-  scrollContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 28 },
+  scrollContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 14 },
   // Brand stack: green "Convoy" wordmark, the C-mark app icon, then the tagline —
   // real text around the logo so it stays crisp and on-brand (#2DEC86 on #0B0B0C).
-  brandSection: { alignItems: 'center', marginBottom: 30 },
+  brandSection: { alignItems: 'center', marginBottom: 16 },
   // Transparent Hairpin wordmark (black keyed out); cover-crops the top/bottom bands.
-  wordmarkImg: { width: 300, height: 128, marginBottom: 6 },
+  wordmarkImg: { width: 300, height: 104, marginBottom: 2 },
   wordmark: { color: '#2DEC86', fontSize: 42, fontWeight: '800', fontStyle: 'italic', letterSpacing: 1, marginBottom: 18, textShadowColor: 'rgba(45,236,134,0.45)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 14 },
   logoMark: { width: 140, height: 140, borderRadius: 32 },
-  tagline: { color: '#2DEC86', fontSize: 16, fontWeight: '600', fontStyle: 'italic', letterSpacing: 0.5, opacity: 0.92, marginTop: 16 },
-  formCard: { backgroundColor: 'transparent', overflow: 'hidden', borderRadius: 18, padding: 20, gap: 18, borderWidth: 1, borderColor: '#26262B' },
+  tagline: { color: '#2DEC86', fontSize: 15, fontWeight: '600', fontStyle: 'italic', letterSpacing: 0.5, opacity: 0.92, marginTop: 8 },
+  formCard: { backgroundColor: 'transparent', overflow: 'hidden', borderRadius: 18, padding: 16, gap: 12, borderWidth: 1, borderColor: '#26262B' },
   inputGroup: { gap: 8 },
   label: { color: '#9A9A9A', fontSize: 13, fontWeight: '500' },
-  input: { backgroundColor: 'rgba(6,8,12,0.4)', borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
+  input: { backgroundColor: 'rgba(6,8,12,0.4)', borderRadius: 12, paddingVertical: 11, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
   inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(6,8,12,0.4)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', paddingRight: 8 },
   inputFlex: { flex: 1, paddingVertical: 13, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16 },
   eyeBtn: { padding: 8 },
@@ -335,15 +335,15 @@ const styles = StyleSheet.create({
   linkHighlight: { color: '#2DEC86', fontWeight: '600' },
   forgotLink: { color: '#2DEC86', fontSize: 13, fontWeight: '500', paddingVertical: 6 },
   versionText: { color: '#6A6A6A', fontSize: 12, textAlign: 'center', paddingVertical: 10 },
-  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 18, marginBottom: 6 },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12, marginBottom: 4 },
   dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.18)' },
   dividerText: { color: '#9A9A9A', fontSize: 12, fontWeight: '500' },
-  appleBtn: { height: 50, width: '100%', marginTop: 12 },
+  appleBtn: { height: 46, width: '100%', marginTop: 10 },
   // Google: dark frosted-glass button to match the Apple BLACK button + the glass
   // form card — the two social buttons now read as one cohesive dark set under the
   // green primary "Sign in", instead of two stark white slabs.
-  googleBtn: { height: 50, marginTop: 12, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', backgroundColor: 'rgba(20,20,24,0.55)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  googleBtn: { height: 46, marginTop: 10, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', backgroundColor: 'rgba(20,20,24,0.55)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   googleBtnText: { color: '#F4F4F4', fontSize: 16, fontWeight: '600' },
-  termsText: { color: '#7A7A7A', fontSize: 12, lineHeight: 17, textAlign: 'center', marginTop: 18, paddingHorizontal: 8 },
+  termsText: { color: '#7A7A7A', fontSize: 12, lineHeight: 17, textAlign: 'center', marginTop: 12, paddingHorizontal: 8 },
   termsLink: { color: '#2DEC86', fontWeight: '600' },
 });

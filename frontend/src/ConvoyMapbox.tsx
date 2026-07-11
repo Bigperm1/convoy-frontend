@@ -255,25 +255,23 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 // green pyramid + white base rim) verified in a GLB viewer: proper Waze-style
 // chevron, vivid brand green. KEY FIX vs v1/v2: #2DEC86 baked as sRGB→LINEAR
 // ([0.026,0.839,0.238]) — raw sRGB rendered washed-out pale (the "wrong green").
-// Modelled pointing +Y; max extent ≈1.86 (car ≈1.91), so it reuses the car's curve.
-// v5: the ACTUAL Waze arrow (tester feedback on v4: "looks nothing like the Waze
-// 3D image"). A plump ROUNDED extruded cursor — blunt rounded tip, rounded wings,
-// soft notch, squat proportions, real thickness — over a white rounded outline
-// slab. Baked diagonal gradient top (sheen #7DF7B2 → brand #2DEC86 → deep
-// #1CC96F) + darker walls (#0FA35A) carry the 3D read under the fully-self-lit
-// render. Viewer-verified against the Waze reference screenshot before shipping.
-// v8 — tilt direction fixed by ON-DEVICE ground truth: v6 (-18°) showed the
-// green top correctly; v7 (+55°) flipped the green AWAY from the camera (white
-// underside dominated — IMG_6394). So NEGATIVE rotation is the camera-facing
-// direction, proven, and v8 is simply v6's direction made steep enough to see:
-// -42° — tail raised toward the viewer, tip low pointing into the screen
-// (forward along the route), green face leaning back at the chase camera.
-// White body flush + green inset construction unchanged.
-export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v8.glb");
-export const ARROW_MODEL_ID = "convoyArrow9"; // bundled-asset registration — fresh id per geometry change.
-export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forward). The car needs +90 (it exports sideways); a +Y arrow needs 0, and v1 tracked heading fine at 0.
-// v6 max extent ≈1.34 (the tilt + inset shrink the footprint vs v5's ≈1.57) —
-// 1.9 keeps the same on-screen presence v5 had at 1.6. OTA-tunable.
+// v9 — the tilt is FINALLY correct because it was VERIFIED IN THE iOS SIMULATOR
+// against the real @rnmapbox renderer (not a desktop GLB viewer that mispredicts
+// orientation, and not baked into the mesh which composed unpredictably with
+// Mapbox's own transform). The model is now FLAT (green-arrow-v9.glb = the v6
+// flush-white-body + green-inset construction, no baked tilt), and the standing
+// lean is applied at render time via Mapbox's modelRotation X = ARROW_MODEL_PITCH.
+// Ground truth from the sim: POSITIVE modelRotation-X stands the arrow UP to face
+// the chase camera (tip forward) — the Waze stance. +52° faces the camera cleanly
+// across the whole nav pitch band (city 48° → highway 60°); verified at both.
+export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v9.glb");
+export const ARROW_MODEL_ID = "convoyArrow10"; // bundled-asset registration — fresh id per geometry change.
+export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forward). The car needs +90 (it exports sideways); a +Y arrow needs 0.
+// Stand-up lean, applied via modelRotation X (NOT baked into the mesh). +52° ≈ the
+// mid nav pitch, so the flat arrow rotates to face the chase camera like Waze.
+// Sim-verified at pitch 48 and 58. OTA-tunable.
+export const ARROW_MODEL_PITCH = 52;
+// v9 max extent ≈1.34 — 1.9 keeps the on-screen presence tuned for v6/v8. OTA-tunable.
 export const ARROW_MODEL_SCALE: any = carModelScale(1.9);
 // Self-illumination for the 3D car per light preset. ALL modes now render the
 // car fully self-lit (1.0) — the same dusk/dark-tint bypass the arrow uses — so
@@ -604,8 +602,11 @@ type PlacePoint = { id: string; lat: number; lng: number; label: string; price?:
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0 }: {
   lat: number; lng: number; heading: number; emissive: number;
+  // modelRotation X (deg): stand a flat marker UP toward the chase camera. 0 for the
+  // car (sits flat on its wheels); the green arrow passes ARROW_MODEL_PITCH (~52).
+  pitchTilt?: number;
   // Mapbox model id this layer renders. Color-specific (e.g. "convoyCar_grc_heavy_metal")
   // so a car-color change swaps the 3D model live. Default keeps the legacy fixed id.
   modelId?: string;
@@ -866,7 +867,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           modelTranslation: [0, 0, 10],
           modelEmissiveStrength: emissive,
           modelScale: scale ?? CAR_MODEL_SCALE_SIZED,
-          modelRotation: [0, 0, (r.heading ?? 0) + headingOffset],
+          modelRotation: [pitchTilt, 0, (r.heading ?? 0) + headingOffset],
           modelCastShadows: false,
           modelReceiveShadows: false,
         }}
@@ -1817,6 +1818,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             modelId={selfModelId}
             scale={selfIsArrow ? ARROW_MODEL_SCALE : undefined}
             headingOffset={selfIsArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
+            pitchTilt={selfIsArrow ? ARROW_MODEL_PITCH : 0}
             cameraRef={cameraRef}
             getCam={getCam}
             readyRef={lockReadyRef}

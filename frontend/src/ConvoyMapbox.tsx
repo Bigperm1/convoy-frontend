@@ -31,9 +31,9 @@
 // the OPPOSITE of react-native-maps' { latitude, longitude }. Every coordinate
 // handed to Mapbox below is [lng, lat].
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import { View, Text, Image, StyleSheet, Pressable, Platform, AppState, Alert } from "react-native";
-import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
+import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getPowerMode } from "./powerMode";
@@ -949,6 +949,7 @@ const INCIDENT_ICON: Record<RoadEventKind, string> = {
   weather: "rainy",
   event: "flag",
 };
+const INCIDENT_KINDS: RoadEventKind[] = ["incident", "construction", "road", "weather", "event"];
 function incidentColor(sev: RoadEventSeverity): string {
   if (sev === "MAJOR") return "#FF453A";     // red
   if (sev === "MODERATE") return "#FF9F0A";   // amber
@@ -1014,6 +1015,113 @@ function DestWeatherMarker({ lat, lng, weather }: { lat: number; lng: number; we
   );
 }
 
+// ===== GLPinLayers — hazards / cameras / incidents / places as GL layers =====
+// The self-position marker is a 3D GL ModelLayer (slot="top"). MarkerView pins are RN
+// view annotations that Mapbox ALWAYS composites ABOVE every GL layer, so a MarkerView
+// pin sitting on the puck would cover the 3D arrow/car. To keep the self marker on top
+// of EVERYTHING (user request — applies to both the arrow and the car), we render these
+// pins as GL layers in slot="middle" (below the model) instead of MarkerViews.
+//   • hazards / cameras → their existing PNGs (registered as symbol images)
+//   • incidents → a severity-colored CircleLayer (always visible) + the exact ionicon
+//                 glyph snapshotted into a symbol image, so it matches the phone badge
+//   • places → a green CircleLayer + a number text label
+// Taps route through ShapeSource.onPress to the SAME handlers the MarkerViews used. The
+// hazard "dispute / it's gone" action lives INSIDE the tap sheet (HazardDrawer), so
+// routing tap→sheet loses no capability (long-press was only a shortcut to it).
+// NOTE: the MarkerView marker components above stay exported — the CarPlay surface
+// (CarMapView) still renders them as MarkerViews on its glanceable map.
+type PinFC = { type: "FeatureCollection"; features: any[] };
+const fcPoint = (id: string, lng: number, lat: number, props: any): any => ({
+  type: "Feature", id, geometry: { type: "Point", coordinates: [lng, lat] }, properties: { id, ...props },
+});
+const hazardImgName = (kind: string) => (HAZARD_ICONS[kind] ? `hz_${kind}` : "hz_default");
+// PNG symbol images shared by every hazard/camera feature (registered once).
+const PIN_IMAGE_MAP: Record<string, any> = {
+  hz_police: HAZARD_ICONS.police,
+  hz_default: HAZARD_ICON_DEFAULT,
+  cam: CAMERA_ICON,
+};
+
+function GLPinLayers({
+  hazards, cameras, incidents, places, onHazardPress, onPlacePress,
+}: {
+  hazards: Hazard[];
+  cameras: { id: string; lat: number; lng: number }[];
+  incidents: RoadEvent[];
+  places: PlacePoint[];
+  onHazardPress?: (h: Hazard) => void;
+  onPlacePress?: (p: PlacePoint) => void;
+}) {
+  const hazardFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: hazards.map((h) => fcPoint(h.id, h.lng, h.lat, { icon: hazardImgName(h.kind) })) }), [hazards]);
+  const cameraFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: cameras.map((c) => fcPoint(c.id, c.lng, c.lat, {})) }), [cameras]);
+  const incidentFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: incidents.map((e) => fcPoint(e.id, e.lng, e.lat, { color: incidentColor(e.severity), glyph: `incg_${e.kind}`, kind: e.kind, road: e.road || "", headline: e.headline })) }), [incidents]);
+  const placeFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: places.map((p, i) => fcPoint(p.id, p.lng, p.lat, { num: String(i + 1) })) }), [places]);
+
+  const tapHazard = useCallback((e: any) => { const id = e?.features?.[0]?.properties?.id; const h = hazards.find((x) => x.id === id); if (h) onHazardPress?.(h); }, [hazards, onHazardPress]);
+  const tapPlace = useCallback((e: any) => { const id = e?.features?.[0]?.properties?.id; const p = places.find((x) => x.id === id); if (p) onPlacePress?.(p); }, [places, onPlacePress]);
+  const tapIncident = useCallback((e: any) => {
+    const pr = e?.features?.[0]?.properties; if (!pr) return;
+    const title = `${INCIDENT_TITLE[pr.kind as RoadEventKind] || "Road event"}${pr.road ? ` · ${pr.road}` : ""}`;
+    Alert.alert(title, pr.headline || "", [{ text: "OK" }]);
+  }, []);
+
+  return (
+    <>
+      {/* Symbol-image registry: hazard/camera PNGs + one snapshotted ionicon glyph per
+          incident kind (the RN badge glyph, rendered once into a native image). */}
+      <Images images={PIN_IMAGE_MAP}>
+        {INCIDENT_KINDS.map((k) => (
+          <MBXImage key={`incg_${k}`} name={`incg_${k}`}>
+            <View style={styles.incidentGlyphSnap}>
+              <Ionicons name={(INCIDENT_ICON[k] || "warning") as any} size={16} color="#0B0B0C" />
+            </View>
+          </MBXImage>
+        ))}
+      </Images>
+
+      {/* All pins are slot="top" so they draw ABOVE the selected-route ribbon (also
+          slot="top", but mounted BEFORE this block) — the old MarkerViews composited
+          over the route, so this preserves that. The self 3D model (SelfCarModel) is
+          slot="top" too but mounted AFTER this block, so it still draws over the pins
+          (later-in-slot = on top; 2D symbol/circle pins don't share the model's depth
+          quirk). Mount order within this block = pin-vs-pin stacking (last = on top):
+          hazards → cameras → incidents → places (numbered pins on top), matching the old
+          MarkerView order. iconSize is per-asset: hazard/police PNGs are 512px (→0.078 for
+          ~40pt), the speed_camera PNG is 44px (→0.64 for ~28pt). */}
+
+      {/* Community hazard / police pins — tap → detail sheet (which carries the dispute action). */}
+      {hazards.length > 0 && (
+        <ShapeSource id="gl-hazards" shape={hazardFC} onPress={tapHazard}>
+          <SymbolLayer id="gl-hazards-sym" slot="top" style={{ iconImage: ["get", "icon"] as any, iconSize: 0.078, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+        </ShapeSource>
+      )}
+
+      {/* Speed cameras — pins only (no tap). */}
+      {cameras.length > 0 && (
+        <ShapeSource id="gl-cameras" shape={cameraFC}>
+          <SymbolLayer id="gl-cameras-sym" slot="top" style={{ iconImage: "cam", iconSize: 0.64, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+        </ShapeSource>
+      )}
+
+      {/* DriveBC incidents — severity circle base (always visible) + kind glyph. */}
+      {incidents.length > 0 && (
+        <ShapeSource id="gl-incidents" shape={incidentFC} onPress={tapIncident}>
+          <CircleLayer id="gl-incidents-bg" slot="top" style={{ circleColor: ["get", "color"] as any, circleRadius: 15, circleStrokeColor: "rgba(11,11,12,0.85)", circleStrokeWidth: 2 }} />
+          <SymbolLayer id="gl-incidents-glyph" slot="top" style={{ iconImage: ["get", "glyph"] as any, iconSize: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+        </ShapeSource>
+      )}
+
+      {/* Category place pins — numbered green pin. */}
+      {places.length > 0 && (
+        <ShapeSource id="gl-places" shape={placeFC} onPress={tapPlace}>
+          <CircleLayer id="gl-places-bg" slot="top" style={{ circleColor: "#2DEC86", circleRadius: 15, circleStrokeColor: "#8E8E93", circleStrokeWidth: 1 }} />
+          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: 14, textColor: "#0A0A0A", textAllowOverlap: true, textIgnorePlacement: true }} />
+        </ShapeSource>
+      )}
+    </>
+  );
+}
+
 function ConvoyMapbox(props: ConvoyMapboxProps) {
   const {
     center, user, peers, hideSelfMarker, selfMarkerType = "car", mapView = "heading_up",
@@ -1023,7 +1131,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     distanceToManeuverM, onMapPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
     hazards, speedCameras, roadEvents, places, showPlacePins = true, destWeather,
-    onHazardPress, onHazardLongPress, onPlacePress, onHeading, resetNorthSignal,
+    onHazardPress, onPlacePress, onHeading, resetNorthSignal,
     zoomOffset = 0,
   } = props;
 
@@ -1515,7 +1623,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     ? routeProj!.bearing
     : (camHeadingRef.current != null ? camHeadingRef.current : (selfCar?.heading ?? 0));
 
-  const visibleHazards = (hazards || []).filter((h) => h && typeof h.lat === "number" && typeof h.lng === "number");
+  // Memoized so the downstream GL FeatureCollection memo can actually cache (a bare
+  // .filter() returns a fresh array every render). Number.isFinite also drops NaN coords.
+  const visibleHazards = useMemo(
+    () => (hazards || []).filter((h) => h && Number.isFinite(h.lat) && Number.isFinite(h.lng)),
+    [hazards],
+  );
   const showRoutes = !!destination && routeFC.features.length > 0;
 
   // Speed cameras render ONLY along the SELECTED route (within the corridor), so
@@ -1778,30 +1891,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           );
         })}
 
-        {/* Community hazard / police pins. */}
-        {visibleHazards.map((h) => (
-          <HazardMarker
-            key={`hz_${h.id}`}
-            hazard={h}
-            onPress={() => onHazardPress?.(h)}
-            onLongPress={() => onHazardLongPress?.(h)}
-          />
-        ))}
-
-        {/* Speed cameras — only those along the active route (decluttered). */}
-        {onRouteCameras.map((c) => (
-          <CameraMarker key={`cam_${c.id}`} lat={c.lat} lng={c.lng} />
-        ))}
-
-        {/* Official DriveBC road events (Open511) — incidents / construction / closures. */}
-        {(roadEvents || []).map((e) => (
-          <IncidentMarker key={`inc_${e.id}`} event={e} />
-        ))}
-
-        {/* Category quick-search place pins. */}
-        {(places || []).map((p, i) => (
-          <PlaceMarker key={`place_${p.id}`} place={p} index={i} onPress={onPlacePress} />
-        ))}
+        {/* Hazards / cameras / DriveBC incidents / place pins — drawn as GL layers in
+            slot="middle" so the self 3D marker (ModelLayer, slot="top") renders ABOVE
+            them. Cameras are the on-route decluttered subset; hazards the visible set.
+            Taps route to the same handlers (see GLPinLayers). */}
+        <GLPinLayers
+          hazards={visibleHazards}
+          cameras={onRouteCameras}
+          incidents={roadEvents || []}
+          places={places || []}
+          onHazardPress={onHazardPress}
+          onPlacePress={onPlacePress}
+        />
 
         {/* Arrival-weather chip floating above the destination. */}
         {destination && destWeather && (
@@ -1879,6 +1980,9 @@ const styles = StyleSheet.create({
     borderWidth: 2, borderColor: "rgba(11,11,12,0.85)",
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 4,
   },
+  // Transparent wrapper for the incident glyph snapshotted into a GL symbol image
+  // (drawn over the severity CircleLayer). Sized to the ionicon so the snapshot is tight.
+  incidentGlyphSnap: { width: 18, height: 18, alignItems: "center", justifyContent: "center", backgroundColor: "transparent" },
   // Place pins (gas price chips / fuel badges / named places).
   placePinWrap: { alignItems: "center", maxWidth: 150 },
   placeLabel: {

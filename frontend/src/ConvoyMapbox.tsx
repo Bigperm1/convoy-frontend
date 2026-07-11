@@ -908,7 +908,7 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
 // ===== HazardMarker =====
 // Community hazard / police pin — a flat icon image (police.png for police,
 // hazard.png otherwise). Tap → details; long-press → the standard hazard menu.
-function HazardMarker({ hazard, onPress, onLongPress }: { hazard: Hazard; onPress?: () => void; onLongPress?: () => void }) {
+export function HazardMarker({ hazard, onPress, onLongPress }: { hazard: Hazard; onPress?: () => void; onLongPress?: () => void }) {
   const src = HAZARD_ICONS[hazard.kind] || HAZARD_ICON_DEFAULT;
   return (
     <MarkerView coordinate={[hazard.lng, hazard.lat]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
@@ -922,7 +922,7 @@ function HazardMarker({ hazard, onPress, onLongPress }: { hazard: Hazard; onPres
 // ===== CameraMarker =====
 // Fixed speed-camera pin (OpenStreetMap). Pins only — the proximity voice alert
 // is handled in map.tsx. No press handler.
-function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
+export function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
   // The Image is wrapped in a sized View: MarkerView positions a child view at
   // the coordinate and reads its measured size — a BARE <Image> child can
   // measure 0×0 (before the bitmap loads) and render invisibly, which is why
@@ -958,7 +958,7 @@ const INCIDENT_TITLE: Record<RoadEventKind, string> = {
   incident: "Incident", construction: "Roadwork", road: "Road closure",
   weather: "Weather hazard", event: "Road event",
 };
-function IncidentMarker({ event }: { event: RoadEvent }) {
+export function IncidentMarker({ event }: { event: RoadEvent }) {
   const color = incidentColor(event.severity);
   // Official event — tap shows the headline. Deliberately NOT the crew-hazard sheet
   // (no report/delete actions on a government feed item).
@@ -982,7 +982,7 @@ function IncidentMarker({ event }: { event: RoadEvent }) {
 // The "Place pins" setting (showPins) hides the pure pin GLYPHS (teardrop under
 // a name, gas-pump badge) while ALWAYS keeping price chips and name labels. A
 // no-price gas station with pins off has nothing to draw → no marker at all.
-function PlaceMarker({ place, index, onPress }: { place: PlacePoint; index: number; onPress?: (p: PlacePoint) => void }) {
+export function PlaceMarker({ place, index, onPress }: { place: PlacePoint; index: number; onPress?: (p: PlacePoint) => void }) {
   // Unified numbered result pin — green background, thin grey border, Convoy
   // font. The number matches the row order in the Results dropdown so the list
   // and the map line up (1, 2, 3 …). Gas premium price + ratings live in the

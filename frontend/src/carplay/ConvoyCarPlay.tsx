@@ -43,7 +43,8 @@ import CompassNeedle from '../components/CompassNeedle';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
-import { formatSpeed, getSettings, getMapMode, getRouteColor } from '../settings';
+import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
+import type { RoadEvent } from '../driveBcEvents';
 
 // CarPlay HUD floor — a solid dark tint ONLY on light basemaps (dawn / day / satellite),
 // where clear glass over the bright map would wash out. On DARK basemaps (dusk / night)
@@ -508,7 +509,7 @@ export function CarSurface() {
           carStore action that map.tsx (same JS context) turns into tap-to-talk.
           Green while listening, amber while thinking, white idle. */}
       <TouchableOpacity
-        style={styles.scoutMicBtn}
+        style={[styles.scoutMicBtn, { backgroundColor: carHudFloor() }]}
         activeOpacity={0.7}
         onPress={() => emitCarGesture({ kind: 'scoutMic' })}
         testID="car-scout-mic"
@@ -538,9 +539,9 @@ export function CarSurface() {
           sign here if it reads mirrored on the head unit.) */}
       {typeof s.heading === 'number' ? (
         <View style={[styles.compassDock, { backgroundColor: carHudFloor() }]} pointerEvents="none">
-          <GlassFill tintColor={undefined} style={{ borderRadius: 19, overflow: 'hidden' }} />
+          <GlassFill tintColor={undefined} style={{ borderRadius: 26, overflow: 'hidden' }} />
           <View style={{ transform: [{ rotate: `${-(s.heading || 0)}deg` }] }}>
-            <CompassNeedle size={30} />
+            <CompassNeedle size={40} />
           </View>
         </View>
       ) : null}
@@ -609,13 +610,20 @@ type CarPlayArgs = {
   // listener (tap to start, tap again to stop + send). Wired to map.tsx's
   // useVoice instance; listening/thinking feedback renders via carStore flags.
   onScoutMic?: () => void;
+  // Map markers to mirror onto the CarPlay live map. The caller (map.tsx) applies the
+  // 'when active' gates before passing these (cameras/roadEvents are already [] when
+  // their layer is off; places only when the pins setting is on; hazards pre-filtered).
+  hazards?: { id: string; kind: string; lat: number; lng: number; confirms?: number; disputes?: number }[];
+  speedCameras?: { id: string; lat: number; lng: number }[];
+  roadEvents?: RoadEvent[];
+  places?: { id: string; lat: number; lng: number; label?: string }[];
 };
 
 /**
  * Mount ONCE from map.tsx. Mirrors live route + turn-by-turn + nearby-convoy
  * state onto CarPlay (iOS, tabbed) / Android Auto (nav only). No-op on web.
  */
-export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, user, destination, peers, onEnd, weather, onReportPolice, onScoutMic }: CarPlayArgs) {
+export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, user, destination, peers, onEnd, weather, onReportPolice, onScoutMic, hazards, speedCameras, roadEvents, places }: CarPlayArgs) {
   const [connected, setConnected] = useState(false);
 
   const mapTemplateRef = useRef<any>(null);
@@ -687,6 +695,14 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       selfCarColor: getSettings().carColor,
       // Base-map mode → car map matches the phone's style choice.
       mapMode: getMapMode(getSettings()),
+      // Self-marker style → car live map renders the arrow when the phone does.
+      selfMarkerType: getSelfMarkerType(getSettings()),
+      // Mirrored map markers (gates already applied by the caller). undefined→[] so a
+      // cleared layer wipes the car too.
+      hazards: hazards || [],
+      speedCameras: speedCameras || [],
+      roadEvents: roadEvents || [],
+      places: places || [],
       // Route-line color → car route matches the phone's chosen color.
       routeColor: getRouteColor(getSettings()),
       // Live weather (only while the phone's weather layer feeds it). Temp pre-formatted
@@ -711,6 +727,10 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
     peers,
     user?.speed,
     weather,
+    hazards,
+    speedCameras,
+    roadEvents,
+    places,
   ]);
 
   // ---- position mirror: ADDITIVE ONLY ----
@@ -987,8 +1007,10 @@ const styles = StyleSheet.create({
   speedLimitBadge: { position: 'absolute', left: 0, bottom: 0, width: 58, height: 48, borderRadius: 14, backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   speedLimitNum: { color: '#000', fontSize: 21, fontWeight: '800', letterSpacing: -0.5, lineHeight: 23 },
   speedLimitUnit: { color: '#333', fontSize: 9, fontWeight: '700', letterSpacing: 0.3, marginTop: 1 },
-  // Compass — top-right, below the maneuver banner. Smaller, closer to the edge.
-  compassDock: { position: 'absolute', right: 8, top: 58, width: 38, height: 38, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 19, overflow: 'hidden' },
+  // Compass — TOP-RIGHT corner, mirroring the Scout mic button (top-left) in size +
+  // vertical position: same 52×52 circle at top:10, hard against the right edge. In
+  // LIVE mode the maneuver banner sits bottom-right (navStack), so the top-right is free.
+  compassDock: { position: 'absolute', right: 10, top: 10, width: 52, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', overflow: 'hidden' },
   // Weather chip — BOTTOM-left, just above the speedo (left edge aligned, small gap),
   // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
   weatherChip: { position: 'absolute', left: 56, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },

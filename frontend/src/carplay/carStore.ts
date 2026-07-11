@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import type { MapMode } from '../settings';
+import type { RoadEvent } from '../driveBcEvents';
 
 export type CarPeer = { id: string; handle: string };
 
@@ -46,6 +47,20 @@ export type CarState = {
   // match the phone's style: 'satellite' → SatelliteStreet, else Standard with the
   // matching light preset. undefined → car falls back to the phone default 'dusk'.
   mapMode?: MapMode;
+  // Self-marker style (mirror of settings.selfMarkerType). Lets the CarPlay live map
+  // render the green ARROW model when the phone is set to 'arrow', else the 3D car —
+  // so the head unit matches the phone. undefined → car.
+  selfMarkerType?: 'car' | 'arrow' | 'photo';
+  // Map markers mirrored from the phone so the CarPlay live map shows the SAME
+  // hazards / DriveBC incidents / speed cameras / place pins the driver sees on the
+  // phone. All optional; undefined → none. The 'when active' gating is applied on the
+  // phone BEFORE writing (speed cameras + road events self-gate to [] when their layer
+  // is off; places only when the pins setting is on; hazards filtered to disputes<2).
+  // CarMapView renders them with the phone's own marker components (no duplication).
+  hazards?: { id: string; kind: string; lat: number; lng: number; confirms?: number; disputes?: number }[];
+  speedCameras?: { id: string; lat: number; lng: number }[];
+  roadEvents?: RoadEvent[];
+  places?: { id: string; lat: number; lng: number; label?: string }[];
   // Posted speed limit (km/h) for the road the driver is on (OSM/Overpass, fed by
   // the navNotification location feed). undefined/0 → no badge shown.
   speedLimitKmh?: number;

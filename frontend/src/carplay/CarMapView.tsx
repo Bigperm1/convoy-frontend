@@ -43,6 +43,15 @@ import {
   projectOntoRoute,
   carModelScale,
   applyCarGapGradient,
+  GREEN_ARROW_MODEL,
+  ARROW_MODEL_ID,
+  ARROW_MODEL_PITCH,
+  ARROW_MODEL_SCALE,
+  ARROW_MODEL_HEADING_OFFSET,
+  HazardMarker,
+  CameraMarker,
+  IncidentMarker,
+  PlaceMarker,
 } from '../ConvoyMapbox';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
@@ -165,10 +174,17 @@ export default function CarMapView({ onGLError }: Props) {
   const mode = s.mapMode ?? DEFAULT_MODE;
   const useStandard = mode !== 'satellite';
   const styleURL = useStandard ? 'mapbox://styles/mapbox/standard' : Mapbox.StyleURL.SatelliteStreet;
-  const emissive = CAR_EMISSIVE_BY_MODE[mode] ?? 0;
-  // Color-specific model id so a car-color change swaps the 3D model live (Mapbox
-  // caches a model by id; a fixed id won't reload a new .glb until remount).
-  const carModelId = 'convoyCar_' + getVehicleModelKey(s.selfCarColor);
+  // Self-marker style mirrors the phone (settings.selfMarkerType). Arrow → the green
+  // arrow GLB (always fully self-lit, emissive 1, like the phone); else the 3D car with
+  // the per-mode emissive. Uses the SAME exported ARROW_MODEL_* consts the phone uses,
+  // so phone + CarPlay stay in lockstep.
+  const isArrow = s.selfMarkerType === 'arrow';
+  const emissive = isArrow ? 1 : (CAR_EMISSIVE_BY_MODE[mode] ?? 0);
+  // Model id: the arrow's fixed id, or a color-specific car id so a car-color change
+  // swaps the 3D model live (Mapbox caches a model by id; a fixed id won't reload a new
+  // .glb until remount). The key={carModelId} on <Models>+<SelfCarModel> forces the
+  // remount that re-registers the GLB when the id flips car↔arrow.
+  const carModelId = isArrow ? ARROW_MODEL_ID : ('convoyCar_' + getVehicleModelKey(s.selfCarColor));
 
   // Speed-aware zoom for BOTH nav AND cruise — chaseZoom with no turn distance is a pure
   // speed→zoom curve (city tighter, highway wider), so cruise now dynamically zooms in/out
@@ -423,8 +439,9 @@ export default function CarMapView({ onGLError }: Props) {
         animationDuration={0}
       />
 
-      {/* Register the self-car 3D model for the chosen paint. */}
-      <Models key={carModelId} models={{ [carModelId]: getVehicleModelUrl(s.selfCarColor) }} />
+      {/* Register the self 3D model for the chosen marker: the arrow GLB, or the
+          per-color car. key={carModelId} remounts <Models> when the id flips. */}
+      <Models key={carModelId} models={{ [carModelId]: isArrow ? GREEN_ARROW_MODEL : getVehicleModelUrl(s.selfCarColor) }} />
 
       {/* 3D self car + the native location feed, BOTH driven off ONE rAF-eased pose
           (SelfCarModel, reused verbatim from the phone). This is THE smoothness fix:
@@ -442,7 +459,9 @@ export default function CarMapView({ onGLError }: Props) {
           cameraRef={cameraRef}
           getCam={getCam}
           readyRef={lockReadyRef}
-          scale={carModelScale(0.7)}
+          scale={isArrow ? ARROW_MODEL_SCALE : carModelScale(0.7)}
+          headingOffset={isArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
+          pitchTilt={isArrow ? ARROW_MODEL_PITCH : 0}
         />
       )}
 
@@ -514,6 +533,26 @@ export default function CarMapView({ onGLError }: Props) {
           />
         </ShapeSource>
       )}
+
+      {/* Mirrored map markers — the SAME hazards / DriveBC incidents / speed cameras /
+          place pins the driver sees on the phone, reusing the phone's marker components
+          verbatim (no style duplication). The phone applies the 'when active' gates before
+          writing carStore, so these arrays are already the right set to draw. No press
+          handlers are needed on the head unit (glanceable, and CarPlay doesn't deliver
+          touches to this surface anyway). Keys are id-stable so the lockstep camera
+          re-renders don't remount them. */}
+      {(s.roadEvents || []).map((e) => (
+        <IncidentMarker key={'inc_' + e.id} event={e} />
+      ))}
+      {(s.hazards || []).map((h) => (
+        <HazardMarker key={'hz_' + h.id} hazard={h as any} />
+      ))}
+      {(s.speedCameras || []).map((c) => (
+        <CameraMarker key={'cam_' + c.id} lat={c.lat} lng={c.lng} />
+      ))}
+      {(s.places || []).map((p, i) => (
+        <PlaceMarker key={'pl_' + p.id} place={p as any} index={i} />
+      ))}
     </MapView>
   );
 }

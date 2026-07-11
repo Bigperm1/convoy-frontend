@@ -130,9 +130,9 @@ callSign?: string;
 // Per-source output volume multipliers, 0..1 (1 = full). Applied where each sound
 // actually plays. Music (Apple Music / Spotify) has NO field — iOS gives no volume
 // API for external players, so it's shown as a fixed 100% reference only and the
-// others are tuned relative to it. Stock (undefined → 0.6 via getAudioVol) starts
-// each adjustable source at 60% so testers can calibrate up OR down; see
-// STOCK_AUDIO_VOL below and app/(app)/settings/audio.tsx.
+// others are tuned relative to it. Stock via getAudioVol: Scout/Voice starts at MAX
+// (1.0, the app's ceiling — no gain past it), the rest at 60% so testers can
+// calibrate up OR down; see STOCK_AUDIO_VOL / STOCK_BY_KEY below + settings/audio.tsx.
 volVoice?: number;        // Scout / nav / agentic TTS
 volDings?: number;        // alerts & dings (speed ding, alert sound)
 volComms?: number;        // live push-to-talk voice
@@ -287,19 +287,29 @@ export function getSelfMarkerType(s: Settings): 'car' | 'arrow' | 'photo' {
 }
 
 // ---- Per-source audio volume (0..1), for the tester-calibration Audio screen ----
-// STOCK (untuned) level for the adjustable sources. Starts at 60% — not 100% — so
-// testers can calibrate in EITHER direction against their music (the fixed 100%
-// reference) instead of only being able to turn things down. Both the slider
-// position (audio.tsx seeds from getAudioVol) and actual playback read this, so
-// every source plays at 60% until a slider is moved. The Music reference row is
-// hardcoded to 100% in audio.tsx and is unaffected.
-export const STOCK_AUDIO_VOL = 0.6;
-// Read at each playback site (Scout TTS, dings, comms, transmission) to scale
-// volume; falls back to STOCK_AUDIO_VOL when a source hasn't been tuned. Clamped.
+// STOCK (untuned) levels. Most sources start at 60% — not 100% — so testers can
+// calibrate in EITHER direction against their music (the fixed 100% reference)
+// rather than only being able to turn things down. Scout / Voice is the exception:
+// it's the guidance line, so it stocks at the app's MAX (1.0). NOTE: expo-av volume
+// is a 0..1 multiplier with NO gain past 1.0 — 1.0 is the loudest the CLIENT can
+// make Scout. To go louder than that, the backend /tts must boost the synth gain
+// (e.g. an ffmpeg loudnorm / volume filter on the returned mp3); the app has no
+// lever above 1.0. Both the slider position (audio.tsx seeds from getAudioVol) and
+// actual playback read these. The Music reference row is hardcoded 100% and unaffected.
+export const STOCK_AUDIO_VOL = 0.6; // default stock for the tuned-relative sources
 export type AudioVolKey = 'volVoice' | 'volDings' | 'volComms' | 'volTransmission';
+// Scout/Voice stocks at MAX (1.0); dings/comms/transmission at STOCK_AUDIO_VOL.
+const STOCK_BY_KEY: Record<AudioVolKey, number> = {
+  volVoice: 1.0,
+  volDings: STOCK_AUDIO_VOL,
+  volComms: STOCK_AUDIO_VOL,
+  volTransmission: STOCK_AUDIO_VOL,
+};
+// Read at each playback site (Scout TTS, dings, comms, transmission) to scale
+// volume; falls back to the per-key stock when a source hasn't been tuned. Clamped.
 export function getAudioVol(s: Settings = cached, key: AudioVolKey): number {
   const v = s?.[key];
-  return typeof v === 'number' ? Math.max(0, Math.min(1, v)) : STOCK_AUDIO_VOL;
+  return typeof v === 'number' ? Math.max(0, Math.min(1, v)) : (STOCK_BY_KEY[key] ?? STOCK_AUDIO_VOL);
 }
 
 let cached: Settings = { ...DEFAULT_SETTINGS };

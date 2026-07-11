@@ -262,12 +262,17 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 // slab. Baked diagonal gradient top (sheen #7DF7B2 → brand #2DEC86 → deep
 // #1CC96F) + darker walls (#0FA35A) carry the 3D read under the fully-self-lit
 // render. Viewer-verified against the Waze reference screenshot before shipping.
-export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v5.glb");
-export const ARROW_MODEL_ID = "convoyArrow6"; // bundled-asset registration — fresh id per geometry change.
+// v6 (tester feedback on v5): (1) the white slab stuck out around the green —
+// now the WHITE IS THE BODY (flush sides) with the green as a thin INSET on top,
+// leaving an even white border ring, exactly the Waze construction; (2) "the
+// arrow faces the sky" — baked an 18° forward lean (nose toward the route, tail
+// raised) so it reads as driving into the scene instead of painted on the road.
+export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v6.glb");
+export const ARROW_MODEL_ID = "convoyArrow7"; // bundled-asset registration — fresh id per geometry change.
 export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forward). The car needs +90 (it exports sideways); a +Y arrow needs 0, and v1 tracked heading fine at 0.
-// v5 max extent ≈1.57 (squatter than v4's ≈1.96) vs the car's ≈1.91 — 1.6 keeps
-// the same on-screen presence the v4 arrow had at 1.3. OTA-tunable.
-export const ARROW_MODEL_SCALE: any = carModelScale(1.6);
+// v6 max extent ≈1.34 (the tilt + inset shrink the footprint vs v5's ≈1.57) —
+// 1.9 keeps the same on-screen presence v5 had at 1.6. OTA-tunable.
+export const ARROW_MODEL_SCALE: any = carModelScale(1.9);
 // Self-illumination for the 3D car per light preset. ALL modes now render the
 // car fully self-lit (1.0) — the same dusk/dark-tint bypass the arrow uses — so
 // the paint color stays vivid instead of being washed dark by the scene light

@@ -256,8 +256,13 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 // chevron, vivid brand green. KEY FIX vs v1/v2: #2DEC86 baked as sRGB→LINEAR
 // ([0.026,0.839,0.238]) — raw sRGB rendered washed-out pale (the "wrong green").
 // Modelled pointing +Y; max extent ≈1.86 (car ≈1.91), so it reuses the car's curve.
-export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v3.glb");
-export const ARROW_MODEL_ID = "convoyArrow4"; // bundled-asset registration — fresh id so no cached remote model can shadow it.
+// v4: the always-self-lit render (emissive 1) means NO scene shading, which
+// flattened v3's bevel into one solid green on-device — so v4 BAKES the shading
+// into the facet colors, Waze-style (lit side #6BF5A8 → shadow side #12B25F, brand
+// #2DEC86 in front). Also lifts the white rim to z=0.04: at exactly z=0 it
+// z-fought the road surface and vanished (the 07-11 phone screenshot had no rim).
+export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v4.glb");
+export const ARROW_MODEL_ID = "convoyArrow5"; // bundled-asset registration — fresh id per geometry change.
 export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forward). The car needs +90 (it exports sideways); a +Y arrow needs 0, and v1 tracked heading fine at 0.
 // v3 max extent ≈1.86 vs the car's ≈1.91, so ~1.0 matches the car footprint; 1.3
 // renders it ~30% bigger — a prominent "you-are-here" chevron. OTA-tunable.

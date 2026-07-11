@@ -262,13 +262,16 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 // slab. Baked diagonal gradient top (sheen #7DF7B2 → brand #2DEC86 → deep
 // #1CC96F) + darker walls (#0FA35A) carry the 3D read under the fully-self-lit
 // render. Viewer-verified against the Waze reference screenshot before shipping.
-// v6 (tester feedback on v5): (1) the white slab stuck out around the green —
-// now the WHITE IS THE BODY (flush sides) with the green as a thin INSET on top,
-// leaving an even white border ring, exactly the Waze construction; (2) "the
-// arrow faces the sky" — baked an 18° forward lean (nose toward the route, tail
-// raised) so it reads as driving into the scene instead of painted on the road.
-export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v6.glb");
-export const ARROW_MODEL_ID = "convoyArrow7"; // bundled-asset registration — fresh id per geometry change.
+// v7 ("still faces the sky", twice): the v6 18° NOSE-DOWN lean was backwards —
+// Waze/Google markers STAND UP: tail on the road, TIP pointing up at the
+// horizon, face toward the chase camera. Up-screen IS the travel direction in
+// a pitched view, so the standing stance reads "pointing along the route",
+// while any flat-lying arrow reads "painted on the road, facing the sky".
+// v7 bakes a +55° standing tilt. Viewer-verified from the true chase angle
+// (behind+above) AND top-down before shipping. White body flush + green inset
+// construction unchanged from v6.
+export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v7.glb");
+export const ARROW_MODEL_ID = "convoyArrow8"; // bundled-asset registration — fresh id per geometry change.
 export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forward). The car needs +90 (it exports sideways); a +Y arrow needs 0, and v1 tracked heading fine at 0.
 // v6 max extent ≈1.34 (the tilt + inset shrink the footprint vs v5's ≈1.57) —
 // 1.9 keeps the same on-screen presence v5 had at 1.6. OTA-tunable.

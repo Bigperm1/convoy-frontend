@@ -2944,7 +2944,7 @@ export default function MapScreen() {
           Comms/Music headers (top iOS52/Android28, right12) so it's pixel-identical
           across tabs. Rendered after topBar so it overlays and stays tappable. */}
       <View style={styles.mapLogoBacking}>
-        <GlassFill tintColor={hudTint()} style={{ borderRadius: 25, overflow: "hidden" }} />
+        <GlassFill tintColor={hudTint()} style={{ borderRadius: 14, overflow: "hidden" }} />
         <LogoMenu size={38} align="right" />
       </View>
 
@@ -4047,11 +4047,12 @@ const styles = StyleSheet.create({
     position: 'absolute', top: Platform.OS === 'ios' ? 52 : 28, right: 12, zIndex: 100,
     width: 50,
     height: 50,
-    borderRadius: 25,
+    borderRadius: 14,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
+    overflow: 'hidden',
     shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 6,
   },

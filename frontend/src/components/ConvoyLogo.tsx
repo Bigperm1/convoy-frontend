@@ -9,9 +9,9 @@ interface Props {
 export default function ConvoyLogo({ size = 120, style }: Props) {
   return (
     <Image
-      source={require('../../assets/images/brand-mark.png')}
-      style={[{ width: size, height: size }, style]}
-      resizeMode="contain"
+      source={require('../../assets/HAIRPIN.png')}
+      style={[{ width: size, height: size, borderRadius: size * 0.28 }, style]}
+      resizeMode="cover"
     />
   );
 }

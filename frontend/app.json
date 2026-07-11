@@ -4,7 +4,7 @@
     "slug": "convoy",
     "version": "2.0.0",
     "orientation": "portrait",
-    "icon": "./assets/final_icon.png",
+    "icon": "./assets/HAIRPIN.png",
     "scheme": "convoy",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
@@ -35,7 +35,7 @@
       "versionCode": 63,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/hairpin-adaptive.png",
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,

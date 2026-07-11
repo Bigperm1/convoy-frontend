@@ -605,6 +605,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const lastFixAt = useRef(0);
   const fixGap = useRef(1000);
   const rafDead = useRef(false); // latched true while the rAF loop is paused (phone display asleep)
+  const bgTimer = useRef<any>(null); // background-safe ease timer that keeps the car moving smoothly while rAF is paused (phone display off + CarPlay active)
   const resumeSnapUntil = useRef(0); // snap-track (don't ease) until this wall-clock after foreground
   const wasBackgrounded = useRef(false); // true once the app actually hit 'background' since last 'active'
   const [, setTick] = useState(0);
@@ -636,8 +637,37 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     } catch {}
   };
 
+  // Advance the current ease by ONE frame from a background TIMER (setInterval),
+  // used only while rafDead — the phone display is asleep so requestAnimationFrame
+  // is paused, but the app stays alive (background location + audio) so setInterval
+  // keeps firing and the head-unit car can still move smoothly instead of snapping
+  // to each ~1 Hz GPS fix. Deliberately does NOT set `a.stepped` or clear rafDead —
+  // those are how the fix handler / step() detect the display waking (only a real
+  // rAF tick flips them), so the timer path stays latched until the screen returns.
+  const bgTick = () => {
+    const a = anim.current;
+    if (!a) return;
+    const now = Date.now();
+    const t = Math.min(1, (now - a.start) / a.dur);
+    render.current = {
+      lat: a.fromLat + (a.toLat - a.fromLat) * t,
+      lng: a.fromLng + (a.toLng - a.fromLng) * t,
+      heading: a.fromHdg + (a.toHdg - a.fromHdg) * t,
+    };
+    pushCam(render.current.lat, render.current.lng, render.current.heading);
+    setTick((n) => (n + 1) & 0xffff);
+    if (t >= 1) anim.current = null;
+  };
+  const startBgTimer = () => {
+    if (bgTimer.current == null) bgTimer.current = setInterval(bgTick, 33); // ~30 fps (matches the eco frame cap)
+  };
+  const stopBgTimer = () => {
+    if (bgTimer.current != null) { clearInterval(bgTimer.current); bgTimer.current = null; }
+  };
+
   const step = () => {
     rafDead.current = false; // the loop ticked → the display is awake; smooth easing is live
+    stopBgTimer(); // rAF is driving again → drop the background timer to avoid double-advancing
     const a = anim.current;
     if (!a) { raf.current = null; return; }
     a.stepped = true; // this ease has rendered ≥1 frame → the loop is alive for it
@@ -702,16 +732,20 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // after foreground, SNAP every fix (camera jumps straight to the latest) instead
     // of easing through the stale→fresh pair; smooth easing resumes after.
     const inResumeSnap = now < resumeSnapUntil.current;
-    if (!seeded.current || jumpDeg > 0.01 || rafStale || inResumeSnap) {
+    // Hard-snap ONLY for genuine jumps: first fix, a teleport/GPS glitch, or the
+    // post-foreground resume window. A display-asleep stall (rafStale) is NO LONGER a
+    // snap — it now eases via the background timer (below) so the head unit stays
+    // smooth with the phone screen off, instead of stepping to each ~1 Hz GPS fix.
+    if (!seeded.current || jumpDeg > 0.01 || inResumeSnap) {
       seeded.current = true;
       render.current = { lat, lng, heading };
       anim.current = null;
       if (raf.current != null) { cancelAnimationFrame(raf.current); raf.current = null; }
-      pushCam(lat, lng, heading); // hard-snap the camera with the car (first fix / recenter / resume / screen-off)
+      stopBgTimer();
+      pushCam(lat, lng, heading); // hard-snap the camera with the car (first fix / recenter / resume)
       setTick((n) => (n + 1) & 0xffff);
       // Probe: a live display ticks step() → rafDead clears → the next fix eases
-      // smoothly again. While asleep the probe never fires, so the latch holds and
-      // every fix keeps snapping (tracking continues, just without interpolation).
+      // smoothly again. While asleep the probe never fires, so the latch holds.
       if (rafStale) raf.current = requestAnimationFrame(step);
       return;
     }
@@ -728,12 +762,25 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       start: now, dur: Math.max(220, fixGap.current * 1.1),
       armedAt: now, stepped: false,
     };
-    if (raf.current == null) raf.current = requestAnimationFrame(step);
+    if (rafStale) {
+      // Phone display asleep (requestAnimationFrame paused) but CarPlay active + the app
+      // alive via background location/audio → drive the ease from a background timer so
+      // the head-unit car keeps moving smoothly instead of snapping to each ~1 Hz fix.
+      // The probe rAF wakes step() the instant the display returns → drops the timer and
+      // resumes normal 60 fps easing.
+      startBgTimer();
+      if (raf.current == null) raf.current = requestAnimationFrame(step);
+    } else if (raf.current == null) {
+      raf.current = requestAnimationFrame(step);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lat, lng, heading]);
 
   // Stop the loop if the car unmounts mid-animation.
-  useEffect(() => () => { if (raf.current != null) cancelAnimationFrame(raf.current); }, []);
+  useEffect(() => () => {
+    if (raf.current != null) cancelAnimationFrame(raf.current);
+    if (bgTimer.current != null) { clearInterval(bgTimer.current); bgTimer.current = null; }
+  }, []);
 
   // Snap (not ease) to the live position after the app returns to the foreground.
   // Backgrounding (switching to another app) suspends the JS thread, so render.current

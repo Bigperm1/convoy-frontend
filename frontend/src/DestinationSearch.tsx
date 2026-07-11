@@ -278,7 +278,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           {aiSuggest ? (
             <>
               <TouchableOpacity testID="ai-lets-go" onPress={onAiGo} style={styles.letsGoBtn} activeOpacity={0.85}>
-                <GlassFill tintColor="#2DEC86" style={{ borderRadius: 14, overflow: "hidden" }} />
+                <GlassFill tintColor="#2DEC86" style={{ borderRadius: 10, overflow: "hidden" }} />
                 <Ionicons name="navigate" size={14} color="#06281A" />
                 <Text style={styles.letsGoText}>Let's go</Text>
               </TouchableOpacity>
@@ -385,7 +385,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 5,
     // Green floor keeps the CTA bright + the dark text readable; the green-tinted
     // GlassFill on top adds the liquid-glass sheen.
-    backgroundColor: 'rgba(45,236,134,0.62)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 7,
+    backgroundColor: 'rgba(45,236,134,0.62)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7,
     overflow: 'hidden',
   },
   letsGoText: { color: '#06281A', fontSize: 14, fontWeight: '800' },

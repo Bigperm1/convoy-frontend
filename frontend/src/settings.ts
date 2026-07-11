@@ -130,8 +130,9 @@ callSign?: string;
 // Per-source output volume multipliers, 0..1 (1 = full). Applied where each sound
 // actually plays. Music (Apple Music / Spotify) has NO field — iOS gives no volume
 // API for external players, so it's shown as a fixed 100% reference only and the
-// others are tuned relative to it. Default (undefined → 1 via getAudioVol) means
-// nothing changes until a tester moves a slider. See app/(app)/settings/audio.tsx.
+// others are tuned relative to it. Stock (undefined → 0.6 via getAudioVol) starts
+// each adjustable source at 60% so testers can calibrate up OR down; see
+// STOCK_AUDIO_VOL below and app/(app)/settings/audio.tsx.
 volVoice?: number;        // Scout / nav / agentic TTS
 volDings?: number;        // alerts & dings (speed ding, alert sound)
 volComms?: number;        // live push-to-talk voice
@@ -286,12 +287,19 @@ export function getSelfMarkerType(s: Settings): 'car' | 'arrow' | 'photo' {
 }
 
 // ---- Per-source audio volume (0..1), for the tester-calibration Audio screen ----
-// Defaults to 1 (full) when a source hasn't been tuned. Clamped defensively. Read
-// at each playback site (Scout TTS, dings, comms, transmission) to scale volume.
+// STOCK (untuned) level for the adjustable sources. Starts at 60% — not 100% — so
+// testers can calibrate in EITHER direction against their music (the fixed 100%
+// reference) instead of only being able to turn things down. Both the slider
+// position (audio.tsx seeds from getAudioVol) and actual playback read this, so
+// every source plays at 60% until a slider is moved. The Music reference row is
+// hardcoded to 100% in audio.tsx and is unaffected.
+export const STOCK_AUDIO_VOL = 0.6;
+// Read at each playback site (Scout TTS, dings, comms, transmission) to scale
+// volume; falls back to STOCK_AUDIO_VOL when a source hasn't been tuned. Clamped.
 export type AudioVolKey = 'volVoice' | 'volDings' | 'volComms' | 'volTransmission';
 export function getAudioVol(s: Settings = cached, key: AudioVolKey): number {
   const v = s?.[key];
-  return typeof v === 'number' ? Math.max(0, Math.min(1, v)) : 1;
+  return typeof v === 'number' ? Math.max(0, Math.min(1, v)) : STOCK_AUDIO_VOL;
 }
 
 let cached: Settings = { ...DEFAULT_SETTINGS };

@@ -618,14 +618,25 @@ export function useTurnByTurn(
         if (dHdg > 180) dHdg = 360 - dHdg;
         headingOff = dHdg > OFFROUTE_HEADING_TOL_DEG;
       }
-      if (dRoute > REROUTE_DISTANCE_M && headingOff) offRouteStreakRef.current += 1;
+      // Count ANY tick that's off the line by more than the threshold. The heading
+      // gate no longer SUPPRESSES the count — that was the bug behind the "~1 minute
+      // to recalculate": on a road PARALLEL to the route the heading stays aligned,
+      // so the streak reset every tick and a reroute never fired until the roads
+      // finally diverged. Heading now feeds the TRIP threshold instead, so real
+      // departures act in ~2-3 s while a transient multipath spike (a brief sideways
+      // fix with aligned heading) still gets ridden out.
+      const conclusivelyOff = dRoute > REROUTE_DISTANCE_M * 2;   // >160 m: GPS multipath can't explain this
+      if (dRoute > REROUTE_DISTANCE_M) offRouteStreakRef.current += 1;
       else offRouteStreakRef.current = 0;
-      // With the heading gate filtering multipath, require a slightly longer
-      // streak to act: a clearly-off fix (~2x the threshold) needs >=2 ticks, a
-      // marginal one >=3. A real wrong turn grows distance AND diverges heading,
-      // so it still trips within a couple of seconds.
-      const clearlyOff = dRoute > REROUTE_DISTANCE_M * 2;
-      const tripped = clearlyOff ? offRouteStreakRef.current >= 2 : offRouteStreakRef.current >= 3;
+      // Trip fast when the evidence is strong, slower when it's marginal:
+      //   • conclusively off (>160 m)      → 2 ticks (~2 s), heading irrelevant
+      //   • off + heading diverging (>55°) → 3 ticks (~3 s): a real wrong turn
+      //   • off but heading still aligned  → 6 ticks (~6 s): a SUSTAINED offset,
+      //     not a momentary multipath spike (the parallel-road departure)
+      const tripped =
+        conclusivelyOff ? offRouteStreakRef.current >= 2 :
+        headingOff      ? offRouteStreakRef.current >= 3 :
+                          offRouteStreakRef.current >= 6;
       if (tripped) {
         const now = Date.now();
         if (now - lastOffRouteAtRef.current > 8000) {

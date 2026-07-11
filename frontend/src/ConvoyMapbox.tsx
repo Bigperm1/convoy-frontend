@@ -262,16 +262,15 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 // slab. Baked diagonal gradient top (sheen #7DF7B2 → brand #2DEC86 → deep
 // #1CC96F) + darker walls (#0FA35A) carry the 3D read under the fully-self-lit
 // render. Viewer-verified against the Waze reference screenshot before shipping.
-// v7 ("still faces the sky", twice): the v6 18° NOSE-DOWN lean was backwards —
-// Waze/Google markers STAND UP: tail on the road, TIP pointing up at the
-// horizon, face toward the chase camera. Up-screen IS the travel direction in
-// a pitched view, so the standing stance reads "pointing along the route",
-// while any flat-lying arrow reads "painted on the road, facing the sky".
-// v7 bakes a +55° standing tilt. Viewer-verified from the true chase angle
-// (behind+above) AND top-down before shipping. White body flush + green inset
-// construction unchanged from v6.
-export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v7.glb");
-export const ARROW_MODEL_ID = "convoyArrow8"; // bundled-asset registration — fresh id per geometry change.
+// v8 — tilt direction fixed by ON-DEVICE ground truth: v6 (-18°) showed the
+// green top correctly; v7 (+55°) flipped the green AWAY from the camera (white
+// underside dominated — IMG_6394). So NEGATIVE rotation is the camera-facing
+// direction, proven, and v8 is simply v6's direction made steep enough to see:
+// -42° — tail raised toward the viewer, tip low pointing into the screen
+// (forward along the route), green face leaning back at the chase camera.
+// White body flush + green inset construction unchanged.
+export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v8.glb");
+export const ARROW_MODEL_ID = "convoyArrow9"; // bundled-asset registration — fresh id per geometry change.
 export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forward). The car needs +90 (it exports sideways); a +Y arrow needs 0, and v1 tracked heading fine at 0.
 // v6 max extent ≈1.34 (the tilt + inset shrink the footprint vs v5's ≈1.57) —
 // 1.9 keeps the same on-screen presence v5 had at 1.6. OTA-tunable.

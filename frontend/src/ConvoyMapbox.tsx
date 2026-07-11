@@ -256,26 +256,30 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 // chevron, vivid brand green. KEY FIX vs v1/v2: #2DEC86 baked as sRGB→LINEAR
 // ([0.026,0.839,0.238]) — raw sRGB rendered washed-out pale (the "wrong green").
 // Modelled pointing +Y; max extent ≈1.86 (car ≈1.91), so it reuses the car's curve.
-// v4: the always-self-lit render (emissive 1) means NO scene shading, which
-// flattened v3's bevel into one solid green on-device — so v4 BAKES the shading
-// into the facet colors, Waze-style (lit side #6BF5A8 → shadow side #12B25F, brand
-// #2DEC86 in front). Also lifts the white rim to z=0.04: at exactly z=0 it
-// z-fought the road surface and vanished (the 07-11 phone screenshot had no rim).
-export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v4.glb");
-export const ARROW_MODEL_ID = "convoyArrow5"; // bundled-asset registration — fresh id per geometry change.
+// v5: the ACTUAL Waze arrow (tester feedback on v4: "looks nothing like the Waze
+// 3D image"). A plump ROUNDED extruded cursor — blunt rounded tip, rounded wings,
+// soft notch, squat proportions, real thickness — over a white rounded outline
+// slab. Baked diagonal gradient top (sheen #7DF7B2 → brand #2DEC86 → deep
+// #1CC96F) + darker walls (#0FA35A) carry the 3D read under the fully-self-lit
+// render. Viewer-verified against the Waze reference screenshot before shipping.
+export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v5.glb");
+export const ARROW_MODEL_ID = "convoyArrow6"; // bundled-asset registration — fresh id per geometry change.
 export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forward). The car needs +90 (it exports sideways); a +Y arrow needs 0, and v1 tracked heading fine at 0.
-// v3 max extent ≈1.86 vs the car's ≈1.91, so ~1.0 matches the car footprint; 1.3
-// renders it ~30% bigger — a prominent "you-are-here" chevron. OTA-tunable.
-export const ARROW_MODEL_SCALE: any = carModelScale(1.3);
-// Self-illumination for the 3D car per light preset. Dawn + night are dim, so
-// the tinted paint renders near-black with only scene light — lift those so the
-// color shows. Bright presets (day/dusk/satellite) already light it, so keep 0
-// to preserve real 3D shading. 0 = fully scene-lit, 1 = fully self-lit (flat).
+// v5 max extent ≈1.57 (squatter than v4's ≈1.96) vs the car's ≈1.91 — 1.6 keeps
+// the same on-screen presence the v4 arrow had at 1.3. OTA-tunable.
+export const ARROW_MODEL_SCALE: any = carModelScale(1.6);
+// Self-illumination for the 3D car per light preset. ALL modes now render the
+// car fully self-lit (1.0) — the same dusk/dark-tint bypass the arrow uses — so
+// the paint color stays vivid instead of being washed dark by the scene light
+// (user request 2026-07-11). Unlike the flat-shaded arrow, the car GLBs carry
+// baked texture shading, so they keep their 3D depth even without scene light.
+// CarMapView reads this same map, so CarPlay stays in lockstep with the phone.
+// 0 = fully scene-lit, 1 = fully self-lit. Per-mode entries kept for OTA tuning.
 export const CAR_EMISSIVE_BY_MODE: Record<string, number> = {
-  satellite: 0,
-  day: 0,
-  dusk: 0.55,
-  dawn: 0.55,
+  satellite: 1.0,
+  day: 1.0,
+  dusk: 1.0,
+  dawn: 1.0,
   night: 1.0,
 };
 

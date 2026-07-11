@@ -2679,7 +2679,7 @@ export default function MapScreen() {
     try {
       await createCommunityRoute({
         community_id: settings.activeCommunityId,
-        name: destination.label || "Convoy cruise",
+        name: destination.label || "Hairpin cruise",
         dest_label: destination.label,
         dest_lat: destination.lat,
         dest_lng: destination.lng,
@@ -2863,7 +2863,7 @@ export default function MapScreen() {
           // and topSpeed (PB showed "—"). livePeerById carries every field.
           setSelectedPeer((livePeerById.get(p.user_id) || p) as any);
         }}
-        onExternalAlertPress={(a: any) => Alert.alert(`${a.type}${a.subtype ? " · " + a.subtype : ""}`, "Live alert from Convoy feed.")}
+        onExternalAlertPress={(a: any) => Alert.alert(`${a.type}${a.subtype ? " · " + a.subtype : ""}`, "Live alert from Hairpin feed.")}
         places={placePins}
         showPlacePins={settings.showPlacePins !== false}
         onPlacePress={handlePlacePinPress}
@@ -2990,7 +2990,7 @@ export default function MapScreen() {
                 <Ionicons name="megaphone" size={20} color={COLORS.warning} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.routeToastTitle}>Convoy route shared</Text>
+                <Text style={styles.routeToastTitle}>Hairpin route shared</Text>
                 <Text style={styles.routeToastSub} numberOfLines={1}>
                   {routeToast.created_by ? `${routeToast.created_by}: ` : ""}{routeToast.name}
                 </Text>
@@ -3624,7 +3624,7 @@ export default function MapScreen() {
               </View>
               <View style={[styles.layerRow, { borderBottomWidth: 0 }]}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Highlight Convoy Reports</Text>
+                  <Text style={styles.layerRowLabel}>Highlight Hairpin Reports</Text>
                   <Text style={styles.layerRowSub}>Gold border on community pins</Text>
                 </View>
                 <Switch value={!!settings.highlightConvoy} onValueChange={(v) => { void updateGlobalSettings({ highlightConvoy: v }); }}

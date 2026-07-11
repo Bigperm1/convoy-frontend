@@ -626,7 +626,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
   };
   const shareInvite = async () => {
     if (!c?.invite_code) return;
-    try { await Share.share({ message: `Join my Convoy community "${c.name}". Use invite code: ${c.invite_code}` }); }
+    try { await Share.share({ message: `Join my Hairpin community "${c.name}". Use invite code: ${c.invite_code}` }); }
     catch {}
   };
   const leave = async () => {
@@ -955,7 +955,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
             testID="member-search-input"
             value={searchQ}
             onChangeText={doSearch}
-            placeholder="Search Convoy by handle or email"
+            placeholder="Search Hairpin by handle or email"
             placeholderTextColor={COLORS.textMute}
             autoCapitalize="none"
             autoCorrect={false}

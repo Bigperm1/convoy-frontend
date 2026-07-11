@@ -164,11 +164,10 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.brandSection}>
-            <Text style={styles.wordmark}>Convoy</Text>
             <Image
-              source={require('../../assets/final_icon.png')}
-              style={styles.logoMark}
-              resizeMode="contain"
+              source={require('../../assets/images/hairpin-word.png')}
+              style={styles.wordmarkImg}
+              resizeMode="cover"
             />
             <Text style={styles.tagline}>Drive Together</Text>
           </View>
@@ -310,6 +309,8 @@ const styles = StyleSheet.create({
   // Brand stack: green "Convoy" wordmark, the C-mark app icon, then the tagline —
   // real text around the logo so it stays crisp and on-brand (#2DEC86 on #0B0B0C).
   brandSection: { alignItems: 'center', marginBottom: 30 },
+  // Transparent Hairpin wordmark (black keyed out); cover-crops the top/bottom bands.
+  wordmarkImg: { width: 300, height: 128, marginBottom: 6 },
   wordmark: { color: '#2DEC86', fontSize: 42, fontWeight: '800', fontStyle: 'italic', letterSpacing: 1, marginBottom: 18, textShadowColor: 'rgba(45,236,134,0.45)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 14 },
   logoMark: { width: 140, height: 140, borderRadius: 32 },
   tagline: { color: '#2DEC86', fontSize: 16, fontWeight: '600', fontStyle: 'italic', letterSpacing: 0.5, opacity: 0.92, marginTop: 16 },

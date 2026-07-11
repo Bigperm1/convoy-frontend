@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Convoy",
+    "name": "Hairpin",
     "slug": "convoy",
     "version": "2.0.0",
     "orientation": "portrait",
@@ -15,7 +15,7 @@
       "buildNumber": "63",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "NSAppleMusicUsageDescription": "Play and control Apple Music right inside Convoy",
+        "NSAppleMusicUsageDescription": "Play and control Apple Music right inside Hairpin",
         "NSLocationWhenInUseUsageDescription": "Show nearby drivers and hazards on the map",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Keep the convoy live in the background",
         "NSMicrophoneUsageDescription": "Push-to-talk and voice commands",
@@ -147,8 +147,8 @@
       "fallbackToCacheTimeout": 15000
     },
     "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
+      "image": "./assets/images/splash.png",
+      "resizeMode": "cover",
       "backgroundColor": "#000000"
     }
   }

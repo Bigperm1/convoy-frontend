@@ -600,7 +600,7 @@ export default function MusicScreen() {
                 <Text style={styles.heroTitle}>Apple Music</Text>
                 <Text style={styles.heroSub}>
                   {isMusicSupported
-                    ? "Your playlists, library, and recently played — right inside Convoy."
+                    ? "Your playlists, library, and recently played — right inside Hairpin."
                     : "In-app playback is iPhone-only. Tap to open Apple Music on this device."}
                 </Text>
                 <View style={styles.heroBtn}>
@@ -642,7 +642,7 @@ export default function MusicScreen() {
                 <View style={styles.heroLogo}><MaterialCommunityIcons name="spotify" size={32} color="#fff" /></View>
                 <Text style={styles.heroTitle}>Spotify</Text>
                 <Text style={styles.heroSub}>
-                  Control your Spotify and bring your playlists into Convoy — works on Android too.
+                  Control your Spotify and bring your playlists into Hairpin — works on Android too.
                 </Text>
                 <View style={styles.heroBtn}>
                   <MaterialCommunityIcons name="spotify" size={16} color={SP_GREEN} />
@@ -660,7 +660,7 @@ export default function MusicScreen() {
             <LinearGradient colors={AM_PINK} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
               <View style={styles.heroLogo}><Ionicons name="musical-notes" size={30} color="#fff" /></View>
               <Text style={styles.heroTitle}>Apple Music</Text>
-              <Text style={styles.heroSub}>Reconnect your Apple Music account to keep listening in Convoy.</Text>
+              <Text style={styles.heroSub}>Reconnect your Apple Music account to keep listening in Hairpin.</Text>
               <View style={styles.heroBtn}>
                 {connecting ? <ActivityIndicator color={AM_PINK[1]} /> : (<><Ionicons name="link" size={16} color={AM_PINK[1]} /><Text style={styles.heroBtnText}>Connect Apple Music</Text></>)}
               </View>
@@ -688,7 +688,7 @@ export default function MusicScreen() {
         {source === "apple" && (
           <>
             <Text style={styles.footer}>
-              Convoy plays Apple Music through your own subscription. Your library, account, and billing
+              Hairpin plays Apple Music through your own subscription. Your library, account, and billing
               stay with Apple Music.
             </Text>
             <TouchableOpacity onPress={() => updateSettings({ musicSource: null })} style={{ alignSelf: "center", marginTop: 10 }} testID="switch-source-apple">

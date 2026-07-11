@@ -51,7 +51,7 @@ export default function LocationServicesPage() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.statusTitle}>Location Access</Text>
-            <Text style={styles.statusSub}>How Convoy can use your location</Text>
+            <Text style={styles.statusSub}>How Hairpin can use your location</Text>
           </View>
           <Text style={[styles.statusValue, { color: status.color }]}>{status.text}</Text>
         </View>
@@ -69,7 +69,7 @@ export default function LocationServicesPage() {
       )}
 
       <HelpText>
-        Convoy needs location to show your car on the convoy map, navigate turn-by-turn, and keep the CarPlay map live while you drive. iOS controls the actual permission — use “Open in iOS Settings” to switch between While Using and Always, or to turn on Precise Location.
+        Hairpin needs location to show your car on the convoy map, navigate turn-by-turn, and keep the CarPlay map live while you drive. iOS controls the actual permission — use “Open in iOS Settings” to switch between While Using and Always, or to turn on Precise Location.
       </HelpText>
       <HelpText>
         Set “Always” so the CarPlay map keeps tracking when your phone is locked in your pocket. Choose who can see you on the map under Visibility &amp; Comms → Avatar Live.

@@ -33,7 +33,7 @@ export default function SettingsMenu() {
   const routeColor = getRouteColor(settings);
 
   const sendFeedback = useCallback(() => {
-    const url = "mailto:support@convoy.app?subject=Convoy%20Feedback";
+    const url = "mailto:support@convoy.app?subject=Hairpin%20Feedback";
     Linking.openURL(url).catch(() =>
       Alert.alert("Couldn't open Mail", "Email us at support@convoy.app")
     );
@@ -73,7 +73,7 @@ export default function SettingsMenu() {
       // "You're up to date" and returned, killing the escape hatch. Apply the
       // pending update instead.
       if (pendingUpdate) {
-        Alert.alert("Update ready", "The latest update is already downloaded. Restart Convoy now to apply it?", [
+        Alert.alert("Update ready", "The latest update is already downloaded. Restart Hairpin now to apply it?", [
           { text: "Later", style: "cancel" },
           { text: "Restart now", onPress: () => { void Updates.reloadAsync(); } },
         ]);
@@ -85,7 +85,7 @@ export default function SettingsMenu() {
         return;
       }
       await Updates.fetchUpdateAsync();
-      Alert.alert("Update downloaded", "Reload Convoy now to apply the latest version?", [
+      Alert.alert("Update downloaded", "Reload Hairpin now to apply the latest version?", [
         { text: "Later", style: "cancel" },
         { text: "Reload now", onPress: () => { void Updates.reloadAsync(); } },
       ]);
@@ -97,7 +97,7 @@ export default function SettingsMenu() {
   }, [updating, pendingUpdate, running.isEmbeddedLaunch, otaShort, otaWhen]);
 
   const confirmSignOut = useCallback(() => {
-    Alert.alert("Sign out", "Sign out of Convoy on this device?", [
+    Alert.alert("Sign out", "Sign out of Hairpin on this device?", [
       { text: "Cancel", style: "cancel" },
       { text: "Sign out", style: "destructive", onPress: () => { void logout(); } },
     ]);
@@ -161,7 +161,7 @@ export default function SettingsMenu() {
       {/* COMMUNITY */}
       <SectionLabel>COMMUNITY</SectionLabel>
       <SettingsCard>
-        <MenuRow icon="ribbon" iconColor="#2DEC86" title="Convoy Community" subtitle="Report highlighting & alert sound" onPress={() => go("/(app)/settings/community")} />
+        <MenuRow icon="ribbon" iconColor="#2DEC86" title="Hairpin Community" subtitle="Report highlighting & alert sound" onPress={() => go("/(app)/settings/community")} />
       </SettingsCard>
 
       {/* PRIVACY */}

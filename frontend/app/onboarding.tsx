@@ -71,7 +71,7 @@ export default function Onboarding() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <Text style={styles.logo}>CONVOY</Text>
+        <Text style={styles.logo}>HAIRPIN</Text>
         <TouchableOpacity onPress={finish}>
           <Text style={styles.skip}>Skip</Text>
         </TouchableOpacity>

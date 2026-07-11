@@ -98,7 +98,7 @@ export default function Signup() {
             style={styles.logo}
             resizeMode="contain"
           />
-          <Text style={styles.title}>Join Convoy</Text>
+          <Text style={styles.title}>Join Hairpin</Text>
           <Text style={styles.tag}>Set up your driver profile</Text>
         </View>
 

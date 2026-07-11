@@ -268,12 +268,12 @@ export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v9.glb");
 export const ARROW_MODEL_ID = "convoyArrow10"; // bundled-asset registration — fresh id per geometry change.
 export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forward). The car needs +90 (it exports sideways); a +Y arrow needs 0.
 // Lean applied via modelRotation X (NOT baked into the mesh). DIRECTION (sim ground
-// truth, corrected): HIGHER = nose tips forward-DOWN toward the road; LOWER = nose
-// rears UP toward the sky. (52° read as nose-up ~45°; 30° was nearly vertical.) 75°
-// puts the nose in the Waze diving-forward posture with the top face still toward
-// the driver; 85° starts lying too flat. Sim-verified sweep 30/52/75/85 in the iOS
-// sim against the real @rnmapbox render at nav pitch. OTA-tunable.
-export const ARROW_MODEL_PITCH = 75;
+// truth): HIGHER = nose tips forward-DOWN toward the road; LOWER = nose rears UP
+// toward the sky. (52° read as nose-up ~45°; 30° nearly vertical; 75° Waze
+// diving-forward.) 90° lays the arrow FLAT — parallel with the ground, a chevron
+// lying on the road pointing forward, 3D bevel still readable. Sim-verified sweep
+// 30/52/75/85/90 in the iOS sim against the real @rnmapbox render. OTA-tunable.
+export const ARROW_MODEL_PITCH = 90;
 // v9 max extent ≈1.34 — 1.9 keeps the on-screen presence tuned for v6/v8. OTA-tunable.
 export const ARROW_MODEL_SCALE: any = carModelScale(1.9);
 // Self-illumination for the 3D car per light preset. ALL modes now render the

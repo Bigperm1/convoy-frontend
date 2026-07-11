@@ -112,6 +112,13 @@ const DEFAULT_MODE = 'dusk';
 // DEAD event on iOS — so we trust a POSITIVE paint signal (onDidFinishRenderingFrameFully)
 // and treat its absence as failure, rather than waiting for an error that never comes.
 const PAINT_WATCHDOG_MS = 6000;
+// Route-snap heading gate (Phase 1 road-snap) — mirrors the phone (ConvoyMapbox). In
+// addition to the ≤60 m distance test, the route bearing must be within tolerance of the
+// travel heading, so a turn onto a parallel/cross street un-snaps the car to raw GPS.
+// Hysteresis (lock 45° / release 60°) avoids flicker; skipped below ~walking speed.
+const CAR_SNAP_HDG_LOCK = 45;
+const CAR_SNAP_HDG_UNLOCK = 60;
+const CAR_SNAP_MOVING_MS = 1.5;
 
 type Props = {
   // Called when the GL map fails or never paints on the CarPlay window, so the
@@ -199,6 +206,8 @@ export default function CarMapView({ onGLError }: Props) {
   const camHdgRef = useRef(hdg);
   if (typeof s.heading === 'number') camHdgRef.current = s.heading;
   const followHeadingDeg = camHdgRef.current;
+  // Hysteresis latch for the route-snap heading gate (see carSnapped below).
+  const carSnapHdgOkRef = useRef(true);
 
   // Seed the FIRST rendered frame at the driver's location so the GL map never
   // paints the world/default view before the lockstep snap lands — that's the
@@ -313,7 +322,18 @@ export default function CarMapView({ onGLError }: Props) {
   // matching the phone — stops the low-speed position drift + heading spin. Steer the
   // camera by the SAME bearing (getCam reads camHdgRef live) so the map doesn't rotate
   // around a locked car. Off-route (> 60 m) → real GPS so you can see you've left the route.
-  const carSnapped = routeProj != null && routeProj.distM <= 60;
+  // Distance snap + heading gate (mirror the phone). Uses RAW s.heading for the gate (NOT
+  // camHdgRef, which is set to the route bearing when snapped → would be circular). Reroute
+  // detection lives on the phone off raw GPS, so this display-only un-snap can't affect it.
+  const _carDistSnap = routeProj != null && routeProj.distM <= 60;
+  const _carTravelHdg = typeof s.heading === 'number' ? s.heading : null;
+  let _carHdgOk = true;
+  if (_carDistSnap && _carTravelHdg != null && (s.speedMs || 0) >= CAR_SNAP_MOVING_MS) {
+    const _hd = Math.abs(((((_carTravelHdg - routeProj!.bearing) % 360) + 540) % 360) - 180);
+    _carHdgOk = carSnapHdgOkRef.current ? _hd <= CAR_SNAP_HDG_UNLOCK : _hd <= CAR_SNAP_HDG_LOCK;
+  }
+  carSnapHdgOkRef.current = _carDistSnap ? _carHdgOk : true;
+  const carSnapped = _carDistSnap && _carHdgOk;
   const drawLat = carSnapped ? routeProj!.lat : lat;
   const drawLng = carSnapped ? routeProj!.lng : lng;
   const drawHdg = carSnapped ? routeProj!.bearing : hdg;

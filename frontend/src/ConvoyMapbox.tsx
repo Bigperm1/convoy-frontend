@@ -1167,6 +1167,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Smoothed, speed-gated map bearing we feed the follow camera (anti-wobble +
   // anti-spin). null until the first GPS heading seeds it.
   const camHeadingRef = useRef<number | null>(null);
+  // Hysteresis latch for the route-snap heading gate (see selfSnapped below): holds the
+  // last gate decision so the snap locks in at 45° but only releases past 60°, preventing
+  // flicker when the travel heading hovers near the boundary.
+  const snapHdgOkRef = useRef(true);
   // Last-known GPS spot, read ONCE at mount (synchronous; hydrated with settings).
   // Lets the camera's first paint frame the driver's last location instead of
   // flying in from the world view while we wait on the first GPS fix.
@@ -1627,7 +1631,27 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // off-route. SelfCarModel interpolates, so the snap eases in smoothly. (Widened
   // 45 → 60 m so a car a couple lanes off a parallel street still locks to the line.)
   const SELF_SNAP_M = 60;
-  const selfSnapped = navigationActive && routeProj != null && routeProj.distM <= SELF_SNAP_M;
+  // Heading gate (Phase 1 road-snap): in ADDITION to the ≤60 m distance test, require the
+  // route's local bearing to be within tolerance of the driver's travel heading — so turning
+  // onto a parallel / frontage / cross street un-snaps the marker to raw GPS instead of
+  // staying glued to the route line (which read as "still on route" after a wrong turn).
+  // Hysteresis: locks in at ≤45°, only releases past 60°, so it doesn't flicker at the edge.
+  // Skipped below ~walking speed (a stopped car keeps the distance-only snap — its held
+  // heading may be stale). DISPLAY-ONLY: reroute/off-route detection reads RAW GPS (nav.ts),
+  // never this, so un-snapping here cannot mask a deviation — it just stops mis-showing one.
+  const SELF_SNAP_HDG_LOCK = 45;
+  const SELF_SNAP_HDG_UNLOCK = 60;
+  const SELF_SNAP_MOVING_MS = 1.5; // ~5.4 km/h
+  const _distSnap = navigationActive && routeProj != null && routeProj.distM <= SELF_SNAP_M;
+  const _travelHdg = camHeadingRef.current != null ? camHeadingRef.current : (selfCar?.heading ?? null);
+  let _hdgOk = true;
+  if (_distSnap && _travelHdg != null && (userSpeedMs ?? 0) >= SELF_SNAP_MOVING_MS) {
+    // Absolute shortest-arc angle between travel heading and the route segment bearing.
+    const _hd = Math.abs(((((_travelHdg - routeProj!.bearing) % 360) + 540) % 360) - 180);
+    _hdgOk = snapHdgOkRef.current ? _hd <= SELF_SNAP_HDG_UNLOCK : _hd <= SELF_SNAP_HDG_LOCK;
+  }
+  snapHdgOkRef.current = _distSnap ? _hdgOk : true; // reset the latch when not distance-snapped
+  const selfSnapped = _distSnap && _hdgOk;
   const selfDraw = selfSnapped
     ? { lat: routeProj!.lat, lng: routeProj!.lng }
     : (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null);

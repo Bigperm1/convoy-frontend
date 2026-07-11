@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Platform, AppState } from "react-native";
 import { api } from "./api";
 import { fetchMapboxRoutes, fetchMapboxRouteVia, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
-import { getSettings, getNovaVoice } from "./settings";
+import { getSettings, getNovaVoice, getAudioVol } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
 import { isOnCall } from "./callState";
@@ -1001,6 +1001,7 @@ async function _playClip(b64: string, mime: string): Promise<void> {
         const audio = new Audio(`data:${mime};base64,${b64}`);
         audio.playbackRate = NAV_TTS_RATE;
         (audio as any).preservesPitch = true;
+        audio.volume = getAudioVol(getSettings(), "volVoice");
         audio.onended = () => resolve();
         audio.onerror = () => resolve();
         audio.play().catch(() => resolve());
@@ -1039,7 +1040,8 @@ async function _playClip(b64: string, mime: string): Promise<void> {
       // volume control — it's a hard pause), so this fades NOVA's voice; external
       // apps (Spotify/podcasts) are already ramped by iOS's duck session.
       const onCall = isOnCall();
-      const target = onCall ? 0.22 : 1.0;
+      // Tester-tunable Voice level (Settings → Audio) scales the whole fade envelope.
+      const target = (onCall ? 0.22 : 1.0) * getAudioVol(getSettings(), "volVoice");
       const startV = Math.min(target, 0.05);     // ease in from near-silent
       const FADE_IN_MS = 180, FADE_OUT_MS = 240, STEPS = 4;
       Audio.Sound.createAsync({ uri: path }, { shouldPlay: true, rate: NAV_TTS_RATE, shouldCorrectPitch: true, volume: startV })

@@ -12,6 +12,7 @@ import LogoMenu from '../../src/components/LogoMenu';
 import CommsHoldGlow from '../../src/components/CommsHoldGlow';
 import { GlassFill } from '../../src/Glass';
 import GlassBackdrop from '../../src/components/GlassBackdrop';
+import { getSettings, getAudioVol } from '../../src/settings';
 import { shareInbox } from '../../src/shareInbox';
 import { api } from '../../src/api';
 import { useAuth } from '../../src/auth';
@@ -475,7 +476,7 @@ export default function TalkScreen() {
       const uri = `data:audio/mp4;base64,${m.audio_b64}`;
       const { sound } = await Audio.Sound.createAsync(
         { uri },
-        { shouldPlay: true, volume: 1.0 },
+        { shouldPlay: true, volume: getAudioVol(getSettings(), "volTransmission") },
         (status: any) => {
           if (status?.didJustFinish) {
             sound.unloadAsync().catch(() => {});

@@ -114,8 +114,28 @@ carYear?: string;
 carMake?: string;
 carModel?: string;
 carColor?: string;
+// How the driver is DRAWN on the convoy map — separate from avatarMode, which is
+// privacy/visibility (whether you appear at all). 'car' = the 3D GRC model (default),
+// 'arrow' = a 3D green arrow, 'photo' = a circular uploaded profile photo. undefined
+// → 'car' via getSelfMarkerType(). Mirrored to the backend profile (avatar_type) +
+// presence so peers render you the same way you chose in the Garage.
+selfMarkerType?: 'car' | 'arrow' | 'photo';
+// Hosted profile-photo URL (Supabase Storage) used when selfMarkerType==='photo'.
+// Also shown in rosters and "drive with a friend" search. Mirrored to the backend
+// profile (avatar_url) + presence (small URL only — never the image bytes).
+avatarUrl?: string;
 topSpeed?: number;
 callSign?: string;
+// ── Audio calibration (TEMP: tester tuning to find good default levels) ───────
+// Per-source output volume multipliers, 0..1 (1 = full). Applied where each sound
+// actually plays. Music (Apple Music / Spotify) has NO field — iOS gives no volume
+// API for external players, so it's shown as a fixed 100% reference only and the
+// others are tuned relative to it. Default (undefined → 1 via getAudioVol) means
+// nothing changes until a tester moves a slider. See app/(app)/settings/audio.tsx.
+volVoice?: number;        // Scout / nav / agentic TTS
+volDings?: number;        // alerts & dings (speed ding, alert sound)
+volComms?: number;        // live push-to-talk voice
+volTransmission?: number; // incoming transmission tone / cue
 // Which music source the user picked in the Music tab ('apple' | 'spotify').
 // null = not chosen yet → show the source-picker connect screen.
 musicSource?: 'apple' | 'spotify' | null;
@@ -178,8 +198,14 @@ carYear: undefined,
 carMake: undefined,
 carModel: undefined,
 carColor: undefined,
+selfMarkerType: undefined,
+avatarUrl: undefined,
 topSpeed: undefined,
 callSign: undefined,
+volVoice: undefined,
+volDings: undefined,
+volComms: undefined,
+volTransmission: undefined,
 musicSource: null,
 debugOverlays: false,
 carplayDebug: false,
@@ -247,6 +273,25 @@ export function getAvatarMode(s: Settings): AvatarMode {
 // (full/partial → true, ghost → false) so any older reader still behaves.
 export async function setAvatarMode(mode: AvatarMode): Promise<Settings> {
   return updateSettings({ avatarMode: mode, avatarLive: mode !== "ghost" });
+}
+
+// ---- Self-marker appearance (source of truth = settings.selfMarkerType) ----
+// How the driver is DRAWN on the map: 'car' (3D GRC model, default), 'arrow' (3D
+// green arrow), or 'photo' (circular profile photo). Default-safe accessor — an
+// install stored before this field existed reads as 'car'. Separate from
+// getAvatarMode() (privacy/visibility). A 'photo' choice with no avatarUrl yet
+// still falls back to the car at the render layer.
+export function getSelfMarkerType(s: Settings): 'car' | 'arrow' | 'photo' {
+  return s.selfMarkerType ?? 'car';
+}
+
+// ---- Per-source audio volume (0..1), for the tester-calibration Audio screen ----
+// Defaults to 1 (full) when a source hasn't been tuned. Clamped defensively. Read
+// at each playback site (Scout TTS, dings, comms, transmission) to scale volume.
+export type AudioVolKey = 'volVoice' | 'volDings' | 'volComms' | 'volTransmission';
+export function getAudioVol(s: Settings = cached, key: AudioVolKey): number {
+  const v = s?.[key];
+  return typeof v === 'number' ? Math.max(0, Math.min(1, v)) : 1;
 }
 
 let cached: Settings = { ...DEFAULT_SETTINGS };

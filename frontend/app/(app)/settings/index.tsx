@@ -127,6 +127,12 @@ export default function SettingsMenu() {
         <MenuRow icon="volume-high" iconColor="#BF5AF2" title="Scout Voice" value={scoutVal} subtitle="Greeting, speed & mid-drive callouts" onPress={() => go("/(app)/settings/scout-voice")} />
       </SettingsCard>
 
+      {/* AUDIO — tester calibration for per-source output levels */}
+      <SectionLabel>AUDIO</SectionLabel>
+      <SettingsCard>
+        <MenuRow icon="options" iconColor="#FF9F0A" title="Audio Levels" subtitle="Tune Scout, dings & comms volume" onPress={() => go("/(app)/settings/audio")} />
+      </SettingsCard>
+
       {/* COMMUNITY */}
       <SectionLabel>COMMUNITY</SectionLabel>
       <SettingsCard>

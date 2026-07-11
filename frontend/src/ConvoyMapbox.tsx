@@ -101,6 +101,9 @@ interface ConvoyMapboxProps {
   center?: { lat: number; lng: number; heading?: number } | null;
   user?: UserLocation | null;
   hideSelfMarker?: boolean;
+  // How the driver draws THEMSELVES on the map: 'car' (3D GRC model, default) or
+  // 'arrow' (3D green arrow). ('photo' is parked.) Mirrors settings.selfMarkerType.
+  selfMarkerType?: "car" | "arrow" | "photo";
   mapView?: "heading_up" | "north_up";
   // Base-map mode — drives the Mapbox style + light preset directly. mapType/
   // mapDark are still accepted (shared MapEngine props) but unused by this engine.
@@ -240,6 +243,17 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 // so we rotate it +90 to point along the direction of travel. If after this the car points exactly
 // BACKWARDS, flip to 270; if it's still sideways the other way, that means -90 didn't apply — but 90/270
 // are the two real candidates (the model is a constant 90° off, not a sign error).
+
+// ── Green arrow avatar (selfMarkerType === 'arrow') ──────────────────────────
+// The user can choose a 3D green arrow instead of their car (Garage → Map Appearance).
+// Hosted on the Hairpin marketing CDN so it loads OTA, exactly like the car GLBs
+// (ModelLayer + a remote model URL — no native change). The arrow GLB is modelled
+// pointing +Y (north/forward), so it needs NO heading offset. Scale is a first-pass
+// guess (the arrow mesh is ~23× a car-GLB unit) — tune on-device.
+export const GREEN_ARROW_MODEL_URL = "https://hairpin-site.pages.dev/green-arrow.glb";
+export const ARROW_MODEL_ID = "convoyArrow";
+export const ARROW_MODEL_HEADING_OFFSET = 0; // GLB already points forward; flip to 180 if it points backwards.
+export const ARROW_MODEL_SCALE: any = carModelScale(0.045); // ~1/23 of the car curve. Tune on-device.
 // Self-illumination for the 3D car per light preset. Dawn + night are dim, so
 // the tinted paint renders near-black with only scene light — lift those so the
 // color shows. Bright presets (day/dusk/satellite) already light it, so keep 0
@@ -566,11 +580,14 @@ type PlacePoint = { id: string; lat: number; lng: number; label: string; price?:
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, scale, modelId = "convoyCar" }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Mapbox model id this layer renders. Color-specific (e.g. "convoyCar_grc_heavy_metal")
   // so a car-color change swaps the 3D model live. Default keeps the legacy fixed id.
   modelId?: string;
+  // Degrees added to world heading for THIS model's forward axis. Cars default to
+  // CAR_MODEL_HEADING_OFFSET (90 — the car GLB faces sideways); the green arrow passes 0.
+  headingOffset?: number;
   // LOCKSTEP camera (optional): when all three are passed, SelfCarModel drives the
   // camera from the SAME 60fps tween that eases the car, so camera-center == car-pose
   // every frame and the car is pinned to a fixed screen spot (map rotates around it).
@@ -778,7 +795,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           modelTranslation: [0, 0, 10],
           modelEmissiveStrength: emissive,
           modelScale: scale ?? CAR_MODEL_SCALE_SIZED,
-          modelRotation: [0, 0, (r.heading ?? 0) + CAR_MODEL_HEADING_OFFSET],
+          modelRotation: [0, 0, (r.heading ?? 0) + headingOffset],
           modelCastShadows: false,
           modelReceiveShadows: false,
         }}
@@ -924,7 +941,7 @@ function DestWeatherMarker({ lat, lng, weather }: { lat: number; lng: number; we
 
 function ConvoyMapbox(props: ConvoyMapboxProps) {
   const {
-    center, user, peers, hideSelfMarker, mapView = "heading_up",
+    center, user, peers, hideSelfMarker, selfMarkerType = "car", mapView = "heading_up",
     mapMode = "satellite", leaderUserId, show3dBuildings = true,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
     routeColor = DEFAULT_ROUTE_COLOR,
@@ -1304,11 +1321,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // PNG; peers stay PNG MarkerViews. Pulled out here so the model layer below has
   // its live coordinate + heading.
   const selfCar = cars.find((c) => c.id === SELF_ID);
+  // 'arrow' appearance → the green arrow GLB instead of the car; else the per-color
+  // car model. (Both render through the same SelfCarModel ModelLayer below.)
+  const selfIsArrow = selfMarkerType === "arrow";
   // Per-color baked 3D model URL → the user's chosen GRC paint (body-only paint; 5 colors from one render).
-  const selfModelUrl = getVehicleModelUrl(selfCar?.color);
+  const selfModelUrl = selfIsArrow ? GREEN_ARROW_MODEL_URL : getVehicleModelUrl(selfCar?.color);
   // Color-specific model id so changing the car color swaps the model LIVE (Mapbox
   // caches a model by id — a fixed id won't reload a new .glb until remount).
-  const selfModelId = "convoyCar_" + getVehicleModelKey(selfCar?.color);
+  const selfModelId = selfIsArrow ? ARROW_MODEL_ID : "convoyCar_" + getVehicleModelKey(selfCar?.color);
   // Lift the paint out of the dark on the dim light presets (dawn/night).
   const selfEmissive = CAR_EMISSIVE_BY_MODE[mapMode] ?? 0;
 
@@ -1721,6 +1741,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             heading={selfHeadingLocked}
             emissive={selfEmissive}
             modelId={selfModelId}
+            scale={selfIsArrow ? ARROW_MODEL_SCALE : undefined}
+            headingOffset={selfIsArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
             cameraRef={cameraRef}
             getCam={getCam}
             readyRef={lockReadyRef}

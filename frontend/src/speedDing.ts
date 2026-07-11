@@ -15,6 +15,7 @@
 import { Platform } from "react-native";
 import { setIdleAudioMode } from "./audioMode";
 import { isAudioBusy } from "./nav";
+import { getSettings, getAudioVol } from "./settings";
 
 // 16 kHz mono 16-bit WAV, ~480 ms — SOFT, mellow LOW descending two-note
 // "doo-dun": a warm E4 (330 Hz) dropping a perfect fourth to B3 (247 Hz), near-
@@ -44,7 +45,7 @@ async function playOnceNative(): Promise<void> {
     const { Audio }: any = await import("expo-av");
     const uri = await ensureNativeFile();
     if (!uri) return;
-    const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true, volume: 1.0 });
+    const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true, volume: getAudioVol(getSettings(), "volDings") });
     sound.setOnPlaybackStatusUpdate((st: any) => {
       if (!st?.isLoaded || st?.didJustFinish) {
         sound.unloadAsync().catch(() => {});
@@ -57,6 +58,7 @@ function playOnceWeb(): Promise<void> {
   return new Promise((resolve) => {
     try {
       const a = new Audio(`data:${DING_MIME};base64,${DING_WAV_B64}`);
+      a.volume = getAudioVol(getSettings(), "volDings");
       a.onended = () => resolve();
       a.onerror = () => resolve();
       a.play().catch(() => resolve());

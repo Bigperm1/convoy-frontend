@@ -15,6 +15,7 @@
 import { Audio } from "expo-av";
 import { api } from "./api";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
+import { getSettings, getAudioVol } from "./settings";
 
 export type NovaVoice = { id: string; label: string; blurb: string };
 
@@ -68,7 +69,7 @@ export async function previewNovaVoice(voiceId: string): Promise<void> {
     await setPlaybackAudioMode(); // duck music + ensure audible in silent mode
     const { sound } = await Audio.Sound.createAsync(
       { uri: `data:${clip.mime};base64,${clip.b64}` },
-      { shouldPlay: true },
+      { shouldPlay: true, volume: getAudioVol(getSettings(), "volVoice") },
     );
     if (myToken !== _token) { try { await sound.unloadAsync(); } catch {} void setIdleAudioMode(); return; }
     _sound = sound;

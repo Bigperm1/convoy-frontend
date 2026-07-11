@@ -19,7 +19,7 @@ import { Platform } from "react-native";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
 import { api, getToken, wsUrl } from "./api";
-import { getSettings } from "./settings";
+import { getSettings, getAudioVol } from "./settings";
 import { hailBus } from "./hailBus";
 import { shareBus } from "./shareBus";
 import { setIdleAudioMode, setPlaybackAudioMode } from "./audioMode";
@@ -147,11 +147,12 @@ async function playOne(m: PTTMessage) {
       }
       uri = path;
     }
+    // Full by default; tester-tunable via Settings → Audio (Comms). Without this,
+    // expo-av defaults to ~0.5 which sounded like "the earpiece is half-busted".
+    const commsVol = getAudioVol(getSettings(), "volComms");
     const { sound } = await Audio.Sound.createAsync(
       { uri },
-      // volume: 1.0 = max. Without this, expo-av defaults to ~0.5 which
-      // sounded like "the earpiece is half-busted" on real devices.
-      { shouldPlay: true, volume: 1.0 },
+      { shouldPlay: true, volume: commsVol },
       (status: any) => {
         if (status?.didJustFinish) {
           sound.unloadAsync().catch(() => {});
@@ -163,7 +164,7 @@ async function playOne(m: PTTMessage) {
     );
     // Defensive — set volume after load too in case the constructor ignored it
     // on a particular platform (web Safari has been seen to clamp this).
-    try { await sound.setVolumeAsync(1.0); } catch {}
+    try { await sound.setVolumeAsync(commsVol); } catch {}
     activeSound = sound;
   } catch {
     // Swallow playback errors so a single bad clip doesn't permanently jam the

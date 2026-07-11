@@ -2,13 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ImageBackground, SafeAreaView, Dimensions, TextInput, LayoutAnimation,
-  Platform, UIManager,
+  Platform, UIManager, Image, ActivityIndicator, Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { getSettings, updateSettings } from '../../src/settings';
+import { getSettings, updateSettings, getSelfMarkerType } from '../../src/settings';
 import { useAuth } from '../../src/auth';
 import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
@@ -19,6 +20,11 @@ import { YEARS, getMakeNames, getModelsForMake, getColorsForModel } from '../../
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const YELLOW = '#2DEC86';
+
+// Photo avatars are parked until the backend upload endpoint + Supabase Storage
+// exist (they need server-side work). Flip to true to re-enable the Photo option;
+// the picker/upload code below is already wired for it.
+const PHOTO_AVATAR_ENABLED = false;
 
 // Enable LayoutAnimation on Android for the smooth dropdown expand/collapse.
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -117,6 +123,10 @@ export default function GarageScreen() {
   const [color, setColor] = useState('');
   const [topSpeed, setTopSpeed] = useState<number | null>(null);
   const [callSign, setCallSign] = useState('');
+  // How the driver appears on the convoy map: 3D car / 3D green arrow / profile photo.
+  const [markerType, setMarkerType] = useState<'car' | 'arrow' | 'photo'>('car');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   // Which dropdown is currently expanded ('year' | 'make' | 'model' | 'color' | null).
   // Only one open at a time keeps the screen tidy.
@@ -151,6 +161,14 @@ export default function GarageScreen() {
     else if (user?.top_speed_record) setTopSpeed(user.top_speed_record);
     if (s.callSign) setCallSign(s.callSign);
     else if (user?.handle) setCallSign(user.handle);
+    // Appearance: local settings first, backend profile as fallback.
+    setMarkerType(getSelfMarkerType(s));
+    if (s.avatarUrl) setAvatarUrl(s.avatarUrl);
+    else if ((user as any)?.avatar_url) setAvatarUrl((user as any).avatar_url);
+    if (!s.selfMarkerType && (user as any)?.avatar_type) {
+      setMarkerType((user as any).avatar_type);
+      updateSettings({ selfMarkerType: (user as any).avatar_type });
+    }
 
     // If local was empty but the profile had the car, persist it locally so the
     // rest of the app (map self-marker, presence) picks it up immediately too.
@@ -214,6 +232,60 @@ export default function GarageScreen() {
 
   // Color selection drives the hero image; collapse after pick.
   const handleColor = (v: string) => { setColor(v); save({ carColor: v }); setOpenField(null); };
+
+  // ---- Appearance (how you're drawn on the map: car / arrow / photo) ----
+  // Persist the choice locally AND to the backend profile (avatar_type) so peers,
+  // /users/nearby and the live /location broadcast all render you the same way —
+  // exactly like carColor is mirrored above.
+  const applyMarkerType = useCallback((type: 'car' | 'arrow' | 'photo') => {
+    Haptics.selectionAsync();
+    setMarkerType(type);
+    updateSettings({ selfMarkerType: type });
+    api.put('/auth/profile', { avatar_type: type }).catch(() => {});
+  }, []);
+
+  // Photo mode: pick a square photo → send as base64 to the backend, which stores
+  // it (Supabase Storage) and returns a hosted avatar_url. Same base64→profile
+  // pattern the community logo/cover uploads already use.
+  const pickAndUploadAvatar = useCallback(async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== 'granted') {
+        return Alert.alert('Photo access needed', 'Allow photo access to set a profile picture.');
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true, aspect: [1, 1], quality: 0.6, base64: true,
+      });
+      if (res.canceled || !res.assets?.[0]?.base64) return;
+      const asset = res.assets[0];
+      const mime = asset.mimeType || 'image/jpeg';
+      const dataUri = `data:${mime};base64,${asset.base64}`;
+      setUploadingAvatar(true);
+      // Backend uploads to Supabase Storage and returns { avatar_url }.
+      const r = await api.put('/auth/profile', { avatar_b64: dataUri, avatar_type: 'photo' });
+      const url: string | undefined = r?.data?.avatar_url || r?.data?.user?.avatar_url;
+      if (url) {
+        setAvatarUrl(url);
+        setMarkerType('photo');
+        await updateSettings({ selfMarkerType: 'photo', avatarUrl: url });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        Alert.alert('Upload failed', 'Could not save your photo. Please try again.');
+      }
+    } catch {
+      Alert.alert('Upload failed', 'Could not upload your photo. Please try again.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }, []);
+
+  // Tap an appearance option. Photo: if we don't have a picture yet, open the
+  // picker; otherwise just switch back to the saved photo.
+  const handleAppearance = (type: 'car' | 'arrow' | 'photo') => {
+    if (type === 'photo' && !avatarUrl) { pickAndUploadAvatar(); return; }
+    applyMarkerType(type);
+  };
 
   // Explicit Save — selections already auto-save, but this confirms + persists
   // the call sign and gives clear feedback before returning.
@@ -322,6 +394,54 @@ export default function GarageScreen() {
               returnKeyType="done"
             />
           </View>
+        </View>
+
+        {/* Map Appearance — how you're drawn on the live convoy map */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Map Appearance</Text>
+          <View style={styles.apRow}>
+            <TouchableOpacity
+              style={[styles.apCard, markerType === 'car' && styles.apCardSel]}
+              activeOpacity={0.85}
+              onPress={() => handleAppearance('car')}
+            >
+              <Ionicons name="car-sport" size={25} color={markerType === 'car' ? '#000' : YELLOW} />
+              <Text style={[styles.apLabel, markerType === 'car' && styles.apLabelSel]}>3D Car</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.apCard, markerType === 'arrow' && styles.apCardSel]}
+              activeOpacity={0.85}
+              onPress={() => handleAppearance('arrow')}
+            >
+              <Ionicons name="navigate" size={25} color={markerType === 'arrow' ? '#000' : YELLOW} />
+              <Text style={[styles.apLabel, markerType === 'arrow' && styles.apLabelSel]}>Arrow</Text>
+            </TouchableOpacity>
+
+            {PHOTO_AVATAR_ENABLED ? (
+              <TouchableOpacity
+                style={[styles.apCard, markerType === 'photo' && styles.apCardSel]}
+                activeOpacity={0.85}
+                onPress={() => handleAppearance('photo')}
+                disabled={uploadingAvatar}
+              >
+                {uploadingAvatar ? (
+                  <ActivityIndicator color={markerType === 'photo' ? '#000' : YELLOW} />
+                ) : avatarUrl ? (
+                  <Image source={{ uri: avatarUrl }} style={styles.apPhoto} />
+                ) : (
+                  <Ionicons name="person-circle" size={26} color={markerType === 'photo' ? '#000' : YELLOW} />
+                )}
+                <Text style={[styles.apLabel, markerType === 'photo' && styles.apLabelSel]}>Photo</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          {PHOTO_AVATAR_ENABLED && markerType === 'photo' && avatarUrl ? (
+            <TouchableOpacity onPress={pickAndUploadAvatar} style={styles.apChange} activeOpacity={0.7}>
+              <Ionicons name="camera-outline" size={15} color={YELLOW} />
+              <Text style={styles.apChangeText}>Change photo</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         {/* Dropdowns */}
@@ -433,6 +553,16 @@ const styles = StyleSheet.create({
 
   // Call sign input
   callSignInput:      { flex: 1, color: '#F4F4F4', fontSize: 17, fontWeight: '600', paddingVertical: 14 },
+
+  // Map appearance selector (3D car / arrow / photo)
+  apRow:              { flexDirection: 'row', gap: 10 },
+  apCard:             { flex: 1, height: 86, borderRadius: 16, borderWidth: 1, borderColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  apCardSel:          { backgroundColor: YELLOW, borderColor: YELLOW },
+  apLabel:            { color: '#808080', fontSize: 13, fontWeight: '600' },
+  apLabelSel:         { color: '#000', fontWeight: '800' },
+  apPhoto:            { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: 'rgba(0,0,0,0.25)' },
+  apChange:           { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 8, paddingVertical: 4 },
+  apChangeText:       { color: YELLOW, fontSize: 13, fontWeight: '600' },
 
   // Save button
   saveBtn:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginHorizontal: 16, marginTop: 8, height: 52, borderRadius: 16, backgroundColor: YELLOW },

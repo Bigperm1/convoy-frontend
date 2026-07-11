@@ -16,7 +16,7 @@
 import { Platform, AppState } from "react-native";
 import { Audio } from "expo-av";
 import { api } from "./api";
-import { getNovaVoice } from "./settings";
+import { getNovaVoice, getSettings, getAudioVol } from "./settings";
 import { isAudioBusy } from "./nav";
 import { setPlaybackAudioMode, setRecordingAudioMode, setIdleAudioMode } from "./audioMode";
 import { getPttRecordingOptions } from "./proximityAudio";
@@ -110,13 +110,14 @@ async function speakAndWait(text: string): Promise<void> {
     const { data } = await api.post("/tts", { text, voice: getNovaVoice() });
     const b64 = data?.audio_b64;
     if (!b64) return;
+    // volume — expo-av defaults to ~0.5, which made Scout sound faint next to the
+    // nav callouts. Full by default; tester-tunable via Settings → Audio (Voice).
+    const vVol = getAudioVol(getSettings(), "volVoice");
     const { sound } = await Audio.Sound.createAsync(
       { uri: `data:${data?.mime || "audio/mp3"};base64,${b64}` },
-      // volume:1.0 — expo-av defaults to ~0.5, which made Scout sound faint next
-      // to the nav callouts (nav.ts sets 1.0 for the same reason). Max it out.
-      { shouldPlay: true, volume: 1.0 },
+      { shouldPlay: true, volume: vVol },
     );
-    try { await sound.setVolumeAsync(1.0); } catch {}
+    try { await sound.setVolumeAsync(vVol); } catch {}
     await new Promise<void>((resolve) => {
       let done = false;
       const finish = () => { if (done) return; done = true; sound.unloadAsync().catch(() => {}); resolve(); };

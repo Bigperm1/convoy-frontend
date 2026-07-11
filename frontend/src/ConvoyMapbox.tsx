@@ -618,6 +618,29 @@ export function projectOntoRoute(pLat: number, pLng: number, coords: { latitude:
   return { frac: bestArc / acc, lat: invLat(bestY), lng: invLng(bestX), distM: Math.sqrt(bestD2), totalM: acc, bearing };
 }
 
+// Initial compass bearing (0..360) of a decoded route polyline — from its start toward the
+// first point ~ROUTE_START_BEARING_M ahead, so a tiny/noisy first segment doesn't skew it.
+// Used to orient the heading-up camera "route-ahead" when guidance starts from a standstill
+// (no GPS course at 0 mph). Equirectangular meters are plenty accurate over this short span.
+const ROUTE_START_BEARING_M = 30;
+export function routeInitialBearing(line: { latitude: number; longitude: number }[]): number | null {
+  if (!line || line.length < 2) return null;
+  const a = line[0];
+  const cosLat = Math.cos((a.latitude * Math.PI) / 180);
+  const mPerDeg = 111320;
+  let b = line[1];
+  for (let i = 1; i < line.length; i++) {
+    b = line[i];
+    const dx = (b.longitude - a.longitude) * cosLat * mPerDeg;
+    const dy = (b.latitude - a.latitude) * mPerDeg;
+    if (Math.sqrt(dx * dx + dy * dy) >= ROUTE_START_BEARING_M) break;
+  }
+  const east = (b.longitude - a.longitude) * cosLat;
+  const north = b.latitude - a.latitude;
+  if (east === 0 && north === 0) return null;
+  return ((Math.atan2(east, north) * 180) / Math.PI + 360) % 360;
+}
+
 type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer; status?: "live" | "parked" };
 type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
 
@@ -1382,6 +1405,24 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   //   • followZoomLevel    = speed/corner chase zoom while navigating, fixed follow zoom otherwise
   //   • followPitch        = 45° while navigating heading-up, flat otherwise
   const headingUp = mapView === "heading_up";
+
+  // ── Route-ahead orientation at guidance start ──
+  // When a route STARTS from a standstill there's no GPS course (0 mph → heading undefined), so
+  // the heading-up camera would default to its last/zero bearing (often north). On the
+  // navigationActive rising edge, seed the bearing to the route's INITIAL heading so the map
+  // immediately faces the way you're about to drive; once the car is moving, the smoothed-GPS
+  // path below takes over. Skipped when we already have a reliable moving course (auto-start at
+  // ≥5 km/h keeps real GPS). User pick 2026-07-11: orient to direction-of-travel.
+  const navOrientedRef = useRef(false);
+  useEffect(() => {
+    if (!navigationActive) { navOrientedRef.current = false; return; }
+    if (navOrientedRef.current) return; // once per guidance start
+    const spd = userSpeedMs;
+    const moving = typeof spd === "number" && Number.isFinite(spd) && spd * 3.6 > COURSE_OFF_KMH;
+    if (moving) { navOrientedRef.current = true; return; } // reliable GPS course — leave it
+    const b = routeInitialBearing(decodePolyline(routes?.[selectedRouteIndex]?.polyline));
+    if (b != null) { camHeadingRef.current = b; navOrientedRef.current = true; }
+  }, [navigationActive, userSpeedMs, routes, selectedRouteIndex]);
 
   // Heading-up bearing — driven by US, not Mapbox's native FollowWithCourse.
   // FollowWithCourse rotates to raw GPS course every frame, so its noise made the

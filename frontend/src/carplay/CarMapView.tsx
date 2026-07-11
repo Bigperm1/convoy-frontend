@@ -47,7 +47,7 @@ import {
   GREEN_ARROW_MODEL,
   ARROW_MODEL_ID,
   ARROW_MODEL_PITCH,
-  ARROW_MODEL_SCALE,
+  CARPLAY_ARROW_SCALE,
   ARROW_MODEL_HEADING_OFFSET,
   HazardMarker,
   CameraMarker,
@@ -542,7 +542,7 @@ export default function CarMapView({ onGLError }: Props) {
           cameraRef={cameraRef}
           getCam={getCam}
           readyRef={lockReadyRef}
-          scale={isArrow ? ARROW_MODEL_SCALE : carModelScale(0.7)}
+          scale={isArrow ? CARPLAY_ARROW_SCALE : carModelScale(0.7)}
           headingOffset={isArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
           pitchTilt={isArrow ? ARROW_MODEL_PITCH : 0}
         />

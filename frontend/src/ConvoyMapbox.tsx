@@ -275,8 +275,14 @@ export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forw
 // lying on the road pointing forward, 3D bevel still readable. Sim-verified sweep
 // 30/52/75/85/90 in the iOS sim against the real @rnmapbox render. OTA-tunable.
 export const ARROW_MODEL_PITCH = 90;
-// v9 max extent ≈1.34 — 1.9 keeps the on-screen presence tuned for v6/v8. OTA-tunable.
-export const ARROW_MODEL_SCALE: any = carModelScale(1.9);
+// v9 max extent ≈1.34 — 1.6 reads present-but-not-oversized on the phone (was 1.9, a
+// touch too big per drive feedback 2026-07-11). CarPlay uses its OWN smaller scale
+// (CARPLAY_ARROW_SCALE) since its tighter camera renders the same value much larger. OTA-tunable.
+export const ARROW_MODEL_SCALE: any = carModelScale(1.6);
+// CarPlay self-arrow scale — the head-unit camera sits tighter than the phone, so the shared
+// phone scale rendered the arrow enormous (drive feedback 2026-07-11). 1.0 brings it in line with
+// the CarPlay car (carModelScale(0.7)) at a sane arrow/car ratio. OTA-tunable.
+export const CARPLAY_ARROW_SCALE: any = carModelScale(1.0);
 // Self-marker jitter dead-band: when a new GPS fix is within SELF_DEADBAND_M meters AND
 // SELF_DEADBAND_HDG degrees of the current drawn pose, the marker HOLDS instead of easing
 // toward it — absorbs stationary GPS noise so the puck stops wandering when idle/slow.
@@ -1117,33 +1123,37 @@ function GLPinLayers({
           MarkerView order. iconSize is per-asset: hazard/police PNGs are 512px (→0.078 for
           ~40pt), the speed_camera PNG is 44px (→0.64 for ~28pt). */}
 
-      {/* Community hazard / police pins — tap → detail sheet (which carries the dispute action). */}
+      {/* Community hazard / police pins — tap → detail sheet (which carries the dispute action).
+          emissiveStrength 1 keeps the icons full-brightness under the Standard style's 3D scene
+          lighting — WITHOUT it, dusk/night light presets dim these pins to muddy/near-black (the
+          route line + self model already self-light for exactly this reason; see line ~386). */}
       {hazards.length > 0 && (
         <ShapeSource id="gl-hazards" shape={hazardFC} onPress={tapHazard}>
-          <SymbolLayer id="gl-hazards-sym" slot="top" style={{ iconImage: ["get", "icon"] as any, iconSize: 0.078, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          <SymbolLayer id="gl-hazards-sym" slot="top" style={{ iconImage: ["get", "icon"] as any, iconSize: 0.078, iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
         </ShapeSource>
       )}
 
       {/* Speed cameras — pins only (no tap). */}
       {cameras.length > 0 && (
         <ShapeSource id="gl-cameras" shape={cameraFC}>
-          <SymbolLayer id="gl-cameras-sym" slot="top" style={{ iconImage: "cam", iconSize: 0.64, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          <SymbolLayer id="gl-cameras-sym" slot="top" style={{ iconImage: "cam", iconSize: 0.64, iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
         </ShapeSource>
       )}
 
-      {/* DriveBC incidents — severity circle base (always visible) + kind glyph. */}
+      {/* DriveBC incidents — severity circle base (always visible) + kind glyph. Both self-lit
+          (circle/icon emissiveStrength 1) so the severity colors stay vivid in every light preset. */}
       {incidents.length > 0 && (
         <ShapeSource id="gl-incidents" shape={incidentFC} onPress={tapIncident}>
-          <CircleLayer id="gl-incidents-bg" slot="top" style={{ circleColor: ["get", "color"] as any, circleRadius: 15, circleStrokeColor: "rgba(11,11,12,0.85)", circleStrokeWidth: 2 }} />
-          <SymbolLayer id="gl-incidents-glyph" slot="top" style={{ iconImage: ["get", "glyph"] as any, iconSize: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          <CircleLayer id="gl-incidents-bg" slot="top" style={{ circleColor: ["get", "color"] as any, circleRadius: 15, circleEmissiveStrength: 1, circleStrokeColor: "rgba(11,11,12,0.85)", circleStrokeWidth: 2 }} />
+          <SymbolLayer id="gl-incidents-glyph" slot="top" style={{ iconImage: ["get", "glyph"] as any, iconSize: 1, iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
         </ShapeSource>
       )}
 
-      {/* Category place pins — numbered green pin. */}
+      {/* Category place pins — numbered green pin (self-lit so the green + number stay bright). */}
       {places.length > 0 && (
         <ShapeSource id="gl-places" shape={placeFC} onPress={tapPlace}>
-          <CircleLayer id="gl-places-bg" slot="top" style={{ circleColor: "#2DEC86", circleRadius: 15, circleStrokeColor: "#8E8E93", circleStrokeWidth: 1 }} />
-          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: 14, textColor: "#0A0A0A", textAllowOverlap: true, textIgnorePlacement: true }} />
+          <CircleLayer id="gl-places-bg" slot="top" style={{ circleColor: "#2DEC86", circleRadius: 15, circleEmissiveStrength: 1, circleStrokeColor: "#8E8E93", circleStrokeWidth: 1 }} />
+          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: 14, textColor: "#0A0A0A", textEmissiveStrength: 1, textAllowOverlap: true, textIgnorePlacement: true }} />
         </ShapeSource>
       )}
     </>

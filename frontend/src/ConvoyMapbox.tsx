@@ -247,14 +247,16 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 // ── Green arrow avatar (selfMarkerType === 'arrow') ──────────────────────────
 // The user can choose a 3D green arrow instead of their car (Garage → Map Appearance).
 // Hosted on the Hairpin marketing CDN so it loads OTA, exactly like the car GLBs
-// (ModelLayer + a remote model URL — no native change). v2 is a 3D BEVELED chevron
-// (raised green pyramid + white base rim, emissive) — Waze-style, replacing the flat
-// v1 triangle that read as a crude 2D wedge. Modelled pointing +Y; max extent ≈1.86
-// (car ≈1.91), so it reuses the car's zoom curve at ~car scale.
-export const GREEN_ARROW_MODEL_URL = "https://hairpin-site.pages.dev/green-arrow-v2.glb";
-export const ARROW_MODEL_ID = "convoyArrow2"; // v2 geometry — Mapbox caches a model by id, so new geometry needs a new id to re-register (and the new filename busts the CDN).
-export const ARROW_MODEL_HEADING_OFFSET = 180; // v1 rendered pointing backwards (IMG_6384), so flip the +Y model 180° to face travel. Verify on-device — 0/90/270 are the other candidates.
-// v2 max extent ≈1.86 vs the car's ≈1.91, so ~1.0 matches the car footprint; 1.3
+// (ModelLayer + a remote model URL — no native change). v3 is a 3D BEVELED chevron
+// (raised green pyramid + white base rim) verified in a GLB viewer: proper Waze-style
+// chevron, vivid brand green. KEY FIX vs v1/v2: the brand green #2DEC86 is baked as
+// sRGB→LINEAR ([0.026,0.839,0.238]) — authoring raw sRGB rendered washed-out pale
+// (the "wrong green"); plus matte + a brand-green self-glow so it stays vivid.
+// Modelled pointing +Y; max extent ≈1.86 (car ≈1.91), so it reuses the car's curve.
+export const GREEN_ARROW_MODEL_URL = "https://hairpin-site.pages.dev/green-arrow-v3.glb";
+export const ARROW_MODEL_ID = "convoyArrow3"; // v3 geometry/material — Mapbox caches a model by id, so a new id + filename re-registers it and busts the CDN.
+export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forward). The car needs +90 (it exports sideways); a +Y arrow needs 0, and v1 tracked heading fine at 0.
+// v3 max extent ≈1.86 vs the car's ≈1.91, so ~1.0 matches the car footprint; 1.3
 // renders it ~30% bigger — a prominent "you-are-here" chevron. OTA-tunable.
 export const ARROW_MODEL_SCALE: any = carModelScale(1.3);
 // Self-illumination for the 3D car per light preset. Dawn + night are dim, so

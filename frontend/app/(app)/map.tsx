@@ -2895,9 +2895,11 @@ export default function MapScreen() {
       <View style={styles.topBar} pointerEvents="box-none">
         {searchVisible && (
           <View pointerEvents="box-none">
-            {/* marginRight clears the absolutely-positioned top-right logo (54 + gap)
-                so the search field ends to its left. Pills/overlay stay full-width. */}
-            <View style={{ marginRight: 64 }}>
+            {/* marginRight clears the absolutely-positioned top-right logo (50 wide,
+                right:12) so the search field ends just to its left. 56 leaves a tight
+                ~6px gap (was 64/~14px) → more room in the search bar. Pills/overlay
+                stay full-width. */}
+            <View style={{ marginRight: 56 }}>
               <DestinationSearch
                 origin={coords}
                 onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}

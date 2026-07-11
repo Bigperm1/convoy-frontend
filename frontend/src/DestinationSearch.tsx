@@ -233,7 +233,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           own content without affecting avatar placement. */}
       <View style={styles.searchRow} pointerEvents="box-none">
         <View style={styles.bar} {...dismissPan.panHandlers}>
-          <GlassFill tintColor={hudTint()} style={{ borderRadius: 25, overflow: "hidden" }} />
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 14, overflow: "hidden" }} />
           {/* Convoy logo on the LEFT = the menu button (Google puts its 'G'
               here). Tapping opens the Convoy menu, which drops below the bar.
               Falls back to a search glyph if no logo slot was provided. */}
@@ -278,7 +278,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           {aiSuggest ? (
             <>
               <TouchableOpacity testID="ai-lets-go" onPress={onAiGo} style={styles.letsGoBtn} activeOpacity={0.85}>
-                <GlassFill tintColor="#2DEC86" style={{ borderRadius: 16, overflow: "hidden" }} />
+                <GlassFill tintColor="#2DEC86" style={{ borderRadius: 14, overflow: "hidden" }} />
                 <Ionicons name="navigate" size={14} color="#06281A" />
                 <Text style={styles.letsGoText}>Let's go</Text>
               </TouchableOpacity>
@@ -357,7 +357,9 @@ const styles = StyleSheet.create({
     // Fixed height (not paddingVertical) so the bar is ALWAYS exactly this tall —
     // matching the 50px logo button regardless of which right-side control shows.
     height: 50,
-    borderRadius: 25,
+    // Rounded-square (r14) to match the top-right logo button + HUD chips — the
+    // shared design language. (Was a full pill at r25.)
+    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.12)',
     shadowColor: '#000',
@@ -383,7 +385,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 5,
     // Green floor keeps the CTA bright + the dark text readable; the green-tinted
     // GlassFill on top adds the liquid-glass sheen.
-    backgroundColor: 'rgba(45,236,134,0.62)', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7,
+    backgroundColor: 'rgba(45,236,134,0.62)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 7,
     overflow: 'hidden',
   },
   letsGoText: { color: '#06281A', fontSize: 14, fontWeight: '800' },

@@ -267,10 +267,12 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v9.glb");
 export const ARROW_MODEL_ID = "convoyArrow10"; // bundled-asset registration — fresh id per geometry change.
 export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forward). The car needs +90 (it exports sideways); a +Y arrow needs 0.
-// Stand-up lean, applied via modelRotation X (NOT baked into the mesh). +52° ≈ the
-// mid nav pitch, so the flat arrow rotates to face the chase camera like Waze.
-// Sim-verified at pitch 48 and 58. OTA-tunable.
-export const ARROW_MODEL_PITCH = 52;
+// Stand-up lean, applied via modelRotation X (NOT baked into the mesh). Higher =
+// more upright / nose higher; lower = nose tips forward-down toward the road. 52°
+// stood it up facing the camera but read as nose-up ~45° (tester); 30° drops the
+// nose forward like Waze while keeping the 3D standing presence. Sim-verified
+// (swept 25/30/35/52 in the iOS sim against the real render). OTA-tunable.
+export const ARROW_MODEL_PITCH = 30;
 // v9 max extent ≈1.34 — 1.9 keeps the on-screen presence tuned for v6/v8. OTA-tunable.
 export const ARROW_MODEL_SCALE: any = carModelScale(1.9);
 // Self-illumination for the 3D car per light preset. ALL modes now render the

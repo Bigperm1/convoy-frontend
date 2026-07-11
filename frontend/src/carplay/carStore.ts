@@ -129,6 +129,43 @@ export function setCarState(patch: Partial<CarState>) {
   listeners.forEach((l) => l(state));
 }
 
+// ── Self-position write GATE (fixes the "marker roams after CarPlay connects") ──
+// Once CarPlay connects, selfLat/selfLng is fed by THREE concurrent GPS streams: the
+// phone-coords mirror (BestForNavigation / 0 m — most accurate), a foreground car watch
+// (High / 15 m), and the background nav task (High / 20 m). A plain last-writer-wins
+// merge let the two LAGGING feeds overwrite the precise one, so the stored position
+// hopped between three disagreeing fixes and the eased marker wandered. This gate keeps
+// ALL THREE feeds running (the CarPlay-logo robustness is untouched) but only lets the
+// highest-priority ACTIVE feed move the marker: a lower-priority feed is ignored while a
+// higher one is still fresh, and takes over only once the higher goes stale
+// (SELF_STALE_MS) — e.g. when the phone screen backgrounds and its mirror stops, the
+// fg/bg feeds resume within ~2 s. Because the first write and any post-staleness write are
+// always accepted, selfLat/selfLng are never left null, so the logo-fallback can't return.
+export type SelfPosSource = 'mirror' | 'fgwatch' | 'bgtask';
+const SELF_SOURCE_RANK: Record<SelfPosSource, number> = { mirror: 3, fgwatch: 2, bgtask: 1 };
+// Kept ≥2× the 500 ms mirror interval so a single interleaved fg/bg fix is still rejected
+// (no roam), but short enough that if a higher-priority feed dies (phone screen sleeps →
+// mirror/fgwatch stop) the surviving lower feed takes over in ≤~1.2 s instead of stalling.
+const SELF_STALE_MS = 1200;
+let lastSelfPos: { ts: number; rank: number } | null = null;
+
+export function setCarSelfPosition(lat: number, lng: number, heading: number | null, source: SelfPosSource) {
+  const now = Date.now();
+  const rank = SELF_SOURCE_RANK[source];
+  const cur = lastSelfPos;
+  // dt < 0 = the wall clock stepped backward (NTP / manual set); treat as stale so a clock
+  // jump can never leave a dead higher feed looking permanently fresh and freeze the marker.
+  const dt = cur ? now - cur.ts : Infinity;
+  const stale = dt > SELF_STALE_MS || dt < 0;
+  // Ignore ONLY a lower-priority feed overwriting a still-fresh higher-priority fix.
+  // Same/higher priority always writes; after staleness the next feed takes over. The first
+  // write (cur null → stale) and every post-staleness write are accepted, so selfLat/selfLng
+  // are never left null → the CONVOY-logo fallback cannot return.
+  if (cur && !stale && rank < cur.rank) return;
+  lastSelfPos = { ts: now, rank };
+  setCarState({ selfLat: lat, selfLng: lng, heading });
+}
+
 export function getCarState(): CarState {
   return state;
 }

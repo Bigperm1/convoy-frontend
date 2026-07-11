@@ -276,6 +276,14 @@ export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forw
 export const ARROW_MODEL_PITCH = 90;
 // v9 max extent ≈1.34 — 1.9 keeps the on-screen presence tuned for v6/v8. OTA-tunable.
 export const ARROW_MODEL_SCALE: any = carModelScale(1.9);
+// Self-marker jitter dead-band: when a new GPS fix is within SELF_DEADBAND_M meters AND
+// SELF_DEADBAND_HDG degrees of the current drawn pose, the marker HOLDS instead of easing
+// toward it — absorbs stationary GPS noise so the puck stops wandering when idle/slow.
+// Sustained movement accumulates past the band (compared to the held pose, not the last
+// fix) so it always catches up; genuine turns (heading delta) and jumps (already hard-
+// snapped) animate normally. OTA-tunable.
+const SELF_DEADBAND_M = 2.5;
+const SELF_DEADBAND_HDG = 8;
 // Self-illumination for the 3D car per light preset. ALL modes now render the
 // car fully self-lit (1.0) — the same dusk/dark-tint bypass the arrow uses — so
 // the paint color stays vivid instead of being washed dark by the scene light
@@ -775,6 +783,15 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       // Probe: a live display ticks step() → rafDead clears → the next fix eases
       // smoothly again. While asleep the probe never fires, so the latch holds.
       if (rafStale) raf.current = requestAnimationFrame(step);
+      return;
+    }
+    // Jitter dead-band — hold the current pose for a sub-threshold move so stationary GPS
+    // noise doesn't ease the marker toward each jittery fix (the idle "roam"). Compared to
+    // the HELD pose (prev = render.current), so real movement accumulates past the band and
+    // still animates; a pending ease keeps running to its target. Meters via equirectangular.
+    const dLatM = (lat - prev.lat) * 111320;
+    const dLngM = (lng - prev.lng) * 111320 * Math.cos(prev.lat * Math.PI / 180);
+    if (Math.hypot(dLatM, dLngM) < SELF_DEADBAND_M && Math.abs(angDelta(prev.heading, heading)) < SELF_DEADBAND_HDG) {
       return;
     }
     // Ease from the current drawn pose to the new fix over ~the fix interval

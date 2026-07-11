@@ -37,7 +37,7 @@ import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, have
 import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
-import { setCarState, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
+import { setCarState, setCarSelfPosition, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
 import { GlassFill, hudTint } from '../Glass';
@@ -740,11 +740,9 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
   // surface back to the CONVOY logo. speedMs stays in the metadata effect above.
   useEffect(() => {
     if (typeof user?.lat !== 'number' || typeof user?.lng !== 'number') return;
-    setCarState({
-      selfLat: user.lat,
-      selfLng: user.lng,
-      heading: typeof user?.heading === 'number' ? user.heading : null,
-    });
+    // Gated by source priority — the phone mirror (BestForNavigation/0m) is the most
+    // accurate feed, so it wins over the fg/bg car feeds while the phone is foreground.
+    setCarSelfPosition(user.lat, user.lng, typeof user?.heading === 'number' ? user.heading : null, 'mirror');
   }, [user?.lat, user?.lng, user?.heading]);
 
   // ---- connect / disconnect lifecycle ----

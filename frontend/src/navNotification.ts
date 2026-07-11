@@ -18,7 +18,7 @@ import * as Notifications from "expo-notifications";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import { NavRoute, haversineMeters, maneuverVerb, fmtDistanceM, fmtManeuverDist } from "./nav";
-import { setCarState } from "./carplay/carStore";
+import { setCarState, setCarSelfPosition } from "./carplay/carStore";
 import { getSettings, getMapMode } from "./settings";
 import { fetchSpeedLimitWaysAround, nearestLimit } from "./speedLimit";
 
@@ -209,10 +209,11 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   // throw while reading settings/mapMode (cold/headless context) must NEVER skip
   // this write — otherwise selfLat/selfLng stay null, hasFix is false, and the car
   // surface falls back to the CONVOY logo (the build-55 regression).
+  // Position through the source-priority gate (lowest priority; yields to the fg watch /
+  // phone mirror while they're fresh, takes over when they go stale). speedMs + carDbg
+  // stay UNGATED so the bg-tick proof + speed always land even if the position is gated.
+  setCarSelfPosition(loc.coords.latitude, loc.coords.longitude, typeof _h === "number" && _h >= 0 ? _h : null, 'bgtask');
   setCarState({
-    selfLat: loc.coords.latitude,
-    selfLng: loc.coords.longitude,
-    heading: typeof _h === "number" && _h >= 0 ? _h : null,
     speedMs: typeof _sp === "number" && _sp >= 0 ? _sp : 0,
     carDbg: "navtask#" + (++_navTaskTicks), // on-screen proof bg ticks are arriving
   });
@@ -255,11 +256,10 @@ export async function startForegroundCarFeed(): Promise<void> {
       (loc) => {
         const h = loc.coords.heading;
         const sp = loc.coords.speed;
-        // CRITICAL: position lands first, unconditionally (see the bg task above).
+        // Position through the source-priority gate ('fgwatch' — beats the bg task,
+        // yields to the phone mirror while it's fresh). speedMs + carDbg stay ungated.
+        setCarSelfPosition(loc.coords.latitude, loc.coords.longitude, typeof h === "number" && h >= 0 ? h : null, 'fgwatch');
         setCarState({
-          selfLat: loc.coords.latitude,
-          selfLng: loc.coords.longitude,
-          heading: typeof h === "number" && h >= 0 ? h : null,
           speedMs: typeof sp === "number" && sp >= 0 ? sp : 0,
           carDbg: "fgfeed",
         });

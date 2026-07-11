@@ -246,15 +246,18 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 
 // ── Green arrow avatar (selfMarkerType === 'arrow') ──────────────────────────
 // The user can choose a 3D green arrow instead of their car (Garage → Map Appearance).
-// Hosted on the Hairpin marketing CDN so it loads OTA, exactly like the car GLBs
-// (ModelLayer + a remote model URL — no native change). v3 is a 3D BEVELED chevron
-// (raised green pyramid + white base rim) verified in a GLB viewer: proper Waze-style
-// chevron, vivid brand green. KEY FIX vs v1/v2: the brand green #2DEC86 is baked as
-// sRGB→LINEAR ([0.026,0.839,0.238]) — authoring raw sRGB rendered washed-out pale
-// (the "wrong green"); plus matte + a brand-green self-glow so it stays vivid.
+// BUNDLED with the JS (require → ships inside every OTA/build) — NOT fetched from
+// a CDN. The remote-URL approach left one unverifiable link: whether the device's
+// Mapbox engine actually fetched the new GLB at runtime (the 07-11 "arrow never
+// changes" incident). A 1.9 KB asset has no business being remote; Metro bundles
+// .glb (assetExts) and <Models> resolves require() natively, so the model now
+// updates in lockstep with the JS, atomically. v3 is a 3D BEVELED chevron (raised
+// green pyramid + white base rim) verified in a GLB viewer: proper Waze-style
+// chevron, vivid brand green. KEY FIX vs v1/v2: #2DEC86 baked as sRGB→LINEAR
+// ([0.026,0.839,0.238]) — raw sRGB rendered washed-out pale (the "wrong green").
 // Modelled pointing +Y; max extent ≈1.86 (car ≈1.91), so it reuses the car's curve.
-export const GREEN_ARROW_MODEL_URL = "https://hairpin-site.pages.dev/green-arrow-v3.glb";
-export const ARROW_MODEL_ID = "convoyArrow3"; // v3 geometry/material — Mapbox caches a model by id, so a new id + filename re-registers it and busts the CDN.
+export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v3.glb");
+export const ARROW_MODEL_ID = "convoyArrow4"; // bundled-asset registration — fresh id so no cached remote model can shadow it.
 export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forward). The car needs +90 (it exports sideways); a +Y arrow needs 0, and v1 tracked heading fine at 0.
 // v3 max extent ≈1.86 vs the car's ≈1.91, so ~1.0 matches the car footprint; 1.3
 // renders it ~30% bigger — a prominent "you-are-here" chevron. OTA-tunable.
@@ -1376,13 +1379,16 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // 'arrow' appearance → the green arrow GLB instead of the car; else the per-color
   // car model. (Both render through the same SelfCarModel ModelLayer below.)
   const selfIsArrow = selfMarkerType === "arrow";
-  // Per-color baked 3D model URL → the user's chosen GRC paint (body-only paint; 5 colors from one render).
-  const selfModelUrl = selfIsArrow ? GREEN_ARROW_MODEL_URL : getVehicleModelUrl(selfCar?.color);
+  // Arrow = the BUNDLED asset (require id, ships with the JS); car = per-color
+  // remote GLB URL → the user's chosen GRC paint. <Models> accepts both.
+  const selfModelUrl: string | number = selfIsArrow ? GREEN_ARROW_MODEL : getVehicleModelUrl(selfCar?.color);
   // Color-specific model id so changing the car color swaps the model LIVE (Mapbox
   // caches a model by id — a fixed id won't reload a new .glb until remount).
   const selfModelId = selfIsArrow ? ARROW_MODEL_ID : "convoyCar_" + getVehicleModelKey(selfCar?.color);
-  // Lift the paint out of the dark on the dim light presets (dawn/night).
-  const selfEmissive = CAR_EMISSIVE_BY_MODE[mapMode] ?? 0;
+  // Lift the paint out of the dark on the dim light presets (dawn/night). The ARROW
+  // is always FULLY self-lit (1): it's a UI marker, not a realistic car — scene
+  // lighting at day/dusk (0/0.55) washed its brand green pale.
+  const selfEmissive = selfIsArrow ? 1 : (CAR_EMISSIVE_BY_MODE[mapMode] ?? 0);
 
   // Project the car onto the selected route while navigating. Drives two things:
   // (1) trimming the line behind the car (3D car reads on top), and (2) snapping

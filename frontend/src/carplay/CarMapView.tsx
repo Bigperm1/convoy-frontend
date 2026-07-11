@@ -25,6 +25,7 @@ import Mapbox, {
   Camera,
   ShapeSource,
   LineLayer,
+  VectorSource,
   Models,
 } from '@rnmapbox/maps';
 import { useCarStore, subscribeCarGesture, type CarGesture } from './carStore';
@@ -52,7 +53,14 @@ import {
   CameraMarker,
   IncidentMarker,
   PlaceMarker,
+  ROAD_SRC_ID,
+  ROAD_SNAP_LOCK_M,
+  ROAD_SNAP_RELEASE_M,
+  ROAD_SNAP_QUERY_MS,
+  ROAD_SNAP_MOVING_MS,
+  ROAD_SNAP_CROSS_DEG,
 } from '../ConvoyMapbox';
+import { nearestRoadLine, roadHeadingOff, type LatLng as RoadLatLng } from '../roadSnap';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
 // (index != 0) and the casing/core draw it (index == 0), exactly like the phone.
@@ -229,6 +237,44 @@ export default function CarMapView({ onGLError }: Props) {
   const cameraRef = useRef<React.ElementRef<typeof Camera> | null>(null);
   const lockReadyRef = useRef(false);
   lockReadyRef.current = paintedRef.current && hasFix;
+  // ── Phase-2 road-snap (mirror of the phone) ── query the invisible mapbox-streets-v8 road
+  // source near the car when NOT route-snapped, snap the DRAWN pose to the nearest road.
+  const carMapRef = useRef<any>(null);
+  const [carRoadSnap, setCarRoadSnap] = useState<{ line: RoadLatLng[] } | null>(null);
+  const carRoadSnapRef = useRef<{ line: RoadLatLng[] } | null>(null);
+  const carRoadStickyRef = useRef(false);
+  const carRoadInputsRef = useRef<{ lat: number; lng: number; hdg: number | null; speed: number; active: boolean }>(
+    { lat: 0, lng: 0, hdg: null, speed: 0, active: false },
+  );
+  useEffect(() => {
+    let mounted = true;
+    const id = setInterval(async () => {
+      const inp = carRoadInputsRef.current;
+      if (!inp.active || !paintedRef.current || !carMapRef.current?.querySourceFeatures) {
+        if (carRoadStickyRef.current) { carRoadStickyRef.current = false; carRoadSnapRef.current = null; setCarRoadSnap(null); }
+        return;
+      }
+      // Road continuity: stay locked to the current road while still on it (see phone comment).
+      const cur = carRoadSnapRef.current;
+      if (cur && carRoadStickyRef.current) {
+        const p = projectOntoRoute(inp.lat, inp.lng, cur.line);
+        if (p && p.distM <= ROAD_SNAP_RELEASE_M) return;
+      }
+      try {
+        const fc = await carMapRef.current.querySourceFeatures(ROAD_SRC_ID, [], ['road']);
+        if (!mounted || !carRoadInputsRef.current.active) return;
+        const tol = carRoadStickyRef.current ? ROAD_SNAP_RELEASE_M : ROAD_SNAP_LOCK_M;
+        const nl = nearestRoadLine(inp.lat, inp.lng, fc?.features, tol);
+        const p = nl ? projectOntoRoute(inp.lat, inp.lng, nl.line) : null;
+        const moving = inp.speed >= ROAD_SNAP_MOVING_MS;
+        const crossOk = !p || !moving || inp.hdg == null || roadHeadingOff(inp.hdg, p.bearing) <= ROAD_SNAP_CROSS_DEG;
+        if (nl && crossOk) { carRoadStickyRef.current = true; carRoadSnapRef.current = { line: nl.line }; setCarRoadSnap({ line: nl.line }); }
+        else if (carRoadStickyRef.current) { carRoadStickyRef.current = false; carRoadSnapRef.current = null; setCarRoadSnap(null); }
+      } catch { /* querySourceFeatures can throw mid-style-reload; retry next tick */ }
+    }, ROAD_SNAP_QUERY_MS);
+    return () => { mounted = false; clearInterval(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Driver pinch-zoom bias (in Mapbox zoom levels), applied ON TOP of the auto
   // follow-zoom. A ref (not state) so the ~60fps lockstep reads the live value
   // each frame with no re-render; zoomBaseRef snapshots it at gesture start
@@ -334,8 +380,18 @@ export default function CarMapView({ onGLError }: Props) {
   }
   carSnapHdgOkRef.current = _carDistSnap ? _carHdgOk : true;
   const carSnapped = _carDistSnap && _carHdgOk;
-  const drawLat = carSnapped ? routeProj!.lat : lat;
-  const drawLng = carSnapped ? routeProj!.lng : lng;
+  // Feed the road-snap query (only when NOT route-snapped) + use a FRESH snap for the draw.
+  const _carRoadActive = !carSnapped && hasFix;
+  carRoadInputsRef.current = { lat, lng, hdg: _carTravelHdg, speed: s.speedMs || 0, active: _carRoadActive };
+  let carRoadDraw: { lat: number; lng: number } | null = null;
+  if (_carRoadActive && carRoadSnap) {
+    const _p = projectOntoRoute(lat, lng, carRoadSnap.line);
+    if (_p && _p.distM <= ROAD_SNAP_RELEASE_M) carRoadDraw = { lat: _p.lat, lng: _p.lng };
+  }
+  // DISPLAY-ONLY: route line → nearest road (idle/off-route) → raw GPS. (Raw stays authoritative
+  // for everything else — this only moves the drawn car.)
+  const drawLat = carSnapped ? routeProj!.lat : (carRoadDraw ? carRoadDraw.lat : lat);
+  const drawLng = carSnapped ? routeProj!.lng : (carRoadDraw ? carRoadDraw.lng : lng);
   const drawHdg = carSnapped ? routeProj!.bearing : hdg;
   if (carSnapped) camHdgRef.current = routeProj!.bearing;
   const buildLineFade = (solid: string, clear: string): any => {
@@ -407,6 +463,7 @@ export default function CarMapView({ onGLError }: Props) {
 
   return (
     <MapView
+      ref={carMapRef}
       style={StyleSheet.absoluteFill}
       styleURL={styleURL}
       projection="mercator"
@@ -437,6 +494,12 @@ export default function CarMapView({ onGLError }: Props) {
       {useStandard && (
         <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: mode, show3dObjects: true } as any} />
       )}
+
+      {/* Road-snap source (Phase 2) — invisible mapbox-streets-v8 roads, queried by the
+          road-snap interval above. Zero visual footprint (opacity 0), same as the phone. */}
+      <VectorSource id={ROAD_SRC_ID} url="mapbox://mapbox.mapbox-streets-v8">
+        <LineLayer id="car-road-query" sourceLayerID="road" style={{ lineOpacity: 0, lineWidth: 1 } as any} />
+      </VectorSource>
 
       {/* LOCKSTEP camera — NO followUserLocation. SelfCarModel drives this camera
           imperatively (cameraRef.setCamera) on the SAME rAF tick that moves the 3D car,

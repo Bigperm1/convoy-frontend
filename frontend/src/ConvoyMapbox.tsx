@@ -34,6 +34,7 @@
 import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import { View, Text, Image, StyleSheet, Pressable, Platform, AppState, Alert } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
+import { nearestRoadLine, roadHeadingOff, type LatLng as RoadLatLng } from "./roadSnap";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getPowerMode } from "./powerMode";
@@ -284,6 +285,16 @@ export const ARROW_MODEL_SCALE: any = carModelScale(1.9);
 // snapped) animate normally. OTA-tunable.
 const SELF_DEADBAND_M = 2.5;
 const SELF_DEADBAND_HDG = 8;
+// Phase-2 road-snap tuning. The invisible mapbox-streets-v8 road source id (shared by both
+// surfaces); how close a road must be to snap (lock)/stay snapped (release, hysteresis); how
+// often to re-query the road tiles when NOT route-snapped; and the max cross-street angle
+// allowed while moving (so we don't snap onto a road we're only driving over). OTA-tunable.
+export const ROAD_SRC_ID = "convoy-roads";
+export const ROAD_SNAP_LOCK_M = 22;
+export const ROAD_SNAP_RELEASE_M = 34;
+export const ROAD_SNAP_QUERY_MS = 1400;
+export const ROAD_SNAP_MOVING_MS = 1.5; // ~5.4 km/h — above this, apply the cross-street heading filter
+export const ROAD_SNAP_CROSS_DEG = 55;  // reject a nearest road whose bearing is more perpendicular than this to travel
 // Self-illumination for the 3D car per light preset. ALL modes now render the
 // car fully self-lit (1.0) — the same dusk/dark-tint bypass the arrow uses — so
 // the paint color stays vivid instead of being washed dark by the scene light
@@ -1171,6 +1182,64 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // last gate decision so the snap locks in at 45° but only releases past 60°, preventing
   // flicker when the travel heading hovers near the boundary.
   const snapHdgOkRef = useRef(true);
+  // ── Phase-2 road-snap state ──
+  // mapRef → querySourceFeatures on the invisible road source. roadSnap holds the last snap
+  // point + the raw fix it was computed for (staleness gate). roadStickyRef = hysteresis
+  // (once snapped, stay snapped out to the wider RELEASE distance). roadInputsRef feeds the
+  // throttled interval with the latest raw pose without it re-subscribing each render.
+  const mapRef = useRef<any>(null);
+  // The LOCKED road polyline. The render projects the LIVE raw fix onto it each frame, so the
+  // marker slides smoothly along the road; the interval only swaps WHICH road is locked. A ref
+  // mirror lets the interval read the current lock without re-subscribing.
+  const [roadSnap, setRoadSnap] = useState<{ line: RoadLatLng[] } | null>(null);
+  const roadSnapRef = useRef<{ line: RoadLatLng[] } | null>(null);
+  const roadStickyRef = useRef(false);
+  const roadInputsRef = useRef<{ lat: number; lng: number; hdg: number | null; speed: number; active: boolean }>(
+    { lat: 0, lng: 0, hdg: null, speed: 0, active: false },
+  );
+  useEffect(() => {
+    let mounted = true;
+    const id = setInterval(async () => {
+      const inp = roadInputsRef.current;
+      // Only query when the marker is NOT route-snapped (idle / off-route) and the map is up.
+      if (!inp.active || !readyRef.current || !mapRef.current?.querySourceFeatures) {
+        if (roadStickyRef.current) { roadStickyRef.current = false; roadSnapRef.current = null; setRoadSnap(null); }
+        return;
+      }
+      // Road continuity: if already locked to a road and the car is still on it (within the
+      // release band), KEEP it — don't re-query and risk hopping to a closer parallel road /
+      // opposite carriageway across a median. The render tracks the car along this line live.
+      const cur = roadSnapRef.current;
+      if (cur && roadStickyRef.current) {
+        const p = projectOntoRoute(inp.lat, inp.lng, cur.line);
+        if (p && p.distM <= ROAD_SNAP_RELEASE_M) return;
+      }
+      try {
+        const fc = await mapRef.current.querySourceFeatures(ROAD_SRC_ID, [], ["road"]);
+        // Re-check after the await — the marker may have re-locked to the route meanwhile.
+        if (!mounted || !roadInputsRef.current.active) return;
+        const tol = roadStickyRef.current ? ROAD_SNAP_RELEASE_M : ROAD_SNAP_LOCK_M;
+        const nl = nearestRoadLine(inp.lat, inp.lng, fc?.features, tol);
+        const p = nl ? projectOntoRoute(inp.lat, inp.lng, nl.line) : null;
+        // While moving, reject a road we're only crossing (bearing too perpendicular to travel).
+        const moving = inp.speed >= ROAD_SNAP_MOVING_MS;
+        const crossOk = !p || !moving || inp.hdg == null || roadHeadingOff(inp.hdg, p.bearing) <= ROAD_SNAP_CROSS_DEG;
+        if (nl && crossOk) {
+          roadStickyRef.current = true;
+          roadSnapRef.current = { line: nl.line };
+          setRoadSnap({ line: nl.line });
+        } else if (roadStickyRef.current) {
+          roadStickyRef.current = false;
+          roadSnapRef.current = null;
+          setRoadSnap(null);
+        }
+      } catch {
+        // querySourceFeatures can throw mid-style-reload; keep the last lock, retry next tick.
+      }
+    }, ROAD_SNAP_QUERY_MS);
+    return () => { mounted = false; clearInterval(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Last-known GPS spot, read ONCE at mount (synchronous; hydrated with settings).
   // Lets the camera's first paint frame the driver's last location instead of
   // flying in from the world view while we wait on the first GPS fix.
@@ -1652,8 +1721,27 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   }
   snapHdgOkRef.current = _distSnap ? _hdgOk : true; // reset the latch when not distance-snapped
   const selfSnapped = _distSnap && _hdgOk;
+  // Feed the throttled road-snap query with the latest raw pose — only while NOT route-snapped
+  // (idle / off-route), so it never runs during normal on-route nav.
+  const _roadActive = !selfSnapped && selfCar != null;
+  roadInputsRef.current = {
+    lat: selfCar?.lat ?? 0, lng: selfCar?.lng ?? 0,
+    hdg: _travelHdg, speed: userSpeedMs ?? 0, active: _roadActive,
+  };
+  // Project the LIVE raw fix onto the locked road line each render (smooth along-road tracking,
+  // no ~1.4 s lag); drop back to raw once we've drifted beyond the release band laterally
+  // (genuinely left the road / a parking lot).
+  let roadDraw: { lat: number; lng: number } | null = null;
+  if (_roadActive && roadSnap && selfCar) {
+    const _p = projectOntoRoute(selfCar.lat, selfCar.lng, roadSnap.line);
+    if (_p && _p.distM <= ROAD_SNAP_RELEASE_M) roadDraw = { lat: _p.lat, lng: _p.lng };
+  }
+  // DISPLAY-ONLY draw position: route line (snapped) → nearest road (idle/off-route) → raw GPS.
+  // Reroute + /location + presence stay on RAW GPS (see nav.ts); NEVER lift this into `coords`.
   const selfDraw = selfSnapped
     ? { lat: routeProj!.lat, lng: routeProj!.lng }
+    : roadDraw
+    ? roadDraw
     : (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null);
   // Heading LOCK — the "car drifting/spinning around" fix. The camera heading is already
   // smoothed + held when stopped (camHeadingRef); the car model was still riding RAW GPS
@@ -1713,6 +1801,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       }}
     >
       <MapView
+        ref={mapRef}
         style={styles.map}
         styleURL={styleURL}
         projection="mercator"
@@ -1763,6 +1852,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         {useStandard && (
           <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: mapMode, show3dObjects: show3dBuildings }} />
         )}
+
+        {/* Road-snap source (Phase 2): mapbox-streets-v8 roads. Standard v3 hides its own
+            road layers from queries, so we add our own source + an INVISIBLE road LineLayer
+            (opacity 0) purely so the road tiles load in the viewport; querySourceFeatures on
+            it feeds the nearest-road snap. Zero visual footprint, no network beyond tiles. */}
+        <Mapbox.VectorSource id={ROAD_SRC_ID} url="mapbox://mapbox.mapbox-streets-v8">
+          <Mapbox.LineLayer id="convoy-road-query" sourceLayerID="road" style={{ lineOpacity: 0, lineWidth: 1 } as any} />
+        </Mapbox.VectorSource>
 
         {/* Register the self-car 3D model once for the map. Referenced by id
             ("convoyCar") from the ModelLayer below. */}

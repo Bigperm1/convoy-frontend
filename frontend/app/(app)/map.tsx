@@ -12,6 +12,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import Glass, { GlassFill, hudTint, drawerTint } from "../../src/Glass";
 import ConvoyMapbox, { type Hazard, type Peer, contrastingRouteColor } from "../../src/ConvoyMapbox";
 import DestinationSearch from "../../src/DestinationSearch";
+import UpdateReadyPill from "../../src/UpdateReadyPill";
 import CategoryPills, { PlaceResult } from "../../src/components/CategoryPills";
 import LogoMenu from "../../src/components/LogoMenu";
 import { supabase, SUPABASE_ENABLED, SupaHazard } from "../../src/supabase";
@@ -2922,6 +2923,10 @@ export default function MapScreen() {
                 </View>
               );
             })()}
+            {/* Stranded-OTA escape hatch: appears the moment a newer update finishes
+                downloading (expo-updates "pending" state — see UpdateReadyPill).
+                Hidden mid-drive so a tap can never reload during turn-by-turn. */}
+            <UpdateReadyPill hidden={navMode === "turn-by-turn"} />
           </View>
         )}
       </View>

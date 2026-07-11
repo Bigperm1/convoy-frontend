@@ -45,18 +45,43 @@ export default function SettingsMenu() {
   // sit on a stale bundle for a long time. This makes the running bundle VISIBLE and
   // lets the user force the newest one in one tap (fetch → reload), no cold-start dance.
   const [updating, setUpdating] = useState(false);
-  const otaShort = Updates.isEmbeddedLaunch ? "build-bundled" : (Updates.updateId || "unknown").slice(0, 8);
+  // LIVE expo-updates state. `currentlyRunning` = the bundle actually executing;
+  // `isUpdatePending` = a NEWER update is fully DOWNLOADED and waiting for a launch
+  // that never reliably comes on this app (background audio/location keep the
+  // process alive, so "apply on next launch" strands for days — the 2026-07-09 and
+  // 2026-07-11 incidents where every OTA "vanished").
+  const updState = Updates.useUpdates();
+  const running = updState.currentlyRunning;
+  const pendingUpdate = updState.isUpdatePending;
+  const otaShort = running.isEmbeddedLaunch ? "build-bundled" : (running.updateId || "unknown").slice(0, 8);
   const otaWhen = (() => {
-    try { return Updates.createdAt ? new Date(Updates.createdAt).toLocaleString() : ""; } catch { return ""; }
+    try { return running.createdAt ? new Date(running.createdAt).toLocaleString() : ""; } catch { return ""; }
   })();
-  const otaSubtitle = `${Updates.isEmbeddedLaunch ? "No OTA yet — bundled with the build" : "OTA " + otaShort}${otaWhen ? " · " + otaWhen : ""}`;
+  // isEmergencyLaunch = expo-updates hit an error loading an update and fell back —
+  // surface it so a strand is visible at a glance instead of silent.
+  const emergencyFlag = (running as any)?.isEmergencyLaunch ? " · ⚠ recovery launch" : "";
+  const otaSubtitle = pendingUpdate
+    ? "Update downloaded — tap to install & restart"
+    : `${running.isEmbeddedLaunch ? "No OTA yet — bundled with the build" : "OTA " + otaShort}${otaWhen ? " · " + otaWhen : ""}${emergencyFlag}`;
   const checkForUpdate = useCallback(async () => {
     if (updating) return;
     setUpdating(true);
     try {
+      // THE 07-11 BUG FIX: a downloaded-but-not-applied update is the stranded
+      // state this app hits. checkForUpdateAsync compares the server against
+      // what's DOWNLOADED on disk — so in exactly that state the old code said
+      // "You're up to date" and returned, killing the escape hatch. Apply the
+      // pending update instead.
+      if (pendingUpdate) {
+        Alert.alert("Update ready", "The latest update is already downloaded. Restart Convoy now to apply it?", [
+          { text: "Later", style: "cancel" },
+          { text: "Restart now", onPress: () => { void Updates.reloadAsync(); } },
+        ]);
+        return;
+      }
       const res = await Updates.checkForUpdateAsync();
       if (!res.isAvailable) {
-        Alert.alert("You're up to date", `Running the latest update.\n\n${Updates.isEmbeddedLaunch ? "build-bundled" : "OTA " + otaShort}`);
+        Alert.alert("You're up to date", `Running ${running.isEmbeddedLaunch ? "the build-bundled version" : "OTA " + otaShort}${otaWhen ? `\nfrom ${otaWhen}` : ""}.`);
         return;
       }
       await Updates.fetchUpdateAsync();
@@ -69,7 +94,7 @@ export default function SettingsMenu() {
     } finally {
       setUpdating(false);
     }
-  }, [updating, otaShort]);
+  }, [updating, pendingUpdate, running.isEmbeddedLaunch, otaShort, otaWhen]);
 
   const confirmSignOut = useCallback(() => {
     Alert.alert("Sign out", "Sign out of Convoy on this device?", [

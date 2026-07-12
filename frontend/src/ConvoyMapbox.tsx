@@ -265,8 +265,8 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 // Ground truth from the sim: POSITIVE modelRotation-X stands the arrow UP to face
 // the chase camera (tip forward) — the Waze stance. +52° faces the camera cleanly
 // across the whole nav pitch band (city 48° → highway 60°); verified at both.
-export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v9.glb");
-export const ARROW_MODEL_ID = "convoyArrow10"; // bundled-asset registration — fresh id per geometry change.
+export const GREEN_ARROW_MODEL = require("../assets/models/green-arrow-v10.glb");
+export const ARROW_MODEL_ID = "convoyArrow11"; // bundled-asset registration — fresh id per geometry change.
 export const ARROW_MODEL_HEADING_OFFSET = 0; // arrow modelled pointing +Y (forward). The car needs +90 (it exports sideways); a +Y arrow needs 0.
 // Lean applied via modelRotation X (NOT baked into the mesh). DIRECTION (sim ground
 // truth): HIGHER = nose tips forward-DOWN toward the road; LOWER = nose rears UP
@@ -924,7 +924,11 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           // override it (rnmapbox #13049/#13428) — this vertical lift is the only OTA
           // lever. [lng_m, lat_m, altitude_m]. Tradeoff: mild float at high camera tilt;
           // OTA-tunable (raise if taller buildings still occlude, lower if it floats).
-          modelTranslation: [0, 0, 10],
+          // The flat arrow loses the shared model/line depth buffer to the slot="top"
+          // route ribbon (the tall car wins at +10m; the low arrow doesn't), so the ribbon
+          // drew OVER it. Lift the arrow higher than the car so it clears the ground-level
+          // route line. OTA-tunable (raise if the ribbon still covers it, lower if it floats).
+          modelTranslation: [0, 0, modelId === ARROW_MODEL_ID ? 16 : 10],
           modelEmissiveStrength: emissive,
           modelScale: scale ?? CAR_MODEL_SCALE_SIZED,
           modelRotation: [pitchTilt, 0, (r.heading ?? 0) + headingOffset],

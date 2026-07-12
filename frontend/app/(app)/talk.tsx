@@ -921,13 +921,16 @@ const styles = StyleSheet.create({
     width: MIC_D, height: MIC_D, borderRadius: MIC_D / 2, backgroundColor: 'transparent',
     alignItems: 'center', justifyContent: 'center', borderWidth: 6, borderColor: '#2a2a2e',
   },
-  pttOuterActive: { borderColor: YELLOW },
+  // Pressed feedback is the soft outward glow ONLY — drop the button's ring entirely so
+  // there's no hard line at all (was borderColor YELLOW = a bright hard ring on press; even
+  // the neutral dark ring read as a hard edge). The button dissolves into the glow.
+  pttOuterActive: { borderWidth: 0 },
   pttOuterDisabled: { opacity: 0.5 },
   pttInner: {
     width: MIC_INNER_D, height: MIC_INNER_D, borderRadius: MIC_INNER_D / 2, backgroundColor: 'transparent',
     alignItems: 'center', justifyContent: 'center',
   },
-  pttInnerActive: { backgroundColor: '#1f1b00' },
+  pttInnerActive: {},
   pttLabel: { color: '#808080', fontSize: 16, fontWeight: '600', marginTop: 30, letterSpacing: 0.5 },
   // Hands-free (VOX) toggle pill, shown under the mic label on private threads.
   voxToggle: {

@@ -9,7 +9,6 @@ import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import LogoMenu from '../../src/components/LogoMenu';
-import Svg, { Defs, RadialGradient, Stop, Circle } from 'react-native-svg';
 import { GlassFill } from '../../src/Glass';
 import GlassBackdrop from '../../src/components/GlassBackdrop';
 import { getSettings, getAudioVol } from '../../src/settings';
@@ -665,19 +664,11 @@ export default function TalkScreen() {
             gradient that breathes with the `glow` value. Deliberately DISTINCT from the
             Scout screen-edge glow: this one hugs the button; the edge glow frames the
             whole screen. Replaces the old smoke cloud + sonar ring. */}
-        <Animated.View pointerEvents="none" style={[styles.micGlow, { opacity: glowOpacity }]}>
-          <Svg width={GLOW_D} height={GLOW_D}>
-            <Defs>
-              <RadialGradient id="micGlowGrad" cx="50%" cy="50%" r="50%">
-                <Stop offset="0%" stopColor={YELLOW} stopOpacity={0.3} />
-                <Stop offset="60%" stopColor={YELLOW} stopOpacity={0.26} />
-                <Stop offset="86%" stopColor={YELLOW} stopOpacity={0.16} />
-                <Stop offset="100%" stopColor={YELLOW} stopOpacity={0} />
-              </RadialGradient>
-            </Defs>
-            <Circle cx={GLOW_D / 2} cy={GLOW_D / 2} r={GLOW_D / 2} fill="url(#micGlowGrad)" />
-          </Svg>
-        </Animated.View>
+        <Animated.Image
+          source={require('../../assets/images/mic-glow.png')}
+          resizeMode="contain"
+          style={[styles.micGlow, { opacity: glowOpacity }]}
+        />
         <Animated.View
           style={[
             styles.glowWrap,
@@ -842,10 +833,12 @@ export default function TalkScreen() {
 // tab bar. Shrink the mic on Android (and lift the stack via body.paddingBottom)
 // so it clears the bar. iOS keeps the original 360. Tunable.
 const MIC_D = Platform.OS === 'android' ? 300 : 360;
-// Button-halo glow diameter — the mic + a soft ring of glow around it (breathes on press).
-// +66 keeps the halo tight to the rim; react-native-svg renders radial gradients bolder
-// than a browser, so the stops below are kept low + gradual for a soft aura (not a hard ring).
-const GLOW_D = MIC_D + 66;
+// Button-glow diameter. The glow is a pre-rendered DONUT png (mic-glow.png): transparent
+// in the center so the mic stays clean (nothing bleeds through the glass), glowing only
+// OUTSIDE the ring and fading outward toward the screen edges. 1.72× sizes the donut so its
+// transparent hole lands on the mic edge (no dark gap, no green inside). A bitmap renders
+// perfectly soft — react-native-svg radial gradients came out hard/ring-y.
+const GLOW_D = Math.round(MIC_D * 1.72);
 const MIC_INNER_D = Platform.OS === 'android' ? 242 : 290;
 const MIC_ICON_SIZE = Platform.OS === 'android' ? 106 : 128;
 
@@ -910,7 +903,7 @@ const styles = StyleSheet.create({
   micWrap: { width: MIC_D, height: MIC_D, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
   glowWrap: { width: MIC_D, height: MIC_D, borderRadius: MIC_D / 2, alignItems: 'center', justifyContent: 'center', elevation: 18 },
   // Halo glow sits BEHIND the mic, centered on it (GLOW_D box centered in the MIC_D micWrap).
-  micGlow: { position: 'absolute', width: GLOW_D, height: GLOW_D, top: (MIC_D - GLOW_D) / 2, left: (MIC_D - GLOW_D) / 2, alignItems: 'center', justifyContent: 'center' },
+  micGlow: { position: 'absolute', width: GLOW_D, height: GLOW_D, top: (MIC_D - GLOW_D) / 2, left: (MIC_D - GLOW_D) / 2, pointerEvents: 'none' },
   pttRing: {
     position: 'absolute',
     top: 0, left: 0, right: 0, bottom: 0,

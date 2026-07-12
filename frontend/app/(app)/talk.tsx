@@ -9,7 +9,7 @@ import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import LogoMenu from '../../src/components/LogoMenu';
-import CommsHoldGlow from '../../src/components/CommsHoldGlow';
+import { ListeningEdgeGlow } from '../../src/components/ListeningEdgeGlow';
 import { GlassFill } from '../../src/Glass';
 import GlassBackdrop from '../../src/components/GlassBackdrop';
 import { getSettings, getAudioVol } from '../../src/settings';
@@ -516,6 +516,9 @@ export default function TalkScreen() {
     <>
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <GlassBackdrop source={require("../../assets/images/glass-bgt.png")} />
+      {/* Scout-style screen-EDGE glow while the mic is held (or hands-free/VOX active) —
+          replaces the old smoke cloud + sonar ring around the mic. */}
+      <ListeningEdgeGlow active={pressed || ptt.voxActive} />
       {/* Community header — live active convoy */}
       <View style={styles.header}>
         {active ? (
@@ -661,14 +664,8 @@ export default function TalkScreen() {
             always perfectly centered on the mic (the absolute ring fills this
             box, and the mic fills it too, so they share the same center). */}
         <View style={styles.micWrap}>
-        {/* Smoky green hold-glow — the same cloud as the Comms tab mic, scaled up
-            and more dramatic. Breathes outward while holding-to-talk or hands-free. */}
-        <CommsHoldGlow active={pressed || ptt.voxActive} sizeScale={2.6} />
-        {/* Expanding sonar ring while transmitting */}
-        <Animated.View
-          pointerEvents="none"
-          style={[styles.pttRing, { opacity: ringOpacity, transform: [{ scale: ringScale }] }]}
-        />
+        {/* Mic feedback is now the screen-edge glow (ListeningEdgeGlow, rendered at the
+            screen root above) — no more smoke cloud or sonar ring around the button. */}
         <Animated.View
           style={[
             styles.glowWrap,

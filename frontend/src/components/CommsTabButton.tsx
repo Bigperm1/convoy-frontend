@@ -13,7 +13,6 @@ import React, { useRef } from "react";
 import { Pressable, StyleSheet } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useVoice } from "../useVoice";
-import CommsHoldGlow from "./CommsHoldGlow";
 
 type Props = {
   children?: React.ReactNode;
@@ -57,8 +56,8 @@ export default function CommsTabButton({ children, onPress, accessibilityState, 
       onPressOut={handlePressOut}
       delayLongPress={250}
     >
-      {/* Smoky green haze behind the mic while holding-to-talk. */}
-      <CommsHoldGlow active={voice.recording} />
+      {/* Hold-to-talk feedback is now the Scout screen-edge glow (fired by useVoice
+          via setListeningGlow) — no more smoke cloud behind the tab icon. */}
       {children}
     </Pressable>
   );

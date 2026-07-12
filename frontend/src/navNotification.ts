@@ -326,7 +326,7 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
         showsBackgroundLocationIndicator: true,
         pausesUpdatesAutomatically: false,
         foregroundService: {
-          notificationTitle: "Convoy navigation",
+          notificationTitle: "Hairpin navigation",
           notificationBody: "Turn-by-turn directions are active",
           notificationColor: "#2DEC86",
         },

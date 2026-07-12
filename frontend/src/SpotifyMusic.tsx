@@ -78,7 +78,7 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
           await new Promise((res) => setTimeout(res, 600));
           r = await (retry ?? fn)();
         } else {
-          Alert.alert("Open Spotify first", "Start Spotify on your phone (play anything for a second), then come back — Convoy will control it from here.");
+          Alert.alert("Open Spotify first", "Start Spotify on your phone (play anything for a second), then come back — Hairpin will control it from here.");
         }
       }
       if (r.status === 403) Alert.alert("Spotify Premium needed", "Controlling playback requires a Spotify Premium account.");
@@ -162,7 +162,7 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
             <Text style={styles.hint}>Nothing in your Spotify library yet. Add playlists or listen a bit and they'll show up here.</Text>
           )}
 
-          <Text style={styles.footer}>Convoy controls your own Spotify. Premium is required to start/skip playback, and your Spotify app must be the active device.</Text>
+          <Text style={styles.footer}>Hairpin controls your own Spotify. Premium is required to start/skip playback, and your Spotify app must be the active device.</Text>
         </ScrollView>
       )}
 

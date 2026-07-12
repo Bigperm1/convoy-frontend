@@ -361,7 +361,7 @@ export function CarSurface() {
         <View style={styles.topChip} pointerEvents="none">
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 14, overflow: 'hidden' }} />
           <Text style={styles.topChipText}>
-            {nearby ? `CONVOY   ·   ${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'CONVOY'}
+            {nearby ? `HAIRPIN   ·   ${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'HAIRPIN'}
           </Text>
         </View>
       )}
@@ -386,7 +386,7 @@ export function CarSurface() {
       ) : (
         <>
           <Image source={require('../../assets/final_icon.png')} style={styles.carLogo} resizeMode="contain" />
-          <Text style={styles.brand}>CONVOY</Text>
+          <Text style={styles.brand}>HAIRPIN</Text>
           <Text style={styles.sub}>{nearby ? `${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'Drive together'}</Text>
           {/* Self-diagnosing readout (no Mac/logs needed): shows whether the car surface
               has a GPS fix, the actual lat/lng it reads, and which feed last wrote

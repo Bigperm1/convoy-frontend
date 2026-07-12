@@ -49,7 +49,7 @@ export async function showTransmitNotification(handle: string) {
     // so we only ever land here when backgrounded.
     const id = await Notifications.scheduleNotificationAsync({
       content: {
-        title: "🎙 Convoy comms",
+        title: "🎙 Hairpin comms",
         body: `${handle} is transmitting`,
         // No `sound` field — the actual PTT audio plays through the speaker
         // already; an extra notification chime would just collide.

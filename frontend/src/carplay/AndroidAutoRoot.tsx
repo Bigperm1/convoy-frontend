@@ -33,7 +33,7 @@ const AA_UNIT_METERS = 1;
 
 // One persistent action in the strip (Android Auto requires a non-empty action
 // strip on a NavigationTemplate). Kept stable across updates.
-const AA_ACTIONS = [{ id: 'convoy-aa-brand', title: 'Convoy' }];
+const AA_ACTIONS = [{ id: 'convoy-aa-brand', title: 'Hairpin' }];
 
 export default function AndroidAutoRoot() {
   const s = useCarStore();

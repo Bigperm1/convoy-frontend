@@ -2,17 +2,17 @@
   "expo": {
     "name": "Hairpin",
     "slug": "convoy",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "orientation": "portrait",
     "icon": "./assets/HAIRPIN.png",
     "scheme": "convoy",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "runtimeVersion": "1.15.0",
+    "runtimeVersion": "1.16.0",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
-      "buildNumber": "63",
+      "buildNumber": "64",
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSAppleMusicUsageDescription": "Play and control Apple Music right inside Hairpin",
@@ -32,7 +32,7 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 63,
+      "versionCode": 64,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/hairpin-adaptive.png",
@@ -82,7 +82,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/brand-mark.png",
+          "icon": "./assets/images/notification-icon.png",
           "color": "#2DEC86"
         }
       ],

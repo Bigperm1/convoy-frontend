@@ -9,7 +9,7 @@ import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import LogoMenu from '../../src/components/LogoMenu';
-import { ListeningEdgeGlow } from '../../src/components/ListeningEdgeGlow';
+import Svg, { Defs, RadialGradient, Stop, Circle } from 'react-native-svg';
 import { GlassFill } from '../../src/Glass';
 import GlassBackdrop from '../../src/components/GlassBackdrop';
 import { getSettings, getAudioVol } from '../../src/settings';
@@ -267,7 +267,7 @@ export default function TalkScreen() {
   }, [channelId]);
 
   useEffect(() => {
-    if (pressed) {
+    if (pressed || ptt.voxActive) {
       Animated.timing(scale, { toValue: 1.08, duration: 130, useNativeDriver: false }).start();
       Animated.loop(
         Animated.sequence([
@@ -287,7 +287,7 @@ export default function TalkScreen() {
       Animated.timing(glow, { toValue: 0, duration: 200, useNativeDriver: false }).start();
       Animated.timing(ring, { toValue: 0, duration: 200, useNativeDriver: false }).start();
     }
-  }, [pressed]);
+  }, [pressed, ptt.voxActive]);
 
   const onPressIn = () => {
     if (!channelId) { // nothing to transmit to — nudge the user to pick a crew
@@ -516,9 +516,6 @@ export default function TalkScreen() {
     <>
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <GlassBackdrop source={require("../../assets/images/glass-bgt.png")} />
-      {/* Scout-style screen-EDGE glow while the mic is held (or hands-free/VOX active) —
-          replaces the old smoke cloud + sonar ring around the mic. */}
-      <ListeningEdgeGlow active={pressed || ptt.voxActive} />
       {/* Community header — live active convoy */}
       <View style={styles.header}>
         {active ? (
@@ -664,13 +661,25 @@ export default function TalkScreen() {
             always perfectly centered on the mic (the absolute ring fills this
             box, and the mic fills it too, so they share the same center). */}
         <View style={styles.micWrap}>
-        {/* Mic feedback is now the screen-edge glow (ListeningEdgeGlow, rendered at the
-            screen root above) — no more smoke cloud or sonar ring around the button. */}
+        {/* Soft green glow halo AROUND the mic while pushed (or hands-free) — a radial
+            gradient that breathes with the `glow` value. Deliberately DISTINCT from the
+            Scout screen-edge glow: this one hugs the button; the edge glow frames the
+            whole screen. Replaces the old smoke cloud + sonar ring. */}
+        <Animated.View pointerEvents="none" style={[styles.micGlow, { opacity: glowOpacity }]}>
+          <Svg width={GLOW_D} height={GLOW_D}>
+            <Defs>
+              <RadialGradient id="micGlowGrad" cx="50%" cy="50%" r="50%">
+                <Stop offset="0%" stopColor={YELLOW} stopOpacity={0.55} />
+                <Stop offset="72%" stopColor={YELLOW} stopOpacity={0.5} />
+                <Stop offset="100%" stopColor={YELLOW} stopOpacity={0} />
+              </RadialGradient>
+            </Defs>
+            <Circle cx={GLOW_D / 2} cy={GLOW_D / 2} r={GLOW_D / 2} fill="url(#micGlowGrad)" />
+          </Svg>
+        </Animated.View>
         <Animated.View
           style={[
             styles.glowWrap,
-            // Green smoke (CommsHoldGlow) is the only glow now — drop the yellow
-            // shadow halo so this matches the Comms tab mic's animation exactly.
             { transform: [{ scale }] },
           ]}
         >
@@ -832,6 +841,8 @@ export default function TalkScreen() {
 // tab bar. Shrink the mic on Android (and lift the stack via body.paddingBottom)
 // so it clears the bar. iOS keeps the original 360. Tunable.
 const MIC_D = Platform.OS === 'android' ? 300 : 360;
+// Button-halo glow diameter — the mic + a soft ring of glow around it (breathes on press).
+const GLOW_D = MIC_D + 96;
 const MIC_INNER_D = Platform.OS === 'android' ? 242 : 290;
 const MIC_ICON_SIZE = Platform.OS === 'android' ? 106 : 128;
 
@@ -895,6 +906,8 @@ const styles = StyleSheet.create({
 
   micWrap: { width: MIC_D, height: MIC_D, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
   glowWrap: { width: MIC_D, height: MIC_D, borderRadius: MIC_D / 2, alignItems: 'center', justifyContent: 'center', elevation: 18 },
+  // Halo glow sits BEHIND the mic, centered on it (GLOW_D box centered in the MIC_D micWrap).
+  micGlow: { position: 'absolute', width: GLOW_D, height: GLOW_D, top: (MIC_D - GLOW_D) / 2, left: (MIC_D - GLOW_D) / 2, alignItems: 'center', justifyContent: 'center' },
   pttRing: {
     position: 'absolute',
     top: 0, left: 0, right: 0, bottom: 0,

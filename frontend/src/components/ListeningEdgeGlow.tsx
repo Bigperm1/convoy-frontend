@@ -19,7 +19,9 @@ import { LinearGradient } from "expo-linear-gradient";
 
 const GREEN = "#2DEC86";
 const AMBER = "#FF9F0A";     // "Thinking…" — agent turn in flight
-const EDGE = 110;            // how far the glow bleeds in from each edge (px)
+const EDGE = 64;             // how far the glow bleeds in from each edge (px). Tightened
+                            // 110→64 so it hugs the edges (matches the website's Scout
+                            // glow) instead of washing far into the screen.
 const PULSE_MS = 1500;       // one breathe direction (in or out)
 
 // ---- glow bus (module-level, same Set pattern as voiceBus) ----

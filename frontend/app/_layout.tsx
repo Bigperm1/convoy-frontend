@@ -1,11 +1,12 @@
 // Set the Mapbox public access token before anything renders (side-effect import,
 // must stay first). No-op on web via initMapbox.web.ts.
 import '../src/initMapbox';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider } from '../src/auth';
+import AnimatedSplash from '../src/components/AnimatedSplash';
 // NOTE: NavigationProvider (Google Navigation SDK) is temporarily NOT mounted while
 // the map runs on react-native-maps. The dependency has been removed; re-add
 // @googlemaps/react-native-navigation-sdk and wrap the tree with <NavigationProvider>
@@ -18,6 +19,10 @@ export default function RootLayout() {
   // stuck on the logo; hiding it here on phone-root mount clears it. Guarded —
   // a no-op if already hidden. We deliberately do NOT call preventAutoHideAsync,
   // so the normal cold-phone launch keeps auto-hiding as before.
+  // Play the branded launch animation (H logo + map fading to black) once per cold start,
+  // over the app while it boots. It masks the native splash and unmounts itself when done.
+  const [splashDone, setSplashDone] = useState(false);
+
   useEffect(() => {
     SplashScreen.hideAsync().catch(() => {});
   }, []);
@@ -27,6 +32,7 @@ export default function RootLayout() {
       <AuthProvider>
         <Stack screenOptions={{ headerShown: false }} />
       </AuthProvider>
+      {!splashDone && <AnimatedSplash onDone={() => setSplashDone(true)} />}
     </SafeAreaProvider>
   );
 }

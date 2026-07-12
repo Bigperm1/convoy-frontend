@@ -147,6 +147,14 @@ debugOverlays: boolean;
 // the head unit). Separate from debugOverlays so the car screen can stay clean
 // while phone diagnostics are on. Off by default.
 carplayDebug: boolean;
+// Keep the phone screen awake while the map is open, so it can't auto-lock and
+// freeze the CarPlay marker mid-drive (Waze-style "keep screen on"). Gates the
+// map.tsx keep-awake. undefined/legacy → on (matches the prior always-on behavior).
+preventAutoLock: boolean;
+// Mute Hairpin's OWN audio — Scout voice, comms & alert dings — while a phone
+// call is active (external music is paused by iOS automatically). Gates
+// callSilence() at each audio play site. undefined/legacy → on.
+muteDuringCalls: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -210,6 +218,8 @@ volTransmission: undefined,
 musicSource: null,
 debugOverlays: false,
 carplayDebug: false,
+preventAutoLock: true,
+muteDuringCalls: true,
 };
 
 // ---- Map mode helpers (single source of truth = settings.mapMode) ----

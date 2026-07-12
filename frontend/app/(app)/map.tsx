@@ -1806,6 +1806,9 @@ export default function MapScreen() {
   // old tbt-only gate let it dim mid-drive. Released on unmount; iOS still locks once
   // backgrounded. (Trade-off: foregrounded + parked + unplugged won't auto-dim.)
   useEffect(() => {
+    // Prevent Auto-Lock (Settings → Driving, default on): when the user turns it OFF,
+    // release the lock and bail so the phone can auto-dim/lock normally.
+    if (settings.preventAutoLock === false) { deactivateKeepAwake('convoy-nav').catch(() => {}); return; }
     activateKeepAwakeAsync('convoy-nav').catch(() => {});
     // Re-assert on every return to foreground. iOS clears isIdleTimerDisabled when
     // the app backgrounds (phone locked / CarPlay took over), so without this the
@@ -1816,7 +1819,7 @@ export default function MapScreen() {
       if (s === 'active') activateKeepAwakeAsync('convoy-nav').catch(() => {});
     });
     return () => { sub.remove(); deactivateKeepAwake('convoy-nav').catch(() => {}); };
-  }, []);
+  }, [settings.preventAutoLock]);
 
   // ----- Continuous heading + position watcher -----
   // BestForNavigation accuracy + 1s tick + 0m distance gate so the speedometer

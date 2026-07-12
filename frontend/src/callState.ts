@@ -8,6 +8,7 @@
 // WITHOUT the module (e.g. existing 1.1.11 builds that only got this over OTA),
 // so this safely returns false there and lights up on builds that bundle it.
 import { requireOptionalNativeModule } from "expo-modules-core";
+import { getSettings } from "./settings";
 
 let Native: any = null;
 try { Native = requireOptionalNativeModule("ConvoyCallDetector"); } catch { Native = null; }
@@ -16,6 +17,13 @@ try { Native = requireOptionalNativeModule("ConvoyCallDetector"); } catch { Nati
 export function isOnCall(): boolean {
   if (!Native || typeof Native.isOnCall !== "function") return false;
   try { return !!Native.isOnCall(); } catch { return false; }
+}
+
+/** True when a call is active AND the user wants Hairpin's own audio muted during calls
+ *  (Settings → Driving → "Mute During Calls", default on). Gate for Scout voice, comms
+ *  & dings so Hairpin goes quiet on a call; external music is paused by iOS on its own. */
+export function callSilence(): boolean {
+  try { return getSettings().muteDuringCalls !== false && isOnCall(); } catch { return false; }
 }
 
 /** Kept for call-site compatibility — detection is query-based, no init needed. */

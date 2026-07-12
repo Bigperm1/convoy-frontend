@@ -6,6 +6,7 @@ import { GlassFill } from "../../../src/Glass";
 import { useAuth } from "../../../src/auth";
 import {
   useSettings,
+  updateSettings,
   getMapModeChoice,
   getRouteColor,
 } from "../../../src/settings";
@@ -14,6 +15,7 @@ import {
   SectionLabel,
   SettingsCard,
   MenuRow,
+  ToggleRow,
   Divider,
 } from "../../../src/components/settingsKit";
 
@@ -136,6 +138,26 @@ export default function SettingsMenu() {
         <MenuRow icon="color-palette" iconColor="#BF5AF2" title="Route Color" swatch={routeColor} onPress={() => go("/(app)/settings/route-color")} />
         <Divider />
         <MenuRow icon="options" iconColor="#30D158" title="Route Preferences" subtitle="Tolls, highways, ferries" onPress={() => go("/(app)/settings/route-preferences")} />
+      </SettingsCard>
+
+      {/* DRIVING — keep the screen alive + quiet Hairpin on a call */}
+      <SectionLabel>DRIVING</SectionLabel>
+      <SettingsCard>
+        <ToggleRow
+          icon="phone-portrait" iconColor="#5AC8FA"
+          title="Prevent Auto-Lock"
+          subtitle="Keep the screen on so the map & CarPlay marker don't freeze"
+          value={settings.preventAutoLock !== false}
+          onChange={(v) => updateSettings({ preventAutoLock: v })}
+        />
+        <Divider />
+        <ToggleRow
+          icon="call" iconColor="#30D158"
+          title="Mute During Calls"
+          subtitle="Silence Scout, comms & dings while you're on a phone call"
+          value={settings.muteDuringCalls !== false}
+          onChange={(v) => updateSettings({ muteDuringCalls: v })}
+        />
       </SettingsCard>
 
       {/* MAP & FUEL */}

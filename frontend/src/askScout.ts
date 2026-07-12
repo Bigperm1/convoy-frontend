@@ -18,6 +18,7 @@ import { Audio } from "expo-av";
 import { api } from "./api";
 import { getNovaVoice, getSettings, getAudioVol } from "./settings";
 import { isAudioBusy } from "./nav";
+import { callSilence } from "./callState";
 import { setPlaybackAudioMode, setRecordingAudioMode, setIdleAudioMode } from "./audioMode";
 import { getPttRecordingOptions } from "./proximityAudio";
 
@@ -105,6 +106,7 @@ export async function askScout(prompt: string, opts?: { listenMs?: number }): Pr
 // Speak a line and resolve when it finishes (standalone sound, independent of the nav
 // TTS queue — askScout owns the floor while it's asking).
 async function speakAndWait(text: string): Promise<void> {
+  if (callSilence()) return; // muted during a phone call (Settings → Mute During Calls)
   try {
     await setPlaybackAudioMode();
     const { data } = await api.post("/tts", { text, voice: getNovaVoice() });

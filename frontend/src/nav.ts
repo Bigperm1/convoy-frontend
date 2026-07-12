@@ -10,7 +10,7 @@ import { fetchMapboxRoutes, fetchMapboxRouteVia, type MapboxRoute, type MapboxRo
 import { getSettings, getNovaVoice, getAudioVol } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
-import { isOnCall } from "./callState";
+import { isOnCall, callSilence } from "./callState";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -1006,6 +1006,9 @@ async function playBase64Audio(b64: string, mime: string): Promise<void> {
 }
 
 async function _playClip(b64: string, mime: string): Promise<void> {
+  // Mute-during-calls: skip Nova entirely while on a call (nav callouts, greeting & quips
+  // all route through here) so she isn't loud over the call. Settings → Mute During Calls.
+  if (callSilence()) return;
   if (Platform.OS === "web") {
     return new Promise((resolve) => {
       try {

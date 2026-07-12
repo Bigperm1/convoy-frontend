@@ -23,6 +23,7 @@ import { getSettings, getAudioVol } from "./settings";
 import { hailBus } from "./hailBus";
 import { shareBus } from "./shareBus";
 import { setIdleAudioMode, setPlaybackAudioMode } from "./audioMode";
+import { callSilence } from "./callState";
 import { duckMusicFor, unduckMusicFor } from "./applePlayer";
 import { showTransmitNotification } from "./pttNotification";
 import { AppState } from "react-native";
@@ -110,6 +111,7 @@ let activeSound: Audio.Sound | null = null;
 const handledIds = new Set<string>();
 
 async function playOne(m: PTTMessage) {
+  if (callSilence()) return; // don't play crew comms over a phone call (Settings → Mute During Calls)
   try {
     // Unload anything still hanging around from a prior clip.
     if (activeSound) {

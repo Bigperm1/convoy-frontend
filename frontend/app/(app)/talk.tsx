@@ -669,8 +669,9 @@ export default function TalkScreen() {
           <Svg width={GLOW_D} height={GLOW_D}>
             <Defs>
               <RadialGradient id="micGlowGrad" cx="50%" cy="50%" r="50%">
-                <Stop offset="0%" stopColor={YELLOW} stopOpacity={0.55} />
-                <Stop offset="72%" stopColor={YELLOW} stopOpacity={0.5} />
+                <Stop offset="0%" stopColor={YELLOW} stopOpacity={0.3} />
+                <Stop offset="60%" stopColor={YELLOW} stopOpacity={0.26} />
+                <Stop offset="86%" stopColor={YELLOW} stopOpacity={0.16} />
                 <Stop offset="100%" stopColor={YELLOW} stopOpacity={0} />
               </RadialGradient>
             </Defs>
@@ -842,7 +843,9 @@ export default function TalkScreen() {
 // so it clears the bar. iOS keeps the original 360. Tunable.
 const MIC_D = Platform.OS === 'android' ? 300 : 360;
 // Button-halo glow diameter — the mic + a soft ring of glow around it (breathes on press).
-const GLOW_D = MIC_D + 96;
+// +66 keeps the halo tight to the rim; react-native-svg renders radial gradients bolder
+// than a browser, so the stops below are kept low + gradual for a soft aura (not a hard ring).
+const GLOW_D = MIC_D + 66;
 const MIC_INNER_D = Platform.OS === 'android' ? 242 : 290;
 const MIC_ICON_SIZE = Platform.OS === 'android' ? 106 : 128;
 

@@ -289,6 +289,33 @@ export async function hydrateCarRouteFromDisk(): Promise<void> {
   } catch {}
 }
 
+// ===== One-time foreground "Always" upgrade ask (CarPlay-standalone Wave 1a) =====
+// The bg location task (NAV_TASK) reliably delivers with the phone LOCKED only under
+// "Always" authorization — but the only requestBackgroundPermissionsAsync call used to
+// live inside acquireBgLocation, which runs on CarPlay connect when the app is already
+// backgrounded/locked, where iOS CANNOT present the upgrade prompt (it silently returns
+// the current status). So When-In-Use users were never upgraded, and the car map could
+// starve once the phone locked while idle. Ask ONCE, from the foreground (map mount),
+// where the system alert can actually appear.
+//
+// UX guards: never chains onto the foreground prompt (if fg isn't granted yet, we skip
+// and a later session asks); the flag is set BEFORE requesting so an interrupted prompt
+// can never turn into a re-nag loop. iOS shows "Keep Only While Using / Change to
+// Always Allow" exactly once; if the user keeps While-Using, later calls are no-ops.
+const ASKED_ALWAYS_KEY = "convoy.askedAlways.v1";
+export async function askAlwaysLocationOnce(): Promise<void> {
+  try {
+    if (Platform.OS === "web") return;
+    if (await AsyncStorage.getItem(ASKED_ALWAYS_KEY)) return;
+    const fg = await Location.getForegroundPermissionsAsync();
+    if (!fg.granted) return; // don't chain two permission dialogs — retry next session
+    const bg = await Location.getBackgroundPermissionsAsync();
+    if (bg.granted) { await AsyncStorage.setItem(ASKED_ALWAYS_KEY, "1"); return; }
+    await AsyncStorage.setItem(ASKED_ALWAYS_KEY, "1");
+    await Location.requestBackgroundPermissionsAsync().catch(() => {});
+  } catch {}
+}
+
 export async function acquireBgLocation(tag: string): Promise<boolean> {
   _locConsumers.add(tag);
   try {

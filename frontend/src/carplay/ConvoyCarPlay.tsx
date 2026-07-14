@@ -25,24 +25,24 @@
 // The car's map AREA (CarSurface) renders the LIVE Mapbox SDK 3D map (the same
 // @rnmapbox engine as the phone) via <CarMapView>, with the maneuver / nearby /
 // speed read-outs floated on top. CAR_LIVE_MAP_ENABLED gates it; CarMapView is
-// wrapped in CarMapBoundary and self-demotes (glFailed) to a Mapbox Static Images
-// frame if the GL map throws or never paints, which in turn falls back to the
-// dashboard until a GPS fix arrives — so the car screen is never blank. The live
-// surface only paints once the bridgeless Fabric surface actually commits a frame
-// (forced natively in withConvoyCarPlay.js).
+// wrapped in CarMapBoundary, and a GL failure (watchdog / style error / render
+// throw) schedules a REMOUNT with backoff (liveAttempt) — the 3D map is the ONLY
+// map surface (standing rule: never the flat 2D static-image map), with the boot
+// dashboard shown only until a GPS fix arrives. The live surface only paints once
+// the bridgeless Fabric surface actually commits a frame (forced natively in
+// withConvoyCarPlay.js).
 
 import React, { useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated, TouchableOpacity } from 'react-native';
-import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec, haversineMeters } from '../nav';
+import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec } from '../nav';
 import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
-import { setCarState, setCarSelfPosition, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
+import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
-import { MAPBOX_PUBLIC_TOKEN } from '../initMapbox';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
 
@@ -123,66 +123,20 @@ function fmtClock(d: Date): string {
   return `${h}:${m < 10 ? '0' : ''}${m}${ap}`;
 }
 
-// ---- Mapbox Static Images: live street map for the car surface ----
-// Renders a REAL dark street map centered on the driver as a plain <Image>
-// (Mapbox Static Images API) — deliberately NOT a live GL <MapView>. On the
-// secondary CarPlay window a GL/Metal map risks failing to get a render context
-// and, worse, tripping the CarPlay watchdog (the same watchdog that caused the
-// original connect crash when nothing drew in time). A static <Image> has no GL
-// context, can't trip the watchdog, always draws, and is 100% OTA-able. The map
-// is fetched HEADING-UP — the heading is baked into the Static Images URL as the
-// bearing, so Mapbox renders it rotated with upright labels and correct framing;
-// the car marker sits at centre pointing straight up. New frames are fetched on
-// movement, on route change, or when the car turns >= CAR_MAP_HEADING_DEG, so
-// small heading jitter costs nothing. If we ever confirm a live MapView is safe
-// on a head unit, it slots in here behind the same fallback.
-const CAR_MAP_STYLE = 'mapbox/dark-v11'; // standard, always-valid dark style
-const CAR_MAP_ZOOM = 15;
-const CAR_MAP_W = 800;
-const CAR_MAP_H = 480;
-const CAR_ROUTE_COLOR = '2dec86'; // brand green, no '#'
-// Refresh the street map when the car moves this far OR this long passes —
-// whichever first. Keeps Static Images API request volume modest while staying
-// current enough for a glanceable dashboard.
-const CAR_MAP_MOVE_M = 70;
-const CAR_MAP_MAX_AGE_MS = 5000;
-// Heading-up: re-fetch the frame when the car's heading turns at least this many
-// degrees (the bearing is baked into the static image, so a turn needs a new
-// frame). Jitter below this costs no request.
-const CAR_MAP_HEADING_DEG = 12;
-// Hard ceiling on the whole URL; if a long route polyline would blow past it the
-// route overlay is dropped (the map still renders, centered on the car).
-const CAR_MAP_URL_MAX = 7500;
-
-function buildStaticMapUrl(lat: number, lng: number, polyline: string, bearing = 0): string {
-  const b = (((Math.round(bearing) % 360) + 360) % 360); // heading-up bearing, 0-359
-  const tail =
-    `${lng},${lat},${CAR_MAP_ZOOM},${b}/${CAR_MAP_W}x${CAR_MAP_H}@2x` +
-    `?access_token=${MAPBOX_PUBLIC_TOKEN}`;
-  let overlay = '';
-  if (polyline) {
-    // Google's overview polyline is precision-5 — a drop-in for Mapbox's `path`
-    // overlay. URL-encode it (it can contain \\, ?, @, etc.).
-    const withPath = `path-9+${CAR_ROUTE_COLOR}-1(${encodeURIComponent(polyline)})/`;
-    const probe = `https://api.mapbox.com/styles/v1/${CAR_MAP_STYLE}/static/${withPath}${tail}`;
-    if (probe.length <= CAR_MAP_URL_MAX) overlay = withPath;
-  }
-  return `https://api.mapbox.com/styles/v1/${CAR_MAP_STYLE}/static/${overlay}${tail}`;
-}
-
 // ---- The component rendered onto the car screen ----
 // Shown the whole time a car is connected — idle (no route) AND during nav.
 // Reads the shared store so it shows live data despite being a separate root.
 //
-// With a GPS fix it shows a real street map (centered on the driver, route line
-// overlaid) with the maneuver / nearby / speed read-outs floated on top. Until a
-// fix arrives (or if the map image ever fails to load) it falls back to the
-// original dashboard, so the car screen is never worse than before.
+// With a GPS fix it shows the LIVE 3D map (CarMapView — Mapbox Standard, pitched
+// chase camera) with the maneuver / nearby / speed read-outs floated on top; until
+// a fix arrives it shows the boot dashboard. There is deliberately NO 2D/static
+// map surface anymore (standing rule: never show the flat street-image map) — a
+// GL failure RETRIES the live map instead of demoting (see liveAttempt below).
 // Catches a RENDER throw from the live <CarMapView> on the CarPlay window (distinct
 // from a GL *load* failure, which CarMapView already reports via onGLError). Without
 // this, a throw would unwind the whole CarSurface tree → nothing commits → blank. The
-// boundary renders null and fires onFail → glFailed → the static map takes over, so
-// the surface still commits and the car screen is never empty.
+// boundary renders null and fires onFail → a scheduled live-map REMOUNT, so the
+// surface still commits (black backstop) and heals to 3D instead of staying empty.
 class CarMapBoundary extends React.Component<
   { onFail: () => void; children: React.ReactNode },
   { dead: boolean }
@@ -213,44 +167,30 @@ export function CarSurface() {
 
   const hasFix = typeof s.selfLat === 'number' && typeof s.selfLng === 'number';
 
-  // Static-map URL loaded straight into the visible full-size <Image>. The old
-  // off-screen 1x1/opacity-0 preloader never decoded on the CarPlay surface, so
-  // its onLoad never fired and the map never showed.
-  const [mapUrl, setMapUrl] = useState<string | null>(null);
-  const [dbgErr, setDbgErr] = useState<string>('');
-  // Live-vs-static gate (Path A scaffold). When the live @rnmapbox MapView lands
-  // next pass it mounts under `showLive`; a GL/load failure flips `glFailed` true
-  // and the surface drops back to the static <Image> branch below. This commit
-  // ships NO live map yet — the placeholder branch renders the static surface, so
-  // behavior is unchanged.
-  const [glFailed, setGlFailed] = useState(false);
-  const lastRef = useRef<{ lat: number; lng: number; at: number; poly: string; hdg: number }>({ lat: 0, lng: 0, at: 0, poly: '', hdg: 0 });
-
-  useEffect(() => {
-    if (!hasFix) return;
-    const lat = s.selfLat as number;
-    const lng = s.selfLng as number;
-    const hdg = (((Math.round(s.heading ?? 0) % 360) + 360) % 360);
-    const now = Date.now();
-    const last = lastRef.current;
-    const movedM = (last.lat || last.lng)
-      ? haversineMeters({ lat: last.lat, lng: last.lng }, { lat, lng })
-      : Infinity;
-    const polyChanged = last.poly !== s.routePolyline;
-    const stale = now - last.at > CAR_MAP_MAX_AGE_MS;
-    const everFetched = last.at !== 0;
-    // Heading-up: also re-fetch when the car has turned enough that the frame's
-    // baked-in bearing is visibly stale (shortest angular gap >= threshold).
-    let dHdg = Math.abs(hdg - last.hdg) % 360;
-    if (dHdg > 180) dHdg = 360 - dHdg;
-    const turned = dHdg >= CAR_MAP_HEADING_DEG;
-    if (everFetched && !polyChanged && movedM < CAR_MAP_MOVE_M && !stale && !turned) return;
-
-    lastRef.current = { lat, lng, at: now, poly: s.routePolyline, hdg };
-    // Set the visible map URL directly — the full-size <Image> loads it the same
-    // way the logo PNG does (which the hidden preloader did not on CarPlay).
-    setMapUrl(buildStaticMapUrl(lat, lng, s.routePolyline, hdg));
-  }, [hasFix, s.selfLat, s.selfLng, s.routePolyline, s.heading]);
+  // Live-map RETRY (the "3D 100% of the time" fix). The old `glFailed` was a
+  // ONE-WAY latch: a single slow first paint (the 6s watchdog on the secondary
+  // CarPlay GL window) or one transient style/tile error demoted the car to the
+  // flat 2D static-image map for the ENTIRE connected session — the "basic 2D
+  // Hairpin map on connect" bug, and a violation of the no-2D standing rule.
+  // Now a GL failure schedules a REMOUNT of CarMapView (key={liveAttempt} →
+  // fresh GL context + fresh watchdog) with exponential backoff (1s→8s cap),
+  // forever: the car surface only ever shows the live 3D map, or the boot
+  // dashboard while there is no GPS fix. While a retry is pending the failed
+  // CarMapView stays mounted (dark) — never a flat street raster.
+  const [liveAttempt, setLiveAttempt] = useState(0);
+  const liveAttemptRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleLiveRetry = () => {
+    if (retryTimerRef.current) return; // one pending retry at a time
+    const next = liveAttemptRef.current + 1;
+    const delay = Math.min(1000 * 2 ** (next - 1), 8000);
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null;
+      liveAttemptRef.current = next;
+      setLiveAttempt(next);
+    }, delay);
+  };
+  useEffect(() => () => { if (retryTimerRef.current) clearTimeout(retryTimerRef.current); }, []);
 
   // DIAGNOSTIC tick (CAR_DIAG_MODE). Independent of the store/GPS so it proves the
   // React tree is not just mounted but actively re-rendering on the CarPlay window.
@@ -307,15 +247,13 @@ export function CarSurface() {
   // chip keeps above the speedo, so the bottom-left cluster reads as one unit.
   const limitSlideX = limitSlide.interpolate({ inputRange: [0, 1], outputRange: [0, 62] });
 
-  const showMap = hasFix && !!mapUrl;
-  // Live @rnmapbox MapView gate. Three conditions, all required:
-  //   - CAR_LIVE_MAP_ENABLED: master kill-switch (carPlayShared). Currently TRUE for
-  //     the MapboxMaps 11.25.0 build; flip FALSE via OTA to force the static surface.
+  // Live @rnmapbox MapView gate. Two conditions:
+  //   - CAR_LIVE_MAP_ENABLED: master kill-switch (carPlayShared). Flip FALSE via
+  //     OTA to force the boot dashboard (emergency lever — there is no 2D map).
   //   - hasFix: we have a GPS position.
-  //   - !glFailed: CarMapView's frame watchdog hasn't demoted us to static.
-  // When the live arm IS active, <CarMapView/> mounts; its watchdog flips glFailed
-  // (-> showLive false -> static) if it never paints, so the car can't stay blank.
-  const showLive = CAR_LIVE_MAP_ENABLED && hasFix && !glFailed;
+  // A GL failure no longer gates this — it schedules a live-map REMOUNT instead
+  // (liveAttempt above), so the car always converges on the 3D map.
+  const showLive = CAR_LIVE_MAP_ENABLED && hasFix;
 
   // GROUND-TRUTH RENDER TEST. If this paints, the CarPlay React surface is alive and
   // the bug is downstream (content/layout); if the head unit stays the bare logo, the
@@ -330,52 +268,10 @@ export function CarSurface() {
     );
   }
 
-  // The static-map surface: the live map background as a plain <Image> with the
-  // maneuver/chip/meta overlays, falling back to the dashboard/logo when there's
-  // no GPS fix (or the image failed). Extracted to a const so the `showLive`
-  // placeholder arm can render it without duplicating the markup.
-  const staticSurface = showMap ? (
-    <>
-      <Image
-        source={{ uri: mapUrl as string }}
-        style={StyleSheet.absoluteFill}
-        resizeMode="cover"
-        onError={(e: any) => { setMapUrl(null); lastRef.current = { lat: 0, lng: 0, at: 0, poly: '', hdg: 0 }; setDbgErr(String(e?.nativeEvent?.error || 'map-img-err')); }}
-      />
-
-      {/* Car marker pinned to the map centre. The map is now heading-up, so the
-          car always points straight up (its travel direction). */}
-      <View style={styles.markerCenter} pointerEvents="none">
-        <View style={styles.markerHalo} />
-        <View style={styles.markerChevron} />
-      </View>
-
-      {/* Top: maneuver while navigating, else a small CONVOY / nearby chip. */}
-      {s.navigating ? (
-        <View style={styles.topStrip} pointerEvents="none">
-          <GlassFill tintColor={hudTint()} style={{ borderRadius: 12, overflow: 'hidden' }} />
-          <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
-          <Text style={styles.topInst} numberOfLines={1}>{s.instruction || 'Continue'}</Text>
-        </View>
-      ) : (
-        <View style={styles.topChip} pointerEvents="none">
-          <GlassFill tintColor={hudTint()} style={{ borderRadius: 14, overflow: 'hidden' }} />
-          <Text style={styles.topChipText}>
-            {nearby ? `HAIRPIN   ·   ${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'HAIRPIN'}
-          </Text>
-        </View>
-      )}
-
-      {/* Bottom-right: arrival / eta / remaining while navigating. */}
-      {s.navigating && metaLine ? (
-        <View style={[styles.bottomMeta, { backgroundColor: carHudFloor() }]} pointerEvents="none">
-          <GlassFill tintColor={undefined} style={{ borderRadius: 10, overflow: 'hidden' }} />
-          <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
-        </View>
-      ) : null}
-    </>
-  ) : (
-    /* ---- Fallback: no GPS fix yet (or image failed) → original dashboard ---- */
+  // Boot dashboard — shown ONLY until a GPS fix arrives (no fix = nothing to map).
+  // There is deliberately no map-image branch here anymore: with a fix, the live 3D
+  // CarMapView is the ONLY map surface (see liveAttempt retry above).
+  const bootSurface = (
     <View style={styles.center}>
       {s.navigating ? (
         <>
@@ -402,10 +298,8 @@ export function CarSurface() {
     </View>
   );
 
-  // Maneuver/chip + meta overlays that float on top of the MAP (live or static).
-  // Mirrors the overlays inside staticSurface's map branch so they read the same
-  // over the live CarMapView. The center chevron is NOT here — the live map draws
-  // the real 3D car (ModelLayer), so only the static image needs the chevron.
+  // Maneuver + meta overlays that float on top of the live CarMapView. No center
+  // chevron here — the live map draws the real 3D car (ModelLayer) itself.
   const mapOverlays = (
     <>
       {/* BOTTOM-RIGHT nav stack (out of the route line's way): the ETA pill sits just
@@ -450,16 +344,18 @@ export function CarSurface() {
   return (
     <View style={styles.surface}>
       {showLive ? (
-        // Live @rnmapbox map on the CarPlay window. A GL/load failure flips
-        // glFailed -> showLive false -> the static surface below takes over.
+        // Live 3D map on the CarPlay window — the ONLY map surface. A GL/load
+        // failure (watchdog, style error, render throw) schedules a remount with
+        // backoff via scheduleLiveRetry; key={liveAttempt} gives the retry a fresh
+        // GL context + boundary + watchdog. attempt>0 widens the paint watchdog.
         <>
-          <CarMapBoundary onFail={() => setGlFailed(true)}>
-            <CarMapView onGLError={() => setGlFailed(true)} />
+          <CarMapBoundary key={liveAttempt} onFail={scheduleLiveRetry}>
+            <CarMapView attempt={liveAttempt} onGLError={scheduleLiveRetry} />
           </CarMapBoundary>
           {mapOverlays}
         </>
       ) : (
-        staticSurface
+        bootSurface
       )}
 
       {/* ---- Shared overlays: render on top of EITHER surface (live or static) ---- */}
@@ -571,7 +467,16 @@ function upcomingManeuverKey(route: NavRoute | null, stepIndex: number): string 
 function toCarPeers(peers?: Record<string, any> | null): CarPeer[] {
   if (!peers) return [];
   return Object.values(peers)
-    .map((p: any) => ({ id: p?.user_id, handle: p?.handle }))
+    .map((p: any) => ({
+      id: p?.user_id,
+      handle: p?.handle,
+      // Optional position fields → CarMapView draws the convoy on the head-unit
+      // map (CarPlay-standalone Wave 1). Peers without coords just skip the dot.
+      lat: typeof p?.lat === 'number' ? p.lat : undefined,
+      lng: typeof p?.lng === 'number' ? p.lng : undefined,
+      heading: typeof p?.heading === 'number' ? p.heading : undefined,
+      status: (p?.status === 'parked' ? 'parked' : 'live') as 'live' | 'parked',
+    }))
     .filter((p) => p.id && p.handle);
 }
 
@@ -659,7 +564,9 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       eta: tbt.active ? fmtEtaSec(tbt.etaSeconds) : '',
       distanceRemaining: tbt.active ? fmtDistanceM(tbt.distanceRemainingM) : '',
       destinationLabel: destination?.label || '',
-      peers: toCarPeers(peers),
+      // NOTE: peers + hazards are NOT written here anymore — they go through the
+      // gated setCarPeers/setCarHazards writes in the effect below, so the cold
+      // carDataService and this warm mirror can share ownership without clobbering.
       // Raw numerics for the Android Auto NavigationTemplate (AndroidAutoRoot).
       distanceToTurnM: tbt.active ? tbt.distanceToManeuverM : 0,
       distanceRemainingM: tbt.active ? tbt.distanceRemainingM : 0,
@@ -698,8 +605,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       // Self-marker style → car live map renders the arrow when the phone does.
       selfMarkerType: getSelfMarkerType(getSettings()),
       // Mirrored map markers (gates already applied by the caller). undefined→[] so a
-      // cleared layer wipes the car too.
-      hazards: hazards || [],
+      // cleared layer wipes the car too. (hazards moved to the gated write below.)
       speedCameras: speedCameras || [],
       roadEvents: roadEvents || [],
       places: places || [],
@@ -724,14 +630,21 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
     routes,
     selectedRouteIndex,
     destination?.label,
-    peers,
     user?.speed,
     weather,
-    hazards,
     speedCameras,
     roadEvents,
     places,
   ]);
+
+  // ---- peers + hazards: GATED writes (dual ownership with the cold service) ----
+  // Split out of the metadata effect so they route through the carStore freshness
+  // gates: this warm phone mirror ('phone') always wins while it's writing; when the
+  // phone screen unmounts/backgrounds and its writes stop, the module-scope
+  // carDataService ('service', started on CarPlay connect) takes over within
+  // FEED_STALE_MS — so the head unit keeps showing the convoy + hazards cold.
+  useEffect(() => { setCarPeers(toCarPeers(peers), 'phone'); }, [peers]);
+  useEffect(() => { setCarHazards(hazards || [], 'phone'); }, [hazards]);
 
   // ---- position mirror: ADDITIVE ONLY ----
   // Writes selfLat/selfLng/heading ONLY when the phone has a real fix. carStore is a

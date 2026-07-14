@@ -14,6 +14,7 @@ import * as Location from 'expo-location';
 import { carPlayHookOwnsRoot } from './carPlayShared';
 import { setCarState, getCarState } from './carStore';
 import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
+import { startCarDataService, stopCarDataService } from './carDataService';
 
 let booted = false;
 
@@ -51,6 +52,11 @@ export function initCarPlayBootstrap(): void {
   const onConnect = () => {
     setIdleRoot();
     void acquireBgLocation('carplay');
+    // Cold-capable PEERS + HAZARDS feeds (CarPlay-standalone Wave 1): WebSocket +
+    // Supabase presence/Realtime + REST backstops, module-scope — the head unit
+    // shows the convoy and hazards even when map.tsx never mounted. Coexists with
+    // the warm phone mirror via the carStore freshness gates.
+    startCarDataService();
     // ALSO start the continuous foreground feed directly on connect — independent of
     // map.tsx (which may be unmounted behind CarPlay) and of acquireBgLocation's
     // permission branch. It self-guards (idempotent) and is released with the shared
@@ -92,6 +98,7 @@ export function initCarPlayBootstrap(): void {
 
   const onDisconnect = () => {
     void releaseBgLocation('carplay');
+    stopCarDataService();
   };
 
   try {

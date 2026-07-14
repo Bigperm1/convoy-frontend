@@ -10,7 +10,18 @@ import { useEffect, useState } from 'react';
 import type { MapMode } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
 
-export type CarPeer = { id: string; handle: string };
+// Peer entry for the car surface. `id`+`handle` feed the Comms list (the original
+// shape); the optional position/status fields (added for CarPlay-standalone Wave 1)
+// let CarMapView draw the convoy on the head-unit map. Peers without a numeric
+// lat/lng simply don't render a map dot — the Comms list is unaffected.
+export type CarPeer = {
+  id: string;
+  handle: string;
+  lat?: number;
+  lng?: number;
+  heading?: number;
+  status?: 'live' | 'parked';
+};
 
 export type CarState = {
   navigating: boolean;
@@ -166,8 +177,57 @@ export function setCarSelfPosition(lat: number, lng: number, heading: number | n
   setCarState({ selfLat: lat, selfLng: lng, heading });
 }
 
+// ── Peers/hazards write GATE (CarPlay-standalone Wave 1) ────────────────────
+// Two writers now produce peers + hazards: the WARM phone mirror (useConvoyCarPlay,
+// runs only while map.tsx is mounted) and the COLD module-scope carDataService
+// (started on CarPlay connect, keeps the head unit fed when the phone app was never
+// opened). Plain setCarState is last-writer-wins, so without a gate they'd clobber
+// each other on every tick. Same mental model as setCarSelfPosition above: the
+// richer 'phone' feed always writes and suppresses 'service' while fresh; when the
+// phone screen unmounts/backgrounds (its writes stop), the service takes over after
+// FEED_STALE_MS. The first write and any post-staleness write are always accepted.
+export type ConvoyFeedSource = 'phone' | 'service';
+const FEED_RANK: Record<ConvoyFeedSource, number> = { phone: 2, service: 1 };
+// The phone mirror re-writes only when its React deps CHANGE (not on a fixed
+// cadence), so this is deliberately generous — long enough that a quiet-but-alive
+// phone feed isn't usurped mid-drive, short enough that the cold service takes
+// over within one of its own refresh ticks after the phone goes away.
+const FEED_STALE_MS = 12_000;
+let lastPeersWrite: { ts: number; rank: number } | null = null;
+let lastHazardsWrite: { ts: number; rank: number } | null = null;
+
+function feedGateAllows(cur: { ts: number; rank: number } | null, rank: number): boolean {
+  if (!cur) return true;
+  const dt = Date.now() - cur.ts;
+  const stale = dt > FEED_STALE_MS || dt < 0; // dt<0 = wall clock stepped back → treat stale
+  return stale || rank >= cur.rank;
+}
+
+export function setCarPeers(peers: CarPeer[], source: ConvoyFeedSource) {
+  const rank = FEED_RANK[source];
+  if (!feedGateAllows(lastPeersWrite, rank)) return;
+  lastPeersWrite = { ts: Date.now(), rank };
+  setCarState({ peers });
+}
+
+export function setCarHazards(hazards: NonNullable<CarState['hazards']>, source: ConvoyFeedSource) {
+  const rank = FEED_RANK[source];
+  if (!feedGateAllows(lastHazardsWrite, rank)) return;
+  lastHazardsWrite = { ts: Date.now(), rank };
+  setCarState({ hazards });
+}
+
 export function getCarState(): CarState {
   return state;
+}
+
+// Imperative subscription for module-scope services (no React). The cold
+// carDataService drives its refresh throttles off these ticks — the background
+// location task keeps writing positions while the phone is locked, so position
+// ticks are the reliable event source (JS timers can stall when locked).
+export function subscribeCarState(fn: (s: CarState) => void): () => void {
+  listeners.add(fn);
+  return () => { listeners.delete(fn); };
 }
 
 export function useCarStore(): CarState {

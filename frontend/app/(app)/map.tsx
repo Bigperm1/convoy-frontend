@@ -57,7 +57,7 @@ import { recordOver, habitualOverKmh } from "../../src/speedProfile";
 import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
-import { startNavBanner, stopNavBanner, updateNavBanner } from "../../src/navNotification";
+import { startNavBanner, stopNavBanner, updateNavBanner, askAlwaysLocationOnce } from "../../src/navNotification";
 import RerouteCard from "../../src/RerouteCard";
 import { PoliceBadgeIcon } from "../../src/components/MapControlIcons";
 import CompassNeedle from '../../src/components/CompassNeedle';
@@ -1747,6 +1747,10 @@ export default function MapScreen() {
       // so the map isn't blank (first launch / denied / no cache / GPS failed).
       setCoords((cur) => cur ?? { lat: 37.7749, lng: -122.4194 });
       loadPeers();
+      // One-time "Always" location upgrade ask (CarPlay-standalone). Delayed a few
+      // seconds past mount so it never stacks on the foreground prompt / first paint;
+      // self-guards (one-shot flag, skips if fg not yet granted — see navNotification).
+      setTimeout(() => { void askAlwaysLocationOnce(); }, 6000);
     })();
   }, []);
 

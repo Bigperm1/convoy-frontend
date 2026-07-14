@@ -25,6 +25,7 @@ import Mapbox, {
   Camera,
   ShapeSource,
   LineLayer,
+  CircleLayer,
   VectorSource,
   Models,
 } from '@rnmapbox/maps';
@@ -115,11 +116,15 @@ const CAR_LEFT_PAD_FRAC = 0.08;
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';
 // Positive-frame watchdog: if the GL map hasn't painted a real frame within this
-// window after mount, demote to the static surface. The secondary CarPlay window
-// can leave the Metal map silently blank, and rnmapbox's onDidFailLoadingMap is a
-// DEAD event on iOS — so we trust a POSITIVE paint signal (onDidFinishRenderingFrameFully)
-// and treat its absence as failure, rather than waiting for an error that never comes.
+// window after mount, report failure via onGLError — the parent then REMOUNTS this
+// component with a fresh GL context (the 3D-100% retry; there is no 2D fallback).
+// The secondary CarPlay window can leave the Metal map silently blank, and
+// rnmapbox's onDidFailLoadingMap is a DEAD event on iOS — so we trust a POSITIVE
+// paint signal (onDidFinishRenderingFrameFully) and treat its absence as failure,
+// rather than waiting for an error that never comes. Retries (attempt > 0) get a
+// wider window — a slow head-unit boot shouldn't churn contexts back to back.
 const PAINT_WATCHDOG_MS = 6000;
+const RETRY_WATCHDOG_MS = 9000;
 // Route-snap heading gate (Phase 1 road-snap) — mirrors the phone (ConvoyMapbox). In
 // addition to the ≤60 m distance test, the route bearing must be within tolerance of the
 // travel heading, so a turn onto a parallel/cross street un-snaps the car to raw GPS.
@@ -130,12 +135,14 @@ const CAR_SNAP_MOVING_MS = 1.5;
 
 type Props = {
   // Called when the GL map fails or never paints on the CarPlay window, so the
-  // surface can fall back to the static <Image>. Driven by onMapLoadingError AND
-  // the positive-frame watchdog below (NOT onDidFailLoadingMap — dead on iOS).
+  // parent (CarSurface) can schedule a REMOUNT retry. Driven by onMapLoadingError
+  // AND the positive-frame watchdog below (NOT onDidFailLoadingMap — dead on iOS).
   onGLError?: () => void;
+  // Which retry this mount is (0 = first). Retries widen the paint watchdog.
+  attempt?: number;
 };
 
-export default function CarMapView({ onGLError }: Props) {
+export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   const s = useCarStore();
   const powerMode = usePowerMode(); // premium (plugged) → 60fps; eco (unplugged) → 30fps
   const [mapH, setMapH] = useState(0);
@@ -167,10 +174,20 @@ export default function CarMapView({ onGLError }: Props) {
     // Start the watchdog from MOUNT (after the CarPlay handshake), not connect.
     watchdogRef.current = setTimeout(() => {
       if (!paintedRef.current) fail();
-    }, PAINT_WATCHDOG_MS);
+    }, attempt > 0 ? RETRY_WATCHDOG_MS : PAINT_WATCHDOG_MS);
     return () => { if (watchdogRef.current) clearTimeout(watchdogRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Style-load re-assert (the "live map paints but looks FLAT" race): the
+  // <StyleImport existing config> below patches the Standard basemap import, but on
+  // a fresh GL context the config write can land BEFORE the basemap import exists —
+  // Standard then loads with default lighting and NO 3D objects (a 2D-looking live
+  // map). onDidFinishLoadingStyle fires once the style (incl. imports) is actually
+  // in, so bump styleGen → remounts <StyleImport> → config re-applies on the loaded
+  // style. Also re-assert the pitched camera if the first frame hasn't painted yet,
+  // so the very first visible frame is guaranteed pitched at the driver.
+  const [styleGen, setStyleGen] = useState(0);
 
   const hasFix = typeof s.selfLat === 'number' && typeof s.selfLng === 'number';
   const lat = s.selfLat ?? 0;
@@ -484,15 +501,37 @@ export default function CarMapView({ onGLError }: Props) {
         if (typeof w === 'number' && w > 0 && Math.abs(w - mapW) > 1) setMapW(w);
       }}
       // Real native iOS events (onDidFailLoadingMap is a no-op on iOS — do NOT use):
-      // a rendered frame clears the watchdog; a style/tile load error demotes now.
+      // a rendered frame clears the watchdog; a style/tile load error triggers the
+      // parent's remount-retry (fail → onGLError → fresh CarMapView).
       onDidFinishRenderingFrameFully={markPainted}
       onMapLoadingError={() => fail()}
+      onDidFinishLoadingStyle={() => {
+        // Re-apply the StyleImport config now that the style (and its basemap
+        // import) actually exists — kills the flat/unlit first paint (see the
+        // styleGen comment above) — and guarantee the first visible frame is
+        // pitched at the driver if nothing has painted yet.
+        setStyleGen((g) => g + 1);
+        if (!paintedRef.current && hasFix) {
+          try {
+            cameraRef.current?.setCamera({
+              centerCoordinate: [lng, lat],
+              zoomLevel: followZoom,
+              pitch: followPitch,
+              heading: followHeadingDeg,
+              animationMode: 'none',
+              animationDuration: 0,
+            } as any);
+          } catch {}
+        }
+      }}
     >
       {/* Standard basemap with the phone's light preset (3D buildings on). Only
           mounted for Standard; harmless to omit on satellite. `config` is cast to
           any to pass the boolean show3dObjects to native — same as the phone. */}
       {useStandard && (
-        <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: mode, show3dObjects: true } as any} />
+        // key={styleGen}: remounted on every style load so the config re-applies
+        // AFTER the basemap import exists (the flat-first-paint race fix above).
+        <Mapbox.StyleImport key={'basemap' + styleGen} id="basemap" existing config={{ lightPreset: mode, show3dObjects: true } as any} />
       )}
 
       {/* Road-snap source (Phase 2) — invisible mapbox-streets-v8 roads, queried by the
@@ -624,6 +663,45 @@ export default function CarMapView({ onGLError }: Props) {
           handlers are needed on the head unit (glanceable, and CarPlay doesn't deliver
           touches to this surface anyway). Keys are id-stable so the lockstep camera
           re-renders don't remount them. */}
+      {/* Convoy peers (CarPlay-standalone Wave 1) — the crew's live positions on the
+          head-unit map, fed warm by the phone mirror or cold by carDataService. GL
+          circles (not MarkerViews): cheap, view-sync-safe on the car window, and
+          glanceable. circleEmissiveStrength is REQUIRED — Standard's night/dusk
+          light preset renders unlit GL layers near-black (the "hazards are black"
+          bug). Parked peers dim to a fainter pin. Drawn in the 'top' slot so dots
+          never hide under the route ribbon. */}
+      {(s.peers || []).some((p) => typeof p.lat === 'number' && typeof p.lng === 'number') && (
+        <ShapeSource
+          id="car-peers"
+          shape={{
+            type: 'FeatureCollection',
+            features: (s.peers || [])
+              .filter((p) => typeof p.lat === 'number' && typeof p.lng === 'number')
+              .map((p) => ({
+                type: 'Feature' as const,
+                id: p.id,
+                properties: { parked: p.status === 'parked' ? 1 : 0 },
+                geometry: { type: 'Point' as const, coordinates: [p.lng as number, p.lat as number] },
+              })),
+          } as any}
+        >
+          <CircleLayer
+            id="car-peer-dots"
+            slot="top"
+            style={{
+              circleRadius: 8,
+              circleColor: '#2DEC86',
+              circleOpacity: ['case', ['==', ['get', 'parked'], 1], 0.45, 1] as any,
+              circleStrokeWidth: 2.5,
+              circleStrokeColor: '#FFFFFF',
+              circleStrokeOpacity: ['case', ['==', ['get', 'parked'], 1], 0.45, 1] as any,
+              circlePitchAlignment: 'map',
+              circleEmissiveStrength: 1,
+            } as any}
+          />
+        </ShapeSource>
+      )}
+
       {(s.roadEvents || []).map((e) => (
         <IncidentMarker key={'inc_' + e.id} event={e} />
       ))}

@@ -90,6 +90,18 @@ export default function HubScreen() {
       loadExplore();
     } catch (e) { Alert.alert("Failed", formatErr(e)); }
   }, [loadExplore]);
+  // Inline Discover search (debounced) — replaces the old Discover action card.
+  const [exploreQ, setExploreQ] = useState("");
+  const exploreDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onExploreSearch = (text: string) => {
+    setExploreQ(text);
+    if (exploreDebounceRef.current) clearTimeout(exploreDebounceRef.current);
+    exploreDebounceRef.current = setTimeout(async () => {
+      setExploreLoading(true);
+      try { const { data } = await api.get("/communities/search", { params: { q: text.trim() } }); setExplore(data); } catch {}
+      setExploreLoading(false);
+    }, 250);
+  };
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (tab === "explore" && explore.length === 0) loadExplore(); }, [tab, explore.length, loadExplore]);
@@ -129,22 +141,28 @@ export default function HubScreen() {
         {section === "cruises" && <EventsSection kind="cruise" openEventId={openEventId} />}
 
         {section === "clubs" && (<>
-        {/* Action cards */}
-        <View style={styles.actionGrid}>
-          <ActionCard testID="open-garage" icon="car-sport" label="Garage" onPress={() => router.push("/(app)/garage")} />
-          <ActionCard testID="create-community" icon="add-circle" label="Create" onPress={() => setShowCreate(true)} />
-          <ActionCard testID="search-community" icon="search" label="Discover" onPress={() => setShowSearch(true)} />
-        </View>
-
-        {/* Explore / My Clubs segmented control (Velox-style) */}
+        {/* Clubs — mirrors the Events/Cruises section layout (segment → Create row
+            → list). The old Garage/Create/Discover action grid is gone: Garage
+            lives in the logo menu, Create is the row below, Discover is the tab. */}
         <View style={styles.segment}>
           <TouchableOpacity testID="tab-explore" onPress={() => setTab("explore")} style={[styles.segmentBtn, tab === "explore" && styles.segmentBtnOn]}>
-            <Text style={[styles.segmentText, tab === "explore" && styles.segmentTextOn]}>Explore</Text>
+            <Text style={[styles.segmentText, tab === "explore" && styles.segmentTextOn]}>Discover</Text>
           </TouchableOpacity>
           <TouchableOpacity testID="tab-mine" onPress={() => setTab("mine")} style={[styles.segmentBtn, tab === "mine" && styles.segmentBtnOn]}>
             <Text style={[styles.segmentText, tab === "mine" && styles.segmentTextOn]}>My Clubs</Text>
           </TouchableOpacity>
         </View>
+
+        <TouchableOpacity testID="create-community" onPress={() => setShowCreate(true)} activeOpacity={0.85} style={{ marginBottom: 14 }}>
+          <Glass radius={16}>
+            <View style={styles.createClubRow}>
+              <LinearGradient colors={[COLORS.primary, "#18B368"]} style={styles.createClubIcon}>
+                <Ionicons name="add" size={22} color="#0A1A10" />
+              </LinearGradient>
+              <Text style={styles.createClubText}>Create club</Text>
+            </View>
+          </Glass>
+        </TouchableOpacity>
 
         {tab === "mine" ? (
           <>
@@ -153,7 +171,7 @@ export default function HubScreen() {
                 <View style={{ padding: 22, alignItems: "center" }}>
                   <Image source={heroImg} style={styles.emptyHero} resizeMode="cover" />
                   <Text style={styles.emptyTitle}>No clubs yet</Text>
-                  <Text style={styles.emptyText}>Create your own crew, or tap Explore to find public clubs to join.</Text>
+                  <Text style={styles.emptyText}>Create your own crew, or tap Discover to find public clubs to join.</Text>
                 </View>
               </Glass>
             )}
@@ -163,6 +181,20 @@ export default function HubScreen() {
           </>
         ) : (
           <>
+            {/* Inline search + invite-code entry (replaces the old Discover modal
+                button; the SearchModal still handles the code-join flow). */}
+            <TextInput
+              testID="club-search"
+              style={styles.clubSearchInput}
+              placeholder="Search public clubs…"
+              placeholderTextColor={COLORS.textMute}
+              value={exploreQ}
+              onChangeText={onExploreSearch}
+            />
+            <TouchableOpacity testID="search-community" onPress={() => setShowSearch(true)} style={styles.inviteLink}>
+              <Ionicons name="key-outline" size={14} color={COLORS.primary} />
+              <Text style={styles.inviteLinkText}>Have an invite code?</Text>
+            </TouchableOpacity>
             {explore.length === 0 && !exploreLoading && (
               <Text style={styles.emptyText}>No public clubs found yet. Be the first — tap Create.</Text>
             )}
@@ -194,21 +226,9 @@ export default function HubScreen() {
   );
 }
 
-function ActionCard({ icon, label, onPress, testID }: any) {
-  return (
-    <TouchableOpacity testID={testID} onPress={onPress} style={styles.actionCard} activeOpacity={0.85}>
-      <Glass radius={18} style={{ flex: 1 }}>
-        <View style={{ padding: 18, alignItems: "center" }}>
-          <View style={styles.actionIcon}>
-            <LinearGradient colors={["#7DF0B0", "#2DEC86", "#00C46A"]} style={StyleSheet.absoluteFill} />
-            <Ionicons name={icon} size={24} color="#fff" />
-          </View>
-          <Text style={styles.actionLabel}>{label}</Text>
-        </View>
-      </Glass>
-    </TouchableOpacity>
-  );
-}
+// (The old ActionCard grid — Garage / Create / Discover — was removed when the
+// Clubs section adopted the Events/Cruises layout: Garage lives in the logo
+// menu, Create is the glass row, Discover is the segment tab.)
 
 // Velox-style club card: full-width cover banner → logo + name + member count →
 // description → category tag chips. `mode` swaps the trailing control: a chevron on
@@ -1111,10 +1131,6 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
-  actionGrid: { flexDirection: "row", gap: 10, marginTop: 18 },
-  actionCard: { flex: 1 },
-  actionIcon: { width: 56, height: 56, borderRadius: 18, alignItems: "center", justifyContent: "center", overflow: "hidden", marginBottom: 10 },
-  actionLabel: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
 
   section: { color: COLORS.textDim, marginTop: 24, marginBottom: 10, fontSize: 13, fontWeight: "500" },
   sectionRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 24, marginBottom: 10 },
@@ -1245,11 +1261,21 @@ const styles = StyleSheet.create({
   hubTabBtnOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   hubTabText: { color: "#D9D9DE", fontWeight: "800", fontSize: 13.5 },
   hubTabTextOn: { color: "#0A1A10" },
-  segment: { flexDirection: "row", backgroundColor: "rgba(118,118,128,0.20)", borderRadius: 12, padding: 4, marginTop: 22, marginBottom: 14 },
-  segmentBtn: { flex: 1, paddingVertical: 9, borderRadius: 9, alignItems: "center" },
-  segmentBtnOn: { backgroundColor: COLORS.primary },
-  segmentText: { color: COLORS.textDim, fontWeight: "700", fontSize: 14 },
-  segmentTextOn: { color: "#06281A" },
+  // Segment restyled to MATCH the Events/Cruises sections (hubEvents.tsx) so the
+  // three Hub tabs read as one system. Sits first in the clubs section now (the
+  // action grid is gone), so no top margin.
+  segment: { flexDirection: "row", backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 12, padding: 3, marginBottom: 12 },
+  // Create-club row + Discover search + invite link (Events-section visual language).
+  createClubRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
+  createClubIcon: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  createClubText: { color: COLORS.text, fontWeight: "800", fontSize: 15.5 },
+  clubSearchInput: { backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 12, paddingHorizontal: 13, paddingVertical: 11, color: COLORS.text, fontSize: 15 },
+  inviteLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, marginBottom: 4 },
+  inviteLinkText: { color: COLORS.primary, fontWeight: "700", fontSize: 13 },
+  segmentBtn: { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: "center" },
+  segmentBtnOn: { backgroundColor: "rgba(255,255,255,0.12)" },
+  segmentText: { color: COLORS.textMute, fontWeight: "700", fontSize: 13.5 },
+  segmentTextOn: { color: COLORS.text },
 
   clubCardInner: { borderRadius: 20, overflow: "hidden" },
   clubBanner: { width: "100%", height: 130, alignItems: "center", justifyContent: "center", backgroundColor: "#0F1512" },

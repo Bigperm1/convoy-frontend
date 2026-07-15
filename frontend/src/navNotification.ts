@@ -12,7 +12,7 @@
 //  - Android: needs the background-location + foreground-service permissions
 //    staged in app.json (next native build). Until then it degrades to
 //    foreground-only updates and never crashes (all native calls are guarded).
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import * as Location from "expo-location";
@@ -316,56 +316,85 @@ export async function askAlwaysLocationOnce(): Promise<void> {
   } catch {}
 }
 
+// Start (or confirm) the background location task. Extracted from acquireBgLocation
+// so it can be RETRIED after a failed cold start — previously one failure at
+// CarPlay-connect meant no retry for the whole session (drive feedback 2026-07-14:
+// "car marker frozen until the phone screen turns on"). Idempotent via the
+// hasStarted check. Returns true when the task is running.
+async function tryStartBgUpdates(): Promise<boolean> {
+  try {
+    const already = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
+    if (already) return true;
+    await Location.startLocationUpdatesAsync(NAV_TASK, {
+      accuracy: Location.Accuracy.High,
+      timeInterval: 3000,
+      distanceInterval: 20,
+      // AutomotiveNavigation tells iOS these updates are for driving, so it keeps
+      // the location session alive through a locked screen instead of throttling/
+      // pausing it as it does for the generic (Other) type. NOTE the drive-tested
+      // ground truth (2026-07-14): with only "When In Use" permission, iOS still
+      // TIES DELIVERY TO THE SCREEN on a cold locked launch — a live CarPlay scene
+      // does NOT count as "in use". "Always" is the only authorization that keeps
+      // fixes flowing with the phone locked in a pocket (what Waze/Google run on).
+      // With When-In-Use the task can only deliver-through-lock if it STARTED
+      // while the app was in use — which is why the AppState retry below matters.
+      activityType: Location.LocationActivityType.AutomotiveNavigation,
+      showsBackgroundLocationIndicator: true,
+      pausesUpdatesAutomatically: false,
+      foregroundService: {
+        notificationTitle: "Hairpin navigation",
+        notificationBody: "Turn-by-turn directions are active",
+        notificationColor: "#2DEC86",
+      },
+    });
+    return true;
+  } catch (e) {
+    // Background updates couldn't start (likely needs "Always"). Surface the reason
+    // on the car overlay instead of swallowing it.
+    setCarState({ carDbg: "bgstart:err:" + String(e).slice(0, 40) });
+    return false;
+  }
+}
+
+// Self-healing: whenever the app comes to the FOREGROUND, re-attempt the background
+// start if a consumer (CarPlay / nav banner) still holds the location lock and the
+// task isn't running. Covers both recovery paths: (a) the user just granted "Always"
+// in iOS Settings (the in-app CTA deep-links there) — the task can now start;
+// (b) still on When-In-Use — starting the task while the app IS in use arms iOS's
+// documented continued-background-updates mode (blue indicator), so fixes keep
+// flowing after the next lock for the rest of the session. Module-scope: registered
+// once at import (this module loads at app boot via carPlayBootstrap).
+if (Platform.OS !== "web") {
+  AppState.addEventListener("change", (st) => {
+    if (st !== "active" || _locConsumers.size === 0) return;
+    void (async () => {
+      const ok = await tryStartBgUpdates();
+      if (ok) setCarState({ carDbg: "bgstart:healed" });
+    })();
+  });
+}
+
 export async function acquireBgLocation(tag: string): Promise<boolean> {
   _locConsumers.add(tag);
   try {
     const already = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
     if (already) { void startForegroundCarFeed(); return true; }
     // Try for "Always" (keeps the car map fed while the phone is FULLY
-    // backgrounded behind the head unit). If it isn't granted we no longer give
-    // up: start a foreground feed (covers the app-foreground / phone-in-mount
-    // case on "When In Use") AND still attempt the background updates — a nav app
-    // with the location background mode + the background-location indicator can
-    // keep them flowing without "Always" on many devices.
+    // backgrounded behind the head unit). Note: when this runs from a cold CarPlay
+    // connect the app is backgrounded, so iOS CANNOT show the upgrade prompt here —
+    // it silently returns the current status. The foreground ask lives in
+    // askAlwaysLocationOnce (map mount) + the CarPlay-connect CTA in map.tsx.
     let canBg = false;
     try { canBg = (await Location.requestBackgroundPermissionsAsync()).granted; } catch {}
+    if (!canBg) setCarState({ carDbg: "bg:no-always" }); // head-unit-visible breadcrumb
     // ALWAYS start the foreground feed (self-guards via _fgCarWatch; released with the
     // shared lock). It is the only CONTINUOUS main-context writer that lands selfLat in
     // the carStore the CarPlay surface reads. Previously this ran only `if (!canBg)`, so
     // on "Always" it was skipped — leaving the car surface with no fix (CONVOY logo)
     // whenever the phone backgrounded behind the head unit while idle (not navigating).
     await startForegroundCarFeed();
-    try {
-      await Location.startLocationUpdatesAsync(NAV_TASK, {
-        accuracy: Location.Accuracy.High,
-        timeInterval: 3000,
-        distanceInterval: 20,
-        // AutomotiveNavigation tells iOS these updates are for driving, so it keeps
-        // the location session alive through a locked screen instead of throttling/
-        // pausing it as it does for the generic (Other) type. This is the CarPlay
-        // "car marker freezes when the phone sleeps" fix — the car feed is this bg
-        // task, and the generic activity type let iOS suspend it once the screen
-        // locked. (allowsBackgroundLocationUpdates is already forced YES by
-        // expo-location's EXLocationTaskConsumer for this API; only foreground
-        // permission + the UIBackgroundModes "location" entitlement are required,
-        // both present — so this is OTA-safe, no native/permission change.)
-        activityType: Location.LocationActivityType.AutomotiveNavigation,
-        showsBackgroundLocationIndicator: true,
-        pausesUpdatesAutomatically: false,
-        foregroundService: {
-          notificationTitle: "Hairpin navigation",
-          notificationBody: "Turn-by-turn directions are active",
-          notificationColor: "#2DEC86",
-        },
-      });
-      return true;
-    } catch (e) {
-      // Background updates couldn't start (likely needs "Always"). Surface the reason
-      // on the car overlay instead of swallowing it. The foreground feed above still
-      // keeps the car map alive while the app is foregrounded.
-      setCarState({ carDbg: "bgstart:err:" + String(e).slice(0, 40) });
-      return canBg;
-    }
+    const started = await tryStartBgUpdates();
+    return started || canBg;
   } catch {
     return false;
   }

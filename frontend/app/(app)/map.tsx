@@ -144,6 +144,10 @@ const TAB_BAR_H = Platform.OS === 'ios' ? 86 : 84;
 
 const LAST_LOC_KEY = "convoy:lastLoc";
 
+// Once-per-app-session guard for the CarPlay "Always location" CTA below —
+// module-level so a map remount (tab switches) can't re-nag mid-drive.
+let _carAlwaysCtaShownThisSession = false;
+
 // Format a Date as a 12-hour clock like "10:42 AM" without relying on Intl
 // (Hermes' Intl is limited on device, so we build the string by hand).
 function fmtClock(d: Date): string {
@@ -1539,6 +1543,31 @@ export default function MapScreen() {
     roadEvents,
     places: (settings.showPlacePins !== false ? placePins : []),
   });
+
+  // CarPlay ⇄ "Always" location CTA (CarPlay-standalone). Drive-tested ground truth
+  // (2026-07-14): with only "While Using", iOS freezes GPS the moment the screen
+  // locks — even with a live CarPlay scene — so the car marker stops until the
+  // screen wakes. iOS shows the Always upgrade dialog at most once (the one-shot
+  // askAlwaysLocationOnce), so the recovery path is Settings. Ask ONCE per app
+  // session, only when a head unit is actually connected (the moment it matters).
+  useEffect(() => {
+    if (!carConnected || _carAlwaysCtaShownThisSession) return;
+    (async () => {
+      try {
+        const bg = await Location.getBackgroundPermissionsAsync();
+        if (bg.granted || _carAlwaysCtaShownThisSession) return;
+        _carAlwaysCtaShownThisSession = true;
+        Alert.alert(
+          "Keep CarPlay tracking while locked",
+          'iOS pauses Hairpin’s GPS when your phone locks unless Location is set to "Always" — so the car map freezes until the screen wakes. Set Location to Always and CarPlay keeps moving with the phone in your pocket.',
+          [
+            { text: "Not now", style: "cancel" },
+            { text: "Open Settings", onPress: () => { void Linking.openSettings(); } },
+          ],
+        );
+      } catch {}
+    })();
+  }, [carConnected]);
   // Delete a hazard (by id) — used by the long-press / right-click flow on
   // markers. Optimistically removes from local state on success so the pin
   // disappears immediately. Backend already authorizes (only the original

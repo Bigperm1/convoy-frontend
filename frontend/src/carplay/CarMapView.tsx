@@ -82,13 +82,13 @@ const CAR_PITCH_MAX = 60;
 // Pull the car camera back a touch vs the phone so more of the road ahead reads on the
 // wide head-unit screen. Subtracted from the phone's zoom (Mapbox zoom is log2, so 0.7
 // ≈ 1.6x more area) for both nav and cruise.
-// Pull the camera back from the phone's chase zoom so more road reads on the wide
-// head-unit screen. Applied to BOTH nav AND cruise (which is now speed-aware too).
-// Larger = more zoomed out. OTA-tunable.
-// Was 1.8 (~3.5× more area than the phone) — testers wanted the CarPlay view to MATCH
-// the phone's zoom, which they call correct. Cut to a hair (0.3) so it's effectively the
-// same close chase; the tiny residual just accounts for the wider head-unit aspect.
-const CAR_ZOOM_OUT = 0.3;
+// Offset from the phone's chase zoom. ZERO since 2026-07-14 — the standing rule is
+// the CarPlay camera MATCHES the phone (same chaseZoom/chasePitch speed curves), and
+// even the old 0.3 "hair" read as a mismatch on the head unit. NOTE: most of the
+// perceived zoom mismatch was actually the FROZEN GPS feed (speed stuck at 0 pins
+// the car camera at slow-city framing while the phone frames for real speed) — with
+// the locked-phone GPS fix the two cameras track the same curve. OTA-tunable.
+const CAR_ZOOM_OUT = 0;
 // EXTRA pull-back while previewing 2+ route options (not navigating), so the Best/Scenic/AI
 // fan-out reads on the head unit. Added to CAR_ZOOM_OUT only in multi-route preview; the
 // car stays pinned (the proven lockstep chase is untouched — this is purely a zoom value).

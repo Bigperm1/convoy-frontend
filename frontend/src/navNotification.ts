@@ -17,7 +17,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
-import { NavRoute, haversineMeters, maneuverVerb, fmtDistanceM, fmtManeuverDist } from "./nav";
+import { NavRoute, haversineMeters, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec, announce, isPhoneTbtSpeaking } from "./nav";
+import { maneuverDir } from "./components/ManeuverArrow";
 import { setCarState, setCarSelfPosition } from "./carplay/carStore";
 import { getSettings, getMapMode } from "./settings";
 import { fetchSpeedLimitWaysAround, nearestLimit } from "./speedLimit";
@@ -35,8 +36,12 @@ const NAV_POLY_KEY = "convoy:navPolyline";
 // reads as "your turn is coming up", not a constant ping the whole drive.
 const ANNOUNCE_DISTANCE_M = 500;
 
-type SlimStep = { endLat: number; endLng: number; maneuver?: string; html: string };
-type SlimRoute = { steps: SlimStep[]; destLabel?: string };
+// distanceM (per step) + paceSPerM (route seconds-per-meter, traffic-aware) were
+// added for CarPlay-standalone Wave 2 so a COLD drive computes real ETA/remaining
+// on the head unit. Both optional — a route persisted by an older build simply
+// shows the turn + distance (the pre-Wave-2 behavior), never a wrong number.
+type SlimStep = { endLat: number; endLng: number; maneuver?: string; html: string; distanceM?: number };
+type SlimRoute = { steps: SlimStep[]; destLabel?: string; paceSPerM?: number };
 
 // Module-level cache. NOTE: a backgrounded location task can run in a separate
 // JS context where these reset, so progress is also mirrored to AsyncStorage.
@@ -103,19 +108,41 @@ export async function updateNavBanner(lat: number, lng: number): Promise<void> {
   // only source of the upcoming maneuver + distance on the car. Done BEFORE the
   // banner-incoming gate below so the car shows the turn even while still far from
   // it. (ETA/distance-remaining stay blank cold — the slim route has no duration.)
+  const upNext = steps[Math.min(idx + 1, steps.length - 1)];
   let carInstruction: string;
   if (arriving) {
     carInstruction = route.destLabel ? `Arrive at ${route.destLabel}` : "Arriving";
   } else {
-    const upNext = steps[Math.min(idx + 1, steps.length - 1)];
     carInstruction = strip(upNext.html) || maneuverVerb(upNext.maneuver);
   }
+  // Real ETA / distance-remaining COLD (Wave 2): remaining = distance to the current
+  // step's end + the persisted lengths of every later step; ETA = remaining × the
+  // route's traffic-aware pace. Only for routes persisted with the Wave-2 fields —
+  // an old slim route keeps the pre-Wave-2 blanks rather than showing a wrong number.
+  const paced = typeof route.paceSPerM === "number" && route.paceSPerM > 0;
+  let remainM = 0;
+  if (paced) {
+    remainM = d;
+    for (let i = idx + 1; i < steps.length; i++) remainM += steps[i].distanceM || 0;
+  }
+  const etaS = paced ? Math.max(0, Math.round(remainM * (route.paceSPerM as number))) : 0;
   setCarState({
     navigating: true,
     instruction: carInstruction,
     distanceToTurn: fmtManeuverDist(d),
     distanceToTurnM: Math.round(d),
     destinationLabel: route.destLabel || "",
+    // Maneuver glyph for the car banner's arrow box — same derivation as the
+    // phone mirror (maneuverDir over the instruction + Mapbox maneuver key).
+    maneuverIcon: maneuverDir(carInstruction, arriving ? steps[steps.length - 1]?.maneuver : upNext.maneuver),
+    ...(paced
+      ? {
+          eta: fmtEtaSec(etaS),
+          etaSeconds: etaS,
+          distanceRemaining: fmtDistanceM(Math.round(remainM)),
+          distanceRemainingM: Math.round(remainM),
+        }
+      : {}),
   });
 
   // ONLY surface the banner when the next maneuver is actually incoming (within
@@ -149,6 +176,22 @@ export async function updateNavBanner(lat: number, lng: number): Promise<void> {
     body = `In ${fmtDistanceM(d)}`;
   }
   await postBanner(title, body);
+
+  // COLD spoken guidance (CarPlay-standalone Wave 2): Nova speaks the incoming
+  // turn on drives where the phone's TBT engine never ran (app force-quit /
+  // never opened — the CarPlay-only case). Reuses the SAME per-turn gate as the
+  // banner above (once per step, ≤ANNOUNCE_DISTANCE), and the SAME queue as the
+  // phone engine (announce → speak: novaVoice setting, greeting hold, dedupe,
+  // music ducking, mute-during-calls all apply). isPhoneTbtSpeaking() is the
+  // double-speak guard — while map.tsx's useTurnByTurn is actively guiding, it
+  // owns the voice and this stays silent.
+  if (!isPhoneTbtSpeaking()) {
+    announce(
+      arriving
+        ? (route.destLabel ? `Arriving at ${route.destLabel}` : "Arriving at your destination")
+        : `In ${fmtDistanceM(d)}, ${title}`,
+    );
+  }
 }
 
 // ===== Speed-limit feed for the car map (PART 5) =====
@@ -431,8 +474,12 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
 
     const slim: SlimRoute = {
       destLabel,
+      // Traffic-aware average pace (s/m) — lets the cold bg task turn remaining
+      // meters into a live ETA without the phone engine (Wave 2).
+      paceSPerM: route.distance_m > 0 && route.duration_s > 0 ? route.duration_s / route.distance_m : undefined,
       steps: (route.steps || []).map((s) => ({
         endLat: s.end.lat, endLng: s.end.lng, maneuver: s.maneuver, html: s.html,
+        distanceM: typeof s.distance_m === "number" ? s.distance_m : undefined,
       })),
     };
     _route = slim;

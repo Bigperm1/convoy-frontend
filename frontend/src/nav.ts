@@ -426,6 +426,14 @@ function roundaboutExitCue(maneuverKey?: string, html?: string): string | null {
   return "Take your exit at the roundabout";
 }
 
+// TRUE while the PHONE's turn-by-turn engine (this hook, mounted by map.tsx) is
+// actively guiding. The cold CarPlay guidance path (navNotification's bg-task
+// callouts — CarPlay-standalone Wave 2) checks this so BOTH engines never speak
+// the same turn: the phone engine always wins while it's alive; the cold path
+// covers force-quit / never-opened drives where this stays false.
+let _tbtEngineActive = false;
+export function isPhoneTbtSpeaking(): boolean { return _tbtEngineActive; }
+
 export function useTurnByTurn(
   route: NavRoute | null,
   // `speed` (m/s, from GPS) rides along on the position the caller already
@@ -460,6 +468,7 @@ export function useTurnByTurn(
 
   useEffect(() => {
     if (!active) {
+      _tbtEngineActive = false; // cold CarPlay guidance may take over (Wave 2)
       resetSpeakGate();
       announcedRef.current.clear();
       hasAnnouncedStartRef.current = false;
@@ -468,6 +477,7 @@ export function useTurnByTurn(
       setState(cleared);
       return;
     }
+    _tbtEngineActive = true; // phone engine owns spoken guidance while active
     // NOTE: no resetSpeakGate() here. startNav() calls stopSpeech() right before
     // reserving the Nova greeting, so resetting again on activate would wipe the
     // greeting we just queued (and clear the in-flight hold) — which let the first
@@ -487,6 +497,10 @@ export function useTurnByTurn(
       hasAnnouncedStartRef.current = true;
     }
   }, [active]);
+
+  // Release spoken-guidance ownership if the phone screen unmounts mid-nav (tab
+  // switch / app teardown) so the cold CarPlay path can pick the voice up.
+  useEffect(() => () => { _tbtEngineActive = false; }, []);
 
   // Re-anchor on a mid-drive route SWAP. When the active route's polyline changes
   // while navigating — a Nova reroute the driver accepted, or an off-route

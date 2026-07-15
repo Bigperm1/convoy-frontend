@@ -7,8 +7,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth";
+import { EventsSection } from "../../src/hubEvents";
+import { getEvent } from "../../src/eventsApi";
 import { api, formatErr } from "../../src/api";
 import { COLORS } from "../../src/theme";
 import Glass, { GlassFill } from "../../src/Glass";
@@ -56,6 +58,22 @@ export default function HubScreen() {
     setLoading(false);
   }, []);
 
+  // Hub sections (Hub P2): Clubs (the original hub) · Events · Cruises. Each has
+  // its own discover/create/mine. Events + Cruises live in src/hubEvents.tsx.
+  const [section, setSection] = useState<"clubs" | "events" | "cruises">("clubs");
+  // Deep-open an event/cruise from a push notification (hub?event=<id> — set by
+  // the notification-response handler in _layout.tsx). We fetch it first to learn
+  // its kind so the right section mounts, then hand the id down to auto-open.
+  const params = useLocalSearchParams<{ event?: string }>();
+  const [openEventId, setOpenEventId] = useState<string | null>(null);
+  useEffect(() => {
+    const eid = typeof params.event === "string" ? params.event : null;
+    if (!eid) return;
+    getEvent(eid)
+      .then((e) => { setSection(e.kind === "cruise" ? "cruises" : "events"); setOpenEventId(eid); })
+      .catch(() => {});
+  }, [params.event]);
+
   // Explore tab — browse PUBLIC clubs (empty search query returns all public).
   const [tab, setTab] = useState<"mine" | "explore">("mine");
   const [explore, setExplore] = useState<Community[]>([]);
@@ -97,6 +115,20 @@ export default function HubScreen() {
         </View>
         <Text style={styles.sub}>{user?.handle} · {[user?.car_year, user?.car_make, user?.car_model].filter(Boolean).join(" ") || "Tap the car icon to set up your Garage"}</Text>
 
+        {/* Hub section selector — Clubs · Events · Cruises (Hub P2) */}
+        <View style={styles.hubTabsRow}>
+          {([["clubs", "people", "Clubs"], ["events", "calendar", "Events"], ["cruises", "car-sport", "Cruises"]] as const).map(([key, icon, label]) => (
+            <TouchableOpacity key={key} testID={`hub-section-${key}`} onPress={() => setSection(key)} style={[styles.hubTabBtn, section === key && styles.hubTabBtnOn]} activeOpacity={0.85}>
+              <Ionicons name={icon as any} size={16} color={section === key ? "#0A1A10" : "#D9D9DE"} />
+              <Text style={[styles.hubTabText, section === key && styles.hubTabTextOn]}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {section === "events" && <EventsSection kind="event" openEventId={openEventId} />}
+        {section === "cruises" && <EventsSection kind="cruise" openEventId={openEventId} />}
+
+        {section === "clubs" && (<>
         {/* Action cards */}
         <View style={styles.actionGrid}>
           <ActionCard testID="open-garage" icon="car-sport" label="Garage" onPress={() => router.push("/(app)/garage")} />
@@ -139,6 +171,7 @@ export default function HubScreen() {
             ))}
           </>
         )}
+        </>)}
 
         <TouchableOpacity testID="logout-btn" style={styles.logoutBtn} onPress={logout} activeOpacity={0.85}>
           {/* Candy-apple-red glossy fill (matches the nav Exit button): a red
@@ -1205,6 +1238,13 @@ const styles = StyleSheet.create({
   dangerText: { color: COLORS.danger, fontWeight: "600" },
 
   // ===== Velox-style club cards =====
+  // Hub section selector (Clubs · Events · Cruises) — pill trio above everything.
+  // (hubTab* — "section*" names were already taken by the detail modal's rows.)
+  hubTabsRow: { flexDirection: "row", gap: 8, marginTop: 16, marginBottom: 16 },
+  hubTabBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+  hubTabBtnOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  hubTabText: { color: "#D9D9DE", fontWeight: "800", fontSize: 13.5 },
+  hubTabTextOn: { color: "#0A1A10" },
   segment: { flexDirection: "row", backgroundColor: "rgba(118,118,128,0.20)", borderRadius: 12, padding: 4, marginTop: 22, marginBottom: 14 },
   segmentBtn: { flex: 1, paddingVertical: 9, borderRadius: 9, alignItems: "center" },
   segmentBtnOn: { backgroundColor: COLORS.primary },

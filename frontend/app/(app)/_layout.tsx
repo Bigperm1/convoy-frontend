@@ -23,6 +23,7 @@ import { useSettings, hydrateCarFromProfile } from "../../src/settings";
 import { api } from "../../src/api";
 import { hailBus } from "../../src/hailBus";
 import { shareBus } from "../../src/shareBus";
+import { shareInbox } from "../../src/shareInbox";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
@@ -245,6 +246,25 @@ export default function AppLayout() {
       if (data?.type === "share") {
         const k = String(data.kind || "music");
         router.push((k === "route" ? "/(app)/map" : k === "comm" ? "/(app)/talk" : "/(app)/music") as any);
+      }
+      // Event / Cruise pushes (Hub P2 — sent by the backend's reminder sweeper):
+      //  • action "route" (2h before start): drop the venue into the shareInbox
+      //    one-shot slot and open the map — the same hand-off the ShareToast uses,
+      //    so the map plots a route to the meet exactly like a shared route (and
+      //    from there CarPlay/AA follow via the normal nav mirror).
+      //  • action "confirm" (24h check-in) or anything else: open the Hub with the
+      //    event id — hub.tsx resolves its kind and auto-opens the detail sheet
+      //    with the "I'm showing up" button front and center.
+      if (data?.type === "event") {
+        if (data.action === "route" && typeof data.lat === "number" && typeof data.lng === "number") {
+          shareInbox.setRoute({ lat: data.lat, lng: data.lng, label: String(data.label || "Event meetup") });
+          router.push("/(app)/map");
+          shareInbox.ping();
+        } else if (data.event_id) {
+          router.push({ pathname: "/(app)/hub", params: { event: String(data.event_id) } } as any);
+        } else {
+          router.push("/(app)/hub" as any);
+        }
       }
     });
     return () => sub.remove();

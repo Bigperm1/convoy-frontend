@@ -571,7 +571,7 @@ export function useTurnByTurn(
             const ns = steps[stepIdx + 1];
             const ra = roundaboutExitCue(ns.maneuver, ns.html);
             const v = maneuverVerb(ns.maneuver);
-            const street = stripDirections(ns.html);
+            const street = spokenStreet(v, ns.html);
             speak(ra
               ? `In ${fmtDistanceM(dManeuver)}, ${ra.toLowerCase()}.`
               : `In ${fmtDistanceM(dManeuver)}, ${v.toLowerCase()}${street ? " onto " + street : ""}.`);
@@ -596,7 +596,7 @@ export function useTurnByTurn(
           // names. Everything else keeps the normal verb (+ onto street) phrasing.
           const roundabout = roundaboutExitCue(nextStep.maneuver, nextStep.html);
           const verb = maneuverVerb(nextStep.maneuver);
-          const inst = stripDirections(nextStep.html);
+          const inst = spokenStreet(verb, nextStep.html);
           if (dManeuver <= imminentM && !announcedRef.current.has(immKey)) {
             speak(roundabout ? `${roundabout}.` : `${verb}.`);
             announcedRef.current.add(immKey);
@@ -1111,10 +1111,36 @@ async function _playClip(b64: string, mime: string): Promise<void> {
 
 function stripDirections(s: string): string {
   return (s || "")
-    .replace(/^(Continue\s+(on\s+)?|Head\s+\w+\s+(on\s+)?|Take\s+|Turn\s+\w+\s+(onto\s+)?)/i, "")
+    // Verb coverage matters: any leading verb phrase this regex misses leaks the
+    // whole instruction through as the "street" (see spokenStreet below). The
+    // trailing \s+ is deliberate — a BARE verb ("Turn left", end of string) should
+    // NOT strip; it has no street, and spokenStreet drops it instead.
+    .replace(/^(Continue\s+(straight\s+)?(on\s+)?|Head\s+\w+\s+(on\s+)?|Take\s+|Turn\s+\w+\s+(onto\s+)?|Slight\s+\w+\s+(onto\s+)?|Sharp\s+\w+\s+(onto\s+)?|Keep\s+\w+\s+to\s+stay\s+on\s+|Keep\s+\w+\s+(onto\s+)?|Merge\s+(onto\s+|on\s+)?|Make\s+a\s+U-?turn\s+(onto\s+)?)/i, "")
     .replace(/\s+toward\b.*$/i, "")
     .replace(/\.?\s*(Destination|The\s+destination)\b.*$/i, "")
     .trim();
+}
+
+// The spoken "onto <street>" tail for a turn callout. stripDirections removes the
+// leading verb phrase to leave the road name — but Mapbox instructions come in more
+// shapes than that regex covers: a BARE verb with no street ("Turn left" — the
+// trailing-space requirement fails at end-of-string, so nothing strips), or verbs
+// outside its list ("Sharp left onto X", "Keep right to stay on Y", "Merge…"). In
+// those cases the "street" is really the instruction itself, and composing
+// `${verb} onto ${street}` spoke the reported "turn left onto Turn left." Guard:
+// if what's left echoes the verb (either contains the other) or still STARTS like
+// an instruction, there is no clean street name — return "" so Nova says just
+// "In 200 m, turn left." Dropping the tail is always safe; duplicating it never is.
+function spokenStreet(verb: string, html: string): string {
+  const street = stripDirections(html);
+  if (!street) return "";
+  const s = street.toLowerCase();
+  const v = (verb || "").toLowerCase();
+  if (v && (v.includes(s) || s.includes(v))) return "";
+  // Looks-like-an-instruction check. Turny verbs need a DIRECTION word after them
+  // so real streets like "Turn Valley Road" or "Keeping Creek Dr" still get spoken.
+  if (/^((turn|slight|sharp|keep)\s+(left|right|straight)\b|(merge|continue|head|take|make|exit|u-?turn|the\s+ramp|the\s+exit)\b|at\s+the\s+roundabout)/i.test(street)) return "";
+  return street;
 }
 
 export function fmtDistanceM(m: number): string {

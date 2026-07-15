@@ -8,11 +8,11 @@ export default function PrivacyPage() {
     <SettingsPage title="Visibility & Comms">
       <SectionLabel>COMMS</SectionLabel>
       <SettingsCard>
-        <ToggleRow icon="radio-outline" iconColor="#FF6A00" title="Comms Live" subtitle="Hear & broadcast walkie-talkie on your communities. Off = radio silence." value={settings.commsLive} onChange={(v) => setSettings({ commsLive: v })} />
+        <ToggleRow icon="radio-outline" iconColor="#FF6A00" title="Comms Live" subtitle="Hear & broadcast walkie-talkie on your clubs. Off = radio silence." value={settings.commsLive} onChange={(v) => setSettings({ commsLive: v })} />
         <Divider />
         <ToggleRow icon="people-outline" iconColor="#30D158" title="Nearby" subtitle="Show how many crew members are near you on the Comms screen." value={settings.showNearby} onChange={(v) => setSettings({ showNearby: v })} />
       </SettingsCard>
-      <HelpText>{`Your car only ever appears on maps inside communities you've joined — strangers from outside the crew can never see you. Choose how you appear with Avatar Live below.`}</HelpText>
+      <HelpText>{`Your car only ever appears on maps inside clubs you've joined — strangers from outside the crew can never see you. Choose how you appear with Avatar Live below.`}</HelpText>
 
       <SectionLabel>AVATAR LIVE</SectionLabel>
       <SettingsCard>

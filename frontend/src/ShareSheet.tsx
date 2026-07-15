@@ -190,8 +190,8 @@ export default function ShareSheet({ visible, onClose, share }: Props) {
           ) : members.length === 0 ? (
             <Text style={styles.empty}>
               {communityId
-                ? "No other members in this community yet."
-                : "Join a community to share with members."}
+                ? "No other members in this club yet."
+                : "Join a club to share with members."}
             </Text>
           ) : (
             <ScrollView style={{ maxHeight: 340 }} contentContainerStyle={{ paddingBottom: 8 }}>

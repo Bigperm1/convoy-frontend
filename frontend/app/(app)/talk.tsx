@@ -547,7 +547,7 @@ export default function TalkScreen() {
             </View>
             <View style={{ flexShrink: 1 }}>
               <Text style={styles.communityName} numberOfLines={1}>
-                {communities.length ? 'Choose your convoy' : 'No communities yet'}
+                {communities.length ? 'Choose your convoy' : 'No clubs yet'}
               </Text>
               <Text style={styles.connectedMuted} numberOfLines={1}>
                 {communities.length ? 'Tap to pick the crew you’re driving with' : 'Create or join one in the Hub'}
@@ -572,11 +572,11 @@ export default function TalkScreen() {
       {/* Community switcher dropdown — lists all joined communities. */}
       {dropdownOpen && (
         <View style={styles.switcher}>
-          <Text style={styles.switcherTitle}>Your communities</Text>
+          <Text style={styles.switcherTitle}>Your clubs</Text>
           {communities.length === 0 ? (
             <TouchableOpacity onPress={() => { setDropdownOpen(false); router.push('/(app)/hub'); }} style={styles.switcherEmpty}>
               <Ionicons name="add-circle-outline" size={18} color={YELLOW} />
-              <Text style={styles.switcherEmptyText}>Go to the Hub to create or join a community</Text>
+              <Text style={styles.switcherEmptyText}>Go to the Hub to create or join a club</Text>
             </TouchableOpacity>
           ) : (
             <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>

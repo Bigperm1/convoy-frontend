@@ -19,12 +19,12 @@ type Item = {
   route: string;
 };
 
-// The global destinations behind the logo. Community points at the Hub (which
-// hosts community create/discover/admin); the Admin row is appended at runtime
+// The global destinations behind the logo. Hub hosts clubs (create/discover/
+// admin) — and soon Events + Cruises; the Admin row is appended at runtime
 // for the owner only (see below).
 const ITEMS: Item[] = [
   { label: 'Garage',    icon: 'car-sport',        route: '/(app)/garage' },
-  { label: 'Community', icon: 'people',           route: '/(app)/hub' },
+  { label: 'Hub',       icon: 'people',           route: '/(app)/hub' },
   { label: 'Settings',  icon: 'settings-sharp',   route: '/(app)/settings' },
 ];
 

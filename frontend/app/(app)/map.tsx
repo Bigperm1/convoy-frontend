@@ -2721,7 +2721,7 @@ export default function MapScreen() {
   const shareRouteToCommunity = async () => {
     if (!destination) return;
     if (!settings.activeCommunityId) {
-      Alert.alert("Join a community first", "Select or join a community to share routes with your crew.");
+      Alert.alert("Join a club first", "Select or join a club to share routes with your crew.");
       return;
     }
     try {

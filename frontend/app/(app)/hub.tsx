@@ -269,7 +269,7 @@ function CreateModal({ visible, onClose, onCreated }: any) {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (perm.status !== "granted") {
-        return Alert.alert("Permission needed", "We need photo access to set a community logo.");
+        return Alert.alert("Permission needed", "We need photo access to set a club logo.");
       }
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -330,7 +330,7 @@ function CreateModal({ visible, onClose, onCreated }: any) {
         <View style={styles.sheet}>
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }}>
             <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>Create community</Text>
+              <Text style={styles.sheetTitle}>Create club</Text>
               <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={COLORS.textDim} /></TouchableOpacity>
             </View>
 
@@ -363,7 +363,7 @@ function CreateModal({ visible, onClose, onCreated }: any) {
             <Text style={styles.label}>Name</Text>
             <TextInput testID="cc-name" value={name} onChangeText={setName} style={styles.input} placeholder="Sunday Drivers" placeholderTextColor={COLORS.textMute} />
             <Text style={styles.label}>Description</Text>
-            <TextInput testID="cc-desc" value={desc} onChangeText={setDesc} style={[styles.input, { height: 80 }]} multiline placeholder="What's this community about?" placeholderTextColor={COLORS.textMute} />
+            <TextInput testID="cc-desc" value={desc} onChangeText={setDesc} style={[styles.input, { height: 80 }]} multiline placeholder="What's this club about?" placeholderTextColor={COLORS.textMute} />
 
             <Text style={[styles.label, { marginTop: 14 }]}>Tags</Text>
             <View style={styles.tagWrap}>
@@ -383,7 +383,7 @@ function CreateModal({ visible, onClose, onCreated }: any) {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.toggleTitle}>Public</Text>
-                <Text style={styles.toggleSub}>Anyone can find this community and request to join</Text>
+                <Text style={styles.toggleSub}>Anyone can find this club and request to join</Text>
               </View>
             </TouchableOpacity>
 
@@ -392,7 +392,7 @@ function CreateModal({ visible, onClose, onCreated }: any) {
               testID="cc-walkie"
               icon="flash" iconColor="#FF6A00"
               title="Walkie-Talkie Connect"
-              sub="Enable push-to-talk channel for this community"
+              sub="Enable push-to-talk channel for this club"
               value={walkie} onChange={setWalkie}
             />
             <FeatureToggle
@@ -412,7 +412,7 @@ function CreateModal({ visible, onClose, onCreated }: any) {
 
             <TouchableOpacity testID="cc-submit" onPress={submit} disabled={busy} style={styles.btn} activeOpacity={0.85}>
               <LinearGradient colors={["#7DF0B0", "#2DEC86", "#00C46A"]} style={styles.btnGrad}>
-                <Text style={[styles.btnText, { color: "#1a1a1a" }]}>{busy ? "Creating…" : "Create community"}</Text>
+                <Text style={[styles.btnText, { color: "#1a1a1a" }]}>{busy ? "Creating…" : "Create club"}</Text>
               </LinearGradient>
             </TouchableOpacity>
           </ScrollView>
@@ -467,7 +467,7 @@ function SearchModal({ visible, onClose, onChanged }: any) {
     try {
       await api.post("/communities/join", null, { params: { code: code.trim() } });
       setCode(""); onChanged(); onClose();
-      Alert.alert("Joined", "Welcome to the community");
+      Alert.alert("Joined", "Welcome to the club");
     } catch (e) { Alert.alert("Failed", formatErr(e)); }
   };
 
@@ -476,7 +476,7 @@ function SearchModal({ visible, onClose, onChanged }: any) {
       <View style={styles.modalRoot}>
         <View style={[styles.sheet, { maxHeight: "85%" }]}>
           <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>Discover communities</Text>
+            <Text style={styles.sheetTitle}>Discover clubs</Text>
             <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={COLORS.textDim} /></TouchableOpacity>
           </View>
 
@@ -488,11 +488,11 @@ function SearchModal({ visible, onClose, onChanged }: any) {
             </TouchableOpacity>
           </View>
 
-          <Text style={[styles.label, { marginTop: 16 }]}>Search public communities</Text>
+          <Text style={[styles.label, { marginTop: 16 }]}>Search public clubs</Text>
           <TextInput testID="search-q" value={q} onChangeText={setQ} style={styles.input} placeholder="e.g. JDM, mountain, drift" placeholderTextColor={COLORS.textMute} autoCapitalize="none" />
 
           <ScrollView style={{ marginTop: 12 }} contentContainerStyle={{ paddingBottom: 30 }}>
-            {results.length === 0 && <Text style={{ color: COLORS.textMute, textAlign: "center", marginTop: 12 }}>No communities found</Text>}
+            {results.length === 0 && <Text style={{ color: COLORS.textMute, textAlign: "center", marginTop: 12 }}>No clubs found</Text>}
             {/* Same Velox club card as Explore / My Clubs (cover banner, logo, tags,
                 Join / Joined / Pending) — discovery now matches the rest of the app. */}
             {results.map((c) => (
@@ -560,7 +560,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
   const pickAndSaveLogo = async () => {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (perm.status !== "granted") return Alert.alert("Permission needed", "We need photo access to set a community logo.");
+      if (perm.status !== "granted") return Alert.alert("Permission needed", "We need photo access to set a club logo.");
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true, aspect: [1, 1], quality: 0.6, base64: true,
@@ -626,7 +626,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
   };
   const shareInvite = async () => {
     if (!c?.invite_code) return;
-    try { await Share.share({ message: `Join my Hairpin community "${c.name}". Use invite code: ${c.invite_code}` }); }
+    try { await Share.share({ message: `Join my Hairpin club "${c.name}". Use invite code: ${c.invite_code}` }); }
     catch {}
   };
   const leave = async () => {
@@ -634,7 +634,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
     catch (e) { Alert.alert("Failed", formatErr(e)); }
   };
   const remove = async () => {
-    Alert.alert("Delete community?", "This cannot be undone.", [
+    Alert.alert("Delete club?", "This cannot be undone.", [
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: async () => {
         try { await api.delete(`/communities/${community.id}`); onChanged(); onClose(); }
@@ -649,7 +649,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
     try { const { data } = await api.get(`/communities/${c.id}`); setC(data); } catch {}
   };
   const removeMember = (m: any) => {
-    Alert.alert("Remove member?", `Remove ${m.handle || "this member"} from the community?`, [
+    Alert.alert("Remove member?", `Remove ${m.handle || "this member"} from the club?`, [
       { text: "Cancel", style: "cancel" },
       { text: "Remove", style: "destructive", onPress: async () => {
         try { await api.delete(`/communities/${c.id}/members/${m.id}`); await refreshDetail(); onChanged(); }
@@ -741,7 +741,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                         value={nameDraft}
                         onChangeText={setNameDraft}
                         style={[styles.input, { flex: 1, marginTop: 0 }]}
-                        placeholder="Community name"
+                        placeholder="Club name"
                         placeholderTextColor={COLORS.textMute}
                       />
                       <TouchableOpacity
@@ -799,7 +799,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                   onChangeText={setDescDraft}
                   style={[styles.input, { height: 90, marginTop: 0 }]}
                   multiline
-                  placeholder="What's this community about?"
+                  placeholder="What's this club about?"
                   placeholderTextColor={COLORS.textMute}
                 />
                 <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
@@ -927,7 +927,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
 
                 <TouchableOpacity testID="delete-community" onPress={remove} style={styles.dangerBtn}>
                   <Ionicons name="trash" size={16} color={COLORS.danger} />
-                  <Text style={styles.dangerText}>Delete community</Text>
+                  <Text style={styles.dangerText}>Delete club</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -935,7 +935,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
             {c && !c.is_admin && c.is_member && (
               <TouchableOpacity testID="leave-community" onPress={leave} style={[styles.dangerBtn, { marginTop: 18 }]}>
                 <Ionicons name="exit" size={16} color={COLORS.danger} />
-                <Text style={styles.dangerText}>Leave community</Text>
+                <Text style={styles.dangerText}>Leave club</Text>
               </TouchableOpacity>
             )}
           </ScrollView>

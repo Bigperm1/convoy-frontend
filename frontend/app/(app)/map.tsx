@@ -57,6 +57,7 @@ import { recordOver, habitualOverKmh } from "../../src/speedProfile";
 import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
+import { cruisePlot } from "../../src/cruisePlot";
 import { startNavBanner, stopNavBanner, updateNavBanner, askAlwaysLocationOnce, CAR_NAV_KEY } from "../../src/navNotification";
 import { onCarNavStarted } from "../../src/carplay/carActions";
 import RerouteCard from "../../src/RerouteCard";
@@ -934,6 +935,34 @@ export default function MapScreen() {
         }
       }
 
+      // ===== Pre-designed CRUISE route (Hub P3) =====
+      // A consumed cruisePlot pin (below) stashed the via points and set this
+      // destination. Replay meeting-point → stops → end through fetchAiRoute (the
+      // same via-waypoint path the learned-routes feature uses) and append it as
+      // the AI slot, auto-selected — so the pre-designed line is what's highlighted
+      // and Best/Scenic stay one tap away.
+      try {
+        const cv = pendingCruiseViaRef.current;
+        if (cv && Math.abs(cv.destLat - destination.lat) < 1e-6 && Math.abs(cv.destLng - destination.lng) < 1e-6) {
+          pendingCruiseViaRef.current = null;
+          const cruiseRoute = await fetchAiRoute(
+            { lat: origin.lat, lng: origin.lng },
+            // fetchAiRoute/fetchMapboxRouteVia take interior waypoints as
+            // [lng, lat] TUPLES (Mapbox coordinate order) — not {lat,lng}.
+            cv.via.map((p): [number, number] => [p.lng, p.lat]),
+            { lat: destination.lat, lng: destination.lng },
+            { tolls: settings.avoidTolls, highways: settings.avoidHighways, ferries: settings.avoidFerries },
+          );
+          if (!cancelled && !navActiveRef.current && cruiseRoute?.polyline) {
+            (cruiseRoute as any).cruise = true; // chip reads "Cruise" instead of "AI"
+            const withCruise = [...results.slice(0, 2), cruiseRoute as any];
+            setRoutes(withCruise);
+            setSelectedRouteIndex(withCruise.length - 1);
+            return; // the learned-AI append below would clobber the cruise slot
+          }
+        }
+      } catch {}
+
       // ===== AI route (P3) — the habitual path to a saved place. =====
       // If this destination is a saved place we've driven to before AND we're starting
       // from near that learned trace's origin, replay the stored path through Mapbox so
@@ -1544,6 +1573,28 @@ export default function MapScreen() {
     roadEvents,
     places: (settings.showPlacePins !== false ? placePins : []),
   });
+
+  // ---- Plot a pre-designed cruise route (Hub P3) ----
+  // Consumes the cruisePlot one-shot (set by the arrival push handler or the
+  // cruise detail sheet): stash the via points for the route-fetch effect and set
+  // the destination to the cruise end — the effect then builds meeting-point →
+  // stops → end as the auto-selected route. Never clobbers active navigation
+  // (re-pins the payload so it applies after the current drive ends).
+  const pendingCruiseViaRef = useRef<{ via: { lat: number; lng: number }[]; destLat: number; destLng: number } | null>(null);
+  useEffect(() => {
+    const consume = () => {
+      const c = cruisePlot.take();
+      if (!c) return;
+      if (navActiveRef.current) { cruisePlot.set(c); return; }
+      const dest = c.end ?? c.venue;
+      const via = (c.end ? [c.venue, ...c.stops] : c.stops).map((p) => ({ lat: p.lat, lng: p.lng }));
+      pendingCruiseViaRef.current = { via, destLat: dest.lat, destLng: dest.lng };
+      setDestination({ lat: dest.lat, lng: dest.lng, label: dest.label || c.title || "Cruise finish" });
+    };
+    const un = cruisePlot.subscribe(consume);
+    consume(); // cold start: the push was tapped before this screen mounted
+    return un;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Adopt a car-started navigation session (CarPlay-standalone Wave 3) ----
   // A route can now be STARTED from the head unit (Search on the car's nav bar →
@@ -3117,7 +3168,7 @@ export default function MapScreen() {
         // AI chip: a real learned route if we have one; otherwise a disabled "Learning…"
         // stub ONLY when the destination is a saved place (so it's discoverable that
         // Convoy will learn this trip), hidden for one-off destinations.
-        if (aiIdx >= 0) routeChips.push({ key: "ai", label: "AI", idx: aiIdx, color: userColor, sub: fmtChipDur(routes[aiIdx]) });
+        if (aiIdx >= 0) routeChips.push({ key: "ai", label: (routes[aiIdx] as any)?.cruise ? "Cruise" : "AI", idx: aiIdx, color: userColor, sub: fmtChipDur(routes[aiIdx]) });
         else if (savedMatch) routeChips.push({ key: "ai", label: "AI", idx: -1, color: "#9AA0A6", sub: "Learning…", disabled: true });
         // Green summary label — NAME the selected route by its kind ("Best route" /
         // "Scenic route" / "AI route") so it mirrors the chip you picked, falling back to
@@ -3126,7 +3177,7 @@ export default function MapScreen() {
         const bestLabel =
           selChip?.key === "best" ? "Best route"
           : selChip?.key === "scenic" ? "Scenic route"
-          : selChip?.key === "ai" ? "AI route"
+          : selChip?.key === "ai" ? ((ar as any)?.cruise ? "Cruise route" : "AI route")
           : ar?.summary ? `via ${ar.summary}` : "Alternate";
         return (
           <View style={[styles.routeSheet, { bottom: TAB_BAR_H + navInset }]} onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>

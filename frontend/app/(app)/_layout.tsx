@@ -24,6 +24,8 @@ import { api } from "../../src/api";
 import { hailBus } from "../../src/hailBus";
 import { shareBus } from "../../src/shareBus";
 import { shareInbox } from "../../src/shareInbox";
+import { cruisePlot } from "../../src/cruisePlot";
+import { getEvent } from "../../src/eventsApi";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
@@ -256,7 +258,21 @@ export default function AppLayout() {
       //    event id — hub.tsx resolves its kind and auto-opens the detail sheet
       //    with the "I'm showing up" button front and center.
       if (data?.type === "event") {
-        if (data.action === "route" && typeof data.lat === "number" && typeof data.lng === "number") {
+        // Cruise ARRIVAL push (P3): fetch the cruise and hand its pre-designed
+        // route (venue → stops → end) to the map via the cruisePlot one-shot.
+        // Falls back to opening the Hub detail if the fetch fails (offline).
+        if (data.action === "cruise_route" && data.event_id) {
+          (async () => {
+            try {
+              const ev = await getEvent(String(data.event_id));
+              cruisePlot.set({ title: ev.title, venue: ev.venue, stops: ev.stops || [], end: ev.end || null });
+              router.push("/(app)/map");
+              cruisePlot.ping();
+            } catch {
+              router.push({ pathname: "/(app)/hub", params: { event: String(data.event_id) } } as any);
+            }
+          })();
+        } else if (data.action === "route" && typeof data.lat === "number" && typeof data.lng === "number") {
           shareInbox.setRoute({ lat: data.lat, lng: data.lng, label: String(data.label || "Event meetup") });
           router.push("/(app)/map");
           shareInbox.ping();

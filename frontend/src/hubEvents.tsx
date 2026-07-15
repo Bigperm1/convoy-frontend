@@ -25,6 +25,7 @@ import { api, formatErr } from './api';
 import { autocompletePlaces, placeDetails, type Suggestion } from './places';
 import WhenPicker, { fmtWhen } from './components/WhenPicker';
 import { shareInbox } from './shareInbox';
+import { cruisePlot } from './cruisePlot';
 import {
   type HubEvent, type EventPoint, createEvent, myEvents, discoverEvents,
   getEvent, attendEvent, confirmEvent, unattendEvent, deleteEvent,
@@ -229,6 +230,7 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
   const [desc, setDesc] = useState('');
   const [venue, setVenue] = useState<EventPoint | null>(null);
   const [end, setEnd] = useState<EventPoint | null>(null);           // cruise only
+  const [stops, setStops] = useState<EventPoint[]>([]);              // cruise only (waypoints)
   const defaultStart = () => { const d = new Date(Date.now() + 26 * 3600_000); d.setMinutes(0, 0, 0); return d; };
   const [when, setWhen] = useState<Date>(defaultStart);
   const [isPublic, setIsPublic] = useState(true);
@@ -261,11 +263,11 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
         start_at: when.toISOString(),
         notify_enabled: notify,
         ...(kind === 'cruise' && end ? { end_lat: end.lat, end_lng: end.lng, end_label: end.label || '' } : {}),
-        ...(kind === 'cruise' ? { departure_at: when.toISOString() } : {}),
+        ...(kind === 'cruise' ? { departure_at: when.toISOString(), stops } : {}),
       });
       onCreated(e);
       // reset for next time
-      setTitle(''); setDesc(''); setVenue(null); setEnd(null); setWhen(defaultStart()); setIsPublic(true); setNotify(true); setClubId(null);
+      setTitle(''); setDesc(''); setVenue(null); setEnd(null); setStops([]); setWhen(defaultStart()); setIsPublic(true); setNotify(true); setClubId(null);
     } catch (err) {
       Alert.alert('Could not create', formatErr(err));
     } finally {
@@ -289,7 +291,30 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
             <TextInput style={[styles.input, { minHeight: 64 }]} placeholder={`What's this ${copy.one} about?`} placeholderTextColor={COLORS.textMute} value={desc} onChangeText={setDesc} multiline />
 
             <VenueField label={kind === 'cruise' ? 'Meeting point (first stop)' : 'Meeting destination'} value={venue} onPick={setVenue} />
-            {kind === 'cruise' && <VenueField label="End location" value={end} onPick={setEnd} />}
+            {kind === 'cruise' && (
+              <>
+                {/* Stops along the way (P3) — venue → stops → end becomes the
+                    pre-designed route pushed to attendees on arrival. */}
+                {stops.length > 0 && (
+                  <View style={{ marginTop: 14 }}>
+                    <Text style={styles.label}>{`Stops along the way (${stops.length})`}</Text>
+                    {stops.map((s, i) => (
+                      <View key={`${s.lat},${s.lng},${i}`} style={styles.stopRow}>
+                        <Text style={styles.stopNum}>{i + 1}</Text>
+                        <Text style={styles.stopLabel} numberOfLines={1}>{s.label || `${s.lat.toFixed(4)}, ${s.lng.toFixed(4)}`}</Text>
+                        <TouchableOpacity onPress={() => setStops((cur) => cur.filter((_, j) => j !== i))} hitSlop={8}>
+                          <Ionicons name="close-circle" size={18} color={COLORS.textMute} />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {stops.length < 10 && (
+                  <VenueField label={stops.length ? 'Add another stop' : 'Add a stop (optional)'} value={null} onPick={(p) => { if (p) setStops((cur) => [...cur, p]); }} />
+                )}
+                <VenueField label="End location" value={end} onPick={setEnd} />
+              </>
+            )}
 
             <Text style={[styles.label, { marginTop: 16 }]}>{kind === 'cruise' ? 'Departure time' : 'When'}</Text>
             <WhenPicker value={when} onChange={setWhen} />
@@ -360,6 +385,15 @@ function EventDetailModal({ event: e, onClose, onChanged, onDeleted }: {
     shareInbox.ping();
   };
 
+  const plotCruise = () => {
+    // The PRE-DESIGNED route: meeting point → stops → end, same hand-off the
+    // arrival push uses (cruisePlot one-shot; map builds the multi-stop line).
+    cruisePlot.set({ title: e.title, venue: e.venue, stops: e.stops || [], end: e.end || null });
+    onClose();
+    router.push('/(app)/map' as any);
+    cruisePlot.ping();
+  };
+
   const remove = () => {
     Alert.alert(`Delete ${copy.one}?`, 'Attendees will no longer see it.', [
       { text: 'Cancel', style: 'cancel' },
@@ -386,6 +420,12 @@ function EventDetailModal({ event: e, onClose, onChanged, onDeleted }: {
                 <Text style={styles.detailRowText} numberOfLines={2}>{e.venue.label}</Text>
               </View>
             )}
+            {e.kind === 'cruise' && (e.stops || []).map((s, i) => (
+              <View key={`st${i}`} style={styles.detailRow}>
+                <Ionicons name="ellipse-outline" size={13} color={COLORS.textMute} />
+                <Text style={styles.detailRowText} numberOfLines={1}>{`Stop ${i + 1}: ${s.label || `${s.lat.toFixed(3)}, ${s.lng.toFixed(3)}`}`}</Text>
+              </View>
+            ))}
             {e.kind === 'cruise' && e.end?.label ? (
               <View style={styles.detailRow}>
                 <Ionicons name="flag" size={15} color={COLORS.textMute} />
@@ -430,6 +470,12 @@ function EventDetailModal({ event: e, onClose, onChanged, onDeleted }: {
                   <Ionicons name="navigate" size={16} color={COLORS.primary} />
                   <Text style={styles.secondaryBtnText}>Route to the meet</Text>
                 </TouchableOpacity>
+                {e.kind === 'cruise' && (e.end || (e.stops || []).length > 0) && (
+                  <TouchableOpacity onPress={plotCruise} activeOpacity={0.85} style={styles.secondaryBtn}>
+                    <Ionicons name="git-branch" size={16} color={COLORS.primary} />
+                    <Text style={styles.secondaryBtnText}>Plot the cruise route</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity onPress={() => act(() => unattendEvent(e.id))} style={styles.linkBtn}>
                   <Text style={styles.linkBtnText}>{`Can't make it`}</Text>
                 </TouchableOpacity>
@@ -497,6 +543,9 @@ const styles = StyleSheet.create({
   input: { backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 12, paddingHorizontal: 13, paddingVertical: 11, color: COLORS.text, fontSize: 15 },
 
   venuePicked: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(45,236,134,0.10)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(45,236,134,0.35)', paddingHorizontal: 12, paddingVertical: 11 },
+  stopRow: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 6 },
+  stopNum: { color: '#0A1A10', backgroundColor: COLORS.primary, width: 20, height: 20, borderRadius: 10, textAlign: 'center', fontWeight: '900', fontSize: 12, lineHeight: 20, overflow: 'hidden' },
+  stopLabel: { color: COLORS.text, fontSize: 13.5, flex: 1 },
   venuePickedText: { color: COLORS.text, fontSize: 14.5, fontWeight: '600', flex: 1 },
   sugRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.08)' },
   sugText: { color: COLORS.text, fontSize: 14, flex: 1 },

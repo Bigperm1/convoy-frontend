@@ -32,6 +32,13 @@ const PROGRESS_KEY = "convoy:navProgress";
 // connect (phone map not mounted) can draw the real green ribbon on the car map.
 // The slim ROUTE_KEY only holds per-step end-points; this holds the smooth line.
 const NAV_POLY_KEY = "convoy:navPolyline";
+// Car-started nav hand-off (Wave 3): carActions.startCarNav persists
+// { dest:{lat,lng,label}, startedAt } here so map.tsx can ADOPT the session on
+// its next mount (phone opened mid-drive). Owned by this module because
+// stopNavBanner is the universal nav-teardown — ending nav from ANY surface
+// must also end the adoptable session, or a stale key would re-start guidance
+// on the next app open.
+export const CAR_NAV_KEY = "convoy:carNav";
 // Only pop the off-screen banner once the next maneuver is this close — so it
 // reads as "your turn is coming up", not a constant ping the whole drive.
 const ANNOUNCE_DISTANCE_M = 500;
@@ -515,6 +522,9 @@ export async function stopNavBanner(): Promise<void> {
     await AsyncStorage.removeItem(ROUTE_KEY);
     await AsyncStorage.removeItem(PROGRESS_KEY);
     await AsyncStorage.removeItem(NAV_POLY_KEY);
+    // End the adoptable car-started session too (Wave 3) — nav ended on any
+    // surface must not re-adopt on the next phone open.
+    await AsyncStorage.removeItem(CAR_NAV_KEY);
   } catch {}
   // Clear the car map's route + TBT strip so the ribbon and maneuver disappear on nav end.
   setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0 });

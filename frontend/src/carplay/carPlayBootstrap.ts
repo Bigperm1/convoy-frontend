@@ -15,6 +15,7 @@ import { carPlayHookOwnsRoot } from './carPlayShared';
 import { setCarState, getCarState } from './carStore';
 import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
+import { CAR_BAR_BUTTON_CONFIG, handleCarBarButton } from './carActions';
 
 let booted = false;
 
@@ -42,6 +43,12 @@ export function initCarPlayBootstrap(): void {
         tabSystemImageName: 'map',
         guidanceBackgroundColor: '#0B0B0C',
         tripEstimateStyle: 'dark',
+        // Wave 3: Search / Police / End on the map template's NAV-BAR — the
+        // chrome layer that actually renders + taps on the head unit (the round
+        // CPMapButtons don't; see carActions.ts header). Cold-capable: these
+        // handlers run entirely at module scope.
+        ...CAR_BAR_BUTTON_CONFIG,
+        onBarButtonPressed: ({ id }: { id: string }) => handleCarBarButton(id),
       });
       CarPlay.setRootTemplate(t);
     } catch {

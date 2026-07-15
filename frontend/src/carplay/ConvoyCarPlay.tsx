@@ -43,6 +43,7 @@ import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
+import { CAR_BAR_BUTTON_CONFIG, handleCarBarButton } from './carActions';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
 
@@ -689,6 +690,14 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // after the template appeared. Pin both so the buttons are always there.
             automaticallyHidesNavigationBar: false,
             hidesButtonsWithNavigationBar: false,
+            // Wave 3: Search / Police / End on the map template's NAV BAR — the
+            // chrome layer that renders + taps on the head unit (the round
+            // mapButtons below still don't; kept pending the native fix). Same
+            // module-scope handlers as the cold root, so behavior is identical
+            // whether or not the phone app is open.
+            leadingNavigationBarButtons: CAR_BAR_BUTTON_CONFIG.leadingNavigationBarButtons,
+            trailingNavigationBarButtons: CAR_BAR_BUTTON_CONFIG.trailingNavigationBarButtons,
+            onBarButtonPressed: (e: { id: string }) => handleCarBarButton(e?.id),
             onDidCancelNavigation: () => onEndRef.current?.(),
             // Native CarPlay map button (the ONLY reliably-touchable element on the
             // head unit — custom RN overlays don't receive CarPlay touches). One tap

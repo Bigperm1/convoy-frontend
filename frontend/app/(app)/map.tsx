@@ -57,7 +57,8 @@ import { recordOver, habitualOverKmh } from "../../src/speedProfile";
 import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
-import { startNavBanner, stopNavBanner, updateNavBanner, askAlwaysLocationOnce } from "../../src/navNotification";
+import { startNavBanner, stopNavBanner, updateNavBanner, askAlwaysLocationOnce, CAR_NAV_KEY } from "../../src/navNotification";
+import { onCarNavStarted } from "../../src/carplay/carActions";
 import RerouteCard from "../../src/RerouteCard";
 import { PoliceBadgeIcon } from "../../src/components/MapControlIcons";
 import CompassNeedle from '../../src/components/CompassNeedle';
@@ -1543,6 +1544,37 @@ export default function MapScreen() {
     roadEvents,
     places: (settings.showPlacePins !== false ? placePins : []),
   });
+
+  // ---- Adopt a car-started navigation session (CarPlay-standalone Wave 3) ----
+  // A route can now be STARTED from the head unit (Search on the car's nav bar →
+  // carActions.startCarNav) with the phone in a pocket. Two adoption paths:
+  //  • live (bus): the car starts nav while this screen is mounted → follow along now;
+  //  • cold (persisted CAR_NAV_KEY): the phone opens mid-drive → resume seamlessly.
+  // Adoption = setDestination + setNavMode ONLY: the destination-keyed route-fetch
+  // effect rebuilds full routes from the CURRENT position, activeRoute derives, and
+  // the nav-banner + turn engines fire off navMode — no startNav(), so the Nova
+  // greeting (already played in the car) never replays. stopNavBanner clears the
+  // key on any nav end, so a finished/ended drive can't re-adopt.
+  useEffect(() => {
+    const adopt = (dest: { lat: number; lng: number; label?: string }) => {
+      if (navActiveRef.current) return; // already navigating — never clobber
+      setDestination({ lat: dest.lat, lng: dest.lng, label: dest.label || "" });
+      setNavMode("turn-by-turn");
+    };
+    const un = onCarNavStarted(({ dest }) => adopt(dest));
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(CAR_NAV_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (typeof saved?.dest?.lat !== "number" || typeof saved?.dest?.lng !== "number") return;
+        // Stale-session guard: only adopt a car drive from the last 12h.
+        if (Date.now() - (saved.startedAt || 0) > 12 * 3600_000) return;
+        adopt(saved.dest);
+      } catch {}
+    })();
+    return un;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // CarPlay ⇄ "Always" location CTA (CarPlay-standalone). Drive-tested ground truth
   // (2026-07-14): with only "While Using", iOS freezes GPS the moment the screen

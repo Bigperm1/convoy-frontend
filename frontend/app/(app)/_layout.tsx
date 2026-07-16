@@ -49,8 +49,18 @@ if (Platform.OS !== "web") {
       // the map screen already shows the in-app maneuver banner, so don't pop the
       // system heads-up over it while the app is foregrounded. This handler only
       // runs in the foreground — backgrounded, the OS shows the banner normally.
-      const isNav = (notification?.request?.content?.data as any)?.nav === true;
-      if (isNav) {
+      const data = (notification?.request?.content?.data as any) || {};
+      const isNav = data?.nav === true;
+      // Incoming SHARE pushes (music/route/clip) have their own in-app banner:
+      // the received-listener below re-emits onto shareBus and <ShareToast>
+      // renders the rich card with the Open/Play action. Showing the OS banner
+      // too produced the tester's double-banner overlap (the OS one lands
+      // first, has no action button, and the ShareToast slides in under it).
+      // Foreground → suppress the OS banner for shares; backgrounded, this
+      // handler doesn't run and the OS banner shows normally (correct — the
+      // toast can't render then).
+      const isShare = data?.type === "share";
+      if (isNav || isShare) {
         return {
           shouldShowAlert: false,
           shouldPlaySound: false,

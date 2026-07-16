@@ -1119,6 +1119,10 @@ const PIN_IMAGE_MAP: Record<string, any> = {
   hz_police: HAZARD_ICONS.police,
   hz_default: HAZARD_ICON_DEFAULT,
   cam: CAMERA_ICON,
+  // Hairpin teardrop (73×95 px) — the system-wide brand pin, now ALSO the GL
+  // category-place pin (gas/food/coffee…) so phone results match the dropped
+  // pin + destination pin + CarPlay's PlaceMarker.
+  brand_pin: require("../assets/images/brand-pin.png"),
 };
 
 function GLPinLayers({
@@ -1194,11 +1198,19 @@ function GLPinLayers({
         </ShapeSource>
       )}
 
-      {/* Category place pins — numbered green pin (self-lit so the green + number stay bright). */}
+      {/* Category place pins — the Hairpin brand teardrop with the result number
+          badged on its head (same design as the dropped pin / destination pin /
+          CarPlay PlaceMarker, so every pin on the map speaks the brand language).
+          Geometry mirrors the RN PlaceMarker: 73×95 asset → iconSize 0.466 ≈
+          34×44 pt, tip on the coordinate (iconAnchor bottom); the badge circle +
+          number sit at the pin head, ~29 pt above the tip (circleTranslate is pt;
+          textOffset is em of textSize 13 → −29/13 ≈ −2.23). All self-lit so the
+          pin stays bright under the dusk/night light presets. */}
       {places.length > 0 && (
         <ShapeSource id="gl-places" shape={placeFC} onPress={tapPlace}>
-          <CircleLayer id="gl-places-bg" slot="top" style={{ circleColor: "#2DEC86", circleRadius: 15, circleEmissiveStrength: 1, circleStrokeColor: "#8E8E93", circleStrokeWidth: 1 }} />
-          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: 14, textColor: "#0A0A0A", textEmissiveStrength: 1, textAllowOverlap: true, textIgnorePlacement: true }} />
+          <SymbolLayer id="gl-places-pin" slot="top" style={{ iconImage: "brand_pin", iconSize: 0.466, iconAnchor: "bottom", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          <CircleLayer id="gl-places-bg" slot="top" style={{ circleColor: "#0A1A10", circleRadius: 10, circleTranslate: [0, -29] as any, circleEmissiveStrength: 1 }} />
+          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: 13, textColor: "#2DEC86", textOffset: [0, -2.23] as any, textEmissiveStrength: 1, textAllowOverlap: true, textIgnorePlacement: true }} />
         </ShapeSource>
       )}
     </>
@@ -2277,7 +2289,9 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 3, shadowOffset: { width: 0, height: 1 },
     elevation: 4,
   },
-  placeNumText: { color: "#0A0A0A", fontSize: 14, fontWeight: "800" },
+  // Brand green, NOT near-black: the number sits on the badge's dark #0A1A10
+  // circle — dark-on-dark made the CarPlay PlaceMarker numbers invisible.
+  placeNumText: { color: "#2DEC86", fontSize: 14, fontWeight: "800" },
   locPin: { alignItems: "center", justifyContent: "center" },
   locPinInner: { position: "absolute" },
   placePriceLabel: { backgroundColor: "#FFD60A", borderWidth: 1, borderColor: "rgba(0,0,0,0.55)" },

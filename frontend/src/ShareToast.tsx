@@ -122,7 +122,10 @@ export default function ShareToast() {
       style={[styles.wrap, { top: insets.top + 8, transform: [{ translateY: slide }] }]}
       pointerEvents="box-none"
     >
-      <View style={styles.card}>
+      {/* The WHOLE card accepts the share (tester ask: "tap anywhere on the
+          banner") — the CTA chip stays as a visual affordance, and only the ✕
+          dismisses (inner touchable wins over the card's press). */}
+      <TouchableOpacity activeOpacity={0.85} onPress={open} style={styles.card}>
         {Platform.OS !== "web" ? (
           <GlassFill intensity={64} />
         ) : (
@@ -131,19 +134,19 @@ export default function ShareToast() {
         <View style={styles.iconWrap}>
           <Ionicons name={KIND_ICON[k] || "share-social"} size={20} color="#fff" />
         </View>
-        <TouchableOpacity activeOpacity={0.85} style={{ flex: 1 }} onPress={open}>
+        <View style={{ flex: 1 }}>
           <Text style={styles.from} numberOfLines={1}>
             {event.fromHandle || "A driver"} {verb}{p.shared_at ? `  ·  ${relTime(p.shared_at)}` : ""}
           </Text>
           <Text style={styles.what} numberOfLines={1}>{what}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={open} style={styles.cta} activeOpacity={0.85}>
+        </View>
+        <View style={styles.cta}>
           <Text style={styles.ctaText}>{KIND_CTA[k] || "Open"}</Text>
-        </TouchableOpacity>
+        </View>
         <TouchableOpacity onPress={dismiss} hitSlop={8} style={styles.close}>
           <Ionicons name="close" size={18} color={COLORS.textDim} />
         </TouchableOpacity>
-      </View>
+      </TouchableOpacity>
     </Animated.View>
   );
 }

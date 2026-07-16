@@ -260,7 +260,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         delayLongPress={250}
         style={[styles.pill, active && styles.pillActive]}
       >
-        {!active && <GlassFill tintColor={hudTint()} style={{ borderRadius: 999, overflow: "hidden" }} />}
+        {!active && <GlassFill tintColor={hudTint()} style={{ borderRadius: 13, overflow: "hidden" }} />}
         {loading ? (
           <ActivityIndicator size="small" color={active ? "#1C1C1E" : "#2DEC86"} />
         ) : (
@@ -282,7 +282,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         {PRIMARY.map(renderPill)}
         {/* More pill — always last, opens the overflow sheet. */}
         <TouchableOpacity testID="cat-pill-more" activeOpacity={0.8} onPress={() => setMoreOpen(true)} style={styles.pill}>
-          <GlassFill tintColor={hudTint()} style={{ borderRadius: 999, overflow: "hidden" }} />
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 13, overflow: "hidden" }} />
           <MaterialCommunityIcons name="dots-horizontal" size={16} color="#2DEC86" />
           <Text style={styles.pillText}>More</Text>
         </TouchableOpacity>
@@ -383,7 +383,9 @@ const styles = StyleSheet.create({
   pill: {
     flexDirection: "row", alignItems: "center", gap: 6,
     paddingHorizontal: 12, paddingVertical: 8,
-    borderRadius: 999,
+    // Squared-off rounded corners (the app's card/panel radius family) instead of
+    // the fully-round 999 capsule — matches the search bar / glass panels.
+    borderRadius: 13,
     // Transparent so the CLEAR glass bends the map at the pill edges. Stability now
     // comes from the GlassContainer inside GlassFill (not an opaque floor, which
     // would give the edges a flat colour to refract instead of the live map).

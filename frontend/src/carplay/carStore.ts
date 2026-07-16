@@ -159,10 +159,16 @@ export function setCarState(patch: Partial<CarState>) {
 // always accepted, selfLat/selfLng are never left null, so the logo-fallback can't return.
 export type SelfPosSource = 'mirror' | 'fgwatch' | 'bgtask';
 const SELF_SOURCE_RANK: Record<SelfPosSource, number> = { mirror: 3, fgwatch: 2, bgtask: 1 };
-// Kept ≥2× the 500 ms mirror interval so a single interleaved fg/bg fix is still rejected
-// (no roam), but short enough that if a higher-priority feed dies (phone screen sleeps →
-// mirror/fgwatch stop) the surviving lower feed takes over in ≤~1.2 s instead of stalling.
-const SELF_STALE_MS = 1200;
+// Kept well above the 500 ms mirror interval so interleaved fg/bg fixes are rejected
+// while the mirror is alive, but short enough that if a higher-priority feed dies
+// (phone screen sleeps → mirror stops) the surviving lower feed takes over quickly.
+// 1200 → 2600 (2026-07-16 drive test): the same-day bg-cadence bump (fg/bg feeds now
+// tick at 1 s/5 m) let RAW-GPS fixes slip between the phone's ROUTE-SNAPPED mirror
+// fixes whenever the mirror paused >1.2 s (render hitch, GPS gap) — the marker
+// zigzagged between the two tracks ("very jittery even when plugged in"). 2.6 s
+// rejects those interleaves; screen-off handoff now takes ≤2.6 s once, then the
+// lower feed owns the marker (and the SelfCarModel watchdog keeps it easing).
+const SELF_STALE_MS = 2600;
 let lastSelfPos: { ts: number; rank: number } | null = null;
 
 export function setCarSelfPosition(lat: number, lng: number, heading: number | null, source: SelfPosSource) {

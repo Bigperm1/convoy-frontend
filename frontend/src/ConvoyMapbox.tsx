@@ -695,6 +695,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const fixGap = useRef(1000);
   const rafDead = useRef(false); // latched true while the rAF loop is paused (phone display asleep)
   const bgTimer = useRef<any>(null); // background-safe ease timer that keeps the car moving smoothly while rAF is paused (phone display off + CarPlay active)
+  const lastStepAtRef = useRef(0); // wall-clock of the last REAL rAF tick — the watchdog's liveness heartbeat
   const resumeSnapUntil = useRef(0); // snap-track (don't ease) until this wall-clock after foreground
   const wasBackgrounded = useRef(false); // true once the app actually hit 'background' since last 'active'
   const [, setTick] = useState(0);
@@ -734,6 +735,15 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // those are how the fix handler / step() detect the display waking (only a real
   // rAF tick flips them), so the timer path stays latched until the screen returns.
   const bgTick = () => {
+    // HEARTBEAT GUARD (build-65 drive test, 2026-07-16): a real rAF tick within the
+    // last ~150 ms means the display is awake and step() is driving — do nothing, so
+    // the two drivers can never double-advance. When the phone display sleeps, rAF
+    // stops stamping the heartbeat and this timer takes over WITHIN 150 ms — no
+    // detector to latch, no state machine to trip. (The old design only STARTED this
+    // timer after a pending-ease detector latched rafDead; on the head unit it never
+    // reliably latched and the car marker froze with the screen off even though GPS
+    // kept flowing — the route line kept trimming while the car sat still.)
+    if (Date.now() - lastStepAtRef.current < 150) return;
     const a = anim.current;
     if (!a) return;
     const now = Date.now();
@@ -754,9 +764,20 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     if (bgTimer.current != null) { clearInterval(bgTimer.current); bgTimer.current = null; }
   };
 
+  // ALWAYS-ON watchdog for the LOCKSTEP (CarPlay) instance: the ticker runs for the
+  // whole life of the surface and no-ops behind the heartbeat while rAF is alive.
+  // Phone instances (no cameraRef) keep the pure-rAF path — their display and their
+  // marker sleep together, so there's nothing to hand off to.
+  useEffect(() => {
+    if (!cameraRef) return;
+    startBgTimer();
+    return stopBgTimer;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const step = () => {
     rafDead.current = false; // the loop ticked → the display is awake; smooth easing is live
-    stopBgTimer(); // rAF is driving again → drop the background timer to avoid double-advancing
+    lastStepAtRef.current = Date.now(); // heartbeat for the always-on car watchdog below
     const a = anim.current;
     if (!a) { raf.current = null; return; }
     a.stepped = true; // this ease has rendered ≥1 frame → the loop is alive for it
@@ -830,7 +851,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       render.current = { lat, lng, heading };
       anim.current = null;
       if (raf.current != null) { cancelAnimationFrame(raf.current); raf.current = null; }
-      stopBgTimer();
+      // NOTE: do NOT stop the bg watchdog here — for the lockstep (CarPlay)
+      // instance it's the always-on freeze net, and killing it on a snap/recenter
+      // would disarm it for the rest of the drive. anim=null + the heartbeat
+      // guard make a running-but-idle timer free.
       pushCam(lat, lng, heading); // hard-snap the camera with the car (first fix / recenter / resume)
       setTick((n) => (n + 1) & 0xffff);
       // Probe: a live display ticks step() → rafDead clears → the next fix eases

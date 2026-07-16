@@ -13,11 +13,6 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
       "buildNumber": "65",
-      "entitlements": {
-        "com.apple.security.application-groups": [
-          "group.com.sw0rdfisch.convoy"
-        ]
-      },
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSAppleMusicUsageDescription": "Play and control Apple Music right inside Hairpin",
@@ -132,8 +127,7 @@
       ],
       "./plugins/withConvoyAndroidAuto.js",
       "./plugins/withConvoyCarPlay.js",
-      "./plugins/withScoutSiri.js",
-      "@bacons/apple-targets"
+      "./plugins/withScoutSiri.js"
     ],
     "experiments": {
       "typedRoutes": true

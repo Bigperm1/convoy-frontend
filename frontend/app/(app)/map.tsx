@@ -1621,6 +1621,10 @@ export default function MapScreen() {
   // stops → end as the auto-selected route. Never clobbers active navigation
   // (re-pins the payload so it applies after the current drive ends).
   const pendingCruiseViaRef = useRef<{ via: { lat: number; lng: number }[]; destLat: number; destLng: number } | null>(null);
+  // Double-tap pin-drop: the previous single tap (time + coord). Ref, not state —
+  // it must never re-render the map between the two taps. (Up here with the other
+  // hooks — the render body below the no-coords early return can't declare refs.)
+  const lastMapTapRef = useRef<{ t: number; lat: number; lng: number } | null>(null);
   useEffect(() => {
     const consume = () => {
       const c = cruisePlot.take();
@@ -3017,9 +3021,24 @@ export default function MapScreen() {
         distanceToManeuverM={tbt.distanceToManeuverM}
         // The corner the turn arrow locks onto (snaps to the next when completed).
         maneuverCoord={maneuverCoord}
-        // Tap on empty map → close any open search overlay so the driver can
-        // peek at the map fullscreen mid-trip without ending navigation.
-        onMapPress={() => { /* search bar stays pinned until a route is selected — no auto-hide on map tap */ }}
+        // DOUBLE-TAP → DROP A PIN (native double-tap-zoom is disabled in
+        // ConvoyMapbox; pinch still zooms). Two taps within 350ms and ~150m of
+        // each other drop the pin at the second tap and run the FULL destination
+        // pipeline — routes fetch, the Drive drawer with Start appears — exactly
+        // like picking a search result or a gas/food pin. Ignored during active
+        // guidance so a stray double-tap can't hijack the drive.
+        onMapPress={(c?: { lat: number; lng: number }) => {
+          if (!c) return;
+          const now = Date.now();
+          const last = lastMapTapRef.current;
+          lastMapTapRef.current = { t: now, lat: c.lat, lng: c.lng };
+          if (!last || now - last.t > 350) return;
+          if (haversineMeters({ lat: last.lat, lng: last.lng }, c) > 150) return;
+          lastMapTapRef.current = null; // consumed — a 3rd tap starts fresh
+          if (navMode === "turn-by-turn") return;
+          try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
+          setDestination({ lat: c.lat, lng: c.lng, label: "Dropped pin" });
+        }}
         onMapLongPress={handleMapLongPress}
         onHazardPress={(h: any) => setSelected(h)}
         onHazardLongPress={handleHazardLongPress}

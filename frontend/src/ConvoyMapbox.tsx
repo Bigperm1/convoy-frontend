@@ -142,7 +142,10 @@ interface ConvoyMapboxProps {
   distanceToManeuverM?: number;
   maneuverCoord?: { lat: number; lng: number } | null;
   showTraffic?: boolean;
-  onMapPress?: () => void;
+  // Now delivers the tapped coordinate (undefined if unavailable) so the caller
+  // can implement gestures like double-tap-to-drop-a-pin. Existing "just tapped
+  // the map" callers can ignore the argument.
+  onMapPress?: (coord?: { lat: number; lng: number }) => void;
   onMapLongPress?: (c: { lat: number; lng: number }) => void;
   onHazardPress?: (h: Hazard) => void;
   onHazardLongPress?: (h: Hazard) => void;
@@ -1060,10 +1063,15 @@ export function PlaceMarker({ place, index, onPress }: { place: PlacePoint; inde
   // and the map line up (1, 2, 3 …). Gas premium price + ratings live in the
   // dropdown now, keeping the map itself clean.
   return (
-    <MarkerView coordinate={[place.lng, place.lat]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+    <MarkerView coordinate={[place.lng, place.lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
       <Pressable onPress={() => onPress?.(place)} hitSlop={6}>
-        <View style={styles.placeNumPin}>
-          <Text style={styles.placeNumText}>{index + 1}</Text>
+        {/* Hairpin brand pin + the result number badged on its head, so the map
+            pins, the results list, and the logo all speak the same language. */}
+        <View style={styles.brandPinWrap}>
+          <Image source={require("../assets/images/brand-pin.png")} style={styles.brandPin} resizeMode="contain" />
+          <View style={styles.brandPinBadge}>
+            <Text style={styles.placeNumText}>{index + 1}</Text>
+          </View>
         </View>
       </Pressable>
     </MarkerView>
@@ -1880,7 +1888,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         pitchEnabled
         rotateEnabled
         onDidFinishLoadingMap={() => { readyRef.current = true; onMapReady?.(); }}
-        onPress={() => onMapPress?.()}
+        // Double-tap belongs to PIN DROP (map.tsx detects two quick presses), so
+        // Mapbox's native double-tap-zoom is off — pinch still zooms as always.
+        gestureSettings={{ doubleTapToZoomInEnabled: false }}
+        onPress={(f: any) => {
+          const c = f?.geometry?.coordinates;
+          onMapPress?.(Array.isArray(c) && typeof c[0] === "number" ? { lat: c[1], lng: c[0] } : undefined);
+        }}
         onLongPress={(f: any) => {
           const c = f?.geometry?.coordinates;
           if (Array.isArray(c) && typeof c[0] === "number") onMapLongPress?.({ lat: c[1], lng: c[0] });
@@ -2070,10 +2084,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           </ShapeSource>
         )}
 
-        {/* Destination pin (red dot). */}
+        {/* Destination pin — the Hairpin brand pin (cropped straight from the
+            wordmark, so map pins and the logo are literally the same art).
+            Bottom-anchored: the teardrop tip sits ON the destination. */}
         {destination && (
-          <MarkerView coordinate={[destination.lng, destination.lat]} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={styles.destPin} />
+          <MarkerView coordinate={[destination.lng, destination.lat]} anchor={{ x: 0.5, y: 1 }}>
+            <Image source={require("../assets/images/brand-pin.png")} style={styles.brandPin} resizeMode="contain" />
           </MarkerView>
         )}
 
@@ -2199,6 +2215,14 @@ const styles = StyleSheet.create({
   destPin: {
     width: 22, height: 22, borderRadius: 11,
     backgroundColor: "#FF453A", borderWidth: 3, borderColor: "#FFFFFF",
+  },
+  // Hairpin brand pin (the wordmark's teardrop) — destination + place results.
+  // 73x95 source → 34x44 keeps it crisp; badge centers on the pin's round head.
+  brandPin: { width: 34, height: 44 },
+  brandPinWrap: { width: 34, height: 44, alignItems: "center" },
+  brandPinBadge: {
+    position: "absolute", top: 5, left: 7, width: 20, height: 20, borderRadius: 10,
+    backgroundColor: "#0A1A10", alignItems: "center", justifyContent: "center",
   },
   // Mid-drive reroute offer pill (tap = switch, ✕ = dismiss).
   offerPill: {

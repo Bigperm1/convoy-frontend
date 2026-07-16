@@ -106,6 +106,11 @@ speedCameras: boolean;
 roadIncidents: boolean;
 showPlacePins: boolean;
 showNearby: boolean;
+// Power profile (Settings → Driving → Battery Saver). "auto" (default) = premium
+// when plugged in, eco when unplugged / iOS Low Power Mode. "eco" = eco ALWAYS —
+// the phone-runs-hot escape hatch (plugged-in = premium by design, which is
+// exactly when testers reported the most heat). Optional: undefined → "auto".
+powerProfile?: "auto" | "eco";
 // Gas Jockey — declutter the map's Gas pins by favorite brand + octane.
 gasBrands?: Record<string, boolean>;          // brandKey -> shown; undefined = all shown
 gasOther: boolean;                            // show unbranded / unrecognized stations

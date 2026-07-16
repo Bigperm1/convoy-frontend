@@ -14,6 +14,7 @@
 // changes; eco only ever adds an `if (unplugged)` branch.
 
 import { useEffect, useState } from "react";
+import { getSettings, useSettings } from "./settings";
 
 export type PowerMode = "premium" | "eco";
 
@@ -78,19 +79,23 @@ export async function startPowerMode(): Promise<void> {
   }
 }
 
-/** Sync read for non-React call sites (the rAF camera loop, GPS config, etc.). */
+/** Sync read for non-React call sites (the rAF camera loop, GPS config, etc.).
+ *  Settings → Driving → Battery Saver forces "eco" regardless of charge state. */
 export function getPowerMode(): PowerMode {
+  try { if (getSettings().powerProfile === "eco") return "eco"; } catch {}
   return _mode;
 }
 
-/** Reactive read for components. Kicks off startPowerMode() on first use. */
+/** Reactive read for components. Kicks off startPowerMode() on first use.
+ *  Reacts to BOTH charge-state changes and the Battery Saver setting. */
 export function usePowerMode(): PowerMode {
   const [m, setM] = useState<PowerMode>(_mode);
+  const [s] = useSettings(); // re-renders consumers when Battery Saver flips
   useEffect(() => {
     setM(_mode); // sync to any value resolved before mount
     _listeners.add(setM);
     void startPowerMode();
     return () => { _listeners.delete(setM); };
   }, []);
-  return m;
+  return s.powerProfile === "eco" ? "eco" : m;
 }

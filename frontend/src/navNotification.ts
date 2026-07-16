@@ -291,6 +291,7 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   const locs = data?.locations;
   const loc = locs && locs.length ? locs[locs.length - 1] : null;
   if (!loc?.coords) return;
+  _lastFixAt = Date.now(); // feed the GPS stall watchdog
   // Feed the CarPlay surface too: this is the SAME background-location task the
   // car map now relies on (acquireBgLocation). Cheap no-op when CarPlay isn't up.
   const _h = loc.coords.heading;
@@ -324,6 +325,40 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
 // behind the head unit). Needs "Always" location permission.
 const _locConsumers = new Set<string>();
 
+// ===== GPS stall watchdog (CarPlay screen-off freeze, 2026-07-16) =====
+// "The GPS still stops on CarPlay when the phone screen is off." Whatever kills
+// the flow (a watcher iOS quietly stops delivering to, a bg task that failed to
+// start on a cold locked connect and was never retried until the next
+// foreground), the recovery is the same: REBUILD both feeds. While any consumer
+// holds the shared location lock, track when the last fix landed (any source);
+// if nothing has arrived for STALL_MS, tear down + restart the foreground watch
+// and re-attempt the background task, stamping a carDbg breadcrumb so a freeze
+// self-reports on the head-unit debug overlay. The interval only runs while the
+// JS runtime is alive — which a connected CarPlay scene keeps it. This is the
+// OTA-side hardening; a fully-native location manager remains the build-scoped
+// belt-and-suspenders if freezes persist.
+const STALL_MS = 25000;
+const STALL_CHECK_MS = 10000;
+let _lastFixAt = 0;
+let _stallTimer: ReturnType<typeof setInterval> | null = null;
+let _stallHeals = 0;
+function _startStallWatchdog(): void {
+  if (_stallTimer) return;
+  _lastFixAt = Date.now(); // grace period from acquisition, not from 1970
+  _stallTimer = setInterval(() => {
+    if (_locConsumers.size === 0) return;
+    if (Date.now() - _lastFixAt <= STALL_MS) return;
+    _lastFixAt = Date.now(); // re-arm so a dead-GPS zone doesn't heal-loop every tick
+    setCarState({ carDbg: "stallheal#" + (++_stallHeals) });
+    stopForegroundCarFeed();
+    void startForegroundCarFeed();
+    void tryStartBgUpdates(true); // force: rebuild even a session that claims "started"
+  }, STALL_CHECK_MS);
+}
+function _stopStallWatchdog(): void {
+  if (_stallTimer) { clearInterval(_stallTimer); _stallTimer = null; }
+}
+
 // ===== Foreground fallback feed for the CarPlay car-map =====
 // The background task (NAV_TASK) only starts with "Always" location permission.
 // Most users grant only "When In Use", so without a fallback carStore never gets
@@ -342,8 +377,11 @@ export async function startForegroundCarFeed(): Promise<void> {
     const fg = await Location.getForegroundPermissionsAsync();
     if (!fg.granted) return;
     _fgCarWatch = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.High, timeInterval: 2000, distanceInterval: 15 },
+      // 1s/5m (was 2s/15m): the head unit's only continuous feed in several
+      // states — 15m gating read as "GPS stopped" at parking-lot speeds.
+      { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 5 },
       (loc) => {
+        _lastFixAt = Date.now(); // feed the GPS stall watchdog
         const h = loc.coords.heading;
         const sp = loc.coords.speed;
         // Position through the source-priority gate ('fgwatch' — beats the bg task,
@@ -411,14 +449,19 @@ export async function askAlwaysLocationOnce(): Promise<void> {
 // CarPlay-connect meant no retry for the whole session (drive feedback 2026-07-14:
 // "car marker frozen until the phone screen turns on"). Idempotent via the
 // hasStarted check. Returns true when the task is running.
-async function tryStartBgUpdates(): Promise<boolean> {
+async function tryStartBgUpdates(force = false): Promise<boolean> {
   try {
     const already = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
-    if (already) return true;
+    // `force` (stall watchdog): a wedged session still REPORTS started but
+    // delivers nothing — stop it so the start below rebuilds it for real.
+    if (already && !force) return true;
+    if (already && force) { try { await Location.stopLocationUpdatesAsync(NAV_TASK); } catch {} }
     await Location.startLocationUpdatesAsync(NAV_TASK, {
       accuracy: Location.Accuracy.High,
-      timeInterval: 3000,
-      distanceInterval: 20,
+      // 1s/5m (was 3s/20m): with the phone locked this is the ONLY feed moving
+      // the car marker — 3s/20m looked frozen-then-teleporting on the head unit.
+      timeInterval: 1000,
+      distanceInterval: 5,
       // AutomotiveNavigation tells iOS these updates are for driving, so it keeps
       // the location session alive through a locked screen instead of throttling/
       // pausing it as it does for the generic (Other) type. NOTE the drive-tested
@@ -466,6 +509,7 @@ if (Platform.OS !== "web") {
 
 export async function acquireBgLocation(tag: string): Promise<boolean> {
   _locConsumers.add(tag);
+  _startStallWatchdog(); // self-heal a feed that dies while the lock is held
   try {
     const already = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
     if (already) { void startForegroundCarFeed(); return true; }
@@ -493,6 +537,7 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
 export async function releaseBgLocation(tag: string): Promise<void> {
   _locConsumers.delete(tag);
   if (_locConsumers.size > 0) return; // another consumer still needs it
+  _stopStallWatchdog();
   stopForegroundCarFeed();
   try {
     const started = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);

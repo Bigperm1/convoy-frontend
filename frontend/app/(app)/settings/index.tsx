@@ -158,6 +158,14 @@ export default function SettingsMenu() {
           value={settings.muteDuringCalls !== false}
           onChange={(v) => updateSettings({ muteDuringCalls: v })}
         />
+        <Divider />
+        <ToggleRow
+          icon="battery-half" iconColor="#FFD60A"
+          title="Battery Saver"
+          subtitle="Run cooler: lighter GPS & frame rate. Off = auto (eco only when unplugged)"
+          value={settings.powerProfile === "eco"}
+          onChange={(v) => updateSettings({ powerProfile: v ? "eco" : "auto" })}
+        />
       </SettingsCard>
 
       {/* MAP & FUEL */}

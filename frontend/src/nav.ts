@@ -556,7 +556,29 @@ export function useTurnByTurn(
       cur = steps[stepIdx];
       dManeuver = haversineMeters(user, cur.end);
     }
-    if (stepIdx !== prevStepIdx) announcedRef.current.clear();
+    if (stepIdx !== prevStepIdx) {
+      // Split-maneuver corners: Google often breaks one physical turn into two
+      // adjacent same-verb steps, so right after advancing, the "next" callout
+      // is the SAME verb again a few dozen metres away — and the driver, still
+      // IN the corner, hears "turn right" a third time (tester complaint
+      // 2026-07-16). If we already voiced the turn on the step we just left and
+      // the new upcoming maneuver is the same verb almost immediately (<120 m),
+      // inherit the announced marks instead of re-voicing. Genuinely distinct
+      // same-verb turns further out still announce normally, and the on-screen
+      // banner always shows the new step regardless.
+      const prevSpoke =
+        announcedRef.current.has(`${prevStepIdx}-imm`) || announcedRef.current.has(`${prevStepIdx}-prep`);
+      const prevNext = steps[prevStepIdx + 1];
+      const newNext = steps[stepIdx + 1];
+      announcedRef.current.clear();
+      if (
+        prevSpoke && prevNext && newNext && dManeuver < 120 &&
+        maneuverVerb(newNext.maneuver) === maneuverVerb(prevNext.maneuver)
+      ) {
+        announcedRef.current.add(`${stepIdx}-imm`);
+        announcedRef.current.add(`${stepIdx}-prep`);
+      }
+    }
 
     // Speed-aware spoken callouts. The lead distance scales with current speed
     // so a cue lands a steady few seconds before the turn at any speed, and the
@@ -753,7 +775,11 @@ let _lastSpoke = 0;
 // window so a split maneuver can't say "Turn left, turn left" a beat apart.
 let _lastText = "";
 let _lastTextAt = 0;
-const SAME_TEXT_DEDUPE_MS = 6000;
+// 12s (was 6s): a slow corner takes longer than 6s, so the second half of a
+// split maneuver could re-say the identical "Turn right." mid-corner (tester:
+// told to take a right 3 times before through the corner). Two genuinely
+// distinct identical bare-verb turns within 12s are effectively one corner.
+const SAME_TEXT_DEDUPE_MS = 12000;
 let _lastRerouteSpoke = 0;
 type TtsItem = string | { _greetAudio: string; mime: string };
 const ttsQueue: TtsItem[] = [];
@@ -913,8 +939,31 @@ function _flushHeldSpeech(): void {
   }
 }
 
+// FINAL safety net for the "turn right onto Turn right" family. spokenStreet()
+// guards the phone engine's own composition, but every builder that feeds
+// speak() (cold CarPlay guidance, banner text, future callers) must ALSO never
+// utter its own instruction twice. If the same turn phrase appears a second
+// time later in the text, cut the sentence at the second occurrence and drop
+// any dangling connector ("onto", "at", …). Dropping a tail is always safe;
+// speaking a doubled instruction never is.
+const INSTRUCTION_VERB_RE =
+  /\b(turn\s+(?:left|right)|keep\s+(?:left|right)|slight\s+(?:left|right)|sharp\s+(?:left|right)|continue\s+straight|make\s+a\s+u-?turn|u-?turn|merge)\b/gi;
+function scrubDoubledInstruction(text: string): string {
+  INSTRUCTION_VERB_RE.lastIndex = 0;
+  const first = INSTRUCTION_VERB_RE.exec(text);
+  if (!first) return text;
+  const second = INSTRUCTION_VERB_RE.exec(text);
+  if (!second) return text;
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ");
+  if (norm(second[1]) !== norm(first[1])) return text; // two DIFFERENT maneuvers ("turn left then turn right") are legit
+  let head = text.slice(0, second.index).replace(/[,\s]*(onto|at|on|to|toward|towards)?\s*$/i, "");
+  if (head && !/[.!?]$/.test(head)) head += ".";
+  return head || text;
+}
+
 function speak(text: string) {
   if (!text || !text.trim()) return;
+  text = scrubDoubledInstruction(text);
   // Master Nova voice switch (settings). Off → nothing speaks at all.
   if (getSettings().novaVoice === false) return;
   // While the route-start greeting is in flight, park the latest turn callout

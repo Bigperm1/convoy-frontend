@@ -30,7 +30,7 @@ import { fetchRoutes, type NavRoute } from '../nav';
 import { startNavBanner, stopNavBanner, CAR_NAV_KEY } from '../navNotification';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
-import { getCarState, setCarState, setCarHazards, subscribeCarState } from './carStore';
+import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
 
 // ── lazy react-native-carplay access (same guard style as carPlayBootstrap) ──
 function getLib(): any | null {
@@ -270,6 +270,42 @@ export const CAR_BAR_BUTTON_CONFIG = {
     { id: 'car-end', type: 'text' as const, title: 'End' },
   ],
 };
+
+// ── Round CPMapButtons (build 65+, systemImage patch) ────────────────────────
+// The custom-PNG map buttons never rendered because [RCTConvert UIImage:] goes
+// through the LEGACY bridge image loader — nil under bridgeless New Arch, and
+// CarPlay draws nothing for a nil-image CPMapButton. The build-65 patch adds
+// `systemImage` (UIImage systemImageNamed:, no bridge involved), so these render
+// on any build ≥65. On older builds the unknown key is ignored natively and the
+// buttons are simply absent — same as today, so this config is safe to OTA.
+export const CAR_MAP_BUTTON_CONFIG = {
+  mapButtons: [
+    { id: 'car-zoom-in', systemImage: 'plus.magnifyingglass' },
+    { id: 'car-zoom-out', systemImage: 'minus.magnifyingglass' },
+    { id: 'car-mic', systemImage: 'mic.fill' },
+  ],
+};
+
+// One tap = one zoom step on the car camera. The CarMapView pinch handler
+// rebases on zoomBegin and applies log2(scale) as the bias delta, so a discrete
+// button press is just a tiny "pinch": begin at the current zoom, then one
+// scale factor. ~log2(1.35) ≈ ±0.43 zoom levels per tap.
+const ZOOM_STEP_IN = 1.35;
+const ZOOM_STEP_OUT = 1 / 1.35;
+export function handleCarMapButton(id: string): void {
+  if (id === 'car-zoom-in' || id === 'car-zoom-out') {
+    emitCarGesture({ kind: 'zoomBegin' });
+    emitCarGesture({ kind: 'zoom', scale: id === 'car-zoom-in' ? ZOOM_STEP_IN : ZOOM_STEP_OUT, velocity: 0 });
+    emitCarGesture({ kind: 'zoomEnd', velocity: 0 });
+    return;
+  }
+  if (id === 'car-mic') {
+    // Same bus event the RN-surface experiment used — map.tsx already
+    // subscribes and toggles the Scout voice agent.
+    emitCarGesture({ kind: 'scoutMic' });
+    return;
+  }
+}
 
 export function handleCarBarButton(id: string): void {
   armPosRing(); // idempotent — make sure the 5s-ago buffer is running

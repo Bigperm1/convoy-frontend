@@ -45,7 +45,7 @@ import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
-import { CAR_BAR_BUTTON_CONFIG, handleCarBarButton } from './carActions';
+import { CAR_BAR_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
 
@@ -719,19 +719,24 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             trailingNavigationBarButtons: CAR_BAR_BUTTON_CONFIG.trailingNavigationBarButtons,
             onBarButtonPressed: (e: { id: string }) => handleCarBarButton(e?.id),
             onDidCancelNavigation: () => onEndRef.current?.(),
-            // Native CarPlay map button (the ONLY reliably-touchable element on the
-            // head unit — custom RN overlays don't receive CarPlay touches). One tap
-            // reports police at the driver's current spot via the phone's reportAlert.
+            // Round CPMapButtons — SF symbols via the build-65 `systemImage` patch.
+            // ROOT CAUSE of "map buttons never render": custom PNG images resolve
+            // through the legacy bridge image loader ([RCTConvert UIImage:]),
+            // which returns nil under bridgeless New Arch, and CarPlay draws
+            // NOTHING for a nil-image CPMapButton. systemImageNamed: skips the
+            // bridge entirely. Zoom ± drives the same gesture bus as pinch; mic
+            // taps the Scout agent. On pre-65 builds the unknown key is ignored
+            // (buttons absent — same as before), so this is OTA-safe.
             mapButtons: [
-              { id: 'police', image: require('../../assets/images/police.png') },
-              // Agentic Scout mic — tap to start listening, tap again to stop +
-              // send. Feedback ("Listening…"/"Thinking…") renders on the car
-              // surface via carStore since map buttons have no pressed state.
-              { id: 'scout', image: require('../../assets/images/scout-mic.png') },
+              { id: 'car-zoom-in', systemImage: 'plus.magnifyingglass' },
+              { id: 'car-zoom-out', systemImage: 'minus.magnifyingglass' },
+              { id: 'scout', systemImage: 'mic.fill' },
+              { id: 'police', systemImage: 'shield.fill' },
             ],
             onMapButtonPressed: (e: { id: string }) => {
-              if (e?.id === 'police') onReportPoliceRef.current?.();
-              if (e?.id === 'scout') onScoutMicRef.current?.();
+              if (e?.id === 'police') { onReportPoliceRef.current?.(); return; }
+              if (e?.id === 'scout') { onScoutMicRef.current?.(); return; }
+              handleCarMapButton(e?.id); // zoom ± (shared with the cold root)
             },
             // iOS-26 raw pinch/zoom on the CarPlay map (react-native-carplay patch +
             // CPMapTemplate.h gesture delegate). Forwarded to CarMapView via the

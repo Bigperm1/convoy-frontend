@@ -98,6 +98,28 @@ index 01dbabd..bacb6f0 100644
          }
        }
      }.build()
+diff --git a/node_modules/react-native-carplay/ios/RCTConvert+RNCarPlay.m b/node_modules/react-native-carplay/ios/RCTConvert+RNCarPlay.m
+index 5ef378d..26b7312 100644
+--- a/node_modules/react-native-carplay/ios/RCTConvert+RNCarPlay.m
++++ b/node_modules/react-native-carplay/ios/RCTConvert+RNCarPlay.m
+@@ -43,6 +43,17 @@ + (CPMapButton*)CPMapButton:(id)json withHandler:(void (^)(CPMapButton * _Nonnul
+         [mapButton setImage:[RCTConvert UIImage:json[@"image"]]];
+     }
+ 
++    // Convoy: SF-symbol map buttons. [RCTConvert UIImage:] resolves RN asset
++    // dicts through the LEGACY bridge image loader, which returns nil under
++    // bridgeless New Arch — and CarPlay renders NOTHING for a CPMapButton whose
++    // image is nil (why the police/Scout-mic map buttons "never rendered" on
++    // builds 61-64). UIImage systemImageNamed: needs no bridge at all, so it
++    // works everywhere. Takes precedence over a (probably-nil) custom image.
++    if ([json objectForKey:@"systemImage"]) {
++        UIImage *sysImg = [UIImage systemImageNamed:[RCTConvert NSString:json[@"systemImage"]]];
++        if (sysImg) { [mapButton setImage:sysImg]; }
++    }
++
+     if ([json objectForKey:@"focusedImage"]) {
+         [mapButton setFocusedImage:[RCTConvert UIImage:json[@"focusedImage"]]];
+     }
 diff --git a/node_modules/react-native-carplay/ios/RNCarPlay.m b/node_modules/react-native-carplay/ios/RNCarPlay.m
 index 153dbad..5f4449a 100644
 --- a/node_modules/react-native-carplay/ios/RNCarPlay.m
@@ -181,6 +203,23 @@ index 153dbad..5f4449a 100644
  
  
  # pragma SearchTemplate
+diff --git a/node_modules/react-native-carplay/lib/interfaces/MapButton.d.ts b/node_modules/react-native-carplay/lib/interfaces/MapButton.d.ts
+index 9e3b0a7..0e0a74d 100644
+--- a/node_modules/react-native-carplay/lib/interfaces/MapButton.d.ts
++++ b/node_modules/react-native-carplay/lib/interfaces/MapButton.d.ts
+@@ -11,6 +11,12 @@ export interface MapButton {
+      * The image to display on the button.
+      */
+     image?: ImageSourcePropType;
++    /**
++     * Convoy: SF Symbol name to display on the button (e.g. "plus.magnifyingglass").
++     * Resolved natively via UIImage(systemName:) — works under bridgeless New Arch,
++     * where the RN asset `image` path resolves nil. Takes precedence over `image`.
++     */
++    systemImage?: string;
+     /**
+      * The image to display when focus is on the button.
+      */
 diff --git a/node_modules/react-native-carplay/lib/templates/MapTemplate.d.ts b/node_modules/react-native-carplay/lib/templates/MapTemplate.d.ts
 index 442b0a5..7f21320 100644
 --- a/node_modules/react-native-carplay/lib/templates/MapTemplate.d.ts

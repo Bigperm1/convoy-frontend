@@ -15,7 +15,7 @@ import { carPlayHookOwnsRoot } from './carPlayShared';
 import { setCarState, getCarState } from './carStore';
 import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
-import { CAR_BAR_BUTTON_CONFIG, handleCarBarButton } from './carActions';
+import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
 
 let booted = false;
 
@@ -49,6 +49,11 @@ export function initCarPlayBootstrap(): void {
         // handlers run entirely at module scope.
         ...CAR_BAR_BUTTON_CONFIG,
         onBarButtonPressed: ({ id }: { id: string }) => handleCarBarButton(id),
+        // Round CPMapButtons (zoom ± / Scout mic) — SF symbols via the build-65
+        // systemImage patch (custom PNGs resolve nil under bridgeless; see
+        // carActions.CAR_MAP_BUTTON_CONFIG). Ignored harmlessly on older builds.
+        ...CAR_MAP_BUTTON_CONFIG,
+        onMapButtonPressed: ({ id }: { id: string }) => handleCarMapButton(id),
       });
       CarPlay.setRootTemplate(t);
     } catch {

@@ -36,6 +36,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated, TouchableOpacity } from 'react-native';
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec } from '../nav';
 import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { laneIcon } from '../components/TurnByTurnNav';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
 import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
@@ -307,6 +309,24 @@ export function CarSurface() {
           ABOVE the turn-by-turn maneuver banner, and both share the same width. */}
       {s.navigating ? (
         <View style={styles.navStack} pointerEvents="none">
+          {/* LANE GUIDANCE ("3D-lanes lite") — the phone's glowing-lane diagram on
+              the head unit: active lanes brand green, the rest dim. Appears only
+              when Mapbox lane data confidently matches the upcoming turn (the
+              fail-closed pickLaneCue), warm via the phone mirror or cold via
+              navNotification — so it works with the phone in a pocket too. */}
+          {!!s.lanes && s.lanes.length > 0 ? (
+            <View style={[styles.laneRow, { backgroundColor: carHudFloor() }]}>
+              <GlassFill tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
+              {s.lanes.map((lane, i) => (
+                <MaterialCommunityIcons
+                  key={i}
+                  name={laneIcon((lane.active && lane.activeDir) ? lane.activeDir : (lane.dirs[0] || 'straight'))}
+                  size={26}
+                  color={lane.active ? '#2DEC86' : '#5A5A5E'}
+                />
+              ))}
+            </View>
+          ) : null}
           {/* ETA — just above the maneuver banner. */}
           {metaLine ? (
             <View style={[styles.navEta, { backgroundColor: carHudFloor() }]}>
@@ -970,4 +990,5 @@ const styles = StyleSheet.create({
   navStack: { position: 'absolute', right: 8, bottom: 8, width: 210, alignItems: 'stretch', gap: 6 },
   navBannerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   navEta: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden' },
 });

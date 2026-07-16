@@ -168,7 +168,8 @@ export function SpeedPill({ speedMs, unit, bottom, limitKmh }: { speedMs?: numbe
 
 // Map a Mapbox lane direction token to a MaterialCommunityIcons arrow glyph.
 // Unknown tokens fall back to a straight-up arrow (never throws / shows blank).
-function laneIcon(dir: string): any {
+// Exported: the CarPlay banner renders the same lane diagram (ConvoyCarPlay).
+export function laneIcon(dir: string): any {
   switch (dir) {
     case "left": return "arrow-top-left";
     case "slight left": return "arrow-top-left";

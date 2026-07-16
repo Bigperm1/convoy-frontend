@@ -1586,6 +1586,19 @@ export default function MapScreen() {
     places: (settings.showPlacePins !== false ? placePins : []),
   });
 
+  // Mirror LANE GUIDANCE onto the CarPlay banner ("3D-lanes lite") — the same
+  // fail-closed pickLaneCue the phone's lane row uses, so the head unit shows
+  // the identical glowing-lane diagram as the turn approaches. null → hidden.
+  // (Lives up here with the other hooks — the render-time maneuverCoord below
+  // sits past the no-coords early return, where hooks are illegal.)
+  useEffect(() => {
+    if (navMode !== "turn-by-turn" || !tbt.active) { setCarState({ lanes: undefined }); return; }
+    const steps = activeRoute?.steps;
+    const end = steps && tbt.stepIndex < steps.length - 1 ? steps[tbt.stepIndex]?.end : null;
+    const lanes = end ? pickLaneCue(laneCues, { lat: end.lat, lng: end.lng }, tbt.distanceToManeuverM) : null;
+    setCarState({ lanes: lanes || undefined });
+  }, [laneCues, activeRoute, tbt.stepIndex, tbt.distanceToManeuverM, tbt.active, navMode]);
+
   // ---- Plot a pre-designed cruise route (Hub P3) ----
   // Consumes the cruisePlot one-shot (set by the arrival push handler or the
   // cruise detail sheet): stash the via points for the route-fetch effect and set

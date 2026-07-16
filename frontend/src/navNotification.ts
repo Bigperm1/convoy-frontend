@@ -22,6 +22,7 @@ import { maneuverDir } from "./components/ManeuverArrow";
 import { setCarState, setCarSelfPosition } from "./carplay/carStore";
 import { getSettings, getMapMode } from "./settings";
 import { fetchSpeedLimitWaysAround, nearestLimit } from "./speedLimit";
+import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "./mapboxDirections";
 
 const NAV_TASK = "convoy-nav-location";
 const NAV_NOTIF_ID = "convoy-nav-banner";
@@ -55,6 +56,39 @@ type SlimRoute = { steps: SlimStep[]; destLabel?: string; paceSPerM?: number };
 let _route: SlimRoute | null = null;
 let _stepIdx = 0;
 let _notifiedStep = -1;
+
+// ── COLD lane guidance ("3D-lanes lite", CarPlay) ────────────────────────────
+// One Mapbox guidance fetch per nav session (keyed on the destination) gives us
+// per-maneuver lane arrows; each tick then matches the upcoming turn with the
+// SAME fail-closed pickLaneCue the phone banner uses. Only runs when the phone
+// TBT engine isn't active (warm drives mirror the phone's lanes instead). One
+// attempt per route — a fetch failure just means no lanes this session, never
+// wrong lanes and never a retry storm on the 3s tick.
+let _laneCues: LaneCue[] | null = null;
+let _laneKey = "";
+let _laneFetching = false;
+function ensureLaneCues(lat: number, lng: number, route: SlimRoute): void {
+  const last = route.steps[route.steps.length - 1];
+  if (!last) return;
+  const key = `${last.endLat},${last.endLng}`;
+  if (_laneKey === key || _laneFetching) return;
+  _laneFetching = true;
+  void (async () => {
+    try {
+      _laneCues = await fetchMapboxLaneCues({ lat, lng }, { lat: last.endLat, lng: last.endLng });
+    } catch {
+      _laneCues = null;
+    } finally {
+      _laneKey = key; // one attempt per route, success or not
+      _laneFetching = false;
+    }
+  })();
+}
+function resetLaneCues(): void {
+  _laneCues = null;
+  _laneKey = "";
+  _laneFetching = false;
+}
 
 function strip(s: string): string {
   return (s || "").replace(/<[^>]+>/g, "").trim();
@@ -150,7 +184,13 @@ export async function updateNavBanner(lat: number, lng: number): Promise<void> {
           distanceRemainingM: Math.round(remainM),
         }
       : {}),
+    // COLD lane guidance — only when the phone engine isn't driving the mirror
+    // (its lanes are anchored to the richer route); fail-closed → hidden.
+    ...(!isPhoneTbtSpeaking()
+      ? { lanes: pickLaneCue(_laneCues, { lat: steps[idx].endLat, lng: steps[idx].endLng }, d) || undefined }
+      : {}),
   });
+  if (!isPhoneTbtSpeaking()) ensureLaneCues(lat, lng, route);
 
   // ONLY surface the banner when the next maneuver is actually incoming (within
   // ANNOUNCE_DISTANCE) or we're arriving. Previously it popped on every step
@@ -492,6 +532,7 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
     _route = slim;
     _stepIdx = 0;
     _notifiedStep = -1; // -1 so the FIRST turn still announces when it's incoming
+    resetLaneCues();    // fresh route → fresh lane-guidance fetch (cold CarPlay lanes)
     try {
       await AsyncStorage.setItem(ROUTE_KEY, JSON.stringify(slim));
       await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx: 0, notified: -1 }));
@@ -518,6 +559,7 @@ export async function stopNavBanner(): Promise<void> {
   _route = null;
   _stepIdx = 0;
   _notifiedStep = -1;
+  resetLaneCues();
   try {
     await AsyncStorage.removeItem(ROUTE_KEY);
     await AsyncStorage.removeItem(PROGRESS_KEY);

@@ -83,9 +83,11 @@ convoyAlerts?: boolean;
 // the FIRST nudge toward it (bounded; the firmer second alert stays fixed) so it stops
 // nagging at speeds they always drive. undefined → on. See src/speedProfile.ts.
 adaptiveSpeedAlerts?: boolean;
-// Departure IQ — when parked at a saved place at a predictable time, proactively offer a
-// one-tap drive to the predicted destination (e.g. "Heading to Work?"). undefined → on.
+// Departure IQ — when parked at a predictable time, proactively offer a one-tap
+// drive to the predicted destination (e.g. "Heading to Work?"). undefined → on.
 departureIQ?: boolean;
+// Whether Nova SPEAKS the Departure IQ offer (the pill always shows). undefined → on.
+departureIQVoice?: boolean;
 // One-time migration flag: when absent from stored settings, flip the three
 // chatty Nova toggles (speeding / mid-drive / reroute) OFF once so the new
 // quieter defaults reach existing installs too, then never repeat.

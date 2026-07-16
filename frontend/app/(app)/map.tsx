@@ -1399,10 +1399,13 @@ export default function MapScreen() {
   }, []);
 
   // ===== Departure IQ (Scout) =====
-  // When you're parked AT a saved place at a predictable time, proactively offer a one-tap
-  // drive to where you're probably headed (predictDestination's time-of-day heuristic). A
-  // dismissible top banner, NOT spoken. One shot per parked session — re-arms only after
-  // you actually drive away, and a dismiss hushes it for a while.
+  // When you're parked at a predictable time, proactively offer a one-tap drive to
+  // where you're probably headed (predictDestination's time-of-day heuristic) — the
+  // Hairpin flavor of Apple Maps' "Predicted Destinations". A dismissible pill in
+  // the search bar, plus Nova SAYS the offer once ("Heading home? About 22 minutes
+  // right now") — gated on settings.departureIQVoice and everything announce()
+  // already respects (Nova master switch, ducking, mute-during-calls). One shot per
+  // parked session — re-arms only after you actually drive away; dismiss hushes it.
   const [departSuggest, setDepartSuggest] = useState<{ place: SavedPlace; reason: string; etaText?: string } | null>(null);
   const departPromptedRef = useRef(false);
   const departHushRef = useRef(0);
@@ -1420,10 +1423,11 @@ export default function MapScreen() {
     if (departPromptedRef.current || departBusyRef.current) return;
     if (Date.now() < departHushRef.current) return;
     if ((c.speed ?? 0) > 1.5) return;                              // must be parked
-    const here = matchSavedPlace(c.lat, c.lng);                   // parked at a saved place?
-    if (!here) return;
-    const pred = predictDestination(new Date(), c.lat, c.lng);    // where you usually go from here, now
-    if (!pred || pred.place.id === here.id) return;
+    // Predict from ANY parked spot, not just saved places — predictDestination
+    // carries its own 250 m "you're already there" guard, so the old
+    // at-a-saved-place gate was hiding the feature for most parking spots.
+    const pred = predictDestination(new Date(), c.lat, c.lng);
+    if (!pred) return;
     departBusyRef.current = true;
     departPromptedRef.current = true;                              // one shot per parked session
     (async () => {
@@ -1436,6 +1440,14 @@ export default function MapScreen() {
         if (best) etaText = best.duration_in_traffic_text || best.duration_text;
       } catch {}
       setDepartSuggest({ place: pred.place, reason: pred.reason, etaText });
+      // Nova makes the offer out loud (once per parked session). "22 min" reads
+      // badly in TTS — expand the units for the spoken line only.
+      if (getSettings().departureIQVoice !== false) {
+        const spokenEta = etaText
+          ? ` About ${etaText.replace(/\bhrs?\b/g, "hours").replace(/\bhr\b/g, "hour").replace(/\bmins?\b/g, "minutes").replace(/\b1 minutes\b/, "1 minute").replace(/\b1 hours\b/, "1 hour")} right now.`
+          : "";
+        announce(`${pred.reason.charAt(0).toUpperCase()}${pred.reason.slice(1)}?${spokenEta}`);
+      }
       departBusyRef.current = false;
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -30,6 +30,7 @@ import {
   type HubEvent, type EventPoint, createEvent, myEvents, discoverEvents,
   getEvent, attendEvent, confirmEvent, unattendEvent, deleteEvent,
 } from './eventsApi';
+import { updateWidgetFeed } from './widgetFeed';
 
 type Kind = 'event' | 'cruise';
 
@@ -66,6 +67,7 @@ export function EventsSection({ kind, openEventId }: { kind: Kind; openEventId?:
       const [m, d] = await Promise.all([myEvents(), discoverEvents('', kind)]);
       setMine(m.filter((e) => e.kind === kind));
       setFound(d);
+      updateWidgetFeed(m); // keep the home-screen widget's "Next up" fresh (build 65+)
     } catch {}
     setLoading(false);
   }, [kind]);

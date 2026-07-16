@@ -26,6 +26,8 @@ import { shareBus } from "../../src/shareBus";
 import { shareInbox } from "../../src/shareInbox";
 import { cruisePlot } from "../../src/cruisePlot";
 import { getEvent } from "../../src/eventsApi";
+import { initVisitMonitor } from "../../src/visitMonitor";
+import { refreshWidgetFeed } from "../../src/widgetFeed";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
@@ -199,6 +201,15 @@ export default function AppLayout() {
       car_year: user.car_year ?? null,
     });
   }, [user]);
+
+  // OS-level visit monitoring (build 65+): CLVisit arrivals refresh the backend
+  // last-known position so the cruise arrival trigger fires with the phone
+  // pocketed. No-op on Android/web and on builds without the native module.
+  useEffect(() => { initVisitMonitor(); }, []);
+
+  // Home-screen widget feed (build 65+): refresh "Next up" on boot so the widget
+  // stays current without opening the Hub. No-op without the native module.
+  useEffect(() => { void refreshWidgetFeed(); }, []);
 
   // Foreground delivery listener — fires while the app is open. We DON'T
   // rely on the system banner here; instead we forward the hail to `hailBus`

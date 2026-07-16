@@ -1,0 +1,6 @@
+{
+  "name": "hairpin-system",
+  "version": "1.0.0",
+  "description": "Hairpin system integrations: CLVisit visit monitoring + App Group shared defaults (widget feed).",
+  "main": "index.ts"
+}

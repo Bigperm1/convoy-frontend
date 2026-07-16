@@ -291,8 +291,13 @@ type TbtState = {
 // before the maneuver, clamped so it stays sane when stopped/crawling or very
 // fast. TTS adds ~1–2 s of queue+network latency, so the imminent lead must
 // cover reaction time AND that latency.
-const IMMINENT_LEAD_S = 7;     // "Turn now" cue ~7 s out
-const IMMINENT_MIN_M = 30;
+// Tester feedback (2026-07-16): callouts landed "as I'm already turning". Two
+// stacked lags — the cue armed only 7s out, and speakOne() then did a LIVE /tts
+// HTTP synth (1–3s on cellular) before any sound. Lead raised to ~10s / 60m min,
+// and the imminent phrase is now PRE-SYNTHESIZED at prepare time (see
+// prefetchTts) so "Turn right." plays from cache with zero network wait.
+const IMMINENT_LEAD_S = 10;    // "Turn now" cue ~10 s out
+const IMMINENT_MIN_M = 60;
 const IMMINENT_MAX_M = 250;
 const PREPARE_LEAD_S = 30;     // "In X, turn …" heads-up ~30 s out
 const PREPARE_MIN_M = 150;
@@ -465,6 +470,12 @@ export function useTurnByTurn(
   // Tracks the active route's polyline so we can detect a mid-drive route SWAP
   // (Nova reroute accept / off-route refetch) and re-anchor guidance onto it.
   const routeKeyRef = useRef<string>("");
+  // Post-swap grace window: a just-swapped route was computed from a GPS fix a
+  // couple of seconds old, so its first maneuver can already be under the car —
+  // voicing it lands "Turn right." AS you're passing the turn. While this
+  // deadline is live, maneuvers already within ~40m are marked announced
+  // (banner still shows them; we just don't speak them late).
+  const swapSuppressUntilRef = useRef<number>(0);
 
   useEffect(() => {
     if (!active) {
@@ -516,6 +527,7 @@ export function useTurnByTurn(
     if (key !== routeKeyRef.current) {
       routeKeyRef.current = key;
       announcedRef.current.clear();
+      swapSuppressUntilRef.current = Date.now() + 8000;
       const reAnchored: TbtState = { ...stateRef.current, active: true, stepIndex: 0 };
       stateRef.current = reAnchored;
       setState(reAnchored);
@@ -558,6 +570,12 @@ export function useTurnByTurn(
       const prepKey = `${stepIdx}-prep`;
       const immKey = `${stepIdx}-imm`;
       const isFinal = stepIdx >= steps.length - 1;
+      // Post-swap grace (see swapSuppressUntilRef): don't voice a maneuver the
+      // car is already passing — mark it announced and let the next one speak.
+      if (Date.now() < swapSuppressUntilRef.current && dManeuver < 40 && !isFinal) {
+        announcedRef.current.add(immKey);
+        announcedRef.current.add(prepKey);
+      }
       // ONE-SHOT START CUE — the first thing Nova says once guidance is free (the
       // greeting finished, or there was none): whatever maneuver is next from the
       // CURRENT position, regardless of the distance threshold. Marked announced so
@@ -575,6 +593,9 @@ export function useTurnByTurn(
             speak(ra
               ? `In ${fmtDistanceM(dManeuver)}, ${ra.toLowerCase()}.`
               : `In ${fmtDistanceM(dManeuver)}, ${v.toLowerCase()}${street ? " onto " + street : ""}.`);
+            // Pre-synthesize the matching imminent phrase so "Turn right." plays
+            // from cache the instant the turn-now cue fires (no /tts wait).
+            prefetchTts(ra ? `${ra}.` : `${v}.`);
           }
           announcedRef.current.add(prepKey);
           lastSpokeRef.current = Date.now();
@@ -606,6 +627,9 @@ export function useTurnByTurn(
               ? `In ${fmtDistanceM(dManeuver)}, ${roundabout.toLowerCase()}.`
               : `In ${fmtDistanceM(dManeuver)}, ${verb.toLowerCase()}${inst ? " onto " + inst : ""}.`);
             announcedRef.current.add(prepKey);
+            // Pre-synthesize the imminent phrase now (~30s out) so the turn-now
+            // cue plays instantly from cache instead of waiting on a /tts hop.
+            prefetchTts(roundabout ? `${roundabout}.` : `${verb}.`);
           }
         }
       }
@@ -681,11 +705,11 @@ export function useTurnByTurn(
 }
 
 // ---- Speech helper ----
-// Spoken-direction playback rate (1.0 = normal). Nudged a touch ABOVE normal so
-// Nova's callouts feel brisk rather than sluggish. Pitch is corrected on both
-// web and native (preservesPitch / shouldCorrectPitch), so faster playback
-// speeds her up without chipmunking her voice.
-const NAV_TTS_RATE = 1.05;
+// Spoken-direction playback rate. Was 1.05 ("brisk"), but the time-stretch +
+// pitch-correction pass smears consonants on some clips — a tester reported
+// Nova "slurs some words which makes it basically impossible to understand".
+// Clarity beats brisk: play the synth exactly as rendered.
+const NAV_TTS_RATE = 1.0;
 
 // Normalize text for natural speech: spell out street-type AND unit
 // abbreviations so the TTS voice never reads "min", "km", or "Rd" literally.
@@ -991,8 +1015,48 @@ async function drainTtsQueue(): Promise<void> {
   drainTtsQueue();
 }
 
+// ===== TTS prefetch cache =====
+// The imminent "Turn right." cue must land INSTANTLY — a live /tts hop at speak
+// time (1–3s on cellular) put the voice mid-turn (tester: "tells me to turn
+// right as I'm already turning"). When the prepare callout fires (~30s out) the
+// turn engine pre-synthesizes the matching imminent phrase; speakOne() then
+// plays it straight from this cache with zero network wait. The working set is
+// tiny (bare verbs + roundabout exits repeat all drive), capped hard so it can
+// never grow unbounded, and keyed by voice so a settings change never plays the
+// wrong narrator.
+const _ttsCache = new Map<string, { b64: string; mime: string }>();
+const _ttsPending = new Set<string>();
+const TTS_CACHE_MAX = 12;
+function _ttsKey(text: string): string { return `${getNovaVoice()}|${text}`; }
+export function prefetchTts(text: string): void {
+  const t = (text || "").trim();
+  if (!t) return;
+  if (getSettings().novaVoice === false) return;
+  const key = _ttsKey(t);
+  if (_ttsCache.has(key) || _ttsPending.has(key)) return;
+  _ttsPending.add(key);
+  api.post("/tts", { text: t, voice: getNovaVoice() })
+    .then(({ data }) => {
+      if (!data?.audio_b64) return;
+      if (_ttsCache.size >= TTS_CACHE_MAX) {
+        const oldest = _ttsCache.keys().next().value;
+        if (oldest !== undefined) _ttsCache.delete(oldest);
+      }
+      _ttsCache.set(key, { b64: data.audio_b64, mime: data.mime ?? "audio/mp3" });
+    })
+    .catch(() => {})
+    .finally(() => { _ttsPending.delete(key); });
+}
+
 async function speakOne(text: string): Promise<void> {
   try {
+    // Pre-synthesized? Play instantly — no network hop between "should speak"
+    // and sound. (Cached clips are kept: the same bare verb recurs all drive.)
+    const cached = _ttsCache.get(_ttsKey(text));
+    if (cached) {
+      await playBase64Audio(cached.b64, cached.mime);
+      return;
+    }
     const { data } = await api.post("/tts", { text, voice: getNovaVoice() });
     if (data?.audio_b64) {
       await playBase64Audio(data.audio_b64, data.mime ?? "audio/mp3");
@@ -1023,6 +1087,11 @@ async function _playClip(b64: string, mime: string): Promise<void> {
   // Mute-during-calls: skip Nova entirely while on a call (nav callouts, greeting & quips
   // all route through here) so she isn't loud over the call. Settings → Mute During Calls.
   if (callSilence()) return;
+  // Voice slider at/near zero → the clip would be INAUDIBLE, but playing it
+  // would still pause Apple Music + grab the .duckOthers session — the tester's
+  // "random dips in my music but nothing plays in the app". Silence costs
+  // nothing; never duck anyone's music for it.
+  if (getAudioVol(getSettings(), "volVoice") <= 0.02) return;
   if (Platform.OS === "web") {
     return new Promise((resolve) => {
       try {
@@ -1070,8 +1139,12 @@ async function _playClip(b64: string, mime: string): Promise<void> {
       const onCall = isOnCall();
       // Tester-tunable Voice level (Settings → Audio) scales the whole fade envelope.
       const target = (onCall ? 0.22 : 1.0) * getAudioVol(getSettings(), "volVoice");
-      const startV = Math.min(target, 0.05);     // ease in from near-silent
-      const FADE_IN_MS = 180, FADE_OUT_MS = 240, STEPS = 4;
+      // Ease in from ~55% of target, NOT near-silence: the old 0.05 start +
+      // 180ms ramp swallowed the first word entirely (tester: "the first word
+      // will be super quiet"). 55%/100ms still rounds off the attack over the
+      // music without eating any speech.
+      const startV = target * 0.55;
+      const FADE_IN_MS = 100, FADE_OUT_MS = 240, STEPS = 4;
       Audio.Sound.createAsync({ uri: path }, { shouldPlay: true, rate: NAV_TTS_RATE, shouldCorrectPitch: true, volume: startV })
         .then(({ sound, status: initStatus }) => {
           _currentSound = sound;

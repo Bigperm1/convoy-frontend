@@ -274,8 +274,16 @@ export async function fetchMapboxLaneCues(
     const json: any = await res.json();
     const steps: any[] = json?.routes?.[0]?.legs?.[0]?.steps || [];
     const cues: LaneCue[] = [];
-    for (const s of steps) {
-      const loc = s?.maneuver?.location; // [lng, lat]
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i];
+      // OFF-BY-ONE FIX: a step's bannerInstructions describe the maneuver at the
+      // END of that step (= the NEXT step's maneuver.location) — they're what you
+      // display while driving ALONG the step, guiding you into the upcoming turn.
+      // Anchoring to s.maneuver.location (the turn you already made at the START
+      // of the step) shifted every lane row one maneuver early: approaching turn T
+      // showed the lanes for the turn AFTER T ("stay left" on a right turn — the
+      // tester screenshot). Anchor to the maneuver the banner actually describes.
+      const loc = steps[i + 1]?.maneuver?.location; // [lng, lat]
       if (!Array.isArray(loc) || loc.length < 2) continue;
       // Find a banner for this step that carries lane sub-components.
       let lanes: LaneArrow[] | null = null;

@@ -15,8 +15,16 @@ import WidgetKit
 // 2) APP-GROUP SHARED DEFAULTS — the write side of the Hairpin home-screen
 //    widget. JS serializes the "next event" payload; the widget extension
 //    reads it from UserDefaults(suiteName:) and we poke WidgetKit to redraw.
-public class HairpinSystemModule: Module, CLLocationManagerDelegate {
+//
+// NOTE: Expo's `Module` base class is NOT an NSObject, so this class cannot
+// conform to CLLocationManagerDelegate itself (Swift: "cannot declare
+// conformance to 'NSObjectProtocol'" — the exact error that failed the first
+// build-65 iOS run). The delegate lives in a small NSObject helper below,
+// retained by the module (CLLocationManager.delegate is weak) and forwarding
+// visits back through a closure.
+public class HairpinSystemModule: Module {
   private var visitManager: CLLocationManager?
+  private var visitDelegate: HairpinVisitDelegate?
 
   public func definition() -> ModuleDefinition {
     Name("HairpinSystem")
@@ -26,8 +34,12 @@ public class HairpinSystemModule: Module, CLLocationManagerDelegate {
     Function("startVisitMonitoring") {
       DispatchQueue.main.async {
         if self.visitManager == nil {
+          let delegate = HairpinVisitDelegate { [weak self] payload in
+            self?.sendEvent("onVisit", payload)
+          }
           let m = CLLocationManager()
-          m.delegate = self
+          m.delegate = delegate
+          self.visitDelegate = delegate // retain — manager.delegate is weak
           self.visitManager = m
         }
         self.visitManager?.startMonitoringVisits()
@@ -47,13 +59,23 @@ public class HairpinSystemModule: Module, CLLocationManagerDelegate {
       }
     }
   }
+}
 
-  public func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
+// NSObject delegate for the visit stream (see NOTE above).
+private final class HairpinVisitDelegate: NSObject, CLLocationManagerDelegate {
+  private let onVisit: ([String: Any]) -> Void
+
+  init(onVisit: @escaping ([String: Any]) -> Void) {
+    self.onVisit = onVisit
+    super.init()
+  }
+
+  func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
     // CLVisit uses distantPast/distantFuture for unknown bounds — normalize to 0
     // so JS can tell "arrival event" (departure unknown) from "departure event".
     let arrival = visit.arrivalDate == Date.distantPast ? 0 : visit.arrivalDate.timeIntervalSince1970 * 1000
     let departure = visit.departureDate == Date.distantFuture ? 0 : visit.departureDate.timeIntervalSince1970 * 1000
-    sendEvent("onVisit", [
+    onVisit([
       "lat": visit.coordinate.latitude,
       "lng": visit.coordinate.longitude,
       "arrivalTs": arrival,

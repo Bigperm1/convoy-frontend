@@ -764,6 +764,16 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
           // STILL crashes, the fault is the native car-window RN bridge /
           // scene setup, which needs a native rebuild (not an OTA).
           CarPlay.setRootTemplate(mapTemplate);
+          // ── TEMPLATE-LAYER PROBE (2026-07-16, remove once resolved) ──
+          // Build-65 field result: NO template chrome renders on the head unit
+          // (no nav bar, no bar buttons, no round map buttons — even with valid
+          // SF-symbol images), while our window-mounted RN surface renders fine.
+          // A CPAlert-style toast is pure template-layer UI: if this appears on
+          // the unit ~3s after connect, the interfaceController pipeline works
+          // and the chrome problem is compositing; if it NEVER appears, the
+          // template pipeline itself is dead under bridgeless and the fix is
+          // native (build 66). One glance on the next drive answers it.
+          setTimeout(() => { try { CarPlay.bridge?.toast?.('Hairpin ✓ template layer alive', 3); } catch {} }, 3000);
         }
         // Android Auto is NOT built here. The head unit can launch the car app
         // even when this phone screen isn't mounted, so its UI is owned by the

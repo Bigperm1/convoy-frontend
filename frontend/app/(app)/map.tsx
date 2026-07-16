@@ -60,7 +60,6 @@ import { shareInbox } from "../../src/shareInbox";
 import { cruisePlot } from "../../src/cruisePlot";
 import { startNavBanner, stopNavBanner, updateNavBanner, askAlwaysLocationOnce, CAR_NAV_KEY } from "../../src/navNotification";
 import { onCarNavStarted } from "../../src/carplay/carActions";
-import RerouteCard from "../../src/RerouteCard";
 import { PoliceBadgeIcon } from "../../src/components/MapControlIcons";
 import CompassNeedle from '../../src/components/CompassNeedle';
 
@@ -1135,8 +1134,10 @@ export default function MapScreen() {
     savedMin: number; lateMin: number; etaSec: number;
     divLat: number; divLng: number; cause: string; maneuver: string | null;
   } | null>(null);
-  // The visual reroute offer currently on screen (mini-map card). null = none.
-  type RerouteOffer = { route: NavRoute; title: string; subtitle: string; savedMin: number; etaMin: number; arrival: string; lateMin: number };
+  // The visual reroute offer currently on screen — Google-style INLINE: the blue
+  // offer line + a tappable "Save X min" pill at the divergence point, drawn on
+  // the live map (the old RerouteCard modal is gone — Jeff: no popups). null = none.
+  type RerouteOffer = { route: NavRoute; title: string; subtitle: string; savedMin: number; etaMin: number; arrival: string; lateMin: number; divLat: number; divLng: number };
   const [rerouteOffer, setRerouteOffer] = useState<RerouteOffer | null>(null);
   // Mirror of the on-screen offer in a ref, so the hands-free voice callback (which
   // resolves seconds later from a stale render closure) reads the CURRENT offer, not a
@@ -1266,7 +1267,20 @@ export default function MapScreen() {
   // roughly constant — a fixed distance would warn too early in town / too late on the
   // highway. Runs on every GPS tick (the 60s check only re-arms the candidate).
   useEffect(() => {
-    if (navMode !== "turn-by-turn" || rerouteShowingRef.current) return;
+    if (navMode !== "turn-by-turn") return;
+    // A live INLINE offer auto-expires once the driver reaches/passes the split
+    // without taking it — the blue line and pill quietly disappear (no modal to
+    // dismiss, matching Google's behavior). Same speed-aware past-ramp guard the
+    // arming path uses below.
+    if (rerouteShowingRef.current) {
+      const o = rerouteOfferRef.current;
+      if (o && coords) {
+        const dPass = haversineMeters({ lat: coords.lat, lng: coords.lng }, { lat: o.divLat, lng: o.divLng });
+        const spdNow = Math.max(coords.speed ?? 0, 8);
+        if (dPass < Math.max(180, spdNow * 8)) declineReroute();
+      }
+      return;
+    }
     if (Date.now() < rerouteSuppressUntilRef.current) return;
     const pend = pendingRerouteRef.current;
     if (!pend || !coords) return;
@@ -1296,6 +1310,7 @@ export default function MapScreen() {
       title: pend.title,
       subtitle: pend.maneuver ? `${pend.maneuver} · in ${distText}` : `${pend.subtitle} · in ${distText}`,
       savedMin: pend.savedMin, etaMin, arrival, lateMin: pend.lateMin,
+      divLat: pend.divLat, divLng: pend.divLng,
     });
     const handsFree = getSettings().scoutHandsFree !== false && !navMutedRef.current;
     if (handsFree) {
@@ -1799,6 +1814,10 @@ export default function MapScreen() {
   // collapsed to the tapped route and jumped straight into navigation, which
   // is why tapping a line never simply "turned it yellow".)
   const handleSelectRoute = (index: number) => {
+    // Google-style inline reroute: the offer line is appended AFTER `routes` for
+    // display only, so a tap landing past the real list means the driver tapped
+    // the blue offer line — switch instantly (same accept path as the pill).
+    if (rerouteOfferRef.current && index >= routes.length) { acceptReroute(); return; }
     if (index < 0 || index >= routes.length) return;
     setSelectedRouteIndex(index);
   };
@@ -2972,9 +2991,15 @@ export default function MapScreen() {
         destination={destination}
         destWeather={destWeather}
         encodedPolyline={encodedPolyline}
-        routes={routes}
+        // While a reroute offer is up, append its line for DISPLAY (kind "offer" →
+        // blue inline alternate, tappable during nav). Never lands in `routes`
+        // state, so the turn engine / chips / CarPlay mirror are untouched.
+        routes={rerouteOffer ? [...routes, { ...(rerouteOffer.route as any), kind: "offer" }] : routes}
         selectedRouteIndex={selectedRouteIndex}
         onSelectRoute={handleSelectRoute}
+        offerPill={rerouteOffer ? { lat: rerouteOffer.divLat, lng: rerouteOffer.divLng, savedMin: rerouteOffer.savedMin, arrival: rerouteOffer.arrival } : null}
+        onOfferAccept={acceptReroute}
+        onOfferDismiss={declineReroute}
         // Follow-mode logic, driven by the single `isFollowing` flag (true even
         // during nav). When the driver pans the map — including mid-guidance —
         // ConvoyMap fires `onUserPan`; we drop follow so the camera stops chasing
@@ -3518,21 +3543,9 @@ export default function MapScreen() {
         myTopSpeed={Math.max(user?.top_speed_record || 0, sessionMaxSpeed)}
       />
 
-      {/* Scout's mid-drive reroute offer — frosted card with a live mini-map of the
-          suggested alternate (congestion-colored) + its ETA, time saved, and how far
-          behind your start estimate you've fallen. */}
-      <RerouteCard
-        visible={!!rerouteOffer}
-        route={rerouteOffer?.route ?? null}
-        title={rerouteOffer?.title ?? ""}
-        subtitle={rerouteOffer?.subtitle ?? ""}
-        savedMin={rerouteOffer?.savedMin}
-        etaMin={rerouteOffer?.etaMin}
-        arrival={rerouteOffer?.arrival}
-        lateMin={rerouteOffer?.lateMin}
-        onAccept={acceptReroute}
-        onDecline={declineReroute}
-      />
+      {/* (The RerouteCard modal is gone — the mid-drive offer now draws INLINE on
+          the map: blue alternate line + tappable "Save X min" pill at the split.
+          Detection/voice unchanged; see the proactive-reroute block above.) */}
 
       {/* Share the current destination to specific community members (push +
           in-app toast via /notifications/share — no Supabase needed). */}

@@ -32,7 +32,7 @@
 // handed to Mapbox below is [lng, lat].
 
 import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
-import { View, Text, Image, StyleSheet, Pressable, Platform, AppState, Alert } from "react-native";
+import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, type LatLng as RoadLatLng } from "./roadSnap";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -123,6 +123,12 @@ interface ConvoyMapboxProps {
   highlightConvoy?: boolean;
   destination?: LatLng | null;
   destWeather?: { kind: WeatherKind; temp: string } | null;
+  // Mid-drive reroute OFFER pill (Google-style inline alternate): anchored at the
+  // point where the offer route peels off the active one. Tap the pill (or the
+  // blue offer line itself) → accept; ✕ → dismiss. null → nothing renders.
+  offerPill?: { lat: number; lng: number; savedMin: number; arrival?: string } | null;
+  onOfferAccept?: () => void;
+  onOfferDismiss?: () => void;
   encodedPolyline?: string | null;
   routes?: { polyline: string; color?: string; congestion?: CongestionLevel[]; coordinates?: [number, number][] }[];
   selectedRouteIndex?: number;
@@ -460,6 +466,9 @@ export function applyCarGapGradient(grad: any, s0: number, s1: number): any {
 // ===== 3-route palette (Best / Scenic / AI) =====
 // AI route core is black; its EDGES (casing) are the user color.
 export const ROUTE_AI_CORE = "#000000";
+// Mid-drive reroute OFFER line (Google-style inline alternate): calm blue with a
+// white casing — clearly not the active ribbon, clearly not a hazard.
+export const ROUTE_OFFER_CORE = "#5B8DEF";
 function _rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   r /= 255; g /= 255; b /= 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
@@ -493,7 +502,7 @@ export function contrastingRouteColor(hex: string): string {
   return _hslToHex((h + 160) % 360, 0.82, 0.56);
 }
 
-export type RouteKind = "best" | "scenic" | "ai" | "alt";
+export type RouteKind = "best" | "scenic" | "ai" | "alt" | "offer";
 // Which slot a route occupies. An explicit `kind` (set by the AI-memory subsystem, P3)
 // wins; otherwise positional — fastest=Best(0), first alternate=Scenic(1), the rest=alt.
 export function routeKindFor(i: number, r: any): RouteKind {
@@ -503,6 +512,7 @@ export function routeKindFor(i: number, r: any): RouteKind {
 // color; Scenic = the contrasting hue; AI = BLACK core with user-color edges. ONE source of
 // truth for both the phone map (routeFC) and the CarPlay mirror — keep them identical.
 export function routeColorsFor(kind: RouteKind, routeColor: string): { color: string; edge: string } {
+  if (kind === "offer") return { color: ROUTE_OFFER_CORE, edge: "#FFFFFF" }; // inline reroute offer
   const color = kind === "scenic" ? contrastingRouteColor(routeColor) : kind === "ai" ? ROUTE_AI_CORE : routeColor;
   const edge = kind === "ai" ? routeColor : color;
   return { color, edge };
@@ -1195,6 +1205,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     routeColor = DEFAULT_ROUTE_COLOR,
     distanceToManeuverM, onMapPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
+    offerPill, onOfferAccept, onOfferDismiss,
     hazards, speedCameras, roadEvents, places, showPlacePins = true, destWeather,
     onHazardPress, onPlacePress, onHeading, resetNorthSignal,
     zoomOffset = 0,
@@ -1985,16 +1996,19 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
                 three kinds — including AI's inverted look (user-color edges, black core).
                 Shown ONLY in preview; during active navigation they're filtered to a
                 non-existent index so no alternate draws straight through the car. */}
+            {/* During NAV, alternates are filtered out — EXCEPT the mid-drive reroute
+                OFFER line (kind "offer"): the Google-style inline alternate that draws
+                beside the active ribbon so the driver can tap it to switch. */}
             <LineLayer
               id="route-alt-casing"
               slot="middle"
-              filter={(navigationActive ? ["==", ["get", "index"], -1] : ["!=", ["get", "index"], selectedRouteIndex]) as any}
+              filter={(navigationActive ? ["==", ["get", "kind"], "offer"] : ["!=", ["get", "index"], selectedRouteIndex]) as any}
               style={{ lineColor: ["get", "edge"] as any, lineWidth: 17, lineBlur: 5, lineOpacity: 0.4, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
             <LineLayer
               id="route-alt-core"
               slot="middle"
-              filter={(navigationActive ? ["==", ["get", "index"], -1] : ["!=", ["get", "index"], selectedRouteIndex]) as any}
+              filter={(navigationActive ? ["==", ["get", "kind"], "offer"] : ["!=", ["get", "index"], selectedRouteIndex]) as any}
               style={{ lineColor: ["get", "color"] as any, lineWidth: 7, lineOpacity: 0.7, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
             {/* Selected route ribbon — casing (edges) + core, in the selected kind's colors
@@ -2060,6 +2074,28 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         {destination && (
           <MarkerView coordinate={[destination.lng, destination.lat]} anchor={{ x: 0.5, y: 0.5 }}>
             <View style={styles.destPin} />
+          </MarkerView>
+        )}
+
+        {/* Mid-drive reroute OFFER pill (Google-style) — anchored where the blue
+            offer line peels off the active route. Tap → switch instantly; ✕ →
+            dismiss. Replaces the old RerouteCard modal (Jeff: no popups). */}
+        {offerPill && (
+          <MarkerView coordinate={[offerPill.lng, offerPill.lat]} anchor={{ x: 0.5, y: 1.15 }} allowOverlap>
+            <TouchableOpacity onPress={onOfferAccept} activeOpacity={0.85} style={styles.offerPill}>
+              <View style={styles.offerBolt}>
+                <Ionicons name="flash" size={14} color="#0A1A10" />
+              </View>
+              <View style={{ minWidth: 0 }}>
+                <Text style={styles.offerTitle}>{`Save ${offerPill.savedMin} min`}</Text>
+                <Text style={styles.offerSub} numberOfLines={1}>
+                  {offerPill.arrival ? `Tap to switch · ${offerPill.arrival}` : "Tap to switch"}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={onOfferDismiss} hitSlop={10} style={styles.offerClose}>
+                <Ionicons name="close" size={15} color="#8E8E93" />
+              </TouchableOpacity>
+            </TouchableOpacity>
           </MarkerView>
         )}
 
@@ -2164,6 +2200,21 @@ const styles = StyleSheet.create({
     width: 22, height: 22, borderRadius: 11,
     backgroundColor: "#FF453A", borderWidth: 3, borderColor: "#FFFFFF",
   },
+  // Mid-drive reroute offer pill (tap = switch, ✕ = dismiss).
+  offerPill: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: "rgba(10,12,14,0.94)", borderRadius: 14,
+    borderWidth: 1.5, borderColor: "rgba(91,141,239,0.75)",
+    paddingVertical: 8, paddingHorizontal: 10,
+    shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 10, shadowOffset: { width: 0, height: 4 },
+  },
+  offerBolt: {
+    width: 24, height: 24, borderRadius: 12, backgroundColor: "#2DEC86",
+    alignItems: "center", justifyContent: "center",
+  },
+  offerTitle: { color: "#2DEC86", fontWeight: "900", fontSize: 14.5 },
+  offerSub: { color: "#C9C9CE", fontWeight: "600", fontSize: 11 },
+  offerClose: { marginLeft: 2, padding: 2 },
   // Hazard / camera icons.
   hazardIcon: { width: 40, height: 40 },
   cameraIconWrap: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },

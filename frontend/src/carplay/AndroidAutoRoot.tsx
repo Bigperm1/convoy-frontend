@@ -27,6 +27,8 @@
 import { useEffect, useRef } from 'react';
 import { CarSurface } from './ConvoyCarPlay';
 import { useCarStore } from './carStore';
+import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
+import { startCarDataService, stopCarDataService } from './carDataService';
 
 // androidx.car.app Distance unit constant: meters = 1 (Distance.UNIT_METERS).
 const AA_UNIT_METERS = 1;
@@ -59,6 +61,29 @@ export default function AndroidAutoRoot() {
     }
     return () => {
       templateRef.current = null;
+    };
+  }, []);
+
+  // ---- DATA/LOCATION FEED BOOTSTRAP (Android parity with iOS's
+  // carPlayBootstrap.onConnect — 2026-07-16 deep dive) ----
+  // carPlayBootstrap early-returns on Android, so nothing used to start the
+  // GPS/peers/hazards/route feeds on an Android Auto connect: carStore stayed
+  // empty unless the PHONE was sitting on the map screen or actively
+  // navigating — a cold AA connect showed a fixless surface with no convoy.
+  // This root's mount IS the correct trigger: CarPlaySession (Kotlin) runs the
+  // "AndroidAuto" AppRegistry root ONLY when a real car session starts, so
+  // (unlike the library's didConnect event, which fires spuriously at every
+  // Android app launch — see ANDROID_SPURIOUS_CONNECT_GUARD_MS) starting feeds
+  // here can never leak GPS onto a phone with no car attached. All four calls
+  // are platform-agnostic; released/stopped when the car session unmounts.
+  useEffect(() => {
+    void acquireBgLocation('androidauto');   // shared bg task + fg car feed
+    startCarDataService();                   // cold peers + hazards (WS/Supabase/REST)
+    void startForegroundCarFeed();           // continuous GPS writer for the car map
+    void hydrateCarRouteFromDisk();          // persisted route ribbon on cold connect
+    return () => {
+      void releaseBgLocation('androidauto');
+      stopCarDataService();
     };
   }, []);
 

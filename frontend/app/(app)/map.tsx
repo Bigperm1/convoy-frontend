@@ -31,6 +31,7 @@ import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import { BearingTracker } from "../../src/bearing";
 import PeerModal from "../../src/PeerModal";
+import LiveRosterSheet from "../../src/LiveRosterSheet";
 import ShareSheet from "../../src/ShareSheet";
 import {
   fetchRoutes, fetchDirections, fetchAiRoute, NavRoute, useTurnByTurn, maneuverVerb,
@@ -2714,6 +2715,9 @@ export default function MapScreen() {
     presencePos
   );
   const [selectedPeer, setSelectedPeer] = useState<ConvoyPresencePeer | null>(null);
+  // Who's-on roster sheet, opened from the "N live" pill under the search bar
+  // (tester request: see who's on → talk to them or drive to them).
+  const [rosterOpen, setRosterOpen] = useState(false);
 
   // ---- Community Routes (admin-shared destinations / cruises) ----
   const { routes: communityRoutes } = useCommunityRoutes(settings.activeCommunityId || null);
@@ -3123,10 +3127,17 @@ export default function MapScreen() {
               const selfLive = getAvatarMode(settings) !== "ghost" && !!settings.activeCommunityId ? 1 : 0;
               const liveCount = selfLive + peerList.length;
               return (
-                <View style={styles.liveOverlay} pointerEvents="none">
+                // Tappable (tester request): opens the who's-on roster sheet —
+                // every live member with YOHB + Drive-to actions.
+                <TouchableOpacity
+                  style={styles.liveOverlay}
+                  onPress={() => setRosterOpen(true)}
+                  activeOpacity={0.8}
+                  hitSlop={8}
+                >
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
                   <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts · v3</Text>
-                </View>
+                </TouchableOpacity>
               );
             })()}
             {/* Stranded-OTA escape hatch: appears the moment a newer update finishes
@@ -3567,6 +3578,29 @@ export default function MapScreen() {
         onClose={() => setSelectedPeer(null)}
         myCoords={coords}
         myTopSpeed={Math.max(user?.top_speed_record || 0, sessionMaxSpeed)}
+        onDriveTo={selectedPeer && typeof selectedPeer.lat === "number" && typeof selectedPeer.lng === "number" ? () => {
+          // Tester request: "click on someone on the map and have the map guide
+          // me to them" — same flow as picking a search result: destination set
+          // to the peer's live position, route drawer with Start slides up.
+          const p = selectedPeer;
+          setSelectedPeer(null);
+          setDestination({ lat: p.lat, lng: p.lng, label: p.handle || "Driver" });
+          setShowSteps(true);
+        } : undefined}
+      />
+
+      {/* Who's-on roster (tap the "N live" pill): every live convoy member,
+          nearest first, with YOHB + Drive-to actions per row. */}
+      <LiveRosterSheet
+        visible={rosterOpen}
+        onClose={() => setRosterOpen(false)}
+        peers={peerList}
+        myCoords={coords}
+        onDriveTo={(p) => {
+          setRosterOpen(false);
+          setDestination({ lat: p.lat, lng: p.lng, label: p.handle || "Driver" });
+          setShowSteps(true);
+        }}
       />
 
       {/* (The RerouteCard modal is gone — the mid-drive offer now draws INLINE on

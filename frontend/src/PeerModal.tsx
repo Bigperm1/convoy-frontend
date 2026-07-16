@@ -17,6 +17,11 @@ type Props = {
   // The hailing user's OWN personal-best cruise speed (km/h), shown on the YOHB
   // button as a flex when you fist-bump a peer. Live max-of(persisted, session).
   myTopSpeed?: number;
+  // Tester request (2026-07-16): "click on someone on the map and have the map
+  // guide me to them." When provided, a "Drive to" button under the hail button
+  // hands the peer's live position to the map's drive-to flow (route drawer +
+  // Start), same as picking a search result.
+  onDriveTo?: () => void;
 };
 
 function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -38,7 +43,7 @@ const lastSeen = (iso?: string) => {
   return `${Math.round(sec / 3600)}h ago`;
 };
 
-export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed }: Props) {
+export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed, onDriveTo }: Props) {
   // ===== Hail state =====
   //
   // Three phases:
@@ -173,6 +178,18 @@ export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed
                   </Text>
                 </View>
               </TouchableOpacity>
+
+              {onDriveTo && (
+                <TouchableOpacity
+                  testID="peer-drive-to"
+                  onPress={onDriveTo}
+                  style={styles.driveBtn}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="navigate" size={18} color={COLORS.brand} />
+                  <Text style={styles.driveText}>Drive to {peer.handle || "driver"}</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </TouchableOpacity>
@@ -205,4 +222,10 @@ const styles = StyleSheet.create({
   hailBtnSent: { backgroundColor: COLORS.success },
   hailText: { color: "#fff", fontWeight: "700", fontSize: 15, letterSpacing: 0.2 },
   hailSubText: { fontWeight: "600", fontSize: 11, letterSpacing: 0.2, opacity: 0.85, marginTop: 1 },
+  driveBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    marginTop: 10, paddingVertical: 13, borderRadius: 14,
+    backgroundColor: "rgba(45,236,134,0.10)", borderWidth: 1, borderColor: "rgba(45,236,134,0.55)",
+  },
+  driveText: { color: COLORS.brand, fontWeight: "700", fontSize: 15, letterSpacing: 0.2 },
 });

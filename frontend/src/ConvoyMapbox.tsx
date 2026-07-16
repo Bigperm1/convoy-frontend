@@ -142,10 +142,10 @@ interface ConvoyMapboxProps {
   distanceToManeuverM?: number;
   maneuverCoord?: { lat: number; lng: number } | null;
   showTraffic?: boolean;
-  // Now delivers the tapped coordinate (undefined if unavailable) so the caller
-  // can implement gestures like double-tap-to-drop-a-pin. Existing "just tapped
-  // the map" callers can ignore the argument.
-  onMapPress?: (coord?: { lat: number; lng: number }) => void;
+  // Delivers the tapped coordinate AND the on-screen tap point (sx/sy, px) so the
+  // caller can implement gestures like double-tap-to-drop-a-pin in SCREEN space
+  // (zoom-independent). undefined if unavailable. "Just tapped" callers ignore it.
+  onMapPress?: (coord?: { lat: number; lng: number; sx?: number; sy?: number }) => void;
   onMapLongPress?: (c: { lat: number; lng: number }) => void;
   onHazardPress?: (h: Hazard) => void;
   onHazardLongPress?: (h: Hazard) => void;
@@ -1893,7 +1893,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         gestureSettings={{ doubleTapToZoomInEnabled: false }}
         onPress={(f: any) => {
           const c = f?.geometry?.coordinates;
-          onMapPress?.(Array.isArray(c) && typeof c[0] === "number" ? { lat: c[1], lng: c[0] } : undefined);
+          const p = f?.properties;
+          onMapPress?.(Array.isArray(c) && typeof c[0] === "number"
+            ? { lat: c[1], lng: c[0], sx: p?.screenPointX, sy: p?.screenPointY }
+            : undefined);
         }}
         onLongPress={(f: any) => {
           const c = f?.geometry?.coordinates;

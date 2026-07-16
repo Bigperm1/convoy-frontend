@@ -1624,7 +1624,7 @@ export default function MapScreen() {
   // Double-tap pin-drop: the previous single tap (time + coord). Ref, not state —
   // it must never re-render the map between the two taps. (Up here with the other
   // hooks — the render body below the no-coords early return can't declare refs.)
-  const lastMapTapRef = useRef<{ t: number; lat: number; lng: number } | null>(null);
+  const lastMapTapRef = useRef<{ t: number; lat: number; lng: number; sx?: number; sy?: number } | null>(null);
   useEffect(() => {
     const consume = () => {
       const c = cruisePlot.take();
@@ -3022,18 +3022,25 @@ export default function MapScreen() {
         // The corner the turn arrow locks onto (snaps to the next when completed).
         maneuverCoord={maneuverCoord}
         // DOUBLE-TAP → DROP A PIN (native double-tap-zoom is disabled in
-        // ConvoyMapbox; pinch still zooms). Two taps within 350ms and ~150m of
-        // each other drop the pin at the second tap and run the FULL destination
-        // pipeline — routes fetch, the Drive drawer with Start appears — exactly
-        // like picking a search result or a gas/food pin. Ignored during active
-        // guidance so a stray double-tap can't hijack the drive.
-        onMapPress={(c?: { lat: number; lng: number }) => {
+        // ConvoyMapbox; pinch still zooms). The "same spot" test is in SCREEN
+        // pixels (sx/sy), NOT world metres — so it works identically zoomed in or
+        // out (the old 150m world gate silently failed a double-tap taken while
+        // zoomed out, since a few pixels there spans hundreds of metres — that was
+        // the "double-tap does nothing" bug). Two taps within 500ms and ~45pt drop
+        // the pin at the second tap and run the FULL destination pipeline (routes
+        // fetch + Drive drawer with Start). Ignored mid-guidance.
+        onMapPress={(c?: { lat: number; lng: number; sx?: number; sy?: number }) => {
           if (!c) return;
           const now = Date.now();
           const last = lastMapTapRef.current;
-          lastMapTapRef.current = { t: now, lat: c.lat, lng: c.lng };
-          if (!last || now - last.t > 350) return;
-          if (haversineMeters({ lat: last.lat, lng: last.lng }, c) > 150) return;
+          lastMapTapRef.current = { t: now, lat: c.lat, lng: c.lng, sx: c.sx, sy: c.sy };
+          if (!last || now - last.t > 500) return;
+          // Screen-space proximity when we have pixel coords; fall back to a
+          // generous world gate only if the payload lacked them.
+          const near = (typeof c.sx === "number" && typeof last.sx === "number")
+            ? Math.hypot((c.sx - (last.sx ?? 0)), (c.sy ?? 0) - (last.sy ?? 0)) <= 45
+            : haversineMeters({ lat: last.lat, lng: last.lng }, c) <= 400;
+          if (!near) return;
           lastMapTapRef.current = null; // consumed — a 3rd tap starts fresh
           if (navMode === "turn-by-turn") return;
           try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}

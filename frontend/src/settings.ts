@@ -105,8 +105,9 @@ speedCameras: boolean;
 // location. undefined → on.
 roadIncidents: boolean;
 // Split visibility for the DriveBC pins: red = major/moderate, grey = minor/info
-// ("sometimes the grey is just too much on the screen"). Both undefined → on;
-// the master roadIncidents toggle above still gates everything.
+// ("sometimes the grey is just too much on the screen"). Red undefined → ON;
+// grey undefined → OFF (opt-in — Jeff wants a clean map on first launch).
+// The master roadIncidents toggle above still gates everything.
 roadIncidentsRed?: boolean;
 roadIncidentsGrey?: boolean;
 showPlacePins: boolean;

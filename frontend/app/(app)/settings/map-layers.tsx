@@ -18,7 +18,7 @@ export default function MapLayersPage() {
             <Divider />
             <ToggleRow icon="alert-circle" iconColor="#FF453A" title="Major incidents" subtitle="Red pins — accidents & closures (major / moderate)" value={settings.roadIncidentsRed !== false} onChange={(v) => setSettings({ roadIncidentsRed: v })} />
             <Divider />
-            <ToggleRow icon="information-circle" iconColor="#8E8E93" title="Minor incidents" subtitle="Grey pins — minor roadwork & info events. Turn off to declutter the map." value={settings.roadIncidentsGrey !== false} onChange={(v) => setSettings({ roadIncidentsGrey: v })} />
+            <ToggleRow icon="information-circle" iconColor="#8E8E93" title="Minor incidents" subtitle="Grey pins — minor roadwork & info events. Off by default to keep the map clean." value={settings.roadIncidentsGrey === true} onChange={(v) => setSettings({ roadIncidentsGrey: v })} />
           </>
         )}
         <Divider />

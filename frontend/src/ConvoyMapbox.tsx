@@ -1077,10 +1077,12 @@ export function IncidentMarker({ event }: { event: RoadEvent }) {
             style={styles.brandPin}
             resizeMode="contain"
           />
-          {/* Glyph sits INSIDE the pin's head circle — no badge circle behind it
-              (matches the phone's GL pins after the tester's redesign ask). */}
+          {/* Glyph sits INSIDE the pin's head circle — no badge circle behind it.
+              The small margins counter the MCI glyph's font bearing (draws
+              ~1.8pt left / 2.35pt high of its box — measured on the phone's GL
+              pins from the tester screenshot; same font, same correction). */}
           <View style={[styles.brandPinBadge, { backgroundColor: "transparent" }]}>
-            <MaterialCommunityIcons name="hammer-wrench" size={12} color="#0B0B0C" />
+            <MaterialCommunityIcons name="hammer-wrench" size={12} color="#0B0B0C" style={{ marginLeft: 3.6, marginTop: 4.7 }} />
           </View>
         </View>
       </Pressable>
@@ -1263,7 +1265,12 @@ function GLPinLayers({
       {incidents.length > 0 && (
         <ShapeSource id="gl-incidents" shape={incidentFC} onPress={tapIncident}>
           <SymbolLayer id="gl-incidents-pin" slot="top" style={{ iconImage: ["get", "icon"] as any, iconSize: 0.466, iconAnchor: "bottom", iconRotationAlignment: "viewport", iconPitchAlignment: "viewport", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
-          <SymbolLayer id="gl-incidents-glyph" slot="top" style={{ iconImage: "incg_wrench", iconSize: 1, iconOffset: [0, -28] as any, iconRotationAlignment: "viewport", iconPitchAlignment: "viewport", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          {/* Offset MEASURED, not eyeballed (tester screenshot 2026-07-16): the
+              hole centre sits [-0.15, -27.4] pt from the pin anchor (alpha-
+              centroid of the asset), and the MCI hammer-wrench glyph draws
+              1.8 pt left / 2.35 pt high of its layout box (font bearing) —
+              so the corrected offset is [+1.7, -25.6]. */}
+          <SymbolLayer id="gl-incidents-glyph" slot="top" style={{ iconImage: "incg_wrench", iconSize: 1, iconOffset: [1.7, -25.6] as any, iconRotationAlignment: "viewport", iconPitchAlignment: "viewport", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
         </ShapeSource>
       )}
 

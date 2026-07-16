@@ -777,8 +777,8 @@ export default function MapScreen() {
   // and hiding red pins silences the major/moderate voice alerts below.
   const roadEventsFiltered = roadEventsAll.filter((e: any) =>
     e.severity === "MAJOR" || e.severity === "MODERATE"
-      ? (settings as any).roadIncidentsRed !== false
-      : (settings as any).roadIncidentsGrey !== false
+      ? (settings as any).roadIncidentsRed !== false   // red: ON by default
+      : (settings as any).roadIncidentsGrey === true   // grey: OPT-IN (off on first launch — "the grey is just too much")
   );
   // Collapse near-duplicates (tester: red + grey pins stacking on each other —
   // DriveBC often files the same closure twice, once per direction/severity).

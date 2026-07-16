@@ -775,11 +775,28 @@ export default function MapScreen() {
   // Severity split (Settings → Map Layers): red = major/moderate, grey = minor.
   // Filtered HERE so hiding grey pins also silences their (nonexistent) callouts
   // and hiding red pins silences the major/moderate voice alerts below.
-  const roadEvents = roadEventsAll.filter((e: any) =>
+  const roadEventsFiltered = roadEventsAll.filter((e: any) =>
     e.severity === "MAJOR" || e.severity === "MODERATE"
       ? (settings as any).roadIncidentsRed !== false
       : (settings as any).roadIncidentsGrey !== false
   );
+  // Collapse near-duplicates (tester: red + grey pins stacking on each other —
+  // DriveBC often files the same closure twice, once per direction/severity).
+  // RED (major/moderate) sorts first so it always wins the spot; anything within
+  // ~250 m of an already-kept event is dropped. O(n²) is fine at DriveBC counts.
+  const roadEvents = (() => {
+    const sorted = [...roadEventsFiltered].sort((a: any, b: any) => {
+      const ra = a.severity === "MAJOR" || a.severity === "MODERATE" ? 0 : 1;
+      const rb = b.severity === "MAJOR" || b.severity === "MODERATE" ? 0 : 1;
+      return ra - rb;
+    });
+    const kept: typeof sorted = [];
+    for (const e of sorted) {
+      if (kept.some((k: any) => haversineMeters({ lat: k.lat, lng: k.lng }, { lat: e.lat, lng: e.lng }) < 250)) continue;
+      kept.push(e);
+    }
+    return kept;
+  })();
   // Posted speed limit for the road you're on (OpenStreetMap maxspeed via
   // Overpass). Feeds the speedometer's over-limit pulse; null when the road has
   // no maxspeed tag, in which case the pill simply stays neutral.

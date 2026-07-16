@@ -1077,7 +1077,9 @@ export function IncidentMarker({ event }: { event: RoadEvent }) {
             style={styles.brandPin}
             resizeMode="contain"
           />
-          <View style={[styles.brandPinBadge, { backgroundColor: red ? "#FF6B63" : "#C6CBD0" }]}>
+          {/* Glyph sits INSIDE the pin's head circle — no badge circle behind it
+              (matches the phone's GL pins after the tester's redesign ask). */}
+          <View style={[styles.brandPinBadge, { backgroundColor: "transparent" }]}>
             <MaterialCommunityIcons name="hammer-wrench" size={12} color="#0B0B0C" />
           </View>
         </View>
@@ -1162,13 +1164,19 @@ const PIN_IMAGE_MAP: Record<string, any> = {
   brand_pin_red: require("../assets/images/brand-pin-red.png"),
   brand_pin_grey: require("../assets/images/brand-pin-grey.png"),
 };
-// DriveBC severity → the red (major/moderate) or grey (minor/unknown) pin, plus
-// the badge-circle fill behind the black wrench glyph (lighter than the pin so
-// the glyph reads at a glance).
-function incidentPin(sev: RoadEventSeverity): { icon: string; badge: string } {
+// DriveBC severity → the red (major/moderate, system red #FF453A) or grey
+// (minor/unknown) pin. The wrench glyph draws straight into the pin's head
+// circle — no badge circle behind it (the old circleTranslate badge was
+// map-anchored, so it drifted off the head whenever the map rotated).
+function incidentPin(sev: RoadEventSeverity): { icon: string } {
   return sev === "MAJOR" || sev === "MODERATE"
-    ? { icon: "brand_pin_red", badge: "#FF6B63" }
-    : { icon: "brand_pin_grey", badge: "#C6CBD0" };
+    ? { icon: "brand_pin_red" }
+    : { icon: "brand_pin_grey" };
+}
+// True for the severities that draw the RED pin (also used by map.tsx's
+// near-duplicate collapse so red always outranks grey).
+export function isRedIncident(sev: RoadEventSeverity): boolean {
+  return sev === "MAJOR" || sev === "MODERATE";
 }
 
 function GLPinLayers({
@@ -1183,7 +1191,7 @@ function GLPinLayers({
 }) {
   const hazardFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: hazards.map((h) => fcPoint(h.id, h.lng, h.lat, { icon: hazardImgName(h.kind) })) }), [hazards]);
   const cameraFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: cameras.map((c) => fcPoint(c.id, c.lng, c.lat, {})) }), [cameras]);
-  const incidentFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: incidents.map((e) => { const pin = incidentPin(e.severity); return fcPoint(e.id, e.lng, e.lat, { icon: pin.icon, badge: pin.badge, kind: e.kind, road: e.road || "", headline: e.headline }); }) }), [incidents]);
+  const incidentFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: incidents.map((e) => fcPoint(e.id, e.lng, e.lat, { icon: incidentPin(e.severity).icon, kind: e.kind, road: e.road || "", headline: e.headline })) }), [incidents]);
   const placeFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: places.map((p, i) => fcPoint(p.id, p.lng, p.lat, { num: String(i + 1) })) }), [places]);
 
   const tapHazard = useCallback((e: any) => { const id = e?.features?.[0]?.properties?.id; const h = hazards.find((x) => x.id === id); if (h) onHazardPress?.(h); }, [hazards, onHazardPress]);
@@ -1246,13 +1254,16 @@ function GLPinLayers({
       )}
 
       {/* DriveBC incidents — severity-tinted Hairpin teardrops (red = major/
-          moderate, grey = minor) with a black wrench/hammer badged on the head,
-          same geometry as the place pins. Self-lit for the night presets. */}
+          moderate in the system red, grey = minor) with the black wrench/hammer
+          drawn INSIDE the pin's head circle. No badge circle (its map-anchored
+          circleTranslate drifted off the head as the map rotated — the tester
+          screenshot). Pin + glyph are BOTH viewport-locked symbols with
+          screen-space offsets, so they stay glued at any rotation/pitch.
+          Head-circle centre sits ~28 pt above the tip at iconSize 0.466. */}
       {incidents.length > 0 && (
         <ShapeSource id="gl-incidents" shape={incidentFC} onPress={tapIncident}>
-          <SymbolLayer id="gl-incidents-pin" slot="top" style={{ iconImage: ["get", "icon"] as any, iconSize: 0.466, iconAnchor: "bottom", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
-          <CircleLayer id="gl-incidents-bg" slot="top" style={{ circleColor: ["get", "badge"] as any, circleRadius: 10, circleTranslate: [0, -29] as any, circleEmissiveStrength: 1 }} />
-          <SymbolLayer id="gl-incidents-glyph" slot="top" style={{ iconImage: "incg_wrench", iconSize: 1, iconOffset: [0, -29] as any, iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          <SymbolLayer id="gl-incidents-pin" slot="top" style={{ iconImage: ["get", "icon"] as any, iconSize: 0.466, iconAnchor: "bottom", iconRotationAlignment: "viewport", iconPitchAlignment: "viewport", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          <SymbolLayer id="gl-incidents-glyph" slot="top" style={{ iconImage: "incg_wrench", iconSize: 1, iconOffset: [0, -28] as any, iconRotationAlignment: "viewport", iconPitchAlignment: "viewport", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
         </ShapeSource>
       )}
 
@@ -1266,9 +1277,12 @@ function GLPinLayers({
           pin stays bright under the dusk/night light presets. */}
       {places.length > 0 && (
         <ShapeSource id="gl-places" shape={placeFC} onPress={tapPlace}>
-          <SymbolLayer id="gl-places-pin" slot="top" style={{ iconImage: "brand_pin", iconSize: 0.466, iconAnchor: "bottom", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
-          <CircleLayer id="gl-places-bg" slot="top" style={{ circleColor: "#0A1A10", circleRadius: 10, circleTranslate: [0, -29] as any, circleEmissiveStrength: 1 }} />
-          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: 13, textColor: "#2DEC86", textOffset: [0, -2.23] as any, textEmissiveStrength: 1, textAllowOverlap: true, textIgnorePlacement: true }} />
+          <SymbolLayer id="gl-places-pin" slot="top" style={{ iconImage: "brand_pin", iconSize: 0.466, iconAnchor: "bottom", iconRotationAlignment: "viewport", iconPitchAlignment: "viewport", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          {/* Badge circle behind the number: translate anchored to the VIEWPORT
+              (default is "map", which drifted the circle off the pin head as the
+              map rotated — the same bug that hit the DriveBC badge). */}
+          <CircleLayer id="gl-places-bg" slot="top" style={{ circleColor: "#0A1A10", circleRadius: 10, circleTranslate: [0, -28] as any, circleTranslateAnchor: "viewport", circlePitchAlignment: "viewport", circleEmissiveStrength: 1 }} />
+          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: 13, textColor: "#2DEC86", textOffset: [0, -28 / 13] as any, textRotationAlignment: "viewport", textPitchAlignment: "viewport", textEmissiveStrength: 1, textAllowOverlap: true, textIgnorePlacement: true }} />
         </ShapeSource>
       )}
     </>

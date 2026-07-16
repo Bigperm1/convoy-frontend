@@ -771,7 +771,15 @@ export default function MapScreen() {
   const speedCameras = useSpeedCameras(coords?.lat ?? null, coords?.lng ?? null, speedCamerasEnabled);
   // Official BC road events (DriveBC Open511) — accidents/construction/closures.
   const roadIncidentsEnabled = (settings as any).roadIncidents !== false;
-  const roadEvents = useDriveBcEvents(coords?.lat ?? null, coords?.lng ?? null, roadIncidentsEnabled);
+  const roadEventsAll = useDriveBcEvents(coords?.lat ?? null, coords?.lng ?? null, roadIncidentsEnabled);
+  // Severity split (Settings → Map Layers): red = major/moderate, grey = minor.
+  // Filtered HERE so hiding grey pins also silences their (nonexistent) callouts
+  // and hiding red pins silences the major/moderate voice alerts below.
+  const roadEvents = roadEventsAll.filter((e: any) =>
+    e.severity === "MAJOR" || e.severity === "MODERATE"
+      ? (settings as any).roadIncidentsRed !== false
+      : (settings as any).roadIncidentsGrey !== false
+  );
   // Posted speed limit for the road you're on (OpenStreetMap maxspeed via
   // Overpass). Feeds the speedometer's over-limit pulse; null when the road has
   // no maxspeed tag, in which case the pill simply stays neutral.

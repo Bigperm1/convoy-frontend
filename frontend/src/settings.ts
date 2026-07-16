@@ -104,6 +104,11 @@ speedCameras: boolean;
 // weather. Map pins + a Scout callout for major/moderate. BC-only; auto-gated by
 // location. undefined → on.
 roadIncidents: boolean;
+// Split visibility for the DriveBC pins: red = major/moderate, grey = minor/info
+// ("sometimes the grey is just too much on the screen"). Both undefined → on;
+// the master roadIncidents toggle above still gates everything.
+roadIncidentsRed?: boolean;
+roadIncidentsGrey?: boolean;
 showPlacePins: boolean;
 showNearby: boolean;
 // Power profile (Settings → Driving → Battery Saver). "auto" (default) = premium

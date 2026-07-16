@@ -1034,7 +1034,10 @@ const INCIDENT_TITLE: Record<RoadEventKind, string> = {
   weather: "Weather hazard", event: "Road event",
 };
 export function IncidentMarker({ event }: { event: RoadEvent }) {
-  const color = incidentColor(event.severity);
+  // Severity-tinted Hairpin teardrop (red = major/moderate, grey = minor) with
+  // the black wrench/hammer badged on the head — matches the phone's GL pins
+  // (this MarkerView version renders on the CarPlay map; parity rule).
+  const red = event.severity === "MAJOR" || event.severity === "MODERATE";
   // Official event — tap shows the headline. Deliberately NOT the crew-hazard sheet
   // (no report/delete actions on a government feed item).
   const showDetail = () => {
@@ -1042,10 +1045,17 @@ export function IncidentMarker({ event }: { event: RoadEvent }) {
     Alert.alert(title, event.headline, [{ text: "OK" }]);
   };
   return (
-    <MarkerView coordinate={[event.lng, event.lat]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+    <MarkerView coordinate={[event.lng, event.lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
       <Pressable onPress={showDetail} hitSlop={8}>
-        <View style={[styles.incidentBadge, { backgroundColor: color }]}>
-          <Ionicons name={(INCIDENT_ICON[event.kind] || "warning") as any} size={16} color="#0B0B0C" />
+        <View style={styles.brandPinWrap}>
+          <Image
+            source={red ? require("../assets/images/brand-pin-red.png") : require("../assets/images/brand-pin-grey.png")}
+            style={styles.brandPin}
+            resizeMode="contain"
+          />
+          <View style={[styles.brandPinBadge, { backgroundColor: red ? "#FF6B63" : "#C6CBD0" }]}>
+            <MaterialCommunityIcons name="hammer-wrench" size={12} color="#0B0B0C" />
+          </View>
         </View>
       </Pressable>
     </MarkerView>
@@ -1123,7 +1133,19 @@ const PIN_IMAGE_MAP: Record<string, any> = {
   // category-place pin (gas/food/coffee…) so phone results match the dropped
   // pin + destination pin + CarPlay's PlaceMarker.
   brand_pin: require("../assets/images/brand-pin.png"),
+  // Severity-tinted teardrops for DriveBC incidents (pngjs luminance re-tints of
+  // the green pin, shading preserved): red = major/moderate, grey = minor/info.
+  brand_pin_red: require("../assets/images/brand-pin-red.png"),
+  brand_pin_grey: require("../assets/images/brand-pin-grey.png"),
 };
+// DriveBC severity → the red (major/moderate) or grey (minor/unknown) pin, plus
+// the badge-circle fill behind the black wrench glyph (lighter than the pin so
+// the glyph reads at a glance).
+function incidentPin(sev: RoadEventSeverity): { icon: string; badge: string } {
+  return sev === "MAJOR" || sev === "MODERATE"
+    ? { icon: "brand_pin_red", badge: "#FF6B63" }
+    : { icon: "brand_pin_grey", badge: "#C6CBD0" };
+}
 
 function GLPinLayers({
   hazards, cameras, incidents, places, onHazardPress, onPlacePress,
@@ -1137,7 +1159,7 @@ function GLPinLayers({
 }) {
   const hazardFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: hazards.map((h) => fcPoint(h.id, h.lng, h.lat, { icon: hazardImgName(h.kind) })) }), [hazards]);
   const cameraFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: cameras.map((c) => fcPoint(c.id, c.lng, c.lat, {})) }), [cameras]);
-  const incidentFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: incidents.map((e) => fcPoint(e.id, e.lng, e.lat, { color: incidentColor(e.severity), glyph: `incg_${e.kind}`, kind: e.kind, road: e.road || "", headline: e.headline })) }), [incidents]);
+  const incidentFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: incidents.map((e) => { const pin = incidentPin(e.severity); return fcPoint(e.id, e.lng, e.lat, { icon: pin.icon, badge: pin.badge, kind: e.kind, road: e.road || "", headline: e.headline }); }) }), [incidents]);
   const placeFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: places.map((p, i) => fcPoint(p.id, p.lng, p.lat, { num: String(i + 1) })) }), [places]);
 
   const tapHazard = useCallback((e: any) => { const id = e?.features?.[0]?.properties?.id; const h = hazards.find((x) => x.id === id); if (h) onHazardPress?.(h); }, [hazards, onHazardPress]);
@@ -1153,13 +1175,23 @@ function GLPinLayers({
       {/* Symbol-image registry: hazard/camera PNGs + one snapshotted ionicon glyph per
           incident kind (the RN badge glyph, rendered once into a native image). */}
       <Images images={PIN_IMAGE_MAP}>
-        {INCIDENT_KINDS.map((k) => (
-          <MBXImage key={`incg_${k}`} name={`incg_${k}`}>
-            <View style={styles.incidentGlyphSnap}>
-              <Ionicons name={(INCIDENT_ICON[k] || "warning") as any} size={16} color="#0B0B0C" />
-            </View>
-          </MBXImage>
-        ))}
+        {/* DriveBC glyph: ONE black wrench/hammer on every incident pin (the
+            red/grey pin colour carries the severity; the tap sheet carries the
+            kind). Snapshotted once into a native symbol image. */}
+        <MBXImage name="incg_wrench">
+          <View style={styles.incidentGlyphSnap}>
+            <MaterialCommunityIcons name="hammer-wrench" size={13} color="#0B0B0C" />
+          </View>
+        </MBXImage>
+        {/* Speed camera: glassy rounded-square badge (dark translucent floor,
+            brand-green hairline + camera glyph, top highlight strip for the
+            glass read) — the squared/rounded design family, not a teardrop. */}
+        <MBXImage name="cam_glass">
+          <View style={styles.camGlassSnap}>
+            <View style={styles.camGlassHighlight} />
+            <Ionicons name="camera" size={15} color="#2DEC86" />
+          </View>
+        </MBXImage>
       </Images>
 
       {/* All pins are slot="top" so they draw ABOVE the selected-route ribbon (also
@@ -1182,19 +1214,21 @@ function GLPinLayers({
         </ShapeSource>
       )}
 
-      {/* Speed cameras — pins only (no tap). */}
+      {/* Speed cameras — the glassy rounded-square badge (snapshotted above). */}
       {cameras.length > 0 && (
         <ShapeSource id="gl-cameras" shape={cameraFC}>
-          <SymbolLayer id="gl-cameras-sym" slot="top" style={{ iconImage: "cam", iconSize: 0.64, iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          <SymbolLayer id="gl-cameras-sym" slot="top" style={{ iconImage: "cam_glass", iconSize: 1, iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
         </ShapeSource>
       )}
 
-      {/* DriveBC incidents — severity circle base (always visible) + kind glyph. Both self-lit
-          (circle/icon emissiveStrength 1) so the severity colors stay vivid in every light preset. */}
+      {/* DriveBC incidents — severity-tinted Hairpin teardrops (red = major/
+          moderate, grey = minor) with a black wrench/hammer badged on the head,
+          same geometry as the place pins. Self-lit for the night presets. */}
       {incidents.length > 0 && (
         <ShapeSource id="gl-incidents" shape={incidentFC} onPress={tapIncident}>
-          <CircleLayer id="gl-incidents-bg" slot="top" style={{ circleColor: ["get", "color"] as any, circleRadius: 15, circleEmissiveStrength: 1, circleStrokeColor: "rgba(11,11,12,0.85)", circleStrokeWidth: 2 }} />
-          <SymbolLayer id="gl-incidents-glyph" slot="top" style={{ iconImage: ["get", "glyph"] as any, iconSize: 1, iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          <SymbolLayer id="gl-incidents-pin" slot="top" style={{ iconImage: ["get", "icon"] as any, iconSize: 0.466, iconAnchor: "bottom", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          <CircleLayer id="gl-incidents-bg" slot="top" style={{ circleColor: ["get", "badge"] as any, circleRadius: 10, circleTranslate: [0, -29] as any, circleEmissiveStrength: 1 }} />
+          <SymbolLayer id="gl-incidents-glyph" slot="top" style={{ iconImage: "incg_wrench", iconSize: 1, iconOffset: [0, -29] as any, iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
         </ShapeSource>
       )}
 
@@ -2266,6 +2300,20 @@ const styles = StyleSheet.create({
   // Transparent wrapper for the incident glyph snapshotted into a GL symbol image
   // (drawn over the severity CircleLayer). Sized to the ionicon so the snapshot is tight.
   incidentGlyphSnap: { width: 18, height: 18, alignItems: "center", justifyContent: "center", backgroundColor: "transparent" },
+  // Speed-camera glass badge (snapshotted into a native symbol image): dark
+  // translucent floor + brand-green hairline + a top highlight strip — reads as
+  // frosted glass on the map without needing a live blur view.
+  camGlassSnap: {
+    width: 30, height: 30, borderRadius: 10,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(12,17,14,0.82)",
+    borderWidth: 1, borderColor: "rgba(45,236,134,0.55)",
+    overflow: "hidden",
+  },
+  camGlassHighlight: {
+    position: "absolute", top: 1, left: 3, right: 3, height: 9,
+    borderRadius: 7, backgroundColor: "rgba(255,255,255,0.12)",
+  },
   // Place pins (gas price chips / fuel badges / named places).
   placePinWrap: { alignItems: "center", maxWidth: 150 },
   placeLabel: {

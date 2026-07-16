@@ -13,6 +13,14 @@ export default function MapLayersPage() {
         <ToggleRow icon="camera" iconColor="#FF453A" title="Speed cameras" subtitle="Show fixed speed cameras and get a Scout voice alert as you approach (OpenStreetMap)" value={settings.speedCameras !== false} onChange={(v) => setSettings({ speedCameras: v })} />
         <Divider />
         <ToggleRow icon="warning" iconColor="#FF9F0A" title="Road incidents" subtitle="Official BC accidents, construction & closures with a Scout callout for major ones (DriveBC). British Columbia only." value={settings.roadIncidents !== false} onChange={(v) => setSettings({ roadIncidents: v })} />
+        {settings.roadIncidents !== false && (
+          <>
+            <Divider />
+            <ToggleRow icon="alert-circle" iconColor="#FF453A" title="Major incidents" subtitle="Red pins — accidents & closures (major / moderate)" value={settings.roadIncidentsRed !== false} onChange={(v) => setSettings({ roadIncidentsRed: v })} />
+            <Divider />
+            <ToggleRow icon="information-circle" iconColor="#8E8E93" title="Minor incidents" subtitle="Grey pins — minor roadwork & info events. Turn off to declutter the map." value={settings.roadIncidentsGrey !== false} onChange={(v) => setSettings({ roadIncidentsGrey: v })} />
+          </>
+        )}
         <Divider />
         <ToggleRow icon="location" iconColor="#2DEC86" title="Place pins" subtitle="Show the pin markers for category search results. Gas prices and place names always stay visible." value={settings.showPlacePins !== false} onChange={(v) => setSettings({ showPlacePins: v })} />
       </SettingsCard>

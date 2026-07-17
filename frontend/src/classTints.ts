@@ -4,6 +4,30 @@
 // nearest preset (see nearestClassPreset).
 export const CLASS_PRESET_HEXES = ["#2DEC86","#0A84FF","#00D6E0","#5E5CE6","#BF5CFF","#FF2D95","#FF3B30","#FF9500","#FFD60A","#FFFFFF"] as const;
 export const CLASS_TINTS: Record<string, Record<string, any>> = {
+  boat: {
+    "2DEC86": require("../assets/images/classes/tints/boat_2DEC86.png"),
+    "0A84FF": require("../assets/images/classes/tints/boat_0A84FF.png"),
+    "00D6E0": require("../assets/images/classes/tints/boat_00D6E0.png"),
+    "5E5CE6": require("../assets/images/classes/tints/boat_5E5CE6.png"),
+    "BF5CFF": require("../assets/images/classes/tints/boat_BF5CFF.png"),
+    "FF2D95": require("../assets/images/classes/tints/boat_FF2D95.png"),
+    "FF3B30": require("../assets/images/classes/tints/boat_FF3B30.png"),
+    "FF9500": require("../assets/images/classes/tints/boat_FF9500.png"),
+    "FFD60A": require("../assets/images/classes/tints/boat_FFD60A.png"),
+    "FFFFFF": require("../assets/images/classes/tints/boat_FFFFFF.png"),
+  },
+  sedan: {
+    "2DEC86": require("../assets/images/classes/tints/sedan_2DEC86.png"),
+    "0A84FF": require("../assets/images/classes/tints/sedan_0A84FF.png"),
+    "00D6E0": require("../assets/images/classes/tints/sedan_00D6E0.png"),
+    "5E5CE6": require("../assets/images/classes/tints/sedan_5E5CE6.png"),
+    "BF5CFF": require("../assets/images/classes/tints/sedan_BF5CFF.png"),
+    "FF2D95": require("../assets/images/classes/tints/sedan_FF2D95.png"),
+    "FF3B30": require("../assets/images/classes/tints/sedan_FF3B30.png"),
+    "FF9500": require("../assets/images/classes/tints/sedan_FF9500.png"),
+    "FFD60A": require("../assets/images/classes/tints/sedan_FFD60A.png"),
+    "FFFFFF": require("../assets/images/classes/tints/sedan_FFFFFF.png"),
+  },
   coupe: {
     "2DEC86": require("../assets/images/classes/tints/coupe_2DEC86.png"),
     "0A84FF": require("../assets/images/classes/tints/coupe_0A84FF.png"),

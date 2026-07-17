@@ -421,18 +421,23 @@ export default function GarageScreen() {
             <Text style={styles.clsSaveText}>Apply</Text>
           </TouchableOpacity>
         </View>
-        <TouchableOpacity style={styles.clsSaveBtn} activeOpacity={0.85} onPress={() => void (arrow ? saveArrowPaint() : saveClassPaint())}>
-          <Text style={styles.clsSaveText}>
-            {arrow ? 'Save Arrow' : `Save ${VEHICLE_CLASSES.find((c) => c.key === vehClass)?.label}`}
-          </Text>
-        </TouchableOpacity>
+        {/* Arrow keeps its own Save; the CLASS paint commits through the main
+            garage Save button below (Jeff: "just have the original save"). */}
+        {arrow && (
+          <TouchableOpacity style={styles.clsSaveBtn} activeOpacity={0.85} onPress={() => void saveArrowPaint()}>
+            <Text style={styles.clsSaveText}>Save Arrow</Text>
+          </TouchableOpacity>
+        )}
       </>
     );
   };
 
   // Explicit Save — selections already auto-save, but this confirms + persists
-  // the call sign and gives clear feedback before returning.
+  // the call sign and gives clear feedback before returning. In CLASS mode it
+  // ALSO commits the paint drafts (the panel has no Save of its own — Jeff:
+  // "just have the original save button").
   const handleSave = async () => {
+    if (markerType === 'class') await saveClassPaint();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const sign = callSign.trim();
     await updateSettings({
@@ -659,9 +664,9 @@ export default function GarageScreen() {
         </View>
 
         {/* Dropdowns — the car identity (feeds the 3D GRC + peer rendering).
-            Hidden in ARROW mode (Jeff 2026-07-17): the arrow panel replaces
+            Shown ONLY in 3D mode (Jeff 2026-07-17): Arrow and Class replace
             them with the primary/secondary paint picker. */}
-        {markerType !== 'arrow' && (<>
+        {markerType !== 'arrow' && markerType !== 'class' && (<>
         <Dropdown
           label="Year"
           items={YEARS}

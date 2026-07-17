@@ -1456,6 +1456,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Painted-arrow GLB URI (runtime material recolor, cached on disk). null →
   // the stock bundled arrow. Resolved async whenever the arrow paint changes.
   const [paintedArrowUri, setPaintedArrowUri] = useState<string | null>(null);
+  // Painted class-sprite MBXImage ref — refreshed once its layers load.
+  const classImgRef = useRef<any>(null);
   useEffect(() => {
     let alive = true;
     if (selfMarkerType !== "arrow" || (!selfArrowPaint?.primary && !selfArrowPaint?.secondary)) {
@@ -2144,8 +2146,21 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         {selfIsClass && (selfClassAsShot ? (
           selfClassPainted ? (
             <Images key={selfClassImg}>
-              <MBXImage name={selfClassImg}>
-                <ClassSprite vehicleClass={selfVehicleClass} primary={_pri} secondary={_sec} size={66} />
+              {/* refresh() once every layer bitmap has loaded — the snapshot
+                  otherwise races image loading and can freeze an UNPAINTED
+                  frame (the "boat color not saving onto the map" bug). */}
+              <MBXImage name={selfClassImg} ref={classImgRef}>
+                <ClassSprite
+                  vehicleClass={selfVehicleClass}
+                  primary={_pri}
+                  secondary={_sec}
+                  size={66}
+                  onReady={() => {
+                    try { (classImgRef.current as any)?.refresh?.(); } catch {}
+                    // belt-and-braces second capture after the view settles
+                    setTimeout(() => { try { (classImgRef.current as any)?.refresh?.(); } catch {} }, 350);
+                  }}
+                />
               </MBXImage>
             </Images>
           ) : (

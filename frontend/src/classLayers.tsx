@@ -28,41 +28,69 @@ export const CLASS_LAYERS: Record<string, { priBlack: any; priMask: any; secBlac
   sedan:  { priBlack: L(require("../assets/images/classes/sedan_priblack.png")),  priMask: L(require("../assets/images/classes/sedan_primask.png")),  secBlack: L(require("../assets/images/classes/sedan_secblack.png")),  secMask: L(require("../assets/images/classes/sedan_secmask.png")) },
 };
 
-// The 7-swatch palette (Jeff: "7 to be exact including black").
+// The 20-swatch palette (Jeff 2026-07-17), ordered as a hue ramp.
 export const PAINT_COLORS = [
   "#2DEC86", // Hairpin green
-  "#FFFFFF", // white
-  "#0B0B0C", // black
-  "#FF3B30", // red
+  "#14532D", // dark green
+  "#0D9488", // teal
+  "#5AC8FA", // sky blue
   "#0A84FF", // blue
-  "#FFD60A", // yellow
+  "#1D3557", // dark blue
   "#BF5CFF", // purple
+  "#FF2D95", // pink
+  "#D2042D", // candy red
+  "#FF3B30", // red
+  "#5C4033", // dark brown
+  "#D2B48C", // tan
+  "#FF9500", // orange
+  "#FFD60A", // yellow
+  "#D4AF37", // gold
+  "#F5F2E9", // off white
+  "#FFFFFF", // white
+  "#C0C4C9", // silver
+  "#3A3F45", // gunmetal
+  "#0B0B0C", // black
 ];
 
 // The stacked sprite. size = square pt box (images use contain, same aspect).
-export function ClassSprite({ vehicleClass, primary, secondary, size = 66 }: {
+// onReady fires ONCE when every rendered layer has loaded its bitmap — the map
+// registration uses it to re-capture the MBXImage snapshot (which otherwise
+// races image loading and can freeze an unpainted frame: the "boat color not
+// saving onto the map" bug).
+export function ClassSprite({ vehicleClass, primary, secondary, size = 66, onReady }: {
   vehicleClass: string;
   primary?: string | null;
   secondary?: string | null;
   size?: number;
+  onReady?: () => void;
 }) {
   const photo = CLASS_TOPDOWN[vehicleClass];
   const layers = CLASS_LAYERS[vehicleClass];
+  const total = 1 + (layers && primary ? 2 : 0) + (layers && secondary ? 2 : 0);
+  const loadedRef = React.useRef(0);
+  const firedRef = React.useRef(false);
+  const onLoad = () => {
+    loadedRef.current += 1;
+    if (!firedRef.current && loadedRef.current >= total) {
+      firedRef.current = true;
+      onReady?.();
+    }
+  };
   if (!photo) return null;
   const img = { ...StyleSheet.absoluteFillObject, width: size, height: size } as const;
   return (
     <View style={{ width: size, height: size }}>
-      <Image source={photo} style={img} resizeMode="contain" fadeDuration={0} />
+      <Image source={photo} style={img} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
       {layers && primary ? (
         <>
-          <Image source={layers.priBlack} style={img} resizeMode="contain" fadeDuration={0} />
-          <Image source={layers.priMask} style={[img, { tintColor: primary }]} resizeMode="contain" fadeDuration={0} />
+          <Image source={layers.priBlack} style={img} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
+          <Image source={layers.priMask} style={[img, { tintColor: primary }]} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
         </>
       ) : null}
       {layers && secondary ? (
         <>
-          <Image source={layers.secBlack} style={img} resizeMode="contain" fadeDuration={0} />
-          <Image source={layers.secMask} style={[img, { tintColor: secondary }]} resizeMode="contain" fadeDuration={0} />
+          <Image source={layers.secBlack} style={img} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
+          <Image source={layers.secMask} style={[img, { tintColor: secondary }]} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
         </>
       ) : null}
     </View>

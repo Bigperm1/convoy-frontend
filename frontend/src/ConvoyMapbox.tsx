@@ -1864,7 +1864,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // now decoded and warm in the image cache. One remount per paint key — the
   // remounted sprite fires onReady again, and the ref guard stops the loop.
   const [classImgGen, setClassImgGen] = useState(0);
-  const classImgGenForRef = useRef("");
+  const classImgGenForRef = useRef({ key: "", count: 0 });
   const selfClassImg = selfClassAsShot
     ? (selfClassPainted ? `self_class_paint_${selfVehicleClass}_${_paintKey}` : `self_class_photo_${selfVehicleClass}`)
     : "self_class_" + (_pri || "#2DEC86").replace(/[^0-9a-fA-F]/g, "");
@@ -2170,9 +2170,15 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
                     try { (classImgRef.current as any)?.refresh?.(); } catch {}
                     // belt-and-braces second capture after the view settles
                     setTimeout(() => { try { (classImgRef.current as any)?.refresh?.(); } catch {} }, 350);
-                    if (Platform.OS === "ios" && classImgGenForRef.current !== selfClassImg) {
-                      classImgGenForRef.current = selfClassImg;
-                      setTimeout(() => setClassImgGen((g) => g + 1), 250);
+                    if (Platform.OS === "ios") {
+                      const sched = classImgGenForRef.current;
+                      if (sched.key !== selfClassImg) { sched.key = selfClassImg; sched.count = 0; }
+                      // two remounts per paint key (fast + late) so even a slow
+                      // bitmap decode gets a clean capture; then stop for good.
+                      if (sched.count < 2) {
+                        sched.count += 1;
+                        setTimeout(() => setClassImgGen((g) => g + 1), sched.count === 1 ? 300 : 1200);
+                      }
                     }
                   }}
                 />

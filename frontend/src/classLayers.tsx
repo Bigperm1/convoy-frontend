@@ -79,7 +79,12 @@ export function ClassSprite({ vehicleClass, primary, secondary, size = 66, onRea
   if (!photo) return null;
   const img = { ...StyleSheet.absoluteFillObject, width: size, height: size } as const;
   return (
-    <View style={{ width: size, height: size }}>
+    // collapsable={false}: Fabric view-flattening otherwise removes this wrapper
+    // when the sprite is the child of the map's MBXImage — the native snapshot
+    // then receives the 5 layer Images as DIRECT subviews, logs "Image supports
+    // max 1 subview", and captures ONLY subview[0] (the unpainted base photo).
+    // That was the real "boat color never lands on the map" bug.
+    <View collapsable={false} style={{ width: size, height: size }}>
       <Image source={photo} style={img} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
       {layers && primary ? (
         <>

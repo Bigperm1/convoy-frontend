@@ -39,7 +39,8 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getPowerMode } from "./powerMode";
 import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey, CLASS_TOPDOWN } from "./vehicleAssets";
-import { CLASS_TINTS, nearestClassPreset } from "./classTints";
+import { ClassSprite } from "./classLayers";
+import { getPaintedArrowUri } from "./arrowModel";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient, type CongestionLevel } from "./mapboxDirections";
 import { getCarState } from "./carplay/carStore";
@@ -107,11 +108,15 @@ interface ConvoyMapboxProps {
   // 'arrow' (3D green arrow), 'class' (flat top-down class sprite in a chosen
   // color). ('photo' is parked.) Mirrors settings.selfMarkerType.
   selfMarkerType?: "car" | "arrow" | "photo" | "class";
-  // Paint for the 'class' sprite (#rrggbb — Garage per-class color).
-  selfClassColor?: string;
+  // Paint for the 'class' sprite: PRIMARY (accent band) + SECONDARY (second
+  // band) — Garage per-class colors. Both unset → the photo as-shot.
+  selfClassPaint?: { primary?: string; secondary?: string };
   // Which class is active — picks the real top-down photo when one exists
   // (CLASS_TOPDOWN); otherwise the tinted silhouette placeholder renders.
   selfVehicleClass?: string;
+  // Arrow appearance paint: primary = green body materials, secondary = the
+  // white rim (runtime GLB recolor). Unset → the stock Hairpin arrow.
+  selfArrowPaint?: { primary?: string; secondary?: string };
   mapView?: "heading_up" | "north_up";
   // Base-map mode — drives the Mapbox style + light preset directly. mapType/
   // mapDark are still accepted (shared MapEngine props) but unused by this engine.
@@ -1359,7 +1364,7 @@ function GLPinLayers({
 
 function ConvoyMapbox(props: ConvoyMapboxProps) {
   const {
-    center, user, peers, hideSelfMarker, selfMarkerType = "car", selfClassColor, selfVehicleClass = "hatchback", mapView = "heading_up",
+    center, user, peers, hideSelfMarker, selfMarkerType = "car", selfClassPaint, selfVehicleClass = "hatchback", selfArrowPaint, mapView = "heading_up",
     mapMode = "satellite", leaderUserId, show3dBuildings = true,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
     routeColor = DEFAULT_ROUTE_COLOR,
@@ -1448,6 +1453,20 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     return () => { mounted = false; clearInterval(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Painted-arrow GLB URI (runtime material recolor, cached on disk). null →
+  // the stock bundled arrow. Resolved async whenever the arrow paint changes.
+  const [paintedArrowUri, setPaintedArrowUri] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (selfMarkerType !== "arrow" || (!selfArrowPaint?.primary && !selfArrowPaint?.secondary)) {
+      setPaintedArrowUri(null);
+      return;
+    }
+    getPaintedArrowUri(GREEN_ARROW_MODEL as number, selfArrowPaint?.primary, selfArrowPaint?.secondary)
+      .then((uri) => { if (alive) setPaintedArrowUri(uri); })
+      .catch(() => { if (alive) setPaintedArrowUri(null); });
+    return () => { alive = false; };
+  }, [selfMarkerType, selfArrowPaint?.primary, selfArrowPaint?.secondary]);
   // Last-known GPS spot, read ONCE at mount (synchronous; hydrated with settings).
   // Lets the camera's first paint frame the driver's last location instead of
   // flying in from the world view while we wait on the first GPS fix.
@@ -1824,30 +1843,30 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // car model. (Both render through the same SelfCarModel ModelLayer below.)
   const selfIsArrow = selfMarkerType === "arrow";
   // "Class" appearance → a registered top-down sprite instead of a GLB.
-  //  • photo class + NO saved color → the photo AS-SHOT
-  //  • photo class + saved color   → the pre-baked luminance-tinted variant
-  //    (GL can't tint an RGBA image live; custom hex snaps to nearest preset)
-  //  • no photo yet                → the tinted silhouette placeholder
-  // Image name carries class+color so switching either re-registers live.
+  //  • photo class, no paint  → the photo AS-SHOT (static registration)
+  //  • photo class, painted   → live MBXImage snapshot of <ClassSprite> (photo
+  //    + primary/secondary band layers tinted at runtime — any hex works)
+  //  • no photo yet           → the tinted silhouette placeholder
+  // Image name carries class+paint so changing either re-registers live.
   const selfIsClass = selfMarkerType === "class";
   const selfClassAsShot = CLASS_TOPDOWN[selfVehicleClass];
-  let selfClassPhoto: any = selfClassAsShot;
-  let selfClassImg: string;
-  if (selfClassAsShot && selfClassColor) {
-    const preset = nearestClassPreset(selfClassColor);
-    selfClassPhoto = CLASS_TINTS[selfVehicleClass]?.[preset] ?? selfClassAsShot;
-    selfClassImg = `self_class_photo_${selfVehicleClass}_${preset}`;
-  } else if (selfClassAsShot) {
-    selfClassImg = `self_class_photo_${selfVehicleClass}`;
-  } else {
-    selfClassImg = "self_class_" + (selfClassColor || "#2DEC86").replace(/[^0-9a-fA-F]/g, "");
-  }
-  // Arrow = the BUNDLED asset (require id, ships with the JS); car = per-color
-  // remote GLB URL → the user's chosen GRC paint. <Models> accepts both.
-  const selfModelUrl: string | number = selfIsArrow ? GREEN_ARROW_MODEL : getVehicleModelUrl(selfCar?.color);
-  // Color-specific model id so changing the car color swaps the model LIVE (Mapbox
+  const _pri = selfClassPaint?.primary, _sec = selfClassPaint?.secondary;
+  const selfClassPainted = !!selfClassAsShot && (!!_pri || !!_sec);
+  const _paintKey = `${(_pri || "x").replace("#", "")}_${(_sec || "x").replace("#", "")}`;
+  const selfClassImg = selfClassAsShot
+    ? (selfClassPainted ? `self_class_paint_${selfVehicleClass}_${_paintKey}` : `self_class_photo_${selfVehicleClass}`)
+    : "self_class_" + (_pri || "#2DEC86").replace(/[^0-9a-fA-F]/g, "");
+  // Arrow = the BUNDLED asset, or the runtime-recolored copy (file:// URI) when
+  // the driver saved arrow paint; car = per-color remote GLB URL. <Models>
+  // accepts all three.
+  const selfModelUrl: string | number = selfIsArrow
+    ? (paintedArrowUri ?? GREEN_ARROW_MODEL)
+    : getVehicleModelUrl(selfCar?.color);
+  // Paint/color-specific model id so a change swaps the model LIVE (Mapbox
   // caches a model by id — a fixed id won't reload a new .glb until remount).
-  const selfModelId = selfIsArrow ? ARROW_MODEL_ID : "convoyCar_" + getVehicleModelKey(selfCar?.color);
+  const selfModelId = selfIsArrow
+    ? (paintedArrowUri ? ARROW_MODEL_ID + "_" + paintedArrowUri.split("arrow_").pop()!.replace(".glb", "") : ARROW_MODEL_ID)
+    : "convoyCar_" + getVehicleModelKey(selfCar?.color);
   // Lift the paint out of the dark on the dim light presets (dawn/night). The ARROW
   // is always FULLY self-lit (1): it's a UI marker, not a realistic car — scene
   // lighting at day/dusk (0/0.55) washed its brand green pale.
@@ -2119,15 +2138,23 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             ("convoyCar") from the ModelLayer below. */}
         <Models key={selfModelId} models={{ [selfModelId]: selfModelUrl }} />
 
-        {/* "Class" appearance: register the top-down sprite. Real class photo
-            when one exists (as-is); otherwise the tinted silhouette snapshot.
-            Keyed by class+color so switching either swaps live. */}
-        {selfIsClass && (selfClassPhoto ? (
-          <Images key={selfClassImg} images={{ [selfClassImg]: selfClassPhoto }} />
+        {/* "Class" appearance: register the top-down sprite. Painted → live
+            composite snapshot; unpainted photo → static registration; no photo
+            yet → tinted silhouette. Keyed by class+paint so changes swap live. */}
+        {selfIsClass && (selfClassAsShot ? (
+          selfClassPainted ? (
+            <Images key={selfClassImg}>
+              <MBXImage name={selfClassImg}>
+                <ClassSprite vehicleClass={selfVehicleClass} primary={_pri} secondary={_sec} size={66} />
+              </MBXImage>
+            </Images>
+          ) : (
+            <Images key={selfClassImg} images={{ [selfClassImg]: selfClassAsShot }} />
+          )
         ) : (
           <Images key={selfClassImg}>
             <MBXImage name={selfClassImg}>
-              <TopDownClassSnap color={selfClassColor || "#2DEC86"} />
+              <TopDownClassSnap color={_pri || "#2DEC86"} />
             </MBXImage>
           </Images>
         ))}
@@ -2359,9 +2386,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             headingOffset={selfIsArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
             pitchTilt={selfIsArrow ? ARROW_MODEL_PITCH : 0}
             sprite={selfIsClass ? selfClassImg : undefined}
-            // Class photos are baked at 3x (132px) so the ~59pt on-screen draw is
-            // pixel-dense instead of 4x-upscaled mush (the "boat quality" report).
-            spriteSize={selfClassPhoto ? 0.45 : 1}
+            // Same ~59pt on-screen footprint from each source: painted snapshot
+            // is a 66pt view (device-scale dense) → 0.9; the static photo is a
+            // 132px @1x asset → 0.45; silhouette snapshot → 1.
+            spriteSize={selfClassAsShot ? (selfClassPainted ? 0.9 : 0.45) : 1}
             cameraRef={cameraRef}
             getCam={getCam}
             readyRef={lockReadyRef}

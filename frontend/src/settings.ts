@@ -134,10 +134,17 @@ carColor?: string;
 // presence so peers render you the same way you chose in the Garage.
 selfMarkerType?: 'car' | 'arrow' | 'photo' | 'class';
 // "Class" map appearance (Garage): a top-down sprite of the vehicle class,
-// tinted a user-picked color. Colors are stored PER CLASS so switching class
-// remembers each one's paint. vehicleClass undefined → 'hatchback'.
+// painted with user-picked PRIMARY (accent band) + SECONDARY (second band)
+// colors. Stored PER CLASS so switching class remembers each one's paint.
+// vehicleClass undefined → 'hatchback'.
 vehicleClass?: 'hatchback' | 'coupe' | 'sports' | 'exotic' | 'sedan' | 'truck' | 'electric' | 'atv' | 'motorcycle' | 'sxs' | 'boat';
-classColors?: Record<string, string>; // class key -> #rrggbb
+// LEGACY single-color per class (pre primary/secondary). Read as the primary
+// fallback; new saves write classPaint below.
+classColors?: Record<string, string>;
+classPaint?: Record<string, { primary?: string; secondary?: string }>;
+// Arrow appearance paint: primary = the green body materials of the arrow GLB,
+// secondary = the white rim. Unset → the stock Hairpin arrow.
+arrowPaint?: { primary?: string; secondary?: string };
 // Hosted profile-photo URL (Supabase Storage) used when selfMarkerType==='photo'.
 // Also shown in rosters and "drive with a friend" search. Mirrored to the backend
 // profile (avatar_url) + presence (small URL only — never the image bytes).
@@ -327,6 +334,12 @@ export function getClassColor(s: Settings): string {
 // use this to tell "tint it" apart from "show the photo as-shot".
 export function getClassColorRaw(s: Settings): string | undefined {
   return s.classColors?.[getVehicleClass(s)];
+}
+// Primary/secondary paint for the ACTIVE class. Legacy single color (the old
+// classColors map) reads as primary when no v2 entry exists.
+export function getClassPaint(s: Settings): { primary?: string; secondary?: string } {
+  const cls = getVehicleClass(s);
+  return s.classPaint?.[cls] ?? (s.classColors?.[cls] ? { primary: s.classColors[cls] } : {});
 }
 
 // ---- Per-source audio volume (0..1), for the tester-calibration Audio screen ----

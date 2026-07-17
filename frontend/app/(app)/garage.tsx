@@ -9,10 +9,10 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { getSettings, updateSettings, getSelfMarkerType, getVehicleClass, getClassColorRaw, type VehicleClass } from '../../src/settings';
+import { getSettings, updateSettings, getSelfMarkerType, getVehicleClass, getClassPaint, type VehicleClass } from '../../src/settings';
 import { getVehiclePngOrDefault, CLASS_TOPDOWN } from '../../src/vehicleAssets';
 import { TopDownClassSnap } from '../../src/ConvoyMapbox';
-import { CLASS_TINTS, nearestClassPreset } from '../../src/classTints';
+import { ClassSprite, PAINT_COLORS } from '../../src/classLayers';
 import { useAuth } from '../../src/auth';
 import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
@@ -151,11 +151,14 @@ export default function GarageScreen() {
   const [callSign, setCallSign] = useState('');
   // How the driver appears on the convoy map: arrow / class sprite / 3D car / photo.
   const [markerType, setMarkerType] = useState<'car' | 'arrow' | 'photo' | 'class'>('car');
-  // "Class" appearance drafts: which class + its paint. null = "Original" — the
-  // photo as-shot (or brand green on silhouette classes). Committed by the Save
-  // buttons in the class panel (per-class colors persist in settings.classColors).
+  // Paint drafts (PRIMARY + SECONDARY slots; null = original / stock). The
+  // class panel and the arrow panel each keep their own pair; Save commits.
   const [vehClass, setVehClass] = useState<VehicleClass>(getVehicleClass(getSettings()));
-  const [classColorDraft, setClassColorDraft] = useState<string | null>(getClassColorRaw(getSettings()) ?? null);
+  const [paintSlot, setPaintSlot] = useState<'primary' | 'secondary'>('primary');
+  const [priDraft, setPriDraft] = useState<string | null>(getClassPaint(getSettings()).primary ?? null);
+  const [secDraft, setSecDraft] = useState<string | null>(getClassPaint(getSettings()).secondary ?? null);
+  const [arrPriDraft, setArrPriDraft] = useState<string | null>(getSettings().arrowPaint?.primary ?? null);
+  const [arrSecDraft, setArrSecDraft] = useState<string | null>(getSettings().arrowPaint?.secondary ?? null);
   const [classHexDraft, setClassHexDraft] = useState<string>('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -319,29 +322,113 @@ export default function GarageScreen() {
     applyMarkerType(type);
   };
 
-  // ---- "Class" panel actions ----
-  // color === null → "Original": remove the saved paint (photo shows as-shot).
-  const saveClass = useCallback(async (color: string | null) => {
+  // ---- Paint actions (class + arrow) ----
+  // Pick into the ACTIVE slot (primary/secondary); null = original / stock.
+  const pickColor = useCallback((color: string | null, arrow: boolean) => {
+    Haptics.selectionAsync();
+    if (arrow) { (paintSlot === 'primary' ? setArrPriDraft : setArrSecDraft)(color); }
+    else { (paintSlot === 'primary' ? setPriDraft : setSecDraft)(color); }
+  }, [paintSlot]);
+  const saveClassPaint = useCallback(async () => {
     const s = getSettings();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setClassColorDraft(color);
-    const next = { ...(s.classColors || {}) };
-    if (color) next[vehClass] = color; else delete next[vehClass];
+    const nextPaint = { ...(s.classPaint || {}) };
+    if (priDraft || secDraft) nextPaint[vehClass] = { primary: priDraft ?? undefined, secondary: secDraft ?? undefined };
+    else delete nextPaint[vehClass];
+    // retire any legacy single-color entry so it can't shadow the new paint
+    const legacy = { ...(s.classColors || {}) }; delete legacy[vehClass];
+    await updateSettings({ selfMarkerType: 'class', vehicleClass: vehClass, classPaint: nextPaint, classColors: legacy });
+  }, [vehClass, priDraft, secDraft]);
+  const saveArrowPaint = useCallback(async () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     await updateSettings({
-      selfMarkerType: 'class',
-      vehicleClass: vehClass,
-      classColors: next,
+      selfMarkerType: 'arrow',
+      arrowPaint: (arrPriDraft || arrSecDraft) ? { primary: arrPriDraft ?? undefined, secondary: arrSecDraft ?? undefined } : undefined,
     });
-  }, [vehClass]);
-  const saveClassHex = useCallback(() => {
+  }, [arrPriDraft, arrSecDraft]);
+  const applyClassHex = useCallback(() => {
     const raw = classHexDraft.trim().replace(/^#/, '');
     if (!/^[0-9a-fA-F]{6}$/.test(raw)) {
       Alert.alert('Invalid color code', 'Enter a 6-digit hex code, e.g. 2DEC86 or #FF453A.');
       return;
     }
-    void saveClass('#' + raw.toUpperCase());
+    pickColor('#' + raw.toUpperCase(), markerType === 'arrow');
     setClassHexDraft('');
-  }, [classHexDraft, saveClass]);
+  }, [classHexDraft, pickColor, markerType]);
+
+  // Shared Primary/Secondary paint picker (class + arrow panels): two slot
+  // buttons (each shows its current color dot), the 7-swatch palette + an
+  // "Original/Stock" chip, and a hex field that applies to the ACTIVE slot.
+  const renderPaintPicker = (arrow: boolean) => {
+    const pri = arrow ? arrPriDraft : priDraft;
+    const sec = arrow ? arrSecDraft : secDraft;
+    const activeColor = paintSlot === 'primary' ? pri : sec;
+    return (
+      <>
+        <View style={styles.slotRow}>
+          {(['primary', 'secondary'] as const).map((slot) => {
+            const on = paintSlot === slot;
+            const col = slot === 'primary' ? pri : sec;
+            return (
+              <TouchableOpacity key={slot} style={[styles.slotBtn, on && styles.slotBtnOn]} activeOpacity={0.85}
+                onPress={() => { Haptics.selectionAsync(); setPaintSlot(slot); }}>
+                <View style={[styles.slotDot, { backgroundColor: col ?? 'transparent', borderStyle: col ? 'solid' : 'dashed' }]} />
+                <Text style={[styles.slotText, on && styles.slotTextOn]}>
+                  {slot === 'primary' ? 'Primary' : 'Secondary'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <View style={styles.clsSwatchRow}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => pickColor(null, arrow)}
+            style={[styles.clsSwatch, { backgroundColor: 'rgba(255,255,255,0.08)' }, activeColor === null && styles.clsSwatchSel]}
+          >
+            <Ionicons name="ban-outline" size={15} color="#9A9A9E" />
+          </TouchableOpacity>
+          {PAINT_COLORS.map((hex) => {
+            const active = (activeColor ?? '').toLowerCase() === hex.toLowerCase();
+            return (
+              <TouchableOpacity
+                key={hex}
+                activeOpacity={0.8}
+                onPress={() => pickColor(hex, arrow)}
+                style={[styles.clsSwatch, { backgroundColor: hex }, active && styles.clsSwatchSel]}
+              >
+                {active && <Ionicons name="checkmark" size={16} color={hex === '#FFFFFF' || hex === '#FFD60A' ? '#000' : '#FFF'} />}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={styles.clsHint}>Have a paint code? Enter the hex — applies to the selected slot</Text>
+        <View style={styles.clsHexRow}>
+          <Text style={styles.clsHexHash}>#</Text>
+          <TextInput
+            style={styles.clsHexInput}
+            value={classHexDraft}
+            onChangeText={setClassHexDraft}
+            placeholder="2DEC86"
+            placeholderTextColor="#606060"
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={7}
+            returnKeyType="done"
+            onSubmitEditing={applyClassHex}
+          />
+          <TouchableOpacity style={styles.clsHexSave} activeOpacity={0.85} onPress={applyClassHex}>
+            <Text style={styles.clsSaveText}>Apply</Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity style={styles.clsSaveBtn} activeOpacity={0.85} onPress={() => void (arrow ? saveArrowPaint() : saveClassPaint())}>
+          <Text style={styles.clsSaveText}>
+            {arrow ? 'Save Arrow' : `Save ${VEHICLE_CLASSES.find((c) => c.key === vehClass)?.label}`}
+          </Text>
+        </TouchableOpacity>
+      </>
+    );
+  };
 
   // Explicit Save — selections already auto-save, but this confirms + persists
   // the call sign and gives clear feedback before returning.
@@ -509,6 +596,14 @@ export default function GarageScreen() {
             </TouchableOpacity>
           ) : null}
 
+          {/* ---- Arrow panel: primary (body) + secondary (rim) paint ---- */}
+          {markerType === 'arrow' && (
+            <View style={styles.clsPanel}>
+              <Text style={styles.clsHint}>Arrow paint — Primary is the body, Secondary is the rim</Text>
+              {renderPaintPicker(true)}
+            </View>
+          )}
+
           {/* ---- Class panel: top-down class picker + per-class paint ---- */}
           {markerType === 'class' && (
             <View style={styles.clsPanel}>
@@ -524,7 +619,10 @@ export default function GarageScreen() {
                       onPress={() => {
                         Haptics.selectionAsync();
                         setVehClass(c.key);
-                        setClassColorDraft(getSettings().classColors?.[c.key] ?? null);
+                        const p = getSettings().classPaint?.[c.key] ?? (getSettings().classColors?.[c.key] ? { primary: getSettings().classColors![c.key] } : {});
+                        setPriDraft(p.primary ?? null);
+                        setSecDraft(p.secondary ?? null);
+                        setPaintSlot('primary');
                       }}
                     >
                       {c.key === 'hatchback' ? (
@@ -543,74 +641,27 @@ export default function GarageScreen() {
                 })}
               </View>
 
-              {/* Live preview of the map sprite in the draft paint. Photo classes
-                  show the real image (as-shot, or the baked tint variant). */}
+              {/* Live preview — the exact sprite the map draws, in the draft paint. */}
               <View style={styles.clsPreviewRow}>
                 {CLASS_TOPDOWN[vehClass] ? (
-                  <Image
-                    source={classColorDraft ? (CLASS_TINTS[vehClass]?.[nearestClassPreset(classColorDraft)] ?? CLASS_TOPDOWN[vehClass]) : CLASS_TOPDOWN[vehClass]}
-                    style={{ width: 52, height: 52 }}
-                    resizeMode="contain"
-                  />
+                  <ClassSprite vehicleClass={vehClass} primary={priDraft} secondary={secDraft} size={56} />
                 ) : (
-                  <TopDownClassSnap color={classColorDraft ?? '#2DEC86'} />
+                  <TopDownClassSnap color={priDraft ?? '#2DEC86'} />
                 )}
-                <Text style={styles.clsPreviewText}>{VEHICLE_CLASSES.find((c) => c.key === vehClass)?.label} · {classColorDraft ? classColorDraft.toUpperCase() : 'Original'}</Text>
+                <Text style={styles.clsPreviewText}>
+                  {VEHICLE_CLASSES.find((c) => c.key === vehClass)?.label} · {priDraft ? priDraft.toUpperCase() : 'Original'}{secDraft ? ` / ${secDraft.toUpperCase()}` : ''}
+                </Text>
               </View>
 
-              {/* Paint swatches (same palette as Route Color) + Save. First chip =
-                  "Original" (no tint — the photo as-shot). */}
-              <View style={styles.clsSwatchRow}>
-                <TouchableOpacity
-                  activeOpacity={0.8}
-                  onPress={() => { Haptics.selectionAsync(); setClassColorDraft(null); }}
-                  style={[styles.clsSwatch, { backgroundColor: 'rgba(255,255,255,0.08)' }, classColorDraft === null && styles.clsSwatchSel]}
-                >
-                  <Ionicons name="ban-outline" size={15} color="#9A9A9E" />
-                </TouchableOpacity>
-                {CLASS_PRESETS.map((hex) => {
-                  const active = (classColorDraft ?? '').toLowerCase() === hex.toLowerCase();
-                  return (
-                    <TouchableOpacity
-                      key={hex}
-                      activeOpacity={0.8}
-                      onPress={() => { Haptics.selectionAsync(); setClassColorDraft(hex); }}
-                      style={[styles.clsSwatch, { backgroundColor: hex }, active && styles.clsSwatchSel]}
-                    >
-                      {active && <Ionicons name="checkmark" size={16} color={hex === '#FFFFFF' || hex === '#FFD60A' ? '#000' : '#FFF'} />}
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              <TouchableOpacity style={styles.clsSaveBtn} activeOpacity={0.85} onPress={() => void saveClass(classColorDraft)}>
-                <Text style={styles.clsSaveText}>Save {VEHICLE_CLASSES.find((c) => c.key === vehClass)?.label}</Text>
-              </TouchableOpacity>
-
-              {/* Exact color code (hex) + its own Save */}
-              <Text style={styles.clsHint}>Have your paint code? Enter the hex</Text>
-              <View style={styles.clsHexRow}>
-                <Text style={styles.clsHexHash}>#</Text>
-                <TextInput
-                  style={styles.clsHexInput}
-                  value={classHexDraft}
-                  onChangeText={setClassHexDraft}
-                  placeholder="2DEC86"
-                  placeholderTextColor="#606060"
-                  autoCapitalize="characters"
-                  autoCorrect={false}
-                  maxLength={7}
-                  returnKeyType="done"
-                  onSubmitEditing={saveClassHex}
-                />
-                <TouchableOpacity style={styles.clsHexSave} activeOpacity={0.85} onPress={saveClassHex}>
-                  <Text style={styles.clsSaveText}>Save code</Text>
-                </TouchableOpacity>
-              </View>
+              {renderPaintPicker(false)}
             </View>
           )}
         </View>
 
-        {/* Dropdowns */}
+        {/* Dropdowns — the car identity (feeds the 3D GRC + peer rendering).
+            Hidden in ARROW mode (Jeff 2026-07-17): the arrow panel replaces
+            them with the primary/secondary paint picker. */}
+        {markerType !== 'arrow' && (<>
         <Dropdown
           label="Year"
           items={YEARS}
@@ -652,6 +703,7 @@ export default function GarageScreen() {
             swatchFor={swatchFor}
           />
         )}
+        </>)}
 
         {/* Save */}
         <TouchableOpacity
@@ -734,6 +786,12 @@ const styles = StyleSheet.create({
   clsPreviewRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12, marginBottom: 4 },
   clsPreviewText:     { color: '#F4F4F4', fontSize: 13, fontWeight: '700' },
   clsSwatchRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
+  slotRow:            { flexDirection: 'row', gap: 8, marginTop: 10, marginBottom: 2 },
+  slotBtn:            { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 13, borderWidth: 1, borderColor: '#1E1E1E' },
+  slotBtnOn:          { borderColor: YELLOW, backgroundColor: 'rgba(45,236,134,0.10)' },
+  slotDot:            { width: 16, height: 16, borderRadius: 8, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)' },
+  slotText:           { color: '#808080', fontSize: 13, fontWeight: '700' },
+  slotTextOn:         { color: '#F4F4F4' },
   clsSwatch:          { width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
   clsSwatchSel:       { borderWidth: 3, borderColor: '#FFFFFF' },
   clsSaveBtn:         { marginTop: 12, alignSelf: 'flex-start', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 13, backgroundColor: YELLOW },

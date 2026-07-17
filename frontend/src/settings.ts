@@ -132,7 +132,12 @@ carColor?: string;
 // 'arrow' = a 3D green arrow, 'photo' = a circular uploaded profile photo. undefined
 // → 'car' via getSelfMarkerType(). Mirrored to the backend profile (avatar_type) +
 // presence so peers render you the same way you chose in the Garage.
-selfMarkerType?: 'car' | 'arrow' | 'photo';
+selfMarkerType?: 'car' | 'arrow' | 'photo' | 'class';
+// "Class" map appearance (Garage): a top-down sprite of the vehicle class,
+// tinted a user-picked color. Colors are stored PER CLASS so switching class
+// remembers each one's paint. vehicleClass undefined → 'hatchback'.
+vehicleClass?: 'hatchback' | 'coupe' | 'sports' | 'exotic' | 'sedan' | 'truck' | 'electric' | 'atv' | 'motorcycle' | 'sxs' | 'boat';
+classColors?: Record<string, string>; // class key -> #rrggbb
 // Hosted profile-photo URL (Supabase Storage) used when selfMarkerType==='photo'.
 // Also shown in rosters and "drive with a friend" search. Mirrored to the backend
 // profile (avatar_url) + presence (small URL only — never the image bytes).
@@ -305,8 +310,18 @@ export async function setAvatarMode(mode: AvatarMode): Promise<Settings> {
 // install stored before this field existed reads as 'car'. Separate from
 // getAvatarMode() (privacy/visibility). A 'photo' choice with no avatarUrl yet
 // still falls back to the car at the render layer.
-export function getSelfMarkerType(s: Settings): 'car' | 'arrow' | 'photo' {
+export function getSelfMarkerType(s: Settings): 'car' | 'arrow' | 'photo' | 'class' {
   return s.selfMarkerType ?? 'car';
+}
+
+// ---- "Class" appearance helpers ----
+export type VehicleClass = NonNullable<Settings['vehicleClass']>;
+export function getVehicleClass(s: Settings): VehicleClass {
+  return s.vehicleClass ?? 'hatchback';
+}
+// The chosen paint for the ACTIVE class (per-class map; brand green default).
+export function getClassColor(s: Settings): string {
+  return s.classColors?.[getVehicleClass(s)] ?? '#2DEC86';
 }
 
 // ---- Per-source audio volume (0..1), for the tester-calibration Audio screen ----

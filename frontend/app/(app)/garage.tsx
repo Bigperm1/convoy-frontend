@@ -7,9 +7,11 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { getSettings, updateSettings, getSelfMarkerType } from '../../src/settings';
+import { getSettings, updateSettings, getSelfMarkerType, getVehicleClass, getClassColor, type VehicleClass } from '../../src/settings';
+import { getVehiclePngOrDefault } from '../../src/vehicleAssets';
+import { TopDownClassSnap } from '../../src/ConvoyMapbox';
 import { useAuth } from '../../src/auth';
 import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
@@ -25,6 +27,29 @@ const YELLOW = '#2DEC86';
 // exist (they need server-side work). Flip to true to re-enable the Photo option;
 // the picker/upload code below is already wired for it.
 const PHOTO_AVATAR_ENABLED = false;
+
+// ---- "Class" map appearance ----
+// Top-down vehicle classes. Hatchback previews with the GR Corolla asset; the
+// rest use MCI glyph PLACEHOLDERS until Jeff's top-down class photos land.
+const VEHICLE_CLASSES: { key: VehicleClass; label: string; icon: string }[] = [
+  { key: 'hatchback',  label: 'Hatchback',  icon: 'car-hatchback' },
+  { key: 'coupe',      label: 'Coupe',      icon: 'car-side' },
+  { key: 'sports',     label: 'Sports',     icon: 'car-sports' },
+  { key: 'exotic',     label: 'Exotic',     icon: 'car-convertible' },
+  { key: 'sedan',      label: 'Sedan',      icon: 'car' },
+  { key: 'truck',      label: 'Truck',      icon: 'car-pickup' },
+  { key: 'electric',   label: 'Electric',   icon: 'car-electric' },
+  { key: 'atv',        label: 'ATV',        icon: 'atv' },
+  { key: 'motorcycle', label: 'Motorcycle', icon: 'motorbike' },
+  { key: 'sxs',        label: 'SxS',        icon: 'go-kart' },
+  { key: 'boat',       label: 'Boat',       icon: 'sail-boat' },
+];
+// Same palette as Settings → Route Color, per Jeff ("use the color swatch from
+// the route line").
+const CLASS_PRESETS = [
+  '#2DEC86', '#0A84FF', '#00D6E0', '#5E5CE6', '#BF5CFF',
+  '#FF2D95', '#FF3B30', '#FF9500', '#FFD60A', '#FFFFFF',
+];
 
 // Enable LayoutAnimation on Android for the smooth dropdown expand/collapse.
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -123,8 +148,13 @@ export default function GarageScreen() {
   const [color, setColor] = useState('');
   const [topSpeed, setTopSpeed] = useState<number | null>(null);
   const [callSign, setCallSign] = useState('');
-  // How the driver appears on the convoy map: 3D car / 3D green arrow / profile photo.
-  const [markerType, setMarkerType] = useState<'car' | 'arrow' | 'photo'>('car');
+  // How the driver appears on the convoy map: arrow / class sprite / 3D car / photo.
+  const [markerType, setMarkerType] = useState<'car' | 'arrow' | 'photo' | 'class'>('car');
+  // "Class" appearance drafts: which class + its paint. Committed by the Save
+  // buttons in the class panel (per-class colors persist in settings.classColors).
+  const [vehClass, setVehClass] = useState<VehicleClass>(getVehicleClass(getSettings()));
+  const [classColorDraft, setClassColorDraft] = useState<string>(getClassColor(getSettings()));
+  const [classHexDraft, setClassHexDraft] = useState<string>('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
@@ -237,7 +267,7 @@ export default function GarageScreen() {
   // Persist the choice locally AND to the backend profile (avatar_type) so peers,
   // /users/nearby and the live /location broadcast all render you the same way —
   // exactly like carColor is mirrored above.
-  const applyMarkerType = useCallback((type: 'car' | 'arrow' | 'photo') => {
+  const applyMarkerType = useCallback((type: 'car' | 'arrow' | 'photo' | 'class') => {
     Haptics.selectionAsync();
     setMarkerType(type);
     updateSettings({ selfMarkerType: type });
@@ -282,10 +312,31 @@ export default function GarageScreen() {
 
   // Tap an appearance option. Photo: if we don't have a picture yet, open the
   // picker; otherwise just switch back to the saved photo.
-  const handleAppearance = (type: 'car' | 'arrow' | 'photo') => {
+  const handleAppearance = (type: 'car' | 'arrow' | 'photo' | 'class') => {
     if (type === 'photo' && !avatarUrl) { pickAndUploadAvatar(); return; }
     applyMarkerType(type);
   };
+
+  // ---- "Class" panel actions ----
+  const saveClass = useCallback(async (color: string) => {
+    const s = getSettings();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setClassColorDraft(color);
+    await updateSettings({
+      selfMarkerType: 'class',
+      vehicleClass: vehClass,
+      classColors: { ...(s.classColors || {}), [vehClass]: color },
+    });
+  }, [vehClass]);
+  const saveClassHex = useCallback(() => {
+    const raw = classHexDraft.trim().replace(/^#/, '');
+    if (!/^[0-9a-fA-F]{6}$/.test(raw)) {
+      Alert.alert('Invalid color code', 'Enter a 6-digit hex code, e.g. 2DEC86 or #FF453A.');
+      return;
+    }
+    void saveClass('#' + raw.toUpperCase());
+    setClassHexDraft('');
+  }, [classHexDraft, saveClass]);
 
   // Explicit Save — selections already auto-save, but this confirms + persists
   // the call sign and gives clear feedback before returning.
@@ -399,16 +450,8 @@ export default function GarageScreen() {
         {/* Map Appearance — how you're drawn on the live convoy map */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Map Appearance</Text>
+          {/* Order per Jeff: Arrow · Class · 3D (3D slated to become premium). */}
           <View style={styles.apRow}>
-            <TouchableOpacity
-              style={[styles.apCard, markerType === 'car' && styles.apCardSel]}
-              activeOpacity={0.85}
-              onPress={() => handleAppearance('car')}
-            >
-              <Ionicons name="car-sport" size={25} color={markerType === 'car' ? '#000' : YELLOW} />
-              <Text style={[styles.apLabel, markerType === 'car' && styles.apLabelSel]}>3D Car</Text>
-            </TouchableOpacity>
-
             <TouchableOpacity
               style={[styles.apCard, markerType === 'arrow' && styles.apCardSel]}
               activeOpacity={0.85}
@@ -416,6 +459,24 @@ export default function GarageScreen() {
             >
               <Ionicons name="navigate" size={25} color={markerType === 'arrow' ? '#000' : YELLOW} />
               <Text style={[styles.apLabel, markerType === 'arrow' && styles.apLabelSel]}>Arrow</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.apCard, markerType === 'class' && styles.apCardSel]}
+              activeOpacity={0.85}
+              onPress={() => handleAppearance('class')}
+            >
+              <MaterialCommunityIcons name="car-hatchback" size={25} color={markerType === 'class' ? '#000' : YELLOW} />
+              <Text style={[styles.apLabel, markerType === 'class' && styles.apLabelSel]}>Class</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.apCard, markerType === 'car' && styles.apCardSel]}
+              activeOpacity={0.85}
+              onPress={() => handleAppearance('car')}
+            >
+              <Ionicons name="car-sport" size={25} color={markerType === 'car' ? '#000' : YELLOW} />
+              <Text style={[styles.apLabel, markerType === 'car' && styles.apLabelSel]}>3D</Text>
             </TouchableOpacity>
 
             {PHOTO_AVATAR_ENABLED ? (
@@ -442,6 +503,86 @@ export default function GarageScreen() {
               <Text style={styles.apChangeText}>Change photo</Text>
             </TouchableOpacity>
           ) : null}
+
+          {/* ---- Class panel: top-down class picker + per-class paint ---- */}
+          {markerType === 'class' && (
+            <View style={styles.clsPanel}>
+              <Text style={styles.clsHint}>Pick your class — each remembers its own paint</Text>
+              <View style={styles.clsGrid}>
+                {VEHICLE_CLASSES.map((c) => {
+                  const sel = vehClass === c.key;
+                  return (
+                    <TouchableOpacity
+                      key={c.key}
+                      style={[styles.clsTile, sel && styles.clsTileSel]}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        Haptics.selectionAsync();
+                        setVehClass(c.key);
+                        setClassColorDraft(getSettings().classColors?.[c.key] ?? '#2DEC86');
+                      }}
+                    >
+                      {c.key === 'hatchback' ? (
+                        // Top-down GR Corolla for Hatchback; the rest are
+                        // placeholder glyphs until Jeff's class photos land.
+                        <Image source={getVehiclePngOrDefault(getSettings().carColor)} style={styles.clsTileImg} resizeMode="contain" />
+                      ) : (
+                        <MaterialCommunityIcons name={c.icon as any} size={26} color={sel ? '#000' : YELLOW} />
+                      )}
+                      <Text style={[styles.clsTileLabel, sel && styles.clsTileLabelSel]} numberOfLines={1}>{c.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Live preview of the map sprite in the draft paint */}
+              <View style={styles.clsPreviewRow}>
+                <TopDownClassSnap color={classColorDraft} />
+                <Text style={styles.clsPreviewText}>{VEHICLE_CLASSES.find((c) => c.key === vehClass)?.label} · {classColorDraft.toUpperCase()}</Text>
+              </View>
+
+              {/* Paint swatches (same palette as Route Color) + Save */}
+              <View style={styles.clsSwatchRow}>
+                {CLASS_PRESETS.map((hex) => {
+                  const active = classColorDraft.toLowerCase() === hex.toLowerCase();
+                  return (
+                    <TouchableOpacity
+                      key={hex}
+                      activeOpacity={0.8}
+                      onPress={() => { Haptics.selectionAsync(); setClassColorDraft(hex); }}
+                      style={[styles.clsSwatch, { backgroundColor: hex }, active && styles.clsSwatchSel]}
+                    >
+                      {active && <Ionicons name="checkmark" size={16} color={hex === '#FFFFFF' || hex === '#FFD60A' ? '#000' : '#FFF'} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <TouchableOpacity style={styles.clsSaveBtn} activeOpacity={0.85} onPress={() => void saveClass(classColorDraft)}>
+                <Text style={styles.clsSaveText}>Save {VEHICLE_CLASSES.find((c) => c.key === vehClass)?.label}</Text>
+              </TouchableOpacity>
+
+              {/* Exact color code (hex) + its own Save */}
+              <Text style={styles.clsHint}>Have your paint code? Enter the hex</Text>
+              <View style={styles.clsHexRow}>
+                <Text style={styles.clsHexHash}>#</Text>
+                <TextInput
+                  style={styles.clsHexInput}
+                  value={classHexDraft}
+                  onChangeText={setClassHexDraft}
+                  placeholder="2DEC86"
+                  placeholderTextColor="#606060"
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  maxLength={7}
+                  returnKeyType="done"
+                  onSubmitEditing={saveClassHex}
+                />
+                <TouchableOpacity style={styles.clsHexSave} activeOpacity={0.85} onPress={saveClassHex}>
+                  <Text style={styles.clsSaveText}>Save code</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
         </View>
 
         {/* Dropdowns */}
@@ -556,6 +697,26 @@ const styles = StyleSheet.create({
 
   // Map appearance selector (3D car / arrow / photo)
   apRow:              { flexDirection: 'row', gap: 10 },
+  // ---- Class panel ----
+  clsPanel:           { marginTop: 12 },
+  clsHint:            { color: '#808080', fontSize: 12, fontWeight: '600', marginBottom: 8, marginTop: 4 },
+  clsGrid:            { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  clsTile:            { width: '23%', flexGrow: 1, height: 66, borderRadius: 13, borderWidth: 1, borderColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  clsTileSel:         { backgroundColor: YELLOW, borderColor: YELLOW },
+  clsTileImg:         { width: 40, height: 26 },
+  clsTileLabel:       { color: '#808080', fontSize: 10.5, fontWeight: '600' },
+  clsTileLabelSel:    { color: '#000' },
+  clsPreviewRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12, marginBottom: 4 },
+  clsPreviewText:     { color: '#F4F4F4', fontSize: 13, fontWeight: '700' },
+  clsSwatchRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
+  clsSwatch:          { width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  clsSwatchSel:       { borderWidth: 3, borderColor: '#FFFFFF' },
+  clsSaveBtn:         { marginTop: 12, alignSelf: 'flex-start', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 13, backgroundColor: YELLOW },
+  clsSaveText:        { color: '#000', fontWeight: '800', fontSize: 13 },
+  clsHexRow:          { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  clsHexHash:         { color: '#808080', fontSize: 16, fontWeight: '800' },
+  clsHexInput:        { flex: 1, height: 42, borderRadius: 13, borderWidth: 1, borderColor: '#1E1E1E', color: '#F4F4F4', paddingHorizontal: 12, fontSize: 15, fontWeight: '700', letterSpacing: 1 },
+  clsHexSave:         { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 13, backgroundColor: YELLOW },
   apCard:             { flex: 1, height: 86, borderRadius: 16, borderWidth: 1, borderColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center', gap: 7 },
   apCardSel:          { backgroundColor: YELLOW, borderColor: YELLOW },
   apLabel:            { color: '#808080', fontSize: 13, fontWeight: '600' },

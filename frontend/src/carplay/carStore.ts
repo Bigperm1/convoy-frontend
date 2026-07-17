@@ -61,7 +61,9 @@ export type CarState = {
   // Self-marker style (mirror of settings.selfMarkerType). Lets the CarPlay live map
   // render the green ARROW model when the phone is set to 'arrow', else the 3D car —
   // so the head unit matches the phone. undefined → car.
-  selfMarkerType?: 'car' | 'arrow' | 'photo';
+  // 'class' falls back to the 3D car on the head unit for now (the top-down
+  // class sprite is phone-only until the CarPlay parity pass).
+  selfMarkerType?: 'car' | 'arrow' | 'photo' | 'class';
   // Map markers mirrored from the phone so the CarPlay live map shows the SAME
   // hazards / DriveBC incidents / speed cameras / place pins the driver sees on the
   // phone. All optional; undefined → none. The 'when active' gating is applied on the

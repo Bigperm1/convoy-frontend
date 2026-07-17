@@ -22,7 +22,15 @@
 import { AppRegistry, Platform } from 'react-native';
 
 if (Platform.OS === 'ios') {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { CarSurface } = require('./ConvoyCarPlay');
-  AppRegistry.registerComponent('ConvoyCarSurface', () => CarSurface);
+  // try/catch: this require synchronously evaluates the ENTIRE car-UI module
+  // tree at every app launch (phone and headless CarPlay alike). A module-scope
+  // throw anywhere in that tree used to kill the whole app at boot — degrade to
+  // "no CarPlay surface this session" instead and let the phone app live.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { CarSurface } = require('./ConvoyCarPlay');
+    AppRegistry.registerComponent('ConvoyCarSurface', () => CarSurface);
+  } catch (e) {
+    console.error('[carplay] CarSurface registration failed:', e);
+  }
 }

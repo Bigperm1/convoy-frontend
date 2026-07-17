@@ -16,7 +16,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Router gate (app/index.tsx) imports this key to decide first-launch routing.
 export const ONBOARDING_KEY = 'convoy:onboarded:v1';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+// Lazy, not module-scope: this module is imported by the router gate
+// (app/index.tsx re-exports ONBOARDING_KEY) so it loads on cold HEADLESS
+// launches too, where a module-scope Dimensions.get('window') can throw.
+const screenW = () => Dimensions.get('window').width;
 
 const screens = [
   {
@@ -59,7 +62,7 @@ export default function Onboarding() {
   const goNext = () => {
     if (currentIdx < screens.length - 1) {
       const next = currentIdx + 1;
-      scrollRef.current?.scrollTo({ x: next * SCREEN_W, animated: true });
+      scrollRef.current?.scrollTo({ x: next * screenW(), animated: true });
       setCurrentIdx(next);
     } else {
       finish();
@@ -86,7 +89,7 @@ export default function Onboarding() {
         style={styles.scroller}
       >
         {screens.map((screen) => (
-          <View key={screen.id} style={[styles.slide, { width: SCREEN_W }]}>
+          <View key={screen.id} style={[styles.slide, { width: screenW() }]}>
             <ImageBackground source={screen.image} style={styles.image} resizeMode="cover">
               <LinearGradient
                 colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}

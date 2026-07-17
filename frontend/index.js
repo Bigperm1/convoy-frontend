@@ -13,6 +13,12 @@ import 'expo-router/entry';
 import './src/carplay/registerAndroidAuto';
 import './src/carplay/registerCarSurface';
 
+// Fatal-JS-error breadcrumbs: queue message+stack on a fatal (expo-updates'
+// ~5s recovery window gives the write time to land), harvest expo-updates'
+// own error log next launch, deliver to Supabase. See src/crashBreadcrumb.ts.
+import { installCrashBreadcrumb } from './src/crashBreadcrumb';
+installCrashBreadcrumb();
+
 // Sets a CarPlay root template on a COLD connect (CarPlay opened while the phone
 // app isn't running), where the phone map screen's useConvoyCarPlay hook isn't
 // mounted to do it. No-op on web/Android and on the warm path. See carPlayBootstrap.ts.

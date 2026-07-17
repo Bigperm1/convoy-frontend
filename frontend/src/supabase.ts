@@ -38,10 +38,19 @@ const isClientRuntime =
 
 let _client: SupabaseClient | null = null;
 if (isClientRuntime && URL && KEY) {
-  _client = createClient(URL, KEY, {
-    auth: { persistSession: false },
-    realtime: { params: { eventsPerSecond: 10 } },
-  });
+  // try/catch: since build 65 this module loads at COLD HEADLESS startup (a
+  // CarPlay-scene launch pulls it in via carPlayBootstrap → carDataService),
+  // where a module-scope constructor throw would be a fatal boot crash the
+  // whole app dies on. Every consumer already handles supabase === null, so
+  // degrade to that instead. (Suspect in the 2026-07-17 Olaf TestFlight crash.)
+  try {
+    _client = createClient(URL, KEY, {
+      auth: { persistSession: false },
+      realtime: { params: { eventsPerSecond: 10 } },
+    });
+  } catch {
+    _client = null;
+  }
 }
 
 export const supabase: SupabaseClient | null = _client;

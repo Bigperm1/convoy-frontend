@@ -11,9 +11,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Dimensions, Easing, StyleSheet } from 'react-native';
 
-const { width: SW, height: SH } = Dimensions.get('window');
-
 export default function AnimatedSplash({ onDone }: { onDone?: () => void }) {
+  // Read inside the component, not at module scope: Dimensions.get('window')
+  // throws if the window dimensions aren't set yet, and this module loads
+  // during cold HEADLESS launches (CarPlay scene, no phone window).
+  const { width: SW, height: SH } = Dimensions.get('window');
   const fade = useRef(new Animated.Value(1)).current; // whole splash → 0 to reveal the app
   const [gone, setGone] = useState(false);
 

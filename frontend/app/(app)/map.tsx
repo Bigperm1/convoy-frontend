@@ -51,7 +51,7 @@ import { playSpeedDing } from "../../src/speedDing";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
 import { prepareRouteGreeting, playPreparedGreeting, clearPreparedGreeting } from "../../src/novaGreeting";
-import { useSavedPlaces, saveSavedPlace, removeSavedPlace, resolveTarget, ensureSavedPlacesLoaded, matchSavedPlace, predictDestination, type SavedPlace } from "../../src/savedPlaces";
+import { useSavedPlaces, saveSavedPlace, removeSavedPlace, resolveTarget, ensureSavedPlacesLoaded, matchSavedPlace, predictDestination, recordDeparture, type SavedPlace } from "../../src/savedPlaces";
 import { recordDrive, matchAiRoute, viaPointsFor, ensureAiRoutesLoaded } from "../../src/aiRoutes";
 import { askScout } from "../../src/askScout";
 import { recordOver, habitualOverKmh } from "../../src/speedProfile";
@@ -1502,6 +1502,17 @@ export default function MapScreen() {
   // it isn't (e.g. background-location permission denied), the second effect
   // drives the banner from the live foreground GPS coords instead.
   const navBgActiveRef = useRef(false);
+  // Departure-IQ learning: nav started toward a saved place → log the departure
+  // time, so "leave for work / head home" suggestions calibrate to when this
+  // driver ACTUALLY leaves (predictDestination only offers inside the learned
+  // window). Once per nav session (the ref), custom places included.
+  const departLoggedRef = useRef(false);
+  useEffect(() => {
+    if (navMode !== "turn-by-turn") { departLoggedRef.current = false; return; }
+    if (departLoggedRef.current || !destination) return;
+    const sp = matchSavedPlace(destination.lat, destination.lng);
+    if (sp) { departLoggedRef.current = true; recordDeparture(sp); }
+  }, [navMode, destination]);
   useEffect(() => {
     if (navMode !== "turn-by-turn" || !activeRoute) return;
     startNavBanner(activeRoute, destination?.label)

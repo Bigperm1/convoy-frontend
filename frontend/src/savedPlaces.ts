@@ -155,14 +155,60 @@ export function resolveTarget(target: string): SavedPlace | undefined {
   return cached.find((p) => p.label.toLowerCase() === t) || cached.find((p) => p.id === target);
 }
 
+// ===== Departure-time learning (Departure IQ v2) =====
+// Jeff (2026-07-17): "this should be time-sensitive to when you usually leave
+// for work and go home" — after arriving HOME in the evening, the app offered
+// WORK. Root cause was the old anti-"predict where you already are" guard: the
+// evening pick was Home, he was AT home, and the guard FLIPPED to the other
+// anchor instead of staying quiet. v2: every nav start toward a saved place
+// logs the departure time; predictions only surface within ±75 min of the
+// MEDIAN learned departure for that place (weekday and weekend learned
+// separately). No learned data yet → conservative static windows (work =
+// weekday morning, home = weekday afternoon/evening), and being parked at a
+// candidate now EXCLUDES it — never flips to the other. Custom places learn
+// too (keyed by id), so "gym Tuesdays" starts predicting after a few drives.
+type DepartSample = { k: string; m: number; d: number; ts: number }; // key, minutes-of-day, weekday, when
+const DEPART_KEY = "convoy.departLog.v1";
+const DEPART_CAP = 240;      // rolling cap across all places
+const DEPART_WINDOW_MIN = 75; // suggest within ±75 min of the learned median
+const LEARN_MIN_SAMPLES = 3;  // fewer than this → fall back to static windows
+let departLog: DepartSample[] = [];
+const departLoad: Promise<void> = (async () => {
+  try {
+    const raw = await AsyncStorage.getItem(DEPART_KEY);
+    if (raw) { const p = JSON.parse(raw); if (Array.isArray(p)) departLog = p.filter((s: any) => s && typeof s.k === "string" && typeof s.m === "number"); }
+  } catch {}
+})();
+
+function departKey(p: SavedPlace): string { return p.kind === "custom" ? p.id : p.kind; }
+
+// Log a real departure toward a saved place (call at nav start). Fire-and-forget.
+export function recordDeparture(place: SavedPlace, when: Date = new Date()): void {
+  void departLoad.then(() => {
+    departLog.push({ k: departKey(place), m: when.getHours() * 60 + when.getMinutes(), d: when.getDay(), ts: when.getTime() });
+    if (departLog.length > DEPART_CAP) departLog = departLog.slice(-DEPART_CAP);
+    AsyncStorage.setItem(DEPART_KEY, JSON.stringify(departLog)).catch(() => {});
+  });
+}
+
+// true = now is inside the learned window; false = learned data says NOT now;
+// null = not enough samples to judge (caller falls back to static windows).
+function inLearnedWindow(key: string, now: Date): boolean | null {
+  const wk = now.getDay() >= 1 && now.getDay() <= 5;
+  const samples = departLog.filter((s) => s.k === key && (s.d >= 1 && s.d <= 5) === wk);
+  if (samples.length < LEARN_MIN_SAMPLES) return null;
+  const mins = samples.map((s) => s.m).sort((a, b) => a - b);
+  const med = mins[Math.floor(mins.length / 2)];
+  const nowM = now.getHours() * 60 + now.getMinutes();
+  const diff = Math.min(Math.abs(nowM - med), 1440 - Math.abs(nowM - med)); // circular day
+  return diff <= DEPART_WINDOW_MIN;
+}
+
 // ===== Destination prediction =====
-// Lightweight time-of-day heuristic over the Home/Work anchors:
-//   weekday morning (4a-11a)        -> Work
-//   weekday afternoon/evening (2p-10p) -> Home
-//   everything else / weekends      -> Home (fallback Work)
-// Returns the predicted place plus a short reason phrase the greeting can fold
-// in, or null when we can't make a confident guess (no anchors saved, or the
-// user is already sitting at the only candidate).
+// Candidates: Home + Work always; custom places once they have learned data.
+// A candidate survives only if (a) its learned window says NOW (or, with no
+// data yet, its static window does), and (b) you're not parked at it. If
+// nothing survives, we stay quiet — no more flip-to-the-other-anchor.
 export type Prediction = { place: SavedPlace; reason: string } | null;
 
 export function predictDestination(
@@ -172,27 +218,34 @@ export function predictDestination(
 ): Prediction {
   const home = getHome();
   const work = getWork();
-  if (!home && !work) return null;
+  const customs = cached.filter((p) => p.kind === "custom");
+  if (!home && !work && customs.length === 0) return null;
 
-  const day = now.getDay(); // 0 = Sun ... 6 = Sat
+  const day = now.getDay();
   const hour = now.getHours();
   const isWeekday = day >= 1 && day <= 5;
+  const parkedAt = (p: SavedPlace) =>
+    typeof nearLat === "number" && typeof nearLng === "number" &&
+    haversineM(nearLat, nearLng, p.lat, p.lng) < 250;
 
-  let target: SavedPlace | undefined;
-  if (isWeekday && hour >= 4 && hour < 11) target = work || home;
-  else if (isWeekday && hour >= 14 && hour < 22) target = home || work;
-  else target = home || work;
-  if (!target) return null;
+  const staticWindow = (p: SavedPlace): boolean => {
+    if (p.kind === "work") return isWeekday && hour >= 4 && hour < 11;
+    if (p.kind === "home") return hour >= 14 && hour < 23; // any day: afternoons/evenings point home
+    return false; // custom places only predict once LEARNED
+  };
 
-  // Don't predict the place you're already parked at — if we're within 250 m of
-  // the candidate, switch to the other anchor (or give up).
-  if (typeof nearLat === "number" && typeof nearLng === "number") {
-    if (haversineM(nearLat, nearLng, target.lat, target.lng) < 250) {
-      const other = target.kind === "work" ? home : work;
-      if (other && haversineM(nearLat, nearLng, other.lat, other.lng) >= 250) target = other;
-      else return null;
-    }
+  const candidates: { place: SavedPlace; learned: boolean }[] = [];
+  for (const p of [work, home, ...customs]) {
+    if (!p || parkedAt(p)) continue;
+    const learned = inLearnedWindow(departKey(p), now);
+    if (learned === true) candidates.push({ place: p, learned: true });
+    else if (learned === null && staticWindow(p)) candidates.push({ place: p, learned: false });
+    // learned === false → the data says you don't leave for this place now → excluded
   }
+  if (candidates.length === 0) return null;
+  // Learned matches beat static guesses; ties keep the [work, home, customs] priority.
+  candidates.sort((a, b) => Number(b.learned) - Number(a.learned));
+  const target = candidates[0].place;
 
   const reason =
     target.kind === "work" ? "heading to work" : target.kind === "home" ? "heading home" : `heading to ${target.label}`;

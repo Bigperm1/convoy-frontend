@@ -2359,7 +2359,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             headingOffset={selfIsArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
             pitchTilt={selfIsArrow ? ARROW_MODEL_PITCH : 0}
             sprite={selfIsClass ? selfClassImg : undefined}
-            spriteSize={selfClassPhoto ? 1.35 : 1}
+            // Class photos are baked at 3x (132px) so the ~59pt on-screen draw is
+            // pixel-dense instead of 4x-upscaled mush (the "boat quality" report).
+            spriteSize={selfClassPhoto ? 0.45 : 1}
             cameraRef={cameraRef}
             getCam={getCam}
             readyRef={lockReadyRef}

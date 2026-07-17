@@ -1,0 +1,17 @@
+diff --git a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXImageModule.mm b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXImageModule.mm
+index 0bb9417..1283975 100644
+--- a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXImageModule.mm
++++ b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXImageModule.mm
+@@ -50,8 +50,10 @@ - (void)withImage:(nonnull NSNumber*)viewRef block:(void (^)(RNMBXImage *))block
+ RCT_EXPORT_METHOD(refresh:(nonnull NSNumber*)viewRef resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject)
+ {
+     [self withImage:viewRef block:^(RNMBXImage *view) {
+-        // TODO: implement refresh on iOS
+-//        [view refresh];
++        dispatch_async(dispatch_get_main_queue(), ^{
++            [view setImage];
++        });
++        resolve(nil);
+     } reject:reject methodName:@"refresh"];
+ }
+ 

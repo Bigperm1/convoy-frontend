@@ -1855,6 +1855,16 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const _pri = selfClassPaint?.primary, _sec = selfClassPaint?.secondary;
   const selfClassPainted = !!selfClassAsShot && (!!_pri || !!_sec);
   const _paintKey = `${(_pri || "x").replace("#", "")}_${(_sec || "x").replace("#", "")}`;
+  // iOS ONLY captures an MBXImage's children ONCE, ~10µs after native mount —
+  // before the paint-mask bitmaps decode — and RNMBXImageModule.refresh() is an
+  // unimplemented stub upstream (patched natively for build 66), so the map can
+  // freeze the UNPAINTED frame forever ("boat color not saving onto the map").
+  // OTA workaround: once every layer bitmap has loaded, REMOUNT the native
+  // image (bump the key) so the mount-time snapshot sees the painted composite,
+  // now decoded and warm in the image cache. One remount per paint key — the
+  // remounted sprite fires onReady again, and the ref guard stops the loop.
+  const [classImgGen, setClassImgGen] = useState(0);
+  const classImgGenForRef = useRef("");
   const selfClassImg = selfClassAsShot
     ? (selfClassPainted ? `self_class_paint_${selfVehicleClass}_${_paintKey}` : `self_class_photo_${selfVehicleClass}`)
     : "self_class_" + (_pri || "#2DEC86").replace(/[^0-9a-fA-F]/g, "");
@@ -2145,10 +2155,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             yet → tinted silhouette. Keyed by class+paint so changes swap live. */}
         {selfIsClass && (selfClassAsShot ? (
           selfClassPainted ? (
-            <Images key={selfClassImg}>
-              {/* refresh() once every layer bitmap has loaded — the snapshot
-                  otherwise races image loading and can freeze an UNPAINTED
-                  frame (the "boat color not saving onto the map" bug). */}
+            <Images key={`${selfClassImg}_g${classImgGen}`}>
+              {/* onReady = every layer bitmap loaded. refresh() re-captures on
+                  Android; on iOS it's a stub (see classImgGen above), so bump
+                  the key to remount — the fresh mount-time snapshot captures
+                  the painted sprite from the now-warm image cache. */}
               <MBXImage name={selfClassImg} ref={classImgRef}>
                 <ClassSprite
                   vehicleClass={selfVehicleClass}
@@ -2159,6 +2170,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
                     try { (classImgRef.current as any)?.refresh?.(); } catch {}
                     // belt-and-braces second capture after the view settles
                     setTimeout(() => { try { (classImgRef.current as any)?.refresh?.(); } catch {} }, 350);
+                    if (Platform.OS === "ios" && classImgGenForRef.current !== selfClassImg) {
+                      classImgGenForRef.current = selfClassImg;
+                      setTimeout(() => setClassImgGen((g) => g + 1), 250);
+                    }
                   }}
                 />
               </MBXImage>

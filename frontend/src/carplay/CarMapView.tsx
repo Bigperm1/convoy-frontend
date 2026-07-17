@@ -54,6 +54,7 @@ import {
   CameraMarker,
   IncidentMarker,
   PlaceMarker,
+  routeColorsFor,
   ROAD_SRC_ID,
   ROAD_SNAP_LOCK_M,
   ROAD_SNAP_RELEASE_M,
@@ -417,9 +418,13 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
     const s1 = Math.min(0.999, Math.max(s0 + 0.0006, s0 + fadeSpanFrac));
     return ['interpolate', ['linear'], ['line-progress'], 0, clear, s0, clear, s1, solid, 1, solid];
   };
-  // User-chosen route color (mirrored from the phone via carStore). Core + glow + the
-  // near-car fade all derive from it; falls back to brand green.
-  const carRouteColor = s.routeColor || ROUTE_GREEN_CORE;
+  // User-chosen route color (mirrored from the phone via carStore) — resolved
+  // through the SAME per-kind transform the phone paints with (scenic =
+  // contrast color, AI = black core), so the head unit's line matches the
+  // phone exactly (tester: "CarPlay route colour differs, phone is correct").
+  // s.routeKind mirrors the SELECTED route's kind; absent (old bundle) → base.
+  const carBaseColor = s.routeColor || ROUTE_GREEN_CORE;
+  const carRouteColor = routeColorsFor((s.routeKind as any) || 'best', carBaseColor).color;
   const coreGrad = buildLineFade(routeRgba(carRouteColor, 1), routeRgba(carRouteColor, 0));
   const glowGrad = buildLineFade(routeRgba(carRouteColor, 1), routeRgba(carRouteColor, 0));
   const routeFC: any = {
@@ -703,7 +708,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
       )}
 
       {(s.roadEvents || []).map((e) => (
-        <IncidentMarker key={'inc_' + e.id} event={e} />
+        <IncidentMarker key={'inc_' + e.id} event={e} scale={0.72} />
       ))}
       {(s.hazards || []).map((h) => (
         <HazardMarker key={'hz_' + h.id} hazard={h as any} />
@@ -712,7 +717,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
         <CameraMarker key={'cam_' + c.id} lat={c.lat} lng={c.lng} />
       ))}
       {(s.places || []).map((p, i) => (
-        <PlaceMarker key={'pl_' + p.id} place={p as any} index={i} />
+        <PlaceMarker key={'pl_' + p.id} place={p as any} index={i} scale={0.72} />
       ))}
     </MapView>
   );

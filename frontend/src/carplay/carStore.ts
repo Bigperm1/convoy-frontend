@@ -89,6 +89,9 @@ export type CarState = {
   // User-chosen route-line color (base hex, mirror of settings.routeColor). Lets the
   // CarPlay live route match the phone. undefined → CarMapView falls back to green.
   routeColor?: string;
+  // Selected route's kind ('best' | 'scenic' | 'ai' | …) — CarMapView resolves the
+  // phone's per-kind color transform from it so both screens paint identically.
+  routeKind?: string;
   // Up to three DISPLAY routes (Best / Scenic / AI) for the CarPlay preview, mirrored
   // from the phone. Each carries its precomputed core `color` + casing `edge` (AI = black
   // core, user-color edge) so CarMapView paints them per-kind without re-deriving, plus

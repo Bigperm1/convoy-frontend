@@ -455,6 +455,12 @@ export function useTurnByTurn(
   });
   const announcedRef = useRef<Set<string>>(new Set());
   const lastSpokeRef = useRef<number>(0);
+  // MISSED-MANEUVER fast path: closest approach to the current step's maneuver.
+  // Approached (<80 m) then receded (>min+150 m) without advancing = the driver
+  // kept going past the turn/exit (tester: straight past an exit took ~30 s to
+  // react, because the mainline runs parallel to the ramp and the perpendicular
+  // off-route distance grows too slowly to trip the streak).
+  const missRef = useRef<{ step: number; min: number } | null>(null);
   const lastOffRouteAtRef = useRef<number>(0);
   const offRouteStreakRef = useRef<number>(0);
   const polyCacheRef = useRef<{ key: string; pts: LatLng[] }>({ key: "", pts: [] });
@@ -657,6 +663,13 @@ export function useTurnByTurn(
       }
     }
 
+    // Track the closest approach to THIS step's maneuver (missed-turn detector).
+    if (!missRef.current || missRef.current.step !== stepIdx) {
+      missRef.current = { step: stepIdx, min: dManeuver };
+    } else if (dManeuver < missRef.current.min) {
+      missRef.current.min = dManeuver;
+    }
+
     // Off-route by PERPENDICULAR distance to the route LINE — not distance to the
     // step's endpoints (which falsely flagged off-route in the middle of a long
     // highway step → the underpass/bridge detours). Require it to persist ≥2 GPS
@@ -693,7 +706,20 @@ export function useTurnByTurn(
       //   • off + heading diverging (>55°) → 3 ticks (~3 s): a real wrong turn
       //   • off but heading still aligned  → 6 ticks (~6 s): a SUSTAINED offset,
       //     not a momentary multipath spike (the parallel-road departure)
+      // MISSED-MANEUVER fast path (tester: kept straight past an exit; the
+      // mainline parallels the ramp so dRoute grows too slowly — ~30 s to
+      // react). Got within 80 m of the maneuver, then receded 150 m+ WITHOUT
+      // advancing (a pass-through advances at <25 m), while measurably off the
+      // line (>25 m — kills loop-road false positives where the route itself
+      // curls near the maneuver). Trips immediately, no streak needed.
+      const missedManeuver =
+        stepIdx < steps.length - 1 &&
+        missRef.current != null && missRef.current.step === stepIdx &&
+        missRef.current.min < 80 &&
+        dManeuver > missRef.current.min + 150 &&
+        dRoute > 25;
       const tripped =
+        missedManeuver ? true :
         conclusivelyOff ? offRouteStreakRef.current >= 2 :
         headingOff      ? offRouteStreakRef.current >= 3 :
                           offRouteStreakRef.current >= 6;
@@ -702,6 +728,7 @@ export function useTurnByTurn(
         if (now - lastOffRouteAtRef.current > 8000) {
           lastOffRouteAtRef.current = now;
           offRouteStreakRef.current = 0;
+          missRef.current = null; // one miss = one reroute; re-arm on the new route
           options?.onOffRoute?.();
         }
       }

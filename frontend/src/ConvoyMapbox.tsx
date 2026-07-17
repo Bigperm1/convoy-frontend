@@ -1057,11 +1057,13 @@ const INCIDENT_TITLE: Record<RoadEventKind, string> = {
   incident: "Incident", construction: "Roadwork", road: "Road closure",
   weather: "Weather hazard", event: "Road event",
 };
-export function IncidentMarker({ event }: { event: RoadEvent }) {
-  // Severity-tinted Hairpin teardrop (red = major/moderate, grey = minor) with
-  // the black wrench/hammer badged on the head — matches the phone's GL pins
-  // (this MarkerView version renders on the CarPlay map; parity rule).
+export function IncidentMarker({ event, scale = 1 }: { event: RoadEvent; scale?: number }) {
+  // Severity-tinted Hairpin teardrop (red = major/moderate in the SPEEDO red,
+  // grey = minor) with the black wrench/hammer in the head — matches the
+  // phone's GL pins (this MarkerView version renders on the CarPlay map;
+  // parity rule). `scale` shrinks the pin (CarPlay passes ~0.72).
   const red = event.severity === "MAJOR" || event.severity === "MODERATE";
+  const W = 34 * scale, H = 44 * scale;
   // Official event — tap shows the headline. Deliberately NOT the crew-hazard sheet
   // (no report/delete actions on a government feed item).
   const showDetail = () => {
@@ -1071,18 +1073,18 @@ export function IncidentMarker({ event }: { event: RoadEvent }) {
   return (
     <MarkerView coordinate={[event.lng, event.lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
       <Pressable onPress={showDetail} hitSlop={8}>
-        <View style={styles.brandPinWrap}>
+        <View style={{ width: W, height: H, alignItems: "center" }}>
           <Image
             source={red ? require("../assets/images/brand-pin-red.png") : require("../assets/images/brand-pin-grey.png")}
-            style={styles.brandPin}
+            style={{ width: W, height: H }}
             resizeMode="contain"
           />
           {/* Glyph sits INSIDE the pin's head circle — no badge circle behind it.
-              The small margins counter the MCI glyph's font bearing (draws
-              ~1.8pt left / 2.35pt high of its box — measured on the phone's GL
-              pins from the tester screenshot; same font, same correction). */}
-          <View style={[styles.brandPinBadge, { backgroundColor: "transparent" }]}>
-            <MaterialCommunityIcons name="hammer-wrench" size={12} color="#0B0B0C" style={{ marginLeft: 3.6, marginTop: 4.7 }} />
+              Box centre = the hole's alpha-centroid (x 0.5w, y 0.38h); the small
+              margins counter the MCI glyph's font bearing (draws ~1.8pt left /
+              2.35pt high of its box — measured from the tester screenshot). */}
+          <View style={[styles.brandPinBadgeDyn, { backgroundColor: "transparent", top: H * 0.38 - 10 * scale, left: W / 2 - 10 * scale, width: 20 * scale, height: 20 * scale }]}>
+            <MaterialCommunityIcons name="hammer-wrench" size={12 * scale} color="#0B0B0C" style={{ marginLeft: 3.6 * scale, marginTop: 4.7 * scale }} />
           </View>
         </View>
       </Pressable>
@@ -1095,20 +1097,23 @@ export function IncidentMarker({ event }: { event: RoadEvent }) {
 // The "Place pins" setting (showPins) hides the pure pin GLYPHS (teardrop under
 // a name, gas-pump badge) while ALWAYS keeping price chips and name labels. A
 // no-price gas station with pins off has nothing to draw → no marker at all.
-export function PlaceMarker({ place, index, onPress }: { place: PlacePoint; index: number; onPress?: (p: PlacePoint) => void }) {
+export function PlaceMarker({ place, index, onPress, scale = 1 }: { place: PlacePoint; index: number; onPress?: (p: PlacePoint) => void; scale?: number }) {
   // Unified numbered result pin — green background, thin grey border, Convoy
   // font. The number matches the row order in the Results dropdown so the list
   // and the map line up (1, 2, 3 …). Gas premium price + ratings live in the
-  // dropdown now, keeping the map itself clean.
+  // dropdown now, keeping the map itself clean. `scale` shrinks the whole pin
+  // proportionally (CarPlay passes ~0.72 — full-size pins crowd the head unit).
+  const W = 34 * scale, H = 44 * scale;
   return (
     <MarkerView coordinate={[place.lng, place.lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
       <Pressable onPress={() => onPress?.(place)} hitSlop={6}>
         {/* Hairpin brand pin + the result number badged on its head, so the map
             pins, the results list, and the logo all speak the same language. */}
-        <View style={styles.brandPinWrap}>
-          <Image source={require("../assets/images/brand-pin.png")} style={styles.brandPin} resizeMode="contain" />
-          <View style={styles.brandPinBadge}>
-            <Text style={styles.placeNumText}>{index + 1}</Text>
+        <View style={{ width: W, height: H, alignItems: "center" }}>
+          <Image source={require("../assets/images/brand-pin.png")} style={{ width: W, height: H }} resizeMode="contain" />
+          {/* Badge centre = the pin-head hole centre (alpha-centroid: x 0.5w, y 0.38h). */}
+          <View style={[styles.brandPinBadgeDyn, { top: H * 0.38 - 10 * scale, left: W / 2 - 10 * scale, width: 20 * scale, height: 20 * scale, borderRadius: 10 * scale }]}>
+            <Text style={[styles.placeNumText, { fontSize: 14 * scale }]}>{index + 1}</Text>
           </View>
         </View>
       </Pressable>
@@ -2230,11 +2235,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           );
         })}
 
-        {/* Hazards / cameras / DriveBC incidents / place pins — drawn as GL layers in
-            slot="middle" so the self 3D marker (ModelLayer, slot="top") renders ABOVE
-            them. Cameras are the on-route decluttered subset; hazards the visible set.
-            Taps route to the same handlers (see GLPinLayers). */}
+        {/* Hazards / cameras / DriveBC incidents / place pins — GL layers. Within a
+            Mapbox slot, z-order is ADD-time order, not JSX order: these pin layers
+            mount at app open, the route layers only get ADDED when a route first
+            exists — so a later route painted OVER the pins (tester photo). The key
+            forces a pin-layer REMOUNT whenever route layers appear/disappear,
+            re-adding the pins after the route so they stack on top again. */}
         <GLPinLayers
+          key={`pins-${routeFC.features.length > 0 ? "r" : "n"}`}
           hazards={visibleHazards}
           cameras={onRouteCameras}
           incidents={roadEvents || []}
@@ -2317,6 +2325,11 @@ const styles = StyleSheet.create({
   brandPinBadge: {
     position: "absolute", top: 5, left: 7, width: 20, height: 20, borderRadius: 10,
     backgroundColor: "#0A1A10", alignItems: "center", justifyContent: "center",
+  },
+  // Scale-aware variant: size/position come inline from the marker's `scale`.
+  brandPinBadgeDyn: {
+    position: "absolute", backgroundColor: "#0A1A10",
+    alignItems: "center", justifyContent: "center",
   },
   // Mid-drive reroute offer pill (tap = switch, ✕ = dismiss).
   offerPill: {

@@ -632,6 +632,10 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       places: places || [],
       // Route-line color → car route matches the phone's chosen color.
       routeColor: getRouteColor(getSettings()),
+      // Selected route's KIND → the car resolves the same per-kind transform the
+      // phone paints with (scenic = contrast color, AI = black core). Without it
+      // CarPlay drew the raw base color and diverged from the phone on AI/scenic.
+      routeKind: routes && routes.length ? routeKindFor(selectedRouteIndex, routes[selectedRouteIndex]) : 'best',
       // Live weather (only while the phone's weather layer feeds it). Temp pre-formatted
       // in the driver's unit; CarSurface maps weatherKind to a glyph.
       weatherTemp: weather

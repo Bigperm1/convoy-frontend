@@ -777,7 +777,11 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
           // and the chrome problem is compositing; if it NEVER appears, the
           // template pipeline itself is dead under bridgeless and the fix is
           // native (build 66). One glance on the next drive answers it.
-          setTimeout(() => { try { CarPlay.bridge?.toast?.('Hairpin ✓ template layer alive', 3); } catch {} }, 3000);
+          // Three probes over the first 30s (a single 3s toast right at connect
+          // was too easy to miss while parking/plugging in).
+          for (const at of [5000, 15000, 30000]) {
+            setTimeout(() => { try { CarPlay.bridge?.toast?.('Hairpin ✓ template layer alive', 4); } catch {} }, at);
+          }
         }
         // Android Auto is NOT built here. The head unit can launch the car app
         // even when this phone screen isn't mounted, so its UI is owned by the

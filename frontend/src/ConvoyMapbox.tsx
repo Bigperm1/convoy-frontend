@@ -322,6 +322,38 @@ export const ROAD_SNAP_RELEASE_M = 34;
 export const ROAD_SNAP_QUERY_MS = 1400;
 export const ROAD_SNAP_MOVING_MS = 1.5; // ~5.4 km/h — above this, apply the cross-street heading filter
 export const ROAD_SNAP_CROSS_DEG = 55;  // reject a nearest road whose bearing is more perpendicular than this to travel
+// Auto-boat-on-water tuning (OTA-tunable). Poll cadence + hysteresis: ~3 wet
+// polls (~7.5s) flips the marker to the boat, ~6 dry (~15s) flips it back.
+export const WATER_QUERY_MS = 2500;
+export const WATER_ON_POLLS = 3;
+export const WATER_OFF_POLLS = 6;
+
+// Even-odd point-in-polygon over the water features returned by
+// querySourceFeatures (tile-clipped Polygon/MultiPolygon rings, [lng, lat]).
+// Counting crossings across EVERY ring of a polygon handles holes (islands)
+// for free: outer ring makes it odd (inside), an island ring flips it back.
+function pointInWaterPolys(lat: number, lng: number, features?: any[]): boolean {
+  if (!Array.isArray(features)) return false;
+  const inRings = (rings: number[][][]) => {
+    let inside = false;
+    for (const ring of rings) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i], [xj, yj] = ring[j];
+        if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+    }
+    return inside;
+  };
+  for (const f of features) {
+    const g = f?.geometry;
+    if (!g) continue;
+    if (g.type === "Polygon" && inRings(g.coordinates)) return true;
+    if (g.type === "MultiPolygon") {
+      for (const poly of g.coordinates) if (inRings(poly)) return true;
+    }
+  }
+  return false;
+}
 // Self-illumination for the 3D car per light preset. ALL modes now render the
 // car fully self-lit (1.0) — the same dusk/dark-tint bypass the arrow uses — so
 // the paint color stays vivid instead of being washed dark by the scene light
@@ -1453,6 +1485,47 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     return () => { mounted = false; clearInterval(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // ── Auto-boat-on-water (Garage toggle, default ON) ──
+  // Poll the streets-v8 WATER polygons (same shared VectorSource as the road
+  // snap, via an invisible FillLayer that forces the layer to load) and flip the
+  // self marker to the BOAT class sprite while the GPS position sits on water.
+  // Guards: (1) hysteresis — ~3 wet polls (~7.5s) to switch, ~6 dry (~15s) to
+  // revert; (2) road suppression — a live road/route snap (bridges, causeways)
+  // counts as land no matter what the polygons say.
+  const [onWater, setOnWater] = useState(false);
+  const onWaterRef = useRef(false);
+  const wetPollsRef = useRef(0);
+  const dryPollsRef = useRef(0);
+  const waterInputsRef = useRef({ lat: 0, lng: 0, active: false, suppressed: false });
+  useEffect(() => {
+    let mounted = true;
+    const id = setInterval(async () => {
+      const inp = waterInputsRef.current;
+      const enabled = getSettings().autoBoatOnWater !== false;
+      if (!enabled || !inp.active || !readyRef.current || !mapRef.current?.querySourceFeatures) {
+        wetPollsRef.current = 0; dryPollsRef.current = 0;
+        if (onWaterRef.current) { onWaterRef.current = false; setOnWater(false); }
+        return;
+      }
+      try {
+        const fc = await mapRef.current.querySourceFeatures(ROAD_SRC_ID, [], ["water"]);
+        if (!mounted) return;
+        const wet = !inp.suppressed && pointInWaterPolys(inp.lat, inp.lng, fc?.features);
+        if (wet) {
+          wetPollsRef.current += 1; dryPollsRef.current = 0;
+          if (!onWaterRef.current && wetPollsRef.current >= WATER_ON_POLLS) { onWaterRef.current = true; setOnWater(true); }
+        } else {
+          dryPollsRef.current += 1; wetPollsRef.current = 0;
+          if (onWaterRef.current && dryPollsRef.current >= WATER_OFF_POLLS) { onWaterRef.current = false; setOnWater(false); }
+        }
+      } catch {
+        // mid-style-reload; retry next tick
+      }
+    }, WATER_QUERY_MS);
+    return () => { mounted = false; clearInterval(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Painted-arrow GLB URI (runtime material recolor, cached on disk). null →
   // the stock bundled arrow. Resolved async whenever the arrow paint changes.
   const [paintedArrowUri, setPaintedArrowUri] = useState<string | null>(null);
@@ -1850,9 +1923,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   //    + primary/secondary band layers tinted at runtime — any hex works)
   //  • no photo yet           → the tinted silhouette placeholder
   // Image name carries class+paint so changing either re-registers live.
-  const selfIsClass = selfMarkerType === "class";
-  const selfClassAsShot = CLASS_TOPDOWN[selfVehicleClass];
-  const _pri = selfClassPaint?.primary, _sec = selfClassPaint?.secondary;
+  // Auto-boat override: while onWater (see the poll above), the marker renders
+  // as the BOAT class sprite regardless of the saved appearance (car/arrow/
+  // class), wearing the driver's saved boat paint. Everything downstream keys
+  // off these effective values, so entering/leaving water swaps live.
+  const waterBoat = onWater && !!CLASS_TOPDOWN["boat"];
+  const selfIsClass = waterBoat || selfMarkerType === "class";
+  const effVehicleClass = waterBoat ? "boat" : selfVehicleClass;
+  const effClassPaint = waterBoat && selfVehicleClass !== "boat"
+    ? (getSettings().classPaint?.["boat"] ?? {})
+    : selfClassPaint;
+  const selfClassAsShot = CLASS_TOPDOWN[effVehicleClass];
+  const _pri = effClassPaint?.primary, _sec = effClassPaint?.secondary;
   const selfClassPainted = !!selfClassAsShot && (!!_pri || !!_sec);
   const _paintKey = `${(_pri || "x").replace("#", "")}_${(_sec || "x").replace("#", "")}`;
   // iOS ONLY captures an MBXImage's children ONCE, ~10µs after native mount —
@@ -1866,7 +1948,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const [classImgGen, setClassImgGen] = useState(0);
   const classImgGenForRef = useRef({ key: "", count: 0 });
   const selfClassImg = selfClassAsShot
-    ? (selfClassPainted ? `self_class_paint_${selfVehicleClass}_${_paintKey}` : `self_class_photo_${selfVehicleClass}`)
+    ? (selfClassPainted ? `self_class_paint_${effVehicleClass}_${_paintKey}` : `self_class_photo_${effVehicleClass}`)
     : "self_class_" + (_pri || "#2DEC86").replace(/[^0-9a-fA-F]/g, "");
   // Arrow = the BUNDLED asset, or the runtime-recolored copy (file:// URI) when
   // the driver saved arrow paint; car = per-color remote GLB URL. <Models>
@@ -2003,6 +2085,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   roadInputsRef.current = {
     lat: selfCar?.lat ?? 0, lng: selfCar?.lng ?? 0,
     hdg: _travelHdg, speed: userSpeedMs ?? 0, active: _roadActive,
+  };
+  // Feed the auto-boat water poll the same raw pose. suppressed: any live road
+  // or route snap (bridge, causeway, ferry-terminal ramp) counts as LAND.
+  waterInputsRef.current = {
+    lat: selfCar?.lat ?? 0, lng: selfCar?.lng ?? 0,
+    active: selfCar != null,
+    suppressed: selfSnapped || roadStickyRef.current,
   };
   // Project the LIVE raw fix onto the locked road line each render (smooth along-road tracking,
   // no ~1.4 s lag); drop back to raw once we've drifted beyond the release band laterally
@@ -2144,6 +2233,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             it feeds the nearest-road snap. Zero visual footprint, no network beyond tiles. */}
         <Mapbox.VectorSource id={ROAD_SRC_ID} url="mapbox://mapbox.mapbox-streets-v8">
           <Mapbox.LineLayer id="convoy-road-query" sourceLayerID="road" style={{ lineOpacity: 0, lineWidth: 1 } as any} />
+          {/* Invisible water layer: forces the WATER polygons of the shared
+              streets-v8 tiles to load so the auto-boat poll can
+              querySourceFeatures them. Zero visual footprint. */}
+          <Mapbox.FillLayer id="convoy-water-query" sourceLayerID="water" style={{ fillOpacity: 0 } as any} />
         </Mapbox.VectorSource>
 
         {/* Register the self-car 3D model once for the map. Referenced by id
@@ -2162,7 +2255,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
                   the painted sprite from the now-warm image cache. */}
               <MBXImage name={selfClassImg} ref={classImgRef}>
                 <ClassSprite
-                  vehicleClass={selfVehicleClass}
+                  vehicleClass={effVehicleClass}
                   primary={_pri}
                   secondary={_sec}
                   size={66}

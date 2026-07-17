@@ -145,6 +145,10 @@ classPaint?: Record<string, { primary?: string; secondary?: string }>;
 // Arrow appearance paint: primary = the green body materials of the arrow GLB,
 // secondary = the white rim. Unset → the stock Hairpin arrow.
 arrowPaint?: { primary?: string; secondary?: string };
+// Auto-switch the self marker to the BOAT sprite while the GPS position sits on
+// a water polygon (lake/ocean), reverting on land. Hysteresis + road-snap
+// suppression (bridges stay a car) live in ConvoyMapbox. undefined → ON.
+autoBoatOnWater?: boolean;
 // Hosted profile-photo URL (Supabase Storage) used when selfMarkerType==='photo'.
 // Also shown in rosters and "drive with a friend" search. Mirrored to the backend
 // profile (avatar_url) + presence (small URL only — never the image bytes).

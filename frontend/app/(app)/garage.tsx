@@ -160,6 +160,8 @@ export default function GarageScreen() {
   const [arrPriDraft, setArrPriDraft] = useState<string | null>(getSettings().arrowPaint?.primary ?? null);
   const [arrSecDraft, setArrSecDraft] = useState<string | null>(getSettings().arrowPaint?.secondary ?? null);
   const [classHexDraft, setClassHexDraft] = useState<string>('');
+  // Auto-boat-on-water toggle (persists immediately; the map polls it live).
+  const [autoBoat, setAutoBoat] = useState<boolean>(() => getSettings().autoBoatOnWater !== false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
@@ -421,6 +423,24 @@ export default function GarageScreen() {
             <Text style={styles.clsSaveText}>Apply</Text>
           </TouchableOpacity>
         </View>
+        {/* Auto-boat: while driving ON WATER the map marker switches itself to
+            the boat sprite (saved boat paint), and back on land. Class panel
+            only — arrow has its own panel. */}
+        {!arrow && (
+          <TouchableOpacity
+            style={styles.clsToggleRow}
+            activeOpacity={0.8}
+            onPress={() => {
+              Haptics.selectionAsync();
+              const next = !autoBoat;
+              setAutoBoat(next);
+              void updateSettings({ autoBoatOnWater: next });
+            }}
+          >
+            <Ionicons name={autoBoat ? 'checkbox' : 'square-outline'} size={20} color={autoBoat ? '#2DEC86' : '#8E8E93'} />
+            <Text style={styles.clsToggleText}>Auto-switch to boat on water</Text>
+          </TouchableOpacity>
+        )}
         {/* Arrow keeps its own Save; the CLASS paint commits through the main
             garage Save button below (Jeff: "just have the original save"). */}
         {arrow && (
@@ -802,6 +822,8 @@ const styles = StyleSheet.create({
   clsSaveBtn:         { marginTop: 12, alignSelf: 'flex-start', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 13, backgroundColor: YELLOW },
   clsSaveText:        { color: '#000', fontWeight: '800', fontSize: 13 },
   clsHexRow:          { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  clsToggleRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
+  clsToggleText:      { color: '#E5E5EA', fontSize: 13, fontWeight: '600' },
   clsHexHash:         { color: '#808080', fontSize: 16, fontWeight: '800' },
   clsHexInput:        { flex: 1, height: 42, borderRadius: 13, borderWidth: 1, borderColor: '#1E1E1E', color: '#F4F4F4', paddingHorizontal: 12, fontSize: 15, fontWeight: '700', letterSpacing: 1 },
   clsHexSave:         { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 13, backgroundColor: YELLOW },

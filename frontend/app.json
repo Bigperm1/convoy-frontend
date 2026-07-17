@@ -2,17 +2,22 @@
   "expo": {
     "name": "Hairpin",
     "slug": "convoy",
-    "version": "3.1.0",
+    "version": "3.2.0",
     "orientation": "portrait",
     "icon": "./assets/HAIRPIN.png",
     "scheme": "convoy",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "runtimeVersion": "1.17.0",
+    "runtimeVersion": "1.18.0",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
-      "buildNumber": "65",
+      "buildNumber": "66",
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.sw0rdfisch.convoy"
+        ]
+      },
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSAppleMusicUsageDescription": "Play and control Apple Music right inside Hairpin",
@@ -32,7 +37,7 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 65,
+      "versionCode": 66,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/hairpin-adaptive.png",
@@ -127,7 +132,8 @@
       ],
       "./plugins/withConvoyAndroidAuto.js",
       "./plugins/withConvoyCarPlay.js",
-      "./plugins/withScoutSiri.js"
+      "./plugins/withScoutSiri.js",
+      "@bacons/apple-targets"
     ],
     "experiments": {
       "typedRoutes": true

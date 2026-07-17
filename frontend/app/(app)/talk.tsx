@@ -132,9 +132,23 @@ export default function TalkScreen() {
   const loadCommunities = useCallback(async () => {
     try {
       const { data } = await api.get('/communities/mine');
-      setCommunities(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setCommunities(list);
+      // ANDROID TESTER FIX (2026-07-17): activeCommunityId lives in LOCAL
+      // AsyncStorage — it never syncs to a new device. A fresh install (or a
+      // stale id after leaving a club) rendered Comms in a DEAD state: the
+      // threads strip is gated on `active`, so the chats the tester belongs to
+      // never showed ("can't click into my chats"), and New only toggled the
+      // club dropdown ("can't create a chat"). If the saved id is missing or
+      // no longer one of their clubs, auto-activate the first club so Comms
+      // always lands usable. (getSettings() — not the hook value — so this
+      // reads the LIVE id even inside the stable callback.)
+      const cur = getSettings().activeCommunityId;
+      if (list.length > 0 && !list.some((c) => c.id === cur)) {
+        setSettings({ activeCommunityId: list[0].id, activeThreadId: null });
+      }
     } catch { /* keep last known list */ }
-  }, []);
+  }, [setSettings]);
 
   // Nearby crew count — direct fetch so the figure is live on this screen
   // regardless of whether the map published a tier. Skipped when the Nearby

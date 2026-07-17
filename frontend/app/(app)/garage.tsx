@@ -9,9 +9,10 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { getSettings, updateSettings, getSelfMarkerType, getVehicleClass, getClassColor, type VehicleClass } from '../../src/settings';
-import { getVehiclePngOrDefault } from '../../src/vehicleAssets';
+import { getSettings, updateSettings, getSelfMarkerType, getVehicleClass, getClassColorRaw, type VehicleClass } from '../../src/settings';
+import { getVehiclePngOrDefault, CLASS_TOPDOWN } from '../../src/vehicleAssets';
 import { TopDownClassSnap } from '../../src/ConvoyMapbox';
+import { CLASS_TINTS, nearestClassPreset } from '../../src/classTints';
 import { useAuth } from '../../src/auth';
 import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
@@ -150,10 +151,11 @@ export default function GarageScreen() {
   const [callSign, setCallSign] = useState('');
   // How the driver appears on the convoy map: arrow / class sprite / 3D car / photo.
   const [markerType, setMarkerType] = useState<'car' | 'arrow' | 'photo' | 'class'>('car');
-  // "Class" appearance drafts: which class + its paint. Committed by the Save
+  // "Class" appearance drafts: which class + its paint. null = "Original" — the
+  // photo as-shot (or brand green on silhouette classes). Committed by the Save
   // buttons in the class panel (per-class colors persist in settings.classColors).
   const [vehClass, setVehClass] = useState<VehicleClass>(getVehicleClass(getSettings()));
-  const [classColorDraft, setClassColorDraft] = useState<string>(getClassColor(getSettings()));
+  const [classColorDraft, setClassColorDraft] = useState<string | null>(getClassColorRaw(getSettings()) ?? null);
   const [classHexDraft, setClassHexDraft] = useState<string>('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -318,14 +320,17 @@ export default function GarageScreen() {
   };
 
   // ---- "Class" panel actions ----
-  const saveClass = useCallback(async (color: string) => {
+  // color === null → "Original": remove the saved paint (photo shows as-shot).
+  const saveClass = useCallback(async (color: string | null) => {
     const s = getSettings();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setClassColorDraft(color);
+    const next = { ...(s.classColors || {}) };
+    if (color) next[vehClass] = color; else delete next[vehClass];
     await updateSettings({
       selfMarkerType: 'class',
       vehicleClass: vehClass,
-      classColors: { ...(s.classColors || {}), [vehClass]: color },
+      classColors: next,
     });
   }, [vehClass]);
   const saveClassHex = useCallback(() => {
@@ -519,14 +524,17 @@ export default function GarageScreen() {
                       onPress={() => {
                         Haptics.selectionAsync();
                         setVehClass(c.key);
-                        setClassColorDraft(getSettings().classColors?.[c.key] ?? '#2DEC86');
+                        setClassColorDraft(getSettings().classColors?.[c.key] ?? null);
                       }}
                     >
                       {c.key === 'hatchback' ? (
-                        // Top-down GR Corolla for Hatchback; the rest are
-                        // placeholder glyphs until Jeff's class photos land.
+                        // Top-down GR Corolla for Hatchback.
                         <Image source={getVehiclePngOrDefault(getSettings().carColor)} style={styles.clsTileImg} resizeMode="contain" />
+                      ) : CLASS_TOPDOWN[c.key] ? (
+                        // Real top-down class photo (keyed + nose-up).
+                        <Image source={CLASS_TOPDOWN[c.key]} style={styles.clsTileImg} resizeMode="contain" />
                       ) : (
+                        // Placeholder glyph until Jeff's photo lands for this class.
                         <MaterialCommunityIcons name={c.icon as any} size={26} color={sel ? '#000' : YELLOW} />
                       )}
                       <Text style={[styles.clsTileLabel, sel && styles.clsTileLabelSel]} numberOfLines={1}>{c.label}</Text>
@@ -535,16 +543,33 @@ export default function GarageScreen() {
                 })}
               </View>
 
-              {/* Live preview of the map sprite in the draft paint */}
+              {/* Live preview of the map sprite in the draft paint. Photo classes
+                  show the real image (as-shot, or the baked tint variant). */}
               <View style={styles.clsPreviewRow}>
-                <TopDownClassSnap color={classColorDraft} />
-                <Text style={styles.clsPreviewText}>{VEHICLE_CLASSES.find((c) => c.key === vehClass)?.label} · {classColorDraft.toUpperCase()}</Text>
+                {CLASS_TOPDOWN[vehClass] ? (
+                  <Image
+                    source={classColorDraft ? (CLASS_TINTS[vehClass]?.[nearestClassPreset(classColorDraft)] ?? CLASS_TOPDOWN[vehClass]) : CLASS_TOPDOWN[vehClass]}
+                    style={{ width: 52, height: 52 }}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <TopDownClassSnap color={classColorDraft ?? '#2DEC86'} />
+                )}
+                <Text style={styles.clsPreviewText}>{VEHICLE_CLASSES.find((c) => c.key === vehClass)?.label} · {classColorDraft ? classColorDraft.toUpperCase() : 'Original'}</Text>
               </View>
 
-              {/* Paint swatches (same palette as Route Color) + Save */}
+              {/* Paint swatches (same palette as Route Color) + Save. First chip =
+                  "Original" (no tint — the photo as-shot). */}
               <View style={styles.clsSwatchRow}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => { Haptics.selectionAsync(); setClassColorDraft(null); }}
+                  style={[styles.clsSwatch, { backgroundColor: 'rgba(255,255,255,0.08)' }, classColorDraft === null && styles.clsSwatchSel]}
+                >
+                  <Ionicons name="ban-outline" size={15} color="#9A9A9E" />
+                </TouchableOpacity>
                 {CLASS_PRESETS.map((hex) => {
-                  const active = classColorDraft.toLowerCase() === hex.toLowerCase();
+                  const active = (classColorDraft ?? '').toLowerCase() === hex.toLowerCase();
                   return (
                     <TouchableOpacity
                       key={hex}

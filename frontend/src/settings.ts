@@ -323,6 +323,11 @@ export function getVehicleClass(s: Settings): VehicleClass {
 export function getClassColor(s: Settings): string {
   return s.classColors?.[getVehicleClass(s)] ?? '#2DEC86';
 }
+// RAW per-class paint — undefined when the user never saved one. Photo classes
+// use this to tell "tint it" apart from "show the photo as-shot".
+export function getClassColorRaw(s: Settings): string | undefined {
+  return s.classColors?.[getVehicleClass(s)];
+}
 
 // ---- Per-source audio volume (0..1), for the tester-calibration Audio screen ----
 // STOCK (untuned) levels. Most sources start at 60% — not 100% — so testers can

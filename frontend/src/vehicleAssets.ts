@@ -181,3 +181,18 @@ export function getVehicleModelUrl(color?: string | null): string {
 export function getVehicleModelKey(color?: string | null): string {
   return resolveGRCKey(color) || DEFAULT_GRC_KEY;
 }
+
+// ===== Top-down "Class" photos (Garage → Map Appearance → Class) =====
+// Real top-down shots, background-keyed + rotated nose-up + fit to the GRC
+// marker canvas (44×44, transparent) by the class-asset pipeline. Classes not
+// in this map fall back to the tinted top-down silhouette until Jeff supplies
+// a photo (missing: sedan [source too dark/grainy to key], electric,
+// motorcycle, boat — hatchback intentionally uses the GRC avatar PNGs).
+export const CLASS_TOPDOWN: Partial<Record<string, any>> = {
+  coupe:  require("../assets/images/classes/coupe.png"),   // Porsche 911
+  sports: require("../assets/images/classes/sports.png"),  // Shelby Mustang
+  exotic: require("../assets/images/classes/exotic.png"),  // Aventador roadster
+  truck:  require("../assets/images/classes/truck.png"),   // Ranger Raptor
+  atv:    require("../assets/images/classes/atv.png"),
+  sxs:    require("../assets/images/classes/sxs.png"),     // Can-Am Maverick
+};

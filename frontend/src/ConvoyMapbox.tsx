@@ -38,7 +38,8 @@ import { nearestRoadLine, roadHeadingOff, type LatLng as RoadLatLng } from "./ro
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getPowerMode } from "./powerMode";
-import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey } from "./vehicleAssets";
+import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey, CLASS_TOPDOWN } from "./vehicleAssets";
+import { CLASS_TINTS, nearestClassPreset } from "./classTints";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient, type CongestionLevel } from "./mapboxDirections";
 import { getCarState } from "./carplay/carStore";
@@ -108,6 +109,9 @@ interface ConvoyMapboxProps {
   selfMarkerType?: "car" | "arrow" | "photo" | "class";
   // Paint for the 'class' sprite (#rrggbb — Garage per-class color).
   selfClassColor?: string;
+  // Which class is active — picks the real top-down photo when one exists
+  // (CLASS_TOPDOWN); otherwise the tinted silhouette placeholder renders.
+  selfVehicleClass?: string;
   mapView?: "heading_up" | "north_up";
   // Base-map mode — drives the Mapbox style + light preset directly. mapType/
   // mapDark are still accepted (shared MapEngine props) but unused by this engine.
@@ -669,7 +673,7 @@ type PlacePoint = { id: string; lat: number; lng: number; label: string; price?:
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1 }: {
   lat: number; lng: number; heading: number; emissive: number;
   // modelRotation X (deg): stand a flat marker UP toward the chase camera. 0 for the
   // car (sits flat on its wheels); the green arrow passes ARROW_MODEL_PITCH (~52).
@@ -693,6 +697,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // class sprite). When set, the marker renders as a flat map-aligned SymbolLayer
   // riding the SAME eased pose instead of the 3D ModelLayer.
   sprite?: string;
+  // iconSize for the sprite (real 44px photos need ~1.35 to match the 62pt
+  // silhouette's on-map footprint). Default 1.
+  spriteSize?: number;
 }) {
   const render = useRef({ lat, lng, heading });
   const anim = useRef<{ fromLat: number; fromLng: number; fromHdg: number; toLat: number; toLng: number; toHdg: number; start: number; dur: number; armedAt: number; stepped: boolean } | null>(null);
@@ -957,7 +964,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           slot="top"
           style={{
             iconImage: sprite,
-            iconSize: 1,
+            iconSize: spriteSize,
             iconRotate: r.heading ?? 0,
             iconRotationAlignment: "map",
             iconPitchAlignment: "map",
@@ -1352,7 +1359,7 @@ function GLPinLayers({
 
 function ConvoyMapbox(props: ConvoyMapboxProps) {
   const {
-    center, user, peers, hideSelfMarker, selfMarkerType = "car", selfClassColor = "#2DEC86", mapView = "heading_up",
+    center, user, peers, hideSelfMarker, selfMarkerType = "car", selfClassColor, selfVehicleClass = "hatchback", mapView = "heading_up",
     mapMode = "satellite", leaderUserId, show3dBuildings = true,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
     routeColor = DEFAULT_ROUTE_COLOR,
@@ -1816,10 +1823,25 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // 'arrow' appearance → the green arrow GLB instead of the car; else the per-color
   // car model. (Both render through the same SelfCarModel ModelLayer below.)
   const selfIsArrow = selfMarkerType === "arrow";
-  // "Class" appearance → a registered tinted top-down sprite instead of a GLB.
-  // Image name carries the color so a paint change remounts/re-registers it.
+  // "Class" appearance → a registered top-down sprite instead of a GLB.
+  //  • photo class + NO saved color → the photo AS-SHOT
+  //  • photo class + saved color   → the pre-baked luminance-tinted variant
+  //    (GL can't tint an RGBA image live; custom hex snaps to nearest preset)
+  //  • no photo yet                → the tinted silhouette placeholder
+  // Image name carries class+color so switching either re-registers live.
   const selfIsClass = selfMarkerType === "class";
-  const selfClassImg = "self_class_" + (selfClassColor || "#2DEC86").replace(/[^0-9a-fA-F]/g, "");
+  const selfClassAsShot = CLASS_TOPDOWN[selfVehicleClass];
+  let selfClassPhoto: any = selfClassAsShot;
+  let selfClassImg: string;
+  if (selfClassAsShot && selfClassColor) {
+    const preset = nearestClassPreset(selfClassColor);
+    selfClassPhoto = CLASS_TINTS[selfVehicleClass]?.[preset] ?? selfClassAsShot;
+    selfClassImg = `self_class_photo_${selfVehicleClass}_${preset}`;
+  } else if (selfClassAsShot) {
+    selfClassImg = `self_class_photo_${selfVehicleClass}`;
+  } else {
+    selfClassImg = "self_class_" + (selfClassColor || "#2DEC86").replace(/[^0-9a-fA-F]/g, "");
+  }
   // Arrow = the BUNDLED asset (require id, ships with the JS); car = per-color
   // remote GLB URL → the user's chosen GRC paint. <Models> accepts both.
   const selfModelUrl: string | number = selfIsArrow ? GREEN_ARROW_MODEL : getVehicleModelUrl(selfCar?.color);
@@ -2097,15 +2119,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             ("convoyCar") from the ModelLayer below. */}
         <Models key={selfModelId} models={{ [selfModelId]: selfModelUrl }} />
 
-        {/* "Class" appearance: register the tinted top-down sprite (snapshotted
-            RN view → native map image). Keyed by color so repainting swaps live. */}
-        {selfIsClass && (
+        {/* "Class" appearance: register the top-down sprite. Real class photo
+            when one exists (as-is); otherwise the tinted silhouette snapshot.
+            Keyed by class+color so switching either swaps live. */}
+        {selfIsClass && (selfClassPhoto ? (
+          <Images key={selfClassImg} images={{ [selfClassImg]: selfClassPhoto }} />
+        ) : (
           <Images key={selfClassImg}>
             <MBXImage name={selfClassImg}>
-              <TopDownClassSnap color={selfClassColor} />
+              <TopDownClassSnap color={selfClassColor || "#2DEC86"} />
             </MBXImage>
           </Images>
-        )}
+        ))}
 
         {/* Mapbox's native location layer — REQUIRED to power the Camera's
             followUserLocation (a hidden/unmounted location component doesn't start
@@ -2334,6 +2359,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             headingOffset={selfIsArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
             pitchTilt={selfIsArrow ? ARROW_MODEL_PITCH : 0}
             sprite={selfIsClass ? selfClassImg : undefined}
+            spriteSize={selfClassPhoto ? 1.35 : 1}
             cameraRef={cameraRef}
             getCam={getCam}
             readyRef={lockReadyRef}

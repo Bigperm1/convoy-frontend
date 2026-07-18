@@ -109,6 +109,43 @@ while (q.length) {
   if (filled) console.log("filled", filled, "interior hole px");
 }
 
+// 1c) EDGE REFINEMENT (premium pass, 2026-07-18 "edges missing"):
+//   - notch fill: a transparent pixel mostly surrounded by opaque ones is a
+//     flood bite into the outline — restore it (3 passes eats 1-3px notches).
+//   - feather: binary flood edges are ragged; rebuild edge alpha as the 3x3
+//     opaque coverage fraction for a clean anti-aliased 1px rim.
+{
+  const at = (x, y) => D[idx(x, y) + 3];
+  for (let pass = 0; pass < 3; pass++) {
+    const restore = [];
+    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+      if (at(x, y) !== 0) continue;
+      let solid = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        if (at(x + dx, y + dy) > 128) solid++;
+      }
+      if (solid >= 5) restore.push(idx(x, y));
+    }
+    for (const i of restore) D[i + 3] = 255;
+    if (!restore.length) break;
+  }
+  // feather: recompute alpha at the boundary as neighborhood coverage
+  const A = new Uint8ClampedArray(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) A[y * W + x] = at(x, y);
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    const a = A[y * W + x];
+    // only touch boundary pixels (mixed neighborhood)
+    let sum = 0, n = 0, hasSolid = false, hasClear = false;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const v = A[(y + dy) * W + (x + dx)];
+      sum += v; n++;
+      if (v > 200) hasSolid = true; else if (v < 50) hasClear = true;
+    }
+    if (hasSolid && hasClear) D[idx(x, y) + 3] = Math.round((a + sum / n) / 2);
+  }
+}
+
 // 2) rotate
 const rot = parseInt(rotArg || "0", 10);
 function rotate(png, deg) {

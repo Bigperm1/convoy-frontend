@@ -56,8 +56,14 @@ const wr32 = (b: Uint8Array, o: number, v: number) => { b[o] = v & 255; b[o + 1]
 // (per-channel ratio vs the family base).
 function recolorFamily(mats: any[], names: string[], hex: string): void {
   const base = mats.find((m) => m?.name === names[0]);
-  const baseCol: number[] | undefined = base?.pbrMetallicRoughness?.baseColorFactor;
-  if (!baseCol) return;
+  const baseColRef: number[] | undefined = base?.pbrMetallicRoughness?.baseColorFactor;
+  if (!baseColRef) return;
+  // SNAPSHOT the base color. baseColRef aliases the base material's own array,
+  // and the base is names[0] — processed FIRST below — so mutating it in place
+  // would corrupt the divisor for every other tier (ratio ×target = original,
+  // leaving greenLight/Mid/Dark unrecolored: the "arrow color doesn't work"
+  // bug). A copy keeps the original ratios stable across the whole family.
+  const baseCol = [...baseColRef];
   const target = hexToLinear(hex);
   for (const name of names) {
     const m = mats.find((x) => x?.name === name);
@@ -96,8 +102,11 @@ export async function getPaintedArrowUri(
 ): Promise<string | null> {
   try {
     if (!primary && !secondary) return null;
+    // v2 suffix: invalidate the buggy pre-fix cached arrows (the base-material
+    // aliasing bug left only one tier recolored). Old arrow_*.glb files are
+    // simply never read again; the cache dir self-cleans over time.
     const key = `${(primary || "x").replace("#", "")}_${(secondary || "x").replace("#", "")}`;
-    const outPath = `${FileSystem.cacheDirectory}arrow_${key}.glb`;
+    const outPath = `${FileSystem.cacheDirectory}arrow_v2_${key}.glb`;
     const info = await FileSystem.getInfoAsync(outPath);
     if (info.exists) return outPath;
 

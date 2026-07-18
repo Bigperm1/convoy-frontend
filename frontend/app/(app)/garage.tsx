@@ -40,9 +40,9 @@ const VEHICLE_CLASSES: { key: VehicleClass; label: string; icon: string }[] = [
   { key: 'sedan',      label: 'Sedan',      icon: 'car' },
   { key: 'truck',      label: 'Truck',      icon: 'car-pickup' },
   { key: 'electric',   label: 'Electric',   icon: 'car-electric' },
-  { key: 'atv',        label: 'ATV',        icon: 'atv' },
-  { key: 'motorcycle', label: 'Motorcycle', icon: 'motorbike' },
-  { key: 'sxs',        label: 'SxS',        icon: 'go-kart' },
+  // ATV / Motorcycle / SxS pulled from the picker 2026-07-18 (Jeff: premium
+  // feel first). Assets + rendering stay wired, so anyone already on one keeps
+  // their marker; re-add the rows to bring them back.
   { key: 'boat',       label: 'Boat',       icon: 'sail-boat' },
 ];
 // Same palette as Settings → Route Color, per Jeff ("use the color swatch from

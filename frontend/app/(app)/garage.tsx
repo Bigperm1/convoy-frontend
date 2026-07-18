@@ -503,9 +503,26 @@ export default function GarageScreen() {
           <View style={{ width: 40 }} />
         </View>
 
-        {/* Car hero — full-bleed image that fades to black (welcome-carousel
-            style). No card/LED border; the photo melts into the page and the
-            car name sits over the bottom fade for a premium showroom feel. */}
+        {/* Car hero — what renders depends on the selected appearance:
+              class → the high-res class sprite in the SAVED/draft paint,
+                      rotated nose-LEFT (showroom profile pose)
+              arrow → the Hairpin word logo
+              3D car / photo → the original showroom image (untouched) */}
+        {markerType === 'class' && CLASS_TOPDOWN[vehClass] ? (
+          <View style={[styles.heroWrap, styles.heroAlt]}>
+            <View style={{ transform: [{ rotate: '-90deg' }] }}>
+              <ClassSprite vehicleClass={vehClass} primary={priDraft} secondary={secDraft} size={210} />
+            </View>
+          </View>
+        ) : markerType === 'arrow' ? (
+          <View style={[styles.heroWrap, styles.heroAlt]}>
+            <Image
+              source={require('../../assets/images/hairpin-word.png')}
+              style={styles.heroWordLogo}
+              resizeMode="contain"
+            />
+          </View>
+        ) : (
         <View style={styles.heroWrap}>
           <ImageBackground source={carImage} style={styles.heroBg} resizeMode="cover">
             {/* Subtle top vignette + strong bottom fade to black so the image
@@ -530,6 +547,7 @@ export default function GarageScreen() {
             </View>
           </ImageBackground>
         </View>
+        )}
 
         {/* Top speed badge */}
         {topSpeed ? (
@@ -760,6 +778,8 @@ const styles = StyleSheet.create({
   // Premium full-bleed hero — image fades to black (welcome-carousel style),
   // no card/LED border. The car name overlays the bottom fade.
   heroWrap:           { width: SCREEN_W, height: 240, marginBottom: 14, backgroundColor: '#000' },
+  heroAlt:            { alignItems: 'center', justifyContent: 'center' },
+  heroWordLogo:       { width: '72%', height: 96 },
   heroBg:             { flex: 1, justifyContent: 'flex-end' },
   heroCaption:        { paddingHorizontal: 24, paddingBottom: 22 },
   heroTitle:          { color: '#F4F4F4', fontSize: 26, fontWeight: '800', letterSpacing: -0.3 },

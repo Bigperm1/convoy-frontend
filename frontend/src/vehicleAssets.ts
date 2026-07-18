@@ -191,7 +191,8 @@ export function getVehicleModelKey(color?: string | null): string {
 export const CLASS_TOPDOWN: Partial<Record<string, any>> = {
   hatchback:  require("../assets/images/classes-v2/hatchback.png"),  // carbon-roof hot hatch (512 white set)
   sedan:      require("../assets/images/classes-v2/sedan.png"),      // white BMW
-  boat:       require("../assets/images/classes-v2/boat.png"),       // Supra wake boat
+  boat:       require("../assets/images/classes-v2/boat.png"),    // Supra wake boat
+  jeep:       require("../assets/images/classes-v2/jeep.png"),    // (new class 2026-07-18)       // Supra wake boat
   muscle:     require("../assets/images/classes-v2/muscle.png"),     // striped muscle (512 white set)
   supercar:   require("../assets/images/classes-v2/supercar.png"),   // carbon-roof supercar (512 white set)
   electric:   require("../assets/images/classes-v2/electric.png"),   // glass-roof EV (512 white set)

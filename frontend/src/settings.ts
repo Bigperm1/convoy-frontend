@@ -139,7 +139,7 @@ selfMarkerType?: 'car' | 'arrow' | 'photo' | 'class';
 // vehicleClass undefined → 'hatchback'.
 // 2026-07-18 rename: coupe → muscle, sports → supercar (legacy strings still
 // arrive from old saves/peers — LEGACY_CLASS maps them on read).
-vehicleClass?: 'hatchback' | 'muscle' | 'supercar' | 'exotic' | 'sedan' | 'truck' | 'electric' | 'atv' | 'motorcycle' | 'sxs' | 'boat' | 'coupe' | 'sports';
+vehicleClass?: 'hatchback' | 'muscle' | 'supercar' | 'exotic' | 'sedan' | 'truck' | 'electric' | 'atv' | 'motorcycle' | 'sxs' | 'boat' | 'jeep' | 'coupe' | 'sports';
 // LEGACY single-color per class (pre primary/secondary). Read as the primary
 // fallback; new saves write classPaint below.
 classColors?: Record<string, string>;

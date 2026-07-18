@@ -189,15 +189,15 @@ export function getVehicleModelKey(color?: string | null): string {
 // a photo (missing: electric + motorcycle — hatchback intentionally uses the
 // GRC avatar PNGs).
 export const CLASS_TOPDOWN: Partial<Record<string, any>> = {
-  hatchback:  require("../assets/images/classes/hatchback.png"),  // carbon-roof hot hatch (512 white set)
-  sedan:      require("../assets/images/classes/sedan.png"),      // white BMW
-  boat:       require("../assets/images/classes/boat.png"),       // Supra wake boat
-  muscle:     require("../assets/images/classes/muscle.png"),     // striped muscle (512 white set)
-  supercar:   require("../assets/images/classes/supercar.png"),   // carbon-roof supercar (512 white set)
-  electric:   require("../assets/images/classes/electric.png"),   // glass-roof EV (512 white set)
-  exotic:     require("../assets/images/classes/exotic.png"),     // LaFerrari (512 white set)
-  truck:      require("../assets/images/classes/truck.png"),      // Raptor (512 white set)
-  motorcycle: require("../assets/images/classes/motorcycle.png"), // Ducati (512 white set)
-  atv:        require("../assets/images/classes/atv.png"),
-  sxs:        require("../assets/images/classes/sxs.png"),        // Can-Am Maverick
+  hatchback:  require("../assets/images/classes-v2/hatchback.png"),  // carbon-roof hot hatch (512 white set)
+  sedan:      require("../assets/images/classes-v2/sedan.png"),      // white BMW
+  boat:       require("../assets/images/classes-v2/boat.png"),       // Supra wake boat
+  muscle:     require("../assets/images/classes-v2/muscle.png"),     // striped muscle (512 white set)
+  supercar:   require("../assets/images/classes-v2/supercar.png"),   // carbon-roof supercar (512 white set)
+  electric:   require("../assets/images/classes-v2/electric.png"),   // glass-roof EV (512 white set)
+  exotic:     require("../assets/images/classes-v2/exotic.png"),     // LaFerrari (512 white set)
+  truck:      require("../assets/images/classes-v2/truck.png"),      // Raptor (512 white set)
+  motorcycle: require("../assets/images/classes-v2/motorcycle.png"), // Ducati (512 white set)
+  atv:        require("../assets/images/classes-v2/atv.png"),
+  sxs:        require("../assets/images/classes-v2/sxs.png"),        // Can-Am Maverick
 };

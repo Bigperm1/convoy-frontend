@@ -35,6 +35,13 @@ export type ConvoyPresencePeer = {
   // "live" = actively driving; "parked" = full-mode user broadcasting last-known
   // location while their CarPlay/AA head unit is disconnected.
   status?: "live" | "parked";
+  // Class appearance (Garage): marker === 'class' means peers should render the
+  // vehicleClass top-down sprite in this driver's saved paint instead of the
+  // GRC avatar. Paint is LOCAL-only, so presence is its only carrier.
+  marker?: string;
+  cls?: string;
+  clsPri?: string;
+  clsSec?: string;
 };
 
 export type ConvoyMe = {
@@ -49,6 +56,11 @@ export type ConvoyMe = {
   topSpeed?: number;
   // Presence status broadcast to peers — "live" (default) or "parked".
   status?: "live" | "parked";
+  // Class appearance broadcast (see PresencePayload).
+  marker?: string;
+  cls?: string;
+  clsPri?: string;
+  clsSec?: string;
 };
 
 type Status = "idle" | "joining" | "subscribed" | "error" | "disabled";
@@ -115,6 +127,10 @@ export function useConvoyPresence(
             online_at: p.online_at,
             topSpeed: typeof p.topSpeed === "number" ? p.topSpeed : undefined,
             status: p.status === "parked" ? "parked" : "live",
+            marker: typeof p.marker === "string" ? p.marker : undefined,
+            cls: typeof p.cls === "string" ? p.cls : undefined,
+            clsPri: typeof p.clsPri === "string" ? p.clsPri : undefined,
+            clsSec: typeof p.clsSec === "string" ? p.clsSec : undefined,
           });
         });
         setPeers(list);
@@ -134,6 +150,10 @@ export function useConvoyPresence(
               activeColor: me.activeColor || toGRCSlug(me.carColor) || undefined,
               topSpeed: me.topSpeed,
               status: me.status ?? "live",
+              marker: me.marker,
+              cls: me.cls,
+              clsPri: me.clsPri,
+              clsSec: me.clsSec,
               lat: coords.lat,
               lng: coords.lng,
               heading: coords.heading,
@@ -178,12 +198,16 @@ export function useConvoyPresence(
       activeColor: me.activeColor || toGRCSlug(me.carColor) || undefined,
       topSpeed: me.topSpeed,
       status: me.status ?? "live",
+      marker: me.marker,
+      cls: me.cls,
+      clsPri: me.clsPri,
+      clsSec: me.clsSec,
       lat: coords.lat,
       lng: coords.lng,
       heading: coords.heading,
       online_at: new Date().toISOString(),
     }).catch(() => {});
-  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status]);
+  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec]);
 
   return { peers, status };
 }

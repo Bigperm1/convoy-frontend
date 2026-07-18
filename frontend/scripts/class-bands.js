@@ -17,6 +17,15 @@ const { PNG } = require("pngjs");
 const [,, cls] = process.argv;
 if (!cls) { console.log("usage: node class-bands.js <class>"); process.exit(1); }
 
+// Per-class band profiles. Default = the white-render rule. BOAT keeps its
+// Jeff-approved 2026-07-17 look: PRIMARY = the mid-grey swim-platform/hull
+// accents, SECONDARY = the white deck, dark detail never paints.
+const PROFILES = {
+  default: { priLo: 0.68, priHi: 1.0, secLo: 0.0, secHi: 0.32, secFloor: 0.55 },
+  boat:    { priLo: 0.28, priHi: 0.66, secLo: 0.66, secHi: 1.0, secFloor: 0.45 },
+};
+const P = PROFILES[cls] || PROFILES.default;
+
 const src = PNG.sync.read(fs.readFileSync(`assets/images/classes/${cls}.png`));
 const { width: W, height: H, data: D } = src;
 
@@ -37,18 +46,18 @@ for (let p = 0; p < W * H; p++) {
   const setPx = (png, R, G, B, A) => {
     const d = png.data; d[i] = R; d[i + 1] = G; d[i + 2] = B; d[i + 3] = A;
   };
-  if (lum >= 0.68) {
-    // PRIMARY (white body): shading follows luminance within the band, with a
-    // floor so even creases keep readable color.
-    const t = (lum - 0.68) / (1 - 0.68);
+  if (lum >= P.priLo && lum <= P.priHi) {
+    // PRIMARY band: shading follows luminance within the band, with a floor so
+    // even creases keep readable color.
+    const t = (lum - P.priLo) / (P.priHi - P.priLo);
     const shade = Math.round((0.45 + 0.55 * t) * a);
     setPx(priBlack, 0, 0, 0, a);
     setPx(priMask, 255, 255, 255, shade);
-  } else if (lum <= 0.32) {
-    // SECONDARY (black panels/glass): high color floor so the tint clearly
-    // reads even on near-black, brighter darks get slightly more.
-    const t = lum / 0.32;
-    const shade = Math.round((0.55 + 0.35 * t) * a);
+  } else if (lum >= P.secLo && lum <= P.secHi) {
+    // SECONDARY band: high color floor so the tint clearly reads even at the
+    // band's dark end; brighter pixels get slightly more.
+    const t = (lum - P.secLo) / (P.secHi - P.secLo);
+    const shade = Math.round((P.secFloor + (0.90 - P.secFloor) * t) * a);
     setPx(secBlack, 0, 0, 0, a);
     setPx(secMask, 255, 255, 255, shade);
   }

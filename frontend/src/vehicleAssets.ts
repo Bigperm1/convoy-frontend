@@ -189,6 +189,7 @@ export function getVehicleModelKey(color?: string | null): string {
 // a photo (missing: electric + motorcycle — hatchback intentionally uses the
 // GRC avatar PNGs).
 export const CLASS_TOPDOWN: Partial<Record<string, any>> = {
+  hatchback:  require("../assets/images/classes/hatchback.png"),  // white GRC (from the avatar art — swap in a high-res photo when one lands)
   sedan:      require("../assets/images/classes/sedan.png"),      // white BMW
   boat:       require("../assets/images/classes/boat.png"),       // Supra wake boat
   coupe:      require("../assets/images/classes/coupe.png"),      // Porsche 911 (white set, 198px)

@@ -509,13 +509,13 @@ export default function GarageScreen() {
               arrow → the Hairpin word logo
               3D car / photo → the original showroom image (untouched) */}
         {markerType === 'class' && CLASS_TOPDOWN[vehClass] ? (
-          <View style={[styles.heroWrap, styles.heroAlt]}>
+          <View style={[styles.heroTall, styles.heroAlt]}>
             <View style={{ transform: [{ rotate: '-90deg' }] }}>
-              <ClassSprite vehicleClass={vehClass} primary={priDraft} secondary={secDraft} size={210} />
+              <ClassSprite vehicleClass={vehClass} primary={priDraft} secondary={secDraft} size={360} />
             </View>
           </View>
         ) : markerType === 'arrow' ? (
-          <View style={[styles.heroWrap, styles.heroAlt]}>
+          <View style={[styles.heroTall, styles.heroAlt]}>
             <Image
               source={require('../../assets/images/hairpin-word.png')}
               style={styles.heroWordLogo}
@@ -668,10 +668,7 @@ export default function GarageScreen() {
                         setPaintSlot('primary');
                       }}
                     >
-                      {c.key === 'hatchback' ? (
-                        // Top-down GR Corolla for Hatchback.
-                        <Image source={getVehiclePngOrDefault(getSettings().carColor)} style={styles.clsTileImg} resizeMode="contain" />
-                      ) : CLASS_TOPDOWN[c.key] ? (
+                      {CLASS_TOPDOWN[c.key] ? (
                         // Real top-down class photo (keyed + nose-up).
                         <Image source={CLASS_TOPDOWN[c.key]} style={styles.clsTileImg} resizeMode="contain" />
                       ) : (
@@ -778,8 +775,10 @@ const styles = StyleSheet.create({
   // Premium full-bleed hero — image fades to black (welcome-carousel style),
   // no card/LED border. The car name overlays the bottom fade.
   heroWrap:           { width: SCREEN_W, height: 240, marginBottom: 14, backgroundColor: '#000' },
+  // heroTall: the class-sprite / arrow-logo hero fills most of the screen
+  heroTall:           { width: SCREEN_W, height: 430, marginBottom: 14, backgroundColor: '#000' },
   heroAlt:            { alignItems: 'center', justifyContent: 'center' },
-  heroWordLogo:       { width: '72%', height: 96 },
+  heroWordLogo:       { width: '94%', height: 240 },
   heroBg:             { flex: 1, justifyContent: 'flex-end' },
   heroCaption:        { paddingHorizontal: 24, paddingBottom: 22 },
   heroTitle:          { color: '#F4F4F4', fontSize: 26, fontWeight: '800', letterSpacing: -0.3 },

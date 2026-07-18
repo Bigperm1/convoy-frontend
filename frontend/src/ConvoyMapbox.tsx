@@ -698,7 +698,7 @@ export function routeInitialBearing(line: { latitude: number; longitude: number 
   return ((Math.atan2(east, north) * 180) / Math.PI + 360) % 360;
 }
 
-type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer; status?: "live" | "parked" };
+type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer; status?: "live" | "parked"; cls?: string; clsPri?: string; clsSec?: string };
 type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
 
 // ===== SelfCarModel =====
@@ -1085,12 +1085,19 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
   return (
     <MarkerView coordinate={[car.lng, car.lat]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap allowOverlapWithPuck>
       <Pressable onPress={() => { if (car.peer) onPress?.(); }} hitSlop={8}>
+        {car.cls ? (
+          // Peer broadcasts a class appearance: live tinted sprite in THEIR paint.
+          <View style={[car.status === "parked" ? { opacity: 0.5 } : null, { transform: [{ rotate: `${rotation}deg` }] }]}>
+            <ClassSprite vehicleClass={car.cls} primary={car.clsPri} secondary={car.clsSec} size={44} />
+          </View>
+        ) : (
         <Image
           source={src}
           style={[styles.car, car.status === "parked" ? { opacity: 0.5 } : null, { transform: [{ rotate: `${rotation}deg` }] }]}
           resizeMode="contain"
           fadeDuration={0}
         />
+        )}
       </Pressable>
     </MarkerView>
   );
@@ -1907,6 +1914,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         color: p.activeColor || p.carColor, heading: p.heading,
         leader: !!leaderUserId && p.user_id === leaderUserId, peer: p,
         status: (p as any).status,
+        // Class appearance broadcast: render this peer as their class sprite
+        // in their paint instead of the GRC avatar (MarkerViews are live RN
+        // views, so ClassSprite tints directly — no snapshot machinery).
+        cls: (p as any).marker === "class" && CLASS_TOPDOWN[(p as any).cls] ? (p as any).cls : undefined,
+        clsPri: (p as any).clsPri,
+        clsSec: (p as any).clsSec,
       });
     }
   });

@@ -18,6 +18,7 @@ import { CLASS_TOPDOWN } from "./vehicleAssets";
 
 const L = (p: any) => p as any;
 export const CLASS_LAYERS: Record<string, { priBlack: any; priMask: any; secBlack: any; secMask: any }> = {
+  hatchback: { priBlack: L(require("../assets/images/classes/hatchback_priblack.png")), priMask: L(require("../assets/images/classes/hatchback_primask.png")), secBlack: L(require("../assets/images/classes/hatchback_secblack.png")), secMask: L(require("../assets/images/classes/hatchback_secmask.png")) },
   coupe:  { priBlack: L(require("../assets/images/classes/coupe_priblack.png")),  priMask: L(require("../assets/images/classes/coupe_primask.png")),  secBlack: L(require("../assets/images/classes/coupe_secblack.png")),  secMask: L(require("../assets/images/classes/coupe_secmask.png")) },
   sports: { priBlack: L(require("../assets/images/classes/sports_priblack.png")), priMask: L(require("../assets/images/classes/sports_primask.png")), secBlack: L(require("../assets/images/classes/sports_secblack.png")), secMask: L(require("../assets/images/classes/sports_secmask.png")) },
   exotic: { priBlack: L(require("../assets/images/classes/exotic_priblack.png")), priMask: L(require("../assets/images/classes/exotic_primask.png")), secBlack: L(require("../assets/images/classes/exotic_secblack.png")), secMask: L(require("../assets/images/classes/exotic_secmask.png")) },

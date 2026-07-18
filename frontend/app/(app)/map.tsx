@@ -2741,6 +2741,12 @@ export default function MapScreen() {
       // carColor sourced from LOCAL settings (Garage) first so peers see the
       // paint the driver actually picked, with the backend value as fallback.
       carColor: settings.carColor || user.car_color || undefined,
+      // Class appearance: marker/class/paint travel over presence so crew see
+      // the exotic (or boat, or Ducati) instead of the GRC avatar.
+      marker: getSelfMarkerType(settings),
+      cls: getVehicleClass(settings),
+      clsPri: getClassPaint(settings).primary,
+      clsSec: getClassPaint(settings).secondary,
       // Personal best — live max-of(sessionMaxSpeed, persisted) so peers see
       // an up-to-date number even before the throttled sync fires.
       topSpeed: Math.max(user.top_speed_record || 0, sessionMaxSpeed),
@@ -2927,6 +2933,10 @@ export default function MapScreen() {
         topSpeed: p.topSpeed,
         // "parked" peers render dimmed (full-mode user with head unit off).
         status: p.status,
+        marker: (p as any).marker,
+        cls: (p as any).cls,
+        clsPri: (p as any).clsPri,
+        clsSec: (p as any).clsSec,
       } as Peer;
     });
     return Object.values(byId);

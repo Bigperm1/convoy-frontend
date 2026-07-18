@@ -81,25 +81,33 @@ export function ClassSprite({ vehicleClass, primary, secondary, size = 66, onRea
     }
   };
   if (!photo) return null;
-  const img = { ...StyleSheet.absoluteFillObject, width: size, height: size } as const;
+  // The BASE photo is IN-FLOW (concrete width/height) so the wrapper View has a
+  // real measured size; the paint layers are absolute OVERLAYS on top. This is
+  // load-bearing on ANDROID: @rnmapbox's MarkerView sizes the annotation from
+  // `view.width`/`view.height` (the measured pixels), and Mapbox's snapshot
+  // reads the same — an all-`absoluteFill` view measures to 0 on Android →
+  // BLANK markers / wrong size (the GRC single-Image marker works precisely
+  // because it's one in-flow Image). iOS is unaffected (same composited box).
+  const base = { width: size, height: size } as const;
+  const over = { position: "absolute" as const, top: 0, left: 0, width: size, height: size };
   return (
     // collapsable={false}: Fabric view-flattening otherwise removes this wrapper
     // when the sprite is the child of the map's MBXImage — the native snapshot
     // then receives the 5 layer Images as DIRECT subviews, logs "Image supports
     // max 1 subview", and captures ONLY subview[0] (the unpainted base photo).
     // That was the real "boat color never lands on the map" bug.
-    <View collapsable={false} style={{ width: size, height: size }}>
-      <Image source={photo} style={img} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
+    <View collapsable={false} style={{ width: size, height: size, overflow: "visible" }}>
+      <Image source={photo} style={base} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
       {layers && primary ? (
         <>
-          <Image source={layers.priBlack} style={img} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
-          <Image source={layers.priMask} style={[img, { tintColor: primary }]} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
+          <Image source={layers.priBlack} style={over} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
+          <Image source={layers.priMask} style={[over, { tintColor: primary }]} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
         </>
       ) : null}
       {layers && secondary ? (
         <>
-          <Image source={layers.secBlack} style={img} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
-          <Image source={layers.secMask} style={[img, { tintColor: secondary }]} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
+          <Image source={layers.secBlack} style={over} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
+          <Image source={layers.secMask} style={[over, { tintColor: secondary }]} resizeMode="contain" fadeDuration={0} onLoad={onLoad} />
         </>
       ) : null}
     </View>

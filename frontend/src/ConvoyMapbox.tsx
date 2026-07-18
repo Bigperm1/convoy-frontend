@@ -1095,7 +1095,10 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
           </View>
         ) : car.cls ? (
           // Peer broadcasts a class appearance: live tinted sprite in THEIR paint.
-          <View style={[car.status === "parked" ? { opacity: 0.5 } : null, { transform: [{ rotate: `${rotation}deg` }] }]}>
+          // Explicit width/height (not just the child's) so @rnmapbox's Android
+          // MarkerView measures a concrete size for the annotation — otherwise
+          // the wrapper can measure 0 → blank/cut-off peer markers on Android.
+          <View style={[car.status === "parked" ? { opacity: 0.5 } : null, { width: 44, height: 44, transform: [{ rotate: `${rotation}deg` }] }]}>
             <ClassSprite vehicleClass={car.cls} primary={car.clsPri} secondary={car.clsSec} size={44} />
           </View>
         ) : (

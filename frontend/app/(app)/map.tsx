@@ -2747,6 +2747,8 @@ export default function MapScreen() {
       cls: getVehicleClass(settings),
       clsPri: getClassPaint(settings).primary,
       clsSec: getClassPaint(settings).secondary,
+      arrPri: settings.arrowPaint?.primary,
+      arrSec: settings.arrowPaint?.secondary,
       // Personal best — live max-of(sessionMaxSpeed, persisted) so peers see
       // an up-to-date number even before the throttled sync fires.
       topSpeed: Math.max(user.top_speed_record || 0, sessionMaxSpeed),
@@ -2937,6 +2939,8 @@ export default function MapScreen() {
         cls: (p as any).cls,
         clsPri: (p as any).clsPri,
         clsSec: (p as any).clsSec,
+        arrPri: (p as any).arrPri,
+        arrSec: (p as any).arrSec,
       } as Peer;
     });
     return Object.values(byId);

@@ -42,6 +42,9 @@ export type ConvoyPresencePeer = {
   cls?: string;
   clsPri?: string;
   clsSec?: string;
+  // Arrow appearance paint (marker === 'arrow'): peers render a 2-tone arrow.
+  arrPri?: string;
+  arrSec?: string;
 };
 
 export type ConvoyMe = {
@@ -61,6 +64,9 @@ export type ConvoyMe = {
   cls?: string;
   clsPri?: string;
   clsSec?: string;
+  // Arrow appearance paint (marker === 'arrow'): peers render a 2-tone arrow.
+  arrPri?: string;
+  arrSec?: string;
 };
 
 type Status = "idle" | "joining" | "subscribed" | "error" | "disabled";
@@ -153,6 +159,8 @@ export function useConvoyPresence(
             cls: typeof p.cls === "string" ? p.cls : undefined,
             clsPri: typeof p.clsPri === "string" ? p.clsPri : undefined,
             clsSec: typeof p.clsSec === "string" ? p.clsSec : undefined,
+            arrPri: typeof p.arrPri === "string" ? p.arrPri : undefined,
+            arrSec: typeof p.arrSec === "string" ? p.arrSec : undefined,
           });
         });
         setPeers(list);
@@ -176,6 +184,8 @@ export function useConvoyPresence(
               cls: me.cls,
               clsPri: me.clsPri,
               clsSec: me.clsSec,
+              arrPri: me.arrPri,
+              arrSec: me.arrSec,
               lat: coords.lat,
               lng: coords.lng,
               heading: coords.heading,
@@ -232,12 +242,14 @@ export function useConvoyPresence(
       cls: me.cls,
       clsPri: me.clsPri,
       clsSec: me.clsSec,
+      arrPri: me.arrPri,
+      arrSec: me.arrSec,
       lat: coords.lat,
       lng: coords.lng,
       heading: coords.heading,
       online_at: new Date().toISOString(),
     }).catch(() => {});
-  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec]);
+  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec, me?.arrPri, me?.arrSec]);
 
   return { peers, status };
 }

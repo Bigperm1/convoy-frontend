@@ -698,7 +698,7 @@ export function routeInitialBearing(line: { latitude: number; longitude: number 
   return ((Math.atan2(east, north) * 180) / Math.PI + 360) % 360;
 }
 
-type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer; status?: "live" | "parked"; cls?: string; clsPri?: string; clsSec?: string };
+type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer; status?: "live" | "parked"; cls?: string; clsPri?: string; clsSec?: string; arrow?: boolean; arrPri?: string; arrSec?: string };
 type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
 
 // ===== SelfCarModel =====
@@ -1085,7 +1085,15 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
   return (
     <MarkerView coordinate={[car.lng, car.lat]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap allowOverlapWithPuck>
       <Pressable onPress={() => { if (car.peer) onPress?.(); }} hitSlop={8}>
-        {car.cls ? (
+        {car.arrow ? (
+          // Peer uses the ARROW appearance: a 2-tone navigation chevron in their
+          // paint (primary body over a secondary outline), rotated to heading.
+          // Peers are MarkerViews (2D), so this mirrors the self 3D arrow flatly.
+          <View style={[car.status === "parked" ? { opacity: 0.5 } : null, { width: 40, height: 40, alignItems: "center", justifyContent: "center", transform: [{ rotate: `${rotation}deg` }] }]}>
+            <MaterialCommunityIcons name="navigation" size={38} color={car.arrSec || "#FFFFFF"} style={{ position: "absolute" }} />
+            <MaterialCommunityIcons name="navigation" size={30} color={car.arrPri || "#2DEC86"} />
+          </View>
+        ) : car.cls ? (
           // Peer broadcasts a class appearance: live tinted sprite in THEIR paint.
           <View style={[car.status === "parked" ? { opacity: 0.5 } : null, { transform: [{ rotate: `${rotation}deg` }] }]}>
             <ClassSprite vehicleClass={car.cls} primary={car.clsPri} secondary={car.clsSec} size={44} />
@@ -1920,6 +1928,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         cls: (p as any).marker === "class" && CLASS_TOPDOWN[canonicalClass((p as any).cls)] ? canonicalClass((p as any).cls) : undefined,
         clsPri: (p as any).clsPri,
         clsSec: (p as any).clsSec,
+        // Arrow appearance: render a 2-tone arrow marker in the peer's paint.
+        arrow: (p as any).marker === "arrow",
+        arrPri: (p as any).arrPri,
+        arrSec: (p as any).arrSec,
       });
     }
   });

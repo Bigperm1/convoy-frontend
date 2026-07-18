@@ -34,8 +34,8 @@ const PHOTO_AVATAR_ENABLED = false;
 // rest use MCI glyph PLACEHOLDERS until Jeff's top-down class photos land.
 const VEHICLE_CLASSES: { key: VehicleClass; label: string; icon: string }[] = [
   { key: 'hatchback',  label: 'Hatchback',  icon: 'car-hatchback' },
-  { key: 'coupe',      label: 'Coupe',      icon: 'car-side' },
-  { key: 'sports',     label: 'Sports',     icon: 'car-sports' },
+  { key: 'muscle',     label: 'Muscle',     icon: 'car-side' },
+  { key: 'supercar',   label: 'Supercar',   icon: 'car-sports' },
   { key: 'exotic',     label: 'Exotic',     icon: 'car-convertible' },
   { key: 'sedan',      label: 'Sedan',      icon: 'car' },
   { key: 'truck',      label: 'Truck',      icon: 'car-pickup' },

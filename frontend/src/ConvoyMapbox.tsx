@@ -44,7 +44,7 @@ import { getPaintedArrowUri } from "./arrowModel";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient, type CongestionLevel } from "./mapboxDirections";
 import { getCarState } from "./carplay/carStore";
-import { getLastLocation, setLastLocation, getSettings } from "./settings";
+import { getLastLocation, setLastLocation, getSettings, canonicalClass } from "./settings";
 
 // 1×1 fully transparent PNG — a REAL bundled asset, not a data-URI (@rnmapbox's
 // Images may not load a data-URI at runtime, which would let the default dot fall
@@ -1917,7 +1917,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         // Class appearance broadcast: render this peer as their class sprite
         // in their paint instead of the GRC avatar (MarkerViews are live RN
         // views, so ClassSprite tints directly — no snapshot machinery).
-        cls: (p as any).marker === "class" && CLASS_TOPDOWN[(p as any).cls] ? (p as any).cls : undefined,
+        cls: (p as any).marker === "class" && CLASS_TOPDOWN[canonicalClass((p as any).cls)] ? canonicalClass((p as any).cls) : undefined,
         clsPri: (p as any).clsPri,
         clsSec: (p as any).clsSec,
       });
@@ -1942,7 +1942,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // off these effective values, so entering/leaving water swaps live.
   const waterBoat = onWater && !!CLASS_TOPDOWN["boat"];
   const selfIsClass = waterBoat || selfMarkerType === "class";
-  const effVehicleClass = waterBoat ? "boat" : selfVehicleClass;
+  const effVehicleClass = waterBoat ? "boat" : canonicalClass(selfVehicleClass);
   const effClassPaint = waterBoat && selfVehicleClass !== "boat"
     ? (getSettings().classPaint?.["boat"] ?? {})
     : selfClassPaint;

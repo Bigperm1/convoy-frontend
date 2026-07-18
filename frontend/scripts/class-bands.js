@@ -23,6 +23,8 @@ if (!cls) { console.log("usage: node class-bands.js <class>"); process.exit(1); 
 const PROFILES = {
   default: { priLo: 0.68, priHi: 1.0, secLo: 0.0, secHi: 0.32, secFloor: 0.55 },
   boat:    { priLo: 0.28, priHi: 0.66, secLo: 0.66, secHi: 1.0, secFloor: 0.45 },
+  // silver-bodied render — widen the primary band so the darker flank paints too
+  sedan:   { priLo: 0.55, priHi: 1.0, secLo: 0.0, secHi: 0.32, secFloor: 0.55 },
 };
 const P = PROFILES[cls] || PROFILES.default;
 

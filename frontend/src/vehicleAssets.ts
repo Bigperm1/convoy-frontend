@@ -189,14 +189,15 @@ export function getVehicleModelKey(color?: string | null): string {
 // a photo (missing: electric + motorcycle — hatchback intentionally uses the
 // GRC avatar PNGs).
 export const CLASS_TOPDOWN: Partial<Record<string, any>> = {
-  hatchback:  require("../assets/images/classes/hatchback.png"),  // white GRC (from the avatar art — swap in a high-res photo when one lands)
+  hatchback:  require("../assets/images/classes/hatchback.png"),  // carbon-roof hot hatch (512 white set)
   sedan:      require("../assets/images/classes/sedan.png"),      // white BMW
   boat:       require("../assets/images/classes/boat.png"),       // Supra wake boat
-  coupe:      require("../assets/images/classes/coupe.png"),      // Porsche 911 (white set, 198px)
-  sports:     require("../assets/images/classes/sports.png"),     // striped Mustang (white set, 198px)
-  exotic:     require("../assets/images/classes/exotic.png"),     // LaFerrari (white set, 198px)
-  truck:      require("../assets/images/classes/truck.png"),      // Raptor (white set, 198px)
-  motorcycle: require("../assets/images/classes/motorcycle.png"), // Ducati (white set, 198px)
+  muscle:     require("../assets/images/classes/muscle.png"),     // striped muscle (512 white set)
+  supercar:   require("../assets/images/classes/supercar.png"),   // carbon-roof supercar (512 white set)
+  electric:   require("../assets/images/classes/electric.png"),   // glass-roof EV (512 white set)
+  exotic:     require("../assets/images/classes/exotic.png"),     // LaFerrari (512 white set)
+  truck:      require("../assets/images/classes/truck.png"),      // Raptor (512 white set)
+  motorcycle: require("../assets/images/classes/motorcycle.png"), // Ducati (512 white set)
   atv:        require("../assets/images/classes/atv.png"),
   sxs:        require("../assets/images/classes/sxs.png"),        // Can-Am Maverick
 };

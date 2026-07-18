@@ -137,7 +137,9 @@ selfMarkerType?: 'car' | 'arrow' | 'photo' | 'class';
 // painted with user-picked PRIMARY (accent band) + SECONDARY (second band)
 // colors. Stored PER CLASS so switching class remembers each one's paint.
 // vehicleClass undefined → 'hatchback'.
-vehicleClass?: 'hatchback' | 'coupe' | 'sports' | 'exotic' | 'sedan' | 'truck' | 'electric' | 'atv' | 'motorcycle' | 'sxs' | 'boat';
+// 2026-07-18 rename: coupe → muscle, sports → supercar (legacy strings still
+// arrive from old saves/peers — LEGACY_CLASS maps them on read).
+vehicleClass?: 'hatchback' | 'muscle' | 'supercar' | 'exotic' | 'sedan' | 'truck' | 'electric' | 'atv' | 'motorcycle' | 'sxs' | 'boat' | 'coupe' | 'sports';
 // LEGACY single-color per class (pre primary/secondary). Read as the primary
 // fallback; new saves write classPaint below.
 classColors?: Record<string, string>;
@@ -327,8 +329,13 @@ export function getSelfMarkerType(s: Settings): 'car' | 'arrow' | 'photo' | 'cla
 
 // ---- "Class" appearance helpers ----
 export type VehicleClass = NonNullable<Settings['vehicleClass']>;
+// Legacy class names → current (old saves + old-version peers keep working).
+export const LEGACY_CLASS: Record<string, VehicleClass> = { coupe: 'muscle', sports: 'supercar' };
+export function canonicalClass(cls?: string | null): VehicleClass {
+  return (LEGACY_CLASS[cls ?? ''] ?? cls ?? 'hatchback') as VehicleClass;
+}
 export function getVehicleClass(s: Settings): VehicleClass {
-  return s.vehicleClass ?? 'hatchback';
+  return canonicalClass(s.vehicleClass);
 }
 // The chosen paint for the ACTIVE class (per-class map; brand green default).
 export function getClassColor(s: Settings): string {
@@ -343,7 +350,12 @@ export function getClassColorRaw(s: Settings): string | undefined {
 // classColors map) reads as primary when no v2 entry exists.
 export function getClassPaint(s: Settings): { primary?: string; secondary?: string } {
   const cls = getVehicleClass(s);
-  return s.classPaint?.[cls] ?? (s.classColors?.[cls] ? { primary: s.classColors[cls] } : {});
+  // Saved paint may live under the legacy key (pre-rename saves) — check the
+  // canonical key first, then any legacy alias of it.
+  const legacyKey = Object.keys(LEGACY_CLASS).find((k) => LEGACY_CLASS[k] === cls);
+  return s.classPaint?.[cls]
+    ?? (legacyKey ? s.classPaint?.[legacyKey] : undefined)
+    ?? (s.classColors?.[cls] ? { primary: s.classColors[cls] } : {});
 }
 
 // ---- Per-source audio volume (0..1), for the tester-calibration Audio screen ----

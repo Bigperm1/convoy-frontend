@@ -98,11 +98,33 @@ export function useConvoyPresence(
     }
     setStatus("joining");
 
-    const channel = supabase.channel(channelName, {
-      config: { presence: { key: me.user_id } },
-    });
+    // CRASH FIX (2026-07-18, crash_reports): supabase-js keys channels by TOPIC.
+    // If the CarPlay data service (or a hot-remount of this hook) already
+    // joined this community's channel, attaching presence callbacks to the
+    // deduped, already-subscribed instance THROWS a fatal ("cannot add
+    // `presence` callbacks ... after `subscribe()`") — the tester crash wave
+    // around car connects. The phone map is the authoritative presence owner:
+    // tear down ANY existing channel on this topic first, and never let a
+    // realtime error escape as an app-killing exception.
+    try {
+      supabase
+        .getChannels()
+        .filter((c: any) => c?.topic === `realtime:${channelName}`)
+        .forEach((c: any) => { try { supabase!.removeChannel(c); } catch {} });
+    } catch {}
+
+    let channel: RealtimeChannel;
+    try {
+      channel = supabase.channel(channelName, {
+        config: { presence: { key: me.user_id } },
+      });
+    } catch {
+      setStatus("error");
+      return;
+    }
     channelRef.current = channel;
 
+    try {
     channel
       .on("presence", { event: "sync" }, () => {
         const state = channel.presenceState();
@@ -166,6 +188,14 @@ export function useConvoyPresence(
           setStatus("error");
         }
       });
+    } catch {
+      // Realtime wiring must NEVER kill the app — presence degrades to "error"
+      // (no peer pins) and retries on the next channel/user change.
+      setStatus("error");
+      try { supabase.removeChannel(channel); } catch {}
+      channelRef.current = null;
+      return;
+    }
 
     return () => {
       try { channel.untrack().catch(() => {}); } catch {}

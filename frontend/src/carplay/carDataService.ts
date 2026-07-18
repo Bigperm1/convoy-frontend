@@ -274,10 +274,16 @@ function presenceChannelName(): string | null {
 }
 
 function joinPresence(): void {
+  if (_presenceChannel && (_presenceChannel as any).state === 'closed') _presenceChannel = null; // phone hook tore it down — allow rejoin
   if (!_running || _presenceChannel || !SUPABASE_ENABLED || !supabase || !_me?.id) return;
   const channelName = presenceChannelName();
   if (!channelName) return;
   try {
+    // Defer to the phone map's presence hook: if ANY channel already exists on
+    // this topic, joining again risks the deduped-channel presence throw (the
+    // 2026-07-18 crash wave). The phone broadcasts a richer payload anyway.
+    const topic = `realtime:${channelName}`;
+    if (supabase.getChannels().some((c: any) => c?.topic === topic)) return;
     const channel = supabase.channel(channelName, { config: { presence: { key: _me.id } } });
     _presenceChannel = channel;
     channel

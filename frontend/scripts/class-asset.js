@@ -3,7 +3,7 @@
 //   1. key out the studio background (flood from the borders on near-uniform color)
 //   2. rotate so the nose points UP
 //   3. trim to content + fit into a 44x44 transparent canvas (GRC parity)
-//   4. write assets/images/classes/<class>.png
+//   4. write assets/images/classes-v2/<class>.png
 // PNG input only — convert JPEGs first: `sips -s format png in.jpeg --out in.png`
 const fs = require("fs");
 const { PNG } = require("pngjs");
@@ -215,6 +215,6 @@ for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
   }
 }
 fs.mkdirSync("assets/images/classes", { recursive: true });
-const outPath = `assets/images/classes/${cls}.png`;
+const outPath = `assets/images/classes-v2/${cls}.png`;
 fs.writeFileSync(outPath, PNG.sync.write(out));
 console.log("wrote", outPath, `${SIZE}x${SIZE}`, `(content ${cw}x${ch} keyed+rotated ${rot})`);

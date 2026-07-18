@@ -54,26 +54,36 @@ const wr32 = (b: Uint8Array, o: number, v: number) => { b[o] = v & 255; b[o + 1]
 
 // Recolor one material family toward `hex`, preserving each tier's shading
 // (per-channel ratio vs the family base).
-function recolorFamily(mats: any[], names: string[], hex: string): void {
-  const base = mats.find((m) => m?.name === names[0]);
-  const baseColRef: number[] | undefined = base?.pbrMetallicRoughness?.baseColorFactor;
-  if (!baseColRef) return;
-  // SNAPSHOT the base color. baseColRef aliases the base material's own array,
-  // and the base is names[0] — processed FIRST below — so mutating it in place
-  // would corrupt the divisor for every other tier (ratio ×target = original,
-  // leaving greenLight/Mid/Dark unrecolored: the "arrow color doesn't work"
-  // bug). A copy keeps the original ratios stable across the whole family.
-  const baseCol = [...baseColRef];
-  const target = hexToLinear(hex);
+// Recolor one FACTOR array (baseColorFactor OR emissiveFactor) across a material
+// family toward `target` (linear rgb), preserving each tier's per-channel ratio
+// vs the family's base tier. `getFactor` returns the mutable [r,g,b(,a)] array.
+function recolorFactor(mats: any[], names: string[], target: number[], getFactor: (m: any) => number[] | undefined): void {
+  const baseRef = getFactor(mats.find((m) => m?.name === names[0]));
+  if (!baseRef) return;
+  // SNAPSHOT: baseRef aliases the base tier's own array and the base is names[0]
+  // (processed first) — mutating it in place would corrupt the divisor for every
+  // other tier (ratio×target collapses to the original color). A copy is stable.
+  const base = [...baseRef];
   for (const name of names) {
-    const m = mats.find((x) => x?.name === name);
-    const col: number[] | undefined = m?.pbrMetallicRoughness?.baseColorFactor;
-    if (!col) continue;
+    const f = getFactor(mats.find((x) => x?.name === name));
+    if (!f) continue;
     for (let k = 0; k < 3; k++) {
-      const ratio = baseCol[k] > 0.0001 ? col[k] / baseCol[k] : 1;
-      col[k] = Math.min(1, Math.max(0, target[k] * ratio));
+      const ratio = base[k] > 0.0001 ? f[k] / base[k] : 1;
+      f[k] = Math.min(1, Math.max(0, target[k] * ratio));
     }
   }
+}
+
+function recolorFamily(mats: any[], names: string[], hex: string): void {
+  const target = hexToLinear(hex);
+  // baseColorFactor (the lit surface color)…
+  recolorFactor(mats, names, target, (m) => m?.pbrMetallicRoughness?.baseColorFactor);
+  // …AND emissiveFactor. The arrow is fully self-lit (modelEmissiveStrength 1),
+  // and every material carries a GREEN/blue-grey emissive glow. Leaving it green
+  // is why "reds aren't red / black secondary isn't black" — the glow mixed over
+  // the recolored base. Recolour the glow to the SAME hue (ratios preserve each
+  // tier's relative glow); a near-black target drives emissive → ~0 = truly black.
+  recolorFactor(mats, names, target, (m) => m?.emissiveFactor);
 }
 
 let _stockUriPromise: Promise<string | null> | null = null;
@@ -106,7 +116,7 @@ export async function getPaintedArrowUri(
     // aliasing bug left only one tier recolored). Old arrow_*.glb files are
     // simply never read again; the cache dir self-cleans over time.
     const key = `${(primary || "x").replace("#", "")}_${(secondary || "x").replace("#", "")}`;
-    const outPath = `${FileSystem.cacheDirectory}arrow_v2_${key}.glb`;
+    const outPath = `${FileSystem.cacheDirectory}arrow_v3_${key}.glb`;
     const info = await FileSystem.getInfoAsync(outPath);
     if (info.exists) return outPath;
 

@@ -1,6 +1,6 @@
 // class-bands.js <class> [--white-pri]
 // Generates the 4 runtime paint-band layers for a baked class photo
-// (assets/images/classes/<class>.png → <class>_{priblack,primask,secblack,secmask}.png).
+// (assets/images/classes-v2/<class>.png → <class>_{priblack,primask,secblack,secmask}.png).
 //
 // Band model (see src/classLayers.tsx): each band ships a BLACK floor (solid
 // black, alpha = band coverage) + a WHITE shading mask (alpha = shading × mix).
@@ -22,16 +22,17 @@ if (!cls) { console.log("usage: node class-bands.js <class>"); process.exit(1); 
 // accents, SECONDARY = the white deck, dark detail never paints.
 const PROFILES = {
   default: { priLo: 0.68, priHi: 1.0, secLo: 0.0, secHi: 0.32, secFloor: 0.55 },
-  // boat is a busy top-down with detail at every luminance — the old wide band
-  // tinted the whole interior (the "pixelated green mess"). Paint ONLY the
-  // bright smooth hull/gunwale (a boat-wrap accent); leave the interior natural.
-  boat:    { priLo: 0.80, priHi: 1.0, secLo: 2, secHi: 2, secFloor: 0.5 },
+  // boat: two-tone wrap. PRIMARY = the bright smooth hull/gunwale (0.80-1.0);
+  // SECONDARY = the mid-tone deck/upholstery (0.48-0.72). Dark detail (<0.48)
+  // and colored bits stay natural, so it reads as a clean hull+deck two-tone
+  // instead of the old whole-interior green mess.
+  boat:    { priLo: 0.80, priHi: 1.0, secLo: 0.62, secHi: 0.80, secFloor: 0.5 },
   // silver-bodied render — widen the primary band so the darker flank paints too
   sedan:   { priLo: 0.55, priHi: 1.0, secLo: 0.0, secHi: 0.32, secFloor: 0.55 },
 };
 const P = PROFILES[cls] || PROFILES.default;
 
-const src = PNG.sync.read(fs.readFileSync(`assets/images/classes/${cls}.png`));
+const src = PNG.sync.read(fs.readFileSync(`assets/images/classes-v2/${cls}.png`));
 const { width: W, height: H, data: D } = src;
 
 const mk = () => new PNG({ width: W, height: H });
@@ -69,7 +70,7 @@ for (let p = 0; p < W * H; p++) {
 }
 
 for (const [suffix, png] of [["priblack", priBlack], ["primask", priMask], ["secblack", secBlack], ["secmask", secMask]]) {
-  const out = `assets/images/classes/${cls}_${suffix}.png`;
+  const out = `assets/images/classes-v2/${cls}_${suffix}.png`;
   fs.writeFileSync(out, PNG.sync.write(png));
 }
 console.log(`wrote ${cls} bands (${W}x${H})`);

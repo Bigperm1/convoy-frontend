@@ -25,6 +25,7 @@ export const CLASS_LAYERS: Record<string, { priBlack: any; priMask: any; secBlac
   atv:    { priBlack: L(require("../assets/images/classes/atv_priblack.png")),    priMask: L(require("../assets/images/classes/atv_primask.png")),    secBlack: L(require("../assets/images/classes/atv_secblack.png")),    secMask: L(require("../assets/images/classes/atv_secmask.png")) },
   sxs:    { priBlack: L(require("../assets/images/classes/sxs_priblack.png")),    priMask: L(require("../assets/images/classes/sxs_primask.png")),    secBlack: L(require("../assets/images/classes/sxs_secblack.png")),    secMask: L(require("../assets/images/classes/sxs_secmask.png")) },
   boat:   { priBlack: L(require("../assets/images/classes/boat_priblack.png")),   priMask: L(require("../assets/images/classes/boat_primask.png")),   secBlack: L(require("../assets/images/classes/boat_secblack.png")),   secMask: L(require("../assets/images/classes/boat_secmask.png")) },
+  motorcycle: { priBlack: L(require("../assets/images/classes/motorcycle_priblack.png")), priMask: L(require("../assets/images/classes/motorcycle_primask.png")), secBlack: L(require("../assets/images/classes/motorcycle_secblack.png")), secMask: L(require("../assets/images/classes/motorcycle_secmask.png")) },
   sedan:  { priBlack: L(require("../assets/images/classes/sedan_priblack.png")),  priMask: L(require("../assets/images/classes/sedan_primask.png")),  secBlack: L(require("../assets/images/classes/sedan_secblack.png")),  secMask: L(require("../assets/images/classes/sedan_secmask.png")) },
 };
 

@@ -189,12 +189,13 @@ export function getVehicleModelKey(color?: string | null): string {
 // a photo (missing: electric + motorcycle — hatchback intentionally uses the
 // GRC avatar PNGs).
 export const CLASS_TOPDOWN: Partial<Record<string, any>> = {
-  sedan:  require("../assets/images/classes/sedan.png"),   // white BMW
-  boat:   require("../assets/images/classes/boat.png"),    // Supra wake boat
-  coupe:  require("../assets/images/classes/coupe.png"),   // Porsche 911
-  sports: require("../assets/images/classes/sports.png"),  // Shelby Mustang
-  exotic: require("../assets/images/classes/exotic.png"),  // Aventador roadster
-  truck:  require("../assets/images/classes/truck.png"),   // Ranger Raptor
-  atv:    require("../assets/images/classes/atv.png"),
-  sxs:    require("../assets/images/classes/sxs.png"),     // Can-Am Maverick
+  sedan:      require("../assets/images/classes/sedan.png"),      // white BMW
+  boat:       require("../assets/images/classes/boat.png"),       // Supra wake boat
+  coupe:      require("../assets/images/classes/coupe.png"),      // Porsche 911 (white set, 198px)
+  sports:     require("../assets/images/classes/sports.png"),     // striped Mustang (white set, 198px)
+  exotic:     require("../assets/images/classes/exotic.png"),     // LaFerrari (white set, 198px)
+  truck:      require("../assets/images/classes/truck.png"),      // Raptor (white set, 198px)
+  motorcycle: require("../assets/images/classes/motorcycle.png"), // Ducati (white set, 198px)
+  atv:        require("../assets/images/classes/atv.png"),
+  sxs:        require("../assets/images/classes/sxs.png"),        // Can-Am Maverick
 };

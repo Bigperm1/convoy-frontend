@@ -2247,39 +2247,39 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             composite snapshot; unpainted photo → static registration; no photo
             yet → tinted silhouette. Keyed by class+paint so changes swap live. */}
         {selfIsClass && (selfClassAsShot ? (
-          selfClassPainted ? (
-            <Images key={`${selfClassImg}_g${classImgGen}`}>
-              {/* onReady = every layer bitmap loaded. refresh() re-captures on
-                  Android; on iOS it's a stub (see classImgGen above), so bump
-                  the key to remount — the fresh mount-time snapshot captures
-                  the painted sprite from the now-warm image cache. */}
-              <MBXImage name={selfClassImg} ref={classImgRef}>
-                <ClassSprite
-                  vehicleClass={effVehicleClass}
-                  primary={_pri}
-                  secondary={_sec}
-                  size={66}
-                  onReady={() => {
-                    try { (classImgRef.current as any)?.refresh?.(); } catch {}
-                    // belt-and-braces second capture after the view settles
-                    setTimeout(() => { try { (classImgRef.current as any)?.refresh?.(); } catch {} }, 350);
-                    if (Platform.OS === "ios") {
-                      const sched = classImgGenForRef.current;
-                      if (sched.key !== selfClassImg) { sched.key = selfClassImg; sched.count = 0; }
-                      // two remounts per paint key (fast + late) so even a slow
-                      // bitmap decode gets a clean capture; then stop for good.
-                      if (sched.count < 2) {
-                        sched.count += 1;
-                        setTimeout(() => setClassImgGen((g) => g + 1), sched.count === 1 ? 300 : 1200);
-                      }
+          // Painted AND unpainted photos both register through the live
+          // ClassSprite snapshot: the 66pt view renders at device scale, so
+          // per-class asset resolution (132px legacy vs 198px white-set) never
+          // leaks into the map's iconSize math.
+          <Images key={`${selfClassImg}_g${classImgGen}`}>
+            {/* onReady = every layer bitmap loaded. refresh() re-captures on
+                Android; on iOS it's a stub (see classImgGen above), so bump
+                the key to remount — the fresh mount-time snapshot captures
+                the painted sprite from the now-warm image cache. */}
+            <MBXImage name={selfClassImg} ref={classImgRef}>
+              <ClassSprite
+                vehicleClass={effVehicleClass}
+                primary={_pri}
+                secondary={_sec}
+                size={66}
+                onReady={() => {
+                  try { (classImgRef.current as any)?.refresh?.(); } catch {}
+                  // belt-and-braces second capture after the view settles
+                  setTimeout(() => { try { (classImgRef.current as any)?.refresh?.(); } catch {} }, 350);
+                  if (Platform.OS === "ios") {
+                    const sched = classImgGenForRef.current;
+                    if (sched.key !== selfClassImg) { sched.key = selfClassImg; sched.count = 0; }
+                    // two remounts per paint key (fast + late) so even a slow
+                    // bitmap decode gets a clean capture; then stop for good.
+                    if (sched.count < 2) {
+                      sched.count += 1;
+                      setTimeout(() => setClassImgGen((g) => g + 1), sched.count === 1 ? 300 : 1200);
                     }
-                  }}
-                />
-              </MBXImage>
-            </Images>
-          ) : (
-            <Images key={selfClassImg} images={{ [selfClassImg]: selfClassAsShot }} />
-          )
+                  }
+                }}
+              />
+            </MBXImage>
+          </Images>
         ) : (
           <Images key={selfClassImg}>
             <MBXImage name={selfClassImg}>
@@ -2515,10 +2515,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             headingOffset={selfIsArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
             pitchTilt={selfIsArrow ? ARROW_MODEL_PITCH : 0}
             sprite={selfIsClass ? selfClassImg : undefined}
-            // Same ~59pt on-screen footprint from each source: painted snapshot
-            // is a 66pt view (device-scale dense) → 0.9; the static photo is a
-            // 132px @1x asset → 0.45; silhouette snapshot → 1.
-            spriteSize={selfClassAsShot ? (selfClassPainted ? 0.9 : 0.45) : 1}
+            // ~59pt on-screen footprint: every photo class (painted or not) now
+            // registers via the 66pt ClassSprite snapshot → one 0.9 iconSize,
+            // independent of per-class asset resolution; silhouette snapshot → 1.
+            spriteSize={selfClassAsShot ? 0.9 : 1}
             cameraRef={cameraRef}
             getCam={getCam}
             readyRef={lockReadyRef}

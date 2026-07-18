@@ -109,40 +109,52 @@ while (q.length) {
   if (filled) console.log("filled", filled, "interior hole px");
 }
 
-// 1c) EDGE REFINEMENT (premium pass, 2026-07-18 "edges missing"):
-//   - notch fill: a transparent pixel mostly surrounded by opaque ones is a
-//     flood bite into the outline — restore it (3 passes eats 1-3px notches).
-//   - feather: binary flood edges are ragged; rebuild edge alpha as the 3x3
-//     opaque coverage fraction for a clean anti-aliased 1px rim.
+// 1c) MATTE CLEANUP (2026-07-18 — kills the grey halo on the black garage bg).
+// The flood leaves a ~1-2px ring of the studio background's anti-aliased
+// transition (light grey) just OUTSIDE the true body. On green it hid; on
+// black it glowed. Fix in three surgical steps:
+//   (1) ERODE the opaque mask inward past that ring (into clean body pixels),
+//   (2) rebuild a 1px anti-aliased edge whose COLOR is pulled from solid body
+//       neighbors (so the AA fringe is body-colored, never grey),
+//   (3) leave the interior untouched.
 {
-  const at = (x, y) => D[idx(x, y) + 3];
-  for (let pass = 0; pass < 3; pass++) {
-    const restore = [];
-    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
-      if (at(x, y) !== 0) continue;
-      let solid = 0;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        if (!dx && !dy) continue;
-        if (at(x + dx, y + dy) > 128) solid++;
-      }
-      if (solid >= 5) restore.push(idx(x, y));
+  const ERODE = parseInt(process.env.CLASS_ERODE || "2", 10);
+  // binary mask (flood/hole-fill already produced 0/255)
+  let M = new Uint8Array(W * H);
+  for (let p = 0; p < W * H; p++) M[p] = D[(p << 2) + 3] > 128 ? 1 : 0;
+  // iterative 4-neighbour erosion: strip ERODE rings off the exterior boundary
+  for (let e = 0; e < ERODE; e++) {
+    const N = M.slice();
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const p = y * W + x; if (!M[p]) continue;
+      if ((x > 0 && !M[p - 1]) || (x < W - 1 && !M[p + 1]) ||
+          (y > 0 && !M[p - W]) || (y < H - 1 && !M[p + W])) N[p] = 0;
     }
-    for (const i of restore) D[i + 3] = 255;
-    if (!restore.length) break;
+    M = N;
   }
-  // feather: recompute alpha at the boundary as neighborhood coverage
-  const A = new Uint8ClampedArray(W * H);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) A[y * W + x] = at(x, y);
-  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
-    const a = A[y * W + x];
-    // only touch boundary pixels (mixed neighborhood)
-    let sum = 0, n = 0, hasSolid = false, hasClear = false;
+  // snapshot the original (pre-cleanup) RGB so decontamination reads true color
+  const R0 = new Uint8ClampedArray(W * H), G0 = new Uint8ClampedArray(W * H), B0 = new Uint8ClampedArray(W * H);
+  for (let p = 0; p < W * H; p++) { const i = p << 2; R0[p] = D[i]; G0[p] = D[i + 1]; B0[p] = D[i + 2]; }
+  // rebuild alpha + edge color from the eroded mask
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const p = y * W + x, i = p << 2;
+    if (M[p]) { D[i + 3] = 255; continue; }          // solid body: fully opaque
+    // outside the eroded body: cover only the immediate 1px rim, colored by
+    // the solid neighbours it touches (kills the grey halo entirely)
+    let cov = 0, n = 0, sr = 0, sg = 0, sb = 0, sn = 0;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const v = A[(y + dy) * W + (x + dx)];
-      sum += v; n++;
-      if (v > 200) hasSolid = true; else if (v < 50) hasClear = true;
+      const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+      const q = yy * W + xx; n++;
+      if (M[q]) { cov++; sr += R0[q]; sg += G0[q]; sb += B0[q]; sn++; }
     }
-    if (hasSolid && hasClear) D[idx(x, y) + 3] = Math.round((a + sum / n) / 2);
+    if (sn > 0) {
+      D[i]     = Math.round(sr / sn);
+      D[i + 1] = Math.round(sg / sn);
+      D[i + 2] = Math.round(sb / sn);
+      D[i + 3] = Math.round((cov / n) * 255);        // coverage AA, body-colored
+    } else {
+      D[i + 3] = 0;                                   // clean transparent
+    }
   }
 }
 

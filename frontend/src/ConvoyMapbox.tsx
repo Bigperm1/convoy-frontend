@@ -427,6 +427,12 @@ const CORNER_NEAR_M = 70;
 // uselessly far, and the plus button can't over-zoom past ~20.
 const ZOOM_MIN = 10.5;
 const ZOOM_MAX = 20;
+// Chase-cam zoom/pitch GLIDE time-constant (ms). The lockstep applies the camera
+// with animationMode:'none' (position must be instant to stay glued to the car),
+// so zoom + pitch are instead low-passed toward the speed target in pushCam — a
+// gradual premium glide to the correct zoom/angle instead of a snap. Larger =
+// smoother/laggier. OTA-tunable. (Position + heading stay instant/eased as before.)
+const CAM_SMOOTH_TAU_MS = 340;
 
 // Heading-up camera bearing — we drive it ourselves instead of Mapbox's native
 // FollowWithCourse, which tracks raw GPS course and updates every frame, so its
@@ -759,6 +765,11 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const lastBgTickAt = useRef(0);  // wall-clock of the last bgTick that ACTUALLY advanced (setInterval liveness)
   const resumeSnapUntil = useRef(0); // snap-track (don't ease) until this wall-clock after foreground
   const wasBackgrounded = useRef(false); // true once the app actually hit 'background' since last 'active'
+  // Low-passed chase zoom/pitch — glide toward the live speed target instead of
+  // snapping (see CAM_SMOOTH_TAU_MS). null until the first frame seeds them.
+  const camZoom = useRef<number | null>(null);
+  const camPitch = useRef<number | null>(null);
+  const lastCamAt = useRef(0);
   const [, setTick] = useState(0);
   const lastFrameRef = useRef(0); // wall-clock of the last RENDERED ease frame (eco fps cap)
 
@@ -770,17 +781,33 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // center == car-pose on EVERY frame → the car never deviates, the world rotates/
   // translates around it. Gated on readyRef so 60fps calls never queue into a not-yet-
   // ready surface (the CarPlay blank-with-bounds hazard). No-op unless wired.
-  const pushCam = (la: number, ln: number, hdg?: number) => {
+  const pushCam = (la: number, ln: number, hdg?: number, snap = false) => {
     if (!cameraRef?.current || !getCam || !(readyRef?.current)) return;
     const c = getCam();
+    // Glide zoom + pitch toward the LIVE speed target (getCam reads a fresh ref, so
+    // this tracks acceleration even though this loop's closure is frozen). Position
+    // + heading stay instant/eased so the car never leaves the locked center. On a
+    // hard snap (first fix / recenter / resume) jump straight to target — no glide
+    // from a stale value. Time-based low-pass so eco 30fps and premium 60fps match.
+    const now = Date.now();
+    const dt = lastCamAt.current ? Math.max(0, Math.min(200, now - lastCamAt.current)) : 16;
+    lastCamAt.current = now;
+    if (snap || camZoom.current == null || camPitch.current == null) {
+      camZoom.current = c.zoomLevel;
+      camPitch.current = c.pitch;
+    } else {
+      const a = 1 - Math.exp(-dt / CAM_SMOOTH_TAU_MS);
+      camZoom.current += (c.zoomLevel - camZoom.current) * a;
+      camPitch.current += (c.pitch - camPitch.current) * a;
+    }
     try {
       cameraRef.current.setCamera({
         centerCoordinate: [ln, la],
         // Ride the EASED heading (render.current.heading) so the map rotates as smoothly
         // as the car turns; getCam's heading is only a fallback when none is passed.
         heading: typeof hdg === 'number' ? hdg : c.heading,
-        zoomLevel: c.zoomLevel,
-        pitch: c.pitch,
+        zoomLevel: camZoom.current,
+        pitch: camPitch.current,
         padding: c.padding,
         animationDuration: 0,
         animationMode: 'none',
@@ -917,7 +944,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       // instance it's the always-on freeze net, and killing it on a snap/recenter
       // would disarm it for the rest of the drive. anim=null + the heartbeat
       // guard make a running-but-idle timer free.
-      pushCam(lat, lng, heading); // hard-snap the camera with the car (first fix / recenter / resume)
+      pushCam(lat, lng, heading, true); // hard-snap the camera with the car (first fix / recenter / resume) — zoom/pitch jump too
       setTick((n) => (n + 1) & 0xffff);
       // Probe: a live display ticks step() → rafDead clears → the next fix eases
       // smoothly again. While asleep the probe never fires, so the latch holds.
@@ -968,7 +995,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       if (now - lastBgTickAt.current > 1500) {
         render.current = { lat, lng, heading: prev.heading + angDelta(prev.heading, heading) };
         anim.current = null;
-        pushCam(render.current.lat, render.current.lng, render.current.heading);
+        pushCam(render.current.lat, render.current.lng, render.current.heading, true);
         setTick((n) => (n + 1) & 0xffff);
       }
     } else if (raf.current == null) {
@@ -1778,11 +1805,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     ? UserTrackingMode.FollowWithCourse
     : UserTrackingMode.Follow;
 
-  const followZoom = Math.round(
-    Math.max(ZOOM_MIN, Math.min(ZOOM_MAX,
-      (navigationActive ? chaseZoom(kmhFromMs(userSpeedMs), distanceToManeuverM) : FOLLOW_ZOOM) + (zoomOffset || 0),
-    )) * 10,
-  ) / 10;
+  // RAW (unrounded) chase zoom target for the imperative lockstep — SelfCarModel's
+  // pushCam low-passes toward it, so a continuous float reads smoothest.
+  const chaseZoomRaw = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX,
+    (navigationActive ? chaseZoom(kmhFromMs(userSpeedMs), distanceToManeuverM) : FOLLOW_ZOOM) + (zoomOffset || 0),
+  ));
+  // Quantized to 0.1 for the NATIVE followZoomLevel (north-up) so the native follow
+  // engine isn't re-nudged on every micro speed change.
+  const followZoom = Math.round(chaseZoomRaw * 10) / 10;
   const followPitchDeg = navigationActive && headingUp ? chasePitch(kmhFromMs(userSpeedMs)) : 0;
 
   // Lower-third chase framing — top padding pushes the followed car DOWN the
@@ -1809,14 +1839,21 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // keep their EXISTING camera paths (the imperative fits + native follow) untouched.
   const lockReadyRef = useRef(false);
   lockReadyRef.current = readyRef.current && coldLockDone && followUser && !placesShown && headingUp;
-  const getCam = () => ({
-    zoomLevel: followZoom,
+  // LIVE camera target, read through a STABLE ref. The rAF lockstep's step() closure
+  // is frozen for the life of an ease and, during continuous driving, never restarts
+  // (a new fix only updates anim.current, not the loop) — so a getCam that closed over
+  // followZoom would freeze the chase zoom at the ROUTE-START (city) value forever
+  // (the "stuck zoomed-in, car bounces at speed" report). Updating this ref every
+  // render + reading it through getCam() makes the frozen closure see the CURRENT
+  // speed's zoom/pitch; pushCam then glides to it. Heading rides the eased pose.
+  const camTargetRef = useRef({ zoomLevel: FOLLOW_ZOOM, pitch: 0, heading: 0, padding: { paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 } as any });
+  camTargetRef.current = {
+    zoomLevel: chaseZoomRaw,
     pitch: followPitchDeg,
-    // Fallback only — pushCam rides the EASED car heading (render.current.heading) so the
-    // map rotates as smoothly as the car turns. Heading-up is the only mode that locksteps.
     heading: followHeadingDeg ?? 0,
     padding: followPadding ?? { paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 },
-  });
+  };
+  const getCam = () => camTargetRef.current;
 
   // ===== User zoom buttons (+/-) =====
   // While FOLLOWING, the offset rides on followZoomLevel above — Mapbox ignores
@@ -2058,9 +2095,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // fixes, so at speed it travels well past the raw fix the trim is computed from.
   // Testers cruising 80–200 km/h saw the green line trail under the car's tail —
   // the old 1.1×/m/s lead (cap 55 m) couldn't keep the clear-point ahead of the
-  // fast tween. Lead harder: ~1.6× a second of travel, cap 90 m.
-  //   12 m @ 0 · ~44 m @ 72 km/h · ~65 m @ 120 km/h · 90 m @ 160+ km/h.
-  const _trimLeadM = Math.max(12, Math.min(90, 12 + _trimSpdMs * 1.6));
+  // fast tween. Lead harder: ~1.6× a second of travel.
+  // FLOOR raised 12→30 m (2026-07-19): at CITY zoom (17) + chase pitch the 3D car/
+  // arrow marker's on-screen footprint spans ~20+ m of ground, so a 12 m lead let
+  // the line touch/overlap the marker at low speed (route start). 30 m clears it at
+  // rest and the line NEVER touches the marker; the speed ramp is unchanged above it.
+  //   30 m @ 0 · ~44 m @ 72 km/h · ~65 m @ 120 km/h · 100 m @ 160+ km/h. OTA-tunable.
+  const _trimLeadM = Math.max(30, Math.min(100, 12 + _trimSpdMs * 1.6));
   const routeTrimEndFrac = routeProj
     ? Math.max(0, Math.min(0.999, routeProj.frac + _trimLeadM / routeProj.totalM))
     : null;

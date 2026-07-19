@@ -1,20 +1,23 @@
-// Supabase Realtime Presence â live peer tracking for the Convoy.
+// Supabase Realtime Presence — live peer tracking for the Convoy.
 //
 // Each user joins a channel and broadcasts their position + metadata. Presence
 // auto-handles join/leave so the map updates instantly when someone connects
 // or drops off (no polling, no manual disconnect plumbing).
 //
 // Channel naming convention:
-//   - "convoy:global"       â everyone, default
-//   - "convoy:community:<id>" â scoped to a specific community
+//   - "convoy:global"          — everyone, default
+//   - "convoy:community:<id>"   — scoped to a specific community
 //
 // Each peer payload looks like:
 //   { user_id, handle, lat, lng, carType, heading?, online_at }
+//
+// The actual channel is owned by presenceHub.ts (ONE per topic) — this hook is
+// just the phone-map consumer of that hub. See presenceHub for why.
 
 import { useEffect, useRef, useState } from "react";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase, SUPABASE_ENABLED } from "./supabase";
 import { toGRCSlug } from "./vehicleAssets";
+import { joinPresence, type PresenceHandle } from "./presenceHub";
 
 export type ConvoyPresencePeer = {
   user_id: string;
@@ -25,12 +28,12 @@ export type ConvoyPresencePeer = {
   carBody?: string;     // sedan / coupe / suv / sports / truck / hatch / motorcycle / van
   carColor?: string;
   // Canonical GR Corolla broadcast slug (e.g. "grc_heavy_metal"). Empty/undefined
-  // when the user hasn't picked one of the official GRC paints â peer marker
+  // when the user hasn't picked one of the official GRC paints — peer marker
   // falls back to the SVG silhouette so we never render a broken image.
   activeColor?: string;
   heading?: number;
   online_at?: string;
-  // Personal best top cruise speed (km/h) â broadcast so peers can see each other's record.
+  // Personal best top cruise speed (km/h) — broadcast so peers can see each other's record.
   topSpeed?: number;
   // "live" = actively driving; "parked" = full-mode user broadcasting last-known
   // location while their CarPlay/AA head unit is disconnected.
@@ -53,7 +56,7 @@ export type ConvoyMe = {
   carType?: string;
   carBody?: string;
   carColor?: string;
-  // Optional pre-resolved slug â if omitted we compute it from carColor below.
+  // Optional pre-resolved slug — if omitted we compute it from carColor below.
   activeColor?: string;
   // Personal best top cruise speed (km/h). Sent every time we re-track the channel.
   topSpeed?: number;
@@ -85,65 +88,66 @@ export function useConvoyPresence(
 ) {
   const [peers, setPeers] = useState<ConvoyPresencePeer[]>([]);
   const [status, setStatus] = useState<Status>("idle");
-  const channelRef = useRef<RealtimeChannel | null>(null);
+  const handleRef = useRef<PresenceHandle | null>(null);
+  // Fresh me/coords so the hub's getPayload closure always reads the latest.
+  const meRef = useRef(me); meRef.current = me;
+  const coordsRef = useRef(coords); coordsRef.current = coords;
   const lastTrackRef = useRef<number>(0);
   // Last status we actually broadcast — lets a live<->parked flip (CarPlay connect/
   // disconnect) bypass the position throttle so the parked pin reaches peers even when
   // the pinned coords don't change.
   const lastStatusRef = useRef<string | undefined>(undefined);
 
-  // Join / leave channel when channelName or me.user_id changes
+  // Build OUR presence payload from the freshest me/coords (the hub calls this
+  // on every track(), and once automatically when the channel goes SUBSCRIBED).
+  const buildPayload = (): Record<string, any> | null => {
+    const m = meRef.current, c = coordsRef.current;
+    if (!m?.user_id || !c) return null;
+    return {
+      user_id: m.user_id,
+      handle: m.handle,
+      carType: m.carType,
+      carBody: m.carBody,
+      carColor: m.carColor,
+      // Canonical GRC slug — auto-derived if caller didn't pre-resolve.
+      activeColor: m.activeColor || toGRCSlug(m.carColor) || undefined,
+      topSpeed: m.topSpeed,
+      status: m.status ?? "live",
+      marker: m.marker,
+      cls: m.cls,
+      clsPri: m.clsPri,
+      clsSec: m.clsSec,
+      arrPri: m.arrPri,
+      arrSec: m.arrSec,
+      lat: c.lat,
+      lng: c.lng,
+      heading: c.heading,
+    };
+  };
+
+  // Join / leave the SHARED presence hub (single channel per topic — the phone
+  // map + CarPlay service can never double-join, so the "cannot add presence
+  // callbacks" crash is structurally impossible now, not merely swallowed).
   useEffect(() => {
-    // No channel name = privacy-off / no active community â completely opt out
-    // of presence. We clear any stale peer list so the previous community's
-    // pins disappear instantly the moment Avatar Live is toggled off.
+    // No channel = privacy-off / no active community — opt out and clear peers so
+    // the previous community's pins disappear the moment Avatar Live is toggled off.
     if (!channelName || !SUPABASE_ENABLED || !supabase || !me?.user_id) {
       setPeers([]);
       setStatus(SUPABASE_ENABLED ? "idle" : "disabled");
       return;
     }
     setStatus("joining");
-
-    // CRASH FIX (2026-07-18, crash_reports): supabase-js keys channels by TOPIC.
-    // If the CarPlay data service (or a hot-remount of this hook) already
-    // joined this community's channel, attaching presence callbacks to the
-    // deduped, already-subscribed instance THROWS a fatal ("cannot add
-    // `presence` callbacks ... after `subscribe()`") — the tester crash wave
-    // around car connects. The phone map is the authoritative presence owner:
-    // tear down ANY existing channel on this topic first, and never let a
-    // realtime error escape as an app-killing exception.
-    try {
-      supabase
-        .getChannels()
-        .filter((c: any) => c?.topic === `realtime:${channelName}`)
-        .forEach((c: any) => { try { supabase!.removeChannel(c); } catch {} });
-    } catch {}
-
-    let channel: RealtimeChannel;
-    try {
-      channel = supabase.channel(channelName, {
-        config: { presence: { key: me.user_id } },
-      });
-    } catch {
-      setStatus("error");
-      return;
-    }
-    channelRef.current = channel;
-
-    try {
-    channel
-      .on("presence", { event: "sync" }, () => {
-        const state = channel.presenceState();
-        // Flatten { user_id: [payload, ...] } â array, drop ourselves
+    const handle = joinPresence({
+      topic: channelName,
+      selfId: me.user_id,
+      priority: 2, // phone map owns the broadcast (richest marker/paint payload)
+      getPayload: buildPayload,
+      onPeers: (raw) => {
         const list: ConvoyPresencePeer[] = [];
-        Object.entries(state).forEach(([uid, presences]) => {
-          if (uid === me.user_id) return;
-          // The most recent payload wins if there are multiple presences for the same key
-          const p: any = (presences as any[])[0];
-          if (!p) return;
-          if (typeof p.lat !== "number" || typeof p.lng !== "number") return;
+        for (const p of raw) {
+          if (typeof p.lat !== "number" || typeof p.lng !== "number") continue;
           list.push({
-            user_id: uid,
+            user_id: p.user_id,
             handle: p.handle,
             lat: p.lat,
             lng: p.lng,
@@ -162,55 +166,16 @@ export function useConvoyPresence(
             arrPri: typeof p.arrPri === "string" ? p.arrPri : undefined,
             arrSec: typeof p.arrSec === "string" ? p.arrSec : undefined,
           });
-        });
-        setPeers(list);
-      })
-      .subscribe(async (s) => {
-        if (s === "SUBSCRIBED") {
-          setStatus("subscribed");
-          // Initial broadcast as soon as we're subscribed
-          if (coords) {
-            await channel.track({
-              user_id: me.user_id,
-              handle: me.handle,
-              carType: me.carType,
-              carBody: me.carBody,
-              carColor: me.carColor,
-              // Canonical GRC slug â auto-derived if caller didn't pre-resolve.
-              activeColor: me.activeColor || toGRCSlug(me.carColor) || undefined,
-              topSpeed: me.topSpeed,
-              status: me.status ?? "live",
-              marker: me.marker,
-              cls: me.cls,
-              clsPri: me.clsPri,
-              clsSec: me.clsSec,
-              arrPri: me.arrPri,
-              arrSec: me.arrSec,
-              lat: coords.lat,
-              lng: coords.lng,
-              heading: coords.heading,
-              online_at: new Date().toISOString(),
-            });
-            lastTrackRef.current = Date.now();
-            lastStatusRef.current = me.status ?? "live";
-          }
-        } else if (s === "CHANNEL_ERROR" || s === "TIMED_OUT" || s === "CLOSED") {
-          setStatus("error");
         }
-      });
-    } catch {
-      // Realtime wiring must NEVER kill the app — presence degrades to "error"
-      // (no peer pins) and retries on the next channel/user change.
-      setStatus("error");
-      try { supabase.removeChannel(channel); } catch {}
-      channelRef.current = null;
-      return;
-    }
-
+        setPeers(list);
+      },
+    });
+    handleRef.current = handle;
+    setStatus("subscribed");
+    handle.track(); // initial broadcast (hub replays it once the channel SUBSCRIBEs)
     return () => {
-      try { channel.untrack().catch(() => {}); } catch {}
-      try { supabase?.removeChannel(channel); } catch {}
-      channelRef.current = null;
+      handle.leave();
+      handleRef.current = null;
       setPeers([]);
       setStatus("idle");
     };
@@ -222,34 +187,14 @@ export function useConvoyPresence(
   // bypasses the throttle — otherwise a parked flip whose pinned coords didn't change
   // would never reach peers (the position deps wouldn't fire, the throttle would eat it).
   useEffect(() => {
-    const ch = channelRef.current;
-    if (!ch || status !== "subscribed" || !coords || !me) return;
+    if (!handleRef.current || !coords || !me) return;
     const now = Date.now();
     const statusChanged = (me.status ?? "live") !== lastStatusRef.current;
     if (!statusChanged && now - lastTrackRef.current < 1500) return;
     lastTrackRef.current = now;
     lastStatusRef.current = me.status ?? "live";
-    ch.track({
-      user_id: me.user_id,
-      handle: me.handle,
-      carType: me.carType,
-      carBody: me.carBody,
-      carColor: me.carColor,
-      activeColor: me.activeColor || toGRCSlug(me.carColor) || undefined,
-      topSpeed: me.topSpeed,
-      status: me.status ?? "live",
-      marker: me.marker,
-      cls: me.cls,
-      clsPri: me.clsPri,
-      clsSec: me.clsSec,
-      arrPri: me.arrPri,
-      arrSec: me.arrSec,
-      lat: coords.lat,
-      lng: coords.lng,
-      heading: coords.heading,
-      online_at: new Date().toISOString(),
-    }).catch(() => {});
-  }, [coords?.lat, coords?.lng, coords?.heading, status, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec, me?.arrPri, me?.arrSec]);
+    handleRef.current.track();
+  }, [coords?.lat, coords?.lng, coords?.heading, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec, me?.arrPri, me?.arrSec]);
 
   return { peers, status };
 }

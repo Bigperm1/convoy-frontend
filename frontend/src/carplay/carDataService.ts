@@ -31,6 +31,7 @@ import { supabase, SUPABASE_ENABLED } from '../supabase';
 import { getSettings, getAvatarMode } from '../settings';
 import { toGRCSlug } from '../vehicleAssets';
 import { getCarState, setCarPeers, setCarHazards, subscribeCarState, type CarPeer } from './carStore';
+import { joinPresence as hubJoinPresence, type PresenceHandle } from '../presenceHub';
 
 // ── throttle cadences (wall-clock, event-driven — NO timers) ────────────────
 const NEARBY_REFRESH_MS = 10_000;   // matches the phone's 10s /users/nearby poll
@@ -63,7 +64,7 @@ let _hazards: SvcHazard[] = [];
 let _nearbyLastFetch = 0;
 let _hazardsLastFetch = 0;
 let _presenceLastTrack = 0;
-let _presenceChannel: any = null;
+let _presenceHandle: PresenceHandle | null = null;
 let _hazardsChannel: any = null;
 let _unsubStore: (() => void) | null = null;
 
@@ -273,76 +274,72 @@ function presenceChannelName(): string | null {
   return s.activeCommunityId ? `convoy:community:${s.activeCommunityId}` : null; // community-scoped ONLY
 }
 
+// OUR slim presence payload for the shared hub (priority 1). Returns null when
+// we have no identity or no self fix yet, so the hub falls through to a higher-
+// priority provider (the phone map) or simply doesn't broadcast.
+function buildCarPayload(): Record<string, any> | null {
+  if (!_me?.id) return null;
+  const st = getCarState();
+  if (typeof st.selfLat !== 'number' || typeof st.selfLng !== 'number') return null;
+  const s = getSettings();
+  return {
+    user_id: _me.id,
+    handle: _me.handle,
+    carType: _me.carType,
+    carBody: _me.carBody,
+    carColor: s.carColor || _me.carColor,
+    activeColor: toGRCSlug(s.carColor || _me.carColor) || undefined,
+    topSpeed: _me.topSpeed,
+    status: 'live', // this service runs only while CarPlay is connected = driving
+    lat: st.selfLat,
+    lng: st.selfLng,
+    heading: st.heading ?? undefined,
+  };
+}
+
 function joinPresence(): void {
-  if (_presenceChannel && (_presenceChannel as any).state === 'closed') _presenceChannel = null; // phone hook tore it down — allow rejoin
-  if (!_running || _presenceChannel || !SUPABASE_ENABLED || !supabase || !_me?.id) return;
+  if (!_running || _presenceHandle || !SUPABASE_ENABLED || !supabase || !_me?.id) return;
   const channelName = presenceChannelName();
   if (!channelName) return;
-  try {
-    // Defer to the phone map's presence hook: if ANY channel already exists on
-    // this topic, joining again risks the deduped-channel presence throw (the
-    // 2026-07-18 crash wave). The phone broadcasts a richer payload anyway.
-    const topic = `realtime:${channelName}`;
-    if (supabase.getChannels().some((c: any) => c?.topic === topic)) return;
-    const channel = supabase.channel(channelName, { config: { presence: { key: _me.id } } });
-    _presenceChannel = channel;
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        try {
-          const state = channel.presenceState();
-          const list: SvcPeer[] = [];
-          Object.entries(state).forEach(([uid, presences]) => {
-            if (uid === _me?.id) return;
-            const p: any = (presences as any[])[0];
-            if (!p || typeof p.lat !== 'number' || typeof p.lng !== 'number') return;
-            list.push({
-              user_id: uid,
-              handle: p.handle,
-              lat: p.lat,
-              lng: p.lng,
-              heading: p.heading,
-              status: p.status === 'parked' ? 'parked' : 'live',
-            });
-          });
-          _presencePeers = list;
-          emitPeers();
-        } catch {}
-      })
-      .subscribe((s: string) => {
-        if (s === 'SUBSCRIBED') void trackPresence(true);
-      });
-  } catch {
-    _presenceChannel = null;
-  }
+  // The hub owns the single channel per topic — the phone map (priority 2) and
+  // this service (priority 1) share it, so the deduped-channel presence throw
+  // (the 2026-07-18 crash wave) can't happen. The map's richer payload wins the
+  // broadcast whenever it's mounted; we broadcast only when the phone isn't.
+  _presenceHandle = hubJoinPresence({
+    topic: channelName,
+    selfId: _me.id,
+    priority: 1,
+    getPayload: buildCarPayload,
+    onPeers: (raw) => {
+      const list: SvcPeer[] = [];
+      for (const p of raw) {
+        if (typeof p.lat !== 'number' || typeof p.lng !== 'number') continue;
+        list.push({
+          user_id: p.user_id,
+          handle: p.handle,
+          lat: p.lat,
+          lng: p.lng,
+          heading: p.heading,
+          status: p.status === 'parked' ? 'parked' : 'live',
+        });
+      }
+      _presencePeers = list;
+      emitPeers();
+    },
+  });
 }
 
 // Broadcast our own position so the convoy sees US while the phone stays in a
 // pocket ("they see you" — the other half of cold peers). Throttled like the
-// phone's hook; payload mirrors useConvoyPresence's track() fields.
-async function trackPresence(force = false): Promise<void> {
-  if (!_running || !_presenceChannel || !_me?.id) return;
+// phone's hook; the actual payload comes from buildCarPayload via the hub.
+function trackPresence(force = false): void {
+  if (!_running || !_presenceHandle || !_me?.id) return;
   const st = getCarState();
   if (typeof st.selfLat !== 'number' || typeof st.selfLng !== 'number') return;
   const now = Date.now();
   if (!force && now - _presenceLastTrack < PRESENCE_TRACK_MS) return;
   _presenceLastTrack = now;
-  const s = getSettings();
-  try {
-    await _presenceChannel.track({
-      user_id: _me.id,
-      handle: _me.handle,
-      carType: _me.carType,
-      carBody: _me.carBody,
-      carColor: s.carColor || _me.carColor,
-      activeColor: toGRCSlug(s.carColor || _me.carColor) || undefined,
-      topSpeed: _me.topSpeed,
-      status: 'live', // this service runs only while CarPlay is connected = driving
-      lat: st.selfLat,
-      lng: st.selfLng,
-      heading: st.heading ?? undefined,
-      online_at: new Date().toISOString(),
-    });
-  } catch {}
+  _presenceHandle.track();
 }
 
 // ── Position-tick driver (the event-driven "clock") ──────────────────────────
@@ -384,9 +381,8 @@ export function stopCarDataService(): void {
   _unsubStore = null;
   try { _ws?.close(); } catch {}
   _ws = null;
-  try { _presenceChannel?.untrack?.().catch?.(() => {}); } catch {}
-  try { if (supabase && _presenceChannel) supabase.removeChannel(_presenceChannel); } catch {}
-  _presenceChannel = null;
+  try { _presenceHandle?.leave(); } catch {}
+  _presenceHandle = null;
   try { if (supabase && _hazardsChannel) supabase.removeChannel(_hazardsChannel); } catch {}
   _hazardsChannel = null;
   _peers = {};

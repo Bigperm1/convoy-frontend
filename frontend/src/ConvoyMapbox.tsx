@@ -1970,21 +1970,32 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // PNG; peers stay PNG MarkerViews. Pulled out here so the model layer below has
   // its live coordinate + heading.
   const selfCar = cars.find((c) => c.id === SELF_ID);
-  // 'arrow' appearance → the green arrow GLB instead of the car; else the per-color
-  // car model. (Both render through the same SelfCarModel ModelLayer below.)
-  const selfIsArrow = selfMarkerType === "arrow";
-  // "Class" appearance → a registered top-down sprite instead of a GLB.
+  // ===== Self appearance: FLAT at rest, 3D while chase-cam/routing =====
+  // 3D models are for chase-cam / routing ONLY. When no route/chase-cam is active
+  // the self marker shows the SAME flat top-down appearance peers see — the class
+  // sprite, or the GR Corolla top-down PNG in the chosen color. When a route IS
+  // active it goes 3D: car→3D car GLB, class→3D arrow, arrow→3D arrow. The
+  // presence BROADCAST is built from settings (map.tsx), NOT from this, so peers
+  // always see the driver's chosen class/car regardless of this local swap.
+  const navActive = !!navigationActive;
+  // Auto-boat override: while onWater (see the poll above), the marker renders as
+  // the BOAT class sprite regardless of the saved appearance (car/arrow/class),
+  // wearing the driver's saved boat paint. Everything downstream keys off these
+  // effective values, so entering/leaving water swaps live.
+  const waterBoat = onWater && !!CLASS_TOPDOWN["boat"];
+  // 'arrow' appearance → the green arrow GLB. A CLASS driver ALSO switches to the
+  // arrow while navigating (there's no 3D class model). Renders through SelfCarModel.
+  const selfIsArrow = selfMarkerType === "arrow" || (selfMarkerType === "class" && navActive && !waterBoat);
+  // Flat "class" top-down sprite: on water (auto-boat), or a class driver AT REST.
   //  • photo class, no paint  → the photo AS-SHOT (static registration)
   //  • photo class, painted   → live MBXImage snapshot of <ClassSprite> (photo
   //    + primary/secondary band layers tinted at runtime — any hex works)
   //  • no photo yet           → the tinted silhouette placeholder
   // Image name carries class+paint so changing either re-registers live.
-  // Auto-boat override: while onWater (see the poll above), the marker renders
-  // as the BOAT class sprite regardless of the saved appearance (car/arrow/
-  // class), wearing the driver's saved boat paint. Everything downstream keys
-  // off these effective values, so entering/leaving water swaps live.
-  const waterBoat = onWater && !!CLASS_TOPDOWN["boat"];
-  const selfIsClass = waterBoat || selfMarkerType === "class";
+  const selfIsClass = waterBoat || (selfMarkerType === "class" && !navActive);
+  // Flat GR Corolla top-down PNG — IDENTICAL to what peers see — in the chosen
+  // color: a car/photo driver AT REST. In nav it becomes the 3D car GLB instead.
+  const selfIsFlatCar = (selfMarkerType === "car" || selfMarkerType === "photo") && !navActive && !waterBoat;
   const effVehicleClass = waterBoat ? "boat" : canonicalClass(selfVehicleClass);
   const effClassPaint = waterBoat && selfVehicleClass !== "boat"
     ? (getSettings().classPaint?.["boat"] ?? {})
@@ -2021,6 +2032,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // is always FULLY self-lit (1): it's a UI marker, not a realistic car — scene
   // lighting at day/dusk (0/0.55) washed its brand green pale.
   const selfEmissive = selfIsArrow ? 1 : (CAR_EMISSIVE_BY_MODE[mapMode] ?? 0);
+  // Flat self-car sprite: the SAME per-color GR Corolla top-down PNG peers see,
+  // registered as a Mapbox image so SelfCarModel can lay it flat on the map (it
+  // rides the same eased pose + camera lockstep as the 3D model). Keyed by color
+  // so a paint change swaps it live.
+  const selfCarFlatImg = "self_car_flat_" + getVehicleModelKey(selfCar?.color);
 
   // Project the car onto the selected route while navigating. Drives two things:
   // (1) trimming the line behind the car (3D car reads on top), and (2) snapping
@@ -2344,6 +2360,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           </Images>
         ))}
 
+        {/* Flat self-car (at rest): register the per-color GR Corolla top-down PNG
+            — the exact asset peers see — so SelfCarModel can draw it as a flat
+            map-plane sprite. Only while idle car/photo; nav swaps to the 3D GLB. */}
+        {selfIsFlatCar && (
+          <Mapbox.Images images={{ [selfCarFlatImg]: getVehiclePngOrDefault(selfCar?.color) }} />
+        )}
+
         {/* Mapbox's native location layer — REQUIRED to power the Camera's
             followUserLocation (a hidden/unmounted location component doesn't start
             the native engine, which stops the chase cam). So we keep it VISIBLE
@@ -2570,11 +2593,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             scale={selfIsArrow ? ARROW_MODEL_SCALE : undefined}
             headingOffset={selfIsArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
             pitchTilt={selfIsArrow ? ARROW_MODEL_PITCH : 0}
-            sprite={selfIsClass ? selfClassImg : undefined}
-            // ~59pt on-screen footprint: every photo class (painted or not) now
-            // registers via the 66pt ClassSprite snapshot → one 0.9 iconSize,
-            // independent of per-class asset resolution; silhouette snapshot → 1.
-            spriteSize={selfClassAsShot ? 0.9 : 1}
+            // Flat sprite when at rest (class sprite OR the GR Corolla top-down
+            // PNG); undefined → the 3D GLB model (nav / chase-cam).
+            sprite={selfIsClass ? selfClassImg : (selfIsFlatCar ? selfCarFlatImg : undefined)}
+            // class photo → 0.9 (66pt snapshot); silhouette → 1; flat car PNG is a
+            // 44pt asset, so iconSize 1 ≈ the 46pt peer marker.
+            spriteSize={selfIsFlatCar ? 1 : (selfClassAsShot ? 0.9 : 1)}
             speedMs={userSpeedMs}
             cameraRef={cameraRef}
             getCam={getCam}

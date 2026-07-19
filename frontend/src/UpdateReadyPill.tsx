@@ -33,14 +33,15 @@ export default function UpdateReadyPill({ hidden }: { hidden?: boolean }) {
 }
 
 const styles = StyleSheet.create({
-  // Mirrors the liveOverlay chip (map.tsx) so it reads as part of the same stack.
+  // Candy-red action banner with a rounded-square shape (matches the liveOverlay
+  // chip's new corners). Bright + solid so the "update ready" CTA stands out.
   pill: {
     alignSelf: "center", marginTop: 6,
     paddingHorizontal: 12, paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: "rgba(45,236,134,0.22)", // brand green glass
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(45,236,134,0.55)",
+    borderRadius: 10,
+    backgroundColor: "rgba(228,0,43,0.95)", // candy red
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.40)",
     zIndex: 5,
   },
-  text: { color: "#2DEC86", fontSize: 11, fontWeight: "700", letterSpacing: 0.2 },
+  text: { color: "#FFFFFF", fontSize: 11, fontWeight: "700", letterSpacing: 0.2 },
 });

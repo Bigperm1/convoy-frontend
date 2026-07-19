@@ -5,6 +5,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import * as Location from "expo-location";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
+import Constants from "expo-constants";
 import { api, formatErr, wsUrl } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
@@ -3183,6 +3184,12 @@ export default function MapScreen() {
             {(() => {
               const selfLive = getAvatarMode(settings) !== "ghost" && !!settings.activeCommunityId ? 1 : 0;
               const liveCount = selfLive + peerList.length;
+              // Actual native build number (v66, v67, …) — reads the installed
+              // binary's build, so it tracks whatever build the user is on without
+              // a code change. Falls back to the app.json value if unavailable.
+              const buildNo = Constants.nativeBuildVersion
+                || Constants.expoConfig?.ios?.buildNumber
+                || String((Constants.expoConfig as any)?.android?.versionCode ?? "");
               return (
                 // Tappable (tester request): opens the who's-on roster sheet —
                 // every live member with YOHB + Drive-to actions.
@@ -3193,7 +3200,7 @@ export default function MapScreen() {
                   hitSlop={8}
                 >
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} live · {visibleHazards.length} alerts · v3</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} Crew · {visibleHazards.length} alerts · v{buildNo}</Text>
                 </TouchableOpacity>
               );
             })()}
@@ -4528,7 +4535,7 @@ const styles = StyleSheet.create({
     alignSelf: "center", marginTop: 8,
     flexDirection: "row", alignItems: "center", gap: 5,
     paddingHorizontal: 9, paddingVertical: 3,
-    borderRadius: 999,
+    borderRadius: 10,
     backgroundColor: "rgba(120,120,128,0.32)",
     borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
     zIndex: 5,

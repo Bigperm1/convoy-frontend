@@ -312,6 +312,12 @@ export const CARPLAY_ARROW_SCALE: any = carModelScale(1.0);
 // snapped) animate normally. OTA-tunable.
 const SELF_DEADBAND_M = 2.5;
 const SELF_DEADBAND_HDG = 8;
+// When stopped/creeping (speed below CREEP), widen the position dead-band so
+// parked GPS jitter (typically 5–10m, worse in an urban canyon) is absorbed and
+// the marker holds still instead of roaming. Restores to SELF_DEADBAND_M the
+// instant the car is actually moving so real driving is never lagged.
+const SELF_DEADBAND_STOP_M = 9;
+const SELF_CREEP_MS = 1.4; // ~5 km/h — below this the car is treated as stopped
 // Phase-2 road-snap tuning. The invisible mapbox-streets-v8 road source id (shared by both
 // surfaces); how close a road must be to snap (lock)/stay snapped (release, hysteresis); how
 // often to re-query the road tiles when NOT route-snapped; and the max cross-street angle
@@ -710,8 +716,11 @@ type PlacePoint = { id: string; lat: number; lng: number; label: string; price?:
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1 }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs }: {
   lat: number; lng: number; heading: number; emissive: number;
+  // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
+  // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
+  speedMs?: number;
   // modelRotation X (deg): stand a flat marker UP toward the chase camera. 0 for the
   // car (sits flat on its wheels); the green arrow passes ARROW_MODEL_PITCH (~52).
   pitchTilt?: number;
@@ -747,6 +756,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const rafDead = useRef(false); // latched true while the rAF loop is paused (phone display asleep)
   const bgTimer = useRef<any>(null); // background-safe ease timer that keeps the car moving smoothly while rAF is paused (phone display off + CarPlay active)
   const lastStepAtRef = useRef(0); // wall-clock of the last REAL rAF tick — the watchdog's liveness heartbeat
+  const lastBgTickAt = useRef(0);  // wall-clock of the last bgTick that ACTUALLY advanced (setInterval liveness)
   const resumeSnapUntil = useRef(0); // snap-track (don't ease) until this wall-clock after foreground
   const wasBackgrounded = useRef(false); // true once the app actually hit 'background' since last 'active'
   const [, setTick] = useState(0);
@@ -798,6 +808,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     const a = anim.current;
     if (!a) return;
     const now = Date.now();
+    lastBgTickAt.current = now; // this timer is alive → the fix effect can rely on the ease
     const t = Math.min(1, (now - a.start) / a.dur);
     render.current = {
       lat: a.fromLat + (a.toLat - a.fromLat) * t,
@@ -919,7 +930,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // still animates; a pending ease keeps running to its target. Meters via equirectangular.
     const dLatM = (lat - prev.lat) * 111320;
     const dLngM = (lng - prev.lng) * 111320 * Math.cos(prev.lat * Math.PI / 180);
-    if (Math.hypot(dLatM, dLngM) < SELF_DEADBAND_M && Math.abs(angDelta(prev.heading, heading)) < SELF_DEADBAND_HDG) {
+    // Speed-scaled dead-band: a wide band when stopped (absorb parked jitter →
+    // no idle roam), the tight band when moving (track real driving 1:1).
+    const band = (speedMs ?? 99) < SELF_CREEP_MS ? SELF_DEADBAND_STOP_M : SELF_DEADBAND_M;
+    if (Math.hypot(dLatM, dLngM) < band && Math.abs(angDelta(prev.heading, heading)) < SELF_DEADBAND_HDG) {
       return;
     }
     // Ease from the current drawn pose to the new fix over ~the fix interval
@@ -943,6 +957,20 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       // resumes normal 60 fps easing.
       startBgTimer();
       if (raf.current == null) raf.current = requestAnimationFrame(step);
+      // FREEZE FIX (2026-07-18 drive report): on a PHONE-ONLY drive with the screen
+      // locked the app is fully backgrounded and RN SUSPENDS setInterval, so bgTick
+      // never fires and the marker froze while the raw-fix-driven route line kept
+      // trimming. If the bg timer isn't actually advancing (its heartbeat is stale),
+      // snap render.current straight to this fix here in the effect (which DOES run on
+      // every background GPS fix — that's what trims the line) so the marker tracks.
+      // When the timer IS alive (CarPlay scene keeps the app active) its heartbeat is
+      // fresh and this snap is skipped, preserving the smooth head-unit ease.
+      if (now - lastBgTickAt.current > 1500) {
+        render.current = { lat, lng, heading: prev.heading + angDelta(prev.heading, heading) };
+        anim.current = null;
+        pushCam(render.current.lat, render.current.lng, render.current.heading);
+        setTick((n) => (n + 1) & 0xffff);
+      }
     } else if (raf.current == null) {
       raf.current = requestAnimationFrame(step);
     }
@@ -2547,6 +2575,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             // registers via the 66pt ClassSprite snapshot → one 0.9 iconSize,
             // independent of per-class asset resolution; silhouette snapshot → 1.
             spriteSize={selfClassAsShot ? 0.9 : 1}
+            speedMs={userSpeedMs}
             cameraRef={cameraRef}
             getCam={getCam}
             readyRef={lockReadyRef}

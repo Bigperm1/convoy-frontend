@@ -2053,7 +2053,11 @@ export default function MapScreen() {
         sub = await Location.watchPositionAsync(
           powerMode === "eco"
             ? { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 8 }
-            : { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 0 },
+            // distanceInterval 2 (was 0): let the OS drop sub-2m stationary jitter
+            // before it reaches the marker (BestForNavigation is tuned for motion and
+            // roams when parked) — the OTA half of the idle-drift fix; the marker's
+            // speed-scaled dead-band is the other half. 2m is well below nav needs.
+            : { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 2 },
           (pos) => {
             const h = pos.coords.heading;
             const heading = typeof h === "number" && h >= 0 ? h : undefined;

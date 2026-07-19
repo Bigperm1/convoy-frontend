@@ -9,7 +9,7 @@
 // refcounted/shared with the nav banner so they never fight over iOS's single
 // background-location slot.
 
-import { NativeModules, Platform } from 'react-native';
+import { NativeModules, Platform, AppState } from 'react-native';
 import * as Location from 'expo-location';
 import { carPlayHookOwnsRoot } from './carPlayShared';
 import { setCarState, getCarState } from './carStore';
@@ -113,10 +113,35 @@ export function initCarPlayBootstrap(): void {
     stopCarDataService();
   };
 
+  // WARM-CONNECT RECOVERY (2026-07-18 — the "CarPlay touch does nothing" root cause).
+  // Under Expo SDK 54 / RN 0.81 bridgeless New Arch, RNCarPlay's native `didConnect`
+  // emit is guarded by `if (cp.bridge)` — nil in bridgeless — so a head unit that
+  // connects AFTER the app is already running never flips CarPlay.connected, onConnect
+  // never fires, and CarPlay.setRootTemplate is never called. With no CPMapTemplate
+  // presented there is NO input channel at all (iOS CarPlay routes ALL touch through
+  // the template's map/bar buttons + pan/zoom gestures — never to the app's UIView),
+  // so the surface paints but nothing responds. The library's `checkForConnection()`
+  // re-sends didConnect WITHOUT the bridge guard, but JS calls it only once at
+  // construction (before any car is attached). Poll it until connected so the template
+  // (and its already-wired buttons + iOS-26 pinch-zoom) actually comes up. No native
+  // build needed; a no-op once connected / if the true cause is elsewhere.
+  const poke = () => { try { (CarPlay as any).bridge?.checkForConnection?.(); } catch {} };
+  let poll: any = null;
+  const ensurePolling = () => {
+    if (poll || CarPlay.connected) return;
+    poll = setInterval(() => {
+      if (CarPlay.connected) { clearInterval(poll); poll = null; return; }
+      poke();
+    }, 3000);
+  };
+
   try {
-    CarPlay.registerOnConnect(onConnect);
-    CarPlay.registerOnDisconnect(onDisconnect);
-    if (CarPlay.connected) onConnect();
+    CarPlay.registerOnConnect(() => { if (poll) { clearInterval(poll); poll = null; } onConnect(); });
+    CarPlay.registerOnDisconnect(() => { onDisconnect(); ensurePolling(); });
+    if (CarPlay.connected) onConnect(); else { poke(); ensurePolling(); }
+    // A head unit connecting often brings the app active — re-poke then, and resume
+    // polling in case it had stopped.
+    AppState.addEventListener('change', (s) => { if (s === 'active' && !CarPlay.connected) { poke(); ensurePolling(); } });
   } catch {
     // react-native-carplay not ready yet — ignore; the hook covers the warm path.
   }

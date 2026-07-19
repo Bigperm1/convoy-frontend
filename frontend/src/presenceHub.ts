@@ -29,13 +29,23 @@ const fanout = (e: Entry) => { e.subs.forEach((fn) => { try { fn(e.peers); } cat
 
 function doTrack(e: Entry): void {
   if (!e.channel || e.status !== "SUBSCRIBED") return;
-  // Highest-priority provider with a non-null payload wins, so when the phone
-  // map (priority 2, richer marker/paint payload) is active it owns the
-  // broadcast; the CarPlay service (priority 1, slim) only broadcasts when the
-  // map isn't mounted. No alternating/flicker.
   const sorted = [...e.providers].sort((a, b) => b.priority - a.priority);
+  if (!sorted.length) return;
+  // Only the HIGHEST-priority tier may broadcast. When the phone map (priority 2,
+  // richer marker/paint payload) is registered it owns the broadcast. If it's
+  // registered but momentarily NOT ready (null payload — e.g. mounted before its
+  // first GPS fix) we SKIP rather than fall through to the CarPlay service
+  // (priority 1, slim): a slim track would strip our class-sprite/arrow fields
+  // off the retained presence until the map re-tracks. supabase keeps the last
+  // tracked payload, so skipping preserves the rich one. A lower tier only ever
+  // broadcasts when it's the highest tier REGISTERED (i.e. the map isn't mounted).
+  const topPriority = sorted[0].priority;
   let payload: Record<string, any> | null = null;
-  for (const p of sorted) { const v = p.get(); if (v) { payload = v; break; } }
+  for (const p of sorted) {
+    if (p.priority !== topPriority) break;   // never fall to a lower tier
+    const v = p.get();
+    if (v) { payload = v; break; }
+  }
   if (!payload) return;
   try { e.channel.track({ ...payload, online_at: new Date().toISOString() }); } catch {}
 }
@@ -66,6 +76,18 @@ function ensureChannel(e: Entry): void {
       .subscribe((s: string) => {
         e.status = s;
         if (s === "SUBSCRIBED") doTrack(e);
+        else if (s === "CLOSED" && e.channel === channel && e.subs.size > 0) {
+          // Defensive rebuild: a hard CLOSE while consumers still need presence
+          // would otherwise freeze peers until an app restart. supabase auto-
+          // rejoins CHANNEL_ERROR/TIMED_OUT on its own, and the refcount means we
+          // only removeChannel at zero subs — so a CLOSE seen here WITH live subs
+          // is unexpected and gets exactly one rebuild. `e.channel === channel`
+          // guards against a stale prior channel firing after we've moved on, so
+          // it can't loop. (This restores the old CarPlay service's closed->rejoin
+          // heal, now shared by every consumer.)
+          e.channel = null;
+          ensureChannel(e);
+        }
       });
   } catch {
     // Realtime wiring must never escape as a fatal.

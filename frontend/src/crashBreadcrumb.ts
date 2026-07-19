@@ -73,10 +73,30 @@ export function installCrashBreadcrumb() {
     if (!EU?.setGlobalHandler) return;
     const prev = EU.getGlobalHandler?.();
     EU.setGlobalHandler((error: any, isFatal?: boolean) => {
+      const msg = String(error?.message ?? error);
+      // SAFETY NET (2026-07-18): the supabase Realtime "cannot add `presence`
+      // callbacks ... after `subscribe()`" double-join race is GENUINELY benign —
+      // it only means presence didn't attach on this device — yet it was reaching
+      // the global handler as a FATAL (escaping the per-call-site try/catch via a
+      // render-path/race) and killing the app for the whole crew. It must NEVER be
+      // fatal. Swallow it here (log a breadcrumb, do NOT propagate to the default
+      // handler / expo-updates ErrorRecovery). Every OTHER error passes through
+      // untouched. This backstops both call sites no matter which race fires.
+      const benignRealtime = /cannot add `?(?:presence|postgres_changes|broadcast|system)`? callbacks/i.test(msg);
+      if (benignRealtime) {
+        try {
+          void queue([{
+            message: "SWALLOWED benign-realtime: " + msg.slice(0, 1500),
+            stack: String(error?.stack ?? "").slice(0, 4000),
+            is_fatal: false, late: false, ...baseMeta(),
+          }]);
+        } catch {}
+        return; // app survives — do not call prev()
+      }
       try {
         if (isFatal) {
           void queue([{
-            message: String(error?.message ?? error).slice(0, 2000),
+            message: msg.slice(0, 2000),
             stack: String(error?.stack ?? "").slice(0, 12000),
             is_fatal: true,
             late: false,

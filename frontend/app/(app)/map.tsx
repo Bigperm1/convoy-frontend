@@ -3182,8 +3182,9 @@ export default function MapScreen() {
               <CategoryPills origin={coords} onResults={setPlacePins} onSelect={handlePlacePinPress} />
             )}
             {(() => {
-              const selfLive = getAvatarMode(settings) !== "ghost" && !!settings.activeCommunityId ? 1 : 0;
-              const liveCount = selfLive + peerList.length;
+              // OTHER crew members only — never count the viewer. peerList already
+              // excludes self (presence keys us out; WS/REST filter our own id).
+              const liveCount = peerList.length;
               // Actual native build number (v66, v67, …) — reads the installed
               // binary's build, so it tracks whatever build the user is on without
               // a code change. Falls back to the app.json value if unavailable.

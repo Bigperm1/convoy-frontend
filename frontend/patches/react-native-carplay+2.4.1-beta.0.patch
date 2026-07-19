@@ -1,19 +1,158 @@
+diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt
+index 73aad53..ac319d1 100644
+--- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt
++++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt
+@@ -1,23 +1,27 @@
+ package org.birkir.carplay
+ 
+-import android.content.BroadcastReceiver
+-import android.content.Context
+-import android.content.Intent
+-import android.content.IntentFilter
+ import android.util.Log
+ import androidx.car.app.CarAppService
+ import androidx.car.app.Session
+ import androidx.car.app.SessionInfo
+ import androidx.car.app.validation.HostValidator
+ import com.facebook.react.ReactApplication
+-import com.facebook.react.ReactInstanceManager
++import com.facebook.react.ReactHost
+ 
+ class CarPlayService : CarAppService() {
+-  private lateinit var reactInstanceManager: ReactInstanceManager
++  // Bridgeless (RN 0.81 / New Architecture): there is no ReactInstanceManager.
++  // Resolve the app-wide bridgeless ReactHost singleton instead. Under Expo SDK 54
++  // (newArchEnabled) the generated MainApplication overrides ReactApplication.reactHost
++  // via ExpoReactHostFactory, so this is non-null; elvis-throw to stay null-safe.
++  private lateinit var reactHost: ReactHost
++
+   override fun onCreate() {
+     super.onCreate()
+-    reactInstanceManager =
+-      (application as ReactApplication).reactNativeHost.reactInstanceManager
++    reactHost = (application as ReactApplication).reactHost
++      ?: throw IllegalStateException(
++        "CarPlayService: application does not expose a bridgeless reactHost. " +
++          "Android Auto requires the New Architecture (newArchEnabled)."
++      )
+   }
+ 
+   override fun createHostValidator(): HostValidator {
+@@ -26,10 +30,11 @@ class CarPlayService : CarAppService() {
+ 
+   override fun onCreateSession(sessionInfo: SessionInfo): Session {
+     Log.d(TAG, "onCreateSession: sessionId = ${sessionInfo.sessionId}, display = ${sessionInfo.displayType}")
+-    return CarPlaySession(reactInstanceManager)
++    return CarPlaySession(reactHost)
+   }
+ 
+   companion object {
+     var TAG = "CarPlayService"
+   }
+ }
++
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
-index 2235853..edcde80 100644
+index 2235853..f84f649 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
-@@ -77,15 +77,11 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
-       }
+@@ -7,24 +7,24 @@ import android.content.Intent
+ import android.content.IntentFilter
+ import android.content.res.Configuration
+ import android.os.Bundle
++import android.os.Handler
+ import android.util.Log
+-import androidx.car.app.CarContext.SCREEN_SERVICE
+ import androidx.car.app.Screen
+-import androidx.car.app.ScreenManager
+ import androidx.car.app.Session
+ import androidx.lifecycle.DefaultLifecycleObserver
+ import androidx.lifecycle.LifecycleOwner
+-import com.facebook.react.ReactInstanceManager
++import com.facebook.react.ReactHost
++import com.facebook.react.ReactInstanceEventListener
+ import com.facebook.react.bridge.Arguments
+ import com.facebook.react.bridge.ReactContext
+ import com.facebook.react.bridge.WritableNativeMap
+ import com.facebook.react.modules.appregistry.AppRegistry
+-import com.facebook.react.modules.core.TimingModule
+-import com.facebook.react.modules.debug.DevSettingsModule
+ import org.birkir.carplay.screens.CarScreen
  
-       catalystInstance.getJSModule(AppRegistry::class.java)
+ 
+-class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : Session(), DefaultLifecycleObserver {
++// Bridgeless (RN 0.81 / New Architecture): the session is fed the app-wide bridgeless
++// ReactHost instead of the (now non-existent) ReactInstanceManager.
++class CarPlaySession(private val reactHost: ReactHost) : Session(), DefaultLifecycleObserver {
+   private lateinit var screen: CarScreen
+ 
+   @SuppressLint("UnspecifiedRegisterReceiverFlag")
+@@ -39,7 +39,7 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
+     carContext.registerReceiver(object : BroadcastReceiver() {
+       override fun onReceive(context: Context, intent: Intent) {
+         if ("org.birkir.carplay.APP_RELOAD" == intent.action) {
+-          invokeStartTask(reactInstanceManager.currentReactContext!!);
++          reactHost.currentReactContext?.let { invokeStartTask(it) }
+         }
+       }
+     }, IntentFilter("org.birkir.carplay.APP_RELOAD"))
+@@ -50,16 +50,20 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
+   }
+ 
+   private fun runJsApplication() {
+-    val reactContext = reactInstanceManager.currentReactContext
++    val reactContext = reactHost.currentReactContext
+     if (reactContext == null) {
+-      reactInstanceManager.addReactInstanceEventListener(
+-        object : ReactInstanceManager.ReactInstanceEventListener {
+-          override fun onReactContextInitialized(reactContext: ReactContext) {
+-            invokeStartTask(reactContext)
+-            reactInstanceManager.removeReactInstanceEventListener(this)
++      // Instance not yet initialized — register a one-shot listener and kick off start().
++      // Bridgeless: ReactInstanceEventListener is a top-level interface (not nested on the
++      // old ReactInstanceManager), and createReactContextInBackground() becomes start().
++      reactHost.addReactInstanceEventListener(
++        object : ReactInstanceEventListener {
++          override fun onReactContextInitialized(context: ReactContext) {
++            invokeStartTask(context)
++            reactHost.removeReactInstanceEventListener(this)
+           }
+         })
+-      reactInstanceManager.createReactContextInBackground()
++      // start() must run on the main looper.
++      Handler(carContext.mainLooper).post { reactHost.start() }
+     } else {
+       invokeStartTask(reactContext)
+     }
+@@ -67,25 +71,21 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
+ 
+   private fun invokeStartTask(reactContext: ReactContext) {
+     try {
+-      val catalystInstance = reactContext.catalystInstance
++      // Bridgeless: resolve AppRegistry directly off the ReactContext (getJSModule is
++      // proxied to reactHost.callFunctionOnModule). Do NOT go through catalystInstance —
++      // it no longer exists in the New Architecture.
+       val jsAppModuleName = "AndroidAuto"
+       val appParams = WritableNativeMap()
+       appParams.putDouble("rootTag", 1.0)
+-      val appProperties = Bundle.EMPTY
+-      if (appProperties != null) {
+-        appParams.putMap("initialProps", Arguments.fromBundle(appProperties))
+-      }
++      // Pass an empty (non-null) props bundle so JS that reads initialProps as an object
++      // does not NPE. Bundle.EMPTY is a shared immutable empty bundle.
++      appParams.putMap("initialProps", Arguments.fromBundle(Bundle.EMPTY))
+ 
+-      catalystInstance.getJSModule(AppRegistry::class.java)
 -        .runApplication(jsAppModuleName, appParams)
++      reactContext.getJSModule(AppRegistry::class.java)
 +        ?.runApplication(jsAppModuleName, appParams)
  
 -      val timingModule = reactContext.getNativeModule(
 -        TimingModule::class.java
 -      )
-       val carModule = reactInstanceManager
-         .currentReactContext?.getNativeModule(CarPlayModule::class.java)
+-      val carModule = reactInstanceManager
+-        .currentReactContext?.getNativeModule(CarPlayModule::class.java)
++      val carModule = reactContext.getNativeModule(CarPlayModule::class.java)
        carModule!!.setCarContext(carContext, screen)
 -      timingModule!!.onHostResume()
  
@@ -98,6 +237,88 @@ index 01dbabd..bacb6f0 100644
          }
        }
      }.build()
+diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/VirtualRenderer.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/VirtualRenderer.kt
+index bafa640..f4c8289 100644
+--- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/VirtualRenderer.kt
++++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/VirtualRenderer.kt
+@@ -5,6 +5,7 @@ import android.content.Context
+ import android.hardware.display.DisplayManager
+ import android.os.Bundle
+ import android.util.Log
++import android.view.ContextThemeWrapper
+ import android.view.Display
+ import android.view.ViewGroup
+ import androidx.car.app.AppManager
+@@ -12,14 +13,17 @@ import androidx.car.app.CarContext
+ import androidx.car.app.SurfaceCallback
+ import androidx.car.app.SurfaceContainer
+ import com.facebook.react.ReactApplication
+-import com.facebook.react.ReactRootView
++import com.facebook.react.interfaces.fabric.ReactSurface
+ 
+ /**
+  * Renders the view tree into a surface using VirtualDisplay. It runs the ReactNative component registered
++ * under [moduleName]. Bridgeless (RN 0.81 / New Architecture): the map is rendered through a
++ * ReactHost-created ReactSurface (Fabric) instead of the legacy ReactRootView.startReactApplication
++ * Paper path.
+  */
+ class VirtualRenderer(private val context: CarContext, private val moduleName: String) {
+ 
+-  private var rootView: ReactRootView? = null
++  private var surface: ReactSurface? = null
+ 
+   init {
+     context.getCarService(AppManager::class.java).setSurfaceCallback(object : SurfaceCallback {
+@@ -52,19 +56,32 @@ class VirtualRenderer(private val context: CarContext, private val moduleName: S
+     Presentation(context, display) {
+     override fun onCreate(savedInstanceState: Bundle?) {
+       super.onCreate(savedInstanceState)
+-      val instanceManager =
+-        (context.applicationContext as ReactApplication).reactNativeHost.reactInstanceManager
+-      if (rootView == null) {
+-        Log.d(TAG, "onCreate: rootView is null, initializing rootView")
+-        rootView = ReactRootView(context).apply {
+-          startReactApplication(instanceManager, moduleName)
+-          runApplication()
+-        }
++      // Bridgeless: resolve the app-wide ReactHost. The Presentation's constructor context is a
++      // display/outer context, so go through applicationContext (the Application is the
++      // ReactApplication). Elvis-throw to stay null-safe like the rest of the port.
++      val appContext = context.applicationContext
++      val reactHost = (appContext as ReactApplication).reactHost
++        ?: throw IllegalStateException(
++          "VirtualRenderer: application does not expose a bridgeless reactHost. " +
++            "Android Auto requires the New Architecture (newArchEnabled)."
++        )
++      if (surface == null) {
++        Log.d(TAG, "onCreate: surface is null, creating ReactSurface for $moduleName")
++        // A bare VirtualDisplay/Presentation context has no AppCompat/app theme, so RN views
++        // fail to resolve theme attrs and the map renders black. Wrap the application context
++        // (which carries the manifest AppTheme) so the Fabric surface has a real theme. Use the
++        // framework ContextThemeWrapper to avoid a compile-time androidx.appcompat.R reference;
++        // applicationInfo.theme is the manifest <application android:theme> resource id.
++        val themed: Context = ContextThemeWrapper(appContext, appContext.applicationInfo.theme)
++        // createSurface() attaches a ReactSurfaceView immediately, so .view is non-null here.
++        val newSurface = reactHost.createSurface(themed, moduleName, null)
++        surface = newSurface
++        newSurface.view?.let { setContentView(it) }
++        newSurface.start()
+       } else {
+-        (rootView?.parent as? ViewGroup)?.removeView(rootView)
+-      }
+-      rootView?.let {
+-        setContentView(it)
++        // Re-parent the existing surface view onto this Presentation.
++        (surface?.view?.parent as? ViewGroup)?.removeView(surface?.view)
++        surface?.view?.let { setContentView(it) }
+       }
+     }
+   }
+@@ -73,3 +90,4 @@ class VirtualRenderer(private val context: CarContext, private val moduleName: S
+     const val TAG = "VirtualRenderer"
+   }
+ }
++
 diff --git a/node_modules/react-native-carplay/ios/RCTConvert+RNCarPlay.m b/node_modules/react-native-carplay/ios/RCTConvert+RNCarPlay.m
 index 5ef378d..26b7312 100644
 --- a/node_modules/react-native-carplay/ios/RCTConvert+RNCarPlay.m

@@ -601,7 +601,7 @@ index 13a66ff..b7d786e 100644
  
      CarPlay.bridge.createTemplate(
 diff --git a/node_modules/react-native-carplay/src/templates/Template.ts b/node_modules/react-native-carplay/src/templates/Template.ts
-index d39678f..2b4e8f3 100644
+index d39678f..2d29edc 100644
 --- a/node_modules/react-native-carplay/src/templates/Template.ts
 +++ b/node_modules/react-native-carplay/src/templates/Template.ts
 @@ -3,7 +3,18 @@ import { CarPlay } from '../CarPlay';
@@ -624,7 +624,22 @@ index d39678f..2b4e8f3 100644
  
  export interface BaseEvent {
    /**
-@@ -153,7 +164,15 @@ export class Template<P> {
+@@ -129,6 +140,14 @@ export class Template<P> {
+         android: ({ error }: { error?: string } = {}) => {
+           error && console.error(error);
+         },
++        // Convoy fix (2026-07-19): iOS had NO key here, so Platform.select returned
++        // undefined and createTemplate was invoked with an undefined callback. The
++        // legacy bridge tolerated it; the bridgeless TurboModule interop throws an
++        // ObjC exception -> SIGABRT. This path runs for every NON-MAP template
++        // (AlertTemplate, SearchTemplate, ListTemplate...), so tapping the CarPlay
++        // Police button crashed the app the moment it tried to show its confirmation
++        // alert. Same fix already applied in MapTemplate.ts.
++        ios: () => {},
+       });
+       CarPlay.bridge.createTemplate(
+         this.id,
+@@ -153,7 +172,15 @@ export class Template<P> {
          }
          if (String(i).match(/[Ii]mage$/)) {
            // eslint-disable-next-line @typescript-eslint/no-unsafe-call

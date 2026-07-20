@@ -45,7 +45,7 @@ import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
-import { CAR_BAR_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton, carAlert } from './carActions';
+import { CAR_BAR_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
 
@@ -800,20 +800,14 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             dbg += ' root=THREW:' + String(e).slice(0, 28);
           }
           setCarState({ carDbg: dbg });
-          // ── TEMPLATE-LAYER PROBE (rewritten 2026-07-19 — the old one was a no-op) ──
-          // The previous probe called `CarPlay.bridge.toast(...)`, which has ZERO
-          // occurrences in ios/RNCarPlay.m (it is Android-only) — so it could never
-          // have fired on iOS regardless of template state, and every "the probe
-          // never appeared" datapoint was meaningless. carAlert() uses a real
-          // CPAlertTemplate (native template UI), so this is now an HONEST test:
-          //   • alert APPEARS  → the interfaceController/template pipeline is ALIVE;
-          //     any remaining problem is chrome compositing or perception, NOT the
-          //     template layer, and NO native build is warranted.
-          //   • alert NEVER appears → the template pipeline really is dead under
-          //     bridgeless and a native build is justified.
-          // It is PASSIVE (needs no tap), so it answers the question even if the
-          // chrome itself doesn't render and there is nothing to tap.
-          setTimeout(() => { try { carAlert('Hairpin ✓ template layer alive'); } catch {} }, 6000);
+          // Template-layer probe REMOVED 2026-07-19 — it did its job (chrome is
+          // confirmed rendering on the head unit) and it had become a liability:
+          // carAlert() builds a CPAlertTemplate, which goes through Template.ts's
+          // non-map createTemplate path. That path passed an undefined callback on
+          // iOS (Platform.select had no `ios` key), which the bridgeless TurboModule
+          // interop rejects with an ObjC exception -> SIGABRT. So this passive probe
+          // was crashing the app on a 6s timer after every CarPlay connect. The
+          // underlying callback bug is fixed in the patch; the probe stays gone.
         }
         // Android Auto is NOT built here. The head unit can launch the car app
         // even when this phone screen isn't mounted, so its UI is owned by the

@@ -451,28 +451,14 @@ export function CarSurface() {
           CarPlay taps. Renders for sure (like the HUD chips). Tap emits a
           carStore action that map.tsx (same JS context) turns into tap-to-talk.
           Green while listening, amber while thinking, white idle. */}
-      {/* STATUS INDICATOR ONLY — deliberately NOT tappable (2026-07-19).
-          CarPlay never delivers touches to the app's own window/views (documented
-          at carActions.ts, CarMapView.tsx and carPlayBootstrap.ts), so this drawn
-          mic could never respond to a tap. Shipping it as a TouchableOpacity made
-          it the most prominent control on the surface AND a guaranteed dead tap —
-          the single biggest contributor to the "CarPlay is completely touch-inert"
-          report. It now only REPORTS Scout state; the tappable equivalent is the
-          native `scout` CPMapButton (and `car-mic` on the cold root), which CarPlay
-          itself renders and routes. pointerEvents="none" so it can't swallow
-          anything either. */}
-      <View
-        style={[styles.scoutMicBtn, { backgroundColor: carHudFloor() }]}
-        pointerEvents="none"
-        testID="car-scout-mic"
-      >
-        <GlassFill tintColor={undefined} style={{ borderRadius: 26, overflow: 'hidden' }} />
-        <Image
-          source={require('../../assets/images/scout-mic.png')}
-          style={{ width: 28, height: 28, tintColor: s.scoutListening ? '#2DEC86' : (s.scoutThinking ? '#FF9F0A' : '#F4F4F4') }}
-          resizeMode="contain"
-        />
-      </View>
+      {/* The drawn Scout mic was REMOVED 2026-07-20 (Jeff's call). It had been demoted
+          to a status indicator because CarPlay never delivers touches to the app's own
+          window — so it was a pixel-identical twin of the real `car-mic` CPMapButton
+          that could never respond to a tap, sitting in the most reachable corner of the
+          screen. With the Listening…/Thinking… pill now visible (it used to be hidden
+          behind the nav bar at top:10) Scout state is already reported, so the twin was
+          pure downside: a dead target a driver would jab at mid-drive. The one true mic
+          is the native CPMapButton in the trailing column. */}
 
       {/* Scout mic feedback — TOP-CENTER pill. The native mic map button has no
           pressed/active state and the head unit has no haptics, so this is the
@@ -1106,24 +1092,21 @@ const styles = StyleSheet.create({
   // edge belongs to the system. Keeping our two round controls in one left-hand
   // column also reads as a deliberate pair instead of two orphans.
   // scoutMicBtn is top:10 h:52 -> its bottom edge is 62; +8pt gap = 70.
-  // vertical position: same 52×52 circle at top:10, hard against the right edge. In
-  // LIVE mode the maneuver banner sits bottom-right (navStack), so the top-right is free.
+  // LEFT RAIL, slot 2. The drawn Scout mic used to hold slot 1; with it gone the
+  // weather chip moved up into that slot and the compass stays directly under it,
+  // which is still "compass under the top-left control" as asked.
   compassDock: { position: 'absolute', left: 56, top: CAR_TOP_INSET + 52 + 8, width: 52, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', overflow: 'hidden' },
-  // Weather chip — BOTTOM-left, just above the speedo (left edge aligned, small gap),
-  // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
-  // MOVED 2026-07-20: was bottom-left above the speedo (bottom: 62 -> y130-178),
-  // which HARD-OVERLAPPED the compass by 40pt once the compass moved into the
-  // left rail. The rail cannot hold mic+compass+weather+speed: that needs 282pt
-  // and a CarPlay canvas is ~240pt tall. Weather is the one that does not have to
-  // be in the column, so it sits BESIDE the Scout mic instead. Height 52 = the
-  // mic's, so the two read as one row. (Invisible in the local sim — the
-  // OpenWeather key only exists in EAS builds — hence the collision was latent.)
-  weatherChip: { position: 'absolute', left: 116, top: CAR_TOP_INSET, width: 58, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
+  // LEFT RAIL, slot 1. Was bottom-left above the speedo (bottom: 62 -> y130-178), which
+  // HARD-OVERLAPPED the compass by 40pt once the compass moved into the rail — latent
+  // locally because the OpenWeather key only exists in EAS builds, so the chip never
+  // draws in the sim. The rail could not hold mic+compass+weather+speed (282pt needed,
+  // ~240pt canvas); removing the dead Scout mic freed exactly the slot it needed.
+  // Resulting rail: weather 58-110, compass 118-170, speed 182-230 — 8pt and 12pt gaps.
+  weatherChip: { position: 'absolute', left: 56, top: CAR_TOP_INSET, width: 58, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
   // top was 10 -> INSIDE the CPMapTemplate nav bar, i.e. the one signal that says
   // Scout is listening was hidden behind system chrome. Left-anchored at
   // CAR_LEFT_INSET rather than centred so it also clears the weather chip.
   scoutPill: { position: 'absolute', top: CAR_TOP_INSET, left: CAR_LEFT_INSET, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
-  scoutMicBtn: { position: 'absolute', left: 56, top: CAR_TOP_INSET, width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(18,18,22,0.5)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   scoutDot: { width: 10, height: 10, borderRadius: 5 },
   scoutPillText: { color: '#F4F4F4', fontSize: 14, fontWeight: '700' },
   weatherText: { color: '#F4F4F4', fontSize: 13, fontWeight: '800', marginTop: 1 },

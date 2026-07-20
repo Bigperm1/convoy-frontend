@@ -106,16 +106,17 @@ const CAR_ZOOM_MAX = 20;
 // head unit (larger = lower on screen). Applied every frame via getCam, nav AND cruise.
 // Bumped 0.42 → 0.52 (CarPlay only, tilt unchanged): drops the car a bit lower on the wide
 // head-unit so more road/horizon reads ahead of it, matching the phone's forward view.
-// BACK to 0.42 (2026-07-20) because 0.52 put the car INTO the maneuver banner. Mapbox
-// padding centres the camera in the INSET rect, so the car sits at y = H*(1+frac)/2:
-//   0.52 -> 240*(1.52)/2 = 182.5pt, and the banner occupies y190-232 from x184 — i.e.
-//          the car's anchor was 7.5pt above the banner's top-LEFT CORNER and the lower
-//          half of the 3D model drew behind it.
-//   0.42 -> 240*(1.42)/2 = 170.4pt, ~20pt of clear air above the banner.
-// The cost is real and Jeff should know it: a slightly higher car = slightly less road
-// ahead. 0.42 is the value that shipped before the 0.52 bump, so it is known-good rather
-// than a fresh guess. OTA-tunable if he wants it lower again.
-const CAR_LOWER_PAD_FRAC = 0.42;
+// Briefly dropped to 0.42 on 2026-07-20 over a computed car/banner overlap, then put
+// BACK to 0.52 — Jeff prefers the lower car and the overlap does not actually bite:
+//   Mapbox centres the camera in the INSET rect, so the car sits at y = H*(1+frac)/2
+//   -> 240*(1.52)/2 = 182.5pt on a 240pt canvas.
+//   The maneuver banner used to start at y184 (height 48) leaving ~1.5pt; it now starts
+//   at y190 because TURN_ROW_H shrank to 42 for the mic alignment, so the SAME 0.52 has
+//   ~4x the clearance it had before, and head-unit captures show the car reading clearly
+//   above the banner rather than behind it.
+// If it ever does look buried, prefer narrowing the nav stack over raising the car —
+// raising it costs road-ahead, which is the whole point of the low framing.
+const CAR_LOWER_PAD_FRAC = 0.52;
 // Shift the pinned car LEFT of center (fraction of map width, applied as camera
 // paddingRight → the car moves left by ~half this). 0.22 sat it near the left
 // speed-limit chip; 0.08 centres it in the open gap BETWEEN the bottom-left HUD

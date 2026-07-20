@@ -231,8 +231,12 @@ export function CarSurface() {
   // CarPlay canvas is far narrower than a phone (~431pt on the iOS 18.6 sim), so a
   // fixed width silently collides on the small end.
   const [surfaceW, setSurfaceW] = useState(0);
+  // Clamp DOWNWARD only. A hard MIN floor that exceeds the space available would
+  // push the stack's left edge back over the speed cluster — the very collision
+  // CAR_LEFT_INSET exists to prevent — so on a canvas too narrow to satisfy the
+  // floor the stack gets narrow rather than overlapping.
   const navStackW = surfaceW > 0
-    ? Math.max(NAV_STACK_MIN_W, Math.min(NAV_STACK_MAX_W, surfaceW - CAR_LEFT_INSET - CAR_RIGHT_INSET))
+    ? Math.max(NAV_STACK_ABS_MIN_W, Math.min(NAV_STACK_MAX_W, surfaceW - CAR_LEFT_INSET - CAR_RIGHT_INSET))
     : NAV_STACK_FALLBACK_W;
   const speedPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -1010,10 +1014,35 @@ const CAR_TOP_INSET = 58; // clears the CPMapTemplate navigation bar
 // clear of the ETA and maneuver banner. CPMapTemplate.h:71-75 caps mapButtons at 4,
 // so 2 real + 2 spacers is the highest they can possibly go.
 const CAR_RIGHT_INSET = 8;
-// ...but the LANE ROW is the top element of the stack and still sits at the mic
-// button's height, so it alone keeps clearance. Measured in the iOS 18.6 sim: the
-// button column occupies ~48pt in from the trailing edge.
-const CAR_MAP_BUTTON_COL_W = 48;
+
+// ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────
+// Measured off a real 800x480 CarPlay capture (= 400x240pt @2x) by decoding the
+// PNG and finding the glyph rows/columns, NOT by eyeballing:
+//   police glyph rows 179-231  -> 26pt tall, centre 102.5pt from the top
+//   mic    glyph rows 247-301  -> 27pt tall, centre 137pt   from the top
+//   police <-> mic gap ......... 8pt
+//   leftmost glyph edge ........ x=366pt, i.e. 34pt in from the trailing edge
+// So 8pt is the system's own rhythm, and everything we draw matches it.
+const NAV_GAP = 8;
+// Lane row's right edge lands NAV_GAP clear of the leftmost glyph (400-366-8=26 ->
+// 42 from the edge once CAR_RIGHT_INSET is added back by the margin below).
+const CAR_MAP_BUTTON_COL_W = 42;
+
+// EXPLICIT row heights. These were paddingVertical-derived, which made the stack's
+// total height depend on RN's font line-height and therefore impossible to align
+// against a fixed system button. Fixed heights make the arithmetic exact:
+//   lane centre from bottom = 8 + TURN + 8 + ETA + 8 + LANE/2
+//                           = 8 + 42  + 8 + 22  + 8 + 15   = 103pt
+//   mic centre from bottom  = 240 - 137                    = 103pt   <- aligned
+// LANE_ROW_H ~= the mic's own 27pt so the two read as one row, per Jeff's
+// "the arrow banner needs to be the same height/alignment of the mic".
+// TURN_ROW_H is the value that FALLS OUT of that alignment — it is why the
+// maneuver banner got shorter ("if the mic is too close to the eta banner then
+// narrow the height of the turn banner"). Content still fits: the maneuver box is
+// 30 and the two text lines ~34, both under 42.
+const LANE_ROW_H = 30;
+const ETA_ROW_H = 22;
+const TURN_ROW_H = 42;
 // Left edge the bottom nav stack must not cross: the speed cluster is speedDock
 // (left 56) + the posted-limit badge, which SLIDES OUT 62pt and is itself 58 wide
 // -> 56 + 62 + 58 = 176 at full extension, +8pt of air.
@@ -1023,18 +1052,25 @@ const CAR_LEFT_INSET = 184;
 // head unit: 184 + 210 + 76 overflows a ~431pt CarPlay canvas, which is exactly
 // how the maneuver banner ended up underneath the speedo in the sim. Clamped so it
 // stays readable on small screens and does not sprawl on ultra-wide ones.
-const NAV_STACK_MIN_W = 150;
 const NAV_STACK_MAX_W = 280;
-const NAV_STACK_FALLBACK_W = 210; // pre-measurement (first frame only)
+// Absolute floor — readability past this point is already lost, and going lower
+// would be worse than a narrow banner. Deliberately NOT a "preferred" width: see
+// the clamp-downward comment at the navStackW computation.
+const NAV_STACK_ABS_MIN_W = 120;
+// Pre-measurement, first frame only. Was 210, which overlapped the speed cluster
+// on a 400pt canvas for one frame; the floor is the safe guess.
+const NAV_STACK_FALLBACK_W = NAV_STACK_ABS_MIN_W;
 
 // Lane guidance has to fit the (now measured) stack width. A 5-lane cue at the old
 // fixed size 26 overflowed a narrow head unit and the leftmost arrow was clipped —
 // which on a real junction is the one you need. Shrink to fit, floor 16 so it stays
 // legible at a glance; laneRow is paddingHorizontal 10 + gap 10 (see styles.laneRow).
 function laneIconSize(count: number, stackW: number): number {
-  if (count <= 0) return 26;
+  if (count <= 0) return LANE_ROW_H - 8;
   const avail = stackW - 20 /* padding */ - (count - 1) * 10 /* gaps */;
-  return Math.max(16, Math.min(26, Math.floor(avail / count)));
+  // Also capped by the row's own fixed height so a wide head unit can't grow the
+  // icons past the band the row occupies.
+  return Math.max(16, Math.min(LANE_ROW_H - 8, Math.floor(avail / count)));
 }
 
 const styles = StyleSheet.create({
@@ -1075,8 +1111,18 @@ const styles = StyleSheet.create({
   compassDock: { position: 'absolute', left: 56, top: CAR_TOP_INSET + 52 + 8, width: 52, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', overflow: 'hidden' },
   // Weather chip — BOTTOM-left, just above the speedo (left edge aligned, small gap),
   // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
-  weatherChip: { position: 'absolute', left: 56, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
-  scoutPill: { position: 'absolute', top: 10, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
+  // MOVED 2026-07-20: was bottom-left above the speedo (bottom: 62 -> y130-178),
+  // which HARD-OVERLAPPED the compass by 40pt once the compass moved into the
+  // left rail. The rail cannot hold mic+compass+weather+speed: that needs 282pt
+  // and a CarPlay canvas is ~240pt tall. Weather is the one that does not have to
+  // be in the column, so it sits BESIDE the Scout mic instead. Height 52 = the
+  // mic's, so the two read as one row. (Invisible in the local sim — the
+  // OpenWeather key only exists in EAS builds — hence the collision was latent.)
+  weatherChip: { position: 'absolute', left: 116, top: CAR_TOP_INSET, width: 58, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
+  // top was 10 -> INSIDE the CPMapTemplate nav bar, i.e. the one signal that says
+  // Scout is listening was hidden behind system chrome. Left-anchored at
+  // CAR_LEFT_INSET rather than centred so it also clears the weather chip.
+  scoutPill: { position: 'absolute', top: CAR_TOP_INSET, left: CAR_LEFT_INSET, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   scoutMicBtn: { position: 'absolute', left: 56, top: CAR_TOP_INSET, width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(18,18,22,0.5)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   scoutDot: { width: 10, height: 10, borderRadius: 5 },
   scoutPillText: { color: '#F4F4F4', fontSize: 14, fontWeight: '700' },
@@ -1096,7 +1142,7 @@ const styles = StyleSheet.create({
   // the phone banner EXACTLY and is backdrop-independent, so no washout on the pale day
   // map. NO border (like the phone banner + other chips); shadow lifts it.
   topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
-  maneuverBox: { width: 36, height: 36, borderRadius: 9, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
+  maneuverBox: { width: 30, height: 30, borderRadius: 8, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: NAV_GAP },
   maneuverArrow: { color: '#0B0B0C', fontSize: 24, fontWeight: '900', lineHeight: 28, marginTop: -1 },
   topTextCol: { flex: 1, minWidth: 0 },
   topDist: { color: '#F4F4F4', fontSize: 17, fontWeight: '800' },
@@ -1110,12 +1156,12 @@ const styles = StyleSheet.create({
   // width is the shared "length" of both banners — OTA-tunable. alignItems:'stretch' makes
   // the ETA + maneuver banner fill it equally so they line up.
   // width is applied INLINE (navStackW) — it has to be measured, see CAR_LEFT_INSET.
-  navStack: { position: 'absolute', right: CAR_RIGHT_INSET, bottom: 8, alignItems: 'stretch', gap: 6 },
-  navBannerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
-  navEta: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  navStack: { position: 'absolute', right: CAR_RIGHT_INSET, bottom: 8, alignItems: 'stretch', gap: NAV_GAP },
+  navBannerRow: { flexDirection: 'row', alignItems: 'center', height: TURN_ROW_H, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
+  navEta: { paddingHorizontal: 8, height: ETA_ROW_H, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   // marginRight: the lane row is the ONLY stack element level with the map buttons
   // (the ETA and maneuver banner clear them vertically), so it carries the offset
   // instead of insetting the whole stack. Jeff's explicit requirement: the lane
   // guidance banner must never touch the buttons.
-  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden', marginRight: CAR_MAP_BUTTON_COL_W - CAR_RIGHT_INSET },
+  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: LANE_ROW_H, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden', marginRight: CAR_MAP_BUTTON_COL_W - CAR_RIGHT_INSET },
 });

@@ -106,7 +106,16 @@ const CAR_ZOOM_MAX = 20;
 // head unit (larger = lower on screen). Applied every frame via getCam, nav AND cruise.
 // Bumped 0.42 → 0.52 (CarPlay only, tilt unchanged): drops the car a bit lower on the wide
 // head-unit so more road/horizon reads ahead of it, matching the phone's forward view.
-const CAR_LOWER_PAD_FRAC = 0.52;
+// BACK to 0.42 (2026-07-20) because 0.52 put the car INTO the maneuver banner. Mapbox
+// padding centres the camera in the INSET rect, so the car sits at y = H*(1+frac)/2:
+//   0.52 -> 240*(1.52)/2 = 182.5pt, and the banner occupies y190-232 from x184 — i.e.
+//          the car's anchor was 7.5pt above the banner's top-LEFT CORNER and the lower
+//          half of the 3D model drew behind it.
+//   0.42 -> 240*(1.42)/2 = 170.4pt, ~20pt of clear air above the banner.
+// The cost is real and Jeff should know it: a slightly higher car = slightly less road
+// ahead. 0.42 is the value that shipped before the 0.52 bump, so it is known-good rather
+// than a fresh guess. OTA-tunable if he wants it lower again.
+const CAR_LOWER_PAD_FRAC = 0.42;
 // Shift the pinned car LEFT of center (fraction of map width, applied as camera
 // paddingRight → the car moves left by ~half this). 0.22 sat it near the left
 // speed-limit chip; 0.08 centres it in the open gap BETWEEN the bottom-left HUD

@@ -354,11 +354,15 @@ export function CarSurface() {
           `fgfeed` = only the foreground watch is running (freezes on screen-lock).
           Shown on the LIVE map so a mid-drive freeze is diagnosable on the head
           unit itself. Remove once the background-location fix is verified. */}
-      {getSettings().carplayDebug === true ? (
-        <View style={styles.mapFeedDiag} pointerEvents="none">
-          <Text style={styles.mapFeedDiagText} numberOfLines={1}>{`feed=${s.carDbg ?? '-'}`}</Text>
-        </View>
-      ) : null}
+      {/* TEMP — FORCED VISIBLE 2026-07-19 while diagnosing the CarPlay template layer.
+          This line is normally gated behind settings.carplayDebug, and THAT is why the
+          instrumentation added to answer "was a root template actually set?" never showed
+          up in the field (Jeff has the flag off). The car surface is the only layer that
+          demonstrably paints on the head unit, so it has to carry the readout unconditionally.
+          RESTORE the `getSettings().carplayDebug === true ?` gate once CarPlay touch is resolved. */}
+      <View style={styles.mapFeedDiag} pointerEvents="none">
+        <Text style={styles.mapFeedDiagText} numberOfLines={1}>{`feed=${s.carDbg ?? '-'}`}</Text>
+      </View>
     </>
   );
 
@@ -776,11 +780,23 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
           // those was the offender and we re-add them one at a time. If it
           // STILL crashes, the fault is the native car-window RN bridge /
           // scene setup, which needs a native rebuild (not an OTA).
-          CarPlay.setRootTemplate(mapTemplate);
-          // Report state onto the one layer that demonstrably paints (see the twin
-          // call in carPlayBootstrap.setIdleRoot) — a photo of the surface answers
-          // "did didConnect land / was a root template set?" with no native build.
-          setCarState({ carDbg: 'cp:conn=' + (CarPlay.connected ? '1' : '0') + ' root=warm' });
+          // ── FULL-CHAIN TEMPLATE DIAGNOSTIC (2026-07-19) ──────────────────
+          // Head-unit evidence (build 67, both idle AND routing): our RN surface
+          // renders perfectly but ZERO CPMapTemplate chrome appears — no nav bar,
+          // no map buttons. So the break is at/after setRootTemplate. Native
+          // setRootTemplate (RNCarPlay.m:545-558) NSLogs and returns NOTHING on
+          // both branches — a store miss (template id absent) is SILENT end to end,
+          // and this JS call site historically swallowed throws. Capture each link
+          // onto the car surface so one photo says exactly where it dies.
+          let dbg = 'conn=' + (CarPlay.connected ? '1' : '0')
+            + ' tpl=' + (mapTemplate ? ('ok:' + String((mapTemplate as any)?.id ?? '?').slice(0, 10)) : 'NULL');
+          try {
+            CarPlay.setRootTemplate(mapTemplate);
+            dbg += ' root=CALLED';
+          } catch (e) {
+            dbg += ' root=THREW:' + String(e).slice(0, 28);
+          }
+          setCarState({ carDbg: dbg });
           // ── TEMPLATE-LAYER PROBE (rewritten 2026-07-19 — the old one was a no-op) ──
           // The previous probe called `CarPlay.bridge.toast(...)`, which has ZERO
           // occurrences in ios/RNCarPlay.m (it is Android-only) — so it could never

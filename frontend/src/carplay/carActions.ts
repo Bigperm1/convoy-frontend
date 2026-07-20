@@ -31,7 +31,8 @@ import { startNavBanner, stopNavBanner, CAR_NAV_KEY } from '../navNotification';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
-import { CAR_ICON_POLICE, CAR_ICON_MIC, CAR_ICON_BLANK } from './carButtonIcons';
+import { CAR_ICON_POLICE, CAR_ICON_MIC, CAR_ICON_BLANK, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED } from './carButtonIcons';
+import { ensureSavedPlacesLoaded, getSavedPlaces, type SavedPlace } from '../savedPlaces';
 
 // ── lazy react-native-carplay access (same guard style as carPlayBootstrap) ──
 function getLib(): any | null {
@@ -260,6 +261,24 @@ export async function endCarNav(): Promise<void> {
 
 // ── the CarPlay Search template (pushed from the map's nav-bar button) ──────
 let _searchTemplate: any | null = null;
+// Which list the search template is currently showing. onItemSelect gets only an
+// INDEX, so without this the driver tapping "Home" would open whatever Places result
+// happened to sit at index 0.
+let _listMode: 'saved' | 'results' = 'saved';
+let _savedShown: SavedPlace[] = [];
+
+// Home first, then Work, then custom places newest-first — the phone's own ordering.
+function savedPlaceRows(): { text: string; detailText?: string; image: unknown }[] {
+  const rank = (k: SavedPlace['kind']) => (k === 'home' ? 0 : k === 'work' ? 1 : 2);
+  _savedShown = getSavedPlaces()
+    .slice()
+    .sort((a, b) => rank(a.kind) - rank(b.kind) || b.createdAt - a.createdAt);
+  return _savedShown.map((p) => ({
+    text: p.label,
+    detailText: p.address || undefined,
+    image: p.kind === 'home' ? CAR_ICON_HOME : p.kind === 'work' ? CAR_ICON_WORK : CAR_ICON_SAVED,
+  }));
+}
 function getSearchTemplate(): any | null {
   if (_searchTemplate) return _searchTemplate;
   const lib = getLib();
@@ -269,16 +288,35 @@ function getSearchTemplate(): any | null {
       id: 'convoy-car-search',
       // Called per keystroke; return ListItem[] to render. (CarPlay only offers
       // the keyboard while parked — an OS rule, same as Waze.)
+      // EMPTY QUERY -> the driver's SAVED PLACES, so the search screen is useful the
+      // moment it opens instead of an empty list behind a keyboard. Same rows and the
+      // same Ionicons the phone's search screen shows (NavSearchScreen.tsx), and
+      // savedPlaces is AsyncStorage-backed so this works on a COLD connect too.
       onSearch: async (query: string) => {
-        if (!query || query.trim().length < 2) { _lastResults = []; return []; }
+        const q = (query || '').trim();
+        if (q.length < 2) {
+          _listMode = 'saved';
+          try { await ensureSavedPlacesLoaded(); } catch {}
+          return savedPlaceRows();
+        }
+        _listMode = 'results';
         try {
-          _lastResults = await placesAutocomplete(query.trim());
+          _lastResults = await placesAutocomplete(q);
         } catch {
           _lastResults = [];
         }
         return _lastResults.map((r) => ({ text: r.description }));
       },
       onItemSelect: async ({ index }: { index: number }) => {
+        // The list is EITHER saved places or Places results — index means different
+        // things in each, so route on the mode the last onSearch left behind.
+        if (_listMode === 'saved') {
+          const p = _savedShown[index];
+          if (!p) return;
+          const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
+          if (ok) { try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {} }
+          return;
+        }
         const picked = _lastResults[index];
         if (!picked) return;
         const dest = await placeDetails(picked.placeId).catch(() => null);
@@ -381,6 +419,9 @@ export function handleCarBarButton(id: string): void {
   if (id === 'car-police') { void reportPoliceFromCar(); return; }
   if (id === 'car-end') { void endCarNav(); return; }
   if (id === 'car-search') {
+    // Prime the cache BEFORE the template appears — the first updatedSearchText can
+    // arrive before an await would have resolved.
+    void ensureSavedPlacesLoaded().catch(() => {});
     const t = getSearchTemplate();
     if (!t) return;
     try { getLib()?.CarPlay?.pushTemplate?.(t, true); } catch {}

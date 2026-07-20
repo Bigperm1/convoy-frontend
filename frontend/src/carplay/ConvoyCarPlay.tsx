@@ -42,7 +42,6 @@ import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
 import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView from './CarMapView';
-import CompassNeedle from '../components/CompassNeedle';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
@@ -472,18 +471,10 @@ export function CarSurface() {
         </View>
       ) : null}
 
-      {/* Compass — north-needle, docked under the Scout mic (TOP-LEFT). The car map
-          is heading-up, so rotate
-          the needle by -heading to keep North pointing at true north. (Flip the
-          sign here if it reads mirrored on the head unit.) */}
-      {typeof s.heading === 'number' ? (
-        <View style={[styles.compassDock, { backgroundColor: carHudFloor() }]} pointerEvents="none">
-          <GlassFill tintColor={undefined} style={{ borderRadius: 26, overflow: 'hidden' }} />
-          <View style={{ transform: [{ rotate: `${-(s.heading || 0)}deg` }] }}>
-            <CompassNeedle size={40} />
-          </View>
-        </View>
-      ) : null}
+      {/* The compass was REMOVED from CarPlay entirely (2026-07-20, Jeff's call). The car
+          map is heading-up and the maneuver banner already states the turn, so a north
+          needle earns little on a ~400x240pt canvas — and it was the item forcing the
+          left rail over its height budget. The phone HUD keeps its compass. */}
     </View>
   );
 }
@@ -1092,17 +1083,13 @@ const styles = StyleSheet.create({
   // edge belongs to the system. Keeping our two round controls in one left-hand
   // column also reads as a deliberate pair instead of two orphans.
   // scoutMicBtn is top:10 h:52 -> its bottom edge is 62; +8pt gap = 70.
-  // LEFT RAIL, slot 2. The drawn Scout mic used to hold slot 1; with it gone the
-  // weather chip moved up into that slot and the compass stays directly under it,
-  // which is still "compass under the top-left control" as asked.
-  compassDock: { position: 'absolute', left: 56, top: CAR_TOP_INSET + 52 + 8, width: 52, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', overflow: 'hidden' },
-  // LEFT RAIL, slot 1. Was bottom-left above the speedo (bottom: 62 -> y130-178), which
-  // HARD-OVERLAPPED the compass by 40pt once the compass moved into the rail — latent
-  // locally because the OpenWeather key only exists in EAS builds, so the chip never
-  // draws in the sim. The rail could not hold mic+compass+weather+speed (282pt needed,
-  // ~240pt canvas); removing the dead Scout mic freed exactly the slot it needed.
-  // Resulting rail: weather 58-110, compass 118-170, speed 182-230 — 8pt and 12pt gaps.
-  weatherChip: { position: 'absolute', left: 56, top: CAR_TOP_INSET, width: 58, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
+  // BACK above the speedo (2026-07-20) — its original home, and the phone's
+  // weather-over-speed column. It only ever moved to the top-left to dodge the compass;
+  // with the compass gone from CarPlay entirely there is nothing to dodge, and the
+  // top-left is better left as MAP: nothing we draw there can ever be tapped (CarPlay
+  // routes touches through the template only), so a readout parked in the most reachable
+  // corner is wasted space. Rail is now just weather 130-178 + speed 182-230.
+  weatherChip: { position: 'absolute', left: 56, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
   // top was 10 -> INSIDE the CPMapTemplate nav bar, i.e. the one signal that says
   // Scout is listening was hidden behind system chrome. Left-anchored at
   // CAR_LEFT_INSET rather than centred so it also clears the weather chip.

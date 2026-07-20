@@ -56,8 +56,14 @@ export function initCarPlayBootstrap(): void {
         onMapButtonPressed: ({ id }: { id: string }) => handleCarMapButton(id),
       });
       CarPlay.setRootTemplate(t);
-    } catch {
+      // Report template state onto the ONE layer that demonstrably paints on the
+      // head unit (carDbg renders on the car surface). Lets a single photo answer
+      // "did didConnect land and was a root template actually set?" without any
+      // native build and without depending on the template layer being visible.
+      setCarState({ carDbg: 'cp:conn=' + (CarPlay.connected ? '1' : '0') + ' root=cold' });
+    } catch (e) {
       // The phone hook will set a proper root once it mounts; safe to ignore.
+      setCarState({ carDbg: 'cp:root=COLD-ERR ' + String(e).slice(0, 40) });
     }
   };
 
@@ -113,18 +119,33 @@ export function initCarPlayBootstrap(): void {
     stopCarDataService();
   };
 
-  // WARM-CONNECT RECOVERY (2026-07-18 — the "CarPlay touch does nothing" root cause).
-  // Under Expo SDK 54 / RN 0.81 bridgeless New Arch, RNCarPlay's native `didConnect`
-  // emit is guarded by `if (cp.bridge)` — nil in bridgeless — so a head unit that
-  // connects AFTER the app is already running never flips CarPlay.connected, onConnect
-  // never fires, and CarPlay.setRootTemplate is never called. With no CPMapTemplate
-  // presented there is NO input channel at all (iOS CarPlay routes ALL touch through
-  // the template's map/bar buttons + pan/zoom gestures — never to the app's UIView),
-  // so the surface paints but nothing responds. The library's `checkForConnection()`
-  // re-sends didConnect WITHOUT the bridge guard, but JS calls it only once at
-  // construction (before any car is attached). Poll it until connected so the template
-  // (and its already-wired buttons + iOS-26 pinch-zoom) actually comes up. No native
-  // build needed; a no-op once connected / if the true cause is elsewhere.
+  // COLD-CONNECT BELT + CORRECTED ROOT-CAUSE NOTE (rewritten 2026-07-19).
+  //
+  // ⚠ The note that used to live here claimed bridgeless nils `cp.bridge`, so
+  // RNCarPlay's `didConnect` emit (guarded by `if (cp.bridge)`) is dropped, no
+  // template is ever presented, and THAT is why CarPlay has no input channel.
+  // THAT WAS WRONG — and because it was written as fact, three separate audits
+  // re-derived it from this comment and it nearly bought a native build. Verified
+  // against the RN 0.81 source actually on disk:
+  //   • RCTEventEmitter declares a readwrite `bridge` property (RCTEventEmitter.h:16)
+  //     with no manual accessors, so it is auto-synthesized.
+  //   • Bridgeless RCTInstance constructs an RCTBridgeProxy (RCTInstance.mm:303/326)
+  //     and RCTTurboModuleManager assigns it via setValue:forKey:@"bridge"
+  //     (RCTTurboModuleManager.mm:683-703).
+  //   → `cp.bridge` is NON-nil on a warm connect, the guard PASSES, didConnect DOES
+  //     fire and setRootTemplate DOES run. (sendEventWithName never needed the bridge
+  //     anyway — it dispatches through _callableJSModules.)
+  //
+  // The REAL cause of "CarPlay does nothing when I touch it": every confirmation
+  // routed through `CarPlay.bridge.toast()`, which has ZERO occurrences in
+  // ios/RNCarPlay.m (it is Android-only) and was swallowed by `?.` + try/catch — so a
+  // WORKING nav-bar button was indistinguishable from a dead one. Fixed in
+  // carActions.carAlert() (real CPAlertTemplate). See that function's comment.
+  //
+  // This poll STAYS: it is idempotent, self-cancels at the CarPlay.connected check,
+  // and still covers the genuine COLD case where CarSceneDelegate mints the singleton
+  // before TurboModuleManager has set `bridge` — there the guard CAN legitimately drop
+  // the emit, and checkForConnection() (not bridge-guarded) recovers it.
   const poke = () => { try { (CarPlay as any).bridge?.checkForConnection?.(); } catch {} };
   let poll: any = null;
   const ensurePolling = () => {

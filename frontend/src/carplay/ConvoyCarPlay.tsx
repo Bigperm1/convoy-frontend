@@ -45,7 +45,7 @@ import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
-import { CAR_BAR_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
+import { CAR_BAR_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton, carAlert } from './carActions';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
 
@@ -425,10 +425,19 @@ export function CarSurface() {
           CarPlay taps. Renders for sure (like the HUD chips). Tap emits a
           carStore action that map.tsx (same JS context) turns into tap-to-talk.
           Green while listening, amber while thinking, white idle. */}
-      <TouchableOpacity
+      {/* STATUS INDICATOR ONLY — deliberately NOT tappable (2026-07-19).
+          CarPlay never delivers touches to the app's own window/views (documented
+          at carActions.ts, CarMapView.tsx and carPlayBootstrap.ts), so this drawn
+          mic could never respond to a tap. Shipping it as a TouchableOpacity made
+          it the most prominent control on the surface AND a guaranteed dead tap —
+          the single biggest contributor to the "CarPlay is completely touch-inert"
+          report. It now only REPORTS Scout state; the tappable equivalent is the
+          native `scout` CPMapButton (and `car-mic` on the cold root), which CarPlay
+          itself renders and routes. pointerEvents="none" so it can't swallow
+          anything either. */}
+      <View
         style={[styles.scoutMicBtn, { backgroundColor: carHudFloor() }]}
-        activeOpacity={0.7}
-        onPress={() => emitCarGesture({ kind: 'scoutMic' })}
+        pointerEvents="none"
         testID="car-scout-mic"
       >
         <GlassFill tintColor={undefined} style={{ borderRadius: 26, overflow: 'hidden' }} />
@@ -437,7 +446,7 @@ export function CarSurface() {
           style={{ width: 28, height: 28, tintColor: s.scoutListening ? '#2DEC86' : (s.scoutThinking ? '#FF9F0A' : '#F4F4F4') }}
           resizeMode="contain"
         />
-      </TouchableOpacity>
+      </View>
 
       {/* Scout mic feedback — TOP-CENTER pill. The native mic map button has no
           pressed/active state and the head unit has no haptics, so this is the
@@ -768,20 +777,24 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
           // STILL crashes, the fault is the native car-window RN bridge /
           // scene setup, which needs a native rebuild (not an OTA).
           CarPlay.setRootTemplate(mapTemplate);
-          // ── TEMPLATE-LAYER PROBE (2026-07-16, remove once resolved) ──
-          // Build-65 field result: NO template chrome renders on the head unit
-          // (no nav bar, no bar buttons, no round map buttons — even with valid
-          // SF-symbol images), while our window-mounted RN surface renders fine.
-          // A CPAlert-style toast is pure template-layer UI: if this appears on
-          // the unit ~3s after connect, the interfaceController pipeline works
-          // and the chrome problem is compositing; if it NEVER appears, the
-          // template pipeline itself is dead under bridgeless and the fix is
-          // native (build 66). One glance on the next drive answers it.
-          // Three probes over the first 30s (a single 3s toast right at connect
-          // was too easy to miss while parking/plugging in).
-          for (const at of [5000, 15000, 30000]) {
-            setTimeout(() => { try { CarPlay.bridge?.toast?.('Hairpin ✓ template layer alive', 4); } catch {} }, at);
-          }
+          // Report state onto the one layer that demonstrably paints (see the twin
+          // call in carPlayBootstrap.setIdleRoot) — a photo of the surface answers
+          // "did didConnect land / was a root template set?" with no native build.
+          setCarState({ carDbg: 'cp:conn=' + (CarPlay.connected ? '1' : '0') + ' root=warm' });
+          // ── TEMPLATE-LAYER PROBE (rewritten 2026-07-19 — the old one was a no-op) ──
+          // The previous probe called `CarPlay.bridge.toast(...)`, which has ZERO
+          // occurrences in ios/RNCarPlay.m (it is Android-only) — so it could never
+          // have fired on iOS regardless of template state, and every "the probe
+          // never appeared" datapoint was meaningless. carAlert() uses a real
+          // CPAlertTemplate (native template UI), so this is now an HONEST test:
+          //   • alert APPEARS  → the interfaceController/template pipeline is ALIVE;
+          //     any remaining problem is chrome compositing or perception, NOT the
+          //     template layer, and NO native build is warranted.
+          //   • alert NEVER appears → the template pipeline really is dead under
+          //     bridgeless and a native build is justified.
+          // It is PASSIVE (needs no tap), so it answers the question even if the
+          // chrome itself doesn't render and there is nothing to tap.
+          setTimeout(() => { try { carAlert('Hairpin ✓ template layer alive'); } catch {} }, 6000);
         }
         // Android Auto is NOT built here. The head unit can launch the car app
         // even when this phone screen isn't mounted, so its UI is owned by the

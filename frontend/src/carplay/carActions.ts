@@ -44,9 +44,47 @@ function getLib(): any | null {
   }
 }
 
-function toast(msg: string): void {
-  try { getLib()?.CarPlay?.bridge?.toast?.(msg, 2.5); } catch {}
+// Visible confirmation on the head unit.
+//
+// WAS: `CarPlay.bridge.toast(msg, 2.5)` — a method that DOES NOT EXIST ON iOS.
+// `toast` is declared in the library's TypeScript surface and implemented ONLY
+// in the Android CarPlayModule (grep: ZERO occurrences in ios/RNCarPlay.m), and
+// the `?.` + try/catch swallowed the miss silently. Every confirmation below was
+// therefore dropped on the floor, which made a WORKING nav-bar button
+// indistinguishable from a dead one — the actual root of the long-running
+// "CarPlay is completely touch-inert" report (deep-dive 2026-07-19). getLib()
+// also returns null off-iOS, so this was dead on BOTH platforms.
+//
+// NOW: CPAlertTemplate — real native template UI that CarPlay itself renders and
+// taps (RNCarPlay.m:394 builds it, :603 presentTemplate, :616 dismissTemplate,
+// :1333 emits alertActionPressed). This restores feedback for every call site AND
+// doubles as an HONEST probe that the interfaceController/template layer is alive
+// (the old toast-based probe could never have fired on iOS).
+// NOTE: RCTTiming pauses setTimeout while the phone is locked, so the auto-dismiss
+// may not fire cold — the OK action is the always-available way out.
+let _alertTimer: any = null;
+export function carAlert(msg: string): void {
+  const lib = getLib();
+  if (!lib) return;
+  const CarPlay = lib.CarPlay, AlertTemplate = lib.AlertTemplate;
+  if (!CarPlay?.presentTemplate || !AlertTemplate) return;
+  try {
+    // Never stack alerts — dismiss any in-flight one first.
+    if (_alertTimer) { clearTimeout(_alertTimer); _alertTimer = null; try { CarPlay.dismissTemplate(false); } catch {} }
+    const alert = new AlertTemplate({
+      titleVariants: [msg],
+      actions: [{ id: 'ok', title: 'OK' }],
+      onActionButtonPressed: () => {
+        if (_alertTimer) { clearTimeout(_alertTimer); _alertTimer = null; }
+        try { CarPlay.dismissTemplate(true); } catch {}
+      },
+    });
+    CarPlay.presentTemplate(alert, true);
+    _alertTimer = setTimeout(() => { _alertTimer = null; try { CarPlay.dismissTemplate(true); } catch {} }, 2600);
+  } catch {}
 }
+// Back-compat alias for this file's existing confirmation call sites.
+const toast = carAlert;
 
 // ── 5s-ago position ring buffer (parity with the phone's getPos5SecAgo) ─────
 // The phone anchors police pins ~5s behind the car (you report what you just

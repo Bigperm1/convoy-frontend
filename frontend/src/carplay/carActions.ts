@@ -350,6 +350,15 @@ export const CAR_BAR_BUTTON_CONFIG = {
   // never set it, so these rendered as plain text.
   // NATIVE: needs the parseBarButtons patch in RNCarPlay.m, so it does NOTHING until
   // the build that ships it (68). Harmless on 67 — the key is simply never read.
+  //
+  // MEASURED, AND THE NEWS IS BAD: on iOS 18.6 CarPlay this has NO VISIBLE EFFECT.
+  // Local native build + CarPlay sim, with the title temporarily renamed to prove the
+  // config really was reaching native — the 'rounded' button still drew as bare text.
+  // Rebuilding the button with the modern -initWithTitle:handler: (the library uses the
+  // iOS-14-deprecated -initWithType:) did not help either, so that was reverted.
+  // iOS 26 could not be checked: CarPlay's own carkitd daemon crashes in the iOS 26
+  // simulator. Kept because it is tiny, @available-guarded and inert where unsupported —
+  // but treat rounded nav-bar buttons as UNPROVEN, not delivered.
   trailingNavigationBarButtons: [
     { id: 'car-search', type: 'text' as const, title: 'Search', buttonStyle: 'rounded' as const },
     { id: 'car-end', type: 'text' as const, title: 'End', buttonStyle: 'rounded' as const },

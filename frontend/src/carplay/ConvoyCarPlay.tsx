@@ -354,18 +354,18 @@ export function CarSurface() {
           `fgfeed` = only the foreground watch is running (freezes on screen-lock).
           Shown on the LIVE map so a mid-drive freeze is diagnosable on the head
           unit itself. Remove once the background-location fix is verified. */}
-      {/* TEMP — FORCED VISIBLE 2026-07-19 while diagnosing the CarPlay template layer.
-          This line is normally gated behind settings.carplayDebug, and THAT is why the
-          instrumentation added to answer "was a root template actually set?" never showed
-          up in the field (Jeff has the flag off). The car surface is the only layer that
-          demonstrably paints on the head unit, so it has to carry the readout unconditionally.
-          RESTORE the `getSettings().carplayDebug === true ?` gate once CarPlay touch is resolved. */}
-      <View style={styles.mapFeedDiag} pointerEvents="none">
-        <Text style={styles.mapFeedDiagText} numberOfLines={1}>{`feed=${s.carDbg ?? '-'}`}</Text>
-        {/* Dedicated CarPlay template breadcrumb — carDbg is clobbered by every
-            position tick, so the template state needs its own line. */}
-        <Text style={styles.mapFeedDiagText} numberOfLines={1}>{`cp=${s.cpDbg ?? '-'}`}</Text>
-      </View>
+      {/* Re-gated 2026-07-19 after the CarPlay template root cause was fixed and
+          CONFIRMED on the head unit (chrome renders: Search/End/Police + the four
+          map buttons). While forced-visible this line sat under the nav bar and
+          collided with the End button. `cp=` (carStore.cpDbg) reports the template
+          state and stays available behind the flag — carDbg alone is useless for
+          that, since every position tick overwrites it. */}
+      {getSettings().carplayDebug === true ? (
+        <View style={styles.mapFeedDiag} pointerEvents="none">
+          <Text style={styles.mapFeedDiagText} numberOfLines={1}>{`feed=${s.carDbg ?? '-'}`}</Text>
+          <Text style={styles.mapFeedDiagText} numberOfLines={1}>{`cp=${s.cpDbg ?? '-'}`}</Text>
+        </View>
+      ) : null}
     </>
   );
 

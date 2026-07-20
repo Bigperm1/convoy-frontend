@@ -330,7 +330,7 @@ export function CarSurface() {
                 <MaterialCommunityIcons
                   key={i}
                   name={laneIcon((lane.active && lane.activeDir) ? lane.activeDir : (lane.dirs[0] || 'straight'))}
-                  size={laneIconSize(s.lanes!.length, navStackW)}
+                  size={laneIconSize(s.lanes!.length, navStackW - (CAR_MAP_BUTTON_COL_W - CAR_RIGHT_INSET))}
                   color={lane.active ? '#2DEC86' : '#5A5A5E'}
                 />
               ))}
@@ -1003,8 +1003,17 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
 // plumbing into carStore, so it is queued for build 68; until then these constants
 // match the measured chrome and are deliberately generous. Erring large costs a
 // little map, erring small hides a turn instruction.
-const CAR_TOP_INSET = 58;   // clears the CPMapTemplate navigation bar
-const CAR_RIGHT_INSET = 76; // clears the round CPMapButton column
+const CAR_TOP_INSET = 58; // clears the CPMapTemplate navigation bar
+// The nav stack is back at the RIGHT EDGE. It only had to be inset by the whole
+// button column while police/mic sat in the bottom two slots; two invisible spacer
+// buttons now hold those slots (see CAR_MAP_BUTTON_CONFIG), lifting the real pair
+// clear of the ETA and maneuver banner. CPMapTemplate.h:71-75 caps mapButtons at 4,
+// so 2 real + 2 spacers is the highest they can possibly go.
+const CAR_RIGHT_INSET = 8;
+// ...but the LANE ROW is the top element of the stack and still sits at the mic
+// button's height, so it alone keeps clearance. Measured in the iOS 18.6 sim: the
+// button column occupies ~48pt in from the trailing edge.
+const CAR_MAP_BUTTON_COL_W = 48;
 // Left edge the bottom nav stack must not cross: the speed cluster is speedDock
 // (left 56) + the posted-limit badge, which SLIDES OUT 62pt and is itself 58 wide
 // -> 56 + 62 + 58 = 176 at full extension, +8pt of air.
@@ -1104,5 +1113,9 @@ const styles = StyleSheet.create({
   navStack: { position: 'absolute', right: CAR_RIGHT_INSET, bottom: 8, alignItems: 'stretch', gap: 6 },
   navBannerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   navEta: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden' },
+  // marginRight: the lane row is the ONLY stack element level with the map buttons
+  // (the ETA and maneuver banner clear them vertically), so it carries the offset
+  // instead of insetting the whole stack. Jeff's explicit requirement: the lane
+  // guidance banner must never touch the buttons.
+  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden', marginRight: CAR_MAP_BUTTON_COL_W - CAR_RIGHT_INSET },
 });

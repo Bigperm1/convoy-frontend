@@ -31,7 +31,7 @@ import { startNavBanner, stopNavBanner, CAR_NAV_KEY } from '../navNotification';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
-import { CAR_ICON_POLICE, CAR_ICON_MIC } from './carButtonIcons';
+import { CAR_ICON_POLICE, CAR_ICON_MIC, CAR_ICON_BLANK } from './carButtonIcons';
 
 // ── lazy react-native-carplay access (same guard style as carPlayBootstrap) ──
 function getLib(): any | null {
@@ -333,6 +333,30 @@ export const CAR_MAP_BUTTON_CONFIG = {
   mapButtons: [
     { id: 'car-police', image: CAR_ICON_POLICE, focusedImage: CAR_ICON_POLICE },
     { id: 'car-mic', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC },
+    // ── INVISIBLE LAYOUT SPACERS (2026-07-20, sim-verified) ──────────────────
+    // CarPlay renders mapButtons at the "trailing BOTTOM corner" and stacks them
+    // UPWARD (CPMapTemplate.h:71-75), so it is the LAST entries that own the
+    // bottom-right — exactly where our ETA + maneuver banner live. Dropping from
+    // 4 buttons to 2 therefore moved police/mic DOWN onto the banner rather than
+    // leaving them where zoom +/- used to sit.
+    //
+    // There is no position API (CPMapButton has only image/focusedImage/enabled/
+    // hidden), so the only lever is WHICH SLOT a button occupies. These two
+    // fully-transparent, disabled buttons hold the bottom two slots and lift the
+    // real pair back into the upper ones.
+    //
+    // `hidden: true` does NOT work — sim-verified, the buttons still drew (all
+    // four glyphs visible). A transparent image does, because CarPlay draws no
+    // circular chrome of its own: only the glyph. `disabled` stops the dead slot
+    // from swallowing a tap as a no-op press.
+    //
+    // 4 is the documented MAXIMUM (extra entries are ignored), so 2 real + 2
+    // spacers is the highest the real buttons can possibly sit. Bonus: in panning
+    // mode the system hides map buttons "beginning from the END of the array"
+    // (CPMapTemplate.h:135-137) — i.e. it drops the spacers first and keeps
+    // police + mic. Keep the spacers LAST.
+    { id: 'car-spacer-1', image: CAR_ICON_BLANK, focusedImage: CAR_ICON_BLANK, disabled: true },
+    { id: 'car-spacer-2', image: CAR_ICON_BLANK, focusedImage: CAR_ICON_BLANK, disabled: true },
   ],
 };
 

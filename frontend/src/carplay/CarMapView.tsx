@@ -299,21 +299,36 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // because CarPlay's pinch `scale` is cumulative from the gesture's begin.
   const userZoomRef = useRef(0);
   const zoomBaseRef = useRef(0);
-  const getCam = useCallback(() => ({
-    // followZoom + driver pinch bias, clamped. userZoomRef is read live (a ref,
-    // deliberately not a dep) so a pinch takes effect on the very next frame.
-    zoomLevel: Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, followZoom + userZoomRef.current)),
-    pitch: followPitch,
-    heading: camHdgRef.current,
-    // paddingTop drops the car DOWN the wide head-unit; paddingRight shifts it LEFT of
-    // center so the bottom-RIGHT nav stack (banner/ETA) never collides with the car.
-    padding: {
-      paddingTop: mapH > 0 ? Math.round(mapH * CAR_LOWER_PAD_FRAC) : 0,
-      paddingBottom: 0,
-      paddingLeft: 0,
-      paddingRight: mapW > 0 ? Math.round(mapW * CAR_LEFT_PAD_FRAC) : 0,
-    },
-  }), [followZoom, followPitch, mapH, mapW]);
+  // FROZEN-CLOSURE FIX (2026-07-20) — the CarPlay half of the phone's chase-cam bug
+  // (see ConvoyMapbox.tsx:1844). SelfCarModel's rAF step() loop captures ONE closure
+  // at mount, so it kept calling render-#1's getCam forever. userZoomRef/camHdgRef
+  // are refs and stayed live, but followZoom, followPitch, mapH and mapW were baked
+  // in at first render — and at first render onLayout has NOT fired, so mapH/mapW are
+  // 0 and the padding that pins the car low-and-left evaluated to all-zeros for the
+  // whole session. Head-unit evidence (trip photo, build 67): the car sits near dead
+  // centre instead of dropped down/left, and the speed-aware chase zoom never adapts.
+  // Fix = keep the FUNCTION IDENTITY stable (so the frozen closure is harmless) and
+  // read every input through a ref that is refreshed on each render.
+  const camInputsRef = useRef({ followZoom, followPitch, mapH, mapW });
+  camInputsRef.current = { followZoom, followPitch, mapH, mapW };
+  const getCam = useRef(() => {
+    const { followZoom: fz, followPitch: fp, mapH: h, mapW: w } = camInputsRef.current;
+    return {
+      // followZoom + driver pinch bias, clamped. userZoomRef is read live (a ref,
+      // deliberately not a dep) so a pinch takes effect on the very next frame.
+      zoomLevel: Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, fz + userZoomRef.current)),
+      pitch: fp,
+      heading: camHdgRef.current,
+      // paddingTop drops the car DOWN the wide head-unit; paddingRight shifts it LEFT of
+      // center so the bottom-RIGHT nav stack (banner/ETA) never collides with the car.
+      padding: {
+        paddingTop: h > 0 ? Math.round(h * CAR_LOWER_PAD_FRAC) : 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
+        paddingRight: w > 0 ? Math.round(w * CAR_LEFT_PAD_FRAC) : 0,
+      },
+    };
+  }).current;
 
   // COLD-START SNAP (fixes the "map opens on Europe" case). SelfCarModel's own
   // first-fix hard-snap is gated on paint AND fix; if those land in either order

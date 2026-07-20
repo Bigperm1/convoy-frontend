@@ -585,6 +585,21 @@ index 5f6a243..a27d9ec 100644
              });
              CarPlay_1.CarPlay.bridge.createTemplate(this.id, this.parseConfig({ type: this.type, ...config }), callbackFn);
          }
+diff --git a/node_modules/react-native-carplay/src/CarPlay.ts b/node_modules/react-native-carplay/src/CarPlay.ts
+index be4f962..6f3b005 100644
+--- a/node_modules/react-native-carplay/src/CarPlay.ts
++++ b/node_modules/react-native-carplay/src/CarPlay.ts
+@@ -86,7 +86,9 @@ export interface InternalCarPlay extends NativeModule {
+   reactToSelectedResult(status: boolean): void;
+   updateListTemplateSections(id: string, config: unknown): void;
+   updateListTemplateItem(id: string, config: unknown): void;
+-  reactToUpdatedSearchText(id: string, items: unknown): void;
++  // Convoy fix (2026-07-20): matches the ACTUAL native selector
++  // `reactToUpdatedSearchText:(NSArray*)items templateId:(NSString*)templateId`.
++  reactToUpdatedSearchText(items: unknown, id: string): void;
+   updateTabBarTemplates(id: string, config: unknown): void;
+   activateVoiceControlState(id: string, identifier: string): void;
+   // Android
 diff --git a/node_modules/react-native-carplay/src/templates/MapTemplate.ts b/node_modules/react-native-carplay/src/templates/MapTemplate.ts
 index 13a66ff..b7d786e 100644
 --- a/node_modules/react-native-carplay/src/templates/MapTemplate.ts
@@ -600,6 +615,31 @@ index 13a66ff..b7d786e 100644
      });
  
      CarPlay.bridge.createTemplate(
+diff --git a/node_modules/react-native-carplay/src/templates/SearchTemplate.ts b/node_modules/react-native-carplay/src/templates/SearchTemplate.ts
+index b52d6c8..530f8d3 100644
+--- a/node_modules/react-native-carplay/src/templates/SearchTemplate.ts
++++ b/node_modules/react-native-carplay/src/templates/SearchTemplate.ts
+@@ -49,7 +49,19 @@ export class SearchTemplate extends Template<SearchTemplateConfig> {
+                 ...item,
+                 image: item.image ? Image.resolveAssetSource(item.image) : undefined,
+               }));
+-              CarPlay.bridge.reactToUpdatedSearchText(e.templateId, parsedResults);
++              // Convoy fix (2026-07-20): ARGUMENT ORDER WAS REVERSED. The native
++              // selector is `reactToUpdatedSearchText:(NSArray*)items templateId:(NSString*)templateId`
++              // (RNCarPlay.m:910) — items FIRST. It is the only exported method that
++              // does not take templateId first, and this call site (plus the
++              // `(id, items)` type decl in CarPlay.ts) was written to the convention
++              // instead of the real selector. Native therefore got the templateId
++              // STRING where it expected an array and ran `for (NSDictionary *item in
++              // items)` over it -> unrecognized selector -> ObjC exception ->
++              // objc_exception_rethrow in performVoidMethodInvocation -> SIGABRT.
++              // Fires on the FIRST KEYSTROKE, so the CarPlay search keyboard killed
++              // the app every time. The legacy bridge tolerated the mismatch; the
++              // bridgeless TurboModule interop does not.
++              CarPlay.bridge.reactToUpdatedSearchText(parsedResults, e.templateId);
+             }
+           });
+         }
 diff --git a/node_modules/react-native-carplay/src/templates/Template.ts b/node_modules/react-native-carplay/src/templates/Template.ts
 index d39678f..2d29edc 100644
 --- a/node_modules/react-native-carplay/src/templates/Template.ts

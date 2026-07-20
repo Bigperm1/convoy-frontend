@@ -344,9 +344,15 @@ export const CAR_BAR_BUTTON_CONFIG = {
   // in the chrome), and Search took its place — which also empties the leading side
   // so the top-left of the car screen is free for our own Scout mic + compass.
   leadingNavigationBarButtons: [],
+  // buttonStyle 'rounded' = CPBarButtonStyleRounded (CPBarButton.h:63) — the system's
+  // rounded background behind the label instead of bare text. It is the ONLY shape
+  // control Apple exposes for a bar button (size stays system-owned), and the library
+  // never set it, so these rendered as plain text.
+  // NATIVE: needs the parseBarButtons patch in RNCarPlay.m, so it does NOTHING until
+  // the build that ships it (68). Harmless on 67 — the key is simply never read.
   trailingNavigationBarButtons: [
-    { id: 'car-search', type: 'text' as const, title: 'Search' },
-    { id: 'car-end', type: 'text' as const, title: 'End' },
+    { id: 'car-search', type: 'text' as const, title: 'Search', buttonStyle: 'rounded' as const },
+    { id: 'car-end', type: 'text' as const, title: 'End', buttonStyle: 'rounded' as const },
   ],
 };
 

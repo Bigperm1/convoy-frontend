@@ -342,7 +342,7 @@ index 5ef378d..26b7312 100644
          [mapButton setFocusedImage:[RCTConvert UIImage:json[@"focusedImage"]]];
      }
 diff --git a/node_modules/react-native-carplay/ios/RNCarPlay.m b/node_modules/react-native-carplay/ios/RNCarPlay.m
-index 153dbad..5f4449a 100644
+index 153dbad..bf1eaf8 100644
 --- a/node_modules/react-native-carplay/ios/RNCarPlay.m
 +++ b/node_modules/react-native-carplay/ios/RNCarPlay.m
 @@ -103,6 +103,17 @@ + (id)allocWithZone:(NSZone *)zone {
@@ -380,7 +380,31 @@ index 153dbad..5f4449a 100644
      }
  }
  
-@@ -1460,6 +1475,43 @@ - (void)mapTemplate:(CPMapTemplate *)mapTemplate didUpdatePanGestureWithTranslat
+@@ -1048,6 +1063,23 @@ - (void) applyConfigForMapTemplate:(CPMapTemplate*)mapTemplate templateId:(NSStr
+         BOOL _disabled = [barButton objectForKey:@"disabled"];
+         [_barButton setEnabled:!_disabled];
+ 
++        // Convoy addition: CPBarButton.buttonStyle. The library never sets it, so every
++        // nav-bar button rendered as bare text (CPBarButtonStyleNone is the default,
++        // CPBarButton.h:63). CPBarButtonStyleRounded draws the system's rounded
++        // background behind the label — the only shape control Apple exposes for a bar
++        // button; its SIZE stays system-owned. iOS 14+, so the availability guard keeps
++        // older head units on the default rather than crashing on an unknown selector.
++        if (@available(iOS 14.0, *)) {
++            NSString *_buttonStyle = [RCTConvert NSString:[barButton objectForKey:@"buttonStyle"]];
++            if (_buttonStyle) {
++                if ([_buttonStyle isEqualToString:@"rounded"]) {
++                    [_barButton setButtonStyle:CPBarButtonStyleRounded];
++                } else if ([_buttonStyle isEqualToString:@"none"]) {
++                    [_barButton setButtonStyle:CPBarButtonStyleNone];
++                }
++            }
++        }
++
+         if (_type == CPBarButtonTypeText) {
+             NSString *_title = [barButton objectForKey:@"title"];
+             [_barButton setTitle:_title];
+@@ -1460,6 +1492,43 @@ - (void)mapTemplate:(CPMapTemplate *)mapTemplate didUpdatePanGestureWithTranslat
      [self sendTemplateEventWithName:mapTemplate name:@"didUpdatePanGestureWithTranslation" json:@{ @"translation": @{ @"x": @(translation.x), @"y": @(translation.y) }, @"velocity": @{ @"x": @(velocity.x), @"y": @(velocity.y) }}];
  }
  
@@ -600,6 +624,26 @@ index be4f962..6f3b005 100644
    updateTabBarTemplates(id: string, config: unknown): void;
    activateVoiceControlState(id: string, identifier: string): void;
    // Android
+diff --git a/node_modules/react-native-carplay/src/interfaces/BarButton.ts b/node_modules/react-native-carplay/src/interfaces/BarButton.ts
+index b9891d2..319f5fe 100644
+--- a/node_modules/react-native-carplay/src/interfaces/BarButton.ts
++++ b/node_modules/react-native-carplay/src/interfaces/BarButton.ts
+@@ -9,6 +9,15 @@ interface BarButtonBase {
+    * A Boolean value that enables and disables the bar button.
+    */
+   disabled?: boolean;
++  /**
++   * Convoy addition — CPBarButton.buttonStyle (iOS 14+, CPBarButton.h:63).
++   * 'rounded' draws the system's rounded background behind the label; 'none' is
++   * Apple's default (bare text). Size stays system-owned either way. Requires the
++   * matching native patch in RNCarPlay.m's parseBarButtons, so it only takes effect
++   * from the build that ships it.
++   * @namespace iOS
++   */
++  buttonStyle?: 'none' | 'rounded';
+ }
+ 
+ export interface BarButtonText extends BarButtonBase {
 diff --git a/node_modules/react-native-carplay/src/templates/MapTemplate.ts b/node_modules/react-native-carplay/src/templates/MapTemplate.ts
 index 13a66ff..b7d786e 100644
 --- a/node_modules/react-native-carplay/src/templates/MapTemplate.ts

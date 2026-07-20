@@ -1628,7 +1628,7 @@ export default function MapScreen() {
   // carStore gesture bus back to here — same JS context — and toggles the mic.
   useEffect(() => subscribeCarGesture((g) => { if (g.kind === "scoutMic") void toggleScoutMic(); }), [toggleScoutMic]);
 
-  const { connected: carConnected } = useConvoyCarPlay({ route: activeRoute, routes, selectedRouteIndex, tbt, user: coords, destination, peers, onEnd: endNav, weather, onReportPolice: () => reportAlert('police'), onScoutMic: toggleScoutMic,
+  const { connected: carConnected } = useConvoyCarPlay({ route: activeRoute, routes, selectedRouteIndex, tbt, user: coords, destination, peers, onEnd: endNav, weather, onReportPolice: () => reportAlert('police'), onScoutMic: toggleScoutMic, selfUserId: user?.id,
     // Mirror the phone's map markers onto the CarPlay live map, with the SAME 'when
     // active' gates the phone uses. speedCameras/roadEvents are already [] when their
     // layer is off (hooks self-gate); hazards → the visible set (disputes<2); places →

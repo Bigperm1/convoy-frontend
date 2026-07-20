@@ -32,6 +32,11 @@ export type CarState = {
   distanceRemaining: string; // e.g. "33 km"
   destinationLabel: string;
   peers: CarPeer[];
+  // Self user id, mirrored from the warm phone hook. Lets the CarPlay surface drop our
+  // OWN voice out of the "X is talking…" indicator. undefined on a cold connect (no auth
+  // object headlessly) — the filter then just no-ops, which is harmless because you
+  // cannot transmit from the car yet.
+  selfUserId?: string;
   // Raw numeric mirrors of the formatted strings above. Android Auto's
   // NavigationTemplate needs real meters/seconds (it formats them itself), not
   // the pre-formatted phone-banner strings. Populated alongside the strings.

@@ -61,6 +61,8 @@ function carHudFloor(): string {
 }
 import { routeKindFor, routeColorsFor } from '../ConvoyMapbox';
 import { weatherKind, type WeatherCondition, type WeatherKind } from '../weatherLayer';
+import Constants from 'expo-constants';
+import { livePttBus } from '../livePtt';
 import { WeatherGlyph } from '../components/WeatherHUD';
 
 const isIOS = Platform.OS === 'ios';
@@ -224,6 +226,50 @@ export function CarSurface() {
   // CarPlay HUD chip reads the SAME on the pale map; red floor when over the limit. The
   // GlassFill on top stays CLEAR (real Liquid Glass sheen) — floor gives the tint.
   const speedoBg = speedoOver ? '#E4002B' : carHudFloor();
+
+  // ── Incoming crew transmission ("X is talking…") ────────────────────────────
+  // Mirrors CommsTalkingToast on the phone, off the SAME module-level livePttBus, so
+  // no refactor was needed: incoming clips already AUTO-PLAY through
+  // useLiveWalkieListener (app/(app)/_layout.tsx:166 -> livePtt.ts:155
+  // Audio.Sound.createAsync), and with CarPlay connected that audio routes to the car
+  // speakers. This is purely the visual telling you WHO you are hearing.
+  //
+  // Deliberately DROPS two of the phone toast's guards:
+  //  • AppState 'active' — on a head unit the phone is usually backgrounded or locked,
+  //    which is exactly when the driver needs the indicator most.
+  //  • isCommsScreenFocused() — that exists to stop the phone double-banner; the car
+  //    screen is a different surface and never double-shows.
+  const [talker, setTalker] = useState<string | null>(null);
+  const talkerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const off = livePttBus.on((m) => {
+      const st = getSettings();
+      if (st.commsLive === false) return;               // respect the Live mute toggle
+      if (s.selfUserId && m.user_id === s.selfUserId) return;          // not our own voice
+      const activeCh = st.activeThreadId || st.activeCommunityId;
+      if (!activeCh || m.channel !== activeCh) return;  // active channel only
+      // The listener replays a backlog on cold start / channel switch — only a genuinely
+      // recent clip means someone is talking RIGHT NOW.
+      const created = new Date(m.created_at).getTime();
+      if (Number.isFinite(created) && Date.now() - created > 15000) return;
+      setTalker(m.handle || 'Driver');
+      if (talkerTimer.current) clearTimeout(talkerTimer.current);
+      talkerTimer.current = setTimeout(() => setTalker(null), 3000);
+    });
+    return () => {
+      off();
+      if (talkerTimer.current) clearTimeout(talkerTimer.current);
+    };
+  }, []);
+
+  // Crew / alerts / build pill — the phone's map pill (map.tsx:3204), mirrored. Crew is
+  // OTHER crew only, matching the phone rule. Build number comes from the binary so it
+  // tracks every build without a manual edit.
+  const crewCount = (s.peers || []).length;
+  const alertCount = (s.hazards || []).length;
+  const carBuildNo = Constants.nativeBuildVersion
+    || Constants.expoConfig?.ios?.buildNumber
+    || String((Constants.expoConfig as any)?.android?.versionCode ?? '');
 
   // Measured CPWindow width -> bottom nav-stack width. See CAR_LEFT_INSET: the
   // stack has to fit BETWEEN the speed cluster and the system map buttons, and the
@@ -459,15 +505,41 @@ export function CarSurface() {
           pure downside: a dead target a driver would jab at mid-drive. The one true mic
           is the native CPMapButton in the trailing column. */}
 
-      {/* Scout mic feedback — TOP-CENTER pill. The native mic map button has no
-          pressed/active state and the head unit has no haptics, so this is the
-          only "she's listening" signal. Green dot while recording; dimmed
-          "Thinking…" while the agent turn is in flight. */}
-      {(s.scoutListening || s.scoutThinking) ? (
-        <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]} pointerEvents="none">
-          <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
-          <View style={[styles.scoutDot, { backgroundColor: s.scoutListening ? '#2DEC86' : '#8E8E93' }]} />
-          <Text style={styles.scoutPillText}>{s.scoutListening ? 'Listening…' : 'Thinking…'}</Text>
+      {/* CREW / ALERTS / BUILD — top-centre, mirroring the phone's map pill
+          (map.tsx:3204). Small and non-tappable by necessity: CarPlay routes touches
+          through the template, so nothing we draw can ever be a control. Crew counts
+          OTHER crew only, same rule as the phone. */}
+      <View style={styles.topCenterRow} pointerEvents="none">
+        <View style={[styles.crewPill, { backgroundColor: carHudFloor() }]}>
+          <GlassFill tintColor={undefined} style={{ borderRadius: 9, overflow: 'hidden' }} />
+          <Text style={styles.crewPillText} numberOfLines={1}>
+            {crewCount} Crew · {alertCount} alerts · v{carBuildNo}
+          </Text>
+        </View>
+      </View>
+
+      {/* TRANSIENT STATUS — one slot, directly under the crew pill, shared by the two
+          mutually-exclusive states so they can never stack on a ~240pt-tall canvas.
+          A live crew transmission WINS over Scout: someone talking to you is more
+          urgent than your own assistant's progress.
+          Incoming audio already AUTO-PLAYS through the car speakers (the app-level
+          useLiveWalkieListener), so this is the "who am I hearing" caption, not a
+          prompt to tap — and it could not be tappable anyway. */}
+      {talker ? (
+        <View style={styles.statusRow} pointerEvents="none">
+          <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
+            <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
+            <MaterialCommunityIcons name="account-voice" size={16} color="#FF6A00" />
+            <Text style={styles.scoutPillText} numberOfLines={1}>{talker} is talking…</Text>
+          </View>
+        </View>
+      ) : (s.scoutListening || s.scoutThinking) ? (
+        <View style={styles.statusRow} pointerEvents="none">
+          <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
+            <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
+            <View style={[styles.scoutDot, { backgroundColor: s.scoutListening ? '#2DEC86' : '#8E8E93' }]} />
+            <Text style={styles.scoutPillText}>{s.scoutListening ? 'Listening…' : 'Thinking…'}</Text>
+          </View>
         </View>
       ) : null}
 
@@ -556,13 +628,18 @@ type CarPlayArgs = {
   speedCameras?: { id: string; lat: number; lng: number }[];
   roadEvents?: RoadEvent[];
   places?: { id: string; lat: number; lng: number; label?: string }[];
+  // ACCOUNT id — note that `user` in these args is the driver's POSITION, not the
+  // account. Mirrored into carStore so the car surface can drop our own voice out of
+  // the "X is talking…" indicator (the car surface is a SEPARATE React root, so it
+  // cannot read AuthProvider context itself).
+  selfUserId?: string;
 };
 
 /**
  * Mount ONCE from map.tsx. Mirrors live route + turn-by-turn + nearby-convoy
  * state onto CarPlay (iOS, tabbed) / Android Auto (nav only). No-op on web.
  */
-export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, user, destination, peers, onEnd, weather, onReportPolice, onScoutMic, hazards, speedCameras, roadEvents, places }: CarPlayArgs) {
+export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, user, destination, peers, onEnd, weather, onReportPolice, onScoutMic, hazards, speedCameras, roadEvents, places, selfUserId }: CarPlayArgs) {
   const [connected, setConnected] = useState(false);
 
   const mapTemplateRef = useRef<any>(null);
@@ -643,6 +720,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       speedCameras: speedCameras || [],
       roadEvents: roadEvents || [],
       places: places || [],
+      selfUserId,
       // Route-line color → car route matches the phone's chosen color.
       routeColor: getRouteColor(getSettings()),
       // Selected route's KIND → the car resolves the same per-kind transform the
@@ -1017,6 +1095,8 @@ const CAR_MAP_BUTTON_COL_W = 42;
 // maneuver banner got shorter ("if the mic is too close to the eta banner then
 // narrow the height of the turn banner"). Content still fits: the maneuver box is
 // 30 and the two text lines ~34, both under 42.
+// Crew/alerts/build pill height — deliberately small; it is ambient info, not a control.
+const CREW_PILL_H = 22;
 const LANE_ROW_H = 30;
 const ETA_ROW_H = 22;
 const TURN_ROW_H = 42;
@@ -1093,7 +1173,14 @@ const styles = StyleSheet.create({
   // top was 10 -> INSIDE the CPMapTemplate nav bar, i.e. the one signal that says
   // Scout is listening was hidden behind system chrome. Left-anchored at
   // CAR_LEFT_INSET rather than centred so it also clears the weather chip.
-  scoutPill: { position: 'absolute', top: CAR_TOP_INSET, left: CAR_LEFT_INSET, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
+  // Two CENTRED rows in the top band. Full-width absolute rows with centred content
+  // keep both pills optically centred at any head-unit width, instead of pinning them
+  // to a hand-measured left offset that only holds on one canvas.
+  topCenterRow: { position: 'absolute', top: CAR_TOP_INSET, left: 0, right: 0, alignItems: 'center' },
+  statusRow: { position: 'absolute', top: CAR_TOP_INSET + CREW_PILL_H + NAV_GAP, left: 0, right: 0, alignItems: 'center' },
+  crewPill: { flexDirection: 'row', alignItems: 'center', height: CREW_PILL_H, paddingHorizontal: 10, borderRadius: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
+  crewPillText: { color: '#C7CCD1', fontSize: 11, fontWeight: '700' },
+  scoutPill: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   scoutDot: { width: 10, height: 10, borderRadius: 5 },
   scoutPillText: { color: '#F4F4F4', fontSize: 14, fontWeight: '700' },
   weatherText: { color: '#F4F4F4', fontSize: 13, fontWeight: '800', marginTop: 1 },

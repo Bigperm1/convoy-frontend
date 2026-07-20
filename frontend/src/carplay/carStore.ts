@@ -122,6 +122,11 @@ export type CarState = {
   // self-reports why hasFix is false — no Mac/device log needed. e.g. 'fgfeed',
   // 'navtask#3', 'seed:ok#0', 'seed:err#1:…', 'seed:no-fg-perm', 'bgstart:err:…'.
   carDbg?: string;
+  // DEDICATED CarPlay template-layer breadcrumb. Separate from carDbg on purpose:
+  // carDbg is rewritten by every position tick (navtask#N), which clobbered the
+  // template state before it could ever be read on the head unit. Written ONLY by
+  // the CarPlay connect / setRootTemplate paths.
+  cpDbg?: string;
 };
 
 const initial: CarState = {

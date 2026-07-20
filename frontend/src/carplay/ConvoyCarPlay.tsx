@@ -362,6 +362,9 @@ export function CarSurface() {
           RESTORE the `getSettings().carplayDebug === true ?` gate once CarPlay touch is resolved. */}
       <View style={styles.mapFeedDiag} pointerEvents="none">
         <Text style={styles.mapFeedDiagText} numberOfLines={1}>{`feed=${s.carDbg ?? '-'}`}</Text>
+        {/* Dedicated CarPlay template breadcrumb — carDbg is clobbered by every
+            position tick, so the template state needs its own line. */}
+        <Text style={styles.mapFeedDiagText} numberOfLines={1}>{`cp=${s.cpDbg ?? '-'}`}</Text>
       </View>
     </>
   );

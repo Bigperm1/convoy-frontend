@@ -34,8 +34,10 @@ export function initCarPlayBootstrap(): void {
   const { CarPlay, MapTemplate } = lib;
   if (!CarPlay || !MapTemplate) return;
 
+  setCarState({ cpDbg: 'boot' });
+
   const setIdleRoot = () => {
-    if (carPlayHookOwnsRoot) return;
+    if (carPlayHookOwnsRoot) { setCarState({ cpDbg: 'idle:SKIP(hookOwns)' }); return; }
     try {
       const t = new MapTemplate({
         id: 'convoy-carplay-idle',
@@ -56,14 +58,14 @@ export function initCarPlayBootstrap(): void {
         onMapButtonPressed: ({ id }: { id: string }) => handleCarMapButton(id),
       });
       CarPlay.setRootTemplate(t);
-      // Report template state onto the ONE layer that demonstrably paints on the
-      // head unit (carDbg renders on the car surface). Lets a single photo answer
-      // "did didConnect land and was a root template actually set?" without any
-      // native build and without depending on the template layer being visible.
-      setCarState({ carDbg: 'cp:conn=' + (CarPlay.connected ? '1' : '0') + ' root=cold' });
-    } catch (e) {
-      // The phone hook will set a proper root once it mounts; safe to ignore.
-      setCarState({ carDbg: 'cp:root=COLD-ERR ' + String(e).slice(0, 40) });
+      setCarState({ cpDbg: 'idle:SET conn=' + (CarPlay.connected ? '1' : '0') });
+    } catch (e: any) {
+      // Full error + stack to the device log — the on-screen breadcrumb truncates,
+      // and this throw is what prevents any CPMapTemplate from ever being created.
+      try {
+        console.error('[cpdiag] setIdleRoot THREW:', e?.message || String(e), '\nSTACK:\n' + (e?.stack || '(no stack)'));
+      } catch {}
+      setCarState({ cpDbg: 'idle:THREW ' + String(e?.message || e).slice(0, 40) });
     }
   };
 
@@ -146,7 +148,15 @@ export function initCarPlayBootstrap(): void {
   // and still covers the genuine COLD case where CarSceneDelegate mints the singleton
   // before TurboModuleManager has set `bridge` — there the guard CAN legitimately drop
   // the emit, and checkForConnection() (not bridge-guarded) recovers it.
-  const poke = () => { try { (CarPlay as any).bridge?.checkForConnection?.(); } catch {} };
+  let pokes = 0;
+  const poke = () => {
+    pokes += 1;
+    const b = (CarPlay as any).bridge;
+    // Record WHY a poke did nothing: missing bridge vs missing method vs it ran.
+    const how = !b ? 'NOBRIDGE' : (typeof b.checkForConnection !== 'function' ? 'NOFN' : 'ok');
+    try { b?.checkForConnection?.(); } catch {}
+    setCarState({ cpDbg: 'poke#' + pokes + ':' + how + ' conn=' + (CarPlay.connected ? '1' : '0') });
+  };
   let poll: any = null;
   const ensurePolling = () => {
     if (poll || CarPlay.connected) return;
@@ -157,8 +167,9 @@ export function initCarPlayBootstrap(): void {
   };
 
   try {
-    CarPlay.registerOnConnect(() => { if (poll) { clearInterval(poll); poll = null; } onConnect(); });
+    CarPlay.registerOnConnect(() => { setCarState({ cpDbg: 'onConnect:FIRED' }); if (poll) { clearInterval(poll); poll = null; } onConnect(); });
     CarPlay.registerOnDisconnect(() => { onDisconnect(); ensurePolling(); });
+    setCarState({ cpDbg: 'wired conn=' + (CarPlay.connected ? '1' : '0') });
     if (CarPlay.connected) onConnect(); else { poke(); ensurePolling(); }
     // A head unit connecting often brings the app active — re-poke then, and resume
     // polling in case it had stopped.

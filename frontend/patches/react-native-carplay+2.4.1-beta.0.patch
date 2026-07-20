@@ -512,7 +512,7 @@ index 442b0a5..7f21320 100644
          didCancelNavigation: string;
          startedTrip: string;
 diff --git a/node_modules/react-native-carplay/lib/templates/MapTemplate.js b/node_modules/react-native-carplay/lib/templates/MapTemplate.js
-index 839b590..1a0b7ca 100644
+index 839b590..8825596 100644
 --- a/node_modules/react-native-carplay/lib/templates/MapTemplate.js
 +++ b/node_modules/react-native-carplay/lib/templates/MapTemplate.js
 @@ -28,6 +28,21 @@ class MapTemplate extends Template_1.Template {
@@ -537,3 +537,107 @@ index 839b590..1a0b7ca 100644
              selectedPreviewForTrip: 'onSelectedPreviewForTrip',
              didCancelNavigation: 'onDidCancelNavigation',
              startedTrip: 'onStartedTrip',
+@@ -43,6 +58,13 @@ class MapTemplate extends Template_1.Template {
+             android: ({ error } = {}) => {
+                 error && console.error(error);
+             },
++            // Convoy fix (2026-07-19): iOS had NO key here, so Platform.select
++            // returned undefined and createTemplate was invoked with an undefined
++            // callback. The legacy bridge tolerated that; the bridgeless
++            // TurboModule interop throws "TypeError: Object is not a function",
++            // which killed the MapTemplate constructor before setRootTemplate ran
++            // -> no template -> no CarPlay chrome -> no touch.
++            ios: () => { },
+         });
+         CarPlay_1.CarPlay.bridge.createTemplate(this.id, this.parseConfig({ type: this.type, ...config, render: true }), callbackFn);
+     }
+diff --git a/node_modules/react-native-carplay/lib/templates/Template.js b/node_modules/react-native-carplay/lib/templates/Template.js
+index 5f6a243..a27d9ec 100644
+--- a/node_modules/react-native-carplay/lib/templates/Template.js
++++ b/node_modules/react-native-carplay/lib/templates/Template.js
+@@ -4,7 +4,17 @@ exports.Template = void 0;
+ const react_native_1 = require("react-native");
+ const CarPlay_1 = require("../CarPlay");
+ // eslint-disable-next-line @typescript-eslint/no-var-requires
+-const resolveAssetSource = require('react-native/Libraries/Image/resolveAssetSource');
++// Convoy fix (2026-07-19) — ROOT CAUSE of "no CarPlay chrome / touch-inert".
++// RN 0.81's resolveAssetSource.js ends in `export default resolveAssetSource`, so
++// require() returns the ESM namespace object { default: fn }, NOT the function.
++// traverse() below calls resolveAssetSource(...) on EVERY config key matching
++// /[Ii]mage$/ (our map buttons use `systemImage`), which threw
++// "TypeError: Object is not a function" inside parseConfig -> the MapTemplate
++// constructor died -> createTemplate/setRootTemplate never ran -> NO template was
++// ever created -> no nav bar, no map buttons, and nothing for CarPlay to route a
++// touch to. Verified against a local CarPlay-simulator reproduction.
++const _resolveAssetSourceMod = require('react-native/Libraries/Image/resolveAssetSource');
++const resolveAssetSource = _resolveAssetSourceMod.default || _resolveAssetSourceMod;
+ class Template {
+     config;
+     get type() {
+@@ -44,6 +54,10 @@ class Template {
+                 android: ({ error } = {}) => {
+                     error && console.error(error);
+                 },
++                // Convoy fix (2026-07-19): see MapTemplate.js — iOS had no key, so
++                // createTemplate got an undefined callback, which the bridgeless
++                // TurboModule interop rejects with "Object is not a function".
++                ios: () => { },
+             });
+             CarPlay_1.CarPlay.bridge.createTemplate(this.id, this.parseConfig({ type: this.type, ...config }), callbackFn);
+         }
+diff --git a/node_modules/react-native-carplay/src/templates/MapTemplate.ts b/node_modules/react-native-carplay/src/templates/MapTemplate.ts
+index 13a66ff..b7d786e 100644
+--- a/node_modules/react-native-carplay/src/templates/MapTemplate.ts
++++ b/node_modules/react-native-carplay/src/templates/MapTemplate.ts
+@@ -132,6 +132,10 @@ export class MapTemplate extends Template<MapTemplateConfig> {
+       android: ({ error }: { error?: string } = {}) => {
+         error && console.error(error);
+       },
++      // Convoy fix (2026-07-19): iOS had no key, so Platform.select returned
++      // undefined and createTemplate was called with an undefined callback, which
++      // the bridgeless TurboModule interop rejects.
++      ios: () => {},
+     });
+ 
+     CarPlay.bridge.createTemplate(
+diff --git a/node_modules/react-native-carplay/src/templates/Template.ts b/node_modules/react-native-carplay/src/templates/Template.ts
+index d39678f..2b4e8f3 100644
+--- a/node_modules/react-native-carplay/src/templates/Template.ts
++++ b/node_modules/react-native-carplay/src/templates/Template.ts
+@@ -3,7 +3,18 @@ import { CarPlay } from '../CarPlay';
+ import { BarButton } from '../interfaces/BarButton';
+ 
+ // eslint-disable-next-line @typescript-eslint/no-var-requires
+-const resolveAssetSource = require('react-native/Libraries/Image/resolveAssetSource');
++// Convoy fix (2026-07-19) — ROOT CAUSE of "no CarPlay chrome / CarPlay touch-inert".
++// RN 0.81's resolveAssetSource.js ends in `export default resolveAssetSource`, so
++// require() returns the ESM namespace object { default: fn }, NOT the function.
++// traverse() below calls resolveAssetSource(...) on EVERY config key matching
++// /[Ii]mage$/ — our map buttons use `systemImage` — which threw
++// "TypeError: Object is not a function" inside parseConfig, killing the
++// MapTemplate constructor before createTemplate/setRootTemplate ever ran. Result:
++// NO template was ever created, so CarPlay had no nav bar, no map buttons, and
++// nothing to route a touch to. NOTE: this package sets "react-native":
++// "src/index.ts", so Metro bundles THIS file — patching lib/ has no effect.
++const _resolveAssetSourceMod = require('react-native/Libraries/Image/resolveAssetSource');
++const resolveAssetSource = _resolveAssetSourceMod.default || _resolveAssetSourceMod;
+ 
+ export interface BaseEvent {
+   /**
+@@ -153,7 +164,15 @@ export class Template<P> {
+         }
+         if (String(i).match(/[Ii]mage$/)) {
+           // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+-          obj[i] = resolveAssetSource(obj[i]);
++          // Convoy fix (2026-07-19): SF-symbol names (systemImage: 'mic.fill',
++          // 'plus.magnifyingglass') are plain STRINGS and must pass through
++          // untouched. resolveAssetSource() returns null for a string (it expects a
++          // require() id or {uri}), so native received a NIL image and threw an
++          // ObjC exception inside the TurboModule call -> SIGABRT. Only resolve
++          // real asset references.
++          if (typeof obj[i] !== 'string') {
++            obj[i] = resolveAssetSource(obj[i]);
++          }
+         }
+       }
+     }

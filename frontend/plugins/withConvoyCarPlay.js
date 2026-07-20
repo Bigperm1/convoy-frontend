@@ -578,21 +578,37 @@ final class ConvoyPhoneRootViewController: UIViewController, ConvoyHostedVC {
 
 @objc(CarSceneDelegate)
 class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
+  // MAPS-ENTITLED apps must adopt the WINDOW variant of this callback.
+  //
+  // We hold com.apple.developer.carplay-maps, but this delegate previously
+  // implemented only templateApplicationScene(_:didConnect:) with no window. iOS
+  // logs that mismatch verbatim on connect:
+  //     "Application declares maps entitlement."
+  //     "App supports CPTemplateApplicationScene method without window"
+  // With the non-maps callback, CarPlay hands over the interface controller but
+  // never establishes the template-hosting relationship for the car window — so
+  // CPMapTemplate chrome (nav bar, bar buttons, round map buttons) never draws,
+  // and because iOS routes ALL CarPlay touch through the template, there is no
+  // input channel at all. That is the long-standing "surface paints but CarPlay
+  // is touch-inert / no chrome" report.
+  //
+  // REPRODUCED LOCALLY in the CarPlay simulator 2026-07-19 (map + RN chips render,
+  // zero chrome) — this is the first version of this fix verified against a real
+  // reproduction rather than code-reading.
   func templateApplicationScene(
     _ templateApplicationScene: CPTemplateApplicationScene,
-    didConnect interfaceController: CPInterfaceController
+    didConnect interfaceController: CPInterfaceController,
+    to window: CPWindow
   ) {
-    let carWindow = templateApplicationScene.carWindow
-
     // Let react-native-carplay set up its interface controller + templates.
-    RNCarPlay.connect(with: interfaceController, window: carWindow)
+    RNCarPlay.connect(with: interfaceController, window: window)
 
     // Mount the Convoy RN dashboard onto the CarPlay window. Boots the RN host
     // first if this is a COLD CarPlay connect (phone app not running) — the case
     // that used to crash (superView on a host that was never started).
     guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
-    ConvoyRNHost.mount(moduleName: "ConvoyCarSurface", in: carWindow, appDelegate: appDelegate, makeVisible: false)
-    ConvoyRNHost.armCarRepaints(in: carWindow)
+    ConvoyRNHost.mount(moduleName: "ConvoyCarSurface", in: window, appDelegate: appDelegate, makeVisible: false)
+    ConvoyRNHost.armCarRepaints(in: window)
   }
 
   func templateApplicationScene(

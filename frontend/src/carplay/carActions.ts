@@ -31,6 +31,7 @@ import { startNavBanner, stopNavBanner, CAR_NAV_KEY } from '../navNotification';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
+import { CAR_ICON_POLICE, CAR_ICON_MIC } from './carButtonIcons';
 
 // ── lazy react-native-carplay access (same guard style as carPlayBootstrap) ──
 function getLib(): any | null {
@@ -300,43 +301,46 @@ function getSearchTemplate(): any | null {
 // no image assets on the head unit.
 export const CAR_BAR_BUTTON_CONFIG = {
   automaticallyHidesNavigationBar: false,
-  leadingNavigationBarButtons: [
-    { id: 'car-search', type: 'text' as const, title: 'Search' },
-  ],
+  // Nav bar is TRAILING-ONLY (2026-07-20). Police moved OFF the nav bar to a round
+  // map button (it is a one-tap driving action, so it belongs under the thumb, not
+  // in the chrome), and Search took its place — which also empties the leading side
+  // so the top-left of the car screen is free for our own Scout mic + compass.
+  leadingNavigationBarButtons: [],
   trailingNavigationBarButtons: [
-    { id: 'car-police', type: 'text' as const, title: 'Police' },
+    { id: 'car-search', type: 'text' as const, title: 'Search' },
     { id: 'car-end', type: 'text' as const, title: 'End' },
   ],
 };
 
-// ── Round CPMapButtons (build 65+, systemImage patch) ────────────────────────
-// The custom-PNG map buttons never rendered because [RCTConvert UIImage:] goes
-// through the LEGACY bridge image loader — nil under bridgeless New Arch, and
-// CarPlay draws nothing for a nil-image CPMapButton. The build-65 patch adds
-// `systemImage` (UIImage systemImageNamed:, no bridge involved), so these render
-// on any build ≥65. On older builds the unknown key is ignored natively and the
-// buttons are simply absent — same as today, so this config is safe to OTA.
+// ── Round CPMapButtons — POLICE + SCOUT MIC, in OUR artwork ──────────────────
+// SHARED BY BOTH ROOTS (cold idle + warm). They used to declare different button
+// sets with different ids, which is how "the mic works but the others don't"
+// bugs kept appearing — one source of truth now.
+//
+// 2026-07-20 changes:
+//  • Zoom ± REMOVED. They occupied two of the (max 4) map-button slots on the
+//    right edge, crowding our own nav stack, and the head unit reported them as
+//    doing nothing. Pinch-to-zoom still works via the CPMapTemplate zoom gesture
+//    (onDidBegin/Update/EndZoomGesture -> the gesture bus), which is unaffected.
+//  • Police PROMOTED from the nav bar to a round map button (one-tap driving
+//    action), and both glyphs are now OUR OWN artwork instead of SF Symbols.
+//
+// The `systemImage` key (our build-65 native patch) is deliberately NOT used
+// here: it takes precedence over `image` in RCTConvert+RNCarPlay.m, so leaving it
+// in would mask our art. See carButtonIcons.ts for why a data URI is bridge-free
+// and OTA-able.
 export const CAR_MAP_BUTTON_CONFIG = {
   mapButtons: [
-    { id: 'car-zoom-in', systemImage: 'plus.magnifyingglass' },
-    { id: 'car-zoom-out', systemImage: 'minus.magnifyingglass' },
-    { id: 'car-mic', systemImage: 'mic.fill' },
+    { id: 'car-police', image: CAR_ICON_POLICE, focusedImage: CAR_ICON_POLICE },
+    { id: 'car-mic', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC },
   ],
 };
 
-// One tap = one zoom step on the car camera. The CarMapView pinch handler
-// rebases on zoomBegin and applies log2(scale) as the bias delta, so a discrete
-// button press is just a tiny "pinch": begin at the current zoom, then one
-// scale factor. ~log2(1.35) ≈ ±0.43 zoom levels per tap.
-const ZOOM_STEP_IN = 1.35;
-const ZOOM_STEP_OUT = 1 / 1.35;
+// Map-button handler for the COLD root (no phone app in the foreground). The warm
+// root intercepts these same ids first and routes them to its live refs; anything
+// it does not claim falls through to here, so the two roots behave identically.
 export function handleCarMapButton(id: string): void {
-  if (id === 'car-zoom-in' || id === 'car-zoom-out') {
-    emitCarGesture({ kind: 'zoomBegin' });
-    emitCarGesture({ kind: 'zoom', scale: id === 'car-zoom-in' ? ZOOM_STEP_IN : ZOOM_STEP_OUT, velocity: 0 });
-    emitCarGesture({ kind: 'zoomEnd', velocity: 0 });
-    return;
-  }
+  if (id === 'car-police') { armPosRing(); void reportPoliceFromCar(); return; }
   if (id === 'car-mic') {
     // Same bus event the RN-surface experiment used — map.tsx already
     // subscribes and toggles the Scout voice agent.
@@ -347,6 +351,9 @@ export function handleCarMapButton(id: string): void {
 
 export function handleCarBarButton(id: string): void {
   armPosRing(); // idempotent — make sure the 5s-ago buffer is running
+  // 'car-police' is no longer a NAV-BAR button (it moved to a round map button in
+  // CAR_MAP_BUTTON_CONFIG), but keep the branch: an older cached template on a
+  // head unit can still deliver it, and dropping it would silently no-op.
   if (id === 'car-police') { void reportPoliceFromCar(); return; }
   if (id === 'car-end') { void endCarNav(); return; }
   if (id === 'car-search') {

@@ -33,7 +33,7 @@
 // withConvoyCarPlay.js).
 
 import React, { useEffect, useRef, useState } from 'react';
-import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated, TouchableOpacity } from 'react-native';
+import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated, TouchableOpacity, processColor } from 'react-native';
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec } from '../nav';
 import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -45,7 +45,7 @@ import CarMapView from './CarMapView';
 import CompassNeedle from '../components/CompassNeedle';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
-import { CAR_BAR_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
+import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
 
@@ -225,6 +225,15 @@ export function CarSurface() {
   // CarPlay HUD chip reads the SAME on the pale map; red floor when over the limit. The
   // GlassFill on top stays CLEAR (real Liquid Glass sheen) — floor gives the tint.
   const speedoBg = speedoOver ? '#E4002B' : carHudFloor();
+
+  // Measured CPWindow width -> bottom nav-stack width. See CAR_LEFT_INSET: the
+  // stack has to fit BETWEEN the speed cluster and the system map buttons, and the
+  // CarPlay canvas is far narrower than a phone (~431pt on the iOS 18.6 sim), so a
+  // fixed width silently collides on the small end.
+  const [surfaceW, setSurfaceW] = useState(0);
+  const navStackW = surfaceW > 0
+    ? Math.max(NAV_STACK_MIN_W, Math.min(NAV_STACK_MAX_W, surfaceW - CAR_LEFT_INSET - CAR_RIGHT_INSET))
+    : NAV_STACK_FALLBACK_W;
   const speedPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!speedoOver) { speedPulse.setValue(1); return; }
@@ -308,7 +317,7 @@ export function CarSurface() {
       {/* BOTTOM-RIGHT nav stack (out of the route line's way): the ETA pill sits just
           ABOVE the turn-by-turn maneuver banner, and both share the same width. */}
       {s.navigating ? (
-        <View style={styles.navStack} pointerEvents="none">
+        <View style={[styles.navStack, { width: navStackW }]} pointerEvents="none">
           {/* LANE GUIDANCE ("3D-lanes lite") — the phone's glowing-lane diagram on
               the head unit: active lanes brand green, the rest dim. Appears only
               when Mapbox lane data confidently matches the upcoming turn (the
@@ -321,7 +330,7 @@ export function CarSurface() {
                 <MaterialCommunityIcons
                   key={i}
                   name={laneIcon((lane.active && lane.activeDir) ? lane.activeDir : (lane.dirs[0] || 'straight'))}
-                  size={26}
+                  size={laneIconSize(s.lanes!.length, navStackW)}
                   color={lane.active ? '#2DEC86' : '#5A5A5E'}
                 />
               ))}
@@ -370,7 +379,13 @@ export function CarSurface() {
   );
 
   return (
-    <View style={styles.surface}>
+    <View
+      style={styles.surface}
+      onLayout={(e) => {
+        const w = e?.nativeEvent?.layout?.width;
+        if (typeof w === 'number' && w > 0 && Math.abs(w - surfaceW) > 1) setSurfaceW(w);
+      }}
+    >
       {showLive ? (
         // Live 3D map on the CarPlay window — the ONLY map surface. A GL/load
         // failure (watchdog, style error, render throw) schedules a remount with
@@ -467,7 +482,8 @@ export function CarSurface() {
         </View>
       ) : null}
 
-      {/* Compass — north-needle, RIGHT edge. The car map is heading-up, so rotate
+      {/* Compass — north-needle, docked under the Scout mic (TOP-LEFT). The car map
+          is heading-up, so rotate
           the needle by -heading to keep North pointing at true north. (Flip the
           sign here if it reads mirrored on the head unit.) */}
       {typeof s.heading === 'number' ? (
@@ -721,7 +737,11 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // which renders nothing under the New Architecture, so we bypass it.
             tabTitle: 'Map',
             tabSystemImageName: 'map',
-            guidanceBackgroundColor: '#0B0B0C',
+            // processColor(), NOT a hex string — see the same fix in
+            // carPlayBootstrap.ts: an NSString converts to NIL and the present-key
+            // check then skips the lib's own fallback, setting nil on a nonnull
+            // CPMapTemplate property.
+            guidanceBackgroundColor: processColor('#0B0B0C'),
             tripEstimateStyle: 'dark',
             // KEEP the map buttons (police + Scout mic) on screen. CPMapTemplate's
             // defaults auto-hide the navigation bar after a few idle seconds and
@@ -739,24 +759,21 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             trailingNavigationBarButtons: CAR_BAR_BUTTON_CONFIG.trailingNavigationBarButtons,
             onBarButtonPressed: (e: { id: string }) => handleCarBarButton(e?.id),
             onDidCancelNavigation: () => onEndRef.current?.(),
-            // Round CPMapButtons — SF symbols via the build-65 `systemImage` patch.
-            // ROOT CAUSE of "map buttons never render": custom PNG images resolve
-            // through the legacy bridge image loader ([RCTConvert UIImage:]),
-            // which returns nil under bridgeless New Arch, and CarPlay draws
-            // NOTHING for a nil-image CPMapButton. systemImageNamed: skips the
-            // bridge entirely. Zoom ± drives the same gesture bus as pinch; mic
-            // taps the Scout agent. On pre-65 builds the unknown key is ignored
-            // (buttons absent — same as before), so this is OTA-safe.
-            mapButtons: [
-              { id: 'car-zoom-in', systemImage: 'plus.magnifyingglass' },
-              { id: 'car-zoom-out', systemImage: 'minus.magnifyingglass' },
-              { id: 'scout', systemImage: 'mic.fill' },
-              { id: 'police', systemImage: 'shield.fill' },
-            ],
+            // Round CPMapButtons — POLICE + SCOUT MIC in OUR OWN artwork, from the
+            // SHARED config so the warm and cold roots can never drift apart again
+            // (they previously declared different sets with different ids, which is
+            // exactly how "one button works and the others don't" kept happening).
+            // Zoom ± was removed here: it ate two of CarPlay's four map-button slots
+            // and crowded our nav stack. Pinch-to-zoom is untouched — see the zoom
+            // gesture handlers below.
+            mapButtons: CAR_MAP_BUTTON_CONFIG.mapButtons,
             onMapButtonPressed: (e: { id: string }) => {
-              if (e?.id === 'police') { onReportPoliceRef.current?.(); return; }
-              if (e?.id === 'scout') { onScoutMicRef.current?.(); return; }
-              handleCarMapButton(e?.id); // zoom ± (shared with the cold root)
+              // Warm root: prefer the live refs (they reach the mounted surface).
+              // Anything not claimed here falls through to the module-level handler
+              // so cold-root behaviour stays identical.
+              if (e?.id === 'car-police') { onReportPoliceRef.current?.(); return; }
+              if (e?.id === 'car-mic') { onScoutMicRef.current?.(); return; }
+              handleCarMapButton(e?.id);
             },
             // iOS-26 raw pinch/zoom on the CarPlay map (react-native-carplay patch +
             // CPMapTemplate.h gesture delegate). Forwarded to CarMapView via the
@@ -970,6 +987,47 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
   return { connected };
 }
 
+// ── CarPlay chrome insets (2026-07-20, measured in the iOS 18.6 CarPlay sim) ────
+// Our RN surface is mounted on the FULL CPWindow, but CPMapTemplate draws its own
+// chrome ON TOP of it: a navigation bar across the top and a vertical stack of
+// round CPMapButtons down the RIGHT edge. None of that is movable — CPMapButton
+// exposes only image/focusedImage/enabled/hidden, with no position API — so the
+// avoidance has to happen on OUR side.
+//
+// Verified in the simulator: with these at 0 the Scout mic was CLIPPED by the nav
+// bar and the bottom-right nav stack (lane guidance / ETA / maneuver banner) ran
+// straight under the police + mic buttons.
+//
+// Apple's real answer is CPWindow.mapButtonSafeAreaLayoutGuide (CPWindow.h:18),
+// which reports the true chrome-free rect per head unit. Reading it needs native
+// plumbing into carStore, so it is queued for build 68; until then these constants
+// match the measured chrome and are deliberately generous. Erring large costs a
+// little map, erring small hides a turn instruction.
+const CAR_TOP_INSET = 58;   // clears the CPMapTemplate navigation bar
+const CAR_RIGHT_INSET = 76; // clears the round CPMapButton column
+// Left edge the bottom nav stack must not cross: the speed cluster is speedDock
+// (left 56) + the posted-limit badge, which SLIDES OUT 62pt and is itself 58 wide
+// -> 56 + 62 + 58 = 176 at full extension, +8pt of air.
+const CAR_LEFT_INSET = 184;
+// The nav stack is anchored RIGHT (at CAR_RIGHT_INSET) and its width is measured,
+// not fixed. A fixed 210 could not co-exist with the speed cluster on a narrow
+// head unit: 184 + 210 + 76 overflows a ~431pt CarPlay canvas, which is exactly
+// how the maneuver banner ended up underneath the speedo in the sim. Clamped so it
+// stays readable on small screens and does not sprawl on ultra-wide ones.
+const NAV_STACK_MIN_W = 150;
+const NAV_STACK_MAX_W = 280;
+const NAV_STACK_FALLBACK_W = 210; // pre-measurement (first frame only)
+
+// Lane guidance has to fit the (now measured) stack width. A 5-lane cue at the old
+// fixed size 26 overflowed a narrow head unit and the leftmost arrow was clipped —
+// which on a real junction is the one you need. Shrink to fit, floor 16 so it stays
+// legible at a glance; laneRow is paddingHorizontal 10 + gap 10 (see styles.laneRow).
+function laneIconSize(count: number, stackW: number): number {
+  if (count <= 0) return 26;
+  const avail = stackW - 20 /* padding */ - (count - 1) * 10 /* gaps */;
+  return Math.max(16, Math.min(26, Math.floor(avail / count)));
+}
+
 const styles = StyleSheet.create({
   // padding 0 → overlays sit at the true screen edges (the CarPlay side bar still
   // covers the far left, so left-side elements keep a ~68pt offset).
@@ -996,15 +1054,21 @@ const styles = StyleSheet.create({
   speedLimitBadge: { position: 'absolute', left: 0, bottom: 0, width: 58, height: 48, borderRadius: 14, backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   speedLimitNum: { color: '#000', fontSize: 21, fontWeight: '800', letterSpacing: -0.5, lineHeight: 23 },
   speedLimitUnit: { color: '#333', fontSize: 9, fontWeight: '700', letterSpacing: 0.3, marginTop: 1 },
-  // Compass — TOP-RIGHT corner, mirroring the Scout mic button (top-left) in size +
+  // Compass — TOP-LEFT, docked directly UNDER the Scout mic button (moved off the
+  // right edge 2026-07-20). CarPlay stacks its own round CPMapButtons down the
+  // RIGHT side of the map and we cannot move them (CPMapButton has no position
+  // API — its only properties are image/focusedImage/enabled/hidden), so the right
+  // edge belongs to the system. Keeping our two round controls in one left-hand
+  // column also reads as a deliberate pair instead of two orphans.
+  // scoutMicBtn is top:10 h:52 -> its bottom edge is 62; +8pt gap = 70.
   // vertical position: same 52×52 circle at top:10, hard against the right edge. In
   // LIVE mode the maneuver banner sits bottom-right (navStack), so the top-right is free.
-  compassDock: { position: 'absolute', right: 10, top: 10, width: 52, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', overflow: 'hidden' },
+  compassDock: { position: 'absolute', left: 56, top: CAR_TOP_INSET + 52 + 8, width: 52, height: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', overflow: 'hidden' },
   // Weather chip — BOTTOM-left, just above the speedo (left edge aligned, small gap),
   // mirroring the phone's weather-over-speed HUD column. Vector glyph + temp, stacked.
   weatherChip: { position: 'absolute', left: 56, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
   scoutPill: { position: 'absolute', top: 10, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
-  scoutMicBtn: { position: 'absolute', left: 56, top: 10, width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(18,18,22,0.5)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  scoutMicBtn: { position: 'absolute', left: 56, top: CAR_TOP_INSET, width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(18,18,22,0.5)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   scoutDot: { width: 10, height: 10, borderRadius: 5 },
   scoutPillText: { color: '#F4F4F4', fontSize: 14, fontWeight: '700' },
   weatherText: { color: '#F4F4F4', fontSize: 13, fontWeight: '800', marginTop: 1 },
@@ -1031,12 +1095,13 @@ const styles = StyleSheet.create({
   topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'transparent', borderRadius: 14, overflow: 'hidden' },
   topChipText: { color: '#2DEC86', fontSize: 15, fontWeight: '800', letterSpacing: 1 },
   // ETA / arrival — tucked into the BOTTOM-RIGHT corner, small.
-  bottomMeta: { position: 'absolute', right: 8, bottom: 8, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 10, overflow: 'hidden' },
+  bottomMeta: { position: 'absolute', right: CAR_RIGHT_INSET, bottom: 8, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 10, overflow: 'hidden' },
   bottomText: { color: '#C7CCD1', fontSize: 12, fontWeight: '600' },
   // --- BOTTOM-RIGHT nav stack (live map): ETA pill above the maneuver banner, same width ---
   // width is the shared "length" of both banners — OTA-tunable. alignItems:'stretch' makes
   // the ETA + maneuver banner fill it equally so they line up.
-  navStack: { position: 'absolute', right: 8, bottom: 8, width: 210, alignItems: 'stretch', gap: 6 },
+  // width is applied INLINE (navStackW) — it has to be measured, see CAR_LEFT_INSET.
+  navStack: { position: 'absolute', right: CAR_RIGHT_INSET, bottom: 8, alignItems: 'stretch', gap: 6 },
   navBannerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   navEta: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden' },

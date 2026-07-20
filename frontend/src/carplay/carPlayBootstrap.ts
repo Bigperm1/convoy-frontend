@@ -9,7 +9,7 @@
 // refcounted/shared with the nav banner so they never fight over iOS's single
 // background-location slot.
 
-import { NativeModules, Platform, AppState } from 'react-native';
+import { NativeModules, Platform, AppState, processColor } from 'react-native';
 import * as Location from 'expo-location';
 import { carPlayHookOwnsRoot } from './carPlayShared';
 import { setCarState, getCarState } from './carStore';
@@ -43,7 +43,14 @@ export function initCarPlayBootstrap(): void {
         id: 'convoy-carplay-idle',
         tabTitle: 'Map',
         tabSystemImageName: 'map',
-        guidanceBackgroundColor: '#0B0B0C',
+        // processColor(), NOT a hex string: [RCTConvert UIColor:] accepts only
+        // NSArray / NSNumber / NSDictionary (RCTConvert.mm:936+) — an NSString falls
+        // through and returns NIL. And because the KEY is present, RNCarPlay.m:947
+        // takes the if-branch and skips its own systemGray5 fallback, so we were
+        // calling setGuidanceBackgroundColor:nil on a property the SDK declares
+        // nonnull (CPMapTemplate.h:63). processColor returns the ARGB NSNumber the
+        // NSNumber branch expects.
+        guidanceBackgroundColor: processColor('#0B0B0C'),
         tripEstimateStyle: 'dark',
         // Wave 3: Search / Police / End on the map template's NAV-BAR — the
         // chrome layer that actually renders + taps on the head unit (the round

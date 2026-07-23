@@ -628,7 +628,7 @@ export default function TalkScreen() {
 
       {/* Conversation strip — Crew (whole community) + your private threads +
           a New button. Pick one to set who the mic talks to. */}
-      {active && !dropdownOpen && (
+      {(active || threads.length > 0) && !dropdownOpen && (
         <View style={styles.stripWrap}>
           <Text style={styles.stripTitle}>Comms Threads</Text>
           <ScrollView
@@ -636,11 +636,20 @@ export default function TalkScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.strip}
           >
-            <TouchableOpacity onPress={selectCrew} style={[styles.chip, !activeThreadId && styles.chipActive]} activeOpacity={0.85}>
-              <Ionicons name="people" size={15} color={!activeThreadId ? '#000' : YELLOW} />
-              <Text style={[styles.chipText, !activeThreadId && styles.chipTextActive]} numberOfLines={1}>Crew</Text>
-              {!!activeThreadId && !!active && commsRead.channelHasUnread(active.id) && <View style={styles.chipDot} />}
-            </TouchableOpacity>
+            {/* Crew chip needs an ACTIVE community (it IS the community channel).
+                The strip itself no longer does: private threads are fetched
+                globally (/threads) and channelId = activeThreadId works with NO
+                community — but the old `active &&` gate hid the WHOLE strip, so
+                anyone whose activeCommunityId was wiped (every Android reinstall
+                during the black-screen era; settings are per-device) "lost" their
+                private chats while the threads still existed server-side. */}
+            {active ? (
+              <TouchableOpacity onPress={selectCrew} style={[styles.chip, !activeThreadId && styles.chipActive]} activeOpacity={0.85}>
+                <Ionicons name="people" size={15} color={!activeThreadId ? '#000' : YELLOW} />
+                <Text style={[styles.chipText, !activeThreadId && styles.chipTextActive]} numberOfLines={1}>Crew</Text>
+                {!!activeThreadId && !!active && commsRead.channelHasUnread(active.id) && <View style={styles.chipDot} />}
+              </TouchableOpacity>
+            ) : null}
             {threads.map((t) => {
               const on = t.id === activeThreadId;
               return (

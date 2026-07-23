@@ -2696,17 +2696,57 @@ export default function MapScreen() {
 
   // Last GPS sample seen WHILE the car head unit was connected — used as the
   // "parked" fallback position in full mode after the unit disconnects.
+  // REWORKED 2026-07-20 (Jeff's photo: a parked peer's pin sat on their HOUSE).
+  // Three stacked defects put a parked avatar at the driver's real location:
+  //  1. The car spot was only recorded while a HEAD UNIT was connected — a peer
+  //     without CarPlay/AA never recorded one.
+  //  2. With no recorded spot, the parked branch FELL BACK TO LIVE COORDS —
+  //     broadcasting exactly the location "parked" exists to hide.
+  //  3. It was a bare useRef, wiped on every app restart — so even head-unit users
+  //     leaked their home position after a relaunch.
+  // Now: the spot is recorded whenever the head unit is connected OR the driver is
+  // plainly DRIVING (speed ≥ 2.5 m/s ≈ 9 km/h — above walking pace), so the last
+  // recorded point is on the road by construction; it persists across restarts;
+  // and when parked with NO known car spot we broadcast NOTHING (buildPayload
+  // returns null on null coords → the hub skips track) — absent beats exposed.
+  const LAST_CAR_SPOT_KEY = "convoy.lastCarSpot.v1";
   const lastCarLocRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastCarLocSavedAtRef = useRef(0);
   useEffect(() => {
-    if (carConnected && coords) lastCarLocRef.current = { lat: coords.lat, lng: coords.lng };
+    // Hydrate once; never clobber a fresher in-memory value.
+    AsyncStorage.getItem(LAST_CAR_SPOT_KEY)
+      .then((raw) => {
+        if (!raw || lastCarLocRef.current) return;
+        const p = JSON.parse(raw);
+        if (typeof p?.lat === "number" && typeof p?.lng === "number") lastCarLocRef.current = { lat: p.lat, lng: p.lng };
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const lastDrivingAtRef = useRef(0);
+  useEffect(() => {
+    const driving = (coords?.speed ?? 0) >= 2.5;
+    if (driving) lastDrivingAtRef.current = Date.now();
+    if (coords && (carConnected || driving)) {
+      lastCarLocRef.current = { lat: coords.lat, lng: coords.lng };
+      const now = Date.now();
+      if (now - lastCarLocSavedAtRef.current > 15000) {
+        lastCarLocSavedAtRef.current = now;
+        AsyncStorage.setItem(LAST_CAR_SPOT_KEY, JSON.stringify(lastCarLocRef.current)).catch(() => {});
+      }
+    }
   }, [carConnected, coords?.lat, coords?.lng]);
 
-  // Position + status we actually broadcast. PARTIAL or FULL while DISCONNECTED →
-  // pinned at the last car spot, status "parked" (real location hidden); connected
-  // (or any other state) → live coords.
-  const presenceParked = avatarMode !== "ghost" && !carConnected;
+  // Position + status we actually broadcast. PARTIAL or FULL → LIVE while the head
+  // unit is connected OR while plainly driving (phone-only drivers used to render as
+  // a translucent "parked" car even at highway speed); PINNED to the last car spot
+  // otherwise. drivingRecently carries a 90s hysteresis so GPS jitter at a red light
+  // doesn't flap live↔parked — and a mid-light flip is harmless anyway, since the
+  // pin is the car's own road position by construction.
+  const drivingRecently = Date.now() - lastDrivingAtRef.current < 90000;
+  const presenceParked = avatarMode !== "ghost" && !carConnected && !drivingRecently;
   const presencePos = presenceParked
-    ? (lastCarLocRef.current ?? (coords ? { lat: coords.lat, lng: coords.lng } : null))
+    ? lastCarLocRef.current
     : (coords ? { lat: coords.lat, lng: coords.lng, heading: coords.heading || 0 } : null);
   const presenceStatus: "live" | "parked" = presenceParked ? "parked" : "live";
 

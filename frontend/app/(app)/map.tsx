@@ -724,6 +724,9 @@ export default function MapScreen() {
   // ask the engine to animate back to north-up (heading 0).
   const [mapHeading, setMapHeading] = useState(0);
   const [northSignal, setNorthSignal] = useState(0);
+  // Bumped by the "Crew" pill (replaces the old zoom +/- buttons): frames self +
+  // all live/partial peers in one north-up overview.
+  const [crewSignal, setCrewSignal] = useState(0);
   // Transient north-up override. The Compass FAB sets this so a tap faces TRUE
   // NORTH (and recenters on the car) even while in heading-up chase: it routes the
   // camera through the engine's north-up follow path, which has no lockstep
@@ -3082,6 +3085,7 @@ export default function MapScreen() {
         // Live bearing readout + north-reset signal for the Compass FAB.
         onHeading={setMapHeading}
         resetNorthSignal={northSignal}
+        fitCrewSignal={crewSignal}
         // Layer controls — driven by the bottom-right Layers FAB.
         mapMode={mapMode}
         show3dBuildings={settings.show3dBuildings !== false && powerMode === "premium"}
@@ -3635,20 +3639,28 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* ===== Zoom +/- buttons (left column, styled like the speedo/weather pills) =====
-          Hidden while the Avatar panel is open (the panel overlays this spot); the
-          weather chip stays put just below the panel, so nothing shuffles. */}
-      <View style={[styles.zoomStack, { bottom: weatherBottom + 68, display: (avatarPanelOpen || (weatherForecastOpen && !!weather && showWeatherLayer)) ? 'none' : 'flex' }]}>
-        {/* radius matches zoomStack (16) so the GlassView shapes round — no diamond creases */}
+      {/* ===== "Crew" overview pill (replaced the zoom +/- buttons, 2026-07-20) =====
+          One tap frames self + all live/partial peers in a north-up overview. Same
+          glass box + radius as the speedo / weather chip. Hidden while the Avatar
+          panel is open (it overlays this spot). Non-following after the tap so the
+          chase cam doesn't immediately re-grab; the existing 20s idle auto-recenter
+          then returns to follow. */}
+      <View style={[styles.crewStack, { bottom: weatherBottom + 68, display: (avatarPanelOpen || (weatherForecastOpen && !!weather && showWeatherLayer)) ? 'none' : 'flex' }]}>
         <GlassFill tintColor={hudTint()} style={{ borderRadius: 16, overflow: "hidden" }} />
-        <TouchableOpacity testID="zoom-in-fab" style={styles.zoomBtn} activeOpacity={0.8}
-          onPress={() => setZoomOffset((z) => Math.min(3, z + 1))}>
-          <Ionicons name="add" size={26} color="#fff" />
-        </TouchableOpacity>
-        <View style={styles.zoomDivider} />
-        <TouchableOpacity testID="zoom-out-fab" style={styles.zoomBtn} activeOpacity={0.8}
-          onPress={() => setZoomOffset((z) => Math.max(-5, z - 1))}>
-          <Ionicons name="remove" size={26} color="#fff" />
+        <TouchableOpacity
+          testID="crew-fit-fab"
+          style={styles.crewBtn}
+          activeOpacity={0.8}
+          onPress={() => {
+            try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+            // Drop follow + arm the 20s auto-recenter, exactly like a finger pan,
+            // so the overview holds instead of the chase cam snapping back.
+            handleUserPan();
+            setCrewSignal((n) => n + 1);
+          }}
+        >
+          <Ionicons name="people" size={22} color="#fff" />
+          <Text style={styles.crewBtnLabel}>Crew</Text>
         </TouchableOpacity>
       </View>
 
@@ -4451,16 +4463,16 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 5,
   },
-  zoomStack: {
+  // "Crew" overview pill — same clear-glass box + radius + shadow as the speedo /
+  // weather chip (a single 58x60 box, matching their footprint), left column.
+  crewStack: {
     position: "absolute", left: 12, zIndex: 55, width: 60,
     borderRadius: 16, overflow: "hidden",
     backgroundColor: "transparent",
-    // No hard stroke — let the clear glass edge stand alone (see fab). Shadow lifts it.
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 5,
   },
-  zoomBtn: { width: 58, height: 52, alignItems: "center", justifyContent: "center" },
-  // Faint divider between + / − — a hint of separation, not a hard white line.
-  zoomDivider: { height: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.06)" },
+  crewBtn: { width: 58, height: 60, alignItems: "center", justifyContent: "center", gap: 1 },
+  crewBtnLabel: { color: "#F4F4F4", fontSize: 11, fontWeight: "700", letterSpacing: 0.2 },
   // Hold-to-activate Avatar panel (bottom-left). Dark card matching the other
   // map glass; green-dot radio rows mirror the Settings MAP MODE selector.
   avatarPanel: {

@@ -176,6 +176,9 @@ interface ConvoyMapboxProps {
   // increment animates the camera back to north-up (heading 0).
   onHeading?: (deg: number) => void;
   resetNorthSignal?: number;
+  // Monotonic counter; each bump frames ALL crew (self + every peer) in one
+  // north-up overview. Mirrors resetNorthSignal's signal pattern. See the effect.
+  fitCrewSignal?: number;
   // User zoom-button offset (in map-zoom steps) added on top of the follow zoom.
   zoomOffset?: number;
   [key: string]: any;
@@ -1482,7 +1485,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
     offerPill, onOfferAccept, onOfferDismiss,
     hazards, speedCameras, roadEvents, places, showPlacePins = true, destWeather,
-    onHazardPress, onPlacePress, onHeading, resetNorthSignal,
+    onHazardPress, onPlacePress, onHeading, resetNorthSignal, fitCrewSignal,
     zoomOffset = 0,
   } = props;
 
@@ -1667,6 +1670,38 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetNorthSignal]);
+
+  // Fit-all-crew: frame self + every peer in a north-up overview. The parent drops
+  // follow BEFORE bumping the signal (so the chase cam doesn't re-grab), which also
+  // makes the map north-up. Uses the SAME peerList the markers render from, so we
+  // frame exactly what's visible. One point (self, no peers) → a gentle zoom-to
+  // rather than a degenerate zero-size box.
+  const didMountFitRef = useRef(false);
+  useEffect(() => {
+    if (!didMountFitRef.current) { didMountFitRef.current = true; return; }
+    try {
+      const pts: [number, number][] = [];
+      if (user && typeof user.lat === "number" && typeof user.lng === "number") pts.push([user.lng, user.lat]);
+      for (const pr of peerList) {
+        if (typeof pr?.lat === "number" && typeof pr?.lng === "number") pts.push([pr.lng, pr.lat]);
+      }
+      if (pts.length === 0) return;
+      if (pts.length === 1) {
+        cameraRef.current?.setCamera({ centerCoordinate: pts[0], zoomLevel: 13.5, pitch: 0, heading: 0, animationDuration: 550, animationMode: "easeTo" });
+        return;
+      }
+      let minLng = pts[0][0], maxLng = pts[0][0], minLat = pts[0][1], maxLat = pts[0][1];
+      for (const [lng, lat] of pts) {
+        if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
+      }
+      // Flatten to north-up first so the fit isn't computed against a pitched camera.
+      try { cameraRef.current?.setCamera({ pitch: 0, heading: 0, animationDuration: 250, animationMode: "easeTo" }); } catch {}
+      // padding: top clears the search bar + crew pill; bottom clears the HUD + tab bar.
+      cameraRef.current?.fitBounds([maxLng, maxLat], [minLng, minLat], [150, 60, 200, 60], 600);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitCrewSignal]);
 
   // Persist the driver's location (throttled) so the NEXT cold start frames the
   // map on them immediately (see coldStartLoc). Uses the dedicated last-location

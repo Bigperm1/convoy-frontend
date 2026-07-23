@@ -54,6 +54,22 @@ function ensureChannel(e: Entry): void {
   if (e.channel || !SUPABASE_ENABLED || !supabase) return;
   let channel: any;
   try {
+    // SWEEP STALE CLIENT CHANNELS FIRST. supabase-js dedupes channel() BY TOPIC
+    // (RealtimeClient.channel returns the EXISTING instance if one with this topic
+    // is still registered) — and leave()'s removeChannel is async, so a fast
+    // leave→rejoin, or the CLOSED-rebuild below (which nulls e.channel without
+    // removing it from the client), can hand us back the OLD, possibly
+    // joined/joining instance. Calling .on('presence') on that is exactly the
+    // "cannot add `presence` callbacks" fatal (which also trips expo-updates
+    // ErrorRecovery and rolls testers back to the embedded bundle). Any client
+    // channel with our topic at this point is stale by definition — e.channel is
+    // null — so remove it before creating a fresh one.
+    const realtimeTopic = `realtime:${e.topic}`;
+    try {
+      (supabase.getChannels?.() ?? []).forEach((c: any) => {
+        if (c?.topic === realtimeTopic) { try { supabase!.removeChannel(c); } catch {} }
+      });
+    } catch {}
     channel = supabase.channel(e.topic, { config: { presence: { key: e.selfId } } });
   } catch { return; }
   e.channel = channel;

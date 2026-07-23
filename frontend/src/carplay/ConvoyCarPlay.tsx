@@ -379,7 +379,7 @@ export function CarSurface() {
                 <MaterialCommunityIcons
                   key={i}
                   name={laneIcon((lane.active && lane.activeDir) ? lane.activeDir : (lane.dirs[0] || 'straight'))}
-                  size={laneIconSize(s.lanes!.length, navStackW - (CAR_MAP_BUTTON_COL_W - CAR_RIGHT_INSET))}
+                  size={laneIconSize(s.lanes!.length, navStackW)}
                   color={lane.active ? '#2DEC86' : '#5A5A5E'}
                 />
               ))}
@@ -827,10 +827,9 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // gesture handlers below.
             mapButtons: CAR_MAP_BUTTON_CONFIG.mapButtons,
             onMapButtonPressed: (e: { id: string }) => {
-              // Warm root: prefer the live refs (they reach the mounted surface).
-              // Anything not claimed here falls through to the module-level handler
-              // so cold-root behaviour stays identical.
-              if (e?.id === 'car-police') { onReportPoliceRef.current?.(); return; }
+              // Warm root: prefer the live ref (reaches the mounted surface); anything
+              // else falls through so cold-root behaviour stays identical. (Police was
+              // removed from CarPlay at Jeff's request, 2026-07-20.)
               if (e?.id === 'car-mic') { onScoutMicRef.current?.(); return; }
               handleCarMapButton(e?.id);
             },
@@ -1068,7 +1067,12 @@ const CAR_TOP_INSET = 58; // clears the CPMapTemplate navigation bar
 // buttons now hold those slots (see CAR_MAP_BUTTON_CONFIG), lifting the real pair
 // clear of the ETA and maneuver banner. CPMapTemplate.h:71-75 caps mapButtons at 4,
 // so 2 real + 2 spacers is the highest they can possibly go.
-const CAR_RIGHT_INSET = 8;
+// Back to a REAL right inset (2026-07-20): with police + the spacer buttons gone
+// there is exactly ONE map button (the mic) in CarPlay's bottom-trailing slot, and
+// the banner stack must clear it — Jeff's head-unit report: "the banners cover the
+// car / are not the same". 56 covers the button column incl. iOS 26's own glass
+// chrome (wider than the bare glyph the 18.6 sim draws).
+const CAR_RIGHT_INSET = 56;
 
 // ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────
 // Measured off a real 800x480 CarPlay capture (= 400x240pt @2x) by decoding the
@@ -1220,5 +1224,5 @@ const styles = StyleSheet.create({
   // (the ETA and maneuver banner clear them vertically), so it carries the offset
   // instead of insetting the whole stack. Jeff's explicit requirement: the lane
   // guidance banner must never touch the buttons.
-  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: LANE_ROW_H, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden', marginRight: CAR_MAP_BUTTON_COL_W - CAR_RIGHT_INSET },
+  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: LANE_ROW_H, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden' },
 });

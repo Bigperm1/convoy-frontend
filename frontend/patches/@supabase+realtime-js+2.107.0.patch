@@ -1,0 +1,50 @@
+diff --git a/node_modules/@supabase/realtime-js/dist/main/RealtimeChannel.js b/node_modules/@supabase/realtime-js/dist/main/RealtimeChannel.js
+index 14b1042..dedf943 100644
+--- a/node_modules/@supabase/realtime-js/dist/main/RealtimeChannel.js
++++ b/node_modules/@supabase/realtime-js/dist/main/RealtimeChannel.js
+@@ -405,8 +405,18 @@ class RealtimeChannel {
+         const stateCheck = this.channelAdapter.isJoined() || this.channelAdapter.isJoining();
+         const typeCheck = type === REALTIME_LISTEN_TYPES.PRESENCE || type === REALTIME_LISTEN_TYPES.POSTGRES_CHANGES;
+         if (stateCheck && typeCheck) {
+-            this.socket.log('channel', `cannot add \`${type}\` callbacks for ${this.topic} after \`subscribe()\`.`);
+-            throw new Error(`cannot add \`${type}\` callbacks for ${this.topic} after \`subscribe()\`.`);
++            // Convoy patch (2026-07-20): DO NOT THROW. This throw has been the app's
++            // single recurring production fatal ("cannot add `presence` callbacks for
++            // realtime:convoy:community:<id>") across runtimes 1.17-1.19 — and worse
++            // than the crash itself, the fatal trips expo-updates ErrorRecovery, which
++            // ROLLS THE APP BACK to the embedded bundle, silently undoing every OTA fix
++            // (testers: "the tweaks only work on first launch after install"). Every
++            // known call site is single-owner (src/presenceHub.ts) and try-wrapped, yet
++            // the fatal still fired in the field — so the landmine itself goes.
++            // Attaching to a joined/joining channel is benign here: the callback simply
++            // starts receiving events from the next sync/message on.
++            this.socket.log('channel', `cannot add \`${type}\` callbacks for ${this.topic} after \`subscribe()\`. (Convoy patch: attaching anyway instead of throwing)`);
++            return this._on(type, filter, callback);
+         }
+         return this._on(type, filter, callback);
+     }
+diff --git a/node_modules/@supabase/realtime-js/dist/module/RealtimeChannel.js b/node_modules/@supabase/realtime-js/dist/module/RealtimeChannel.js
+index 9633201..5a91274 100644
+--- a/node_modules/@supabase/realtime-js/dist/module/RealtimeChannel.js
++++ b/node_modules/@supabase/realtime-js/dist/module/RealtimeChannel.js
+@@ -401,8 +401,18 @@ export default class RealtimeChannel {
+         const stateCheck = this.channelAdapter.isJoined() || this.channelAdapter.isJoining();
+         const typeCheck = type === REALTIME_LISTEN_TYPES.PRESENCE || type === REALTIME_LISTEN_TYPES.POSTGRES_CHANGES;
+         if (stateCheck && typeCheck) {
+-            this.socket.log('channel', `cannot add \`${type}\` callbacks for ${this.topic} after \`subscribe()\`.`);
+-            throw new Error(`cannot add \`${type}\` callbacks for ${this.topic} after \`subscribe()\`.`);
++            // Convoy patch (2026-07-20): DO NOT THROW. This throw has been the app's
++            // single recurring production fatal ("cannot add `presence` callbacks for
++            // realtime:convoy:community:<id>") across runtimes 1.17-1.19 — and worse
++            // than the crash itself, the fatal trips expo-updates ErrorRecovery, which
++            // ROLLS THE APP BACK to the embedded bundle, silently undoing every OTA fix
++            // (testers: "the tweaks only work on first launch after install"). Every
++            // known call site is single-owner (src/presenceHub.ts) and try-wrapped, yet
++            // the fatal still fired in the field — so the landmine itself goes.
++            // Attaching to a joined/joining channel is benign here: the callback simply
++            // starts receiving events from the next sync/message on.
++            this.socket.log('channel', `cannot add \`${type}\` callbacks for ${this.topic} after \`subscribe()\`. (Convoy patch: attaching anyway instead of throwing)`);
++            return this._on(type, filter, callback);
+         }
+         return this._on(type, filter, callback);
+     }

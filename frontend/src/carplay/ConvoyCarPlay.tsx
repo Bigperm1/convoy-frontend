@@ -831,7 +831,15 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // whether or not the phone app is open.
             leadingNavigationBarButtons: CAR_BAR_BUTTON_CONFIG.leadingNavigationBarButtons,
             trailingNavigationBarButtons: CAR_BAR_BUTTON_CONFIG.trailingNavigationBarButtons,
-            onBarButtonPressed: (e: { id: string }) => handleCarBarButton(e?.id),
+            onBarButtonPressed: (e: { id: string }) => {
+              // WARM End must end the PHONE's navigation too (Jeff's head-unit
+              // report: ending on CarPlay left the phone navigating, and the
+              // mirror immediately re-populated the car route — End looked dead).
+              // onEndRef reaches map.tsx's endNav; everything else falls through
+              // to the shared handler so cold behaviour is identical.
+              if (e?.id === 'car-end') { onEndRef.current?.(); return; }
+              handleCarBarButton(e?.id);
+            },
             onDidCancelNavigation: () => onEndRef.current?.(),
             // Round CPMapButtons — POLICE + SCOUT MIC in OUR OWN artwork, from the
             // SHARED config so the warm and cold roots can never drift apart again

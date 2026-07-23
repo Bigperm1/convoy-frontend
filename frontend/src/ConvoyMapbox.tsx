@@ -730,7 +730,7 @@ type PlacePoint = { id: string; lat: number; lng: number; label: string; price?:
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -751,6 +751,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // car's modelScale (CarPlay passes a smaller curve).
   cameraRef?: React.RefObject<any>;
   getCam?: () => { zoomLevel: number; pitch: number; heading: number; padding: any };
+  // Optional CAMERA-heading override (the MODEL keeps its real heading). Read live
+  // per frame; undefined = normal heading-up chase. CarPlay's compass north-up
+  // hold sets it to 0. Phone callers never pass it — zero behaviour change.
+  camHeadingOverrideRef?: React.RefObject<number | undefined>;
   readyRef?: React.RefObject<boolean>;
   scale?: any;
   // "Class" appearance: the name of a REGISTERED map image (the tinted top-down
@@ -813,7 +817,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         centerCoordinate: [ln, la],
         // Ride the EASED heading (render.current.heading) so the map rotates as smoothly
         // as the car turns; getCam's heading is only a fallback when none is passed.
-        heading: typeof hdg === 'number' ? hdg : c.heading,
+        heading: (camHeadingOverrideRef && typeof camHeadingOverrideRef.current === 'number') ? camHeadingOverrideRef.current : (typeof hdg === 'number' ? hdg : c.heading),
         zoomLevel: camZoom.current,
         pitch: camPitch.current,
         padding: c.padding,

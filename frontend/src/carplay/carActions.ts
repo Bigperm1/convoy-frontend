@@ -402,7 +402,7 @@ export const CAR_MAP_BUTTON_CONFIG = {
 // it does not claim falls through to here, so the two roots behave identically.
 export function handleCarMapButton(id: string): void {
   if (id === 'car-crew') { emitCarGesture({ kind: 'crewFit' }); return; }
-  if (id === 'car-compass') { emitCarGesture({ kind: 'recenter' }); return; }
+  if (id === 'car-compass') { emitCarGesture({ kind: 'compass' }); return; }
   // Stale-template tolerance: an older cached template can still deliver these.
   if (id === 'car-police') { armPosRing(); void reportPoliceFromCar(); return; }
   if (id === 'car-mic') { emitCarGesture({ kind: 'scoutMic' }); return; }

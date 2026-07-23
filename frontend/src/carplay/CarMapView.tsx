@@ -271,6 +271,14 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // fitBounds over the whole crew isn't overwritten on the next rAF tick. Expires
   // on its own — no cleanup path can strand the chase cam off.
   const camHoldUntilRef = useRef(0);
+  // Compass north-up hold (mirrors the phone compass): camera heading pinned to 0
+  // while the chase keeps following position; the car MODEL keeps its real heading.
+  // Toggled by the compass button; auto-released when navigation starts (the phone
+  // does the same — guidance is heading-up chase, not the compass hold).
+  const [carNorthUp, setCarNorthUp] = useState(false);
+  const camHdgOverrideRef = useRef<number | undefined>(undefined);
+  useEffect(() => { if (s.navigating) setCarNorthUp(false); }, [s.navigating]);
+  camHdgOverrideRef.current = carNorthUp ? 0 : undefined;
   lockReadyRef.current = paintedRef.current && hasFix && Date.now() >= camHoldUntilRef.current;
   // ── Phase-2 road-snap (mirror of the phone) ── query the invisible mapbox-streets-v8 road
   // source near the car when NOT route-snapped, snap the DRAWN pose to the nearest road.
@@ -397,6 +405,16 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           // come home, so the chase cam takes back over immediately.
           camHoldUntilRef.current = 0;
           break;
+        case 'compass':
+          // Mirror the PHONE compass (Jeff's ask): recenter on the car AND face
+          // north, holding north-up until tapped again (or nav starts). Also
+          // cancels a crew overview and resets any pinch bias, exactly like the
+          // phone's recenterNow.
+          userZoomRef.current = 0;
+          zoomBaseRef.current = 0;
+          camHoldUntilRef.current = 0;
+          setCarNorthUp((v) => !v);
+          break;
         case 'crewFit': {
           // Frame self + every peer, north-up, and hold the chase cam off for 8s
           // (the lockstep re-grabs automatically when the hold expires — same
@@ -410,7 +428,13 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
               if (typeof pr?.lat === 'number' && typeof pr?.lng === 'number') pts.push([pr.lng, pr.lat]);
             }
             if (pts.length === 0) break;
-            camHoldUntilRef.current = Date.now() + 8000;
+            // Engage the hold IMMEDIATELY (Jeff's head-unit report: the fit "did
+            // not act the same as the phone"). The render-time gate above only
+            // recomputes on the next store tick (~1s), so without this line the
+            // chase cam kept pushing frames over the fitBounds animation and the
+            // overview never landed. 15s ≈ the phone's 20s pan-hold feel.
+            camHoldUntilRef.current = Date.now() + 15000;
+            lockReadyRef.current = false;
             if (pts.length === 1) {
               cameraRef.current?.setCamera({ centerCoordinate: pts[0], zoomLevel: 12.5, pitch: 0, heading: 0, animationDuration: 550, animationMode: 'easeTo' });
               break;
@@ -649,6 +673,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           cameraRef={cameraRef}
           getCam={getCam}
           readyRef={lockReadyRef}
+          camHeadingOverrideRef={camHdgOverrideRef}
           scale={isArrow ? CARPLAY_ARROW_SCALE : carModelScale(0.7)}
           headingOffset={isArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
           pitchTilt={isArrow ? ARROW_MODEL_PITCH : 0}

@@ -29,7 +29,7 @@ import Mapbox, {
   VectorSource,
   Models,
 } from '@rnmapbox/maps';
-import { useCarStore, subscribeCarGesture, type CarGesture } from './carStore';
+import { useCarStore, getCarState, subscribeCarGesture, type CarGesture } from './carStore';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { usePowerMode } from '../powerMode';
 import { getVehicleModelUrl, getVehicleModelKey } from '../vehicleAssets';
@@ -264,7 +264,11 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // so we never queue 60fps setCamera calls before the surface is live.
   const cameraRef = useRef<React.ElementRef<typeof Camera> | null>(null);
   const lockReadyRef = useRef(false);
-  lockReadyRef.current = paintedRef.current && hasFix;
+  // Crew-overview hold: while set (epoch ms), the lockstep camera stands down so a
+  // fitBounds over the whole crew isn't overwritten on the next rAF tick. Expires
+  // on its own — no cleanup path can strand the chase cam off.
+  const camHoldUntilRef = useRef(0);
+  lockReadyRef.current = paintedRef.current && hasFix && Date.now() >= camHoldUntilRef.current;
   // ── Phase-2 road-snap (mirror of the phone) ── query the invisible mapbox-streets-v8 road
   // source near the car when NOT route-snapped, snap the DRAWN pose to the nearest road.
   const carMapRef = useRef<any>(null);
@@ -386,7 +390,38 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
         case 'recenter':
           userZoomRef.current = 0;
           zoomBaseRef.current = 0;
+          // A recenter also cancels any crew-overview hold — the driver asked to
+          // come home, so the chase cam takes back over immediately.
+          camHoldUntilRef.current = 0;
           break;
+        case 'crewFit': {
+          // Frame self + every peer, north-up, and hold the chase cam off for 8s
+          // (the lockstep re-grabs automatically when the hold expires — same
+          // spirit as the phone's 20s pan timeout, shorter because a head unit
+          // has no other way to dismiss the overview than waiting).
+          try {
+            const cs = getCarState();
+            const pts: [number, number][] = [];
+            if (typeof cs.selfLat === 'number' && typeof cs.selfLng === 'number') pts.push([cs.selfLng, cs.selfLat]);
+            for (const pr of cs.peers || []) {
+              if (typeof pr?.lat === 'number' && typeof pr?.lng === 'number') pts.push([pr.lng, pr.lat]);
+            }
+            if (pts.length === 0) break;
+            camHoldUntilRef.current = Date.now() + 8000;
+            if (pts.length === 1) {
+              cameraRef.current?.setCamera({ centerCoordinate: pts[0], zoomLevel: 12.5, pitch: 0, heading: 0, animationDuration: 550, animationMode: 'easeTo' });
+              break;
+            }
+            let minLng = pts[0][0], maxLng = pts[0][0], minLat = pts[0][1], maxLat = pts[0][1];
+            for (const [ln2, la2] of pts) {
+              if (ln2 < minLng) minLng = ln2; if (ln2 > maxLng) maxLng = ln2;
+              if (la2 < minLat) minLat = la2; if (la2 > maxLat) maxLat = la2;
+            }
+            try { cameraRef.current?.setCamera({ pitch: 0, heading: 0, animationDuration: 250, animationMode: 'easeTo' }); } catch {}
+            cameraRef.current?.fitBounds([maxLng, maxLat], [minLng, minLat], [70, 60, 90, 60], 600);
+          } catch {}
+          break;
+        }
         // 'zoomEnd': no fling/momentum for now — the pinched zoom simply holds.
       }
     });

@@ -31,7 +31,8 @@ import { startNavBanner, stopNavBanner, CAR_NAV_KEY } from '../navNotification';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
-import { CAR_ICON_MIC, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED } from './carButtonIcons';
+import { CAR_ICON_MIC, CAR_ICON_BLANK, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED } from './carButtonIcons';
+import { toggleCarComms } from './carComms';
 import { ensureSavedPlacesLoaded, getSavedPlaces, type SavedPlace } from '../savedPlaces';
 
 // ── lazy react-native-carplay access (same guard style as carPlayBootstrap) ──
@@ -339,29 +340,18 @@ function getSearchTemplate(): any | null {
 // no image assets on the head unit.
 export const CAR_BAR_BUTTON_CONFIG = {
   automaticallyHidesNavigationBar: false,
-  // Nav bar is TRAILING-ONLY (2026-07-20). Police moved OFF the nav bar to a round
-  // map button (it is a one-tap driving action, so it belongs under the thumb, not
-  // in the chrome), and Search took its place — which also empties the leading side
-  // so the top-left of the car screen is free for our own Scout mic + compass.
-  leadingNavigationBarButtons: [],
-  // buttonStyle 'rounded' = CPBarButtonStyleRounded (CPBarButton.h:63) — the system's
-  // rounded background behind the label instead of bare text. It is the ONLY shape
-  // control Apple exposes for a bar button (size stays system-owned), and the library
-  // never set it, so these rendered as plain text.
-  // NATIVE: needs the parseBarButtons patch in RNCarPlay.m, so it does NOTHING until
-  // the build that ships it (68). Harmless on 67 — the key is simply never read.
-  //
-  // MEASURED, AND THE NEWS IS BAD: on iOS 18.6 CarPlay this has NO VISIBLE EFFECT.
-  // Local native build + CarPlay sim, with the title temporarily renamed to prove the
-  // config really was reaching native — the 'rounded' button still drew as bare text.
-  // Rebuilding the button with the modern -initWithTitle:handler: (the library uses the
-  // iOS-14-deprecated -initWithType:) did not help either, so that was reverted.
-  // iOS 26 could not be checked: CarPlay's own carkitd daemon crashes in the iOS 26
-  // simulator. Kept because it is tiny, @available-guarded and inert where unsupported —
-  // but treat rounded nav-bar buttons as UNPROVEN, not delivered.
+  // TOP-LEFT: the crew-comms mic (tap-to-toggle transmit — carComms.ts). An IMAGE
+  // bar button with our own mic glyph; CarPlay renders its own glass chrome around
+  // bar buttons natively on iOS 26 (the "Liquid Glass" look is the system's).
+  leadingNavigationBarButtons: [
+    { id: 'car-comms', type: 'image' as const, image: CAR_ICON_MIC },
+  ],
+  // TOP-RIGHT: Search then End at the far corner. NOTE the array is REVERSED vs
+  // the visual order — head-unit photo evidence: config [search, end] rendered as
+  // "End Search" left-to-right, so array[0] lands RIGHT-most.
   trailingNavigationBarButtons: [
-    { id: 'car-search', type: 'text' as const, title: 'Search', buttonStyle: 'rounded' as const },
     { id: 'car-end', type: 'text' as const, title: 'End', buttonStyle: 'rounded' as const },
+    { id: 'car-search', type: 'text' as const, title: 'Search', buttonStyle: 'rounded' as const },
   ],
 };
 
@@ -383,16 +373,20 @@ export const CAR_BAR_BUTTON_CONFIG = {
 // in would mask our art. See carButtonIcons.ts for why a data URI is bridge-free
 // and OTA-able.
 export const CAR_MAP_BUTTON_CONFIG = {
-  // MIC ONLY (2026-07-20, Jeff's head-unit feedback). Police REMOVED at his request.
-  // The transparent spacer buttons are gone too: they were invisible on the iOS 18.6
-  // SIMULATOR (which draws no button chrome), but Jeff's iOS 26 head unit draws its
-  // own glass circle behind every CPMapButton — so the "hidden" spacers rendered as
-  // two empty buttons. Lesson recorded: the spacer trick is iOS-version-dependent;
-  // never assume chrome behaviour from the 18.6 sim.
-  // With a single button it sits in CarPlay's bottom-trailing slot (the column is
-  // bottom-anchored, CPMapTemplate.h:71-75); the nav stack's right inset clears it.
+  // Jeff's 2026-07-23 spec: right side = CREW (top) + COMPASS, with the two BOTTOM
+  // slots held by invisible spacers so the real pair sits high; our turn banner and
+  // ETA banner occupy the region of the two spacer slots. The column is
+  // bottom-anchored and stacks upward with the LAST entries at the bottom
+  // (CPMapTemplate.h:71-75), so array order = [crew, compass, spacer, spacer].
+  // KNOWN UNKNOWN: whether iOS 26 draws its glass circle behind a transparent
+  // spacer. The earlier "spacers visible" report came from a rolled-back bundle
+  // (the old 4 REAL buttons), so it proved nothing — needs one head-unit photo.
+  // The Scout mic map button is GONE per the same spec (Scout stays on the phone).
   mapButtons: [
-    { id: 'car-mic', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC },
+    { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW },
+    { id: 'car-compass', image: CAR_ICON_COMPASS, focusedImage: CAR_ICON_COMPASS },
+    { id: 'car-spacer-1', image: CAR_ICON_BLANK, focusedImage: CAR_ICON_BLANK, disabled: true },
+    { id: 'car-spacer-2', image: CAR_ICON_BLANK, focusedImage: CAR_ICON_BLANK, disabled: true },
   ],
 };
 
@@ -400,17 +394,19 @@ export const CAR_MAP_BUTTON_CONFIG = {
 // root intercepts these same ids first and routes them to its live refs; anything
 // it does not claim falls through to here, so the two roots behave identically.
 export function handleCarMapButton(id: string): void {
+  if (id === 'car-crew') { emitCarGesture({ kind: 'crewFit' }); return; }
+  if (id === 'car-compass') { emitCarGesture({ kind: 'recenter' }); return; }
+  // Stale-template tolerance: an older cached template can still deliver these.
   if (id === 'car-police') { armPosRing(); void reportPoliceFromCar(); return; }
-  if (id === 'car-mic') {
-    // Same bus event the RN-surface experiment used — map.tsx already
-    // subscribes and toggles the Scout voice agent.
-    emitCarGesture({ kind: 'scoutMic' });
-    return;
-  }
+  if (id === 'car-mic') { emitCarGesture({ kind: 'scoutMic' }); return; }
 }
 
 export function handleCarBarButton(id: string): void {
   armPosRing(); // idempotent — make sure the 5s-ago buffer is running
+  if (id === 'car-comms') {
+    void toggleCarComms().then((msg) => { if (msg) carAlert(msg); });
+    return;
+  }
   // 'car-police' is no longer a NAV-BAR button (it moved to a round map button in
   // CAR_MAP_BUTTON_CONFIG), but keep the branch: an older cached template on a
   // head unit can still deliver it, and dropping it would silently no-op.

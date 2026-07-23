@@ -3639,30 +3639,8 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* ===== "Crew" overview pill (replaced the zoom +/- buttons, 2026-07-20) =====
-          One tap frames self + all live/partial peers in a north-up overview. Same
-          glass box + radius as the speedo / weather chip. Hidden while the Avatar
-          panel is open (it overlays this spot). Non-following after the tap so the
-          chase cam doesn't immediately re-grab; the existing 20s idle auto-recenter
-          then returns to follow. */}
-      <View style={[styles.crewStack, { bottom: weatherBottom + 68, display: (avatarPanelOpen || (weatherForecastOpen && !!weather && showWeatherLayer)) ? 'none' : 'flex' }]}>
-        <GlassFill tintColor={hudTint()} style={{ borderRadius: 16, overflow: "hidden" }} />
-        <TouchableOpacity
-          testID="crew-fit-fab"
-          style={styles.crewBtn}
-          activeOpacity={0.8}
-          onPress={() => {
-            try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
-            // Drop follow + arm the 20s auto-recenter, exactly like a finger pan,
-            // so the overview holds instead of the chase cam snapping back.
-            handleUserPan();
-            setCrewSignal((n) => n + 1);
-          }}
-        >
-          <Ionicons name="people" size={22} color="#fff" />
-          <Text style={styles.crewBtnLabel}>Crew</Text>
-        </TouchableOpacity>
-      </View>
+{/* The "Crew" pill above the weather chip was REMOVED 2026-07-23 — the crew
+          overview now lives in the round FAB stack (bottom-right), replacing police. */}
 
       {/* ===== Avatar visibility panel (hold the Map tab to open) =====
           Bottom-left card with Full / Partial / Ghost rows in the same green-dot
@@ -3779,17 +3757,25 @@ export default function MapScreen() {
             <CompassNeedle size={54} />
           </View>
         </TouchableOpacity>
-        {/* Police report button. One-tap: posts a hazard with kind='police' at
-            the GPS sample closest to (now - 5s), shows a success toast, and
-            fires a haptic on native. */}
+        {/* Crew button (replaced the police FAB, 2026-07-23 — Jeff's call): one tap
+            frames self + every live/partial peer in a north-up overview. Same round
+            glass FAB as the compass above it. Police reporting still lives in voice
+            ("report police"), the Report sheet, and the hazard long-press. */}
         <TouchableOpacity
-          testID="report-police-fab"
+          testID="crew-fit-fab"
           style={[styles.fab, styles.fabPolice]}
-          onPress={() => reportAlert('police')}
+          onPress={() => {
+            try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+            // Drop follow like a finger pan (arms the 20s auto-recenter) so the
+            // overview holds instead of the chase cam snapping straight back.
+            handleUserPan();
+            setCrewSignal((n) => n + 1);
+          }}
           activeOpacity={0.8}
         >
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
-          <PoliceBadgeIcon size={40} />
+          <Ionicons name="people" size={26} color="#fff" />
+          <Text style={styles.fabCrewLabel}>Crew</Text>
         </TouchableOpacity>
         {/* Recenter FAB removed — recentering now lives in the compass tap
             (which both recenters on the car and faces north). */}
@@ -4463,16 +4449,8 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
     elevation: 5,
   },
-  // "Crew" overview pill — same clear-glass box + radius + shadow as the speedo /
-  // weather chip (a single 58x60 box, matching their footprint), left column.
-  crewStack: {
-    position: "absolute", left: 12, zIndex: 55, width: 60,
-    borderRadius: 16, overflow: "hidden",
-    backgroundColor: "transparent",
-    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 5,
-  },
-  crewBtn: { width: 58, height: 60, alignItems: "center", justifyContent: "center", gap: 1 },
-  crewBtnLabel: { color: "#F4F4F4", fontSize: 11, fontWeight: "700", letterSpacing: 0.2 },
+  // Tiny label under the people icon in the Crew FAB (round, bottom-right stack).
+  fabCrewLabel: { color: "#F4F4F4", fontSize: 9, fontWeight: "700", letterSpacing: 0.2, marginTop: -1 },
   // Hold-to-activate Avatar panel (bottom-left). Dark card matching the other
   // map glass; green-dot radio rows mirror the Settings MAP MODE selector.
   avatarPanel: {

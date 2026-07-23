@@ -37,6 +37,9 @@ export type CarState = {
   // object headlessly) — the filter then just no-ops, which is harmless because you
   // cannot transmit from the car yet.
   selfUserId?: string;
+  // Own outbound crew-comms transmission from the CAR (carComms.ts): drives the
+  // red "Transmitting…" indicator on the car surface.
+  commsTx?: "idle" | "recording" | "sending";
   // Raw numeric mirrors of the formatted strings above. Android Auto's
   // NavigationTemplate needs real meters/seconds (it formats them itself), not
   // the pre-formatted phone-banner strings. Populated alongside the strings.
@@ -280,6 +283,7 @@ export type CarGesture =
   | { kind: 'zoom'; scale: number; velocity: number }
   | { kind: 'zoomEnd'; velocity: number }
   | { kind: 'recenter' }
+  | { kind: 'crewFit' }
   // RN-surface Scout mic tap → map.tsx (same JS context) toggles the voice agent.
   // EXPERIMENT: native map buttons are covered by our RN car surface, so this
   // tests whether the surface ITSELF receives CarPlay taps.

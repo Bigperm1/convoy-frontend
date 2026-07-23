@@ -379,12 +379,16 @@ export function CarSurface() {
                 <MaterialCommunityIcons
                   key={i}
                   name={laneIcon((lane.active && lane.activeDir) ? lane.activeDir : (lane.dirs[0] || 'straight'))}
-                  size={laneIconSize(s.lanes!.length, navStackW)}
+                  size={laneIconSize(s.lanes!.length, navStackW - LANE_CLEAR_R)}
                   color={lane.active ? '#2DEC86' : '#5A5A5E'}
                 />
               ))}
             </View>
           ) : null}
+          {/* Lane-lift spacer: pushes the lane row up beside the CREW button (top
+              map-button slot) while the ETA + turn banners stay over the two
+              invisible bottom slots. See LANE_LIFT_H. */}
+          <View style={{ height: LANE_LIFT_H }} pointerEvents="none" />
           {/* ETA — just above the maneuver banner. */}
           {metaLine ? (
             <View style={[styles.navEta, { backgroundColor: carHudFloor() }]}>
@@ -525,7 +529,15 @@ export function CarSurface() {
           Incoming audio already AUTO-PLAYS through the car speakers (the app-level
           useLiveWalkieListener), so this is the "who am I hearing" caption, not a
           prompt to tap — and it could not be tappable anyway. */}
-      {talker ? (
+      {(s.commsTx === 'recording' || s.commsTx === 'sending') ? (
+        <View style={styles.statusRow} pointerEvents="none">
+          <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
+            <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
+            <View style={[styles.scoutDot, { backgroundColor: s.commsTx === 'recording' ? '#FF453A' : '#8E8E93' }]} />
+            <Text style={styles.scoutPillText}>{s.commsTx === 'recording' ? 'Transmitting…' : 'Sending…'}</Text>
+          </View>
+        </View>
+      ) : talker ? (
         <View style={styles.statusRow} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
@@ -1067,12 +1079,16 @@ const CAR_TOP_INSET = 58; // clears the CPMapTemplate navigation bar
 // buttons now hold those slots (see CAR_MAP_BUTTON_CONFIG), lifting the real pair
 // clear of the ETA and maneuver banner. CPMapTemplate.h:71-75 caps mapButtons at 4,
 // so 2 real + 2 spacers is the highest they can possibly go.
-// Back to a REAL right inset (2026-07-20): with police + the spacer buttons gone
-// there is exactly ONE map button (the mic) in CarPlay's bottom-trailing slot, and
-// the banner stack must clear it — Jeff's head-unit report: "the banners cover the
-// car / are not the same". 56 covers the button column incl. iOS 26's own glass
-// chrome (wider than the bare glyph the 18.6 sim draws).
-const CAR_RIGHT_INSET = 56;
+// Jeff's 2026-07-23 spec: the turn banner and ETA banner run to the right EDGE,
+// occupying the region of the two invisible bottom map-button slots; only the lane
+// row keeps clearance (it sits beside the CREW button, the top slot).
+const CAR_RIGHT_INSET = 8;
+// Lifts the lane row from the compass slot up to the CREW slot: slot pitch is
+// ~35pt (measured), the flex gap adds 8, so a 23pt spacer moves the lane centre
+// from ~137pt (slot 3) to ~106pt (slot 4 = crew) on the 240pt sim canvas.
+const LANE_LIFT_H = 23;
+// Lane row's right margin so it clears the button column (col ≈48pt incl. air).
+const LANE_CLEAR_R = 48;
 
 // ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────
 // Measured off a real 800x480 CarPlay capture (= 400x240pt @2x) by decoding the
@@ -1224,5 +1240,5 @@ const styles = StyleSheet.create({
   // (the ETA and maneuver banner clear them vertically), so it carries the offset
   // instead of insetting the whole stack. Jeff's explicit requirement: the lane
   // guidance banner must never touch the buttons.
-  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: LANE_ROW_H, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden' },
+  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: LANE_ROW_H, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden', marginRight: LANE_CLEAR_R },
 });

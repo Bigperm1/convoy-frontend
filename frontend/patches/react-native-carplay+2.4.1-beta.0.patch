@@ -645,10 +645,35 @@ index b9891d2..319f5fe 100644
  
  export interface BarButtonText extends BarButtonBase {
 diff --git a/node_modules/react-native-carplay/src/templates/MapTemplate.ts b/node_modules/react-native-carplay/src/templates/MapTemplate.ts
-index 13a66ff..b7d786e 100644
+index 13a66ff..abea46e 100644
 --- a/node_modules/react-native-carplay/src/templates/MapTemplate.ts
 +++ b/node_modules/react-native-carplay/src/templates/MapTemplate.ts
-@@ -132,6 +132,10 @@ export class MapTemplate extends Template<MapTemplateConfig> {
+@@ -87,6 +87,9 @@ export interface MapTemplateConfig extends TemplateConfig {
+   onPanWithDirection?(e: { direction: string }): void;
+   onPanBeganWithDirection?(e: { direction: string }): void;
+   onPanEndedWithDirection?(e: { direction: string }): void;
++  onDidBeginZoomGesture?(e: { templateId: string }): void;
++  onDidUpdateZoomGesture?(e: { center: { x: number; y: number }; scale: number; velocity: number }): void;
++  onDidEndZoomGesture?(e: { velocity: number }): void;
+   onSelectedPreviewForTrip?(e: { tripId: string; routeIndex: number }): void;
+   onDidCancelNavigation?(): void;
+   onStartedTrip?(e: { tripId: string; routeIndex: number }): void;
+@@ -115,6 +118,14 @@ export class MapTemplate extends Template<MapTemplateConfig> {
+       panWithDirection: 'onPanWithDirection',
+       panBeganWithDirection: 'onPanBeganWithDirection',
+       panEndedWithDirection: 'onPanEndedWithDirection',
++      // Convoy fix (2026-07-23): PINCH-TO-ZOOM did nothing on CarPlay. RNCarPlay.m
++      // emits these iOS-26 CPMapTemplate zoom-gesture events, but they were never in
++      // this eventMap, so the base Template registered NO listener and the
++      // onDidBegin/Update/EndZoomGesture config callbacks were dead wiring. Pure JS
++      // (bundled from src/), so OTA-able.
++      didBeginZoomGesture: 'onDidBeginZoomGesture',
++      didUpdateZoomGestureWithCenter: 'onDidUpdateZoomGesture',
++      didEndZoomGestureWithVelocity: 'onDidEndZoomGesture',
+       selectedPreviewForTrip: 'onSelectedPreviewForTrip',
+       didCancelNavigation: 'onDidCancelNavigation',
+       startedTrip: 'onStartedTrip',
+@@ -132,6 +143,10 @@ export class MapTemplate extends Template<MapTemplateConfig> {
        android: ({ error }: { error?: string } = {}) => {
          error && console.error(error);
        },

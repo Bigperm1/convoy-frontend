@@ -40,6 +40,10 @@ export type CarState = {
   // Own outbound crew-comms transmission from the CAR (carComms.ts): drives the
   // red "Transmitting…" indicator on the car surface.
   commsTx?: "idle" | "recording" | "sending";
+  // Crew-overview confirmation: shown as a transient pill so a dead CREW tap is
+  // distinguishable from a dead camera (set by CarMapView when the fit runs).
+  crewViewUntil?: number;
+  crewViewCount?: number;
   // Raw numeric mirrors of the formatted strings above. Android Auto's
   // NavigationTemplate needs real meters/seconds (it formats them itself), not
   // the pre-formatted phone-banner strings. Populated alongside the strings.

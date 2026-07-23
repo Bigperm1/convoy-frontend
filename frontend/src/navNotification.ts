@@ -614,7 +614,7 @@ export async function stopNavBanner(): Promise<void> {
     await AsyncStorage.removeItem(CAR_NAV_KEY);
   } catch {}
   // Clear the car map's route + TBT strip so the ribbon and maneuver disappear on nav end.
-  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0 });
+  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0, lanes: undefined });
   // Release our hold; the shared task keeps running if CarPlay still needs it.
   await releaseBgLocation("nav");
   try { await Notifications.dismissNotificationAsync(NAV_NOTIF_ID); } catch {}

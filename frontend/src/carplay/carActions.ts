@@ -31,7 +31,7 @@ import { startNavBanner, stopNavBanner, CAR_NAV_KEY } from '../navNotification';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
-import { CAR_ICON_MIC, CAR_ICON_BLANK, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED } from './carButtonIcons';
+import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED } from './carButtonIcons';
 import { toggleCarComms } from './carComms';
 import { ensureSavedPlacesLoaded, getSavedPlaces, type SavedPlace } from '../savedPlaces';
 
@@ -373,27 +373,15 @@ export const CAR_BAR_BUTTON_CONFIG = {
 // in would mask our art. See carButtonIcons.ts for why a data URI is bridge-free
 // and OTA-able.
 export const CAR_MAP_BUTTON_CONFIG = {
-  // Jeff's 2026-07-23 spec: right side = CREW (top) + COMPASS, with the two BOTTOM
-  // slots held by invisible spacers so the real pair sits high; our turn banner and
-  // ETA banner occupy the region of the two spacer slots. The column is
-  // bottom-anchored and stacks upward with the LAST entries at the bottom
-  // (CPMapTemplate.h:71-75), so array order = [crew, compass, spacer, spacer].
-  // KNOWN UNKNOWN: whether iOS 26 draws its glass circle behind a transparent
-  // spacer. The earlier "spacers visible" report came from a rolled-back bundle
-  // (the old 4 REAL buttons), so it proved nothing — needs one head-unit photo.
-  // The Scout mic map button is GONE per the same spec (Scout stays on the phone).
+  // SPACERS REMOVED FOR GOOD (2026-07-23, second head-unit confirmation): iOS 26
+  // draws its glass circle behind ANY CPMapButton — transparent image AND
+  // hidden:true both failed on the real unit (hidden was also a no-op on the 18.6
+  // sim). The 4-slot trick is dead on iOS 26. Crew + compass now live in the two
+  // bottom-trailing slots CarPlay gives a 2-button array, and the banner stack sits
+  // BESIDE the column (CAR_RIGHT_INSET) instead of underneath phantom circles.
   mapButtons: [
     { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW },
     { id: 'car-compass', image: CAR_ICON_COMPASS, focusedImage: CAR_ICON_COMPASS },
-    // hidden:true ADDED 2026-07-23 after Jeff's head-unit photos: iOS 26 draws its
-    // glass circle even for a fully transparent image, so the spacers showed as two
-    // empty buttons. `hidden` was a no-op on the iOS 18.6 SIM (tested 7/20 — all
-    // four glyphs drew), but 26's renderer is new (glass button configurations) and
-    // Apple documents CPMapButton.hidden as hiding the button — so ship it and let
-    // the next head-unit photo decide. If circles STILL show on 26, the 4-slot
-    // spacer trick is dead there and the layout needs restructuring instead.
-    { id: 'car-spacer-1', image: CAR_ICON_BLANK, focusedImage: CAR_ICON_BLANK, disabled: true, hidden: true },
-    { id: 'car-spacer-2', image: CAR_ICON_BLANK, focusedImage: CAR_ICON_BLANK, disabled: true, hidden: true },
   ],
 };
 

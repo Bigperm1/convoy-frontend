@@ -29,7 +29,7 @@ import Mapbox, {
   VectorSource,
   Models,
 } from '@rnmapbox/maps';
-import { useCarStore, getCarState, subscribeCarGesture, type CarGesture } from './carStore';
+import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { usePowerMode } from '../powerMode';
 import { getVehicleModelUrl, getVehicleModelKey } from '../vehicleAssets';
@@ -428,24 +428,35 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
               if (typeof pr?.lat === 'number' && typeof pr?.lng === 'number') pts.push([pr.lng, pr.lat]);
             }
             if (pts.length === 0) break;
-            // Engage the hold IMMEDIATELY (Jeff's head-unit report: the fit "did
-            // not act the same as the phone"). The render-time gate above only
-            // recomputes on the next store tick (~1s), so without this line the
-            // chase cam kept pushing frames over the fitBounds animation and the
-            // overview never landed. 15s ≈ the phone's 20s pan-hold feel.
+            // Engage the hold IMMEDIATELY — the render-time gate above only
+            // recomputes on the next store tick (~1s); without this the chase cam
+            // kept pushing frames over the overview and it never landed.
             camHoldUntilRef.current = Date.now() + 15000;
             lockReadyRef.current = false;
-            if (pts.length === 1) {
-              cameraRef.current?.setCamera({ centerCoordinate: pts[0], zoomLevel: 12.5, pitch: 0, heading: 0, animationDuration: 550, animationMode: 'easeTo' });
-              break;
-            }
+            // Visible confirmation (also a field diagnostic: pill without zoom =
+            // camera problem; no pill = the tap never arrived).
+            setCarState({ crewViewUntil: Date.now() + 3000, crewViewCount: Math.max(0, pts.length - 1) });
+            // EXPLICIT camera computation instead of Camera.fitBounds: fitBounds on
+            // the secondary CarPlay window silently did nothing on the head unit
+            // (2026-07-23 drive), while setCamera is the exact call the chase cam
+            // proves every frame. Zoom from the bounds span vs the measured
+            // viewport (512px Mapbox world tiles), clamped 3..15.
             let minLng = pts[0][0], maxLng = pts[0][0], minLat = pts[0][1], maxLat = pts[0][1];
             for (const [ln2, la2] of pts) {
               if (ln2 < minLng) minLng = ln2; if (ln2 > maxLng) maxLng = ln2;
               if (la2 < minLat) minLat = la2; if (la2 > maxLat) maxLat = la2;
             }
-            try { cameraRef.current?.setCamera({ pitch: 0, heading: 0, animationDuration: 250, animationMode: 'easeTo' }); } catch {}
-            cameraRef.current?.fitBounds([maxLng, maxLat], [minLng, minLat], [70, 60, 90, 60], 600);
+            const cLng = (minLng + maxLng) / 2, cLat = (minLat + maxLat) / 2;
+            const lngSpan = Math.max(0.002, maxLng - minLng);
+            const latSpan = Math.max(0.002, maxLat - minLat);
+            const w = mapW > 0 ? mapW : 400, h = mapH > 0 ? mapH : 240;
+            const zx = Math.log2((w * 0.75 * 360) / (512 * lngSpan));
+            const zy = Math.log2((h * 0.65 * 180) / (512 * latSpan));
+            const zoom = Math.max(3, Math.min(15, Math.min(zx, zy)));
+            cameraRef.current?.setCamera({
+              centerCoordinate: [cLng, cLat], zoomLevel: zoom,
+              pitch: 0, heading: 0, animationDuration: 600, animationMode: 'easeTo',
+            });
           } catch {}
           break;
         }

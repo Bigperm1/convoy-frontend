@@ -379,18 +379,11 @@ export function CarSurface() {
                 <MaterialCommunityIcons
                   key={i}
                   name={laneIcon((lane.active && lane.activeDir) ? lane.activeDir : (lane.dirs[0] || 'straight'))}
-                  size={laneIconSize(s.lanes!.length, navStackW - LANE_CLEAR_R)}
+                  size={laneIconSize(s.lanes!.length, navStackW)}
                   color={lane.active ? '#2DEC86' : '#5A5A5E'}
                 />
               ))}
             </View>
-          ) : null}
-          {/* Lane-lift spacer: pushes the lane row up beside the CREW button (top
-              map-button slot) while the ETA + turn banners stay over the two
-              invisible bottom slots. Rendered ONLY with the lane row — on lane-less
-              stretches it was 23pt of dead air above the ETA (Jeff's photo 3). */}
-          {!!s.lanes && s.lanes.length > 0 ? (
-            <View style={{ height: LANE_LIFT_H }} pointerEvents="none" />
           ) : null}
           {/* ETA — just above the maneuver banner. */}
           {metaLine ? (
@@ -532,7 +525,15 @@ export function CarSurface() {
           Incoming audio already AUTO-PLAYS through the car speakers (the app-level
           useLiveWalkieListener), so this is the "who am I hearing" caption, not a
           prompt to tap — and it could not be tappable anyway. */}
-      {(s.commsTx === 'recording' || s.commsTx === 'sending') ? (
+      {(Date.now() < (s.crewViewUntil || 0) && s.commsTx !== 'recording') ? (
+        <View style={styles.statusRow} pointerEvents="none">
+          <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
+            <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
+            <MaterialCommunityIcons name="account-group" size={16} color="#2DEC86" />
+            <Text style={styles.scoutPillText}>Crew view · {s.crewViewCount ?? 0}</Text>
+          </View>
+        </View>
+      ) : (s.commsTx === 'recording' || s.commsTx === 'sending') ? (
         <View style={styles.statusRow} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
@@ -682,21 +683,32 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
 
   // ---- mirror live state into the shared store (read by CarSurface) ----
   useEffect(() => {
+    // When the phone's OWN tbt is idle, OMIT the nav fields entirely instead of
+    // writing '' — a route started FROM CARPLAY SEARCH is driven by the COLD
+    // banner engine (navNotification), and this mirror ticking '' over its
+    // eta/distanceRemaining every second was why the ETA row showed nothing on
+    // car-initiated routes (Jeff's 7/23 drive). navigating flips true from the
+    // cold engine's own write; the mirror only overwrites once tbt goes active
+    // (the adopted phone route), whose richer numbers then win legitimately.
     setCarState({
-      navigating: tbt.active,
       speedMs: typeof user?.speed === 'number' ? user.speed : 0,
-      instruction: tbt.active ? upcomingInstruction(route, tbt.stepIndex) : '',
-      distanceToTurn: tbt.active ? fmtDistanceM(tbt.distanceToManeuverM) : '',
-      eta: tbt.active ? fmtEtaSec(tbt.etaSeconds) : '',
-      distanceRemaining: tbt.active ? fmtDistanceM(tbt.distanceRemainingM) : '',
       destinationLabel: destination?.label || '',
+      ...(tbt.active ? {
+        navigating: true,
+        instruction: upcomingInstruction(route, tbt.stepIndex),
+        distanceToTurn: fmtDistanceM(tbt.distanceToManeuverM),
+        eta: fmtEtaSec(tbt.etaSeconds),
+        distanceRemaining: fmtDistanceM(tbt.distanceRemainingM),
+      } : {}),
       // NOTE: peers + hazards are NOT written here anymore — they go through the
       // gated setCarPeers/setCarHazards writes in the effect below, so the cold
       // carDataService and this warm mirror can share ownership without clobbering.
       // Raw numerics for the Android Auto NavigationTemplate (AndroidAutoRoot).
-      distanceToTurnM: tbt.active ? tbt.distanceToManeuverM : 0,
-      distanceRemainingM: tbt.active ? tbt.distanceRemainingM : 0,
-      etaSeconds: tbt.active ? tbt.etaSeconds : 0,
+      ...(tbt.active ? {
+        distanceToTurnM: tbt.distanceToManeuverM,
+        distanceRemainingM: tbt.distanceRemainingM,
+        etaSeconds: tbt.etaSeconds,
+      } : {}),
       // Route polyline (preview or nav) for the car map ribbon. NOTE: position
       // (selfLat/selfLng/heading) is mirrored in a SEPARATE additive effect below —
       // it must NEVER be written here, because this metadata effect re-runs on ticks
@@ -1090,16 +1102,11 @@ const CAR_TOP_INSET = 58; // clears the CPMapTemplate navigation bar
 // buttons now hold those slots (see CAR_MAP_BUTTON_CONFIG), lifting the real pair
 // clear of the ETA and maneuver banner. CPMapTemplate.h:71-75 caps mapButtons at 4,
 // so 2 real + 2 spacers is the highest they can possibly go.
-// Jeff's 2026-07-23 spec: the turn banner and ETA banner run to the right EDGE,
-// occupying the region of the two invisible bottom map-button slots; only the lane
-// row keeps clearance (it sits beside the CREW button, the top slot).
-const CAR_RIGHT_INSET = 8;
-// Lifts the lane row from the compass slot up to the CREW slot: slot pitch is
-// ~35pt (measured), the flex gap adds 8, so a 23pt spacer moves the lane centre
-// from ~137pt (slot 3) to ~106pt (slot 4 = crew) on the 240pt sim canvas.
-const LANE_LIFT_H = 23;
-// Lane row's right margin so it clears the button column (col ≈48pt incl. air).
-const LANE_CLEAR_R = 48;
+// Spacer buttons are DEAD on iOS 26 (glass circles draw behind transparent AND
+// hidden buttons — two head-unit confirmations). Crew + compass sit in the bottom
+// two trailing slots and the whole banner stack sits BESIDE that column: 56 clears
+// the iOS 26 glass button width.
+const CAR_RIGHT_INSET = 56;
 
 // ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────
 // Measured off a real 800x480 CarPlay capture (= 400x240pt @2x) by decoding the
@@ -1129,7 +1136,7 @@ const CAR_MAP_BUTTON_COL_W = 42;
 // Crew/alerts/build pill height — deliberately small; it is ambient info, not a control.
 const CREW_PILL_H = 22;
 // True top-centre for the pill (iOS 26 has no full-width nav bar to clear).
-const CAR_PILL_TOP = 12;
+const CAR_PILL_TOP = 4;
 const LANE_ROW_H = 30;
 const ETA_ROW_H = 22;
 const TURN_ROW_H = 42;
@@ -1262,5 +1269,5 @@ const styles = StyleSheet.create({
   // (the ETA and maneuver banner clear them vertically), so it carries the offset
   // instead of insetting the whole stack. Jeff's explicit requirement: the lane
   // guidance banner must never touch the buttons.
-  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: LANE_ROW_H, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden', marginRight: LANE_CLEAR_R },
+  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: LANE_ROW_H, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden' },
 });

@@ -3241,6 +3241,13 @@ export default function MapScreen() {
               // Actual native build number (v66, v67, …) — reads the installed
               // binary's build, so it tracks whatever build the user is on without
               // a code change. Falls back to the app.json value if unavailable.
+              // Runtime version on the pill (Jeff, 2026-07-23): the fastest way to
+              // see which testers are orphaned on an old runtime (an OTA only
+              // reaches exact runtime matches). Read from expo-updates (the value
+              // the update system actually keys on), app.json as fallback.
+              let rtv = '';
+              try { rtv = require('expo-updates').runtimeVersion || ''; } catch {}
+              if (!rtv) rtv = (Constants.expoConfig as any)?.runtimeVersion || '';
               const buildNo = Constants.nativeBuildVersion
                 || Constants.expoConfig?.ios?.buildNumber
                 || String((Constants.expoConfig as any)?.android?.versionCode ?? "");
@@ -3254,7 +3261,7 @@ export default function MapScreen() {
                   hitSlop={8}
                 >
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} Crew · {visibleHazards.length} alerts · v{buildNo}</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} Crew · {visibleHazards.length} alerts · v{buildNo}{rtv ? ` · ${rtv}` : ''}</Text>
                 </TouchableOpacity>
               );
             })()}

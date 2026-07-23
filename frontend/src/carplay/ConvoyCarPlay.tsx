@@ -267,6 +267,9 @@ export function CarSurface() {
   // tracks every build without a manual edit.
   const crewCount = (s.peers || []).length;
   const alertCount = (s.hazards || []).length;
+  let carRtv = '';
+  try { carRtv = require('expo-updates').runtimeVersion || ''; } catch {}
+  if (!carRtv) carRtv = (Constants.expoConfig as any)?.runtimeVersion || '';
   const carBuildNo = Constants.nativeBuildVersion
     || Constants.expoConfig?.ios?.buildNumber
     || String((Constants.expoConfig as any)?.android?.versionCode ?? '');
@@ -513,7 +516,7 @@ export function CarSurface() {
         <View style={[styles.crewPill, { backgroundColor: carHudFloor() }]}>
           <GlassFill tintColor={undefined} style={{ borderRadius: 9, overflow: 'hidden' }} />
           <Text style={styles.crewPillText} numberOfLines={1}>
-            {crewCount} Crew · {alertCount} alerts · v{carBuildNo}
+            {crewCount} Crew · {alertCount} alerts · v{carBuildNo}{carRtv ? ` · ${carRtv}` : ''}
           </Text>
         </View>
       </View>

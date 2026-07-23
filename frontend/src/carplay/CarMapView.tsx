@@ -122,7 +122,10 @@ const CAR_LOWER_PAD_FRAC = 0.52;
 // speed-limit chip; 0.08 centres it in the open gap BETWEEN the bottom-left HUD
 // (speed/limit) and the bottom-right nav banner — still biased just enough left
 // that it never collides with the banner. OTA-tunable.
-const CAR_LEFT_PAD_FRAC = 0.08;
+// 0.08 -> 0.14 (2026-07-23): Jeff's drive photo showed the ETA pill straddling the
+// car. Together with the narrower nav stack this seats the car in clear air between
+// the speed cluster and the banners. OTA-tunable.
+const CAR_LEFT_PAD_FRAC = 0.14;
 // Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';

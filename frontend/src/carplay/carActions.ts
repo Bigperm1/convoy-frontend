@@ -385,8 +385,15 @@ export const CAR_MAP_BUTTON_CONFIG = {
   mapButtons: [
     { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW },
     { id: 'car-compass', image: CAR_ICON_COMPASS, focusedImage: CAR_ICON_COMPASS },
-    { id: 'car-spacer-1', image: CAR_ICON_BLANK, focusedImage: CAR_ICON_BLANK, disabled: true },
-    { id: 'car-spacer-2', image: CAR_ICON_BLANK, focusedImage: CAR_ICON_BLANK, disabled: true },
+    // hidden:true ADDED 2026-07-23 after Jeff's head-unit photos: iOS 26 draws its
+    // glass circle even for a fully transparent image, so the spacers showed as two
+    // empty buttons. `hidden` was a no-op on the iOS 18.6 SIM (tested 7/20 — all
+    // four glyphs drew), but 26's renderer is new (glass button configurations) and
+    // Apple documents CPMapButton.hidden as hiding the button — so ship it and let
+    // the next head-unit photo decide. If circles STILL show on 26, the 4-slot
+    // spacer trick is dead there and the layout needs restructuring instead.
+    { id: 'car-spacer-1', image: CAR_ICON_BLANK, focusedImage: CAR_ICON_BLANK, disabled: true, hidden: true },
+    { id: 'car-spacer-2', image: CAR_ICON_BLANK, focusedImage: CAR_ICON_BLANK, disabled: true, hidden: true },
   ],
 };
 

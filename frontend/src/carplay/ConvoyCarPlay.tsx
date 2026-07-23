@@ -387,8 +387,11 @@ export function CarSurface() {
           ) : null}
           {/* Lane-lift spacer: pushes the lane row up beside the CREW button (top
               map-button slot) while the ETA + turn banners stay over the two
-              invisible bottom slots. See LANE_LIFT_H. */}
-          <View style={{ height: LANE_LIFT_H }} pointerEvents="none" />
+              invisible bottom slots. Rendered ONLY with the lane row — on lane-less
+              stretches it was 23pt of dead air above the ETA (Jeff's photo 3). */}
+          {!!s.lanes && s.lanes.length > 0 ? (
+            <View style={{ height: LANE_LIFT_H }} pointerEvents="none" />
+          ) : null}
           {/* ETA — just above the maneuver banner. */}
           {metaLine ? (
             <View style={[styles.navEta, { backgroundColor: carHudFloor() }]}>
@@ -1117,6 +1120,8 @@ const CAR_MAP_BUTTON_COL_W = 42;
 // 30 and the two text lines ~34, both under 42.
 // Crew/alerts/build pill height — deliberately small; it is ambient info, not a control.
 const CREW_PILL_H = 22;
+// True top-centre for the pill (iOS 26 has no full-width nav bar to clear).
+const CAR_PILL_TOP = 12;
 const LANE_ROW_H = 30;
 const ETA_ROW_H = 22;
 const TURN_ROW_H = 42;
@@ -1129,7 +1134,10 @@ const CAR_LEFT_INSET = 184;
 // head unit: 184 + 210 + 76 overflows a ~431pt CarPlay canvas, which is exactly
 // how the maneuver banner ended up underneath the speedo in the sim. Clamped so it
 // stays readable on small screens and does not sprawl on ultra-wide ones.
-const NAV_STACK_MAX_W = 280;
+// 280 -> 232 (2026-07-23): Jeff's drive photos showed long empty runs after the
+// banner text and the ETA pill straddling the car. Narrower stack = content-sized
+// banners, right-anchored over the (hidden) bottom button slots.
+const NAV_STACK_MAX_W = 232;
 // Absolute floor — readability past this point is already lost, and going lower
 // would be worse than a narrow banner. Deliberately NOT a "preferred" width: see
 // the clamp-downward comment at the navStackW computation.
@@ -1196,8 +1204,14 @@ const styles = StyleSheet.create({
   // Two CENTRED rows in the top band. Full-width absolute rows with centred content
   // keep both pills optically centred at any head-unit width, instead of pinning them
   // to a hand-measured left offset that only holds on one canvas.
-  topCenterRow: { position: 'absolute', top: CAR_TOP_INSET, left: 0, right: 0, alignItems: 'center' },
-  statusRow: { position: 'absolute', top: CAR_TOP_INSET + CREW_PILL_H + NAV_GAP, left: 0, right: 0, alignItems: 'center' },
+  // TRUE top-centre (2026-07-23, Jeff's head-unit photos): on iOS 26 the nav "bar"
+  // is floating corner buttons (mic top-left, Search/End top-right) — the top
+  // CENTRE of the canvas is open map, so the pill no longer needs to clear a
+  // full-width bar. The status pill (Transmitting…/X is talking…/Scout) docks
+  // directly beneath it. (On the iOS 18.6 sim the old full-width bar overlaps
+  // this spot — the head unit is the target, the sim just looks off there.)
+  topCenterRow: { position: 'absolute', top: CAR_PILL_TOP, left: 0, right: 0, alignItems: 'center' },
+  statusRow: { position: 'absolute', top: CAR_PILL_TOP + CREW_PILL_H + NAV_GAP, left: 0, right: 0, alignItems: 'center' },
   crewPill: { flexDirection: 'row', alignItems: 'center', height: CREW_PILL_H, paddingHorizontal: 10, borderRadius: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   crewPillText: { color: '#C7CCD1', fontSize: 11, fontWeight: '700' },
   scoutPill: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },

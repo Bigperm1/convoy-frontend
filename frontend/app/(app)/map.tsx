@@ -3148,6 +3148,15 @@ export default function MapScreen() {
           try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
           setDestination({ lat: c.lat, lng: c.lng, label: "Dropped pin" });
         }}
+        // TAP A BASEMAP POI (restaurant, gas, park…) → the full destination
+        // pipeline with the place's real name — same flow as search and pin-drop
+        // (routes fetch + Drive drawer with Start; nothing auto-starts). Ignored
+        // mid-guidance, same rule as pin-drop.
+        onPoiPress={(poi) => {
+          if (navMode === "turn-by-turn") return;
+          try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+          setDestination({ lat: poi.lat, lng: poi.lng, label: poi.name });
+        }}
         onMapLongPress={handleMapLongPress}
         onHazardPress={(h: any) => setSelected(h)}
         onHazardLongPress={handleHazardLongPress}

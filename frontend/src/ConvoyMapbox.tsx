@@ -45,6 +45,7 @@ import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient, type CongestionLevel } from "./mapboxDirections";
 import { getCarState } from "./carplay/carStore";
 import { getLastLocation, setLastLocation, getSettings, canonicalClass } from "./settings";
+import { haversineMeters } from "./nav";
 
 // 1×1 fully transparent PNG — a REAL bundled asset, not a data-URI (@rnmapbox's
 // Images may not load a data-URI at runtime, which would let the default dot fall
@@ -158,6 +159,10 @@ interface ConvoyMapboxProps {
   // caller can implement gestures like double-tap-to-drop-a-pin in SCREEN space
   // (zoom-independent). undefined if unavailable. "Just tapped" callers ignore it.
   onMapPress?: (coord?: { lat: number; lng: number; sx?: number; sy?: number }) => void;
+  // Fired when a single tap lands on a NAMED basemap POI (restaurant, gas station,
+  // park…): the nearest poi_label feature within ~one icon's radius of the tap.
+  // map.tsx feeds it straight into setDestination → the full route pipeline.
+  onPoiPress?: (poi: { name: string; lat: number; lng: number; kind?: string }) => void;
   onMapLongPress?: (c: { lat: number; lng: number }) => void;
   onHazardPress?: (h: Hazard) => void;
   onHazardLongPress?: (h: Hazard) => void;
@@ -1473,7 +1478,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     mapMode = "satellite", leaderUserId, show3dBuildings = true,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
     routeColor = DEFAULT_ROUTE_COLOR,
-    distanceToManeuverM, onMapPress, onMapLongPress, onPeerPress, onMapReady,
+    distanceToManeuverM, onMapPress, onPoiPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
     offerPill, onOfferAccept, onOfferDismiss,
     hazards, speedCameras, roadEvents, places, showPlacePins = true, destWeather,
@@ -2298,9 +2303,44 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         onPress={(f: any) => {
           const c = f?.geometry?.coordinates;
           const p = f?.properties;
-          onMapPress?.(Array.isArray(c) && typeof c[0] === "number"
+          const coord = Array.isArray(c) && typeof c[0] === "number"
             ? { lat: c[1], lng: c[0], sx: p?.screenPointX, sy: p?.screenPointY }
-            : undefined);
+            : undefined;
+          onMapPress?.(coord);
+          // POI tap-to-route: find the nearest NAMED poi_label point within roughly
+          // one icon's radius of the finger. Async and additive — the pin-drop
+          // double-tap counter above is untouched. The radius is measured in SCREEN
+          // space (24pt converted to metres via getCoordinateFromView) so it works
+          // identically at any zoom/pitch, same lesson as the pin-drop's sx/sy gate.
+          if (coord && onPoiPress && typeof coord.sx === "number" && typeof coord.sy === "number") {
+            void (async () => {
+              try {
+                const m = mapRef.current;
+                if (!m?.querySourceFeatures || !m?.getCoordinateFromView) return;
+                const [e1, e2] = await Promise.all([
+                  m.getCoordinateFromView([coord.sx! - 24, coord.sy!]),
+                  m.getCoordinateFromView([coord.sx! + 24, coord.sy!]),
+                ]);
+                const radiusM = Math.max(12, haversineMeters(
+                  { lat: e1[1], lng: e1[0] }, { lat: e2[1], lng: e2[0] }) / 2);
+                const fc = await m.querySourceFeatures(ROAD_SRC_ID, [], ["poi_label"]);
+                let best: { name: string; lat: number; lng: number; kind?: string } | null = null;
+                let bestD = radiusM;
+                for (const ft of fc?.features ?? []) {
+                  const g = ft?.geometry;
+                  if (g?.type !== "Point") continue;
+                  const name = ft?.properties?.name;
+                  if (!name || typeof name !== "string") continue;
+                  const d = haversineMeters({ lat: g.coordinates[1], lng: g.coordinates[0] }, coord);
+                  if (d < bestD) {
+                    bestD = d;
+                    best = { name, lat: g.coordinates[1], lng: g.coordinates[0], kind: ft?.properties?.class || ft?.properties?.maki };
+                  }
+                }
+                if (best) onPoiPress(best);
+              } catch { /* mid-style-reload queries can throw; a missed POI tap is fine */ }
+            })();
+          }
         }}
         onLongPress={(f: any) => {
           const c = f?.geometry?.coordinates;
@@ -2350,6 +2390,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               streets-v8 tiles to load so the auto-boat poll can
               querySourceFeatures them. Zero visual footprint. */}
           <Mapbox.FillLayer id="convoy-water-query" sourceLayerID="water" style={{ fillOpacity: 0 } as any} />
+          {/* Invisible POI layer: loads the poi_label points of the SAME shared
+              streets-v8 tiles so tap-to-route can querySourceFeatures them —
+              identical pattern to the road/water query layers above. Standard's own
+              POI layers live behind the style import and are not queryable, which is
+              why we query our own copy of the data instead. */}
+          <Mapbox.CircleLayer id="convoy-poi-query" sourceLayerID="poi_label" style={{ circleOpacity: 0, circleRadius: 1 } as any} />
         </Mapbox.VectorSource>
 
         {/* Register the self-car 3D model once for the map. Referenced by id

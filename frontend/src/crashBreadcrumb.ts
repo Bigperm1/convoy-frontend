@@ -17,7 +17,11 @@ import { Platform } from "react-native";
 const QUEUE_KEY = "convoy.pendingCrashReports.v1";
 const HARVEST_KEY = "convoy.crashLogHarvestedAt.v1";
 const MAX_QUEUE = 5;
-const DELIVER_DELAY_MS = 8000;
+// 8000 -> 3000 (2026-07-23): a crash-looping device (Android login loop) dies
+// before an 8s delayed delivery ever runs — which is why crash_reports had ZERO
+// android rows across an entire week of Android crashes. 3s still keeps delivery
+// out of the boot-critical window.
+const DELIVER_DELAY_MS = 3000;
 
 type Report = {
   message: string;
@@ -95,13 +99,24 @@ export function installCrashBreadcrumb() {
       }
       try {
         if (isFatal) {
-          void queue([{
+          const report: Report = {
             message: msg.slice(0, 2000),
             stack: String(error?.stack ?? "").slice(0, 12000),
             is_fatal: true,
             late: false,
             ...baseMeta(),
-          }]);
+          };
+          void queue([report]);
+          // ALSO deliver right now, fire-and-forget: expo-updates' recovery holds
+          // the process a few seconds on iOS, and even on Android the insert often
+          // wins the race against process death. The queued copy stays as backup;
+          // the near-duplicate on success is a price worth paying for visibility
+          // (2026-07-23: an entire week of Android crashes produced ZERO rows
+          // because delivery only ran 8s after a SUCCESSFUL launch).
+          try {
+            const { supabase } = require("./supabase");
+            if (supabase) void supabase.from("crash_reports").insert([{ ...report }]);
+          } catch {}
         }
       } catch {}
       prev?.(error, isFatal);

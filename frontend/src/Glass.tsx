@@ -109,6 +109,23 @@ export default function Glass({
     );
   }
 
+  if (Platform.OS === "android") {
+    // ANDROID: expo-blur's BlurView does NOT blur here (that needs the opt-in
+    // experimental renderer) — it just paints a translucent grey RECT. Stacked on
+    // the container's own dark background it produced a lighter inner box that
+    // didn't follow the rounded shape: the "two shades in every button" report
+    // (Jeff, 2026-07-23, system-wide). One flat translucent layer instead — same
+    // radius, one shade, and cheaper to composite.
+    return (
+      <View
+        style={[base, { backgroundColor: frost ? "rgba(20,20,24,0.88)" : "rgba(26,26,30,0.78)" }, style]}
+        {...rest}
+      >
+        {children}
+      </View>
+    );
+  }
+
   return (
     <View style={[base, style]} {...rest}>
       <BlurView intensity={frost ? Math.min(100, intensity + 40) : intensity} tint={tint} style={StyleSheet.absoluteFill} />
@@ -154,6 +171,18 @@ export function GlassFill({
       <GlassContainer style={fill} pointerEvents="none">
         <GlassView glassEffectStyle="clear" colorScheme="dark" tintColor={tintColor} style={fill} />
       </GlassContainer>
+    );
+  }
+  if (Platform.OS === "android") {
+    // Same Android two-shade fix as the Glass card above: BlurView adds no blur
+    // here, only a mismatched grey rect. One flat wash, following the caller's
+    // radius (carried in `fill`). tintColor callers (e.g. the red Exit) keep
+    // their colour as the wash itself.
+    return (
+      <View
+        style={[fill, { backgroundColor: tintColor ?? "rgba(26,26,30,0.45)" }]}
+        pointerEvents="none"
+      />
     );
   }
   return (

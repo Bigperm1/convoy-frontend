@@ -41,7 +41,7 @@ import { laneIcon } from '../components/TurnByTurnNav';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
 import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
-import CarMapView from './CarMapView';
+import CarMapView, { CAR_LEFT_PAD_FRAC } from './CarMapView';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
@@ -284,8 +284,21 @@ export function CarSurface() {
   // push the stack's left edge back over the speed cluster — the very collision
   // CAR_LEFT_INSET exists to prevent — so on a canvas too narrow to satisfy the
   // floor the stack gets narrow rather than overlapping.
+  // DERIVED car clearance (2026-07-24) — Jeff: "the car marker is still covered by
+  // the banners". The old fixed CAR_LEFT_INSET (184) only cleared the SPEED cluster;
+  // it knew nothing about where the car actually sits, so on a wider head unit the
+  // banner's left edge landed exactly on the car. Mapbox centres the camera in the
+  // inset rect, so the car sits at x = W*(1 - CAR_LEFT_PAD_FRAC)/2 — compute that
+  // here (importing the same constant the camera uses, so the two can never drift)
+  // and keep the stack right of car + half-width + a gap. The stack still also
+  // clears the speed cluster, whichever bound is larger.
+  const carX = surfaceW > 0 ? (surfaceW * (1 - CAR_LEFT_PAD_FRAC)) / 2 : 0;
+  const carClearLeft = carX + CAR_MODEL_HALF_W + NAV_GAP;
   const navStackW = surfaceW > 0
-    ? Math.max(NAV_STACK_ABS_MIN_W, Math.min(NAV_STACK_MAX_W, surfaceW - CAR_LEFT_INSET - CAR_RIGHT_INSET))
+    ? Math.max(
+        NAV_STACK_ABS_MIN_W,
+        Math.min(NAV_STACK_MAX_W, surfaceW - Math.max(CAR_LEFT_INSET, carClearLeft) - CAR_RIGHT_INSET),
+      )
     : NAV_STACK_FALLBACK_W;
   const speedPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -1119,7 +1132,11 @@ const CAR_TOP_INSET = 58; // clears the CPMapTemplate navigation bar
 // LEFT of the crew/compass buttons — not above them. 64 clears the iOS-26 glass
 // button column (~56pt) + air. Both banners may grow TOWARD the car so the
 // eta/time/distance line fits un-cut — but the car itself is untouched.
-const CAR_RIGHT_INSET = 64;
+// 64 -> 48 (2026-07-24). Measured off Jeff's head-unit photo: at 64 the banner's
+// right edge sat ~23pt clear of the glass button circles — a visible dead channel.
+// The circles start ~41pt in from the trailing edge, so 48 leaves ~7pt of air:
+// tight, still non-touching.
+const CAR_RIGHT_INSET = 48;
 const NAV_STACK_BOTTOM = 8;
 
 // ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────
@@ -1151,8 +1168,16 @@ const CAR_MAP_BUTTON_COL_W = 42;
 const CREW_PILL_H = 22;
 // True top-centre for the pill (iOS 26 has no full-width nav bar to clear).
 const CAR_PILL_TOP = 4;
-const LANE_ROW_H = 30;
-const ETA_ROW_H = 22;
+// Jeff (2026-07-24): "make sure the arrow banner is the same exact dimensions as
+// the eta banner". The lane (arrow) row and the ETA row now share ONE height and
+// one style recipe, so they read as siblings; both are CONTENT-sized (alignSelf
+// flex-end) rather than stretched to the stack width, which kills the empty padding
+// he saw beside "1:11pm · 3 min · 777 m" and pulls their left edge away from the car.
+const NAV_PILL_H = 24;
+const LANE_ROW_H = NAV_PILL_H;
+const ETA_ROW_H = NAV_PILL_H;
+// The turn banner keeps its own height — it carries the maneuver box plus two text
+// lines, so it cannot shrink to the pill height without clipping.
 const TURN_ROW_H = 42;
 // Left edge the bottom nav stack must not cross: the speed cluster is speedDock
 // (left 56) + the posted-limit badge, which SLIDES OUT 62pt and is itself 58 wide
@@ -1170,6 +1195,9 @@ const NAV_STACK_MAX_W = 260;
 // Absolute floor — readability past this point is already lost, and going lower
 // would be worse than a narrow banner. Deliberately NOT a "preferred" width: see
 // the clamp-downward comment at the navStackW computation.
+// Half the on-screen width of the 3D car model at chase zoom (measured off head-unit
+// captures). Used to keep the banner stack clear of the car — see carClearLeft.
+const CAR_MODEL_HALF_W = 20;
 const NAV_STACK_ABS_MIN_W = 120;
 // Pre-measurement, first frame only. Was 210, which overlapped the speed cluster
 // on a 400pt canvas for one frame; the floor is the safe guess.
@@ -1180,11 +1208,11 @@ const NAV_STACK_FALLBACK_W = NAV_STACK_ABS_MIN_W;
 // which on a real junction is the one you need. Shrink to fit, floor 16 so it stays
 // legible at a glance; laneRow is paddingHorizontal 10 + gap 10 (see styles.laneRow).
 function laneIconSize(count: number, stackW: number): number {
-  if (count <= 0) return LANE_ROW_H - 8;
+  if (count <= 0) return LANE_ROW_H - 6;
   const avail = stackW - 20 /* padding */ - (count - 1) * 10 /* gaps */;
   // Also capped by the row's own fixed height so a wide head unit can't grow the
   // icons past the band the row occupies.
-  return Math.max(16, Math.min(LANE_ROW_H - 8, Math.floor(avail / count)));
+  return Math.max(14, Math.min(LANE_ROW_H - 6, Math.floor(avail / count)));
 }
 
 const styles = StyleSheet.create({
@@ -1278,10 +1306,10 @@ const styles = StyleSheet.create({
   // width is applied INLINE (navStackW) — it has to be measured, see CAR_LEFT_INSET.
   navStack: { position: 'absolute', right: CAR_RIGHT_INSET, bottom: NAV_STACK_BOTTOM, alignItems: 'stretch', gap: NAV_GAP },
   navBannerRow: { flexDirection: 'row', alignItems: 'center', height: TURN_ROW_H, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
-  navEta: { paddingHorizontal: 8, height: ETA_ROW_H, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  navEta: { alignSelf: 'flex-end', paddingHorizontal: 10, height: ETA_ROW_H, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   // marginRight: the lane row is the ONLY stack element level with the map buttons
   // (the ETA and maneuver banner clear them vertically), so it carries the offset
   // instead of insetting the whole stack. Jeff's explicit requirement: the lane
   // guidance banner must never touch the buttons.
-  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: LANE_ROW_H, paddingHorizontal: 10, borderRadius: 12, overflow: 'hidden' },
+  laneRow: { alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: LANE_ROW_H, paddingHorizontal: 10, borderRadius: 10, overflow: 'hidden' },
 });

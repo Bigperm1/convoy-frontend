@@ -126,7 +126,12 @@ const CAR_LOWER_PAD_FRAC = 0.52;
 // banners I had misplaced; Jeff never asked for it and told me not to touch the car.
 // 0.08 is the long-standing value his layout was designed around. The banners avoid
 // the car (CAR_LEFT_INSET), never the reverse.
-const CAR_LEFT_PAD_FRAC = 0.08;
+// 0.08 -> 0.13 (2026-07-24) — Jeff asked for it this round ("maybe move the car
+// marker over to the left slightly"). Mapbox centres the camera in the inset rect,
+// so the car sits at x = (W - W*frac)/2; +0.05 shifts it ~10pt left on a ~420pt
+// canvas. Together with the now content-sized ETA/lane pills (whose left edge moved
+// right), that clears the car from the banner stack.
+export const CAR_LEFT_PAD_FRAC = 0.13;
 // Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';

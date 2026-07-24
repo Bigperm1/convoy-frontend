@@ -391,7 +391,7 @@ export function CarSurface() {
           {metaLine ? (
             <View style={[styles.navEta, { backgroundColor: carHudFloor() }]}>
               <GlassFill tintColor={undefined} style={{ borderRadius: 10, overflow: 'hidden' }} />
-              <Text style={styles.bottomText} numberOfLines={1}>{metaLine}</Text>
+              <MarqueeText text={metaLine} style={styles.bottomText} />
             </View>
           ) : null}
           {/* Maneuver banner — bottom of the stack. */}
@@ -1104,11 +1104,13 @@ const CAR_TOP_INSET = 58; // clears the CPMapTemplate navigation bar
 // buttons now hold those slots (see CAR_MAP_BUTTON_CONFIG), lifting the real pair
 // clear of the ETA and maneuver banner. CPMapTemplate.h:71-75 caps mapButtons at 4,
 // so 2 real + 2 spacers is the highest they can possibly go.
-// Spacer buttons are DEAD on iOS 26 (glass circles draw behind transparent AND
-// hidden buttons — two head-unit confirmations). Crew + compass sit in the bottom
-// two trailing slots and the whole banner stack sits BESIDE that column: 56 clears
-// the iOS 26 glass button width.
-const CAR_RIGHT_INSET = 56;
+// Jeff's drive feedback 2026-07-23 (round 3): banners at the right EDGE but ABOVE
+// the crew/compass buttons — not beside them at car height. The two buttons own the
+// bottom-right corner (bottom-anchored slots, measured column ≈88pt tall incl.
+// air); the banner stack starts above them, so the car (bottom-centre) and both
+// buttons stay fully visible.
+const CAR_RIGHT_INSET = 8;
+const NAV_STACK_BOTTOM = 96; // clears the 2-button trailing column
 
 // ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────
 // Measured off a real 800x480 CarPlay capture (= 400x240pt @2x) by decoding the
@@ -1151,10 +1153,10 @@ const CAR_LEFT_INSET = 184;
 // head unit: 184 + 210 + 76 overflows a ~431pt CarPlay canvas, which is exactly
 // how the maneuver banner ended up underneath the speedo in the sim. Clamped so it
 // stays readable on small screens and does not sprawl on ultra-wide ones.
-// 280 -> 232 (2026-07-23): Jeff's drive photos showed long empty runs after the
-// banner text and the ETA pill straddling the car. Narrower stack = content-sized
-// banners, right-anchored over the (hidden) bottom button slots.
-const NAV_STACK_MAX_W = 232;
+// 232 -> 176 (2026-07-23 round 3): still "a lot of wasted space" in the banners on
+// the head unit. The direction text SCROLLS (MarqueeText ping-pongs on overflow),
+// so the banner no longer needs width for long street names — compact wins.
+const NAV_STACK_MAX_W = 176;
 // Absolute floor — readability past this point is already lost, and going lower
 // would be worse than a narrow banner. Deliberately NOT a "preferred" width: see
 // the clamp-downward comment at the navStackW computation.
@@ -1264,7 +1266,7 @@ const styles = StyleSheet.create({
   // width is the shared "length" of both banners — OTA-tunable. alignItems:'stretch' makes
   // the ETA + maneuver banner fill it equally so they line up.
   // width is applied INLINE (navStackW) — it has to be measured, see CAR_LEFT_INSET.
-  navStack: { position: 'absolute', right: CAR_RIGHT_INSET, bottom: 8, alignItems: 'stretch', gap: NAV_GAP },
+  navStack: { position: 'absolute', right: CAR_RIGHT_INSET, bottom: NAV_STACK_BOTTOM, alignItems: 'stretch', gap: NAV_GAP },
   navBannerRow: { flexDirection: 'row', alignItems: 'center', height: TURN_ROW_H, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   navEta: { paddingHorizontal: 8, height: ETA_ROW_H, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   // marginRight: the lane row is the ONLY stack element level with the map buttons

@@ -262,6 +262,41 @@ export async function endCarNav(): Promise<void> {
 
 // ── the CarPlay Search template (pushed from the map's nav-bar button) ──────
 let _searchTemplate: any | null = null;
+// Is the search template currently on top of the CarPlay stack? Tracked via the
+// template's own didAppear/didDisappear so it survives a system-back cancel too.
+// Two jobs: (a) refuse a DOUBLE-PUSH — pushing the same memoised template instance
+// that is already on the interface-controller stack corrupts CarPlay's navigation
+// stack, which is exactly the "keyboard up, nothing touchable, no buttons work"
+// freeze Jeff hit; (b) let the motion watcher know when to auto-dismiss.
+let _searchPresented = false;
+// Auto-dismiss search the moment the car is genuinely MOVING. CarPlay gates the
+// keyboard by drive-state, so a pushed search template while driving is a dead
+// modal that hides the map's own buttons — the driver is trapped and the HUD
+// looks frozen (Jeff, 2026-07-24: "when i stopped the keyboard popped up and
+// nothing was touchable ... none of the carplay buttons were working"). Popping
+// to the map root returns every button to life. You search parked; you drive on
+// the map. 2.5 m/s ≈ 9 km/h clears creep/GPS-jitter; require it sustained one tick
+// so a single stationary blip can't yank a parked search away.
+const _SEARCH_POP_SPEED_MS = 2.5;
+let _searchMotionArmed = false;
+let _movingTicks = 0;
+function armSearchAutoDismiss(): void {
+  if (_searchMotionArmed) return;
+  _searchMotionArmed = true;
+  subscribeCarState((st) => {
+    if (!_searchPresented) { _movingTicks = 0; return; }
+    if ((st.speedMs || 0) > _SEARCH_POP_SPEED_MS) {
+      _movingTicks += 1;
+      if (_movingTicks >= 2) {                 // ~2 position ticks of real motion
+        _movingTicks = 0;
+        try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
+        // _searchPresented flips false from the template's didDisappear.
+      }
+    } else {
+      _movingTicks = 0;
+    }
+  });
+}
 // Which list the search template is currently showing. onItemSelect gets only an
 // INDEX, so without this the driver tapping "Home" would open whatever Places result
 // happened to sit at index 0.
@@ -328,6 +363,8 @@ function getSearchTemplate(): any | null {
         }
       },
       onSearchButtonPressed: () => {},
+      onDidAppear: () => { _searchPresented = true; _movingTicks = 0; },
+      onDidDisappear: () => { _searchPresented = false; _movingTicks = 0; },
     });
   } catch {
     _searchTemplate = null;
@@ -408,11 +445,15 @@ export function handleCarBarButton(id: string): void {
   if (id === 'car-police') { void reportPoliceFromCar(); return; }
   if (id === 'car-end') { void endCarNav(); return; }
   if (id === 'car-search') {
+    // Already showing? Do NOT push it again — a second push of the same instance
+    // corrupts the CarPlay stack (the freeze). A stray re-tap is a no-op.
+    if (_searchPresented) return;
     // Prime the cache BEFORE the template appears — the first updatedSearchText can
     // arrive before an await would have resolved.
     void ensureSavedPlacesLoaded().catch(() => {});
     const t = getSearchTemplate();
     if (!t) return;
+    armSearchAutoDismiss();                    // idempotent
     try { getLib()?.CarPlay?.pushTemplate?.(t, true); } catch {}
   }
 }

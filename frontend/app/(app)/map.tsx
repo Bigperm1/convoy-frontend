@@ -1601,6 +1601,27 @@ export default function MapScreen() {
     setNavMode("preview");
   };
 
+  // END pressed on the HEAD UNIT — a FULL stop, not the phone's "drop to preview".
+  //
+  // THE GHOST-DESTINATION BUG (Jeff, 2026-07-24: "carplay had a gps location already
+  // programmed in ... I could only get rid of it by plotting a destination from the
+  // phone, but it came back when the phone route ended"):
+  // endNav() deliberately KEEPS `destination` so the phone can show its preview
+  // drawer and let you restart the same trip. But `activeRoute` therefore survives,
+  // and the CarPlay mirror writes `routePolyline: route?.polyline` on EVERY tick
+  // (preview is mirrored on purpose, for the route fan-out). So on the car the
+  // ribbon reappeared the instant nav ended — and CarPlay has no preview drawer and
+  // no clear button, so there was no way to dismiss it from the driver's seat:
+  // pressing End cleared the car store and the next mirror tick put it straight back.
+  // The car has no "preview" concept, so End from the car clears the destination and
+  // the selected route as well — the same trio the phone's own Clear button uses.
+  const endNavFromCar = useCallback(() => {
+    endNav();
+    setDestination(null);
+    setRoute(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ---- CarPlay / Android Auto mirror (Phase 1) ----
   // Mirrors the active route + live turn-by-turn state onto the car display.
   // Consumes the SAME tbt/route the phone UI uses — no second engine, no double
@@ -1631,7 +1652,7 @@ export default function MapScreen() {
   // carStore gesture bus back to here — same JS context — and toggles the mic.
   useEffect(() => subscribeCarGesture((g) => { if (g.kind === "scoutMic") void toggleScoutMic(); }), [toggleScoutMic]);
 
-  const { connected: carConnected } = useConvoyCarPlay({ route: activeRoute, routes, selectedRouteIndex, tbt, user: coords, destination, peers, onEnd: endNav, weather, onReportPolice: () => reportAlert('police'), onScoutMic: toggleScoutMic, selfUserId: user?.id,
+  const { connected: carConnected } = useConvoyCarPlay({ route: activeRoute, routes, selectedRouteIndex, tbt, user: coords, destination, peers, onEnd: endNavFromCar, weather, onReportPolice: () => reportAlert('police'), onScoutMic: toggleScoutMic, selfUserId: user?.id,
     // Mirror the phone's map markers onto the CarPlay live map, with the SAME 'when
     // active' gates the phone uses. speedCameras/roadEvents are already [] when their
     // layer is off (hooks self-gate); hazards → the visible set (disputes<2); places →

@@ -1168,6 +1168,11 @@ const CAR_MAP_BUTTON_COL_W = 42;
 const CREW_PILL_H = 22;
 // True top-centre for the pill (iOS 26 has no full-width nav bar to clear).
 const CAR_PILL_TOP = 4;
+// Jeff (2026-07-24, second pass): all three rows share ONE WIDTH — he may add a
+// third button on the right, and a ragged stack would then need re-tuning. So the
+// rows STRETCH to the stack width (navStack alignItems:'stretch') and the width
+// itself is what shrinks (see the derived carClearLeft) — that is what removes the
+// dead padding, not per-row sizing. Reverses the brief content-sizing experiment.
 // Jeff (2026-07-24): "make sure the arrow banner is the same exact dimensions as
 // the eta banner". The lane (arrow) row and the ETA row now share ONE height and
 // one style recipe, so they read as siblings; both are CONTENT-sized (alignSelf
@@ -1306,10 +1311,10 @@ const styles = StyleSheet.create({
   // width is applied INLINE (navStackW) — it has to be measured, see CAR_LEFT_INSET.
   navStack: { position: 'absolute', right: CAR_RIGHT_INSET, bottom: NAV_STACK_BOTTOM, alignItems: 'stretch', gap: NAV_GAP },
   navBannerRow: { flexDirection: 'row', alignItems: 'center', height: TURN_ROW_H, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
-  navEta: { alignSelf: 'flex-end', paddingHorizontal: 10, height: ETA_ROW_H, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  navEta: { paddingHorizontal: 10, height: ETA_ROW_H, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   // marginRight: the lane row is the ONLY stack element level with the map buttons
   // (the ETA and maneuver banner clear them vertically), so it carries the offset
   // instead of insetting the whole stack. Jeff's explicit requirement: the lane
   // guidance banner must never touch the buttons.
-  laneRow: { alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: LANE_ROW_H, paddingHorizontal: 10, borderRadius: 10, overflow: 'hidden' },
+  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: LANE_ROW_H, paddingHorizontal: 10, borderRadius: 10, overflow: 'hidden' },
 });

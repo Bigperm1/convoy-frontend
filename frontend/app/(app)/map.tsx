@@ -3274,7 +3274,7 @@ export default function MapScreen() {
                   hitSlop={8}
                 >
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} Crew · {visibleHazards.length} alerts · v{buildNo}{rtv ? ` · ${rtv}` : ''}{otaTag ? ` · ${otaTag}` : ''}</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} Crew · v{buildNo}{rtv ? ` · ${rtv}` : ''}{otaTag ? ` · ${otaTag}` : ''}</Text>
                 </TouchableOpacity>
               );
             })()}

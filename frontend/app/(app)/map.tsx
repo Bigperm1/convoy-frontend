@@ -3250,13 +3250,15 @@ export default function MapScreen() {
               try {
                 const U = require('expo-updates');
                 rtv = U.runtimeVersion || '';
-                // Compact OTA identity: first 4 hex of the running update id, or
+                // Compact OTA identity: LAST 4 hex of the running update id (update ids
+                // are time-ordered UUIDs, so the FIRST hex chars are near-identical
+                // across updates — the tail is the discriminating part), or
                 // "emb" for the embedded (factory) bundle. THE tell for "is this
                 // device actually current" — today alone one runtime carried five
                 // different OTAs, and the runtime string can't distinguish them
                 // (a tester on a stale OTA looked 'current' by the pill and
                 // reported an already-fixed bug as unfixed).
-                otaTag = U.isEmbeddedLaunch ? 'emb' : String(U.updateId || '').replace(/-/g, '').slice(0, 4);
+                otaTag = U.isEmbeddedLaunch ? 'emb' : String(U.updateId || '').replace(/-/g, '').slice(-4);
               } catch {}
               if (!rtv) rtv = (Constants.expoConfig as any)?.runtimeVersion || '';
               const buildNo = Constants.nativeBuildVersion

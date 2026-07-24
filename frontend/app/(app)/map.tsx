@@ -3246,7 +3246,18 @@ export default function MapScreen() {
               // reaches exact runtime matches). Read from expo-updates (the value
               // the update system actually keys on), app.json as fallback.
               let rtv = '';
-              try { rtv = require('expo-updates').runtimeVersion || ''; } catch {}
+              let otaTag = '';
+              try {
+                const U = require('expo-updates');
+                rtv = U.runtimeVersion || '';
+                // Compact OTA identity: first 4 hex of the running update id, or
+                // "emb" for the embedded (factory) bundle. THE tell for "is this
+                // device actually current" — today alone one runtime carried five
+                // different OTAs, and the runtime string can't distinguish them
+                // (a tester on a stale OTA looked 'current' by the pill and
+                // reported an already-fixed bug as unfixed).
+                otaTag = U.isEmbeddedLaunch ? 'emb' : String(U.updateId || '').replace(/-/g, '').slice(0, 4);
+              } catch {}
               if (!rtv) rtv = (Constants.expoConfig as any)?.runtimeVersion || '';
               const buildNo = Constants.nativeBuildVersion
                 || Constants.expoConfig?.ios?.buildNumber
@@ -3261,7 +3272,7 @@ export default function MapScreen() {
                   hitSlop={8}
                 >
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
-                  <Text style={styles.liveOverlayText}>{liveCount} Crew · {visibleHazards.length} alerts · v{buildNo}{rtv ? ` · ${rtv}` : ''}</Text>
+                  <Text style={styles.liveOverlayText}>{liveCount} Crew · {visibleHazards.length} alerts · v{buildNo}{rtv ? ` · ${rtv}` : ''}{otaTag ? ` · ${otaTag}` : ''}</Text>
                 </TouchableOpacity>
               );
             })()}

@@ -1863,9 +1863,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // screen so the driver sees more road ahead. Applies ONLY during active
   // navigation (heading-up); otherwise — free drive / north-up — the car sits
   // centred.
+  // NEVER undefined (2026-07-23 — THE Android arrival black screen). Flipping this
+  // OBJECT prop to undefined at route end made Android's Fabric deliver a non-map
+  // Dynamic to RNMBXCamera.followPadding → native "Dynamic value from Object is not
+  // a ReadableMap" throw in the mount phase → in release, the whole app dies to an
+  // unresponsive black screen (no JS fatal, so crash_reports stayed empty). iOS
+  // coerces the null harmlessly, which is why only Android testers ever saw it.
+  // Reproduced deterministically with a local probe (nav → teardown) and pinned to
+  // this exact prop by the RedBox stack; zero-padding object = same visual result,
+  // no native throw.
   const followPadding = navigationActive && headingUp && mapH > 0
     ? { paddingTop: Math.round(mapH * FOLLOW_LOWER_PAD_FRAC), paddingBottom: 0, paddingLeft: 0, paddingRight: 0 }
-    : undefined;
+    : { paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 };
 
   // While category-search result pins are on the map (preview only), we frame
   // ALL of them and HOLD that overview — native follow is suspended (see the

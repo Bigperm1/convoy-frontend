@@ -167,7 +167,9 @@ export function CarSurface() {
   const arrival = (s.navigating && (s.etaSeconds || 0) > 0)
     ? fmtClock(new Date(Date.now() + (s.etaSeconds || 0) * 1000))
     : '';
-  const metaLine = [arrival, s.eta, s.distanceRemaining].filter(Boolean).join('   ·   ');
+  // Tight separators (was three spaces each side): the same three fields in ~15%
+  // less width, so 'eta · time · distance' fits the bottom-band banner un-cut.
+  const metaLine = [arrival, s.eta, s.distanceRemaining].filter(Boolean).join(' · ');
 
   const hasFix = typeof s.selfLat === 'number' && typeof s.selfLng === 'number';
 
@@ -391,7 +393,16 @@ export function CarSurface() {
           {metaLine ? (
             <View style={[styles.navEta, { backgroundColor: carHudFloor() }]}>
               <GlassFill tintColor={undefined} style={{ borderRadius: 10, overflow: 'hidden' }} />
-              <MarqueeText text={metaLine} style={styles.bottomText} />
+              {/* Jeff's spec: eta/time/distance must FIT, not truncate to "27…".
+                  adjustsFontSizeToFit shrinks the last few points on a narrow head
+                  unit rather than cutting; a marquee here made a fixed 3-field
+                  readout crawl, which is worse for a glanceable number. */}
+              <Text
+                style={styles.bottomText}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.7}
+              >{metaLine}</Text>
             </View>
           ) : null}
           {/* Maneuver banner — bottom of the stack. */}
@@ -1104,13 +1115,12 @@ const CAR_TOP_INSET = 58; // clears the CPMapTemplate navigation bar
 // buttons now hold those slots (see CAR_MAP_BUTTON_CONFIG), lifting the real pair
 // clear of the ETA and maneuver banner. CPMapTemplate.h:71-75 caps mapButtons at 4,
 // so 2 real + 2 spacers is the highest they can possibly go.
-// Jeff's drive feedback 2026-07-23 (round 3): banners at the right EDGE but ABOVE
-// the crew/compass buttons — not beside them at car height. The two buttons own the
-// bottom-right corner (bottom-anchored slots, measured column ≈88pt tall incl.
-// air); the banner stack starts above them, so the car (bottom-centre) and both
-// buttons stay fully visible.
-const CAR_RIGHT_INSET = 8;
-const NAV_STACK_BOTTOM = 96; // clears the 2-button trailing column
+// Jeff's OPTION 2 (2026-07-24, his exact spec): banners in the BOTTOM band, to the
+// LEFT of the crew/compass buttons — not above them. 64 clears the iOS-26 glass
+// button column (~56pt) + air. Both banners may grow TOWARD the car so the
+// eta/time/distance line fits un-cut — but the car itself is untouched.
+const CAR_RIGHT_INSET = 64;
+const NAV_STACK_BOTTOM = 8;
 
 // ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────
 // Measured off a real 800x480 CarPlay capture (= 400x240pt @2x) by decoding the
@@ -1153,10 +1163,10 @@ const CAR_LEFT_INSET = 184;
 // head unit: 184 + 210 + 76 overflows a ~431pt CarPlay canvas, which is exactly
 // how the maneuver banner ended up underneath the speedo in the sim. Clamped so it
 // stays readable on small screens and does not sprawl on ultra-wide ones.
-// 232 -> 176 (2026-07-23 round 3): still "a lot of wasted space" in the banners on
-// the head unit. The direction text SCROLLS (MarqueeText ping-pongs on overflow),
-// so the banner no longer needs width for long street names — compact wins.
-const NAV_STACK_MAX_W = 176;
+// Wide enough that "11:42pm · 31 min · 3.4 km" fits UN-CUT (Jeff's spec: the ETA
+// line must fit; grow toward the car rather than truncate). Long street names
+// still marquee rather than widening further.
+const NAV_STACK_MAX_W = 260;
 // Absolute floor — readability past this point is already lost, and going lower
 // would be worse than a narrow banner. Deliberately NOT a "preferred" width: see
 // the clamp-downward comment at the navStackW computation.

@@ -122,10 +122,11 @@ const CAR_LOWER_PAD_FRAC = 0.52;
 // speed-limit chip; 0.08 centres it in the open gap BETWEEN the bottom-left HUD
 // (speed/limit) and the bottom-right nav banner — still biased just enough left
 // that it never collides with the banner. OTA-tunable.
-// 0.08 -> 0.14 (2026-07-23): Jeff's drive photo showed the ETA pill straddling the
-// car. Together with the narrower nav stack this seats the car in clear air between
-// the speed cluster and the banners. OTA-tunable.
-const CAR_LEFT_PAD_FRAC = 0.14;
+// BACK to 0.08 (2026-07-24). I moved this to 0.14 on my own initiative to dodge
+// banners I had misplaced; Jeff never asked for it and told me not to touch the car.
+// 0.08 is the long-standing value his layout was designed around. The banners avoid
+// the car (CAR_LEFT_INSET), never the reverse.
+const CAR_LEFT_PAD_FRAC = 0.08;
 // Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';
@@ -346,11 +347,16 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
       heading: camHdgRef.current,
       // paddingTop drops the car DOWN the wide head-unit; paddingRight shifts it LEFT of
       // center so the bottom-RIGHT nav stack (banner/ETA) never collides with the car.
+      // HARDENED 2026-07-24 (Jeff: "why is the car in the middle of the screen").
+      // The CarPlay window sizes LATE; if onLayout delivered h=0 (or a post-OTA
+      // remount missed the event), this padding collapsed to zero — camera centre
+      // = screen centre = car mid-screen. Fall back to nominal CarPlay dimensions
+      // instead of zero so the car is ALWAYS pinned low.
       padding: {
-        paddingTop: h > 0 ? Math.round(h * CAR_LOWER_PAD_FRAC) : 0,
+        paddingTop: Math.round((h > 0 ? h : 240) * CAR_LOWER_PAD_FRAC),
         paddingBottom: 0,
         paddingLeft: 0,
-        paddingRight: w > 0 ? Math.round(w * CAR_LEFT_PAD_FRAC) : 0,
+        paddingRight: Math.round((w > 0 ? w : 400) * CAR_LEFT_PAD_FRAC),
       },
     };
   }).current;
@@ -781,9 +787,16 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
             type: 'FeatureCollection',
             features: (s.peers || [])
               .filter((p) => typeof p.lat === 'number' && typeof p.lng === 'number')
-              .map((p) => ({
+              .map((p, i) => ({
                 type: 'Feature' as const,
-                id: p.id,
+                // NUMERIC id (2026-07-24). This was `id: p.id` — a peer UUID STRING.
+                // The layer had never rendered (car peers were always empty, see the
+                // map.tsx crew feed), so nobody hit it; the moment real peers arrived
+                // the native shape conversion threw an ObjC exception inside
+                // performVoidMethodInvocation and the app SIGABRTed on launch.
+                // Mapbox feature ids must be numeric; nothing here uses feature-state,
+                // so the index is fine.
+                id: i,
                 properties: { parked: p.status === 'parked' ? 1 : 0 },
                 geometry: { type: 'Point' as const, coordinates: [p.lng as number, p.lat as number] },
               })),

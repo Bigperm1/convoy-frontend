@@ -2,17 +2,17 @@
   "expo": {
     "name": "Hairpin",
     "slug": "convoy",
-    "version": "3.3.0",
+    "version": "3.4.0",
     "orientation": "portrait",
     "icon": "./assets/HAIRPIN.png",
     "scheme": "convoy",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "runtimeVersion": "1.19.0",
+    "runtimeVersion": "1.20.0",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
-      "buildNumber": "67",
+      "buildNumber": "68",
       "entitlements": {
         "com.apple.security.application-groups": [
           "group.com.sw0rdfisch.convoy"
@@ -37,7 +37,7 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 67,
+      "versionCode": 68,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/hairpin-adaptive.png",

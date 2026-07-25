@@ -175,17 +175,30 @@ export function initCarPlayBootstrap(): void {
     try { b?.checkForConnection?.(); } catch {}
     setCarState({ cpDbg: 'poke#' + pokes + ':' + how + ' conn=' + (CarPlay.connected ? '1' : '0') });
   };
+  // HEAT/BATTERY: this poll used to run every 3s FOREVER on any phone that never
+  // connects to CarPlay — i.e. permanently, for every Android user and every iPhone
+  // driver not in a CarPlay car. It only exists to recover a didConnect emit that was
+  // dropped because JS listeners weren't registered yet, which resolves within seconds
+  // of process start; it was never meant to be a lifetime timer. So: bounded window,
+  // and re-armed whenever the app becomes active (below) or CarPlay disconnects — both
+  // of which are exactly when a real connect can appear. A genuine connect still
+  // arrives through registerOnConnect regardless of this poll.
+  const POKE_WINDOW_MS = 60000;
   let poll: any = null;
+  let pollStartedAt = 0;
+  const stopPolling = () => { if (poll) { clearInterval(poll); poll = null; } };
   const ensurePolling = () => {
     if (poll || CarPlay.connected) return;
+    pollStartedAt = Date.now();
     poll = setInterval(() => {
-      if (CarPlay.connected) { clearInterval(poll); poll = null; return; }
+      if (CarPlay.connected) { stopPolling(); return; }
+      if (Date.now() - pollStartedAt > POKE_WINDOW_MS) { stopPolling(); return; }
       poke();
     }, 3000);
   };
 
   try {
-    CarPlay.registerOnConnect(() => { setCarState({ cpDbg: 'onConnect:FIRED' }); if (poll) { clearInterval(poll); poll = null; } onConnect(); });
+    CarPlay.registerOnConnect(() => { setCarState({ cpDbg: 'onConnect:FIRED' }); stopPolling(); onConnect(); });
     CarPlay.registerOnDisconnect(() => { onDisconnect(); ensurePolling(); });
     setCarState({ cpDbg: 'wired conn=' + (CarPlay.connected ? '1' : '0') });
     if (CarPlay.connected) onConnect(); else { poke(); ensurePolling(); }

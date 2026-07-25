@@ -783,6 +783,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const camPitch = useRef<number | null>(null);
   const lastCamAt = useRef(0);
   const [, setTick] = useState(0);
+  // Last pose actually DRAWN (see the sub-pixel skip in the rAF step).
+  const lastDrawnRef = useRef<{ lat: number; lng: number; heading: number } | null>(null);
   const lastFrameRef = useRef(0); // wall-clock of the last RENDERED ease frame (eco fps cap)
 
   // Shortest signed angular delta a→b in degrees (−180…180].
@@ -893,12 +895,40 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       raf.current = requestAnimationFrame(step);
       return;
     }
+    // SUB-PIXEL FRAME SKIP (heat, 2026-07-25). The comment above is right that the
+    // per-frame setCamera + full re-render is the app's biggest thermal load — this
+    // component re-renders its entire tree on every eased frame because the self-car
+    // marker's position/rotation are React PROPS on the Mapbox layers.
+    // So: don't render a frame that would look IDENTICAL. At z17 one physical pixel
+    // is ~0.25m of ground, so a pose that moved <6cm and rotated <0.08 degrees cannot
+    // produce a different image — skipping it is invisible BY CONSTRUCTION, not a
+    // quality trade. Premium is untouched at speed (deltas are far larger every
+    // frame); the saving lands exactly where the heat complaints come from — crawling
+    // in traffic and idling in a mount, where GPS jitter was driving 60fps of
+    // full-tree re-renders that changed nothing on screen.
+    // CRITICAL: this skips the CAMERA PUSH TOO. Skipping only the re-render while
+    // still moving the camera would slide the map under a stale marker — the exact
+    // drift class we chased on 2026-07-24. Camera and marker hold together, then
+    // advance together. The final frame (t>=1) is never skipped, so the ease always
+    // lands precisely.
+    const _nLat = a.fromLat + (a.toLat - a.fromLat) * t;
+    const _nLng = a.fromLng + (a.toLng - a.fromLng) * t;
+    const _nHdg = a.fromHdg + (a.toHdg - a.fromHdg) * t;
+    if (t < 1) {
+      const _pr = lastDrawnRef.current;
+      if (_pr) {
+        const dN = (_nLat - _pr.lat) * 111320;
+        const dE = (_nLng - _pr.lng) * 111320 * Math.cos((_nLat * Math.PI) / 180);
+        const dH = Math.abs(((((_nHdg - _pr.heading) % 360) + 540) % 360) - 180);
+        if (Math.hypot(dN, dE) < 0.06 && dH < 0.08) {
+          raf.current = requestAnimationFrame(step);
+          return;
+        }
+      }
+    }
+    lastDrawnRef.current = { lat: _nLat, lng: _nLng, heading: _nHdg };
     lastFrameRef.current = now;
-    render.current = {
-      lat: a.fromLat + (a.toLat - a.fromLat) * t,
-      lng: a.fromLng + (a.toLng - a.fromLng) * t,
-      heading: a.fromHdg + (a.toHdg - a.fromHdg) * t,
-    };
+    render.current = { lat: _nLat, lng: _nLng, heading: _nHdg };
     pushCam(render.current.lat, render.current.lng, render.current.heading); // LOCKSTEP: camera rides the eased pose
     setTick((n) => (n + 1) & 0xffff);
     if (t < 1) {
@@ -1583,6 +1613,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const wetPollsRef = useRef(0);
   const dryPollsRef = useRef(0);
   const waterInputsRef = useRef({ lat: 0, lng: 0, active: false, suppressed: false });
+  // Last position the water polygons were actually queried at (see the skip below).
+  const waterLastPosRef = useRef<{ lat: number; lng: number } | null>(null);
   useEffect(() => {
     let mounted = true;
     const id = setInterval(async () => {
@@ -1593,6 +1625,21 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         if (onWaterRef.current) { onWaterRef.current = false; setOnWater(false); }
         return;
       }
+      // HEAT: skip the GL query when we haven't actually moved. querySourceFeatures
+      // is a real tile query on the render thread and this ran every 2.5s for the
+      // entire life of the map — including parked in a driveway with the app open,
+      // where the water/land answer cannot possibly change. Land vs water is a pure
+      // function of position, so an unchanged position means the previous verdict
+      // still stands: keep the state and the hysteresis counters exactly as they
+      // are and do no work. ~8m is well inside GPS jitter, so a stationary car
+      // stops polling entirely while a moving one is unaffected.
+      const _wp = waterLastPosRef.current;
+      if (_wp) {
+        const dLat = (inp.lat - _wp.lat) * 111320;
+        const dLng = (inp.lng - _wp.lng) * 111320 * Math.cos((inp.lat * Math.PI) / 180);
+        if (Math.hypot(dLat, dLng) < 8) return;
+      }
+      waterLastPosRef.current = { lat: inp.lat, lng: inp.lng };
       try {
         const fc = await mapRef.current.querySourceFeatures(ROAD_SRC_ID, [], ["water"]);
         if (!mounted) return;

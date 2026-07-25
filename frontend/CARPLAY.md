@@ -142,6 +142,21 @@ Cold falls through to the module-scope handlers.
 7. **A pushed template needs (a) an already-presented guard and (b) an automatic way home.**
    Re-pushing the same instance corrupts the stack (renders, takes no touches), and a modal
    over the map hides every map button. Search auto-pops once moving.
+7b. **NEVER present a template for routine feedback — that was the recurring "CarPlay buttons
+   not working".** Root-caused 2026-07-24 in the sim with a broken-mode control: eleven call
+   sites raised a `CPAlertTemplate` for confirmations ("Route ended", "Routing to X", every
+   comms-mic message). The alert covers the map, so every button dies — and its only escape
+   was a 2600ms `setTimeout`. **iOS suspends JS timers while the phone is locked, which is
+   how a phone sits in a mount**, so the dismiss never fired on a drive while the sim (fore-
+   grounded, unlocked) always cleared it in 2.6s and looked fine. Routine feedback now goes
+   to the non-blocking pill on our own surface, expiring by TIMESTAMP COMPARISON at render.
+   **Corollary: never let anything a driver depends on hinge on a JS timer.** Use carStore
+   position ticks — the background feed keeps them flowing while locked.
+7c. **Diagnose this class with the framework's own log, not by reading code.**
+   `xcrun simctl spawn <udid> log stream --predicate 'processImagePath CONTAINS "Hairpin"'`
+   prints `Template did push/pop, stack count: N` and `Requesting present template <...>`.
+   Stack depth > 1 at rest = the map is covered. Three rounds of plausible code-reading
+   failed to settle this; one log line did.
 8. **Colours must go through `processColor()`** — `RCTConvert UIColor:` rejects hex strings
    and silently yields nil.
 9. **A native event with no entry in the template's `eventMap` never reaches JS.** That was
@@ -164,6 +179,9 @@ Cold falls through to the module-scope handlers.
 ## 7. Open / next
 
 - **Route line touching the car, drifting off-route** — Jeff's next focus, not yet addressed.
+- **Tap receipts are live** — every press logs `carplay-tap:<id>` to `crash_reports` and flashes
+  on the pill. Query that table after the next drive: rows present = taps reach JS (our bug,
+  OTA-able); rows absent while Jeff taps = the press dies in the native template layer (build).
 - Headless Scout + comms on a COLD connect (build 68) — the mic gesture's only subscriber is
   `map.tsx`, so it's dead until the phone app has been opened.
 - Mic arbiter (build 68) — expo-av allows one recorder; the loser's cleanup pauses the winner.

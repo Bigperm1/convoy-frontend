@@ -3,7 +3,9 @@
 **Written 2026-07-25, end of an overnight session. Read this first, then `CLAUDE.md`
 (build/release rules) and `CARPLAY.md` (the locked CarPlay spec).**
 
-Shipped state: **build 67 · v3.3.0 · runtime 1.19.0**, OTA branch **`mapbox-migration`**.
+Shipped state: **build 68 · v3.4.0 · runtime 1.20.0** (cut 2026-07-25 — iOS store, Android
+APK + Android AAB), OTA branch **`mapbox-migration`**.
+**Post-68 OTAs go to runtime 1.20.0** (dual-publish with 1.19.0 until everyone is on 68).
 Everything below marked "shipped" is live via OTA on 1.19.0 **and** 1.18.0 (always
 dual-publish — build 66 testers are still on 1.18.0).
 
@@ -38,9 +40,9 @@ before that row exists.
 
 | # | Issue | State |
 |---|---|---|
-| 1 | **Android Auto** | Broken. Needs build 68 for the black box (above). |
-| 2 | **CarPlay doesn't re-mount after an app crash** | **Fixed in the plugin, needs build 68.** Reproduced + fix written; see §3. |
-| 3 | **CarPlay pinch-to-zoom** | Cold root fixed (shipped). Warm path unverified — see §4. |
+| 1 | **Android Auto** | Broken on 67. **Build 68 ships the black box** — get the trace (above). |
+| 2 | **CarPlay doesn't re-mount after an app crash** | **Fix ships in build 68.** Reproduced + fixed; re-run the §3 table to confirm. |
+| 3 | **CarPlay pinch-to-zoom** | Cold root fixed. Warm path still head-unit-only — see §4. |
 | 4 | **Route line / off-route drift** | Free-drive "lost marker" is FIXED. Nav-time route-line polish still open. |
 | 5 | **Heat** | Three real wins shipped tonight (§5). Needs a real drive to judge. |
 | 6 | **Android Play submit** | Blocked on missing `play-store-service-account.json`. 67 AAB is built and Play-ready. |
@@ -157,14 +159,22 @@ know this before a tester is stuck.
 
 ---
 
-## 7. Build 68 backlog
+## 7. Build 68 — CUT 2026-07-25
 
-Nothing native has shipped since 67. A build would take runtime to **1.20.0** and **must
-cut BOTH platforms** (a runtime bump only "takes" for the platform actually rebuilt).
+Three builds at **v3.4.0 / runtime 1.20.0 / code 68**: `mapbox-ios` (store → TestFlight),
+`mapbox` (internal APK → QR for sideloading), `mapbox-android-store` (AAB → Play, which
+Android Auto needs to be enabled on production head units).
 
-1. **Android Auto black box** (`AACrashLog`) — the reason to cut 68 even without a fix.
-2. **CarPlay crash-restart recovery** (§3) — written, needs the build.
-3. **Mic arbiter** — a live bug *today*: expo-av allows one recorder and the loser's
+**Shipped in 68:** the Android Auto black box (`AACrashLog`), the CarPlay crash-restart
+remount, CarPlay cold-root pinch-to-zoom, the Android glass fix (elevation halo), staggered
+permission prompts, first-launch defaults, the heat sweep, and the dead-code removal.
+
+**First thing to check after testers are on it:** query `crash_reports` for
+`android-auto-failure` — that row is the whole reason 68 exists.
+
+### Still open for build 69
+
+1. **Mic arbiter** — a live bug *today*: expo-av allows one recorder and the loser's
    `setIdleAudioMode()` pauses the winner (`EXAV.m:275-279`). There is no arbiter; `useVoice`
    is mounted in three places, so **Scout can already truncate Scout**. Fix shape:
    `src/micOwner.ts` on the single-owner-by-priority pattern that killed the presence

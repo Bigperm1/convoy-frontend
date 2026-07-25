@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**➜ Read `HANDOFF.md` first** — current shipped state, every open issue (Android Auto, CarPlay
+crash-remount, heat), the local test rigs, and the traps that have each cost a bad session.
+`CARPLAY.md` is the locked CarPlay/Android Auto spec.
+
 ## What this is
 
 Convoy — an Expo / React Native (New Architecture, RN 0.81, React 19) app for driving in a group ("convoy"): a live map with peer car positions and crowd-sourced hazards, turn-by-turn navigation, push-to-talk comms, a "Nova" voice assistant, music control (Apple Music / Spotify), and CarPlay + Android Auto surfaces. iOS, Android, and web (via `react-native-web`) all build from one codebase.
@@ -51,6 +55,34 @@ File-based routing under `app/`. `typedRoutes` is on. Three groups:
 ### Env vars & the hardcoded-fallback pattern (important)
 
 `EXPO_PUBLIC_*` vars come from `.env` (local) and `eas.json` `env` blocks (builds). EAS has historically failed to inject these at bundle time, silently killing search/routes/presence. So `src/api.ts` and `src/supabase.ts` deliberately keep **hardcoded production fallbacks** (`PROD_BACKEND_URL`, `PROD_MAPS_KEY`, `FALLBACK_SUPABASE_*`) and read `process.env.X || FALLBACK`. This redundancy is intentional — read the long comments before "cleaning it up." Supabase client creation gates on `Platform`, **not** `typeof window` (which is undefined on Hermes and would disable presence on device).
+
+### Permissions (staggered, never at login)
+
+`src/permissionGate.ts` is the ONLY place that should raise an OS permission prompt. It
+SERIALIZES prompts — one dialog at a time with a ~900ms gap — because correctly-placed
+prompts can still collide (a screen mounts, a tab switch lands, iOS stacks the sheets and
+the user reflexively denies). Only the PROMPT is queued; reading an already-decided status
+never is.
+
+Placement: **location → Map**, **mic → Comms**, **notifications → Comms** (awaited after the
+mic sheet), **Apple Music → Music** (user-initiated). The app shell prompts for NOTHING.
+`src/pushRegistration.ts` splits the two halves: `reportDevice()` never prompts and runs at
+login so the admin roster stays complete; `registerPushToken()` only fetches a token when
+permission is already granted.
+
+Rule: gate on `status === 'undetermined'`. On Android, Expo tracks "have we asked?" in app
+storage, so a revoked-but-previously-asked permission reports `denied` and must NOT be
+re-prompted.
+
+### Settings defaults
+
+`DEFAULT_SETTINGS` in `src/settings.ts` is FIRST-LAUNCH ONLY — existing installs keep their
+stored values (load does `{...DEFAULT_SETTINGS, ...parsed}`). To change behaviour for
+EXISTING testers you need a one-time migration flag next to `weatherOnMigrated` /
+`novaQuietMigrated` / `baselineMigrated`; follow that pattern and never silently flip a
+choice the user made. Per-source audio levels are the `STOCK_BY_KEY` table (voice 80 /
+alerts 60 / comms 80 / transmissions 80) — those are what an untuned install plays at and
+what the Audio screen's sliders seed from.
 
 ### Event buses (pub/sub)
 

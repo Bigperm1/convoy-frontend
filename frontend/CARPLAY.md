@@ -176,6 +176,32 @@ Cold falls through to the module-scope handlers.
 
 ---
 
+## 6b. Start paths — cold / warm / crash / mid-drive
+
+The surface must mount identically however the session begins. Three of the four were always
+fine; the CRASH path was not.
+
+| path | what happens | state |
+|---|---|---|
+| cold (phone app never opened) | `carPlayBootstrap` sets the idle root at module scope | OK |
+| warm (phone app open) | `ConvoyCarPlay` owns the root (`carPlayHookOwnsRoot`) | OK |
+| mid-drive connect | `registerOnConnect` → `onConnect()` | OK |
+| **crash while connected** | **iOS re-activates the scene WITHOUT re-delivering `didConnect`** | **fixed in the plugin, needs build 68** |
+
+Reproduced in the sim: normal launch → 3 `Setting root template`; **SIGKILL + relaunch → 0,
+and zero `carplayframework` activity**; graceful quit + relaunch → 3. Run 3 proves the CarPlay
+display was still live, so it is the crash path specifically.
+
+RNCarPlay never learns the interface controller, `RNCPStore` stays disconnected, and JS's
+`checkForConnection()` poke cannot recover it — that native method early-returns on
+`!isConnected`. **No JS fix exists.** `CarSceneDelegate.recoverCarPlayIfNeeded()` now runs on
+`sceneDidBecomeActive` / `sceneWillEnterForeground`: if this process holds no car window it
+never got a `didConnect`, so it connects from the scene itself. Self-guarding on the weak
+`carWindowRef`.
+
+**The connect poke is now bounded to 60s** (re-armed on AppState-active / disconnect). It used
+to run every 3s forever on every phone that never connects to CarPlay.
+
 ## 7. Open / next
 
 - **Route line touching the car, drifting off-route** — Jeff's next focus, not yet addressed.
@@ -187,5 +213,12 @@ Cold falls through to the module-scope handlers.
 - Mic arbiter (build 68) — expo-av allows one recorder; the loser's cleanup pauses the winner.
 - `CPWindow.mapButtonSafeAreaLayoutGuide` (build 68) — replaces the hand-measured insets
   with Apple's real per-head-unit chrome rect.
-- Android Auto still fails to launch — native, needs the VirtualDisplay path from
-  `patches/android-auto-bridgeless.RECIPE.md`.
+- **Android Auto still fails to launch on build 67** (confirmed with the current OTA). The
+  bridgeless port already shipped in 67 and did NOT fix it. Blocked on a stack trace: the
+  `AACrashLog` black box is written into the patch and uploads via
+  `src/androidAutoCrashLog.ts` on the next launch — it just needs build 68. Do not theorise
+  further before that `crash_reports` row exists.
+- **Pinch-to-zoom:** the COLD root had no zoom handlers at all (fixed + shipped). The rest of
+  the chain is verified end to end — `mapDelegate = self`, native emits, eventMap entries,
+  config types. If it still fails WARM on the head unit, the suspect is Apple's iOS-26 gating;
+  untestable locally (carkitd crashes in the iOS 26 sim).

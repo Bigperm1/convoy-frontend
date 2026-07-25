@@ -13,19 +13,27 @@ export default function LegalPage({
   updated,
   intro,
   sections,
+  draft,
 }: {
   title: string;
   updated: string;
   intro?: string;
   sections: LegalSection[];
+  // Placeholder banner is now OPT-IN. The Privacy Policy is finalised (2026-07-25)
+  // and is the same text published at hairpin-site /privacy — the URL given to
+  // Google Play — so it must NOT show a "placeholder" warning. Terms and Safety
+  // still pass draft:true until their copy is written.
+  draft?: boolean;
 }) {
   return (
     <SettingsPage title={title}>
-      <View style={styles.placeholderNote}>
-        <Text style={styles.placeholderText}>
-          Placeholder copy — replace with your finalized wording before App Store submission.
-        </Text>
-      </View>
+      {draft ? (
+        <View style={styles.placeholderNote}>
+          <Text style={styles.placeholderText}>
+            Placeholder copy — replace with your finalized wording before App Store submission.
+          </Text>
+        </View>
+      ) : null}
       <Text style={styles.updated}>Last updated {updated}</Text>
       {!!intro && <Text style={styles.body}>{intro}</Text>}
       {sections.map((s, i) => (

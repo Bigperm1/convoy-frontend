@@ -1634,6 +1634,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const [coldStartLoc] = useState(() => getLastLocation());
   // Map viewport height in points (set on layout) — drives lower-third chase framing.
   const [mapH, setMapH] = useState(0);
+  // Width too — the Crew overview computes its own zoom from the bounds span and
+  // needs the viewport in BOTH axes (see the fitCrew effect).
+  const [mapW, setMapW] = useState(0);
   // Cold-start camera: snap (no animation) for the first beat after the initial
   // location arrives so the map opens ALREADY settled on the driver instead of a
   // zoom-in / fly-in. After ~1.2s we restore the default animated follow (props
@@ -1700,10 +1703,31 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng;
         if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
       }
-      // Flatten to north-up first so the fit isn't computed against a pitched camera.
-      try { cameraRef.current?.setCamera({ pitch: 0, heading: 0, animationDuration: 250, animationMode: "easeTo" }); } catch {}
-      // padding: top clears the search bar + crew pill; bottom clears the HUD + tab bar.
-      cameraRef.current?.fitBounds([maxLng, maxLat], [minLng, minLat], [150, 60, 200, 60], 600);
+      // ONE explicit camera, computed like CarPlay's crewFit — NOT flatten-then-fitBounds.
+      // WHY (measured in the sim 2026-07-24, after a first attempt that did NOT work):
+      // `fitBounds` takes no heading, and issuing it SUPERSEDES the 250 ms flatten that
+      // used to run just before it, so a map the driver had rotated stayed rotated —
+      // Jeff: "right now it faces the direction of the car is facing". Forcing the
+      // engine to north-up mode does not help either: that only governs the FOLLOW
+      // camera, and the Crew tap has already dropped follow via handleUserPan, so
+      // nothing was left to reset the bearing. Computing the zoom ourselves and issuing
+      // a single setCamera WITH heading 0 is deterministic, and it is exactly the call
+      // CarMapView's crewFit has been using successfully on the head unit.
+      // The 0.72/0.55 viewport factors stand in for the old [150,60,200,60] padding:
+      // they keep the framing clear of the search bar + crew pill on top and the
+      // speed/weather HUD + tab bar on the bottom.
+      const vw = mapW > 0 ? mapW : 390;
+      const vh = mapH > 0 ? mapH : 700;
+      const lngSpan = Math.max(0.002, maxLng - minLng);
+      const latSpan = Math.max(0.002, maxLat - minLat);
+      const zx = Math.log2((vw * 0.72 * 360) / (512 * lngSpan));
+      const zy = Math.log2((vh * 0.55 * 180) / (512 * latSpan));
+      const zoom = Math.max(2, Math.min(16, Math.min(zx, zy)));
+      cameraRef.current?.setCamera({
+        centerCoordinate: [(minLng + maxLng) / 2, (minLat + maxLat) / 2],
+        zoomLevel: zoom, pitch: 0, heading: 0,
+        animationDuration: 600, animationMode: "easeTo",
+      });
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitCrewSignal]);
@@ -2347,6 +2371,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       onLayout={(e: any) => {
         const h = e?.nativeEvent?.layout?.height;
         if (typeof h === "number" && h > 0 && Math.abs(h - mapH) > 1) setMapH(h);
+        const w = e?.nativeEvent?.layout?.width;
+        if (typeof w === "number" && w > 0 && Math.abs(w - mapW) > 1) setMapW(w);
       }}
     >
       <MapView

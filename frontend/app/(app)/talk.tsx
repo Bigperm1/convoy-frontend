@@ -658,42 +658,64 @@ export default function TalkScreen() {
       {/* Conversation strip — Crew (whole community) + your private threads +
           a New button. Pick one to set who the mic talks to. */}
       {(active || threads.length > 0) && !dropdownOpen && (
-        <View style={styles.stripWrap}>
+        <View style={styles.stripWrap} collapsable={false}>
           <Text style={styles.stripTitle}>Comms Threads</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.strip}
-          >
-            {/* Crew chip needs an ACTIVE community (it IS the community channel).
-                The strip itself no longer does: private threads are fetched
-                globally (/threads) and channelId = activeThreadId works with NO
-                community — but the old `active &&` gate hid the WHOLE strip, so
-                anyone whose activeCommunityId was wiped (every Android reinstall
-                during the black-screen era; settings are per-device) "lost" their
-                private chats while the threads still existed server-side. */}
-            {active ? (
-              <TouchableOpacity onPress={selectCrew} style={[styles.chip, !activeThreadId && styles.chipActive]} activeOpacity={0.85}>
-                <Ionicons name="people" size={15} color={!activeThreadId ? '#000' : YELLOW} />
-                <Text style={[styles.chipText, !activeThreadId && styles.chipTextActive]} numberOfLines={1}>Crew</Text>
-                {!!activeThreadId && !!active && commsRead.channelHasUnread(active.id) && <View style={styles.chipDot} />}
-              </TouchableOpacity>
-            ) : null}
-            {threads.map((t) => {
+          {/* WRAPPING ROW, NOT A HORIZONTAL ScrollView (2026-07-24). Reproduced on a
+              real Android emulator: every touchable INSIDE the old horizontal
+              ScrollView was dead — no onPressIn, no press opacity, with both
+              TouchableOpacity and Pressable — while the ScrollView itself still
+              scrolled and every control OUTSIDE it on the same screen (mic,
+              hands-free, tab bar) worked. Native was innocent: dumpsys showed the
+              chips VFE...C.. (visible/enabled/clickable) at the right bounds with
+              nothing overlaying them. keyboardShouldPersistTaps="handled" did not
+              help either. Dropping the ScrollView removes the broken dispatch path
+              entirely — and wrapping is better here anyway: every thread is visible
+              at once instead of hidden off the right edge. */}
+          {/* collapsable={false}: RN Android FLATTENS layout-only Views, re-parenting
+              their children — and a hoisted child laid out beyond the surviving
+              parent's box is drawn but NEVER hit-tested (Android does not dispatch
+              touches outside a parent's bounds). That is why the wrapped SECOND ROW
+              of chips was dead while the first row worked. Forcing a real native view
+              keeps the rows inside a container that actually bounds them. */}
+          {(() => {
+            // EXPLICIT ROWS, not flex-wrap lines. On Android the chips on a WRAPPED
+            // second line were drawn but never received touches (verified on a real
+            // emulator: row 1 logged onPressIn and switched channel, row 2 logged
+            // nothing at all, with the container measured correctly around both and
+            // nothing overlapping). Chunking into real row Views gives every chip a
+            // properly-bounded native parent, which is what Android hit-testing needs.
+            const chips: React.ReactNode[] = [];
+            if (active) {
+              chips.push(
+                <Pressable key="crew" onPress={selectCrew} style={({ pressed }) => [styles.chip, !activeThreadId && styles.chipActive, pressed && { opacity: 0.85 }]}>
+                  <Ionicons name="people" size={15} color={!activeThreadId ? '#000' : YELLOW} />
+                  <Text style={[styles.chipText, !activeThreadId && styles.chipTextActive]} numberOfLines={1}>Crew</Text>
+                  {!!activeThreadId && !!active && commsRead.channelHasUnread(active.id) && <View style={styles.chipDot} />}
+                </Pressable>,
+              );
+            }
+            for (const t of threads) {
               const on = t.id === activeThreadId;
-              return (
-                <TouchableOpacity key={t.id} onPress={() => selectThread(t)} onLongPress={() => confirmDeleteThread(t)} delayLongPress={400} style={[styles.chip, on && styles.chipActive]} activeOpacity={0.85}>
+              chips.push(
+                <Pressable key={t.id} onPress={() => selectThread(t)} onLongPress={() => confirmDeleteThread(t)} delayLongPress={400} style={({ pressed }) => [styles.chip, on && styles.chipActive, pressed && { opacity: 0.85 }]}>
                   <Ionicons name={t.is_group ? 'people-circle' : 'person'} size={15} color={on ? '#000' : '#bbb'} />
                   <Text style={[styles.chipText, on && styles.chipTextActive]} numberOfLines={1}>{t.title}</Text>
                   {!on && commsRead.channelHasUnread(t.id) && <View style={styles.chipDot} />}
-                </TouchableOpacity>
+                </Pressable>,
               );
-            })}
-            <TouchableOpacity onPress={openThreadPicker} style={styles.chipNew} activeOpacity={0.85}>
-              <Ionicons name="add" size={16} color={YELLOW} />
-              <Text style={styles.chipNewText}>New</Text>
-            </TouchableOpacity>
-          </ScrollView>
+            }
+            chips.push(
+              <Pressable key="new" onPress={openThreadPicker} style={({ pressed }) => [styles.chipNew, pressed && { opacity: 0.85 }]}>
+                <Ionicons name="add" size={16} color={YELLOW} />
+                <Text style={styles.chipNewText}>New</Text>
+              </Pressable>,
+            );
+            const rows: React.ReactNode[][] = [];
+            for (let i = 0; i < chips.length; i += 3) rows.push(chips.slice(i, i + 3));
+            return rows.map((row, i) => (
+              <View key={'row' + i} style={styles.stripRow} collapsable={false}>{row}</View>
+            ));
+          })()}
         </View>
       )}
 
@@ -1028,7 +1050,7 @@ const styles = StyleSheet.create({
   // ----- Conversation strip (Crew + private threads + New) -----
   stripWrap: { paddingTop: 10, paddingBottom: 2 },
   stripTitle: { color: '#F4F4F4', fontSize: 13, fontWeight: '700', marginLeft: 16, marginBottom: 8, letterSpacing: 0.2 },
-  strip: { paddingHorizontal: 16, gap: 8, alignItems: 'center' },
+  stripRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, marginBottom: 8 },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18,

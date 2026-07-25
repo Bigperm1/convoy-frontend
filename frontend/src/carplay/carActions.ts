@@ -33,6 +33,7 @@ import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
 import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED } from './carButtonIcons';
 import { toggleCarComms } from './carComms';
+import { logEvent } from '../crashBreadcrumb';
 import { ensureSavedPlacesLoaded, getSavedPlaces, type SavedPlace } from '../savedPlaces';
 
 // ── lazy react-native-carplay access (same guard style as carPlayBootstrap) ──
@@ -83,11 +84,49 @@ export function carAlert(msg: string): void {
       },
     });
     CarPlay.presentTemplate(alert, true);
-    _alertTimer = setTimeout(() => { _alertTimer = null; try { CarPlay.dismissTemplate(true); } catch {} }, 2600);
+    // Dismissal must NOT depend on setTimeout alone. iOS suspends JS timers while
+    // the phone is locked — a phone in a mount — so the 2600ms fallback below
+    // provably never fires on a drive, and a presented alert then covers the map
+    // and kills every CarPlay button for the rest of the trip (root-caused
+    // 2026-07-24 in the CarPlay sim: the control run logged "Requesting present
+    // template <CPAlertTemplate>" and only dismissed because the sim was
+    // foregrounded and unlocked). carStore position ticks keep flowing when locked
+    // — that is what the background location feed exists for — so they, not a
+    // timer, are the reliable clock here. Nothing calls carAlert today; this makes
+    // it safe to call again.
+    const deadline = Date.now() + 2600;
+    const off = subscribeCarState(() => {
+      if (Date.now() < deadline) return;
+      try { off(); } catch {}
+      if (_alertTimer) { clearTimeout(_alertTimer); _alertTimer = null; }
+      try { CarPlay.dismissTemplate(true); } catch {}
+    });
+    _alertTimer = setTimeout(() => {
+      _alertTimer = null;
+      try { off(); } catch {}
+      try { CarPlay.dismissTemplate(true); } catch {}
+    }, 2600);
   } catch {}
 }
-// Back-compat alias for this file's existing confirmation call sites.
-const toast = carAlert;
+// ── ROUTINE FEEDBACK IS NON-BLOCKING (2026-07-24) ────────────────────────────
+// `toast()` used to be carAlert -> CPAlertTemplate -> CarPlay.presentTemplate, i.e.
+// a MODAL over the map. Two consequences, both fatal to a driver:
+//   • a presented template makes EVERY map button unreachable by design, and
+//   • carAlert's auto-dismiss is a setTimeout — and iOS PAUSES JS TIMERS WHILE THE
+//     PHONE IS LOCKED, which is exactly the state a phone is in while driving.
+// So one tap that produced any message (e.g. the comms mic returning "Allow the
+// microphone on your phone first") left a modal on screen that could not time out,
+// and every CarPlay button went dead until the phone was unlocked. That is Jeff's
+// "THE CARPLAY BUTTONS WERE NOT WORKING AGAIN" on 2026-07-24 — and it violated the
+// rule written into CARPLAY.md the same morning.
+// Routine feedback now goes to the car surface's own status pill: never covers a
+// button, and it expires by TIMESTAMP COMPARISON at render, so a paused timer
+// cannot strand it. carAlert is kept for genuine decisions only (nothing uses it
+// today) — never for informational messages.
+const TOAST_MS = 3000;
+function toast(msg: string): void {
+  try { setCarState({ carToast: msg, carToastUntil: Date.now() + TOAST_MS }); } catch {}
+}
 
 // ── 5s-ago position ring buffer (parity with the phone's getPos5SecAgo) ─────
 // The phone anchors police pins ~5s behind the car (you report what you just
@@ -425,7 +464,35 @@ export const CAR_MAP_BUTTON_CONFIG = {
 // Map-button handler for the COLD root (no phone app in the foreground). The warm
 // root intercepts these same ids first and routes them to its live refs; anything
 // it does not claim falls through to here, so the two roots behave identically.
+// Every CarPlay press logs a receipt (screen + crash_reports). See logEvent's
+// comment: this is what splits "the tap never reached JS" from "the tap reached JS
+// and the action did nothing" — the fork that three rounds of code-reading could
+// not settle for the recurring dead-buttons report.
+const TAP_LABEL: Record<string, string> = {
+  'car-crew': 'Crew', 'car-compass': 'Compass', 'car-comms': 'Comms',
+  'car-mic': 'Scout', 'car-search': 'Search', 'car-end': 'End',
+};
+export function carTap(id: string): void {
+  if (!id) return;
+  try { logEvent(`carplay-tap:${id}`); } catch {}
+  try {
+    setCarState({
+      carTapEcho: id,
+      carTapEchoAt: Date.now(),
+      // Visible receipt in the same non-blocking slot. Jeff can now tell the two
+      // failure modes apart AT A GLANCE mid-drive, without waiting on a query:
+      // pill appears but nothing happens = the action is broken (our JS, OTA-able);
+      // pill never appears = the press never reached JS at all (native template
+      // layer, needs a build). Any real message from the action overwrites this
+      // a moment later, which is the correct ordering.
+      carToast: `${TAP_LABEL[id] || id} ✓`,
+      carToastUntil: Date.now() + 1600,
+    });
+  } catch {}
+}
+
 export function handleCarMapButton(id: string): void {
+  carTap(id);
   if (id === 'car-crew') { emitCarGesture({ kind: 'crewFit' }); return; }
   if (id === 'car-compass') { emitCarGesture({ kind: 'compass' }); return; }
   // Stale-template tolerance: an older cached template can still deliver these.
@@ -434,9 +501,10 @@ export function handleCarMapButton(id: string): void {
 }
 
 export function handleCarBarButton(id: string): void {
+  carTap(id);
   armPosRing(); // idempotent — make sure the 5s-ago buffer is running
   if (id === 'car-comms') {
-    void toggleCarComms().then((msg) => { if (msg) carAlert(msg); });
+    void toggleCarComms().then((msg) => { if (msg) toast(msg); });
     return;
   }
   // 'car-police' is no longer a NAV-BAR button (it moved to a round map button in

@@ -69,6 +69,25 @@ async function queue(reports: Report[]) {
 // 1) Fatal-handler wrap. Installed once from the app entry; chains the previous
 // handler so RN/expo-updates recovery behavior is untouched.
 let installed = false;
+// ── NON-FATAL EVENT LOG ──────────────────────────────────────────────────────
+// Fire-and-forget row into the same crash_reports table with is_fatal:false.
+// Built 2026-07-24 for the CarPlay "buttons not working" report, which has now
+// survived three plausible-but-unverifiable theories. The one thing no amount of
+// code-reading can settle is whether a tap REACHES JS at all: if it does, the bug
+// is in our action; if it does not, the tap dies in the native template layer and
+// no OTA can fix it. Every CarPlay button press logs one row, so the next drive
+// answers that question with data instead of another hypothesis. Never throws and
+// never blocks the caller's action.
+export function logEvent(message: string): void {
+  try {
+    const { supabase } = require("./supabase");
+    if (!supabase) return;
+    void supabase.from("crash_reports")
+      .insert([{ message, is_fatal: false, late: false, ...baseMeta() }])
+      .then(() => {}, () => {});
+  } catch {}
+}
+
 export function installCrashBreadcrumb() {
   if (installed) return;
   installed = true;

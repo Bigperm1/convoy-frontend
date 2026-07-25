@@ -42,6 +42,14 @@ export type CarState = {
   commsTx?: "idle" | "recording" | "sending";
   // Crew-overview confirmation: shown as a transient pill so a dead CREW tap is
   // distinguishable from a dead camera (set by CarMapView when the fit runs).
+  // Non-blocking car toast (replaces the CPAlertTemplate modals). Rendered by the
+  // car surface's status row; expiry is a TIMESTAMP COMPARISON at render, never a
+  // setTimeout — iOS pauses JS timers while the phone is locked, which is precisely
+  // when a driver is using CarPlay.
+  carTapEcho?: string;
+  carTapEchoAt?: number;
+  carToast?: string;
+  carToastUntil?: number;
   crewViewUntil?: number;
   crewViewCount?: number;
   // Raw numeric mirrors of the formatted strings above. Android Auto's

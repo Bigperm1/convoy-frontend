@@ -44,7 +44,7 @@ import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, getCarStat
 import CarMapView, { CAR_LEFT_PAD_FRAC } from './CarMapView';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
-import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
+import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton, carTap } from './carActions';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
 
@@ -562,7 +562,24 @@ export function CarSurface() {
           Incoming audio already AUTO-PLAYS through the car speakers (the app-level
           useLiveWalkieListener), so this is the "who am I hearing" caption, not a
           prompt to tap — and it could not be tappable anyway. */}
-      {(Date.now() < (s.crewViewUntil || 0) && s.commsTx !== 'recording') ? (
+      {Date.now() < (s.carToastUntil || 0) && s.carToast ? (
+        /* ACTION RECEIPT. This slot replaced the CPAlertTemplate modals that every
+           button used to raise for its confirmation. A presented template covers the
+           map and makes EVERY map button unreachable by design, and carAlert's
+           auto-dismiss is a setTimeout — which iOS pauses while the phone is locked,
+           i.e. exactly how a phone sits in a mount. One tap that produced a message
+           could therefore strand a modal that never timed out and kill every CarPlay
+           button for the rest of the drive. Expiry here is a TIMESTAMP COMPARISON at
+           render, so a paused timer cannot strand it, and the worst failure is a
+           caption lingering — never a dead screen. */
+        <View style={styles.statusRow} pointerEvents="none">
+          <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
+            <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
+            <MaterialCommunityIcons name="information-outline" size={16} color="#2DEC86" />
+            <Text style={styles.scoutPillText} numberOfLines={1}>{s.carToast}</Text>
+          </View>
+        </View>
+      ) : (Date.now() < (s.crewViewUntil || 0) && s.commsTx !== 'recording') ? (
         <View style={styles.statusRow} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
@@ -893,7 +910,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
               // mirror immediately re-populated the car route — End looked dead).
               // onEndRef reaches map.tsx's endNav; everything else falls through
               // to the shared handler so cold behaviour is identical.
-              if (e?.id === 'car-end') { onEndRef.current?.(); return; }
+              if (e?.id === 'car-end') { carTap('car-end'); onEndRef.current?.(); return; }
               handleCarBarButton(e?.id);
             },
             onDidCancelNavigation: () => onEndRef.current?.(),
@@ -909,7 +926,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
               // Warm root: prefer the live ref (reaches the mounted surface); anything
               // else falls through so cold-root behaviour stays identical. (Police was
               // removed from CarPlay at Jeff's request, 2026-07-20.)
-              if (e?.id === 'car-mic') { onScoutMicRef.current?.(); return; }
+              if (e?.id === 'car-mic') { carTap('car-mic'); onScoutMicRef.current?.(); return; }
               handleCarMapButton(e?.id);
             },
             // iOS-26 raw pinch/zoom on the CarPlay map (react-native-carplay patch +

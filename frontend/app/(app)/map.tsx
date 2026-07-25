@@ -3323,7 +3323,18 @@ export default function MapScreen() {
                 // different OTAs, and the runtime string can't distinguish them
                 // (a tester on a stale OTA looked 'current' by the pill and
                 // reported an already-fixed bug as unfixed).
-                otaTag = U.isEmbeddedLaunch ? 'emb' : String(U.updateId || '').replace(/-/g, '').slice(-4);
+                // Tag = the update's PUBLISH TIME (day·HHMM), not its id. EAS mints a
+                // SEPARATE update id per platform inside ONE publish, so iOS and
+                // Android on the SAME update always showed different tags — which made
+                // a perfectly in-sync Android tester look stale (2026-07-24: iOS 'b37e'
+                // vs Android '6d6f', same publish). createdAt is shared by every
+                // platform in a publish, so this is comparable ACROSS devices and also
+                // says how old the JS is. 'emb' = still on the embedded factory bundle.
+                const ts = U.createdAt ? new Date(U.createdAt) : null;
+                const p2 = (n: number) => String(n).padStart(2, '0');
+                otaTag = U.isEmbeddedLaunch
+                  ? 'emb'
+                  : (ts ? `${p2(ts.getDate())}·${p2(ts.getHours())}${p2(ts.getMinutes())}` : '');
               } catch {}
               if (!rtv) rtv = (Constants.expoConfig as any)?.runtimeVersion || '';
               const buildNo = Constants.nativeBuildVersion

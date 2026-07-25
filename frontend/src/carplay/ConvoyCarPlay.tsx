@@ -271,6 +271,17 @@ export function CarSurface() {
   let carRtv = '';
   try { carRtv = require('expo-updates').runtimeVersion || ''; } catch {}
   if (!carRtv) carRtv = (Constants.expoConfig as any)?.runtimeVersion || '';
+  // Same publish-time tag as the phone pill (see map.tsx): comparable across iOS and
+  // Android, unlike the per-platform update id it replaced.
+  let carOtaTag = '';
+  try {
+    const U = require('expo-updates');
+    const ts = U.createdAt ? new Date(U.createdAt) : null;
+    const p2 = (n: number) => String(n).padStart(2, '0');
+    carOtaTag = U.isEmbeddedLaunch
+      ? 'emb'
+      : (ts ? `${p2(ts.getDate())}·${p2(ts.getHours())}${p2(ts.getMinutes())}` : '');
+  } catch {}
   const carBuildNo = Constants.nativeBuildVersion
     || Constants.expoConfig?.ios?.buildNumber
     || String((Constants.expoConfig as any)?.android?.versionCode ?? '');
@@ -539,7 +550,7 @@ export function CarSurface() {
         <View style={[styles.crewPill, { backgroundColor: carHudFloor() }]}>
           <GlassFill tintColor={undefined} style={{ borderRadius: 9, overflow: 'hidden' }} />
           <Text style={styles.crewPillText} numberOfLines={1}>
-            {crewCount} Crew · v{carBuildNo}{carRtv ? ` · ${carRtv}` : ''}
+            {crewCount} Crew · v{carBuildNo}{carRtv ? ` · ${carRtv}` : ''}{carOtaTag ? ` · ${carOtaTag}` : ''}
           </Text>
         </View>
       </View>

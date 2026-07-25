@@ -153,9 +153,23 @@ audio stocks voice 80 / alerts 60 / comms 80 / transmissions 80.
 
 **Removed from Settings:** "Hairpin Community" and "Check for Updates" (plus the orphaned
 `settings/community.tsx`).
-⚠ **Check for Updates was the documented manual OTA-rescue path.** The always-on
-`UpdateReadyPill` on the map still covers a stranded bundle, so the escape hatch survives —
-know this before a tester is stuck.
+
+### ⚠ The RED PILL is the ONLY OTA pickup path — say nothing else
+Jeff's standing call (2026-07-25): **"moving forward I want to stick with the red pill update
+to keep it simple."** Two rival instructions were confusing testers, so there is now exactly one:
+
+> Open the app, wait a few seconds on the map, tap the red **"Update ready — tap to install"**
+> pill under the search bar.
+
+`src/UpdateReadyPill.tsx` watches `Updates.useUpdates().isUpdatePending`, so it appears the
+moment the bundle finishes downloading, and the tap calls `reloadAsync()` — the new JS runs
+immediately. Hidden during turn-by-turn nav; returns when the drive ends.
+
+**Never tell a tester "Settings → Software Update"** (the button is gone, and it lied anyway —
+`checkForUpdateAsync` compares the server to what is DOWNLOADED, not what is RUNNING, which is
+why it said "You're up to date" through the 07-09/07-11 stranded-OTA incidents). **Never tell a
+tester to cold-start twice** — that is the dance the pill replaced. Only if the pill never shows
+is the device stranded on the embedded bundle → `/ota-rescue`.
 
 ---
 

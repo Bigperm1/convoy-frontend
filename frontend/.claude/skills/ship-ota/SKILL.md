@@ -37,8 +37,16 @@ eas update --branch mapbox-migration --message "<one-line summary>" --non-intera
 ```
 Report the Update group ID, commit hash, and EAS dashboard link back to Jeff.
 
-## 6. Pickup instructions
-Tell Jeff: pull via **Settings → Software Update** (the in-app button). If the button is missing, the device is on the embedded bundle — use `/ota-rescue` guidance (foreground 2 min on Wi-Fi → force-quit → reopen).
+## 6. Pickup instructions — the RED PILL, and nothing else
+Tell Jeff and the testers exactly one thing:
+
+> Open the app and leave it on the map for a few seconds. A red **"Update ready — tap to install"** pill appears under the search bar. Tap it. Done.
+
+That is `src/UpdateReadyPill.tsx`: it watches `Updates.useUpdates().isUpdatePending`, so it shows the moment the new bundle finishes downloading, and one tap calls `reloadAsync()` — the new JS runs immediately. It is deliberately hidden while turn-by-turn nav is active and comes back when the drive ends.
+
+**Do NOT tell anyone to use "Settings → Software Update" — that button was REMOVED** (Jeff, 2026-07-25). It was confusing next to the pill, and it actively lied: `checkForUpdateAsync` compares the server against what is DOWNLOADED on disk, not what is RUNNING, so it answered "You're up to date" during the 2026-07-09/07-11 stranded-OTA incidents. **Do not tell anyone to force-close twice either** — that is the old cold-start dance the pill exists to replace.
+
+Only if the pill never appears is the device stranded on the embedded bundle → `/ota-rescue` (foreground ~2 min on Wi-Fi → force-quit → reopen).
 
 ## Hard rules
 - NEVER run `eas submit` — that's a separate, explicitly-authorized action.

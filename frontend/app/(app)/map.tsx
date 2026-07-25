@@ -3882,6 +3882,19 @@ export default function MapScreen() {
             // Drop follow like a finger pan (arms the 20s auto-recenter) so the
             // overview holds instead of the chase cam snapping straight back.
             handleUserPan();
+            // FACE NORTH (Jeff, 2026-07-24: "when tappin the crew button ... make sure
+            // that when it zooms out it always faces north? right now it faces the
+            // direction of the car is facing"). MUST come AFTER handleUserPan — that
+            // call deliberately CLEARS northUpHold (:1559, a manual pan releases the
+            // compass hold), so setting it first would be wiped out immediately.
+            // This is the same lever the Compass FAB uses (:3865) and the only one
+            // that actually works: it flips the engine to mapView 'north_up', which
+            // is the AUTHORITATIVE camera path. Without it the map stays heading-up,
+            // the follow camera keeps pushing the car's bearing, and fitBounds cannot
+            // correct it — fitBounds takes no heading, and it supersedes the 250 ms
+            // flatten that ConvoyMapbox issues just before it. Released the same way
+            // the compass hold is: a manual pan, or nav starting.
+            setNorthUpHold(true);
             setCrewSignal((n) => n + 1);
           }}
           activeOpacity={0.8}

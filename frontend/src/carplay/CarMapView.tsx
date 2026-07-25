@@ -463,6 +463,13 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
             // kept pushing frames over the overview and it never landed.
             camHoldUntilRef.current = Date.now() + 15000;
             lockReadyRef.current = false;
+            // FACE NORTH, and keep facing north. The setCamera below asks for
+            // heading 0, but that alone is not durable: camHdgOverrideRef (:292) is
+            // what the lockstep consults every frame, and while it is undefined the
+            // camera is free to swing back to the car's bearing. Setting the north-up
+            // STATE pins the override at 0 for the whole overview. Mirrors the phone's
+            // northUpHold. Released automatically when navigation starts (:291).
+            setCarNorthUp(true);
             // Visible confirmation (also a field diagnostic: pill without zoom =
             // camera problem; no pill = the tap never arrived).
             setCarState({ crewViewUntil: Date.now() + 3000, crewViewCount: Math.max(0, pts.length - 1) });

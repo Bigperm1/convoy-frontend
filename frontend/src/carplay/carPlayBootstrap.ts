@@ -12,7 +12,7 @@
 import { NativeModules, Platform, AppState, processColor } from 'react-native';
 import * as Location from 'expo-location';
 import { carPlayHookOwnsRoot } from './carPlayShared';
-import { setCarState, getCarState } from './carStore';
+import { setCarState, getCarState, emitCarGesture } from './carStore';
 import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
 import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
@@ -63,6 +63,17 @@ export function initCarPlayBootstrap(): void {
         // carActions.CAR_MAP_BUTTON_CONFIG). Ignored harmlessly on older builds.
         ...CAR_MAP_BUTTON_CONFIG,
         onMapButtonPressed: ({ id }: { id: string }) => handleCarMapButton(id),
+        // iOS-26 pinch/zoom — the COLD root was missing these entirely, so a driver
+        // who connected the head unit without opening the phone app first had no
+        // pinch at all (the warm root in ConvoyCarPlay.tsx has had them since
+        // d704ced). Same gesture bus, so CarMapView biases its follow-zoom
+        // identically on both roots. Harmless below iOS 26 — the native delegate
+        // methods are API_AVAILABLE(ios 26.0) and simply never fire.
+        onDidBeginZoomGesture: () => emitCarGesture({ kind: 'zoomBegin' }),
+        onDidUpdateZoomGesture: (e: { scale: number; velocity: number }) =>
+          emitCarGesture({ kind: 'zoom', scale: e?.scale ?? 1, velocity: e?.velocity ?? 0 }),
+        onDidEndZoomGesture: (e: { velocity: number }) =>
+          emitCarGesture({ kind: 'zoomEnd', velocity: e?.velocity ?? 0 }),
       });
       CarPlay.setRootTemplate(t);
       setCarState({ cpDbg: 'idle:SET conn=' + (CarPlay.connected ? '1' : '0') });

@@ -27,6 +27,7 @@ import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/component
 import { hailBus } from "../../src/hailBus";
 import { subscribeAvatarHold } from "../../src/avatarHoldBus";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import { ensureLocationPermission as askLocationPermission } from "../../src/permissionGate";
 import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, getMapModeChoice, mapModeToLegacy, getAvatarMode, setAvatarMode, getSelfMarkerType, getClassPaint, getVehicleClass, unitForCountry, getSpeedAlertMode, getRouteColor } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
@@ -124,7 +125,11 @@ async function ensureLocationPermission(): Promise<boolean> {
     try {
       let { status } = await Location.getForegroundPermissionsAsync();
       if (status === "undetermined") {
-        status = (await Location.requestForegroundPermissionsAsync()).status;
+        // Through the shared gate so this can never land on top of another OS
+        // sheet (mic / notifications). Location is the FIRST thing asked for,
+        // because the Map is the landing screen and is useless without it.
+        // See src/permissionGate.ts.
+        status = (await askLocationPermission()) as typeof status;
       }
       return status === "granted";
     } catch {

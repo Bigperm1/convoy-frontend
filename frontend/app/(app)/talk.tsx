@@ -18,6 +18,8 @@ import { useAuth } from '../../src/auth';
 import { useSettings } from '../../src/settings';
 import { useLatestTier, type ProximityTier } from '../../src/proximityAudio';
 import { usePttChannel, type PTTMessage } from '../../src/pttChannel';
+import { ensureMicPermission, ensureNotificationPermission } from '../../src/permissionGate';
+import { registerPushToken } from '../../src/pushRegistration';
 import { livePttBus, setCommsScreenFocused, acquireFloor, releaseFloor, getFloorHolder, floorBus, threadBus } from '../../src/livePtt';
 import { commsRead } from '../../src/commsRead';
 import { setPlaybackAudioMode, setIdleAudioMode } from '../../src/audioMode';
@@ -196,13 +198,21 @@ export default function TalkScreen() {
     // calmly here rather than under a press. Requesting it during a PTT press
     // and then immediately starting a recording crashes the iOS audio session.
     // Only prompts when status is still undetermined.
+    //
+    // NOTIFICATIONS ARE ALSO ASKED HERE (2026-07-25), not at login. Push on this
+    // app means hails and crew messages, so Comms is the screen where the ask
+    // makes sense — and asking on login is what stacked every dialog at once
+    // ("bombarded with the allows right when you login"). Both go through
+    // src/permissionGate.ts, which serializes prompts with a gap, so the mic
+    // sheet is fully dismissed before the notification sheet appears. Awaiting
+    // the mic call first also fixes the ORDER: mic is what this screen actually
+    // needs, so it is asked first and notifications follow.
+    // Once notifications are granted we register the push token immediately,
+    // because login no longer does it for a first-launch user.
     (async () => {
-      try {
-        const p = await Audio.getPermissionsAsync();
-        if (p.status === 'undetermined' && p.canAskAgain) {
-          await Audio.requestPermissionsAsync();
-        }
-      } catch {}
+      await ensureMicPermission();
+      const status = await ensureNotificationPermission();
+      if (status === 'granted') void registerPushToken();
     })();
     // Poll nearby every 20s while the Comms screen is focused.
     const t = setInterval(loadNearby, 20000);

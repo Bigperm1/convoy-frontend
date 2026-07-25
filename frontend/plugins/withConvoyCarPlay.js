@@ -624,8 +624,40 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     ConvoyRNHost.endCarBgTask()
   }
 
+  // CRASH-RESTART RECOVERY (2026-07-25). REPRODUCED in the CarPlay simulator:
+  //   normal launch            -> 3x "Setting root template", CarPlay mounts
+  //   SIGKILL then relaunch    -> 0x, ZERO carplayframework activity, head unit blank
+  //   graceful quit + relaunch -> 3x, mounts fine
+  // So it is specifically the CRASH path. When the process dies while connected, iOS
+  // brings the CarPlay scene back ACTIVE without re-delivering
+  // templateApplicationScene(_:didConnect:to:), so RNCarPlay never learns the interface
+  // controller, RNCPStore stays disconnected, and JS's checkForConnection() poke can
+  // never recover it (it early-returns on !isConnected). Nothing in JS can fix this —
+  // the native store is the thing that is empty. That is Jeff's report: after a crash
+  // CarPlay only comes back by power-cycling the car, because a real power cycle is
+  // what finally produces a fresh didConnect.
+  //
+  // Fix: on every activation, if we hold no car window in THIS process we never got a
+  // didConnect — so establish the connection from the scene itself. CPTemplateApplicationScene
+  // exposes both interfaceController and carWindow, which is everything didConnect passes.
+  // carWindowRef is a weak static cleared on disconnect and nil in a fresh process, so
+  // this is self-guarding: it runs exactly once per process on the recovery path and
+  // never on the normal path (where didConnect already set it).
+  private func recoverCarPlayIfNeeded(_ scene: UIScene) {
+    guard ConvoyRNHost.carWindowRef == nil else { return }
+    guard let cpScene = scene as? CPTemplateApplicationScene else { return }
+    let ic = cpScene.interfaceController
+    let win = cpScene.carWindow
+    ConvoyRNHost.carSceneState = "recover"
+    RNCarPlay.connect(with: ic, window: win)
+    guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
+    ConvoyRNHost.mount(moduleName: "ConvoyCarSurface", in: win, appDelegate: appDelegate, makeVisible: false)
+    ConvoyRNHost.armCarRepaints(in: win)
+  }
+
   func sceneDidBecomeActive(_ scene: UIScene) {
     ConvoyRNHost.carSceneState = "active"
+    recoverCarPlayIfNeeded(scene)
     ConvoyRNHost.burstCarRepaints()
     // Force the screen-sized layout through on activation — CarPlay may never re-deliver
     // a real window.bounds, so re-assert the carWindow root's frame to the head-unit
@@ -635,7 +667,11 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
       vc.view.setNeedsLayout(); vc.view.layoutIfNeeded()
     }
   }
-  func sceneWillEnterForeground(_ scene: UIScene) { ConvoyRNHost.carSceneState = "fg"; ConvoyRNHost.burstCarRepaints() }
+  func sceneWillEnterForeground(_ scene: UIScene) {
+    ConvoyRNHost.carSceneState = "fg"
+    recoverCarPlayIfNeeded(scene)   // same crash-restart belt as sceneDidBecomeActive
+    ConvoyRNHost.burstCarRepaints()
+  }
   func sceneWillResignActive(_ scene: UIScene) { ConvoyRNHost.carSceneState = "inactive" }
   func sceneDidEnterBackground(_ scene: UIScene) { ConvoyRNHost.carSceneState = "bg" }
 

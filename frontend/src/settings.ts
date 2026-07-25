@@ -208,7 +208,7 @@ routeColor: "#2DEC86",
 show3dBuildings: true,
 novaGreeting: false,
 novaSpeeding: false,
-novaMidDrive: false,
+novaMidDrive: true,   // mid-drive callouts ON at first launch (Jeff, 2026-07-25)
 novaMuted: false,
 novaVoice: true,
 novaVoiceName: "nova",
@@ -223,7 +223,7 @@ speedUnitManual: false,
 showWeatherLayer: true,
 weatherOnMigrated: true,
 speedCameras: false,
-roadIncidents: true,
+roadIncidents: false,  // OFF at first launch (Jeff, 2026-07-25)
 showPlacePins: true,
 showNearby: true,
 // Default Gas Jockey: only the four major BC chains shown; the rest (and
@@ -371,11 +371,18 @@ export function getClassPaint(s: Settings): { primary?: string; secondary?: stri
 export const STOCK_AUDIO_VOL = 0.6; // default stock for the tuned-relative sources
 export type AudioVolKey = 'volVoice' | 'volDings' | 'volComms' | 'volTransmission';
 // Scout/Voice stocks at MAX (1.0); dings/comms/transmission at STOCK_AUDIO_VOL.
+// Calibrated stock levels (Jeff, 2026-07-25): voice 80 / alerts 60 / comms 80 /
+// transmissions 80. These are the values an UNTUNED install plays at and what the
+// Audio screen's sliders seed from, so they are the "first launch" defaults — a
+// tester who has already moved a slider keeps their own number (getAudioVol only
+// falls back to these when the key is undefined).
+// Voice came down off the 1.0 ceiling so there is headroom to tune UP as well as
+// down; comms/transmissions came up so crew speech isn't buried under music.
 const STOCK_BY_KEY: Record<AudioVolKey, number> = {
-  volVoice: 1.0,
-  volDings: STOCK_AUDIO_VOL,
-  volComms: STOCK_AUDIO_VOL,
-  volTransmission: STOCK_AUDIO_VOL,
+  volVoice: 0.8,
+  volDings: 0.6,
+  volComms: 0.8,
+  volTransmission: 0.8,
 };
 // Read at each playback site (Scout TTS, dings, comms, transmission) to scale
 // volume; falls back to the per-key stock when a source hasn't been tuned. Clamped.

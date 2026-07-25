@@ -20,7 +20,7 @@ import ShareToast from "../../src/ShareToast";
 import { GlobalListeningGlow } from "../../src/components/ListeningEdgeGlow";
 import { useLiveWalkieListener } from "../../src/livePtt";
 import { useSettings, hydrateCarFromProfile } from "../../src/settings";
-import { api } from "../../src/api";
+import { registerPushToken } from "../../src/pushRegistration";
 import { hailBus } from "../../src/hailBus";
 import { shareBus } from "../../src/shareBus";
 import { shareInbox } from "../../src/shareInbox";
@@ -29,8 +29,6 @@ import { getEvent } from "../../src/eventsApi";
 import { initVisitMonitor } from "../../src/visitMonitor";
 import { refreshWidgetFeed } from "../../src/widgetFeed";
 import * as Notifications from "expo-notifications";
-import Constants from "expo-constants";
-import * as Device from "expo-device";
 import { initCallDetection } from "../../src/callState";
 
 // ===== Push notification module-scope config =====
@@ -80,71 +78,6 @@ if (Platform.OS !== "web") {
   });
 }
 
-// One-shot async helper invoked from the layout's mount effect. Pulls the
-// FCM/APNs device token from the OS and PUTs it to /auth/push-token. Safe to
-// call on every cold start — backend is idempotent.
-// Human-readable device identity (expo-device). Reported to the backend so the
-// owner admin roster shows what each tester is actually running.
-function deviceInfo() {
-  return {
-    device_model: Device.modelName || undefined,                    // "iPhone 15 Pro", "Pixel 7"
-    device_brand: Device.brand || Device.manufacturer || undefined, // "Apple", "Google", "Samsung"
-    os_name: Device.osName || Platform.OS,                          // "iOS", "Android"
-    os_version: Device.osVersion || undefined,                      // "18.1", "14"
-  };
-}
-
-async function registerForPushNotifications() {
-  if (Platform.OS === "web") return;
-  // Always report the device identity — even if push is denied/unavailable — so
-  // the admin roster knows what every tester is on. The backend token field is
-  // optional, so a device-only update is valid.
-  const info = deviceInfo();
-  const reportDeviceOnly = () =>
-    api.put("/auth/push-token", { platform: Platform.OS, ...info }).catch(() => {});
-
-  try {
-    const perm = await Notifications.getPermissionsAsync();
-    let final = perm.status;
-    // Only PROMPT on the very first launch (status still "undetermined"). On
-    // later launches we just read the saved status, so the OS prompt never
-    // reappears. If previously denied, we silently skip (WS fallback delivers).
-    if (perm.status === "undetermined" && perm.canAskAgain) {
-      final = (await Notifications.requestPermissionsAsync()).status;
-    }
-    if (final !== "granted") {
-      // No push — still record the device, then leave (WS fallback handles Hails).
-      await reportDeviceOnly();
-      return;
-    }
-
-    // Expo push token ("ExponentPushToken[...]"). Expo's hosted push service
-    // relays to FCM (Android) / APNs (iOS) on our behalf, so the backend only
-    // has to POST to Expo - no Emergent relay, no raw FCM/APNs handling.
-    const projectId =
-      Constants?.expoConfig?.extra?.eas?.projectId ??
-      (Constants as any)?.easConfig?.projectId;
-    const tokenData = await Notifications.getExpoPushTokenAsync(
-      projectId ? { projectId } : undefined
-    );
-    if (!tokenData?.data) {
-      await reportDeviceOnly();
-      return;
-    }
-
-    await api.put("/auth/push-token", {
-      token: tokenData.data,
-      platform: Platform.OS,
-      ...info,
-    });
-  } catch (e) {
-    // Permission denied, simulator, or other token-fetch failure. Non-fatal —
-    // still try to record the device identity for the roster.
-    await reportDeviceOnly();
-    if (__DEV__) console.warn("Push token registration failed:", e);
-  }
-}
-
 export default function AppLayout() {
   const { user } = useAuth();
   const router = useRouter();
@@ -176,7 +109,14 @@ export default function AppLayout() {
   // token gets re-saved against the new user's row.
   useEffect(() => {
     if (!user) return;
-    registerForPushNotifications();
+    // NO PERMISSION PROMPT HERE (2026-07-25). The shell used to call
+    // Notifications.requestPermissionsAsync() the instant a user logged in, which
+    // is what stacked the OS dialogs at first launch ("bombarded with the allows
+    // right when you login"). Login now only RECORDS the device for the roster —
+    // no dialog — and grabs a push token if permission happens to be granted
+    // already. The ask itself lives on the Comms tab, where hails and messages
+    // land, serialized through src/permissionGate.ts.
+    void registerPushToken();
   }, [user]);
 
   // ===== Clear the app-icon badge =====

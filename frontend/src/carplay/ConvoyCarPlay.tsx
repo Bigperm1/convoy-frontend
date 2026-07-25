@@ -812,7 +812,14 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
   // phone screen unmounts/backgrounds and its writes stop, the module-scope
   // carDataService ('service', started on CarPlay connect) takes over within
   // FEED_STALE_MS — so the head unit keeps showing the convoy + hazards cold.
-  useEffect(() => { setCarPeers(toCarPeers(peers), 'phone'); }, [peers]);
+  // Legacy REST/WS peers — FALLBACK ONLY. map.tsx pushes the presence-merged crew
+  // (the real live feed); this must never clobber it with the empty legacy map.
+  useEffect(() => {
+    const incoming = toCarPeers(peers);
+    if (!incoming.length) return;                        // never write empty
+    if ((getCarState().peers || []).length > 0) return;  // presence feed owns it
+    setCarPeers(incoming, 'phone');
+  }, [peers]);
   useEffect(() => { setCarHazards(hazards || [], 'phone'); }, [hazards]);
 
   // ---- position mirror: ADDITIVE ONLY ----

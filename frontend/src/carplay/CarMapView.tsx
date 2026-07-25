@@ -117,6 +117,11 @@ const CAR_ZOOM_MAX = 20;
 // If it ever does look buried, prefer narrowing the nav stack over raising the car —
 // raising it costs road-ahead, which is the whole point of the low framing.
 const CAR_LOWER_PAD_FRAC = 0.52;
+// Distance from the CarPlay canvas bottom to the centre of the gap between the turn
+// banner and the ETA banner — the line Jeff wants the car sitting on. Mirrors the
+// banner stack in ConvoyCarPlay.tsx: NAV_STACK_BOTTOM(8) + TURN_ROW_H(42) + NAV_GAP/2(4).
+// KEEP IN SYNC with those three constants (both are listed in CARPLAY.md).
+const CAR_BANNER_GAP_FROM_BOTTOM = 54;
 // Shift the pinned car LEFT of center (fraction of map width, applied as camera
 // paddingRight → the car moves left by ~half this). 0.22 sat it near the left
 // speed-limit chip; 0.08 centres it in the open gap BETWEEN the bottom-left HUD
@@ -358,7 +363,20 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
       // = screen centre = car mid-screen. Fall back to nominal CarPlay dimensions
       // instead of zero so the car is ALWAYS pinned low.
       padding: {
-        paddingTop: Math.round((h > 0 ? h : 240) * CAR_LOWER_PAD_FRAC),
+        // VERTICAL ANCHOR (2026-07-24) — Jeff: "get the car down a little more so it
+        // is in line with the space between the turn banner and eta banner".
+        // DERIVED, not a tuned fraction: Mapbox centres the camera in the inset rect,
+        // so the car sits at y = (h + paddingTop)/2. Setting
+        //   paddingTop = h - 2*CAR_BANNER_GAP_FROM_BOTTOM
+        // puts the car exactly on that gap's centre line at ANY canvas height —
+        // 240pt, 480pt, whatever the head unit reports — instead of drifting the way
+        // a fixed fraction does. Clamped so a tiny/zero measurement can never push
+        // the car off-screen; the old fraction is the floor.
+        paddingTop: (() => {
+          const H = h > 0 ? h : 240;
+          const anchored = H - 2 * CAR_BANNER_GAP_FROM_BOTTOM;
+          return Math.round(Math.max(H * CAR_LOWER_PAD_FRAC, Math.min(H * 0.72, anchored)));
+        })(),
         paddingBottom: 0,
         paddingLeft: 0,
         paddingRight: Math.round((w > 0 ? w : 400) * CAR_LEFT_PAD_FRAC),

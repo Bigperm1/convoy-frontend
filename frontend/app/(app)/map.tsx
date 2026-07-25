@@ -40,7 +40,7 @@ import {
 } from "../../src/nav";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
-import { setCarState, subscribeCarGesture } from "../../src/carplay/carStore";
+import { setCarState, setCarPeers, subscribeCarGesture } from "../../src/carplay/carStore";
 import { useVoice } from "../../src/useVoice";
 import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
@@ -1663,6 +1663,49 @@ export default function MapScreen() {
     places: (settings.showPlacePins !== false ? placePins : []),
   });
 
+  // ── CarPlay crew feed ──────────────────────────────────────────────────────
+  // WHY: the car surface fed carStore from the LEGACY REST/WS `peers` map, which is
+  // essentially always empty since presence became the live feed — so the car had no
+  // crew. The CarPlay Crew button gathered 0 peers and silently self-zoomed, and the
+  // car map drew no convoy, while the pill (counting presence) said "2 Crew".
+  //
+  // ⚠ HOOK PLACEMENT IS LOAD-BEARING. This MUST stay above map.tsx's
+  // `if (!coords) return <Locating…>` early return. Two crashes today came from
+  // putting these hooks BELOW it: with no GPS fix the hooks did not run, then once
+  // coords arrived the hook count changed and React threw "Rendered more hooks than
+  // during the previous render" — fatal, and it surfaced as an opaque native abort.
+  // peerList is built after that return, so we read peerListRef (kept fresh there)
+  // on an interval instead of deriving a render-time dependency.
+  const lastCrewSigRef = useRef('');
+  useEffect(() => {
+    if (!carConnected) return;
+    const push = () => {
+      const list = peerListRef.current || [];
+      // Coordinates rounded to ~11 m so GPS jitter alone cannot retrigger a write.
+      const sig = list
+        .map((p) => `${p.user_id}:${p.lat?.toFixed(4) ?? ''}:${p.lng?.toFixed(4) ?? ''}:${p.status ?? ''}`)
+        .join('|');
+      if (sig === lastCrewSigRef.current) return;
+      lastCrewSigRef.current = sig;
+      setCarPeers(
+        list
+          .filter((p) => p && p.user_id)
+          .map((p) => ({
+            id: String(p.user_id),
+            handle: p.handle || 'Driver',
+            lat: typeof p.lat === 'number' ? p.lat : undefined,
+            lng: typeof p.lng === 'number' ? p.lng : undefined,
+            heading: typeof p.heading === 'number' ? p.heading : undefined,
+            status: (p.status === 'parked' ? 'parked' : 'live') as 'live' | 'parked',
+          })),
+        'phone',
+      );
+    };
+    push();
+    const id = setInterval(push, 2000);   // bounded write rate, no render coupling
+    return () => clearInterval(id);
+  }, [carConnected]);
+
   // Mirror LANE GUIDANCE onto the CarPlay banner ("3D-lanes lite") — the same
   // fail-closed pickLaneCue the phone's lane row uses, so the head unit shows
   // the identical glowing-lane diagram as the turn approaches. null → hidden.
@@ -3015,6 +3058,7 @@ export default function MapScreen() {
     return Object.values(byId);
   })();
   peerListRef.current = peerList; // keep the convoy-health monitor reading the live crew
+
   const liveDot = live === "live" ? COLORS.success : live === "connecting" ? COLORS.warning : COLORS.danger;
   const liveText = live === "live" ? "Live" : live === "connecting" ? "Connecting" : "Offline";
 

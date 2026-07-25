@@ -14,7 +14,7 @@ export const PRIVACY_POLICY: { title: string; updated: string; intro: string; se
   sections: [
     {
       heading: "Who We Are",
-      body: "Hairpin is operated by its developers and owners (\u201cHairpin\u201d, \u201cwe\u201d, \u201cus\u201d). If you have any question about this policy or your data, contact us at support@convoy.app.",
+      body: "Hairpin is operated by its developers and owners (\u201cHairpin\u201d, \u201cwe\u201d, \u201cus\u201d). If you have any question about this policy or your data, contact us at support@hairpin.app.",
     },
     {
       heading: "Information We Collect",
@@ -56,7 +56,7 @@ export const PRIVACY_POLICY: { title: string; updated: string; intro: string; se
       heading: "Retention and Deletion",
       body:
         "Account and profile data is kept while your account exists. Live positions are transient and are not kept as a location history. Transmissions and hazard reports are kept only as long as they are useful to your crew. Crash reports are kept for diagnostics.\n\n" +
-        "You can ask us to delete your account and associated data at any time by emailing support@convoy.app.",
+        "You can ask us to delete your account and associated data at any time by emailing support@hairpin.app.",
     },
     {
       heading: "Security",
@@ -71,7 +71,7 @@ export const PRIVACY_POLICY: { title: string; updated: string; intro: string; se
     {
       heading: "Your Rights",
       body:
-        "You can access, correct or delete your information, withdraw permissions such as location, microphone or notifications in your device settings, and request a copy of your data. Contact support@convoy.app.",
+        "You can access, correct or delete your information, withdraw permissions such as location, microphone or notifications in your device settings, and request a copy of your data. Contact support@hairpin.app.",
     },
     {
       heading: "Safety and Distracted Driving",
@@ -96,7 +96,7 @@ export const PRIVACY_POLICY: { title: string; updated: string; intro: string; se
     },
     {
       heading: "Contact",
-      body: "Questions about privacy, or a request to delete your data: support@convoy.app.",
+      body: "Questions about privacy, or a request to delete your data: support@hairpin.app.",
     },
   ],
 };
@@ -113,7 +113,7 @@ export const TERMS_OF_SERVICE: { title: string; updated: string; intro: string; 
     { heading: "Location & Navigation", body: "Routing, ETAs, hazards, and speed data may be inaccurate or delayed. Always rely on real-world conditions and road signs. [Placeholder.]" },
     { heading: "Data Attribution", body: "Road-incident data for British Columbia contains information licensed under the Open Government Licence – British Columbia, © Province of British Columbia (DriveBC Open511). Fixed speed-camera and speed-limit data © OpenStreetMap contributors, under the Open Database Licence (ODbL)." },
     { heading: "Disclaimers & Liability", body: "The app is provided “as is”. Add your warranty disclaimers and liability limits here. [Placeholder.]" },
-    { heading: "Changes & Contact", body: "We may update these terms; continued use means acceptance. Questions: support@convoy.app. [Placeholder.]" },
+    { heading: "Changes & Contact", body: "We may update these terms; continued use means acceptance. Questions: support@hairpin.app. [Placeholder.]" },
   ],
 };
 

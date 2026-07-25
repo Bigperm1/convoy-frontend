@@ -34,9 +34,9 @@ export default function SettingsMenu() {
   const routeColor = getRouteColor(settings);
 
   const sendFeedback = useCallback(() => {
-    const url = "mailto:support@convoy.app?subject=Hairpin%20Feedback";
+    const url = "mailto:support@hairpin.app?subject=Hairpin%20Feedback";
     Linking.openURL(url).catch(() =>
-      Alert.alert("Couldn't open Mail", "Email us at support@convoy.app")
+      Alert.alert("Couldn't open Mail", "Email us at support@hairpin.app")
     );
   }, []);
 

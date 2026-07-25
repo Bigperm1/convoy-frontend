@@ -210,7 +210,10 @@ const styles = StyleSheet.create({
   avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 2, borderColor: "rgba(45,236,134,0.55)" },
   avatarImg: { width: 46, height: 46 },
   handle: { color: COLORS.text, fontSize: 18, fontWeight: "700", letterSpacing: -0.3 },
-  car: { color: COLORS.textDim, fontSize: 13, marginTop: 2 },
+  // White, not textDim — the car line is the whole point of tapping a peer, and
+  // #808080 on the glass card read as unlit grey on a phone in a mount (Jeff,
+  // 2026-07-25). Same call as the roster sheet's `sub`.
+  car: { color: COLORS.text, fontSize: 13, marginTop: 2 },
   closeBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.10)" },
   metaRow: { flexDirection: "row", gap: 8, marginTop: 14, marginBottom: 14, flexWrap: "wrap" },
   metaCell: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)" },

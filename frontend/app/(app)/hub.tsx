@@ -1115,7 +1115,7 @@ const styles = StyleSheet.create({
   c: { flex: 1, backgroundColor: COLORS.bg },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { color: COLORS.text, fontSize: 34, fontWeight: "700", letterSpacing: -1 },
-  sub: { color: COLORS.textDim, marginTop: 2, fontSize: 13 },
+  sub: { color: COLORS.text, marginTop: 2, fontSize: 13 },
   iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(118,118,128,0.24)", alignItems: "center", justifyContent: "center" },
   logoBacking: {
     // Identical to the map's logo button (mapLogoBacking) so it never jumps between tabs.
@@ -1137,13 +1137,13 @@ const styles = StyleSheet.create({
   userHero: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)", backgroundColor: "#000" },
   emptyHero: { width: 72, height: 72, borderRadius: 16, marginBottom: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", backgroundColor: "#000" },
   emptyTitle: { color: COLORS.text, fontWeight: "600", fontSize: 17, marginTop: 10 },
-  emptyText: { color: COLORS.textDim, textAlign: "center", marginTop: 6, fontSize: 13 },
+  emptyText: { color: COLORS.text, textAlign: "center", marginTop: 6, fontSize: 13 },
 
   commCard: { flexDirection: "row", alignItems: "center", padding: 12, gap: 12 },
   commIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: COLORS.primary + "22", alignItems: "center", justifyContent: "center" },
   commLogo: { width: 44, height: 44, borderRadius: 14 },
   commName: { color: COLORS.text, fontWeight: "600", fontSize: 16 },
-  commMeta: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
+  commMeta: { color: COLORS.text, fontSize: 12, marginTop: 2 },
   // Feature pills row inside the community card
   featurePills: { flexDirection: "row", gap: 4, marginTop: 6 },
   featurePill: {
@@ -1224,9 +1224,9 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   featureTitle: { color: COLORS.text, fontSize: 15, fontWeight: "600", letterSpacing: -0.1 },
-  featureSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2, lineHeight: 16 },
+  featureSub: { color: COLORS.text, fontSize: 12, marginTop: 2, lineHeight: 16 },
   toggleTitle: { color: COLORS.text, fontWeight: "500", fontSize: 14 },
-  toggleSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
+  toggleSub: { color: COLORS.text, fontSize: 12, marginTop: 2 },
 
   btn: { marginTop: 22, borderRadius: 14, overflow: "hidden" },
   btnGrad: { paddingVertical: 14, alignItems: "center" },
@@ -1239,7 +1239,7 @@ const styles = StyleSheet.create({
   statusText: { color: COLORS.success, fontSize: 12, fontWeight: "600" },
 
   detailDesc: { color: COLORS.text, fontSize: 14, marginTop: 6 },
-  detailMeta: { color: COLORS.textDim, fontSize: 12, marginTop: 6 },
+  detailMeta: { color: COLORS.text, fontSize: 12, marginTop: 6 },
   inviteBox: { flexDirection: "row", alignItems: "center", padding: 14, borderRadius: 12, backgroundColor: "rgba(118,118,128,0.18)", gap: 12 },
   inviteCode: { flex: 1, color: COLORS.primary, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 15, fontWeight: "600", letterSpacing: 1 },
 
@@ -1285,8 +1285,12 @@ const styles = StyleSheet.create({
   clubLogo: { width: 42, height: 42, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.15)" },
   clubLogoPlaceholder: { width: 42, height: 42, borderRadius: 12, backgroundColor: COLORS.primary + "22", alignItems: "center", justifyContent: "center" },
   clubName: { color: COLORS.text, fontWeight: "700", fontSize: 17, letterSpacing: -0.3, flexShrink: 1 },
-  clubMeta: { color: COLORS.textDim, fontSize: 12, fontWeight: "500" },
-  clubDesc: { color: COLORS.textDim, fontSize: 13, lineHeight: 18, marginTop: 10 },
+  // Club CONTENT text is white, not textDim (Jeff, 2026-07-25: "in the hub club
+  // the fonts are grey"). #808080 at 12-13pt over the dark card was the least
+  // readable copy in the app. Small FORM labels (`label`, `section`) stay dim —
+  // those are chrome, and dimming them is what gives the content its hierarchy.
+  clubMeta: { color: COLORS.text, fontSize: 12, fontWeight: "500" },
+  clubDesc: { color: COLORS.text, fontSize: 13, lineHeight: 18, marginTop: 10 },
   clubTags: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 12 },
   clubTag: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
   clubTagText: { color: "#D8D8DC", fontSize: 11, fontWeight: "600" },
@@ -1305,7 +1309,7 @@ const styles = StyleSheet.create({
   tagWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   tagChip: { backgroundColor: "rgba(118,118,128,0.20)", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: "transparent" },
   tagChipOn: { backgroundColor: "rgba(45,236,134,0.18)", borderColor: COLORS.primary },
-  tagChipText: { color: COLORS.textDim, fontSize: 12, fontWeight: "600" },
+  tagChipText: { color: COLORS.text, fontSize: 12, fontWeight: "600" },
   tagChipTextOn: { color: COLORS.primary },
 
   detailBannerEdit: { width: "100%", height: 120, borderRadius: 16, overflow: "hidden" },

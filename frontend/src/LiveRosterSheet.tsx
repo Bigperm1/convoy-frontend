@@ -155,7 +155,10 @@ const styles = StyleSheet.create({
   avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1.5, borderColor: "rgba(45,236,134,0.45)" },
   avatarImg: { width: 34, height: 34 },
   handle: { color: COLORS.text, fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
-  sub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
+  // Car · distance · parked — WHITE, not textDim. This line is the reason the
+  // roster exists (Jeff, 2026-07-25: the crew car info/distance read grey), and
+  // #808080 at 12pt is the least legible thing on the sheet.
+  sub: { color: COLORS.text, fontSize: 12, marginTop: 1 },
   actBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 999, backgroundColor: COLORS.brand },
   actBtnSent: { backgroundColor: COLORS.success },
   driveBtn: { backgroundColor: "rgba(45,236,134,0.12)", borderWidth: 1, borderColor: "rgba(45,236,134,0.55)" },

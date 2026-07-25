@@ -3905,7 +3905,9 @@ export default function MapScreen() {
           activeOpacity={0.8}
         >
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
-          <Ionicons name="people" size={26} color="#fff" />
+          {/* Brand-green people glyph over a white "Crew" label (Jeff, 2026-07-25).
+              The CarPlay crew map button uses the SAME green — see CAR_ICON_CREW. */}
+          <Ionicons name="people" size={26} color={COLORS.brand} />
           <Text style={styles.fabCrewLabel}>Crew</Text>
         </TouchableOpacity>
         {/* Recenter FAB removed — recentering now lives in the compass tap
@@ -4582,7 +4584,7 @@ const styles = StyleSheet.create({
     ...glassLift,
   },
   // Tiny label under the people icon in the Crew FAB (round, bottom-right stack).
-  fabCrewLabel: { color: "#F4F4F4", fontSize: 9, fontWeight: "700", letterSpacing: 0.2, marginTop: -1 },
+  fabCrewLabel: { color: "#FFFFFF", fontSize: 9, fontWeight: "700", letterSpacing: 0.2, marginTop: -1 },
   // Hold-to-activate Avatar panel (bottom-left). Dark card matching the other
   // map glass; green-dot radio rows mirror the Settings MAP MODE selector.
   avatarPanel: {

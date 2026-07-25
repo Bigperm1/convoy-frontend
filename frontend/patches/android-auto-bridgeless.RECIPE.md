@@ -1,6 +1,11 @@
 # Android Auto bridgeless port — build-67 patch recipe
 
-**Status:** STAGED (not yet applied). Native change → build 67. Needs a compile + DHU/head-unit test.
+**Status:** APPLIED and SHIPPED IN BUILD 67 (verified 2026-07-24 — the diffs live in
+`patches/react-native-carplay+2.4.1-beta.0.patch`, rewriting CarPlayService.kt, CarPlaySession.kt
+and VirtualRenderer.kt onto the bridgeless `ReactHost`). Compiled clean; STILL UNVERIFIED on a
+head unit. ⚠ Before adding more Android Auto native work, CONFIRM THE TESTER IS ACTUALLY ON A
+67 BUILD — Play submit was blocked on the missing service-account key, so Android testers
+sideload APKs and may still be on 66, which would explain an unchanged "encountered an error".
 **Confirmed 2026-07-18:** Android tester (build 66) sees "Hairpin has encountered an unexpected error / Exit" when launching Hairpin on the head unit. Discoverability is already solved (Play install lists it).
 
 ## Root cause (verified in node_modules source)

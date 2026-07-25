@@ -27,7 +27,7 @@ import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/component
 import { hailBus } from "../../src/hailBus";
 import { subscribeAvatarHold } from "../../src/avatarHoldBus";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { ensureLocationPermission as askLocationPermission } from "../../src/permissionGate";
+import { ensureLocationPermission as askLocationPermission, askPermission } from "../../src/permissionGate";
 import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, getMapModeChoice, mapModeToLegacy, getAvatarMode, setAvatarMode, getSelfMarkerType, getClassPaint, getVehicleClass, unitForCountry, getSpeedAlertMode, getRouteColor } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
@@ -1811,13 +1811,26 @@ export default function MapScreen() {
         const bg = await Location.getBackgroundPermissionsAsync();
         if (bg.granted || _carAlwaysCtaShownThisSession) return;
         _carAlwaysCtaShownThisSession = true;
-        Alert.alert(
-          "Keep CarPlay tracking while locked",
-          'iOS pauses Hairpin’s GPS when your phone locks unless Location is set to "Always" — so the car map freezes until the screen wakes. Set Location to Always and CarPlay keeps moving with the phone in your pocket.',
-          [
-            { text: "Not now", style: "cancel" },
-            { text: "Open Settings", onPress: () => { void Linking.openSettings(); } },
-          ],
+        // QUEUED, not fired immediately. This is a modal that wants the driver's
+        // attention, so it goes through the same serializer as the OS permission
+        // prompts — otherwise it lands ON TOP of the location disclosure when a head
+        // unit is connected at first launch (seen in the CarPlay sim 2026-07-25:
+        // both were on screen at once, which is exactly the "bombarded with allows"
+        // pile-up we just removed). askPermission also leaves a gap after the
+        // previous sheet dismisses.
+        await askPermission(
+          () => new Promise<void>((resolve) => {
+            Alert.alert(
+              "Keep CarPlay tracking while locked",
+              'iOS pauses Hairpin’s GPS when your phone locks unless Location is set to "Always" — so the car map freezes until the screen wakes. Set Location to Always and CarPlay keeps moving with the phone in your pocket.',
+              [
+                { text: "Not now", style: "cancel", onPress: () => resolve() },
+                { text: "Open Settings", onPress: () => { void Linking.openSettings(); resolve(); } },
+              ],
+              { onDismiss: () => resolve() },
+            );
+          }),
+          undefined,
         );
       } catch {}
     })();

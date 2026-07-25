@@ -114,6 +114,15 @@ export async function ensureLocationPermission(): Promise<string> {
     const Location = require("expo-location");
     const perm = await Location.getForegroundPermissionsAsync();
     if (perm.status !== "undetermined" || !perm.canAskAgain) return perm.status;
+    // PROMINENT DISCLOSURE FIRST. Google Play requires an in-app explanation before
+    // the OS location dialog for any app requesting ACCESS_BACKGROUND_LOCATION —
+    // Android's own dialog shows no reason, unlike iOS which renders the Info.plist
+    // string inside it. Shown on both platforms so the two behave the same and the
+    // demo video matches what a reviewer sees. See src/locationDisclosure.tsx.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { requestLocationDisclosure } = require("./locationDisclosure");
+    const proceed = await requestLocationDisclosure();
+    if (!proceed) return perm.status;   // "Not now" — ask again next time, never nag
     const res = await askPermission(() => Location.requestForegroundPermissionsAsync(), perm);
     return res?.status ?? perm.status;
   } catch {

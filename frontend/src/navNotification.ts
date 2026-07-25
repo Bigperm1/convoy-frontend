@@ -518,8 +518,20 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
     // connect the app is backgrounded, so iOS CANNOT show the upgrade prompt here —
     // it silently returns the current status. The foreground ask lives in
     // askAlwaysLocationOnce (map mount) + the CarPlay-connect CTA in map.tsx.
+    // NEVER ask for background before FOREGROUND is granted. On iOS
+    // requestBackgroundPermissionsAsync() with nothing granted surfaces the
+    // WHEN-IN-USE prompt itself — which fired here on a CarPlay connect and landed on
+    // top of the location disclosure (sim, 2026-07-25), defeating the whole point of
+    // the disclosure and breaking Google's "explain before you ask" requirement.
+    // Foreground is requested through permissionGate (disclosure first); this only
+    // upgrades once that has been granted, and otherwise just reads the status.
     let canBg = false;
-    try { canBg = (await Location.requestBackgroundPermissionsAsync()).granted; } catch {}
+    try {
+      const fgNow = await Location.getForegroundPermissionsAsync();
+      canBg = fgNow.granted
+        ? (await Location.requestBackgroundPermissionsAsync()).granted
+        : (await Location.getBackgroundPermissionsAsync()).granted;
+    } catch {}
     if (!canBg) setCarState({ carDbg: "bg:no-always" }); // head-unit-visible breadcrumb
     // ALWAYS start the foreground feed (self-guards via _fgCarWatch; released with the
     // shared lock). It is the only CONTINUOUS main-context writer that lands selfLat in

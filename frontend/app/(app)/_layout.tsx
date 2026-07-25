@@ -21,6 +21,7 @@ import { GlobalListeningGlow } from "../../src/components/ListeningEdgeGlow";
 import { useLiveWalkieListener } from "../../src/livePtt";
 import { useSettings, hydrateCarFromProfile } from "../../src/settings";
 import { registerPushToken } from "../../src/pushRegistration";
+import { LocationDisclosureHost } from "../../src/locationDisclosure";
 import { hailBus } from "../../src/hailBus";
 import { shareBus } from "../../src/shareBus";
 import { shareInbox } from "../../src/shareInbox";
@@ -258,6 +259,10 @@ export default function AppLayout() {
 
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
+      {/* Prominent location disclosure — mounted once, app-wide. Renders nothing
+          until permissionGate asks for it, immediately BEFORE the OS location
+          prompt. Required by Google Play for ACCESS_BACKGROUND_LOCATION. */}
+      <LocationDisclosureHost />
       <Tabs
         screenOptions={{
           headerShown: false,

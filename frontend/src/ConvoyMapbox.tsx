@@ -34,7 +34,7 @@
 import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
-import { nearestRoadLine, roadHeadingOff, type LatLng as RoadLatLng } from "./roadSnap";
+import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getPowerMode } from "./powerMode";
@@ -1542,7 +1542,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       const cur = roadSnapRef.current;
       if (cur && roadStickyRef.current) {
         const p = projectOntoRoute(inp.lat, inp.lng, cur.line);
-        if (p && p.distM <= ROAD_SNAP_RELEASE_M) return;
+        // roadProjUsable: don't keep a lock we've driven off the END of (see roadSnap.ts).
+        if (p && roadProjUsable(p) && p.distM <= ROAD_SNAP_RELEASE_M) return;
       }
       try {
         const fc = await mapRef.current.querySourceFeatures(ROAD_SRC_ID, [], ["road"]);
@@ -2258,7 +2259,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const selfSnapped = _distSnap && _hdgOk;
   // Feed the throttled road-snap query with the latest raw pose — only while NOT route-snapped
   // (idle / off-route), so it never runs during normal on-route nav.
-  const _roadActive = !selfSnapped && selfCar != null;
+  // ROAD SNAP IS NAV-ONLY (2026-07-24). It exists to keep the car on the road while
+  // NAVIGATING but off the route line (mid-reroute). In free drive there is no route to
+  // stay pretty for, and snapping actively LIED about position: the marker sat on
+  // whatever fragment was locked — up to the release band away from the real fix — and
+  // froze/jumped at every fragment boundary. Jeff: "why cant it just pin point where I
+  // am and stick to me? its like its lost." In free drive we now draw RAW GPS.
+  const _roadActive = navigationActive && !selfSnapped && selfCar != null;
   roadInputsRef.current = {
     lat: selfCar?.lat ?? 0, lng: selfCar?.lng ?? 0,
     hdg: _travelHdg, speed: userSpeedMs ?? 0, active: _roadActive,
@@ -2276,7 +2283,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   let roadDraw: { lat: number; lng: number } | null = null;
   if (_roadActive && roadSnap && selfCar) {
     const _p = projectOntoRoute(selfCar.lat, selfCar.lng, roadSnap.line);
-    if (_p && _p.distM <= ROAD_SNAP_RELEASE_M) roadDraw = { lat: _p.lat, lng: _p.lng };
+    if (_p && roadProjUsable(_p) && _p.distM <= ROAD_SNAP_RELEASE_M) roadDraw = { lat: _p.lat, lng: _p.lng };
   }
   // DISPLAY-ONLY draw position: route line (snapped) → nearest road (idle/off-route) → raw GPS.
   // Reroute + /location + presence stay on RAW GPS (see nav.ts); NEVER lift this into `coords`.

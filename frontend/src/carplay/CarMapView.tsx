@@ -62,7 +62,7 @@ import {
   ROAD_SNAP_MOVING_MS,
   ROAD_SNAP_CROSS_DEG,
 } from '../ConvoyMapbox';
-import { nearestRoadLine, roadHeadingOff, type LatLng as RoadLatLng } from '../roadSnap';
+import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
 // (index != 0) and the casing/core draw it (index == 0), exactly like the phone.
@@ -312,7 +312,8 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
       const cur = carRoadSnapRef.current;
       if (cur && carRoadStickyRef.current) {
         const p = projectOntoRoute(inp.lat, inp.lng, cur.line);
-        if (p && p.distM <= ROAD_SNAP_RELEASE_M) return;
+        // roadProjUsable: don't keep a lock we've driven off the END of (see roadSnap.ts).
+        if (p && roadProjUsable(p) && p.distM <= ROAD_SNAP_RELEASE_M) return;
       }
       try {
         const fc = await carMapRef.current.querySourceFeatures(ROAD_SRC_ID, [], ['road']);
@@ -526,12 +527,15 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   carSnapHdgOkRef.current = _carDistSnap ? _carHdgOk : true;
   const carSnapped = _carDistSnap && _carHdgOk;
   // Feed the road-snap query (only when NOT route-snapped) + use a FRESH snap for the draw.
-  const _carRoadActive = !carSnapped && hasFix;
+  // NAV-ONLY, mirroring the phone exactly — in free drive the car marker draws RAW GPS.
+  // See the long note at ConvoyMapbox's _roadActive: off-route snapping froze and jumped
+  // the marker at every tile-clipped road-fragment boundary, on BOTH surfaces.
+  const _carRoadActive = !!s.navigating && !carSnapped && hasFix;
   carRoadInputsRef.current = { lat, lng, hdg: _carTravelHdg, speed: s.speedMs || 0, active: _carRoadActive };
   let carRoadDraw: { lat: number; lng: number } | null = null;
   if (_carRoadActive && carRoadSnap) {
     const _p = projectOntoRoute(lat, lng, carRoadSnap.line);
-    if (_p && _p.distM <= ROAD_SNAP_RELEASE_M) carRoadDraw = { lat: _p.lat, lng: _p.lng };
+    if (_p && roadProjUsable(_p) && _p.distM <= ROAD_SNAP_RELEASE_M) carRoadDraw = { lat: _p.lat, lng: _p.lng };
   }
   // DISPLAY-ONLY: route line → nearest road (idle/off-route) → raw GPS. (Raw stays authoritative
   // for everything else — this only moves the drawn car.)

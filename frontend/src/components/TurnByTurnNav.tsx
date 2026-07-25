@@ -25,7 +25,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Animated } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { LaneArrow } from "../mapboxDirections";
-import { GlassFill, hudTint } from "../Glass";
+import { GlassFill, hudTint, glassLift } from "../Glass";
 import { ManeuverArrow, maneuverDir } from "./ManeuverArrow";
 
 const YELLOW = "#2DEC86";
@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 5,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 5,
+    ...glassLift,
   },
   speedValue: { color: "#F4F4F4", fontSize: 24, fontWeight: "800", letterSpacing: -0.5, lineHeight: 26 },
   speedUnit: { color: "#F4F4F4", fontSize: 10, fontWeight: "600", letterSpacing: 0.3, marginTop: 1 },

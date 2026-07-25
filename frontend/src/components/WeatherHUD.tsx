@@ -5,7 +5,7 @@ import { View, Text, StyleSheet, Platform, TouchableOpacity, Animated } from "re
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { WeatherCondition, ForecastDay } from "../weatherLayer";
 import { weatherKind, windDirectionLabel, type WeatherKind } from "../weatherLayer";
-import { GlassFill, hudTint } from "../Glass";
+import { GlassFill, hudTint, glassLift } from "../Glass";
 
 type Props = {
   weather: WeatherCondition;
@@ -278,10 +278,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     // No hard stroke — the clear glass draws its own clean edge (see map fab/zoom);
     // a 1px stroke on top read as an unfinished double edge. Shadow keeps it lifted.
-    ...Platform.select({
-      ios: { shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
-      android: { elevation: 5 },
-    }),
+    // Android gets NO elevation — the shadow shows through the glass as a grey halo.
+    // See glassLift in src/Glass.tsx.
+    ...glassLift,
   },
   compactTemp: { color: "#F4F4F4", fontSize: 18, fontWeight: "800", letterSpacing: -0.3, marginTop: 2 },
 });

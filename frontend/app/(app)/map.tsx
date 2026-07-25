@@ -10,7 +10,7 @@ import { api, formatErr, wsUrl } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
 import { useRouter, useFocusEffect } from "expo-router";
-import Glass, { GlassFill, hudTint, drawerTint } from "../../src/Glass";
+import Glass, { GlassFill, hudTint, drawerTint, glassLift } from "../../src/Glass";
 import ConvoyMapbox, { type Hazard, type Peer, contrastingRouteColor } from "../../src/ConvoyMapbox";
 import DestinationSearch from "../../src/DestinationSearch";
 import UpdateReadyPill from "../../src/UpdateReadyPill";
@@ -4337,7 +4337,7 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     maxHeight: "62%",
     zIndex: 30,
-    shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: -4 }, elevation: 14,
+    ...glassLift,
   },
   sheetGrabber: { width: 38, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.22)", alignSelf: "center", marginBottom: 12 },
   // ===== Route preview banner =====
@@ -4458,7 +4458,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FF3B30",
     zIndex: 7,
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
-    elevation: 6,
+    ...glassLift,
   },
   endNavFabText: { color: "#F4F4F4", fontWeight: "700", fontSize: 13, letterSpacing: 0.2 },
   etaBig: { color: COLORS.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.4 },
@@ -4483,7 +4483,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(10,132,255,0.92)", // matches Apple Maps blue
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
-    elevation: 6,
+    ...glassLift,
   },
 
   // Dark circular backing behind the brand logo on the MAP screen only.
@@ -4503,7 +4503,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.18)',
     overflow: 'hidden',
     shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
+    ...glassLift,
   },
 
   // Trip Summary pill — collapsed view of the route preview card. Renders at
@@ -4564,8 +4564,9 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
     // No hard white stroke — the clear glass draws its own clean edge; a 1px stroke
     // on top fought it and read as an "unfinished" double edge. Shadow keeps it lifted.
-    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
-    elevation: 5,
+    // Android: no elevation — see glassLift in src/Glass.tsx (the shadow bleeds
+    // through the translucent glass as a grey halo = the "two shades" report).
+    ...glassLift,
   },
   // Tiny label under the people icon in the Crew FAB (round, bottom-right stack).
   fabCrewLabel: { color: "#F4F4F4", fontSize: 9, fontWeight: "700", letterSpacing: 0.2, marginTop: -1 },
@@ -4576,7 +4577,7 @@ const styles = StyleSheet.create({
     borderRadius: 16, paddingVertical: 8, paddingHorizontal: 12, overflow: "hidden",
     backgroundColor: "transparent",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
-    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 6,
+    ...glassLift,
   },
   avatarPanelTitle: { color: "#FFFFFF", fontSize: 13, fontWeight: "700", letterSpacing: 0.5, marginBottom: 6, marginLeft: 2 },
   avatarRow: { flexDirection: "row", alignItems: "center", paddingVertical: 7 },

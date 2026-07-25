@@ -43,6 +43,27 @@ export function drawerTint(): string | undefined {
   return darkMap ? undefined : "rgba(16,16,20,0.55)";
 }
 
+/**
+ * Drop-shadow for TRANSLUCENT glass surfaces (HUD chips, FABs, sheets).
+ *
+ * iOS keeps its soft shadow. **Android gets NO elevation on purpose.** An Android
+ * elevation shadow is drawn from the view's outline and composites BEHIND it — so on a
+ * surface whose fill is see-through (every glass chip: `backgroundColor:'transparent'`
+ * plus a translucent GlassFill wash) the shadow shows THROUGH the glass and hugs the
+ * rounded edge. Against a light basemap a black shadow reads as a LIGHT GREY HALO
+ * around a darker middle — which is exactly the "two shades / looks really bad on
+ * Android" report (2026-07-24 and again 2026-07-25). It is not the blur, and it is not
+ * the wash: the earlier fix flattened GlassFill to a single Android layer and the
+ * halo remained, because the halo was never part of GlassFill.
+ *
+ * Opaque cards can still use elevation safely — nothing shows through them. Use this
+ * ONLY where the surface is meant to be see-through.
+ */
+export const glassLift = Platform.select({
+  ios: { shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
+  default: {},
+}) as object;
+
 type Props = ViewProps & {
   intensity?: number;
   tint?: "light" | "dark" | "default";

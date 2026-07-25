@@ -2401,15 +2401,47 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     });
   }, [speedCameras, routes, selectedRouteIndex]);
 
-  // Preview congestion gradient is shown whenever we have a fetched congestion
-  // route, a destination, and we're not navigating. When on, it REPLACES the
-  // solid blue selected ribbon (so there's only one line for the active route).
-  const showCongestion = !!congestionRoute && !navigationActive && !!destination;
+  // ===== Preview congestion — the SELECTED route's OWN data comes FIRST =====
+  //
+  // WHY (Jeff, 2026-07-25: "the CarPlay does not show the same as the phone for the
+  // congestion gradients"). The palette (CONGESTION_COLOR), the bucketing
+  // (levelFromNumeric over congestion_numeric) and the gradient builder are all
+  // shared with CarMapView — those were never the problem. The DATA was:
+  //
+  //   CarPlay (preview AND nav) paints routes[selectedRouteIndex].congestion,
+  //     mirrored through carStore as routeCoordinates + routeCongestion.
+  //   This surface, in PREVIEW ONLY, painted a SEPARATE fetchMapboxCongestion()
+  //     request instead — a second, independent origin→destination Mapbox call.
+  //
+  // Two calls means two geometries and two live-traffic snapshots taken seconds
+  // apart, so the bands could never line up. Worse, fetchMapboxCongestion always
+  // returns route[0]: pick Scenic or AI and the phone was colouring a road the
+  // driver had not chosen, while the head unit correctly coloured the one they had.
+  //
+  // Both surfaces now derive from the one selected route — which is exactly what
+  // this surface already did DURING navigation (see navCongestionGradient), so this
+  // also makes preview and nav consistent with each other on the phone.
+  //
+  // The fetched route stays as a FALLBACK for the case where the selected route came
+  // back with no usable congestion, so preview never silently loses its gradient.
+  const selPreviewCong = useMemo(() => {
+    if (navigationActive) return null;
+    const sel: any = routes?.[selectedRouteIndex];
+    const coords = sel?.coordinates as [number, number][] | undefined;
+    const cong = sel?.congestion as CongestionLevel[] | undefined;
+    if (!coords || coords.length < 2 || !cong || cong.length === 0) return null;
+    return { coordinates: coords, gradient: buildCongestionGradient(coords, cong, selColor) };
+  }, [navigationActive, routes, selectedRouteIndex, selColor]);
+
+  const previewCong = selPreviewCong || congestionRoute;
+  // Shown whenever we have a congestion route, a destination, and we're not
+  // navigating. When on, it REPLACES the solid selected ribbon (one line per route).
+  const showCongestion = !!previewCong && !navigationActive && !!destination;
   const congestionFeature: any = useMemo(
-    () => congestionRoute
-      ? { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: congestionRoute.coordinates } }
+    () => previewCong
+      ? { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: previewCong.coordinates } }
       : null,
-    [congestionRoute],
+    [previewCong],
   );
 
   return (
@@ -2727,7 +2759,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             <LineLayer
               id="cong-core"
               slot="top"
-              style={{ lineGradient: congestionRoute!.gradient, lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
+              style={{ lineGradient: previewCong!.gradient, lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
           </ShapeSource>
         )}

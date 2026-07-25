@@ -19,6 +19,13 @@ import './src/carplay/registerCarSurface';
 import { installCrashBreadcrumb } from './src/crashBreadcrumb';
 installCrashBreadcrumb();
 
+// ANDROID AUTO BLACK BOX (phone half). The native car entry points record any throw to
+// filesDir/aa_crash.txt; this uploads and clears it on the next launch, so nobody has to
+// sit in the car with a laptop running adb to capture an AA failure. Android-only, fully
+// guarded, never blocks startup. See src/androidAutoCrashLog.ts.
+import { flushAndroidAutoCrashLog } from './src/androidAutoCrashLog';
+void flushAndroidAutoCrashLog();
+
 // Sets a CarPlay root template on a COLD connect (CarPlay opened while the phone
 // app isn't running), where the phone map screen's useConvoyCarPlay hook isn't
 // mounted to do it. No-op on web/Android and on the warm path. See carPlayBootstrap.ts.

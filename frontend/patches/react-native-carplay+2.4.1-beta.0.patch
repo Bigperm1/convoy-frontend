@@ -1,12 +1,12 @@
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt
-index 73aad53..ac319d1 100644
+index 73aad53..4f187ab 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt
-@@ -1,23 +1,27 @@
+@@ -1,23 +1,76 @@
  package org.birkir.carplay
  
 -import android.content.BroadcastReceiver
--import android.content.Context
+ import android.content.Context
 -import android.content.Intent
 -import android.content.IntentFilter
  import android.util.Log
@@ -17,6 +17,49 @@ index 73aad53..ac319d1 100644
  import com.facebook.react.ReactApplication
 -import com.facebook.react.ReactInstanceManager
 +import com.facebook.react.ReactHost
++
++/**
++ * ANDROID AUTO BLACK BOX (Convoy, 2026-07-24).
++ *
++ * When Android Auto fails it shows androidx's "encountered an unexpected error" card and the
++ * real Kotlin stack trace goes ONLY to logcat — which means a tester would have to sit in the
++ * car with a laptop and adb to capture it. Not acceptable.
++ *
++ * So we record it ourselves: any throw from the car entry points is appended to
++ * `filesDir/aa_crash.txt` and RETHROWN unchanged (behaviour is identical; this is purely a
++ * recorder). `filesDir` is exactly what expo-file-system exposes as `documentDirectory`, so
++ * the JS side reads the file on the next phone-app launch, uploads it to crash_reports and
++ * deletes it — see src/androidAutoCrashLog.ts. The tester just drives, sees the error, and
++ * opens the app later.
++ *
++ * Must never throw itself: a recorder that crashes would mask the very thing it records.
++ */
++object AACrashLog {
++  private const val FILE = "aa_crash.txt"
++  private const val MAX_BYTES = 64 * 1024
++
++  fun record(context: Context?, where: String, t: Throwable) {
++    try {
++      val ctx = context ?: return
++      val f = java.io.File(ctx.filesDir, FILE)
++      if (f.exists() && f.length() > MAX_BYTES) f.delete()
++      val sw = java.io.StringWriter()
++      t.printStackTrace(java.io.PrintWriter(sw))
++      f.appendText(
++        "=== ANDROID AUTO FAILURE ===\n" +
++          "at: " + where + "\n" +
++          "when: " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
++            .format(java.util.Date()) + "\n" +
++          "type: " + t.javaClass.name + "\n" +
++          "message: " + (t.message ?: "(none)") + "\n" +
++          sw.toString() + "\n\n",
++      )
++      Log.e("AACrashLog", "recorded Android Auto failure at " + where, t)
++    } catch (ignored: Throwable) {
++      // never let the recorder become the failure
++    }
++  }
++}
  
  class CarPlayService : CarAppService() {
 -  private lateinit var reactInstanceManager: ReactInstanceManager
@@ -30,20 +73,30 @@ index 73aad53..ac319d1 100644
      super.onCreate()
 -    reactInstanceManager =
 -      (application as ReactApplication).reactNativeHost.reactInstanceManager
-+    reactHost = (application as ReactApplication).reactHost
-+      ?: throw IllegalStateException(
-+        "CarPlayService: application does not expose a bridgeless reactHost. " +
-+          "Android Auto requires the New Architecture (newArchEnabled)."
-+      )
++    try {
++      reactHost = (application as ReactApplication).reactHost
++        ?: throw IllegalStateException(
++          "CarPlayService: application does not expose a bridgeless reactHost. " +
++            "Android Auto requires the New Architecture (newArchEnabled)."
++        )
++    } catch (t: Throwable) {
++      AACrashLog.record(applicationContext, "CarPlayService.onCreate", t)
++      throw t
++    }
    }
  
    override fun createHostValidator(): HostValidator {
-@@ -26,10 +30,11 @@ class CarPlayService : CarAppService() {
+@@ -26,10 +79,16 @@ class CarPlayService : CarAppService() {
  
    override fun onCreateSession(sessionInfo: SessionInfo): Session {
      Log.d(TAG, "onCreateSession: sessionId = ${sessionInfo.sessionId}, display = ${sessionInfo.displayType}")
 -    return CarPlaySession(reactInstanceManager)
-+    return CarPlaySession(reactHost)
++    try {
++      return CarPlaySession(reactHost)
++    } catch (t: Throwable) {
++      AACrashLog.record(applicationContext, "CarPlayService.onCreateSession", t)
++      throw t
++    }
    }
  
    companion object {
@@ -52,10 +105,10 @@ index 73aad53..ac319d1 100644
  }
 +
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
-index 2235853..f84f649 100644
+index 2235853..9fd0fca 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
-@@ -7,24 +7,24 @@ import android.content.Intent
+@@ -7,28 +7,42 @@ import android.content.Intent
  import android.content.IntentFilter
  import android.content.res.Configuration
  import android.os.Bundle
@@ -86,7 +139,25 @@ index 2235853..f84f649 100644
    private lateinit var screen: CarScreen
  
    @SuppressLint("UnspecifiedRegisterReceiverFlag")
-@@ -39,7 +39,7 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
+   override fun onCreateScreen(intent: Intent): Screen {
++    try {
++      return onCreateScreenInner(intent)
++    } catch (t: Throwable) {
++      // Android Auto black box — see AACrashLog in CarPlayService.kt. Records and rethrows.
++      AACrashLog.record(
++        try { carContext.applicationContext } catch (e: Throwable) { null },
++        "CarPlaySession.onCreateScreen", t,
++      )
++      throw t
++    }
++  }
++
++  @SuppressLint("UnspecifiedRegisterReceiverFlag")
++  private fun onCreateScreenInner(intent: Intent): Screen {
+     Log.d(TAG, "On create screen " + intent.action + " - " + intent.dataString)
+     val lifecycle = lifecycle
+     lifecycle.addObserver(this)
+@@ -39,7 +53,7 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
      carContext.registerReceiver(object : BroadcastReceiver() {
        override fun onReceive(context: Context, intent: Intent) {
          if ("org.birkir.carplay.APP_RELOAD" == intent.action) {
@@ -95,7 +166,7 @@ index 2235853..f84f649 100644
          }
        }
      }, IntentFilter("org.birkir.carplay.APP_RELOAD"))
-@@ -50,16 +50,20 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
+@@ -50,16 +64,20 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
    }
  
    private fun runJsApplication() {
@@ -123,7 +194,7 @@ index 2235853..f84f649 100644
      } else {
        invokeStartTask(reactContext)
      }
-@@ -67,25 +71,21 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
+@@ -67,25 +85,21 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
  
    private fun invokeStartTask(reactContext: ReactContext) {
      try {
@@ -238,7 +309,7 @@ index 01dbabd..bacb6f0 100644
        }
      }.build()
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/VirtualRenderer.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/VirtualRenderer.kt
-index bafa640..f4c8289 100644
+index bafa640..e0b0f08 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/VirtualRenderer.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/VirtualRenderer.kt
 @@ -5,6 +5,7 @@ import android.content.Context
@@ -249,11 +320,12 @@ index bafa640..f4c8289 100644
  import android.view.Display
  import android.view.ViewGroup
  import androidx.car.app.AppManager
-@@ -12,14 +13,17 @@ import androidx.car.app.CarContext
+@@ -12,14 +13,18 @@ import androidx.car.app.CarContext
  import androidx.car.app.SurfaceCallback
  import androidx.car.app.SurfaceContainer
  import com.facebook.react.ReactApplication
 -import com.facebook.react.ReactRootView
++import org.birkir.carplay.AACrashLog
 +import com.facebook.react.interfaces.fabric.ReactSurface
  
  /**
@@ -269,7 +341,7 @@ index bafa640..f4c8289 100644
  
    init {
      context.getCarService(AppManager::class.java).setSurfaceCallback(object : SurfaceCallback {
-@@ -52,19 +56,32 @@ class VirtualRenderer(private val context: CarContext, private val moduleName: S
+@@ -52,19 +57,42 @@ class VirtualRenderer(private val context: CarContext, private val moduleName: S
      Presentation(context, display) {
      override fun onCreate(savedInstanceState: Bundle?) {
        super.onCreate(savedInstanceState)
@@ -281,6 +353,20 @@ index bafa640..f4c8289 100644
 -          startReactApplication(instanceManager, moduleName)
 -          runApplication()
 -        }
+-      } else {
+-        (rootView?.parent as? ViewGroup)?.removeView(rootView)
++      try {
++        onCreateInner()
++      } catch (t: Throwable) {
++        // Android Auto black box — see AACrashLog in CarPlayService.kt. Records and rethrows.
++        AACrashLog.record(context.applicationContext, "VirtualRenderer.MapPresentation.onCreate", t)
++        throw t
+       }
+-      rootView?.let {
+-        setContentView(it)
++    }
++
++    private fun onCreateInner() {
 +      // Bridgeless: resolve the app-wide ReactHost. The Presentation's constructor context is a
 +      // display/outer context, so go through applicationContext (the Application is the
 +      // ReactApplication). Elvis-throw to stay null-safe like the rest of the port.
@@ -303,18 +389,14 @@ index bafa640..f4c8289 100644
 +        surface = newSurface
 +        newSurface.view?.let { setContentView(it) }
 +        newSurface.start()
-       } else {
--        (rootView?.parent as? ViewGroup)?.removeView(rootView)
--      }
--      rootView?.let {
--        setContentView(it)
++      } else {
 +        // Re-parent the existing surface view onto this Presentation.
 +        (surface?.view?.parent as? ViewGroup)?.removeView(surface?.view)
 +        surface?.view?.let { setContentView(it) }
        }
      }
    }
-@@ -73,3 +90,4 @@ class VirtualRenderer(private val context: CarContext, private val moduleName: S
+@@ -73,3 +101,4 @@ class VirtualRenderer(private val context: CarContext, private val moduleName: S
      const val TAG = "VirtualRenderer"
    }
  }

@@ -1169,6 +1169,23 @@ export default function MapScreen() {
   // the live map (the old RerouteCard modal is gone — Jeff: no popups). null = none.
   type RerouteOffer = { route: NavRoute; title: string; subtitle: string; savedMin: number; etaMin: number; arrival: string; lateMin: number; divLat: number; divLng: number };
   const [rerouteOffer, setRerouteOffer] = useState<RerouteOffer | null>(null);
+  // STABLE IDENTITY for the map's `routes` prop. This was previously built inline in
+  // the JSX — `rerouteOffer ? [...routes, {...}] : routes` — which minted a BRAND NEW
+  // ARRAY on every single render for as long as an offer was on screen. Every consumer
+  // downstream keys a useMemo on `routes`, so all of them were invalidated per render
+  // and recomputed from scratch: routeProj (full decodePolyline + projectOntoRoute of
+  // the car onto the whole line), onRouteCameras (decode + an O(cameras × line-points)
+  // corridor scan), the fit-bounds memo (decodes EVERY route), and the route render
+  // memo. That storm ran precisely when the driver was off-route and a reroute offer
+  // was up — the same moment Jeff reports the car drifting and the line misbehaving.
+  // ⚠ MUST stay above the `if (!coords) return` early return (:3023) — a hook below it
+  // changes the hook count when the first fix lands and React throws. See CARPLAY.md
+  // rule 1; that trap cost two crashes on 2026-07-24.
+  // Pure identity fix: the array CONTENTS are byte-for-byte what they were.
+  const displayRoutes = useMemo(
+    () => (rerouteOffer ? [...routes, { ...(rerouteOffer.route as any), kind: "offer" }] : routes),
+    [rerouteOffer, routes],
+  );
   // Mirror of the on-screen offer in a ref, so the hands-free voice callback (which
   // resolves seconds later from a stale render closure) reads the CURRENT offer, not a
   // captured one. Kept in sync by showOffer()/clearOffer().
@@ -3169,7 +3186,7 @@ export default function MapScreen() {
         // While a reroute offer is up, append its line for DISPLAY (kind "offer" →
         // blue inline alternate, tappable during nav). Never lands in `routes`
         // state, so the turn engine / chips / CarPlay mirror are untouched.
-        routes={rerouteOffer ? [...routes, { ...(rerouteOffer.route as any), kind: "offer" }] : routes}
+        routes={displayRoutes}
         selectedRouteIndex={selectedRouteIndex}
         onSelectRoute={handleSelectRoute}
         offerPill={rerouteOffer ? { lat: rerouteOffer.divLat, lng: rerouteOffer.divLng, savedMin: rerouteOffer.savedMin, arrival: rerouteOffer.arrival } : null}

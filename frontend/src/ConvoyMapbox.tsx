@@ -1851,8 +1851,19 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
 
   // RAW (unrounded) chase zoom target for the imperative lockstep — SelfCarModel's
   // pushCam low-passes toward it, so a continuous float reads smoothest.
+  // SPEED-AWARE IN CRUISE TOO — mirrors CarPlay exactly (CarMapView's followZoom).
+  // This branch used to pin cruise to a FIXED FOLLOW_ZOOM and only ramp with speed
+  // while navigating, so driving without a route stayed at city framing at 100 km/h
+  // while the head unit correctly widened out. That is Jeff's 2026-07-24 report:
+  // "the camera zoom at speed is working great on CarPlay but the phone seems to not
+  // be zooming the same" — the cruise curve was added to CarMapView and never
+  // mirrored back here.
+  // SAFE BY CONSTRUCTION: CHASE_ZOOM_CITY === FOLLOW_ZOOM === 17, and chaseZoom
+  // returns CHASE_ZOOM_CITY for anything <= CHASE_KMH_CITY (45 km/h). So parked and
+  // city framing are bit-identical to before; only above 45 km/h does this differ,
+  // which is precisely the band being reported. Turn-tightening stays nav-only.
   const chaseZoomRaw = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX,
-    (navigationActive ? chaseZoom(kmhFromMs(userSpeedMs), distanceToManeuverM) : FOLLOW_ZOOM) + (zoomOffset || 0),
+    chaseZoom(kmhFromMs(userSpeedMs), navigationActive ? distanceToManeuverM : undefined) + (zoomOffset || 0),
   ));
   // Quantized to 0.1 for the NATIVE followZoomLevel (north-up) so the native follow
   // engine isn't re-nudged on every micro speed change.

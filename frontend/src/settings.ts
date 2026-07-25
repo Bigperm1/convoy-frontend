@@ -459,8 +459,20 @@ export function setLastLocation(lat: number, lng: number): void {
 
 export async function updateSettings(patch: Partial<Settings>): Promise<Settings> {
 cached = { ...cached, ...patch };
-try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
+// NOTIFY FIRST, PERSIST AFTER (2026-07-24). This used to `await
+// AsyncStorage.setItem(...)` BEFORE notifying, so every settings-driven piece of
+// UI was gated on a disk write. AsyncStorage on Android is SQLite-backed and far
+// slower than the iOS plist path — and if that write stalls, the listeners never
+// fire and the screen never re-renders, so a tap that DID register looks completely
+// dead. That is Jeff's Android report: "the comms threads they cant use or touch,
+// it only stays on crew" — picking a thread calls setSettings({activeThreadId}),
+// and the chip only moves when the listener runs.
+// State is in-memory (`cached`) and is already updated above, so notifying
+// immediately is correct; persistence is durability, not correctness, and has no
+// business blocking a render. Fire-and-forget keeps the resolved value identical
+// for every `await updateSettings(...)` caller.
 listeners.forEach((l) => l(cached));
+AsyncStorage.setItem(KEY, JSON.stringify(cached)).catch(() => {});
 return cached;
 }
 

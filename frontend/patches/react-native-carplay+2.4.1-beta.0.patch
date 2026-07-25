@@ -105,12 +105,14 @@ index 73aad53..4f187ab 100644
  }
 +
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
-index 2235853..9fd0fca 100644
+index 2235853..fe13d77 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
-@@ -7,28 +7,42 @@ import android.content.Intent
+@@ -6,43 +6,86 @@ import android.content.Context
+ import android.content.Intent
  import android.content.IntentFilter
  import android.content.res.Configuration
++import android.os.Build
  import android.os.Bundle
 +import android.os.Handler
  import android.util.Log
@@ -157,16 +159,53 @@ index 2235853..9fd0fca 100644
      Log.d(TAG, "On create screen " + intent.action + " - " + intent.dataString)
      val lifecycle = lifecycle
      lifecycle.addObserver(this)
-@@ -39,7 +53,7 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
-     carContext.registerReceiver(object : BroadcastReceiver() {
+     screen = CarScreen(carContext)
+     screen.marker = "root"
+ 
+-    // Handle reload events
+-    carContext.registerReceiver(object : BroadcastReceiver() {
++    // Handle reload events.
++    //
++    // ⚠ THIS LINE IS WHY ANDROID AUTO NEVER WORKED (root-caused 2026-07-25 from a real
++    // head-unit stack trace, via the AACrashLog black box):
++    //
++    //   java.lang.SecurityException: com.sw0rdfisch.convoy: One of RECEIVER_EXPORTED or
++    //   RECEIVER_NOT_EXPORTED should be specified when a receiver isn't being registered
++    //   exclusively for system broadcasts
++    //     at android.app.ContextImpl.registerReceiver(ContextImpl.java:1990)
++    //     at org.birkir.carplay.CarPlaySession.onCreateScreenInner(CarPlaySession.kt:53)
++    //
++    // Android 13 (API 33) REQUIRES the export flag for any receiver that isn't listening
++    // exclusively to system broadcasts, and we target SDK 35. "org.birkir.carplay.APP_RELOAD"
++    // is our OWN private action, so the unflagged call throws, onCreateScreen dies, and
++    // androidx shows its "encountered an unexpected error / Exit" card — the exact symptom
++    // testers reported on every build since the AA port.
++    //
++    // NOTE the @SuppressLint("UnspecifiedRegisterReceiverFlag") on this method: it silences
++    // the LINT, not the RUNTIME check. That suppression is very likely why this shipped.
++    //
++    // RECEIVER_NOT_EXPORTED is correct here — nothing outside the app should ever be able to
++    // trigger a JS reload. Branch on the API level rather than pulling in ContextCompat so the
++    // patch adds no new dependency.
++    val reloadReceiver = object : BroadcastReceiver() {
        override fun onReceive(context: Context, intent: Intent) {
          if ("org.birkir.carplay.APP_RELOAD" == intent.action) {
 -          invokeStartTask(reactInstanceManager.currentReactContext!!);
 +          reactHost.currentReactContext?.let { invokeStartTask(it) }
          }
        }
-     }, IntentFilter("org.birkir.carplay.APP_RELOAD"))
-@@ -50,16 +64,20 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
+-    }, IntentFilter("org.birkir.carplay.APP_RELOAD"))
++    }
++    val reloadFilter = IntentFilter("org.birkir.carplay.APP_RELOAD")
++    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
++      carContext.registerReceiver(reloadReceiver, reloadFilter, Context.RECEIVER_NOT_EXPORTED)
++    } else {
++      carContext.registerReceiver(reloadReceiver, reloadFilter)
++    }
+ 
+     // Run JS
+     runJsApplication()
+@@ -50,16 +93,20 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
    }
  
    private fun runJsApplication() {
@@ -194,7 +233,7 @@ index 2235853..9fd0fca 100644
      } else {
        invokeStartTask(reactContext)
      }
-@@ -67,25 +85,21 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
+@@ -67,25 +114,21 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
  
    private fun invokeStartTask(reactContext: ReactContext) {
      try {

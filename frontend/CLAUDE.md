@@ -78,6 +78,17 @@ Custom Expo config plugins run at prebuild: `withConvoyAndroidAuto.js` (injects 
 
 ### Patches (`patches/`, patch-package)
 
+**⚠ ALWAYS regenerate with `--exclude 'android/build/'`:**
+```bash
+npx patch-package react-native-carplay --exclude 'android/build/'
+```
+A stale Gradle `android/build/` tree inside `node_modules` (left by any local Android build)
+otherwise gets swept in, producing a 382 KB patch of 342 files — 651 `.dex`/`.bin` artifacts —
+that **silently DROPS every real diff, including the whole Android Auto port**. Deleting the
+directory is NOT enough: patch-package's pristine reference still carries it. After
+regenerating, always verify the file list is unchanged:
+`grep -ac '^diff --git' patches/<name>.patch` (2026-07-24: this nearly destroyed the CarPlay patch).
+
 Native deps are patched at install time via `patch-package` (postinstall hook): `react-native-carplay` (RN 0.81 / New Arch null-safety fixes — see recent commits) and `@lomray/react-native-apple-music`. If you change a patched package, regenerate with `npx patch-package <name>`.
 
 ## Conventions

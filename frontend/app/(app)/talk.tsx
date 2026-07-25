@@ -660,62 +660,37 @@ export default function TalkScreen() {
       {(active || threads.length > 0) && !dropdownOpen && (
         <View style={styles.stripWrap} collapsable={false}>
           <Text style={styles.stripTitle}>Comms Threads</Text>
-          {/* WRAPPING ROW, NOT A HORIZONTAL ScrollView (2026-07-24). Reproduced on a
-              real Android emulator: every touchable INSIDE the old horizontal
-              ScrollView was dead — no onPressIn, no press opacity, with both
-              TouchableOpacity and Pressable — while the ScrollView itself still
-              scrolled and every control OUTSIDE it on the same screen (mic,
-              hands-free, tab bar) worked. Native was innocent: dumpsys showed the
-              chips VFE...C.. (visible/enabled/clickable) at the right bounds with
-              nothing overlaying them. keyboardShouldPersistTaps="handled" did not
-              help either. Dropping the ScrollView removes the broken dispatch path
-              entirely — and wrapping is better here anyway: every thread is visible
-              at once instead of hidden off the right edge. */}
-          {/* collapsable={false}: RN Android FLATTENS layout-only Views, re-parenting
-              their children — and a hoisted child laid out beyond the surviving
-              parent's box is drawn but NEVER hit-tested (Android does not dispatch
-              touches outside a parent's bounds). That is why the wrapped SECOND ROW
-              of chips was dead while the first row worked. Forcing a real native view
-              keeps the rows inside a container that actually bounds them. */}
-          {(() => {
-            // EXPLICIT ROWS, not flex-wrap lines. On Android the chips on a WRAPPED
-            // second line were drawn but never received touches (verified on a real
-            // emulator: row 1 logged onPressIn and switched channel, row 2 logged
-            // nothing at all, with the container measured correctly around both and
-            // nothing overlapping). Chunking into real row Views gives every chip a
-            // properly-bounded native parent, which is what Android hit-testing needs.
-            const chips: React.ReactNode[] = [];
-            if (active) {
-              chips.push(
-                <Pressable key="crew" onPress={selectCrew} style={({ pressed }) => [styles.chip, !activeThreadId && styles.chipActive, pressed && { opacity: 0.85 }]}>
-                  <Ionicons name="people" size={15} color={!activeThreadId ? '#000' : YELLOW} />
-                  <Text style={[styles.chipText, !activeThreadId && styles.chipTextActive]} numberOfLines={1}>Crew</Text>
-                  {!!activeThreadId && !!active && commsRead.channelHasUnread(active.id) && <View style={styles.chipDot} />}
-                </Pressable>,
-              );
-            }
-            for (const t of threads) {
+          {/* Horizontal scroller — the ORIGINAL design, restored. It was briefly
+              replaced with wrapped rows while chasing the dead-chip bug; the real
+              cause turned out to be the mic glow covering the strip (see the
+              pointerEvents note on micGlowWrap), not the ScrollView. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.strip}
+          >
+            {active ? (
+              <Pressable onPress={selectCrew} style={({ pressed }) => [styles.chip, !activeThreadId && styles.chipActive, pressed && { opacity: 0.85 }]}>
+                <Ionicons name="people" size={15} color={!activeThreadId ? '#000' : YELLOW} />
+                <Text style={[styles.chipText, !activeThreadId && styles.chipTextActive]} numberOfLines={1}>Crew</Text>
+                {!!activeThreadId && !!active && commsRead.channelHasUnread(active.id) && <View style={styles.chipDot} />}
+              </Pressable>
+            ) : null}
+            {threads.map((t) => {
               const on = t.id === activeThreadId;
-              chips.push(
+              return (
                 <Pressable key={t.id} onPress={() => selectThread(t)} onLongPress={() => confirmDeleteThread(t)} delayLongPress={400} style={({ pressed }) => [styles.chip, on && styles.chipActive, pressed && { opacity: 0.85 }]}>
                   <Ionicons name={t.is_group ? 'people-circle' : 'person'} size={15} color={on ? '#000' : '#bbb'} />
                   <Text style={[styles.chipText, on && styles.chipTextActive]} numberOfLines={1}>{t.title}</Text>
                   {!on && commsRead.channelHasUnread(t.id) && <View style={styles.chipDot} />}
-                </Pressable>,
+                </Pressable>
               );
-            }
-            chips.push(
-              <Pressable key="new" onPress={openThreadPicker} style={({ pressed }) => [styles.chipNew, pressed && { opacity: 0.85 }]}>
-                <Ionicons name="add" size={16} color={YELLOW} />
-                <Text style={styles.chipNewText}>New</Text>
-              </Pressable>,
-            );
-            const rows: React.ReactNode[][] = [];
-            for (let i = 0; i < chips.length; i += 3) rows.push(chips.slice(i, i + 3));
-            return rows.map((row, i) => (
-              <View key={'row' + i} style={styles.stripRow} collapsable={false}>{row}</View>
-            ));
-          })()}
+            })}
+            <Pressable onPress={openThreadPicker} style={({ pressed }) => [styles.chipNew, pressed && { opacity: 0.85 }]}>
+              <Ionicons name="add" size={16} color={YELLOW} />
+              <Text style={styles.chipNewText}>New</Text>
+            </Pressable>
+          </ScrollView>
         </View>
       )}
 
@@ -738,11 +713,22 @@ export default function TalkScreen() {
             gradient that breathes with the `glow` value. Deliberately DISTINCT from the
             Scout screen-edge glow: this one hugs the button; the edge glow frames the
             whole screen. Replaces the old smoke cloud + sonar ring. */}
-        <Animated.Image
-          source={require('../../assets/images/mic-glow.png')}
-          resizeMode="contain"
-          style={[styles.micGlow, { opacity: glowOpacity }]}
-        />
+        {/* pointerEvents on a WRAPPER VIEW, not in the image's style. The glow is a
+            516pt box anchored 108pt ABOVE the mic (top: (MIC_D - GLOW_D) / 2), so it
+            reaches far up the screen and lands on the thread chips: with the mic at
+            y811 its top edge is y~514 and the second chip row spans 513..607. Style-
+            level pointerEvents is not reliably applied on Android, so this fully
+            transparent glow was swallowing every touch beneath it — and with a
+            one-row strip the mic sat higher (y687 -> glow top ~390), covering the
+            WHOLE strip, which is why no chip responded at all. Animated.Image does
+            not accept a pointerEvents prop, hence the wrapper. */}
+        <View pointerEvents="none" style={styles.micGlowWrap}>
+          <Animated.Image
+            source={require('../../assets/images/mic-glow.png')}
+            resizeMode="contain"
+            style={[styles.micGlowImg, { opacity: glowOpacity }]}
+          />
+        </View>
         <Animated.View
           style={[
             styles.glowWrap,
@@ -977,7 +963,8 @@ const styles = StyleSheet.create({
   micWrap: { width: MIC_D, height: MIC_D, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
   glowWrap: { width: MIC_D, height: MIC_D, borderRadius: MIC_D / 2, alignItems: 'center', justifyContent: 'center', elevation: 18 },
   // Halo glow sits BEHIND the mic, centered on it (GLOW_D box centered in the MIC_D micWrap).
-  micGlow: { position: 'absolute', width: GLOW_D, height: GLOW_D, top: (MIC_D - GLOW_D) / 2, left: (MIC_D - GLOW_D) / 2, pointerEvents: 'none' },
+  micGlowWrap: { position: 'absolute', width: GLOW_D, height: GLOW_D, top: (MIC_D - GLOW_D) / 2, left: (MIC_D - GLOW_D) / 2 },
+  micGlowImg: { width: '100%', height: '100%' },
   pttRing: {
     position: 'absolute',
     top: 0, left: 0, right: 0, bottom: 0,
@@ -1050,7 +1037,7 @@ const styles = StyleSheet.create({
   // ----- Conversation strip (Crew + private threads + New) -----
   stripWrap: { paddingTop: 10, paddingBottom: 2 },
   stripTitle: { color: '#F4F4F4', fontSize: 13, fontWeight: '700', marginLeft: 16, marginBottom: 8, letterSpacing: 0.2 },
-  stripRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, marginBottom: 8 },
+  strip: { paddingHorizontal: 16, gap: 8, alignItems: 'center' },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18,

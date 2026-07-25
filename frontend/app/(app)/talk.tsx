@@ -119,9 +119,27 @@ export default function TalkScreen() {
   // picked we transmit to JUST its participants; otherwise we talk to the whole
   // crew (the community channel). channelId is what every layer keys on: the
   // PTT hook, the history list, and the global live listener.
-  const activeThreadId = settings.activeThreadId ?? null;
+  // OPTIMISTIC SELECTION (2026-07-24). The chip used to read `settings` directly, so
+  // the whole strip only responded once the settings listener fired — and on Android
+  // that made a registered tap look completely dead ("the comms threads they cant use
+  // or touch it only stays on crew"). updateSettings no longer blocks on its disk
+  // write, which fixes the known cause, but the strip should not depend on settings
+  // propagation AT ALL to acknowledge a touch: this is the one control a driver uses
+  // to pick who hears them.
+  // `pendingThreadId === undefined` means "no local override, follow settings".
+  // null is a REAL value here (Crew), which is why undefined is the sentinel.
+  const [pendingThreadId, setPendingThreadId] = useState<string | null | undefined>(undefined);
+  const activeThreadId = pendingThreadId !== undefined ? pendingThreadId : (settings.activeThreadId ?? null);
   const activeThread = threads.find((t) => t.id === activeThreadId) || null;
   const channelId = activeThreadId || active?.id || null;
+  // Drop the override once settings agrees. If settings never catches up the override
+  // simply stands — which is the point: the driver's explicit choice wins over a
+  // storage layer that is not answering.
+  useEffect(() => {
+    if (pendingThreadId !== undefined && (settings.activeThreadId ?? null) === pendingThreadId) {
+      setPendingThreadId(undefined);
+    }
+  }, [settings.activeThreadId, pendingThreadId]);
 
   // Real PTT send + history for the active channel (crew OR private thread),
   // recorded at a quality that scales with convoy proximity.
@@ -367,8 +385,17 @@ export default function TalkScreen() {
   };
 
   // ----- Private conversation threads -----
-  const selectCrew = () => { Haptics.selectionAsync().catch(() => {}); setSettings({ activeThreadId: null }); };
-  const selectThread = (t: Thread) => { Haptics.selectionAsync().catch(() => {}); setSettings({ activeThreadId: t.id }); };
+  // Set the local override FIRST so the chip moves on this frame, then persist.
+  const selectCrew = () => {
+    Haptics.selectionAsync().catch(() => {});
+    setPendingThreadId(null);
+    setSettings({ activeThreadId: null });
+  };
+  const selectThread = (t: Thread) => {
+    Haptics.selectionAsync().catch(() => {});
+    setPendingThreadId(t.id);
+    setSettings({ activeThreadId: t.id });
+  };
 
   // ----- Delete a private conversation (hold-to-delete) -----
   // Long-pressing a thread chip removes the whole conversation. The backend
@@ -378,9 +405,11 @@ export default function TalkScreen() {
   // long-press affordance and can never be deleted here.
   const removeThreadLocal = useCallback((id: string) => {
     setThreads((prev) => prev.filter((t) => t.id !== id));
-    // If we were viewing the deleted thread, fall back to the Crew channel.
-    if ((settings.activeThreadId ?? null) === id) setSettings({ activeThreadId: null });
-  }, [settings.activeThreadId, setSettings]);
+    // If we were viewing the deleted thread, fall back to the Crew channel. Checks the
+    // EFFECTIVE selection (override included), or deleting a just-tapped thread would
+    // leave the strip pointing at a conversation that no longer exists.
+    if (activeThreadId === id) { setPendingThreadId(null); setSettings({ activeThreadId: null }); }
+  }, [activeThreadId, setSettings]);
 
   const confirmDeleteThread = useCallback((t: Thread) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});

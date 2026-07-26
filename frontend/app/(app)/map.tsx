@@ -3874,23 +3874,16 @@ export default function MapScreen() {
           (tap the logo in the search bar → "Map Layers"). */}
 
       <View pointerEvents="box-none" style={[styles.fabStack, { bottom: controlsBottom }]}>
-        {/* Compass — top of stack. The needle rotates opposite the live map
-            bearing so North always points north as the map turns; tapping it
-            snaps back to the car (recenter) AND faces the map north (heading 0). */}
-        <TouchableOpacity
-          testID="compass-fab"
-          style={styles.fab}
-          onPress={() => { setNorthUpHold(true); setNorthSignal((n) => n + 1); recenterNow(); }}
-          activeOpacity={0.85}
-        >
-          <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
-          <View style={{ transform: [{ rotate: `${-mapHeading}deg` }] }}>
-            <CompassNeedle size={54} />
-          </View>
-        </TouchableOpacity>
+        {/* ORDER: Crew on TOP, compass BELOW — this stack is deliberately ordered to
+            match the CarPlay map buttons, whose array is [car-crew, car-compass]
+            (carActions.ts CAR_MAP_BUTTON_CONFIG). The phone used to be compass-first,
+            so the two surfaces read as swapped on a head unit (Jeff, 2026-07-26).
+            NOTE this is the ONE place the usual "CarPlay matches the phone" rule runs
+            the other way — CarPlay's order is fixed by the template, so the phone moved.
+            If you reorder either surface, reorder BOTH. */}
         {/* Crew button (replaced the police FAB, 2026-07-23 — Jeff's call): one tap
             frames self + every live/partial peer in a north-up overview. Same round
-            glass FAB as the compass above it. Police reporting still lives in voice
+            glass FAB as the compass below it. Police reporting still lives in voice
             ("report police"), the Report sheet, and the hazard long-press. */}
         <TouchableOpacity
           testID="crew-fit-fab"
@@ -3909,6 +3902,20 @@ export default function MapScreen() {
               The CarPlay crew map button uses the SAME green — see CAR_ICON_CREW. */}
           <Ionicons name="people" size={26} color={COLORS.brand} />
           <Text style={styles.fabCrewLabel}>Crew</Text>
+        </TouchableOpacity>
+        {/* Compass — bottom of stack. The needle rotates opposite the live map
+            bearing so North always points north as the map turns; tapping it
+            snaps back to the car (recenter) AND faces the map north (heading 0). */}
+        <TouchableOpacity
+          testID="compass-fab"
+          style={styles.fab}
+          onPress={() => { setNorthUpHold(true); setNorthSignal((n) => n + 1); recenterNow(); }}
+          activeOpacity={0.85}
+        >
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
+          <View style={{ transform: [{ rotate: `${-mapHeading}deg` }] }}>
+            <CompassNeedle size={54} />
+          </View>
         </TouchableOpacity>
         {/* Recenter FAB removed — recentering now lives in the compass tap
             (which both recenters on the car and faces north). */}

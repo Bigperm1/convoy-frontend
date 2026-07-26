@@ -19,6 +19,13 @@ export type NavStep = {
   distance_text: string;
   distance_m: number;
   duration_text: string;
+  // Traffic-aware seconds for THIS step, straight off Mapbox. Mapbox has always sent
+  // it (MapboxRouteStep.duration); we used to format it to `duration_text` and throw
+  // the number away, which forced the ETA to guess with a flat distance ratio — see
+  // the ETA block in useTurnByTurn for what that cost. Optional because a NavStep can
+  // be rebuilt from a cached/legacy route that predates this field; the ETA falls back
+  // when it's missing.
+  duration_s?: number;
   maneuver?: string;
   start: LatLng;
   end: LatLng;
@@ -220,6 +227,7 @@ export function mapboxToNavRoute(r: MapboxRoute): NavRoute {
         distance_text: formatDistance(s.distance),
         distance_m: s.distance,
         duration_text: formatDuration(s.duration),
+        duration_s: s.duration,
         // Store the joined Mapbox key so maneuverVerb / isSpokenManeuver resolve it.
         maneuver: verbKey,
         start: here,
@@ -736,7 +744,51 @@ export function useTurnByTurn(
 
     let remaining = dManeuver;
     for (let i = stepIdx + 1; i < steps.length; i++) remaining += steps[i].distance_m;
-    const eta = (remaining / Math.max(r.distance_m, 1)) * r.duration_s;
+
+    // ===== TIME REMAINING =====
+    //
+    // Sum the REMAINING STEPS' OWN traffic-aware durations: the un-driven fraction of
+    // the current step, plus every step after it.
+    //
+    // WHY (Jeff, 2026-07-26 — Langley → Anglemont): "when I started it was correct...
+    // then I stopped for gas and continued on and the time increased by an hour even
+    // though I stopped for 15 min. I ended the route and restarted and it was still
+    // wrong."
+    //
+    // The old line was:
+    //     eta = (remaining / r.distance_m) * r.duration_s
+    // a flat DISTANCE ratio, which silently assumes one uniform speed for the whole
+    // route. It is exactly right at the start (remaining === total, so eta ===
+    // duration_s — which is why it always looked correct when you set off) and drifts
+    // from then on, because real routes are not uniform. Every fast highway kilometre
+    // is credited the same as a slow one, so the arrival clock creeps EARLIER across
+    // the Coquihalla and then swings LATER once you reach a slow final stretch like
+    // the winding lake road into Anglemont. Restarting the route could not help: the
+    // fresh route used the same flat model, only now closer to the slow part.
+    //
+    // Of the reported hour, only the ~15 min of the gas stop was real — while parked,
+    // `remaining` doesn't move, so `now + eta` legitimately slides by the time you sat
+    // there. The rest was this formula.
+    //
+    // Mapbox has always sent per-step traffic-aware durations; mapboxToNavRoute just
+    // dropped the number after formatting it for display. Now it keeps it.
+    //
+    // FALLS BACK to the old ratio when the steps carry no usable durations (a cached
+    // or legacy route from before `duration_s` existed) so an old route still shows
+    // something sane rather than 0.
+    const curStep = steps[stepIdx];
+    let stepSecs = 0;
+    for (let i = stepIdx + 1; i < steps.length; i++) stepSecs += steps[i].duration_s || 0;
+    // Pro-rate the step we're partway through by how much of it is left. dManeuver is
+    // the distance still to run in this step, so the fraction is distance-based — fine
+    // WITHIN a single step, where the speed really is roughly constant.
+    const curLeft = curStep && curStep.distance_m > 0
+      ? Math.min(1, Math.max(0, dManeuver / curStep.distance_m))
+      : 0;
+    stepSecs += (curStep?.duration_s || 0) * curLeft;
+    const eta = stepSecs > 0
+      ? stepSecs
+      : (remaining / Math.max(r.distance_m, 1)) * r.duration_s;
 
     const arriveKey = `${steps.length - 1}-arrived`;
     if (stepIdx === steps.length - 1 && dManeuver < 20 && !announcedRef.current.has(arriveKey)) {

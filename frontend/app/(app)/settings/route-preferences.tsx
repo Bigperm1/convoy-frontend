@@ -15,6 +15,19 @@ export default function RoutePreferencesPage() {
         <ToggleRow icon="boat-outline" iconColor="#5AC8FA" title="Avoid ferries" subtitle="Don't route over water crossings" value={settings.avoidFerries} onChange={(v) => setSettings({ avoidFerries: v })} />
       </SettingsCard>
       <HelpText>Applied to every directions request — including auto-reroute when you go off-route. Routes refresh automatically when you toggle a preference.</HelpText>
+
+      <SectionLabel>ON THE ROAD</SectionLabel>
+      <SettingsCard>
+        <ToggleRow
+          icon="timer-outline"
+          iconColor="#2DEC86"
+          title="Pitstop timer"
+          subtitle="Start a stopwatch when you park at a gas station or food stop"
+          value={settings.pitstop !== false}
+          onChange={(v) => setSettings({ pitstop: v })}
+        />
+      </SettingsCard>
+      <HelpText>Pull in for fuel or a bite and Hairpin starts the clock, then banks the stop into a total for the drive. Your arrival time already accounts for time spent stopped, so this is just so you know how long you were off the road.</HelpText>
     </SettingsPage>
   );
 }

@@ -38,8 +38,11 @@ import ShareSheet from "../../src/ShareSheet";
 import {
   fetchRoutes, fetchDirections, fetchAiRoute, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
+  useRouteTrafficRefresh,
 } from "../../src/nav";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
+import { usePitstop } from "../../src/pitstop";
+import PitstopCard from "../../src/components/PitstopCard";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import { setCarState, setCarPeers, subscribeCarGesture } from "../../src/carplay/carStore";
 import { useVoice } from "../../src/useVoice";
@@ -1063,6 +1066,34 @@ export default function MapScreen() {
       temperature: destWeather?.temp ?? null,
     }, key);
   }, [destination, activeRoute, destWeather, navMuted]);
+
+  // LIVE TRAFFIC while driving. The route's per-segment durations are a snapshot from
+  // when it was fetched; on a multi-hour trip that snapshot is stale long before you
+  // arrive, so a jam or a construction slowdown that appears mid-drive would never
+  // reach the ETA (Jeff, 2026-07-26: "I wanted it to calculate everything on the trip
+  // including traffic/construction"). Every 2 min this re-pulls ONLY the annotations
+  // for the geometry we're already on and writes them back onto the SELECTED route —
+  // the ETA's suffix table sees the totals move and rebuilds, and the congestion
+  // gradient recolours, both on the next tick. Never changes the route itself.
+  useRouteTrafficRefresh(activeRoute, navMode === "turn-by-turn", useCallback((patch) => {
+    setRoutes((prev) => {
+      if (!prev.length) return prev;
+      const i = selectedRouteIndex;
+      const cur = prev[i];
+      if (!cur) return prev;
+      const next = prev.slice();
+      next[i] = { ...cur, segDurations: patch.segDurations, congestion: patch.congestion };
+      return next;
+    });
+    // cbRef inside the hook always holds the latest callback, so depending on the
+    // selected index here is safe and keeps the write pointed at the right route.
+  }, [selectedRouteIndex]));
+
+  // PITSTOP — a stopwatch when the car parks at a gas/food place. Runs whether or not
+  // guidance is active (you can pull in for fuel without a route set); the settings
+  // toggle is the only gate. Detection + the "why this doesn't touch the ETA" note
+  // live in src/pitstop.ts.
+  const pitstop = usePitstop(coords, settings.pitstop !== false);
 
   // Turn-by-turn engine — speaks instructions, advances steps, computes ETA / distance remaining
   const tbt = useTurnByTurn(activeRoute, coords, navMode === "turn-by-turn", {
@@ -3393,6 +3424,21 @@ export default function MapScreen() {
                 downloading (expo-updates "pending" state — see UpdateReadyPill).
                 Hidden mid-drive so a tap can never reload during turn-by-turn. */}
             <UpdateReadyPill hidden={navMode === "turn-by-turn"} />
+            {/* PITSTOP stopwatch — sits under the crew pill in the free top-centre
+                strip, clear of the bottom-left speed/weather HUD and the bottom-right
+                FAB stack. Only mounts while a stop is actually confirmed, so it costs
+                nothing the rest of the time. */}
+            {pitstop.active && (
+              <View style={styles.pitstopWrap} pointerEvents="none">
+                <PitstopCard
+                  kind={pitstop.kind}
+                  label={pitstop.label}
+                  elapsedS={pitstop.elapsedS}
+                  totalS={pitstop.totalS}
+                  tint={hudTint()}
+                />
+              </View>
+            )}
           </View>
         )}
       </View>
@@ -4722,6 +4768,9 @@ const styles = StyleSheet.create({
     zIndex: 5,
   },
   liveOverlayText: { color: "#F4F4F4", fontSize: 10, fontWeight: "600", letterSpacing: 0.2 },
+  // Pitstop stopwatch, top-centre under the crew pill. Width-capped so a long place
+  // name truncates instead of stretching the card across the map.
+  pitstopWrap: { marginTop: 8, alignSelf: "center", width: "92%", maxWidth: 380 },
   // ===== Layers bottom sheet =====
   sheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   sheetCard: {

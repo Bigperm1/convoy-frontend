@@ -62,6 +62,11 @@ novaSpeeding: boolean;
 // novaSpeeding choice on upgrade.
 speedAlertMode?: 'off' | 'nova' | 'ding';
 novaMidDrive: boolean;
+// PITSTOP — when the car sits still at a gas station / food place, a live timer
+// appears on the map and CarPlay counting the stop, and the drive banks a running
+// total. Purely informational: it deliberately does NOT feed the ETA, because
+// `now + eta` already absorbs a stop on its own (see src/pitstop.ts).
+pitstop: boolean;
 // Master mute for all Nova nav/alert speech — toggled by the speaker button on
 // the turn-by-turn banner. Persisted so a muted drive stays muted next time.
 novaMuted: boolean;
@@ -209,6 +214,7 @@ show3dBuildings: true,
 novaGreeting: false,
 novaSpeeding: false,
 novaMidDrive: true,   // mid-drive callouts ON at first launch (Jeff, 2026-07-25)
+pitstop: true,        // Pitstop timer ON at first launch (Jeff, 2026-07-26)
 novaMuted: false,
 novaVoice: true,
 novaVoiceName: "nova",

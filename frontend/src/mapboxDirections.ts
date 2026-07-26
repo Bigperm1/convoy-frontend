@@ -364,6 +364,19 @@ export type MapboxRoute = {
   freeflow_s: number;                // typical/no-traffic (annotation duration sum)
   summary: string;
   steps: MapboxRouteStep[];
+  // Per-SEGMENT traffic-aware seconds — one per (coordinates.length - 1), the same
+  // axis `congestion` uses. This is the finest-grained timing Mapbox will give us:
+  // a real Langley→Anglemont route has 16 steps but 4337 segments, so an ETA summed
+  // from these is effectively exact instead of interpolated. See the ETA block in
+  // nav.ts's useTurnByTurn.
+  segDurations: number[];
+  // Directions Refresh handle. With `enable_refresh=true` the response carries a
+  // `uuid`; GET /directions-refresh/v1/mapbox/driving-traffic/{uuid}/{routeIndex}/0
+  // returns UPDATED duration + congestion annotations for this exact geometry, which
+  // is how the ETA keeps up with traffic and construction mid-drive without ever
+  // re-routing the driver. Verified against the live API 2026-07-26.
+  refreshUuid?: string;
+  routeIndex: number;
 };
 
 // Decode a precision-5 polyline to [lng,lat] (GeoJSON order for Mapbox paint).
@@ -411,6 +424,9 @@ export async function fetchMapboxRoutes(
     const qs =
       `?alternatives=true&steps=true&overview=full&geometries=polyline` +
       `&annotations=congestion_numeric,duration,distance&banner_instructions=false` +
+      // enable_refresh gives the response a `uuid`, the handle the Directions Refresh
+      // API needs to hand back UPDATED traffic for this exact geometry mid-drive.
+      `&enable_refresh=true` +
       (exclude.length ? `&exclude=${exclude.join(",")}` : ``) +
       `&access_token=${MAPBOX_PUBLIC_TOKEN}`;
 
@@ -421,7 +437,7 @@ export async function fetchMapboxRoutes(
     const routes: any[] = Array.isArray(json?.routes) ? json.routes : [];
     if (!routes.length) return [];
 
-    return routes.map((route: any): MapboxRoute => {
+    return routes.map((route: any, routeIndex: number): MapboxRoute => {
       const polyline: string = typeof route?.geometry === "string" ? route.geometry : "";
       const coordinates = decodePolyline5LngLat(polyline);
       const leg = route?.legs?.[0] || {};
@@ -431,6 +447,14 @@ export async function fetchMapboxRoutes(
       const rawC: any[] = Array.isArray(ann.congestion_numeric) ? ann.congestion_numeric : [];
       const congestion: CongestionLevel[] = new Array(segCount);
       for (let i = 0; i < segCount; i++) congestion[i] = levelFromNumeric(rawC[i]);
+
+      // Per-segment traffic-aware seconds, same axis as `congestion`.
+      const rawD: any[] = Array.isArray(ann.duration) ? ann.duration : [];
+      const segDurations: number[] = new Array(segCount);
+      for (let i = 0; i < segCount; i++) {
+        const v = Number(rawD[i]);
+        segDurations[i] = Number.isFinite(v) && v >= 0 ? v : 0;
+      }
 
       // Traffic-aware duration = route.duration. Free-flow ~= sum of per-segment
       // annotation durations is ALSO traffic-aware on driving-traffic, so use the
@@ -462,6 +486,9 @@ export async function fetchMapboxRoutes(
         freeflow_s: freeflowS,
         summary: typeof leg?.summary === "string" ? leg.summary : "",
         steps,
+        segDurations,
+        refreshUuid: typeof json?.uuid === "string" ? json.uuid : undefined,
+        routeIndex,
       };
     }).filter((r) => r.polyline);
   } catch {
@@ -518,11 +545,19 @@ export async function fetchMapboxRouteVia(
     const coordinates = decodePolyline5LngLat(polyline);
     const legs: any[] = Array.isArray(route?.legs) ? route.legs : [];
 
-    // Concat per-leg congestion across all legs (each leg annotates its own segments).
+    // Concat per-leg congestion AND per-segment durations across all legs (each leg
+    // annotates its own segments). Both arrays stay on the same axis as `coordinates`,
+    // so the segment-based ETA works on an AI/via route exactly as on a plain one.
     const congestion: CongestionLevel[] = [];
+    const segDurations: number[] = [];
     for (const leg of legs) {
       const rawC: any[] = Array.isArray(leg?.annotation?.congestion_numeric) ? leg.annotation.congestion_numeric : [];
       for (const v of rawC) congestion.push(levelFromNumeric(v));
+      const rawD: any[] = Array.isArray(leg?.annotation?.duration) ? leg.annotation.duration : [];
+      for (const v of rawD) {
+        const n = Number(v);
+        segDurations.push(Number.isFinite(n) && n >= 0 ? n : 0);
+      }
     }
 
     // Concat per-leg steps for turn-by-turn guidance along the whole habitual path.
@@ -564,7 +599,73 @@ export async function fetchMapboxRouteVia(
       freeflow_s: freeflowS,
       summary: legs[0]?.summary && typeof legs[0].summary === "string" ? legs[0].summary : "Your usual way",
       steps,
-    };
+          segDurations,
+      refreshUuid: typeof json?.uuid === "string" ? json.uuid : undefined,
+      routeIndex: 0,
+};
+  } catch {
+    return null; // includes AbortError
+  }
+}
+
+// ── Live traffic refresh ─────────────────────────────────────────────────────
+//
+// Re-fetch ONLY the annotations (per-segment duration + congestion) for a route we
+// already hold, using the `uuid` the original `enable_refresh=true` request returned.
+// The geometry is unchanged, so this can run mid-drive without ever moving the driver
+// onto a different road — it just makes the ETA and the congestion colours reflect
+// traffic and construction as they are RIGHT NOW.
+//
+// Why this and not "re-fetch the route": a full re-fetch returns whatever Mapbox
+// currently considers best, which can silently swap the driver onto another highway
+// halfway through a trip. Refresh cannot do that by construction.
+//
+// Verified against the live API (2026-07-26) on a real Langley→Anglemont route:
+// HTTP 200, `code: "Ok"`, 4337 duration + 4337 congestion_numeric values back — the
+// same segment count as the original. Note the refresh payload carries NO steps, only
+// annotations, which is exactly why the ETA is computed off segments.
+//
+// Routes expire server-side. On any non-OK response (typically 404 once the uuid has
+// aged out) this returns null and the caller simply keeps the numbers it already has.
+export type MapboxRefresh = {
+  segDurations: number[];
+  congestion: CongestionLevel[];
+};
+
+export async function refreshMapboxRoute(
+  uuid: string,
+  routeIndex: number,
+  opts?: { signal?: AbortSignal },
+): Promise<MapboxRefresh | null> {
+  try {
+    if (!uuid) return null;
+    const idx = Number.isFinite(routeIndex) && routeIndex >= 0 ? Math.floor(routeIndex) : 0;
+    const url =
+      `https://api.mapbox.com/directions-refresh/v1/mapbox/driving-traffic/` +
+      `${encodeURIComponent(uuid)}/${idx}/0?access_token=${MAPBOX_PUBLIC_TOKEN}`;
+    const res = await fetch(url, { signal: opts?.signal });
+    if (!res.ok) return null;                       // 404 = uuid expired; keep old numbers
+    const json: any = await res.json();
+    if (json?.code && json.code !== "Ok") return null;
+
+    // Multi-leg (AI/via) routes annotate per leg — concat in order so the arrays stay
+    // on the same axis as the route's `coordinates`, same as the original parse.
+    const legs: any[] = Array.isArray(json?.route?.legs) ? json.route.legs : [];
+    if (!legs.length) return null;
+
+    const segDurations: number[] = [];
+    const congestion: CongestionLevel[] = [];
+    for (const leg of legs) {
+      const rawD: any[] = Array.isArray(leg?.annotation?.duration) ? leg.annotation.duration : [];
+      for (const v of rawD) {
+        const n = Number(v);
+        segDurations.push(Number.isFinite(n) && n >= 0 ? n : 0);
+      }
+      const rawC: any[] = Array.isArray(leg?.annotation?.congestion_numeric) ? leg.annotation.congestion_numeric : [];
+      for (const v of rawC) congestion.push(levelFromNumeric(v));
+    }
+    if (!segDurations.length) return null;
+    return { segDurations, congestion };
   } catch {
     return null; // includes AbortError
   }

@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform, AppState } from "react-native";
 import { api } from "./api";
-import { fetchMapboxRoutes, fetchMapboxRouteVia, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
+import { fetchMapboxRoutes, fetchMapboxRouteVia, refreshMapboxRoute, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
 import { getSettings, getNovaVoice, getAudioVol } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
@@ -50,6 +50,14 @@ export type NavRoute = {
   // any legacy/cached route shape.
   congestion?: CongestionLevel[];
   coordinates?: [number, number][];
+  // Per-SEGMENT traffic-aware seconds (same axis as `congestion` / `coordinates`).
+  // The ETA is summed from these — see the ETA block in useTurnByTurn. Optional for
+  // legacy/cached route shapes, which fall back to step durations then to a ratio.
+  segDurations?: number[];
+  // Directions Refresh handle: lets navigation pull UPDATED durations + congestion
+  // for this exact geometry mid-drive (traffic, construction) without re-routing.
+  refreshUuid?: string;
+  routeIndex?: number;
   steps: NavStep[];
   // Route SLOT for the 3-route system. "best" (fastest) / "scenic" (alternate) are
   // assigned positionally by the map; "ai" is set here by fetchAiRoute for a learned
@@ -208,6 +216,9 @@ export function mapboxToNavRoute(r: MapboxRoute): NavRoute {
     duration_in_traffic_s: hasTraffic ? durS : undefined,
     congestion: r.congestion,
     coordinates: r.coordinates,
+    segDurations: r.segDurations,
+    refreshUuid: r.refreshUuid,
+    routeIndex: r.routeIndex,
     steps: r.steps.map((s: MapboxRouteStep, i: number, arr: MapboxRouteStep[]): NavStep => {
       const loc = s.maneuver?.location; // [lng, lat] — START of this step (the turn point)
       const here: LatLng = Array.isArray(loc) && loc.length >= 2
@@ -447,6 +458,82 @@ function roundaboutExitCue(maneuverKey?: string, html?: string): string | null {
 let _tbtEngineActive = false;
 export function isPhoneTbtSpeaking(): boolean { return _tbtEngineActive; }
 
+// ── Segment-accurate time-remaining ──────────────────────────────────────────
+//
+// Mapbox annotates every geometry SEGMENT with its own traffic-aware duration. On a
+// real Langley→Anglemont route that's 4337 segments against 16 steps, so summing the
+// remaining segments is effectively exact where a step- or distance-based estimate
+// has to interpolate across tens of minutes of mixed road.
+//
+// `suffix[i]` = seconds from the START of segment i to the destination, precomputed
+// once per route so each GPS tick is O(1) instead of O(4337).
+function buildSuffixSeconds(segDurations: number[] | undefined): number[] | null {
+  if (!Array.isArray(segDurations) || segDurations.length === 0) return null;
+  const n = segDurations.length;
+  const suffix = new Array<number>(n + 1);
+  suffix[n] = 0;
+  let total = 0;
+  for (let i = n - 1; i >= 0; i--) {
+    const v = segDurations[i];
+    total += Number.isFinite(v) && v > 0 ? v : 0;
+    suffix[i] = total;
+  }
+  return total > 0 ? suffix : null;
+}
+
+// Squared-ish metric distance from P to segment AB, plus how far along AB the closest
+// point sits (0..1). Equirectangular projection — over a single route segment (metres)
+// the distortion is irrelevant and it avoids trig per candidate.
+function pointToSegment(
+  plng: number, plat: number,
+  alng: number, alat: number,
+  blng: number, blat: number,
+): { d2: number; t: number } {
+  const kx = Math.cos((plat * Math.PI) / 180) * 111320;
+  const ky = 110540;
+  const ax = (alng - plng) * kx, ay = (alat - plat) * ky;
+  const bx = (blng - plng) * kx, by = (blat - plat) * ky;
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 > 0 ? -(ax * dx + ay * dy) / len2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const cx = ax + dx * t, cy = ay + dy * t;
+  return { d2: cx * cx + cy * cy, t };
+}
+
+// Find which segment the driver is on. Scans a WINDOW forward from the last known
+// segment (driving is monotonic along the route), with a small backward allowance for
+// GPS jitter, and only falls back to a full scan when nothing in the window is close —
+// which is what happens after a reroute or when guidance first attaches. Without the
+// window this would be 4337 distance tests on every GPS tick, which is exactly the kind
+// of per-frame work that cooks the phone.
+const SEG_WINDOW_AHEAD = 400;
+const SEG_WINDOW_BACK = 40;
+const SEG_MAX_SNAP_M = 250;   // beyond this the window result is not trusted
+function findRouteSegment(
+  coords: [number, number][],
+  lat: number, lng: number,
+  cursor: number,
+): { seg: number; t: number; distM: number } | null {
+  const n = coords.length - 1;
+  if (n < 1) return null;
+  const scan = (from: number, to: number) => {
+    let bestD2 = Infinity, bestSeg = -1, bestT = 0;
+    for (let i = Math.max(0, from); i < Math.min(n, to); i++) {
+      const a = coords[i], b = coords[i + 1];
+      const r = pointToSegment(lng, lat, a[0], a[1], b[0], b[1]);
+      if (r.d2 < bestD2) { bestD2 = r.d2; bestSeg = i; bestT = r.t; }
+    }
+    return { bestD2, bestSeg, bestT };
+  };
+  let { bestD2, bestSeg, bestT } = scan(cursor - SEG_WINDOW_BACK, cursor + SEG_WINDOW_AHEAD);
+  if (bestSeg < 0 || Math.sqrt(bestD2) > SEG_MAX_SNAP_M) {
+    ({ bestD2, bestSeg, bestT } = scan(0, n));      // reroute / first attach / way off
+  }
+  if (bestSeg < 0) return null;
+  return { seg: bestSeg, t: bestT, distM: Math.sqrt(bestD2) };
+}
+
 export function useTurnByTurn(
   route: NavRoute | null,
   // `speed` (m/s, from GPS) rides along on the position the caller already
@@ -472,6 +559,12 @@ export function useTurnByTurn(
   const lastOffRouteAtRef = useRef<number>(0);
   const offRouteStreakRef = useRef<number>(0);
   const polyCacheRef = useRef<{ key: string; pts: LatLng[] }>({ key: "", pts: [] });
+  // Segment-ETA state. `suffix` is rebuilt whenever the route's segment durations
+  // change — which includes a live traffic REFRESH, not just a new route, so a refresh
+  // takes effect on the very next GPS tick. `cursor` keeps the per-tick segment search
+  // local instead of rescanning the whole geometry.
+  const segSuffixRef = useRef<{ key: string; suffix: number[] | null }>({ key: "", suffix: null });
+  const segCursorRef = useRef<number>(0);
   const stateRef = useRef<TbtState>({
     active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0,
   });
@@ -776,19 +869,60 @@ export function useTurnByTurn(
     // FALLS BACK to the old ratio when the steps carry no usable durations (a cached
     // or legacy route from before `duration_s` existed) so an old route still shows
     // something sane rather than 0.
-    const curStep = steps[stepIdx];
-    let stepSecs = 0;
-    for (let i = stepIdx + 1; i < steps.length; i++) stepSecs += steps[i].duration_s || 0;
-    // Pro-rate the step we're partway through by how much of it is left. dManeuver is
-    // the distance still to run in this step, so the fraction is distance-based — fine
-    // WITHIN a single step, where the speed really is roughly constant.
-    const curLeft = curStep && curStep.distance_m > 0
-      ? Math.min(1, Math.max(0, dManeuver / curStep.distance_m))
-      : 0;
-    stepSecs += (curStep?.duration_s || 0) * curLeft;
-    const eta = stepSecs > 0
-      ? stepSecs
-      : (remaining / Math.max(r.distance_m, 1)) * r.duration_s;
+    // ── TIER 1 (preferred): sum the remaining per-SEGMENT durations.
+    // 4337 segments vs 16 steps on a real long route, and every one carries its own
+    // traffic-aware seconds — including whatever a live refresh last wrote. Rebuild the
+    // suffix table only when those numbers actually change (new route OR refreshed
+    // traffic), keyed on length + total so a refresh is detected without deep-comparing
+    // thousands of floats every tick.
+    let eta = 0;
+    const segDur = r.segDurations;
+    const segCoords = r.coordinates;
+    if (segDur && segDur.length && segCoords && segCoords.length >= 2) {
+      let segTotal = 0;
+      for (let i = 0; i < segDur.length; i++) segTotal += segDur[i] || 0;
+      const key = `${r.polyline.length}:${segDur.length}:${Math.round(segTotal)}`;
+      if (segSuffixRef.current.key !== key) {
+        segSuffixRef.current = { key, suffix: buildSuffixSeconds(segDur) };
+        segCursorRef.current = 0;   // new numbers → re-find our place from scratch
+      }
+      const suffix = segSuffixRef.current.suffix;
+      if (suffix) {
+        const hit = findRouteSegment(segCoords, user.lat, user.lng, segCursorRef.current);
+        if (hit) {
+          segCursorRef.current = hit.seg;
+          // Time left = the un-driven remainder of the segment we're standing on,
+          // plus every segment after it (O(1) via the suffix table).
+          const inSeg = (segDur[hit.seg] || 0) * (1 - hit.t);
+          eta = inSeg + (suffix[hit.seg + 1] ?? 0);
+        }
+      }
+    }
+
+    // ── TIER 2: per-STEP durations (coarser, but still respects the real speed profile).
+    if (eta <= 0) {
+      const curStep = steps[stepIdx];
+      let stepSecs = 0;
+      for (let i = stepIdx + 1; i < steps.length; i++) stepSecs += steps[i].duration_s || 0;
+      // Pro-rate the step we're partway through by how much of it is left. dManeuver is
+      // the distance still to run in this step, so the fraction is distance-based — fine
+      // WITHIN a single step, where the speed really is roughly constant.
+      const curLeft = curStep && curStep.distance_m > 0
+        ? Math.min(1, Math.max(0, dManeuver / curStep.distance_m))
+        : 0;
+      stepSecs += (curStep?.duration_s || 0) * curLeft;
+      eta = stepSecs;
+    }
+
+    // ── TIER 3: the original flat distance ratio. Only for a cached/legacy route that
+    // carries neither segment nor step durations — better than showing 0.
+    if (eta <= 0) eta = (remaining / Math.max(r.distance_m, 1)) * r.duration_s;
+
+    // NOTE — deliberately NOT adding banked pitstop time here. The displayed arrival is
+    // `now + eta`, so sitting still for 15 minutes already pushes arrival out by 15
+    // minutes on its own: `now` advances while `eta` (which is distance-based) does
+    // not. Adding the stop again would double-count it. Pitstop time is tracked and
+    // SHOWN by src/pitstop.ts instead of being folded into the ETA.
 
     const arriveKey = `${steps.length - 1}-arrived`;
     if (stepIdx === steps.length - 1 && dManeuver < 20 && !announcedRef.current.has(arriveKey)) {
@@ -1362,4 +1496,74 @@ export function fmtManeuverDist(m: number): string {
 
 export function fmtEtaSec(s: number): string {
   return formatDuration(s);
+}
+
+// ── Live traffic refresh during navigation ───────────────────────────────────
+//
+// The route's durations are a SNAPSHOT from the moment it was fetched. On a 4-hour
+// drive that snapshot is stale long before you arrive: a crash on the Coquihalla or a
+// construction slowdown that appears after you set off would never reach the ETA.
+// Jeff, 2026-07-26: "I wanted it to calculate everything on the trip including
+// traffic/construction etc. this needs to be very accurate."
+//
+// So while guidance is running, re-pull JUST the annotations for the route we're
+// already on (Mapbox Directions Refresh, keyed by the `uuid` from the original
+// enable_refresh request). Same geometry, ~40 kB, no chance of silently swapping the
+// driver onto a different highway the way a full re-fetch could.
+//
+// The fresh numbers land back on the route, the ETA's suffix table notices the totals
+// changed and rebuilds, and the congestion gradient recolours — all on the next tick.
+//
+// Cadence: every 2 minutes. Fast enough that a jam is priced in within a couple of
+// minutes, slow enough to be invisible on battery and data (a 4-hour drive = ~120
+// small requests).
+const TRAFFIC_REFRESH_MS = 120_000;
+// Routes expire server-side; once the uuid is dead every call 404s. Give up after a few
+// consecutive misses rather than poll a dead handle for the rest of the drive.
+const TRAFFIC_REFRESH_MAX_FAILS = 3;
+
+export function useRouteTrafficRefresh(
+  route: NavRoute | null,
+  active: boolean,
+  onRefresh: (patch: { segDurations: number[]; congestion: CongestionLevel[] }) => void,
+): void {
+  const cbRef = useRef(onRefresh);
+  useEffect(() => { cbRef.current = onRefresh; }, [onRefresh]);
+
+  const uuid = route?.refreshUuid;
+  const routeIndex = route?.routeIndex ?? 0;
+  // Re-arm the whole loop when the ROUTE changes (new uuid), not on every render.
+  useEffect(() => {
+    if (!active || !uuid) return;
+    let cancelled = false;
+    let fails = 0;
+    const ctrls = new Set<AbortController>();
+
+    const tick = async () => {
+      if (cancelled) return;
+      const ctrl = new AbortController();
+      ctrls.add(ctrl);
+      try {
+        const fresh = await refreshMapboxRoute(uuid, routeIndex, { signal: ctrl.signal });
+        if (cancelled) return;
+        if (!fresh) {
+          if (++fails >= TRAFFIC_REFRESH_MAX_FAILS) { clearInterval(timer); }
+          return;
+        }
+        fails = 0;
+        cbRef.current(fresh);
+      } catch {
+        // network blip — keep the numbers we have and try again next tick
+      } finally {
+        ctrls.delete(ctrl);
+      }
+    };
+
+    const timer = setInterval(tick, TRAFFIC_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      for (const c of ctrls) { try { c.abort(); } catch {} }
+    };
+  }, [active, uuid, routeIndex]);
 }

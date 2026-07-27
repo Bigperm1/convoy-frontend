@@ -1089,11 +1089,15 @@ export default function MapScreen() {
     // selected index here is safe and keeps the write pointed at the right route.
   }, [selectedRouteIndex]));
 
-  // PITSTOP — a stopwatch when the car parks at a gas/food place. Runs whether or not
-  // guidance is active (you can pull in for fuel without a route set); the settings
-  // toggle is the only gate. Detection + the "why this doesn't touch the ETA" note
-  // live in src/pitstop.ts.
-  const pitstop = usePitstop(coords, settings.pitstop !== false);
+  // PITSTOP — a stopwatch when the car parks at a gas/food place.
+  //
+  // ROUTED ONLY (Jeff, 2026-07-27). It deliberately does NOT run on an idle map: a
+  // pitstop only means something against a trip, and without a route the car sitting
+  // on a driveway near a cafe is just a parked car. Gating on turn-by-turn also kills
+  // the whole class of false positives at home/work, and stops the Places lookup
+  // firing for anyone who never navigates. Detection + the "why this doesn't touch
+  // the ETA" note live in src/pitstop.ts.
+  const pitstop = usePitstop(coords, settings.pitstop !== false && navMode === "turn-by-turn");
 
   // Turn-by-turn engine — speaks instructions, advances steps, computes ETA / distance remaining
   const tbt = useTurnByTurn(activeRoute, coords, navMode === "turn-by-turn", {

@@ -13,6 +13,10 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { GlassFill, glassLift } from "../Glass";
 import { fmtPitstop, type PitstopKind } from "../pitstop";
 
+// Candy red — the SAME red as UpdateReadyPill's banner, so the app has one "attention"
+// red rather than two near-misses.
+const CANDY_RED = "#E4002B";
+
 const ICON: Record<PitstopKind, any> = {
   gas: "gas-station",
   food: "silverware-fork-knife",
@@ -93,12 +97,16 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(45,236,134,0.14)",
   },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#2DEC86" },
+  // Candy red for the live pulse — same red as the UpdateReadyPill, and it pairs with
+  // the running clock below so the two read as one "timer is running" unit.
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: CANDY_RED },
   title: { color: "#FFFFFF", fontSize: 13.5, fontWeight: "700", letterSpacing: -0.2, flexShrink: 1 },
   sub: { color: "#FFFFFF", opacity: 0.75, fontSize: 11, fontWeight: "600", marginTop: 2 },
+  // The countdown itself is CANDY RED (Jeff, 2026-07-27) — a pitstop clock is a race
+  // clock, and red reads as "time is running" where the brand green read as "all good".
   // Tabular figures so the seconds don't jitter the layout as they tick.
   clock: {
-    color: "#2DEC86", fontSize: 22, fontWeight: "800", letterSpacing: -0.5,
+    color: CANDY_RED, fontSize: 22, fontWeight: "800", letterSpacing: -0.5,
     fontVariant: ["tabular-nums"],
   },
 });

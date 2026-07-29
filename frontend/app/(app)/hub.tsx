@@ -579,12 +579,15 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
   // public.trips, which deliberately holds distance/duration/when and NO coordinates —
   // members compare mileage without publishing where anyone drove. See src/trips.ts.
   const [board, setBoard] = useState<{ userId: string; handle: string; km: number; drives: number; pb: number }[]>([]);
-  const [boardRange, setBoardRange] = useState<0 | 30>(0);   // 0 = all time, 30 = last 30 days
+  // Three modes, not two: All time and 30 days both RANK BY DISTANCE over different
+  // windows, while PB ranks by top speed. PB is deliberately all-time — a personal best
+  // is a record, and a 30-day PB is a different (and much less interesting) claim.
+  const [boardMode, setBoardMode] = useState<'all' | '30' | 'pb'>('all');
   useEffect(() => {
     if (!community?.id) { setBoard([]); return; }
     let dead = false;
     (async () => {
-      const rows = await fetchClubLeaderboard(String(community.id), boardRange || undefined);
+      const rows = await fetchClubLeaderboard(String(community.id), boardMode === '30' ? 30 : undefined);
       if (dead) return;
       // SEED FROM THE ROSTER. Distance only exists for drives recorded since the feature
       // shipped, so a club with real members and real PBs would otherwise show NOTHING —
@@ -607,12 +610,14 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
           byId.set(id, { userId: id, handle: m?.handle || "anon", km: 0, drives: 0, pb: profilePb });
         }
       }
-      // Distance first, then PB, so a member with no drives yet still sorts sensibly.
-      const merged = [...byId.values()].sort((a, b) => (b.km - a.km) || (b.pb - a.pb));
+      // PB mode ranks on top speed; the distance modes rank on km and fall back to PB so
+      // members with no drives yet still order sensibly instead of clumping at zero.
+      const merged = [...byId.values()].sort((a, b) =>
+        boardMode === 'pb' ? (b.pb - a.pb) || (b.km - a.km) : (b.km - a.km) || (b.pb - a.pb));
       setBoard(merged);
     })();
     return () => { dead = true; };
-  }, [community?.id, boardRange, c?.members_users]);
+  }, [community?.id, boardMode, c?.members_users]);
   useEffect(() => {
     if (!community) { setC(null); setEditingDesc(false); setEditingName(false); return; }
     (async () => {
@@ -931,14 +936,14 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                 <View style={styles.boardHead}>
                   <Text style={styles.label}>Leaderboard</Text>
                   <View style={styles.boardToggle}>
-                    {([0, 30] as const).map((r) => (
+                    {([['all', 'All time'], ['30', '30 days'], ['pb', 'PB']] as const).map(([m, label]) => (
                       <TouchableOpacity
-                        key={r}
-                        onPress={() => setBoardRange(r)}
-                        style={[styles.boardTab, boardRange === r && styles.boardTabOn]}
+                        key={m}
+                        onPress={() => setBoardMode(m)}
+                        style={[styles.boardTab, boardMode === m && styles.boardTabOn]}
                       >
-                        <Text style={[styles.boardTabText, boardRange === r && styles.boardTabTextOn]}>
-                          {r === 0 ? "All time" : "30 days"}
+                        <Text style={[styles.boardTabText, boardMode === m && styles.boardTabTextOn]}>
+                          {label}
                         </Text>
                       </TouchableOpacity>
                     ))}
@@ -954,11 +959,20 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                       </Text>
                       {/* PB = the member's fastest km/h on any drive counted here — a MAX,
                           not a total, so it doesn't grow just by driving more. */}
-                      {row.pb > 0 && (
-                        <Text style={styles.boardPb}>PB {Math.round(row.pb)}</Text>
+                      {/* Whichever metric the board is RANKED on gets the emphasis, so the
+                          column your eye lands on is the one the order reflects. */}
+                      {boardMode === 'pb' ? (
+                        <>
+                          <Text style={styles.boardDrives}>{fmtKm(row.km)}</Text>
+                          <Text style={styles.boardKm}>{row.pb > 0 ? `${Math.round(row.pb)} km/h` : "—"}</Text>
+                        </>
+                      ) : (
+                        <>
+                          {row.pb > 0 && <Text style={styles.boardPb}>PB {Math.round(row.pb)}</Text>}
+                          <Text style={styles.boardDrives}>{row.drives}{row.drives === 1 ? " drive" : " drives"}</Text>
+                          <Text style={styles.boardKm}>{fmtKm(row.km)}</Text>
+                        </>
                       )}
-                      <Text style={styles.boardDrives}>{row.drives}{row.drives === 1 ? " drive" : " drives"}</Text>
-                      <Text style={styles.boardKm}>{fmtKm(row.km)}</Text>
                     </View>
                   );
                 })}
@@ -1374,7 +1388,7 @@ const styles = StyleSheet.create({
   // ── Club leaderboard ──
   boardHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 18 },
   boardToggle: { flexDirection: "row", backgroundColor: "rgba(118,118,128,0.20)", borderRadius: 999, padding: 2 },
-  boardTab: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  boardTab: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 },
   boardTabOn: { backgroundColor: "rgba(45,236,134,0.20)" },
   boardTabText: { color: COLORS.text, fontSize: 11.5, fontWeight: "600", opacity: 0.75 },
   boardTabTextOn: { color: "#2DEC86", opacity: 1 },
@@ -1389,7 +1403,7 @@ const styles = StyleSheet.create({
   boardHandle: { flex: 1, minWidth: 0, color: COLORS.text, fontSize: 13.5, fontWeight: "600" },
   boardDrives: { color: COLORS.text, opacity: 0.7, fontSize: 11.5, fontWeight: "600" },
   boardPb: { color: "#00C46A", fontSize: 11.5, fontWeight: "700" },
-  boardKm: { color: "#2DEC86", fontSize: 13.5, fontWeight: "800", minWidth: 62, textAlign: "right" },
+  boardKm: { color: "#2DEC86", fontSize: 13.5, fontWeight: "800", minWidth: 72, textAlign: "right" },
   clubDesc: { color: COLORS.text, fontSize: 13, lineHeight: 18, marginTop: 10 },
   clubTags: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 12 },
   clubTag: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },

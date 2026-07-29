@@ -42,7 +42,7 @@ import {
 } from "../../src/nav";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
 import { usePitstop } from "../../src/pitstop";
-import { recordTrip, consumeTakeAgain } from "../../src/trips";
+import { recordTrip, consumeTakeAgain, cachePeerPbs } from "../../src/trips";
 import PitstopCard from "../../src/components/PitstopCard";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import { setCarState, setCarPeers, subscribeCarGesture } from "../../src/carplay/carStore";
@@ -2602,6 +2602,16 @@ export default function MapScreen() {
             } as Peer;
           }
         });
+        // Stash every PB we just saw for the club leaderboard. The roster endpoint
+        // (/communities/:id) does not carry top_speed_record, but THIS pipeline does —
+        // it is exactly what the peer card reads for "PB 174 km/h". Caching at the
+        // source means the board can never disagree with the card. Fire-and-forget.
+        try {
+          const pbPairs = Object.entries(next)
+            .map(([id, p]: any) => ({ id: String(id), pb: Number(p?.topSpeed) }))
+            .filter((p) => p.id && p.pb > 0);
+          if (pbPairs.length) void cachePeerPbs(pbPairs);
+        } catch {}
         return next;
       });
     } catch {}

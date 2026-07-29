@@ -252,3 +252,38 @@ export function consumeTakeAgain(): Trip | null {
   _takeAgain = null;
   return t;
 }
+
+// ── Peer PB cache ────────────────────────────────────────────────────────────
+// The club leaderboard needs each member's personal-best speed, but the club roster
+// endpoint (/communities/:id -> members_users) does not carry top_speed_record. The
+// number DOES reach the app — it rides the peer pipeline (/users/nearby + presence),
+// which is where the peer card gets the "PB 174 km/h" it shows when you tap a car.
+//
+// So the map records what it sees, and the Hub reads it back. Client-side only: no
+// backend change, and no extra request just to render a board. Speeds carry no location.
+const PB_KEY = "hairpin.peerPb.v1";
+
+export async function cachePeerPbs(pairs: { id: string; pb?: number }[]): Promise<void> {
+  try {
+    const good = pairs.filter((p) => p?.id && Number.isFinite(p.pb) && (p.pb as number) > 0);
+    if (!good.length) return;
+    const raw = await AsyncStorage.getItem(PB_KEY);
+    const map: Record<string, number> = raw ? JSON.parse(raw) : {};
+    let changed = false;
+    for (const p of good) {
+      const v = Math.round((p.pb as number) * 10) / 10;
+      // Only ever climbs — a PB is a record, so a stale lower reading must not erase it.
+      if (!(map[p.id] >= v)) { map[p.id] = v; changed = true; }
+    }
+    if (changed) await AsyncStorage.setItem(PB_KEY, JSON.stringify(map));
+  } catch {}
+}
+
+export async function getPeerPbs(): Promise<Record<string, number>> {
+  try {
+    const raw = await AsyncStorage.getItem(PB_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}

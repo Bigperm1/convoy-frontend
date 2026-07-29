@@ -17,7 +17,7 @@ import Glass, { GlassFill } from "../../src/Glass";
 import GlassBackdrop from "../../src/components/GlassBackdrop";
 import LogoMenu from "../../src/components/LogoMenu";
 import { getGarageImage, getTopDownImage } from "../../src/carImages";
-import { fetchClubLeaderboard, fmtKm } from "../../src/trips";
+import { fetchClubLeaderboard, getPeerPbs, fmtKm } from "../../src/trips";
 import { useSettings, updateSettings } from "../../src/settings";
 
 type Community = {
@@ -596,6 +596,9 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
       // 0 km with the PB already on their profile, and recorded trips overlay on top as
       // they come in. PB here is the LIFETIME profile record; once a member has recorded
       // trips, the higher of the two wins so the number never goes backwards.
+      // PBs the map has seen on the peer pipeline — the roster endpoint omits them.
+      const pbCache = await getPeerPbs();
+      if (dead) return;
       const roster: any[] = c?.members_users || [];
       const byId = new Map(rows.map((r) => [r.userId, { ...r }]));
       for (const m of roster) {
@@ -609,7 +612,8 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
           Number(m?.top_speed_record) ||
           Number(m?.topSpeed) ||
           Number(m?.top_speed) ||
-          Number(m?.pb) || 0;
+          Number(m?.pb) ||
+          Number(pbCache[String(m?.id ?? '')]) || 0;
         const cur = byId.get(id);
         if (cur) {
           cur.pb = Math.max(cur.pb || 0, profilePb);

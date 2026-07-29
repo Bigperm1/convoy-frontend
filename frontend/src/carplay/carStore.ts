@@ -50,6 +50,13 @@ export type CarState = {
   carTapEchoAt?: number;
   carToast?: string;
   carToastUntil?: number;
+  // PITSTOP mirror — the phone owns detection (src/pitstop.ts); the car just draws it.
+  // Standing rule: the CarPlay HUD matches the phone, so a stop that shows a timer on
+  // the phone must show one on the head unit too.
+  pitstopActive?: boolean;
+  pitstopLabel?: string;
+  pitstopKind?: string;
+  pitstopElapsedS?: number;
   crewViewUntil?: number;
   crewViewCount?: number;
   // Raw numeric mirrors of the formatted strings above. Android Auto's

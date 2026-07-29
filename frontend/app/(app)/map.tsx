@@ -1144,6 +1144,19 @@ export default function MapScreen() {
   // the ETA" note live in src/pitstop.ts.
   const pitstop = usePitstop(coords, settings.pitstop !== false && navMode === "turn-by-turn");
 
+  // Mirror the pitstop to the car surface. Phone owns detection; CarPlay/Android Auto
+  // just draw it, per the standing "CarPlay matches the phone" rule.
+  useEffect(() => {
+    try {
+      setCarState({
+        pitstopActive: !!pitstop.active,
+        pitstopLabel: pitstop.label || '',
+        pitstopKind: pitstop.kind || 'rest',
+        pitstopElapsedS: pitstop.elapsedS || 0,
+      });
+    } catch {}
+  }, [pitstop.active, pitstop.label, pitstop.kind, pitstop.elapsedS]);
+
   // Turn-by-turn engine — speaks instructions, advances steps, computes ETA / distance remaining
   const tbt = useTurnByTurn(activeRoute, coords, navMode === "turn-by-turn", {
     mute: navMuted,

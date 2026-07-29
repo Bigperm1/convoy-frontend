@@ -37,6 +37,7 @@ import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated, Touch
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec } from '../nav';
 import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { fmtPitstop } from '../pitstop';
 import { laneIcon } from '../components/TurnByTurnNav';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
@@ -562,7 +563,28 @@ export function CarSurface() {
           Incoming audio already AUTO-PLAYS through the car speakers (the app-level
           useLiveWalkieListener), so this is the "who am I hearing" caption, not a
           prompt to tap — and it could not be tappable anyway. */}
-      {Date.now() < (s.carToastUntil || 0) && s.carToast ? (
+      {/* PITSTOP — highest priority in this slot. A parked car has no live transmission
+          and no Scout progress to compete with, and the driver has walked away from the
+          screen: when they glance back, the running clock is the ONE thing they want.
+          Candy red matches the phone card (src/components/PitstopCard.tsx). */}
+      {s.pitstopActive ? (
+        <View style={styles.statusRow} pointerEvents="none">
+          <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
+            <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
+            <MaterialCommunityIcons
+              name={s.pitstopKind === 'gas' ? 'gas-station'
+                : s.pitstopKind === 'food' ? 'silverware-fork-knife'
+                : s.pitstopKind === 'coffee' ? 'coffee' : 'parking'}
+              size={16}
+              color="#E4002B"
+            />
+            <Text style={styles.scoutPillText} numberOfLines={1}>
+              {s.pitstopLabel ? `${s.pitstopLabel} · ` : 'Pitstop · '}
+              {fmtPitstop(s.pitstopElapsedS || 0)}
+            </Text>
+          </View>
+        </View>
+      ) : Date.now() < (s.carToastUntil || 0) && s.carToast ? (
         /* ACTION RECEIPT. This slot replaced the CPAlertTemplate modals that every
            button used to raise for its confirmation. A presented template covers the
            map and makes EVERY map button unreachable by design, and carAlert's

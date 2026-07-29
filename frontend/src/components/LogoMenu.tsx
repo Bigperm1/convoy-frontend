@@ -25,6 +25,7 @@ type Item = {
 const ITEMS: Item[] = [
   { label: 'Garage',    icon: 'car-sport',        route: '/(app)/garage' },
   { label: 'Hub',       icon: 'people',           route: '/(app)/hub' },
+  { label: 'Drives',    icon: 'navigate',         route: '/(app)/trips' },
   { label: 'Settings',  icon: 'settings-sharp',   route: '/(app)/settings' },
 ];
 

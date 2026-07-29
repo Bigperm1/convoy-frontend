@@ -329,6 +329,8 @@ export default function AppLayout() {
         <Tabs.Screen name="settings" options={{ href: null }} />
         <Tabs.Screen name="drive-mode" options={{ href: null }} />
         <Tabs.Screen name="garage" options={{ href: null }} />
+        {/* Drives (trip history) — reached from the logo menu, not a bottom tab. */}
+        <Tabs.Screen name="trips" options={{ href: null }} />
         <Tabs.Screen name="admin" options={{ href: null }} />
         {/* TEMP (Mapbox migration Phase 1) — throwaway test route, no tab. STRIP BEFORE MERGE. */}
         <Tabs.Screen name="mapbox-test" options={{ href: null }} />

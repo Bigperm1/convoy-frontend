@@ -42,6 +42,7 @@ import {
 } from "../../src/nav";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
 import { usePitstop } from "../../src/pitstop";
+import { recordTrip } from "../../src/trips";
 import PitstopCard from "../../src/components/PitstopCard";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import { setCarState, setCarPeers, subscribeCarGesture } from "../../src/carplay/carStore";
@@ -1142,6 +1143,31 @@ export default function MapScreen() {
       navAutoStartedRef.current = true;  // stay stopped until a new destination is set
       // Learn the habitual path to this place BEFORE we drop the destination.
       maybeLearnDrive(destination);
+      // RECORD THE DRIVE — also before the teardown below nulls everything out.
+      // Distance/duration come from the route rather than an integral of GPS fixes:
+      // raw GPS accumulates jitter (a parked phone invents hundreds of metres), and the
+      // route figure is the one the driver was shown all trip. The polyline is kept ON
+      // DEVICE for playback; only distance/duration/when go to the server. See
+      // src/trips.ts for why that split exists.
+      try {
+        const done = activeRoute;
+        const startedAt = tripBaselineRef.current?.startedAt || Date.now();
+        if (done) {
+          void recordTrip({
+            startedAt,
+            distanceM: done.distance_m || 0,
+            durationS: Math.max(0, (Date.now() - startedAt) / 1000),
+            destLabel: destination?.label || done.summary || "Drive",
+            polyline: done.polyline || "",
+            stops: stops.length ? stops.map((st) => ({ label: st.label, lat: st.lat, lng: st.lng })) : undefined,
+            destLat: destination?.lat,
+            destLng: destination?.lng,
+            userId: user?.id ? String(user.id) : undefined,
+            handle: (user as any)?.handle || undefined,
+            communityId: getSettings().activeCommunityId || undefined,
+          });
+        }
+      } catch {}
       tripBaselineRef.current = null;
       pendingRerouteRef.current = null;
       clearOffer();

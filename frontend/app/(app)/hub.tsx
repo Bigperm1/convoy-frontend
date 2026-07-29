@@ -596,8 +596,22 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
       // 0 km with the PB already on their profile, and recorded trips overlay on top as
       // they come in. PB here is the LIFETIME profile record; once a member has recorded
       // trips, the higher of the two wins so the number never goes backwards.
-      // PBs the map has seen on the peer pipeline — the roster endpoint omits them.
+      // PBs. Three sources, because no single one covers the whole club:
+      //   1. the roster itself (currently omits top_speed_record — hence the rest)
+      //   2. /users/nearby, the SAME feed the peer card reads for "PB 174 km/h";
+      //      it returns full profiles, so it covers members this phone has never
+      //      driven near, which the local cache alone cannot
+      //   3. the local cache, as the offline fallback
+      // Without 2, only members seen live as peers had a PB and everyone else showed "—".
       const pbCache = await getPeerPbs();
+      let pbLive: Record<string, number> = {};
+      try {
+        const { data } = await api.get("/users/nearby", { params: { radius_km: 20000 } });
+        for (const u of (Array.isArray(data) ? data : [])) {
+          const v = Number(u?.top_speed_record) || 0;
+          if (u?.id && v > 0) pbLive[String(u.id)] = v;
+        }
+      } catch {}
       if (dead) return;
       const roster: any[] = c?.members_users || [];
       const byId = new Map(rows.map((r) => [r.userId, { ...r }]));
@@ -613,6 +627,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
           Number(m?.topSpeed) ||
           Number(m?.top_speed) ||
           Number(m?.pb) ||
+          Number(pbLive[String(m?.id ?? '')]) ||
           Number(pbCache[String(m?.id ?? '')]) || 0;
         const cur = byId.get(id);
         if (cur) {
@@ -971,16 +986,14 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                       </Text>
                       {/* PB = the member's fastest km/h on any drive counted here — a MAX,
                           not a total, so it doesn't grow just by driving more. */}
-                      {/* Whichever metric the board is RANKED on gets the emphasis, so the
-                          column your eye lands on is the one the order reflects. */}
+                      {/* ONE metric per tab (Jeff, 2026-07-28): PB has no business on the
+                          Drives board and a 0 km column has none on the PB board. Each tab
+                          shows only what it ranks on, so nothing competes with the number
+                          the order actually reflects. */}
                       {boardMode === 'pb' ? (
-                        <>
-                          <Text style={styles.boardDrives}>{fmtKm(row.km)}</Text>
-                          <Text style={styles.boardKm}>{row.pb > 0 ? `${Math.round(row.pb)} km/h` : "—"}</Text>
-                        </>
+                        <Text style={styles.boardKm}>{row.pb > 0 ? `${Math.round(row.pb)} km/h` : "—"}</Text>
                       ) : (
                         <>
-                          {row.pb > 0 && <Text style={styles.boardPb}>PB {Math.round(row.pb)}</Text>}
                           <Text style={styles.boardDrives}>{row.drives}{row.drives === 1 ? " drive" : " drives"}</Text>
                           <Text style={styles.boardKm}>{fmtKm(row.km)}</Text>
                         </>

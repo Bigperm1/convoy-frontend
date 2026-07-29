@@ -601,7 +601,15 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
       for (const m of roster) {
         const id = String(m?.id ?? "");
         if (!id) continue;
-        const profilePb = Number(m?.top_speed_record) || 0;
+        // The PB shown on the peer card (e.g. "PB 174 km/h") is top_speed_record. Read it
+        // tolerantly: the roster endpoint and the presence payload have historically
+        // spelled this differently, and an unrecognised field would silently render an
+        // empty PB column rather than an error anyone would notice.
+        const profilePb =
+          Number(m?.top_speed_record) ||
+          Number(m?.topSpeed) ||
+          Number(m?.top_speed) ||
+          Number(m?.pb) || 0;
         const cur = byId.get(id);
         if (cur) {
           cur.pb = Math.max(cur.pb || 0, profilePb);

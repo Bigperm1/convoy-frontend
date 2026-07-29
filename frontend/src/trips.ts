@@ -48,6 +48,8 @@ export type Trip = {
   /** Destination, so "take it again" can re-run the trip. */
   destLat?: number;
   destLng?: number;
+  /** Fastest km/h seen on THIS drive — the PB the club board ranks on. */
+  topSpeedKmh?: number;
 };
 
 function newId(startedAt: number, endedAt: number): string {
@@ -95,6 +97,7 @@ export async function recordTrip(input: {
   stops?: { label: string; lat: number; lng: number }[];
   destLat?: number;
   destLng?: number;
+  topSpeedKmh?: number;
   userId?: string;
   handle?: string;
   communityId?: string;
@@ -120,6 +123,9 @@ export async function recordTrip(input: {
       stops: input.stops?.length ? input.stops : undefined,
       destLat: input.destLat,
       destLng: input.destLng,
+      topSpeedKmh: Number.isFinite(input.topSpeedKmh) && (input.topSpeedKmh as number) > 0
+        ? Math.round((input.topSpeedKmh as number) * 10) / 10
+        : 0,
     };
 
     const list = await getTrips();
@@ -151,6 +157,7 @@ async function pushTripAggregate(
       community_id: communityId || null,
       distance_m: trip.distanceM,
       duration_s: trip.durationS,
+      top_speed_kmh: trip.topSpeedKmh || 0,
       started_at: new Date(trip.startedAt).toISOString(),
       ended_at: new Date(trip.endedAt).toISOString(),
     }]);
@@ -183,7 +190,7 @@ export async function removeTrip(id: string): Promise<Trip[]> {
 export async function fetchClubLeaderboard(
   communityId: string,
   sinceDays?: number,
-): Promise<{ userId: string; handle: string; km: number; drives: number }[]> {
+): Promise<{ userId: string; handle: string; km: number; drives: number; pb: number }[]> {
   try {
     if (!communityId) return [];
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -191,7 +198,7 @@ export async function fetchClubLeaderboard(
     if (!supabase) return [];
     let q = supabase
       .from("trips")
-      .select("user_id,handle,distance_m")
+      .select("user_id,handle,distance_m,top_speed_kmh")
       .eq("community_id", communityId);
     if (sinceDays && sinceDays > 0) {
       q = q.gte("ended_at", new Date(Date.now() - sinceDays * 86400000).toISOString());
@@ -199,13 +206,15 @@ export async function fetchClubLeaderboard(
     const { data, error } = await q;
     if (error || !Array.isArray(data)) return [];
 
-    const by = new Map<string, { userId: string; handle: string; km: number; drives: number }>();
+    const by = new Map<string, { userId: string; handle: string; km: number; drives: number; pb: number }>();
     for (const row of data as any[]) {
       const uid = String(row?.user_id || "");
       if (!uid) continue;
-      const cur = by.get(uid) || { userId: uid, handle: row?.handle || "Driver", km: 0, drives: 0 };
+      const cur = by.get(uid) || { userId: uid, handle: row?.handle || "Driver", km: 0, drives: 0, pb: 0 };
       cur.km += (Number(row?.distance_m) || 0) / 1000;
       cur.drives += 1;
+      // PB is a MAX across the member's trips, not a sum.
+      cur.pb = Math.max(cur.pb, Number(row?.top_speed_kmh) || 0);
       // Keep the freshest handle we see — members rename themselves.
       if (row?.handle) cur.handle = row.handle;
       by.set(uid, cur);

@@ -1189,6 +1189,9 @@ export default function MapScreen() {
             stops: stops.length ? stops.map((st) => ({ label: st.label, lat: st.lat, lng: st.lng })) : undefined,
             destLat: destination?.lat,
             destLng: destination?.lng,
+            // PB for this drive. sessionMaxSpeed is the fastest km/h since the map
+            // mounted, which for a normal drive IS this trip's max.
+            topSpeedKmh: sessionMaxSpeed,
             userId: user?.id ? String(user.id) : undefined,
             handle: (user as any)?.handle || undefined,
             communityId: getSettings().activeCommunityId || undefined,

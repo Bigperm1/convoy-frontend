@@ -578,7 +578,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
   // Ranked by distance recorded on drives tagged to THIS club. The rows come from
   // public.trips, which deliberately holds distance/duration/when and NO coordinates —
   // members compare mileage without publishing where anyone drove. See src/trips.ts.
-  const [board, setBoard] = useState<{ userId: string; handle: string; km: number; drives: number }[]>([]);
+  const [board, setBoard] = useState<{ userId: string; handle: string; km: number; drives: number; pb: number }[]>([]);
   const [boardRange, setBoardRange] = useState<0 | 30>(0);   // 0 = all time, 30 = last 30 days
   useEffect(() => {
     if (!community?.id) { setBoard([]); return; }
@@ -928,7 +928,12 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                       <Text style={[styles.boardHandle, me && { fontWeight: "800" }]} numberOfLines={1}>
                         {row.handle}{me ? " · you" : ""}
                       </Text>
-                      <Text style={styles.boardDrives}>{row.drives} {row.drives === 1 ? "drive" : "drives"}</Text>
+                      {/* PB = the member's fastest km/h on any drive counted here — a MAX,
+                          not a total, so it doesn't grow just by driving more. */}
+                      {row.pb > 0 && (
+                        <Text style={styles.boardPb}>PB {Math.round(row.pb)}</Text>
+                      )}
+                      <Text style={styles.boardDrives}>{row.drives}{row.drives === 1 ? " drive" : " drives"}</Text>
                       <Text style={styles.boardKm}>{fmtKm(row.km)}</Text>
                     </View>
                   );
@@ -1359,6 +1364,7 @@ const styles = StyleSheet.create({
   boardRankTop: { color: "#2DEC86", opacity: 1 },
   boardHandle: { flex: 1, minWidth: 0, color: COLORS.text, fontSize: 13.5, fontWeight: "600" },
   boardDrives: { color: COLORS.text, opacity: 0.7, fontSize: 11.5, fontWeight: "600" },
+  boardPb: { color: "#00C46A", fontSize: 11.5, fontWeight: "700" },
   boardKm: { color: "#2DEC86", fontSize: 13.5, fontWeight: "800", minWidth: 62, textAlign: "right" },
   clubDesc: { color: COLORS.text, fontSize: 13, lineHeight: 18, marginTop: 10 },
   clubTags: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 12 },

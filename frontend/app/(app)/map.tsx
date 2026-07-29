@@ -38,7 +38,7 @@ import ShareSheet from "../../src/ShareSheet";
 import {
   fetchRoutes, fetchDirections, fetchAiRoute, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
-  useRouteTrafficRefresh,
+  useRouteTrafficRefresh, fetchRouteViaStops,
 } from "../../src/nav";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
 import { usePitstop } from "../../src/pitstop";
@@ -491,6 +491,13 @@ export default function MapScreen() {
   const [pillsVisible, setPillsVisible] = useState(false);
   const [route, setRoute] = useState<RouteInfo | null>(null);
   const [showSteps, setShowSteps] = useState(false);
+  // ── ADD STOP (Jeff, 2026-07-28) ────────────────────────────────────────────
+  // Interior waypoints between the driver and the destination, in travel order.
+  // `label` is editable — the whole point of the rename is that "Stop 1" is useless
+  // on a road trip but "Tim's in Hope" tells you what the stop IS.
+  const [stops, setStops] = useState<{ lat: number; lng: number; label: string }[]>([]);
+  const [stopPickerOpen, setStopPickerOpen] = useState(false);
+  const [renameStop, setRenameStop] = useState<{ idx: number; name: string } | null>(null);
   // Whether the turn-by-turn step list is expanded (slide-up). Lifts the FAB
   // stack / speedo / weather above the expanded drawer so they aren't covered.
   const [stepsExpanded, setStepsExpanded] = useState(false);
@@ -922,11 +929,34 @@ export default function MapScreen() {
     }
     let cancelled = false;
     (async () => {
-      const raw = await fetchRoutes(origin, destination, {
+      const avoid = {
         tolls: settings.avoidTolls,
         highways: settings.avoidHighways,
         ferries: settings.avoidFerries,
-      });
+      };
+      // STOPS PINNED → one via-route through them, and no alternates. Mapbox returns a
+      // single route for a via request, which is right: once the driver has pinned the
+      // shape of the trip, "alternate ways through your own waypoints" is meaningless.
+      // The via route is an ordinary NavRoute (segment durations, congestion, refresh
+      // uuid) so the accurate ETA and live traffic keep working through stops.
+      if (stops.length) {
+        const viaRoute = await fetchRouteViaStops(origin, stops, destination, avoid);
+        if (cancelled) return;
+        if (viaRoute) {
+          const only = [{ ...viaRoute, color: '#2DEC86' }] as any[];
+          setRoutes(only);
+          setSelectedRouteIndex(0);
+          setRoute({
+            distance_text: viaRoute.distance_text,
+            duration_text: viaRoute.duration_text,
+            polyline: viaRoute.polyline,
+          } as any);
+          return;
+        }
+        // Via fetch failed (network, or a stop Mapbox can't snap to a road) — fall
+        // through to the normal origin→destination routes rather than showing nothing.
+      }
+      const raw = await fetchRoutes(origin, destination, avoid);
       if (cancelled) return;
       // Sort by traffic-aware ETA when available, else fall back to free-flow
       // duration. This mirrors what Google Maps does in its "Best route" pick.
@@ -1026,7 +1056,7 @@ export default function MapScreen() {
       } catch {}
     })();
     return () => { cancelled = true; };
-  }, [destination, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
+  }, [destination, stops, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
 
   // When a destination is picked, drop follow-mode so the camera can zoom out to
   // frame all route options (ConvoyMap fits to the polylines). The Recenter FAB
@@ -1905,6 +1935,9 @@ export default function MapScreen() {
     setRoute(null);
     setShowSteps(false);
     setNavMode("preview");
+    // Stops belong to THIS trip — clearing the route drops them too, otherwise the
+    // next destination silently inherits the last trip's waypoints.
+    setStops([]);
     // Also retract the step drawer so it doesn't dangle on a destination-less map.
     slideStepDrawerDown();
   };
@@ -3608,6 +3641,34 @@ export default function MapScreen() {
 
             <View style={styles.bannerDivider} />
 
+            {/* ── STOPS ── Interior waypoints in travel order. Tap a name to rename it
+                ("Stop 1" is useless on a road trip; "Tim's in Hope" is not), × removes.
+                Editing either re-runs the route effect through the new via list. */}
+            {stops.length > 0 && (
+              <View style={styles.stopList}>
+                {stops.map((st, i) => (
+                  <View key={`${st.lat},${st.lng},${i}`} style={styles.stopRow}>
+                    <View style={styles.stopDot}><Text style={styles.stopDotText}>{i + 1}</Text></View>
+                    <TouchableOpacity
+                      style={{ flex: 1, minWidth: 0 }}
+                      onPress={() => setRenameStop({ idx: i, name: st.label })}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.stopLabel} numberOfLines={1}>{st.label}</Text>
+                      <Text style={styles.stopHint}>Tap to rename</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => { Haptics.selectionAsync().catch(() => {}); setStops((p) => p.filter((_, k) => k !== i)); }}
+                      hitSlop={10}
+                      testID={`stop-remove-${i}`}
+                    >
+                      <Ionicons name="close-circle" size={20} color="#8E8E93" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+
             {/* Route options — Best / Scenic / AI. Tap to select; summary below updates. */}
             <View style={styles.routeOptChips}>
               {routeChips.map((c) => {
@@ -3666,12 +3727,17 @@ export default function MapScreen() {
                 <Ionicons name="navigate" size={18} color="#1C1C1E" />
                 <Text style={styles.bannerPillStartText}>Start</Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.bannerPill, styles.bannerPillBlue]}
+                activeOpacity={0.9}
+                testID="add-stops"
+                onPress={() => { Haptics.selectionAsync().catch(() => {}); setStopPickerOpen(true); }}
+              >
+                <Ionicons name="add-circle-outline" size={18} color="#fff" />
+                <Text style={styles.bannerPillBlueText}>{stops.length ? "Add another" : "Add stop"}</Text>
+              </TouchableOpacity>
               {SHOW_EXTRA_ROUTE_PILLS && (
                 <>
-                  <TouchableOpacity style={[styles.bannerPill, styles.bannerPillBlue]} activeOpacity={0.9} testID="add-stops">
-                    <Ionicons name="add-circle-outline" size={18} color="#fff" />
-                    <Text style={styles.bannerPillBlueText}>Add stops</Text>
-                  </TouchableOpacity>
                   <TouchableOpacity style={[styles.bannerPill, styles.bannerPillBlue]} activeOpacity={0.9} testID="saved-routes">
                     <Ionicons name="bookmark" size={18} color="#fff" />
                     <Text style={styles.bannerPillBlueText}>Saved</Text>
@@ -4202,6 +4268,65 @@ export default function MapScreen() {
         onSelectPlace={onSearchSelectPlace}
         onSelectFriend={onSearchSelectFriend}
       />
+
+      {/* ===== ADD STOP: pick a place to pin as a waypoint ===== */}
+      {/* Same full-screen search the destination uses — recents, saved places and
+          autocomplete all come for free. The only difference is what we do with the
+          result: append it to `stops` instead of replacing the destination. */}
+      <NavSearchScreen
+        visible={stopPickerOpen}
+        onClose={() => setStopPickerOpen(false)}
+        origin={coords}
+        members={navMembers}
+        onSelectPlace={(loc: any) => {
+          setStopPickerOpen(false);
+          if (typeof loc?.lat !== "number" || typeof loc?.lng !== "number") return;
+          setStops((prev) => [...prev, { lat: loc.lat, lng: loc.lng, label: loc.label || `Stop ${prev.length + 1}` }]);
+        }}
+        onSelectFriend={onSearchSelectFriend}
+      />
+
+      {/* ===== Rename a stop ===== */}
+      <Modal visible={!!renameStop} transparent animationType="fade" onRequestClose={() => setRenameStop(null)}>
+        <TouchableOpacity activeOpacity={1} style={styles.nameModalBackdrop} onPress={() => setRenameStop(null)}>
+          <TouchableOpacity activeOpacity={1} style={styles.nameModalCard} onPress={() => {}}>
+            <Text style={styles.nameModalTitle}>Rename stop</Text>
+            <TextInput
+              value={renameStop?.name ?? ""}
+              onChangeText={(t) => setRenameStop((r) => (r ? { ...r, name: t } : r))}
+              placeholder="e.g. Tim's in Hope, Lunch, Fuel up"
+              placeholderTextColor="#808080"
+              style={styles.nameModalInput}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={() => {
+                if (!renameStop) return;
+                const nm = renameStop.name.trim();
+                if (nm) setStops((p) => p.map((st, i) => (i === renameStop.idx ? { ...st, label: nm } : st)));
+                setRenameStop(null);
+              }}
+            />
+            <View style={styles.nameModalRow}>
+              <TouchableOpacity onPress={() => setRenameStop(null)} style={[styles.nameModalBtn, styles.nameModalCancel]} activeOpacity={0.85}>
+                <Text style={styles.nameModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  if (!renameStop) return;
+                  const nm = renameStop.name.trim();
+                  if (nm) setStops((p) => p.map((st, i) => (i === renameStop.idx ? { ...st, label: nm } : st)));
+                  setRenameStop(null);
+                }}
+                style={[styles.nameModalBtn, styles.nameModalSave, !(renameStop?.name || "").trim() && { opacity: 0.5 }]}
+                activeOpacity={0.9}
+                disabled={!(renameStop?.name || "").trim()}
+              >
+                <Text style={styles.nameModalSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       {/* ===== Name a custom saved place (cross-platform TextInput modal) ===== */}
       <Modal visible={!!savePlaceModal} transparent animationType="fade" onRequestClose={() => setSavePlaceModal(null)}>
@@ -4775,6 +4900,22 @@ const styles = StyleSheet.create({
   // Pitstop stopwatch, top-centre under the crew pill. Width-capped so a long place
   // name truncates instead of stretching the card across the map.
   pitstopWrap: { marginTop: 8, alignSelf: "center", width: "92%", maxWidth: 380 },
+  // ── Add-stop rows in the Drive drawer ──
+  stopList: { paddingHorizontal: 16, paddingTop: 2, paddingBottom: 6, gap: 6 },
+  stopRow: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingVertical: 8, paddingHorizontal: 10, borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  stopDot: {
+    width: 22, height: 22, borderRadius: 11,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(45,236,134,0.18)",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(45,236,134,0.55)",
+  },
+  stopDotText: { color: "#2DEC86", fontSize: 11, fontWeight: "800" },
+  stopLabel: { color: "#FFFFFF", fontSize: 14, fontWeight: "600", letterSpacing: -0.2 },
+  stopHint: { color: COLORS.textDim, fontSize: 10.5, fontWeight: "600", marginTop: 1 },
   // ===== Layers bottom sheet =====
   sheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   sheetCard: {

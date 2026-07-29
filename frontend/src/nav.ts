@@ -1567,3 +1567,42 @@ export function useRouteTrafficRefresh(
     };
   }, [active, uuid, routeIndex]);
 }
+
+// ── Multi-stop routing ───────────────────────────────────────────────────────
+//
+// Route origin → stop → stop → … → destination, pinning each stop as a Mapbox
+// via-waypoint (Jeff, 2026-07-28: "add into the drawer an 'add stop' feature").
+//
+// This rides the SAME `fetchMapboxRouteVia` the AI route already uses, so a stopped
+// route is a completely ordinary NavRoute: it carries per-step durations, per-segment
+// durations, congestion and a refresh uuid, which means the accurate ETA, the live
+// traffic refresh and the congestion gradient all work through stops with no extra
+// wiring. That is why this is a thin wrapper rather than a second routing path.
+//
+// NOTE Mapbox returns ONE route for a via request — no `alternatives`. So adding a stop
+// collapses the Best/Scenic fan-out to a single line, which is correct: the driver has
+// pinned the shape of the trip and alternates through fixed waypoints are meaningless.
+//
+// Interior arrive/depart steps at each waypoint are already stripped inside
+// fetchMapboxRouteVia, so guidance won't announce "you have arrived" at every stop.
+export async function fetchRouteViaStops(
+  origin: LatLng,
+  stops: LatLng[],
+  destination: LatLng,
+  avoid?: AvoidPrefs,
+): Promise<NavRoute | null> {
+  try {
+    const via: [number, number][] = (stops || [])
+      .filter((s) => typeof s?.lat === "number" && typeof s?.lng === "number")
+      .map((s) => [s.lng, s.lat]);
+    if (!via.length) return null;
+    const mb = await fetchMapboxRouteVia(
+      origin, via, destination,
+      { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
+    );
+    if (!mb || !mb.polyline) return null;
+    return mapboxToNavRoute(mb);
+  } catch {
+    return null;
+  }
+}

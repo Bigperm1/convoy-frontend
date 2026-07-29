@@ -30,8 +30,33 @@ import { useCarStore } from './carStore';
 import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
 
-// androidx.car.app Distance unit constant: meters = 1 (Distance.UNIT_METERS).
-const AA_UNIT_METERS = 1;
+// ⚠ updateTemplate IS CURRENTLY A NO-OP ON ANDROID (verified 2026-07-28).
+// CarPlayModule.kt:123 does `val screen = carScreens[name]`, where `name` is the
+// native module's getName() — "RNCarPlay". carScreens is only ever keyed by "root"
+// and by templateId, so the lookup always misses and the whole update body is
+// skipped. Nothing we push below reaches androidx today; every pixel of nav chrome
+// on the head unit is drawn by our own CarSurface. Fixing the lookup is a
+// patch-package change and therefore needs a native build (see the build-70 notes).
+//
+// The payload is written to the shape androidx ACTUALLY parses anyway, because the
+// moment that lookup is fixed a wrong shape stops being harmless: parseTemplate
+// runs inside a bare `handler.post {}` with no try/catch (CarPlayModule.kt:120-133),
+// so a parser NPE is an uncaught throw on the car app's MAIN THREAD — a crash, not a
+// warning. The two traps, read off RCTTemplate.kt rather than the library's TS types
+// (which disagree with its own Kotlin):
+//   • parseNavigationInfo does getMap("info")!! and parseRoutingInfo getMap("step")!!
+//     — the routing fields live under `info`, not at the top level, and the cue lives
+//     in a `step`. `distanceUnits` there is parsed with getString, NOT the int
+//     Distance.UNIT_* constant this file used to send.
+//   • parseTravelEstimate does getMap("destinationTime")!! — a REQUIRED key with no
+//     TS counterpart marked required, and the one this file never sent at all.
+const AA_UNIT_METERS = 'meters';
+const AA_UNIT_KM = 'kilometers';
+
+// androidx wants an absolute arrival instant plus a zone id, not a duration.
+function aaTimeZoneId(): string {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+}
 
 // One persistent action in the strip (Android Auto requires a non-empty action
 // strip on a NavigationTemplate). Kept stable across updates.
@@ -98,13 +123,20 @@ export default function AndroidAutoRoot() {
           actions: AA_ACTIONS,
           navigationInfo: {
             type: 'routingInfo',
-            nextStep: { cue: s.instruction || 'Continue' },
-            distance: Math.max(0, Math.round(s.distanceToTurnM || 0)),
-            distanceUnits: AA_UNIT_METERS,
+            info: {
+              step: { cue: s.instruction || 'Continue' },
+              distance: Math.max(0, Math.round(s.distanceToTurnM || 0)),
+              distanceUnits: AA_UNIT_METERS,
+            },
           },
           travelEstimate: {
             distanceRemaining: (s.distanceRemainingM || 0) / 1000,
+            distanceUnits: AA_UNIT_KM,
             timeRemaining: s.etaSeconds || 0,
+            destinationTime: {
+              timeSinceEpochMillis: Date.now() + (s.etaSeconds || 0) * 1000,
+              id: aaTimeZoneId(),
+            },
           },
         });
       } else {

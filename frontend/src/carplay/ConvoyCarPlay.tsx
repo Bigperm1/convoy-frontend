@@ -33,7 +33,7 @@
 // withConvoyCarPlay.js).
 
 import React, { useEffect, useRef, useState } from 'react';
-import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated, TouchableOpacity, processColor } from 'react-native';
+import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated, TouchableOpacity, processColor, Dimensions, PixelRatio } from 'react-native';
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec } from '../nav';
 import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -48,6 +48,7 @@ import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './c
 import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton, carTap } from './carActions';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
+import { logEvent } from '../crashBreadcrumb';
 
 // CarPlay HUD floor — a solid dark tint ONLY on light basemaps (dawn / day / satellite),
 // where clear glass over the bright map would wash out. On DARK basemaps (dusk / night)
@@ -68,6 +69,47 @@ import { WeatherGlyph } from '../components/WeatherHUD';
 
 const isIOS = Platform.OS === 'ios';
 const isAndroid = Platform.OS === 'android';
+
+// ── ANDROID AUTO vs CARPLAY, inside CarSurface ───────────────────────────────
+// Same value as isAndroid, deliberately named for the thing it actually decides.
+// CarSurface only ever renders INSIDE a car session: on iOS it is the CarPlay
+// window root ('ConvoyCarSurface', registerCarSurface.ts — itself gated to
+// Platform.OS === 'ios'), on Android it is the component handed to the androidx
+// NavigationTemplate (AndroidAutoRoot.tsx). There is no phone path into that
+// component, so within it `android` IS "this is an Android Auto head unit" —
+// which is NOT true of isAndroid elsewhere in this file (useConvoyCarPlay runs
+// on the phone).
+const IS_AA = isAndroid;
+
+// ── ONE-SHOT ANDROID AUTO CANVAS PROBE (2026-07-28) ──────────────────────────
+// Every inset in this file was measured against a CARPLAY canvas (a real 800x480
+// head-unit capture = 400x240pt). The Android Auto canvas is a VirtualDisplay
+// created from the SurfaceContainer androidx hands us (VirtualRenderer.kt:44) at
+// the head unit's own px size and dpi — so its dp size is not knowable from here
+// and has never been measured. Jeff's first head-unit photo (Toyota, build 69)
+// showed the speedo and the maneuver distance colliding into "0124 m", which only
+// happens on a canvas far narrower than CarPlay's.
+//
+// So report it once per process, through the same crash_reports path the Android
+// Auto black box uses. One drive with AA connected answers "how big is this thing
+// actually", and every layout decision after that is arithmetic instead of
+// another photo round-trip.
+let aaCanvasLogged = false;
+function logAaCanvas(w: number, h: number): void {
+  if (!IS_AA || aaCanvasLogged) return;
+  if (!(w > 0) || !(h > 0)) return;
+  aaCanvasLogged = true;
+  try {
+    const win = Dimensions.get('window');
+    const ratio = PixelRatio.get();
+    logEvent(
+      `android-auto-canvas surface=${Math.round(w)}x${Math.round(h)}dp `
+      + `px=${Math.round(w * ratio)}x${Math.round(h * ratio)} `
+      + `pixelRatio=${ratio} fontScale=${PixelRatio.getFontScale()} `
+      + `window=${Math.round(win.width)}x${Math.round(win.height)}dp`,
+    );
+  } catch {}
+}
 
 // FALSE: do NOT drive CarPlay's NATIVE navigation session (no native maneuver banner,
 // no native trip-estimate bar). The live CarMapView + our own overlays (topStrip TBT,
@@ -306,11 +348,31 @@ export function CarSurface() {
   // clears the speed cluster, whichever bound is larger.
   const carX = surfaceW > 0 ? (surfaceW * (1 - CAR_LEFT_PAD_FRAC)) / 2 : 0;
   const carClearLeft = carX + CAR_MODEL_HALF_W + NAV_GAP;
+  // Width genuinely free for the stack once the speed cluster and the car itself
+  // are cleared. May be negative on a very small canvas — that is the signal below.
+  const navAvail = surfaceW > 0
+    ? surfaceW - Math.max(CAR_LEFT_INSET, carClearLeft) - CAR_RIGHT_INSET
+    : 0;
+  // ── TIGHT CANVAS REFLOW (2026-07-28, the Android Auto overlap) ──────────────
+  // The comment above says "clamp downward only", but the code did the opposite:
+  // Math.max(NAV_STACK_ABS_MIN_W, …) FORCED the stack to 120pt even when only, say,
+  // 88pt were free — and since the stack is anchored right, the extra width grew
+  // LEFTWARD, straight over the speedo. On a head unit that is exactly Jeff's
+  // "0124 m": the speedo's "0" and the maneuver banner's "124 m" printed on top of
+  // each other, with "km/h" tucked underneath. CarPlay never showed it because a
+  // ~431pt CarPlay canvas always had the room; the AA canvas does not.
+  //
+  // A narrower banner is not the answer below the floor either — under ~120pt the
+  // instruction is unreadable anyway. So when the two cannot share the bottom band,
+  // they stop sharing it: the stack takes the FULL width and moves up one row, and
+  // the weather chip slides across to sit beside the speedo instead of above it.
+  // Three fixed rows, no overlap possible at any canvas size, and the arithmetic —
+  // not a tuned constant — decides which layout applies.
+  const tightCanvas = surfaceW > 0 && navAvail < NAV_STACK_ABS_MIN_W;
   const navStackW = surfaceW > 0
-    ? Math.max(
-        NAV_STACK_ABS_MIN_W,
-        Math.min(NAV_STACK_MAX_W, surfaceW - Math.max(CAR_LEFT_INSET, carClearLeft) - CAR_RIGHT_INSET),
-      )
+    ? (tightCanvas
+        ? Math.max(0, surfaceW - 2 * CAR_DOCK_LEFT)
+        : Math.min(NAV_STACK_MAX_W, navAvail))
     : NAV_STACK_FALLBACK_W;
   const speedPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -393,9 +455,36 @@ export function CarSurface() {
   const mapOverlays = (
     <>
       {/* BOTTOM-RIGHT nav stack (out of the route line's way): the ETA pill sits just
-          ABOVE the turn-by-turn maneuver banner, and both share the same width. */}
+          ABOVE the turn-by-turn maneuver banner, and both share the same width.
+          ── WHO OWNS WHAT ON ANDROID AUTO (verified 2026-07-28) ─────────────────
+          The obvious theory for the overlapping head-unit HUD was that androidx is
+          ALREADY drawing a maneuver card and a travel estimate from what
+          AndroidAutoRoot pushes in updateTemplate, i.e. that we double-draw. That
+          theory is WRONG, and the code says so:
+            CarPlayModule.kt:123  `val screen = carScreens[name]`
+          `name` there is getName() — the NATIVE MODULE's name, "RNCarPlay".
+          carScreens is only ever keyed by "root" and by templateId, so the lookup
+          always returns null and the whole body is skipped. updateTemplate is a
+          SILENT NO-OP on Android. androidx has never received our navigationInfo
+          or travelEstimate; every pixel of nav chrome on that head unit is ours.
+          (Two further shape bugs sit behind it — parseTravelEstimate does
+          getMap("destinationTime")!! and parseRoutingInfo getMap("step")!!, while
+          AndroidAutoRoot sends neither key — so simply fixing the lookup would
+          NPE on the car's main thread. All three are patch-package work, i.e. a
+          native build; see the build-70 notes.)
+          So on AA this stack is the ONLY maneuver and ETA the driver has. It stays.
+          What actually collides is width — see navStackW / tightCanvas. */}
       {s.navigating ? (
-        <View style={[styles.navStack, { width: navStackW }]} pointerEvents="none">
+        <View
+          style={[
+            styles.navStack,
+            { width: navStackW },
+            // Tight canvas: full width, lifted one row so it clears the speed cluster
+            // entirely instead of growing over it.
+            tightCanvas ? { right: CAR_DOCK_LEFT, bottom: SPEED_ROW_TOP } : null,
+          ]}
+          pointerEvents="none"
+        >
           {/* LANE GUIDANCE ("3D-lanes lite") — the phone's glowing-lane diagram on
               the head unit: active lanes brand green, the rest dim. Appears only
               when Mapbox lane data confidently matches the upcoming turn (the
@@ -470,7 +559,10 @@ export function CarSurface() {
       style={styles.surface}
       onLayout={(e) => {
         const w = e?.nativeEvent?.layout?.width;
+        const h = e?.nativeEvent?.layout?.height;
         if (typeof w === 'number' && w > 0 && Math.abs(w - surfaceW) > 1) setSurfaceW(w);
+        // Android Auto only, once per process — see logAaCanvas.
+        if (typeof w === 'number' && typeof h === 'number') logAaCanvas(w, h);
       }}
     >
       {showLive ? (
@@ -514,7 +606,17 @@ export function CarSurface() {
           mirror the phone HUD's weather-over-speed column (same vector glyph + temp).
           Shows whenever the phone's weather layer is feeding carStore, incl. nav. */}
       {s.weatherTemp ? (
-        <View style={[styles.weatherChip, { backgroundColor: carHudFloor() }]} pointerEvents="none">
+        <View
+          style={[
+            styles.weatherChip,
+            { backgroundColor: carHudFloor() },
+            // Tight canvas: the raised nav stack now occupies the row above the
+            // speedo, so the chip moves BESIDE it — right of the fully-extended
+            // posted-limit badge, which is exactly what CAR_LEFT_INSET measures.
+            tightCanvas ? { left: CAR_LEFT_INSET, bottom: SPEED_DOCK_BOTTOM } : null,
+          ]}
+          pointerEvents="none"
+        >
           <GlassFill tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
           {s.weatherKind ? <WeatherGlyph kind={s.weatherKind as WeatherKind} size={20} /> : null}
           <Text style={styles.weatherText}>{s.weatherTemp}</Text>
@@ -1193,7 +1295,11 @@ const CAR_TOP_INSET = 58; // clears the CPMapTemplate navigation bar
 // right edge sat ~23pt clear of the glass button circles — a visible dead channel.
 // The circles start ~41pt in from the trailing edge, so 48 leaves ~7pt of air:
 // tight, still non-touching.
-const CAR_RIGHT_INSET = 48;
+// ...and 48 is likewise a CARPLAY number: it exists to clear iOS's trailing glass
+// map-button circles. Android Auto draws no button column over our surface (its
+// action strip is androidx chrome outside the stable area), so on AA the same 48
+// is just wasted width on a canvas that has none to spare.
+const CAR_RIGHT_INSET = IS_AA ? 12 : 48;
 const NAV_STACK_BOTTOM = 8;
 
 // ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────
@@ -1241,10 +1347,22 @@ const ETA_ROW_H = NAV_PILL_H;
 // The turn banner keeps its own height — it carries the maneuver box plus two text
 // lines, so it cannot shrink to the pill height without clipping.
 const TURN_ROW_H = 42;
+// Bottom-left speed cluster's own inset. 56 on CarPlay clears the leading map-button
+// rail iOS draws over our window. Android Auto puts nothing there — androidx's chrome
+// is the routing card, the travel estimate and the action strip, none of which is a
+// leading rail — so on AA the cluster hugs the edge and gives the (much narrower,
+// see logAaCanvas) canvas its 44pt back.
+const CAR_DOCK_LEFT = IS_AA ? 12 : 56;
 // Left edge the bottom nav stack must not cross: the speed cluster is speedDock
-// (left 56) + the posted-limit badge, which SLIDES OUT 62pt and is itself 58 wide
-// -> 56 + 62 + 58 = 176 at full extension, +8pt of air.
-const CAR_LEFT_INSET = 184;
+// (CAR_DOCK_LEFT) + the posted-limit badge, which SLIDES OUT 62pt and is itself 58
+// wide -> 56 + 62 + 58 = 176 at full extension, +8pt of air. Derived, not literal,
+// so the AA dock inset above can never drift out of sync with it.
+const CAR_LEFT_INSET = CAR_DOCK_LEFT + 62 + 58 + 8;
+// The speed cluster's own box, named so the tight-canvas reflow can stack a row
+// directly on top of it instead of re-deriving 10 + 48 by hand in two places.
+const SPEED_DOCK_BOTTOM = 10;
+const SPEED_PILL_H = 48;
+const SPEED_ROW_TOP = SPEED_DOCK_BOTTOM + SPEED_PILL_H + NAV_GAP;
 // The nav stack is anchored RIGHT (at CAR_RIGHT_INSET) and its width is measured,
 // not fixed. A fixed 210 could not co-exist with the speed cluster on a narrow
 // head unit: 184 + 210 + 76 overflows a ~431pt CarPlay canvas, which is exactly
@@ -1293,14 +1411,14 @@ const styles = StyleSheet.create({
   inst: { color: '#F4F4F4', fontSize: 22, fontWeight: '600', marginTop: 4, textAlign: 'center' },
   meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },
   // Bottom-LEFT, tucked just right of the CarPlay side bar (~64pt). Smaller pill.
-  speedDock: { position: 'absolute', left: 56, bottom: 10, alignItems: 'flex-start' },
+  speedDock: { position: 'absolute', left: CAR_DOCK_LEFT, bottom: SPEED_DOCK_BOTTOM, alignItems: 'flex-start' },
   // 58×48 — narrower (just fits "299") + the SAME height as the banner/weather/limit chips.
-  speedPill: { width: 58, height: 48, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
+  speedPill: { width: 58, height: SPEED_PILL_H, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
   speedNum: { color: '#F4F4F4', fontSize: 21, fontWeight: '800', letterSpacing: -0.5, lineHeight: 23 },
   speedUnit: { color: '#808080', fontSize: 9, fontWeight: '600', letterSpacing: 0.3, marginTop: 1 },
   // Posted speed-limit sign — white plate, black border. Tucked BEHIND the speedo (same
   // bottom baseline, left:0 within speedDock) and slid out to the right when moving.
-  speedLimitBadge: { position: 'absolute', left: 0, bottom: 0, width: 58, height: 48, borderRadius: 14, backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  speedLimitBadge: { position: 'absolute', left: 0, bottom: 0, width: 58, height: SPEED_PILL_H, borderRadius: 14, backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   speedLimitNum: { color: '#000', fontSize: 21, fontWeight: '800', letterSpacing: -0.5, lineHeight: 23 },
   speedLimitUnit: { color: '#333', fontSize: 9, fontWeight: '700', letterSpacing: 0.3, marginTop: 1 },
   // Compass — TOP-LEFT, docked directly UNDER the Scout mic button (moved off the
@@ -1316,7 +1434,7 @@ const styles = StyleSheet.create({
   // top-left is better left as MAP: nothing we draw there can ever be tapped (CarPlay
   // routes touches through the template only), so a readout parked in the most reachable
   // corner is wasted space. Rail is now just weather 130-178 + speed 182-230.
-  weatherChip: { position: 'absolute', left: 56, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
+  weatherChip: { position: 'absolute', left: CAR_DOCK_LEFT, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
   // top was 10 -> INSIDE the CPMapTemplate nav bar, i.e. the one signal that says
   // Scout is listening was hidden behind system chrome. Left-anchored at
   // CAR_LEFT_INSET rather than centred so it also clears the weather chip.

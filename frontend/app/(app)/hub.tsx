@@ -17,6 +17,7 @@ import Glass, { GlassFill } from "../../src/Glass";
 import GlassBackdrop from "../../src/components/GlassBackdrop";
 import LogoMenu from "../../src/components/LogoMenu";
 import { getGarageImage, getTopDownImage } from "../../src/carImages";
+import { fetchClubLeaderboard, fmtKm } from "../../src/trips";
 import { useSettings, updateSettings } from "../../src/settings";
 
 type Community = {
@@ -573,6 +574,21 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
   const [nameSaving, setNameSaving] = useState(false);
   const [logoSaving, setLogoSaving] = useState(false);
   const [bannerSaving, setBannerSaving] = useState(false);
+  // ── LEADERBOARD ──────────────────────────────────────────────────────────
+  // Ranked by distance recorded on drives tagged to THIS club. The rows come from
+  // public.trips, which deliberately holds distance/duration/when and NO coordinates —
+  // members compare mileage without publishing where anyone drove. See src/trips.ts.
+  const [board, setBoard] = useState<{ userId: string; handle: string; km: number; drives: number }[]>([]);
+  const [boardRange, setBoardRange] = useState<0 | 30>(0);   // 0 = all time, 30 = last 30 days
+  useEffect(() => {
+    if (!community?.id) { setBoard([]); return; }
+    let dead = false;
+    (async () => {
+      const rows = await fetchClubLeaderboard(String(community.id), boardRange || undefined);
+      if (!dead) setBoard(rows);
+    })();
+    return () => { dead = true; };
+  }, [community?.id, boardRange]);
   useEffect(() => {
     if (!community) { setC(null); setEditingDesc(false); setEditingName(false); return; }
     (async () => {
@@ -883,6 +899,42 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
               </TouchableOpacity>
             )}
             <Text style={styles.detailMeta}>{c?.member_count} members · Admin: {c?.admin_handle || "—"}</Text>
+
+            {/* ── LEADERBOARD ── Who's actually putting the kilometres in. Hidden until
+                someone has recorded a drive, so a new club doesn't show an empty board. */}
+            {board.length > 0 && (
+              <>
+                <View style={styles.boardHead}>
+                  <Text style={styles.label}>Leaderboard</Text>
+                  <View style={styles.boardToggle}>
+                    {([0, 30] as const).map((r) => (
+                      <TouchableOpacity
+                        key={r}
+                        onPress={() => setBoardRange(r)}
+                        style={[styles.boardTab, boardRange === r && styles.boardTabOn]}
+                      >
+                        <Text style={[styles.boardTabText, boardRange === r && styles.boardTabTextOn]}>
+                          {r === 0 ? "All time" : "30 days"}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+                {board.slice(0, 10).map((row, i) => {
+                  const me = user?.id != null && String(user.id) === row.userId;
+                  return (
+                    <View key={row.userId} style={[styles.boardRow, me && styles.boardRowMe]}>
+                      <Text style={[styles.boardRank, i < 3 && styles.boardRankTop]}>{i + 1}</Text>
+                      <Text style={[styles.boardHandle, me && { fontWeight: "800" }]} numberOfLines={1}>
+                        {row.handle}{me ? " · you" : ""}
+                      </Text>
+                      <Text style={styles.boardDrives}>{row.drives} {row.drives === 1 ? "drive" : "drives"}</Text>
+                      <Text style={styles.boardKm}>{fmtKm(row.km)}</Text>
+                    </View>
+                  );
+                })}
+              </>
+            )}
 
             {/* Member roster — visible to every member. Shows handle + car
                 line + an ADMIN pill on the owner so it's clear who runs it. */}
@@ -1290,6 +1342,24 @@ const styles = StyleSheet.create({
   // readable copy in the app. Small FORM labels (`label`, `section`) stay dim —
   // those are chrome, and dimming them is what gives the content its hierarchy.
   clubMeta: { color: COLORS.text, fontSize: 12, fontWeight: "500" },
+  // ── Club leaderboard ──
+  boardHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 18 },
+  boardToggle: { flexDirection: "row", backgroundColor: "rgba(118,118,128,0.20)", borderRadius: 999, padding: 2 },
+  boardTab: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  boardTabOn: { backgroundColor: "rgba(45,236,134,0.20)" },
+  boardTabText: { color: COLORS.text, fontSize: 11.5, fontWeight: "600", opacity: 0.75 },
+  boardTabTextOn: { color: "#2DEC86", opacity: 1 },
+  boardRow: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingVertical: 9, paddingHorizontal: 10, marginTop: 6, borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  boardRowMe: { borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(45,236,134,0.55)" },
+  boardRank: { width: 18, color: COLORS.text, opacity: 0.6, fontSize: 12, fontWeight: "800" },
+  boardRankTop: { color: "#2DEC86", opacity: 1 },
+  boardHandle: { flex: 1, minWidth: 0, color: COLORS.text, fontSize: 13.5, fontWeight: "600" },
+  boardDrives: { color: COLORS.text, opacity: 0.7, fontSize: 11.5, fontWeight: "600" },
+  boardKm: { color: "#2DEC86", fontSize: 13.5, fontWeight: "800", minWidth: 62, textAlign: "right" },
   clubDesc: { color: COLORS.text, fontSize: 13, lineHeight: 18, marginTop: 10 },
   clubTags: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 12 },
   clubTag: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },

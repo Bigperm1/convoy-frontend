@@ -261,3 +261,49 @@ permission prompts, first-launch defaults, the heat sweep, and the dead-code rem
 - Never `eas build` or `eas submit` without Jeff's fresh go-ahead. Builds cost money.
 - Every Android build also needs the `mapbox` internal APK + a QR + install link, unprompted.
 - Testers need **two cold starts** to pick up an OTA.
+
+---
+
+## ★ CURRENT STATE — end of 2026-07-28
+
+**ANDROID AUTO WORKS.** Confirmed on Say Phin's Toyota head unit, build 69 installed FROM
+PLAY, wireless and wired. Cause was `CarPlaySession.kt:53` calling `registerReceiver`
+without `RECEIVER_NOT_EXPORTED` — a `SecurityException` on API 33+ that killed
+`onCreateScreen` every launch. Found from a real stack trace via the AACrashLog black box,
+which itself had to be fixed first (SDK 54 moved `documentDirectory` out of
+expo-file-system's main entry, so the reader had been a silent no-op and `crash_reports`
+had ZERO android rows ever).
+
+**⚠ AA testing MUST come from Play, never a sideloaded APK** — Android Auto hides
+non-Play installs. That cost a full tester round-trip on 69.
+
+**Only the AA HUD LAYOUT remains** — elements overlap on the car screen. Before touching
+it, read the memory note `android-auto-layout-next`: AA and CarPlay already render the SAME
+`CarSurface` component, so there is no separate Android layout to align. It is one layout
+in two canvas shapes, plus androidx drawing its own nav chrome from `navigationInfo` /
+`travelEstimate`.
+
+### Shipped this session (all OTA, runtime 1.21.0, build 69 both platforms)
+- **ETA rebuilt on per-segment durations** + a 2-minute Directions-Refresh loop for live
+  traffic/construction. The old flat distance-ratio drifted up to **16 min** on a real
+  Langley→Anglemont route; the new one measured 0.000s error at every sample.
+- **Add stop** — renameable waypoints via `fetchRouteViaStops`; keeps segment durations,
+  congestion and the refresh uuid, so accurate ETA and live traffic work through stops.
+- **Pitstop** timer (phone + CarPlay), routed-only, candy-red countdown.
+- **Drives** — recorded KM, history, totals; **route playback** + "take it again".
+- **Club leaderboard** — Drives / PB tabs.
+- Crew-over-compass ordering, white crew/club text, CarPlay compass = the phone needle.
+
+### Not yet verified by a human
+- Route playback animating, and recorded distance looking sane
+- Pitstop firing at a real fuel stop (phone and car)
+- **One route driven to arrival proves all of these at once.**
+
+### Gotchas earned the hard way this session
+- **Check WHICH BUILD is running before debugging a "broken" fix.** Four speculative fixes
+  chased a stale OTA on the leaderboard; the answer was visible in a screenshot the whole
+  time. Read the map pill: runtime must match `app.json`, tag must not be `emb`.
+- `/communities/:id` did NOT project `top_speed_record`; fixed in the backend repo
+  (`~/convoy-backend`, pushed) — clubs live on the custom backend, not Supabase.
+- `public.trips` is aggregate-only BY DESIGN (no coordinates): there is no Supabase Auth,
+  so RLS cannot scope reads to "your own rows". Route geometry stays on the device.

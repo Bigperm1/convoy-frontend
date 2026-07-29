@@ -579,15 +579,15 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
   // public.trips, which deliberately holds distance/duration/when and NO coordinates —
   // members compare mileage without publishing where anyone drove. See src/trips.ts.
   const [board, setBoard] = useState<{ userId: string; handle: string; km: number; drives: number; pb: number }[]>([]);
-  // Three modes, not two: All time and 30 days both RANK BY DISTANCE over different
-  // windows, while PB ranks by top speed. PB is deliberately all-time — a personal best
-  // is a record, and a 30-day PB is a different (and much less interesting) claim.
-  const [boardMode, setBoardMode] = useState<'all' | '30' | 'pb'>('all');
+  // Two things members actually care about: how much they've driven, and how fast
+  // they've gone. Time windows were dropped (Jeff, 2026-07-28) — a club board is a
+  // standing brag, not a rolling report, and PB is a lifetime record either way.
+  const [boardMode, setBoardMode] = useState<'drives' | 'pb'>('drives');
   useEffect(() => {
     if (!community?.id) { setBoard([]); return; }
     let dead = false;
     (async () => {
-      const rows = await fetchClubLeaderboard(String(community.id), boardMode === '30' ? 30 : undefined);
+      const rows = await fetchClubLeaderboard(String(community.id));
       if (dead) return;
       // SEED FROM THE ROSTER. Distance only exists for drives recorded since the feature
       // shipped, so a club with real members and real PBs would otherwise show NOTHING —
@@ -610,8 +610,8 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
           byId.set(id, { userId: id, handle: m?.handle || "anon", km: 0, drives: 0, pb: profilePb });
         }
       }
-      // PB mode ranks on top speed; the distance modes rank on km and fall back to PB so
-      // members with no drives yet still order sensibly instead of clumping at zero.
+      // PB ranks on top speed; Drives ranks on distance. Each falls back to the other so
+      // members with nothing recorded yet still order sensibly instead of clumping.
       const merged = [...byId.values()].sort((a, b) =>
         boardMode === 'pb' ? (b.pb - a.pb) || (b.km - a.km) : (b.km - a.km) || (b.pb - a.pb));
       setBoard(merged);
@@ -936,7 +936,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                 <View style={styles.boardHead}>
                   <Text style={styles.label}>Leaderboard</Text>
                   <View style={styles.boardToggle}>
-                    {([['all', 'All time'], ['30', '30 days'], ['pb', 'PB']] as const).map(([m, label]) => (
+                    {([['drives', 'Drives'], ['pb', 'PB']] as const).map(([m, label]) => (
                       <TouchableOpacity
                         key={m}
                         onPress={() => setBoardMode(m)}
@@ -1388,7 +1388,7 @@ const styles = StyleSheet.create({
   // ── Club leaderboard ──
   boardHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 18 },
   boardToggle: { flexDirection: "row", backgroundColor: "rgba(118,118,128,0.20)", borderRadius: 999, padding: 2 },
-  boardTab: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 },
+  boardTab: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999 },
   boardTabOn: { backgroundColor: "rgba(45,236,134,0.20)" },
   boardTabText: { color: COLORS.text, fontSize: 11.5, fontWeight: "600", opacity: 0.75 },
   boardTabTextOn: { color: "#2DEC86", opacity: 1 },

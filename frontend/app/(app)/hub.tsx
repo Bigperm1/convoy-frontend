@@ -585,10 +585,34 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
     let dead = false;
     (async () => {
       const rows = await fetchClubLeaderboard(String(community.id), boardRange || undefined);
-      if (!dead) setBoard(rows);
+      if (dead) return;
+      // SEED FROM THE ROSTER. Distance only exists for drives recorded since the feature
+      // shipped, so a club with real members and real PBs would otherwise show NOTHING —
+      // which reads as broken rather than as empty (Jeff, 2026-07-28: "shouldn't the PB
+      // activate it since there are PB right now?"). Every member starts on the board at
+      // 0 km with the PB already on their profile, and recorded trips overlay on top as
+      // they come in. PB here is the LIFETIME profile record; once a member has recorded
+      // trips, the higher of the two wins so the number never goes backwards.
+      const roster: any[] = c?.members_users || [];
+      const byId = new Map(rows.map((r) => [r.userId, { ...r }]));
+      for (const m of roster) {
+        const id = String(m?.id ?? "");
+        if (!id) continue;
+        const profilePb = Number(m?.top_speed_record) || 0;
+        const cur = byId.get(id);
+        if (cur) {
+          cur.pb = Math.max(cur.pb || 0, profilePb);
+          if (!cur.handle || cur.handle === "Driver") cur.handle = m?.handle || cur.handle;
+        } else {
+          byId.set(id, { userId: id, handle: m?.handle || "anon", km: 0, drives: 0, pb: profilePb });
+        }
+      }
+      // Distance first, then PB, so a member with no drives yet still sorts sensibly.
+      const merged = [...byId.values()].sort((a, b) => (b.km - a.km) || (b.pb - a.pb));
+      setBoard(merged);
     })();
     return () => { dead = true; };
-  }, [community?.id, boardRange]);
+  }, [community?.id, boardRange, c?.members_users]);
   useEffect(() => {
     if (!community) { setC(null); setEditingDesc(false); setEditingName(false); return; }
     (async () => {

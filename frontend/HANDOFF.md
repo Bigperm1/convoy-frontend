@@ -277,11 +277,7 @@ had ZERO android rows ever).
 **⚠ AA testing MUST come from Play, never a sideloaded APK** — Android Auto hides
 non-Play installs. That cost a full tester round-trip on 69.
 
-**Only the AA HUD LAYOUT remains** — elements overlap on the car screen. Before touching
-it, read the memory note `android-auto-layout-next`: AA and CarPlay already render the SAME
-`CarSurface` component, so there is no separate Android layout to align. It is one layout
-in two canvas shapes, plus androidx drawing its own nav chrome from `navigationInfo` /
-`travelEstimate`.
+**The AA HUD LAYOUT is fixed and ready to OTA (not yet published).** See §11.
 
 ### Shipped this session (all OTA, runtime 1.21.0, build 69 both platforms)
 - **ETA rebuilt on per-segment durations** + a 2-minute Directions-Refresh loop for live
@@ -307,3 +303,85 @@ in two canvas shapes, plus androidx drawing its own nav chrome from `navigationI
   (`~/convoy-backend`, pushed) — clubs live on the custom backend, not Supabase.
 - `public.trips` is aggregate-only BY DESIGN (no coordinates): there is no Supabase Auth,
   so RLS cannot scope reads to "your own rows". Route geometry stays on the device.
+
+---
+
+## 11. Android Auto HUD overlap — ROOT-CAUSED AND FIXED (2026-07-28, awaiting OTA)
+
+Say Phin's head-unit photo showed the speedo and the maneuver distance printed on top of
+each other as `0124 m`, `km/h` tucked underneath, the `20°C` chip over the ETA line, and
+"Turn right …" clipping.
+
+**Cause — a width floor, nothing to do with the canvas being "crowded".** `navStackW` did
+
+```
+Math.max(NAV_STACK_ABS_MIN_W, Math.min(NAV_STACK_MAX_W, surfaceW - left - right))
+```
+
+while the comment directly above it claimed "clamp DOWNWARD only". So when only ~88pt were
+free the stack was still forced to 120pt — and because the stack is anchored RIGHT, that
+surplus grew **leftward, straight over the speed cluster**. CarPlay never exposed it: a
+~431pt CarPlay canvas always had the room. The Android Auto canvas is a VirtualDisplay
+sized by the head unit (`VirtualRenderer.kt:44`) and is much narrower.
+
+**Fixed (`src/carplay/ConvoyCarPlay.tsx`), all JS/OTA:**
+- **Tight-canvas reflow.** When the nav stack and the speed cluster cannot share the bottom
+  band, they stop sharing it: the stack goes full width and lifts one row
+  (`SPEED_ROW_TOP`), and the weather chip slides *beside* the speedo instead of above it.
+  Three fixed rows; overlap is impossible at any canvas size. Which layout applies is
+  decided by arithmetic (`navAvail < NAV_STACK_ABS_MIN_W`), not by a tuned constant.
+- **AA drops the CarPlay-only chrome insets.** `left: 56` and `right: 48` exist to clear
+  iOS's leading/trailing map-button rails, which do not exist on a head unit — 80pt back.
+- **One-shot canvas probe.** `logAaCanvas()` writes `android-auto-canvas surface=WxHdp …`
+  to `crash_reports` on the first layout of a car session. One drive replaces "narrower
+  than CarPlay" with a number. **Query that row before tuning anything else.**
+
+### ⚠ The theory that was wrong — do not act on it again
+It looked obvious that androidx already draws a maneuver card and travel estimate from what
+`AndroidAutoRoot` pushes, i.e. that we double-draw. **It has never received them.**
+
+```
+CarPlayModule.kt:123   val screen = carScreens[name]
+```
+
+`name` there is the NATIVE MODULE's `getName()` — `"RNCarPlay"`. `carScreens` is only ever
+keyed by `"root"` and by templateId, so the lookup always misses and the entire update body
+is skipped: **`updateTemplate` is a silent no-op on Android.** Every pixel of nav chrome on
+that head unit is ours. Deleting our maneuver banner and ETA "because the car draws them"
+would have left an AA driver with neither — that edit was written, then reverted when the
+Kotlin was actually read.
+
+`AndroidAutoRoot.tsx`'s payload was corrected anyway (`info`/`step` nesting, string
+`distanceUnits`, the required `destinationTime`), because the moment that lookup is fixed a
+wrong shape stops being harmless — see below.
+
+### Build 70 — the native half (patch-package, needs a paid build)
+Land together or not at all:
+1. `updateTemplate` → resolve the screen by templateId, falling back to `currentCarScreen`.
+2. `parseTemplate` runs inside a bare `handler.post {}` with **no try/catch**
+   (`CarPlayModule.kt:120-133`), so a parser throw is uncaught on the car app's MAIN
+   THREAD — a crash, not a warning. Wrap it before enabling (1).
+3. `parseTravelEstimate` does `getMap("destinationTime")!!`, `parseRoutingInfo` does
+   `getMap("step")!!`. The OTA above already sends both; re-verify against `RCTTemplate.kt`
+   (the library's own TS types disagree with its Kotlin) before patching.
+
+Only once the car is genuinely rendering chrome is it worth deciding which elements to hand
+back to androidx.
+
+Also still unplumbed: `SurfaceCallback.onStableAreaChanged` / `onVisibleAreaChanged` —
+`VirtualRenderer.kt:30` implements only `onSurfaceAvailable`. Those callbacks are androidx
+telling us exactly which rect its chrome does not cover, which is the real end state for
+this layout instead of insets we guess at.
+
+### Verification done
+- `yarn typecheck` clean; eslint unchanged from baseline (0 errors).
+- iOS release bundle swapped into the installed sim build (device
+  `0CA8F128-…`): boots and renders the same screen as a control bundle built from HEAD, no
+  JS errors, `setRootTemplate` returns `error (null)`. The first screenshot was BLACK and
+  looked like a regression — it was a slow first launch, proven by re-running the identical
+  bundle. **Always run the control.**
+- iOS render paths are unchanged by construction: every branch added is gated on
+  `Platform.OS === 'android'` or on a width threshold a CarPlay canvas does not cross
+  (431pt → `navAvail` ≈ 167 > 120).
+- **NOT verified:** the head unit itself. Needs one AA drive on the OTA, then the
+  `android-auto-canvas` row + a fresh photo.

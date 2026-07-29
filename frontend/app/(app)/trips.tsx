@@ -13,7 +13,8 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { COLORS } from "../../src/theme";
-import { getTrips, tripTotals, removeTrip, fmtKm, fmtDur, type Trip } from "../../src/trips";
+import { getTrips, tripTotals, removeTrip, setTakeAgain, fmtKm, fmtDur, type Trip } from "../../src/trips";
+import TripPlayback from "../../src/components/TripPlayback";
 
 function whenLabel(ms: number): string {
   const d = new Date(ms);
@@ -31,6 +32,7 @@ export default function TripsPage() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [totals, setTotals] = useState({ km: 0, drives: 0, hours: 0 });
   const [busy, setBusy] = useState(false);
+  const [playing, setPlaying] = useState<Trip | null>(null);
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -91,13 +93,14 @@ export default function TripsPage() {
               <View style={styles.rowIcon}>
                 <Ionicons name="navigate" size={18} color="#2DEC86" />
               </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
+              {/* Tap the drive to watch it play back — the geometry is already local. */}
+              <TouchableOpacity style={{ flex: 1, minWidth: 0 }} activeOpacity={0.7} onPress={() => setPlaying(t)}>
                 <Text style={styles.rowTitle} numberOfLines={1}>{t.destLabel}</Text>
                 <Text style={styles.rowSub} numberOfLines={1}>
                   {whenLabel(t.endedAt)} · {fmtKm(t.distanceM / 1000)} · {fmtDur(t.durationS)}
                   {t.stops?.length ? ` · ${t.stops.length} stop${t.stops.length === 1 ? "" : "s"}` : ""}
                 </Text>
-              </View>
+              </TouchableOpacity>
               <TouchableOpacity
                 onPress={async () => setTrips(await removeTrip(t.id))}
                 hitSlop={10}
@@ -115,6 +118,17 @@ export default function TripsPage() {
           </Text>
         )}
       </ScrollView>
+
+      <TripPlayback
+        trip={playing}
+        visible={!!playing}
+        onClose={() => setPlaying(null)}
+        onTakeAgain={(t) => {
+          setPlaying(null);
+          setTakeAgain(t);          // the map consumes this on focus
+          router.push("/(app)/map" as any);
+        }}
+      />
     </SafeAreaView>
   );
 }

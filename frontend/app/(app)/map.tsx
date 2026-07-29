@@ -42,7 +42,7 @@ import {
 } from "../../src/nav";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
 import { usePitstop } from "../../src/pitstop";
-import { recordTrip } from "../../src/trips";
+import { recordTrip, consumeTakeAgain } from "../../src/trips";
 import PitstopCard from "../../src/components/PitstopCard";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import { setCarState, setCarPeers, subscribeCarGesture } from "../../src/carplay/carStore";
@@ -1119,6 +1119,20 @@ export default function MapScreen() {
     // cbRef inside the hook always holds the latest callback, so depending on the
     // selected index here is safe and keeps the write pointed at the right route.
   }, [selectedRouteIndex]));
+
+  // "TAKE IT AGAIN" — the Drives screen hands a recorded trip over and we rebuild it as a
+  // live route: same destination, same stops, same order. Read-once (consume) so coming
+  // back to the map later can never silently restart an old drive. Runs on focus rather
+  // than mount because the map is a TAB and stays mounted the whole session.
+  useFocusEffect(useCallback(() => {
+    const t = consumeTakeAgain();
+    if (!t) return;
+    if (typeof t.destLat === "number" && typeof t.destLng === "number") {
+      setStops(t.stops?.length ? t.stops.map((st) => ({ lat: st.lat, lng: st.lng, label: st.label })) : []);
+      setDestination({ lat: t.destLat, lng: t.destLng, label: t.destLabel || "Drive" });
+      setShowSteps(true);
+    }
+  }, []));
 
   // PITSTOP — a stopwatch when the car parks at a gas/food place.
   //

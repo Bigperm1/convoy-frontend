@@ -229,3 +229,17 @@ export function fmtDur(sec: number): string {
   const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
+
+// ── "Take it again" hand-off ─────────────────────────────────────────────────
+// The Drives screen and the map are different screens; this is the one value that
+// crosses between them. A module-level slot rather than router params because the trip
+// carries stops (an array of objects) and serialising that through a URL just to parse
+// it back is noise. The map CONSUMES it (read-once) on focus, so re-opening the map
+// later can't silently restart an old drive.
+let _takeAgain: Trip | null = null;
+export function setTakeAgain(t: Trip | null): void { _takeAgain = t; }
+export function consumeTakeAgain(): Trip | null {
+  const t = _takeAgain;
+  _takeAgain = null;
+  return t;
+}

@@ -954,6 +954,43 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── NATIVE CARPLAY FRAME PUMP (build 70, iOS) ───────────────────────────────
+  // The only clock that survives the phone display powering off. Everything above
+  // this — rAF and the 33 ms setInterval alike — is pumped by RN from a CADisplayLink
+  // bound to the phone's BUILT-IN display (React/Base/RCTDisplayLink.m:32), which iOS
+  // pauses with the screen. Apple's own guidance is to take the link from the CarPlay
+  // UIScreen instead (Developer Forums 777989); RN has no such variant, so the native
+  // module does it and emits a frame here. Advancing the SAME bgTick means there is one
+  // ease implementation, not two, and bgTick's own heartbeat guard already prevents
+  // double-advancing when rAF is also alive.
+  //
+  // Degrades to exactly today's behaviour on any build without the native module
+  // (requireOptionalNativeModule → undefined) and on Android.
+  useEffect(() => {
+    if (!cameraRef || Platform.OS !== 'ios') return;
+    let sub: { remove: () => void } | null = null;
+    let retry: ReturnType<typeof setInterval> | null = null;
+    let HS: any = null;
+    try { HS = require('../modules/hairpin-system').HairpinSystem; } catch {}
+    if (!HS?.startCarFrames) return;
+    try { sub = HS.addListener('onCarFrame', () => { bgTick(); }); } catch {}
+    // startCarFrames returns false until a CarPlay scene exists, so keep asking. Cheap
+    // (a scene lookup), stops the moment it takes.
+    const arm = () => {
+      let ok = false;
+      try { ok = !!HS.startCarFrames(); } catch {}
+      if (ok && retry) { clearInterval(retry); retry = null; }
+      return ok;
+    };
+    if (!arm()) retry = setInterval(arm, 3000);
+    return () => {
+      if (retry) clearInterval(retry);
+      try { sub?.remove(); } catch {}
+      try { HS.stopCarFrames(); } catch {}
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const step = () => {
     rafDead.current = false; // the loop ticked → the display is awake; smooth easing is live
     lastStepAtRef.current = Date.now(); // heartbeat for the always-on car watchdog below

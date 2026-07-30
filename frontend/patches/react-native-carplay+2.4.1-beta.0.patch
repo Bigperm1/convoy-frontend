@@ -1,3 +1,45 @@
+diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
+index ef6aa04..757ad2e 100644
+--- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
++++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
+@@ -120,13 +120,33 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+   fun updateTemplate(templateId: String, config: ReadableMap) {
+     handler.post {
+       carTemplates[templateId] = config;
+-      val screen = carScreens[name]
++      // CONVOY FIX (build 70): this looked up `carScreens[name]`, where `name` is
++      // getName() — the NATIVE MODULE's name, "RNCarPlay". carScreens is only ever
++      // keyed by "root" (setCarContext) and by templateId (createScreen), so the
++      // lookup ALWAYS missed and this whole method was a silent no-op on Android.
++      // Consequence: androidx never received the navigationInfo / travelEstimate the
++      // JS pushes, so Android Auto drew none of its own maneuver or ETA chrome and
++      // every pixel of guidance up there came from our own rendered surface.
++      // Look the screen up by templateId, falling back to the current root screen —
++      // which is what a single-template nav app (Convoy) actually has.
++      val screen = carScreens[templateId] ?: currentCarScreen
+       if (screen != null) {
+         val carScreenContext = carScreenContexts[screen];
+         if (carScreenContext != null) {
+-          val template = parseTemplate(config, carScreenContext);
+-          screen.setTemplate(template, templateId, config);
+-          screen.invalidate()
++          // WRAPPED DELIBERATELY. parseTemplate runs inside this bare handler.post
++          // with no try/catch upstream, so ANY parser throw is an uncaught exception
++          // on the car app's MAIN THREAD — a crash, not a warning. The parsers use
++          // non-null assertions liberally (parseTravelEstimate does
++          // getMap("destinationTime")!!, parseRoutingInfo getMap("step")!!), so one
++          // malformed payload would take Android Auto down mid-drive. With this,
++          // the worst case is the previous behaviour: the template is not updated.
++          try {
++            val template = parseTemplate(config, carScreenContext);
++            screen.setTemplate(template, templateId, config);
++            screen.invalidate()
++          } catch (e: Throwable) {
++            Log.w(TAG, "updateTemplate: parse/apply failed for $templateId: ${e.message}")
++          }
+         }
+       }
+     }
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt
 index 73aad53..4f187ab 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt

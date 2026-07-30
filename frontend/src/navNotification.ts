@@ -300,12 +300,18 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   // throw while reading settings/mapMode (cold/headless context) must NEVER skip
   // this write — otherwise selfLat/selfLng stay null, hasFix is false, and the car
   // surface falls back to the CONVOY logo (the build-55 regression).
-  // Position through the source-priority gate (lowest priority; yields to the fg watch /
-  // phone mirror while they're fresh, takes over when they go stale). speedMs + carDbg
-  // stay UNGATED so the bg-tick proof + speed always land even if the position is gated.
-  setCarSelfPosition(loc.coords.latitude, loc.coords.longitude, typeof _h === "number" && _h >= 0 ? _h : null, 'bgtask');
+  // Position AND SPEED through the source-priority gate (lowest priority; yields to the
+  // fg watch / phone mirror while they're fresh, takes over when they go stale). speed
+  // rides the gate as of 2026-07-30 — it drives the chase-zoom curve, so a fix that was
+  // rejected for position must not move the framing either. carDbg stays ungated: it is
+  // the on-screen proof that bg ticks are arriving and must land regardless.
+  setCarSelfPosition(
+    loc.coords.latitude, loc.coords.longitude,
+    typeof _h === "number" && _h >= 0 ? _h : null,
+    'bgtask',
+    typeof _sp === "number" && _sp >= 0 ? _sp : 0,
+  );
   setCarState({
-    speedMs: typeof _sp === "number" && _sp >= 0 ? _sp : 0,
     carDbg: "navtask#" + (++_navTaskTicks), // on-screen proof bg ticks are arriving
   });
   // Best-effort metadata — wrapped so it can never block the position write above.
@@ -384,13 +390,16 @@ export async function startForegroundCarFeed(): Promise<void> {
         _lastFixAt = Date.now(); // feed the GPS stall watchdog
         const h = loc.coords.heading;
         const sp = loc.coords.speed;
-        // Position through the source-priority gate ('fgwatch' — beats the bg task,
-        // yields to the phone mirror while it's fresh). speedMs + carDbg stay ungated.
-        setCarSelfPosition(loc.coords.latitude, loc.coords.longitude, typeof h === "number" && h >= 0 ? h : null, 'fgwatch');
-        setCarState({
-          speedMs: typeof sp === "number" && sp >= 0 ? sp : 0,
-          carDbg: "fgfeed",
-        });
+        // Position AND SPEED through the source-priority gate ('fgwatch' — beats the bg
+        // task, yields to the phone mirror while it's fresh). See the bgtask write above
+        // for why speed now rides the gate. carDbg stays ungated.
+        setCarSelfPosition(
+          loc.coords.latitude, loc.coords.longitude,
+          typeof h === "number" && h >= 0 ? h : null,
+          'fgwatch',
+          typeof sp === "number" && sp >= 0 ? sp : 0,
+        );
+        setCarState({ carDbg: "fgfeed" });
         // Best-effort metadata — wrapped so it can never block the position write.
         try {
           setCarState({ selfCarColor: getSettings().carColor, mapMode: getMapMode(getSettings()) });

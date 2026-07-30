@@ -927,7 +927,10 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
     // cold engine's own write; the mirror only overwrites once tbt goes active
     // (the adopted phone route), whose richer numbers then win legitimately.
     setCarState({
-      speedMs: typeof user?.speed === 'number' ? user.speed : 0,
+      // speedMs is NOT written here any more — it rides the source-priority gate with
+      // position (setCarSelfPosition below). Writing it here as well would reintroduce
+      // exactly the ungated path that let a rejected feed drive the zoom.
+
       destinationLabel: destination?.label || '',
       ...(tbt.active ? {
         navigating: true,
@@ -1041,8 +1044,17 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
     if (typeof user?.lat !== 'number' || typeof user?.lng !== 'number') return;
     // Gated by source priority — the phone mirror (BestForNavigation/0m) is the most
     // accurate feed, so it wins over the fg/bg car feeds while the phone is foreground.
-    setCarSelfPosition(user.lat, user.lng, typeof user?.heading === 'number' ? user.heading : null, 'mirror');
-  }, [user?.lat, user?.lng, user?.heading]);
+    setCarSelfPosition(
+      user.lat, user.lng,
+      typeof user?.heading === 'number' ? user.heading : null,
+      'mirror',
+      // Speed rides the position gate as of 2026-07-30 (see carStore). It used to be
+      // written ungated in the metadata effect above, which meant a feed whose position
+      // the gate REJECTED could still move the chase-zoom target — framing from one
+      // track, position from another.
+      typeof user?.speed === 'number' ? user.speed : undefined,
+    );
+  }, [user?.lat, user?.lng, user?.heading, user?.speed]);
 
   // ---- connect / disconnect lifecycle ----
   useEffect(() => {

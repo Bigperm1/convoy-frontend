@@ -890,6 +890,31 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // those are how the fix handler / step() detect the display waking (only a real
   // rAF tick flips them), so the timer path stays latched until the screen returns.
   const bgTick = () => {
+    // ── THE SCREEN-OFF JITTER BUG LIVED HERE (fixed 2026-07-30) ────────────────
+    // This stamp says ONE thing: "the background timer is alive". It therefore has to
+    // happen BEFORE every bail, and it used to happen after two of them.
+    //
+    // The consequence was a ONE-WAY LOCKOUT, and it is the whole reason the car
+    // marker jitters on CarPlay with the phone display off:
+    //   1. any window >1500 ms with no ease armed (a standstill inside the dead-band,
+    //      or one longer GPS gap — screen-off CoreLocation delivers in BATCHES and the
+    //      bg task keeps only the newest fix of each batch, navNotification.ts:292)
+    //   2. → the backstop at the fix effect below reads this stamp as stale, hard-snaps
+    //      the marker, and sets `anim.current = null`
+    //   3. → with `anim` null this function returned at the `if (!a)` bail BELOW the
+    //      stamp, so the stamp could never be refreshed again
+    //   4. → every subsequent fix therefore also read "timer dead" and hard-snapped,
+    //      for the REST of the screen-off period. Nothing cleared it but a real rAF
+    //      tick, i.e. waking the phone.
+    // The result is exactly what a driver sees: not a freeze and not smooth motion, but
+    // a discrete teleport per GPS fix, each step a different length (step = speed x fix
+    // gap, and batched delivery makes both vary), each one popping the zoom/pitch too
+    // because the snap passed snap=true. Independent of whether a route is active.
+    //
+    // Stamping first makes the signal honest — "alive" now means alive, not
+    // "alive AND currently animating something".
+    const now = Date.now();
+    lastBgTickAt.current = now;
     // HEARTBEAT GUARD (build-65 drive test, 2026-07-16): a real rAF tick within the
     // last ~150 ms means the display is awake and step() is driving — do nothing, so
     // the two drivers can never double-advance. When the phone display sleeps, rAF
@@ -898,11 +923,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // timer after a pending-ease detector latched rafDead; on the head unit it never
     // reliably latched and the car marker froze with the screen off even though GPS
     // kept flowing — the route line kept trimming while the car sat still.)
-    if (Date.now() - lastStepAtRef.current < 150) return;
+    if (now - lastStepAtRef.current < 150) return;
     const a = anim.current;
     if (!a) return;
-    const now = Date.now();
-    lastBgTickAt.current = now; // this timer is alive → the fix effect can rely on the ease
     const t = Math.min(1, (now - a.start) / a.dur);
     render.current = {
       lat: a.fromLat + (a.toLat - a.fromLat) * t,
@@ -1088,9 +1111,17 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       // When the timer IS alive (CarPlay scene keeps the app active) its heartbeat is
       // fresh and this snap is skipped, preserving the smooth head-unit ease.
       if (now - lastBgTickAt.current > 1500) {
+        // Genuinely no driver (phone-only, screen locked, JS timers suspended): move the
+        // marker from here, because nothing else will. With the stamp above now honest
+        // this only fires when the timer really is not running, instead of latching for
+        // the rest of the drive after one quiet moment.
         render.current = { lat, lng, heading: prev.heading + angDelta(prev.heading, heading) };
         anim.current = null;
-        pushCam(render.current.lat, render.current.lng, render.current.heading, true);
+        // snap = FALSE deliberately. Position has to jump (there is no animator), but the
+        // zoom/pitch low-pass must NOT be reset to target on every fix — that is what put
+        // a framing POP on each of those teleports. Left to glide, dt clamps to 200 ms so
+        // it still closes ~44% of any gap per fix, which is smooth enough to be invisible.
+        pushCam(render.current.lat, render.current.lng, render.current.heading, false);
         setTick((n) => (n + 1) & 0xffff);
       }
     } else if (raf.current == null) {

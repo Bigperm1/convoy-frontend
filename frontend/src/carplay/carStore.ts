@@ -208,7 +208,20 @@ const SELF_SOURCE_RANK: Record<SelfPosSource, number> = { mirror: 3, fgwatch: 2,
 const SELF_STALE_MS = 2600;
 let lastSelfPos: { ts: number; rank: number } | null = null;
 
-export function setCarSelfPosition(lat: number, lng: number, heading: number | null, source: SelfPosSource) {
+export function setCarSelfPosition(
+  lat: number,
+  lng: number,
+  heading: number | null,
+  source: SelfPosSource,
+  // SPEED THROUGH THE SAME GATE (2026-07-30). speedMs used to be written by all three
+  // feeds with plain setCarState, OUTSIDE this gate — the comments at those call sites
+  // even said so deliberately. But speedMs drives the chase ZOOM curve
+  // (CarMapView: chaseZoom(kmh, …)), so a feed whose POSITION was rejected as
+  // lower-priority was still free to move the camera's zoom target. Position came from
+  // one track and framing from another. Passing it here keeps the two in agreement: if
+  // the fix is not good enough to move the car, it is not good enough to move the zoom.
+  speedMs?: number | null,
+) {
   const now = Date.now();
   const rank = SELF_SOURCE_RANK[source];
   const cur = lastSelfPos;
@@ -222,7 +235,23 @@ export function setCarSelfPosition(lat: number, lng: number, heading: number | n
   // are never left null → the CONVOY-logo fallback cannot return.
   if (cur && !stale && rank < cur.rank) return;
   lastSelfPos = { ts: now, rank };
-  setCarState({ selfLat: lat, selfLng: lng, heading });
+  // STICKY HEADING (2026-07-30). iOS reports course = -1 whenever it cannot determine
+  // one — at low speed, at a standstill, and on the first fixes after a restart — and
+  // both the fg and bg feeds translate that to `null` (navNotification.ts:306, :389).
+  // The car surface then coerced null to 0 (`s.heading ?? 0`), which is DUE NORTH, so
+  // the 3D car yawed to north and back while the camera held its last good bearing
+  // (CarMapView keeps `camHdgRef` only for real numbers). That is a visible spin against
+  // a stationary map, and it is worst exactly where course is unavailable: crawling and
+  // stopped. The phone's own mirror has always been sticky (`heading ?? cur?.heading`,
+  // map.tsx) — this brings the store in line, so every consumer inherits it.
+  const prevHeading = getCarState().heading;
+  const nextHeading = (typeof heading === 'number' && Number.isFinite(heading))
+    ? heading
+    : (typeof prevHeading === 'number' ? prevHeading : null);
+  setCarState({
+    selfLat: lat, selfLng: lng, heading: nextHeading,
+    ...(typeof speedMs === 'number' && Number.isFinite(speedMs) && speedMs >= 0 ? { speedMs } : {}),
+  });
 }
 
 // ── Peers/hazards write GATE (CarPlay-standalone Wave 1) ────────────────────

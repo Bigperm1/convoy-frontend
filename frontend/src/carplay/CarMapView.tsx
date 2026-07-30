@@ -802,6 +802,15 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           getCam={getCam}
           readyRef={lockReadyRef}
           camHeadingOverrideRef={camHdgOverrideRef}
+          // PHONE PARITY (2026-07-30). Without this the dead-band expression in
+          // SelfCarModel reads `(speedMs ?? 99) < SELF_CREEP_MS` = false FOREVER, so the
+          // car surface was permanently on the tight 2.5 m moving band and never got the
+          // 9 m parked band the phone has had since 818cc49. Standing still, every metre
+          // of GPS scatter above 2.5 m eased the marker AND the camera toward the noise —
+          // and screen-off makes it worse, because the 2 m-filtered mirror feed dies and
+          // the coarser 5 m feeds take over. A one-word omission, not a design choice;
+          // `s.speedMs` was already in scope and used for the zoom curve above.
+          speedMs={s.speedMs}
           scale={isArrow ? CARPLAY_ARROW_SCALE : carModelScale(0.7)}
           headingOffset={isArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
           pitchTilt={isArrow ? ARROW_MODEL_PITCH : 0}

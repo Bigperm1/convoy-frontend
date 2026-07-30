@@ -40,7 +40,7 @@ import {
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
   useRouteTrafficRefresh, fetchRouteViaStops,
 } from "../../src/nav";
-import { getDepartureBearing, noteCourse } from "../../src/departureBearing";
+import { getDepartureBearing, noteCourse, orderRoutesForward } from "../../src/departureBearing";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue, type CongestionLevel } from "../../src/mapboxDirections";
 import { logEvent } from "../../src/crashBreadcrumb";
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from "../../src/routeOptimizer";
@@ -310,55 +310,10 @@ function maneuverNear(route: NavRoute | null, lat: number, lng: number): string 
   return bestD <= 250 ? best : null;
 }
 
-// Initial compass bearing (deg, 0..360) from point a to point b.
-function bearingDeg(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const toDeg = (r: number) => (r * 180) / Math.PI;
-  const lat1 = toRad(a.lat), lat2 = toRad(b.lat), dLng = toRad(b.lng - a.lng);
-  const y = Math.sin(dLng) * Math.cos(lat2);
-  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-  return (toDeg(Math.atan2(y, x)) + 360) % 360;
-}
 
-// The direction a route initially heads — bearing from its origin to the end of
-// the first step that's >=25 m away (skips a tiny DEPART step). null if unknown.
-function routeInitialBearing(r: any): number | null {
-  const steps = r?.steps;
-  if (!Array.isArray(steps) || steps.length === 0) return null;
-  const start = steps[0]?.start;
-  if (!start || typeof start.lat !== "number") return null;
-  for (let i = 0; i < Math.min(steps.length, 4); i++) {
-    const end = steps[i]?.end;
-    if (end && typeof end.lat === "number" && haversineMeters(start, end) >= 25) return bearingDeg(start, end);
-  }
-  const end = steps[0]?.end;
-  return end && typeof end.lat === "number" ? bearingDeg(start, end) : null;
-}
-
-// Order reroute options so the FASTEST route that heads roughly the way the car
-// is already facing comes first (within +/-75 deg of current heading); options
-// that start with a U-turn fall to the back (also fastest-first). Falls back to
-// plain fastest-first when there's no heading. Keeps a wrong-way reroute from
-// being auto-selected the instant the driver goes off course.
 // How long the map stays where the driver put it before the chase cam takes back
 // over. Expressed once so the timestamp and the fast-path timer cannot drift.
 const PAN_RECENTER_MS = 20000;
-
-function orderReroutesForward(res: any[], heading?: number): any[] {
-  if (!Array.isArray(res) || res.length <= 1) return res;
-  const dur = (r: any) => r?.duration_in_traffic_s ?? r?.duration_s ?? Infinity;
-  if (typeof heading !== "number" || !Number.isFinite(heading)) {
-    return [...res].sort((a, b) => dur(a) - dur(b));
-  }
-  const offBy = (br: number) => Math.abs(((br - heading + 540) % 360) - 180); // 0..180
-  const scored = res.map((r) => {
-    const br = routeInitialBearing(r);
-    return { r, forward: br != null && offBy(br) <= 75, d: dur(r) };
-  });
-  const fwd = scored.filter((s) => s.forward).sort((a, b) => a.d - b.d);
-  const rest = scored.filter((s) => !s.forward).sort((a, b) => a.d - b.d);
-  return [...fwd, ...rest].map((s) => s.r);
-}
 
 // ===== Nova speeding-alert lines =====
 // tier 1 = light/humorous nudge (~20 over); tier 2 = firmer warning (~40 over).
@@ -992,7 +947,7 @@ export default function MapScreen() {
       // the selected, green route — is the quickest one that does NOT turn you
       // around. When nothing departs forward the order is unchanged: sometimes a
       // U-turn genuinely is the only way out.
-      const sorted = orderReroutesForward(raw, facing ?? undefined);
+      const sorted = orderRoutesForward(raw, facing ?? undefined);
       // Color-rank: green (fastest) → orange (mid) → red (slowest). Cast to
       // any so we can attach an extra `color` field without modifying the
       // shared NavRoute type in src/nav.ts.
@@ -1433,7 +1388,7 @@ export default function MapScreen() {
         if (res.length > 0) {
           // Prefer the fastest reroute that continues in the direction the car is
           // already facing, so going off-course never auto-selects a U-turn line.
-          const ordered = orderReroutesForward(res, coords?.heading);
+          const ordered = orderRoutesForward(res, coords?.heading);
           setRoutes(ordered.slice(0, 2));
           setSelectedRouteIndex(0);
           // Re-baseline to the new route: the driver deliberately changed path, so the

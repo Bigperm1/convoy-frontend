@@ -41,6 +41,7 @@
 // timeout or a throw all return null, and a null simply means "rank by ETA alone",
 // i.e. exactly today's behaviour.
 import * as Location from "expo-location";
+import { haversineMeters } from "./nav";
 
 // How long a GPS course stays trustworthy as a proxy for "facing". A car that was
 // moving 90 s ago is almost certainly still pointing the way it was travelling —
@@ -100,4 +101,56 @@ export async function getDepartureBearing(): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+// ── PREFER A ROUTE THAT DEPARTS THE WAY WE FACE ──────────────────────────────
+// Lives HERE, not in a screen, because FOUR surfaces start routes and they must
+// choose identically: the phone's own route effect (iOS + Android) and
+// carActions.startCarNav, which is what a search from CarPlay OR Android Auto runs.
+// It was duplicated-by-omission before — the phone got the forward preference and
+// the car surfaces kept sorting on ETA alone, so the same destination gave a U-turn
+// from the head unit and not from the phone.
+const FORWARD_TOLERANCE_DEG = 75;
+
+function bearingDeg(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const lat1 = toRad(a.lat), lat2 = toRad(b.lat), dLng = toRad(b.lng - a.lng);
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+// The direction a route initially heads — bearing from its origin to the end of the
+// first step that is >=25 m away (skips a tiny DEPART step). null if unknown.
+export function routeInitialBearing(r: any): number | null {
+  const steps = r?.steps;
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+  const start = steps[0]?.start;
+  if (!start || typeof start.lat !== "number") return null;
+  for (let i = 0; i < Math.min(steps.length, 4); i++) {
+    const end = steps[i]?.end;
+    if (end && typeof end.lat === "number" && haversineMeters(start, end) >= 25) return bearingDeg(start, end);
+  }
+  const end = steps[0]?.end;
+  return end && typeof end.lat === "number" ? bearingDeg(start, end) : null;
+}
+
+// Order routes so the FASTEST one heading roughly the way the car already faces comes
+// first; options that start with a U-turn fall to the back (also fastest-first).
+// No heading -> plain fastest-first, i.e. the behaviour before any of this existed.
+export function orderRoutesForward<T = any>(res: T[], heading?: number): T[] {
+  if (!Array.isArray(res) || res.length <= 1) return res;
+  const dur = (r: any) => r?.duration_in_traffic_s ?? r?.duration_s ?? Infinity;
+  if (typeof heading !== "number" || !Number.isFinite(heading)) {
+    return [...res].sort((a, b) => dur(a) - dur(b));
+  }
+  const offBy = (br: number) => Math.abs(((br - heading + 540) % 360) - 180); // 0..180
+  const scored = res.map((r) => {
+    const br = routeInitialBearing(r);
+    return { r, forward: br != null && offBy(br) <= FORWARD_TOLERANCE_DEG, d: dur(r) };
+  });
+  const fwd = scored.filter((s) => s.forward).sort((a, b) => a.d - b.d);
+  const rest = scored.filter((s) => !s.forward).sort((a, b) => a.d - b.d);
+  return [...fwd, ...rest].map((s) => s.r);
 }

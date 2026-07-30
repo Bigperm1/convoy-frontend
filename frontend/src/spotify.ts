@@ -324,6 +324,22 @@ export const spotify = {
   playbackState: () => callSafe<any>("/me/player"),
   devices: () => callSafe<any>("/me/player/devices"),
   playlistTracks: (id: string) => call<any>(`/playlists/${id}/tracks?limit=50`),
+  // ── FOUR-SURFACE PARITY (2026-07-30) ──────────────────────────────────────
+  // The Apple screen has had Recently Played and share-a-playlist for a while;
+  // Spotify (the Android music source) had neither, so those rows were failing on
+  // the Android phone. These three close it.
+  //
+  // recently-played returns TRACKS, each with the `context` it was played from
+  // (a playlist/album uri) — so a tap can resume the whole playlist rather than
+  // orphaning one song, which is what the Apple side does.
+  recentlyPlayed: () => callSafe<any>("/me/player/recently-played?limit=20"),
+  // Name-based resolution is what makes a share work ACROSS services: an Apple
+  // Music playlist id means nothing here, but its NAME does. Spotify exposes
+  // playlist search, which Apple's native module does not (see build 71).
+  searchPlaylists: (q: string) =>
+    call<any>(`/search?type=playlist&limit=5&q=${encodeURIComponent(q)}`),
+  searchTracks: (q: string) =>
+    call<any>(`/search?type=track&limit=5&q=${encodeURIComponent(q)}`),
   // ----- Playback controls (Web API; needs Premium + an active device) -----
   resume: () => mutate("PUT", "/me/player/play"),
   // Play a context (playlist/album). Optional offset starts at the Nth track so

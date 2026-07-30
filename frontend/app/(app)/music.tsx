@@ -364,6 +364,12 @@ export default function MusicScreen() {
   // otherwise we prefill the search box so it's ready once they connect.
   // Consumed once — on the ping if this screen is mounted, else on next focus.
   const applyPendingMusic = useCallback(async () => {
+    // ⚠ ONLY CONSUME WHAT THIS SOURCE CAN PLAY. shareInbox.takeMusic() NULLS the
+    // slot, and SpotifyMusic subscribes to the same inbox — so if this Apple handler
+    // ran on an Android/Spotify install it would swallow the share, fail the
+    // isMusicSupported check below, and leave the Spotify handler nothing to act on.
+    // Whoever takes it must be able to use it.
+    if (source !== "apple" || !isMusicSupported) return;
     const m = shareInbox.takeMusic();
     if (!m) return;
     // ── A SHARED PLAYLIST (2026-07-30) ────────────────────────────────────────
@@ -407,7 +413,7 @@ export default function MusicScreen() {
     } finally {
       setSearching(false);
     }
-  }, [authorized]);
+  }, [authorized, source]);
   useEffect(() => {
     const fn = () => { applyPendingMusic(); };
     return shareInbox.subscribe(fn);

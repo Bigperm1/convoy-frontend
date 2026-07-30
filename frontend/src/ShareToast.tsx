@@ -109,9 +109,9 @@ export default function ShareToast() {
         fromHandle: event.fromHandle,
         sharedAt: typeof p.shared_at === "number" ? p.shared_at : Date.now(),
       });
-    } else if (k === "music" && (p.title || p.url || p.playlistId)) {
+    } else if (k === "music" && (p.title || p.url || p.playlistId || p.spotifyUri)) {
       shareInbox.setMusic({ title: p.title, artist: p.artist, url: p.url,
-        mediaType: p.mediaType, playlistId: p.playlistId });
+        mediaType: p.mediaType, playlistId: p.playlistId, spotifyUri: p.spotifyUri });
     } else if (k === "comm" && p.id) {
       shareInbox.setComm({ id: p.id, channel: p.channel });
     }

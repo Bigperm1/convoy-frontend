@@ -11,6 +11,8 @@ import { useFocusEffect } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { COLORS } from "./theme";
 import { spotify } from "./spotify";
+import ShareSheet from "./ShareSheet";
+import { shareInbox } from "./shareInbox";
 
 const SP_GREEN = "#1DB954";
 
@@ -24,6 +26,10 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
   const [isPlaying, setIsPlaying] = useState(false);
   const [tracks, setTracks] = useState<any[]>([]);
   const [playlists, setPlaylists] = useState<any[]>([]);
+  const [recent, setRecent] = useState<any[]>([]);
+  // Share target — same one-slot pattern the Apple screen uses, so a song and a
+  // playlist can share one sheet.
+  const [sharePayload, setSharePayload] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [shuffle, setShuffleState] = useState(false);
@@ -48,9 +54,31 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
   useEffect(() => {
     (async () => {
       try {
-        const [t, p] = await Promise.all([spotify.topTracks(), spotify.myPlaylists()]);
+        const [t, p, r] = await Promise.all([
+          spotify.topTracks(), spotify.myPlaylists(), spotify.recentlyPlayed(),
+        ]);
         setTracks(t?.items ?? []);
         setPlaylists((p?.items ?? []).filter(Boolean));
+        // recently-played is a list of PLAY EVENTS: {track, context}. Dedupe by the
+        // thing you would actually replay — the context when there is one, else the
+        // track — so the strip is not five rows of the same playlist.
+        const seen = new Set<string>();
+        const rows: any[] = [];
+        for (const it of (r?.items ?? [])) {
+          const ctx = it?.context?.uri;
+          const key = ctx || it?.track?.uri;
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          rows.push({
+            uri: key,
+            isContext: !!ctx,
+            title: ctx ? (it?.track?.album?.name ?? it?.track?.name) : it?.track?.name,
+            subtitle: (it?.track?.artists ?? []).map((a: any) => a?.name).filter(Boolean).join(", "),
+            artwork: img(it?.track?.album?.images),
+          });
+          if (rows.length >= 12) break;
+        }
+        setRecent(rows);
       } catch {}
       finally { setLoading(false); }
       refreshNow();
@@ -95,6 +123,63 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
     control(() => spotify.playUris(uris, i));
   };
   const playPlaylist = (uri: string) => { Haptics.selectionAsync().catch(() => {}); control(() => spotify.playContext(uri)); };
+  // Recently Played: resume the CONTEXT (playlist/album) when the event had one,
+  // else just the track. Mirrors playRecentItem on the Apple side.
+  const playRecent = (r: any) => {
+    Haptics.selectionAsync().catch(() => {});
+    control(() => (r?.isContext ? spotify.playContext(r.uri) : spotify.playUris([r.uri])));
+  };
+  const sharePlaylistSp = useCallback((p: any) => {
+    Haptics.selectionAsync().catch(() => {});
+    setSharePayload({
+      kind: "music",
+      mediaType: "playlist",
+      // Carried so a Spotify->Spotify share is exact; a recipient on Apple Music
+      // ignores it and falls back to the title, which is the cross-service handle.
+      spotifyUri: p?.uri,
+      title: p?.name,
+      artworkUrl: img(p?.images),
+    });
+  }, []);
+
+  // ── RECEIVE A SHARE (2026-07-30) ─────────────────────────────────────────
+  // Previously nothing here consumed shareInbox, so a song or playlist sent to an
+  // Android/Spotify user silently did nothing — music.tsx's applyPendingMusic is
+  // all MusicKit and bails on `isMusicSupported`, and this view returns before it
+  // can matter anyway.
+  //
+  // Resolution order, most-exact first:
+  //   1. a spotify: uri from another Spotify user  -> play it directly
+  //   2. otherwise search by NAME. This is what makes an APPLE MUSIC share work
+  //      here: the id is meaningless across services but the name is not, and
+  //      Spotify (unlike Apple's native module) exposes playlist search.
+  const applyPendingShare = useCallback(async () => {
+    const m = shareInbox.takeMusic();
+    if (!m) return;
+    try {
+      if (m.mediaType === "playlist") {
+        if (typeof m.spotifyUri === "string" && m.spotifyUri.startsWith("spotify:")) {
+          await control(() => spotify.playContext(m.spotifyUri!));
+          return;
+        }
+        if (m.title) {
+          const res = await spotify.searchPlaylists(m.title);
+          const hit = (res?.playlists?.items ?? []).filter(Boolean)[0];
+          if (hit?.uri) { await control(() => spotify.playContext(hit.uri)); return; }
+        }
+        return;
+      }
+      const q = [m.title, m.artist].filter(Boolean).join(" ").trim();
+      if (!q) return;
+      const res = await spotify.searchTracks(q);
+      const hit = (res?.tracks?.items ?? []).filter(Boolean)[0];
+      if (hit?.uri) await control(() => spotify.playUris([hit.uri]));
+    } catch {
+      // A share that cannot be resolved must never break the screen.
+    }
+  }, []);
+  useEffect(() => shareInbox.subscribe(() => { void applyPendingShare(); }), [applyPendingShare]);
+  useFocusEffect(useCallback(() => { void applyPendingShare(); }, [applyPendingShare]));
   const toggle = () => control(() => (isPlaying ? spotify.pause() : spotify.resume()));
   const toggleShuffle = () => {
     const ns = !shuffle;
@@ -115,13 +200,47 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
         <ActivityIndicator color={SP_GREEN} style={{ marginTop: 40 }} />
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: now ? 200 : 130 }} showsVerticalScrollIndicator={false}>
+          {/* Recently Played — same position and behaviour as the Apple screen. */}
+          {recent.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Recently Played</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hStrip}>
+                {recent.map((r, i) => (
+                  <TouchableOpacity
+                    key={r.uri || i}
+                    style={styles.card}
+                    activeOpacity={0.85}
+                    onPress={() => playRecent(r)}
+                    onLongPress={() => r.isContext && sharePlaylistSp({ uri: r.uri, name: r.title, images: r.artwork ? [{ url: r.artwork }] : [] })}
+                    delayLongPress={350}
+                  >
+                    {r.artwork ? (
+                      <Image source={{ uri: r.artwork }} style={styles.cardArt} contentFit="cover" />
+                    ) : (
+                      <View style={[styles.cardArt, styles.artPlaceholder]}><Ionicons name="musical-notes" size={28} color={SP_GREEN} /></View>
+                    )}
+                    <Text style={styles.cardTitle} numberOfLines={2}>{r.title}</Text>
+                    {!!r.subtitle && <Text style={styles.cardSub} numberOfLines={1}>{r.subtitle}</Text>}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
           {/* Your Playlists */}
           {playlists.length > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Your Playlists</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hStrip}>
                 {playlists.map((p, i) => (
-                  <TouchableOpacity key={p.id || i} style={styles.card} activeOpacity={0.85} onPress={() => playPlaylist(p.uri)}>
+                  <TouchableOpacity
+                    key={p.id || i}
+                    style={styles.card}
+                    activeOpacity={0.85}
+                    onPress={() => playPlaylist(p.uri)}
+                    onLongPress={() => sharePlaylistSp(p)}
+                    delayLongPress={350}
+                  >
                     {img(p.images) ? (
                       <Image source={{ uri: img(p.images) }} style={styles.cardArt} contentFit="cover" />
                     ) : (
@@ -178,6 +297,24 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
             <Text style={styles.nowTitle} numberOfLines={1}>{now.name ?? "Now Playing"}</Text>
             <Text style={styles.nowSub} numberOfLines={1}>{(now.artists ?? []).map((a: any) => a.name).join(", ")}</Text>
           </View>
+          {/* Share the now-playing track — the Apple screen has had this; Spotify
+              had no share at all, so a shared song could never originate here. */}
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              setSharePayload({
+                kind: "music",
+                title: now?.name,
+                artist: (now?.artists ?? []).map((a: any) => a?.name).filter(Boolean).join(", "),
+                artworkUrl: img(now?.album?.images),
+                spotifyUri: now?.uri,
+              });
+            }}
+            hitSlop={8}
+            style={{ marginRight: 2 }}
+          >
+            <Ionicons name="share-outline" size={20} color={COLORS.text} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={toggleShuffle} hitSlop={8} disabled={busy} style={{ marginRight: 12 }}>
             <Ionicons name="shuffle" size={20} color={shuffle ? SP_GREEN : COLORS.textDim} />
           </TouchableOpacity>
@@ -192,6 +329,14 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Share sheet — shared by the now-playing track and by a held playlist,
+          same single-slot pattern as the Apple screen. */}
+      <ShareSheet
+        visible={!!sharePayload}
+        onClose={() => setSharePayload(null)}
+        share={sharePayload}
+      />
     </View>
   );
 }

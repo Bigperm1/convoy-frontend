@@ -27,7 +27,7 @@ export type SharePayload =
   // the recipient when it is a CATALOG id (pl....) — a library id (p....) means
   // nothing on someone else's device, and the receiver handles that.
   | { kind: "music"; title?: string; artist?: string; url?: string; artworkUrl?: string;
-      mediaType?: "song" | "playlist"; playlistId?: string }
+      mediaType?: "song" | "playlist"; playlistId?: string; spotifyUri?: string }
   | { kind: "route"; name?: string; dest_label?: string; dest_lat?: number; dest_lng?: number; polyline?: string }
   | { kind: "comm"; id?: string; channel?: string };
 

@@ -13,7 +13,10 @@ type Listener = () => void;
 
 export type PendingRoute = { lat: number; lng: number; label: string; fromHandle?: string; sharedAt?: number };
 export type PendingMusic = { title?: string; artist?: string; url?: string;
-  mediaType?: "song" | "playlist"; playlistId?: string };
+  mediaType?: "song" | "playlist"; playlistId?: string;
+  // Spotify context uri, when the sender was on Spotify. Exact for Spotify->Spotify;
+  // an Apple recipient ignores it and resolves by title instead.
+  spotifyUri?: string };
 export type PendingComm = { id: string; channel?: string };
 
 let _route: PendingRoute | null = null;

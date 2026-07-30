@@ -474,6 +474,35 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // live, so mutating the ref is all that's needed — no imperative setCamera that
   // would fight the lockstep. `scale` is cumulative from the gesture start, so we
   // rebase on 'zoomBegin' and set bias = base + log2(scale) (Mapbox zoom is log2).
+  // ── WHY PINCH DID NOTHING WHILE PARKED (fixed 2026-07-30) ──────────────────
+  // Mutating userZoomRef is only half a gesture. The lockstep is what turns it into a
+  // camera, and EVERY pushCam call in ConvoyMapbox sits behind an active ease —
+  // step() bails at `if (!a) { raf.current = null; return; }` and bgTick at
+  // `if (!a) return`. A stationary car arms no ease (no fix clears the dead-band), so
+  // nothing pushes the camera at all and getCam() — which is only ever CALLED from
+  // pushCam — is never consulted. Net effect: pinch was silently dead whenever the car
+  // was stopped, and worked while moving because each fix armed an ease. That is
+  // exactly the "pinch doesn't work on the head unit" report, and it is why crew view
+  // DID work: crewFit is the one gesture that calls setCamera directly.
+  //
+  // So apply the gesture immediately. Only zoomLevel is set: centre, heading and pitch
+  // are deliberately omitted so Mapbox keeps whatever the lockstep last set, and the
+  // next eased frame pushes the same value anyway (getCam adds the same bias), so the
+  // two can never disagree.
+  const applyZoomNow = () => {
+    try {
+      const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
+      cameraRef.current?.setCamera({
+        zoomLevel: Math.max(
+          pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN,
+          Math.min(CAR_ZOOM_MAX, fz + userZoomRef.current),
+        ),
+        animationDuration: 0,
+        animationMode: 'none',
+      });
+    } catch {}
+  };
+
   useEffect(() => {
     return subscribeCarGesture((g: CarGesture) => {
       switch (g.kind) {
@@ -486,11 +515,13 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
             -CAR_USER_ZOOM_BIAS_LIMIT,
             Math.min(CAR_USER_ZOOM_BIAS_LIMIT, zoomBaseRef.current + delta),
           );
+          applyZoomNow();   // don't wait for an ease that a parked car will never arm
           break;
         }
         case 'recenter':
           userZoomRef.current = 0;
           zoomBaseRef.current = 0;
+          applyZoomNow();   // same reason as 'zoom' — parked, nothing else will push it
           // A recenter also cancels any crew-overview hold — the driver asked to
           // come home, so the chase cam takes back over immediately.
           camHoldUntilRef.current = 0;
@@ -503,6 +534,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           userZoomRef.current = 0;
           zoomBaseRef.current = 0;
           camHoldUntilRef.current = 0;
+          applyZoomNow();
           setCarNorthUp((v) => !v);
           break;
         case 'crewFit': {

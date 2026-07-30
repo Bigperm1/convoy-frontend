@@ -46,6 +46,9 @@ import {
   SelfCarModel,
   projectOntoRoute,
   carModelScale,
+  easedFrac,
+  TRIM_TICK_MS_PREMIUM,
+  TRIM_TICK_MS_ECO,
   applyCarGapGradient,
   GREEN_ARROW_MODEL,
   ARROW_MODEL_ID,
@@ -220,6 +223,7 @@ type Props = {
 export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   const s = useCarStore();
   const powerMode = usePowerMode(); // premium (plugged) → 60fps; eco (unplugged) → 30fps
+
   const [mapH, setMapH] = useState(0);
   const [mapW, setMapW] = useState(0);
 
@@ -429,6 +433,31 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // because CarPlay's pinch `scale` is cumulative from the gesture's begin.
   const userZoomRef = useRef(0);
   const zoomBaseRef = useRef(0);
+  // The camera's ACTUAL low-passed zoom, written every frame by SelfCarModel's
+  // pushCam. A ref → no renders. The route trim reads it; see trimZoom.
+  const camZoomRef = useRef<number | null>(null);
+  // Along-route ease state for the route trim (see routeTrimEndFrac below).
+  const fixEaseRef = useRef<{ key: string | null; prev: number; cur: number; at: number; gap: number } | null>(null);
+  const [, setTrimTick] = useState(0);
+  // Drive the route-trim ease (see routeTrimEndFrac). Navigating only, and it
+  // self-suppresses once the ease has landed, so a parked or free-driving car
+  // surface never ticks. NOTE: iOS suspends JS timers while the phone is locked in
+  // a mount — that is fine here BY CONSTRUCTION, because easedFrac clamps at t<=1,
+  // so a starved ticker degrades to the old hold-until-next-fix behaviour and can
+  // never run the line past the car.
+  useEffect(() => {
+    if (!s.navigating) return;
+    const period = powerMode === 'eco' ? TRIM_TICK_MS_ECO : TRIM_TICK_MS_PREMIUM;
+    const id = setInterval(() => {
+      const f = fixEaseRef.current;
+      if (!f) return;
+      const now = Date.now();
+      if (now - f.at >= f.gap) return;
+      if (Math.abs(f.cur - f.prev) < 1e-9) return;
+      setTrimTick((n) => (n + 1) & 0xffff);
+    }, period);
+    return () => clearInterval(id);
+  }, [s.navigating, powerMode]);
   // FROZEN-CLOSURE FIX (2026-07-20) — the CarPlay half of the phone's chase-cam bug
   // (see ConvoyMapbox.tsx:1844). SelfCarModel's rAF step() loop captures ONE closure
   // at mount, so it kept calling render-#1's getCam forever. userZoomRef/camHdgRef
@@ -680,10 +709,44 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // on screen everywhere and cannot drift apart again.
   // Zoom must include the driver's pinch bias, exactly as getCam applies it — the
   // line is trimmed for the camera the driver is actually looking through.
-  const trimZoom = Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, followZoom + userZoomRef.current));
+  // ── WHICH ZOOM (2026-07-30) ───────────────────────────────────────────────
+  // Same defect the phone had, same fix: followZoom is the speed-derived TARGET,
+  // but pushCam low-passes the camera toward it over CAM_SMOOTH_TAU_MS. Computing
+  // the gap from the target made every noisy GPS speed sample move the line start
+  // at full amplitude while the camera — which filters that noise — barely moved,
+  // so the line jittered against a still map. Ride the camera's ACTUAL zoom.
+  // The pinch bias still has to be added: camZoom already contains it (it tracks
+  // getCam, which applies userZoomRef), so do NOT add it twice here.
+  const trimZoom = camZoomRef.current != null
+    ? Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, camZoomRef.current))
+    : Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, followZoom + userZoomRef.current));
   const trimLeadM = routeTrimLeadM(trimZoom, lat);
+  // TRIM RIDES THE MARKER'S EASE — see the matching block in ConvoyMapbox.tsx for the
+  // full reasoning. The trim was anchored to the NEWEST fix while the marker eases
+  // toward it, so the gap sawtoothed by one whole step per fix (~15dp of 76.6 at
+  // 60 km/h). An anchor offset cannot fix that — only interpolating between fixes can
+  // — so the line start now runs the same linear ease, over the same measured gap, on
+  // the same clock as the car.
+  const routeKey = s.routePolyline ?? null;
+  const fm = fixEaseRef.current;
+  if (routeProj && (!fm || fm.key !== routeKey || fm.cur !== routeProj.frac)) {
+    const nowMs = Date.now();
+    const gapMs = (fm && fm.key === routeKey) ? Math.max(300, Math.min(1600, nowMs - fm.at)) : 600;
+    fixEaseRef.current = {
+      key: routeKey,
+      prev: (fm && fm.key === routeKey) ? easedFrac(fm, nowMs) : routeProj.frac,
+      cur: routeProj.frac,
+      at: nowMs,
+      gap: gapMs,
+    };
+  } else if (!routeProj && fixEaseRef.current) {
+    fixEaseRef.current = null;
+  }
+  const fracDrawn = (routeProj && fixEaseRef.current)
+    ? easedFrac(fixEaseRef.current, Date.now())
+    : (routeProj ? routeProj.frac : 0);
   const routeTrimEndFrac = routeProj
-    ? Math.max(0, Math.min(0.999, routeProj.frac + trimLeadM / routeProj.totalM))
+    ? Math.max(0, Math.min(0.999, fracDrawn + trimLeadM / routeProj.totalM))
     : null;
   const fadeSpanFrac = routeProj
     ? Math.max(0.0008, Math.min(0.06, routeTrimFadeM(trimZoom, lat) / routeProj.totalM))
@@ -900,6 +963,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           getCam={getCam}
           readyRef={lockReadyRef}
           camHeadingOverrideRef={camHdgOverrideRef}
+          camZoomOutRef={camZoomRef}
           // PHONE PARITY (2026-07-30). Without this the dead-band expression in
           // SelfCarModel reads `(speedMs ?? 99) < SELF_CREEP_MS` = false FOREVER, so the
           // car surface was permanently on the tight 2.5 m moving band and never got the

@@ -94,6 +94,36 @@ const IS_AA = isAndroid;
 // Auto black box uses. One drive with AA connected answers "how big is this thing
 // actually", and every layout decision after that is arithmetic instead of
 // another photo round-trip.
+// ── CARPLAY GESTURE PROBE (2026-07-30) ───────────────────────────────────────
+// Jeff, after a drive on build 70: "pinch to zoom did not work. and car play touch
+// did not work either." The JS wiring is complete and correct end-to-end (verified:
+// the native delegate posts didUpdateZoomGestureWithCenter, and MapTemplate.ts maps
+// it to onDidUpdateZoomGesture, which is what we register). And CPMapTemplate.h says
+// of these callbacks: "May not be called when connected to some CarPlay systems."
+//
+// So the open question is not our code, it is whether the CAR delivers the gesture at
+// all — which no amount of code-reading settles. Log the first of each kind per
+// process, exactly like logAaCanvas, and one drive answers it:
+//   zoom* rows                          -> the car delivers pinch; a remaining bug is ours
+//   no zoom* but carplay-tap rows exist -> the car talks to us and simply has no
+//                                          multitouch (iOS 26 pinch is a HEAD-UNIT
+//                                          capability) — a limit, not a defect
+//   neither -> nothing is reaching JS at all; the native template layer is the suspect
+// carplay-tap (carActions.carTap) is the CONTROL — it already logs every button press,
+// and a drive with tap rows but no gesture rows isolates this to multitouch alone.
+// (Deliberately NOT probing pan: MapTemplate's eventMap carries only the old
+// panWithDirection button API, which needs the panning interface shown, so its silence
+// would prove nothing.)
+// Once per kind, so a 60Hz pinch cannot flood the table.
+const carGestureLogged = new Set<string>();
+function logCarGestureOnce(kind: string, detail?: number): void {
+  if (carGestureLogged.has(kind)) return;
+  carGestureLogged.add(kind);
+  try {
+    logEvent(`carplay-gesture:${kind}${typeof detail === 'number' ? ` scale=${detail.toFixed(3)}` : ''}`);
+  } catch {}
+}
+
 let aaCanvasLogged = false;
 function logAaCanvas(w: number, h: number): void {
   if (!IS_AA || aaCanvasLogged) return;
@@ -1129,11 +1159,15 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // gesture bus, which biases the lockstep follow-zoom. Apple gates raw
             // touch on some head units, so these may not fire on every car — the
             // native map buttons remain the guaranteed-touchable fallback.
-            onDidBeginZoomGesture: () => emitCarGesture({ kind: 'zoomBegin' }),
-            onDidUpdateZoomGesture: (e: { scale: number; velocity: number }) =>
-              emitCarGesture({ kind: 'zoom', scale: e.scale, velocity: e.velocity }),
-            onDidEndZoomGesture: (e: { velocity: number }) =>
-              emitCarGesture({ kind: 'zoomEnd', velocity: e.velocity }),
+            onDidBeginZoomGesture: () => { logCarGestureOnce('zoomBegin'); emitCarGesture({ kind: 'zoomBegin' }); },
+            onDidUpdateZoomGesture: (e: { scale: number; velocity: number }) => {
+              logCarGestureOnce('zoomUpdate', e?.scale);
+              emitCarGesture({ kind: 'zoom', scale: e.scale, velocity: e.velocity });
+            },
+            onDidEndZoomGesture: (e: { velocity: number }) => {
+              logCarGestureOnce('zoomEnd');
+              emitCarGesture({ kind: 'zoomEnd', velocity: e.velocity });
+            },
           });
           mapTemplateRef.current = mapTemplate;
 

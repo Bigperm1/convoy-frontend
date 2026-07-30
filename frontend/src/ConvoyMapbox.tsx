@@ -453,6 +453,24 @@ const ZOOM_MAX = CHASE_ZOOM_CLAMP_MAX;
 // smoother/laggier. OTA-tunable. (Position + heading stay instant/eased as before.)
 const CAM_SMOOTH_TAU_MS = 340;
 
+// Route-trim ease: linear from prev→cur over the measured fix gap, clamped at both
+// ends. Deliberately the SAME shape and clock as SelfCarModel's position ease, so the
+// line start and the drawn car advance in step and the gap between them is constant.
+// Overshoot is clamped (t<=1) rather than extrapolated: a late fix should hold the
+// line still, never run it past the car.
+export function easedFrac(f: { prev: number; cur: number; at: number; gap: number }, now: number): number {
+  const t = Math.max(0, Math.min(1, (now - f.at) / Math.max(1, f.gap)));
+  return f.prev + (f.cur - f.prev) * t;
+}
+// How often the trim ease is resampled. 12Hz premium / 8Hz eco leaves a residual
+// sawtooth of one tick's travel — at 60 km/h that is ~1.4m (1.3dp) premium against
+// the ~15dp it replaces, i.e. below the perceptual floor — while costing a fraction
+// of the 60fps full-tree re-render the heat work exists to avoid. It runs ONLY while
+// navigating with an ease actually in flight, so a parked or free-driving map is
+// untouched.
+export const TRIM_TICK_MS_PREMIUM = 83;
+export const TRIM_TICK_MS_ECO = 125;
+
 // Heading-up camera bearing — we drive it ourselves instead of Mapbox's native
 // FollowWithCourse, which tracks raw GPS course and updates every frame, so its
 // noise makes the map WOBBLE while driving and SPIN while stopped. Instead we
@@ -783,7 +801,7 @@ type PlacePoint = { id: string; lat: number; lng: number; label: string; price?:
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -808,6 +826,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // per frame; undefined = normal heading-up chase. CarPlay's compass north-up
   // hold sets it to 0. Phone callers never pass it — zero behaviour change.
   camHeadingOverrideRef?: React.RefObject<number | undefined>;
+  // OUT-param: the camera's ACTUAL low-passed zoom, written every frame. The route
+  // trim needs it — see the routeTrim call site. Read-only for the caller.
+  camZoomOutRef?: React.RefObject<number | null>;
   readyRef?: React.RefObject<boolean>;
   scale?: any;
   // "Class" appearance: the name of a REGISTERED map image (the tinted top-down
@@ -867,6 +888,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       camZoom.current += (c.zoomLevel - camZoom.current) * a;
       camPitch.current += (c.pitch - camPitch.current) * a;
     }
+    // Publish the zoom the camera is ACTUALLY at. The route trim converts a fixed
+    // screen distance to metres and must use this, not the speed-derived TARGET —
+    // see the routeTrim call site for why that difference is visible as jitter.
+    if (camZoomOutRef) camZoomOutRef.current = camZoom.current;
     try {
       cameraRef.current.setCamera({
         centerCoordinate: [ln, la],
@@ -2111,6 +2136,35 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     padding: followPadding ?? { paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 },
   };
   const getCam = () => camTargetRef.current;
+  // The camera's ACTUAL low-passed zoom, written every frame by SelfCarModel's
+  // pushCam. A ref, so it costs no renders — the route trim reads it at render time
+  // and gets the zoom the driver is really looking through rather than the noisy
+  // speed-derived target. null until the first camera frame seeds it.
+  const camZoomRef = useRef<number | null>(null);
+  // Along-route ease state for the route trim: where the line start is coming FROM,
+  // where it is going TO, when that leg started and how long it should take. Keyed by
+  // polyline so a reroute starts clean instead of interpolating across two routes.
+  const fixEaseRef = useRef<{ key: string | null; prev: number; cur: number; at: number; gap: number } | null>(null);
+  // Trim ticker heartbeat. State (not a ref) purely because the route line is a style
+  // prop and only a render can move it.
+  const [, setTrimTick] = useState(0);
+  // Drive the trim ease. Gated three ways so it can never become a background
+  // 12Hz re-render loop: navigating only, and inside the interval it self-suppresses
+  // both when no ease is in flight (t has reached 1 — parked, or waiting on a late
+  // fix) and when the step is too small to move the line a visible amount.
+  useEffect(() => {
+    if (!navigationActive) return;
+    const period = getPowerMode() === "eco" ? TRIM_TICK_MS_ECO : TRIM_TICK_MS_PREMIUM;
+    const id = setInterval(() => {
+      const f = fixEaseRef.current;
+      if (!f) return;
+      const now = Date.now();
+      if (now - f.at >= f.gap) return;          // ease finished — nothing to advance
+      if (Math.abs(f.cur - f.prev) < 1e-9) return; // standing still
+      setTrimTick((n) => (n + 1) & 0xffff);
+    }, period);
+    return () => clearInterval(id);
+  }, [navigationActive]);
 
   // ===== User zoom buttons (+/-) =====
   // While FOLLOWING, the offset rides on followZoomLevel above — Mapbox ignores
@@ -2354,9 +2408,59 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // on a main road and "overlapping" at highway speed. The lead is now a fixed
   // SCREEN distance converted at the live zoom, so it grows exactly as fast as the
   // marker does, and CarMapView (CarPlay + Android Auto) calls the same function.
-  const _trimLeadM = routeTrimLeadM(chaseZoomRaw, selfCar?.lat ?? 0);
+  // ── WHICH ZOOM (2026-07-30, Jeff: "the route line in front of me was jittering") ──
+  // This read chaseZoomRaw — the speed-derived TARGET. But the camera does NOT go
+  // there immediately: pushCam low-passes toward it with CAM_SMOOTH_TAU_MS (340ms).
+  // So every noisy GPS speed sample moved the line start at FULL amplitude while the
+  // camera, which filters that same noise out, barely moved. The line danced against
+  // a still map — high-frequency jitter, exactly as reported, and worst at the steep
+  // part of the chase-zoom curve where a 1-2 km/h wobble is a real zoom delta.
+  // Ride the camera's ACTUAL zoom instead, so the gap is computed at the zoom the
+  // driver is actually looking through. Falls back to the target before the first
+  // frame seeds it (and on surfaces with no lockstep camera).
+  const _trimZoom = camZoomRef.current ?? chaseZoomRaw;
+  const _trimLeadM = routeTrimLeadM(_trimZoom, selfCar?.lat ?? 0);
+  // ── AND WHICH POSITION (2026-07-30) ────────────────────────────────────────
+  // Second, independent source of the same complaint, and the bigger one. The trim
+  // was anchored to routeProj.frac — the NEWEST fix — while the MARKER eases toward
+  // that fix across the whole inter-fix interval. So each fix threw the line start a
+  // full step ahead while the car was still back at the previous one, and the gap
+  // then closed as the car caught up. A sawtooth of exactly one step: ~15dp of the
+  // 76.6dp gap at 60 km/h on iOS's ~1Hz GPS, i.e. the gap breathing by a fifth.
+  //
+  // ⚠ An anchor OFFSET cannot fix this — I tried the car's mean position first and
+  // simulated it: a constant shift moves the whole waveform, it cannot shrink its
+  // amplitude. Only updating between fixes can, so the trim now rides the SAME ease
+  // the marker does: linear from the previous projection to the current one over the
+  // measured fix gap, driven by a low-rate ticker. Same interpolation, same clock, so
+  // the line start and the car advance together and the gap is constant by
+  // construction rather than by tuning.
+  const _routeKey = routes?.[selectedRouteIndex]?.polyline ?? null;
+  const _fm = fixEaseRef.current;
+  if (routeProj && (!_fm || _fm.key !== _routeKey || _fm.cur !== routeProj.frac)) {
+    const _now = Date.now();
+    // Measure the gap the same way SelfCarModel does, and clamp it to the same
+    // rails, so the two eases cannot disagree about how long a step should take.
+    const _gap = (_fm && _fm.key === _routeKey)
+      ? Math.max(300, Math.min(1600, _now - _fm.at))
+      : 600;
+    fixEaseRef.current = {
+      key: _routeKey,
+      // Carry the CURRENT drawn value forward as the new start, not the old target —
+      // if a fix lands mid-ease the line must continue from where it actually is.
+      prev: (_fm && _fm.key === _routeKey) ? easedFrac(_fm, _now) : routeProj.frac,
+      cur: routeProj.frac,
+      at: _now,
+      gap: _gap,
+    };
+  } else if (!routeProj && fixEaseRef.current) {
+    fixEaseRef.current = null;
+  }
+  const _fracDrawn = (routeProj && fixEaseRef.current)
+    ? easedFrac(fixEaseRef.current, Date.now())
+    : (routeProj ? routeProj.frac : 0);
   const routeTrimEndFrac = routeProj
-    ? Math.max(0, Math.min(0.999, routeProj.frac + _trimLeadM / routeProj.totalM))
+    ? Math.max(0, Math.min(0.999, _fracDrawn + _trimLeadM / routeProj.totalM))
     : null;
   // Soft fade-in just past that buffer: the line ramps transparent → solid over
   // ~20 m instead of hard-starting in front of the nose. Uses the route source's
@@ -2364,7 +2468,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // preview keeps the solid color. Built as a line-progress gradient anchored at
   // the trim edge.
   const _fadeSpanFrac = routeProj
-    ? Math.max(0.0008, Math.min(0.06, routeTrimFadeM(chaseZoomRaw, selfCar?.lat ?? 0) / routeProj.totalM))
+    ? Math.max(0.0008, Math.min(0.06, routeTrimFadeM(_trimZoom, selfCar?.lat ?? 0) / routeProj.totalM))
     : 0;
   const buildLineFade = (solid: string, clear: string): any => {
     if (routeTrimEndFrac == null) return null;
@@ -2998,6 +3102,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             speedMs={userSpeedMs}
             cameraRef={cameraRef}
             getCam={getCam}
+            camZoomOutRef={camZoomRef}
             readyRef={lockReadyRef}
           />
         )}

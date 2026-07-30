@@ -3,11 +3,13 @@
 **Written 2026-07-25, end of an overnight session. Read this first, then `CLAUDE.md`
 (build/release rules) and `CARPLAY.md` (the locked CarPlay spec).**
 
-Shipped state: **build 68 · v3.4.0 · runtime 1.20.0** (cut 2026-07-25 — iOS store, Android
-APK + Android AAB), OTA branch **`mapbox-migration`**.
-**Post-68 OTAs go to runtime 1.20.0** (dual-publish with 1.19.0 until everyone is on 68).
-Everything below marked "shipped" is live via OTA on 1.19.0 **and** 1.18.0 (always
-dual-publish — build 66 testers are still on 1.18.0).
+Shipped state: **build 70 · v3.6.0 · runtime 1.22.0** (cut 2026-07-30 — iOS store→TestFlight,
+Android APK + Android AAB), OTA branch **`mapbox-migration`**.
+**Post-70 OTAs go to runtime 1.22.0.** Build 70 is the first build with NATIVE changes since
+69: the CarPlay frame pump and the Android Auto `updateTemplate` fix (§15, §16). Anything
+OTA'd before it targeted 1.21.0 and does NOT reach a 70 install — republish to 1.22.0.
+⚠ **Android Auto can only be tested from a PLAY install** (AA hides non-Play installs); the
+sideloaded APK is for everything else.
 
 ---
 
@@ -702,3 +704,44 @@ zoom/pitch because the snap passed `snap=true`. Route-independent, as reported.
 ### Not yet verified by a human
 A real drive with the phone locked in a mount. The mechanism and the fix are proven in
 isolation; what a head unit does with them is not.
+
+---
+
+## 16. Build 70 — CUT 2026-07-30 (v3.6.0 · runtime 1.22.0)
+
+First build with native changes since 69. **Both were compile-verified locally before any
+money was spent** — that was the explicit gate:
+
+```
+iOS     xcodebuild -workspace ios/Hairpin.xcworkspace -scheme HairpinSystem \
+          -sdk iphonesimulator            →  ** BUILD SUCCEEDED **
+Kotlin  cd android && ./gradlew :react-native-carplay:compileReleaseKotlin
+                                          →  BUILD SUCCESSFUL
+```
+(Local Java for that gradle run: `JAVA_HOME=/opt/homebrew/opt/openjdk@17`,
+`ANDROID_SDK_ROOT=/opt/homebrew/share/android-commandlinetools`. There is no
+`/Library/Java` and no Android Studio on this Mac.)
+
+### What's in it
+1. **CarPlay frame pump** (`modules/hairpin-system`) — the screen-off fix. A `CADisplayLink`
+   from the head unit's own `UIScreen`, emitting `onCarFrame` at 30 fps, advancing the SAME
+   `bgTick`. See §15 for why this cannot be done in JS.
+2. **Android Auto `updateTemplate`** (`patches/react-native-carplay+…`) — was a silent no-op
+   (`carScreens[name]`, `name` = the module name). Now keyed by templateId with a root
+   fallback, and `parseTemplate` is wrapped so a parser throw can't kill the car app's main
+   thread. AA's worst case is therefore the old behaviour, not a crash.
+3. **`carMapButtonInsets()`** — `CPWindow.mapButtonSafeAreaLayoutGuide`, replacing insets
+   hand-measured off one 800×480 photo. Returns null with no car window, so it's additive.
+
+### Patch hygiene (the trap that once ate the whole AA port)
+Regenerated with `--exclude 'android/build/'` and verified file-by-file: **17 → 18 diffs,
+46 KB → 49 KB, zero original diffs lost**, `AACrashLog` and the bridgeless `ReactSurface` port
+both still present. Always do that comparison, not just the count.
+
+### First things to check on 70
+- **Screen-off CarPlay**: drive with the phone locked in the mount. The marker should now
+  interpolate instead of stepping. This is the one thing the build exists for.
+- **Android Auto still works** — it must be installed **from Play**, not the APK.
+- Does AA now draw its OWN maneuver card / travel estimate? That's the `updateTemplate` fix
+  landing. If AA regresses at all, that patch is the first suspect — revert hunk 18.
+- CarPlay pinch while **parked** (fixed by OTA before this build, not by the build).

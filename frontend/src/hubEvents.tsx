@@ -26,6 +26,8 @@ import { autocompletePlaces, placeDetails, type Suggestion } from './places';
 import WhenPicker, { fmtWhen } from './components/WhenPicker';
 import { shareInbox } from './shareInbox';
 import { cruisePlot } from './cruisePlot';
+import CruisePlanMap from './components/CruisePlanMap';
+import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from './routeOptimizer';
 import {
   type HubEvent, type EventPoint, createEvent, myEvents, discoverEvents,
   getEvent, attendEvent, confirmEvent, unattendEvent, deleteEvent,
@@ -248,6 +250,35 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
       .catch(() => setClubs([]));
   }, [visible]);
 
+  // ── PLAN ON THE MAP + SCOUT'S BEST ORDER (2026-07-29) ───────────────────────
+  // Jeff asked for the map planner and for Scout's re-ordering to work here too.
+  //
+  // ONE DELIBERATE DIFFERENCE FROM THE DRIVE MAP: on a live route Scout re-orders
+  // automatically, because there the only goal is to get there fastest. A CRUISE is
+  // often the opposite — a deliberately scenic loop where the "inefficient" order IS
+  // the plan. Auto-optimising would quietly destroy a hand-built Sea-to-Sky run. So
+  // here it is a BUTTON: same exact solver, driver's choice when to apply it.
+  const [ordering, setOrdering] = useState(false);
+  const bestOrder = async () => {
+    if (!venue || !end || stops.length < 2 || ordering) return;
+    setOrdering(true);
+    try {
+      const res = await optimizeStopOrder(venue, stops, end);
+      if (!res) { Alert.alert('Could not reorder', 'Scout could not work out a better order for these stops.'); return; }
+      if (isSameOrder(res.order)) { Alert.alert('Already optimal', 'These stops are already in the fastest order.'); return; }
+      setStops(res.order.map((i) => stops[i]));
+      const savedMin = res.savedSec ? Math.round(res.savedSec / 60) : 0;
+      Alert.alert(
+        'Reordered',
+        savedMin >= 1
+          ? `Scout put your ${stops.length} stops in the fastest order — about ${savedMin} ${savedMin === 1 ? 'minute' : 'minutes'} quicker.`
+          : `Scout put your ${stops.length} stops in the fastest order.`,
+      );
+    } finally {
+      setOrdering(false);
+    }
+  };
+
   const create = async () => {
     if (!title.trim()) return Alert.alert('Name it', `Give your ${copy.one} a title.`);
     if (!venue) return Alert.alert('Where?', kind === 'cruise' ? 'Pick the meeting point (first stop).' : 'Pick a meeting destination.');
@@ -297,22 +328,62 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
               <>
                 {/* Stops along the way (P3) — venue → stops → end becomes the
                     pre-designed route pushed to attendees on arrival. */}
+                {/* PLAN IT ON THE MAP — the route drawn through meeting point → stops →
+                    end, pinch to zoom, tap to drop a stop wherever you are looking.
+                    Shown as soon as there is a meeting point to anchor it. */}
+                {venue && (
+                  <>
+                    <Text style={[styles.label, { marginTop: 14 }]}>Plan on the map</Text>
+                    <CruisePlanMap
+                      start={venue}
+                      stops={stops}
+                      end={end}
+                      onAddStop={(p) => setStops((cur) => (
+                        cur.length >= ROUTABLE_MAX_STOPS
+                          ? cur
+                          : [...cur, { ...p, label: `Stop ${cur.length + 1}` }]
+                      ))}
+                    />
+                  </>
+                )}
+
                 {stops.length > 0 && (
                   <View style={{ marginTop: 14 }}>
                     <Text style={styles.label}>{`Stops along the way (${stops.length})`}</Text>
                     {stops.map((s, i) => (
                       <View key={`${s.lat},${s.lng},${i}`} style={styles.stopRow}>
                         <Text style={styles.stopNum}>{i + 1}</Text>
-                        <Text style={styles.stopLabel} numberOfLines={1}>{s.label || `${s.lat.toFixed(4)}, ${s.lng.toFixed(4)}`}</Text>
+                        {/* NAMEABLE (Jeff: "add a label to the stops when creating a
+                            cruise"). Edited in place — attendees see these names in the
+                            detail sheet and when the route is plotted. */}
+                        <TextInput
+                          style={styles.stopInput}
+                          value={s.label ?? ''}
+                          onChangeText={(t) => setStops((cur) => cur.map((st, j) => (j === i ? { ...st, label: t } : st)))}
+                          placeholder={`${s.lat.toFixed(4)}, ${s.lng.toFixed(4)}`}
+                          placeholderTextColor={COLORS.textMute}
+                        />
                         <TouchableOpacity onPress={() => setStops((cur) => cur.filter((_, j) => j !== i))} hitSlop={8}>
                           <Ionicons name="close-circle" size={18} color={COLORS.textMute} />
                         </TouchableOpacity>
                       </View>
                     ))}
+                    {/* Scout's solver, on demand — see bestOrder for why this is a button
+                        here and automatic on a live route. */}
+                    {stops.length >= 2 && !!end && (
+                      <TouchableOpacity onPress={bestOrder} disabled={ordering} style={styles.bestOrderBtn} activeOpacity={0.85}>
+                        <Ionicons name={ordering ? 'hourglass-outline' : 'swap-vertical'} size={15} color={COLORS.primary} />
+                        <Text style={styles.bestOrderText}>
+                          {ordering ? 'Working out the best order…' : 'Let Scout pick the best order'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 )}
-                {stops.length < 10 && (
+                {stops.length < ROUTABLE_MAX_STOPS ? (
                   <VenueField label={stops.length ? 'Add another stop' : 'Add a stop (optional)'} value={null} onPick={(p) => { if (p) setStops((cur) => [...cur, p]); }} />
+                ) : (
+                  <Text style={styles.helpText}>{`${ROUTABLE_MAX_STOPS} stops is the most one route can hold.`}</Text>
                 )}
                 <VenueField label="End location" value={end} onPick={setEnd} />
               </>
@@ -548,6 +619,17 @@ const styles = StyleSheet.create({
   stopRow: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 6 },
   stopNum: { color: '#0A1A10', backgroundColor: COLORS.primary, width: 20, height: 20, borderRadius: 10, textAlign: 'center', fontWeight: '900', fontSize: 12, lineHeight: 20, overflow: 'hidden' },
   stopLabel: { color: COLORS.text, fontSize: 13.5, flex: 1 },
+  // Editable stop name (cruise planner). Borderless so the row still reads as a list
+  // rather than a form, but it IS a text field.
+  stopInput: {
+    color: COLORS.text, fontSize: 13.5, flex: 1, paddingVertical: 4, paddingHorizontal: 0,
+  },
+  bestOrderBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 8,
+    paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10,
+    borderWidth: 1, borderColor: COLORS.primary + '55', backgroundColor: COLORS.primary + '14',
+  },
+  bestOrderText: { color: COLORS.primary, fontSize: 13, fontWeight: '700' },
   venuePickedText: { color: COLORS.text, fontSize: 14.5, fontWeight: '600', flex: 1 },
   sugRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.08)' },
   sugText: { color: COLORS.text, fontSize: 14, flex: 1 },

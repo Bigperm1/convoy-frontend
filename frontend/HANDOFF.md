@@ -312,7 +312,14 @@ Say Phin's head-unit photo showed the speedo and the maneuver distance printed o
 each other as `0124 m`, `km/h` tucked underneath, the `20°C` chip over the ETA line, and
 "Turn right …" clipping.
 
-**Cause — a width floor, nothing to do with the canvas being "crowded".** `navStackW` did
+**The canvas is ~250 × 143 dp** — measured from the photo itself, not assumed: the crew pill
+is `CREW_PILL_H = 22`dp with 11pt text, and on that screen it fills ~15% of the canvas height
+and ~85% of its width. That is a THIRD of the area this HUD was tuned for (400×240pt of
+CarPlay). A head unit reports few dp for a physically large screen, so one dp up there is
+~4–5× the physical size of a phone dp — which is why every chip in that photo looks enormous.
+**Two independent defects follow from it.**
+
+**Cause 1 — a width floor, nothing to do with the canvas being "crowded".** `navStackW` did
 
 ```
 Math.max(NAV_STACK_ABS_MIN_W, Math.min(NAV_STACK_MAX_W, surfaceW - left - right))
@@ -324,12 +331,32 @@ surplus grew **leftward, straight over the speed cluster**. CarPlay never expose
 ~431pt CarPlay canvas always had the room. The Android Auto canvas is a VirtualDisplay
 sized by the head unit (`VirtualRenderer.kt:44`) and is much narrower.
 
+Feeding 250dp back through the shipped code reproduces the photo to within a few dp:
+`navAvail = 250 − 184 − 48 = 18`, forced up to the 120 floor, banner left edge at x=82 over a
+speedo spanning 56–114 — `0124 m`. The ETA row lands at y 61–85 over a weather chip at y
+33–81, in x 82–114 — `20°C` on the ETA line. Both complaints, same arithmetic.
+
+**Cause 2 — everything is drawn ~2× too big for the canvas.** The reflow below is necessary
+but was not sufficient on its own: three stacked rows at full size (42 + 8 + 24 + gaps) are
+~74dp of a 143dp canvas and would have swallowed the map.
+
 **Fixed (`src/carplay/ConvoyCarPlay.tsx`), all JS/OTA:**
+- **`hudScale` = `min(1, max(0.5, min(W/400, H/240)))`, Android Auto only.** Each cluster is
+  scaled about the corner it is pinned to (`transformOrigin`), so its anchor does not move and
+  only its footprint shrinks. ⚠ Three derived **positions** had to be re-derived from the
+  *scaled* height or they detach from what they sit against — the status row under the crew
+  pill, the weather chip on the speedo, and the tight-canvas stack. If you add another
+  position expressed as "10 + 48 + …", it needs the same treatment.
+  At the measured canvas: scale 0.6, stack spans x=137–238 against a speed cluster ending at
+  84 (**117dp clear**), stack height 31% of the canvas instead of 52%.
+  **AA only on purpose** — the CarPlay surface is verified good and its own height has never
+  been measured here; scaling it on a guess would risk a known-good surface.
 - **Tight-canvas reflow.** When the nav stack and the speed cluster cannot share the bottom
-  band, they stop sharing it: the stack goes full width and lifts one row
-  (`SPEED_ROW_TOP`), and the weather chip slides *beside* the speedo instead of above it.
-  Three fixed rows; overlap is impossible at any canvas size. Which layout applies is
-  decided by arithmetic (`navAvail < NAV_STACK_ABS_MIN_W`), not by a tuned constant.
+  band, they stop sharing it: the stack goes full width and lifts one row, and the weather
+  chip slides *beside* the speedo instead of above it. With `hudScale` in place no measured
+  geometry reaches this — it is now a backstop, and one that can no longer fill the screen
+  because the rows it stacks are scaled too. Which layout applies is decided by arithmetic
+  (`navAvail < NAV_STACK_ABS_MIN_W`), not by a tuned constant.
 - **AA drops the CarPlay-only chrome insets.** `left: 56` and `right: 48` exist to clear
   iOS's leading/trailing map-button rails, which do not exist on a head unit — 80pt back.
 - **One-shot canvas probe.** `logAaCanvas()` writes `android-auto-canvas surface=WxHdp …`
@@ -381,7 +408,12 @@ this layout instead of insets we guess at.
   looked like a regression — it was a slow first launch, proven by re-running the identical
   bundle. **Always run the control.**
 - iOS render paths are unchanged by construction: every branch added is gated on
-  `Platform.OS === 'android'` or on a width threshold a CarPlay canvas does not cross
-  (431pt → `navAvail` ≈ 167 > 120).
-- **NOT verified:** the head unit itself. Needs one AA drive on the OTA, then the
-  `android-auto-canvas` row + a fresh photo.
+  `Platform.OS === 'android'` or on a width threshold a CarPlay canvas does not cross. The
+  reworked width maths was checked numerically to return **bit-identical** results at
+  375 / 400 / 431pt (135.9 / 150.0 / 167.5) against the old expression.
+- `transformOrigin` keyword strings (`'left bottom'` etc.) confirmed supported in RN 0.81 —
+  `Libraries/StyleSheet/processTransformOrigin.js`.
+- **NOT verified:** the head unit itself, and the 250×143 figure is photo-derived, not read
+  from the device. Needs one AA drive on the OTA → the `android-auto-canvas` row gives the
+  real number, and a fresh photo says whether 0.6 is the right size to read at arm's length.
+  `HUD_SCALE_FLOOR` / `CAR_REF_W` / `CAR_REF_H` are the tuning knobs; all OTA-able.

@@ -17,6 +17,13 @@ export type PendingCruise = {
   venue: CruisePoint;
   stops: CruisePoint[];
   end: CruisePoint | null;
+  // The creator chose SCENIC (motorway-free) in the planner. Carried through so the
+  // plotted route is re-fetched with the same exclusion and therefore has the shape
+  // that was planned. Deliberately a flag rather than the stored polyline: a bare
+  // polyline has no steps, no congestion and no refresh uuid, so it cannot be
+  // navigated — re-routing with the same constraint yields a full NavRoute that
+  // matches the plan.
+  scenic?: boolean;
 };
 
 type Listener = () => void;

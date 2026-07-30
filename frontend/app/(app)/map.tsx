@@ -1029,7 +1029,14 @@ export default function MapScreen() {
             // [lng, lat] TUPLES (Mapbox coordinate order) — not {lat,lng}.
             cv.via.map((p): [number, number] => [p.lng, p.lat]),
             { lat: destination.lat, lng: destination.lng },
-            { tolls: settings.avoidTolls, highways: settings.avoidHighways, ferries: settings.avoidFerries },
+            // A cruise planned as SCENIC is re-routed motorway-free, so the line the
+            // crew drives has the shape its creator chose. Without this the plot path
+            // silently rebuilt a fastest route through the same stops.
+            {
+              tolls: settings.avoidTolls,
+              highways: settings.avoidHighways || !!cv.scenic,
+              ferries: settings.avoidFerries,
+            },
           );
           if (!cancelled && !navActiveRef.current && cruiseRoute?.polyline) {
             (cruiseRoute as any).cruise = true; // chip reads "Cruise" instead of "AI"
@@ -2018,7 +2025,7 @@ export default function MapScreen() {
   // the destination to the cruise end — the effect then builds meeting-point →
   // stops → end as the auto-selected route. Never clobbers active navigation
   // (re-pins the payload so it applies after the current drive ends).
-  const pendingCruiseViaRef = useRef<{ via: { lat: number; lng: number }[]; destLat: number; destLng: number } | null>(null);
+  const pendingCruiseViaRef = useRef<{ via: { lat: number; lng: number }[]; destLat: number; destLng: number; scenic?: boolean } | null>(null);
   // Double-tap pin-drop: the previous single tap (time + coord). Ref, not state —
   // it must never re-render the map between the two taps. (Up here with the other
   // hooks — the render body below the no-coords early return can't declare refs.)
@@ -2030,7 +2037,7 @@ export default function MapScreen() {
       if (navActiveRef.current) { cruisePlot.set(c); return; }
       const dest = c.end ?? c.venue;
       const via = (c.end ? [c.venue, ...c.stops] : c.stops).map((p) => ({ lat: p.lat, lng: p.lng }));
-      pendingCruiseViaRef.current = { via, destLat: dest.lat, destLng: dest.lng };
+      pendingCruiseViaRef.current = { via, destLat: dest.lat, destLng: dest.lng, scenic: !!c.scenic };
       setDestination({ lat: dest.lat, lng: dest.lng, label: dest.label || c.title || "Cruise finish" });
     };
     const un = cruisePlot.subscribe(consume);

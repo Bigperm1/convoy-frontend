@@ -26,7 +26,7 @@ import { autocompletePlaces, placeDetails, type Suggestion } from './places';
 import WhenPicker, { fmtWhen } from './components/WhenPicker';
 import { shareInbox } from './shareInbox';
 import { cruisePlot } from './cruisePlot';
-import CruisePlanMap from './components/CruisePlanMap';
+import CruisePlanMap, { type PlanStyle, type PlanRoutes } from './components/CruisePlanMap';
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from './routeOptimizer';
 import {
   type HubEvent, type EventPoint, createEvent, myEvents, discoverEvents,
@@ -259,6 +259,23 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
   // the plan. Auto-optimising would quietly destroy a hand-built Sea-to-Sky run. So
   // here it is a BUTTON: same exact solver, driver's choice when to apply it.
   const [ordering, setOrdering] = useState(false);
+  // ── ROUTE STYLE (2026-07-29) ────────────────────────────────────────────────
+  // Jeff: "could we have a selection tool like Best route and Scenic route, kind
+  // like the maps one, which takes into consideration the stops."
+  // Both variants are routed through the SAME pinned stops — the choice is how they
+  // get between them. Scenic EXCLUDES MOTORWAYS, which is what makes the word mean
+  // something: note the drive map's own "Scenic" is only a label on Mapbox's first
+  // alternate (ConvoyMapbox routeKindFor), usually just another freeway.
+  const [routeStyle, setRouteStyle] = useState<PlanStyle>('fastest');
+  const [planRoutes, setPlanRoutes] = useState<PlanRoutes>({ fastest: null, scenic: null });
+  const fmtLeg = (r: { distanceM: number; durationS: number } | null) => {
+    if (!r) return 'unavailable';
+    const km = r.distanceM / 1000;
+    const mins = Math.round(r.durationS / 60);
+    const h = Math.floor(mins / 60), m = mins % 60;
+    const t = h > 0 ? `${h}h ${m}m` : `${m} min`;
+    return `${t} · ${km < 100 ? km.toFixed(1) : Math.round(km)} km`;
+  };
   const bestOrder = async () => {
     if (!venue || !end || stops.length < 2 || ordering) return;
     setOrdering(true);
@@ -297,10 +314,23 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
         notify_enabled: notify,
         ...(kind === 'cruise' && end ? { end_lat: end.lat, end_lng: end.lng, end_label: end.label || '' } : {}),
         ...(kind === 'cruise' ? { departure_at: when.toISOString(), stops } : {}),
+        // Store the line the creator actually chose. The backend has always accepted
+        // `polyline` ("precomputed cruise route") on both create and update, so what the
+        // crew drives is the route that was planned — Fastest or Scenic — rather than
+        // something re-derived later from the waypoints alone.
+        ...(kind === 'cruise' && (routeStyle === 'scenic' ? planRoutes.scenic : planRoutes.fastest)
+          ? { polyline: (routeStyle === 'scenic' ? planRoutes.scenic! : planRoutes.fastest!).polyline }
+          : {}),
+        // The STYLE has to survive too, or plotting the cruise later would rebuild a
+        // fastest route through the same stops and quietly discard the scenic choice.
+        // `tags` is already accepted on create and update, so this needs no backend
+        // change; the plot path reads it back below.
+        ...(kind === 'cruise' && routeStyle === 'scenic' ? { tags: ['scenic'] } : {}),
       });
       onCreated(e);
       // reset for next time
       setTitle(''); setDesc(''); setVenue(null); setEnd(null); setStops([]); setWhen(defaultStart()); setIsPublic(true); setNotify(true); setClubId(null);
+      setRouteStyle('fastest'); setPlanRoutes({ fastest: null, scenic: null });
     } catch (err) {
       Alert.alert('Could not create', formatErr(err));
     } finally {
@@ -338,12 +368,52 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
                       start={venue}
                       stops={stops}
                       end={end}
+                      style={routeStyle}
+                      onRoutes={setPlanRoutes}
                       onAddStop={(p) => setStops((cur) => (
                         cur.length >= ROUTABLE_MAX_STOPS
                           ? cur
                           : [...cur, { ...p, label: `Stop ${cur.length + 1}` }]
                       ))}
                     />
+                    {/* Both options with their real numbers — tap to choose. The
+                        unselected line stays drawn (dimmed) so the trade-off is visible
+                        on the map, not just in the chip. Only meaningful once there are
+                        two ends to route between. */}
+                    {(end || stops.length > 0) && (
+                      <View style={styles.styleRow}>
+                        {(['fastest', 'scenic'] as PlanStyle[]).map((k) => {
+                          const r = k === 'scenic' ? planRoutes.scenic : planRoutes.fastest;
+                          const on = routeStyle === k;
+                          return (
+                            <TouchableOpacity
+                              key={k}
+                              onPress={() => setRouteStyle(k)}
+                              disabled={!r}
+                              style={[styles.styleChip, on && styles.styleChipOn, !r && styles.styleChipOff]}
+                              activeOpacity={0.85}
+                            >
+                              <Ionicons
+                                name={k === 'scenic' ? 'leaf' : 'flash'}
+                                size={13}
+                                color={on ? '#0B0B0C' : COLORS.textMute}
+                              />
+                              <View style={{ minWidth: 0 }}>
+                                <Text style={[styles.styleChipTitle, on && styles.styleChipTitleOn]}>
+                                  {k === 'scenic' ? 'Scenic' : 'Fastest'}
+                                </Text>
+                                <Text style={[styles.styleChipSub, on && styles.styleChipSubOn]} numberOfLines={1}>
+                                  {fmtLeg(r)}
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    )}
+                    {routeStyle === 'scenic' && !planRoutes.scenic && (
+                      <Text style={styles.helpText}>No motorway-free route exists between these points — showing the fastest one.</Text>
+                    )}
                   </>
                 )}
 
@@ -461,7 +531,10 @@ function EventDetailModal({ event: e, onClose, onChanged, onDeleted }: {
   const plotCruise = () => {
     // The PRE-DESIGNED route: meeting point → stops → end, same hand-off the
     // arrival push uses (cruisePlot one-shot; map builds the multi-stop line).
-    cruisePlot.set({ title: e.title, venue: e.venue, stops: e.stops || [], end: e.end || null });
+    cruisePlot.set({
+      title: e.title, venue: e.venue, stops: e.stops || [], end: e.end || null,
+      scenic: (e.tags || []).includes('scenic'),
+    });
     onClose();
     router.push('/(app)/map' as any);
     cruisePlot.ping();
@@ -630,6 +703,18 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: COLORS.primary + '55', backgroundColor: COLORS.primary + '14',
   },
   bestOrderText: { color: COLORS.primary, fontSize: 13, fontWeight: '700' },
+  styleRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  styleChip: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7,
+    paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  styleChipOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  styleChipOff: { opacity: 0.45 },
+  styleChipTitle: { color: COLORS.text, fontSize: 13, fontWeight: '700' },
+  styleChipTitleOn: { color: '#0B0B0C' },
+  styleChipSub: { color: COLORS.textMute, fontSize: 11, fontWeight: '600' },
+  styleChipSubOn: { color: '#0B0B0C', opacity: 0.75 },
   venuePickedText: { color: COLORS.text, fontSize: 14.5, fontWeight: '600', flex: 1 },
   sugRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.08)' },
   sugText: { color: COLORS.text, fontSize: 14, flex: 1 },

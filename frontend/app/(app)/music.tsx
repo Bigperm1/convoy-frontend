@@ -45,6 +45,7 @@ import {
   playLibraryPlaylist,
   playRecentItem,
   playPlaylist,
+  searchPlaylists,
   isAppleLibraryId,
   toggle,
   skipNext,
@@ -375,10 +376,20 @@ export default function MusicScreen() {
     // silently we fall through to the song search below, which at least surfaces
     // something for the title. Making a personal playlist truly shareable needs
     // "playlists" added to the native search types — a build, not an OTA.
-    if (m.mediaType === "playlist" && m.playlistId && isMusicSupported && authorized) {
-      if (!isAppleLibraryId(m.playlistId)) {
+    if (m.mediaType === "playlist" && isMusicSupported && authorized) {
+      if (m.playlistId && !isAppleLibraryId(m.playlistId)) {
         const ok = await playPlaylist(m.playlistId);
         if (ok) return;
+      }
+      // Personal playlist: the id is useless here, so resolve it by NAME against
+      // the catalog. Returns [] until build 71 (the native module drops the
+      // "playlists" search type before then), so this is a no-op on 70 and the
+      // song-search fallback below still runs.
+      if (m.title) {
+        const hits = await searchPlaylists(m.title);
+        const exact = hits.find((h) => (h.name || "").toLowerCase() === m.title!.toLowerCase());
+        const pick = exact || hits[0];
+        if (pick?.id && await playPlaylist(pick.id)) return;
       }
     }
     const q = [m.title, m.artist].filter(Boolean).join(" ").trim();

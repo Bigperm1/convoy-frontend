@@ -92,6 +92,10 @@ export function isAppleLibraryId(_id: string): boolean {
   return false;
 }
 
+export async function searchPlaylists(_query: string): Promise<ApplePlaylist[]> {
+  return [];
+}
+
 export async function playPlaylist(_playlistId: string): Promise<boolean> {
   return false;
 }

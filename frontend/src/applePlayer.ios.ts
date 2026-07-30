@@ -142,6 +142,42 @@ export async function searchSongsDiagnostic(
   }
 }
 
+/**
+ * Search the Apple Music CATALOG for playlists by name.
+ *
+ * Exists so a shared PERSONAL playlist can be resolved on the recipient's device.
+ * A library playlist id ("p....") is private to the sender's account and resolves
+ * to nothing for anyone else, so the name is the only shareable handle there is.
+ *
+ * ⚠ NEEDS BUILD 71. The stock native module only accepts "songs" and "albums" as
+ * search types and drops anything else on the floor (CatalogService.search's
+ * `default: return nil`), so on build 70 and earlier this returns [] — which is
+ * exactly the behaviour we have today. Safe to ship OTA ahead of the build; it
+ * simply starts working once the patched binary is installed. The patch adds
+ * `case "playlists": return Playlist.self` plus the result plumbing.
+ */
+export async function searchPlaylists(query: string): Promise<ApplePlaylist[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const Native: any = (NativeModules as any).MusicModule;
+  try {
+    const res: any = Native?.catalogSearch
+      ? await Native.catalogSearch(q, ["playlists"], {})
+      : await (MusicKit as any).catalogSearch(q, ["playlists"]);
+    const list: any[] = res?.playlists ?? res?.results?.playlists ?? [];
+    if (!Array.isArray(list)) return [];
+    return list.map((p: any) => ({
+      id: String(p?.id ?? ""),
+      name: p?.name ?? p?.title ?? "",
+      artworkUrl: rawArt(p),
+      trackCount: p?.trackCount,
+    })) as ApplePlaylist[];
+  } catch (e) {
+    console.warn("[applePlayer] searchPlaylists failed", e);
+    return [];
+  }
+}
+
 // ---- Library (needs only user authorization) -----------------------------
 
 export async function getUserPlaylists(

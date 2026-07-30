@@ -800,3 +800,65 @@ both still present. Always do that comparison, not just the count.
 - Does AA now draw its OWN maneuver card / travel estimate? That's the `updateTemplate` fix
   landing. If AA regresses at all, that patch is the first suspect — revert hunk 18.
 - CarPlay pinch while **parked** (fixed by OTA before this build, not by the build).
+
+## 17. Build 71 — QUEUED, NOT CUT (2026-07-30)
+
+Native work is staged and compile-gated. **Nothing has been built or submitted** —
+`eas build` still needs Jeff's explicit go-ahead.
+
+### What is in it
+
+**1. Catalog playlist SEARCH (`patches/@lomray+react-native-apple-music+1.4.0.patch`)**
+
+Lets a shared PERSONAL playlist be resolved on the recipient's device. A library
+playlist id (`p....`) is private to the sender's account and resolves to nothing for
+anyone else, so the NAME is the only shareable handle — and the stock native module
+silently dropped any search type other than `songs`/`albums`:
+
+```swift
+case "songs":  return Song.self
+case "albums": return Album.self
+default:       return nil        // <- "playlists" died here
+```
+
+Three edits, all in the patch:
+- `CatalogService.swift` — `case "playlists": return Playlist.self`, a `playlists`
+  field on `SearchResult`, and `response.playlists.map(MusicItemMapper.map)`.
+  (`MusicItemMapper.map(_ playlist:)` already existed — only the plumbing was absent.)
+- `MusicModule.swift` — resolve `playlists` alongside songs/albums.
+
+**Patch hygiene:** regenerated with `--exclude 'android/build/'`; diff count went
+**6 → 7** and all six original files are still present. Verify before trusting it:
+`grep -c '^diff --git' patches/@lomray+react-native-apple-music+1.4.0.patch`
+
+**COMPILE GATE PASSED** — typechecked against the real iOS 26.5 SDK, not just read:
+```bash
+cd node_modules/@lomray/react-native-apple-music/ios
+xcrun -sdk iphoneos swiftc -typecheck -target arm64-apple-ios16.0 \
+  CatalogService.swift MusicItemMapper.swift LibraryService.swift \
+  QueueService.swift PlaybackController.swift SubscriptionService.swift
+```
+Exit 0, silent. `MusicModule.swift` parses clean (it needs React headers for a full
+typecheck, so it is `-parse` only).
+
+**2. The JS half is ALREADY SHIPPED (OTA `df571fad` + this commit)** and is inert
+until the binary lands. `searchPlaylists()` asks for `["playlists"]`; on build 70 the
+native module returns no such key, the guard yields `[]`, and the receiver falls
+through to today's song-search. So build 71 needs no accompanying OTA to activate it.
+
+### Cutting it
+- **Bump `runtimeVersion` 1.22.0 → 1.23.0** — this is a NATIVE change (a patched
+  native dep), so an OTA cannot carry it.
+- **BOTH platforms, same batch.** iOS and Android must not diverge on runtime (see the
+  Release Discipline section — build 62 orphaned Android from six OTAs that way).
+  Android gains nothing functionally here, but it must be rebuilt to stay on-runtime.
+- Android build MUST also go to **Play internal testing** (an AAB), not just the APK —
+  Android Auto hides sideloaded installs.
+- Verify `yarn typecheck` clean + `yarn.lock` consistent first.
+
+### Still open, NOT in 71 unless Jeff says so
+- On-device TTS fallback so voice guidance is not silent offline (see §on offline).
+  Deliberately not done — it reverses an earlier call about the robotic device voice.
+- Mapbox offline tile packs; NetInfo/connectivity awareness.
+- CarPlay gesture probe results — one drive on 70 will say whether the head unit
+  delivers pinch at all. If it does not, that is a head-unit limit, not a fix.

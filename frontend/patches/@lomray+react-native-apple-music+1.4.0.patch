@@ -1,3 +1,36 @@
+diff --git a/node_modules/@lomray/react-native-apple-music/ios/CatalogService.swift b/node_modules/@lomray/react-native-apple-music/ios/CatalogService.swift
+index e3f6577..883a32b 100644
+--- a/node_modules/@lomray/react-native-apple-music/ios/CatalogService.swift
++++ b/node_modules/@lomray/react-native-apple-music/ios/CatalogService.swift
+@@ -22,6 +22,10 @@ final class CatalogService {
+   struct SearchResult {
+     let songs: [[String: Any]]
+     let albums: [[String: Any]]
++    // Convoy: playlists. Needed so a crew member can be sent a playlist by NAME —
++    // a library playlist's id is private to the sender's account and resolves to
++    // nothing on anyone else's device, so name is the only shareable handle.
++    let playlists: [[String: Any]]
+   }
+ 
+   func search(term: String, types: [String], options: SearchOptions) async throws -> SearchResult {
+@@ -29,6 +33,7 @@ final class CatalogService {
+       switch typeString {
+       case "songs": return Song.self
+       case "albums": return Album.self
++      case "playlists": return Playlist.self   // Convoy
+       default: return nil
+       }
+     }
+@@ -41,7 +46,8 @@ final class CatalogService {
+ 
+     return SearchResult(
+       songs: response.songs.map(MusicItemMapper.map),
+-      albums: response.albums.map(MusicItemMapper.map)
++      albums: response.albums.map(MusicItemMapper.map),
++      playlists: response.playlists.map(MusicItemMapper.map)   // Convoy
+     )
+   }
+ 
 diff --git a/node_modules/@lomray/react-native-apple-music/ios/MusicItemMapper.swift b/node_modules/@lomray/react-native-apple-music/ios/MusicItemMapper.swift
 index fd92ce8..3cc1bb2 100644
 --- a/node_modules/@lomray/react-native-apple-music/ios/MusicItemMapper.swift
@@ -69,7 +102,7 @@ index 3ec62e2..603b8a7 100644
  RCT_EXTERN_METHOD(getCurrentState:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
  
 diff --git a/node_modules/@lomray/react-native-apple-music/ios/MusicModule.swift b/node_modules/@lomray/react-native-apple-music/ios/MusicModule.swift
-index 6c1b18c..c595ea5 100644
+index 6c1b18c..c9e1f1e 100644
 --- a/node_modules/@lomray/react-native-apple-music/ios/MusicModule.swift
 +++ b/node_modules/@lomray/react-native-apple-music/ios/MusicModule.swift
 @@ -181,6 +181,11 @@ final class MusicModule: RCTEventEmitter {
@@ -84,6 +117,15 @@ index 6c1b18c..c595ea5 100644
    // MARK: - Authorization
  
    @objc(authorization:)
+@@ -231,7 +236,7 @@ final class MusicModule: RCTEventEmitter {
+           types: types,
+           options: searchOptions
+         )
+-        resolve(["songs": result.songs, "albums": result.albums])
++        resolve(["songs": result.songs, "albums": result.albums, "playlists": result.playlists])   // Convoy: playlists
+       } catch {
+         reject("ERROR", "Failed to perform catalog search: \(error)", error)
+       }
 diff --git a/node_modules/@lomray/react-native-apple-music/ios/PlaybackController.swift b/node_modules/@lomray/react-native-apple-music/ios/PlaybackController.swift
 index bc8133e..40c55b4 100644
 --- a/node_modules/@lomray/react-native-apple-music/ios/PlaybackController.swift

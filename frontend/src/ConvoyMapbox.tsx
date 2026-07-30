@@ -35,6 +35,7 @@ import React, { useEffect, useMemo, useCallback, useRef, useState } from "react"
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
+import { routeTrimLeadM, routeTrimFadeM } from "./routeTrim";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getPowerMode } from "./powerMode";
@@ -2222,22 +2223,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     return projectOntoRoute(selfCar.lat, selfCar.lng, decodePolyline(poly));
   }, [navigationActive, selfCar?.lat, selfCar?.lng, routes, selectedRouteIndex]);
 
-  // Trim end: a speed-aware lead ahead of the car so the line vanishes just in
-  // front of its nose. The drawn car interpolates between fixes, so at speed the
-  // trim point (raw fix) can sit behind the moving car; leading it by ~8 m + a
-  // touch per m/s keeps the green line clearing the nose. OTA-tunable.
-  const _trimSpdMs = typeof userSpeedMs === "number" && userSpeedMs > 0 ? userSpeedMs : 0;
-  // Speed-aware buffer ahead of the nose: the drawn car interpolates between 1 Hz
-  // fixes, so at speed it travels well past the raw fix the trim is computed from.
-  // Testers cruising 80–200 km/h saw the green line trail under the car's tail —
-  // the old 1.1×/m/s lead (cap 55 m) couldn't keep the clear-point ahead of the
-  // fast tween. Lead harder: ~1.6× a second of travel.
-  // FLOOR raised 12→30 m (2026-07-19): at CITY zoom (17) + chase pitch the 3D car/
-  // arrow marker's on-screen footprint spans ~20+ m of ground, so a 12 m lead let
-  // the line touch/overlap the marker at low speed (route start). 30 m clears it at
-  // rest and the line NEVER touches the marker; the speed ramp is unchanged above it.
-  //   30 m @ 0 · ~44 m @ 72 km/h · ~65 m @ 120 km/h · 100 m @ 160+ km/h. OTA-tunable.
-  const _trimLeadM = Math.max(30, Math.min(100, 12 + _trimSpdMs * 1.6));
+  // Trim end: where the line starts, ahead of the car's nose.
+  //
+  // SCREEN-CALIBRATED (2026-07-29) — see src/routeTrim.ts for the full reasoning.
+  // This used to be a speed ramp in metres, clamp(12 + speed*1.6, 30, 100). It could
+  // not hold a consistent gap, because the self-car's modelScale curve is geometric
+  // (~2x per zoom level) so the MARKER's ground footprint doubles every time the
+  // chase camera zooms out — ~20 m at z17 but ~185 m at z14 — while the lead only
+  // grew from 30 m to ~65 m. So the same code read "30 m clear" in town, "touching"
+  // on a main road and "overlapping" at highway speed. The lead is now a fixed
+  // SCREEN distance converted at the live zoom, so it grows exactly as fast as the
+  // marker does, and CarMapView (CarPlay + Android Auto) calls the same function.
+  const _trimLeadM = routeTrimLeadM(chaseZoomRaw, selfCar?.lat ?? 0);
   const routeTrimEndFrac = routeProj
     ? Math.max(0, Math.min(0.999, routeProj.frac + _trimLeadM / routeProj.totalM))
     : null;
@@ -2246,7 +2243,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // lineMetrics (already enabled). Only while navigating (a trim point exists);
   // preview keeps the solid color. Built as a line-progress gradient anchored at
   // the trim edge.
-  const _fadeSpanFrac = routeProj ? Math.max(0.0008, Math.min(0.06, 20 / routeProj.totalM)) : 0;
+  const _fadeSpanFrac = routeProj
+    ? Math.max(0.0008, Math.min(0.06, routeTrimFadeM(chaseZoomRaw, selfCar?.lat ?? 0) / routeProj.totalM))
+    : 0;
   const buildLineFade = (solid: string, clear: string): any => {
     if (routeTrimEndFrac == null) return null;
     const s0 = Math.min(0.997, Math.max(0.0001, routeTrimEndFrac));

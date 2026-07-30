@@ -527,9 +527,18 @@ export async function fetchMapboxRouteVia(
     if (avoid?.highways) exclude.push("motorway");
     if (avoid?.ferries) exclude.push("ferry");
 
+    // ⚠ `enable_refresh=true` IS LOAD-BEARING, and its absence here was a real bug
+    // (2026-07-29). Without it Mapbox returns no `uuid`, so the `refreshUuid` read
+    // below was ALWAYS undefined — and `useRouteTrafficRefresh` early-returns when
+    // there is no uuid. Net effect: every route built through this function (any
+    // route with a STOP, plus the AI and Cruise routes) froze its traffic snapshot
+    // at fetch time for the whole drive. Jeff sat in an hour of traffic watching a
+    // fully green line: the colours were correct for the moment he set off, and
+    // nothing was ever allowed to update them.
     const qs =
       `?alternatives=false&steps=true&overview=full&geometries=polyline` +
       `&annotations=congestion_numeric,duration,distance&banner_instructions=false` +
+      `&enable_refresh=true` +
       (exclude.length ? `&exclude=${exclude.join(",")}` : ``) +
       `&access_token=${MAPBOX_PUBLIC_TOKEN}`;
 
@@ -632,26 +641,36 @@ export type MapboxRefresh = {
   congestion: CongestionLevel[];
 };
 
+// TRANSIENT vs PERMANENT (2026-07-29). This used to return plain `null` for every
+// kind of failure, so the caller could not tell "this uuid is dead" from "we drove
+// through a dead zone". Its give-up counter therefore treated three patchy-signal
+// ticks as route expiry and switched live traffic off for the REST OF THE DRIVE —
+// on a road trip, which is exactly where the signal drops and where a stale ETA
+// hurts most. "expired" is the only failure worth giving up on.
+export type MapboxRefreshResult = MapboxRefresh | "expired" | null;
+
 export async function refreshMapboxRoute(
   uuid: string,
   routeIndex: number,
   opts?: { signal?: AbortSignal },
-): Promise<MapboxRefresh | null> {
+): Promise<MapboxRefreshResult> {
   try {
-    if (!uuid) return null;
+    if (!uuid) return "expired";
     const idx = Number.isFinite(routeIndex) && routeIndex >= 0 ? Math.floor(routeIndex) : 0;
     const url =
       `https://api.mapbox.com/directions-refresh/v1/mapbox/driving-traffic/` +
       `${encodeURIComponent(uuid)}/${idx}/0?access_token=${MAPBOX_PUBLIC_TOKEN}`;
     const res = await fetch(url, { signal: opts?.signal });
-    if (!res.ok) return null;                       // 404 = uuid expired; keep old numbers
+    // 404/410/422 = the server has forgotten this route: permanent. 5xx / 429 are the
+    // server having a moment, and a thrown fetch is the network — both retryable.
+    if (!res.ok) return (res.status === 404 || res.status === 410 || res.status === 422) ? "expired" : null;
     const json: any = await res.json();
-    if (json?.code && json.code !== "Ok") return null;
+    if (json?.code && json.code !== "Ok") return "expired";
 
     // Multi-leg (AI/via) routes annotate per leg — concat in order so the arrays stay
     // on the same axis as the route's `coordinates`, same as the original parse.
     const legs: any[] = Array.isArray(json?.route?.legs) ? json.route.legs : [];
-    if (!legs.length) return null;
+    if (!legs.length) return "expired";
 
     const segDurations: number[] = [];
     const congestion: CongestionLevel[] = [];
@@ -664,7 +683,7 @@ export async function refreshMapboxRoute(
       const rawC: any[] = Array.isArray(leg?.annotation?.congestion_numeric) ? leg.annotation.congestion_numeric : [];
       for (const v of rawC) congestion.push(levelFromNumeric(v));
     }
-    if (!segDurations.length) return null;
+    if (!segDurations.length) return "expired";
     return { segDurations, congestion };
   } catch {
     return null; // includes AbortError

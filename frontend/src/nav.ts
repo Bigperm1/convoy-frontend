@@ -1546,7 +1546,12 @@ export function useRouteTrafficRefresh(
       try {
         const fresh = await refreshMapboxRoute(uuid, routeIndex, { signal: ctrl.signal });
         if (cancelled) return;
-        if (!fresh) {
+        // TRANSIENT failures no longer count. `null` is a dead zone or a 5xx, and
+        // giving up on those switched live traffic off for the rest of a road trip —
+        // the one place patchy signal is guaranteed and a stale ETA matters most.
+        // Only "expired" (the server has forgotten this route) is worth stopping for.
+        if (fresh === null) return;
+        if (fresh === "expired") {
           if (++fails >= TRAFFIC_REFRESH_MAX_FAILS) { clearInterval(timer); }
           return;
         }
@@ -1559,6 +1564,11 @@ export function useRouteTrafficRefresh(
       }
     };
 
+    // Refresh ONCE straight away, then on the interval. Without this the first
+    // update was 2 minutes into guidance — and a route plotted while parked, or
+    // restored from disk on a cold CarPlay connect, could be minutes stale before
+    // the driver even moved. It is one ~40 kB request; do it at Start.
+    void tick();
     const timer = setInterval(tick, TRAFFIC_REFRESH_MS);
     return () => {
       cancelled = true;

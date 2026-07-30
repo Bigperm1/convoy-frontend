@@ -63,6 +63,7 @@ import {
   ROAD_SNAP_CROSS_DEG,
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
+import { routeTrimLeadM, routeTrimFadeM } from '../routeTrim';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
 // (index != 0) and the casing/core draw it (index == 0), exactly like the phone.
@@ -289,6 +290,10 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   const [carNorthUp, setCarNorthUp] = useState(false);
   const camHdgOverrideRef = useRef<number | undefined>(undefined);
   useEffect(() => { if (s.navigating) setCarNorthUp(false); }, [s.navigating]);
+  // getCam() re-derives the override every FRAME (see the comment there); this ref is
+  // how the frozen getCam closure reads the live compass-toggle state.
+  const carNorthUpRef = useRef(false);
+  carNorthUpRef.current = carNorthUp;
   camHdgOverrideRef.current = carNorthUp ? 0 : undefined;
   lockReadyRef.current = paintedRef.current && hasFix && Date.now() >= camHoldUntilRef.current;
   // ── Phase-2 road-snap (mirror of the phone) ── query the invisible mapbox-streets-v8 road
@@ -350,6 +355,30 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   camInputsRef.current = { followZoom, followPitch, mapH, mapW };
   const getCam = useRef(() => {
     const { followZoom: fz, followPitch: fp, mapH: h, mapW: w } = camInputsRef.current;
+    // ── CREW OVERVIEW RELEASE (2026-07-29) ────────────────────────────────────
+    // Jeff: "hitting the crew button on CarPlay doesn't revert back to the chase
+    // cam depending on the speed — it goes to a weird 3-D view."
+    // crewFit used to pin north by calling setCarNorthUp(true). That is a LATCH
+    // whose only release is `useEffect(… [s.navigating])`, which CANNOT fire if you
+    // were already navigating when you tapped Crew. So the 15s hold expired, the
+    // lockstep took position, pitch and zoom back — and the heading stayed frozen
+    // at north. A pitched chase camera facing north instead of down the road is
+    // exactly the "weird 3D view", and nothing short of ending the drive cleared it.
+    //
+    // Derive it here instead. This assignment looks out of place in a getter, but
+    // it is the only place that runs at FRAME rate: pushCam (ConvoyMapbox.tsx:822)
+    // reads camHeadingOverrideRef one line after calling getCam(), and prefers it
+    // over the eased heading — so the override, not getCam's own `heading`, is the
+    // lever. Assigning it at render time (as before) would leave it stale between
+    // store ticks.
+    //
+    // The hold is a TIMESTAMP COMPARISON, deliberately not a setTimeout: iOS
+    // suspends JS timers while the phone is locked, which is how a phone sits in a
+    // mount, so a timer-based release could strand the camera for the whole drive —
+    // the same trap that once stranded the CarPlay alert modals over the map.
+    camHdgOverrideRef.current = (carNorthUpRef.current || Date.now() < camHoldUntilRef.current)
+      ? 0
+      : undefined;
     return {
       // followZoom + driver pinch bias, clamped. userZoomRef is read live (a ref,
       // deliberately not a dep) so a pinch takes effect on the very next frame.
@@ -463,13 +492,14 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
             // kept pushing frames over the overview and it never landed.
             camHoldUntilRef.current = Date.now() + 15000;
             lockReadyRef.current = false;
-            // FACE NORTH, and keep facing north. The setCamera below asks for
-            // heading 0, but that alone is not durable: camHdgOverrideRef (:292) is
-            // what the lockstep consults every frame, and while it is undefined the
-            // camera is free to swing back to the car's bearing. Setting the north-up
-            // STATE pins the override at 0 for the whole overview. Mirrors the phone's
-            // northUpHold. Released automatically when navigation starts (:291).
-            setCarNorthUp(true);
+            // FACE NORTH for the duration of the overview. This deliberately does NOT
+            // set the carNorthUp STATE any more: that is the compass toggle's latch,
+            // and its only release is the s.navigating effect, which cannot fire if you
+            // were already navigating when you tapped Crew — so the camera stayed
+            // north-locked for the rest of the drive. getCam() now derives north-up
+            // from camHoldUntilRef per frame, so it releases itself when the hold
+            // expires and the chase cam comes back whole (heading, pitch and
+            // speed-dependent zoom together).
             // Visible confirmation (also a field diagnostic: pill without zoom =
             // camera problem; no pill = the tap never arrived).
             setCarState({ crewViewUntil: Date.now() + 3000, crewViewCount: Math.max(0, pts.length - 1) });
@@ -512,11 +542,23 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // soft transparent→solid fade just past the trim so it doesn't hard-start into the
   // car. Navigating only; preview/cruise keeps the solid line.
   const routeProj = (s.navigating && hasFix && hasRoute) ? projectOntoRoute(lat, lng, routeLL) : null;
-  const trimLeadM = Math.max(10, Math.min(55, 10 + (s.speedMs > 0 ? s.speedMs : 0) * 1.1));
+  // ONE trim for all three surfaces (2026-07-29, src/routeTrim.ts). This used to be
+  // its OWN formula — clamp(10 + speed*1.1, 10, 55) — against the phone's
+  // clamp(12 + speed*1.6, 30, 100): 10 m vs 30 m of clearance at a standstill. The
+  // phone's floor had already been raised 12 → 30 m precisely because a short lead
+  // let the line touch the marker, and the car surface never received that fix. Now
+  // both call routeTrimLeadM with their own live camera zoom, so the gap is the same
+  // on screen everywhere and cannot drift apart again.
+  // Zoom must include the driver's pinch bias, exactly as getCam applies it — the
+  // line is trimmed for the camera the driver is actually looking through.
+  const trimZoom = Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, followZoom + userZoomRef.current));
+  const trimLeadM = routeTrimLeadM(trimZoom, lat);
   const routeTrimEndFrac = routeProj
     ? Math.max(0, Math.min(0.999, routeProj.frac + trimLeadM / routeProj.totalM))
     : null;
-  const fadeSpanFrac = routeProj ? Math.max(0.0008, Math.min(0.06, 20 / routeProj.totalM)) : 0;
+  const fadeSpanFrac = routeProj
+    ? Math.max(0.0008, Math.min(0.06, routeTrimFadeM(trimZoom, lat) / routeProj.totalM))
+    : 0;
   // Snap the car to the line + lock its heading to the route bearing when on-route (≤60 m),
   // matching the phone — stops the low-speed position drift + heading spin. Steer the
   // camera by the SAME bearing (getCam reads camHdgRef live) so the map doesn't rotate

@@ -19,7 +19,7 @@
 // drop back to the static-image fallback (ConvoyCarPlay's showLive/glFailed).
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import Mapbox, {
   MapView,
   Camera,
@@ -50,7 +50,6 @@ import {
   GREEN_ARROW_MODEL,
   ARROW_MODEL_ID,
   ARROW_MODEL_PITCH,
-  CARPLAY_ARROW_SCALE,
   ARROW_MODEL_HEADING_OFFSET,
   HazardMarker,
   CameraMarker,
@@ -134,7 +133,14 @@ const CAR_LOWER_PAD_FRAC = 0.52;
 // banner and the ETA banner — the line Jeff wants the car sitting on. Mirrors the
 // banner stack in ConvoyCarPlay.tsx: NAV_STACK_BOTTOM(8) + TURN_ROW_H(42) + NAV_GAP/2(4).
 // KEEP IN SYNC with those three constants (both are listed in CARPLAY.md).
-const CAR_BANNER_GAP_FROM_BOTTOM = 54;
+// Split in two because the stack it mirrors is only PARTLY scaled on Android Auto:
+// NAV_STACK_BOTTOM is a real position (unscaled), while TURN_ROW_H(42) and NAV_GAP/2(4)
+// are inside the transform and shrink with hudScale. Summed at scale 1 these are still
+// the CarPlay 8 + 42 + 4 = 54 this was tuned to.
+// KEEP IN SYNC with NAV_STACK_BOTTOM / TURN_ROW_H / NAV_GAP in ConvoyCarPlay.tsx
+// (they cannot be imported — that module imports this one). Both listed in CARPLAY.md.
+const CAR_BANNER_STACK_BOTTOM = Platform.OS === 'android' ? 4 : 8;
+const CAR_BANNER_GAP_SCALABLE = 42 + 4;
 // Shift the pinned car LEFT of center (fraction of map width, applied as camera
 // paddingRight → the car moves left by ~half this). 0.22 sat it near the left
 // speed-limit chip; 0.08 centres it in the open gap BETWEEN the bottom-left HUD
@@ -150,6 +156,37 @@ const CAR_BANNER_GAP_FROM_BOTTOM = 54;
 // canvas. Together with the now content-sized ETA/lane pills (whose left edge moved
 // right), that clears the car from the banner stack.
 export const CAR_LEFT_PAD_FRAC = 0.13;
+
+// ── CANVAS SCALE (shared by the map and the HUD) ────────────────────────────────
+// The canvas every constant in this HUD was measured against: a real 800x480 CarPlay
+// head-unit capture = 400x240pt.
+//
+// ── THE ANDROID AUTO CANVAS IS NOW MEASURED, NOT ESTIMATED (2026-07-30) ──────────
+// logAaCanvas finally reported from Say Phin's Toyota, 18 minutes before the photos
+// that prompted this work:
+//   surface=213x107dp  px=800x400  pixelRatio=3.75  window=384x832dp
+// So the head unit hands us a QUARTER of the CarPlay area (213x107 vs 400x240), not
+// the ~250x143 previously guessed off a photograph. Note pixelRatio 3.75 on an 800px
+// panel: that screen is physically ~7in wide for 213dp, i.e. ~34 dp/inch against a
+// phone's ~160 — one dp there is nearly 5x the physical size. That is why a HUD that
+// is correct on a phone is enormous on a head unit, and why scaling it down does not
+// cost readability.
+//
+// Lives HERE, not in ConvoyCarPlay, purely to break an import cycle: ConvoyCarPlay
+// already imports this module, so exporting from the other direction would be one.
+export const CAR_REF_W = 400;
+export const CAR_REF_H = 240;
+// Floor, 0.5 -> 0.4. The measured canvas needs 107/240 = 0.446, so the old 0.5 was
+// CLAMPING — the HUD stayed 12% larger than the screen it was on, which is a good
+// part of Say Phin's "might have to scale back the sizes". At 0.446 the speed numerals
+// are still ~0.6in tall on that head unit (see the dp/inch note above), so the floor
+// was protecting against nothing here; it is kept only to catch an absurd report.
+export const HUD_SCALE_FLOOR = 0.4;
+// ANDROID AUTO ONLY — CarPlay is the reference surface and always returns 1.
+export function hudScaleFor(w: number, h: number): number {
+  if (Platform.OS !== 'android' || !(w > 0) || !(h > 0)) return 1;
+  return Math.min(1, Math.max(HUD_SCALE_FLOOR, Math.min(w / CAR_REF_W, h / CAR_REF_H)));
+}
 // Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';
@@ -279,6 +316,29 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // no <Images> at all before this, so the sprite path could not have worked.
   const carFlatImg = 'self_car_flat_' + getVehicleModelKey(s.selfCarColor);
 
+  // ── CAR SIZED TO THE CANVAS (2026-07-30) ────────────────────────────────────
+  // Say Phin, on the build-69 head unit: "the bones are there on the car screen,
+  // might have to scale back the sizes / avatar takes up half the screen."
+  //
+  // This is geometry, not taste. The GLB is a fixed size in METRES and metres-per-dp
+  // at a given zoom is fixed too, so the fraction of the canvas the car covers is
+  // carMetres / (canvasDp x metresPerDp) — it grows in inverse proportion to the
+  // canvas. Going from CarPlay's 400dp to Android Auto's ~250dp makes the same car
+  // 1.6x bigger ON SCREEN at the identical zoom. hudScale already shrinks every chip
+  // by that ratio; the model was the one thing left at CarPlay's absolute size, which
+  // is exactly why it started to dominate once the chips got smaller.
+  //
+  // Multiplying by the SAME hudScale (not a hand-picked number) is what makes the two
+  // surfaces the same design: car-to-HUD proportion becomes identical on both.
+  // CarPlay is untouched — hudScaleFor returns 1 off Android.
+  const uiScale = hudScaleFor(mapW, mapH);
+  // Memoised: carModelScale builds a fresh zoom-expression ARRAY, and handing Mapbox a
+  // new array every render re-uploads the layer's paint properties each frame.
+  const selfScale = useMemo(
+    () => carModelScale((isArrow ? 1.0 : 0.7) * uiScale),
+    [isArrow, uiScale],
+  );
+
   // MANDATORY heading-up — mirror the phone: plain Follow + a HELD heading, NOT
   // FollowWithCourse (which wobbles on raw GPS course and spins when stopped). Holding
   // the last good heading keeps the map heading-up even at a standstill.
@@ -379,10 +439,10 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // centre instead of dropped down/left, and the speed-aware chase zoom never adapts.
   // Fix = keep the FUNCTION IDENTITY stable (so the frozen closure is harmless) and
   // read every input through a ref that is refreshed on each render.
-  const camInputsRef = useRef({ followZoom, followPitch, mapH, mapW, previewMulti });
-  camInputsRef.current = { followZoom, followPitch, mapH, mapW, previewMulti };
+  const camInputsRef = useRef({ followZoom, followPitch, mapH, mapW, previewMulti, uiScale });
+  camInputsRef.current = { followZoom, followPitch, mapH, mapW, previewMulti, uiScale };
   const getCam = useRef(() => {
-    const { followZoom: fz, followPitch: fp, mapH: h, mapW: w, previewMulti: pv } = camInputsRef.current;
+    const { followZoom: fz, followPitch: fp, mapH: h, mapW: w, previewMulti: pv, uiScale: us } = camInputsRef.current;
     // ── CREW OVERVIEW RELEASE (2026-07-29) ────────────────────────────────────
     // Jeff: "hitting the crew button on CarPlay doesn't revert back to the chase
     // cam depending on the speed — it goes to a weird 3-D view."
@@ -428,14 +488,20 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
         // is in line with the space between the turn banner and eta banner".
         // DERIVED, not a tuned fraction: Mapbox centres the camera in the inset rect,
         // so the car sits at y = (h + paddingTop)/2. Setting
-        //   paddingTop = h - 2*CAR_BANNER_GAP_FROM_BOTTOM
+        //   paddingTop = h - 2*(banner gap from the bottom)
         // puts the car exactly on that gap's centre line at ANY canvas height —
         // 240pt, 480pt, whatever the head unit reports — instead of drifting the way
         // a fixed fraction does. Clamped so a tiny/zero measurement can never push
         // the car off-screen; the old fraction is the floor.
         paddingTop: (() => {
           const H = h > 0 ? h : 240;
-          const anchored = H - 2 * CAR_BANNER_GAP_FROM_BOTTOM;
+          // The banner stack is SCALED on Android Auto (hudScale) but this anchor was
+          // a flat 54 — so the camera pinned the car to a gap line 54dp up while the
+          // real banner top sat ~31dp up, leaving the car floating high on the head
+          // unit (build-69 photo). Only the stack's own bottom inset is unscaled; the
+          // row height and the half-gap above it shrink with the HUD, so re-derive.
+          const gap = CAR_BANNER_STACK_BOTTOM + CAR_BANNER_GAP_SCALABLE * us;
+          const anchored = H - 2 * gap;
           return Math.round(Math.max(H * CAR_LOWER_PAD_FRAC, Math.min(H * 0.72, anchored)));
         })(),
         paddingBottom: 0,
@@ -843,7 +909,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           // the coarser 5 m feeds take over. A one-word omission, not a design choice;
           // `s.speedMs` was already in scope and used for the zoom curve above.
           speedMs={s.speedMs}
-          scale={isArrow ? CARPLAY_ARROW_SCALE : carModelScale(0.7)}
+          scale={selfScale}
           headingOffset={isArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
           pitchTilt={isArrow ? ARROW_MODEL_PITCH : 0}
           // Flat top-down PNG while not routing, the 3D GLB while routing — the

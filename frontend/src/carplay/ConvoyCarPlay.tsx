@@ -42,7 +42,7 @@ import { laneIcon } from '../components/TurnByTurnNav';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
 import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
-import CarMapView, { CAR_LEFT_PAD_FRAC } from './CarMapView';
+import CarMapView, { CAR_LEFT_PAD_FRAC, hudScaleFor } from './CarMapView';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton, carTap } from './carActions';
@@ -347,30 +347,31 @@ export function CarSurface() {
   // and keep the stack right of car + half-width + a gap. The stack still also
   // clears the speed cluster, whichever bound is larger.
   const carX = surfaceW > 0 ? (surfaceW * (1 - CAR_LEFT_PAD_FRAC)) / 2 : 0;
-  const carClearLeft = carX + CAR_MODEL_HALF_W + NAV_GAP;
   // ── HUD SCALE (2026-07-29) ──────────────────────────────────────────────────
-  // MEASURED off Say Phin's head-unit photo (Toyota, build 69) rather than assumed:
-  // the crew pill is CREW_PILL_H = 22dp tall with 11pt text, and on that screen it
-  // fills ~15% of the canvas height and ~85% of its width. That puts the Android
-  // Auto surface at roughly 250 x 143 dp — a THIRD of the area this HUD was tuned
-  // for (a 400x240pt CarPlay canvas). Reproducing the shipped numbers at 250dp
-  // yields navAvail = 250 - 184 - 48 = 18, forced up to the 120 floor, banner left
-  // edge at x=82 over a speedo spanning 56..114: Jeff's "0124 m", exactly.
+  // NO LONGER AN ESTIMATE (2026-07-30). This started as arithmetic off a photograph
+  // (~250x143dp); logAaCanvas has since reported the real thing from Say Phin's
+  // Toyota — 213 x 107 dp — so every number below is now measured. See the block on
+  // CAR_REF_W in CarMapView.tsx for the full row and what pixelRatio 3.75 implies.
   //
   // A head unit reports few dp for a physically large screen, so one dp there is
-  // ~4-5x the physical size of a phone dp — which is why every chip in that photo
+  // ~5x the physical size of a phone dp — which is why every chip in that photo
   // looks enormous. Widening/reflowing alone cannot fix it: three stacked rows at
-  // full size (42 + 8 + 24 + gaps) are ~74dp of a 143dp canvas and would swallow
-  // the map. So scale the HUD to the canvas it actually got, measured from the
+  // full size (42 + 8 + 24 + gaps) are ~74dp of a 107dp canvas and would swallow
+  // the map whole. So scale the HUD to the canvas it actually got, measured from the
   // 400x240 reference, and let every chip, font and gap shrink together.
   //
   // ANDROID AUTO ONLY. The CarPlay surface is verified good today and its own
   // height has never been measured here — scaling it on a guess would risk a known
   // -good surface to fix an unrelated one.
   const [surfaceH, setSurfaceH] = useState(0);
-  const hudScale = (IS_AA && surfaceW > 0 && surfaceH > 0)
-    ? Math.min(1, Math.max(HUD_SCALE_FLOOR, Math.min(surfaceW / CAR_REF_W, surfaceH / CAR_REF_H)))
-    : 1;
+  // Shared with the MAP (CarMapView scales the 3D car by this exact value), so the
+  // car and the chips can never drift out of proportion with each other.
+  const hudScale = hudScaleFor(surfaceW, surfaceH);
+  // The car model is now scaled by hudScale too, so its on-screen half-width shrinks
+  // with it. Left at the flat CarPlay constant this reserved ~1.7x the room the car
+  // actually occupies on a head unit, and every dp of that came straight off navAvail
+  // — a narrower nav stack on the canvas that can least afford one.
+  const carClearLeft = carX + CAR_MODEL_HALF_W * hudScale + NAV_GAP;
   // Each cluster is scaled about its own anchored corner (transformOrigin), so the
   // edge it is pinned to does not move — only its footprint shrinks. The insets
   // themselves are real positions and stay unscaled; what scales is the box that
@@ -1369,8 +1370,11 @@ const CAR_TOP_INSET = 58; // clears the CPMapTemplate navigation bar
 // map-button circles. Android Auto draws no button column over our surface (its
 // action strip is androidx chrome outside the stable area), so on AA the same 48
 // is just wasted width on a canvas that has none to spare.
-const CAR_RIGHT_INSET = IS_AA ? 12 : 48;
-const NAV_STACK_BOTTOM = 8;
+// 12 -> 6 (2026-07-30, Jeff: "push everything over to the edges"). androidx keeps its
+// own chrome outside the stable area it hands us, so every dp we hold back here is
+// dead margin on the tightest canvas we ship to.
+const CAR_RIGHT_INSET = IS_AA ? 6 : 48;
+const NAV_STACK_BOTTOM = IS_AA ? 4 : 8;
 
 // ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────
 // Measured off a real 800x480 CarPlay capture (= 400x240pt @2x) by decoding the
@@ -1422,7 +1426,7 @@ const TURN_ROW_H = 42;
 // is the routing card, the travel estimate and the action strip, none of which is a
 // leading rail — so on AA the cluster hugs the edge and gives the (much narrower,
 // see logAaCanvas) canvas its 44pt back.
-const CAR_DOCK_LEFT = IS_AA ? 12 : 56;
+const CAR_DOCK_LEFT = IS_AA ? 6 : 56;
 // Left edge the bottom nav stack must not cross: the speed cluster is speedDock
 // (CAR_DOCK_LEFT) + the posted-limit badge, which SLIDES OUT 62pt and is itself 58
 // wide -> 56 + 62 + 58 = 176 at full extension, +8pt of air. Derived, not literal,
@@ -1432,17 +1436,11 @@ const CAR_LEFT_INSET = CAR_DOCK_LEFT + 62 + 58 + 8;
 // directly on top of it (speedRowTopFit) and the weather chip can sit on it
 // (weatherBottomFit) instead of re-deriving 10 + 48 by hand in three places. Both
 // of those derive from the SCALED pill height — see hudScale.
-const SPEED_DOCK_BOTTOM = 10;
+const SPEED_DOCK_BOTTOM = IS_AA ? 6 : 10;
 const SPEED_PILL_H = 48;
-// The canvas every constant in this file was measured against: a real 800x480
-// CarPlay head-unit capture = 400x240pt. hudScale measures an Android Auto canvas
-// against it. See the hudScale comment for why 250x143 is the number to beat.
-const CAR_REF_W = 400;
-const CAR_REF_H = 240;
-// Floor. Below this the read-outs stop being glanceable at driving distance, and a
-// chip that is too small to read is no better than one that overlaps. If a real head
-// unit ever lands here the `android-auto-canvas` row will say so.
-const HUD_SCALE_FLOOR = 0.5;
+// The reference canvas (400x240pt), the scale floor and hudScaleFor itself now live
+// in CarMapView.tsx — the MAP needs the same number to size the 3D car, and this file
+// already imports that module, so exporting from there is the only cycle-free home.
 // The nav stack is anchored RIGHT (at CAR_RIGHT_INSET) and its width is measured,
 // not fixed. A fixed 210 could not co-exist with the speed cluster on a narrow
 // head unit: 184 + 210 + 76 overflows a ~431pt CarPlay canvas, which is exactly

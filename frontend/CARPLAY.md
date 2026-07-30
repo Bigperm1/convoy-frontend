@@ -67,7 +67,7 @@ lane/arrow, ETA, turn (bottom).
 |---|---|---|
 | `CAR_LOWER_PAD_FRAC` | 0.52 | floor for the vertical anchor |
 | `CAR_LEFT_PAD_FRAC` | 0.13 | horizontal: car sits at `W*(1-frac)/2` |
-| `CAR_BANNER_GAP_FROM_BOTTOM` | 54 | **= NAV_STACK_BOTTOM 8 + TURN_ROW_H 42 + NAV_GAP/2 4** |
+| `CAR_BANNER_STACK_BOTTOM` + `CAR_BANNER_GAP_SCALABLE` | 8 + 46 (= 54 on CarPlay) | **= NAV_STACK_BOTTOM + TURN_ROW_H 42 + NAV_GAP/2 4.** Split because on Android Auto only the second half is inside the hudScale transform |
 | `CAR_ZOOM_OUT` | 0 | camera MATCHES the phone — standing rule |
 | `CAR_PITCH_BONUS` | 0 | same |
 
@@ -95,11 +95,12 @@ the banner widens on bigger screens instead of being pinned to one number.
 `(h + paddingTop)/2`. To place it on the turn↔ETA gap line:
 
 ```
-paddingTop = clamp(h*CAR_LOWER_PAD_FRAC, h*0.72, h - 2*CAR_BANNER_GAP_FROM_BOTTOM)
+gap       = CAR_BANNER_STACK_BOTTOM + CAR_BANNER_GAP_SCALABLE * hudScale
+paddingTop = clamp(h*CAR_LOWER_PAD_FRAC, h*0.72, h - 2*gap)
 ```
 
 Exact at 240/280/320pt. **If you change `NAV_STACK_BOTTOM`, `TURN_ROW_H` or `NAV_GAP`, update
-`CAR_BANNER_GAP_FROM_BOTTOM` to match** — that is the one manual coupling left.
+`CAR_BANNER_STACK_BOTTOM` / `CAR_BANNER_GAP_SCALABLE` to match** — that is the one manual coupling left (CarMapView cannot import ConvoyCarPlay; the dependency runs the other way).
 
 ---
 

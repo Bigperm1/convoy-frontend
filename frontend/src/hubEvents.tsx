@@ -28,6 +28,7 @@ import { shareInbox } from './shareInbox';
 import { cruisePlot } from './cruisePlot';
 import CruisePlanMap, { type PlanStyle, type PlanRoutes } from './components/CruisePlanMap';
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from './routeOptimizer';
+import { scoutScenicStops } from './scoutScenic';
 import {
   type HubEvent, type EventPoint, createEvent, myEvents, discoverEvents,
   getEvent, attendEvent, confirmEvent, unattendEvent, deleteEvent,
@@ -276,6 +277,17 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
     const t = h > 0 ? `${h}h ${m}m` : `${m} min`;
     return `${t} · ${km < 100 ? km.toFixed(1) : Math.round(km)} km`;
   };
+  // Which of the two is actually quicker. Caught in the simulator: the no-exclusion
+  // route was labelled "Fastest 9 min" right next to "Scenic 4 min", because avoiding
+  // the motorway around an interchange can genuinely be shorter. A chip the screen
+  // disproves is worse than no chip, so the titles now describe what each route IS
+  // (Direct / Scenic) and the quicker one is MARKED from the data instead of asserted.
+  const quicker: PlanStyle | null = (() => {
+    const f = planRoutes.fastest?.durationS, sc = planRoutes.scenic?.durationS;
+    if (typeof f !== 'number' || typeof sc !== 'number') return null;
+    if (Math.abs(f - sc) < 60) return null;         // a wash — don't crown either
+    return f < sc ? 'fastest' : 'scenic';
+  })();
   const bestOrder = async () => {
     if (!venue || !end || stops.length < 2 || ordering) return;
     setOrdering(true);
@@ -293,6 +305,41 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
       );
     } finally {
       setOrdering(false);
+    }
+  };
+
+  // ── ASK SCOUT FOR GOOD ROADS ────────────────────────────────────────────────
+  // The one place a model belongs in route planning: which roads are worth driving.
+  // It returns NAMES; scoutScenic geocodes them, so a hallucinated suggestion fails to
+  // resolve rather than becoming a pin (see the note in scoutScenic.ts).
+  const [asking, setAsking] = useState(false);
+  const askScoutForRoads = async () => {
+    if (!venue || asking) return;
+    setAsking(true);
+    try {
+      const room = ROUTABLE_MAX_STOPS - stops.length;
+      if (room <= 0) { Alert.alert('Full', `${ROUTABLE_MAX_STOPS} stops is the most one route can hold.`); return; }
+      const { stops: found, unavailable } = await scoutScenicStops({
+        origin: venue,
+        dest: end,
+        note: desc.trim() || undefined,   // the description is a free hint ("coastal run")
+        maxStops: Math.min(3, room),
+      });
+      if (unavailable) {
+        Alert.alert('Scout is offline', "Scout's road suggestions need the latest backend — nothing was changed.");
+        return;
+      }
+      if (!found.length) {
+        Alert.alert('Nothing to add', "Scout couldn't find roads it was confident about for this route.");
+        return;
+      }
+      setStops((cur) => [...cur, ...found.slice(0, ROUTABLE_MAX_STOPS - cur.length).map((f) => ({ lat: f.lat, lng: f.lng, label: f.label }))]);
+      Alert.alert(
+        'Scout added stops',
+        found.map((f) => `${f.label}${f.why ? ` — ${f.why}` : ''}`).join('\n\n'),
+      );
+    } finally {
+      setAsking(false);
     }
   };
 
@@ -400,7 +447,8 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
                               />
                               <View style={{ minWidth: 0 }}>
                                 <Text style={[styles.styleChipTitle, on && styles.styleChipTitleOn]}>
-                                  {k === 'scenic' ? 'Scenic' : 'Fastest'}
+                                  {k === 'scenic' ? 'Scenic' : 'Direct'}
+                                  {quicker === k ? ' · quickest' : ''}
                                 </Text>
                                 <Text style={[styles.styleChipSub, on && styles.styleChipSubOn]} numberOfLines={1}>
                                   {fmtLeg(r)}
@@ -414,6 +462,15 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
                     {routeStyle === 'scenic' && !planRoutes.scenic && (
                       <Text style={styles.helpText}>No motorway-free route exists between these points — showing the fastest one.</Text>
                     )}
+                    {/* Scout's road knowledge — names good driving roads between the
+                        ends and drops them in as stops. Distinct from the Scenic chip,
+                        which only changes HOW the line travels between what you pinned. */}
+                    <TouchableOpacity onPress={askScoutForRoads} disabled={asking} style={styles.bestOrderBtn} activeOpacity={0.85}>
+                      <Ionicons name={asking ? 'hourglass-outline' : 'sparkles'} size={15} color={COLORS.primary} />
+                      <Text style={styles.bestOrderText}>
+                        {asking ? 'Scout is thinking…' : 'Ask Scout for good roads'}
+                      </Text>
+                    </TouchableOpacity>
                   </>
                 )}
 

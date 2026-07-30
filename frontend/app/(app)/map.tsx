@@ -986,6 +986,44 @@ export default function MapScreen() {
       })) as any[];
       setRoutes(results);
       setSelectedRouteIndex(0);
+      // ── A REAL SCENIC ROUTE (2026-07-29) ──────────────────────────────────
+      // Jeff: "make the scenic on the maps the same as cruise."
+      // Until now "Scenic" was only a LABEL: routeKindFor calls index 0 "best" and
+      // index 1 "scenic", so the Scenic option was just Mapbox's first alternate —
+      // normally another freeway with a different colour. The cruise planner's
+      // Scenic excludes MOTORWAYS, which genuinely pushes the line onto back roads,
+      // so bring the same definition here.
+      //
+      // Fetched as its own request (one per destination change, never per GPS tick)
+      // and appended as an explicitly `kind: 'scenic'` route — routeKindFor honours
+      // an explicit kind over the positional guess, so the colours follow.
+      //
+      // Skipped when it is not worth offering: identical to the fastest line (no
+      // motorway on this trip anyway), or absurdly longer. Motorway-free across a
+      // mountain range can mean hours of logging road, which is not a scenic route,
+      // it is a mistake — 2.5x the fastest time is the cut-off.
+      try {
+        const scenicRaw = await fetchRoutes(origin, destination, { ...avoid, highways: true });
+        if (!cancelled && !navActiveRef.current && scenicRaw.length) {
+          const sc: any = scenicRaw[0];
+          const bestSec = results[0]?.duration_in_traffic_s ?? results[0]?.duration_s ?? 0;
+          const scSec = sc.duration_in_traffic_s ?? sc.duration_s ?? 0;
+          const dup = results.some((r: any) => r.polyline === sc.polyline);
+          const sane = !bestSec || !scSec || scSec <= bestSec * 2.5;
+          if (!dup && sane) {
+            sc.kind = 'scenic';
+            // REPLACE the freeway alternate rather than appending. routeKindFor is
+            // positional when a route carries no explicit kind, so leaving the
+            // alternate at index 1 would label IT "scenic" too — two scenic-coloured
+            // lines, one of them a freeway. The documented palette is Best / Scenic /
+            // AI, and the alternate only ever occupied the Scenic slot by accident.
+            // If this fetch fails we simply keep the old behaviour, so nothing is lost.
+            setRoutes((prev) => (prev.length && prev[0]?.polyline === results[0]?.polyline
+              ? [prev[0], sc]
+              : prev));
+          }
+        }
+      } catch {}
       const r0 = results[0];
       setRoute(r0 ? {
         distance_text: r0.distance_text,
@@ -1040,9 +1078,15 @@ export default function MapScreen() {
           );
           if (!cancelled && !navActiveRef.current && cruiseRoute?.polyline) {
             (cruiseRoute as any).cruise = true; // chip reads "Cruise" instead of "AI"
-            const withCruise = [...results.slice(0, 2), cruiseRoute as any];
-            setRoutes(withCruise);
-            setSelectedRouteIndex(withCruise.length - 1);
+            // Same closure trap as the AI append: build on what is CURRENTLY in state
+            // so the scenic route fetched above survives, and select the cruise line.
+            let cruiseIdx = 0;
+            setRoutes((prev) => {
+              const base = (prev.length ? prev : results).slice(0, 2);
+              cruiseIdx = base.length;
+              return [...base, cruiseRoute as any];
+            });
+            setSelectedRouteIndex(cruiseIdx);
             return; // the learned-AI append below would clobber the cruise slot
           }
         }
@@ -1068,7 +1112,14 @@ export default function MapScreen() {
             { tolls: settings.avoidTolls, highways: settings.avoidHighways, ferries: settings.avoidFerries },
           );
           if (!cancelled && !navActiveRef.current && aiRoute?.polyline && aiRoute.polyline !== results[0]?.polyline) {
-            setRoutes([...results, aiRoute as any]);
+            // Functional update, appending to whatever is CURRENTLY there: rebuilding
+            // from the captured `results` would silently drop the scenic route fetched
+            // above (it lands in state, not in this closure).
+            setRoutes((prev) => {
+              const base = prev.length ? prev : results;
+              if (base.some((r: any) => r?.polyline === aiRoute.polyline)) return base;
+              return [...base, aiRoute as any];
+            });
           }
         }
       } catch {}

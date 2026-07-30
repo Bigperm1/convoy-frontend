@@ -154,17 +154,31 @@ export default function CruisePlanMap({
     } catch {}
   };
 
-  // Fit ONCE per change of the point set. Not on every render, or the user's pinch
-  // would be undone under their finger. Adding a stop by tapping deliberately does NOT
-  // re-frame: the map stays exactly where they put it.
+  // ── AUTO-FIT, AND WHEN TO STOP ──────────────────────────────────────────────
+  // Two bugs were caught here by actually looking at the screen in the simulator
+  // (2026-07-29), which is why this is more than a one-liner:
+  //
+  // 1. The map opened on NEW YORK with the meeting point set to Horseshoe Bay. The
+  //    fit ran on the first render, before the GL map had finished loading, so
+  //    setCamera was silently dropped — the same "camera before the map is ready"
+  //    trap CarMapView's cold-start snap exists to work around. So the fit now also
+  //    runs on onDidFinishLoadingMap, and `fittedRef` is only stamped once a fit has
+  //    actually been attempted against a READY map.
+  // 2. Fitting only the FIRST set of points meant adding an end location never
+  //    re-framed to include it. The right rule is not "once" but "until the planner
+  //    takes the wheel": keep framing everything while they build the route, and stop
+  //    the instant they pan or pinch, so their viewport is never yanked away.
+  const mapReadyRef = useRef(false);
+  const userMovedRef = useRef(false);
   const fittedRef = useRef<string>('');
-  useEffect(() => {
-    if (!sig || sig === fittedRef.current) return;
-    const first = fittedRef.current === '';
+  const maybeFit = () => {
+    if (!mapReadyRef.current || !sig || sig === fittedRef.current) return;
+    if (userMovedRef.current) { fittedRef.current = sig; return; } // their camera now
     fittedRef.current = sig;
-    // Only auto-fit on the FIRST set of points (or when the map had nothing). After
-    // that the viewport is the planner's.
-    if (first) fitToPoints();
+    fitToPoints();
+  };
+  useEffect(() => {
+    maybeFit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);
 
@@ -201,9 +215,12 @@ export default function CruisePlanMap({
           if (!Array.isArray(c) || c.length < 2) return;
           onAddStop({ lat: c[1], lng: c[0] });
         }}
+        onDidFinishLoadingMap={() => { mapReadyRef.current = true; maybeFit(); }}
         onCameraChanged={(e: any) => {
           const z = e?.properties?.zoom;
           if (typeof z === 'number' && Number.isFinite(z)) zoomRef.current = z;
+          // A pan or pinch hands the viewport to the planner for good — see maybeFit.
+          if (e?.gestures?.isGestureActive) userMovedRef.current = true;
         }}
       >
         <Camera ref={cameraRef} />
@@ -268,7 +285,11 @@ export default function CruisePlanMap({
           <Ionicons name="remove" size={18} color={COLORS.text} />
         </TouchableOpacity>
         {/* Re-frame the whole cruise on demand — the counterpart to never auto-fitting. */}
-        <TouchableOpacity style={styles.zoomBtn} onPress={fitToPoints} hitSlop={6}>
+        <TouchableOpacity
+          style={styles.zoomBtn}
+          onPress={() => { userMovedRef.current = false; fittedRef.current = sig; fitToPoints(); }}
+          hitSlop={6}
+        >
           <Ionicons name="scan" size={16} color={COLORS.text} />
         </TouchableOpacity>
       </View>

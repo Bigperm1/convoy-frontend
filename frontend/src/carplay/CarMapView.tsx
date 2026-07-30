@@ -38,6 +38,8 @@ import {
   ROUTE_GREEN_CORE,
   routeRgba,
   chaseZoom,
+  CHASE_ZOOM_CLAMP_MIN,
+  CHASE_ZOOM_CLAMP_MAX,
   chasePitch,
   kmhFromMs,
   decodePolyline,
@@ -100,8 +102,18 @@ const PREVIEW_ZOOM_OUT = 2.2;
 // The bias is ADDED to followZoom inside getCam, so the speed-aware chase still
 // modulates around wherever the driver pinched to. Holds until 'recenter'.
 const CAR_USER_ZOOM_BIAS_LIMIT = 4;
-const CAR_ZOOM_MIN = 3;
-const CAR_ZOOM_MAX = 20;
+// PARITY (2026-07-29): the clamp now comes from the phone (ConvoyMapbox exports it),
+// so the two surfaces cannot drift apart again. These were 3 / 20 against the
+// phone's 10.5 / 20, which meant a pinch-out on a head unit could reach a framing
+// the phone can't — a silent breach of the "CarPlay matches the phone" rule at the
+// extremes. Preview keeps its own floor below, because fitting three whole routes
+// legitimately needs to go wider than a chase camera ever does.
+const CAR_ZOOM_MIN = CHASE_ZOOM_CLAMP_MIN;
+const CAR_ZOOM_MAX = CHASE_ZOOM_CLAMP_MAX;
+// The multi-route PREVIEW deliberately zooms out past the chase floor to frame the
+// whole fan-out; crewFit likewise computes its own bounds zoom. Both bypass the
+// chase clamp on purpose.
+const CAR_PREVIEW_ZOOM_MIN = 3;
 
 // Top padding as a fraction of map height — pins the car near the BOTTOM-MIDDLE of the
 // head unit (larger = lower on screen). Applied every frame via getCam, nav AND cruise.
@@ -351,10 +363,10 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // centre instead of dropped down/left, and the speed-aware chase zoom never adapts.
   // Fix = keep the FUNCTION IDENTITY stable (so the frozen closure is harmless) and
   // read every input through a ref that is refreshed on each render.
-  const camInputsRef = useRef({ followZoom, followPitch, mapH, mapW });
-  camInputsRef.current = { followZoom, followPitch, mapH, mapW };
+  const camInputsRef = useRef({ followZoom, followPitch, mapH, mapW, previewMulti });
+  camInputsRef.current = { followZoom, followPitch, mapH, mapW, previewMulti };
   const getCam = useRef(() => {
-    const { followZoom: fz, followPitch: fp, mapH: h, mapW: w } = camInputsRef.current;
+    const { followZoom: fz, followPitch: fp, mapH: h, mapW: w, previewMulti: pv } = camInputsRef.current;
     // ── CREW OVERVIEW RELEASE (2026-07-29) ────────────────────────────────────
     // Jeff: "hitting the crew button on CarPlay doesn't revert back to the chase
     // cam depending on the speed — it goes to a weird 3-D view."
@@ -382,7 +394,10 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
     return {
       // followZoom + driver pinch bias, clamped. userZoomRef is read live (a ref,
       // deliberately not a dep) so a pinch takes effect on the very next frame.
-      zoomLevel: Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, fz + userZoomRef.current)),
+      // Chase framing shares the phone's floor; the multi-route preview keeps its own,
+      // lower one because fitting the whole fan-out legitimately goes wider.
+      zoomLevel: Math.max(pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN,
+                          Math.min(CAR_ZOOM_MAX, fz + userZoomRef.current)),
       pitch: fp,
       heading: camHdgRef.current,
       // paddingTop drops the car DOWN the wide head-unit; paddingRight shifts it LEFT of

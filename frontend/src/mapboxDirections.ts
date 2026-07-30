@@ -146,12 +146,25 @@ export function buildCongestionGradient(
   if (changes.length === 0) return baseColor; // single colour → solid
 
   // Expand each colour change at fraction f into a blend band: hold the previous
-  // colour up to (f - HALF), then linearly blend to the new colour by (f + HALF),
-  // so each transition spans ~2.5% of the line. Where two changes are closer than
-  // a full band, the band is shrunk for that pair (and collapses to a near-hard
-  // edge if they nearly coincide) — inputs are kept clamped to [0,1] and strictly
-  // ascending, which `interpolate` requires.
-  const HALF = 0.0125; // ±1.25% → ~2.5% total blend width
+  // colour up to (f - band), then blend to the new colour by (f + band). Where two
+  // changes are closer than a full band, the band is shrunk for that pair (and
+  // collapses to a near-hard edge if they nearly coincide) — inputs are kept clamped
+  // to [0,1] and strictly ascending, which `interpolate` requires.
+  //
+  // ⚠ THE BAND IS IN METRES, NOT A PERCENTAGE OF THE ROUTE (fixed 2026-07-29).
+  // It used to be ±1.25% of the whole line, which quietly made congestion
+  // unreadable in proportion to trip length — the "sometimes the red is pronounced,
+  // sometimes it isn't" complaint. On a 5 km route ±1.25% is ±62 m and a 300 m jam
+  // paints 58% of itself FULL red. On a 15 km route the band is ±188 m, wider than
+  // the jam itself, so the ramp-in meets the ramp-out and the red NEVER reaches
+  // saturation — 0% of the jam is full red. On a 400 km Langley→Anglemont run the
+  // band is ±5 km. Same data, same code, completely different picture, decided by
+  // how far you happen to be driving.
+  // In metres the blend is a constant 53% of a 300 m jam at ANY route length, so a
+  // jam reads the same whether it is 10 minutes or 4 hours from home. This is the
+  // shared builder, so the phone, CarPlay and Android Auto all inherit it at once.
+  const BLEND_M = 70;
+  const HALF = Math.min(0.05, BLEND_M / total); // metres → fraction, capped for tiny routes
   const EPS = 1e-4;
   const out: Array<[number, string]> = [[0, baseColor]];
   let prevInput = 0;

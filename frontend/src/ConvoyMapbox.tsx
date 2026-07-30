@@ -437,8 +437,15 @@ const CORNER_NEAR_M = 70;
 // The user zoom-button offset is added to the computed follow zoom; clamp the
 // result so the minus button can widen the view well out (~10.5) without going
 // uselessly far, and the plus button can't over-zoom past ~20.
-const ZOOM_MIN = 10.5;
-const ZOOM_MAX = 20;
+// Chase-zoom clamp. EXPORTED and used by CarMapView too (CarPlay + Android Auto):
+// the two surfaces used to clamp differently — the phone floored at 10.5 while the
+// car floored at 3, so a pinch-out on a head unit could reach a zoom the phone
+// cannot, and the "CarPlay matches the phone" rule quietly did not hold at the
+// extremes. One constant, both surfaces (2026-07-29).
+export const CHASE_ZOOM_CLAMP_MIN = 10.5;
+export const CHASE_ZOOM_CLAMP_MAX = 20;
+const ZOOM_MIN = CHASE_ZOOM_CLAMP_MIN;
+const ZOOM_MAX = CHASE_ZOOM_CLAMP_MAX;
 // Chase-cam zoom/pitch GLIDE time-constant (ms). The lockstep applies the camera
 // with animationMode:'none' (position must be instant to stay glued to the car),
 // so zoom + pitch are instead low-passed toward the speed target in pushCam — a
@@ -591,12 +598,54 @@ export function routeColorsFor(kind: RouteKind, routeColor: string): { color: st
 
 function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
 export function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
+// ── SPEED → CHASE ZOOM (finer steps, 2026-07-29) ─────────────────────────────
+// Jeff: "a couple of sessions ago we made the chase camera zooms better — can we
+// add more steps in the zoom based on speed."
+//
+// The old curve was three tiers: FLAT 17 all the way to 45 km/h, then a straight
+// 3-zoom-level plunge to 14 by 95, then a shallow drift to 12.8 by 180. Two
+// problems with that shape. Nothing at all happened between a crawl and 45 km/h,
+// so city driving never re-framed. Then one linear ramp did all the work at once,
+// which reads as a shove rather than the camera breathing with the car — each zoom
+// level is a 2x scale change, so 3 levels over 50 km/h is an 8x area change on a
+// single straight line.
+//
+// A denser table fixes both: the framing eases continuously from crawl to cruise
+// and every ~15 km/h has its own step. The three documented anchors are PRESERVED
+// exactly — 17 at rest (CHASE_ZOOM_CITY, and see the FOLLOW_ZOOM invariant at the
+// chaseZoomRaw call site), 14 at 95 (CHASE_ZOOM_HIGHWAY), 12.8 at 180
+// (CHASE_ZOOM_FAST) — so this reshapes the curve BETWEEN known-good points rather
+// than moving them.
+//
+// 0-20 km/h is deliberately held at exactly CHASE_ZOOM_CITY: parked and crawling
+// framing must stay bit-identical to the native follow zoom (FOLLOW_ZOOM === 17).
+// Monotonically decreasing, so the low-pass in pushCam never has to reverse.
+// Every row is a plain number — OTA-tunable.
+const CHASE_ZOOM_STOPS: [number, number][] = [
+  [0,   CHASE_ZOOM_CITY],    // 17.0  parked / crawl — pinned, see above
+  [20,  CHASE_ZOOM_CITY],    // 17.0  residential
+  [35,  16.6],               //       city street
+  [50,  16.1],               //       arterial
+  [65,  15.5],               //       fast arterial
+  [80,  14.7],               //       highway approach
+  [95,  CHASE_ZOOM_HIGHWAY], // 14.0  highway cruise — anchor
+  [110, 13.6],
+  [125, 13.3],
+  [140, 13.1],
+  [160, 12.9],
+  [180, CHASE_ZOOM_FAST],    // 12.8  widest — anchor
+];
 function chaseZoomForSpeed(kmh: number) {
-  if (kmh <= CHASE_KMH_CITY) return CHASE_ZOOM_CITY;
-  if (kmh <= CHASE_KMH_HIGHWAY) return lerp(CHASE_ZOOM_CITY, CHASE_ZOOM_HIGHWAY, (kmh - CHASE_KMH_CITY) / (CHASE_KMH_HIGHWAY - CHASE_KMH_CITY));
-  // Third tier: 95-180 km/h keeps widening so 100-200 cruising shows more road ahead.
-  if (kmh >= CHASE_KMH_FAST) return CHASE_ZOOM_FAST;
-  return lerp(CHASE_ZOOM_HIGHWAY, CHASE_ZOOM_FAST, (kmh - CHASE_KMH_HIGHWAY) / (CHASE_KMH_FAST - CHASE_KMH_HIGHWAY));
+  const st = CHASE_ZOOM_STOPS;
+  const v = Number.isFinite(kmh) && kmh > 0 ? kmh : 0;
+  if (v <= st[0][0]) return st[0][1];
+  if (v >= st[st.length - 1][0]) return st[st.length - 1][1];
+  for (let i = 1; i < st.length; i++) {
+    if (v <= st[i][0]) {
+      return lerp(st[i - 1][1], st[i][1], (v - st[i - 1][0]) / (st[i][0] - st[i - 1][0]));
+    }
+  }
+  return st[st.length - 1][1];
 }
 export function chaseZoom(kmh: number, distToManeuverM?: number) {
   const base = chaseZoomForSpeed(kmh);

@@ -32,7 +32,7 @@ import Mapbox, {
 import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { usePowerMode } from '../powerMode';
-import { getVehicleModelUrl, getVehicleModelKey } from '../vehicleAssets';
+import { getVehicleModelUrl, getVehicleModelKey, getVehiclePngOrDefault } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
   ROUTE_GREEN_CORE,
@@ -261,7 +261,23 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // with speed too. Pulled back by CAR_ZOOM_OUT so more road reads on the wide screen.
   const kmh = kmhFromMs(s.speedMs);
   const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined) - CAR_ZOOM_OUT - (previewMulti ? PREVIEW_ZOOM_OUT : 0);
-  const followPitch = Math.min(CAR_PITCH_MAX, (s.navigating ? chasePitch(kmh) : CRUISE_PITCH) + CAR_PITCH_BONUS);
+  // ── FLAT WHEN NOT ROUTING (2026-07-29, Jeff's call) ─────────────────────────
+  // "I want to make the CarPlay flat when not routing, because it uses the high-res
+  // PNG images instead of the 3D — the 3D should be for routing."
+  // This is the phone's rule, and the two halves are one decision: ConvoyMapbox
+  // draws the top-down PNG sprite when `!navActive` (selfIsFlatCar, :2224) AND sets
+  // followPitchDeg to 0 then. A flat sprite lies ON the map, so it only reads right
+  // under a top-down camera; the 3D GLB only reads right under a pitched one. The car
+  // surface previously took neither half — pitched at CRUISE_PITCH (45) with the 3D
+  // model always on — so free-driving looked nothing like the phone.
+  // Arrow keeps its 3D model in both modes, same as the phone (it has no flat twin).
+  const carFlat = !s.navigating && !isArrow;
+  const followPitch = s.navigating
+    ? Math.min(CAR_PITCH_MAX, chasePitch(kmh) + CAR_PITCH_BONUS)
+    : (carFlat ? 0 : CRUISE_PITCH);
+  // Sprite id for the flat car. Registered as a Mapbox image below — the car map had
+  // no <Images> at all before this, so the sprite path could not have worked.
+  const carFlatImg = 'self_car_flat_' + getVehicleModelKey(s.selfCarColor);
 
   // MANDATORY heading-up — mirror the phone: plain Follow + a HELD heading, NOT
   // FollowWithCourse (which wobbles on raw GPS course and spins when stopped). Holding
@@ -765,6 +781,10 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           per-color car. key={carModelId} remounts <Models> when the id flips. */}
       <Models key={carModelId} models={{ [carModelId]: isArrow ? GREEN_ARROW_MODEL : getVehicleModelUrl(s.selfCarColor) }} />
 
+      {/* Top-down car PNG for the flat (not-routing) marker — the same asset and the
+          same registration pattern the phone uses (ConvoyMapbox :2676). */}
+      <Mapbox.Images images={{ [carFlatImg]: getVehiclePngOrDefault(s.selfCarColor) }} />
+
       {/* 3D self car + the native location feed, BOTH driven off ONE rAF-eased pose
           (SelfCarModel, reused verbatim from the phone). This is THE smoothness fix:
           it tweens selfLat/selfLng/heading between ~1Hz GPS ticks at ~60fps and feeds
@@ -785,6 +805,10 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           scale={isArrow ? CARPLAY_ARROW_SCALE : carModelScale(0.7)}
           headingOffset={isArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
           pitchTilt={isArrow ? ARROW_MODEL_PITCH : 0}
+          // Flat top-down PNG while not routing, the 3D GLB while routing — the
+          // phone's rule (see carFlat above). undefined → 3D model.
+          sprite={carFlat ? carFlatImg : undefined}
+          spriteSize={1}
         />
       )}
 

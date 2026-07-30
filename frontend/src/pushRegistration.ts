@@ -21,19 +21,55 @@ import Constants from "expo-constants";
 import { api } from "./api";
 
 function deviceInfo() {
+  // ── WHAT VERSION IS THIS TESTER ON (2026-07-30) ──────────────────────────
+  // Jeff: "is there any way on the admin section I can see what version the
+  // testers are on?" There was not — and three things had to be fixed for there
+  // to be. This is the first: the roster never carried a version at all, only
+  // device/OS. Without runtime + update id you cannot tell an orphaned build
+  // (wrong runtimeVersion, so it receives no OTAs) from a stale one (right
+  // runtime, just hasn't tapped the pill) — and that distinction is the whole
+  // point of asking. See [[verify-running-build-before-debugging]].
+  let appVersion: string | undefined;
+  let buildNumber: string | undefined;
+  let runtimeVersion: string | undefined;
+  let updateId: string | undefined;
+  try {
+    appVersion = (Constants as any)?.expoConfig?.version || undefined;
+    buildNumber = (Constants as any)?.nativeBuildVersion || undefined;
+  } catch {}
+  try {
+    // The RUNNING bundle, not the installed one — expo-updates is the only
+    // source that knows which JS actually booted.
+    const U = require("expo-updates");
+    runtimeVersion = U?.runtimeVersion || undefined;
+    updateId = U?.isEmbeddedLaunch ? "embedded" : (U?.updateId || undefined);
+  } catch {}
   return {
     device_model: Device.modelName || undefined,                    // "iPhone 15 Pro", "Pixel 7"
     device_brand: Device.brand || Device.manufacturer || undefined, // "Apple", "Google", "Samsung"
     os_name: Device.osName || Platform.OS,                          // "iOS", "Android"
     os_version: Device.osVersion || undefined,                      // "18.1", "14"
+    app_version: appVersion,                                        // "3.6.0"
+    build_number: buildNumber,                                      // "70"
+    runtime_version: runtimeVersion,                                // "1.22.0"
+    update_id: updateId,                                            // OTA id, or "embedded"
   };
 }
 
-/** Record the device on the roster. Never prompts; safe at login. */
+/**
+ * Record the device + running version on the roster. Never prompts; safe at login.
+ *
+ * ⚠ THIS HAS NEVER ACTUALLY WORKED. It PUTs /auth/push-token without a `token`,
+ * but PushTokenBody declares `token: str` as REQUIRED — so FastAPI rejected every
+ * call with a 422 before the handler ran, and the catch below swallowed it
+ * silently. That is why the admin roster's device column has always been blank.
+ * Fixed on the backend by making `token` optional (a device report is not a push
+ * registration); this now posts to a route that accepts it.
+ */
 export async function reportDevice(): Promise<void> {
   if (Platform.OS === "web") return;
   try {
-    await api.put("/auth/push-token", { platform: Platform.OS, ...deviceInfo() });
+    await api.put("/auth/device", { platform: Platform.OS, ...deviceInfo() });
   } catch {
     /* roster reporting is best-effort */
   }

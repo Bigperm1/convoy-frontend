@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { api, formatErr } from '../../src/api';
 import { useAuth } from '../../src/auth';
+import Constants from 'expo-constants';
 import { COLORS } from '../../src/theme';
 
 const OWNER_EMAIL = 'jwellsmorton@gmail.com';
@@ -25,6 +26,11 @@ type AdminUser = {
   device_brand?: string;    // "Apple", "Google", "Samsung"
   os_name?: string;         // "iOS", "Android"
   os_version?: string;      // "18.1", "14"
+  app_version?: string;     // "3.6.0"
+  build_number?: string;    // "70"
+  runtime_version?: string; // "1.22.0" — decides which OTAs reach this device
+  update_id?: string;       // OTA id, or "embedded"
+  version_seen_at?: string | null;
   created_at?: string | null;
   last_seen?: string | null;
 };
@@ -39,6 +45,33 @@ function deviceLabel(u: AdminUser): string {
     : u.os_name || (u.push_platform ? u.push_platform.toUpperCase() : '');
   const parts = [model, os].filter(Boolean);
   return parts.length ? parts.join(' · ') : 'Unknown device';
+}
+
+// The bundle this tester is ACTUALLY running: "v70 · 3.6.0 · rt 1.22.0 · emb".
+// Empty until they open a build that reports it (see pushRegistration.reportDevice).
+function versionLabel(u: AdminUser): string {
+  const parts = [
+    u.build_number ? `v${u.build_number}` : '',
+    u.app_version || '',
+    u.runtime_version ? `rt ${u.runtime_version}` : '',
+    u.update_id === 'embedded' ? 'emb' : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'version not reported yet';
+}
+
+// THE QUESTION THAT ACTUALLY MATTERS. An OTA only reaches a build whose
+// runtimeVersion matches EXACTLY, so a tester on an older runtime is ORPHANED —
+// they will never receive another update no matter how many times they open the
+// app, and they need a new BUILD, not a nudge to tap the pill. That is a
+// different conversation with the tester, so the roster calls it out rather than
+// leaving you to compare version strings by eye.
+// Read from the bundle rather than hardcoded, so it can never drift out of sync
+// with app.json the way a copied string would.
+const CURRENT_RUNTIME =
+  String((Constants as any)?.expoConfig?.runtimeVersion ?? '') || null;
+function isOrphaned(u: AdminUser): boolean {
+  if (!CURRENT_RUNTIME || !u.runtime_version) return false;  // unknown -> never cry wolf
+  return u.runtime_version !== CURRENT_RUNTIME;
 }
 
 // Icon hint for the platform: Apple logo for iOS, Android robot otherwise.
@@ -155,6 +188,22 @@ export default function AdminScreen() {
           <View style={styles.deviceRow}>
             <Ionicons name={deviceIcon(item)} size={12} color="#7FA8FF" />
             <Text style={styles.deviceText} numberOfLines={1}>{deviceLabel(item)}</Text>
+          </View>
+          {/* Running bundle. Orphaned testers are called out in red because they
+              need a BUILD, not a nudge to tap the update pill — no OTA can ever
+              reach a runtimeVersion that does not match. */}
+          <View style={styles.deviceRow}>
+            <Ionicons
+              name={isOrphaned(item) ? 'alert-circle' : 'cube-outline'}
+              size={13}
+              color={isOrphaned(item) ? '#FF453A' : COLORS.textDim}
+            />
+            <Text
+              style={[styles.deviceText, isOrphaned(item) && { color: '#FF453A', fontWeight: '700' }]}
+              numberOfLines={1}
+            >
+              {versionLabel(item)}{isOrphaned(item) ? '  ·  ORPHANED (needs a build)' : ''}
+            </Text>
           </View>
           {code && (
             <Text selectable style={styles.codePill}>

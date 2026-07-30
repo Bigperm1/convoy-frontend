@@ -20,7 +20,7 @@ import ShareToast from "../../src/ShareToast";
 import { GlobalListeningGlow } from "../../src/components/ListeningEdgeGlow";
 import { useLiveWalkieListener } from "../../src/livePtt";
 import { useSettings, hydrateCarFromProfile } from "../../src/settings";
-import { registerPushToken } from "../../src/pushRegistration";
+import { registerPushToken, reportDevice } from "../../src/pushRegistration";
 import { LocationDisclosureHost } from "../../src/locationDisclosure";
 import { hailBus } from "../../src/hailBus";
 import { shareBus } from "../../src/shareBus";
@@ -117,6 +117,12 @@ export default function AppLayout() {
     // no dialog — and grabs a push token if permission happens to be granted
     // already. The ask itself lives on the Comms tab, where hails and messages
     // land, serialized through src/permissionGate.ts.
+    // Version/device report for the admin roster. Called UNCONDITIONALLY and
+    // separately from push: registerPushToken only reaches reportDevice on its
+    // FAILURE paths, so a tester who granted notifications never reported a
+    // version at all — which is why the roster's device column was always blank.
+    // This never prompts and never blocks.
+    void reportDevice();
     void registerPushToken();
   }, [user]);
 

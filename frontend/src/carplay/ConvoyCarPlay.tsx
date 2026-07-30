@@ -741,7 +741,13 @@ export function CarSurface() {
       <View style={[styles.topCenterRow, hudFit('center top')]} pointerEvents="none">
         <View style={[styles.crewPill, { backgroundColor: carHudFloor() }]}>
           <GlassFill tintColor={undefined} style={{ borderRadius: 9, overflow: 'hidden' }} />
-          <Text style={styles.crewPillText} numberOfLines={1}>
+          {/* RED until location is set to Always (Jeff, 2026-07-30). This is the one
+              setting that decides whether the car marker keeps tracking with the
+              phone locked in a mount, and when it is wrong the symptom looks like
+              our bug — so it gets a permanent, glanceable tell right where the
+              driver already reads the build number. Back to white the moment the
+              permission is granted (re-read on every foreground). */}
+          <Text style={[styles.crewPillText, !s.alwaysLocation && styles.crewPillTextWarn]} numberOfLines={1}>
             {crewCount} Crew · v{carBuildNo}{carRtv ? ` · ${carRtv}` : ''}{carOtaTag ? ` · ${carOtaTag}` : ''}
           </Text>
         </View>
@@ -1439,6 +1445,22 @@ const CAR_MAP_BUTTON_COL_W = 42;
 const CREW_PILL_H = 22;
 // True top-centre for the pill (iOS 26 has no full-width nav bar to clear).
 const CAR_PILL_TOP = 4;
+// ── NAV-BAR SIDE WIDTHS (2026-07-30) ─────────────────────────────────────────
+// What each side of the CarPlay navigation bar occupies, so the crew pill can be
+// centred in the gap between them rather than on the screen.
+//   leading  = edge margin 16 + one 44pt image button (the comms mic)      = 60
+//   trailing = edge margin 16 + "End" ~44 + gap 8 + "Search" ~62           = 130
+// (CAR_BAR_BUTTON_CONFIG in carActions.ts is the source of that inventory; note the
+// trailing array is REVERSED vs visual order, so array[0] "End" is the far corner.)
+//
+// ⚠ DERIVED FROM STANDARD BAR METRICS, NOT MEASURED. CarPlay exposes no frame for a
+// CPBarButton — there is no API to ask — and the two trailing widths depend on the
+// system font at the head unit's scale. The pill is now ~35pt left of screen centre;
+// if a head-unit photo shows it off, these two numbers are the ONLY knobs and both
+// are OTA-tunable. Android Auto draws no such bar over our surface, so it keeps the
+// full width and stays screen-centred.
+const CAR_BAR_LEADING_W = IS_AA ? 0 : 60;
+const CAR_BAR_TRAILING_W = IS_AA ? 0 : 130;
 // Jeff (2026-07-24, second pass): all three rows share ONE WIDTH — he may add a
 // third button on the right, and a ragged stack would then need re-tuning. So the
 // rows STRETCH to the stack width (navStack alignItems:'stretch') and the width
@@ -1559,10 +1581,18 @@ const styles = StyleSheet.create({
   // full-width bar. The status pill (Transmitting…/X is talking…/Scout) docks
   // directly beneath it. (On the iOS 18.6 sim the old full-width bar overlaps
   // this spot — the head unit is the target, the sim just looks off there.)
-  topCenterRow: { position: 'absolute', top: CAR_PILL_TOP, left: 0, right: 0, alignItems: 'center' },
+  // Centred in the GAP BETWEEN THE BAR BUTTONS, not on the screen (Jeff, 2026-07-30:
+  // "center the crew pill between the comms mic (left) and the search button
+  // (right)"). The nav bar is lopsided — one image button leading, TWO text buttons
+  // trailing — so screen-centre sits well right of the visual gap's centre. Insetting
+  // both sides by what each actually occupies centres the pill in the space that is
+  // free, and as a bonus makes it structurally impossible for the pill to slide under
+  // either button however long the text gets.
+  topCenterRow: { position: 'absolute', top: CAR_PILL_TOP, left: CAR_BAR_LEADING_W, right: CAR_BAR_TRAILING_W, alignItems: 'center' },
   statusRow: { position: 'absolute', top: CAR_PILL_TOP + CREW_PILL_H + NAV_GAP, left: 0, right: 0, alignItems: 'center' },
   crewPill: { flexDirection: 'row', alignItems: 'center', height: CREW_PILL_H, paddingHorizontal: 10, borderRadius: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   crewPillText: { color: '#C7CCD1', fontSize: 11, fontWeight: '700' },
+  crewPillTextWarn: { color: '#FF453A' },
   scoutPill: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   scoutDot: { width: 10, height: 10, borderRadius: 5 },
   scoutPillText: { color: '#F4F4F4', fontSize: 14, fontWeight: '700' },

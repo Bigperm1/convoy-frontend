@@ -25,6 +25,11 @@ export type CarPeer = {
 
 export type CarState = {
   navigating: boolean;
+  // Is location permission set to ALWAYS? The car surface turns the crew pill RED
+  // when it is not, because that single setting is what keeps the marker tracking
+  // with the phone locked in a mount — the failure it causes looks like a bug in us.
+  // Defaults TRUE so the pill can never flash red before the first read completes.
+  alwaysLocation: boolean;
   speedMs: number; // current speed in m/s (0 when stopped/unknown)
   instruction: string; // upcoming maneuver text (while navigating)
   distanceToTurn: string; // e.g. "102 m"
@@ -158,6 +163,7 @@ export type CarState = {
 
 const initial: CarState = {
   navigating: false,
+  alwaysLocation: true,
   speedMs: 0,
   instruction: '',
   distanceToTurn: '',

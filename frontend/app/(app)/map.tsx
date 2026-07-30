@@ -40,6 +40,7 @@ import {
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
   useRouteTrafficRefresh, fetchRouteViaStops,
 } from "../../src/nav";
+import { getDepartureBearing, noteCourse } from "../../src/departureBearing";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue, type CongestionLevel } from "../../src/mapboxDirections";
 import { logEvent } from "../../src/crashBreadcrumb";
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from "../../src/routeOptimizer";
@@ -967,15 +968,27 @@ export default function MapScreen() {
         // the change completely" feels like from the driver's seat, whatever caused it.
         showInfoToast("Couldn't route through that stop — showing the direct route.");
       }
-      const raw = await fetchRoutes(origin, destination, avoid);
+      // ── DEPART THE WAY THE CAR IS POINTING (2026-07-30) ───────────────────
+      // Jeff: "parked at work I start a route and it makes me do a U-turn when I
+      // can easily go forward." We were sorting purely by ETA, blind to which way
+      // the car faced — and on a two-way street Mapbox returns BOTH directions as
+      // alternatives (verified: Inverness St gives alt0 departing 181 deg and alt1
+      // departing 1 deg), so picking "fastest" picked the U-turn roughly half the
+      // time. orderReroutesForward already encodes exactly the right preference and
+      // has been doing this for reroutes since long before; the initial pick simply
+      // never got the same treatment. Compass sample runs CONCURRENTLY with the
+      // route fetch so it costs no added latency, and a null facing falls straight
+      // through to plain fastest-first — i.e. today's behaviour.
+      const [raw, facing] = await Promise.all([
+        fetchRoutes(origin, destination, avoid),
+        getDepartureBearing(),
+      ]);
       if (cancelled) return;
-      // Sort by traffic-aware ETA when available, else fall back to free-flow
-      // duration. This mirrors what Google Maps does in its "Best route" pick.
-      const sorted = [...raw].sort((a, b) => {
-        const da = a.duration_in_traffic_s ?? a.duration_s ?? 0;
-        const db = b.duration_in_traffic_s ?? b.duration_s ?? 0;
-        return da - db;
-      });
+      // Forward-departing options first (each group fastest-first), so index 0 —
+      // the selected, green route — is the quickest one that does NOT turn you
+      // around. When nothing departs forward the order is unchanged: sometimes a
+      // U-turn genuinely is the only way out.
+      const sorted = orderReroutesForward(raw, facing ?? undefined);
       // Color-rank: green (fastest) → orange (mid) → red (slowest). Cast to
       // any so we can attach an extra `color` field without modifying the
       // shared NavRoute type in src/nav.ts.
@@ -2133,6 +2146,25 @@ export default function MapScreen() {
   // screen wakes. iOS shows the Always upgrade dialog at most once (the one-shot
   // askAlwaysLocationOnce), so the recovery path is Settings. Ask ONCE per app
   // session, only when a head unit is actually connected (the moment it matters).
+  // Mirror the Always-permission state onto the car surface so the crew pill can go
+  // RED while it is missing (Jeff, 2026-07-30). Re-read on every foreground, because
+  // the only way to fix it is a trip to Settings and the driver comes straight back —
+  // the pill has to be white again by then or the tell is worse than useless.
+  // getBackgroundPermissionsAsync only READS; it never prompts, so this is safe to
+  // run outside permissionGate (see the gate's own rule: only PROMPTS are serialized).
+  useEffect(() => {
+    let alive = true;
+    const read = async () => {
+      try {
+        const bg = await Location.getBackgroundPermissionsAsync();
+        if (alive) setCarState({ alwaysLocation: !!bg?.granted });
+      } catch {}
+    };
+    void read();
+    const sub = AppState.addEventListener('change', (st) => { if (st === 'active') void read(); });
+    return () => { alive = false; sub.remove(); };
+  }, []);
+
   useEffect(() => {
     if (!carConnected || _carAlwaysCtaShownThisSession) return;
     (async () => {
@@ -2498,6 +2530,12 @@ export default function MapScreen() {
             const heading = typeof h === "number" && h >= 0 ? h : undefined;
             const sRaw = pos.coords.speed;
             const speed = typeof sRaw === "number" && sRaw >= 0 ? sRaw : 0;  // clamp negatives
+            // Remember the last REAL travel course. It is the best "which way does
+            // the car face" answer for the first 90s after stopping — no compass
+            // calibration, no interference from the car's own steel — and it is what
+            // the departure-direction pick prefers before falling back to the
+            // magnetometer. See src/departureBearing.ts.
+            noteCourse(heading);
             // Push to the position history buffer so we can recall where the
             // driver was 5s ago (when they tap a hazard/police report button).
             posHistoryRef.current.push({ lat: pos.coords.latitude, lng: pos.coords.longitude, ts: Date.now() });

@@ -27,6 +27,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { LaneArrow } from "../mapboxDirections";
 import { GlassFill, hudTint, glassLift } from "../Glass";
 import { ManeuverArrow, maneuverDir } from "./ManeuverArrow";
+import { speedLimitVisible } from "../speedLimit";
 
 const YELLOW = "#2DEC86";
 const OVER_RED = "#E4002B"; // candy-apple red for the speeding halo + pill tint
@@ -108,9 +109,13 @@ export function SpeedPill({ speedMs, unit, bottom, limitKmh }: { speedMs?: numbe
   // limit is known, it slides out and shows the posted limit on a white sign.
   // Snaps back behind the speedo at a complete stop. Limit is shown in the same
   // unit as the speedo (km/h or mph).
-  const isMoving = displayKmh > 0;
   const hasLimit = typeof limitKmh === "number" && limitKmh > 0;
-  const showLimit = isMoving && hasLimit;
+  // ONE show rule across all four surfaces (speedLimit.speedLimitVisible). This was
+  // `displayKmh > 0 && hasLimit` here and `speedNum > 0` on the car — and speedNum is
+  // already ROUNDED INTO THE DRIVER'S UNIT, so at a crawl the phone showed the sign
+  // and the head unit did not. Testing km/h against one shared dead-band makes them
+  // agree, and makes mph and km/h users behave the same.
+  const showLimit = speedLimitVisible(displayKmh, limitKmh);
   const limitValue = hasLimit
     ? (isMph ? Math.round((limitKmh as number) * 0.621371) : Math.round(limitKmh as number))
     : 0;

@@ -21,7 +21,7 @@ import { NavRoute, haversineMeters, maneuverVerb, fmtDistanceM, fmtManeuverDist,
 import { maneuverDir } from "./components/ManeuverArrow";
 import { setCarState, setCarSelfPosition } from "./carplay/carStore";
 import { getSettings, getMapMode } from "./settings";
-import { fetchSpeedLimitWaysAround, nearestLimit } from "./speedLimit";
+import { updateSpeedLimit } from "./speedLimit";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "./mapboxDirections";
 
 const NAV_TASK = "convoy-nav-location";
@@ -241,46 +241,15 @@ export async function updateNavBanner(lat: number, lng: number): Promise<void> {
   }
 }
 
-// ===== Speed-limit feed for the car map (PART 5) =====
-// Module-scope mirror of useSpeedLimit's logic (no React): cache a radius of
-// maxspeed ways + the fetch center, throttle Overpass to ~30s, resolve the nearest
-// road locally on every tick, and push the result into carStore.speedLimitKmh.
-let _slWays: NonNullable<Awaited<ReturnType<typeof fetchSpeedLimitWaysAround>>> = [];
-let _slCenter: { lat: number; lng: number } | null = null;
-let _slLastFetch = 0;
-let _slInFlight = false;
-const SL_REFETCH_MOVE_M = 1000;
-const SL_MIN_REFETCH_MS = 30000;
-
-function _slHaversineM(aLat: number, aLng: number, bLat: number, bLng: number): number {
-  const R = 6371000;
-  const dLat = ((bLat - aLat) * Math.PI) / 180;
-  const dLng = ((bLng - aLng) * Math.PI) / 180;
-  const x =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(x));
-}
-
+// Posted speed limit for the car surfaces. This used to be a SECOND, near-identical
+// copy of the phone's pipeline (its own ways cache, centre, throttle and in-flight
+// flag) — which is exactly why the sign was "kinda random and not always in sync
+// with CarPlay/phone": two caches, fetched at different times from different
+// positions, resolving independently. It also lacked the phone's stale-cache
+// self-heal. speedLimit.ts now owns ONE pipeline; this just feeds it a position and
+// mirrors the shared value into carStore.
 function maybeUpdateSpeedLimit(lat: number, lng: number): void {
-  const now = Date.now();
-  const moved = _slCenter ? _slHaversineM(_slCenter.lat, _slCenter.lng, lat, lng) : Infinity;
-  const needArea = !_slCenter || moved > SL_REFETCH_MOVE_M;
-  const throttleOk = now - _slLastFetch > SL_MIN_REFETCH_MS;
-  if (needArea && throttleOk && !_slInFlight) {
-    _slInFlight = true;
-    _slLastFetch = now;
-    _slCenter = { lat, lng };
-    fetchSpeedLimitWaysAround(lat, lng)
-      .then((ways) => {
-        _slInFlight = false;
-        if (ways) { _slWays = ways; setCarState({ speedLimitKmh: nearestLimit(lat, lng, ways) ?? undefined }); }
-        else { _slCenter = null; } // fetch failed — allow a retry after the throttle window
-      })
-      .catch(() => { _slInFlight = false; _slCenter = null; });
-  }
-  // Resolve against whatever is cached right now (instant; no network).
-  setCarState({ speedLimitKmh: nearestLimit(lat, lng, _slWays) ?? undefined });
+  setCarState({ speedLimitKmh: updateSpeedLimit(lat, lng) ?? undefined });
 }
 
 // Background location task — fires on each location update (foreground AND

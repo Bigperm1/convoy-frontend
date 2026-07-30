@@ -47,6 +47,7 @@ import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, AA_ACTION_STRIP, AA_MAP_BUTTONS, handleCarBarButton, handleCarMapButton, handleAaButton, carTap } from './carActions';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
+import { speedLimitVisible } from '../speedLimit';
 import type { RoadEvent } from '../driveBcEvents';
 import { logEvent } from '../crashBreadcrumb';
 
@@ -469,7 +470,11 @@ export function CarSurface() {
 
   // Posted speed-limit sign slides out to the RIGHT from behind the speedo once moving
   // with a known limit — exactly like the phone. Tucked back behind the pill at a stop.
-  const showLimit = limitVal != null && speedNum > 0;
+  // Same shared rule as the phone — see speedLimitVisible. Deliberately fed the
+  // km/h speed and the km/h limit, NOT the display values: speedNum/limitVal are
+  // already converted+rounded into the driver's unit, which is what made the two
+  // surfaces disagree at low speed.
+  const showLimit = speedLimitVisible((s.speedMs ?? 0) * 3.6, s.speedLimitKmh);
   const limitSlide = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.spring(limitSlide, { toValue: showLimit ? 1 : 0, useNativeDriver: true, tension: 80, friction: 12 }).start();

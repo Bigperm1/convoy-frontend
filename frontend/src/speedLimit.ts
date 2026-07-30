@@ -187,65 +187,103 @@ export function nearestLimit(lat: number, lng: number, ways: LimitWay[]): number
  * Fetches a radius of maxspeed ways around the driver and caches them; the
  * nearest-road resolution runs locally on every coordinate change.
  */
+// ── ONE PIPELINE FOR ALL FOUR SURFACES (2026-07-30) ─────────────────────────
+// Jeff: "the speed limit sign pop is kinda random and not always in sync with
+// CarPlay/phone."
+//
+// It was TWO independent pipelines off these same primitives — the phone ran this
+// hook's private cache, and navNotification.ts ran a near-identical copy
+// (_slWays/_slCenter/_slLastFetch) to feed carStore. Same constants, but separate
+// caches fetched at DIFFERENT times from DIFFERENT positions, so at any moment the
+// two could hold different ways and resolve different limits. The car copy also had
+// no stale-cache self-heal, so it could sit on an old area indefinitely — the
+// "random" part. And worse, both called nearestLimit(), which writes the
+// module-global _lastNearestM that the phone's self-heal reads: one surface's
+// resolve could trip the other surface's refetch.
+//
+// Now there is ONE cache, ONE throttle, ONE self-heal and ONE current value, and
+// every surface subscribes to it. Two surfaces cannot disagree by construction.
+const _subs = new Set<(v: number | null) => void>();
+let _ways: LimitWay[] = [];
+let _center: { lat: number; lng: number } | null = null;
+let _lastFetch = 0;
+let _inFlight = false;
+let _current: number | null = null;
+
+function _emit(v: number | null): void {
+  if (v === _current) return;          // only wake consumers on a real change
+  _current = v;
+  _subs.forEach((f) => { try { f(v); } catch {} });
+}
+
+export function getSpeedLimitKmh(): number | null { return _current; }
+
+export function subscribeSpeedLimit(fn: (v: number | null) => void): () => void {
+  _subs.add(fn);
+  return () => { _subs.delete(fn); };
+}
+
+/**
+ * Feed a position. Safe to call from anywhere and as often as you like — the
+ * Overpass fetch is throttled and de-duplicated internally. Returns the current
+ * limit so a caller with its own render loop can use it immediately.
+ */
+export function updateSpeedLimit(lat: number, lng: number): number | null {
+  if (typeof lat !== "number" || typeof lng !== "number") return _current;
+  const now = Date.now();
+  const moved = _center ? haversineM(_center.lat, _center.lng, lat, lng) : Infinity;
+  const needArea = !_center || moved > REFETCH_MOVE_M;
+  const throttleOk = now - _lastFetch > MIN_REFETCH_MS;
+  if (needArea && throttleOk && !_inFlight) {
+    _inFlight = true;
+    _lastFetch = now;
+    _center = { lat, lng };
+    fetchSpeedLimitWaysAround(lat, lng)
+      .then((ways) => {
+        _inFlight = false;
+        if (ways) { _ways = ways; _emit(nearestLimit(lat, lng, ways)); }
+        else { _center = null; }       // fetch failed — retry after the throttle window
+      })
+      .catch(() => { _inFlight = false; _center = null; });
+  }
+  // Resolve against whatever is cached right now (instant; no network).
+  _emit(nearestLimit(lat, lng, _ways));
+  // Stale-cache self-heal: if the nearest cached road is implausibly far, the cache
+  // is stale (a wedged/aborted fetch left the centre kilometres behind). Drop the
+  // centre so the next call refetches. The throttle still applies, so this can never
+  // hammer Overpass. _lastNearestM is now read by exactly one owner, so it cannot be
+  // clobbered by another surface mid-resolve.
+  if (_ways.length && Number.isFinite(_lastNearestM) && _lastNearestM > FETCH_RADIUS_M && !_inFlight) {
+    _center = null;
+  }
+  return _current;
+}
+
+export function resetSpeedLimit(): void {
+  _ways = []; _center = null; _emit(null);
+}
+
+// Show the posted-limit sign only while actually moving. ONE rule, in km/h so it is
+// unit-independent — the car previously tested a value already ROUNDED into the
+// driver's unit, so at a crawl the phone showed the sign and the head unit did not.
+// 2 km/h matches the SpeedPill's own noise dead-band.
+export const SPEED_LIMIT_SHOW_KMH = 2;
+export function speedLimitVisible(speedKmh: number | undefined | null, limitKmh: number | undefined | null): boolean {
+  return typeof limitKmh === "number" && limitKmh > 0
+    && typeof speedKmh === "number" && speedKmh >= SPEED_LIMIT_SHOW_KMH;
+}
+
+/** React view of the shared pipeline. Feeds it positions and re-renders on change. */
 export function useSpeedLimit(
   lat: number | null | undefined,
   lng: number | null | undefined,
   enabled: boolean
 ): number | null {
-  const [limit, setLimit] = useState<number | null>(null);
-  const waysRef = useRef<LimitWay[]>([]);
-  const centerRef = useRef<{ lat: number; lng: number } | null>(null);
-  const lastFetchRef = useRef<number>(0);
-  const inFlightRef = useRef(false);
-
+  const [limit, setLimit] = useState<number | null>(getSpeedLimitKmh());
+  useEffect(() => subscribeSpeedLimit(setLimit), []);
   useEffect(() => {
-    if (!enabled || typeof lat !== "number" || typeof lng !== "number") {
-      setLimit(null);
-      waysRef.current = [];
-      centerRef.current = null;
-      return;
-    }
-
-    const now = Date.now();
-    const center = centerRef.current;
-    const moved = center ? haversineM(center.lat, center.lng, lat, lng) : Infinity;
-    const needArea = !center || moved > REFETCH_MOVE_M;
-    const throttleOk = now - lastFetchRef.current > MIN_REFETCH_MS;
-
-    if (needArea && throttleOk && !inFlightRef.current) {
-      inFlightRef.current = true;
-      lastFetchRef.current = now;
-      centerRef.current = { lat, lng };
-      fetchSpeedLimitWaysAround(lat, lng)
-        .then((ways) => {
-          inFlightRef.current = false;
-          if (ways) {
-            waysRef.current = ways;
-            setLimit(nearestLimit(lat, lng, ways));
-          } else {
-            centerRef.current = null;     // fetch failed — allow a retry after the throttle window
-          }
-        })
-        .catch(() => { inFlightRef.current = false; centerRef.current = null; });
-    }
-
-    // Resolve against whatever is cached right now (instant; no network).
-    setLimit(nearestLimit(lat, lng, waysRef.current));
-
-    // Self-heal a stale cache: if the nearest cached road is implausibly far
-    // (beyond the fetch radius), the cached ways are stale — e.g. a wedged or
-    // aborted fetch left the centre kilometres behind. Drop the centre so the
-    // next tick refetches around the current position. The 30s throttle still
-    // applies, so this can never hammer Overpass.
-    if (
-      waysRef.current.length &&
-      Number.isFinite(_lastNearestM) &&
-      _lastNearestM > FETCH_RADIUS_M &&
-      !inFlightRef.current
-    ) {
-      centerRef.current = null;
-    }
+    if (!enabled || typeof lat !== "number" || typeof lng !== "number") return;
+    updateSpeedLimit(lat, lng);
   }, [lat, lng, enabled]);
-
   return limit;
 }

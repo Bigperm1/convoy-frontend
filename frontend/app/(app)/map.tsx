@@ -40,7 +40,8 @@ import {
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
   useRouteTrafficRefresh, fetchRouteViaStops,
 } from "../../src/nav";
-import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "../../src/mapboxDirections";
+import { fetchMapboxLaneCues, pickLaneCue, type LaneCue, type CongestionLevel } from "../../src/mapboxDirections";
+import { logEvent } from "../../src/crashBreadcrumb";
 import { usePitstop } from "../../src/pitstop";
 import { recordTrip, consumeTakeAgain, cachePeerPbs } from "../../src/trips";
 import PitstopCard from "../../src/components/PitstopCard";
@@ -1111,7 +1112,53 @@ export default function MapScreen() {
   // for the geometry we're already on and writes them back onto the SELECTED route —
   // the ETA's suffix table sees the totals move and rebuilds, and the congestion
   // gradient recolours, both on the next tick. Never changes the route itself.
+  // ── CONGESTION PROBE (2026-07-29) ───────────────────────────────────────────
+  // Jeff sat in an hour of traffic watching a fully green line. Two completely
+  // different bugs produce that, and NOTHING readable from this machine tells them
+  // apart:
+  //   (a) Mapbox reported heavy/severe and we failed to PAINT it, or
+  //   (b) Mapbox reported low/unknown for that road and the paint was faithful.
+  // Live-API testing showed (b) is entirely plausible: on his Langley stretch
+  // 44-73% of segments come back null (-> "unknown" -> base green), and three
+  // highway segments moving at under half the posted limit were labelled "low".
+  // But the same testing showed congestion_numeric DOES report heavy/severe
+  // correctly on a well-covered Hwy 1 run, so the source is not simply broken.
+  // (The first theory — a missing enable_refresh -> no uuid -> frozen snapshot —
+  // was DISPROVEN against the live API: the uuid comes back either way.)
+  //
+  // So log what the app actually holds. One row when guidance starts, then only
+  // when the worst level CHANGES — a jam appearing is exactly the transition in
+  // question, and it bounds the rows at a handful per drive instead of one per
+  // 2-minute tick. Next drive in traffic decides (a) vs (b) with data.
+  const congestionProbeRef = useRef<{ key: string; worst: string } | null>(null);
+  const probeCongestion = useCallback((cong: CongestionLevel[] | undefined, when: string) => {
+    try {
+      const c = cong || [];
+      const n = c.length;
+      const count = (l: string) => c.reduce((a, v) => a + (v === l ? 1 : 0), 0);
+      const sev = count("severe"), hvy = count("heavy"), mod = count("moderate");
+      const worst = sev ? "severe" : hvy ? "heavy" : mod ? "moderate" : n ? "low/unknown" : "none";
+      const key = String(activeRouteRef.current?.polyline || "").slice(0, 24);
+      const prev = congestionProbeRef.current;
+      if (prev && prev.key === key && prev.worst === worst) return;  // nothing new to say
+      congestionProbeRef.current = { key, worst };
+      logEvent(
+        `congestion-probe ${when} worst=${worst} n=${n} `
+        + `severe=${sev} heavy=${hvy} moderate=${mod} `
+        + `low=${count("low")} unknown=${count("unknown")} `
+        + `speedKmh=${Math.round((coordsRef.current?.speed ?? 0) * 3.6)}`,
+      );
+    } catch {}
+  }, []);
+  // At guidance start: what did the route we are about to drive come with?
+  useEffect(() => {
+    if (navMode !== "turn-by-turn") { congestionProbeRef.current = null; return; }
+    probeCongestion(activeRoute?.congestion as CongestionLevel[] | undefined, "start");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navMode, activeRoute?.polyline]);
+
   useRouteTrafficRefresh(activeRoute, navMode === "turn-by-turn", useCallback((patch) => {
+    probeCongestion(patch.congestion, "refresh");
     setRoutes((prev) => {
       if (!prev.length) return prev;
       const i = selectedRouteIndex;
@@ -1123,7 +1170,7 @@ export default function MapScreen() {
     });
     // cbRef inside the hook always holds the latest callback, so depending on the
     // selected index here is safe and keeps the write pointed at the right route.
-  }, [selectedRouteIndex]));
+  }, [selectedRouteIndex, probeCongestion]));
 
   // "TAKE IT AGAIN" — the Drives screen hands a recorded trip over and we rebuild it as a
   // live route: same destination, same stops, same order. Read-once (consume) so coming

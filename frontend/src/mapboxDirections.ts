@@ -527,14 +527,16 @@ export async function fetchMapboxRouteVia(
     if (avoid?.highways) exclude.push("motorway");
     if (avoid?.ferries) exclude.push("ferry");
 
-    // ⚠ `enable_refresh=true` IS LOAD-BEARING, and its absence here was a real bug
-    // (2026-07-29). Without it Mapbox returns no `uuid`, so the `refreshUuid` read
-    // below was ALWAYS undefined — and `useRouteTrafficRefresh` early-returns when
-    // there is no uuid. Net effect: every route built through this function (any
-    // route with a STOP, plus the AI and Cruise routes) froze its traffic snapshot
-    // at fetch time for the whole drive. Jeff sat in an hour of traffic watching a
-    // fully green line: the colours were correct for the moment he set off, and
-    // nothing was ever allowed to update them.
+    // `enable_refresh=true` makes the refresh handle EXPLICIT rather than incidental.
+    // ⚠ Correction (2026-07-29): this was first added on the theory that its absence
+    // was why a via-route's congestion froze — that Mapbox withholds the `uuid`
+    // unless asked. TESTED AGAINST THE LIVE API AND THAT IS FALSE: the identical
+    // request returns a uuid with or without this parameter, so `refreshUuid` was
+    // never undefined and this fixed nothing. It stays because relying on an
+    // undocumented default for something load-bearing is a bad trade, and because
+    // the docs specify this parameter as the way to obtain a refresh handle.
+    // The real cause of a green line in traffic is NOT here — see the congestion
+    // probe in map.tsx.
     const qs =
       `?alternatives=false&steps=true&overview=full&geometries=polyline` +
       `&annotations=congestion_numeric,duration,distance&banner_instructions=false` +

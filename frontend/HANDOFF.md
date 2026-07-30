@@ -459,14 +459,39 @@ surfaces, each passing its own zoom (CarPlay including pinch bias). **`TRIM_LEAD
 knob.** Deliberately **no pitch term** (marker and gap share the foreshortened ground plane,
 so the ratio is unchanged) and **no speed term** (zoom already carries speed).
 
-### 2. Congestion frozen green through an hour of traffic
-`fetchMapboxRouteVia` never sent **`enable_refresh=true`**, yet read `json.uuid` on the way
-out. Mapbox only returns that uuid when asked → `refreshUuid` was ALWAYS undefined →
-`useRouteTrafficRefresh` early-returns without a uuid. **Every route built through that
-function — any route with a STOP, plus AI and Cruise — froze its traffic snapshot at fetch
-time for the whole drive.** The colours were right for the moment the route was plotted, and
-nothing was ever allowed to update them. (Jeff had added a stop on that drive, which is why
-the second screenshot coloured correctly: no stop, working uuid.)
+### 2. Congestion green through an hour of traffic — ⚠ NOT ROOT-CAUSED YET
+**The first diagnosis was WRONG and has been retracted.** It claimed
+`fetchMapboxRouteVia` omitting `enable_refresh=true` meant no `uuid`, so the refresh loop
+never armed and the snapshot froze. Tested against the live API on 2026-07-29: **the identical
+request returns a uuid with or without that parameter.** `refreshUuid` was never undefined and
+that fixed nothing. (The parameter was kept — it is the documented way to get a refresh handle
+and relying on an undocumented default for something load-bearing is a bad trade.)
+
+What the live API testing DID establish, on Jeff's own corridor:
+- **44–73% of segments return `congestion_numeric: null`** → `unknown` → painted the SAME brand
+  green as `low`. A driver cannot tell "no data" from "clear".
+- Three highway segments moving at **under half the posted limit** were labelled `low`.
+- But `congestion_numeric` is **not simply broken**: on a longer Hwy 1 Surrey→Abbotsford run it
+  called 19 of 24 sub-50%-of-posted segments `heavy` or `severe`, correctly.
+- A speed-vs-posted-limit derivation was considered as a replacement signal and **rejected**:
+  `maxspeed` is present on only ~40% of segments, and on ramps and light-controlled streets a
+  low live/posted ratio is normal, so it would paint false jams. (Also note `depart_at` did not
+  return typical-time traffic here — it echoed the current annotations — so any "rush hour"
+  measurement through it is worthless.)
+
+So two very different bugs remain in play and **nothing readable from this machine separates
+them**: (a) the app held heavy/severe and failed to PAINT it, or (b) Mapbox reported
+low/unknown for that road and the paint was faithful.
+
+**A probe now answers it.** `map.tsx` logs a `congestion-probe` row to `crash_reports` when
+guidance starts and then only when the WORST level changes — level counts plus current speed.
+One drive in traffic decides (a) vs (b). **Query that row before touching the paint code.**
+
+Two genuine robustness fixes did land, neither of them proven to be Jeff's bug: the refresh now
+runs once immediately instead of first firing two minutes in, and `refreshMapboxRoute`
+distinguishes `"expired"` from a transient failure — it returned plain `null` for everything, so
+three patchy-signal ticks were read as route expiry and switched live traffic off for the rest of
+the drive, on a road trip.
 
 Two more hardenings: the refresh now runs **once immediately** instead of first firing two
 minutes in, and `refreshMapboxRoute` distinguishes `"expired"` from a transient failure — it

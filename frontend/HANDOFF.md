@@ -417,3 +417,91 @@ this layout instead of insets we guess at.
   from the device. Needs one AA drive on the OTA → the `android-auto-canvas` row gives the
   real number, and a fresh photo says whether 0.6 is the right size to read at arm's length.
   `HUD_SCALE_FLOOR` / `CAR_REF_W` / `CAR_REF_H` are the tuning knobs; all OTA-able.
+
+---
+
+## 12. Drive report 2026-07-29 — four items, all root-caused (awaiting OTA)
+
+Screenshots: phone at 12 km/h with a fully green line; CarPlay at 3 km/h same moment;
+a second drive where congestion coloured correctly; two head-unit photos.
+
+### 1. Route line touching / overlapping the car — `src/routeTrim.ts` (NEW)
+Jeff: *"one day it'll be 30 m away from the car, the next drive it'll be touching, the next
+overlapping — consistent for all speeds on CarPlay, Android Auto and phone."*
+
+Two structural causes.
+
+**The surfaces disagreed.** Phone `clamp(12 + speed*1.6, 30, 100)` vs `CarMapView`
+`clamp(10 + speed*1.1, 10, 55)` — and CarMapView draws BOTH CarPlay and Android Auto. 30 m
+of clearance on the phone, 10 m in the car, at a standstill. The phone's floor had been
+raised 12 → 30 m *specifically* because a short lead let the line touch the marker; the car
+surface never got that fix.
+
+**A lead in metres cannot track a marker measured in pixels.** `CAR_MODEL_SCALE_BY_ZOOM` is
+geometric at ~2× per zoom level (13 at z17 → 120 at z14). That is deliberate: it cancels
+metres-per-pixel so the car reads the same SIZE on screen at any zoom. The consequence is its
+footprint in ground metres DOUBLES per zoom level out — ~20 m at z17, ~185 m at z14 — and the
+chase camera zooms out with speed. Clear space in front of the nose, in screen points:
+
+| km/h | zoom | old | new |
+|---|---|---|---|
+| 0 | 17.0 | 51 dp | 51 dp |
+| 70 | 15.5 | 13 dp | 51 dp |
+| 100 | 13.9 | **−8 dp** | 51 dp |
+| 140 | 13.4 | **−10 dp** | 51 dp |
+
+Negative = the line starts *inside* the marker. All three reported behaviours in order as
+speed rises — it looked per-drive because it is per-SPEED, through zoom.
+
+Fixed by measuring the lead where the driver judges it: a fixed SCREEN distance converted at
+the live camera zoom, so it grows exactly as fast as the marker. One function, all three
+surfaces, each passing its own zoom (CarPlay including pinch bias). **`TRIM_LEAD_DP` is the
+knob.** Deliberately **no pitch term** (marker and gap share the foreshortened ground plane,
+so the ratio is unchanged) and **no speed term** (zoom already carries speed).
+
+### 2. Congestion frozen green through an hour of traffic
+`fetchMapboxRouteVia` never sent **`enable_refresh=true`**, yet read `json.uuid` on the way
+out. Mapbox only returns that uuid when asked → `refreshUuid` was ALWAYS undefined →
+`useRouteTrafficRefresh` early-returns without a uuid. **Every route built through that
+function — any route with a STOP, plus AI and Cruise — froze its traffic snapshot at fetch
+time for the whole drive.** The colours were right for the moment the route was plotted, and
+nothing was ever allowed to update them. (Jeff had added a stop on that drive, which is why
+the second screenshot coloured correctly: no stop, working uuid.)
+
+Two more hardenings: the refresh now runs **once immediately** instead of first firing two
+minutes in, and `refreshMapboxRoute` distinguishes `"expired"` from a transient failure — it
+returned plain `null` for everything, so **three patchy-signal ticks were read as route expiry
+and switched live traffic off for the rest of the drive**, on a road trip.
+
+⚠ Still true and worth knowing: congestion `unknown` (no Mapbox data) paints the SAME brand
+green as `low`, so "clear" and "no data" are indistinguishable on the line.
+
+### 3. Crew button didn't return to the chase cam ("weird 3-D view")
+`crewFit` pinned north via `setCarNorthUp(true)` — a latch whose only release is
+`useEffect(… [s.navigating])`, which **cannot fire if you were already navigating when you
+tapped it**. The 15 s hold expired, the lockstep took position, pitch and zoom back, and the
+heading stayed frozen at north: a pitched camera facing north instead of down the road, for
+the rest of the drive. North-up is now derived from the hold timestamp inside `getCam`, which
+runs per frame in the rAF loop — the same loop that reads the override one line after calling
+it. A timestamp comparison, **not** a `setTimeout` (iOS suspends JS timers while the phone is
+locked, i.e. in a mount).
+
+### 4. Add stop — kept the original route, no pin, no tap-to-add
+Not a failed fetch. **`onOffRoute` re-plotted with plain `fetchRoutes(coords, destination)` —
+no stops.** Adding a stop mid-drive swaps in a via-route whose first leg can leave the road
+the car is on, so the engine reports off-route once during the swap; this handler then
+re-plotted *without* the stops and `setRoutes` threw the via-route away, restoring the exact
+original line while the chips still showed the stop. The faster-route checker had the same
+hole: its candidates come from a plain origin→dest fetch, so every one SKIPS the stops and
+accepting one would delete the trip. **Offers are now suppressed while stops are pinned.**
+
+Added: numbered stop PINS on the map, and **double-tap with a trip plotted → add a stop**
+(including mid-drive; with no destination the gesture still drops a destination and keeps its
+mid-guidance guard). The via-fetch fall-through now toasts instead of silently showing the
+direct route.
+
+### Verification status
+`yarn typecheck` clean, eslint identical to baseline on every touched file, and the trim table
+above is arithmetic. **None of it has been driven.** One route with a stop, in traffic, past a
+crew-button tap, proves all four at once — and the trim needs a look at both the phone and a
+head unit at low AND highway speed.

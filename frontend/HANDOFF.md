@@ -46,7 +46,7 @@ before that row exists.
 | 4 | **Route line / off-route drift** | Free-drive "lost marker" is FIXED. Nav-time route-line polish still open. |
 | 5 | **Heat** | Three real wins shipped tonight (§5). Needs a real drive to judge. |
 | 6 | **Android Play submit** | Blocked on missing `play-store-service-account.json`. 67 AAB is built and Play-ready. |
-| 7 | **Screen-off CarPlay** | Unfixed and unverifiable locally. |
+| 7 | **Screen-off CarPlay** | **ROOT-CAUSED AND FIXED 2026-07-30 — see §15.** Also: it IS reproducible locally; the handoff was wrong about that. |
 | 8 | **Club switcher on Android** | `talk.tsx:625` still puts touchables in a ScrollView — probably fine now (§6) but never tested. |
 
 ---
@@ -641,3 +641,64 @@ Directions). The model is only ever asked what it alone knows: which roads are w
 ### Still not verified by a human
 A real drive. §12's `congestion-probe` row is the one to query first if the green-line-in-
 traffic report recurs.
+
+---
+
+## 15. CarPlay screen-off jitter — ROOT-CAUSED AND FIXED (2026-07-30)
+
+Jeff: *"the car still jitters on carplay when the phone screen goes inactive, whether you're
+routing or not — this is not premium."* Open since build 65. Fixed and shipped OTA.
+
+### The cause: a ONE-WAY LOCKOUT on the heartbeat stamp
+`bgTick`'s stamp (`lastBgTickAt`, `src/ConvoyMapbox.tsx`) sat **below two early bails**, so it
+meant *"the timer is alive AND currently animating something"* while every reader treated it as
+*"the timer is alive"*. One quiet moment then became a permanent downgrade:
+
+1. any window >1500 ms with no ease armed — a standstill inside the dead-band, or one longer
+   GPS gap (screen-off CoreLocation delivers in **batches**, and the bg task keeps only the
+   newest fix of each batch, `navNotification.ts:292`)
+2. the per-fix backstop reads the stamp as stale → hard-snaps → sets `anim.current = null`
+3. with `anim` null, `bgTick` returns at `if (!a)` — **above** the stamp → it can never refresh
+4. so every later fix also reads "timer dead" and snaps, **for the rest of the screen-off
+   period**. Only a real rAF tick clears it, i.e. waking the phone.
+
+Which is exactly why it never read as a freeze: a discrete **teleport per GPS fix**, each step a
+different length (step = speed × fix gap, and batching varies both), each also popping the
+zoom/pitch because the snap passed `snap=true`. Route-independent, as reported.
+
+**Proven with a deterministic test of both orderings** (2 s parked, then 20 fixes at ~1 Hz):
+
+| | hard snaps | ease advances | stamps |
+|---|---|---|---|
+| broken | **20 / 20** | 0 | 0 |
+| fixed | 0 | 620 | 681 |
+
+### Four real defects fixed
+1. **Stamp at the TOP of `bgTick`**, above every bail. This is the fix.
+2. **Backstop no longer passes `snap=true`** — position must still jump (no animator exists in
+   that state) but resetting the zoom/pitch low-pass per fix is what popped the framing.
+3. **`CarMapView` never passed `speedMs`** to SelfCarModel → `(speedMs ?? 99) < SELF_CREEP_MS`
+   was false forever → the car surface sat permanently on the 2.5 m moving band and never got
+   the 9 m **parked** band the phone has had since 818cc49. A one-word omission that silently
+   broke the "CarPlay must match the phone" rule.
+4. **Sticky heading in `carStore`.** iOS reports course = −1 at low speed and on cached fixes;
+   both car feeds wrote `null` and the consumer coerced it to 0 = **due north**, so the 3D car
+   yawed to north and back while the camera held its real bearing. The phone's mirror was
+   already sticky.
+5. **`speedMs` now rides the position gate.** It was ungated while position was gated, and it
+   drives the chase-zoom curve — so a fix rejected as lower-priority could still move the
+   framing. Position from one track, zoom from another.
+
+### ⚠ Two corrections to this document
+- **Screen-off IS reproducible locally.** The simulator's **LOCK** button sleeps the display
+  with the app resident (`control {action:'button', name:'LOCK'}`). Verified: process stays up,
+  bg-location task keeps firing.
+- **rAF does NOT stop when the display sleeps.** A file-based clock probe measured it: rAF
+  collapses onto `setInterval` and both fire in **~200,000-tick bursts separated by ~50 s of
+  nothing** (awake baseline: 120 ticks/2 s at 60 fps, max gap 35 ms). So **any detector that
+  infers "display asleep" from rAF having stopped is unsound** — that assumption is what this
+  whole bug was built on. Use `AppState` or an explicit liveness stamp, never rAF silence.
+
+### Not yet verified by a human
+A real drive with the phone locked in a mount. The mechanism and the fix are proven in
+isolation; what a head unit does with them is not.

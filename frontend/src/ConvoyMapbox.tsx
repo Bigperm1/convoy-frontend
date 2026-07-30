@@ -793,6 +793,22 @@ type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?
 type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
 
 // ===== SelfCarModel =====
+// ── ABOVE THE STREET LABELS (2026-07-30) ─────────────────────────────────────
+// Jeff: "is there any way to get the 3D car marker above the street name text?" —
+// a head-unit shot had "202 ST" printed straight across the car.
+//
+// It was slot="top", and in the Mapbox Standard style that slot is defined as
+// "above POI labels and BEHIND Place and Transit labels" — so road/place labels are
+// specified to win. Leaving the slot off appends the layer after the whole Standard
+// import instead, i.e. above every layer it brings, labels included.
+//
+// Only the SELF marker moves. Our own pins stay at slot="top" and therefore stay
+// below the car, which is the existing intent (see the pin block's comment). The
+// building-occlusion behaviour is unrelated and unchanged: that is the shared model
+// depth buffer, which the comment on modelTranslation explains slot cannot override
+// (rnmapbox #13049/#13428) — the +10m lift is still what handles it.
+const SELF_MARKER_SLOT = undefined;
+
 // The self car as a 3D GLB model (ModelLayer), but with its drawn position +
 // heading INTERPOLATED between GPS fixes. Raw fixes land ~1–2×/sec, so binding the
 // model straight to them makes the car teleport a car-length at a time. Here we
@@ -1241,7 +1257,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         <SymbolLayer
           key={sprite}
           id="convoy-self-car-model"
-          slot="top"
+          slot={SELF_MARKER_SLOT}
           style={{
             iconImage: sprite,
             iconSize: spriteSize,
@@ -1260,7 +1276,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         // so a live color change needs BOTH <Models> and this layer to remount to swap.
         key={modelId}
         id="convoy-self-car-model"
-        slot="top"
+        slot={SELF_MARKER_SLOT}
         style={{
           modelId: modelId,
           // common-3d: integrate the car into the 3D scene with depth testing so it sits
@@ -1492,7 +1508,8 @@ function DestWeatherMarker({ lat, lng, weather }: { lat: number; lng: number; we
 }
 
 // ===== GLPinLayers — hazards / cameras / incidents / places as GL layers =====
-// The self-position marker is a 3D GL ModelLayer (slot="top"). MarkerView pins are RN
+// The self-position marker is a 3D GL ModelLayer (SELF_MARKER_SLOT — unslotted, so it
+// draws above the Standard style's labels too). MarkerView pins are RN
 // view annotations that Mapbox ALWAYS composites ABOVE every GL layer, so a MarkerView
 // pin sitting on the puck would cover the 3D arrow/car. To keep the self marker on top
 // of EVERYTHING (user request — applies to both the arrow and the car), we render these

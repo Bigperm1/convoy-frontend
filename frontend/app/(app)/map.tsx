@@ -340,6 +340,10 @@ function routeInitialBearing(r: any): number | null {
 // that start with a U-turn fall to the back (also fastest-first). Falls back to
 // plain fastest-first when there's no heading. Keeps a wrong-way reroute from
 // being auto-selected the instant the driver goes off course.
+// How long the map stays where the driver put it before the chase cam takes back
+// over. Expressed once so the timestamp and the fast-path timer cannot drift.
+const PAN_RECENTER_MS = 20000;
+
 function orderReroutesForward(res: any[], heading?: number): any[] {
   if (!Array.isArray(res) || res.length <= 1) return res;
   const dur = (r: any) => r?.duration_in_traffic_s ?? r?.duration_s ?? Infinity;
@@ -1901,13 +1905,46 @@ export default function MapScreen() {
   const clearRecenterTimer = () => {
     if (recenterTimerRef.current) { clearTimeout(recenterTimerRef.current); recenterTimerRef.current = null; }
   };
+  // ── AUTO-RECENTER IS A TIMESTAMP, NOT A TIMER (2026-07-30) ──────────────────
+  // Jeff: "plotted a route, turned the screen off, and when I turned the phone back
+  // on it re-oriented weird" — the map came back FLAT and NORTH-UP mid-drive.
+  //
+  // Two things had to line up. First, dropping follow during navigation orphans the
+  // camera completely: the imperative lockstep that owns bearing+pitch requires
+  // followUser (ConvoyMapbox lockReadyRef), and native follow is deliberately OFF
+  // while heading-up (followUserLocation = ... && !headingUp). So with followUser
+  // false there is NO camera driver at all, and the map sits at the style default —
+  // north-up, no pitch. Exactly the screenshot.
+  //
+  // Second, the thing meant to rescue it was `setTimeout(..., 20000)`. iOS SUSPENDS
+  // JS TIMERS WHILE THE PHONE IS LOCKED, which is precisely the state being described
+  // — screen off, phone in a mount. The 20s recenter never fired, so the orphaned
+  // camera stayed orphaned for the rest of the drive. This codebase has been bitten
+  // by that exact trap twice before (the CarPlay alert modals that never dismissed);
+  // the standing rule from it is: never hinge driver-facing behaviour on a JS timer.
+  //
+  // So the deadline is now a TIMESTAMP, released from the GPS-fix handler — which
+  // keeps arriving with the screen off because background location does. The timer is
+  // kept only as a fast path for the ordinary unlocked case; whichever fires first
+  // wins, and both are idempotent.
+  const panHoldUntilRef = useRef(0);
   const handleUserPan = () => {
     setIsFollowing(false);            // driver took control — stop chasing
     setNorthUpHold(false);            // a manual pan releases the compass north-up hold
     clearRecenterTimer();
-    recenterTimerRef.current = setTimeout(() => { setIsFollowing(true); }, 20000); // auto-recenter after 20s idle
+    panHoldUntilRef.current = Date.now() + PAN_RECENTER_MS;
+    recenterTimerRef.current = setTimeout(() => { setIsFollowing(true); }, PAN_RECENTER_MS);
   };
-  const recenterNow = () => { clearRecenterTimer(); setIsFollowing(true); };
+  const recenterNow = () => { clearRecenterTimer(); panHoldUntilRef.current = 0; setIsFollowing(true); };
+  // Called from the position watch on every fix. Cheap, and the only release path
+  // that survives a locked screen.
+  const releasePanHoldIfDue = () => {
+    const until = panHoldUntilRef.current;
+    if (!until || Date.now() < until) return;
+    panHoldUntilRef.current = 0;
+    clearRecenterTimer();
+    setIsFollowing(true);
+  };
   useEffect(() => () => clearRecenterTimer(), []); // tidy on unmount
   // User map-zoom offset, driven by the +/- buttons on the left. Rides on the
   // follow zoom inside ConvoyMapbox (clamped there too). Negative = wider, positive = closer.
@@ -2536,6 +2573,8 @@ export default function MapScreen() {
             // the departure-direction pick prefers before falling back to the
             // magnetometer. See src/departureBearing.ts.
             noteCourse(heading);
+            // Survives a locked screen, unlike the 20s timer — see handleUserPan.
+            releasePanHoldIfDue();
             // Push to the position history buffer so we can recall where the
             // driver was 5s ago (when they tap a hazard/police report button).
             posHistoryRef.current.push({ lat: pos.coords.latitude, lng: pos.coords.longitude, ts: Date.now() });

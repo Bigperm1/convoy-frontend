@@ -1445,22 +1445,33 @@ const CAR_MAP_BUTTON_COL_W = 42;
 const CREW_PILL_H = 22;
 // True top-centre for the pill (iOS 26 has no full-width nav bar to clear).
 const CAR_PILL_TOP = 4;
-// ── NAV-BAR SIDE WIDTHS (2026-07-30) ─────────────────────────────────────────
-// What each side of the CarPlay navigation bar occupies, so the crew pill can be
-// centred in the gap between them rather than on the screen.
-//   leading  = edge margin 16 + one 44pt image button (the comms mic)      = 60
-//   trailing = edge margin 16 + "End" ~44 + gap 8 + "Search" ~62           = 130
-// (CAR_BAR_BUTTON_CONFIG in carActions.ts is the source of that inventory; note the
-// trailing array is REVERSED vs visual order, so array[0] "End" is the far corner.)
+// ── NAV-BAR SIDE WIDTHS — MEASURED off a head unit (2026-07-30) ──────────────
+// What each side of the CarPlay navigation bar occupies, so the crew pill centres in
+// the gap between the buttons rather than on the screen.
 //
-// ⚠ DERIVED FROM STANDARD BAR METRICS, NOT MEASURED. CarPlay exposes no frame for a
-// CPBarButton — there is no API to ask — and the two trailing widths depend on the
-// system font at the head unit's scale. The pill is now ~35pt left of screen centre;
-// if a head-unit photo shows it off, these two numbers are the ONLY knobs and both
-// are OTA-tunable. Android Auto draws no such bar over our surface, so it keeps the
-// full width and stays screen-centred.
-const CAR_BAR_LEADING_W = IS_AA ? 0 : 60;
-const CAR_BAR_TRAILING_W = IS_AA ? 0 : 130;
+// First pass DERIVED these from standard bar metrics (60 / 130) and Jeff's photo
+// showed the pill still left of the gap. So they are now measured off that photo
+// instead, against a 431pt canvas:
+//
+//   mic button      spans  51 ..  97pt   -> leading side occupied to 97
+//   crew pill       spans 102 .. 280pt   (centre 191 — the reported error)
+//   "Search" starts at    312pt          -> trailing side occupied from 312
+//   "End" ends at         428pt          (~431 canvas: the check that the frame is right)
+//   ideal gap centre = (97 + 312) / 2   =  205pt
+//
+// ⚠ THE FRAME THAT MAKES THIS WORK. Our RN surface spans the FULL CarPlay window,
+// including the strip under Apple's app dock — it is not inset to the right of it.
+// Confirmed against a constant we already trust: the weather chip renders at
+// CAR_DOCK_LEFT (56pt) from the surface's left edge, and it only lands where the
+// photo shows it if x=0 is the window edge, not the dock edge. Measure from the wrong
+// origin and every number above is ~45pt out. (This is also why CAR_DOCK_LEFT is 56
+// on CarPlay and 6 on Android Auto — it is clearing that dock.)
+//
+// Perspective in a dashboard photo costs a few points of accuracy, so these carry a
+// small margin rather than being pinned to the raw reading. Both are OTA-tunable.
+// Android Auto draws no bar over our surface and keeps the full width.
+const CAR_BAR_LEADING_W = IS_AA ? 0 : 104;
+const CAR_BAR_TRAILING_W = IS_AA ? 0 : 126;
 // Jeff (2026-07-24, second pass): all three rows share ONE WIDTH — he may add a
 // third button on the right, and a ragged stack would then need re-tuning. So the
 // rows STRETCH to the stack width (navStack alignItems:'stretch') and the width

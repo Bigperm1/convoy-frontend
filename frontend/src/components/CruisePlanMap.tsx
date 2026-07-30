@@ -15,30 +15,33 @@
 // planner that re-framed on every edit would fight the pinch the user just did. Adding
 // a stop by tapping therefore leaves the viewport exactly where they put it.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { MapView, Camera, ShapeSource, LineLayer, MarkerView } from '@rnmapbox/maps';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Image } from 'react-native';
+import Mapbox, { MapView, Camera, ShapeSource, LineLayer, MarkerView } from '@rnmapbox/maps';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
 import { fetchMapboxRouteVia } from '../mapboxDirections';
 import { decodePolyline } from '../nav';
-import { getMapMode, getSettings } from '../settings';
+import { getSettings, getRouteColor } from '../settings';
 
 export type PlanPoint = { lat: number; lng: number; label?: string };
 
-// Mapbox style per the user's map-mode setting, so the planner looks like the app.
-function planStyleUrl(): string {
-  const mode = getMapMode(getSettings());
-  if (mode === 'satellite') return 'mapbox://styles/mapbox/satellite-streets-v12';
-  if (mode === 'night' || mode === 'dusk') return 'mapbox://styles/mapbox/dark-v11';
-  return 'mapbox://styles/mapbox/streets-v12';
-}
+// ── SAME BASEMAP AS THE MAIN MAP, LOCKED TO DUSK (2026-07-30, Jeff's call) ───
+// This used to pick between the generic `dark-v11` / `streets-v12` / satellite
+// styles, which is why the planner looked nothing like the app: the drive map uses
+// Mapbox STANDARD with a time-of-day lightPreset (ConvoyMapbox :1853), giving the
+// tilted dark vector basemap with 3D buildings. Same style URL here, and the preset
+// is PINNED to 'dusk' rather than following the user's map mode — a planner is used
+// indoors at any hour, and dusk is the look the route line and pins were designed
+// against, so it stays legible no matter what the driver has set for driving.
+const PLAN_STYLE_URL = 'mapbox://styles/mapbox/standard';
+const PLAN_LIGHT_PRESET = 'dusk';
 
 export type PlanStyle = 'fastest' | 'scenic';
 export type PlanRoute = { polyline: string; coords: [number, number][]; distanceM: number; durationS: number };
 export type PlanRoutes = { fastest: PlanRoute | null; scenic: PlanRoute | null };
 
 export default function CruisePlanMap({
-  start, stops, end, onAddStop, style = 'fastest', onRoutes, height = 260,
+  start, stops, end, onAddStop, style = 'fastest', showScenic = true, onRoutes, height = 260,
 }: {
   start: PlanPoint | null;
   stops: PlanPoint[];
@@ -47,11 +50,19 @@ export default function CruisePlanMap({
   // Which line is the chosen one. The other is still drawn, dimmed, so the trade-off
   // is visible on the map rather than only in a chip — the way Maps shows it.
   style?: PlanStyle;
+  // Set false when the caller has withdrawn the scenic option (e.g. it is absurdly
+  // longer). Keeps the map honest with the chips instead of drawing a line the UI says
+  // does not exist.
+  showScenic?: boolean;
   // Both variants handed back so the creator can label the chips with real numbers and
   // store the chosen polyline with the cruise.
   onRoutes?: (r: PlanRoutes) => void;
   height?: number;
 }) {
+  // The DRIVE map's route colour (settings.routeColor, brand green by default) — not
+  // COLORS.primary, which is the UI's system blue and is why the planner's line read as
+  // a different feature entirely from the route people navigate.
+  const routeColor = getRouteColor(getSettings());
   const cameraRef = useRef<React.ElementRef<typeof Camera> | null>(null);
   const [routes, setRoutes] = useState<PlanRoutes>({ fastest: null, scenic: null });
   const [busy, setBusy] = useState(false);
@@ -184,8 +195,9 @@ export default function CruisePlanMap({
 
   // Selected line on top, the alternative dimmed underneath. lineSortKey floats the
   // chosen one so it is never hidden where they overlap.
-  const sel = style === 'scenic' ? routes.scenic : routes.fastest;
-  const other = style === 'scenic' ? routes.fastest : routes.scenic;
+  const scenicLine = showScenic ? routes.scenic : null;
+  const sel = style === 'scenic' ? scenicLine : routes.fastest;
+  const other = style === 'scenic' ? routes.fastest : scenicLine;
   const routeFC: any = {
     type: 'FeatureCollection',
     features: [
@@ -203,7 +215,7 @@ export default function CruisePlanMap({
     <View style={[styles.wrap, { height }]}>
       <MapView
         style={StyleSheet.absoluteFill}
-        styleURL={planStyleUrl()}
+        styleURL={PLAN_STYLE_URL}
         projection="mercator"
         scaleBarEnabled={false}
         logoEnabled={false}
@@ -225,6 +237,11 @@ export default function CruisePlanMap({
       >
         <Camera ref={cameraRef} />
 
+        {/* The Standard basemap's lighting — the same StyleImport the drive map uses
+            (ConvoyMapbox :2602), pinned to dusk. `existing` targets the style's own
+            basemap import rather than adding a second one. */}
+        <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: PLAN_LIGHT_PRESET }} />
+
         {hasAnyLine && (
           <ShapeSource id="cruise-plan-route" shape={routeFC}>
             <LineLayer
@@ -240,7 +257,7 @@ export default function CruisePlanMap({
             <LineLayer
               id="cruise-plan-core"
               style={{
-                lineColor: ['case', ['==', ['get', 'sel'], 1], COLORS.primary, '#8E8E93'] as any,
+                lineColor: ['case', ['==', ['get', 'sel'], 1], routeColor, '#8E8E93'] as any,
                 lineWidth: ['case', ['==', ['get', 'sel'], 1], 4, 2.5] as any,
                 lineOpacity: ['case', ['==', ['get', 'sel'], 1], 1, 0.75] as any,
                 lineCap: 'round', lineJoin: 'round',
@@ -258,19 +275,25 @@ export default function CruisePlanMap({
           </MarkerView>
         )}
 
+        {/* Stops + end use the HAIRPIN BRAND PIN — the same art and the same numbered
+            badge the drive map draws (ConvoyMapbox destination pin + stop pins), so a
+            planned trip and a live one read identically. The meeting point keeps a flag
+            instead: it is a rally point, not a destination, and the drive map has no
+            equivalent to copy. */}
         {stops.map((s, i) => (
           <MarkerView key={`plan-stop-${i}-${s.lat.toFixed(5)},${s.lng.toFixed(5)}`} coordinate={[s.lng, s.lat]} anchor={{ x: 0.5, y: 1 }}>
-            <View style={[styles.pin, styles.pinStop]}>
-              <Text style={styles.pinNum}>{i + 1}</Text>
+            <View style={styles.brandPinWrap}>
+              <Image source={require('../../assets/images/brand-pin.png')} style={styles.brandPin} resizeMode="contain" />
+              <View style={styles.brandPinBadge}>
+                <Text style={styles.brandPinNum}>{i + 1}</Text>
+              </View>
             </View>
           </MarkerView>
         ))}
 
         {end && (
           <MarkerView coordinate={[end.lng, end.lat]} anchor={{ x: 0.5, y: 1 }}>
-            <View style={[styles.pin, styles.pinEnd]}>
-              <Ionicons name="location" size={12} color="#FFFFFF" />
-            </View>
+            <Image source={require('../../assets/images/brand-pin.png')} style={styles.brandPin} resizeMode="contain" />
           </MarkerView>
         )}
       </MapView>
@@ -313,10 +336,16 @@ const styles = StyleSheet.create({
     width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: '#0B0B0C',
   },
-  pinStart: { backgroundColor: COLORS.primary },
-  pinStop: { backgroundColor: '#FFFFFF' },
-  pinEnd: { backgroundColor: '#E4002B' },
-  pinNum: { color: '#0B0B0C', fontSize: 12, fontWeight: '800' },
+  pinStart: { backgroundColor: '#2DEC86' },
+  // Brand pin, same geometry as the drive map's (ConvoyMapbox brandPin / brandPinBadge):
+  // 73x95 source at 34x44, badge centred on the pin's round head.
+  brandPin: { width: 34, height: 44 },
+  brandPinWrap: { width: 34, height: 44, alignItems: 'center' },
+  brandPinBadge: {
+    position: 'absolute', top: 5, left: 7, width: 20, height: 20, borderRadius: 10,
+    backgroundColor: '#0A1A10', alignItems: 'center', justifyContent: 'center',
+  },
+  brandPinNum: { color: '#2DEC86', fontSize: 14, fontWeight: '800' },
   zoomCol: { position: 'absolute', right: 8, top: 8, gap: 6 },
   zoomBtn: {
     width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center',

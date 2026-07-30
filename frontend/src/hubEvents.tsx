@@ -288,6 +288,22 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
     if (Math.abs(f - sc) < 60) return null;         // a wash — don't crown either
     return f < sc ? 'fastest' : 'scenic';
   })();
+  // ── DON'T OFFER AN ABSURD SCENIC (2026-07-30) ───────────────────────────────
+  // Caught on device: a Horseshoe Bay run offered "Scenic 19h 15m · 1371 km" beside
+  // "Direct 2h 25m". Excluding motorways between two points that are only sanely
+  // joined BY a motorway sends the line across the province. That is not a scenic
+  // route, it is a mistake, and offering it as a peer of the direct route is worse
+  // than offering nothing. Same 2.5x guard the drive map already applies.
+  const scenicAbsurd = (() => {
+    const f = planRoutes.fastest?.durationS, sc = planRoutes.scenic?.durationS;
+    return typeof f === 'number' && typeof sc === 'number' && f > 0 && sc > f * 2.5;
+  })();
+  const scenicOffered = !!planRoutes.scenic && !scenicAbsurd;
+  // If the selection is standing on a route we've just withdrawn, fall back.
+  useEffect(() => {
+    if (routeStyle === 'scenic' && !scenicOffered && planRoutes.fastest) setRouteStyle('fastest');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenicOffered, planRoutes.fastest]);
   const bestOrder = async () => {
     if (!venue || !end || stops.length < 2 || ordering) return;
     setOrdering(true);
@@ -416,6 +432,7 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
                       stops={stops}
                       end={end}
                       style={routeStyle}
+                      showScenic={scenicOffered}
                       onRoutes={setPlanRoutes}
                       onAddStop={(p) => setStops((cur) => (
                         cur.length >= ROUTABLE_MAX_STOPS
@@ -430,7 +447,7 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
                     {(end || stops.length > 0) && (
                       <View style={styles.styleRow}>
                         {(['fastest', 'scenic'] as PlanStyle[]).map((k) => {
-                          const r = k === 'scenic' ? planRoutes.scenic : planRoutes.fastest;
+                          const r = k === 'scenic' ? (scenicOffered ? planRoutes.scenic : null) : planRoutes.fastest;
                           const on = routeStyle === k;
                           return (
                             <TouchableOpacity
@@ -451,7 +468,7 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
                                   {quicker === k ? ' · quickest' : ''}
                                 </Text>
                                 <Text style={[styles.styleChipSub, on && styles.styleChipSubOn]} numberOfLines={1}>
-                                  {fmtLeg(r)}
+                                  {k === 'scenic' && scenicAbsurd ? 'no back-road route' : fmtLeg(r)}
                                 </Text>
                               </View>
                             </TouchableOpacity>
@@ -459,7 +476,7 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
                         })}
                       </View>
                     )}
-                    {routeStyle === 'scenic' && !planRoutes.scenic && (
+                    {routeStyle === 'scenic' && !scenicOffered && (
                       <Text style={styles.helpText}>No motorway-free route exists between these points — showing the fastest one.</Text>
                     )}
                     {/* Scout's road knowledge — names good driving roads between the

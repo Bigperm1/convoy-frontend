@@ -44,6 +44,8 @@ import {
   playLibrarySong,
   playLibraryPlaylist,
   playRecentItem,
+  playPlaylist,
+  isAppleLibraryId,
   toggle,
   skipNext,
   skipPrev,
@@ -216,7 +218,22 @@ export default function MusicScreen() {
   const [appleShuffle, setAppleShuffle] = useState(false);
   const toggleAppleShuffle = () => { const ns = !appleShuffle; setAppleShuffle(ns); setShuffle(ns); };
   // Slide-up "share to members" sheet for the now-playing track.
-  const [shareOpen, setShareOpen] = useState(false);
+  // What the share sheet is currently offering: the now-playing track, or a whole
+  // playlist. One slot rather than a boolean, because the payload now varies.
+  const [sharePayload, setSharePayload] = useState<any | null>(null);
+  // Build a shareable playlist payload. playlistId is what lets the recipient PLAY
+  // it — meaningful for an Apple catalog playlist, inert for a personal library one
+  // (see the receiver in applyPendingMusic).
+  const sharePlaylist = useCallback((p: { id?: string; name?: string; artworkUrl?: string }) => {
+    Haptics.selectionAsync().catch(() => {});
+    setSharePayload({
+      kind: "music",
+      mediaType: "playlist",
+      playlistId: p?.id,
+      title: p?.name,
+      artworkUrl: p?.artworkUrl,
+    });
+  }, []);
   // Playlist detail sheet — tapping a playlist opens its track list instead of
   // immediately playing the whole playlist.
   const [detailPlaylist, setDetailPlaylist] = useState<ApplePlaylist | null>(null);
@@ -348,6 +365,22 @@ export default function MusicScreen() {
   const applyPendingMusic = useCallback(async () => {
     const m = shareInbox.takeMusic();
     if (!m) return;
+    // ── A SHARED PLAYLIST (2026-07-30) ────────────────────────────────────────
+    // A CATALOG playlist (Apple's own, pl....) exists identically in every
+    // subscriber's account, so the id alone is enough — queue it and go.
+    //
+    // A LIBRARY playlist (p....) is the sender's private copy: that id resolves to
+    // nothing on this device, and the native catalogSearch only accepts "songs" and
+    // "albums", so there is no way to look one up by name either. Rather than fail
+    // silently we fall through to the song search below, which at least surfaces
+    // something for the title. Making a personal playlist truly shareable needs
+    // "playlists" added to the native search types — a build, not an OTA.
+    if (m.mediaType === "playlist" && m.playlistId && isMusicSupported && authorized) {
+      if (!isAppleLibraryId(m.playlistId)) {
+        const ok = await playPlaylist(m.playlistId);
+        if (ok) return;
+      }
+    }
     const q = [m.title, m.artist].filter(Boolean).join(" ").trim();
     if (!q) return;
     setQuery(q);
@@ -498,6 +531,13 @@ export default function MusicScreen() {
                           style={styles.recentCard}
                           activeOpacity={0.8}
                           onPress={() => playRecentItem(it)}
+                          // Hold to share. Recently Played is where Apple's CURATED
+                          // playlists live, and a catalog playlist is the one kind a
+                          // crew member can actually play on their own device.
+                          onLongPress={() => it.type === "playlist"
+                            ? sharePlaylist({ id: it.id, name: it.title, artworkUrl: it.artworkUrl })
+                            : undefined}
+                          delayLongPress={350}
                           testID={`am-recent-${i}`}
                         >
                           {artURL(it.artworkUrl, 200) ? (
@@ -524,6 +564,8 @@ export default function MusicScreen() {
                           style={styles.playlistCard}
                           activeOpacity={0.8}
                           onPress={() => openPlaylistDetail(p)}
+                          onLongPress={() => sharePlaylist(p)}
+                          delayLongPress={350}
                           testID={`am-playlist-${i}`}
                         >
                           {artURL(p.artworkUrl, 200) ? (
@@ -744,7 +786,16 @@ export default function MusicScreen() {
                 <Text style={styles.nowSub} numberOfLines={1}>{song?.artistName ?? song?.artist ?? ""}</Text>
               </View>
               <TouchableOpacity
-                onPress={() => { Haptics.selectionAsync().catch(() => {}); setShareOpen(true); }}
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  setSharePayload(song ? {
+                    kind: "music",
+                    title: song?.title ?? song?.name,
+                    artist: song?.artistName ?? song?.artist,
+                    artworkUrl: song?.artworkUrl ?? song?.artwork?.url,
+                    url: song?.url,
+                  } : null);
+                }}
                 hitSlop={8}
                 testID="am-share"
                 style={{ marginRight: 2 }}
@@ -769,19 +820,9 @@ export default function MusicScreen() {
       )}
 
       <ShareSheet
-        visible={shareOpen}
-        onClose={() => setShareOpen(false)}
-        share={
-          song
-            ? {
-                kind: "music",
-                title: song?.title ?? song?.name,
-                artist: song?.artistName ?? song?.artist,
-                artworkUrl: song?.artworkUrl ?? song?.artwork?.url,
-                url: song?.url,
-              }
-            : null
-        }
+        visible={!!sharePayload}
+        onClose={() => setSharePayload(null)}
+        share={sharePayload}
       />
 
       {/* Playlist detail — tap a playlist to see its songs and pick one. */}
@@ -807,6 +848,14 @@ export default function MusicScreen() {
                   {detailLoading ? "Loading…" : `${detailSongs.length} song${detailSongs.length === 1 ? "" : "s"}`}
                 </Text>
               </View>
+              <TouchableOpacity
+                onPress={() => detailPlaylist && sharePlaylist(detailPlaylist)}
+                style={styles.plClose}
+                hitSlop={8}
+                testID="am-share-playlist"
+              >
+                <Ionicons name="share-outline" size={19} color={COLORS.text} />
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => setDetailPlaylist(null)} style={styles.plClose} hitSlop={8}>
                 <Ionicons name="close" size={20} color={COLORS.text} />
               </TouchableOpacity>

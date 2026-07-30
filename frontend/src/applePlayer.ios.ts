@@ -231,20 +231,57 @@ export async function playLibraryPlaylist(playlistId: string, startingAt = -1): 
   }
 }
 
-/** Best-effort play for a recently-played library item (song/playlist/album). */
+// Does this MusicKit id belong to the user's LIBRARY, or to the Apple Music CATALOG?
+// Mirrors QueueService.isLibraryId in the native module — library ids are prefixed
+// "l.", "i." or "p.", and everything else is catalog.
+// ⚠ Note "pl." (an Apple-curated playlist) does NOT match "p." — the dot matters, and
+// that distinction is the whole of the bug fixed below.
+export function isAppleLibraryId(id: string): boolean {
+  return /^(l\.|i\.|p\.)/.test(id || "");
+}
+
+/**
+ * Play a recently-played item — library OR catalog.
+ *
+ * ── THE BUG (Jeff, 2026-07-30) ────────────────────────────────────────────────
+ * "The 2 recently played playlists with the album art are Apple Music's curated
+ * playlists, not mine, but they're not clickable/playable."
+ *
+ * Recently Played mixes the user's own library items with Apple's CATALOG ones —
+ * that is where "100 All-Time Summer Songs" and "Afrobeats Hits" come from, and you
+ * can tell them apart by the little Apple Music badge on the artwork. This function
+ * hard-coded the LIBRARY path for every playlist (playLibraryPlaylist -> a library
+ * fetch by id). A curated playlist's id is a catalog id (pl....), so that lookup
+ * found nothing, threw itemNotFound("Playlist", inLibrary: true), and the catch below
+ * turned it into a console.warn — a tap that silently did nothing.
+ *
+ * setPlaybackQueue already routes by id prefix in the native module and handles song,
+ * album, playlist and station on BOTH sides. So stop second-guessing it: hand it the
+ * id and the type and let it choose. Library items behave exactly as before.
+ */
 export async function playRecentItem(item: RecentItem): Promise<void> {
   if (!item?.id) return;
   try {
-    if (item.type === "playlist") {
-      await (MusicKit as any).playLibraryPlaylist(item.id, -1);
-    } else if (item.type === "song") {
-      await (MusicKit as any).playLibrarySong(item.id);
-    } else {
-      await (MusicKit as any).setPlaybackQueue(item.id, item.type || "album");
-    }
+    await (MusicKit as any).setPlaybackQueue(item.id, item.type || "album");
     await Player.play();
   } catch (e) {
     console.warn("[applePlayer] playRecentItem failed", e);
+  }
+}
+
+/**
+ * Play a playlist by id, from the library or the catalog. Used by the playlist
+ * cards and by an incoming shared playlist.
+ */
+export async function playPlaylist(playlistId: string): Promise<boolean> {
+  if (!playlistId) return false;
+  try {
+    await (MusicKit as any).setPlaybackQueue(playlistId, "playlist");
+    await Player.play();
+    return true;
+  } catch (e) {
+    console.warn("[applePlayer] playPlaylist failed", e);
+    return false;
   }
 }
 

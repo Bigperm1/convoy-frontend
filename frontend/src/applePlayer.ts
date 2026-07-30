@@ -85,6 +85,17 @@ export async function playRecentItem(_item: RecentItem): Promise<void> {
   /* no-op off iOS */
 }
 
+// Mirrors the iOS helper so callers need no Platform check. Off iOS there is no
+// MusicKit at all, so every id is "not a library id" is meaningless — return false
+// and let the caller's catalog branch no-op through playPlaylist below.
+export function isAppleLibraryId(_id: string): boolean {
+  return false;
+}
+
+export async function playPlaylist(_playlistId: string): Promise<boolean> {
+  return false;
+}
+
 export async function playSong(_songId: string): Promise<void> {
   /* no-op off iOS */
 }

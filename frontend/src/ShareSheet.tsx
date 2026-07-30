@@ -22,7 +22,12 @@ import { getVehiclePngOrDefault } from "./vehicleAssets";
 // "music" payload; the map (routes) and comms screens can reuse this same
 // sheet later by passing "route" / "comm" payloads.
 export type SharePayload =
-  | { kind: "music"; title?: string; artist?: string; url?: string; artworkUrl?: string }
+  // `mediaType` distinguishes a single track from a whole playlist. Absent = song,
+  // so every existing sender keeps working unchanged. `playlistId` is only useful to
+  // the recipient when it is a CATALOG id (pl....) — a library id (p....) means
+  // nothing on someone else's device, and the receiver handles that.
+  | { kind: "music"; title?: string; artist?: string; url?: string; artworkUrl?: string;
+      mediaType?: "song" | "playlist"; playlistId?: string }
   | { kind: "route"; name?: string; dest_label?: string; dest_lat?: number; dest_lng?: number; polyline?: string }
   | { kind: "comm"; id?: string; channel?: string };
 
@@ -147,10 +152,13 @@ export default function ShareSheet({ visible, onClose, share }: Props) {
   }, [share, selected, sending, communityId, onClose]);
 
   const allSelected = members.length > 0 && selected.size === members.length;
-  const kindLabel = share?.kind === "route" ? "route" : share?.kind === "comm" ? "clip" : "song";
+  const isPlaylist = share?.kind === "music" && (share as any).mediaType === "playlist";
+  const kindLabel = share?.kind === "route" ? "route"
+    : share?.kind === "comm" ? "clip"
+    : isPlaylist ? "playlist" : "song";
   const headline =
     share?.kind === "music"
-      ? (share as any).title || "Share this song"
+      ? (share as any).title || (isPlaylist ? "Share this playlist" : "Share this song")
       : share?.kind === "route"
         ? (share as any).name || (share as any).dest_label || "Share this route"
         : "Share this clip";

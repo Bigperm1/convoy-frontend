@@ -89,11 +89,12 @@ export default function ShareToast() {
     k === "music"
       ? p.title
         ? `${p.title}${p.artist ? "  ·  " + p.artist : ""}`
-        : "a song"
+        : (p.mediaType === "playlist" ? "a playlist" : "a song")
       : k === "route"
         ? p.name || p.dest_label || "a route"
         : "a clip";
-  const verb = k === "route" ? "shared a route" : k === "comm" ? "shared a clip" : "shared a song";
+  const verb = k === "route" ? "shared a route" : k === "comm" ? "shared a clip"
+    : (p.mediaType === "playlist" ? "shared a playlist" : "shared a song");
 
   const open = () => {
     dismiss();
@@ -108,8 +109,9 @@ export default function ShareToast() {
         fromHandle: event.fromHandle,
         sharedAt: typeof p.shared_at === "number" ? p.shared_at : Date.now(),
       });
-    } else if (k === "music" && (p.title || p.url)) {
-      shareInbox.setMusic({ title: p.title, artist: p.artist, url: p.url });
+    } else if (k === "music" && (p.title || p.url || p.playlistId)) {
+      shareInbox.setMusic({ title: p.title, artist: p.artist, url: p.url,
+        mediaType: p.mediaType, playlistId: p.playlistId });
     } else if (k === "comm" && p.id) {
       shareInbox.setComm({ id: p.id, channel: p.channel });
     }

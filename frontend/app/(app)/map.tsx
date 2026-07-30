@@ -956,6 +956,11 @@ export default function MapScreen() {
         }
         // Via fetch failed (network, or a stop Mapbox can't snap to a road) — fall
         // through to the normal origin→destination routes rather than showing nothing.
+        // SAY SO. The fall-through is the right behaviour (a route beats a blank map)
+        // but it silently drops the stop, so the drawer chips and the stop pins claim a
+        // trip the line does not actually make. That mismatch is what "it didn't make
+        // the change completely" feels like from the driver's seat, whatever caused it.
+        showInfoToast("Couldn't route through that stop — showing the direct route.");
       }
       const raw = await fetchRoutes(origin, destination, avoid);
       if (cancelled) return;
@@ -1212,11 +1217,26 @@ export default function MapScreen() {
       if (!coords || !destination) return;
       // The driver deliberately went a different way — recompute silently and let the
       // turn engine re-anchor to the new line (nav.ts) so guidance picks it up at once.
-      fetchRoutes(coords, destination, {
+      //
+      // ⚠ THIS IS WHY "ADD STOP" APPEARED TO DO NOTHING (2026-07-29). Jeff: "when I
+      // added the stop it kept the same route, the original route — it didn't make the
+      // change completely." Adding a stop mid-drive swaps in a via-route whose first
+      // leg can leave the road the car is currently on, so the turn engine reports
+      // off-route once during the swap. This handler then re-plotted with plain
+      // origin→destination and NO stops, and setRoutes threw the via-route away —
+      // restoring the exact original line. The stop stayed in the chips, so the state
+      // and the map disagreed. Every mid-drive re-plot has to go through the pinned
+      // stops, or it un-does them.
+      const avoid = {
         tolls: settings.avoidTolls,
         highways: settings.avoidHighways,
         ferries: settings.avoidFerries,
-      }).then((res) => {
+      };
+      const pinned = stopsRef.current;
+      (pinned.length
+        ? fetchRouteViaStops(coords, pinned, destination, avoid).then((r) => (r ? [r] : []))
+        : fetchRoutes(coords, destination, avoid)
+      ).then((res) => {
         if (res.length > 0) {
           // Prefer the fastest reroute that continues in the direction the car is
           // already facing, so going off-course never auto-selects a U-turn line.
@@ -1269,6 +1289,11 @@ export default function MapScreen() {
   useEffect(() => { destRef.current = destination; }, [destination]);
   const activeRouteRef = useRef<NavRoute | null>(activeRoute);
   useEffect(() => { activeRouteRef.current = activeRoute; }, [activeRoute]);
+  // PINNED STOPS, readable from callbacks that resolve later (off-route re-plot, the
+  // faster-route checker). Those run from render closures captured seconds earlier, so
+  // reading `stops` directly there would silently use a stale list.
+  const stopsRef = useRef(stops);
+  useEffect(() => { stopsRef.current = stops; }, [stops]);
   const navMutedRef = useRef(navMuted);
   useEffect(() => { navMutedRef.current = navMuted; }, [navMuted]);
   // Sync the mute from the persisted setting once it loads / changes elsewhere.
@@ -1330,6 +1355,13 @@ export default function MapScreen() {
     const baseline = tripBaselineRef.current;
     if (!origin || !dest || !cur || !baseline) return;
     if (tbtEtaRef.current && tbtEtaRef.current < 240) return; // almost there — don't bother
+    // STOPS PINNED → no offers. The candidates below come from a plain origin→dest
+    // fetch, so every one of them SKIPS the driver's stops; accepting one silently
+    // deleted the trip they built (same failure as onOffRoute above). A faster line
+    // that misses your fuel stop is not a faster route. Same reasoning as
+    // fetchRouteViaStops returning a single line: alternates through fixed waypoints
+    // are meaningless.
+    if (stopsRef.current.length) return;
 
     rerouteBusyRef.current = true;
     try {
@@ -3333,6 +3365,7 @@ export default function MapScreen() {
         externalAlerts={[]}
         highlightConvoy={settings.highlightConvoy}
         destination={destination}
+        stops={stops}
         destWeather={destWeather}
         encodedPolyline={encodedPolyline}
         // While a reroute offer is up, append its line for DISPLAY (kind "offer" →
@@ -3382,8 +3415,22 @@ export default function MapScreen() {
             : haversineMeters({ lat: last.lat, lng: last.lng }, c) <= 400;
           if (!near) return;
           lastMapTapRef.current = null; // consumed — a 3rd tap starts fresh
-          if (navMode === "turn-by-turn") return;
+          // DOUBLE-TAP: drop a destination, or ADD A STOP if a trip already exists
+          // (2026-07-29, Jeff: "we should also be able to tap the screen to pin and
+          // add a stop as well"). With a destination already set, replacing it on a
+          // double-tap was the wrong reading of the gesture anyway — you are pointing
+          // at somewhere you want to GO PAST, not somewhere to go instead. This also
+          // makes stops reachable MID-DRIVE, which is when you actually need one
+          // (fuel, food); the old `navMode === "turn-by-turn"` bail meant the map
+          // ignored the gesture exactly then. The pin-drop-as-destination path keeps
+          // its guard, since silently moving the destination mid-guidance is not
+          // something a stray double-tap should be able to do.
           try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
+          if (destination) {
+            setStops((prev) => [...prev, { lat: c.lat, lng: c.lng, label: `Stop ${prev.length + 1}` }]);
+            return;
+          }
+          if (navMode === "turn-by-turn") return;
           setDestination({ lat: c.lat, lng: c.lng, label: "Dropped pin" });
         }}
         // TAP A BASEMAP POI (restaurant, gas, park…) → the full destination

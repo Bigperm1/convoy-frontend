@@ -136,6 +136,9 @@ interface ConvoyMapboxProps {
   externalAlerts?: any[];
   highlightConvoy?: boolean;
   destination?: LatLng | null;
+  // Pinned waypoints (Add stop). Drawn as numbered brand pins so the trip the driver
+  // built is visible on the map, not just as chips in the drawer.
+  stops?: { lat: number; lng: number; label?: string }[];
   destWeather?: { kind: WeatherKind; temp: string } | null;
   // Mid-drive reroute OFFER pill (Google-style inline alternate): anchored at the
   // point where the offer route peels off the active one. Tap the pill (or the
@@ -1517,7 +1520,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
     routeColor = DEFAULT_ROUTE_COLOR,
     distanceToManeuverM, onMapPress, onPoiPress, onMapLongPress, onPeerPress, onMapReady,
-    routes = [], selectedRouteIndex = 0, onSelectRoute, destination,
+    routes = [], selectedRouteIndex = 0, onSelectRoute, destination, stops,
     offerPill, onOfferAccept, onOfferDismiss,
     hazards, speedCameras, roadEvents, places, showPlacePins = true, destWeather,
     onHazardPress, onPlacePress, onHeading, resetNorthSignal, fitCrewSignal,
@@ -2771,6 +2774,25 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             <Image source={require("../assets/images/brand-pin.png")} style={styles.brandPin} resizeMode="contain" />
           </MarkerView>
         )}
+
+        {/* STOP pins (2026-07-29) — Jeff: "we should maybe put a pin on where the
+            stop is". A stop existed only as a chip in the drawer and as a bend in the
+            line, so there was nothing on the map saying "this is the place you pinned"
+            — and nothing to tell you at a glance whether the route actually went
+            through it. Same brand pin as the destination, numbered in trip order so
+            stop 1 and stop 2 are distinguishable, matching the drawer's numbering. */}
+        {(stops || []).map((st, i) => (
+          (typeof st?.lat === "number" && typeof st?.lng === "number") ? (
+            <MarkerView key={`stop-${i}-${st.lat.toFixed(5)},${st.lng.toFixed(5)}`} coordinate={[st.lng, st.lat]} anchor={{ x: 0.5, y: 1 }}>
+              <View style={styles.brandPinWrap}>
+                <Image source={require("../assets/images/brand-pin.png")} style={styles.brandPin} resizeMode="contain" />
+                <View style={styles.brandPinBadge}>
+                  <Text style={styles.placeNumText}>{i + 1}</Text>
+                </View>
+              </View>
+            </MarkerView>
+          ) : null
+        ))}
 
         {/* Mid-drive reroute OFFER pill (Google-style) — anchored where the blue
             offer line peels off the active route. Tap → switch instantly; ✕ →

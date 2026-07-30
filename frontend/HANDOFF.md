@@ -588,3 +588,56 @@ still drops a destination, and that path keeps its mid-guidance guard.
 Everything above is API-verified arithmetic, not a drive. One trip with 3+ deliberately
 out-of-order stops proves it: the chips should visibly reorder, Scout should say so, and
 the line should pass through them in the new order.
+
+---
+
+## 14. Cruise planner, real Scenic routes, and Scout's road knowledge (2026-07-29/30)
+
+All shipped OTA on runtime 1.21.0 and **verified on the signed-in simulator**, not by reading.
+
+### Scenic is now a ROUTE, not a label
+`routeKindFor` called index 0 "best" and index 1 "scenic", so the drive map's Scenic was only
+Mapbox's first alternate — usually another freeway in a different colour. It now fetches its
+own **motorway-free** route and REPLACES that alternate (leaving it would have labelled the
+freeway "scenic" too — two scenic-coloured lines). Skipped when it duplicates the fastest line
+or exceeds 2.5× its time, since motorway-free across a mountain range is a mistake, not a
+scenic route. Verified SF→Palo Alto: **Best 36 min** (freeway) vs **Scenic 1h 19m** (peninsula).
+
+The cruise planner uses the same definition, so the two surfaces finally agree.
+
+### The cruise planner (`src/components/CruisePlanMap.tsx`)
+Route drawn through meeting point → stops → end, pinch/zoom, **tap the map to add a stop**,
+nameable stops, Direct/Scenic chips with real times, Scout's stop re-ordering behind a button
+(a scenic cruise is often deliberately "inefficient", so auto-optimising would wreck it).
+Deliberately NOT built on ConvoyMapbox — that is the drive surface (chase cam, peers, road
+snap); a planner wants the opposite of a follow camera, and separating them means nothing here
+can perturb the map people navigate with.
+
+**Three bugs that only a screenshot caught:**
+1. The map opened on **New York** with the meeting point set to Horseshoe Bay — the initial fit
+   ran before the GL map finished loading and `setCamera` was silently dropped (the same trap
+   `CarMapView`'s cold-start snap exists for). It now also fits on `onDidFinishLoadingMap`.
+2. Fitting only the FIRST point set meant adding an end location never re-framed. The rule is
+   "fit until the planner takes the wheel" — stop on the first pan/pinch, re-frame button
+   hands control back.
+3. The chips read **"Fastest 9 min" beside "Scenic 4 min"** — avoiding a motorway around an
+   interchange can genuinely be shorter, so the label was falsifiable on screen. Titles now
+   describe what each route IS (Direct / Scenic) and the quicker one is marked from the data.
+
+### Scout's road knowledge — DEPLOYED
+`POST /api/routes/scenic-suggest` (`~/convoy-backend`, pushed 2026-07-30, live on Render) +
+`src/scoutScenic.ts`. Verified end-to-end on device from Horseshoe Bay: Porteau Cove,
+Brandywine Falls, Sea to Sky Gondola — each with a one-line reason, geocoded to real pins,
+route re-plotted.
+
+⚠ **The model returns searchable NAMES, never coordinates.** That is the safety property:
+asked for lat/lng a model will produce plausible numbers for a place that does not exist, and
+an unverifiable waypoint would send a convoy down a road that isn't there. Names resolve
+through real place search or are dropped. **Never "improve" this by asking for coordinates.**
+
+Ordering stops and choosing between routes stays exact maths (Optimization / Matrix /
+Directions). The model is only ever asked what it alone knows: which roads are worth driving.
+
+### Still not verified by a human
+A real drive. §12's `congestion-probe` row is the one to query first if the green-line-in-
+traffic report recurs.

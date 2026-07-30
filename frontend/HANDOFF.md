@@ -530,3 +530,61 @@ direct route.
 above is arithmetic. **None of it has been driven.** One route with a stop, in traffic, past a
 crew-button tap, proves all four at once — and the trim needs a look at both the phone and a
 head unit at low AND highway speed.
+
+---
+
+## 13. Scout re-organises the stops (2026-07-29, shipped OTA)
+
+Jeff: *"Scout should reroute the best route based on the two added stops and the end
+destination — it should re-organise the route stops. With Google Maps I have to
+re-organise them myself. We should have as many added stops as you want, no limit."*
+
+Origin and final destination are pinned; everything in between is re-orderable — TSP with
+fixed endpoints. `src/routeOptimizer.ts`.
+
+**The LLM is deliberately not in this loop.** Scout *announces* the result; it does not
+decide it. An LLM guessing a visiting order would be slower and occasionally wrong, and
+wrong here means sending the driver the long way with nothing on screen to reveal it.
+
+### ⚠ The caps are MEASURED, not assumed — don't re-derive them
+Each was found by walking the coordinate count up until the API returned 422:
+
+| API | cap | usable stops |
+|---|---|---|
+| Optimization v1, `driving-traffic` | 12 coords | **10** |
+| Matrix, `driving-traffic` | 10 coords | too small to use |
+| Matrix, `driving` (free-flow) | 25 coords | **23** |
+| Directions, `driving-traffic` | 25 coords | **23** ← hard wall |
+
+- **≤10 stops** → Optimization API, `source=first&destination=last&roundtrip=false`.
+  Exact and traffic-aware. Verified on deliberately scrambled stops: returned west→east
+  with both ends pinned.
+- **11–23 stops** → free-flow Matrix + nearest-neighbour + 2-opt on the device, endpoints
+  never moved. Verified on 12 shuffled stops: 293 min as tapped in → 160 (NN) → **107**
+  (2-opt), recovering a perfectly monotonic west→east order.
+- **>23 stops** → the route **cannot be drawn at all**; Directions refuses >25 coordinates.
+  "No limit" is not achievable in one request. The driver is told rather than having stops
+  silently dropped. Going further needs multi-request leg stitching, which would break the
+  single refresh uuid and the one-axis segment ETA that the accurate ETA **and** the
+  congestion gradient are both built on. Mapbox Optimization **v2** (time windows, more
+  stops) exists but needs beta access — that is the route to a higher ceiling.
+
+### Integration notes
+- Reordering `stops` is the whole integration: the route-fetch effect already keys on it,
+  and `onOffRoute` now preserves stops (§12.4) so nothing un-does the new order mid-drive.
+- **Loop guard keys on the stop SET, not the order.** Reordering the same set must not
+  re-trigger the pass or `setStops` feeds itself forever.
+- Savings are claimed only when measurable like-for-like: the matrix tier scores both
+  orders off the same matrix (exact); the Optimization tier has no comparable figure and
+  so just says it reordered rather than inventing a number.
+- The rename-stop modal is now keyed by **coordinates, not array index** — a reorder while
+  it was open used to rename whichever stop landed in that slot.
+
+### Double-tap semantics (Jeff's call, confirmed)
+While routing, double-tap = **"go past here"** → adds a stop. With no destination set it
+still drops a destination, and that path keeps its mid-guidance guard.
+
+### Not yet verified by a human
+Everything above is API-verified arithmetic, not a drive. One trip with 3+ deliberately
+out-of-order stops proves it: the chips should visibly reorder, Scout should say so, and
+the line should pass through them in the new order.

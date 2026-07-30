@@ -4057,6 +4057,25 @@ export default function MapScreen() {
                 <Ionicons name="add-circle-outline" size={18} color="#fff" />
                 <Text style={styles.bannerPillBlueText}>{stops.length ? "Add another" : "Add stop"}</Text>
               </TouchableOpacity>
+              {/* SHARE THE PLOTTED ROUTE TO THE CLUB (2026-07-30).
+                  The whole feature existed EXCEPT this button: the ShareSheet was
+                  mounted below with a correct kind:"route" payload, the sheet already
+                  pulls the club roster (GET /communities/{id}) with multi-select, the
+                  push goes through /notifications/share, and the receiving half —
+                  ShareToast -> shareInbox.setRoute -> applyPendingRoute — plots it and
+                  credits the sharer. But setRouteShareOpen was never called from
+                  anywhere, so there was no way in. One pill closes it.
+                  Disabled until a destination exists, since the payload needs one. */}
+              <TouchableOpacity
+                style={[styles.bannerPill, styles.bannerPillBlue, !destination && { opacity: 0.5 }]}
+                activeOpacity={0.9}
+                testID="share-route"
+                disabled={!destination}
+                onPress={() => { Haptics.selectionAsync().catch(() => {}); setRouteShareOpen(true); }}
+              >
+                <Ionicons name="share-outline" size={18} color="#fff" />
+                <Text style={styles.bannerPillBlueText}>Share</Text>
+              </TouchableOpacity>
               {SHOW_EXTRA_ROUTE_PILLS && (
                 <>
                   <TouchableOpacity style={[styles.bannerPill, styles.bannerPillBlue]} activeOpacity={0.9} testID="saved-routes">

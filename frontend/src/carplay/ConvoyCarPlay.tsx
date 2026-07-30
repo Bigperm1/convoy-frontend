@@ -348,10 +348,56 @@ export function CarSurface() {
   // clears the speed cluster, whichever bound is larger.
   const carX = surfaceW > 0 ? (surfaceW * (1 - CAR_LEFT_PAD_FRAC)) / 2 : 0;
   const carClearLeft = carX + CAR_MODEL_HALF_W + NAV_GAP;
+  // ── HUD SCALE (2026-07-29) ──────────────────────────────────────────────────
+  // MEASURED off Say Phin's head-unit photo (Toyota, build 69) rather than assumed:
+  // the crew pill is CREW_PILL_H = 22dp tall with 11pt text, and on that screen it
+  // fills ~15% of the canvas height and ~85% of its width. That puts the Android
+  // Auto surface at roughly 250 x 143 dp — a THIRD of the area this HUD was tuned
+  // for (a 400x240pt CarPlay canvas). Reproducing the shipped numbers at 250dp
+  // yields navAvail = 250 - 184 - 48 = 18, forced up to the 120 floor, banner left
+  // edge at x=82 over a speedo spanning 56..114: Jeff's "0124 m", exactly.
+  //
+  // A head unit reports few dp for a physically large screen, so one dp there is
+  // ~4-5x the physical size of a phone dp — which is why every chip in that photo
+  // looks enormous. Widening/reflowing alone cannot fix it: three stacked rows at
+  // full size (42 + 8 + 24 + gaps) are ~74dp of a 143dp canvas and would swallow
+  // the map. So scale the HUD to the canvas it actually got, measured from the
+  // 400x240 reference, and let every chip, font and gap shrink together.
+  //
+  // ANDROID AUTO ONLY. The CarPlay surface is verified good today and its own
+  // height has never been measured here — scaling it on a guess would risk a known
+  // -good surface to fix an unrelated one.
+  const [surfaceH, setSurfaceH] = useState(0);
+  const hudScale = (IS_AA && surfaceW > 0 && surfaceH > 0)
+    ? Math.min(1, Math.max(HUD_SCALE_FLOOR, Math.min(surfaceW / CAR_REF_W, surfaceH / CAR_REF_H)))
+    : 1;
+  // Each cluster is scaled about its own anchored corner (transformOrigin), so the
+  // edge it is pinned to does not move — only its footprint shrinks. The insets
+  // themselves are real positions and stay unscaled; what scales is the box that
+  // grows away from them, which is why the collision maths below mixes the two.
+  const hudFit = (origin: string) => (hudScale < 1
+    ? { transform: [{ scale: hudScale }], transformOrigin: origin }
+    : null) as any;
+  // The transient-status row sits UNDER the crew pill, so its top offset has to
+  // follow the pill's SCALED height — otherwise it detaches and floats down the
+  // canvas as the scale drops.
+  const statusRowFit = (hudScale < 1
+    ? [{ top: CAR_PILL_TOP + (CREW_PILL_H + NAV_GAP) * hudScale }, hudFit('center top')]
+    : null) as any;
+  // Same trap, twice more. Both of these are POSITIONS derived from the speed
+  // cluster's full-size height, so at scale they drift away from the thing they are
+  // supposed to sit against — the weather chip floats up off the speedo, and the
+  // tight-canvas stack leaves a dead band. Re-derive them from the scaled height.
+  const weatherBottomFit = SPEED_DOCK_BOTTOM + (SPEED_PILL_H + 4) * hudScale;
+  const speedRowTopFit = SPEED_DOCK_BOTTOM + (SPEED_PILL_H + NAV_GAP) * hudScale;
   // Width genuinely free for the stack once the speed cluster and the car itself
-  // are cleared. May be negative on a very small canvas — that is the signal below.
+  // are cleared. The speed cluster's own left inset is a position (unscaled); the
+  // pill + limit badge that extend rightward from it are scaled.
+  const effLeftInset = CAR_DOCK_LEFT + (CAR_LEFT_INSET - CAR_DOCK_LEFT) * hudScale;
+  // Physical space free, then converted back to DESIGN units (the stack's width is
+  // written in design units and shrunk by the transform).
   const navAvail = surfaceW > 0
-    ? surfaceW - Math.max(CAR_LEFT_INSET, carClearLeft) - CAR_RIGHT_INSET
+    ? (surfaceW - Math.max(effLeftInset, carClearLeft) - CAR_RIGHT_INSET) / hudScale
     : 0;
   // ── TIGHT CANVAS REFLOW (2026-07-28, the Android Auto overlap) ──────────────
   // The comment above says "clamp downward only", but the code did the opposite:
@@ -368,10 +414,15 @@ export function CarSurface() {
   // the weather chip slides across to sit beside the speedo instead of above it.
   // Three fixed rows, no overlap possible at any canvas size, and the arithmetic —
   // not a tuned constant — decides which layout applies.
+  // With hudScale applied this is now a genuine BACKSTOP rather than the everyday
+  // path: at the measured 250x143 the scaled cluster leaves ~169 design units, so
+  // the normal side-by-side layout fits. It still fires on a canvas narrower than
+  // anything measured, and it can no longer swallow the screen because the rows it
+  // stacks are scaled too.
   const tightCanvas = surfaceW > 0 && navAvail < NAV_STACK_ABS_MIN_W;
   const navStackW = surfaceW > 0
     ? (tightCanvas
-        ? Math.max(0, surfaceW - 2 * CAR_DOCK_LEFT)
+        ? Math.max(0, (surfaceW - 2 * CAR_DOCK_LEFT) / hudScale)
         : Math.min(NAV_STACK_MAX_W, navAvail))
     : NAV_STACK_FALLBACK_W;
   const speedPulse = useRef(new Animated.Value(1)).current;
@@ -479,9 +530,11 @@ export function CarSurface() {
           style={[
             styles.navStack,
             { width: navStackW },
+            // Scaled about the bottom-right corner it is pinned to.
+            hudFit('right bottom'),
             // Tight canvas: full width, lifted one row so it clears the speed cluster
             // entirely instead of growing over it.
-            tightCanvas ? { right: CAR_DOCK_LEFT, bottom: SPEED_ROW_TOP } : null,
+            tightCanvas ? { right: CAR_DOCK_LEFT, bottom: speedRowTopFit } : null,
           ]}
           pointerEvents="none"
         >
@@ -561,6 +614,7 @@ export function CarSurface() {
         const w = e?.nativeEvent?.layout?.width;
         const h = e?.nativeEvent?.layout?.height;
         if (typeof w === 'number' && w > 0 && Math.abs(w - surfaceW) > 1) setSurfaceW(w);
+        if (typeof h === 'number' && h > 0 && Math.abs(h - surfaceH) > 1) setSurfaceH(h);
         // Android Auto only, once per process — see logAaCanvas.
         if (typeof w === 'number' && typeof h === 'number') logAaCanvas(w, h);
       }}
@@ -585,7 +639,7 @@ export function CarSurface() {
       {/* Speed pill — bottom-LEFT, offset right of the CarPlay side bar. Pulses RED
           when well over the posted limit. The posted-limit sign is rendered FIRST so
           it sits BEHIND the pill, then springs out to the right when moving (phone-style). */}
-      <View style={styles.speedDock} pointerEvents="none">
+      <View style={[styles.speedDock, hudFit('left bottom')]} pointerEvents="none">
         {limitVal != null ? (
           <Animated.View
             style={[styles.speedLimitBadge, { opacity: limitSlide, transform: [{ translateX: limitSlideX }] }]}
@@ -610,10 +664,14 @@ export function CarSurface() {
           style={[
             styles.weatherChip,
             { backgroundColor: carHudFloor() },
+            hudFit('left bottom'),
+            // Keep the chip sitting ON the speedo at any scale (its `bottom: 62` is
+            // 10 + the pill's FULL 48 + 4, so it floats away as the pill shrinks).
+            hudScale < 1 ? { bottom: weatherBottomFit } : null,
             // Tight canvas: the raised nav stack now occupies the row above the
             // speedo, so the chip moves BESIDE it — right of the fully-extended
             // posted-limit badge, which is exactly what CAR_LEFT_INSET measures.
-            tightCanvas ? { left: CAR_LEFT_INSET, bottom: SPEED_DOCK_BOTTOM } : null,
+            tightCanvas ? { left: effLeftInset, bottom: SPEED_DOCK_BOTTOM } : null,
           ]}
           pointerEvents="none"
         >
@@ -649,7 +707,7 @@ export function CarSurface() {
           (map.tsx:3204). Small and non-tappable by necessity: CarPlay routes touches
           through the template, so nothing we draw can ever be a control. Crew counts
           OTHER crew only, same rule as the phone. */}
-      <View style={styles.topCenterRow} pointerEvents="none">
+      <View style={[styles.topCenterRow, hudFit('center top')]} pointerEvents="none">
         <View style={[styles.crewPill, { backgroundColor: carHudFloor() }]}>
           <GlassFill tintColor={undefined} style={{ borderRadius: 9, overflow: 'hidden' }} />
           <Text style={styles.crewPillText} numberOfLines={1}>
@@ -670,7 +728,7 @@ export function CarSurface() {
           screen: when they glance back, the running clock is the ONE thing they want.
           Candy red matches the phone card (src/components/PitstopCard.tsx). */}
       {s.pitstopActive ? (
-        <View style={styles.statusRow} pointerEvents="none">
+        <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
             <MaterialCommunityIcons
@@ -696,7 +754,7 @@ export function CarSurface() {
            button for the rest of the drive. Expiry here is a TIMESTAMP COMPARISON at
            render, so a paused timer cannot strand it, and the worst failure is a
            caption lingering — never a dead screen. */
-        <View style={styles.statusRow} pointerEvents="none">
+        <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
             <MaterialCommunityIcons name="information-outline" size={16} color="#2DEC86" />
@@ -704,7 +762,7 @@ export function CarSurface() {
           </View>
         </View>
       ) : (Date.now() < (s.crewViewUntil || 0) && s.commsTx !== 'recording') ? (
-        <View style={styles.statusRow} pointerEvents="none">
+        <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
             <MaterialCommunityIcons name="account-group" size={16} color="#2DEC86" />
@@ -712,7 +770,7 @@ export function CarSurface() {
           </View>
         </View>
       ) : (s.commsTx === 'recording' || s.commsTx === 'sending') ? (
-        <View style={styles.statusRow} pointerEvents="none">
+        <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
             <View style={[styles.scoutDot, { backgroundColor: s.commsTx === 'recording' ? '#FF453A' : '#8E8E93' }]} />
@@ -720,7 +778,7 @@ export function CarSurface() {
           </View>
         </View>
       ) : talker ? (
-        <View style={styles.statusRow} pointerEvents="none">
+        <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
             <MaterialCommunityIcons name="account-voice" size={16} color="#FF6A00" />
@@ -728,7 +786,7 @@ export function CarSurface() {
           </View>
         </View>
       ) : (s.scoutListening || s.scoutThinking) ? (
-        <View style={styles.statusRow} pointerEvents="none">
+        <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
             <View style={[styles.scoutDot, { backgroundColor: s.scoutListening ? '#2DEC86' : '#8E8E93' }]} />
@@ -1359,10 +1417,20 @@ const CAR_DOCK_LEFT = IS_AA ? 12 : 56;
 // so the AA dock inset above can never drift out of sync with it.
 const CAR_LEFT_INSET = CAR_DOCK_LEFT + 62 + 58 + 8;
 // The speed cluster's own box, named so the tight-canvas reflow can stack a row
-// directly on top of it instead of re-deriving 10 + 48 by hand in two places.
+// directly on top of it (speedRowTopFit) and the weather chip can sit on it
+// (weatherBottomFit) instead of re-deriving 10 + 48 by hand in three places. Both
+// of those derive from the SCALED pill height — see hudScale.
 const SPEED_DOCK_BOTTOM = 10;
 const SPEED_PILL_H = 48;
-const SPEED_ROW_TOP = SPEED_DOCK_BOTTOM + SPEED_PILL_H + NAV_GAP;
+// The canvas every constant in this file was measured against: a real 800x480
+// CarPlay head-unit capture = 400x240pt. hudScale measures an Android Auto canvas
+// against it. See the hudScale comment for why 250x143 is the number to beat.
+const CAR_REF_W = 400;
+const CAR_REF_H = 240;
+// Floor. Below this the read-outs stop being glanceable at driving distance, and a
+// chip that is too small to read is no better than one that overlaps. If a real head
+// unit ever lands here the `android-auto-canvas` row will say so.
+const HUD_SCALE_FLOOR = 0.5;
 // The nav stack is anchored RIGHT (at CAR_RIGHT_INSET) and its width is measured,
 // not fixed. A fixed 210 could not co-exist with the speed cluster on a narrow
 // head unit: 184 + 210 + 76 overflows a ~431pt CarPlay canvas, which is exactly

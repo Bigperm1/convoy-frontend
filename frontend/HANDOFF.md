@@ -308,7 +308,62 @@ non-Play installs. That cost a full tester round-trip on 69.
 
 ---
 
-## 11. Android Auto HUD overlap — ROOT-CAUSED AND FIXED (2026-07-28, awaiting OTA)
+## 11. Android Auto HUD — the canvas is now MEASURED (213x107dp), 2026-07-30
+
+> ⚠ **READ THIS FIRST, IT REPLACES THE ESTIMATE BELOW.** Everything in §11 was originally
+> derived from a *photograph* of Say Phin's head unit (~250x143dp). `logAaCanvas` has now
+> reported the real thing, from his 2026-07-30 drive, 18 minutes before the photos:
+>
+> ```sql
+> select created_at, message from crash_reports
+> where message like 'android-auto-canvas%' order by created_at desc;
+> -- android-auto-canvas surface=213x107dp px=800x400 pixelRatio=3.75 window=384x832dp
+> ```
+>
+> **213 x 107 dp** — a QUARTER of the CarPlay area (400x240), not a third. pixelRatio 3.75 on
+> an 800px panel means that screen is ~7in wide for 213dp: **~34 dp/inch against a phone's
+> ~160**, i.e. one dp there is nearly 5x the physical size. That is why a HUD that is right on
+> a phone is enormous in a car, and why shrinking it costs no readability at all.
+>
+> Two things were still sized for CarPlay on that canvas, both fixed and OTA'd
+> (`b55fb425`, commit `f806d6d`):
+>
+> 1. **The 3D car** — the only element `hudScale` never touched. This is geometry, not taste:
+>    the GLB is fixed in METRES and metres-per-dp at a given zoom is fixed too, so the
+>    fraction of screen it covers grows in inverse proportion to the canvas. Measured against
+>    the shipped constants it was **37.4% of the canvas HEIGHT vs CarPlay's 16.7%** — Say
+>    Phin's *"avatar takes up half the screen"* was very nearly literal. It is now multiplied
+>    by the SAME `hudScale` the chips use (`hudScaleFor`, exported from `CarMapView.tsx` —
+>    the map needs it, and the import only runs ConvoyCarPlay -> CarMapView, never back).
+>    Result: 16.7%, identical to CarPlay.
+> 2. **The camera's vertical anchor.** `CAR_BANNER_GAP_FROM_BOTTOM` was a flat 54 while the
+>    banner stack it mirrors is scaled — so the camera pinned the car to a gap line that no
+>    longer existed. Now split into `CAR_BANNER_STACK_BOTTOM` (unscaled, a real position) and
+>    `CAR_BANNER_GAP_SCALABLE` (inside the transform), re-derived per frame.
+>
+> **Scale floor 0.5 -> 0.4.** The real canvas needs 107/240 = 0.446, so 0.5 was CLAMPING and
+> the HUD stayed 12% larger than the screen it sat on. At 0.446 the speed numerals are still
+> ~0.6in tall on that head unit.
+>
+> **Edges** (Jeff: *"push everything over to the edges"*): AA dock insets 12 -> 6, nav stack
+> bottom 8 -> 4. androidx keeps its chrome outside the stable area it hands us, so that was
+> dead margin. Nav stack 80dp -> 97dp of 213.
+>
+> **CarPlay is bit-for-bit unchanged** — verified by reproducing both surfaces from the
+> shipped constants and diffing every derived value (`hudScaleFor` returns 1 off Android).
+>
+> | | CarPlay | AA before | AA after |
+> |---|---|---|---|
+> | car height % of canvas | 16.7 | **37.4** | **16.7** |
+> | car up from bottom | 22.5% | 23.8% | 22.9% |
+> | nav stack width | 150 | 80 | 97 |
+> | free map band | 72 | 17 | 29 |
+>
+> **The method worth repeating:** four sessions argued about this layout from photographs.
+> One `logEvent` row settled it. When a surface cannot be simulated locally, ship the
+> MEASUREMENT first and do the layout arithmetic second.
+
+## 11b. The original photo-derived analysis (2026-07-28) — kept for the reasoning
 
 Say Phin's head-unit photo showed the speedo and the maneuver distance printed on top of
 each other as `0124 m`, `km/h` tucked underneath, the `20°C` chip over the ETA line, and

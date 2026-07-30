@@ -42,6 +42,7 @@ import {
 } from "../../src/nav";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue, type CongestionLevel } from "../../src/mapboxDirections";
 import { logEvent } from "../../src/crashBreadcrumb";
+import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from "../../src/routeOptimizer";
 import { usePitstop } from "../../src/pitstop";
 import { recordTrip, consumeTakeAgain, cachePeerPbs } from "../../src/trips";
 import PitstopCard from "../../src/components/PitstopCard";
@@ -499,7 +500,10 @@ export default function MapScreen() {
   // on a road trip but "Tim's in Hope" tells you what the stop IS.
   const [stops, setStops] = useState<{ lat: number; lng: number; label: string }[]>([]);
   const [stopPickerOpen, setStopPickerOpen] = useState(false);
-  const [renameStop, setRenameStop] = useState<{ idx: number; name: string } | null>(null);
+  // Keyed by the stop's COORDINATES, not its array index: Scout can reorder `stops`
+  // while this modal is open (2026-07-29), and an index would then rename whichever
+  // stop happened to land in that slot.
+  const [renameStop, setRenameStop] = useState<{ lat: number; lng: number; name: string } | null>(null);
   // Whether the turn-by-turn step list is expanded (slide-up). Lifts the FAB
   // stack / speedo / weather above the expanded drawer so they aren't covered.
   const [stepsExpanded, setStepsExpanded] = useState(false);
@@ -1185,6 +1189,73 @@ export default function MapScreen() {
       setShowSteps(true);
     }
   }, []));
+
+  // ── SCOUT REORDERS THE STOPS (2026-07-29) ───────────────────────────────────
+  // Jeff: "if I plot a stop near the end of the route and then add another that's
+  // BEFORE it, Scout should reroute the best route based on the two added stops and
+  // the end destination — it should re-organise the route stops. With Google Maps I
+  // have to re-organise them myself."
+  //
+  // Origin and final destination stay put; everything pinned in between is fair game.
+  // The ORDER is computed exactly (src/routeOptimizer.ts — Mapbox Optimization for up
+  // to 10 stops, a matrix + 2-opt on the device beyond that); Scout ANNOUNCES it. The
+  // language model is deliberately not in this loop: an LLM guessing a visiting order
+  // would be slower and occasionally wrong, and wrong here means sending the driver
+  // the long way with nothing on screen to reveal it.
+  //
+  // Reordering `stops` is all that is needed — the route-fetch effect already keys on
+  // `stops`, so the new order re-plots through fetchRouteViaStops, and the off-route
+  // handler now preserves stops, so nothing un-does it mid-drive.
+  //
+  // LOOP GUARD: the signature is the stop SET (sorted), not the order. Reordering the
+  // same set therefore does NOT re-trigger this — otherwise setStops would feed itself
+  // forever. A genuinely new or removed stop changes the set and earns a fresh pass.
+  const optimizedSetRef = useRef<string>("");
+  useEffect(() => {
+    if (!destination || stops.length < 2) { optimizedSetRef.current = ""; return; }
+    const sig = stops
+      .map((st) => `${st.lat.toFixed(5)},${st.lng.toFixed(5)}`)
+      .sort()
+      .join("|");
+    if (optimizedSetRef.current === sig) return;
+    const origin = coordsRef.current;
+    if (!origin) return;
+    if (stops.length > ROUTABLE_MAX_STOPS) {
+      // Directions itself refuses more than 25 coordinates, so this many stops cannot
+      // be drawn as one route at all — say so rather than silently dropping any.
+      optimizedSetRef.current = sig;
+      showInfoToast(`${ROUTABLE_MAX_STOPS} stops is the most one route can hold.`);
+      return;
+    }
+    let cancelled = false;
+    const ctrl = new AbortController();
+    (async () => {
+      const res = await optimizeStopOrder(
+        origin,
+        stops,
+        destination,
+        { tolls: settings.avoidTolls, highways: settings.avoidHighways, ferries: settings.avoidFerries },
+        { signal: ctrl.signal },
+      );
+      if (cancelled || !res) return;
+      optimizedSetRef.current = sig;                 // set handled, whatever the answer
+      if (isSameOrder(res.order)) return;            // already optimal — stay quiet
+      const reordered = res.order.map((i) => stops[i]);
+      setStops(reordered);
+      const n = reordered.length;
+      const savedMin = res.savedSec ? Math.round(res.savedSec / 60) : 0;
+      const savedPart = savedMin >= 1 ? ` — saves about ${savedMin} ${savedMin === 1 ? "minute" : "minutes"}` : "";
+      showInfoToast(`Scout reordered your ${n} stops for the fastest route${savedPart}.`);
+      if (!getSettings().novaMuted) {
+        try {
+          const cs = (getSettings().callSign || "").trim();
+          announce(`${cs ? cs + ", " : ""}I put your ${n} stops in the fastest order${savedPart}.`);
+        } catch {}
+      }
+    })();
+    return () => { cancelled = true; try { ctrl.abort(); } catch {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stops, destination?.lat, destination?.lng, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
 
   // PITSTOP — a stopwatch when the car parks at a gas/food place.
   //
@@ -3811,7 +3882,7 @@ export default function MapScreen() {
                     <View style={styles.stopDot}><Text style={styles.stopDotText}>{i + 1}</Text></View>
                     <TouchableOpacity
                       style={{ flex: 1, minWidth: 0 }}
-                      onPress={() => setRenameStop({ idx: i, name: st.label })}
+                      onPress={() => setRenameStop({ lat: st.lat, lng: st.lng, name: st.label })}
                       activeOpacity={0.7}
                     >
                       <Text style={styles.stopLabel} numberOfLines={1}>{st.label}</Text>
@@ -4462,7 +4533,7 @@ export default function MapScreen() {
               onSubmitEditing={() => {
                 if (!renameStop) return;
                 const nm = renameStop.name.trim();
-                if (nm) setStops((p) => p.map((st, i) => (i === renameStop.idx ? { ...st, label: nm } : st)));
+                if (nm) setStops((p) => p.map((st) => (st.lat === renameStop.lat && st.lng === renameStop.lng ? { ...st, label: nm } : st)));
                 setRenameStop(null);
               }}
             />
@@ -4474,7 +4545,7 @@ export default function MapScreen() {
                 onPress={() => {
                   if (!renameStop) return;
                   const nm = renameStop.name.trim();
-                  if (nm) setStops((p) => p.map((st, i) => (i === renameStop.idx ? { ...st, label: nm } : st)));
+                  if (nm) setStops((p) => p.map((st) => (st.lat === renameStop.lat && st.lng === renameStop.lng ? { ...st, label: nm } : st)));
                   setRenameStop(null);
                 }}
                 style={[styles.nameModalBtn, styles.nameModalSave, !(renameStop?.name || "").trim() && { opacity: 0.5 }]}

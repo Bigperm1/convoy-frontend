@@ -469,6 +469,50 @@ export const CAR_MAP_BUTTON_CONFIG = {
   ],
 };
 
+// ── ANDROID AUTO BUTTONS (2026-07-30) ────────────────────────────────────────
+// Jeff: "next on the list is getting the touch buttons on AA like CarPlay."
+//
+// AA had NO buttons at all, for two reasons that both had to be fixed:
+//
+//  1. WE SENT iOS-ONLY KEYS. androidx reads `actions` (-> ActionStrip, the button
+//     row) and `mapButtons` (-> MapActionStrip via MapController). We were sending
+//     leadingNavigationBarButtons / trailingNavigationBarButtons, which Android
+//     never looks at — and our mapButtons entries used the iOS `image` key, while
+//     RCTTemplate.parseAction reads `icon`. An Action with neither a title nor an
+//     icon is an IllegalStateException in androidx, so sending the iOS shape was
+//     at best ignored and at worst fatal to the screen. Android now gets ONLY the
+//     Android-shaped keys.
+//  2. THE PRESS HAD NOWHERE TO LAND. parseAction wires
+//     setOnClickListener { eventEmitter.buttonPressed(id) }, but MapTemplate's JS
+//     eventMap had no `buttonPressed` entry, so every press was dropped before it
+//     reached a handler. Fixed in the react-native-carplay patch (src/, so OTA-able)
+//     — the same omission that once made pinch-to-zoom dead.
+//
+// SAME IDS as CarPlay on purpose: the existing handlers below take them unchanged,
+// so the two car surfaces cannot drift apart in behaviour.
+//
+// androidx caps each strip at 4 and requires every Action to carry a title or an
+// icon. Our glyphs are data URIs (see carButtonIcons.ts), which Fresco decodes
+// through ImageSource just as [RCTConvert UIImage:] does on iOS — one artwork set,
+// both platforms.
+export const AA_ACTION_STRIP = [
+  { id: 'car-comms', icon: CAR_ICON_MIC },
+  { id: 'car-search', title: 'Search' },
+  { id: 'car-end', title: 'End' },
+];
+export const AA_MAP_BUTTONS = [
+  { id: 'car-crew', icon: CAR_ICON_CREW },
+  { id: 'car-compass', icon: CAR_ICON_COMPASS },
+];
+
+// One dispatcher for an Android Auto press. The ids are shared with CarPlay, so this
+// just picks whichever existing handler owns each id — no duplicated behaviour.
+export function handleAaButton(id?: string): void {
+  if (!id) return;
+  if (id === 'car-crew' || id === 'car-compass' || id === 'car-mic') { handleCarMapButton(id); return; }
+  handleCarBarButton(id);
+}
+
 // Map-button handler for the COLD root (no phone app in the foreground). The warm
 // root intercepts these same ids first and routes them to its live refs; anything
 // it does not claim falls through to here, so the two roots behave identically.

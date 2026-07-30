@@ -808,20 +808,22 @@ index b9891d2..319f5fe 100644
  
  export interface BarButtonText extends BarButtonBase {
 diff --git a/node_modules/react-native-carplay/src/templates/MapTemplate.ts b/node_modules/react-native-carplay/src/templates/MapTemplate.ts
-index 13a66ff..abea46e 100644
+index 13a66ff..1164d41 100644
 --- a/node_modules/react-native-carplay/src/templates/MapTemplate.ts
 +++ b/node_modules/react-native-carplay/src/templates/MapTemplate.ts
-@@ -87,6 +87,9 @@ export interface MapTemplateConfig extends TemplateConfig {
+@@ -87,6 +87,11 @@ export interface MapTemplateConfig extends TemplateConfig {
    onPanWithDirection?(e: { direction: string }): void;
    onPanBeganWithDirection?(e: { direction: string }): void;
    onPanEndedWithDirection?(e: { direction: string }): void;
++  // Convoy: Android Auto action-strip / map-action-strip press (see eventMap).
++  onButtonPressed?(e: { buttonId: string }): void;
 +  onDidBeginZoomGesture?(e: { templateId: string }): void;
 +  onDidUpdateZoomGesture?(e: { center: { x: number; y: number }; scale: number; velocity: number }): void;
 +  onDidEndZoomGesture?(e: { velocity: number }): void;
    onSelectedPreviewForTrip?(e: { tripId: string; routeIndex: number }): void;
    onDidCancelNavigation?(): void;
    onStartedTrip?(e: { tripId: string; routeIndex: number }): void;
-@@ -115,6 +118,14 @@ export class MapTemplate extends Template<MapTemplateConfig> {
+@@ -115,6 +120,22 @@ export class MapTemplate extends Template<MapTemplateConfig> {
        panWithDirection: 'onPanWithDirection',
        panBeganWithDirection: 'onPanBeganWithDirection',
        panEndedWithDirection: 'onPanEndedWithDirection',
@@ -830,13 +832,21 @@ index 13a66ff..abea46e 100644
 +      // this eventMap, so the base Template registered NO listener and the
 +      // onDidBegin/Update/EndZoomGesture config callbacks were dead wiring. Pure JS
 +      // (bundled from src/), so OTA-able.
++      // Convoy fix (2026-07-30): ANDROID AUTO action-strip / map-action-strip
++      // presses. The Kotlin side emits EventEmitter.ButtonPressed ("buttonPressed",
++      // RCTTemplate.parseAction -> setOnClickListener), but MapTemplate never mapped
++      // it, so every AA button press was dropped in JS before reaching a handler —
++      // the same omission that made pinch-to-zoom dead below. iOS is unaffected: it
++      // routes bar buttons through barButtonPressed and map buttons through
++      // mapButtonPressed, neither of which changes. Pure JS (bundled from src/), OTA-able.
++      buttonPressed: 'onButtonPressed',
 +      didBeginZoomGesture: 'onDidBeginZoomGesture',
 +      didUpdateZoomGestureWithCenter: 'onDidUpdateZoomGesture',
 +      didEndZoomGestureWithVelocity: 'onDidEndZoomGesture',
        selectedPreviewForTrip: 'onSelectedPreviewForTrip',
        didCancelNavigation: 'onDidCancelNavigation',
        startedTrip: 'onStartedTrip',
-@@ -132,6 +143,10 @@ export class MapTemplate extends Template<MapTemplateConfig> {
+@@ -132,6 +153,10 @@ export class MapTemplate extends Template<MapTemplateConfig> {
        android: ({ error }: { error?: string } = {}) => {
          error && console.error(error);
        },

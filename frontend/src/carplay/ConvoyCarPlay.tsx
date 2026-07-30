@@ -45,7 +45,7 @@ import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, getCarStat
 import CarMapView, { CAR_LEFT_PAD_FRAC, hudScaleFor } from './CarMapView';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
-import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton, carTap } from './carActions';
+import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, AA_ACTION_STRIP, AA_MAP_BUTTONS, handleCarBarButton, handleCarMapButton, handleAaButton, carTap } from './carActions';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
 import { logEvent } from '../crashBreadcrumb';
@@ -1133,8 +1133,28 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // mapButtons below still don't; kept pending the native fix). Same
             // module-scope handlers as the cold root, so behavior is identical
             // whether or not the phone app is open.
-            leadingNavigationBarButtons: CAR_BAR_BUTTON_CONFIG.leadingNavigationBarButtons,
-            trailingNavigationBarButtons: CAR_BAR_BUTTON_CONFIG.trailingNavigationBarButtons,
+            // ── PLATFORM-SHAPED BUTTONS (2026-07-30) ─────────────────────
+            // These keys are NOT interchangeable. iOS reads the two
+            // NavigationBarButtons arrays and `mapButtons` (with an `image`);
+            // androidx reads `actions` and `mapButtons` (with an `icon`). Sending
+            // the iOS shape to Android gave AA no buttons at all — and an Action
+            // with neither title nor icon is fatal to an androidx screen, so the
+            // wrong shape is worse than none. See carActions.AA_ACTION_STRIP.
+            ...(IS_AA
+              ? { actions: AA_ACTION_STRIP, mapButtons: AA_MAP_BUTTONS }
+              : {
+                  leadingNavigationBarButtons: CAR_BAR_BUTTON_CONFIG.leadingNavigationBarButtons,
+                  trailingNavigationBarButtons: CAR_BAR_BUTTON_CONFIG.trailingNavigationBarButtons,
+                }),
+            // Android Auto press. parseAction emits EventEmitter.buttonPressed(id);
+            // the JS eventMap entry that receives it is part of the carplay patch.
+            onButtonPressed: (e: { buttonId: string }) => {
+              const id = e?.buttonId;
+              carTap(id || 'aa-unknown');
+              if (id === 'car-end') { onEndRef.current?.(); return; }
+              if (id === 'car-mic' || id === 'car-comms') { onScoutMicRef.current?.(); return; }
+              handleAaButton(id);
+            },
             onBarButtonPressed: (e: { id: string }) => {
               // WARM End must end the PHONE's navigation too (Jeff's head-unit
               // report: ending on CarPlay left the phone navigating, and the
@@ -1152,7 +1172,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // Zoom ± was removed here: it ate two of CarPlay's four map-button slots
             // and crowded our nav stack. Pinch-to-zoom is untouched — see the zoom
             // gesture handlers below.
-            mapButtons: CAR_MAP_BUTTON_CONFIG.mapButtons,
+            ...(IS_AA ? {} : { mapButtons: CAR_MAP_BUTTON_CONFIG.mapButtons }),
             onMapButtonPressed: (e: { id: string }) => {
               // Warm root: prefer the live ref (reaches the mounted surface); anything
               // else falls through so cold-root behaviour stays identical. (Police was

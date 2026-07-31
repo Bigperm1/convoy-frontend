@@ -60,7 +60,12 @@ import { logEvent } from '../crashBreadcrumb';
 function carHudFloor(): string {
   const mode = getMapMode(getSettings());
   const darkMap = mode === 'dusk' || mode === 'night';
-  return darkMap ? 'transparent' : 'rgba(18,18,22,0.5)';
+  // 0.5 -> 0.32 (Jeff, 2026-07-30: "the banners are too dark, they need to be
+  // lighter and a little more transparent"). This floor sits UNDER a GlassFill, so
+  // the two opacities compound — on the day/light basemap in Say Phin's head-unit
+  // photo the pair read as near-solid black slabs over the map. Dark basemaps keep
+  // `transparent` and lean on the glass alone, as before.
+  return darkMap ? 'transparent' : 'rgba(18,18,22,0.32)';
 }
 import { routeKindFor, routeColorsFor } from '../ConvoyMapbox';
 import { weatherKind, type WeatherCondition, type WeatherKind } from '../weatherLayer';
@@ -455,7 +460,18 @@ export function CarSurface() {
   const navStackW = surfaceW > 0
     ? (tightCanvas
         ? Math.max(0, (surfaceW - 2 * CAR_DOCK_LEFT) / hudScale)
-        : Math.min(NAV_STACK_MAX_W, navAvail))
+        : Math.min(
+            NAV_STACK_MAX_W,
+            navAvail,
+            // AA WIDTH CAP (Jeff: "the banners are too wide on the right side").
+            // navAvail is everything left over after the car and the speed cluster,
+            // which on a wide head unit is most of the screen — so the stack grew to
+            // fill it and swallowed the map. Cap it to a share of the canvas instead;
+            // expressed in DESIGN units (÷ hudScale) because the width is applied
+            // inside the scale transform. CarPlay is unaffected: its canvas is narrow
+            // enough that navAvail is always the binding limit there.
+            IS_AA && surfaceW > 0 ? (surfaceW * AA_NAV_STACK_MAX_FRAC) / hudScale : Infinity,
+          ))
     : NAV_STACK_FALLBACK_W;
   const speedPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -1542,6 +1558,9 @@ const SPEED_PILL_H = 48;
 // line must fit; grow toward the car rather than truncate). Long street names
 // still marquee rather than widening further.
 const NAV_STACK_MAX_W = 260;
+// Largest share of the Android Auto canvas the right-hand nav stack may occupy.
+// OTA-tunable; lower it if the stack still crowds the map on a wide head unit.
+const AA_NAV_STACK_MAX_FRAC = 0.42;
 // Absolute floor — readability past this point is already lost, and going lower
 // would be worse than a narrow banner. Deliberately NOT a "preferred" width: see
 // the clamp-downward comment at the navStackW computation.

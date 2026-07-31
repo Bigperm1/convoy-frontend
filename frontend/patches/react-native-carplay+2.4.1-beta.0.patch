@@ -938,3 +938,21 @@ index d39678f..2d29edc 100644
          }
        }
      }
+diff --git a/node_modules/react-native-carplay/src/templates/android/AndroidNavigationBaseTemplate.ts b/node_modules/react-native-carplay/src/templates/android/AndroidNavigationBaseTemplate.ts
+index 5f6c067..7bef181 100644
+--- a/node_modules/react-native-carplay/src/templates/android/AndroidNavigationBaseTemplate.ts
++++ b/node_modules/react-native-carplay/src/templates/android/AndroidNavigationBaseTemplate.ts
+@@ -19,6 +19,13 @@ export class AndroidNavigationBaseTemplate<
+ > extends Template<T> {
+   get eventMap() {
+     return {
++      // Convoy fix (2026-07-30): ANDROID AUTO action-strip / map-action-strip
++      // presses. RCTTemplate.parseAction wires
++      // setOnClickListener { eventEmitter.buttonPressed(id) }, but this base
++      // template never mapped "buttonPressed" — so every press on a
++      // NavigationTemplate action was dropped in JS before reaching a handler.
++      // Identical omission to the one fixed in MapTemplate's eventMap.
++      buttonPressed: 'onButtonPressed',
+       didShowPanningInterface: 'onDidShowPanningInterface',
+       didDismissPanningInterface: 'onDidDismissPanningInterface',
+     };

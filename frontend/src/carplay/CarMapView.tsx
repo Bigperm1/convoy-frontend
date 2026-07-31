@@ -68,6 +68,7 @@ import {
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
 import { routeTrimLeadM, routeTrimFadeM } from '../routeTrim';
+import { logEvent } from '../crashBreadcrumb';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
 // (index != 0) and the casing/core draw it (index == 0), exactly like the phone.
@@ -269,6 +270,28 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   const [styleGen, setStyleGen] = useState(0);
 
   const hasFix = typeof s.selfLat === 'number' && typeof s.selfLng === 'number';
+  // ── FIX-STATE PROBE (2026-07-30) ────────────────────────────────────────────
+  // Say Phin: "when I turned off my phone screen the avatar disappeared on the car
+  // screen... I wondered if the avatar is there but off the screen." Jeff also sees
+  // the car marker missing and the zoom not matching the phone.
+  //
+  // Those two symptoms have ONE likely common cause rather than two: lockReadyRef
+  // requires hasFix, so with no fix the lockstep never pushes the camera — the map
+  // sits at the style's default framing (which is exactly "zoom doesn't match the
+  // phone") AND SelfCarModel has nothing to draw ("marker off screen"). If instead
+  // the fix is fine and only the framing is wrong, that is a camera-maths bug and a
+  // completely different fix. Guessing between them has already cost a round trip,
+  // so log each TRANSITION (never per-frame) and let the next drive decide.
+  const hadFixRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (hadFixRef.current === hasFix) return;
+    const first = hadFixRef.current === null;
+    hadFixRef.current = hasFix;
+    if (first && hasFix) return;             // normal cold start, not worth a row
+    try {
+      logEvent(`car-fix ${hasFix ? 'GAINED' : 'LOST'} nav=${s.navigating ? 1 : 0} src=${s.carDbg ?? '-'}`);
+    } catch {}
+  }, [hasFix, s.navigating, s.carDbg]);
   const lat = s.selfLat ?? 0;
   const lng = s.selfLng ?? 0;
   const hdg = s.heading ?? 0;

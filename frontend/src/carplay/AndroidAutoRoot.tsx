@@ -29,38 +29,39 @@ import { CarSurface } from './ConvoyCarPlay';
 import { useCarStore } from './carStore';
 import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
+import { AA_ACTION_STRIP, AA_MAP_BUTTONS, handleAaButton, carTap } from './carActions';
 
-// ⚠ updateTemplate IS CURRENTLY A NO-OP ON ANDROID (verified 2026-07-28).
-// CarPlayModule.kt:123 does `val screen = carScreens[name]`, where `name` is the
-// native module's getName() — "RNCarPlay". carScreens is only ever keyed by "root"
-// and by templateId, so the lookup always misses and the whole update body is
-// skipped. Nothing we push below reaches androidx today; every pixel of nav chrome
-// on the head unit is drawn by our own CarSurface. Fixing the lookup is a
-// patch-package change and therefore needs a native build (see the build-70 notes).
+// ── updateTemplate WORKS NOW, AND THAT CHANGED EVERYTHING (2026-07-30) ───────
+// It used to be a silent no-op: CarPlayModule.kt looked up `carScreens[name]`
+// with the MODULE name, which never matched, so nothing pushed from here reached
+// androidx and every pixel of nav chrome on the head unit was our own CarSurface.
+// BUILD 70 PATCHED THAT LOOKUP. So from build 70 onward androidx really does
+// receive whatever we send — and it started drawing its OWN routing card and
+// travel estimate ON TOP of the ones CarSurface already draws.
 //
-// The payload is written to the shape androidx ACTUALLY parses anyway, because the
-// moment that lookup is fixed a wrong shape stops being harmless: parseTemplate
-// runs inside a bare `handler.post {}` with no try/catch (CarPlayModule.kt:120-133),
-// so a parser NPE is an uncaught throw on the car app's MAIN THREAD — a crash, not a
-// warning. The two traps, read off RCTTemplate.kt rather than the library's TS types
-// (which disagree with its own Kotlin):
-//   • parseNavigationInfo does getMap("info")!! and parseRoutingInfo getMap("step")!!
-//     — the routing fields live under `info`, not at the top level, and the cue lives
-//     in a `step`. `distanceUnits` there is parsed with getString, NOT the int
-//     Distance.UNIT_* constant this file used to send.
-//   • parseTravelEstimate does getMap("destinationTime")!! — a REQUIRED key with no
-//     TS counterpart marked required, and the one this file never sent at all.
-const AA_UNIT_METERS = 'meters';
-const AA_UNIT_KM = 'kilometers';
+// That is exactly what Say Phin photographed and Jeff called out: a left-hand
+// banner covering the speedo, and two ETAs on screen ("these seem redundant").
+// The androidx docs are explicit — "unless set with this method, navigation info
+// won't be displayed" — so the fix is simply NOT to send it. CarSurface owns the
+// maneuver, the ETA and the speedo, exactly as it does on CarPlay, and androidx
+// contributes only the button strips.
+//
+// ⚠ DO NOT reinstate navigationInfo / travelEstimate without deleting the
+// equivalent rows from CarSurface first, or the duplicate banner comes straight
+// back. The payload shapes that androidx parses are recorded in git history if
+// that trade is ever revisited (parseNavigationInfo does getMap("info")!!,
+// parseTravelEstimate does getMap("destinationTime")!! — both REQUIRED keys whose
+// absence is an uncaught throw on the car's main thread).
 
-// androidx wants an absolute arrival instant plus a zone id, not a duration.
-function aaTimeZoneId(): string {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
-}
-
-// One persistent action in the strip (Android Auto requires a non-empty action
-// strip on a NavigationTemplate). Kept stable across updates.
-const AA_ACTIONS = [{ id: 'convoy-aa-brand', title: 'Hairpin' }];
+// The car's buttons. androidx requires a NON-EMPTY action strip on a
+// NavigationTemplate, which is why this used to be a single "Hairpin" title —
+// a placeholder that was never replaced, and the reason Jeff kept reporting "AA
+// buttons still missing" after they were added to the CarPlay template. THIS is
+// the template Android Auto actually renders; ConvoyCarPlay's MapTemplate is the
+// iOS/phone path and never reaches a head unit.
+//   actions    -> ActionStrip     (up to 4; title OR icon)
+//   mapButtons -> MapActionStrip  (up to 4; ICON ONLY — androidx rejects titles)
+// Both reuse CarPlay's button ids so the existing handlers take them unchanged.
 
 export default function AndroidAutoRoot() {
   const s = useCarStore();
@@ -77,8 +78,14 @@ export default function AndroidAutoRoot() {
       const template = new NavigationTemplate({
         id: 'convoy-aa-nav',
         component: CarSurface,
-        actions: AA_ACTIONS,
-      });
+        actions: AA_ACTION_STRIP,
+        mapButtons: AA_MAP_BUTTONS,
+        onButtonPressed: (e: { buttonId: string }) => {
+          const id = e?.buttonId;
+          carTap(id || 'aa-unknown');
+          handleAaButton(id);
+        },
+      } as any);
       templateRef.current = template;
       CarPlay.setRootTemplate(template);
     } catch (e) {
@@ -112,41 +119,24 @@ export default function AndroidAutoRoot() {
     };
   }, []);
 
-  // Push live maneuver + travel estimates whenever the shared drive state moves.
+  // Re-assert the surface + buttons when the drive state flips. No nav payload is
+  // sent (see the header) — CarSurface draws all of it — so this exists only to keep
+  // the template alive across a route start/end.
   useEffect(() => {
     const template = templateRef.current;
     if (!template) return;
     try {
-      if (s.navigating) {
-        template.updateTemplate({
-          component: CarSurface,
-          actions: AA_ACTIONS,
-          navigationInfo: {
-            type: 'routingInfo',
-            info: {
-              step: { cue: s.instruction || 'Continue' },
-              distance: Math.max(0, Math.round(s.distanceToTurnM || 0)),
-              distanceUnits: AA_UNIT_METERS,
-            },
-          },
-          travelEstimate: {
-            distanceRemaining: (s.distanceRemainingM || 0) / 1000,
-            distanceUnits: AA_UNIT_KM,
-            timeRemaining: s.etaSeconds || 0,
-            destinationTime: {
-              timeSinceEpochMillis: Date.now() + (s.etaSeconds || 0) * 1000,
-              id: aaTimeZoneId(),
-            },
-          },
-        });
-      } else {
-        // Idle (no active route): clear nav info, keep the branded surface up.
-        template.updateTemplate({ component: CarSurface, actions: AA_ACTIONS });
-      }
+      // Keep the surface and the buttons alive; send NO navigationInfo or
+      // travelEstimate (see the header) so androidx draws no chrome of its own.
+      template.updateTemplate({
+        component: CarSurface,
+        actions: AA_ACTION_STRIP,
+        mapButtons: AA_MAP_BUTTONS,
+      } as any);
     } catch (e) {
       console.warn('[AndroidAuto] updateTemplate failed', e);
     }
-  }, [s.navigating, s.instruction, s.distanceToTurnM, s.distanceRemainingM, s.etaSeconds]);
+  }, [s.navigating]);
 
   return null;
 }

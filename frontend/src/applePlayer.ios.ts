@@ -20,7 +20,13 @@ import {
   useIsPlaying,
 } from "@lomray/react-native-apple-music";
 
-export const isMusicSupported = true;
+// TRUE only when MusicKit's native module is actually present in this JS context.
+// It was hardcoded `true`, so if the module was missing the UI still offered Apple
+// Music controls that could never work — and every call went to `MusicModule.x()` on
+// an undefined object. The package's own module-scope emitter used to make that case
+// fatal at import; now that it degrades (see the patch), this is what stops the app
+// pretending the feature is available.
+export const isMusicSupported = !!(NativeModules as any)?.MusicModule;
 
 export type AppleSong = {
   id: string;

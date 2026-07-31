@@ -160,10 +160,34 @@ index a432d94..46cae6f 100644
       * Starts playback of the current song.
       */
 diff --git a/node_modules/@lomray/react-native-apple-music/modules/player.js b/node_modules/@lomray/react-native-apple-music/modules/player.js
-index 59aa6f5..16fd0b4 100644
+index 59aa6f5..490e7b6 100644
 --- a/node_modules/@lomray/react-native-apple-music/modules/player.js
 +++ b/node_modules/@lomray/react-native-apple-music/modules/player.js
-@@ -36,6 +36,12 @@ class Player {
+@@ -2,8 +2,22 @@ import { NativeEventEmitter, NativeModules } from 'react-native';
+ 
+ // eslint-disable-next-line import/named
+ const { MusicModule } = NativeModules;
++// Convoy fix (2026-07-31): this ran `new NativeEventEmitter(MusicModule)` at MODULE
++// SCOPE with no guard, and NativeEventEmitter throws an Invariant Violation on a null
++// argument. Importing this package anywhere MusicModule is not registered was therefore
++// an UNCAUGHT THROW AT IMPORT TIME — fatal, and it trips expo-updates' ErrorRecovery
++// (i.e. a rollback), not merely a broken music screen.
++// That is reachable in normal operation: the background-location task
++// (navNotification.ts -> nav.ts -> applePlayer.ios.ts -> this package) runs in a
++// HEADLESS JS context where the module is not guaranteed to exist, and the same import
++// sits on the CarPlay path.
++// A missing native module must degrade (no Apple Music) rather than kill the app, so
++// fall back to a no-op emitter with the same shape — only addListener and
++// removeAllListeners are ever used (see below).
+ // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+-const nativeEventEmitter = new NativeEventEmitter(MusicModule);
++const nativeEventEmitter = MusicModule
++    ? new NativeEventEmitter(MusicModule)
++    : { addListener: () => ({ remove: () => { } }), removeAllListeners: () => { } };
+ class Player {
+     /**
+      * Skips to the next entry in the playback queue.
+@@ -36,6 +50,12 @@ class Player {
      static togglePlayerState() {
          MusicModule.togglePlayerState();
      }

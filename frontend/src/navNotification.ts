@@ -26,6 +26,7 @@ import { setCarState, setCarSelfPosition } from "./carplay/carStore";
 import { getSettings, getMapMode } from "./settings";
 import { updateSpeedLimit } from "./speedLimit";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "./mapboxDirections";
+import { recordTrip } from "./trips";
 
 const NAV_TASK = "convoy-nav-location";
 const NAV_NOTIF_ID = "convoy-nav-banner";
@@ -46,13 +47,28 @@ export const CAR_NAV_KEY = "convoy:carNav";
 // Only pop the off-screen banner once the next maneuver is this close — so it
 // reads as "your turn is coming up", not a constant ping the whole drive.
 const ANNOUNCE_DISTANCE_M = 500;
+// Written by src/auth.tsx (its USER_KEY). Read directly rather than importing that
+// module: auth pulls in @react-native-google-signin, whose spec calls
+// TurboModuleRegistry.getEnforcing at MODULE SCOPE — that throws when the native
+// module isn't registered, and this file runs inside a HEADLESS background task where
+// it may not be. Importing it would risk killing the very task that feeds the car.
+// The duplication is one string, cross-referenced from both sides.
+const USER_CACHE_KEY = "convoy_user";
 
 // distanceM (per step) + paceSPerM (route seconds-per-meter, traffic-aware) were
 // added for CarPlay-standalone Wave 2 so a COLD drive computes real ETA/remaining
 // on the head unit. Both optional — a route persisted by an older build simply
 // shows the turn + distance (the pre-Wave-2 behavior), never a wrong number.
 type SlimStep = { endLat: number; endLng: number; maneuver?: string; html: string; distanceM?: number };
-type SlimRoute = { steps: SlimStep[]; destLabel?: string; paceSPerM?: number };
+// totalM / startedAt / destLat / destLng were added 2026-07-31 so a COLD arrival can
+// recordTrip. Jeff: trips are his usage gauge ("so i can also gauge if people are using
+// hairpin"), so a car-started drive that never touches the phone must still count.
+// All optional — a route persisted by an older build simply records nothing rather than
+// recording a wrong number.
+type SlimRoute = {
+  steps: SlimStep[]; destLabel?: string; paceSPerM?: number;
+  totalM?: number; startedAt?: number; destLat?: number; destLng?: number;
+};
 
 // Module-level cache. NOTE: a backgrounded location task can run in a separate
 // JS context where these reset, so progress is also mirrored to AsyncStorage.
@@ -144,18 +160,64 @@ let _coldSettleTimer: ReturnType<typeof setTimeout> | null = null;
 // SECOND arrival (two spoken lines, teardown twice). Applies to the phone's teardown
 // as much as this one, since both funnel through stopNavBanner.
 let _navEnding = false;
+// Best-effort PB for a cold drive: the fastest fix THIS context saw. A drive that
+// started in another context reports 0, which recordTrip already treats as "unknown".
+let _coldMaxSpeedMs = 0;
 
 function resetColdArrival(): void {
   _coldArrived = false;
   _navEnding = false;
+  _coldMaxSpeedMs = 0;
   _coldSettleSince = null;
   if (_coldSettleTimer) { clearTimeout(_coldSettleTimer); _coldSettleTimer = null; }
+}
+
+// Record a car-started drive. The phone's onArrive does this from React state; a
+// headless context has none, so everything comes off what startNavBanner persisted
+// plus the cached user (there is no AuthProvider out here).
+//
+// ROUTED DRIVES ONLY, deliberately — the only caller is arrival, and arrival only
+// exists while navigating. Free driving is never recorded, which is what makes the
+// count a clean "people are actually using Hairpin to get somewhere" number.
+// recordTrip's own <500 m guard then drops routes abandoned in the driveway.
+async function recordColdTrip(r: SlimRoute | null, polyline: string): Promise<void> {
+  if (!r?.startedAt || !(r.totalM && r.totalM > 0)) return;   // pre-2026-07-31 route
+  let userId: string | undefined;
+  let handle: string | undefined;
+  try {
+    const raw = await AsyncStorage.getItem(USER_CACHE_KEY);
+    const u = raw ? JSON.parse(raw) : null;
+    // Same shape guard auth.tsx applies: a half-written blob must not become a
+    // "signed in" user and attribute someone else's drive.
+    if (u && typeof u.id === "string") { userId = u.id; handle = u.handle || undefined; }
+  } catch {}
+  if (!userId) return;   // signed out / unknown — recordTrip could not attribute it anyway
+  let communityId: string | undefined;
+  try { communityId = getSettings().activeCommunityId || undefined; } catch {}
+  await recordTrip({
+    startedAt: r.startedAt,
+    distanceM: r.totalM,
+    // Elapsed wall-clock, exactly as the phone computes it — not the route's planned
+    // duration, which would ignore traffic and every stop along the way.
+    durationS: Math.max(0, (Date.now() - r.startedAt) / 1000),
+    destLabel: r.destLabel || "Drive",
+    polyline,
+    destLat: r.destLat,
+    destLng: r.destLng,
+    topSpeedKmh: _coldMaxSpeedMs > 0 ? _coldMaxSpeedMs * 3.6 : 0,
+    userId, handle, communityId,
+  });
 }
 
 async function fireColdArrival(late: boolean): Promise<void> {
   if (_coldArrived) return;
   _coldArrived = true;
   if (_coldSettleTimer) { clearTimeout(_coldSettleTimer); _coldSettleTimer = null; }
+  // Capture BEFORE the teardown: stopNavBanner nulls _route synchronously and removes
+  // NAV_POLY_KEY, so reading either afterwards would record an empty drive.
+  const done = _route;
+  let poly = "";
+  try { poly = (await AsyncStorage.getItem(NAV_POLY_KEY)) || ""; } catch {}
   // Same order the phone uses: speak FIRST (stopNavBanner doesn't stop speech, so the
   // line plays out), then the universal teardown. stopNavBanner already clears the
   // route + navigating flag on the car, drops the persisted route/progress/CAR_NAV
@@ -163,6 +225,9 @@ async function fireColdArrival(late: boolean): Promise<void> {
   // cold equivalent of map.tsx's teardown. destinationLabel is the one thing it never
   // owned, so clear it here or the head unit keeps naming a place you already left.
   if (!late) { try { announce(arrivalLine()); } catch {} }
+  // Before the teardown, and never allowed to block it — a failed upload must cost a
+  // leaderboard row, never leave the route stuck on the head unit.
+  try { await recordColdTrip(done, poly); } catch {}
   try { await stopNavBanner(); } catch {}
   try { setCarState({ destinationLabel: "" }); } catch {}
 }
@@ -225,6 +290,7 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
   // Auto-finish for a car-started drive (see resetColdArrival's header). Evaluated
   // before the banner writes below so the last thing the driver sees is the teardown,
   // not a freshly-posted "Arriving" banner for a route that just ended.
+  if (typeof speedMs === "number" && speedMs > _coldMaxSpeedMs) _coldMaxSpeedMs = speedMs;
   evaluateColdArrival(idx, steps.length, d, speedMs);
   if (_coldArrived) return;
 
@@ -693,6 +759,11 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
 
     const slim: SlimRoute = {
       destLabel,
+      // Trip baseline for a COLD arrival's recordTrip (see recordColdTrip).
+      totalM: route.distance_m > 0 ? route.distance_m : undefined,
+      startedAt: Date.now(),
+      destLat: route.steps?.[route.steps.length - 1]?.end?.lat,
+      destLng: route.steps?.[route.steps.length - 1]?.end?.lng,
       // Traffic-aware average pace (s/m) — lets the cold bg task turn remaining
       // meters into a live ETA without the phone engine (Wave 2).
       paceSPerM: route.distance_m > 0 && route.duration_s > 0 ? route.duration_s / route.distance_m : undefined,

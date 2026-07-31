@@ -44,6 +44,11 @@ const Ctx = createContext<AuthCtx>({} as any);
 // Render cold start (that backend sleeps) could log people out on a slow morning.
 //
 // The rule now: only an explicit rejection FROM the server ends a session.
+// ⚠ navNotification.ts reads this SAME key directly (its cold-arrival recordTrip).
+// It deliberately does not import this module: auth pulls in
+// @react-native-google-signin, whose spec calls TurboModuleRegistry.getEnforcing at
+// MODULE SCOPE, and that throws in a headless background context — which would kill
+// the location task that drives the car surface. Rename here = rename there.
 const USER_KEY = "convoy_user";
 
 async function cacheUser(u: User | null): Promise<void> {

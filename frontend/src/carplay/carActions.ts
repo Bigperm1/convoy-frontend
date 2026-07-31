@@ -495,14 +495,31 @@ export const CAR_MAP_BUTTON_CONFIG = {
 // icon. Our glyphs are data URIs (see carButtonIcons.ts), which Fresco decodes
 // through ImageSource just as [RCTConvert UIImage:] does on iOS — one artwork set,
 // both platforms.
+// ── WHY 'persistent' (2026-07-31) ────────────────────────────────────────────
+// Jeff, off Say Phin's 07:48 photo: "where is his crew button and compass?" They
+// were rendering fine — his OWN tap receipts at 07:36, twelve minutes earlier,
+// show car-crew / car-compass / car-search all reaching JS from platform=android.
+// By 07:48 the strips had FADED OUT: androidx dims and removes an ActionStrip
+// during navigation once the driver stops interacting, and Action.FLAG_IS_PERSISTENT
+// is the documented opt-out ("this action will not fade in/out inside an
+// ActionStrip"). react-native-carplay exposes it as visibility: 'persistent'
+// (RCTTemplate.parseAction).
+//
+// Verified safe before shipping, because a template that fails to build is the
+// androidx "unexpected error" card and there is no way to test that locally:
+// FLAG_IS_PERSISTENT appears in exactly ONE class across androidx.car.app 1.4.0
+// (Action.class) — no ActionsConstraints validator inspects it, so it cannot throw
+// the way an over-long strip or an icon-less action can. A host that ignores the
+// flag simply behaves as it does today; there is no downside case.
+const AA_PERSISTENT = 'persistent' as const;
 export const AA_ACTION_STRIP = [
-  { id: 'car-comms', icon: CAR_ICON_MIC },
-  { id: 'car-search', title: 'Search' },
-  { id: 'car-end', title: 'End' },
+  { id: 'car-comms', icon: CAR_ICON_MIC, visibility: AA_PERSISTENT },
+  { id: 'car-search', title: 'Search', visibility: AA_PERSISTENT },
+  { id: 'car-end', title: 'End', visibility: AA_PERSISTENT },
 ];
 export const AA_MAP_BUTTONS = [
-  { id: 'car-crew', icon: CAR_ICON_CREW },
-  { id: 'car-compass', icon: CAR_ICON_COMPASS },
+  { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT },
+  { id: 'car-compass', icon: CAR_ICON_COMPASS, visibility: AA_PERSISTENT },
 ];
 
 // One dispatcher for an Android Auto press. The ids are shared with CarPlay, so this

@@ -82,7 +82,12 @@ export default function AndroidAutoRoot() {
         mapButtons: AA_MAP_BUTTONS,
         onButtonPressed: (e: { buttonId: string }) => {
           const id = e?.buttonId;
-          carTap(id || 'aa-unknown');
+          // Do NOT carTap here when we have an id: handleAaButton always lands in
+          // handleCarMapButton or handleCarBarButton, and BOTH already open with
+          // carTap(id). Say Phin's 07:36 receipts show every press logged exactly
+          // twice, ~15ms apart — that was this line doubling every row and
+          // re-arming the toast. The action itself only ever ran once.
+          if (!id) { carTap('aa-unknown'); return; }
           handleAaButton(id);
         },
       } as any);

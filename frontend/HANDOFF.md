@@ -856,6 +856,39 @@ through to today's song-search. So build 71 needs no accompanying OTA to activat
   Android Auto hides sideloaded installs.
 - Verify `yarn typecheck` clean + `yarn.lock` consistent first.
 
+**3. Re-cut the flat car PNGs so all five paints match (Jeff: "batch with 71")**
+
+`assets/vehicles/{colour}{,@2x,@3x}.png` — the top-down sprite drawn when parked, when
+cruising on the car surface, and for every peer. The five are NOT interchangeable.
+Measured ink bbox (@3x, alpha>24; stable across a 8/24/64/128 sweep, so this is real
+and not antialias noise):
+
+| paint | ink w x h | aspect |
+|---|---|---|
+| **heavy_metal (GREY — the reference Jeff named)** | **66 x 129** | 1.955 |
+| ice_cap_white | 66 x 130 | 1.970 |
+| precious_black_pearl | 63 x 130 | 2.063 |
+| blue_flame | 62 x 130 | 2.097 |
+| supersonic_red | 62 x 132 | 2.129 |
+
+Lengths agree within 2%, widths differ by 6%, **aspect differs by 10%** — so these are
+not one render at different zooms, the source art is genuinely a different shape per
+colour. **No scale factor can make them identical**, which is the important part:
+a length-based factor ships today (`vehiclePngScale`) and equalises perceived size,
+but the silhouettes still differ. True parity needs the art RE-RENDERED at one camera
+and one crop, not re-cropped — re-cropping can only equalise one axis and would
+stretch the others.
+
+⚠ The 3D GLBs need NOTHING — all five are 1.9101 x 0.6693 x 0.9012 (verified by
+walking each node hierarchy and transforming every accessor min/max corner). Do not
+"fix" the models.
+
+⚠ If the PNGs are re-cut, they MUST land on a NEW path (`assets/vehicles-v2/`) —
+expo-updates dedupes embedded assets by PATH, so changing an existing require()'d
+image's content silently keeps serving the old embedded copy (the classes->classes-v2
+lesson). And `vehiclePngScale` must go back to returning 1.0 in the SAME change, or
+the new art gets scaled a second time.
+
 ### Still open, NOT in 71 unless Jeff says so
 - On-device TTS fallback so voice guidance is not silent offline (see §on offline).
   Deliberately not done — it reverses an earlier call about the robotic device voice.

@@ -191,27 +191,44 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
 // existing require()'d image's CONTENT does nothing over the air — expo-updates
 // dedupes embedded assets by PATH and keeps serving the build's copy — so an asset
 // fix would need a directory rename and a fresh build. A scale factor ships today.
-const VEHICLE_PNG_INK_W: Record<GRCColorKey, number> = {
-  heavy_metal: 66,
-  ice_cap_white: 66,
-  precious_black_pearl: 63,
-  blue_flame: 62,
-  supersonic_red: 62,
+// ⚠ NORMALISE ON LENGTH, NOT WIDTH. My first pass used the ink WIDTH and it was
+// wrong — a uniform scale moves BOTH axes, and the lengths already matched. Measured
+// ink (@3x, alpha>24, stable across a 8/24/64/128 threshold sweep so this is real and
+// not antialias noise):
+//     heavy_metal (GREY)    66 x 129     aspect 1.955
+//     ice_cap_white         66 x 130     aspect 1.970
+//     precious_black_pearl  63 x 130     aspect 2.063
+//     blue_flame            62 x 130     aspect 2.097
+//     supersonic_red        62 x 132     aspect 2.129
+// Lengths agree within 2%; widths differ by 6%; ASPECT differs by 10%. So these are
+// not one render at different zooms — the source art genuinely differs in shape, and
+// NO single factor can make them identical. Scaling to equalise width therefore made
+// red and blue 6.5-8.9% LONGER than grey, i.e. worse on the axis that actually reads
+// as size. A top-down car's perceived size is its LENGTH.
+// Normalising on length gives 0.977-1.000 — small, and correct in the axis that
+// matters. Full parity needs the art re-rendered; queued for build 71.
+const VEHICLE_PNG_INK_LEN: Record<GRCColorKey, number> = {
+  heavy_metal: 129,
+  ice_cap_white: 130,
+  precious_black_pearl: 130,
+  blue_flame: 130,
+  supersonic_red: 132,
 };
-const VEHICLE_PNG_REF_W = VEHICLE_PNG_INK_W.heavy_metal;   // grey is the reference
+const VEHICLE_PNG_REF_LEN = VEHICLE_PNG_INK_LEN.heavy_metal;   // grey is the reference
 
 /**
- * Multiplier that makes a colour's flat top-down sprite render the same on-screen
- * size as the grey one. 1.0 for grey and white; ~1.06 for the narrower crops.
- * Apply to a map marker's size / spriteSize — never to the 3D model, which is
- * already identical across colours.
+ * Multiplier that makes a colour's flat top-down sprite read the same SIZE as the
+ * grey one, matched on the car's LENGTH (its long axis). 1.0 for grey, 0.977-0.992
+ * for the rest. Apply to a map marker's size / spriteSize — never to the 3D model,
+ * whose five GLBs are already dimensionally identical (1.9101 x 0.6693 x 0.9012).
  */
 export function vehiclePngScale(color?: string | null): number {
   const key = resolveGRCKey(color) || DEFAULT_GRC_KEY;
-  const w = VEHICLE_PNG_INK_W[key];
-  if (!w) return 1;
-  return Math.round((VEHICLE_PNG_REF_W / w) * 1000) / 1000;
+  const len = VEHICLE_PNG_INK_LEN[key];
+  if (!len) return 1;
+  return Math.round((VEHICLE_PNG_REF_LEN / len) * 1000) / 1000;
 }
+
 
 /** Hosted 3D car model URL for the chosen paint. Falls back to the default GRC. */
 export function getVehicleModelUrl(color?: string | null): string {

@@ -5,7 +5,7 @@
 // Native runtime). That crash manifested as a black screen on the Music tab.
 // The new `store` wrapper below uses localStorage on web and AsyncStorage on
 // native so every consumer of this module is safe across all three runtimes.
-import { Platform } from "react-native";
+import { Linking, Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Hardcoded fallback mirrors the PROD_* pattern in api.ts / supabase.ts — EAS
@@ -222,7 +222,17 @@ export async function startLogin() {
     // Native: open in the system browser. The user will be redirected back to
     // the convoy:// scheme; handleCallbackCode() is invoked by an expo-linking
     // listener registered in app/_layout.tsx (or the spotify-callback route).
-    const { Linking } = await import("react-native");
+    // ⚠ MUST BE A STATIC, NAMED IMPORT — see the top of this file.
+    // This used to be `const { Linking } = await import("react-native")`, and that one
+    // line was the "I click Spotify and it crashes" bug. A DYNAMIC NAMESPACE import
+    // makes Metro's importAll enumerate EVERY export of react-native, which invokes
+    // the deprecated `PushNotificationIOS` getter. That module was removed from RN
+    // core in 0.81, so its NativeModules.PushNotificationManager is null and its
+    // `new NativeEventEmitter(...)` throws — an uncaught Invariant Violation the
+    // instant the Spotify button is tapped. Confirmed from the on-device stack:
+    //     at get PushNotificationIOS
+    //     at metroImportAll  ->  at asyncRequire
+    // A named static import touches only Linking and never runs the other getters.
     await Linking.openURL(authUrl);
   }
 }

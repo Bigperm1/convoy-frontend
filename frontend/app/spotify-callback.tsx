@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { handleCallbackCode } from "../src/spotify";
+import { handleCallbackCode, spotifyLastAuthError } from "../src/spotify";
 import { updateSettings } from "../src/settings";
 import { COLORS } from "../src/theme";
 
@@ -27,16 +27,21 @@ export default function SpotifyCallback() {
         setTimeout(() => router.replace("/(app)/music"), 2200);
         return;
       }
+      let ok = false;
       try {
-        const ok = await handleCallbackCode(code);
+        ok = await handleCallbackCode(code);
         if (ok) await updateSettings({ musicSource: "spotify" }); // switch the Music tab to Spotify
         setStatus(ok ? "ok" : "fail");
-        setMsg(ok ? "Signed in! Redirecting…" : "Token exchange failed");
+        // Show Spotify's OWN reason on failure — "User not registered in the Developer
+        // Dashboard", "Invalid redirect URI", "Authorization code expired" are all
+        // distinct problems that used to render as one useless line.
+        setMsg(ok ? "Signed in! Redirecting…" : (spotifyLastAuthError() || "Token exchange failed"));
       } catch (e: any) {
         setStatus("fail");
         setMsg(e?.message || "Sign-in failed");
       }
-      setTimeout(() => router.replace("/(app)/music"), 1200);
+      // Give a failure long enough to actually read before bouncing back.
+      setTimeout(() => router.replace("/(app)/music"), ok ? 1200 : 4500);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

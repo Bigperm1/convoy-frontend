@@ -227,9 +227,27 @@ export async function startLogin() {
   }
 }
 
+// The last token-exchange failure, verbatim from Spotify. Read by the callback screen
+// so a failed sign-in says WHY instead of "Token exchange failed".
+//
+// This mattered more than it looks: every failure mode here returned a bare `false`,
+// so an app in Development mode rejecting an unlisted account, a redirect_uri
+// mismatch and an expired code were all indistinguishable on screen — and Spotify
+// returns a precise, human-readable reason for each in error_description. Debugging
+// this by guessing cost a round trip that one string would have prevented.
+let _lastAuthError: string | null = null;
+export function spotifyLastAuthError(): string | null { return _lastAuthError; }
+
 export async function handleCallbackCode(code: string): Promise<boolean> {
+  _lastAuthError = null;
   const verifier = await store.get(VERIFIER_KEY);
-  if (!verifier) return false;
+  if (!verifier) {
+    // startLogin() writes this immediately before opening the browser, so a miss means
+    // the PKCE verifier was cleared between the two (storage wiped, or a stale callback
+    // replayed after a successful sign-in).
+    _lastAuthError = "Sign-in session expired — tap Connect Spotify again.";
+    return false;
+  }
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
@@ -242,7 +260,18 @@ export async function handleCallbackCode(code: string): Promise<boolean> {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
   });
-  if (!res.ok) return false;
+  if (!res.ok) {
+    // Spotify returns {error, error_description} and the description is specific:
+    // "User not registered in the Developer Dashboard" for an app still in Development
+    // mode, "Invalid redirect URI", "Authorization code expired", etc.
+    let detail = `HTTP ${res.status}`;
+    try {
+      const j: any = await res.json();
+      detail = j?.error_description || j?.error || detail;
+    } catch {}
+    _lastAuthError = detail;
+    return false;
+  }
   const data = await res.json();
   await store.set(TOKEN_KEY, data.access_token);
   if (data.refresh_token) await store.set(REFRESH_KEY, data.refresh_token);

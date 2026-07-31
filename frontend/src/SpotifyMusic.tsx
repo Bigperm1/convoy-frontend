@@ -10,7 +10,7 @@ import { Image } from "expo-image";
 import { useFocusEffect } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { COLORS } from "./theme";
-import { spotify } from "./spotify";
+import { spotify, spotifyMissingScopes, startLogin } from "./spotify";
 import ShareSheet from "./ShareSheet";
 import { shareInbox } from "./shareInbox";
 
@@ -27,6 +27,11 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
   const [tracks, setTracks] = useState<any[]>([]);
   const [playlists, setPlaylists] = useState<any[]>([]);
   const [recent, setRecent] = useState<any[]>([]);
+  // Scopes this build needs that the linked session never granted. Spotify cannot
+  // widen scope on a refresh, so an account linked before a scope existed keeps a
+  // narrower token and the dependent feature returns 403 — which callSafe turns into
+  // null, i.e. a feature that silently never appears. Surface it instead.
+  const [needsReauth, setNeedsReauth] = useState<string[]>([]);
   // Share target — same one-slot pattern the Apple screen uses, so a song and a
   // playlist can share one sheet.
   const [sharePayload, setSharePayload] = useState<any | null>(null);
@@ -80,6 +85,7 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
         }
         setRecent(rows);
       } catch {}
+      try { setNeedsReauth(await spotifyMissingScopes()); } catch {}
       finally { setLoading(false); }
       refreshNow();
     })();
@@ -200,6 +206,21 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
         <ActivityIndicator color={SP_GREEN} style={{ marginTop: 40 }} />
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: now ? 200 : 130 }} showsVerticalScrollIndicator={false}>
+          {/* Re-link prompt. Only shown when we KNOW the grant is short — never on a
+              guess, so a healthy session never sees it. */}
+          {needsReauth.length > 0 && (
+            <TouchableOpacity
+              style={styles.reauthRow}
+              activeOpacity={0.85}
+              onPress={() => { Haptics.selectionAsync().catch(() => {}); startLogin().catch(() => {}); }}
+            >
+              <Ionicons name="refresh-circle" size={18} color={SP_GREEN} />
+              <Text style={styles.reauthText}>
+                Reconnect Spotify to enable Recently Played
+              </Text>
+            </TouchableOpacity>
+          )}
+
           {/* Recently Played — same position and behaviour as the Apple screen. */}
           {recent.length > 0 && (
             <View style={styles.section}>
@@ -342,6 +363,10 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
 }
 
 const styles = StyleSheet.create({
+  reauthRow: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 20, marginBottom: 10,
+    paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10,
+    borderWidth: 1, borderColor: "rgba(29,185,84,0.35)", backgroundColor: "rgba(29,185,84,0.10)" },
+  reauthText: { color: COLORS.text, fontSize: 13, fontWeight: "600", flex: 1 },
   switchRow: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-end", paddingHorizontal: 20, paddingVertical: 6 },
   switchText: { color: SP_GREEN, fontSize: 12, fontWeight: "700" },
   section: { marginTop: 18 },

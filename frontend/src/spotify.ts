@@ -20,21 +20,35 @@ const REDIRECT_URI =
   Platform.OS === "web"
     ? (typeof window !== "undefined" ? `${window.location.origin}/spotify-callback` : "")
     : "convoy://spotify-callback";
-const SCOPES = [
+// ⚠ EVERY ENDPOINT THE APP CALLS MUST HAVE ITS SCOPE LISTED HERE, and a missing one
+// fails SILENTLY: callSafe() returns null on any non-OK status, so a 403 for an
+// ungranted scope is indistinguishable from "nothing playing" and the feature simply
+// never appears. That is exactly what happened to Recently Played —
+// /me/player/recently-played shipped 2026-07-30 without user-read-recently-played, so
+// the strip could never have rendered for anyone. Found before a tester hit it, but
+// only because the scope list was re-read; nothing in the code would have complained.
+const SCOPE_LIST: string[] = [
   "user-read-private",
   "user-read-email",
   "user-top-read",
   "playlist-read-private",
+  // Collaborative playlists belong in "Your Playlists" too. Batched in here so the
+  // one re-authorisation this change forces also covers it, rather than asking twice.
+  "playlist-read-collaborative",
   "user-read-currently-playing",
   "user-read-playback-state",
   // Required to CONTROL playback (play/pause/skip/transfer) via the Web API.
   "user-modify-playback-state",
-].join(" ");
+  // Required by spotify.recentlyPlayed() -> /me/player/recently-played.
+  "user-read-recently-played",
+];
+const SCOPES = SCOPE_LIST.join(" ");
 
 const TOKEN_KEY = "spotify_access_token";
 const REFRESH_KEY = "spotify_refresh_token";
 const EXPIRY_KEY = "spotify_token_expiry";
 const VERIFIER_KEY = "spotify_pkce_verifier";
+const GRANTED_SCOPE_KEY = "spotify_granted_scope";
 
 // Platform-safe key/value storage. All methods are async so the surface is
 // identical on web and native (where AsyncStorage IS async). On web we keep
@@ -233,6 +247,12 @@ export async function handleCallbackCode(code: string): Promise<boolean> {
   await store.set(TOKEN_KEY, data.access_token);
   if (data.refresh_token) await store.set(REFRESH_KEY, data.refresh_token);
   await store.set(EXPIRY_KEY, String(Date.now() + (data.expires_in || 3600) * 1000));
+  // Record what Spotify actually GRANTED. Adding a scope to SCOPE_LIST does NOT
+  // upgrade an existing session — Spotify never widens scope on a refresh — so an
+  // already-linked user keeps the old, narrower token and any new feature stays dead
+  // with no error at all (callSafe turns the 403 into null). Storing the grant lets
+  // the UI notice and offer a reconnect instead of silently showing nothing.
+  if (typeof data.scope === "string") await store.set(GRANTED_SCOPE_KEY, data.scope);
   await store.remove(VERIFIER_KEY);
   return true;
 }
@@ -258,8 +278,26 @@ export async function refreshAccessToken(): Promise<string | null> {
   return data.access_token;
 }
 
+/**
+ * Scopes this build needs that the CURRENT session was never granted. Non-empty means
+ * the user linked Spotify before those scopes existed and must re-authorise — a
+ * refresh cannot widen scope. Empty for a fresh link, and empty when we have no grant
+ * record at all (older sessions predate this tracking; we do not nag on a guess).
+ */
+export async function spotifyMissingScopes(): Promise<string[]> {
+  try {
+    const granted = await store.get(GRANTED_SCOPE_KEY);
+    if (!granted) return [];
+    const have = new Set(granted.split(/\s+/).filter(Boolean));
+    return SCOPE_LIST.filter((sc: string) => !have.has(sc));
+  } catch {
+    return [];
+  }
+}
+
 export async function logout(): Promise<void> {
   await store.remove(TOKEN_KEY);
+  await store.remove(GRANTED_SCOPE_KEY);
   await store.remove(REFRESH_KEY);
   await store.remove(EXPIRY_KEY);
 }

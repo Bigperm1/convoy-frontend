@@ -334,7 +334,10 @@ const ADVANCE_THRESHOLD_M = 25;
 //
 // ARRIVE_M stays exactly as it was, so the normal case is bit-identical. The settle
 // path below is purely ADDITIVE: it can only fire where nothing fired before.
-const ARRIVE_M = 20;
+// EXPORTED so the COLD car engine (navNotification's bg-task path) evaluates arrival
+// with the identical numbers instead of a second copy that drifts. Same reason
+// CHASE_ZOOM_CLAMP_* are exported to the car map.
+export const ARRIVE_M = 20;
 // "Close enough, and no longer moving." Deliberately generous on distance and
 // strict on time: a red light 60 m short of the destination clears in well under
 // ARRIVE_SETTLE_MS, whereas a parked car never does. Speed is the driver's own
@@ -344,9 +347,9 @@ const ARRIVE_M = 20;
 // only surviving false positive is a light within 50 m of the destination that holds
 // longer than 25 s — at which point ending the route is nearly right anyway. 60 m /
 // 20 s also fired on a 25 s light 50 m short, which is why it is not those numbers.
-const ARRIVE_SETTLE_M = 50;
-const ARRIVE_SETTLE_SPEED_MS = 1.4;
-const ARRIVE_SETTLE_MS = 25000;
+export const ARRIVE_SETTLE_M = 50;
+export const ARRIVE_SETTLE_SPEED_MS = 1.4;
+export const ARRIVE_SETTLE_MS = 25000;
 // The settle path is driven by fixes AND by one backup timer, because the whole
 // point is that fixes may have stopped. iOS suspends JS timers while the phone is
 // locked, so that timer can land arbitrarily late (the trap that once stranded the
@@ -354,7 +357,7 @@ const ARRIVE_SETTLE_MS = 25000;
 // when the driver next looks — but "You have arrived" half an hour after parking is
 // not, so a late fire tears down silently. Timestamp comparison, never trust the
 // timer's own timing.
-const ARRIVE_SPEAK_MAX_LATE_MS = 90000;
+export const ARRIVE_SPEAK_MAX_LATE_MS = 90000;
 const REROUTE_DISTANCE_M = 80; // PERPENDICULAR distance off the route line before off-route
 // Heading gate for off-route: a big perpendicular distance only counts as a real
 // departure if the car's heading ALSO diverges from the route's local direction
@@ -430,7 +433,7 @@ const ARRIVAL_LINES = [
   "You made it — welcome.",
   "Destination reached. Enjoy.",
 ];
-function arrivalLine(): string {
+export function arrivalLine(): string {
   return ARRIVAL_LINES[Math.floor(Math.random() * ARRIVAL_LINES.length)];
 }
 

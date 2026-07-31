@@ -17,7 +17,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
-import { NavRoute, haversineMeters, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec, announce, isPhoneTbtSpeaking } from "./nav";
+import {
+  NavRoute, haversineMeters, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec, announce, isPhoneTbtSpeaking,
+  arrivalLine, ARRIVE_M, ARRIVE_SETTLE_M, ARRIVE_SETTLE_SPEED_MS, ARRIVE_SETTLE_MS, ARRIVE_SPEAK_MAX_LATE_MS,
+} from "./nav";
 import { maneuverDir } from "./components/ManeuverArrow";
 import { setCarState, setCarSelfPosition } from "./carplay/carStore";
 import { getSettings, getMapMode } from "./settings";
@@ -117,7 +120,82 @@ async function postBanner(title: string, body: string): Promise<void> {
 // Compute the current maneuver from the stored route + a GPS position and pop a
 // fresh banner ONLY when the step changes (or on arrival) so it appears once
 // per turn rather than spamming on every GPS tick.
-export async function updateNavBanner(lat: number, lng: number): Promise<void> {
+// ── COLD ARRIVAL: Android Auto gets what the phone got (2026-07-31) ─────────
+// Jeff's standing rule, restated: *"if you find that 'android doesnt do this' please
+// make it work."* Auto-finish lived only in useTurnByTurn, which is mounted by
+// map.tsx. That is fine on iOS — a CarPlay connect brings up the app's main React
+// root, so map.tsx is there and owns arrival. It is NOT fine on Android: Android
+// Auto runs a SEPARATE AppRegistry root ("AndroidAuto"), deliberately, because the
+// main root is not running (that is the whole reason AndroidAutoRoot bootstraps its
+// own feeds). So an AA-started drive had NO arrival at all and the route ran forever.
+//
+// This is the surface-independent engine — the bg task and the foreground car feed
+// both drive it — so putting arrival here fixes AA and covers cold CarPlay for free.
+// It uses the constants EXPORTED from nav.ts, not copies, so the two engines cannot
+// drift; and it defers entirely to the phone engine whenever that one is live, so a
+// warm drive behaves exactly as it did and can never fire twice.
+let _coldArrived = false;
+let _coldSettleSince: number | null = null;
+let _coldSettleTimer: ReturnType<typeof setTimeout> | null = null;
+// Set SYNCHRONOUSLY the instant any teardown starts, cleared by startNavBanner.
+// stopNavBanner nulls _route synchronously but AWAITS the AsyncStorage removals, and
+// updateNavBanner re-loads the route from storage whenever _route is null — so for the
+// length of those awaits a GPS tick could resurrect the just-ended route and fire a
+// SECOND arrival (two spoken lines, teardown twice). Applies to the phone's teardown
+// as much as this one, since both funnel through stopNavBanner.
+let _navEnding = false;
+
+function resetColdArrival(): void {
+  _coldArrived = false;
+  _navEnding = false;
+  _coldSettleSince = null;
+  if (_coldSettleTimer) { clearTimeout(_coldSettleTimer); _coldSettleTimer = null; }
+}
+
+async function fireColdArrival(late: boolean): Promise<void> {
+  if (_coldArrived) return;
+  _coldArrived = true;
+  if (_coldSettleTimer) { clearTimeout(_coldSettleTimer); _coldSettleTimer = null; }
+  // Same order the phone uses: speak FIRST (stopNavBanner doesn't stop speech, so the
+  // line plays out), then the universal teardown. stopNavBanner already clears the
+  // route + navigating flag on the car, drops the persisted route/progress/CAR_NAV
+  // keys, releases the bg-location hold and dismisses the notification — it IS the
+  // cold equivalent of map.tsx's teardown. destinationLabel is the one thing it never
+  // owned, so clear it here or the head unit keeps naming a place you already left.
+  if (!late) { try { announce(arrivalLine()); } catch {} }
+  try { await stopNavBanner(); } catch {}
+  try { setCarState({ destinationLabel: "" }); } catch {}
+}
+
+// Mirrors the phone's arrival logic exactly (nav.ts). Returns true once it has fired.
+function evaluateColdArrival(idx: number, stepCount: number, d: number, speedMs?: number): void {
+  // The phone engine owns arrival whenever it is running — it also records the trip
+  // and learns the drive, which this path cannot. Never race it.
+  if (isPhoneTbtSpeaking() || _coldArrived || _navEnding) return;
+  const isLast = idx >= stepCount - 1;
+  if (isLast && d < ARRIVE_M) { void fireColdArrival(false); return; }
+  if (isLast && d < ARRIVE_SETTLE_M && Math.max(0, speedMs ?? 0) < ARRIVE_SETTLE_SPEED_MS) {
+    const now = Date.now();
+    if (_coldSettleSince == null) {
+      _coldSettleSince = now;
+      if (_coldSettleTimer) clearTimeout(_coldSettleTimer);
+      _coldSettleTimer = setTimeout(() => {
+        _coldSettleTimer = null;
+        const since = _coldSettleSince;
+        if (since == null) return;   // moved off again before this landed
+        void fireColdArrival(Date.now() - since > ARRIVE_SETTLE_MS + ARRIVE_SPEAK_MAX_LATE_MS);
+      }, ARRIVE_SETTLE_MS);
+    } else if (now - _coldSettleSince >= ARRIVE_SETTLE_MS) {
+      void fireColdArrival(false);
+    }
+    return;
+  }
+  _coldSettleSince = null;
+  if (_coldSettleTimer) { clearTimeout(_coldSettleTimer); _coldSettleTimer = null; }
+}
+
+export async function updateNavBanner(lat: number, lng: number, speedMs?: number): Promise<void> {
+  if (_navEnding) return;   // a teardown is in flight; do not resurrect it from storage
   let route = _route;
   if (!route) {
     try { const raw = await AsyncStorage.getItem(ROUTE_KEY); if (raw) route = JSON.parse(raw); } catch {}
@@ -143,6 +221,12 @@ export async function updateNavBanner(lat: number, lng: number): Promise<void> {
 
   const arriving = idx >= steps.length - 1 && d < 60;
   const stepKey = arriving ? steps.length : idx;
+
+  // Auto-finish for a car-started drive (see resetColdArrival's header). Evaluated
+  // before the banner writes below so the last thing the driver sees is the teardown,
+  // not a freshly-posted "Arriving" banner for a route that just ended.
+  evaluateColdArrival(idx, steps.length, d, speedMs);
+  if (_coldArrived) return;
 
   // Feed the CAR turn-by-turn strip every tick. On a COLD CarPlay connect the phone
   // map isn't mounted, so the warm useConvoyCarPlay mirror never runs — this is the
@@ -327,7 +411,10 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
     setCarState({ selfCarColor: getSettings().carColor, mapMode: getMapMode(getSettings()) });
   } catch {}
   maybeUpdateSpeedLimit(loc.coords.latitude, loc.coords.longitude);
-  await updateNavBanner(loc.coords.latitude, loc.coords.longitude);
+  await updateNavBanner(
+    loc.coords.latitude, loc.coords.longitude,
+    typeof _sp === "number" && _sp >= 0 ? _sp : 0,
+  );
 });
 
 // ===== Shared background-location task (nav banner + CarPlay map) =====
@@ -412,6 +499,18 @@ export async function startForegroundCarFeed(): Promise<void> {
           setCarState({ selfCarColor: getSettings().carColor, mapMode: getMapMode(getSettings()) });
         } catch {}
         maybeUpdateSpeedLimit(loc.coords.latitude, loc.coords.longitude);
+        // Drive the cold nav engine from THIS feed too, not just the bg task. The bg
+        // task needs "Always" location; this watch only needs "While using", and while
+        // Android Auto is projecting the app counts as in use. Without this, a cold AA
+        // drive on a While-using grant had no step tracking and so no arrival at all.
+        // Gated on the phone engine being idle so a warm drive keeps exactly one caller
+        // (map.tsx's) and the banner can't be posted twice per turn.
+        if (!isPhoneTbtSpeaking()) {
+          void updateNavBanner(
+            loc.coords.latitude, loc.coords.longitude,
+            typeof sp === "number" && sp >= 0 ? sp : 0,
+          );
+        }
       }
     );
   } catch {}
@@ -605,6 +704,7 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
     _route = slim;
     _stepIdx = 0;
     _notifiedStep = -1; // -1 so the FIRST turn still announces when it's incoming
+    resetColdArrival();  // a new route must be able to arrive again
     resetLaneCues();    // fresh route → fresh lane-guidance fetch (cold CarPlay lanes)
     try {
       await AsyncStorage.setItem(ROUTE_KEY, JSON.stringify(slim));
@@ -629,9 +729,12 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
 }
 
 export async function stopNavBanner(): Promise<void> {
+  _navEnding = true;   // close the resurrect-from-storage window (see the flag's note)
   _route = null;
   _stepIdx = 0;
   _notifiedStep = -1;
+  _coldSettleSince = null;
+  if (_coldSettleTimer) { clearTimeout(_coldSettleTimer); _coldSettleTimer = null; }
   resetLaneCues();
   try {
     await AsyncStorage.removeItem(ROUTE_KEY);

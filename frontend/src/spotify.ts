@@ -6,6 +6,7 @@
 // The new `store` wrapper below uses localStorage on web and AsyncStorage on
 // native so every consumer of this module is safe across all three runtimes.
 import { Linking, Platform } from "react-native";
+import * as WebBrowser from "expo-web-browser";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Hardcoded fallback mirrors the PROD_* pattern in api.ts / supabase.ts — EAS
@@ -202,7 +203,7 @@ export async function getStoredToken(): Promise<string | null> {
   } catch { return null; }
 }
 
-export async function startLogin() {
+export async function startLogin(): Promise<boolean> {
   if (!CLIENT_ID) throw new Error("Spotify Client ID not configured");
   const verifier = randomString(96);
   await store.set(VERIFIER_KEY, verifier);
@@ -217,23 +218,44 @@ export async function startLogin() {
   });
   const authUrl = `https://accounts.spotify.com/authorize?${params.toString()}`;
   if (Platform.OS === "web") {
+    // Web keeps the full-page redirect; app/spotify-callback.tsx finishes it there.
     window.location.href = authUrl;
-  } else {
-    // Native: open in the system browser. The user will be redirected back to
-    // the convoy:// scheme; handleCallbackCode() is invoked by an expo-linking
-    // listener registered in app/_layout.tsx (or the spotify-callback route).
-    // ⚠ MUST BE A STATIC, NAMED IMPORT — see the top of this file.
-    // This used to be `const { Linking } = await import("react-native")`, and that one
-    // line was the "I click Spotify and it crashes" bug. A DYNAMIC NAMESPACE import
-    // makes Metro's importAll enumerate EVERY export of react-native, which invokes
-    // the deprecated `PushNotificationIOS` getter. That module was removed from RN
-    // core in 0.81, so its NativeModules.PushNotificationManager is null and its
-    // `new NativeEventEmitter(...)` throws — an uncaught Invariant Violation the
-    // instant the Spotify button is tapped. Confirmed from the on-device stack:
-    //     at get PushNotificationIOS
-    //     at metroImportAll  ->  at asyncRequire
-    // A named static import touches only Linking and never runs the other getters.
-    await Linking.openURL(authUrl);
+    return false;
+  }
+  {
+// ── AUTH SESSION, NOT A BARE openURL (2026-07-31) ────────────────────────
+    // Jeff: "I log in, it asks me to connect, but it just keeps looping that page
+    // when I agree."
+    //
+    // Linking.openURL hands the user to Safari and then RELIES on the
+    // convoy://spotify-callback redirect deep-linking back into the app. Nothing in
+    // this app listens for that (no Linking 'url' handler anywhere — checked), so it
+    // depended entirely on expo-router happening to route the incoming URL. When that
+    // does not fire, Safari simply sits on Spotify's page and re-renders the consent
+    // screen: the loop.
+    //
+    // openAuthSessionAsync is the purpose-built primitive — ASWebAuthenticationSession
+    // on iOS, a Custom Tab on Android. It WATCHES for the redirect itself, closes the
+    // browser, and hands the callback URL straight back here. No deep link, no router
+    // involvement, no loop. app/spotify-callback.tsx stays as a fallback for the web
+    // flow and for any redirect that still arrives as a real deep link.
+    //
+    // ⚠ Note the STATIC import of WebBrowser at the top of this file — a dynamic
+    // import() of a native module is what caused the crash fixed just before this.
+    const res = await WebBrowser.openAuthSessionAsync(authUrl, REDIRECT_URI);
+    if (res.type !== "success" || !("url" in res) || !res.url) {
+      // Cancelled / dismissed — not an error worth surfacing.
+      return false;
+    }
+    // Parse without the URL constructor: a custom scheme is not reliably parsed by
+    // the RN URL polyfill. Take the query string verbatim.
+    const q = res.url.split("?")[1] || "";
+    const params = new URLSearchParams(q);
+    const err = params.get("error");
+    if (err) { _lastAuthError = err; return false; }
+    const code = params.get("code");
+    if (!code) { _lastAuthError = "Spotify returned no authorization code."; return false; }
+    return await handleCallbackCode(code);
   }
 }
 

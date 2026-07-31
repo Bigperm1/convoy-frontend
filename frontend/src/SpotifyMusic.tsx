@@ -212,7 +212,13 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
             <TouchableOpacity
               style={styles.reauthRow}
               activeOpacity={0.85}
-              onPress={() => { Haptics.selectionAsync().catch(() => {}); startLogin().catch(() => {}); }}
+              onPress={async () => {
+                Haptics.selectionAsync().catch(() => {});
+                const ok = await startLogin().catch(() => false);
+                // Re-authorising widens the grant, so re-read it — otherwise the
+                // prompt would stay on screen until the next cold start.
+                if (ok) { try { setNeedsReauth(await spotifyMissingScopes()); } catch {} }
+              }}
             >
               <Ionicons name="refresh-circle" size={18} color={SP_GREEN} />
               <Text style={styles.reauthText}>

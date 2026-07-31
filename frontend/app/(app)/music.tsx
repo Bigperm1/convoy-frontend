@@ -16,7 +16,7 @@ import {
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSettings, updateSettings } from "../../src/settings";
-import { startLogin, getStoredToken } from "../../src/spotify";
+import { startLogin, getStoredToken, spotifyLastAuthError } from "../../src/spotify";
 import SpotifyMusic from "../../src/SpotifyMusic";
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
@@ -93,7 +93,14 @@ function SourceSwitcher({ current }: { current: "apple" | "spotify" }) {
         activeOpacity={0.85}
         onPress={async () => {
           if (key === current) return;
-          if (key === "spotify" && !(await getStoredToken())) { startLogin().catch(() => {}); return; }
+          if (key === "spotify" && !(await getStoredToken())) {
+            // startLogin now resolves TRUE only after the auth session came back with a
+            // code AND the token exchange succeeded — the browser no longer has to
+            // deep-link back through app/spotify-callback.tsx. Flip the source here.
+            const ok = await startLogin().catch(() => false);
+            if (ok) updateSettings({ musicSource: "spotify" });
+            return;
+          }
           updateSettings({ musicSource: key });
         }}
         style={[swStyles.pill, active && { backgroundColor: color }]}
@@ -682,11 +689,20 @@ export default function MusicScreen() {
               onPress={async () => {
                 // Surface failures instead of swallowing them — a silent
                 // `.catch(() => {})` here is exactly why a broken login looked
-                // like "nothing happens". startLogin opens the Spotify auth page
-                // in the browser; the convoy://spotify-callback deep link then
-                // lands on app/spotify-callback.tsx to finish sign-in.
+                // like "nothing happens". startLogin now runs the whole flow in an
+                // auth session and resolves true only once the token exchange has
+                // succeeded, so switch the source on its result rather than relying
+                // on the deep link reaching app/spotify-callback.tsx.
                 try {
-                  await startLogin();
+                  const ok = await startLogin();
+                  if (ok) {
+                    updateSettings({ musicSource: "spotify" });
+                  } else {
+                    const why = spotifyLastAuthError();
+                    // Only surface a REAL failure — a cancelled auth sheet also
+                    // returns false and deserves no alert.
+                    if (why) Alert.alert("Spotify sign-in failed", why);
+                  }
                 } catch (e: any) {
                   Alert.alert(
                     "Couldn't open Spotify",

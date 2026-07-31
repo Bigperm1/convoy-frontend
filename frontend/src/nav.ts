@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform, AppState } from "react-native";
 import { api } from "./api";
-import { fetchMapboxRoutes, fetchMapboxRouteVia, refreshMapboxRoute, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
+import { fetchMapboxRoutes, fetchMapboxRouteVia, refreshMapboxRoute, arrivesOnFarSide, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
 import { getSettings, getNovaVoice, getAudioVol } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
@@ -189,7 +189,56 @@ export async function fetchRoutes(
   }
   if (!mbRoutes.length) return [];
 
+  mbRoutes = await preferCurbArrival(origin, destination, avoid, mbRoutes);
   return mbRoutes.map(mapboxToNavRoute).filter((r: NavRoute) => r.polyline);
+}
+
+// ── ARRIVE ON THE DRIVER'S SIDE, WHEN IT IS CHEAP (2026-07-31) ──────────────
+// Jeff: "the GPS needs to be a little mindful on which side of the road the
+// destination is ... to route correctly to it."
+//
+// Mapbox's `approaches=unrestricted;curb` does exactly that. It is NOT free, and
+// "a little mindful" is the whole design — measured against the live API over six
+// real Vancouver origin/destination pairs:
+//
+//   quiet residential / mall / one-way / suburban   +0 m   +0 s   (already correct)
+//   highway-adjacent                              +492 m   +1 s
+//   Broadway (divided arterial)                   +917 m +227 s  (+47%)
+//
+// So four in six cost nothing, one costs a second, and one would have added nearly
+// four minutes to an eight-minute trip. Forcing curb everywhere would be a bad trade;
+// never using it is what Jeff is complaining about. Take it when it is cheap.
+//
+// The second request only fires when it can possibly help: the ARRIVE step already
+// tells us the side (maneuver.modifier vs driving_side), so the common case costs no
+// extra Directions call at all. Raw fields, never parsed English.
+const CURB_MAX_EXTRA_S = 90;      // never detour more than this to switch sides
+const CURB_MAX_EXTRA_FRAC = 0.25; // ...and never more than a quarter of the trip
+async function preferCurbArrival(
+  origin: LatLng,
+  destination: LatLng,
+  avoid: AvoidPrefs | undefined,
+  routes: MapboxRoute[],
+): Promise<MapboxRoute[]> {
+  try {
+    const best = routes[0];
+    if (!best || !arrivesOnFarSide(best)) return routes;   // already correct side
+    const curb = await fetchMapboxRoutes(
+      origin,
+      destination,
+      { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
+      { curbApproach: true },
+    );
+    const alt = curb[0];
+    if (!alt || !alt.polyline || arrivesOnFarSide(alt)) return routes;  // no better
+    const extra = alt.duration_s - best.duration_s;
+    if (extra > CURB_MAX_EXTRA_S || extra > best.duration_s * CURB_MAX_EXTRA_FRAC) return routes;
+    // Replace only the PRIMARY line. The alternatives stay as they were, so the driver
+    // can still pick a different route entirely and nothing else about the fan-out moves.
+    return [alt, ...routes.slice(1)];
+  } catch {
+    return routes;   // routing must never fail because of a side-of-road nicety
+  }
 }
 
 // Map one Mapbox route to the shared NavRoute shape. Extracted so both fetchRoutes and
@@ -359,6 +408,39 @@ export const ARRIVE_SETTLE_MS = 25000;
 // timer's own timing.
 export const ARRIVE_SPEAK_MAX_LATE_MS = 90000;
 const REROUTE_DISTANCE_M = 80; // PERPENDICULAR distance off the route line before off-route
+// ── DIVERGENCE TREND (2026-07-31) ──────────────────────────────────────────
+// Jeff: "I took a different route and it took a while for the route to change, at
+// least 1 min."
+//
+// The streak logic below is already fast ONCE you are 80 m off the line. The 80 m
+// itself is the delay: turn onto a street that parallels the route and the gap opens
+// slowly, so on a city grid you can drive a long way before any threshold trips. The
+// missed-maneuver fast path does not help either — it needs you to have approached
+// within 80 m of a maneuver first, and an early deliberate departure never does.
+//
+// A trend is a much better discriminator than a distance. On-route error OSCILLATES:
+// GPS noise, lane changes and the simplified overview polyline all wander up and down
+// around zero. A real departure MONOTONICALLY grows. So: already clearly off the line,
+// growing on essentially every tick, and enough total growth that it cannot be noise.
+// That fires while the gap is still ~45 m instead of waiting for 80 m.
+//
+// Tuned to require BOTH sustained growth and a floor well above polyline-simplification
+// error (which is a fixed offset on a curve — it does not keep growing).
+// TUNED BY SIMULATION over ten synthetic traces (scratchpad/offroute_sim2.js), three
+// that must reroute and seven that must not. A 5-tick window was tried FIRST and was
+// wrong in both directions: it fired on a 4-tick urban-canyon spike (a spurious reroute
+// mid-drive — worse than the bug) and still missed the slow parallel-street case it was
+// written for. The fix is a LONGER window, because that is what actually separates the
+// two: a multipath spike rises fast and falls back within a few ticks, so it can never
+// stay monotonic for ten; a real departure can. Result at these values, 10/10:
+//   parallel street  23 s -> 10 s      urban-canyon spike   no reroute
+//   gentle fork      38 s -> 19 s      two spikes in a row  no reroute
+//   hard wrong turn   8 s (unchanged)  sweeping bend        no reroute
+//   GPS noise / lane change / overtaking / service road beside the highway: none
+const DIVERGE_MIN_M = 45;        // must already be clearly off the line
+const DIVERGE_GROWTH_M = 20;     // total growth across the window
+const DIVERGE_TICKS = 10;        // ~10 s — long enough that a spike cannot fake it
+const DIVERGE_SLACK_M = 3;       // per-tick dip allowed, so one noisy fix doesn't reset
 // Heading gate for off-route: a big perpendicular distance only counts as a real
 // departure if the car's heading ALSO diverges from the route's local direction
 // by more than this. Driving straight along a highway while GPS multipath off an
@@ -594,6 +676,8 @@ export function useTurnByTurn(
   const missRef = useRef<{ step: number; min: number } | null>(null);
   const lastOffRouteAtRef = useRef<number>(0);
   const offRouteStreakRef = useRef<number>(0);
+  // Recent perpendicular distances, for the divergence trend (see DIVERGE_*).
+  const divergeRef = useRef<number[]>([]);
   const polyCacheRef = useRef<{ key: string; pts: LatLng[] }>({ key: "", pts: [] });
   // Segment-ETA state. `suffix` is rebuilt whenever the route's segment durations
   // change — which includes a live traffic REFRESH, not just a new route, so a refresh
@@ -691,6 +775,7 @@ export function useTurnByTurn(
     if (key !== routeKeyRef.current) {
       routeKeyRef.current = key;
       announcedRef.current.clear();
+      divergeRef.current = [];   // the trend is meaningless against a different line
       // A settle armed against the OLD route's destination must not survive a swap.
       settleSinceRef.current = null;
       if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
@@ -862,6 +947,16 @@ export function useTurnByTurn(
       const conclusivelyOff = dRoute > REROUTE_DISTANCE_M * 2;   // >160 m: GPS multipath can't explain this
       if (dRoute > REROUTE_DISTANCE_M) offRouteStreakRef.current += 1;
       else offRouteStreakRef.current = 0;
+      // Divergence trend — catches the slow parallel-street departure long before the
+      // 80 m threshold does. See the DIVERGE_* block for why a trend beats a distance.
+      const hist = divergeRef.current;
+      hist.push(dRoute);
+      if (hist.length > DIVERGE_TICKS) hist.shift();
+      const diverging =
+        hist.length === DIVERGE_TICKS &&
+        dRoute > DIVERGE_MIN_M &&
+        dRoute - hist[0] > DIVERGE_GROWTH_M &&
+        hist.every((v, i) => i === 0 || v >= hist[i - 1] - DIVERGE_SLACK_M);
       // Trip fast when the evidence is strong, slower when it's marginal:
       //   • conclusively off (>160 m)      → 2 ticks (~2 s), heading irrelevant
       //   • off + heading diverging (>55°) → 3 ticks (~3 s): a real wrong turn
@@ -881,6 +976,7 @@ export function useTurnByTurn(
         dRoute > 25;
       const tripped =
         missedManeuver ? true :
+        diverging ? true :
         conclusivelyOff ? offRouteStreakRef.current >= 2 :
         headingOff      ? offRouteStreakRef.current >= 3 :
                           offRouteStreakRef.current >= 6;
@@ -889,6 +985,7 @@ export function useTurnByTurn(
         if (now - lastOffRouteAtRef.current > 8000) {
           lastOffRouteAtRef.current = now;
           offRouteStreakRef.current = 0;
+          divergeRef.current = [];  // fresh trend against the NEW line
           missRef.current = null; // one miss = one reroute; re-arm on the new route
           options?.onOffRoute?.();
         }

@@ -390,6 +390,14 @@ export type MapboxRoute = {
   // re-routing the driver. Verified against the live API 2026-07-26.
   refreshUuid?: string;
   routeIndex: number;
+  // ── WHICH SIDE OF THE ROAD THE DESTINATION LANDS ON (2026-07-31) ───────────
+  // Jeff: "the GPS needs to be a little mindful on which side of the road the
+  // destination is." Mapbox already tells us — the ARRIVE step carries
+  // maneuver.modifier ("left" | "right" | "straight") and the step carries
+  // driving_side. modifier opposite to driving_side = the driver has to cross
+  // oncoming traffic to reach it. Free: it is in the response we already fetch.
+  arriveSide?: "left" | "right" | "straight";
+  drivingSide?: "left" | "right";
 };
 
 // Decode a precision-5 polyline to [lng,lat] (GeoJSON order for Mapbox paint).
@@ -412,6 +420,15 @@ function decodePolyline5LngLat(encoded: string): [number, number][] {
 
 export type MapboxAvoid = { tolls?: boolean; highways?: boolean; ferries?: boolean };
 
+// True when the destination sits across oncoming traffic — the arrive modifier is the
+// OPPOSITE side from the region's driving side. "straight" (a dead end, a driveway, the
+// end of a cul-de-sac) is never wrong-side. Undefined fields fail closed to false so a
+// route from an older cache never triggers a pointless second request.
+export function arrivesOnFarSide(r: Pick<MapboxRoute, "arriveSide" | "drivingSide">): boolean {
+  if (!r.arriveSide || !r.drivingSide || r.arriveSide === "straight") return false;
+  return r.arriveSide !== r.drivingSide;
+}
+
 // Fetch up to `alternatives` driving-traffic routes from origin->dest with steps,
 // congestion, and a traffic/free-flow duration split. Returns [] on any failure
 // (caller decides fallback). One leg (no waypoints) so annotations cover the whole
@@ -420,7 +437,7 @@ export async function fetchMapboxRoutes(
   origin: LatLng,
   dest: LatLng,
   avoid?: MapboxAvoid,
-  opts?: { signal?: AbortSignal },
+  opts?: { signal?: AbortSignal; curbApproach?: boolean },
 ): Promise<MapboxRoute[]> {
   try {
     if (
@@ -440,6 +457,11 @@ export async function fetchMapboxRoutes(
       // enable_refresh gives the response a `uuid`, the handle the Directions Refresh
       // API needs to hand back UPDATED traffic for this exact geometry mid-drive.
       `&enable_refresh=true` +
+      // approaches is one entry PER COORDINATE. Origin unrestricted (never make the
+      // driver cross the road to LEAVE), destination curb = arrive on the driver's
+      // side. Verified against the live API 2026-07-31: it flips the arrive step from
+      // "on the left" to "on the right" and is a genuine re-route, not a relabel.
+      (opts?.curbApproach ? `&approaches=unrestricted%3Bcurb` : ``) +
       (exclude.length ? `&exclude=${exclude.join(",")}` : ``) +
       `&access_token=${MAPBOX_PUBLIC_TOKEN}`;
 
@@ -502,6 +524,16 @@ export async function fetchMapboxRoutes(
         segDurations,
         refreshUuid: typeof json?.uuid === "string" ? json.uuid : undefined,
         routeIndex,
+        // Read off the ARRIVE step (always the last one). Raw Mapbox fields, not the
+        // cleaned instruction string, so this never depends on parsing English.
+        arriveSide: (() => {
+          const m = (route?.legs?.[0]?.steps || []).slice(-1)[0]?.maneuver?.modifier;
+          return m === "left" || m === "right" || m === "straight" ? m : undefined;
+        })(),
+        drivingSide: (() => {
+          const ds = (route?.legs?.[0]?.steps || []).slice(-1)[0]?.driving_side;
+          return ds === "left" || ds === "right" ? ds : undefined;
+        })(),
       };
     }).filter((r) => r.polyline);
   } catch {

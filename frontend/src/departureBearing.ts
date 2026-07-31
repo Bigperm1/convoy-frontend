@@ -111,6 +111,21 @@ export async function getDepartureBearing(): Promise<number | null> {
 // the car surfaces kept sorting on ETA alone, so the same destination gave a U-turn
 // from the head unit and not from the phone.
 const FORWARD_TOLERANCE_DEG = 75;
+// ── REROUTE USES A U-TURN-ONLY GATE (2026-07-31) ───────────────────────────
+// Jeff: "when it re routed it did not route the fastest 'best way'."
+//
+// orderRoutesForward puts EVERY forward option ahead of every non-forward one, so a
+// forward route that is ten minutes slower beats the fastest one. At DEPARTURE that is
+// right — you are parked, pointing a way, and being told to U-turn out of your own
+// street is the bug this fixed. Mid-drive it is wrong: a reroute is computed from where
+// you are NOW, and the fastest continuation very often begins with an ordinary left or
+// right. routeInitialBearing looks ~25 m ahead, so that first turn IS the bearing it
+// measures — at 75° a normal left turn scores "not forward" and gets demoted below a
+// slower straight-on line. That is exactly the symptom.
+//
+// So the reroute path keeps the guard but narrows it to what it was actually for:
+// doubling back. 135° still catches a real U-turn and no longer punishes a turn.
+export const UTURN_ONLY_TOLERANCE_DEG = 135;
 
 function bearingDeg(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -139,16 +154,17 @@ export function routeInitialBearing(r: any): number | null {
 // Order routes so the FASTEST one heading roughly the way the car already faces comes
 // first; options that start with a U-turn fall to the back (also fastest-first).
 // No heading -> plain fastest-first, i.e. the behaviour before any of this existed.
-export function orderRoutesForward<T = any>(res: T[], heading?: number): T[] {
+export function orderRoutesForward<T = any>(res: T[], heading?: number, toleranceDeg?: number): T[] {
   if (!Array.isArray(res) || res.length <= 1) return res;
   const dur = (r: any) => r?.duration_in_traffic_s ?? r?.duration_s ?? Infinity;
   if (typeof heading !== "number" || !Number.isFinite(heading)) {
     return [...res].sort((a, b) => dur(a) - dur(b));
   }
+  const tol = typeof toleranceDeg === "number" ? toleranceDeg : FORWARD_TOLERANCE_DEG;
   const offBy = (br: number) => Math.abs(((br - heading + 540) % 360) - 180); // 0..180
   const scored = res.map((r) => {
     const br = routeInitialBearing(r);
-    return { r, forward: br != null && offBy(br) <= FORWARD_TOLERANCE_DEG, d: dur(r) };
+    return { r, forward: br != null && offBy(br) <= tol, d: dur(r) };
   });
   const fwd = scored.filter((s) => s.forward).sort((a, b) => a.d - b.d);
   const rest = scored.filter((s) => !s.forward).sort((a, b) => a.d - b.d);

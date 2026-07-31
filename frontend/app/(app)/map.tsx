@@ -40,7 +40,7 @@ import {
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
   useRouteTrafficRefresh, fetchRouteViaStops,
 } from "../../src/nav";
-import { getDepartureBearing, noteCourse, orderRoutesForward } from "../../src/departureBearing";
+import { getDepartureBearing, noteCourse, orderRoutesForward, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
 import { subscribeBgFix } from "../../src/navNotification";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue, type CongestionLevel } from "../../src/mapboxDirections";
 import { logEvent } from "../../src/crashBreadcrumb";
@@ -1398,7 +1398,11 @@ export default function MapScreen() {
         if (res.length > 0) {
           // Prefer the fastest reroute that continues in the direction the car is
           // already facing, so going off-course never auto-selects a U-turn line.
-          const ordered = orderRoutesForward(res, coords?.heading);
+          // U-turn-only gate here, NOT the departure gate — see
+          // UTURN_ONLY_TOLERANCE_DEG. Mid-drive the fastest continuation routinely
+          // starts with an ordinary turn, and the 75° departure gate was demoting
+          // those below slower straight-on lines.
+          const ordered = orderRoutesForward(res, coords?.heading, UTURN_ONLY_TOLERANCE_DEG);
           setRoutes(ordered.slice(0, 2));
           setSelectedRouteIndex(0);
           // Re-baseline to the new route: the driver deliberately changed path, so the

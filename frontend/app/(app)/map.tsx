@@ -3657,6 +3657,15 @@ export default function MapScreen() {
         // user.car_type / user.car_color come from the Garage profile (Mongo,
         // hydrated by useAuth). Pass them as carBody/carColor so the "you"
         // marker uses the same SVG silhouette + paint other drivers see.
+        // The self marker draws exactly what the crew is being sent — same decision,
+        // same coordinates (see src/locationPrivacy). Parked => your car's spot at 0.5
+        // opacity, identical to how peers render you. That is what makes the privacy
+        // contract checkable from the app instead of taken on trust.
+        // Never while navigating. A light longer than the 90s hysteresis would otherwise
+        // flip the marker to parked mid-drive — dimming the car and pinning it to a spot
+        // you are already sitting on. During a route you are driving by definition.
+        selfParked={presenceParked && navMode !== "turn-by-turn"}
+        selfParkedAt={presencePos}
         user={{
           ...coords,
           // Resolve a stable heading: GPS heading when moving, inferred travel

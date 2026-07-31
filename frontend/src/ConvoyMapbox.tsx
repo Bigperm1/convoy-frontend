@@ -106,6 +106,16 @@ interface ConvoyMapboxProps {
   center?: { lat: number; lng: number; heading?: number } | null;
   user?: UserLocation | null;
   hideSelfMarker?: boolean;
+  // ── SHOW ME WHAT THE CREW SEES (2026-07-31) ────────────────────────────────
+  // Jeff, after disconnecting CarPlay and walking into a building: "it is supposed to
+  // stay on my car which is on the street a block away. and i should be translucent."
+  // Both true. The self marker drew live GPS at full opacity, so there was no way to
+  // confirm from the app that the parked contract was working — which is exactly the
+  // blind spot that let an ungated /location pipeline run for months.
+  // These come straight from src/locationPrivacy's decision in map.tsx, so the marker
+  // is literally the broadcast, rendered.
+  selfParked?: boolean;
+  selfParkedAt?: { lat: number; lng: number } | null;
   // How the driver draws THEMSELVES on the map: 'car' (3D GRC model, default) or
   // 'arrow' (3D green arrow), 'class' (flat top-down class sprite in a chosen
   // color). ('photo' is parked.) Mirrors settings.selfMarkerType.
@@ -189,6 +199,8 @@ interface ConvoyMapboxProps {
 }
 
 const SELF_ID = "self";
+// How a PARKED car is drawn — peers and yourself, one value so they cannot diverge.
+export const PARKED_OPACITY = 0.5;
 
 // Self-car 3D model. GLB is ~1.9 units long in its own space; common-3d treats
 // units as meters, so a real GR Corolla (~4.37m) ≈ 2.3x. Bumped to 3 for map
@@ -844,7 +856,7 @@ const SELF_MARKER_SLOT = undefined;
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1 }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -881,6 +893,12 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // iconSize for the sprite (real 44px photos need ~1.35 to match the 62pt
   // silhouette's on-map footprint). Default 1.
   spriteSize?: number;
+  // PARKED DIMMING (2026-07-31). Peers have always drawn a parked car at 0.5 opacity
+  // (CarMarker); the SELF marker had no path to it at all — it was pushed into cars[]
+  // with no `status` field. Jeff: "i should be translucent, correct?" Yes: your own
+  // marker should look exactly like what the crew sees, so the privacy contract is
+  // verifiable at a glance instead of taken on trust.
+  opacity?: number;
 }) {
   const render = useRef({ lat, lng, heading });
   const anim = useRef<{ fromLat: number; fromLng: number; fromHdg: number; toLat: number; toLng: number; toHdg: number; start: number; dur: number; armedAt: number; stepped: boolean } | null>(null);
@@ -1294,6 +1312,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
             iconAllowOverlap: true,
             iconIgnorePlacement: true,
             iconEmissiveStrength: 1,
+            iconOpacity: opacity,
           }}
         />
       ) : (
@@ -1312,6 +1331,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           // car over the buildings AND it drew the route line over the car, so it was
           // strictly worse. Reverted; the building-occlusion fix is tracked separately.)
           modelType: "common-3d",
+          modelOpacity: opacity,
           // Lift the car ~10m so it clears typical (residential) building heights and
           // isn't eaten by the 3D extrusions' depth test. Mapbox shares one depth buffer
           // between models + Standard buildings, and `slot`/location-indicator can't
@@ -1375,7 +1395,7 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
           // Peer uses the ARROW appearance: a 2-tone navigation chevron in their
           // paint (primary body over a secondary outline), rotated to heading.
           // Peers are MarkerViews (2D), so this mirrors the self 3D arrow flatly.
-          <View style={[car.status === "parked" ? { opacity: 0.5 } : null, { width: 40, height: 40, alignItems: "center", justifyContent: "center", transform: [{ rotate: `${rotation}deg` }] }]}>
+          <View style={[car.status === "parked" ? { opacity: PARKED_OPACITY } : null, { width: 40, height: 40, alignItems: "center", justifyContent: "center", transform: [{ rotate: `${rotation}deg` }] }]}>
             <MaterialCommunityIcons name="navigation" size={38} color={car.arrSec || "#FFFFFF"} style={{ position: "absolute" }} />
             <MaterialCommunityIcons name="navigation" size={30} color={car.arrPri || "#2DEC86"} />
           </View>
@@ -1384,7 +1404,7 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
           // Explicit width/height (not just the child's) so @rnmapbox's Android
           // MarkerView measures a concrete size for the annotation — otherwise
           // the wrapper can measure 0 → blank/cut-off peer markers on Android.
-          <View style={[car.status === "parked" ? { opacity: 0.5 } : null, { width: 44, height: 44, transform: [{ rotate: `${rotation}deg` }] }]}>
+          <View style={[car.status === "parked" ? { opacity: PARKED_OPACITY } : null, { width: 44, height: 44, transform: [{ rotate: `${rotation}deg` }] }]}>
             <ClassSprite vehicleClass={car.cls} primary={car.clsPri} secondary={car.clsSec} size={44} />
           </View>
         ) : (
@@ -1394,7 +1414,7 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
           // crops, so their ink is 62-66px wide inside an identical canvas. Scaling to
           // the GREY reference makes every peer's car the same size on the map. See
           // vehiclePngScale; 1.0 for grey/white so those are untouched.
-          style={[styles.car, car.status === "parked" ? { opacity: 0.5 } : null,
+          style={[styles.car, car.status === "parked" ? { opacity: PARKED_OPACITY } : null,
                   { transform: [{ rotate: `${rotation}deg` }, { scale: vehiclePngScale(car.color) }] }]}
           resizeMode="contain"
           fadeDuration={0}
@@ -1706,7 +1726,7 @@ function GLPinLayers({
 
 function ConvoyMapbox(props: ConvoyMapboxProps) {
   const {
-    center, user, peers, hideSelfMarker, selfMarkerType = "car", selfClassPaint, selfVehicleClass = "hatchback", selfArrowPaint, mapView = "heading_up",
+    center, user, peers, hideSelfMarker, selfParked, selfParkedAt, selfMarkerType = "car", selfClassPaint, selfVehicleClass = "hatchback", selfArrowPaint, mapView = "heading_up",
     mapMode = "satellite", leaderUserId, show3dBuildings = true,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs,
     routeColor = DEFAULT_ROUTE_COLOR,
@@ -2339,8 +2359,21 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
 
   // ===== Build the car list (self + peers) =====
   const cars: CarPoint[] = [];
-  if (!hideSelfMarker && user && typeof user.lat === "number" && typeof user.lng === "number") {
-    cars.push({ id: SELF_ID, lat: user.lat, lng: user.lng, color: user.carColor, heading: user.heading });
+  // When parked we draw the CAR's spot, not the phone's. selfParkedAt is the same point
+  // the presence payload carries, so what you see is what the crew sees. No known spot ->
+  // fall back to live: nothing is being broadcast in that case anyway (locationPrivacy
+  // returns share:false), so this is a purely local "where am I" and leaks nothing.
+  const selfPinned = !!selfParked && !!selfParkedAt;
+  const selfPos = selfPinned
+    ? { lat: selfParkedAt!.lat, lng: selfParkedAt!.lng }
+    : (user && typeof user.lat === "number" && typeof user.lng === "number" ? { lat: user.lat, lng: user.lng } : null);
+  if (!hideSelfMarker && selfPos) {
+    cars.push({
+      id: SELF_ID, lat: selfPos.lat, lng: selfPos.lng, color: user?.carColor,
+      // A parked car has no meaningful heading; keep the last one so it doesn't snap north.
+      heading: user?.heading,
+      status: selfPinned ? "parked" : "live",
+    });
   }
   const peerList: Peer[] = Array.isArray(peers) ? peers : peers ? Object.values(peers) : [];
   peerList.forEach((p) => {
@@ -2630,7 +2663,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   }
   // DISPLAY-ONLY draw position: route line (snapped) → nearest road (idle/off-route) → raw GPS.
   // Reroute + /location + presence stay on RAW GPS (see nav.ts); NEVER lift this into `coords`.
-  const selfDraw = selfSnapped
+  const selfDraw = selfPinned
+    // The parked spot was RECORDED while driving, so it is already on the road. Snapping
+    // it again would drag the pin to whatever fragment is nearest the phone's own idea of
+    // "here" — the marker-drift bug, reintroduced.
+    ? (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null)
+    : selfSnapped
     ? { lat: routeProj!.lat, lng: routeProj!.lng }
     : roadDraw
     ? roadDraw
@@ -3136,6 +3174,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           <SelfCarModel
             lat={(selfDraw ?? selfCar).lat}
             lng={(selfDraw ?? selfCar).lng}
+            opacity={selfPinned ? PARKED_OPACITY : 1}
             heading={selfHeadingLocked}
             emissive={selfEmissive}
             modelId={selfModelId}

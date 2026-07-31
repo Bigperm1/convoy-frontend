@@ -799,6 +799,13 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
   }
 }
 
+// When this nav session started, from the slim route startNavBanner persists on EVERY
+// surface. Synchronous, so onArrive can use it as a last-resort trip baseline instead
+// of Date.now() — which silently recorded 0-minute drives. Null when nothing is active.
+export function getNavStartedAt(): number | null {
+  return _route?.startedAt ?? null;
+}
+
 export async function stopNavBanner(): Promise<void> {
   _navEnding = true;   // close the resurrect-from-storage window (see the flag's note)
   _route = null;

@@ -69,7 +69,7 @@ import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
 import { cruisePlot } from "../../src/cruisePlot";
-import { startNavBanner, stopNavBanner, updateNavBanner, askAlwaysLocationOnce, CAR_NAV_KEY } from "../../src/navNotification";
+import { startNavBanner, stopNavBanner, updateNavBanner, askAlwaysLocationOnce, getNavStartedAt, CAR_NAV_KEY } from "../../src/navNotification";
 import { onCarNavStarted } from "../../src/carplay/carActions";
 import { PoliceBadgeIcon } from "../../src/components/MapControlIcons";
 import CompassNeedle from '../../src/components/CompassNeedle';
@@ -1336,7 +1336,12 @@ export default function MapScreen() {
       // src/trips.ts for why that split exists.
       try {
         const done = activeRoute;
-        const startedAt = tripBaselineRef.current?.startedAt || Date.now();
+        // Date.now() as the LAST resort only. It used to be the only fallback, and it
+        // makes startedAt === endedAt — a real 32 km drive recorded as 0.0 minutes
+        // (2026-07-30). getNavStartedAt() is the slim route's stamp, written by
+        // startNavBanner on every nav start on every surface, so it survives any path
+        // that missed the React baseline.
+        const startedAt = tripBaselineRef.current?.startedAt || getNavStartedAt() || Date.now();
         if (done) {
           void recordTrip({
             startedAt,
@@ -1541,6 +1546,9 @@ export default function MapScreen() {
     const cur = activeRouteRef.current;
     const baseline = tripBaselineRef.current;
     if (!origin || !dest || !cur || !baseline) return;
+    // A baseline whose plan hasn't landed yet (adopted drive) would make lateSec below
+    // equal the whole trip, so every alternative would read as a rescue. Wait for it.
+    if (!(baseline.plannedSec > 0)) return;
     if (tbtEtaRef.current && tbtEtaRef.current < 240) return; // almost there — don't bother
     // STOPS PINNED → no offers. The candidates below come from a plain origin→dest
     // fetch, so every one of them SKIPS the driver's stops; accepting one silently
@@ -2154,9 +2162,20 @@ export default function MapScreen() {
   // greeting (already played in the car) never replays. stopNavBanner clears the
   // key on any nav end, so a finished/ended drive can't re-adopt.
   useEffect(() => {
-    const adopt = (dest: { lat: number; lng: number; label?: string }) => {
+    const adopt = (dest: { lat: number; lng: number; label?: string }, startedAt?: number) => {
       if (navActiveRef.current) return; // already navigating — never clobber
       setDestination({ lat: dest.lat, lng: dest.lng, label: dest.label || "" });
+      // TRIP BASELINE (2026-07-31). Adoption deliberately skips startNav() — which is
+      // the ONLY other place this is set — so a car-started drive arrived with a null
+      // baseline and onArrive fell back to `Date.now()`, recording started_at ==
+      // ended_at. Jeff's 2026-07-30 drive landed in the trips table as 32.3 km in
+      // 0.0 MINUTES, which is exactly the usage number he now watches.
+      // startedAt comes from CAR_NAV_KEY on the cold path (the head unit's real start);
+      // the live bus fires the instant the car starts nav, so now() is right there.
+      // plannedSec is 0 until the route lands — see the effect below that fills it, and
+      // the `> 0` guard on the running-late check, because a 0 plan would read as
+      // infinitely late and fire reroute offers all drive.
+      tripBaselineRef.current = { startedAt: startedAt || Date.now(), plannedSec: 0 };
       setNavMode("turn-by-turn");
     };
     const un = onCarNavStarted(({ dest }) => adopt(dest));
@@ -2168,11 +2187,25 @@ export default function MapScreen() {
         if (typeof saved?.dest?.lat !== "number" || typeof saved?.dest?.lng !== "number") return;
         // Stale-session guard: only adopt a car drive from the last 12h.
         if (Date.now() - (saved.startedAt || 0) > 12 * 3600_000) return;
-        adopt(saved.dest);
+        adopt(saved.dest, typeof saved.startedAt === "number" ? saved.startedAt : undefined);
       } catch {}
     })();
     return un;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Complete an ADOPTED baseline once its route lands. adopt() can only stamp the
+  // start time — the route is rebuilt asynchronously from the current position — so
+  // plannedSec arrives one render later. Only ever fills a 0; never re-baselines a
+  // drive that already has a plan.
+  useEffect(() => {
+    if (navMode !== "turn-by-turn" || !activeRoute) return;
+    const b = tripBaselineRef.current;
+    if (!b || b.plannedSec > 0) return;
+    tripBaselineRef.current = {
+      startedAt: b.startedAt,
+      plannedSec: activeRoute.duration_in_traffic_s ?? activeRoute.duration_s ?? 0,
+    };
+  }, [navMode, activeRoute]);
 
   // CarPlay ⇄ "Always" location CTA (CarPlay-standalone). Drive-tested ground truth
   // (2026-07-14): with only "While Using", iOS freezes GPS the moment the screen

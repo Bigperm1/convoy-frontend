@@ -41,6 +41,7 @@ import {
   useRouteTrafficRefresh, fetchRouteViaStops,
 } from "../../src/nav";
 import { getDepartureBearing, noteCourse, orderRoutesForward, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
+import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy } from "../../src/locationPrivacy";
 import { subscribeBgFix } from "../../src/navNotification";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue, type CongestionLevel } from "../../src/mapboxDirections";
 import { logEvent } from "../../src/crashBreadcrumb";
@@ -2474,7 +2475,13 @@ export default function MapScreen() {
             const lng = (pos as any).coords.longitude;
             setCoords({ lat, lng });
             try { await AsyncStorage.setItem(LAST_LOC_KEY, JSON.stringify({ lat, lng })); } catch {}
-            try { await api.post("/location", { lat, lng, speed: 0, heading: 0 }); } catch {}
+            // Cold-start bootstrap. Ungated until 2026-07-31 — opening the app at your
+            // desk posted your desk. Async form: this runs before the settings cache or
+            // the car spot are necessarily hydrated, and the cache defaults to `partial`.
+            try {
+              const share = await shareablePositionAsync({ lat, lng, heading: 0, speed: 0 });
+              if (share.share) await api.post("/location", { lat: share.lat, lng: share.lng, speed: share.speed, heading: share.heading });
+            } catch {}
           }
         }
       } catch {}
@@ -2645,10 +2652,25 @@ export default function MapScreen() {
             const postEveryMs = speed > 0.5 ? 1000 : 12000;
             if (nowPost - lastLocPostRef.current > postEveryMs) {
               lastLocPostRef.current = nowPost;
-              api.post("/location", {
+              // ── PRIVACY GATE (2026-07-31) ──────────────────────────────────
+              // This used to post pos.coords RAW, with no reference to avatarMode
+              // and no parked check — a second, ungated pipeline running beside the
+              // presence contract. The backend writes it to the user document, fans
+              // it out over the WebSocket and serves it from /users/nearby, so
+              // walking from the car into a building published the building, once a
+              // second, to every connected client. The presence "parked" pin was
+              // only ever a client-side render laid over that.
+              // Same decision as presence now, from the one module that owns it.
+              const share = shareablePosition({
                 lat: pos.coords.latitude, lng: pos.coords.longitude,
-                speed, heading: heading ?? 0,
-              }).catch(() => {});
+                heading: heading ?? 0, speed,
+              });
+              if (share.share) {
+                api.post("/location", {
+                  lat: share.lat, lng: share.lng,
+                  speed: share.speed, heading: share.heading,
+                }).catch(() => {});
+              }
             }
             const kmh = speed * 3.6;
             // Personal-best tracking (in-memory): ignore stationary jitter (<1 km/h).
@@ -2975,8 +2997,17 @@ export default function MapScreen() {
           heading: typeof heading === "number" && heading >= 0 ? heading : (coords?.heading || 0),
           speed: typeof speed === "number" && speed >= 0 ? speed : 0,
         });
-        // 2. Push the new fix to the backend so /users/nearby returns us live.
-        try { await api.post("/location", { lat, lng, speed: speed || 0, heading: heading || 0 }); } catch {}
+        // 2. Push the new fix to the backend so /users/nearby returns us live — but only
+        //    what the avatarMode contract allows. This was ungated too, so a manual
+        //    refresh while parked published wherever the driver was standing.
+        try {
+          const share = await shareablePositionAsync({
+            lat, lng,
+            heading: typeof heading === "number" && heading >= 0 ? heading : 0,
+            speed: typeof speed === "number" && speed >= 0 ? speed : 0,
+          });
+          if (share.share) await api.post("/location", { lat: share.lat, lng: share.lng, speed: share.speed, heading: share.heading });
+        } catch {}
       }
     } catch {}
     // 3. Reload peer list + community list in parallel so
@@ -3277,6 +3308,7 @@ export default function MapScreen() {
         if (typeof p?.lat === "number" && typeof p?.lng === "number") lastCarLocRef.current = { lat: p.lat, lng: p.lng };
       })
       .catch(() => {});
+    void hydrateLocationPrivacy();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const lastDrivingAtRef = useRef(0);
@@ -3291,6 +3323,12 @@ export default function MapScreen() {
         AsyncStorage.setItem(LAST_CAR_SPOT_KEY, JSON.stringify(lastCarLocRef.current)).catch(() => {});
       }
     }
+    // Mirror into src/locationPrivacy, which is what every OTHER transport asks
+    // (the /location post above, CLVisit arrivals while the app is suspended).
+    // Same key, same thresholds — this block stays the writer the presence payload
+    // below already trusts; the module just makes the decision reachable elsewhere.
+    noteCarConnected(!!carConnected);
+    if (coords) noteFix(coords.lat, coords.lng, coords.speed ?? 0);
   }, [carConnected, coords?.lat, coords?.lng]);
 
   // Position + status we actually broadcast. PARTIAL or FULL → LIVE while the head
@@ -3299,12 +3337,20 @@ export default function MapScreen() {
   // otherwise. drivingRecently carries a 90s hysteresis so GPS jitter at a red light
   // doesn't flap live↔parked — and a mid-light flip is harmless anyway, since the
   // pin is the car's own road position by construction.
+  // ONE CONTRACT (2026-07-31). This used to be the only place the parked rule lived,
+  // computed inline — which is exactly how three ungated /location posters grew up
+  // beside it. The rule now lives in src/locationPrivacy and this asks it, so presence
+  // and every REST transport cannot drift apart again. It also inherits the tightened
+  // position rule there: live coordinates require PROOF the phone is in the car (head
+  // unit attached, or moving above walking pace right now), which closes the 90-second
+  // window in which walking away from a just-parked car was still published live.
   const drivingRecently = Date.now() - lastDrivingAtRef.current < 90000;
-  const presenceParked = avatarMode !== "ghost" && !carConnected && !drivingRecently;
-  const presencePos = presenceParked
-    ? lastCarLocRef.current
-    : (coords ? { lat: coords.lat, lng: coords.lng, heading: coords.heading || 0 } : null);
-  const presenceStatus: "live" | "parked" = presenceParked ? "parked" : "live";
+  const shareNow = shareablePosition(
+    coords ? { lat: coords.lat, lng: coords.lng, heading: coords.heading || 0, speed: coords.speed || 0 } : null,
+  );
+  const presencePos = shareNow.share ? { lat: shareNow.lat, lng: shareNow.lng, heading: shareNow.heading } : null;
+  const presenceStatus: "live" | "parked" = shareNow.share ? shareNow.status : "parked";
+  const presenceParked = presenceStatus === "parked";
 
   // ----- Throttled top_speed_record sync -----
   // Run whenever sessionMaxSpeed advances. If the new max beats the persisted

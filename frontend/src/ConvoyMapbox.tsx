@@ -39,7 +39,7 @@ import { routeTrimLeadM, routeTrimFadeM } from "./routeTrim";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getPowerMode } from "./powerMode";
-import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey, CLASS_TOPDOWN } from "./vehicleAssets";
+import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
 import { ClassSprite } from "./classLayers";
 import { getPaintedArrowUri } from "./arrowModel";
 import type { WeatherKind } from "./weatherLayer";
@@ -1390,7 +1390,12 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
         ) : (
         <Image
           source={src}
-          style={[styles.car, car.status === "parked" ? { opacity: 0.5 } : null, { transform: [{ rotate: `${rotation}deg` }] }]}
+          // Per-colour size normalisation — the five top-down photos are separate
+          // crops, so their ink is 62-66px wide inside an identical canvas. Scaling to
+          // the GREY reference makes every peer's car the same size on the map. See
+          // vehiclePngScale; 1.0 for grey/white so those are untouched.
+          style={[styles.car, car.status === "parked" ? { opacity: 0.5 } : null,
+                  { transform: [{ rotate: `${rotation}deg` }, { scale: vehiclePngScale(car.color) }] }]}
           resizeMode="contain"
           fadeDuration={0}
         />
@@ -3142,7 +3147,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             sprite={selfIsClass ? selfClassImg : (selfIsFlatCar ? selfCarFlatImg : undefined)}
             // class photo → 0.9 (66pt snapshot); silhouette → 1; flat car PNG is a
             // 44pt asset, so iconSize 1 ≈ the 46pt peer marker.
-            spriteSize={selfIsFlatCar ? 1 : (selfClassAsShot ? 0.9 : 1)}
+            spriteSize={selfIsFlatCar ? vehiclePngScale(selfCar?.color) : (selfClassAsShot ? 0.9 : 1)}
             speedMs={userSpeedMs}
             cameraRef={cameraRef}
             getCam={getCam}

@@ -168,6 +168,51 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
   precious_black_pearl: "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/cc1aa16b-7d5a-437b-a01e-a7a0bca3f9ff.glb",
 };
 
+// ── PER-COLOUR FLAT-SPRITE NORMALISATION (2026-07-30) ────────────────────────
+// Jeff: "make sure the 3D car markers for all the colours scale correctly — use the
+// grey one as the reference."
+//
+// MEASURED, both halves:
+//  • The 3D GLBs are IDENTICAL. Parsed all five and computed each world-space
+//    bounding box through the node hierarchy: every one is 1.9101 x 0.6693 x 0.9012.
+//    Same mesh, different textures — so the shared modelScale curve already renders
+//    every colour at exactly the same size and NO correction is possible or needed.
+//  • The FLAT top-down PNGs do NOT match. Same 44/88/132 canvas, but the car's INK
+//    inside it differs, because each is a separate photo crop. Measured on the @3x
+//    art (alpha bbox, ignoring the antialias fringe below alpha 24):
+//        heavy_metal (GREY)   66 x 129   <- the reference Jeff named
+//        ice_cap_white        66 x 130
+//        precious_black_pearl 63 x 130
+//        blue_flame           62 x 130
+//        supersonic_red       62 x 132
+//    So red/blue/black draw ~6% narrower than grey at the same spriteSize.
+//
+// Normalising in CODE rather than by re-cutting the PNGs is deliberate: changing an
+// existing require()'d image's CONTENT does nothing over the air — expo-updates
+// dedupes embedded assets by PATH and keeps serving the build's copy — so an asset
+// fix would need a directory rename and a fresh build. A scale factor ships today.
+const VEHICLE_PNG_INK_W: Record<GRCColorKey, number> = {
+  heavy_metal: 66,
+  ice_cap_white: 66,
+  precious_black_pearl: 63,
+  blue_flame: 62,
+  supersonic_red: 62,
+};
+const VEHICLE_PNG_REF_W = VEHICLE_PNG_INK_W.heavy_metal;   // grey is the reference
+
+/**
+ * Multiplier that makes a colour's flat top-down sprite render the same on-screen
+ * size as the grey one. 1.0 for grey and white; ~1.06 for the narrower crops.
+ * Apply to a map marker's size / spriteSize — never to the 3D model, which is
+ * already identical across colours.
+ */
+export function vehiclePngScale(color?: string | null): number {
+  const key = resolveGRCKey(color) || DEFAULT_GRC_KEY;
+  const w = VEHICLE_PNG_INK_W[key];
+  if (!w) return 1;
+  return Math.round((VEHICLE_PNG_REF_W / w) * 1000) / 1000;
+}
+
 /** Hosted 3D car model URL for the chosen paint. Falls back to the default GRC. */
 export function getVehicleModelUrl(color?: string | null): string {
   const key = resolveGRCKey(color) || DEFAULT_GRC_KEY;

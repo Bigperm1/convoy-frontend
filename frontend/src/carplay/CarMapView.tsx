@@ -32,7 +32,7 @@ import Mapbox, {
 import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { usePowerMode } from '../powerMode';
-import { getVehicleModelUrl, getVehicleModelKey, getVehiclePngOrDefault } from '../vehicleAssets';
+import { getVehicleModelUrl, getVehicleModelKey, getVehiclePngOrDefault, vehiclePngScale } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
   ROUTE_GREEN_CORE,
@@ -1057,7 +1057,8 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           // Flat top-down PNG while not routing, the 3D GLB while routing — the
           // phone's rule (see carFlat above). undefined → 3D model.
           sprite={carFlat ? carFlatImg : undefined}
-          spriteSize={1}
+          // Same grey-referenced normalisation the phone uses (vehiclePngScale).
+          spriteSize={carFlat ? vehiclePngScale(s.selfCarColor) : 1}
         />
       )}
 

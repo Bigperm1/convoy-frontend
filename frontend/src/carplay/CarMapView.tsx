@@ -191,6 +191,41 @@ export function hudScaleFor(w: number, h: number): number {
   if (Platform.OS !== 'android' || !(w > 0) || !(h > 0)) return 1;
   return Math.min(1, Math.max(HUD_SCALE_FLOOR, Math.min(w / CAR_REF_W, h / CAR_REF_H)));
 }
+
+// ── THE MAP ITSELF NEEDS THE SAME CORRECTION AS THE HUD (2026-07-31) ────────────
+// Say Phin's 07:22 drive, photographed: the map is so tight that a single road label
+// ("E 45TH AVE") spans the whole panel and the car is nowhere on screen. Jeff, three
+// times now: the AA zoom does not match the phone.
+//
+// hudScaleFor already shrank every CHIP and the car model for this canvas — but the
+// BASEMAP was never touched, and it is drawn in dp like everything else. That is the
+// whole bug. Mapbox zoom is defined against dp (one tile = 512dp), so at an identical
+// zoom level a canvas shows ground in proportion to its dp width:
+//   CarPlay 400dp vs Android Auto 213dp -> AA shows 53% of the ground CarPlay does.
+// Both panels are the SAME 800 physical px; the head unit just reports pixelRatio
+// 3.75 where CarPlay reports 2.0, so every dp — road, label, line — is drawn 1.88x
+// physically larger. It is not a taste mismatch, it is a unit mismatch.
+//
+// The correction is therefore exactly that ratio, in log2 because zoom is log2:
+//   log2(400 / 213) = 0.91 zoom levels
+// Cross-checked against his PHONE from the same probe row (window=384x832dp):
+// log2(384/213) = 0.85. Two independent references, 0.06 apart — so this is measured,
+// not tuned, and it self-adjusts on a head unit that reports a different canvas.
+//
+// Width, deliberately, NOT min(w,h) the way hudScaleFor does. Zoom corrects the SIZE
+// of a dp; the AA panel's 2:1 letterbox against CarPlay's 1.67:1 is a framing
+// difference no zoom value can fix, and folding it in here would over-zoom by a
+// further 0.26 levels. The clamp is a sanity rail on a bad layout report.
+//
+// NOT the complete fix: this restores the ground scale, but Mapbox draws label text
+// at a dp size, so road labels stay ~1.9x oversized. The real root fix is native —
+// MapOptions.Builder.pixelRatio(2f) on the AA MapView (verified present in the
+// bundled Mapbox Android SDK 11.25.0) — which needs a build, so it is queued for 71.
+export const AA_ZOOM_OUT_MAX = 1.5;
+export function aaZoomOutFor(w: number): number {
+  if (Platform.OS !== 'android' || !(w > 0) || w >= CAR_REF_W) return 0;
+  return Math.min(AA_ZOOM_OUT_MAX, Math.log2(CAR_REF_W / w));
+}
 // Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
 // phone's default look ('dusk'), so the car never shows a bare default style.
 const DEFAULT_MODE = 'dusk';
@@ -324,7 +359,11 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // speed→zoom curve (city tighter, highway wider), so cruise now dynamically zooms in/out
   // with speed too. Pulled back by CAR_ZOOM_OUT so more road reads on the wide screen.
   const kmh = kmhFromMs(s.speedMs);
-  const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined) - CAR_ZOOM_OUT - (previewMulti ? PREVIEW_ZOOM_OUT : 0);
+  // aaZoomOut is 0 on CarPlay by construction (see aaZoomOutFor) — this line is
+  // byte-identical there. On Android Auto it converts the canvas's inflated dp back
+  // to CarPlay's ground scale, so both car surfaces frame the same road ahead.
+  const aaZoomOut = aaZoomOutFor(mapW);
+  const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined) - CAR_ZOOM_OUT - aaZoomOut - (previewMulti ? PREVIEW_ZOOM_OUT : 0);
   // ── FLAT WHEN NOT ROUTING (2026-07-29, Jeff's call) ─────────────────────────
   // "I want to make the CarPlay flat when not routing, because it uses the high-res
   // PNG images instead of the 3D — the 3D should be for routing."
@@ -620,6 +659,20 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
       });
     } catch {}
   };
+
+  // ── APPLY THE CANVAS CORRECTION THE MOMENT IT IS KNOWN (2026-07-31) ─────────
+  // mapW arrives from onLayout, i.e. one render AFTER the first — so aaZoomOutFor
+  // changes followZoom late. On THIS surface a changed followZoom does not reach the
+  // camera by itself: every pushCam sits behind an active ease and a stopped car arms
+  // none (the note on applyZoomNow above — the exact trap that made pinch dead while
+  // parked). Without this, a head unit that connects while the car is stationary would
+  // keep the uncorrected framing until the driver pulled away. Reuses the same direct
+  // setCamera the pinch uses; zoomLevel only, so centre/heading/pitch are untouched
+  // and the next eased frame pushes the identical value.
+  useEffect(() => {
+    if (!painted || mapW <= 0) return;
+    applyZoomNow();
+  }, [painted, mapW]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     return subscribeCarGesture((g: CarGesture) => {

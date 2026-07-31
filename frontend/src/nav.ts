@@ -212,8 +212,20 @@ export async function fetchRoutes(
 // The second request only fires when it can possibly help: the ARRIVE step already
 // tells us the side (maneuver.modifier vs driving_side), so the common case costs no
 // extra Directions call at all. Raw fields, never parsed English.
-const CURB_MAX_EXTRA_S = 90;      // never detour more than this to switch sides
-const CURB_MAX_EXTRA_FRAC = 0.25; // ...and never more than a quarter of the trip
+// ── TIGHTENED AFTER THE FIRST REAL DRIVE (2026-07-31) ──────────────────────
+// Jeff's lunch run, on the build that first carried this: "I was approaching the
+// destination and it took me around the building."
+//
+// 90 s / 25% was MY number, not the data's. The measured benefit was +0 s (four of six
+// pairs) and +1 s; the measured harm was +227 s. Nothing in that supported 90. And on a
+// SHORT trip the fraction stops protecting anything: a 5-minute lunch run allowed a
+// 75-second detour — a quarter again on the trip, which is precisely "around the
+// building".
+// 20 s / 10% keeps every measured win with a 20x margin and rejects anything a driver
+// would notice. If a genuinely useful curb route ever costs more than 20 s, the honest
+// answer is to OFFER it, not to take it silently.
+const CURB_MAX_EXTRA_S = 20;
+const CURB_MAX_EXTRA_FRAC = 0.10;
 async function preferCurbArrival(
   origin: LatLng,
   destination: LatLng,

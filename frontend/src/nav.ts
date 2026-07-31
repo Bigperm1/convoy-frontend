@@ -322,6 +322,39 @@ const PREPARE_LEAD_S = 30;     // "In X, turn …" heads-up ~30 s out
 const PREPARE_MIN_M = 150;
 const PREPARE_MAX_M = 1200;
 const ADVANCE_THRESHOLD_M = 25;
+// ── ARRIVAL ─────────────────────────────────────────────────────────────────
+// Auto-finish has always existed (map.tsx's onArrive does the full teardown), but
+// it only ever fired on a GPS fix landing within ARRIVE_M of the destination — and
+// that is the one moment the phone stops producing fixes. Both watchers set a
+// distanceInterval (2 m navigating, 8 m eco, 5 m background) precisely so the OS
+// drops stationary jitter, so once the car is parked NO further fix arrives and the
+// effect never re-runs. Park in a lot, a driveway, or the far kerb — anywhere the
+// last moving fix was >20 m from the road-snapped destination — and the route ran
+// forever. Measured: only 4 auto-finished drives across all testers in three days.
+//
+// ARRIVE_M stays exactly as it was, so the normal case is bit-identical. The settle
+// path below is purely ADDITIVE: it can only fire where nothing fired before.
+const ARRIVE_M = 20;
+// "Close enough, and no longer moving." Deliberately generous on distance and
+// strict on time: a red light 60 m short of the destination clears in well under
+// ARRIVE_SETTLE_MS, whereas a parked car never does. Speed is the driver's own
+// course speed in m/s (1.4 ≈ 5 km/h — below a crawl).
+// Values chosen by SIMULATING the state machine against real arrival streams, not
+// picked by feel. 50 m / 25 s is the pair where every parking case finishes and the
+// only surviving false positive is a light within 50 m of the destination that holds
+// longer than 25 s — at which point ending the route is nearly right anyway. 60 m /
+// 20 s also fired on a 25 s light 50 m short, which is why it is not those numbers.
+const ARRIVE_SETTLE_M = 50;
+const ARRIVE_SETTLE_SPEED_MS = 1.4;
+const ARRIVE_SETTLE_MS = 25000;
+// The settle path is driven by fixes AND by one backup timer, because the whole
+// point is that fixes may have stopped. iOS suspends JS timers while the phone is
+// locked, so that timer can land arbitrarily late (the trap that once stranded the
+// CarPlay alert modals). Late is FINE for the teardown — the route should be gone
+// when the driver next looks — but "You have arrived" half an hour after parking is
+// not, so a late fire tears down silently. Timestamp comparison, never trust the
+// timer's own timing.
+const ARRIVE_SPEAK_MAX_LATE_MS = 90000;
 const REROUTE_DISTANCE_M = 80; // PERPENDICULAR distance off the route line before off-route
 // Heading gate for off-route: a big perpendicular distance only counts as a real
 // departure if the car's heading ALSO diverges from the route's local direction
@@ -583,6 +616,27 @@ export function useTurnByTurn(
   // deadline is live, maneuvers already within ~40m are marked announced
   // (banner still shows them; we just don't speak them late).
   const swapSuppressUntilRef = useRef<number>(0);
+  // ── ARRIVAL SETTLE (2026-07-31) ─────────────────────────────────────────────
+  // See ARRIVE_SETTLE_* below. When the driver is stopped near the destination we
+  // stamp the time and arm ONE backup timer; both are cleared the moment they move
+  // off again, and the whole mechanism is inert until the final step.
+  const settleSinceRef = useRef<number | null>(null);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fireArriveRef = useRef<(late: boolean) => void>(() => {});
+  useEffect(() => () => {
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = null;
+  }, []);
+
+  // Disarm the settle window whenever guidance starts OR stops. Without this, a timer
+  // armed while stopped near the old destination could land AFTER the driver ended the
+  // route (or started a new one) and run the arrival teardown on top of it — recording
+  // a second trip and dropping a route the driver had just set. Runs on both edges of
+  // `active` deliberately: teardown and fresh start both invalidate any pending settle.
+  useEffect(() => {
+    settleSinceRef.current = null;
+    if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
+  }, [active]);
 
   useEffect(() => {
     if (!active) {
@@ -634,6 +688,9 @@ export function useTurnByTurn(
     if (key !== routeKeyRef.current) {
       routeKeyRef.current = key;
       announcedRef.current.clear();
+      // A settle armed against the OLD route's destination must not survive a swap.
+      settleSinceRef.current = null;
+      if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
       swapSuppressUntilRef.current = Date.now() + 8000;
       const reAnchored: TbtState = { ...stateRef.current, active: true, stepIndex: 0 };
       stateRef.current = reAnchored;
@@ -925,10 +982,42 @@ export function useTurnByTurn(
     // SHOWN by src/pitstop.ts instead of being folded into the ETA.
 
     const arriveKey = `${steps.length - 1}-arrived`;
-    if (stepIdx === steps.length - 1 && dManeuver < 20 && !announcedRef.current.has(arriveKey)) {
+    const isLastStep = stepIdx === steps.length - 1;
+    // One funnel for both arrival paths, so they cannot disagree and cannot double-fire.
+    // Kept in a ref because the backup timer's closure outlives this effect run.
+    fireArriveRef.current = (late: boolean) => {
+      if (announcedRef.current.has(arriveKey)) return;
       announcedRef.current.add(arriveKey);   // fire once, not on every parked GPS tick
-      if (!options?.mute) speak(arrivalLine());
+      if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
+      if (!options?.mute && !late) speak(arrivalLine());
       options?.onArrive?.();
+    };
+
+    if (isLastStep && dManeuver < ARRIVE_M) {
+      fireArriveRef.current(false);          // unchanged immediate path
+    } else if (isLastStep && dManeuver < ARRIVE_SETTLE_M
+               && Math.max(0, user.speed ?? 0) < ARRIVE_SETTLE_SPEED_MS
+               && !announcedRef.current.has(arriveKey)) {
+      // Stopped within reach of the destination. Stamp it, and arm ONE timer as the
+      // backup for the case this whole mechanism exists to cover: no further fix.
+      const now = Date.now();
+      if (settleSinceRef.current == null) {
+        settleSinceRef.current = now;
+        if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+        settleTimerRef.current = setTimeout(() => {
+          settleTimerRef.current = null;
+          const since = settleSinceRef.current;
+          if (since == null) return;         // moved off again before this landed
+          fireArriveRef.current(Date.now() - since > ARRIVE_SETTLE_MS + ARRIVE_SPEAK_MAX_LATE_MS);
+        }, ARRIVE_SETTLE_MS);
+      } else if (now - settleSinceRef.current >= ARRIVE_SETTLE_MS) {
+        fireArriveRef.current(false);        // fixes still flowing — the normal settle
+      }
+    } else {
+      // Moving again, or no longer near the destination: disarm completely so a
+      // later red light starts its own clean window.
+      settleSinceRef.current = null;
+      if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
     }
 
     const next: TbtState = { active: true, stepIndex: stepIdx, distanceToManeuverM: dManeuver, distanceRemainingM: remaining, etaSeconds: eta };

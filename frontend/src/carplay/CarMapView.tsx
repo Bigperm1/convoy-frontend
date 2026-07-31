@@ -714,15 +714,32 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   }, []);
 
   // Active route → GeoJSON. Only drawn when the polyline decodes to a real line.
-  const routeLL = decodePolyline(s.routePolyline);
-  const routeCoords = routeLL.map((p) => [p.longitude, p.latitude]);
+  //
+  // ⚠ MEMOISED — THIS WAS A REAL REGRESSION (2026-07-30). Jeff: "earlier today
+  // CarPlay was working great but my drive home the car marker was glitching like
+  // crazy." These two lines ran on EVERY render, decoding the entire polyline and
+  // rebuilding the coord array from scratch. That was tolerable while CarMapView
+  // only re-rendered on carStore ticks (~1-2 Hz) — and then the route-trim ticker I
+  // added earlier today started re-rendering it at 12 Hz while navigating, so on a
+  // 28 km route this decoded thousands of points TWELVE TIMES A SECOND. The JS
+  // thread saturates and the 60 fps marker lockstep starves: the marker stutters and
+  // the HUD janks, which is exactly what was reported. The trim fix was right; doing
+  // it on top of an unmemoised decode was not.
+  const routeLL = useMemo(() => decodePolyline(s.routePolyline), [s.routePolyline]);
+  const routeCoords = useMemo(() => routeLL.map((p) => [p.longitude, p.latitude]), [routeLL]);
   const hasRoute = routeCoords.length >= 2;
 
   // BUFFER the green line off the car (mirror the phone): project the car onto the
   // route and TRIM the line so it starts a speed-aware lead AHEAD of the nose, with a
   // soft transparent→solid fade just past the trim so it doesn't hard-start into the
   // car. Navigating only; preview/cruise keeps the solid line.
-  const routeProj = (s.navigating && hasFix && hasRoute) ? projectOntoRoute(lat, lng, routeLL) : null;
+  // Also memoised: projectOntoRoute WALKS the whole decoded line, so at 12 Hz it was
+  // the second half of the same stall. It only changes when the car moves or the
+  // route does — never on a trim tick.
+  const routeProj = useMemo(
+    () => ((s.navigating && hasFix && hasRoute) ? projectOntoRoute(lat, lng, routeLL) : null),
+    [s.navigating, hasFix, hasRoute, lat, lng, routeLL],
+  );
   // ONE trim for all three surfaces (2026-07-29, src/routeTrim.ts). This used to be
   // its OWN formula — clamp(10 + speed*1.1, 10, 55) — against the phone's
   // clamp(12 + speed*1.6, 30, 100): 10 m vs 30 m of clearance at a standstill. The
@@ -837,6 +854,35 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // NOTE: like the phone, the gradient must NOT share a layer with lineTrimOffset (a
   // multi-colour gradient flattens to solid when trimmed); the trimmed glow casing below
   // keeps the behind-car vanish, this untrimmed core supplies the colours.
+  // ── CAR CONGESTION PROBE (2026-07-30) ──────────────────────────────────────
+  // Jeff, comparing a phone shot and a CarPlay shot of the SAME moment: "see the
+  // difference in the colour gradient on CarPlay — there is no red/orange."
+  //
+  // The rendering is NOT the suspect: both surfaces call the same
+  // buildCongestionGradient, both keep the multi-colour gradient off the trimmed
+  // layer (the @rnmapbox flattening trap), and the car is mirrored from
+  // routes[selectedRouteIndex], which the traffic refresh replaces in place. So on
+  // paper they should agree — and a photograph of a sunlit LCD is not evidence
+  // enough to start changing colour code, especially with visible moiré across the
+  // whole frame. Log the car's ACTUAL input mix, in the same shape as the phone's
+  // congestion-probe, so one drive gives a like-for-like comparison from data.
+  const congProbeKey = useRef('');
+  useEffect(() => {
+    const cong = (s.routeCongestion as string[] | undefined) || [];
+    if (!s.navigating || cong.length === 0) return;
+    const key = `${cong.length}:${s.routePolyline.slice(0, 24)}`;
+    if (congProbeKey.current === key) return;      // once per route, not per tick
+    congProbeKey.current = key;
+    const n = (lvl: string) => cong.filter((c) => c === lvl).length;
+    try {
+      logEvent(
+        `car-congestion n=${cong.length} coords=${(s.routeCoordinates?.length ?? 0)} ` +
+        `severe=${n('severe')} heavy=${n('heavy')} moderate=${n('moderate')} ` +
+        `low=${n('low')} unknown=${n('unknown')}`,
+      );
+    } catch {}
+  }, [s.navigating, s.routeCongestion, s.routeCoordinates, s.routePolyline]);
+
   const carCongGradient = useMemo(() => {
     const coords = s.routeCoordinates;
     const cong = s.routeCongestion as any;

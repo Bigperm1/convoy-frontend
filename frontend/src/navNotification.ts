@@ -255,6 +255,34 @@ function maybeUpdateSpeedLimit(lat: number, lng: number): void {
 // Background location task — fires on each location update (foreground AND
 // background) and drives the banner. Registered at module load.
 let _navTaskTicks = 0;
+// ── BACKGROUND FIX BUS (2026-07-30) ─────────────────────────────────────────
+// Tester report: "routing with the screen off, CarPlay does not re-route if I take a
+// different route — I have to open the phone, then it re-routes."
+//
+// Root cause: off-route detection lives in useTurnByTurn (nav.ts), which only sees
+// positions the MAP SCREEN hands it, and map.tsx's only continuous source is a
+// foreground watchPositionAsync. Lock the phone and that watch stops delivering, so
+// `coords` freezes, the streak counters never advance, and onOffRoute can never fire.
+// THIS task keeps running the whole time — it is what holds the banner, the car marker
+// and the speed limit alive — but it had no off-route logic of its own, so nothing
+// noticed the driver had left the line. Unlocking resumes the watch, the engine sees a
+// huge jump, and it re-routes instantly. Exactly the reported behaviour.
+//
+// The fix is deliberately NOT to reimplement off-route detection here. That logic is
+// subtle (perpendicular distance, heading gate, missed-maneuver fast path, three
+// different streak thresholds) and a second copy would drift from the first — the same
+// duplication that gave the route trim two different formulas for months. Instead the
+// background fix is PUBLISHED, and map.tsx feeds it to the one existing engine.
+type BgFix = { lat: number; lng: number; heading?: number; speed?: number };
+const _bgFixListeners = new Set<(f: BgFix) => void>();
+export function subscribeBgFix(fn: (f: BgFix) => void): () => void {
+  _bgFixListeners.add(fn);
+  return () => { _bgFixListeners.delete(fn); };
+}
+function _emitBgFix(f: BgFix): void {
+  _bgFixListeners.forEach((l) => { try { l(f); } catch {} });
+}
+
 TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   if (error) return;
   const locs = data?.locations;
@@ -282,6 +310,16 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   );
   setCarState({
     carDbg: "navtask#" + (++_navTaskTicks), // on-screen proof bg ticks are arriving
+  });
+  // Hand the same fix to any foreground consumer (map.tsx -> useTurnByTurn), so
+  // off-route detection and re-routing keep working with the screen off. Emitted
+  // AFTER the unconditional position write above and wrapped by the bus itself, so a
+  // listener that throws can never cost the car surface its fix.
+  _emitBgFix({
+    lat: loc.coords.latitude,
+    lng: loc.coords.longitude,
+    heading: typeof _h === "number" && _h >= 0 ? _h : undefined,
+    speed: typeof _sp === "number" && _sp >= 0 ? _sp : 0,
   });
   // Best-effort metadata — wrapped so it can never block the position write above.
   // (cache may be unhydrated in a separate bg JS context → defaults, which is fine.)

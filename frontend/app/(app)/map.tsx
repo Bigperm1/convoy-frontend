@@ -41,6 +41,7 @@ import {
   useRouteTrafficRefresh, fetchRouteViaStops,
 } from "../../src/nav";
 import { getDepartureBearing, noteCourse, orderRoutesForward } from "../../src/departureBearing";
+import { subscribeBgFix } from "../../src/navNotification";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue, type CongestionLevel } from "../../src/mapboxDirections";
 import { logEvent } from "../../src/crashBreadcrumb";
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from "../../src/routeOptimizer";
@@ -314,6 +315,10 @@ function maneuverNear(route: NavRoute | null, lat: number, lng: number): string 
 // How long the map stays where the driver put it before the chase cam takes back
 // over. Expressed once so the timestamp and the fast-path timer cannot drift.
 const PAN_RECENTER_MS = 20000;
+// How quiet the foreground watch must go before background fixes take over. The nav
+// watch delivers at ~1-2 Hz, so 3s means "the fg watch has genuinely stopped" (a
+// locked screen) rather than "we're between fixes".
+const BG_FIX_TAKEOVER_MS = 3000;
 
 // ===== Nova speeding-alert lines =====
 // tier 1 = light/humorous nudge (~20 over); tier 2 = firmer warning (~40 over).
@@ -1399,6 +1404,40 @@ export default function MapScreen() {
     },
   });
 
+  // ── KEEP OFF-ROUTE ALIVE WITH THE SCREEN OFF (2026-07-30) ──────────────────
+  // Tester: "routing with the screen off, CarPlay doesn't re-route if I take a
+  // different route — I have to open the phone, then it re-routes."
+  //
+  // Off-route detection lives in useTurnByTurn, and it only ever sees the positions
+  // THIS screen hands it. The only continuous source was the foreground
+  // watchPositionAsync above, which iOS stops delivering once the phone locks — so
+  // `coords` froze, the off-route streak counters never advanced, and onOffRoute could
+  // not fire. The background task kept running the whole time (it holds the banner,
+  // the car marker and the speed limit up) but had no off-route logic of its own.
+  // Unlocking resumed the watch, the engine saw one huge jump, and re-routed at once —
+  // which is why it looked like opening the phone "caused" the reroute.
+  //
+  // Rather than duplicate the detection (perpendicular distance + heading gate +
+  // missed-maneuver fast path + three streak thresholds — a second copy would drift),
+  // the background task now publishes each fix and we feed it to the SAME engine.
+  //
+  // PRIORITY GATE, matching the car surface's mirror>fgwatch>bgtask rule: only apply a
+  // background fix when the foreground watch has gone quiet. While the phone is awake
+  // both are live and the fg watch is the fresher, higher-accuracy source, so it must
+  // win; the moment it stops, this takes over seamlessly.
+  useEffect(() => {
+    if (navMode !== "turn-by-turn") return;
+    return subscribeBgFix((f) => {
+      if (Date.now() - lastFgFixAtRef.current < BG_FIX_TAKEOVER_MS) return;
+      setCoords((cur) => ({
+        lat: f.lat,
+        lng: f.lng,
+        heading: typeof f.heading === "number" ? f.heading : cur?.heading,
+        speed: typeof f.speed === "number" ? f.speed : (cur?.speed ?? 0),
+      }));
+    });
+  }, [navMode]);
+
   // ===== Lane guidance (Mapbox) =====
   // One Directions call per navigation session fetches per-maneuver lane cues;
   // we match the upcoming Google maneuver to the nearest cue at render time and
@@ -1856,6 +1895,9 @@ export default function MapScreen() {
   // ---- Map follow / manual-pan + auto-recenter ----
   // The driver can pan the map freely even while moving or under guidance; after
   // 10s of no further panning the camera snaps back to centre on their car.
+  // Wall-clock of the last FOREGROUND watch fix, so the background subscriber knows
+  // when the fg watch has gone quiet (screen locked) and it should take over.
+  const lastFgFixAtRef = useRef(0);
   const recenterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearRecenterTimer = () => {
     if (recenterTimerRef.current) { clearTimeout(recenterTimerRef.current); recenterTimerRef.current = null; }
@@ -2547,6 +2589,7 @@ export default function MapScreen() {
                 if (t.length > 5000) t.splice(0, t.length - 5000);
               }
             }
+            lastFgFixAtRef.current = Date.now();   // see the bg-fix subscriber below
             setCoords((cur) => ({
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,

@@ -47,6 +47,10 @@ export const CAR_NAV_KEY = "convoy:carNav";
 // Only pop the off-screen banner once the next maneuver is this close — so it
 // reads as "your turn is coming up", not a constant ping the whole drive.
 const ANNOUNCE_DISTANCE_M = 500;
+// How often updateNavBanner may hit the disk looking for a route it does not have.
+// See the call site: this runs at 1 Hz on two feeds, and answers "no route" almost
+// every time.
+const ROUTE_LOOKUP_THROTTLE_MS = 10_000;
 // Written by src/auth.tsx (its USER_KEY). Read directly rather than importing that
 // module: auth pulls in @react-native-google-signin, whose spec calls
 // TurboModuleRegistry.getEnforcing at MODULE SCOPE — that throws when the native
@@ -75,6 +79,7 @@ type SlimRoute = {
 let _route: SlimRoute | null = null;
 let _stepIdx = 0;
 let _notifiedStep = -1;
+let _routeLookAt = 0;
 
 // ── COLD lane guidance ("3D-lanes lite", CarPlay) ────────────────────────────
 // One Mapbox guidance fetch per nav session (keyed on the destination) gives us
@@ -286,7 +291,19 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
   if (_navEnding) return;   // a teardown is in flight; do not resurrect it from storage
   let route = _route;
   if (!route) {
-    try { const raw = await AsyncStorage.getItem(ROUTE_KEY); if (raw) route = JSON.parse(raw); } catch {}
+    // ── DON'T RE-READ THE DISK EVERY FIX WHEN THERE IS NO ROUTE (2026-07-31) ──
+    // This is on a 1 Hz path and, since 0717548 this morning, on TWO of them (the bg
+    // task and the foreground car feed). With Android Auto connected and no route —
+    // the ordinary free-drive case — `_route` is null forever, so every single fix did
+    // an AsyncStorage round-trip, twice a second, for as long as the feed ran. That is
+    // pure waste: a route started in THIS context sets `_route` directly in
+    // startNavBanner, so the only thing this read can discover is a route persisted by
+    // a DIFFERENT (headless) context, which a few seconds of delay cannot hurt.
+    const nowLook = Date.now();
+    if (nowLook - _routeLookAt > ROUTE_LOOKUP_THROTTLE_MS) {
+      _routeLookAt = nowLook;
+      try { const raw = await AsyncStorage.getItem(ROUTE_KEY); if (raw) route = JSON.parse(raw); } catch {}
+    }
   }
   if (!route || !route.steps || route.steps.length === 0) return;
   const steps = route.steps;
@@ -799,6 +816,7 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
     _stepIdx = 0;
     _notifiedStep = -1; // -1 so the FIRST turn still announces when it's incoming
     resetColdArrival();  // a new route must be able to arrive again
+    _routeLookAt = 0;    // and be discoverable by the other feed at once
     resetLaneCues();    // fresh route → fresh lane-guidance fetch (cold CarPlay lanes)
     try {
       await AsyncStorage.setItem(ROUTE_KEY, JSON.stringify(slim));

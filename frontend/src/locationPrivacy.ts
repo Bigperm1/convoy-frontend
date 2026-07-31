@@ -42,11 +42,21 @@ export const DRIVING_SPEED_MS = 2.5;
 // Hysteresis so a red light does not flap live<->parked mid-drive.
 export const DRIVING_HYSTERESIS_MS = 90_000;
 const SPOT_SAVE_THROTTLE_MS = 15_000;
+// The driving stamp gets the SAME throttle as the car spot. It shipped unthrottled on
+// 2026-07-31 and that is a per-fix disk write — roughly 7,200 AsyncStorage writes on a
+// two-hour drive, each a bridge hop plus a real write, for a value nothing reads more
+// precisely than the 90 s hysteresis. Say Phin's battery screenshot the same day put
+// Hairpin top of the list.
+// Staleness is safe BY DIRECTION: the in-memory stamp is always exact, and only the
+// PERSISTED copy lags. A lagging (older) stamp makes isParked() true SOONER, which shares
+// the car spot instead of live — the private side.
+const DRIVING_SAVE_THROTTLE_MS = 15_000;
 
 let _carConnected = false;
 let _lastDrivingAt = 0;
 let _carSpot: { lat: number; lng: number } | null = null;
 let _spotSavedAt = 0;
+let _drivingSavedAt = 0;
 let _hydrated = false;
 
 /** Hydrate the persisted car spot + driving stamp. Idempotent; safe to call anywhere. */
@@ -84,8 +94,12 @@ export function noteFix(lat: number, lng: number, speedMs?: number): void {
   const now = Date.now();
   if (driving) {
     _lastDrivingAt = now;
-    // Persisted so a suspended-app CLVisit can still tell parked from driving.
-    void AsyncStorage.setItem(LAST_DRIVING_KEY, String(now)).catch(() => {});
+    // Persisted so a suspended-app CLVisit can still tell parked from driving — throttled,
+    // see DRIVING_SAVE_THROTTLE_MS.
+    if (now - _drivingSavedAt > DRIVING_SAVE_THROTTLE_MS) {
+      _drivingSavedAt = now;
+      void AsyncStorage.setItem(LAST_DRIVING_KEY, String(now)).catch(() => {});
+    }
   }
   if (!_carConnected && !driving) return;
   _carSpot = { lat, lng };

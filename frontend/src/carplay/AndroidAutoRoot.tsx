@@ -113,6 +113,34 @@ export default function AndroidAutoRoot() {
   // Android app launch — see ANDROID_SPURIOUS_CONNECT_GUARD_MS) starting feeds
   // here can never leak GPS onto a phone with no car attached. All four calls
   // are platform-agnostic; released/stopped when the car session unmounts.
+  // ── RELEASE THE LOCATION HOLD WHEN THE CAR SESSION ACTUALLY ENDS ───────────
+  // The cleanup below only runs if this React root UNMOUNTS, and nothing ever unmounts
+  // it: CarPlaySession.onDestroy was a no-op upstream and the library has no
+  // unmountApplicationComponentAtRootTag. This root shares the app's ReactHost — the
+  // same JS context and the same _locConsumers Set as the phone — so once 'androidauto'
+  // was in that Set, releaseBgLocation's size-0 gate made stopping the location feeds
+  // unreachable for the life of the process. A tester measured 2 h 08 m of GPS against
+  // 21 minutes of screen time; the foreground service kept the process alive and the
+  // stall watchdog rebuilt the feeds every 25 s, so it never healed.
+  //
+  // The native half of the fix (patches/react-native-carplay) makes onDestroy emit
+  // didDisconnect. This is the half that listens. NEEDS BUILD 71 — the event cannot
+  // fire on an existing binary, so on build 70 this is inert and harmless.
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { CarPlay } = require('react-native-carplay');
+      const onDisconnect = () => {
+        void releaseBgLocation('androidauto');
+        stopCarDataService();
+      };
+      CarPlay.registerOnDisconnect?.(onDisconnect);
+      off = () => { try { CarPlay.unregisterOnDisconnect?.(onDisconnect); } catch {} };
+    } catch {}
+    return () => { if (off) off(); };
+  }, []);
+
   useEffect(() => {
     void acquireBgLocation('androidauto');   // shared bg task + fg car feed
     startCarDataService();                   // cold peers + hazards (WS/Supabase/REST)

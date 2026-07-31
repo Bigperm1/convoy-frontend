@@ -106,6 +106,38 @@ export function installCrashBreadcrumb() {
       // handler / expo-updates ErrorRecovery). Every OTHER error passes through
       // untouched. This backstops both call sites no matter which race fires.
       const benignRealtime = /cannot add `?(?:presence|postgres_changes|broadcast|system)`? callbacks/i.test(msg);
+      // SAFETY NET #2 (2026-07-31): `new NativeEventEmitter()` requires a non-null
+      // argument. Jeff: "I click on Spotify and it crashes" — and it kept crashing
+      // across three fixes because this is not one bug, it is a CLASS of bug.
+      //
+      // Several libraries construct a NativeEventEmitter at MODULE SCOPE against a
+      // native module they never null-check — in this bundle alone: @rnmapbox's
+      // RNMBXLocationModule and RNMBXOfflineModule (both module scope), plus
+      // RNMBXLogging, RNCarPlay and MusicKit inside constructors. If any of those
+      // modules is absent in the JS context doing the import — a headless background
+      // task, a CarPlay/car-session context, a partially-initialised bridge — the
+      // IMPORT ITSELF throws, uncaught, before any of our code runs.
+      //
+      // It is never a logic error and never actionable at the throw site: it means
+      // "this native module is not registered here". The correct behaviour is to lose
+      // that one feature, not the app — and critically NOT to reach expo-updates'
+      // ErrorRecovery, which treats it as a bad bundle and ROLLS BACK, stranding the
+      // user on old JS. That rollback is what made this look unfixable: each fix
+      // shipped fine and the crash loop kept reverting the device off it.
+      //
+      // Swallow it and record the STACK, which names the module (the frame above the
+      // emitter is the requiring package), so the specific offender can be guarded.
+      const nativeEmitterNull = /NativeEventEmitter.*non-null argument|Native module cannot be null/i.test(msg);
+      if (nativeEmitterNull) {
+        try {
+          void queue([{
+            message: "SWALLOWED native-emitter-null: " + msg.slice(0, 400),
+            stack: String(error?.stack ?? "").slice(0, 4000),
+            is_fatal: false, late: false, ...baseMeta(),
+          }]);
+        } catch {}
+        return; // app survives — do NOT propagate to ErrorRecovery
+      }
       if (benignRealtime) {
         try {
           void queue([{

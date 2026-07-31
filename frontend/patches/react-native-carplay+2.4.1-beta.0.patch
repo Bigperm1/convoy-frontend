@@ -773,7 +773,7 @@ index 5f6a243..a27d9ec 100644
              CarPlay_1.CarPlay.bridge.createTemplate(this.id, this.parseConfig({ type: this.type, ...config }), callbackFn);
          }
 diff --git a/node_modules/react-native-carplay/src/CarPlay.ts b/node_modules/react-native-carplay/src/CarPlay.ts
-index be4f962..6f3b005 100644
+index be4f962..aa1033e 100644
 --- a/node_modules/react-native-carplay/src/CarPlay.ts
 +++ b/node_modules/react-native-carplay/src/CarPlay.ts
 @@ -86,7 +86,9 @@ export interface InternalCarPlay extends NativeModule {
@@ -787,6 +787,24 @@ index be4f962..6f3b005 100644
    updateTabBarTemplates(id: string, config: unknown): void;
    activateVoiceControlState(id: string, identifier: string): void;
    // Android
+@@ -154,7 +156,16 @@ export class CarPlayInterface {
+   /**
+    * CarPlay Event Emitter
+    */
+-  public emitter = new NativeEventEmitter(RNCarPlay);
++  // Convoy guard (2026-07-31): NativeEventEmitter throws on a null argument, and
++  // `export const CarPlay = new CarPlayInterface()` at the bottom of this file runs
++  // this field initialiser AT MODULE SCOPE — so `require('react-native-carplay')` in
++  // any JS context without RNCarPlay registered (headless background task, a
++  // partially-initialised bridge) is an uncaught throw at IMPORT. That reaches
++  // expo-updates' ErrorRecovery and triggers a ROLLBACK, so the whole app reverts to
++  // old JS because one optional car integration is unavailable. Degrade instead.
++  public emitter: any = RNCarPlay
++    ? new NativeEventEmitter(RNCarPlay)
++    : { addListener: () => ({ remove: () => {} }), removeAllListeners: () => {} };
+ 
+   private onConnectCallbacks = new Set<OnConnectCallback>();
+   private onDisconnectCallbacks = new Set<OnDisconnectCallback>();
 diff --git a/node_modules/react-native-carplay/src/interfaces/BarButton.ts b/node_modules/react-native-carplay/src/interfaces/BarButton.ts
 index b9891d2..319f5fe 100644
 --- a/node_modules/react-native-carplay/src/interfaces/BarButton.ts

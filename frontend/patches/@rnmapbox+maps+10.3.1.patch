@@ -15,3 +15,55 @@ index 0bb9417..1283975 100644
      } reject:reject methodName:@"refresh"];
  }
  
+diff --git a/node_modules/@rnmapbox/maps/lib/module/modules/location/locationManager.js b/node_modules/@rnmapbox/maps/lib/module/modules/location/locationManager.js
+index ac0028a..4fb1172 100644
+--- a/node_modules/@rnmapbox/maps/lib/module/modules/location/locationManager.js
++++ b/node_modules/@rnmapbox/maps/lib/module/modules/location/locationManager.js
+@@ -8,7 +8,13 @@ const MapboxLocationManager = Platform.select({
+   android: NativeRNMBXLocationModule
+ });
+ const IsTurbo = typeof MapboxLocationManager.onLocationUpdate === 'function';
+-export const LocationModuleEventEmitter = Platform.OS === 'ios' || Platform.OS === 'android' && !IsTurbo ? new NativeEventEmitter(MapboxLocationManager) : null;
++// Convoy guard (2026-07-31): NativeEventEmitter THROWS on a null argument, and
++// these run at MODULE SCOPE — so importing @rnmapbox/maps anywhere the native
++// module is not registered (a headless background task, a car-session JS context,
++// a partially-initialised bridge) is an uncaught throw AT IMPORT, which reaches
++// expo-updates' ErrorRecovery and triggers a ROLLBACK. Losing offline packs or a
++// location emitter must degrade, never take the app down.
++export const LocationModuleEventEmitter = MapboxLocationManager && (Platform.OS === 'ios' || Platform.OS === 'android' && !IsTurbo) ? new NativeEventEmitter(MapboxLocationManager) : null;
+ 
+ /**
+  * Location sent by locationManager
+diff --git a/node_modules/@rnmapbox/maps/lib/module/modules/offline/offlineManager.js b/node_modules/@rnmapbox/maps/lib/module/modules/offline/offlineManager.js
+index b1c8e6a..2d8a118 100644
+--- a/node_modules/@rnmapbox/maps/lib/module/modules/offline/offlineManager.js
++++ b/node_modules/@rnmapbox/maps/lib/module/modules/offline/offlineManager.js
+@@ -9,7 +9,13 @@ const {
+   RNMBXModule
+ } = NativeModules;
+ const MapboxOfflineManager = NativeModules.RNMBXOfflineModule;
+-export const OfflineModuleEventEmitter = new NativeEventEmitter(MapboxOfflineManager);
++// Convoy guard (2026-07-31): NativeEventEmitter THROWS on a null argument, and
++// these run at MODULE SCOPE — so importing @rnmapbox/maps anywhere the native
++// module is not registered (a headless background task, a car-session JS context,
++// a partially-initialised bridge) is an uncaught throw AT IMPORT, which reaches
++// expo-updates' ErrorRecovery and triggers a ROLLBACK. Losing offline packs or a
++// location emitter must degrade, never take the app down.
++export const OfflineModuleEventEmitter = MapboxOfflineManager ? new NativeEventEmitter(MapboxOfflineManager) : { addListener: () => ({ remove: () => {} }), removeAllListeners: () => {} };
+ /**
+  * OfflineManager implements a singleton (shared object) that manages offline packs.
+  * All of this class’s instance methods are asynchronous, reflecting the fact that offline resources are stored in a database.
+diff --git a/node_modules/@rnmapbox/maps/lib/module/utils/Logger.js b/node_modules/@rnmapbox/maps/lib/module/utils/Logger.js
+index 170e2f6..0dad39f 100644
+--- a/node_modules/@rnmapbox/maps/lib/module/utils/Logger.js
++++ b/node_modules/@rnmapbox/maps/lib/module/utils/Logger.js
+@@ -13,7 +13,8 @@ class Logger {
+     return this.instance;
+   }
+   constructor() {
+-    this.loggerEmitter = new NativeEventEmitter(RNMBXLogging);
++    // Convoy guard (2026-07-31) — see offlineManager.js.
++    this.loggerEmitter = RNMBXLogging ? new NativeEventEmitter(RNMBXLogging) : { addListener: () => ({ remove: () => {} }), removeAllListeners: () => {} };
+     this.startedCount = 0;
+     this.logCallback = undefined;
+   }

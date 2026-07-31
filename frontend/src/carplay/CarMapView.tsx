@@ -1104,17 +1104,54 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
             filter={(carCongGradient ? ['==', ['get', 'index'], -1] : ['==', ['get', 'index'], SELECTED_INDEX]) as any}
             style={{ lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(coreGrad ? { lineGradient: coreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: carRouteColor }) }}
           />
+          {/* ── CONGESTION CORE — MUST BE THE LAST LAYER IN *THIS* SOURCE ────────
+              Jeff, three times: "the colour gradient on CarPlay does not match the
+              phone — there is no red whatsoever."
+
+              The gradient was never the problem. Running the real
+              buildCongestionGradient + applyCarGapGradient over the actual logged
+              drive (congestion-probe: n=256 severe=31 heavy=49) produces
+              #FF3B30 in the output at EVERY trim value either surface uses — red
+              was always in the expression. The bug was DRAW ORDER.
+
+              This layer used to live in its own separate <ShapeSource> mounted after
+              the route source. Mapbox orders layers within a slot by INSERTION, and
+              the route source sits inside a `previewMulti ? … : hasRoute ? … : null`
+              ternary — so every time that branch flips (preview→nav, a reroute, a
+              route clear) the route source UNMOUNTS AND REMOUNTS, and its layers get
+              re-inserted ABOVE the congestion layer, which never remounted. From that
+              moment the 24pt lineBlur:8 green casing sits on top of the 12pt coloured
+              core and washes it out permanently — no red, and the soft blended look in
+              the head-unit photo rather than the phone's crisp bands. It also explains
+              "it was fine earlier today and wrong on the drive home": order is correct
+              until the first branch flip.
+
+              The phone never had this because route-sel-cong lives INSIDE the same
+              ShapeSource as the glow and is mounted last, so the two can only ever be
+              re-added together, in order. Matching that structure here removes the
+              whole class of bug rather than patching the symptom. */}
+          <LineLayer
+            id="car-cong-core"
+            slot="top"
+            // FILTERED off rather than unmounted when there is no congestion — a
+            // conditional child would unmount the layer and re-insert it on the next
+            // route with congestion, reintroducing exactly the ordering bug above.
+            // Same technique the core layer uses.
+            filter={(carCongGradient ? ['==', ['get', 'index'], SELECTED_INDEX] : ['==', ['get', 'index'], -1]) as any}
+            style={{ lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(carCongGapped ? { lineGradient: carCongGapped } : { lineColor: carRouteColor }) }}
+          />
         </ShapeSource>
       ) : null}
 
-      {/* CONGESTION core — the selected route's live traffic gradient, NON-TRIMMED, drawn
-          ON TOP of whichever route branch is active (preview or nav). Mirrors the phone's
-          route-sel-cong; the glow casing in the branches above keeps the behind-car vanish.
-          Built from the SAME mirrored coordinates the gradient indexes, so it stays aligned. */}
-      {carCongGradient && (
+      {/* PREVIEW-only congestion source. The NAV congestion core now lives inside the
+          car-route ShapeSource above (see the draw-order note there); this standalone
+          source remains solely for the multi-route PREVIEW branch, which has no
+          per-route congestion layer of its own. Gated off during nav so the two can
+          never both paint. */}
+      {carCongGradient && previewMulti && (
         <ShapeSource id="car-congestion" shape={carCongFC} lineMetrics>
           <LineLayer
-            id="car-cong-core"
+            id="car-cong-preview"
             slot="top"
             style={{ lineGradient: carCongGapped, lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
           />

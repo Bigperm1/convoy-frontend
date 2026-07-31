@@ -233,13 +233,36 @@ async function fireColdArrival(late: boolean): Promise<void> {
 }
 
 // Mirrors the phone's arrival logic exactly (nav.ts). Returns true once it has fired.
-function evaluateColdArrival(idx: number, stepCount: number, d: number, speedMs?: number): void {
+// Distance still to run to the DESTINATION, or null when this route cannot express it.
+// Mirrors nav.ts's `remaining`, and exists for the same reason: `idx >= stepCount - 1`
+// is really a 25 m gate (the advance loop only moves on inside 25 m of a step end, and
+// the last two step ends are both the destination), so gating on it made ARRIVE_SETTLE_M
+// unreachable.
+//
+// ⚠ RETURNS NULL RATHER THAN A GUESS. A slim route persisted before the Wave-2 fields
+// existed has no per-step distanceM, so summing would yield `d` on EVERY step — and
+// `d < ARRIVE_M` two steps out would auto-finish the drive miles early. Fail back to the
+// old last-step gate instead; conservative is correct here.
+function coldRemainingM(steps: SlimStep[], idx: number, d: number): number | null {
+  let sum = d;
+  for (let i = idx + 1; i < steps.length; i++) {
+    const m = steps[i].distanceM;
+    if (typeof m !== "number" || !Number.isFinite(m)) return null;   // legacy route
+    sum += m;
+  }
+  return sum;
+}
+
+function evaluateColdArrival(steps: SlimStep[], idx: number, stepCount: number, d: number, speedMs?: number): void {
   // The phone engine owns arrival whenever it is running — it also records the trip
   // and learns the drive, which this path cannot. Never race it.
   if (isPhoneTbtSpeaking() || _coldArrived || _navEnding) return;
-  const isLast = idx >= stepCount - 1;
-  if (isLast && d < ARRIVE_M) { void fireColdArrival(false); return; }
-  if (isLast && d < ARRIVE_SETTLE_M && Math.max(0, speedMs ?? 0) < ARRIVE_SETTLE_SPEED_MS) {
+  const rem = coldRemainingM(steps, idx, d);
+  // Same axis as nav.ts when the route supports it; the old 25 m-equivalent gate when not.
+  const dDest = rem ?? (idx >= stepCount - 1 ? d : Number.POSITIVE_INFINITY);
+  const isLast = dDest < Number.POSITIVE_INFINITY;
+  if (isLast && dDest < ARRIVE_M) { void fireColdArrival(false); return; }
+  if (isLast && dDest < ARRIVE_SETTLE_M && Math.max(0, speedMs ?? 0) < ARRIVE_SETTLE_SPEED_MS) {
     const now = Date.now();
     if (_coldSettleSince == null) {
       _coldSettleSince = now;
@@ -291,7 +314,7 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
   // before the banner writes below so the last thing the driver sees is the teardown,
   // not a freshly-posted "Arriving" banner for a route that just ended.
   if (typeof speedMs === "number" && speedMs > _coldMaxSpeedMs) _coldMaxSpeedMs = speedMs;
-  evaluateColdArrival(idx, steps.length, d, speedMs);
+  evaluateColdArrival(steps, idx, steps.length, d, speedMs);
   if (_coldArrived) return;
 
   // Feed the CAR turn-by-turn strip every tick. On a COLD CarPlay connect the phone

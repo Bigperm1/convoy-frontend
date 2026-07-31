@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Platform, AppState } from "react-native";
 import { api } from "./api";
 import { fetchMapboxRoutes, fetchMapboxRouteVia, refreshMapboxRoute, arrivesOnFarSide, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
+import { logEvent } from "./crashBreadcrumb";
 import { getSettings, getNovaVoice, getAudioVol } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
@@ -226,6 +227,16 @@ export async function fetchRoutes(
 // answer is to OFFER it, not to take it silently.
 const CURB_MAX_EXTRA_S = 20;
 const CURB_MAX_EXTRA_FRAC = 0.10;
+// ── AND A DISTANCE AXIS (2026-07-31) ───────────────────────────────────────
+// Time alone is not a sufficient budget: my own measurements include a curb route that
+// cost +492 m for +1 s. Under a seconds-only rule that is a "free" win that silently
+// adds half a kilometre of driving — the literal shape of "it took me around the
+// building". Calibrated against those same pairs so the cheap win survives and the bad
+// one dies twice over: BOTH conditions must hold to reject, so
+//   highway-adjacent  +492 m on a 14199 m route -> 492 > 250 but < 15% -> KEPT
+//   Broadway          +917 m on a 2702 m route  -> 917 > 250 and > 15%  -> REJECTED
+const CURB_MAX_EXTRA_M = 250;
+const CURB_MAX_EXTRA_DIST_FRAC = 0.15;
 async function preferCurbArrival(
   origin: LatLng,
   destination: LatLng,
@@ -244,7 +255,15 @@ async function preferCurbArrival(
     const alt = curb[0];
     if (!alt || !alt.polyline || arrivesOnFarSide(alt)) return routes;  // no better
     const extra = alt.duration_s - best.duration_s;
-    if (extra > CURB_MAX_EXTRA_S || extra > best.duration_s * CURB_MAX_EXTRA_FRAC) return routes;
+    const extraM = alt.distance_m - best.distance_m;
+    const tooSlow = extra > CURB_MAX_EXTRA_S || extra > best.duration_s * CURB_MAX_EXTRA_FRAC;
+    const tooFar = extraM > CURB_MAX_EXTRA_M && extraM > best.distance_m * CURB_MAX_EXTRA_DIST_FRAC;
+    // RECEIPT. Whether this fired, and at what cost, has so far been inferred from
+    // photographs — twice, with two different conclusions. One row per decision ends that.
+    try {
+      logEvent(`curb ${tooSlow || tooFar ? 'rejected' : 'TAKEN'} extra_s=${Math.round(extra)} extra_m=${Math.round(extraM)} base_s=${Math.round(best.duration_s)} base_m=${Math.round(best.distance_m)}`);
+    } catch {}
+    if (tooSlow || tooFar) return routes;
     // Replace only the PRIMARY line. The alternatives stay as they were, so the driver
     // can still pick a different route entirely and nothing else about the fan-out moves.
     return [alt, ...routes.slice(1)];
@@ -419,6 +438,24 @@ export const ARRIVE_SETTLE_MS = 25000;
 // not, so a late fire tears down silently. Timestamp comparison, never trust the
 // timer's own timing.
 export const ARRIVE_SPEAK_MAX_LATE_MS = 90000;
+// ── TIER 3: PARKED NEAR THE DOOR, BUT THE ROUTE STILL HAS ROAD LEFT (2026-07-31)
+// Jeff's lunch run: photo 2 shows him out of the car with 142 m of route still to run,
+// because the route looped the block and the destination sits across it. Neither tier
+// above can fire — 142 m is 3x ARRIVE_SETTLE_M — and no choice of tier-2 radius fixes it
+// without also firing mid-route.
+//
+// The axis that separates this from "still has far to drive" is CROW-FLY distance to the
+// destination, which is small exactly when the route is doubling back around something.
+// Alone it is not enough: a destination across a river or a divided highway can be 70 m
+// away and 2 km to drive, and ending the route there would strand the driver. So all
+// three must hold — physically close, not much road left, and stopped long enough that
+// this is parking rather than traffic.
+//
+// Deliberately a LONG dwell. This branch is inherently less certain than tier 2, so it
+// buys certainty with time; 90 s of stillness is parking, not a light.
+const ARRIVE_NEAR_CROW_M = 80;
+const ARRIVE_NEAR_ROUTE_M = 400;
+const ARRIVE_NEAR_MS = 90000;
 const REROUTE_DISTANCE_M = 80; // PERPENDICULAR distance off the route line before off-route
 // ── DIVERGENCE TREND (2026-07-31) ──────────────────────────────────────────
 // Jeff: "I took a different route and it took a while for the route to change, at
@@ -451,8 +488,20 @@ const REROUTE_DISTANCE_M = 80; // PERPENDICULAR distance off the route line befo
 //   GPS noise / lane change / overtaking / service road beside the highway: none
 const DIVERGE_MIN_M = 45;        // must already be clearly off the line
 const DIVERGE_GROWTH_M = 20;     // total growth across the window
-const DIVERGE_TICKS = 10;        // ~10 s — long enough that a spike cannot fake it
-const DIVERGE_SLACK_M = 3;       // per-tick dip allowed, so one noisy fix doesn't reset
+const DIVERGE_SLACK_M = 3;       // per-sample dip allowed, so one noisy fix doesn't reset
+// ⚠ WINDOW IS WALL-CLOCK, NOT A TICK COUNT (corrected 2026-07-31, same day).
+// It was DIVERGE_TICKS = 10 and the comment claimed "~10 s". That was wrong, and the
+// error is large in the exact case this detector exists for. Fixes are gated by
+// distanceInterval, not time — 2 m plugged, 8 m unplugged, 5 m background — so ten
+// samples take:
+//        5 km/h   10 km/h   20 km/h
+//   eco    58 s     29 s      14 s
+// Pulling out of a car park unplugged is the 5-10 km/h column, so the "reroute in ~10 s"
+// I measured was really up to a minute. A wall-clock window is honest at any cadence.
+// The sample floor keeps the anti-spike property: a multipath excursion rises and falls
+// within a few seconds, so it cannot stay monotonic across a full window.
+const DIVERGE_WINDOW_MS = 8000;
+const DIVERGE_MIN_SAMPLES = 4;
 // Heading gate for off-route: a big perpendicular distance only counts as a real
 // departure if the car's heading ALSO diverges from the route's local direction
 // by more than this. Driving straight along a highway while GPS multipath off an
@@ -689,7 +738,7 @@ export function useTurnByTurn(
   const lastOffRouteAtRef = useRef<number>(0);
   const offRouteStreakRef = useRef<number>(0);
   // Recent perpendicular distances, for the divergence trend (see DIVERGE_*).
-  const divergeRef = useRef<number[]>([]);
+  const divergeRef = useRef<{ t: number; d: number }[]>([]);
   const polyCacheRef = useRef<{ key: string; pts: LatLng[] }>({ key: "", pts: [] });
   // Segment-ETA state. `suffix` is rebuilt whenever the route's segment durations
   // change — which includes a live traffic REFRESH, not just a new route, so a refresh
@@ -962,13 +1011,15 @@ export function useTurnByTurn(
       // Divergence trend — catches the slow parallel-street departure long before the
       // 80 m threshold does. See the DIVERGE_* block for why a trend beats a distance.
       const hist = divergeRef.current;
-      hist.push(dRoute);
-      if (hist.length > DIVERGE_TICKS) hist.shift();
+      const nowT = Date.now();
+      hist.push({ t: nowT, d: dRoute });
+      while (hist.length && nowT - hist[0].t > DIVERGE_WINDOW_MS) hist.shift();
       const diverging =
-        hist.length === DIVERGE_TICKS &&
+        hist.length >= DIVERGE_MIN_SAMPLES &&
+        nowT - hist[0].t >= DIVERGE_WINDOW_MS * 0.75 &&   // a real window, not 4 fast fixes
         dRoute > DIVERGE_MIN_M &&
-        dRoute - hist[0] > DIVERGE_GROWTH_M &&
-        hist.every((v, i) => i === 0 || v >= hist[i - 1] - DIVERGE_SLACK_M);
+        dRoute - hist[0].d > DIVERGE_GROWTH_M &&
+        hist.every((v, i) => i === 0 || v.d >= hist[i - 1].d - DIVERGE_SLACK_M);
       // Trip fast when the evidence is strong, slower when it's marginal:
       //   • conclusively off (>160 m)      → 2 ticks (~2 s), heading irrelevant
       //   • off + heading diverging (>55°) → 3 ticks (~3 s): a real wrong turn
@@ -1094,7 +1145,25 @@ export function useTurnByTurn(
     // SHOWN by src/pitstop.ts instead of being folded into the ETA.
 
     const arriveKey = `${steps.length - 1}-arrived`;
-    const isLastStep = stepIdx === steps.length - 1;
+    // ── isLastStep WAS A HIDDEN 25 m GATE — my settle path was mostly dead (2026-07-31)
+    // Both arrival branches used to require `stepIdx === steps.length - 1`. That reads
+    // like a cheap guard. It is not: mapboxToNavRoute sets step[i].end to step[i+1]'s
+    // maneuver location (:292-294) and Mapbox's final ARRIVE step has distance 0 AT the
+    // destination — so steps[len-2].end === steps[len-1].end === the destination. The
+    // advance loop only moves on when dManeuver < ADVANCE_THRESHOLD_M (25), which means
+    // stepIdx reaches the last step ONLY after the car has already passed within 25 m.
+    //
+    // So `isLastStep` WAS a 25 m radius, and ARRIVE_SETTLE_M = 50 was unreachable: you
+    // had to come within 25 m before a 50 m band could ever be tested. The exact case I
+    // wrote the settle path for this morning — "park in a lot, a driveway, or the far
+    // kerb" — was still blocked by it. Found by an adversarial review of a real drive.
+    //
+    // `remaining` is the correct axis and is a STRICT SUPERSET: on the last step the
+    // sum loop never runs so remaining === dManeuver (identical behaviour), and on the
+    // step before it remaining === dManeuver === distance-to-destination, so the settle
+    // now fires at a true 50 m without ever requiring the 25 m pass. Nothing that fires
+    // today stops firing.
+    const dDest = remaining;
     // One funnel for both arrival paths, so they cannot disagree and cannot double-fire.
     // Kept in a ref because the backup timer's closure outlives this effect run.
     fireArriveRef.current = (late: boolean) => {
@@ -1105,11 +1174,20 @@ export function useTurnByTurn(
       options?.onArrive?.();
     };
 
-    if (isLastStep && dManeuver < ARRIVE_M) {
-      fireArriveRef.current(false);          // unchanged immediate path
-    } else if (isLastStep && dManeuver < ARRIVE_SETTLE_M
-               && Math.max(0, user.speed ?? 0) < ARRIVE_SETTLE_SPEED_MS
-               && !announcedRef.current.has(arriveKey)) {
+    // Crow-fly gap to the destination — the last step's end IS the destination
+    // (mapboxToNavRoute keeps end = its own maneuver point for the final step).
+    const destPt = steps[steps.length - 1]?.end;
+    const crowM = destPt ? haversineMeters(user, destPt) : Number.POSITIVE_INFINITY;
+    const stopped = Math.max(0, user.speed ?? 0) < ARRIVE_SETTLE_SPEED_MS;
+    const settleOk = dDest < ARRIVE_SETTLE_M && stopped;
+    const nearOk = !settleOk && stopped
+      && crowM < ARRIVE_NEAR_CROW_M && dDest < ARRIVE_NEAR_ROUTE_M;
+    // One timestamp, one timer, but the dwell depends on which branch armed it.
+    const dwellMs = settleOk ? ARRIVE_SETTLE_MS : ARRIVE_NEAR_MS;
+
+    if (dDest < ARRIVE_M) {
+      fireArriveRef.current(false);          // unchanged on the last step
+    } else if ((settleOk || nearOk) && !announcedRef.current.has(arriveKey)) {
       // Stopped within reach of the destination. Stamp it, and arm ONE timer as the
       // backup for the case this whole mechanism exists to cover: no further fix.
       const now = Date.now();
@@ -1120,9 +1198,13 @@ export function useTurnByTurn(
           settleTimerRef.current = null;
           const since = settleSinceRef.current;
           if (since == null) return;         // moved off again before this landed
-          fireArriveRef.current(Date.now() - since > ARRIVE_SETTLE_MS + ARRIVE_SPEAK_MAX_LATE_MS);
-        }, ARRIVE_SETTLE_MS);
-      } else if (now - settleSinceRef.current >= ARRIVE_SETTLE_MS) {
+          try { logEvent(`arrive-settle fired dwell=${Math.round(dwellMs / 1000)}s crow=${Math.round(crowM)} route=${Math.round(dDest)}`); } catch {}
+          fireArriveRef.current(Date.now() - since > dwellMs + ARRIVE_SPEAK_MAX_LATE_MS);
+        }, dwellMs);
+      } else if (now - settleSinceRef.current >= dwellMs) {
+        // Receipt so the next drives PROVE which tier is doing the work, instead of
+        // another round of reading photographs.
+        try { logEvent(`arrive-settle fired dwell=${Math.round(dwellMs / 1000)}s crow=${Math.round(crowM)} route=${Math.round(dDest)}`); } catch {}
         fireArriveRef.current(false);        // fixes still flowing — the normal settle
       }
     } else {

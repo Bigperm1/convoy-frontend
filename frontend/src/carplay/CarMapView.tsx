@@ -890,22 +890,31 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
     const g = buildCongestionGradient(coords, cong, carRouteColor);
     return Array.isArray(g) ? g : (['interpolate', ['linear'], ['line-progress'], 0, g, 1, g] as any);
   }, [s.routeCoordinates, s.routeCongestion, carRouteColor]);
-  const carCongFC: any = {
+  // Memoised for the same reason routeLL/routeCoords/routeProj are: CarMapView
+  // re-renders at ~12 Hz while navigating, and handing native a brand-new shape object
+  // identity every tick re-uploads the whole route geometry. Missed by the first
+  // memoisation pass; it also made the z-order symptom look flaky, because any path
+  // that re-adds this source pushes its layer back to the top of the slot.
+  const carCongFC: any = useMemo(() => ({
     type: 'FeatureCollection',
     features: (carCongGradient && s.routeCoordinates && s.routeCoordinates.length >= 2)
-      ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: s.routeCoordinates } }]
+      ? [{ type: 'Feature', properties: { index: SELECTED_INDEX }, geometry: { type: 'LineString', coordinates: s.routeCoordinates } }]
       : [],
-  };
+  }), [carCongGradient, s.routeCoordinates]);
   // While navigating, gap the (non-trimmed) congestion core off the car too — bake
   // the behind-car vanish + soft front fade into the gradient alpha (same s0/s1 as
   // the plain core) so the coloured line clears the nose instead of running through it.
-  const carCongGapped = (carCongGradient && s.navigating && routeTrimEndFrac != null)
-    ? applyCarGapGradient(
-        carCongGradient,
-        Math.min(0.997, Math.max(0.0001, routeTrimEndFrac)),
-        Math.min(0.999, Math.max(routeTrimEndFrac + 0.0006, routeTrimEndFrac + fadeSpanFrac)),
-      )
-    : carCongGradient;
+  // Memoised — a fresh gradient ARRAY every render re-uploads the layer's paint at 12 Hz.
+  const carCongGapped = useMemo(
+    () => ((carCongGradient && s.navigating && routeTrimEndFrac != null)
+      ? applyCarGapGradient(
+          carCongGradient,
+          Math.min(0.997, Math.max(0.0001, routeTrimEndFrac)),
+          Math.min(0.999, Math.max(routeTrimEndFrac + 0.0006, routeTrimEndFrac + fadeSpanFrac)),
+        )
+      : carCongGradient),
+    [carCongGradient, s.navigating, routeTrimEndFrac, fadeSpanFrac],
+  );
 
   // Multi-route PREVIEW geometry → one feature per display route, carrying its precomputed
   // per-kind core `color` + casing `edge` (AI = black core, user-color edge) so a single
@@ -1058,7 +1067,9 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           NAV / single route: the existing single selected ribbon below, with the speed-aware
           trim + near-car fade, exactly as before (the proven path is untouched). */}
       {previewMulti ? (
-        <ShapeSource id="car-routes-preview" shape={previewFC}>
+        // key=: see the note on the nav branch below. The two branches must NEVER be
+        // reconciled into one another — a distinct key forces a clean unmount/mount.
+        <ShapeSource key="car-routes-preview" id="car-routes-preview" shape={previewFC}>
           <LineLayer
             id="car-preview-casing"
             slot="middle"
@@ -1083,7 +1094,34 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           />
         </ShapeSource>
       ) : hasRoute ? (
-        <ShapeSource id="car-route" shape={routeFC} lineMetrics>
+        // ── key= IS LOAD-BEARING — IT IS WHAT KEEPS THE CONGESTION CORE ON TOP ────
+        // d888154 made car-cong-core the LAST child of this source (phone parity) so
+        // the green casing can never be re-inserted above it. That closes the order
+        // WITHIN the source, but not the flip OF the source: without a key, React sees
+        // one <ShapeSource> in one child position and RECONCILES the preview branch
+        // INTO this one — mutating live native objects rather than replacing them.
+        // The source's `id` prop changes car-routes-preview -> car-route (RNMBXSource
+        // re-registers), and child 1 is mutated in place from car-preview-core (slot
+        // "middle") into car-route-sel-casing (slot "top") — RNMBXLayer's id setter
+        // does removeFromMap on willSet + addToMap on didSet, and with no
+        // aboveLayerID/belowLayerID/layerIndex that re-add lands at LayerPosition
+        // .default = the TOP of its slot. Children 2 and 3 (sel-core, cong-core) are
+        // brand-new mounts in the same commit. So at 'Go' the casing is re-added to
+        // slot "top" by an id mutation while the congestion core arrives by a fresh
+        // mount, and their relative order is decided by native prop-application order,
+        // not by JSX order. Whenever the casing wins, a 24pt lineBlur:8 lineOpacity:.55
+        // brand-green wash composites over the 12pt coloured core: #FF3B30 -> olive
+        // rgb(140,156,95), #FF9500 -> rgb(140,197,74), #FFD60A -> rgb(140,226,78),
+        // green unchanged. Red and orange disappear, yellow survives as yellow — Jeff's
+        // report word for word, three times.
+        //
+        // A distinct key makes the ternary a real unmount -> mount: every layer in this
+        // branch is CREATED, in declaration order, with car-cong-core last. That is the
+        // phone's guarantee (convoy-routes is mounted once for BOTH preview and nav —
+        // showRoutes never flips at 'Go' — so its five layers are only ever added
+        // together, in order). The phone needs no key because it has no branch; the car
+        // needs one because it does.
+        <ShapeSource key="car-route" id="car-route" shape={routeFC} lineMetrics>
           <LineLayer
             id="car-route-alts"
             slot="middle"

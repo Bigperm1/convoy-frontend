@@ -372,19 +372,46 @@ function pointInWaterPolys(lat: number, lng: number, features?: any[]): boolean 
   }
   return false;
 }
-// Self-illumination for the 3D car per light preset. ALL modes now render the
-// car fully self-lit (1.0) — the same dusk/dark-tint bypass the arrow uses — so
-// the paint color stays vivid instead of being washed dark by the scene light
-// (user request 2026-07-11). Unlike the flat-shaded arrow, the car GLBs carry
-// baked texture shading, so they keep their 3D depth even without scene light.
-// CarMapView reads this same map, so CarPlay stays in lockstep with the phone.
-// 0 = fully scene-lit, 1 = fully self-lit. Per-mode entries kept for OTA tuning.
+// Self-illumination for the 3D car per light preset.
+//
+// ── WHY THESE ARE ALL WELL BELOW 1.0 (2026-07-30) ───────────────────────────
+// Jeff: "I want the shiny on all map modes — isn't this possible?" It is, and the
+// two goals were never actually in conflict. Verified against the SDK's own spec
+// (@rnmapbox MapboxStyles.ts, modelEmissiveStrength):
+//
+//   "There is no emission for value 0. For value 1.0, ONLY EMISSIVE COMPONENT
+//    (NO SHADING) is displayed..."
+//
+// So emission is a BLEND, not a switch. Every mode was pinned at 1.0, which is
+// literally the "no shading" end of that blend — the car was drawn as flat unlit
+// albedo. That is the entire reason the paint looked matte instead of metallic.
+//
+// It matters more than it sounds, because the car GLBs are full PBR: inspecting the
+// actual asset shows metallic=1.0 with a metallicRoughness TEXTURE and a NORMAL MAP
+// (5 images). Specular highlights and panel detail both come from scene light hitting
+// those maps — at emissive 1.0 all of it is discarded. (The old comment here claimed
+// the GLBs "carry baked texture shading"; they do not. Baked shading would live in the
+// base colour. That wrong assumption is what kept this at 1.0.)
+//
+// Anything below 1.0 lets shading through, so the car is SHINY ON EVERY MODE. The
+// values only rise on the darker presets, to hold a brightness floor against a dimmer
+// scene light — the same lever that fixes the matte look also protects the vivid paint
+// that 1.0 was originally chosen (2026-07-11) to preserve.
+//
+// NOT levers here, checked so they are not re-tried: modelRoughness applies "only to
+// layers using batchedModel source" (we register a single model), and
+// modelAmbientOcclusionIntensity needs an occlusionTexture the asset does not carry.
+// <Light> is the v2 fill-extrusion light and does not drive Standard v3's lighting.
+//
+// 0 = fully scene-lit, 1 = fully self-lit (no shading). OTA-tunable: raise a mode if
+// its paint reads too dark, lower it if the car looks flat again.
+// CarMapView reads this same map, so all four surfaces stay in lockstep.
 export const CAR_EMISSIVE_BY_MODE: Record<string, number> = {
-  satellite: 1.0,
-  day: 1.0,
-  dusk: 1.0,
-  dawn: 1.0,
-  night: 1.0,
+  satellite: 0.22,
+  day: 0.22,
+  dawn: 0.38,
+  dusk: 0.42,
+  night: 0.55,
 };
 
 // ----- Marker icon assets (shared with the Google engine) -----

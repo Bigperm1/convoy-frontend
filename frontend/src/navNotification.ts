@@ -388,28 +388,51 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
     for (let i = idx + 1; i < steps.length; i++) remainM += steps[i].distanceM || 0;
   }
   const etaS = paced ? Math.max(0, Math.round(remainM * (route.paceSPerM as number))) : 0;
+  // ── ONE WRITER FOR THE CAR'S TBT STRIP (2026-07-31) ────────────────────────
+  // Jeff, first reported 31 July and again after several drives: the CarPlay ETA banner
+  // "glitches all the time" — numbers jumping AND the banner redrawing. Phone only ever
+  // reads the turn engine directly; ONLY CarPlay reads carStore, which is exactly the
+  // surface he named.
+  //
+  // Cause: TWO engines wrote these same fields, ungated against each other.
+  //   warm (ConvoyCarPlay mirror, while tbt.active): the 3-tier segment ETA,
+  //         fmtDistanceM (metre precision), distances off the live route
+  //   cold (here, every fix): remainM * paceSPerM — a FLAT average pace — and
+  //         fmtManeuverDist, which rounds to the nearest 10 m under 300 m
+  // Two different answers alternating into one banner: the numbers jump, and every
+  // write notifies carStore so CarSurface re-renders — the flicker. The comment on the
+  // warm mirror already ASSUMED this exclusivity ("the mirror only overwrites once tbt
+  // goes active, whose richer numbers then win legitimately"); nothing enforced it.
+  //
+  // Worsened today: 0717548 added a SECOND cold caller (startForegroundCarFeed), so the
+  // cold writer ran on two feeds instead of one — roughly double the fighting, which is
+  // why "a couple of days ago" became "all the time".
+  //
+  // isPhoneTbtSpeaking() is the arbiter already used for lanes and for cold arrival.
+  // When the phone engine owns guidance, the cold path writes NONE of the strip.
+  const phoneOwnsStrip = isPhoneTbtSpeaking();
   setCarState({
-    navigating: true,
-    instruction: carInstruction,
-    distanceToTurn: fmtManeuverDist(d),
-    distanceToTurnM: Math.round(d),
-    destinationLabel: route.destLabel || "",
-    // Maneuver glyph for the car banner's arrow box — same derivation as the
-    // phone mirror (maneuverDir over the instruction + Mapbox maneuver key).
-    maneuverIcon: maneuverDir(carInstruction, arriving ? steps[steps.length - 1]?.maneuver : upNext.maneuver),
-    ...(paced
-      ? {
-          eta: fmtEtaSec(etaS),
-          etaSeconds: etaS,
-          distanceRemaining: fmtDistanceM(Math.round(remainM)),
-          distanceRemainingM: Math.round(remainM),
-        }
-      : {}),
-    // COLD lane guidance — only when the phone engine isn't driving the mirror
-    // (its lanes are anchored to the richer route); fail-closed → hidden.
-    ...(!isPhoneTbtSpeaking()
-      ? { lanes: pickLaneCue(_laneCues, { lat: steps[idx].endLat, lng: steps[idx].endLng }, d) || undefined }
-      : {}),
+    ...(phoneOwnsStrip ? {} : {
+      navigating: true,
+      instruction: carInstruction,
+      distanceToTurn: fmtManeuverDist(d),
+      distanceToTurnM: Math.round(d),
+      destinationLabel: route.destLabel || "",
+      // Maneuver glyph for the car banner's arrow box — same derivation as the
+      // phone mirror (maneuverDir over the instruction + Mapbox maneuver key).
+      maneuverIcon: maneuverDir(carInstruction, arriving ? steps[steps.length - 1]?.maneuver : upNext.maneuver),
+      ...(paced
+        ? {
+            eta: fmtEtaSec(etaS),
+            etaSeconds: etaS,
+            distanceRemaining: fmtDistanceM(Math.round(remainM)),
+            distanceRemainingM: Math.round(remainM),
+          }
+        : {}),
+      // COLD lane guidance — its lanes are anchored to the richer route when the phone
+      // engine is driving, so they belong to the same owner; fail-closed → hidden.
+      lanes: pickLaneCue(_laneCues, { lat: steps[idx].endLat, lng: steps[idx].endLng }, d) || undefined,
+    }),
   });
   if (!isPhoneTbtSpeaking()) ensureLaneCues(lat, lng, route);
 

@@ -49,10 +49,18 @@ export const DRIVING_SPEED_MS = 2.5;          // ~9 km/h
 // parked, and the position lags through any stop-and-go below 9 km/h. Jeff asked whether
 // a flat 30 would bring quirks. It would; this is the answer.
 //
-// So: cross 30 km/h ONCE and you are driving; anything above 9 km/h keeps you there;
-// 90 s with nothing above 9 km/h drops you out. A driver crosses 30 within seconds of
-// pulling away and then city crawling holds the latch. A jogger never crosses it at all.
-export const DRIVING_ENTER_SPEED_MS = 8.3;    // ~30 km/h
+// So: cross the entry speed ONCE and you are driving; anything above 9 km/h keeps you
+// there; 90 s with nothing above 9 km/h drops you out. A driver crosses it within seconds
+// of pulling away and then city crawling holds the latch.
+//
+// 15 km/h (Jeff, 2026-08-05 — was 30). Lower arms the latch sooner, which helps the driver
+// who never exceeds 30: a short hop entirely on 25 km/h residential streets, or shuffling
+// around a car park. It clears ordinary jogging (8-12 km/h) with margin.
+// ⚠ WHAT 15 NO LONGER COVERS, and 30 did: CYCLING is 15-25 km/h, and a fast runner reaches
+// 15-18. Those now arm the latch, so a cyclist with the app open broadcasts live along
+// their ride AND records a car spot on the bike path, which then persists as their parked
+// car. If that ever shows up in the field, this constant is the dial — not the hold speed.
+export const DRIVING_ENTER_SPEED_MS = 4.17;   // ~15 km/h
 // Hysteresis so a red light does not flap live<->parked mid-drive.
 export const DRIVING_HYSTERESIS_MS = 90_000;
 const SPOT_SAVE_THROTTLE_MS = 15_000;

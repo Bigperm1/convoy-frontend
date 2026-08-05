@@ -36,9 +36,23 @@ const CAR_SPOT_KEY = "convoy.lastCarSpot.v1";
 // background task) can tell "parked" from "driving" instead of guessing.
 const LAST_DRIVING_KEY = "convoy.lastDrivingAt.v1";
 
-// Above walking pace. The point is that anything recorded at or above this is on a road
-// by construction, head unit or not.
-export const DRIVING_SPEED_MS = 2.5;
+// ── TWO SPEEDS, AND THEY DO DIFFERENT JOBS (2026-08-05) ────────────────────
+// RECORD the car spot at anything above walking pace, so the pin lands where the car
+// actually STOPPED rather than at the last point it was going fast. Low on purpose.
+export const DRIVING_SPEED_MS = 2.5;          // ~9 km/h
+// ENTERING the driving state needs a clearly VEHICULAR speed, and it LATCHES.
+//
+// Why not just use 9 km/h for both: that is jogging pace. A phone-only user out for a
+// run would be treated as driving — broadcast live along their route, AND record a car
+// spot on a footpath, putting a phantom car on a trail.
+// Why not just use 30 km/h for both: then every 25 km/h residential street counts as
+// parked, and the position lags through any stop-and-go below 9 km/h. Jeff asked whether
+// a flat 30 would bring quirks. It would; this is the answer.
+//
+// So: cross 30 km/h ONCE and you are driving; anything above 9 km/h keeps you there;
+// 90 s with nothing above 9 km/h drops you out. A driver crosses 30 within seconds of
+// pulling away and then city crawling holds the latch. A jogger never crosses it at all.
+export const DRIVING_ENTER_SPEED_MS = 8.3;    // ~30 km/h
 // Hysteresis so a red light does not flap live<->parked mid-drive.
 export const DRIVING_HYSTERESIS_MS = 90_000;
 const SPOT_SAVE_THROTTLE_MS = 15_000;
@@ -58,6 +72,7 @@ let _carSpot: { lat: number; lng: number } | null = null;
 let _spotSavedAt = 0;
 let _drivingSavedAt = 0;
 let _hydrated = false;
+let _drivingLatched = false;
 
 /** Hydrate the persisted car spot + driving stamp. Idempotent; safe to call anywhere. */
 export async function hydrateLocationPrivacy(): Promise<void> {
@@ -90,8 +105,13 @@ export function noteCarConnected(connected: boolean): void {
  */
 export function noteFix(lat: number, lng: number, speedMs?: number): void {
   if (typeof lat !== "number" || typeof lng !== "number") return;
-  const driving = (speedMs ?? 0) >= DRIVING_SPEED_MS;
+  const spd = speedMs ?? 0;
   const now = Date.now();
+  // The latch: only a vehicular speed can ARM it; once armed, above-walking keeps it.
+  if (spd >= DRIVING_ENTER_SPEED_MS) _drivingLatched = true;
+  else if (_lastDrivingAt > 0 && now - _lastDrivingAt >= DRIVING_HYSTERESIS_MS) _drivingLatched = false;
+  const aboveWalking = spd >= DRIVING_SPEED_MS;
+  const driving = _drivingLatched && aboveWalking;
   if (driving) {
     _lastDrivingAt = now;
     // Persisted so a suspended-app CLVisit can still tell parked from driving — throttled,
@@ -101,7 +121,17 @@ export function noteFix(lat: number, lng: number, speedMs?: number): void {
       void AsyncStorage.setItem(LAST_DRIVING_KEY, String(now)).catch(() => {});
     }
   }
-  if (!_carConnected && !driving) return;
+  // RECORD on head-unit, or on above-walking WHILE LATCHED. Gating on the LATCH rather
+  // than on the 30 km/h entry speed is what makes both cases work at once: a driver who
+  // has crossed 30 keeps recording right down to a crawl, so the pin lands where the car
+  // actually stopped — while a jogger, never latched, records nothing and so can never
+  // leave a phantom car on a footpath. Simulation caught this: gating on `aboveWalking`
+  // alone let the jogger poison the spot at 10 km/h, which is exactly what the latch was
+  // introduced to prevent.
+  // Cost, accepted: >90 s stationary in gridlock drops the latch, and the pin then stops
+  // tracking until the car next clears 30 km/h. Bounded and self-correcting — unlike a
+  // phantom car on a trail, which persists as your parked location afterwards.
+  if (!_carConnected && !(driving)) return;
   _carSpot = { lat, lng };
   if (now - _spotSavedAt > SPOT_SAVE_THROTTLE_MS) {
     _spotSavedAt = now;
@@ -150,7 +180,9 @@ export function shareablePosition(
   // STATUS keeps the 90 s hysteresis, because that flag only drives how peers DRAW you
   // (0.5 opacity when parked). Flapping the label at every red light is the cosmetic
   // churn the hysteresis was added for — and a label is not a location.
-  const movingNow = (live?.speed ?? 0) >= DRIVING_SPEED_MS;
+  // "Provably in the car": the latch plus current movement. A jogger fails the latch, so
+  // walking-pace-and-above alone can no longer publish a live position.
+  const movingNow = _drivingLatched && (live?.speed ?? 0) >= DRIVING_SPEED_MS;
   const inCar = _carConnected || movingNow;
   const status: "live" | "parked" = isParked() ? "parked" : "live";
 

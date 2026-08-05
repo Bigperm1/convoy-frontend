@@ -4411,8 +4411,10 @@ export default function MapScreen() {
           <GlassFill tintColor={drawerTint()} style={StyleSheet.absoluteFill} />
           <Text style={styles.avatarPanelTitle}>Avatar</Text>
           {([
-            { key: "full", label: "Full", sub: "Always visible to your crew" },
-            { key: "partial", label: "Partial", sub: "Visible only while connected to your car" },
+            // Copy must match settings/privacy.tsx. The retired "Full: always visible"
+            // / "Partial: only while connected" pair promised a difference that never
+            // existed in code — avatarMode was only ever tested for === "ghost".
+            { key: "visible", label: "Visible", sub: "Your car is on the crew map" },
             { key: "ghost", label: "Ghost", sub: "Hidden — you don't appear to anyone" },
           ] as const).map((m) => {
             const active = getAvatarMode(settings) === m.key;

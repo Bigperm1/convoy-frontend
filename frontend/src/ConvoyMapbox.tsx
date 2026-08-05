@@ -199,8 +199,14 @@ interface ConvoyMapboxProps {
 }
 
 const SELF_ID = "self";
-// How a PARKED car is drawn — peers and yourself, one value so they cannot diverge.
-export const PARKED_OPACITY = 0.5;
+// ── PARKED CARS ARE NO LONGER DIMMED (2026-08-05, Jeff) ────────────────────
+// "always make the car 100% visible (no transparancy)". Parked peers and your own
+// parked marker used to render at 0.5 opacity. It read as a rendering fault rather
+// than a status — Say Phin's first reaction to his own was "but why is my avatar
+// translucent?", and it needed a paragraph of explanation. A car that is somewhere
+// is drawn as a car that is somewhere.
+// `status` is still broadcast and still consumed (the peer card, cold-arrival
+// arbitration); it simply no longer changes how the marker is PAINTED.
 
 // Self-car 3D model. GLB is ~1.9 units long in its own space; common-3d treats
 // units as meters, so a real GR Corolla (~4.37m) ≈ 2.3x. Bumped to 3 for map
@@ -1395,7 +1401,7 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
           // Peer uses the ARROW appearance: a 2-tone navigation chevron in their
           // paint (primary body over a secondary outline), rotated to heading.
           // Peers are MarkerViews (2D), so this mirrors the self 3D arrow flatly.
-          <View style={[car.status === "parked" ? { opacity: PARKED_OPACITY } : null, { width: 40, height: 40, alignItems: "center", justifyContent: "center", transform: [{ rotate: `${rotation}deg` }] }]}>
+          <View style={[{ width: 40, height: 40, alignItems: "center", justifyContent: "center", transform: [{ rotate: `${rotation}deg` }] }]}>
             <MaterialCommunityIcons name="navigation" size={38} color={car.arrSec || "#FFFFFF"} style={{ position: "absolute" }} />
             <MaterialCommunityIcons name="navigation" size={30} color={car.arrPri || "#2DEC86"} />
           </View>
@@ -1404,7 +1410,7 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
           // Explicit width/height (not just the child's) so @rnmapbox's Android
           // MarkerView measures a concrete size for the annotation — otherwise
           // the wrapper can measure 0 → blank/cut-off peer markers on Android.
-          <View style={[car.status === "parked" ? { opacity: PARKED_OPACITY } : null, { width: 44, height: 44, transform: [{ rotate: `${rotation}deg` }] }]}>
+          <View style={[{ width: 44, height: 44, transform: [{ rotate: `${rotation}deg` }] }]}>
             <ClassSprite vehicleClass={car.cls} primary={car.clsPri} secondary={car.clsSec} size={44} />
           </View>
         ) : (
@@ -1414,7 +1420,7 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
           // crops, so their ink is 62-66px wide inside an identical canvas. Scaling to
           // the GREY reference makes every peer's car the same size on the map. See
           // vehiclePngScale; 1.0 for grey/white so those are untouched.
-          style={[styles.car, car.status === "parked" ? { opacity: PARKED_OPACITY } : null,
+          style={[styles.car,
                   { transform: [{ rotate: `${rotation}deg` }, { scale: vehiclePngScale(car.color) }] }]}
           resizeMode="contain"
           fadeDuration={0}
@@ -3174,7 +3180,6 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           <SelfCarModel
             lat={(selfDraw ?? selfCar).lat}
             lng={(selfDraw ?? selfCar).lng}
-            opacity={selfPinned ? PARKED_OPACITY : 1}
             heading={selfHeadingLocked}
             emissive={selfEmissive}
             modelId={selfModelId}

@@ -13,17 +13,21 @@ const LAST_LOC_KEY = "convoy.lastlocation.v1";
 // "auto" follows the time of day — getMapMode() resolves it to dawn/day/dusk/night.
 export type MapMode = "satellite" | "dawn" | "day" | "dusk" | "night" | "auto";
 
-// Avatar Live privacy mode — replaces the old avatarLive boolean. Optional for
-// users stored before it existed; getAvatarMode() migrates them (avatarLive
-// true → "full", false → "ghost"). NOT added to DEFAULT_SETTINGS on purpose, so
-// an existing user who had Avatar Live OFF isn't silently flipped to visible by
-// the settings-spread — their intent is read from the legacy boolean instead.
-//   full    = always on the convoy map: live while car-connected, parked at your
-//             last car location when not (never your real non-driving spot).
-//   partial = visible only while connected to the car; disconnect drops you off
-//             peers' maps until you reconnect.
-//   ghost   = never visible to the convoy, driving or parked.
-export type AvatarMode = "full" | "partial" | "ghost";
+// Avatar privacy mode. TWO modes as of 2026-08-05 (Jeff): "full" and "partial" were
+// FUNCTIONALLY IDENTICAL — avatarMode was only ever tested for === "ghost", so nothing
+// anywhere distinguished them — while the UI promised they differed ("Full: always
+// visible" vs "Partial: only while connected"). Say Phin picked Full on the strength of
+// that copy and then asked why his avatar had gone translucent. A three-way control
+// where two options do the same thing is worse than a two-way one.
+//   visible = your CAR is on the crew map. Live while you are in it (head unit
+//             connected, or provably driving); pinned at the car's own spot when you
+//             have left it. Never your real location away from the car.
+//   ghost   = never visible to the crew, driving or parked.
+// NOT in DEFAULT_SETTINGS on purpose, so an existing user who had Avatar Live OFF is
+// never silently flipped to visible by the settings-spread.
+export type AvatarMode = "visible" | "ghost";
+// Accepted on READ only, for installs that stored the retired names. Never written.
+type LegacyAvatarMode = AvatarMode | "full" | "partial";
 
 export type Settings = {
 highlightConvoy: boolean;
@@ -309,16 +313,21 @@ export function mapModeToLegacy(mode: MapMode): { mapType: "hybrid" | "roadmap";
   return { mapType: "roadmap", mapDark: m === "dusk" || m === "night" };
 }
 
-// ---- Avatar Live mode helpers (source of truth = settings.avatarMode) ----
-// Default when no explicit mode is stored: avatarLive true → "partial" (the new
-// default — visible while car-connected), false → "ghost". PRIVACY-SAFE: a user who
-// turned Avatar Live OFF (avatarLive=false) stays invisible; only the "on" default
-// changed from full → partial. An explicit avatarMode always wins.
+// ---- Avatar mode helpers (source of truth = settings.avatarMode) ----
+// MIGRATION, and the direction matters. Both retired names map to "visible" because
+// both BEHAVED as visible — this changes nobody's actual exposure, it only stops the
+// UI claiming a difference that never existed. A user who chose ghost stays ghost, and
+// a user with no explicit mode still falls back to the legacy avatarLive boolean, so
+// "Avatar Live OFF" is never silently flipped on. Read-only: nothing writes the old
+// names, and setAvatarMode's type no longer permits them.
 export function getAvatarMode(s: Settings): AvatarMode {
-  return s.avatarMode ?? (s.avatarLive ? "partial" : "ghost");
+  const stored = s.avatarMode as LegacyAvatarMode | undefined;
+  if (stored === "ghost") return "ghost";
+  if (stored === "visible" || stored === "full" || stored === "partial") return "visible";
+  return s.avatarLive ? "visible" : "ghost";
 }
-// Persist a new Avatar Live mode and keep the legacy avatarLive boolean in sync
-// (full/partial → true, ghost → false) so any older reader still behaves.
+// Persist a new avatar mode and keep the legacy avatarLive boolean in sync
+// (visible → true, ghost → false) so any older reader still behaves.
 export async function setAvatarMode(mode: AvatarMode): Promise<Settings> {
   return updateSettings({ avatarMode: mode, avatarLive: mode !== "ghost" });
 }

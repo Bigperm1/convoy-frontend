@@ -14,15 +14,13 @@ export default function PrivacyPage() {
       </SettingsCard>
       <HelpText>{`Your car only ever appears on maps inside clubs you've joined — strangers from outside the crew can never see you. Choose how you appear with Avatar Live below.`}</HelpText>
 
-      <SectionLabel>AVATAR LIVE</SectionLabel>
+      <SectionLabel>APPEARANCE ON THE CREW MAP</SectionLabel>
       <SettingsCard>
-        <RadioRow icon="car-sport" iconColor="#00C46A" title="Full" subtitle="Always on your convoy's map: live while you drive, parked at your car when you're not. Your real location away from the car is never shared." selected={getAvatarMode(settings) === "full"} onSelect={() => setAvatarMode("full")} />
+        <RadioRow icon="car-sport" iconColor="#00C46A" title="Visible" subtitle="Your car is on the crew map — moving while you're in it, parked at the car's own spot once you've left it. Your real location away from the car is never shared." selected={getAvatarMode(settings) === "visible"} onSelect={() => setAvatarMode("visible")} />
         <Divider />
-        <RadioRow icon="car-outline" iconColor="#0A84FF" title="Partial" subtitle="Live while you're connected to your car; disconnect and you stay pinned at your car's last spot. Reconnect to go live." selected={getAvatarMode(settings) === "partial"} onSelect={() => setAvatarMode("partial")} />
-        <Divider />
-        <RadioRow icon="eye-off-outline" iconColor="#8E8E93" title="Ghost" subtitle="Invisible — your convoy never sees you, driving or parked." selected={getAvatarMode(settings) === "ghost"} onSelect={() => setAvatarMode("ghost")} />
+        <RadioRow icon="eye-off-outline" iconColor="#8E8E93" title="Ghost" subtitle="Invisible — your crew never sees you, driving or parked." selected={getAvatarMode(settings) === "ghost"} onSelect={() => setAvatarMode("ghost")} />
       </SettingsCard>
-      <HelpText>{`Full and Partial both keep you on the map at your car — live while you drive, pinned at your car's spot when you disconnect, never your real location away from it. Ghost hides you completely.`}</HelpText>
+      <HelpText>{`What the crew sees is your CAR, never you. It moves while you're driving it, and once you leave it, it stays put at the car's own last spot — so walking away from it shares nothing. Ghost hides you completely.`}</HelpText>
     </SettingsPage>
   );
 }

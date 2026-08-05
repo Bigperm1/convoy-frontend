@@ -495,6 +495,47 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // because CarPlay's pinch `scale` is cumulative from the gesture's begin.
   const userZoomRef = useRef(0);
   const zoomBaseRef = useRef(0);
+  // ── APPLE HAS THREE ZOOM GESTURES, NOT ONE (2026-08-05) ────────────────────
+  // Jeff has asked for CarPlay zoom ~15 times and it has never worked. Disassembly of
+  // the iOS 26.5 CarPlaySupport host settles why. CPSMapTemplateViewController has THREE
+  // handlers that all funnel into the same didUpdateZoomGesture delegate call:
+  //   _handlePinchGesture:            began -> update(real scale, real velocity) -> ended
+  //   _handleTwoFingerTapGesture:     ONE update, scale = 1.0, velocity = -1.0, no begin
+  //   _handleOneFingerDoubleTapGesture: ONE update, scale = 1.0, velocity = +1.0, no begin
+  // (the two tap handlers literally `fmov` the constants 1.0 and -1.0/+1.0 into place)
+  //
+  // Two-finger tap is Apple's zoom OUT; one-finger double tap is zoom IN. Our telemetry —
+  // two rows, both scale=1.000, ZERO zoomBegin ever — is those tap handlers exactly. So
+  // the gestures DID reach us, and we discarded them: log2(1.0) is 0, and `velocity`,
+  // which carries the entire direction, was destructured and never read.
+  //
+  // A real pinch has never been recognised on this car (no begin has ever arrived), and
+  // nothing on our side can change that — the host's begin and update entry points are
+  // instruction-identical, so any condition that suppressed begin would suppress update
+  // too. Pinch stays a host limitation. TAP-ZOOM is ours to fix, and it is OTA.
+  //
+  // ⚠ THE DISCRIMINATOR IS THE BEGIN FLAG, NOT THE SCALE VALUE. A genuine pinch's FIRST
+  // update also arrives at scale ~1.0 (UIPinchGestureRecognizer starts at 1.0 and the
+  // host filters only on a 0.03 s throttle), so testing |scale-1| would fire a full
+  // discrete step on the opening frame of a real pinch. Taps never send begin; pinches
+  // always do. That is the only safe test.
+  const pinchActiveRef = useRef(false);
+  // One tap = one zoom level. Mapbox zoom is log2, so 1.0 is exactly 2x — the same step
+  // Apple Maps and Google Maps take per double-tap.
+  const ZOOM_TAP_STEP = 1.0;
+  // Clamp the BIAS so that followZoom + bias stays inside the visible range. Clamping the
+  // bias alone lets it saturate past CAR_ZOOM_MAX, and then the first tap back the other
+  // way does nothing visible — which is exactly how a zoom control earns a reputation for
+  // being dead. (Build 65 shipped zoom buttons and they were pulled as "dead on the head
+  // unit"; at that commit the zoom case had no direct setCamera at all.)
+  const clampBias = (want: number) => {
+    const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
+    const lo = pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN;
+    return Math.max(
+      Math.max(-CAR_USER_ZOOM_BIAS_LIMIT, lo - fz),
+      Math.min(Math.min(CAR_USER_ZOOM_BIAS_LIMIT, CAR_ZOOM_MAX - fz), want),
+    );
+  };
   // The camera's ACTUAL low-passed zoom, written every frame by SelfCarModel's
   // pushCam. A ref → no renders. The route trim reads it; see trimZoom.
   const camZoomRef = useRef<number | null>(null);
@@ -678,14 +719,28 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
     return subscribeCarGesture((g: CarGesture) => {
       switch (g.kind) {
         case 'zoomBegin':
+          pinchActiveRef.current = true;
           zoomBaseRef.current = userZoomRef.current;
           break;
+        case 'zoomEnd':
+          pinchActiveRef.current = false;
+          break;
         case 'zoom': {
+          if (!pinchActiveRef.current) {
+            // TAP-ZOOM (see the note on pinchActiveRef). Direction lives in the sign of
+            // velocity: +1 = one-finger double tap = in, -1 = two-finger tap = out.
+            // scale is the constant 1.0 and carries nothing, so it is ignored entirely.
+            const dir = (g.velocity ?? 0) >= 0 ? 1 : -1;
+            userZoomRef.current = clampBias(userZoomRef.current + dir * ZOOM_TAP_STEP);
+            zoomBaseRef.current = userZoomRef.current;   // a later pinch rebases from here
+            camHoldUntilRef.current = 0;                 // a deliberate zoom ends crew overview
+            applyZoomNow();
+            break;
+          }
+          // Real pinch: scale is cumulative from gesture start (the host never calls
+          // setScale:), so bias = base + log2(scale). Never yet observed on a head unit.
           const delta = Math.log2(Math.max(0.01, g.scale));
-          userZoomRef.current = Math.max(
-            -CAR_USER_ZOOM_BIAS_LIMIT,
-            Math.min(CAR_USER_ZOOM_BIAS_LIMIT, zoomBaseRef.current + delta),
-          );
+          userZoomRef.current = clampBias(zoomBaseRef.current + delta);
           applyZoomNow();   // don't wait for an ease that a parked car will never arm
           break;
         }

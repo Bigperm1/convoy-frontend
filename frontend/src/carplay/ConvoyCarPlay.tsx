@@ -1208,7 +1208,15 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // native map buttons remain the guaranteed-touchable fallback.
             onDidBeginZoomGesture: () => { logCarGestureOnce('zoomBegin'); emitCarGesture({ kind: 'zoomBegin' }); },
             onDidUpdateZoomGesture: (e: { scale: number; velocity: number }) => {
-              logCarGestureOnce('zoomUpdate', e?.scale);
+              // Log velocity too, and log the two tap gestures under their OWN keys. The
+              // old probe recorded only `scale`, which is the constant 1.0 for both tap
+              // handlers — so two very different gestures were indistinguishable in
+              // telemetry and read as "pinch sort of fired". Apple's host sends
+              // velocity -1 for a two-finger tap (zoom out) and +1 for a one-finger
+              // double tap (zoom in), with no begin; a real pinch always sends begin.
+              const v = e?.velocity ?? 0;
+              const tap = Math.abs((e?.scale ?? 1) - 1) < 1e-4 && Math.abs(Math.abs(v) - 1) < 1e-4;
+              logCarGestureOnce(tap ? (v >= 0 ? 'tapZoomIn' : 'tapZoomOut') : 'zoomUpdate', e?.scale);
               emitCarGesture({ kind: 'zoom', scale: e.scale, velocity: e.velocity });
             },
             onDidEndZoomGesture: (e: { velocity: number }) => {

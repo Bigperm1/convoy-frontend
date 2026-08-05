@@ -1317,8 +1317,20 @@ export default function MapScreen() {
   }, [pitstop.active, pitstop.label, pitstop.kind, pitstop.elapsedS]);
 
   // Turn-by-turn engine — speaks instructions, advances steps, computes ETA / distance remaining
+  // What Scout SAYS on arrival. Saved name wins, so a destination you searched by address
+  // that happens to be one of your places still speaks as "Lake" rather than the street.
+  // Falls through to whatever the destination was picked as — a POI name ("Denny's") or
+  // the address string. nav.ts's cleanArrivalLabel trims an over-long formatted address
+  // and refuses a bare coordinate pair.
+  const arrivalDestLabel = useMemo(() => {
+    if (!destination) return null;
+    const saved = matchSavedPlace(destination.lat, destination.lng);
+    return saved?.label || destination.label || null;
+  }, [destination?.lat, destination?.lng, destination?.label]);
+
   const tbt = useTurnByTurn(activeRoute, coords, navMode === "turn-by-turn", {
     mute: navMuted,
+    destLabel: arrivalDestLabel,
     onArrive: () => {
       // Auto-finish the trip on arrival. The engine already spoke the (varied)
       // arrival line, so do NOT call stopSpeech() here — that would cut it off

@@ -252,7 +252,9 @@ async function fireColdArrival(late: boolean): Promise<void> {
   // the proof that someone is actually there to hear it; otherwise tear down in silence.
   const liveDrive = _locConsumers.has('androidauto') || _locConsumers.has('carplay')
     || AppState.currentState === 'active';
-  if (!late && liveDrive) { try { announce(arrivalLine()); } catch {} }
+  // The slim route persists destLabel (startNavBanner receives it from map.tsx), so the
+  // cold/AA arrival names the place too rather than falling back to the generic line.
+  if (!late && liveDrive) { try { announce(arrivalLine(done?.destLabel)); } catch {} }
   // Before the teardown, and never allowed to block it — a failed upload must cost a
   // leaderboard row, never leave the route stuck on the head unit.
   try { await recordColdTrip(done, poly); } catch {}

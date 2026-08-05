@@ -568,6 +568,15 @@ function nearestRouteInfo(lat: number, lng: number, pts: LatLng[]): { distM: num
 // Arrival lines — varied so Nova doesn't say the exact same thing every trip.
 // Spoken by the engine (not the screen) so the line survives nav teardown; the
 // map screen's onArrive ends navigation WITHOUT stopSpeech so it isn't cut off.
+// ── NAME THE DESTINATION (2026-08-05) ──────────────────────────────────────
+// Jeff, arriving at his saved place "Lake": Scout said "you have arrived at ... your",
+// which is the generic line read aloud and heard as a fragment. What he wants is the
+// actual place — "Denny's" if he searched it, the address if he searched an address,
+// and the SAVED name (Lake / Home / Work) when the destination is one of his.
+//
+// Two line sets, because a name has to sit in a sentence that was built for it. The
+// unnamed set is unchanged, and is still what plays when we have no label — an
+// arrival with no name is better than "You've arrived at ." with a hole in it.
 const ARRIVAL_LINES = [
   "You've arrived at your destination.",
   "Here we are — you've made it.",
@@ -576,7 +585,36 @@ const ARRIVAL_LINES = [
   "You made it — welcome.",
   "Destination reached. Enjoy.",
 ];
-export function arrivalLine(): string {
+const ARRIVAL_LINES_NAMED = [
+  "You've arrived at {d}.",
+  "Here we are — {d}.",
+  "Arrived at {d}. Nice driving.",
+  "This is it — {d}.",
+  "You made it. Welcome to {d}.",
+  "{d}. Destination reached.",
+];
+// A label only earns its way into speech if it reads as a place. Anything absurdly long
+// is almost always a full formatted address with a country and postcode glued on, which
+// is a mouthful mid-drive; fall back to the unnamed line rather than recite it.
+const ARRIVAL_LABEL_MAX = 60;
+export function cleanArrivalLabel(label?: string | null): string | null {
+  let t = (label || "").trim();
+  if (!t) return null;
+  // Drop a trailing country/postcode tail from formatted addresses so "123 Main St,
+  // Langley, BC V3A 1B2, Canada" speaks as "123 Main Street, Langley".
+  const parts = t.split(",").map((x) => x.trim()).filter(Boolean);
+  if (parts.length > 2) t = parts.slice(0, 2).join(", ");
+  if (!t || t.length > ARRIVAL_LABEL_MAX) return null;
+  // A bare coordinate pair is a label in name only.
+  if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(t)) return null;
+  return t;
+}
+export function arrivalLine(destLabel?: string | null): string {
+  const name = cleanArrivalLabel(destLabel);
+  if (name) {
+    const set = ARRIVAL_LINES_NAMED;
+    return set[Math.floor(Math.random() * set.length)].replace("{d}", name);
+  }
   return ARRIVAL_LINES[Math.floor(Math.random() * ARRIVAL_LINES.length)];
 }
 
@@ -722,7 +760,7 @@ export function useTurnByTurn(
   // detection so GPS multipath off an overpass can't fake a departure.
   user: (LatLng & { speed?: number; heading?: number }) | null,
   active: boolean,
-  options?: { mute?: boolean; onArrive?: () => void; onOffRoute?: () => void }
+  options?: { mute?: boolean; destLabel?: string | null; onArrive?: () => void; onOffRoute?: () => void }
 ) {
   const [state, setState] = useState<TbtState>({
     active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0,
@@ -1170,7 +1208,7 @@ export function useTurnByTurn(
       if (announcedRef.current.has(arriveKey)) return;
       announcedRef.current.add(arriveKey);   // fire once, not on every parked GPS tick
       if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
-      if (!options?.mute && !late) speak(arrivalLine());
+      if (!options?.mute && !late) speak(arrivalLine(options?.destLabel));
       options?.onArrive?.();
     };
 

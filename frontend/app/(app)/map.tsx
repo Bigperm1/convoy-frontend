@@ -3296,7 +3296,13 @@ export default function MapScreen() {
   // recorded point is on the road by construction; it persists across restarts;
   // and when parked with NO known car spot we broadcast NOTHING (buildPayload
   // returns null on null coords → the hub skips track) — absent beats exposed.
+  // A parked pin only makes sense once the car is meaningfully elsewhere. Below this the
+  // driver is standing next to (or crawling past) the recorded spot, and replacing their
+  // live position with it is a lie about where they are. 75 m is well beyond GPS scatter
+  // and stop-and-go creep, and well inside "I walked into that building".
+  const SELF_PIN_MIN_SEPARATION_M = 75;
   const LAST_CAR_SPOT_KEY = "convoy.lastCarSpot.v1";
+  const [privacyHydrated, setPrivacyHydrated] = useState(false);
   const lastCarLocRef = useRef<{ lat: number; lng: number } | null>(null);
   const lastCarLocSavedAtRef = useRef(0);
   useEffect(() => {
@@ -3308,7 +3314,7 @@ export default function MapScreen() {
         if (typeof p?.lat === "number" && typeof p?.lng === "number") lastCarLocRef.current = { lat: p.lat, lng: p.lng };
       })
       .catch(() => {});
-    void hydrateLocationPrivacy();
+    void hydrateLocationPrivacy().then(() => setPrivacyHydrated(true)).catch(() => setPrivacyHydrated(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const lastDrivingAtRef = useRef(0);
@@ -3664,7 +3670,32 @@ export default function MapScreen() {
         // Never while navigating. A light longer than the 90s hysteresis would otherwise
         // flip the marker to parked mid-drive — dimming the car and pinning it to a spot
         // you are already sitting on. During a route you are driving by definition.
-        selfParked={presenceParked && navMode !== "turn-by-turn"}
+        // ── ONLY PIN WHEN THE CAR IS ACTUALLY SOMEWHERE ELSE (2026-08-05) ────
+        // Shipping selfParked straight off presenceParked was wrong, and it is the
+        // "it's glitchy" Jeff reported after several drives. The privacy decision is
+        // deliberately CONSERVATIVE about what may leave the device: isParked() is
+        // "no head unit and no fix above 2.5 m/s for 90 s", and noteFix only advances
+        // the car spot on fixes above that speed. Correct for a broadcast. Wrong for
+        // drawing the driver's own position, because a sub-9 km/h CRAWL longer than
+        // 90 s — stop-and-go, a drive-thru, a car park, a ferry queue — satisfies it
+        // while the driver is still moving. The marker AND the follow camera then
+        // FREEZE on the last above-9 km/h point and only jump when you clear 9 km/h
+        // again: translucent car, frozen map. ConvoyMapbox:2641 already carries Jeff
+        // on the previous incarnation of this exact class — "why cant it just pin
+        // point where I am and stick to me? its like its lost."
+        //
+        // Separation is what distinguishes the two. Walked into a building: the car is
+        // a block away. Crawling in traffic: metres. So require a real gap before the
+        // marker stops telling the driver where they are — which preserves the case
+        // Jeff asked for and kills every crawl.
+        //
+        // privacyHydrated: the car spot loads from disk asynchronously, so without it
+        // the marker seeds at live GPS and teleports one render later.
+        selfParked={
+          presenceParked && navMode !== "turn-by-turn" && privacyHydrated &&
+          !!presencePos && !!coords &&
+          haversineMeters(coords, presencePos) > SELF_PIN_MIN_SEPARATION_M
+        }
         selfParkedAt={presencePos}
         user={{
           ...coords,

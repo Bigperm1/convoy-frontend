@@ -51,6 +51,23 @@ const ANNOUNCE_DISTANCE_M = 500;
 // See the call site: this runs at 1 Hz on two feeds, and answers "no route" almost
 // every time.
 const ROUTE_LOOKUP_THROTTLE_MS = 10_000;
+// ── STALE ROUTES ARE WHY SCOUT TALKS TO AN EMPTY CAR (2026-07-31) ───────────
+// Jeff: "scout for some reason just says things when hairpin is not even on."
+//
+// ROUTE_KEY is written by startNavBanner and removed ONLY by stopNavBanner — i.e. only
+// when a route actually ENDS. Arrival has been failing for weeks, so routes routinely
+// never ended and the persisted one survives app restarts indefinitely. The cold engine
+// then keeps evaluating that dead route on every background fix, and when you happen to
+// drive near its old destination it fires arrival and SPEAKS — with the app closed,
+// because speak() has no foreground gate and fireColdArrival is reachable from the
+// background location task.
+//
+// Today made it far more likely: the gate widened from a hidden 25 m radius to
+// remaining < 50 m plus a crow-fly tier (80 m / 400 m / stopped 90 s), so a stale route
+// now has a much bigger trigger area.
+//
+// A route older than this cannot be the one the driver is on. Drop it.
+const MAX_PERSISTED_ROUTE_AGE_MS = 6 * 3600_000;
 // Written by src/auth.tsx (its USER_KEY). Read directly rather than importing that
 // module: auth pulls in @react-native-google-signin, whose spec calls
 // TurboModuleRegistry.getEnforcing at MODULE SCOPE — that throws when the native
@@ -229,7 +246,13 @@ async function fireColdArrival(late: boolean): Promise<void> {
   // keys, releases the bg-location hold and dismisses the notification — it IS the
   // cold equivalent of map.tsx's teardown. destinationLabel is the one thing it never
   // owned, so clear it here or the head unit keeps naming a place you already left.
-  if (!late) { try { announce(arrivalLine()); } catch {} }
+  // ⚠ SPEAK ONLY DURING A LIVE DRIVE. speak() has no foreground gate and this function is
+  // reachable from the BACKGROUND location task, so an unconditional announce here is how
+  // the app talks to nobody. A car session (head unit attached) or a foregrounded app is
+  // the proof that someone is actually there to hear it; otherwise tear down in silence.
+  const liveDrive = _locConsumers.has('androidauto') || _locConsumers.has('carplay')
+    || AppState.currentState === 'active';
+  if (!late && liveDrive) { try { announce(arrivalLine()); } catch {} }
   // Before the teardown, and never allowed to block it — a failed upload must cost a
   // leaderboard row, never leave the route stuck on the head unit.
   try { await recordColdTrip(done, poly); } catch {}
@@ -303,6 +326,14 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
     if (nowLook - _routeLookAt > ROUTE_LOOKUP_THROTTLE_MS) {
       _routeLookAt = nowLook;
       try { const raw = await AsyncStorage.getItem(ROUTE_KEY); if (raw) route = JSON.parse(raw); } catch {}
+      // A route with no startedAt was persisted before that field existed (2026-07-31),
+      // so by definition it is old too. Either way: not the drive we are on.
+      const startedAt = (route as SlimRoute | null)?.startedAt;
+      if (route && (!startedAt || nowLook - startedAt > MAX_PERSISTED_ROUTE_AGE_MS)) {
+        route = null;
+        try { await stopNavBanner(); } catch {}   // clears the keys AND releases the location hold
+        return;
+      }
     }
   }
   if (!route || !route.steps || route.steps.length === 0) return;

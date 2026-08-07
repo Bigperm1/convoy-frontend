@@ -744,6 +744,19 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           applyZoomNow();   // don't wait for an ease that a parked car will never arm
           break;
         }
+        case 'zoomStep': {
+          // The +/- map buttons on CarPlay and Android Auto. Same destination as the
+          // tap-zoom path: bias the follow-zoom and push it immediately. applyZoomNow is
+          // MANDATORY here, not an optimisation — every pushCam sits behind an active
+          // camera ease and a stationary car arms none, which is exactly why build 65's
+          // zoom buttons were pulled as "dead on the head unit" (abad793): at that commit
+          // the handler only mutated the ref and waited for an ease that never came.
+          userZoomRef.current = clampBias(userZoomRef.current + (g.delta || 0));
+          zoomBaseRef.current = userZoomRef.current;   // a later pinch rebases from here
+          camHoldUntilRef.current = 0;                 // a deliberate zoom ends crew overview
+          applyZoomNow();
+          break;
+        }
         case 'recenter':
           userZoomRef.current = 0;
           zoomBaseRef.current = 0;

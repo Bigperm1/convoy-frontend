@@ -32,7 +32,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
 import { getDepartureBearing, orderRoutesForward } from '../departureBearing';
-import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED } from './carButtonIcons';
+import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED } from './carButtonIcons';
 import { toggleCarComms } from './carComms';
 import { logEvent } from '../crashBreadcrumb';
 import { ensureSavedPlacesLoaded, getSavedPlaces, type SavedPlace } from '../savedPlaces';
@@ -463,7 +463,15 @@ export const CAR_MAP_BUTTON_CONFIG = {
   // sim). The 4-slot trick is dead on iOS 26. Crew + compass now live in the two
   // bottom-trailing slots CarPlay gives a 2-button array, and the banner stack sits
   // BESIDE the column (CAR_RIGHT_INSET) instead of underneath phantom circles.
+  // ⚠ ZOOM FIRST, DELIBERATELY. CPMapTemplate.h on the panning interface: "a maximum
+  // of two mapButtons will be visible. If more than two mapButtons are visible when the
+  // template transitions to panning mode, the system will hide one or more map buttons
+  // BEGINNING FROM THE END of the mapButtons array." So the last two are the ones that
+  // disappear — and losing zoom would be worse than losing crew/compass.
+  // Max is 4 (CPMapTemplate.h:72). This uses all four.
   mapButtons: [
+    { id: 'car-zoom-in', image: CAR_ICON_ZOOM_IN, focusedImage: CAR_ICON_ZOOM_IN },
+    { id: 'car-zoom-out', image: CAR_ICON_ZOOM_OUT, focusedImage: CAR_ICON_ZOOM_OUT },
     { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW },
     { id: 'car-compass', image: CAR_ICON_COMPASS, focusedImage: CAR_ICON_COMPASS },
   ],
@@ -517,7 +525,12 @@ export const AA_ACTION_STRIP = [
   { id: 'car-search', title: 'Search', visibility: AA_PERSISTENT },
   { id: 'car-end', title: 'End', visibility: AA_PERSISTENT },
 ];
+// androidx ACTIONS_CONSTRAINTS_MAP: max 4, ICON ONLY (no titles accepted). Same order
+// rationale as CarPlay above. Note the key is `icon` here and `image` on iOS — they are
+// NOT interchangeable; parseAction reads map.getMap("icon").
 export const AA_MAP_BUTTONS = [
+  { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT },
+  { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT },
   { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT },
   { id: 'car-compass', icon: CAR_ICON_COMPASS, visibility: AA_PERSISTENT },
 ];
@@ -526,7 +539,10 @@ export const AA_MAP_BUTTONS = [
 // just picks whichever existing handler owns each id — no duplicated behaviour.
 export function handleAaButton(id?: string): void {
   if (!id) return;
-  if (id === 'car-crew' || id === 'car-compass' || id === 'car-mic') { handleCarMapButton(id); return; }
+  // ⚠ EXPLICIT ALLOWLIST, not a car-* wildcard. Miss an id here and the AA button
+  // renders, taps, logs a receipt — and does nothing, while CarPlay works fine.
+  if (id === 'car-crew' || id === 'car-compass' || id === 'car-mic'
+      || id === 'car-zoom-in' || id === 'car-zoom-out') { handleCarMapButton(id); return; }
   handleCarBarButton(id);
 }
 
@@ -540,6 +556,7 @@ export function handleAaButton(id?: string): void {
 const TAP_LABEL: Record<string, string> = {
   'car-crew': 'Crew', 'car-compass': 'Compass', 'car-comms': 'Comms',
   'car-mic': 'Scout', 'car-search': 'Search', 'car-end': 'End',
+  'car-zoom-in': 'Zoom in', 'car-zoom-out': 'Zoom out',
 };
 export function carTap(id: string): void {
   if (!id) return;
@@ -564,6 +581,11 @@ export function handleCarMapButton(id: string): void {
   carTap(id);
   if (id === 'car-crew') { emitCarGesture({ kind: 'crewFit' }); return; }
   if (id === 'car-compass') { emitCarGesture({ kind: 'compass' }); return; }
+  // One zoom level per tap — CarMapView applies it through the same applyZoomNow the
+  // tap-zoom gesture uses, so a PARKED car responds (no camera ease is armed when
+  // stationary, which is what made build 65's zoom buttons look dead).
+  if (id === 'car-zoom-in') { emitCarGesture({ kind: 'zoomStep', delta: 1 }); return; }
+  if (id === 'car-zoom-out') { emitCarGesture({ kind: 'zoomStep', delta: -1 }); return; }
   // Stale-template tolerance: an older cached template can still deliver these.
   if (id === 'car-police') { armPosRing(); void reportPoliceFromCar(); return; }
   if (id === 'car-mic') { emitCarGesture({ kind: 'scoutMic' }); return; }

@@ -336,6 +336,8 @@ export type CarGesture =
   | { kind: 'zoomBegin' }
   | { kind: 'zoom'; scale: number; velocity: number }
   | { kind: 'zoomEnd'; velocity: number }
+  // Discrete one-level step from the +/- map buttons (CarPlay and Android Auto).
+  | { kind: 'zoomStep'; delta: number }
   | { kind: 'recenter' }
   | { kind: 'crewFit' }
   | { kind: 'compass' }

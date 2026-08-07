@@ -31,7 +31,7 @@ import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from './routeOptim
 import { scoutScenicStops } from './scoutScenic';
 import {
   type HubEvent, type EventPoint, createEvent, myEvents, discoverEvents,
-  getEvent, attendEvent, confirmEvent, unattendEvent, deleteEvent,
+  getEvent, attendEvent, confirmEvent, unattendEvent, deleteEvent, updateEvent,
 } from './eventsApi';
 import { updateWidgetFeed } from './widgetFeed';
 
@@ -62,6 +62,9 @@ export function EventsSection({ kind, openEventId }: { kind: Kind; openEventId?:
   const [found, setFound] = useState<HubEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  // The event currently being edited. Non-null opens the SAME form the create flow uses,
+  // pre-seeded — see CreateEventModal's `editing` prop.
+  const [editing, setEditing] = useState<HubEvent | null>(null);
   const [detail, setDetail] = useState<HubEvent | null>(null);
 
   const load = useCallback(async () => {
@@ -126,16 +129,20 @@ export function EventsSection({ kind, openEventId }: { kind: Kind; openEventId?:
       )}
 
       <CreateEventModal
-        kind={kind}
-        visible={showCreate}
-        onClose={() => setShowCreate(false)}
-        onCreated={(e) => { setShowCreate(false); load(); setDetail(e); }}
+        kind={editing ? editing.kind : kind}
+        visible={showCreate || !!editing}
+        editing={editing}
+        onClose={() => { setShowCreate(false); setEditing(null); }}
+        onCreated={(e) => { setShowCreate(false); setEditing(null); load(); setDetail(e); }}
       />
       <EventDetailModal
         event={detail}
         onClose={() => setDetail(null)}
         onChanged={(e) => { setDetail(e); load(); }}
         onDeleted={() => { setDetail(null); load(); }}
+        // Close the detail sheet first: two stacked modals leave the form unreachable
+        // behind the detail sheet on iOS.
+        onEdit={(ev) => { setDetail(null); setEditing(ev); }}
       />
     </View>
   );
@@ -227,8 +234,16 @@ function VenueField({ label, value, onPick }: { label: string; value: EventPoint
 // ── Create sheet ─────────────────────────────────────────────────────────────
 type ClubLite = { id: string; name: string };
 
-function CreateEventModal({ kind, visible, onClose, onCreated }: {
-  kind: Kind; visible: boolean; onClose: () => void; onCreated: (e: HubEvent) => void;
+// ── ONE FORM, CREATE AND EDIT (2026-08-05) ──────────────────────────────────
+// Jeff: "for the cruise section when created you cant edit after. lets make sure you can
+// edit post creation and for the events too."
+// PUT /events/{eid} has existed all along and eventsApi.updateEvent wraps it — it simply
+// had NO CALLER. So this is a UI gap, not a missing feature: pass `editing` and the same
+// form (including the whole cruise stop planner and route-style picker) becomes the edit
+// screen. Duplicating it would have guaranteed the two drifted.
+function CreateEventModal({ kind, visible, editing, onClose, onCreated }: {
+  kind: Kind; visible: boolean; editing?: HubEvent | null;
+  onClose: () => void; onCreated: (e: HubEvent) => void;
 }) {
   const copy = KIND_COPY[kind];
   const [title, setTitle] = useState('');
@@ -250,6 +265,33 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
       .then(({ data }) => setClubs((data || []).map((c: any) => ({ id: c.id, name: c.name }))))
       .catch(() => setClubs([]));
   }, [visible]);
+
+  // Seed every field from the event when opening in edit mode, and clear back to a fresh
+  // form when opening to create. Keyed on the id so re-opening the same event re-seeds
+  // rather than keeping whatever the last session left behind.
+  useEffect(() => {
+    if (!visible) return;
+    if (editing) {
+      setTitle(editing.title || '');
+      setDesc(editing.description || '');
+      setVenue(editing.venue || null);
+      setEnd(editing.end || null);
+      setStops(editing.stops || []);
+      setWhen(new Date(editing.departure_at || editing.start_at));
+      setIsPublic(!!editing.is_public);
+      setNotify(!!editing.notify_enabled);
+      setClubId(editing.club_id || null);
+      // The scenic choice is carried in tags — see the create path, which stores it there
+      // so plotting the cruise later cannot silently rebuild it as a fastest route.
+      setRouteStyle((editing.tags || []).includes('scenic') ? 'scenic' : 'fastest');
+      setPlanRoutes({ fastest: null, scenic: null });
+    } else {
+      setTitle(''); setDesc(''); setVenue(null); setEnd(null); setStops([]);
+      setWhen(defaultStart()); setIsPublic(true); setNotify(true); setClubId(null);
+      setRouteStyle('fastest'); setPlanRoutes({ fastest: null, scenic: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, editing?.id]);
 
   // ── PLAN ON THE MAP + SCOUT'S BEST ORDER (2026-07-29) ───────────────────────
   // Jeff asked for the map planner and for Scout's re-ordering to work here too.
@@ -366,7 +408,7 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
     if (!isPublic && !clubId) return Alert.alert('Pick a club', 'Club-only events need a club.');
     setBusy(true);
     try {
-      const e = await createEvent({
+      const payload = {
         kind,
         title: title.trim(),
         description: desc.trim(),
@@ -389,13 +431,28 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
         // `tags` is already accepted on create and update, so this needs no backend
         // change; the plot path reads it back below.
         ...(kind === 'cruise' && routeStyle === 'scenic' ? { tags: ['scenic'] } : {}),
-      });
+      };
+      // EDIT sends the SAME payload to PUT. Two details that matter:
+      //  - `tags` must be sent even when it is back to fastest, or un-picking scenic
+      //    would leave the old 'scenic' tag on the document and the cruise would still
+      //    plot scenic. exclude_none on the server drops undefined, not [].
+      //  - `polyline` only appears in the payload when a route was re-planned in this
+      //    session; otherwise the stored line is left exactly as it was.
+      const e = editing
+        ? await updateEvent(editing.id, {
+            ...payload,
+            ...(kind === 'cruise' ? { tags: routeStyle === 'scenic' ? ['scenic'] : [] } : {}),
+          })
+        : await createEvent(payload);
       onCreated(e);
-      // reset for next time
-      setTitle(''); setDesc(''); setVenue(null); setEnd(null); setStops([]); setWhen(defaultStart()); setIsPublic(true); setNotify(true); setClubId(null);
-      setRouteStyle('fastest'); setPlanRoutes({ fastest: null, scenic: null });
+      // Only a fresh create resets the form; after an edit the caller closes the sheet
+      // and the seed effect above re-fills it next time it opens.
+      if (!editing) {
+        setTitle(''); setDesc(''); setVenue(null); setEnd(null); setStops([]); setWhen(defaultStart()); setIsPublic(true); setNotify(true); setClubId(null);
+        setRouteStyle('fastest'); setPlanRoutes({ fastest: null, scenic: null });
+      }
     } catch (err) {
-      Alert.alert('Could not create', formatErr(err));
+      Alert.alert(editing ? 'Could not save' : 'Could not create', formatErr(err));
     } finally {
       setBusy(false);
     }
@@ -406,7 +463,7 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalRoot}>
         <View style={styles.sheet}>
           <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>{`Create ${copy.one}`}</Text>
+            <Text style={styles.sheetTitle}>{`${editing ? 'Edit' : 'Create'} ${copy.one}`}</Text>
             <TouchableOpacity onPress={onClose} hitSlop={10}><Ionicons name="close" size={24} color={COLORS.text} /></TouchableOpacity>
           </View>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -568,7 +625,7 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
 
             <TouchableOpacity onPress={create} disabled={busy} activeOpacity={0.85} style={{ marginTop: 18, marginBottom: 26 }}>
               <LinearGradient colors={[COLORS.primary, '#18B368']} style={styles.createBtn}>
-                <Text style={styles.createBtnText}>{busy ? 'Creating…' : `Create ${copy.one}`}</Text>
+                <Text style={styles.createBtnText}>{busy ? (editing ? 'Saving…' : 'Creating…') : (editing ? 'Save changes' : `Create ${copy.one}`)}</Text>
               </LinearGradient>
             </TouchableOpacity>
           </ScrollView>
@@ -579,8 +636,9 @@ function CreateEventModal({ kind, visible, onClose, onCreated }: {
 }
 
 // ── Detail sheet ─────────────────────────────────────────────────────────────
-function EventDetailModal({ event: e, onClose, onChanged, onDeleted }: {
+function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEdit }: {
   event: HubEvent | null; onClose: () => void; onChanged: (e: HubEvent) => void; onDeleted: () => void;
+  onEdit: (e: HubEvent) => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -718,9 +776,14 @@ function EventDetailModal({ event: e, onClose, onChanged, onDeleted }: {
             )}
 
             {e.is_creator && (
-              <TouchableOpacity onPress={remove} style={[styles.linkBtn, { marginTop: 16, marginBottom: 24 }]}>
-                <Text style={[styles.linkBtnText, { color: '#FF5A5A' }]}>{`Delete ${copy.one}`}</Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity onPress={() => onEdit(e)} style={[styles.linkBtn, { marginTop: 16 }]}>
+                  <Text style={styles.linkBtnText}>{`Edit ${copy.one}`}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={remove} style={[styles.linkBtn, { marginTop: 4, marginBottom: 24 }]}>
+                  <Text style={[styles.linkBtnText, { color: '#FF5A5A' }]}>{`Delete ${copy.one}`}</Text>
+                </TouchableOpacity>
+              </>
             )}
             <View style={{ height: 20 }} />
           </ScrollView>

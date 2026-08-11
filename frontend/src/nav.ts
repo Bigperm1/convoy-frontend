@@ -1051,7 +1051,31 @@ export function useTurnByTurn(
     // Only reached when the walk above did not move, so on a normal drive this changes
     // nothing at all — it fires exactly in the case that used to stick. See the comment on
     // LOCAL_PAD_M for why this is deliberately local rather than a route-wide placement.
-    if (stepIdx === prevStepIdx && stepIdx < steps.length - 1) {
+    // ⚠ `steps.length - 3`, and the bound is the whole point. A pre-ship review proved this
+    // test could fire a REAL arrival — speaking it, tearing the drive down, and recording a
+    // phantom trip against the usage counter. Two mistakes of mine combined:
+    //
+    //  1. The arrival gate is NOT the final step, it is steps.length-2. Mapbox's ARRIVE step
+    //     carries distance 0 and mapboxToNavRoute sets steps[len-2].end = the destination, so
+    //     on len-2 `remaining` collapses to the crow distance to the destination and
+    //     ARRIVE_M (20 m) is in reach. I had reasoned that anchors[last] == total blocked it,
+    //     which guards an index arrival never needs.
+    //  2. The window below can SATURATE to the whole route: when anchors[stepIdx] + pad >=
+    //     total, hi clamps to the last segment and lo to 0, so projectLocal scans every
+    //     segment — the global nearest-point placement this design exists to avoid. On a
+    //     route whose last maneuver is within the pad of the destination, a car sitting near
+    //     that destination then "passes" step 0 and lands on len-2.
+    //
+    // Reproduced numerically on a LIVE, correct route (5 km, U-turn, arrive 80 m back) with
+    // 6 m of drift toward the opposite carriageway: it bound the final leg, collapsed
+    // `remaining` from 120 m to 40 m, and a 25 s wait at a light fired a full teardown
+    // mid-drive. The old walk does not do this, so it was mine.
+    //
+    // So the local test is confined to steps that CANNOT be the arrival gate or reach it in
+    // one hop. The final approach stays governed entirely by the existing proximity walk and
+    // the settle/near-arrival logic — i.e. exactly today's behaviour, unchanged. Olaf's stuck
+    // step was mid-route (step 1 of 5), which is squarely inside what this still covers.
+    if (stepIdx === prevStepIdx && stepIdx < steps.length - 3) {
       if (localRef.current.key !== r.polyline) {
         const data = buildSuffixMeters(r.coordinates);
         localRef.current = {
@@ -1079,7 +1103,11 @@ export function useTurnByTurn(
         // stale or wrong route inert: the index stays put, `remaining` stays the whole
         // route length, and the arrival branch stays unreachable — the structural immunity
         // the old walk had and the two reverted attempts gave away.
-        if (hit && hit.perpM <= LOCAL_MAX_PERP_M && hit.alongM > endA + PASSED_SLACK_M) {
+        // Past the maneuver, but only by a CREDIBLE amount. Being 5 km beyond it is not
+        // "just passed this turn", it is a bad projection — the upper bound is what stops a
+        // window that reached further than intended from claiming a distant pass.
+        const past = hit ? hit.alongM - endA : 0;
+        if (hit && hit.perpM <= LOCAL_MAX_PERP_M && past > PASSED_SLACK_M && past <= LOCAL_PAD_M) {
           stepIdx += 1;                                  // exactly one step, never more
           cur = steps[stepIdx];
           dManeuver = haversineMeters(user, cur.end);

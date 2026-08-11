@@ -33,16 +33,50 @@ type Report = {
   app_version?: string | null;
   runtime_version?: string | null;
   update_id?: string | null;
+  // Added 2026-08-11 with matching nullable columns on crash_reports. A row with
+  // launch_kind "emergency" means expo-updates failed to launch an update and ran the
+  // embedded JS — which is invisible if you only record update_id.
+  launch_kind?: string | null;
+  emergency_reason?: string | null;
+  channel?: string | null;
 };
 
+// ── WHY update_id ALONE COULD NOT ANSWER "WHICH BUNDLE IS RUNNING" (2026-08-11) ──
+// A tester lost the CarPlay zoom buttons mid-day. Telemetry showed update_id flipping to
+// NULL for a whole drive, and null was read as "running the embedded bundle". It does not
+// mean that. expo-updates sets the id from the LAUNCHED UPDATE, and an embedded launch has
+// one too — AppController.swift assigns `mutableMap["updateId"]` for any non-nil
+// launchedUpdate, and reports embedded-ness separately as
+//   isEmbeddedLaunch = embeddedUpdate != nil && embeddedUpdate.updateId == launchedUpdate.updateId
+// So a normal embedded launch reports a real UUID. update_id is null only when there is NO
+// launched update at all: updates disabled, a dev environment, or an EMERGENCY LAUNCH,
+// where expo-updates failed during launch and ran the embedded JS without an update record.
+//
+// Those cases need completely different fixes, and we were throwing away every field that
+// tells them apart — while `runtime_version`, read from the same object two lines down,
+// came through fine, which is what proves the module itself was working.
+//
+// Nothing here can prompt, block, or throw: these are plain constants captured at launch.
 function baseMeta() {
   let update_id: string | null = null;
   let runtime_version: string | null = null;
   let app_version: string | null = null;
+  let launch_kind: string | null = null;
+  let emergency_reason: string | null = null;
+  let channel: string | null = null;
   try {
     const U = require("expo-updates");
     update_id = U.updateId ?? null;
     runtime_version = U.runtimeVersion ?? null;
+    // One field, so a single glance at a row says which of the three worlds we are in.
+    launch_kind = U.isEmergencyLaunch ? "emergency"
+      : U.isEmbeddedLaunch ? "embedded"
+      : U.isEnabled === false ? "updates-disabled"
+      : update_id ? "ota" : "unknown";
+    if (U.isEmergencyLaunch && U.emergencyLaunchReason) {
+      emergency_reason = String(U.emergencyLaunchReason).slice(0, 500);
+    }
+    channel = U.channel ?? null;
   } catch {}
   try {
     app_version = require("expo-constants").default?.expoConfig?.version ?? null;
@@ -53,6 +87,9 @@ function baseMeta() {
     app_version,
     runtime_version,
     update_id,
+    launch_kind,
+    emergency_reason,
+    channel,
   };
 }
 

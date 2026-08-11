@@ -771,18 +771,48 @@ function buildStepAnchors(
 // fix walks the snapped position ~50 m further backwards while the car drives forwards.
 // Simulation on an exactly-coincident out-and-back measured the error reaching 3.2 km.
 // Any backward allowance at all does this, so there is none.
-//
-// Nothing is lost. A backward GPS jitter simply snaps to the cursor's own segment with the
-// distance-along unchanged, which is the behaviour we want anyway (guidance should not step
-// backwards on noise). And it stays self-correcting in BOTH directions: if a bad fix ever
-// threw the cursor far ahead, the car would then be further from the whole forward span
-// than SEG_MAX_SNAP_M and the whole-route rescan below recovers it.
 const ALONG_AHEAD_M = 2000;
+// ⚠ A pre-ship review killed the original version of this comment, which claimed a
+// backward GPS jitter "snaps to the cursor's own segment with the distance-along
+// unchanged". It does NOT: the scan starts at the cursor's own segment and recomputes t
+// from scratch, so a backward along-track fix can reduce drivenM by up to the whole
+// length of that segment — 100 m+ on open highway geometry. That is why the two guards
+// below exist rather than trusting the geometry to be well behaved.
+//
+// GUARD 1 — DIRECTION. Mapbox emits the same vertices for both directions of a retraced
+// road, so on an out-and-back the return leg sits inside the forward window at an
+// effectively identical distance and can win the minimum on nothing but floating-point
+// discretisation. Nearest-point alone cannot tell the two apart; the car's heading can,
+// because the legs are anti-parallel. Segments pointing more than this far away from our
+// course are rejected — unless that leaves no candidate at all, in which case we fall
+// back to ungated nearest-point rather than failing to place the car.
+const ALONG_HEADING_MAX_DEG = 120;
+// Course over ground is meaningless at a standstill, so the gate only applies while
+// genuinely moving.
+const ALONG_HEADING_MIN_MS = 3;
+// GUARD 2 — PLAUSIBILITY. Nothing else bounds a single-tick FORWARD leap, and an
+// unbounded one is how a mirrored-leg capture would skip several maneuvers at once. A car
+// cannot travel further than its speed allows, so anything beyond generous slack is a
+// snap artefact, not motion: hold the previous placement and let the next fix decide.
+const ALONG_JUMP_FLOOR_M = 300;
+const ALONG_JUMP_SPEED_FACTOR = 2.5;
+
+function bearingDeg(alat: number, alng: number, blat: number, blng: number): number {
+  const kx = Math.cos((alat * Math.PI) / 180) * 111320;
+  const dx = (blng - alng) * kx, dy = (blat - alat) * 110540;
+  const d = (Math.atan2(dx, dy) * 180) / Math.PI;
+  return d < 0 ? d + 360 : d;
+}
+function headingDelta(a: number, b: number): number {
+  const d = Math.abs(((a - b) % 360 + 360) % 360);
+  return d > 180 ? 360 - d : d;
+}
 
 /**
  * Snap the car onto the route and return how far ALONG it that is, searching only a
- * plausible span around where it was last seen. Falls back to a whole-route scan when
- * nothing plausible is near (first attach, a reroute, or emerging from a long GPS gap).
+ * plausible span ahead of where it was last seen, gated by direction of travel.
+ * Falls back to a genuine WHOLE-ROUTE scan when nothing plausible is near (first attach,
+ * a reroute, or emerging from a long GPS gap).
  */
 function snapAlongRoute(
   coords: [number, number][],
@@ -790,28 +820,66 @@ function snapAlongRoute(
   total: number,
   lat: number, lng: number,
   cursor: number,
-): { seg: number; drivenM: number } | null {
+  heading?: number,
+  speedMs?: number,
+  // The FIRST placement on a route must not trust a cursor: it may still hold the previous
+  // drive's value, and a forward-only window from a stale index degenerates to "the last
+  // segment", which on any loop or cruise route sits near the start and would place the
+  // car at the final step on its first fix. Scan everything once instead.
+  forceWide?: boolean,
+): { seg: number; drivenM: number; reattached: boolean } | null {
   const n = coords.length - 1;
   if (n < 1) return null;
   const at = (i: number) => suffix[Math.min(Math.max(i, 0), n)] ?? 0;
-  const here = at(cursor);
+  const gate = (speedMs ?? 0) >= ALONG_HEADING_MIN_MS
+    && typeof heading === "number" && heading >= 0 && Number.isFinite(heading);
+
+  // Best candidate in [lo, hi]. `useGate` rejects anti-parallel segments.
+  const best = (lo: number, hi: number, useGate: boolean) => {
+    let bSeg = -1, bD2 = Infinity, bT = 0;
+    for (let i = lo; i <= hi && i < n; i++) {
+      const a = coords[i], b = coords[i + 1];
+      if (useGate) {
+        const br = bearingDeg(a[1], a[0], b[1], b[0]);
+        if (headingDelta(br, heading as number) > ALONG_HEADING_MAX_DEG) continue;
+      }
+      const r = pointToSegment(lng, lat, a[0], a[1], b[0], b[1]);
+      if (r.d2 < bD2) { bD2 = r.d2; bSeg = i; bT = r.t; }
+    }
+    return { bSeg, bD2, bT };
+  };
+
   const lo = Math.min(Math.max(cursor, 0), n - 1);
   let hi = lo;
+  const here = at(lo);
   while (hi < n - 1 && here - at(hi + 1) <= ALONG_AHEAD_M) hi += 1;
-  let bestSeg = -1, bestD2 = Infinity, bestT = 0;
-  for (let i = lo; i <= hi; i++) {
-    const a = coords[i], b = coords[i + 1];
-    const r = pointToSegment(lng, lat, a[0], a[1], b[0], b[1]);
-    if (r.d2 < bestD2) { bestD2 = r.d2; bestSeg = i; bestT = r.t; }
+
+  // ESCALATION ORDER, and it matters more than it looks. The first version tried the
+  // window GATED, then the same window UNGATED — which handed the win straight back to
+  // the anti-parallel leg it had just rejected, because on a fold-back the coincident
+  // outbound segment sits inside the window at ~0 m while the correct return-leg segment
+  // is hundreds of metres outside it. Simulating a 2.5 km GPS blackout across the fold
+  // measured 2.9 km of error through that fallback. So: when the gate rejects everything
+  // nearby, ESCALATE (widen) rather than relax the gate. Ungated is the last resort only,
+  // for a bogus or absent heading.
+  let reattached = !!forceWide;
+  let { bSeg, bD2, bT } = forceWide ? { bSeg: -1, bD2: Infinity, bT: 0 } : best(lo, hi, gate);
+  if (bSeg < 0 || Math.sqrt(bD2) > SEG_MAX_SNAP_M) {
+    // REATTACH — and this really is every segment. The previous version called
+    // findRouteSegment(coords, lat, lng, 0), whose own first pass is
+    // scan(cursor-40, cursor+400): with cursor 0 that is only the first 400 segments,
+    // and any hit there inside 250 m was returned without ever escalating. On a route
+    // that runs back near its own beginning it therefore rebound the car to the
+    // OUTBOUND leg. A pre-ship review caught it; the comment claimed "scan everything"
+    // and the code did not.
+    reattached = true;
+    ({ bSeg, bD2, bT } = best(0, n - 1, gate));
+    if (bSeg < 0 || Math.sqrt(bD2) > SEG_MAX_SNAP_M) ({ bSeg, bD2, bT } = best(0, n - 1, false));
+    if (bSeg < 0 || Math.sqrt(bD2) > SEG_MAX_SNAP_M) return null;
   }
-  if (bestSeg < 0 || Math.sqrt(bestD2) > SEG_MAX_SNAP_M) {
-    const wide = findRouteSegment(coords, lat, lng, 0);   // reattach: scan everything
-    if (!wide || wide.distM > SEG_MAX_SNAP_M) return null;
-    bestSeg = wide.seg; bestT = wide.t;
-  }
-  const tail = suffix[bestSeg + 1] ?? 0;
-  const ahead = tail + (suffix[bestSeg] - tail) * (1 - bestT);
-  return { seg: bestSeg, drivenM: Math.max(0, total - ahead) };
+  const tail = suffix[bSeg + 1] ?? 0;
+  const ahead = tail + (suffix[bSeg] - tail) * (1 - bT);
+  return { seg: bSeg, drivenM: Math.max(0, total - ahead), reattached };
 }
 
 function buildSuffixSeconds(segDurations: number[] | undefined): number[] | null {
@@ -920,6 +988,9 @@ export function useTurnByTurn(
   const stepAnchorRef = useRef<{ key: string; anchors: number[] | null }>({ key: "", anchors: null });
   // Where the car last sat on the line, in SEGMENT index, for distance-along only.
   const alongCursorRef = useRef<number>(0);
+  // Last ACCEPTED distance-along and when, so a single-tick leap can be judged against
+  // what the car could actually have travelled (see ALONG_JUMP_*).
+  const alongPrevRef = useRef<{ driven: number; at: number } | null>(null);
   const stateRef = useRef<TbtState>({
     active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0,
   });
@@ -1006,7 +1077,21 @@ export function useTurnByTurn(
   // nothing" and the driver stayed on the original road.
   useEffect(() => {
     const key = route?.polyline || "";
-    if (!active || !key) { routeKeyRef.current = key; return; }
+    if (!active || !key) {
+      // ⚠ This branch records the new polyline while guidance is INACTIVE, so when nav is
+      // then switched on the key already matches and the reset block below never runs. A
+      // route previewed before starting (the normal case) therefore used to activate with
+      // the PREVIOUS drive's cursors still loaded — and because the along-track window is
+      // forward-only and clamps to the last segment, a route whose tail passes near its
+      // own start (any loop or cruise) could place the car at the final step on its very
+      // first fix and fire arrival before the driver moved. Reset here so activation is
+      // always clean. A pre-ship review found this.
+      routeKeyRef.current = key;
+      segCursorRef.current = 0;
+      alongCursorRef.current = 0;
+      alongPrevRef.current = null;
+      return;
+    }
     if (key !== routeKeyRef.current) {
       routeKeyRef.current = key;
       announcedRef.current.clear();
@@ -1022,6 +1107,7 @@ export function useTurnByTurn(
       // wherever the car actually is on the new line, on that same first tick.
       segCursorRef.current = 0;
       alongCursorRef.current = 0;
+      alongPrevRef.current = null;
       const reAnchored: TbtState = { ...stateRef.current, active: true, stepIndex: 0 };
       stateRef.current = reAnchored;
       setState(reAnchored);
@@ -1084,13 +1170,34 @@ export function useTurnByTurn(
       // Its own cursor, NOT segCursorRef: that one belongs to the ETA, which re-seeds it
       // to 0 on every traffic refresh. Distance-along must not lose its place because the
       // traffic numbers were updated.
+      const nowMs = Date.now();
       const hit = snapAlongRoute(
         stepCoords, meterData.suffix, meterData.total, user.lat, user.lng, alongCursorRef.current,
+        user.heading, user.speed, alongPrevRef.current == null,
       );
-      // Null means we are not credibly on the line at all; the off-route machinery below
+      // PLAUSIBILITY: reject a forward leap the car could not have made. Generous — the
+      // budget is 2.5x the distance the last known speed allows over the real elapsed
+      // time, floored at 300 m — so a tunnel gap or a slow GPS tick still passes, while a
+      // mirrored-leg snap that teleports the car a kilometre down the route does not. A
+      // rejected fix simply leaves the step where it was; the next fix decides. Skipped
+      // on a reattach, which is the explicit "we do not know where we are" case.
+      let ok = !!hit;
+      if (hit && !hit.reattached) {
+        const prev = alongPrevRef.current;
+        if (prev) {
+          const dtS = Math.max(0.5, (nowMs - prev.at) / 1000);
+          const budget = Math.max(
+            ALONG_JUMP_FLOOR_M,
+            Math.max(0, user.speed ?? 0) * dtS * ALONG_JUMP_SPEED_FACTOR,
+          );
+          if (hit.drivenM - prev.driven > budget) ok = false;
+        }
+      }
+      // Null/rejected means we are not credibly placed; the off-route machinery below
       // owns that situation, so keep the old proximity behaviour for this tick.
-      if (hit) {
+      if (hit && ok) {
         alongCursorRef.current = hit.seg;
+        alongPrevRef.current = { driven: hit.drivenM, at: nowMs };
         const drivenM = hit.drivenM;
         // ADVANCE at the same point the old proximity walk did (25 m before the maneuver),
         // so the banner's timing is unchanged and only its correctness improves.
@@ -1132,9 +1239,22 @@ export function useTurnByTurn(
         announcedRef.current.has(`${prevStepIdx}-imm`) || announcedRef.current.has(`${prevStepIdx}-prep`);
       const prevNext = steps[prevStepIdx + 1];
       const newNext = steps[stepIdx + 1];
+      // Inheritance only makes sense for a SINGLE-step advance, where "the corner we just
+      // left" and "the corner we are entering" really are the same physical junction.
+      // Distance-along placement can cross several anchors in one tick (a dropped fix, a
+      // reattach, an interchange with anchors metres apart); comparing steps two or more
+      // apart compares unrelated turns and could mark a genuine upcoming maneuver as
+      // already announced, silencing it completely. A pre-ship review found this.
+      const singleAdvance = stepIdx === prevStepIdx + 1;
+      // The arrival key lives in this same Set and is the ONLY guard against a duplicate
+      // arrival (speaking twice, tearing down twice, recording a second trip). Clearing it
+      // on a step change was harmless while the walk was strictly monotone; now that the
+      // index can also regress, it must survive.
+      const arriveKeyHeld = announcedRef.current.has(`${steps.length - 1}-arrived`);
       announcedRef.current.clear();
+      if (arriveKeyHeld) announcedRef.current.add(`${steps.length - 1}-arrived`);
       if (
-        prevSpoke && prevNext && newNext && dManeuver < 120 &&
+        singleAdvance && prevSpoke && prevNext && newNext && dManeuver < 120 &&
         maneuverVerb(newNext.maneuver) === maneuverVerb(prevNext.maneuver)
       ) {
         announcedRef.current.add(`${stepIdx}-imm`);

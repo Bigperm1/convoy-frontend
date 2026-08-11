@@ -118,6 +118,16 @@ const CAR_ZOOM_MAX = CHASE_ZOOM_CLAMP_MAX;
 // chase clamp on purpose.
 const CAR_PREVIEW_ZOOM_MIN = 3;
 
+// How long a manual zoom outranks the speed-aware chase zoom before it lapses. Deliberately
+// the SAME 15 s crewFit holds the overview for, so the two map buttons feel like one idea
+// rather than two — that was the ask. Long enough to look ahead down the route and read it,
+// short enough that a driver who forgets they zoomed is not stuck at the wrong framing.
+// ⚠ It is a DEADLINE compared per frame, never a setTimeout. iOS suspends JS timers while
+// the phone is locked, which is how a phone sits in a mount, so a timer-based release can
+// strand the camera for an entire drive — the trap called out above getCam and the one that
+// once stranded the CarPlay alert modals over the map.
+const CAR_ZOOM_HOLD_MS = 15000;
+
 // Top padding as a fraction of map height — pins the car near the BOTTOM-MIDDLE of the
 // head unit (larger = lower on screen). Applied every frame via getCam, nav AND cruise.
 // Bumped 0.42 → 0.52 (CarPlay only, tilt unchanged): drops the car a bit lower on the wide
@@ -437,6 +447,23 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // fitBounds over the whole crew isn't overwritten on the next rAF tick. Expires
   // on its own — no cleanup path can strand the chase cam off.
   const camHoldUntilRef = useRef(0);
+  // ── ZOOM SNAP-BACK (Jeff, 2026-08-11) ───────────────────────────────────────
+  // "when the zoom buttons first showed up I used them and they worked, but they did not
+  //  snap back to the correct zoom/chase cam/tilt that it should have been based on my
+  //  speed. Let's use the same mechanism as the crew snap back."
+  //
+  // He is right, and the two controls were built inside out from each other. crewFit parks
+  // a DEADLINE in camHoldUntilRef; lockReadyRef re-derives from it and the chase cam
+  // re-grabs position, heading, pitch and zoom the moment it lapses. The zoom controls did
+  // the opposite: they wrote a bias into userZoomRef, which getCam ADDS to the speed-aware
+  // followZoom on every frame, and NOTHING ever cleared it. So one tap of +/- retired the
+  // speed-aware framing for the rest of the drive — the camera could not come back to the
+  // zoom your speed asks for, because the offset was still being added on top of it.
+  //
+  // Same deadline shape as crew, but its OWN ref on purpose: camHoldUntilRef also freezes
+  // heading and hands position to the overview, and a zoom must not do either — the chase
+  // cam should keep following the road the whole time, and only the ZOOM offset expires.
+  const zoomHoldUntilRef = useRef(0);
   // Compass north-up hold (mirrors the phone compass): camera heading pinned to 0
   // while the chase keeps following position; the car MODEL keeps its real heading.
   // Toggled by the compass button; auto-released when navigation starts (the phone
@@ -599,6 +626,20 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
     camHdgOverrideRef.current = (carNorthUpRef.current || Date.now() < camHoldUntilRef.current)
       ? 0
       : undefined;
+    // Retire a lapsed manual zoom, here, for the same reason the heading override is
+    // derived here: this is the one place that runs at FRAME rate, so the chase cam takes
+    // the framing back on the very next drawn frame. Not while a pinch is still in
+    // progress. Zeroing the bias does not jump the camera — the ease in pushCam animates
+    // it, exactly as it does when a crew overview lapses.
+    if (
+      zoomHoldUntilRef.current !== 0 &&
+      !pinchActiveRef.current &&
+      Date.now() >= zoomHoldUntilRef.current
+    ) {
+      zoomHoldUntilRef.current = 0;
+      userZoomRef.current = 0;
+      zoomBaseRef.current = 0;
+    }
     return {
       // followZoom + driver pinch bias, clamped. userZoomRef is read live (a ref,
       // deliberately not a dep) so a pinch takes effect on the very next frame.
@@ -734,6 +775,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
             userZoomRef.current = clampBias(userZoomRef.current + dir * ZOOM_TAP_STEP);
             zoomBaseRef.current = userZoomRef.current;   // a later pinch rebases from here
             camHoldUntilRef.current = 0;                 // a deliberate zoom ends crew overview
+            zoomHoldUntilRef.current = Date.now() + CAR_ZOOM_HOLD_MS;
             applyZoomNow();
             break;
           }
@@ -741,6 +783,8 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           // setScale:), so bias = base + log2(scale). Never yet observed on a head unit.
           const delta = Math.log2(Math.max(0.01, g.scale));
           userZoomRef.current = clampBias(zoomBaseRef.current + delta);
+          // Pushed out on every update, so the 15 s runs from the END of the pinch.
+          zoomHoldUntilRef.current = Date.now() + CAR_ZOOM_HOLD_MS;
           applyZoomNow();   // don't wait for an ease that a parked car will never arm
           break;
         }
@@ -754,12 +798,14 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           userZoomRef.current = clampBias(userZoomRef.current + (g.delta || 0));
           zoomBaseRef.current = userZoomRef.current;   // a later pinch rebases from here
           camHoldUntilRef.current = 0;                 // a deliberate zoom ends crew overview
+          zoomHoldUntilRef.current = Date.now() + CAR_ZOOM_HOLD_MS;
           applyZoomNow();
           break;
         }
         case 'recenter':
           userZoomRef.current = 0;
           zoomBaseRef.current = 0;
+          zoomHoldUntilRef.current = 0;
           applyZoomNow();   // same reason as 'zoom' — parked, nothing else will push it
           // A recenter also cancels any crew-overview hold — the driver asked to
           // come home, so the chase cam takes back over immediately.
@@ -772,6 +818,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           // phone's recenterNow.
           userZoomRef.current = 0;
           zoomBaseRef.current = 0;
+          zoomHoldUntilRef.current = 0;
           camHoldUntilRef.current = 0;
           applyZoomNow();
           setCarNorthUp((v) => !v);

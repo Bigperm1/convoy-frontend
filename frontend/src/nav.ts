@@ -402,15 +402,6 @@ const PREPARE_LEAD_S = 30;     // "In X, turn …" heads-up ~30 s out
 const PREPARE_MIN_M = 150;
 const PREPARE_MAX_M = 1200;
 const ADVANCE_THRESHOLD_M = 25;
-// Going BACKWARDS a step needs more evidence than going forwards, because a step change
-// clears announcedRef and a regression would therefore re-speak a turn already voiced.
-// The gap between this and ADVANCE_THRESHOLD_M is the dead band (35 m) that keeps
-// along-track GPS noise from flapping the banner at a maneuver.
-const STEP_REGRESS_SLACK_M = 60;
-// A step's maneuver point should land ON the route line (Mapbox maneuver locations are
-// geometry vertices). If one is further off than this, the step<->line mapping is not
-// trustworthy and we fall back to the old proximity walk rather than guess.
-const STEP_ANCHOR_MAX_M = 25;
 // ── ARRIVAL ─────────────────────────────────────────────────────────────────
 // Auto-finish has always existed (map.tsx's onArrive does the full teardown), but
 // it only ever fired on a GPS fix landing within ARRIVE_M of the destination — and
@@ -693,195 +684,6 @@ export function isPhoneTbtSpeaking(): boolean { return _tbtEngineActive; }
 //
 // `suffix[i]` = seconds from the START of segment i to the destination, precomputed
 // once per route so each GPS tick is O(1) instead of O(4337).
-// Cumulative METRES remaining from each coordinate index — the distance twin of
-// buildSuffixSeconds. Used to place the driver along the route by DISTANCE TRAVELLED
-// rather than by proximity to a maneuver point. See the step-index block in
-// useTurnByTurn for why that distinction is the whole bug.
-function buildSuffixMeters(coords: [number, number][] | undefined): { suffix: number[]; total: number } | null {
-  if (!Array.isArray(coords) || coords.length < 2) return null;
-  const n = coords.length - 1;
-  const seg = new Array<number>(n);
-  for (let i = 0; i < n; i++) {
-    seg[i] = haversineMeters(
-      { lat: coords[i][1], lng: coords[i][0] },
-      { lat: coords[i + 1][1], lng: coords[i + 1][0] },
-    );
-  }
-  const suffix = new Array<number>(n + 1);
-  suffix[n] = 0;
-  let total = 0;
-  for (let i = n - 1; i >= 0; i--) { total += seg[i]; suffix[i] = total; }
-  return { suffix, total };
-}
-
-/**
- * Where each step's maneuver sits ALONG the route, in metres from the start.
- *
- * Built once per route, not per tick. Deliberately measured off the GEOMETRY rather than
- * by accumulating `step.distance_m`, because those sums do not close on a multi-stop
- * route: the via parser drops every interior `depart`/`arrive` step so a stop does not
- * fire a false arrival (mapboxDirections.ts), and an interior `depart` carries real
- * distance. Summing step distances would therefore under-count by that much and place
- * every later step early — on precisely the multi-stop route this whole fix is for.
- *
- * The scan is FORWARD-ONLY from the previous step's segment and breaks at the first
- * near-exact match, so a route that folds back over itself cannot anchor a later step to
- * an earlier crossing, and the total work stays ~O(coords) for the whole route.
- * Returns null if any step won't sit on the line — caller then keeps the old behaviour.
- */
-function buildStepAnchors(
-  coords: [number, number][] | undefined,
-  steps: NavStep[],
-  suffix: number[],
-  total: number,
-): number[] | null {
-  if (!Array.isArray(coords) || coords.length < 2 || !steps.length) return null;
-  const n = coords.length - 1;
-  const out = new Array<number>(steps.length);
-  let cursor = 0;
-  let prev = 0;
-  for (let i = 0; i < steps.length; i++) {
-    const p = steps[i].end;
-    if (!p || (p.lat === 0 && p.lng === 0)) return null;
-    let bestSeg = -1, bestD2 = Infinity, bestT = 0;
-    for (let sg = cursor; sg < n; sg++) {
-      const a = coords[sg], b = coords[sg + 1];
-      const r = pointToSegment(p.lng, p.lat, a[0], a[1], b[0], b[1]);
-      if (r.d2 < bestD2) { bestD2 = r.d2; bestSeg = sg; bestT = r.t; }
-      if (r.d2 <= 1) break;            // within a metre: this IS the vertex, stop looking
-    }
-    if (bestSeg < 0 || Math.sqrt(bestD2) > STEP_ANCHOR_MAX_M) return null;
-    cursor = bestSeg;
-    const tail = suffix[bestSeg + 1] ?? 0;
-    const along = total - (tail + (suffix[bestSeg] - tail) * (1 - bestT));
-    prev = Math.max(prev, along);       // must be non-decreasing for the walk to be sound
-    out[i] = prev;
-  }
-  return out;
-}
-
-// How far ahead of the last known position we look for the car when measuring distance
-// ALONG the route, and why the search does not look BACK at all.
-//
-// findRouteSegment's window is 40 SEGMENTS back, which on typical 25 m geometry is a
-// kilometre of backward allowance. Harmless for the ETA it was written for, fatal here: a
-// multi-stop run that returns down the same street has near-coincident geometry for both
-// directions, the scan takes the FIRST minimum (the LOWER index, i.e. the outbound leg),
-// and because the window re-bases on the cursor every tick that becomes a RATCHET — each
-// fix walks the snapped position ~50 m further backwards while the car drives forwards.
-// Simulation on an exactly-coincident out-and-back measured the error reaching 3.2 km.
-// Any backward allowance at all does this, so there is none.
-const ALONG_AHEAD_M = 2000;
-// ⚠ A pre-ship review killed the original version of this comment, which claimed a
-// backward GPS jitter "snaps to the cursor's own segment with the distance-along
-// unchanged". It does NOT: the scan starts at the cursor's own segment and recomputes t
-// from scratch, so a backward along-track fix can reduce drivenM by up to the whole
-// length of that segment — 100 m+ on open highway geometry. That is why the two guards
-// below exist rather than trusting the geometry to be well behaved.
-//
-// GUARD 1 — DIRECTION. Mapbox emits the same vertices for both directions of a retraced
-// road, so on an out-and-back the return leg sits inside the forward window at an
-// effectively identical distance and can win the minimum on nothing but floating-point
-// discretisation. Nearest-point alone cannot tell the two apart; the car's heading can,
-// because the legs are anti-parallel. Segments pointing more than this far away from our
-// course are rejected — unless that leaves no candidate at all, in which case we fall
-// back to ungated nearest-point rather than failing to place the car.
-const ALONG_HEADING_MAX_DEG = 120;
-// Course over ground is meaningless at a standstill, so the gate only applies while
-// genuinely moving.
-const ALONG_HEADING_MIN_MS = 3;
-// GUARD 2 — PLAUSIBILITY. Nothing else bounds a single-tick FORWARD leap, and an
-// unbounded one is how a mirrored-leg capture would skip several maneuvers at once. A car
-// cannot travel further than its speed allows, so anything beyond generous slack is a
-// snap artefact, not motion: hold the previous placement and let the next fix decide.
-const ALONG_JUMP_FLOOR_M = 300;
-const ALONG_JUMP_SPEED_FACTOR = 2.5;
-
-function bearingDeg(alat: number, alng: number, blat: number, blng: number): number {
-  const kx = Math.cos((alat * Math.PI) / 180) * 111320;
-  const dx = (blng - alng) * kx, dy = (blat - alat) * 110540;
-  const d = (Math.atan2(dx, dy) * 180) / Math.PI;
-  return d < 0 ? d + 360 : d;
-}
-function headingDelta(a: number, b: number): number {
-  const d = Math.abs(((a - b) % 360 + 360) % 360);
-  return d > 180 ? 360 - d : d;
-}
-
-/**
- * Snap the car onto the route and return how far ALONG it that is, searching only a
- * plausible span ahead of where it was last seen, gated by direction of travel.
- * Falls back to a genuine WHOLE-ROUTE scan when nothing plausible is near (first attach,
- * a reroute, or emerging from a long GPS gap).
- */
-function snapAlongRoute(
-  coords: [number, number][],
-  suffix: number[],
-  total: number,
-  lat: number, lng: number,
-  cursor: number,
-  heading?: number,
-  speedMs?: number,
-  // The FIRST placement on a route must not trust a cursor: it may still hold the previous
-  // drive's value, and a forward-only window from a stale index degenerates to "the last
-  // segment", which on any loop or cruise route sits near the start and would place the
-  // car at the final step on its first fix. Scan everything once instead.
-  forceWide?: boolean,
-): { seg: number; drivenM: number; reattached: boolean } | null {
-  const n = coords.length - 1;
-  if (n < 1) return null;
-  const at = (i: number) => suffix[Math.min(Math.max(i, 0), n)] ?? 0;
-  const gate = (speedMs ?? 0) >= ALONG_HEADING_MIN_MS
-    && typeof heading === "number" && heading >= 0 && Number.isFinite(heading);
-
-  // Best candidate in [lo, hi]. `useGate` rejects anti-parallel segments.
-  const best = (lo: number, hi: number, useGate: boolean) => {
-    let bSeg = -1, bD2 = Infinity, bT = 0;
-    for (let i = lo; i <= hi && i < n; i++) {
-      const a = coords[i], b = coords[i + 1];
-      if (useGate) {
-        const br = bearingDeg(a[1], a[0], b[1], b[0]);
-        if (headingDelta(br, heading as number) > ALONG_HEADING_MAX_DEG) continue;
-      }
-      const r = pointToSegment(lng, lat, a[0], a[1], b[0], b[1]);
-      if (r.d2 < bD2) { bD2 = r.d2; bSeg = i; bT = r.t; }
-    }
-    return { bSeg, bD2, bT };
-  };
-
-  const lo = Math.min(Math.max(cursor, 0), n - 1);
-  let hi = lo;
-  const here = at(lo);
-  while (hi < n - 1 && here - at(hi + 1) <= ALONG_AHEAD_M) hi += 1;
-
-  // ESCALATION ORDER, and it matters more than it looks. The first version tried the
-  // window GATED, then the same window UNGATED — which handed the win straight back to
-  // the anti-parallel leg it had just rejected, because on a fold-back the coincident
-  // outbound segment sits inside the window at ~0 m while the correct return-leg segment
-  // is hundreds of metres outside it. Simulating a 2.5 km GPS blackout across the fold
-  // measured 2.9 km of error through that fallback. So: when the gate rejects everything
-  // nearby, ESCALATE (widen) rather than relax the gate. Ungated is the last resort only,
-  // for a bogus or absent heading.
-  let reattached = !!forceWide;
-  let { bSeg, bD2, bT } = forceWide ? { bSeg: -1, bD2: Infinity, bT: 0 } : best(lo, hi, gate);
-  if (bSeg < 0 || Math.sqrt(bD2) > SEG_MAX_SNAP_M) {
-    // REATTACH — and this really is every segment. The previous version called
-    // findRouteSegment(coords, lat, lng, 0), whose own first pass is
-    // scan(cursor-40, cursor+400): with cursor 0 that is only the first 400 segments,
-    // and any hit there inside 250 m was returned without ever escalating. On a route
-    // that runs back near its own beginning it therefore rebound the car to the
-    // OUTBOUND leg. A pre-ship review caught it; the comment claimed "scan everything"
-    // and the code did not.
-    reattached = true;
-    ({ bSeg, bD2, bT } = best(0, n - 1, gate));
-    if (bSeg < 0 || Math.sqrt(bD2) > SEG_MAX_SNAP_M) ({ bSeg, bD2, bT } = best(0, n - 1, false));
-    if (bSeg < 0 || Math.sqrt(bD2) > SEG_MAX_SNAP_M) return null;
-  }
-  const tail = suffix[bSeg + 1] ?? 0;
-  const ahead = tail + (suffix[bSeg] - tail) * (1 - bT);
-  return { seg: bSeg, drivenM: Math.max(0, total - ahead), reattached };
-}
-
 function buildSuffixSeconds(segDurations: number[] | undefined): number[] | null {
   if (!Array.isArray(segDurations) || segDurations.length === 0) return null;
   const n = segDurations.length;
@@ -982,15 +784,6 @@ export function useTurnByTurn(
   // local instead of rescanning the whole geometry.
   const segSuffixRef = useRef<{ key: string; suffix: number[] | null }>({ key: "", suffix: null });
   const segCursorRef = useRef<number>(0);
-  // Metre suffix + total for the distance-progress step index (see the block below).
-  const meterSuffixRef = useRef<{ key: string; data: { suffix: number[]; total: number } | null }>({ key: "", data: null });
-  // Step anchors (metres along the route) for the CURRENT route, keyed on its polyline.
-  const stepAnchorRef = useRef<{ key: string; anchors: number[] | null }>({ key: "", anchors: null });
-  // Where the car last sat on the line, in SEGMENT index, for distance-along only.
-  const alongCursorRef = useRef<number>(0);
-  // Last ACCEPTED distance-along and when, so a single-tick leap can be judged against
-  // what the car could actually have travelled (see ALONG_JUMP_*).
-  const alongPrevRef = useRef<{ driven: number; at: number } | null>(null);
   const stateRef = useRef<TbtState>({
     active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0,
   });
@@ -1077,21 +870,7 @@ export function useTurnByTurn(
   // nothing" and the driver stayed on the original road.
   useEffect(() => {
     const key = route?.polyline || "";
-    if (!active || !key) {
-      // ⚠ This branch records the new polyline while guidance is INACTIVE, so when nav is
-      // then switched on the key already matches and the reset block below never runs. A
-      // route previewed before starting (the normal case) therefore used to activate with
-      // the PREVIOUS drive's cursors still loaded — and because the along-track window is
-      // forward-only and clamps to the last segment, a route whose tail passes near its
-      // own start (any loop or cruise) could place the car at the final step on its very
-      // first fix and fire arrival before the driver moved. Reset here so activation is
-      // always clean. A pre-ship review found this.
-      routeKeyRef.current = key;
-      segCursorRef.current = 0;
-      alongCursorRef.current = 0;
-      alongPrevRef.current = null;
-      return;
-    }
+    if (!active || !key) { routeKeyRef.current = key; return; }
     if (key !== routeKeyRef.current) {
       routeKeyRef.current = key;
       announcedRef.current.clear();
@@ -1100,14 +879,6 @@ export function useTurnByTurn(
       settleSinceRef.current = null;
       if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
       swapSuppressUntilRef.current = Date.now() + 8000;
-      // A new route renumbers the steps AND re-indexes the geometry, so the segment
-      // cursor from the old line means nothing against the new one — without this the
-      // first tick after a swap can snap distance-along to a stale window and place the
-      // step from a wrong position. Step 0 is only a seed now; the walk below lifts it to
-      // wherever the car actually is on the new line, on that same first tick.
-      segCursorRef.current = 0;
-      alongCursorRef.current = 0;
-      alongPrevRef.current = null;
       const reAnchored: TbtState = { ...stateRef.current, active: true, stepIndex: 0 };
       stateRef.current = reAnchored;
       setState(reAnchored);
@@ -1126,104 +897,15 @@ export function useTurnByTurn(
       polyCacheRef.current = { key: r.polyline, pts: r.polyline ? decodePolyline(r.polyline) : [] };
     }
 
-    // ── WHICH STEP ARE WE ON: DISTANCE ALONG THE ROUTE, NOT PROXIMITY (2026-08-11) ──
-    // Olaf, on a route to work with a stop in the middle: "the amount of distance to get
-    // there is increasing, the time is going down, and it keeps telling me to turn left on
-    // the street that keeps getting farther away. The directions of the actual line is
-    // fine." That report names the bug precisely, because those numbers come from three
-    // different places: the LINE is the route geometry (fine), the TIME is the
-    // segment-based ETA which locates the car by snapping to the geometry (fine), and the
-    // DISTANCE and the INSTRUCTION both came from stepIdx — which had exactly one way to
-    // move forward:
-    //     while (stepIdx < last && dManeuver < ADVANCE_THRESHOLD_M) stepIdx++
-    // It could ONLY advance while the car was within 25 m of the current maneuver point,
-    // with no other path. So the first time a driver passes a maneuver wider than 25 m — a
-    // big intersection, a ramp, ordinary GPS scatter, or a mid-drive route swap that
-    // re-anchors to step 0 while the car is kilometres along — the index STICKS for the
-    // rest of the drive. dManeuver then measures to a maneuver already behind the car, so
-    // it GROWS as the driver nears their destination, the banner names a street receding
-    // in the mirror, and `remaining` (dManeuver + every later step) grows with it. All four
-    // of Olaf's observations, one cause.
-    //
-    // So ask the question the ETA already answers correctly — how far along the line are
-    // we? — and take the step whose maneuver is the first one still ahead of that. Immune
-    // to intersection width, to GPS scatter, and to being re-anchored anywhere, because it
-    // never depends on being NEAR anything.
-    const stepCoords = r.coordinates;
-    if (meterSuffixRef.current.key !== r.polyline) {
-      meterSuffixRef.current = { key: r.polyline, data: buildSuffixMeters(stepCoords) };
-    }
-    const meterData = meterSuffixRef.current.data;
-    if (stepAnchorRef.current.key !== r.polyline) {
-      stepAnchorRef.current = {
-        key: r.polyline,
-        anchors: meterData ? buildStepAnchors(stepCoords, steps, meterData.suffix, meterData.total) : null,
-      };
-    }
-    const anchors = stepAnchorRef.current.anchors;
-
     let stepIdx = Math.min(stateRef.current.stepIndex, steps.length - 1);
     const prevStepIdx = stepIdx;
-    let placedByProgress = false;
-
-    if (anchors && meterData && stepCoords && stepCoords.length >= 2) {
-      // Its own cursor, NOT segCursorRef: that one belongs to the ETA, which re-seeds it
-      // to 0 on every traffic refresh. Distance-along must not lose its place because the
-      // traffic numbers were updated.
-      const nowMs = Date.now();
-      const hit = snapAlongRoute(
-        stepCoords, meterData.suffix, meterData.total, user.lat, user.lng, alongCursorRef.current,
-        user.heading, user.speed, alongPrevRef.current == null,
-      );
-      // PLAUSIBILITY: reject a forward leap the car could not have made. Generous — the
-      // budget is 2.5x the distance the last known speed allows over the real elapsed
-      // time, floored at 300 m — so a tunnel gap or a slow GPS tick still passes, while a
-      // mirrored-leg snap that teleports the car a kilometre down the route does not. A
-      // rejected fix simply leaves the step where it was; the next fix decides. Skipped
-      // on a reattach, which is the explicit "we do not know where we are" case.
-      let ok = !!hit;
-      if (hit && !hit.reattached) {
-        const prev = alongPrevRef.current;
-        if (prev) {
-          const dtS = Math.max(0.5, (nowMs - prev.at) / 1000);
-          const budget = Math.max(
-            ALONG_JUMP_FLOOR_M,
-            Math.max(0, user.speed ?? 0) * dtS * ALONG_JUMP_SPEED_FACTOR,
-          );
-          if (hit.drivenM - prev.driven > budget) ok = false;
-        }
-      }
-      // Null/rejected means we are not credibly placed; the off-route machinery below
-      // owns that situation, so keep the old proximity behaviour for this tick.
-      if (hit && ok) {
-        alongCursorRef.current = hit.seg;
-        alongPrevRef.current = { driven: hit.drivenM, at: nowMs };
-        const drivenM = hit.drivenM;
-        // ADVANCE at the same point the old proximity walk did (25 m before the maneuver),
-        // so the banner's timing is unchanged and only its correctness improves.
-        while (stepIdx < steps.length - 1 && drivenM > anchors[stepIdx] - ADVANCE_THRESHOLD_M) stepIdx += 1;
-        // REGRESS only on clear evidence. A step change clears announcedRef, so a step we
-        // walk back onto would re-speak its turn; STEP_REGRESS_SLACK_M is the dead band
-        // that stops along-track noise from doing that. It is a dead band and NOT a
-        // one-way latch on purpose: a latch would make a single bad snap permanent, which
-        // is the very failure being fixed here, just pointing the other way.
-        while (stepIdx > 0 && drivenM < anchors[stepIdx - 1] - STEP_REGRESS_SLACK_M) stepIdx -= 1;
-        placedByProgress = true;
-      }
-    }
-
     let cur = steps[stepIdx];
     let dManeuver = haversineMeters(user, cur.end);
 
-    // FALLBACK, and the ONLY path when the route has no coordinates or a maneuver that
-    // won't sit on the line (a legacy cached route): the original proximity walk, so a
-    // degraded route still advances the way it always did rather than not at all.
-    if (!placedByProgress) {
-      while (stepIdx < steps.length - 1 && dManeuver < ADVANCE_THRESHOLD_M) {
-        stepIdx += 1;
-        cur = steps[stepIdx];
-        dManeuver = haversineMeters(user, cur.end);
-      }
+    while (stepIdx < steps.length - 1 && dManeuver < ADVANCE_THRESHOLD_M) {
+      stepIdx += 1;
+      cur = steps[stepIdx];
+      dManeuver = haversineMeters(user, cur.end);
     }
     if (stepIdx !== prevStepIdx) {
       // Split-maneuver corners: Google often breaks one physical turn into two
@@ -1239,22 +921,9 @@ export function useTurnByTurn(
         announcedRef.current.has(`${prevStepIdx}-imm`) || announcedRef.current.has(`${prevStepIdx}-prep`);
       const prevNext = steps[prevStepIdx + 1];
       const newNext = steps[stepIdx + 1];
-      // Inheritance only makes sense for a SINGLE-step advance, where "the corner we just
-      // left" and "the corner we are entering" really are the same physical junction.
-      // Distance-along placement can cross several anchors in one tick (a dropped fix, a
-      // reattach, an interchange with anchors metres apart); comparing steps two or more
-      // apart compares unrelated turns and could mark a genuine upcoming maneuver as
-      // already announced, silencing it completely. A pre-ship review found this.
-      const singleAdvance = stepIdx === prevStepIdx + 1;
-      // The arrival key lives in this same Set and is the ONLY guard against a duplicate
-      // arrival (speaking twice, tearing down twice, recording a second trip). Clearing it
-      // on a step change was harmless while the walk was strictly monotone; now that the
-      // index can also regress, it must survive.
-      const arriveKeyHeld = announcedRef.current.has(`${steps.length - 1}-arrived`);
       announcedRef.current.clear();
-      if (arriveKeyHeld) announcedRef.current.add(`${steps.length - 1}-arrived`);
       if (
-        singleAdvance && prevSpoke && prevNext && newNext && dManeuver < 120 &&
+        prevSpoke && prevNext && newNext && dManeuver < 120 &&
         maneuverVerb(newNext.maneuver) === maneuverVerb(prevNext.maneuver)
       ) {
         announcedRef.current.add(`${stepIdx}-imm`);

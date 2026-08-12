@@ -23,6 +23,28 @@ const MAX_QUEUE = 5;
 // out of the boot-critical window.
 const DELIVER_DELAY_MS = 3000;
 
+// ── ONE ID PER JS CONTEXT (2026-08-12) ───────────────────────────────────────
+// Generated at module load, so it is constant for the life of a JS context and
+// DIFFERENT for any other context in the same app.
+//
+// Why it exists: the CarPlay zoom buttons vanished, and the telemetry could not settle
+// whether the car surface was (a) a second JS context running a different bundle or
+// (b) one context remounting. Those have completely different fixes, and every argument
+// from the existing data was ambiguous:
+//   - Two different update_ids appeared in one window, which looked like two contexts —
+//     but `created_at` is the SERVER insert time, and logEvent fires an async insert, so a
+//     patchy mobile connection reorders rows across a relaunch and fakes exactly that.
+//   - Identical car-probe rows appeared milliseconds apart despite a per-route dedupe ref,
+//     which looked like two mounts — but a deliberate GL-failure remount (see the
+//     liveAttempt key in ConvoyCarPlay) resets that ref and re-logs too.
+// With an instance id both become one query: two ids overlapping in event_at = two
+// contexts; one id logging twice = a remount. No inference required.
+const INSTANCE_ID = (() => {
+  try {
+    return Math.random().toString(36).slice(2, 8) + "-" + String(Date.now()).slice(-6);
+  } catch { return "unknown"; }
+})();
+
 type Report = {
   message: string;
   stack?: string;
@@ -39,6 +61,10 @@ type Report = {
   launch_kind?: string | null;
   emergency_reason?: string | null;
   channel?: string | null;
+  instance_id?: string | null;
+  // Client-side event time. created_at is the SERVER insert time and a slow connection
+  // can delay it by minutes, so ordering must never be argued from created_at again.
+  event_at?: string | null;
 };
 
 // ── WHY update_id ALONE COULD NOT ANSWER "WHICH BUNDLE IS RUNNING" (2026-08-11) ──
@@ -90,6 +116,8 @@ function baseMeta() {
     launch_kind,
     emergency_reason,
     channel,
+    instance_id: INSTANCE_ID,
+    event_at: new Date().toISOString(),
   };
 }
 

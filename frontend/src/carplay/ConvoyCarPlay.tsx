@@ -1190,9 +1190,13 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // SHARED config so the warm and cold roots can never drift apart again
             // (they previously declared different sets with different ids, which is
             // exactly how "one button works and the others don't" kept happening).
-            // Zoom ± was removed here: it ate two of CarPlay's four map-button slots
-            // and crowded our nav stack. Pinch-to-zoom is untouched — see the zoom
-            // gesture handlers below.
+            // ⚠ The note that used to sit here said "Zoom ± was removed — it ate two of
+            // CarPlay's four map-button slots". That has been WRONG since 2026-08-06:
+            // zoom ± is back and is the FIRST TWO entries of CAR_MAP_BUTTON_CONFIG,
+            // deliberately, because CPMapTemplate hides map buttons from the END of the
+            // array when it enters panning mode. Read that config, not this comment —
+            // a stale comment here sent a debugging session looking for a removal that
+            // had already been reverted.
             ...(IS_AA ? {} : { mapButtons: CAR_MAP_BUTTON_CONFIG.mapButtons }),
             onMapButtonPressed: (e: { id: string }) => {
               // Warm root: prefer the live ref (reaches the mounted surface); anything

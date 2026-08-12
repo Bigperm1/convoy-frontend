@@ -265,10 +265,17 @@ export function CarSurface() {
   const [liveAttempt, setLiveAttempt] = useState(0);
   const liveAttemptRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduleLiveRetry = () => {
+  const scheduleLiveRetry = (why?: string) => {
     if (retryTimerRef.current) return; // one pending retry at a time
     const next = liveAttemptRef.current + 1;
     const delay = Math.min(1000 * 2 ** (next - 1), 8000);
+    // LOG IT. This remount was completely silent, which cost a session: the car probe
+    // logged the SAME congestion row several times over, and a remount resetting that
+    // probe's dedupe ref was indistinguishable from a second CarMapView being mounted.
+    // Those want different fixes. Now the retries say so themselves — and the absence of
+    // these rows next to duplicate probe rows is itself the answer (it means a second
+    // mount, not a remount). Cheap: at most one row per failure, backoff-limited.
+    try { logEvent(`carplay-live-retry attempt=${next} in=${delay}ms why=${why || 'gl'}`); } catch {}
     retryTimerRef.current = setTimeout(() => {
       retryTimerRef.current = null;
       liveAttemptRef.current = next;
@@ -677,8 +684,13 @@ export function CarSurface() {
         // backoff via scheduleLiveRetry; key={liveAttempt} gives the retry a fresh
         // GL context + boundary + watchdog. attempt>0 widens the paint watchdog.
         <>
-          <CarMapBoundary key={liveAttempt} onFail={scheduleLiveRetry}>
-            <CarMapView attempt={liveAttempt} onGLError={scheduleLiveRetry} />
+          {/* Distinct reasons on purpose: the boundary catches a RENDER THROW while
+              onGLError is a GL LOAD failure, and the comment on CarMapBoundary says that
+              difference is the whole point of having both. Passing the same bare callback
+              threw it away. (Identity churn is a non-issue — scheduleLiveRetry is already
+              redefined every render and has always been passed straight through.) */}
+          <CarMapBoundary key={liveAttempt} onFail={() => scheduleLiveRetry('render-throw')}>
+            <CarMapView attempt={liveAttempt} onGLError={() => scheduleLiveRetry('gl-load')} />
           </CarMapBoundary>
           {mapOverlays}
         </>

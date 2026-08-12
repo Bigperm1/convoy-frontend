@@ -402,39 +402,6 @@ const PREPARE_LEAD_S = 30;     // "In X, turn …" heads-up ~30 s out
 const PREPARE_MIN_M = 150;
 const PREPARE_MAX_M = 1200;
 const ADVANCE_THRESHOLD_M = 25;
-// ── PASSING A MANEUVER WIDER THAN 25 m (Olaf, 2026-08-11) ────────────────────
-// ADVANCE_THRESHOLD_M above is the ONLY way the step index used to move, so a maneuver
-// passed further out than 25 m — a wide intersection, a ramp, plain GPS scatter — stuck
-// the index for the whole drive. Distance-to-maneuver then measured to a turn already
-// behind the car, so it GREW as he approached work and the banner named a receding street.
-//
-// The test below asks the same question LOCALLY: am I past THIS step's maneuver, measured
-// along the stretch of route this step actually occupies? Two earlier attempts placed the
-// car by scanning the WHOLE route and were reverted (see b89e6ce) because a global
-// placement can teleport — and a teleport onto a stale route's end fires a false arrival.
-// Locality is the whole point: these windows are anchored to the step we are already on,
-// so being wrong is bounded to one step, and a car that is not near this part of the line
-// advances NOTHING. That keeps the old walk's structural immunity: you can only reach the
-// final step by passing every maneuver before it.
-//
-// How far either side of the step we look. Generous enough to hold the step plus the
-// approach to it, small enough that a coincident return leg of an out-and-back (which is
-// at least a whole step away in route distance) is never inside the window.
-const LOCAL_PAD_M = 250;
-// The car must be credibly ON this stretch. 50 m clears lane width, carriageway
-// separation and ordinary urban multipath, and rejects a parallel street.
-const LOCAL_MAX_PERP_M = 50;
-// And clearly PAST the maneuver, not sitting on it — absorbs along-track jitter so the
-// banner cannot flicker at the turn.
-const PASSED_SLACK_M = 15;
-// ⚠ WHY THERE IS NO LOOK-AHEAD HERE. A version of this probed the next 3 steps' windows
-// too, so that a GPS blackout (tunnel, screen-off batching) dropping the car past several
-// maneuvers could catch up. Simulation on an out-and-back killed it: the coincident return
-// leg IS a later step's window, so looking ahead re-created exactly the wrong-leg capture
-// that got the two previous attempts reverted (distance-grew ticks went 5 -> 32), and a
-// single bad first fix could jump three steps at once. The blackout case is NOT a
-// regression — the old walk is equally stuck there — so it does not justify taking that
-// risk back. ONE step, from the window we are already in.
 // ── ARRIVAL ─────────────────────────────────────────────────────────────────
 // Auto-finish has always existed (map.tsx's onArrive does the full teardown), but
 // it only ever fired on a GPS fix landing within ARRIVE_M of the destination — and
@@ -784,105 +751,6 @@ function findRouteSegment(
   return { seg: bestSeg, t: bestT, distM: Math.sqrt(bestD2) };
 }
 
-// Cumulative metres REMAINING from each coordinate index (suffix[0] = whole route,
-// suffix[n] = 0), plus the total. Built once per route.
-function buildSuffixMeters(coords: [number, number][] | undefined): { suffix: number[]; total: number } | null {
-  if (!Array.isArray(coords) || coords.length < 2) return null;
-  const n = coords.length - 1;
-  const seg = new Array<number>(n);
-  for (let i = 0; i < n; i++) {
-    seg[i] = haversineMeters(
-      { lat: coords[i][1], lng: coords[i][0] },
-      { lat: coords[i + 1][1], lng: coords[i + 1][0] },
-    );
-  }
-  const suffix = new Array<number>(n + 1);
-  suffix[n] = 0;
-  let total = 0;
-  for (let i = n - 1; i >= 0; i--) { total += seg[i]; suffix[i] = total; }
-  return { suffix, total };
-}
-
-/**
- * Where each step's maneuver sits ALONG the route, in metres from the start. Once per
- * route. Measured off the GEOMETRY rather than by summing step.distance_m, because those
- * sums do not close on a multi-stop route: the via parser drops every interior
- * depart/arrive step (mapboxDirections.ts) and an interior depart carries real distance.
- * Forward-only from the previous step's segment, breaking at the first near-exact match,
- * so a route folding back on itself cannot anchor a later step to an earlier crossing.
- * Null if any maneuver will not sit on the line — caller then keeps the old behaviour.
- */
-function buildStepAnchors(
-  coords: [number, number][] | undefined,
-  steps: NavStep[],
-  suffix: number[],
-  total: number,
-): number[] | null {
-  if (!Array.isArray(coords) || coords.length < 2 || !steps.length) return null;
-  const n = coords.length - 1;
-  const out = new Array<number>(steps.length);
-  let cursor = 0;
-  let prev = 0;
-  for (let i = 0; i < steps.length; i++) {
-    const p = steps[i].end;
-    if (!p || (p.lat === 0 && p.lng === 0)) return null;
-    let bestSeg = -1, bestD2 = Infinity, bestT = 0;
-    for (let sg = cursor; sg < n; sg++) {
-      const a = coords[sg], b = coords[sg + 1];
-      const r = pointToSegment(p.lng, p.lat, a[0], a[1], b[0], b[1]);
-      if (r.d2 < bestD2) { bestD2 = r.d2; bestSeg = sg; bestT = r.t; }
-      if (r.d2 <= 1) break;                  // within a metre: this IS the vertex
-    }
-    if (bestSeg < 0 || Math.sqrt(bestD2) > 25) return null;
-    cursor = bestSeg;
-    const tail = suffix[bestSeg + 1] ?? 0;
-    const along = total - (tail + (suffix[bestSeg] - tail) * (1 - bestT));
-    prev = Math.max(prev, along);             // non-decreasing, so the walk stays sound
-    out[i] = prev;
-  }
-  return out;
-}
-
-// Vertex index at or before a given distance ALONG the route. suffix is DESCENDING, so
-// the vertices at/below `alongM` form a prefix; binary search its end.
-function vertexForAlong(suffix: number[], total: number, alongM: number): number {
-  const want = total - Math.max(0, Math.min(total, alongM));   // suffix value at alongM
-  let lo = 0, hi = suffix.length - 1, ans = 0;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (suffix[mid] >= want) { ans = mid; lo = mid + 1; } else { hi = mid - 1; }
-  }
-  return ans;
-}
-
-/**
- * Project the car onto ONLY the stretch of route between two along-distances. This is the
- * local primitive the reverted attempts lacked: it cannot look at, and therefore cannot
- * bind to, any other part of the route.
- */
-function projectLocal(
-  coords: [number, number][],
-  suffix: number[],
-  total: number,
-  lat: number, lng: number,
-  loM: number, hiM: number,
-): { perpM: number; alongM: number } | null {
-  const n = coords.length - 1;
-  if (n < 1) return null;
-  const lo = Math.max(0, Math.min(n - 1, vertexForAlong(suffix, total, loM)));
-  const hi = Math.max(lo, Math.min(n - 1, vertexForAlong(suffix, total, hiM)));
-  let bestSeg = -1, bestD2 = Infinity, bestT = 0;
-  for (let i = lo; i <= hi; i++) {
-    const a = coords[i], b = coords[i + 1];
-    const r = pointToSegment(lng, lat, a[0], a[1], b[0], b[1]);
-    if (r.d2 < bestD2) { bestD2 = r.d2; bestSeg = i; bestT = r.t; }
-  }
-  if (bestSeg < 0) return null;
-  const tail = suffix[bestSeg + 1] ?? 0;
-  const ahead = tail + (suffix[bestSeg] - tail) * (1 - bestT);
-  return { perpM: Math.sqrt(bestD2), alongM: Math.max(0, total - ahead) };
-}
-
 export function useTurnByTurn(
   route: NavRoute | null,
   // `speed` (m/s, from GPS) rides along on the position the caller already
@@ -916,13 +784,6 @@ export function useTurnByTurn(
   // local instead of rescanning the whole geometry.
   const segSuffixRef = useRef<{ key: string; suffix: number[] | null }>({ key: "", suffix: null });
   const segCursorRef = useRef<number>(0);
-  // Step anchors + metre suffix for the CURRENT route, keyed on its polyline. Built once
-  // per route; used ONLY by the local "have I passed this maneuver" test below.
-  const localRef = useRef<{
-    key: string;
-    data: { suffix: number[]; total: number } | null;
-    anchors: number[] | null;
-  }>({ key: "", data: null, anchors: null });
   const stateRef = useRef<TbtState>({
     active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0,
   });
@@ -1045,74 +906,6 @@ export function useTurnByTurn(
       stepIdx += 1;
       cur = steps[stepIdx];
       dManeuver = haversineMeters(user, cur.end);
-    }
-
-    // ── DID WE PASS THE MANEUVER WITHOUT GETTING WITHIN 25 m OF IT? ──────────────
-    // Only reached when the walk above did not move, so on a normal drive this changes
-    // nothing at all — it fires exactly in the case that used to stick. See the comment on
-    // LOCAL_PAD_M for why this is deliberately local rather than a route-wide placement.
-    // ⚠ `steps.length - 3`, and the bound is the whole point. A pre-ship review proved this
-    // test could fire a REAL arrival — speaking it, tearing the drive down, and recording a
-    // phantom trip against the usage counter. Two mistakes of mine combined:
-    //
-    //  1. The arrival gate is NOT the final step, it is steps.length-2. Mapbox's ARRIVE step
-    //     carries distance 0 and mapboxToNavRoute sets steps[len-2].end = the destination, so
-    //     on len-2 `remaining` collapses to the crow distance to the destination and
-    //     ARRIVE_M (20 m) is in reach. I had reasoned that anchors[last] == total blocked it,
-    //     which guards an index arrival never needs.
-    //  2. The window below can SATURATE to the whole route: when anchors[stepIdx] + pad >=
-    //     total, hi clamps to the last segment and lo to 0, so projectLocal scans every
-    //     segment — the global nearest-point placement this design exists to avoid. On a
-    //     route whose last maneuver is within the pad of the destination, a car sitting near
-    //     that destination then "passes" step 0 and lands on len-2.
-    //
-    // Reproduced numerically on a LIVE, correct route (5 km, U-turn, arrive 80 m back) with
-    // 6 m of drift toward the opposite carriageway: it bound the final leg, collapsed
-    // `remaining` from 120 m to 40 m, and a 25 s wait at a light fired a full teardown
-    // mid-drive. The old walk does not do this, so it was mine.
-    //
-    // So the local test is confined to steps that CANNOT be the arrival gate or reach it in
-    // one hop. The final approach stays governed entirely by the existing proximity walk and
-    // the settle/near-arrival logic — i.e. exactly today's behaviour, unchanged. Olaf's stuck
-    // step was mid-route (step 1 of 5), which is squarely inside what this still covers.
-    if (stepIdx === prevStepIdx && stepIdx < steps.length - 3) {
-      if (localRef.current.key !== r.polyline) {
-        const data = buildSuffixMeters(r.coordinates);
-        localRef.current = {
-          key: r.polyline,
-          data,
-          anchors: data ? buildStepAnchors(r.coordinates, steps, data.suffix, data.total) : null,
-        };
-      }
-      const L = localRef.current;
-      if (L.data && L.anchors && r.coordinates && r.coordinates.length >= 2) {
-        const anchors = L.anchors;
-        // Probe the current step's window, then a FEW ahead, for the first one the car is
-        // credibly standing on. Looking ahead matters because a GPS blackout (tunnel,
-        // screen-off batching) can drop the car past several maneuvers at once, and it
-        // would otherwise be outside the current window with no way to catch up — the same
-        // frozen-index symptom, just triggered differently. Bounded to
-        // LOCAL_LOOKAHEAD_STEPS, so no single fix can walk the index an arbitrary distance.
-        const startA = stepIdx > 0 ? anchors[stepIdx - 1] : 0;
-        const endA = anchors[stepIdx];
-        const hit = projectLocal(
-          r.coordinates, L.data.suffix, L.data.total, user.lat, user.lng,
-          startA - LOCAL_PAD_M, endA + LOCAL_PAD_M,
-        );
-        // A car that is not credibly on THIS stretch moves nothing. That is what keeps a
-        // stale or wrong route inert: the index stays put, `remaining` stays the whole
-        // route length, and the arrival branch stays unreachable — the structural immunity
-        // the old walk had and the two reverted attempts gave away.
-        // Past the maneuver, but only by a CREDIBLE amount. Being 5 km beyond it is not
-        // "just passed this turn", it is a bad projection — the upper bound is what stops a
-        // window that reached further than intended from claiming a distant pass.
-        const past = hit ? hit.alongM - endA : 0;
-        if (hit && hit.perpM <= LOCAL_MAX_PERP_M && past > PASSED_SLACK_M && past <= LOCAL_PAD_M) {
-          stepIdx += 1;                                  // exactly one step, never more
-          cur = steps[stepIdx];
-          dManeuver = haversineMeters(user, cur.end);
-        }
-      }
     }
     if (stepIdx !== prevStepIdx) {
       // Split-maneuver corners: Google often breaks one physical turn into two

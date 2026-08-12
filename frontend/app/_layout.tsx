@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider } from '../src/auth';
 import AnimatedSplash from '../src/components/AnimatedSplash';
+import UpdateRequiredGate, { isBuildTooOld } from '../src/UpdateRequiredGate';
 // NOTE: NavigationProvider (Google Navigation SDK) is temporarily NOT mounted while
 // the map runs on react-native-maps. The dependency has been removed; re-add
 // @googlemaps/react-native-navigation-sdk and wrap the tree with <NavigationProvider>
@@ -22,10 +23,22 @@ export default function RootLayout() {
   // Play the branded launch animation (H logo + map fading to black) once per cold start,
   // over the app while it boots. It masks the native splash and unmounts itself when done.
   const [splashDone, setSplashDone] = useState(false);
+  // END-OF-LIFE GATE. Evaluated once, before any provider mounts, so a retired build cannot
+  // navigate, start guidance, or attach to CarPlay. Inert in build 72 itself (72 < 72 is
+  // false) and fails OPEN if the build number is unreadable — see UpdateRequiredGate.
+  const tooOld = isBuildTooOld();
 
   useEffect(() => {
     SplashScreen.hideAsync().catch(() => {});
   }, []);
+
+  if (tooOld) {
+    return (
+      <SafeAreaProvider>
+        <UpdateRequiredGate />
+      </SafeAreaProvider>
+    );
+  }
 
   return (
     <SafeAreaProvider>

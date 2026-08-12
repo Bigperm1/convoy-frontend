@@ -148,7 +148,7 @@
     "updates": {
       "url": "https://u.expo.dev/1e72b32e-e0c5-4126-b590-ea2ec6e596e1",
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 15000
+      "fallbackToCacheTimeout": 0
     }
   }
 }

@@ -16,7 +16,12 @@ import { Platform } from "react-native";
 
 const QUEUE_KEY = "convoy.pendingCrashReports.v1";
 const HARVEST_KEY = "convoy.crashLogHarvestedAt.v1";
-const MAX_QUEUE = 5;
+// 5 -> 25. The updates-log harvest below can legitimately produce a dozen rows from one bad
+// launch, and queue() keeps only the LAST MAX_QUEUE — so a cap of 5 silently threw away the
+// earliest (and usually most explanatory) entries of exactly the incident being chased.
+const MAX_QUEUE = 25;
+// Per-launch ceiling on harvested updates-log rows, so a pathological log cannot flood.
+const MAX_HARVEST = 12;
 // 8000 -> 3000 (2026-07-23): a crash-looping device (Android login loop) dies
 // before an 8s delayed delivery ever runs — which is why crash_reports had ZERO
 // android rows across an entire week of Android crashes. 3s still keeps delivery
@@ -253,16 +258,36 @@ async function harvestUpdatesLog() {
     if (typeof U.readLogEntriesAsync !== "function") return;
     const entries: any[] = (await U.readLogEntriesAsync(24 * 3600 * 1000)) ?? [];
     const watermark = Number((await AsyncStorage.getItem(HARVEST_KEY)) ?? 0);
-    const fresh = entries.filter((e) =>
-      e && e.timestamp > watermark && /jsruntimeerror|fatal/i.test(String(e.code ?? "")));
+    // ── WHY THIS NO LONGER FILTERS TO JS FATALS (2026-08-12) ──────────────────
+    // It used to keep only /jsruntimeerror|fatal/, and that discarded the entire reason
+    // this log is worth reading. Jeff's app keeps coming up on the EMBEDDED bundle — no
+    // zoom buttons, no new telemetry, the version reading back as the bare runtime — and
+    // every diagnostic I added was blind to it BY CONSTRUCTION, because those diagnostics
+    // ship in an OTA and the failing launch runs pre-OTA JS. Instrumenting the failure from
+    // inside the failure cannot work.
+    //
+    // But expo-updates keeps its OWN log natively, and it SURVIVES the launch. So a later
+    // NORMAL launch — running current JS — can read why the PREVIOUS launch fell back.
+    // The diagnostic no longer has to be present while the fault happens, which is the
+    // whole knot. Every entry is kept now: the interesting codes here are things like
+    // NoUpdatesAvailable, UpdateFailedToLoad, AssetsFailedToLoad and the emergency-launch
+    // reason, none of which match the old filter.
+    const fresh = entries
+      .filter((e) => e && Number(e.timestamp) > watermark)
+      .slice(-MAX_HARVEST);
     if (!fresh.length) return;
-    await queue(fresh.map((e): Report => ({
-      message: `[updates-log ${e.code}] ${String(e.message ?? "").slice(0, 2000)}`,
-      stack: e.stacktrace ? String((Array.isArray(e.stacktrace) ? e.stacktrace.join("\n") : e.stacktrace)).slice(0, 12000) : undefined,
-      is_fatal: true,
-      late: true,
-      ...baseMeta(),
-    })));
+    await queue(fresh.map((e): Report => {
+      const code = String(e.code ?? "");
+      return {
+        message: `[updates-log ${code}] ${String(e.message ?? "").slice(0, 2000)}`,
+        stack: e.stacktrace ? String((Array.isArray(e.stacktrace) ? e.stacktrace.join("\n") : e.stacktrace)).slice(0, 12000) : undefined,
+        // Only a real JS fatal is a crash; the rest are launch diagnostics and must not
+        // masquerade as crashes in the table.
+        is_fatal: /jsruntimeerror|fatal/i.test(code),
+        late: true,
+        ...baseMeta(),
+      };
+    }));
     const newest = Math.max(...fresh.map((e) => Number(e.timestamp) || 0));
     await AsyncStorage.setItem(HARVEST_KEY, String(newest));
   } catch {}

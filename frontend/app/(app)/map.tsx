@@ -1841,12 +1841,25 @@ export default function MapScreen() {
   const [departSuggest, setDepartSuggest] = useState<{ place: SavedPlace; reason: string; etaText?: string } | null>(null);
   const departPromptedRef = useRef(false);
   const departHushRef = useRef(0);
+  // ── DO NOT PITCH THE NEXT TRIP AS THE DRIVER ARRIVES (Jeff, 2026-08-12) ──────
+  // "every time I finish a route Scout tells me 'heading to the lake, about 3:40'".
+  // Exactly what the code did: ending a drive clears navMode and destination, which are the
+  // two things that gate this prompt, and the driver is by definition parked — so arrival
+  // opened the gate and immediately fired. Departure IQ is for someone about to LEAVE, and a
+  // driver who just pulled in is the one person we know is not.
+  // Hush for a while after any drive ends. It is a timestamp, not a timer, because iOS
+  // suspends JS timers with the phone locked in a mount.
+  const ARRIVE_HUSH_MS = 15 * 60 * 1000;
   const departBusyRef = useRef(false);
   useEffect(() => {
     const c = coords;
     if (!c) return;
     if ((c.speed ?? 0) > 2.5) { // ~9 km/h → you've driven off; re-arm + clear
-      departPromptedRef.current = false;
+      // …but not back into a hush. Driving away after arriving used to re-arm instantly,
+      // so the next time the car stopped — a shop, a light, the school run — Scout pitched
+      // the same destination again. That is the "every time I open the app" half of the
+      // complaint.
+      if (Date.now() >= departHushRef.current) departPromptedRef.current = false;
       if (departSuggest) setDepartSuggest(null);
       return;
     }
@@ -1898,11 +1911,31 @@ export default function MapScreen() {
   // driver ACTUALLY leaves (predictDestination only offers inside the learned
   // window). Once per nav session (the ref), custom places included.
   const departLoggedRef = useRef(false);
+  // Arm the arrive-hush the moment guidance stops, however it stopped — arrival,
+  // auto-finish, or End. Also blocks the re-arm below, since the driver is stationary at
+  // the place they just drove to.
+  const wasNavigatingRef = useRef(false);
+  useEffect(() => {
+    const nav = navMode === "turn-by-turn";
+    if (wasNavigatingRef.current && !nav) {
+      departHushRef.current = Date.now() + ARRIVE_HUSH_MS;
+      departPromptedRef.current = true;      // and do not re-offer for this stop
+    }
+    wasNavigatingRef.current = nav;
+  }, [navMode]);
   useEffect(() => {
     if (navMode !== "turn-by-turn") { departLoggedRef.current = false; return; }
     if (departLoggedRef.current || !destination) return;
     const sp = matchSavedPlace(destination.lat, destination.lng);
-    if (sp) { departLoggedRef.current = true; recordDeparture(sp); }
+    // Record WHERE we left from, not just when. "from work I head home" and "at 9am I head
+    // to work" are the same clock in different places; without the origin nothing can tell
+    // those two habits apart, which is how standing at home once suggested the lake.
+    if (sp) {
+      departLoggedRef.current = true;
+      const c = coordsRef.current;
+      recordDeparture(sp, new Date(),
+        c && typeof c.lat === "number" ? { lat: c.lat, lng: c.lng } : undefined);
+    }
   }, [navMode, destination]);
   useEffect(() => {
     if (navMode !== "turn-by-turn" || !activeRoute) return;

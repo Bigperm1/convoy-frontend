@@ -222,55 +222,88 @@ export function recordDeparture(
 
 // true = now is inside the learned window; false = learned data says NOT now;
 // null = not enough samples to judge (caller falls back to static windows).
-// Samples for this destination on a comparable DAY.
-// Exact day-of-week first, because a Saturday habit is not a Sunday habit. Only if that is
-// too thin do we pool — and only Mon-Fri with Mon-Fri. Saturday and Sunday are never pooled
-// with each other or with the working week, which is the whole reason a Saturday lake trip
-// used to suggest itself on a Sunday morning.
-function daySamples(key: string, now: Date): { rows: DepartSample[]; exactDay: boolean } {
-  const day = now.getDay();
-  const exact = departLog.filter((s) => s.k === key && s.d === day);
-  if (exact.length >= LEARN_MIN_SAMPLES) return { rows: exact, exactDay: true };
-  const isWeekday = day >= 1 && day <= 5;
-  if (!isWeekday) return { rows: exact, exactDay: true };   // Sat/Sun stand alone
-  return { rows: departLog.filter((s) => s.k === key && s.d >= 1 && s.d <= 5), exactDay: false };
+// ── HOW THE PREDICTION IS DECIDED (rewritten 2026-08-12, Jeff) ───────────────
+// He pushed back on the day/origin version, and he was right:
+//   "not everyone's days are the same. Usually I come home from the lake on Mondays and
+//    I'm at the lake Sundays. So this rule can't be true for everyone. It should take an
+//    average of what happens on specific days and times to predict the route."
+//
+// The thing that made it "a rule" was the leftover STATIC WINDOWS — work = weekday
+// 04:00-11:00, home = any day 14:00-23:00. Those encode one particular life. His Monday is
+// the lake -> home, so a hardcoded weekday morning would have offered him WORK while he was
+// standing at the lake — and the static path did not even consult the origin. Anyone on
+// shifts, nights, or a four-day week had the same problem.
+//
+// So there are no windows any more, and nothing is assumed about what a day means. Every
+// past departure simply VOTES for its destination, weighted by how much it resembles right
+// now:
+//
+//   day     ONLY this weekday votes. Your Mondays predict your Monday and nothing else
+//           does, because no other day can be assumed to resemble it.
+//   time    a linear kernel around now — an 8:55 departure counts almost fully at 9:00 and
+//           not at all two hours out. This is the "average of what happens at this time".
+//   origin  a HARD gate. Leaving from here or not is the difference between "head to work"
+//           and "head to the lake", and it is the signal the old model never had.
+//
+// A destination wins only if it clears MIN_SCORE and is clearly ahead of the runner-up;
+// otherwise nothing is said. Silence is the right answer far more often than a guess, and
+// guessing was the complaint.
+//
+// COST, accepted: a brand-new install predicts NOTHING until it has watched a few drives.
+// That is deliberate. The feature now earns its confidence instead of asserting it.
+// ⚠ ONLY TODAY COUNTS. Two earlier versions let other weekdays contribute, and simulation
+// killed both:
+//   - Blended, a frequent habit won on VOLUME: four Saturday departures for the lake scored
+//     4.0 while sixteen Tue-Fri departures for home reached 3.3 just by being numerous, which
+//     read as "ambiguous" and went silent on the exact case Jeff described.
+//   - Kept separate as a fallback for a day with no history, it invented habits: a night-shift
+//     tester who works Wed-Sat was told "heading to work" at 21:45 on a MONDAY, purely
+//     because Wed-Sat look like that. That is the same wrongness in a new place.
+// So a day with nothing to say says nothing. The cost is real and accepted: each weekday
+// learns on its own, so a new day of the week is silent until it has been seen a couple of
+// times. Silence is what was asked for — being wrong was the complaint.
+// Two clean same-day matches from the right place, or a handful of weaker ones.
+const MIN_SCORE = 1.4;
+// The winner must be this much better than the runner-up, else the moment is ambiguous
+// (e.g. you leave for two different places at the same hour) and we stay quiet.
+const WIN_RATIO = 1.6;
+
+function circMinDiff(a: number, b: number): number {
+  const d = Math.abs(a - b);
+  return Math.min(d, 1440 - d);
 }
 
-// Does the driver's CURRENT position look like a place they have actually left from for
-// this destination? Legacy samples carry no origin — if none of them do, we cannot judge it
-// and must not start refusing, so it passes. Once origins exist, they decide.
-function originMatches(rows: DepartSample[], lat?: number, lng?: number): boolean {
-  const withOrigin = rows.filter((s) => typeof s.oLat === "number" && typeof s.oLng === "number");
-  if (withOrigin.length === 0) return true;                       // nothing learned yet
-  if (typeof lat !== "number" || typeof lng !== "number") return true;
-  return withOrigin.some((s) => haversineM(lat, lng, s.oLat as number, s.oLng as number) <= ORIGIN_MATCH_M);
-}
+/** One destination's vote total for (now, here), plus how many departures backed it. */
+type Vote = { key: string; score: number; sameDay: number; total: number };
 
-// true  = now (and here) is inside the learned habit
-// false = the learned data says NOT now / NOT from here
-// null  = not enough samples to judge (caller falls back to static windows)
-// `offBy` is how far the learned median is from now, so a caller can prefer the tighter fit
-// when two habits both match.
-function inLearnedWindow(
-  key: string, now: Date, lat?: number, lng?: number,
-): { hit: boolean; offBy: number; exactDay: boolean } | null {
-  const { rows, exactDay } = daySamples(key, now);
-  if (rows.length < LEARN_MIN_SAMPLES) return null;
-  const mins = rows.map((s) => s.m).sort((a, b) => a - b);
-  const med = mins[Math.floor(mins.length / 2)];
+function tallyVotes(now: Date, lat?: number, lng?: number): Map<string, Vote> {
   const nowM = now.getHours() * 60 + now.getMinutes();
-  const diff = Math.min(Math.abs(nowM - med), 1440 - Math.abs(nowM - med)); // circular day
-  if (diff > DEPART_WINDOW_MIN) return { hit: false, offBy: diff, exactDay };
-  // Right time — but is it the right place to be leaving from?
-  if (!originMatches(rows, lat, lng)) return { hit: false, offBy: diff, exactDay };
-  return { hit: true, offBy: diff, exactDay };
+  const day = now.getDay();
+  const out = new Map<string, Vote>();
+  for (const sm of departLog) {
+    const dt = circMinDiff(nowM, sm.m);
+    if (dt > DEPART_WINDOW_MIN) continue;                       // outside the kernel
+    // ORIGIN GATE. Samples recorded before this existed have no origin; they cannot be
+    // judged, so they still count — otherwise every existing user would go silent.
+    const hasOrigin = typeof sm.oLat === "number" && typeof sm.oLng === "number";
+    if (hasOrigin && typeof lat === "number" && typeof lng === "number") {
+      if (haversineM(lat, lng, sm.oLat as number, sm.oLng as number) > ORIGIN_MATCH_M) continue;
+    }
+    const timeW = 1 - dt / DEPART_WINDOW_MIN;                   // linear falloff to 0
+    if (sm.d !== day) continue;                                 // only this weekday votes
+    const v = out.get(sm.k) || { key: sm.k, score: 0, sameDay: 0, total: 0 };
+    v.score += timeW;
+    v.sameDay += 1;
+    v.total += 1;
+    out.set(sm.k, v);
+  }
+  return out;
 }
 
 // ===== Destination prediction =====
-// Candidates: Home + Work always; custom places once they have learned data.
-// A candidate survives only if (a) its learned window says NOW (or, with no
-// data yet, its static window does), and (b) you're not parked at it. If
-// nothing survives, we stay quiet — no more flip-to-the-other-anchor.
+// Purely learned: candidates are whatever your own departures vote for, right now, from
+// here. Being parked AT a candidate excludes it (never flip to the other anchor — the
+// 2026-07 bug this file's history is about).
 export type Prediction = { place: SavedPlace; reason: string } | null;
 
 export function predictDestination(
@@ -281,41 +314,26 @@ export function predictDestination(
   const home = getHome();
   const work = getWork();
   const customs = cached.filter((p) => p.kind === "custom");
-  if (!home && !work && customs.length === 0) return null;
+  const places = [work, home, ...customs].filter(Boolean) as SavedPlace[];
+  if (places.length === 0) return null;
 
-  const day = now.getDay();
-  const hour = now.getHours();
-  const isWeekday = day >= 1 && day <= 5;
   const parkedAt = (p: SavedPlace) =>
     typeof nearLat === "number" && typeof nearLng === "number" &&
     haversineM(nearLat, nearLng, p.lat, p.lng) < 250;
 
-  const staticWindow = (p: SavedPlace): boolean => {
-    if (p.kind === "work") return isWeekday && hour >= 4 && hour < 11;
-    if (p.kind === "home") return hour >= 14 && hour < 23; // any day: afternoons/evenings point home
-    return false; // custom places only predict once LEARNED
-  };
+  const votes = tallyVotes(now, nearLat, nearLng);
+  const live = places.filter((p) => !parkedAt(p))
+    .map((p) => ({ place: p, v: votes.get(departKey(p)) }))
+    .filter((r) => !!r.v) as { place: SavedPlace; v: Vote }[];
+  if (live.length === 0) return null;
 
-  const candidates: { place: SavedPlace; learned: boolean; offBy: number; exactDay: boolean }[] = [];
-  for (const p of [work, home, ...customs]) {
-    if (!p || parkedAt(p)) continue;
-    const L = inLearnedWindow(departKey(p), now, nearLat, nearLng);
-    if (L && L.hit) candidates.push({ place: p, learned: true, offBy: L.offBy, exactDay: L.exactDay });
-    else if (L === null && staticWindow(p)) candidates.push({ place: p, learned: false, offBy: 9999, exactDay: false });
-    // L.hit === false → the data says you don't leave for this place now, or not from
-    // here → excluded. Staying quiet is the correct answer far more often than guessing.
-  }
-  if (candidates.length === 0) return null;
-  // A learned habit beats a static guess. Between two learned habits, prefer the one
-  // learned for THIS day of the week, then the one whose usual time is closest to now —
-  // that is what lets "Saturday after work -> the lake" outrank the everyday "-> home"
-  // without either being hardcoded. Ties still keep the [work, home, customs] order.
-  candidates.sort((a, b) =>
-    Number(b.learned) - Number(a.learned)
-    || Number(b.exactDay) - Number(a.exactDay)
-    || a.offBy - b.offBy);
-  const target = candidates[0].place;
+  const ranked = live.sort((a, b) => b.v.score - a.v.score || b.v.sameDay - a.v.sameDay);
+  const best = ranked[0].v.score;
+  if (best < MIN_SCORE) return null;                            // not confident enough
+  const runnerUp = ranked[1] ? ranked[1].v.score : 0;
+  if (runnerUp > 0 && best < runnerUp * WIN_RATIO) return null;  // ambiguous → quiet
 
+  const target = ranked[0].place;
   const reason =
     target.kind === "work" ? "heading to work" : target.kind === "home" ? "heading home" : `heading to ${target.label}`;
   return { place: target, reason };

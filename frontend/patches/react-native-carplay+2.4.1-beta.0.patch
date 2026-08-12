@@ -423,8 +423,49 @@ index 01dbabd..bacb6f0 100644
          }
        }
      }.build()
+diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/EventEmitter.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/EventEmitter.kt
+index 586b354..076bcbe 100644
+--- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/EventEmitter.kt
++++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/EventEmitter.kt
+@@ -68,6 +68,36 @@ class EventEmitter(
+     const val AlertActionPressed = "alertActionPressed"
+     const val SelectedPreviewForTrip = "selectedPreviewForTrip"
+     const val StartedTrip = "startedTrip"
++
++    // ── ANDROID AUTO PINCH-TO-ZOOM (Convoy patch) ────────────────────────────
++    // Android had no zoom event at all. androidx delivers pinch through
++    // SurfaceCallback.onScale, but the library's SurfaceCallback (VirtualRenderer)
++    // implemented ONLY onSurfaceAvailable, so the gesture died in native and no OTA
++    // could reach it. Deliberately the SAME event name iOS uses, because the JS
++    // eventMap in src/templates/MapTemplate.ts already routes
++    // didUpdateZoomGestureWithCenter -> onDidUpdateZoomGesture; reusing it means the
++    // two car surfaces share one handler instead of drifting apart.
++    const val DidUpdateZoomGestureWithCenter = "didUpdateZoomGestureWithCenter"
++  }
++
++  /**
++   * Pinch on the Android Auto map surface.
++   *
++   * ⚠ `scale` here is androidx's scaleFactor, which is INCREMENTAL (the change since the
++   * last callback). iOS CPMapTemplate reports a CUMULATIVE scale from the start of the
++   * gesture. The payload carries `incremental` so the JS side can tell them apart from the
++   * event itself rather than sniffing the platform.
++   */
++  fun didUpdateZoomGesture(scale: Float, focusX: Float, focusY: Float) {
++    emit(DidUpdateZoomGestureWithCenter, Arguments.createMap().apply {
++      putDouble("scale", scale.toDouble())
++      putBoolean("incremental", true)
++      putDouble("velocity", 0.0)
++      putMap("center", Arguments.createMap().apply {
++        putDouble("x", focusX.toDouble())
++        putDouble("y", focusY.toDouble())
++      })
++    })
+   }
+ 
+   fun didConnect() {
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/VirtualRenderer.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/VirtualRenderer.kt
-index bafa640..e0b0f08 100644
+index bafa640..30baed9 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/VirtualRenderer.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/VirtualRenderer.kt
 @@ -5,6 +5,7 @@ import android.content.Context
@@ -456,7 +497,34 @@ index bafa640..e0b0f08 100644
  
    init {
      context.getCarService(AppManager::class.java).setSurfaceCallback(object : SurfaceCallback {
-@@ -52,19 +57,42 @@ class VirtualRenderer(private val context: CarContext, private val moduleName: S
+@@ -31,6 +36,26 @@ class VirtualRenderer(private val context: CarContext, private val moduleName: S
+           renderPresentation(surfaceContainer)
+         }
+       }
++
++      // ── ANDROID AUTO PINCH-TO-ZOOM (Convoy patch) ──────────────────────────
++      // This override is the entire reason AA pinch was impossible over the air: the
++      // callback implemented onSurfaceAvailable and nothing else, so androidx called
++      // onScale into the default no-op and the gesture never left native. The JS half
++      // has worked for months (it is the same bus CarPlay's pinch uses) — only this
++      // emit was missing.
++      // Never throws into androidx: a car service callback that raises takes the whole
++      // AA screen down, and a dropped pinch frame is worth far less than that.
++      override fun onScale(focusX: Float, focusY: Float, scaleFactor: Float) {
++        try {
++          val appContext = context.applicationContext
++          val reactHost = (appContext as? ReactApplication)?.reactHost ?: return
++          reactHost.currentReactContext?.let {
++            EventEmitter(it).didUpdateZoomGesture(scaleFactor, focusX, focusY)
++          }
++        } catch (t: Throwable) {
++          Log.w(TAG, "onScale emit failed", t)
++        }
++      }
+     })
+   }
+ 
+@@ -52,19 +77,42 @@ class VirtualRenderer(private val context: CarContext, private val moduleName: S
      Presentation(context, display) {
      override fun onCreate(savedInstanceState: Bundle?) {
        super.onCreate(savedInstanceState)
@@ -511,7 +579,7 @@ index bafa640..e0b0f08 100644
        }
      }
    }
-@@ -73,3 +101,4 @@ class VirtualRenderer(private val context: CarContext, private val moduleName: S
+@@ -73,3 +121,4 @@ class VirtualRenderer(private val context: CarContext, private val moduleName: S
      const val TAG = "VirtualRenderer"
    }
  }

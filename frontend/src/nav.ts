@@ -672,6 +672,11 @@ function roundaboutExitCue(maneuverKey?: string, html?: string): string | null {
 // callouts — CarPlay-standalone Wave 2) checks this so BOTH engines never speak
 // the same turn: the phone engine always wins while it's alive; the cold path
 // covers force-quit / never-opened drives where this stays false.
+// Breadcrumb cadence for the nav-eta receipt below. A plain timestamp compare, never
+// a JS timer — iOS suspends timers while the phone is locked, which is exactly when a
+// drive is most in need of a receipt.
+const ETA_LOG_EVERY_MS = 30_000;
+let lastEtaLogAt = 0;
 let _tbtEngineActive = false;
 export function isPhoneTbtSpeaking(): boolean { return _tbtEngineActive; }
 
@@ -1134,6 +1139,7 @@ export function useTurnByTurn(
     // traffic), keyed on length + total so a refresh is detected without deep-comparing
     // thousands of floats every tick.
     let eta = 0;
+    let etaTier = 0;   // which tier answered — recorded in the breadcrumb below
     const segDur = r.segDurations;
     const segCoords = r.coordinates;
     if (segDur && segDur.length && segCoords && segCoords.length >= 2) {
@@ -1153,6 +1159,7 @@ export function useTurnByTurn(
           // plus every segment after it (O(1) via the suffix table).
           const inSeg = (segDur[hit.seg] || 0) * (1 - hit.t);
           eta = inSeg + (suffix[hit.seg + 1] ?? 0);
+          etaTier = 1;
         }
       }
     }
@@ -1170,11 +1177,33 @@ export function useTurnByTurn(
         : 0;
       stepSecs += (curStep?.duration_s || 0) * curLeft;
       eta = stepSecs;
+      if (eta > 0) etaTier = 2;
     }
 
     // ── TIER 3: the original flat distance ratio. Only for a cached/legacy route that
     // carries neither segment nor step durations — better than showing 0.
-    if (eta <= 0) eta = (remaining / Math.max(r.distance_m, 1)) * r.duration_s;
+    if (eta <= 0) { eta = (remaining / Math.max(r.distance_m, 1)) * r.duration_s; etaTier = 3; }
+
+    // ── RECEIPT (2026-08-13) ────────────────────────────────────────────────────
+    // Olaf, build 72: the phone read "11 min" while CarPlay read "43 min · 27 km" at
+    // the same instant, and there was NO nav telemetry of any kind — so the only way to
+    // reason about it was to read a photograph of a head unit. This line ends that.
+    //
+    // It records the two numbers side by side ON PURPOSE. `eta` comes from the SEGMENT
+    // table (tier 1) and does not use the step index; `remaining` is the step-suffix sum
+    // and does. When the step index freezes, eta stays right and remaining inflates —
+    // so a widening gap between them, at a step index that stops moving, IS the
+    // signature of the stuck-step defect, readable without a drive report.
+    if (Date.now() - lastEtaLogAt > ETA_LOG_EVERY_MS) {
+      lastEtaLogAt = Date.now();
+      try {
+        logEvent(
+          `nav-eta tier=${etaTier} step=${stepIdx}/${steps.length - 1}` +
+          ` eta=${Math.round(eta)}s rem=${Math.round(remaining)}m turn=${Math.round(dManeuver)}m` +
+          ` seg=${segCursorRef.current}/${(r.segDurations?.length ?? 0)}`
+        );
+      } catch {}
+    }
 
     // NOTE — deliberately NOT adding banked pitstop time here. The displayed arrival is
     // `now + eta`, so sitting still for 15 minutes already pushes arrival out by 15

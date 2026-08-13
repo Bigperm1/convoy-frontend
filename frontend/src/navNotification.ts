@@ -22,11 +22,12 @@ import {
   arrivalLine, ARRIVE_M, ARRIVE_SETTLE_M, ARRIVE_SETTLE_SPEED_MS, ARRIVE_SETTLE_MS, ARRIVE_SPEAK_MAX_LATE_MS,
 } from "./nav";
 import { maneuverDir } from "./components/ManeuverArrow";
-import { setCarState, setCarSelfPosition } from "./carplay/carStore";
+import { setCarState, setCarSelfPosition, claimCarNavStrip, releaseCarNavStrip } from "./carplay/carStore";
 import { getSettings, getMapMode } from "./settings";
 import { updateSpeedLimit } from "./speedLimit";
 import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "./mapboxDirections";
 import { recordTrip } from "./trips";
+import { logEvent } from "./crashBreadcrumb";
 
 const NAV_TASK = "convoy-nav-location";
 const NAV_NOTIF_ID = "convoy-nav-banner";
@@ -97,6 +98,10 @@ let _route: SlimRoute | null = null;
 let _stepIdx = 0;
 let _notifiedStep = -1;
 let _routeLookAt = 0;
+// Cadence for the car-strip receipt. Timestamp compare, not a JS timer (suspended
+// while the phone is locked — see nav.ts).
+const COLD_STRIP_LOG_EVERY_MS = 30_000;
+let _coldStripLogAt = 0;
 
 // ── COLD lane guidance ("3D-lanes lite", CarPlay) ────────────────────────────
 // One Mapbox guidance fetch per nav session (keyed on the destination) gives us
@@ -412,9 +417,23 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
   //
   // isPhoneTbtSpeaking() is the arbiter already used for lanes and for cold arrival.
   // When the phone engine owns guidance, the cold path writes NONE of the strip.
-  const phoneOwnsStrip = isPhoneTbtSpeaking();
+  //
+  // ⚠ 2026-08-13 — the boolean was NOT ENOUGH. Olaf, build 72: phone "11 min" and
+  // CarPlay "43 min · 27 km" at the same instant. `_tbtEngineActive` is module state,
+  // so it only arbitrates inside ONE JS context (the bg-task call site below even
+  // notes it can run in a separate one), and it says nothing about whether the value
+  // already ON SCREEN is fresh — neither engine clears the other's fields, so a cold
+  // number written once just sits there while the phone counts down past it. The
+  // strip now goes through claimCarNavStrip, which RANKS the writers and EXPIRES them;
+  // this boolean stays as the cheap first check. See the gate header in carStore.ts.
+  //
+  // Everything below rides that ONE decision — glyph and lane cue included — so a cold
+  // maneuver can never sit beside the phone's numbers. Kept as a single setCarState:
+  // every write notifies every listener, and a second write per fix would redraw the
+  // car surface twice a tick, which is the "banner redrawing" half of the 7/31 report.
+  const accepted = !isPhoneTbtSpeaking() && claimCarNavStrip('cold');
   setCarState({
-    ...(phoneOwnsStrip ? {} : {
+    ...(accepted ? {
       navigating: true,
       instruction: carInstruction,
       distanceToTurn: fmtManeuverDist(d),
@@ -434,8 +453,20 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
       // COLD lane guidance — its lanes are anchored to the richer route when the phone
       // engine is driving, so they belong to the same owner; fail-closed → hidden.
       lanes: pickLaneCue(_laneCues, { lat: steps[idx].endLat, lng: steps[idx].endLng }, d) || undefined,
-    }),
+    } : {}),
   });
+  // Matching receipt for the COLD engine (see nav.ts's nav-eta line). `accepted` is the
+  // whole point: it records whether the number on the head unit came from HERE or from
+  // the phone — precisely what could not be established about Olaf's 8/13 drive.
+  if (Date.now() - _coldStripLogAt > COLD_STRIP_LOG_EVERY_MS) {
+    _coldStripLogAt = Date.now();
+    try {
+      logEvent(
+        `car-strip cold accepted=${accepted ? 1 : 0} step=${idx}/${steps.length - 1}` +
+        ` rem=${Math.round(remainM)}m eta=${etaS}s turn=${Math.round(d)}m paced=${paced ? 1 : 0}`
+      );
+    } catch {}
+  }
   if (!isPhoneTbtSpeaking()) ensureLaneCues(lat, lng, route);
 
   // ONLY surface the banner when the next maneuver is actually incoming (within
@@ -920,6 +951,10 @@ export async function stopNavBanner(): Promise<void> {
     await AsyncStorage.removeItem(CAR_NAV_KEY);
   } catch {}
   // Clear the car map's route + TBT strip so the ribbon and maneuver disappear on nav end.
+  // Drop strip OWNERSHIP first: this teardown is itself a write, and without releasing,
+  // whichever engine wrote last would keep the other locked out for STRIP_STALE_MS into
+  // the NEXT drive. The clear below then lands unconditionally.
+  releaseCarNavStrip();
   setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0, lanes: undefined });
   // Release our hold; the shared task keeps running if CarPlay still needs it.
   await releaseBgLocation("nav");

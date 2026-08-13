@@ -41,7 +41,7 @@ import { fmtPitstop } from '../pitstop';
 import { laneIcon } from '../components/TurnByTurnNav';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
-import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
+import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, claimCarNavStrip, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView, { CAR_LEFT_PAD_FRAC, hudScaleFor } from './CarMapView';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
@@ -995,6 +995,13 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
 
   // ---- mirror live state into the shared store (read by CarSurface) ----
   useEffect(() => {
+    // Claim the TBT strip as the top-rank 'phone' source, but only while the phone
+    // engine is actually guiding. When tbt is idle we neither claim nor write it: a
+    // route started from CarPlay search is driven by the COLD engine, and ticking ''
+    // over its numbers is what blanked the ETA row on Jeff's 7/23 drive. Not claiming
+    // also leaves ownership untouched, so a car-started drive keeps the strip exactly
+    // as it does today.
+    const ownStrip = tbt.active && claimCarNavStrip('phone');
     // When the phone's OWN tbt is idle, OMIT the nav fields entirely instead of
     // writing '' — a route started FROM CARPLAY SEARCH is driven by the COLD
     // banner engine (navNotification), and this mirror ticking '' over its
@@ -1008,7 +1015,11 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       // exactly the ungated path that let a rejected feed drive the zoom.
 
       destinationLabel: destination?.label || '',
-      ...(tbt.active ? {
+      // The TBT strip — gated on `ownStrip` (was: plain `tbt.active`) so the cold
+      // engine can't leave a step-derived ETA sitting on the head unit while the phone
+      // shows a segment-derived one. See the gate header in carStore.ts (Olaf, 8/13:
+      // phone "11 min" vs CarPlay "43 min · 27 km" at the same instant).
+      ...(ownStrip ? {
         navigating: true,
         instruction: upcomingInstruction(route, tbt.stepIndex),
         distanceToTurn: fmtDistanceM(tbt.distanceToManeuverM),
@@ -1018,8 +1029,9 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       // NOTE: peers + hazards are NOT written here anymore — they go through the
       // gated setCarPeers/setCarHazards writes in the effect below, so the cold
       // carDataService and this warm mirror can share ownership without clobbering.
-      // Raw numerics for the Android Auto NavigationTemplate (AndroidAutoRoot).
-      ...(tbt.active ? {
+      // Raw numerics for the Android Auto NavigationTemplate (AndroidAutoRoot) —
+      // same owner as the strings above, so the two can never come from different engines.
+      ...(ownStrip ? {
         distanceToTurnM: tbt.distanceToManeuverM,
         distanceRemainingM: tbt.distanceRemainingM,
         etaSeconds: tbt.etaSeconds,

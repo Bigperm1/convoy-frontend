@@ -320,6 +320,79 @@ export function setCarHazards(hazards: NonNullable<CarState['hazards']>, source:
   setCarState({ hazards });
 }
 
+// ── NAV-STRIP write GATE (2026-08-13) ───────────────────────────────────────
+// WHY: Olaf's drive on build 72 — the phone banner read "11 min" while CarPlay read
+// "43 min · 27 km" AT THE SAME MOMENT (photo of the head unit). Both surfaces are
+// supposed to show one number; the car's came from a different engine than the phone's.
+//
+// The two writers of these fields:
+//   WARM (ConvoyCarPlay's mirror, while tbt.active) — mirrors tbt.etaSeconds, which is
+//        the phone's TIER-1 SEGMENT-accurate ETA (nav.ts: findRouteSegment + suffix
+//        table). It does not use the step index at all.
+//   COLD (navNotification.updateNavBanner, every fix) — remainM = distance to the
+//        current step's end + the lengths of every LATER step, times a flat average
+//        pace. Both of its numbers hang off its own step index.
+//
+// So a cold value on screen while the phone is guiding shows a step-derived estimate
+// next to a segment-derived one. On Olaf's drive the cold step index was frozen (its
+// walk only advances within 25 m of a maneuver point — the same proximity-walk defect
+// already measured on the phone engine), which inflates remainM AND the ETA by the
+// same factor. That is why "43 min · 27 km" looked self-consistent: both numbers share
+// one wrong input. The phone's 11 min was the correct number.
+//
+// isPhoneTbtSpeaking() was already supposed to prevent this, but it is a module-level
+// boolean, so it only arbitrates INSIDE one JS context and it says nothing about
+// whether the value currently on screen is fresh. Neither writer clears the other's
+// fields, so a cold value written once (before the phone engine went active, or from
+// the bg task's own context — see the "separate bg JS context" note at its call site)
+// can simply SIT there while the phone counts down past it. The arrival clock is
+// recomputed as `now + etaSeconds` on every render, so a frozen ETA still looks live.
+//
+// This gate is the same mental model as setCarSelfPosition / setCarPeers above, and it
+// closes both paths: the phone's numbers always write and suppress the cold engine
+// while they keep arriving; the cold engine takes the strip only once the phone's have
+// gone quiet for STRIP_STALE_MS. A stale value can no longer outlive its writer.
+export type NavStripSource = 'phone' | 'cold';
+const STRIP_RANK: Record<NavStripSource, number> = { phone: 2, cold: 1 };
+// The warm mirror re-writes when its React deps change — i.e. on every GPS tick while
+// guiding (~1 Hz), but not on a fixed cadence. 6 s is long enough that a render hitch
+// or a brief GPS gap doesn't hand the strip to the cold engine mid-drive, and short
+// enough that a genuinely dead phone mirror (screen unmounted, app torn down) is taken
+// over within a few of the cold feed's own 1 Hz ticks.
+const STRIP_STALE_MS = 6000;
+let lastStripWrite: { ts: number; rank: number } | null = null;
+
+/**
+ * Ask for the strip on behalf of `source`, taking ownership when granted.
+ *
+ * Deliberately a CLAIM rather than a write: both callers already build one big
+ * setCarState per tick, and every setCarState notifies every listener, so a separate
+ * strip write would re-render the car surface twice per GPS tick. That extra redraw is
+ * the exact "banner redrawing" half of the 7/31 glitch report — fixing an ETA bug by
+ * reintroducing the flicker beside it is not a fix. Callers spread the strip fields into
+ * their existing single write when this returns true.
+ */
+export function claimCarNavStrip(source: NavStripSource): boolean {
+  const rank = STRIP_RANK[source];
+  const cur = lastStripWrite;
+  if (cur) {
+    const dt = Date.now() - cur.ts;
+    // dt < 0 = the wall clock stepped backward (NTP / manual set); treat as stale so a
+    // clock jump cannot leave a dead writer looking permanently fresh and freeze the strip.
+    const stale = dt > STRIP_STALE_MS || dt < 0;
+    if (!stale && rank < cur.rank) return false;
+  }
+  lastStripWrite = { ts: Date.now(), rank };
+  return true;
+}
+
+/**
+ * Drop strip ownership so the next writer of ANY rank is accepted immediately. Called on
+ * nav teardown: without it, the phone's last write would keep the cold engine locked out
+ * of the FOLLOWING drive for STRIP_STALE_MS.
+ */
+export function releaseCarNavStrip() { lastStripWrite = null; }
+
 export function getCarState(): CarState {
   return state;
 }

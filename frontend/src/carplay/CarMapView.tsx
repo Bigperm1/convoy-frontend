@@ -19,7 +19,7 @@
 // drop back to the static-image fallback (ConvoyCarPlay's showLive/glFailed).
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, Image as RNImage } from 'react-native';
 import Mapbox, {
   MapView,
   Camera,
@@ -30,6 +30,7 @@ import Mapbox, {
   Models,
 } from '@rnmapbox/maps';
 import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
+import { canonicalClass } from '../settings';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { usePowerMode } from '../powerMode';
 import { getVehicleModelUrl, getVehicleModelKey, getVehiclePngOrDefault, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
@@ -411,26 +412,65 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   //
   // Registering only DISTINCT images matters: a convoy of eight cars in three colours
   // registers three, not eight.
+  // Target on-map size for a peer car, in POINTS. 44 matches the self flat car exactly
+  // (a 44pt asset drawn at vehiclePngScale ~1), so the crew and the driver read at the
+  // same scale instead of one dominating the other.
+  const PEER_ICON_PT = 44;
+
+  // ⚠ WHY iconSize IS DERIVED FROM THE ASSET AND NEVER HARDCODED TO 1.
+  // A pre-ship review caught this and it would have been ugly: the classes-v2 PNGs are
+  // single-resolution 512x512 with NO @2x/@3x siblings, so RN's resolveAssetSource reports
+  // scale 1, Mapbox registers the style image at pixelRatio 1, and iconSize 1 renders
+  // 512 LAYOUT POINTS. The CarPlay canvas is 400x240pt and the measured Android Auto canvas
+  // is 213x107dp — a single class peer would have covered the whole map, drawn OVER the
+  // route and the driver's own car because of iconIgnorePlacement below. The GRC photos are
+  // the opposite case (44pt base WITH @2x/@3x, so pixelRatio 3), which is exactly why one
+  // constant cannot serve both.
+  // This repo already knew: ConvoyMapbox notes "iconSize is per-asset: hazard/police PNGs
+  // are 512px (-> 0.078)", and the phone deliberately routes class photos through a 66pt
+  // device-scale snapshot "so per-class asset resolution never leaks into the map's iconSize
+  // math". Deriving it means a future asset at any resolution is right without a magic
+  // number to remember.
+  const iconSizeForAsset = (asset: any, targetPt = PEER_ICON_PT) => {
+    try {
+      const r = RNImage.resolveAssetSource(asset);
+      const pt = (r?.width || 0) / (r?.scale || 1);      // the asset's size in POINTS
+      if (pt > 0) return Math.round((targetPt / pt) * 1000) / 1000;
+    } catch {}
+    // Unresolvable → assume it is already point-sized rather than risk a 512pt icon.
+    return 1;
+  };
+
+  // Resolve a peer to { asset, image name }. ONE place, so peerImages and peerImageFor can
+  // never disagree about a name — a feature naming an unregistered image draws nothing.
+  // canonicalClass mirrors the phone: a legacy/unknown class name still maps to a real
+  // class asset instead of silently falling back to the paint photo.
+  const peerAppearance = (p: { marker?: string | null; cls?: string; color?: string }) => {
+    if (p.marker === 'class') {
+      const key = canonicalClass(p.cls);
+      const asset = (CLASS_TOPDOWN as any)[key];
+      if (asset) return { name: 'peer_cls_' + key, asset };
+    }
+    return { name: 'peer_car_' + getVehicleModelKey(p.color), asset: getVehiclePngOrDefault(p.color) };
+  };
+
+  // Register only DISTINCT images: eight cars in three colours registers three, not eight.
   const peerImages = React.useMemo(() => {
     const out: Record<string, any> = {};
     for (const p of s.peers || []) {
       if (typeof p.lat !== 'number' || typeof p.lng !== 'number') continue;
-      const clsAsset = p.marker === 'class' && p.cls ? (CLASS_TOPDOWN as any)[p.cls] : undefined;
-      if (clsAsset) out['peer_cls_' + p.cls] = clsAsset;
-      else out['peer_car_' + getVehicleModelKey(p.color)] = getVehiclePngOrDefault(p.color);
+      const { name, asset } = peerAppearance(p);
+      if (asset) out[name] = asset;
     }
     return out;
   }, [s.peers]);
 
-  // Which registered image (and how big) each peer draws with. Kept next to peerImages
-  // so the two can never disagree about a name.
   const peerImageFor = (p: { marker?: string | null; cls?: string; color?: string }) => {
-    const clsAsset = p.marker === 'class' && p.cls ? (CLASS_TOPDOWN as any)[p.cls] : undefined;
-    if (clsAsset) return { img: 'peer_cls_' + p.cls, size: 1 };
-    // vehiclePngScale normalises the five photo crops to a common ink width, exactly as
-    // the phone does for its peer markers — without it the colours are visibly
-    // different sizes on the map.
-    return { img: 'peer_car_' + getVehicleModelKey(p.color), size: vehiclePngScale(p.color) };
+    const { name, asset } = peerAppearance(p);
+    // vehiclePngScale normalises the five photo crops to a common ink width (the phone does
+    // the same); it is an INK correction and multiplies the point-size correction above.
+    const ink = p.marker === 'class' ? 1 : vehiclePngScale(p.color);
+    return { img: name, size: Math.round(iconSizeForAsset(asset) * ink * 1000) / 1000 };
   };
 
   // ── CAR SIZED TO THE CANVAS (2026-07-30) ────────────────────────────────────
@@ -1439,8 +1479,12 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
                 properties: {
                   parked: p.status === 'parked' ? 1 : 0,
                   ...peerImageFor(p),
-                  // A parked car has no meaningful heading; 0 would snap it north, so
-                  // keep whatever we last knew (the phone makes the same choice).
+                  // ⚠ An ABSENT heading falls back to 0 = due north. The comment here used
+                  // to claim it kept the last known value; it does not, and the store has no
+                  // per-peer history to keep. Accepted because the feed sends a heading
+                  // whenever it sends a position, so this only bites a peer whose very first
+                  // fix lacks one — pointing north for a tick is better than not drawing a
+                  // car. Do NOT restate this as "last known" without adding that history.
                   hdg: typeof p.heading === 'number' && Number.isFinite(p.heading) ? p.heading : 0,
                 },
                 geometry: { type: 'Point' as const, coordinates: [p.lng as number, p.lat as number] },

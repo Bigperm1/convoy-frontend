@@ -49,6 +49,14 @@ type SvcPeer = {
   lng?: number;
   heading?: number;
   status?: 'live' | 'parked';
+  // Appearance, so the COLD feed can draw each peer's real car on the head unit rather
+  // than flipping the whole crew to default paint the moment the phone screen backgrounds.
+  // ⚠ A pre-ship review caught emitPeers reading these off SvcPeer while NO ingest path
+  // kept them — the mirroring was inert and read as working. Declaring them here is what
+  // makes the compiler hold the ingest to it.
+  marker?: 'class' | 'arrow' | null;
+  cls?: string;
+  color?: string;
 };
 
 type SvcHazard = { id: string; kind: string; lat: number; lng: number; confirms?: number; disputes?: number };
@@ -90,10 +98,9 @@ function emitPeers() {
       status: p.status === 'parked' ? 'parked' : 'live',
       // Appearance, same reason as the warm mirror: the head unit must draw each peer's
       // real car whether the phone screen is up or the cold service is driving.
-      marker: ((p as any).marker === 'class' || (p as any).marker === 'arrow')
-        ? (p as any).marker as 'class' | 'arrow' : undefined,
-      cls: typeof (p as any).cls === 'string' ? (p as any).cls : undefined,
-      color: (p as any).activeColor || (p as any).carColor || undefined,
+      marker: p.marker ?? undefined,
+      cls: p.cls,
+      color: p.color,
     }));
   setCarPeers(out, 'service');
 }
@@ -327,6 +334,12 @@ function joinPresence(): void {
           lng: p.lng,
           heading: p.heading,
           status: p.status === 'parked' ? 'parked' : 'live',
+          // The presence broadcast carries these (see convoyPresence's payload); this
+          // ingest was dropping them, which is why the cold path had nothing to draw with.
+          marker: ((p as any).marker === 'class' || (p as any).marker === 'arrow')
+            ? (p as any).marker as 'class' | 'arrow' : undefined,
+          cls: typeof (p as any).cls === 'string' ? (p as any).cls : undefined,
+          color: (p as any).activeColor || (p as any).carColor || undefined,
         });
       }
       _presencePeers = list;

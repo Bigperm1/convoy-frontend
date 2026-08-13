@@ -138,6 +138,76 @@ async function queue(reports: Report[]) {
 
 // 1) Fatal-handler wrap. Installed once from the app entry; chains the previous
 // handler so RN/expo-updates recovery behavior is untouched.
+// ── BUNDLE MARK ─────────────────────────────────────────────────────────────
+// WHY (2026-08-13): we could not tell which JS was actually running, and it cost a
+// whole day of wrong conclusions.
+//
+// On a CarPlay-FIRST cold launch the RN host can be created before expo-updates has
+// resolved a launcher: withConvoyCarPlay's car branch calls superView(), which bypasses
+// the updates react-delegate, and the host then asks for a bundle URL while
+// AppController.launchAssetUrl() is still nil — so it falls through to
+// [super bundleURL] = the EMBEDDED main.jsbundle. Expo's only guard against this is a
+// Swift `assert`, which is compiled out under -O in Release.
+//
+// The process then runs OLD embedded JS while NATIVE still reports the OTA. So
+// `update_id`, `launch_kind` and the on-screen version pill ALL say "ota" — every
+// instrument we had measures native's INTENT, not the bundle being evaluated. That is
+// how a device provably "on the OTA" drew peers with a CircleLayer that only exists in
+// the embedded bundle (Jeff's green dot, 2026-08-13).
+//
+// This row is the missing instrument, and it works by PRESENCE, not by content:
+//   • row present  → the bundle containing THIS code is the one running.
+//   • row ABSENT, while the session's columns say launch_kind='ota'
+//                  → that process is pinned to an older/embedded bundle.
+// An old bundle cannot report on itself; its silence is the signal. So the row must
+// never be lost for a boring reason — hence the queue fallback in logBundleMark below.
+// A false "absent" would send the next session chasing a bug that isn't there.
+//
+// The stamp follows this repo's standing hardcoded-fallback pattern (see api.ts /
+// supabase.ts): EAS has historically failed to inject env vars at bundle time, so a
+// literal backs it up. If the env var is missing we still get a row, and the row's
+// PRESENCE is the primary signal — the stamp only adds "which publish".
+const SRC_MARK = "0813a";
+const JS_BUNDLE_MARK = process.env.EXPO_PUBLIC_JS_MARK || SRC_MARK;
+let markLogged = false;
+
+/**
+ * Emit the once-per-JS-context bundle mark. Safe to call more than once.
+ * Sends immediately; falls back to the persisted queue (delivered `late` on a later
+ * launch) if Supabase isn't constructed yet — losing this row would read as "pinned".
+ */
+export function logBundleMark(): void {
+  if (markLogged) return;
+  markLogged = true;
+  try {
+    // Native's own claim about the launch, recorded ALONGSIDE the source stamp so one
+    // row carries both sides of the disagreement. `tag` is the same DD·HHMM the version
+    // pill prints, so a row can be matched to what a tester photographed.
+    let tag = "";
+    try {
+      const U = require("expo-updates");
+      const ts = U.createdAt ? new Date(U.createdAt) : null;
+      const p2 = (n: number) => String(n).padStart(2, "0");
+      tag = U.isEmbeddedLaunch ? "emb"
+        : ts ? `${p2(ts.getDate())}·${p2(ts.getHours())}${p2(ts.getMinutes())}` : "";
+    } catch {}
+    const report = {
+      message: `js-mark src=${JS_BUNDLE_MARK} native_tag=${tag || "-"}`,
+      is_fatal: false,
+      late: false,
+      ...baseMeta(),
+    };
+    const { supabase } = require("./supabase");
+    if (!supabase) { void queue([report]); return; }
+    void supabase.from("crash_reports").insert([report]).then(
+      (res: any) => { if (res?.error) void queue([report]); },
+      () => { void queue([report]); },
+    );
+  } catch {
+    // Never let the instrument break the app it is instrumenting.
+  }
+}
+
 let installed = false;
 // ── NON-FATAL EVENT LOG ──────────────────────────────────────────────────────
 // Fire-and-forget row into the same crash_reports table with is_fatal:false.

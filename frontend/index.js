@@ -16,8 +16,16 @@ import './src/carplay/registerCarSurface';
 // Fatal-JS-error breadcrumbs: queue message+stack on a fatal (expo-updates'
 // ~5s recovery window gives the write time to land), harvest expo-updates'
 // own error log next launch, deliver to Supabase. See src/crashBreadcrumb.ts.
-import { installCrashBreadcrumb } from './src/crashBreadcrumb';
+import { installCrashBreadcrumb, logBundleMark } from './src/crashBreadcrumb';
 installCrashBreadcrumb();
+
+// WHICH JS IS ACTUALLY RUNNING. One row per JS context, from the bundle ENTRY so it
+// covers every surface (phone, CarPlay, Android Auto) — they share one runtime. The
+// row's PRESENCE is the signal: a session whose columns say launch_kind='ota' but that
+// never emits `js-mark` is running an older/embedded bundle while native reports the
+// OTA. See the long note in src/crashBreadcrumb.ts for the CarPlay-first host-boot race
+// that makes this possible, and why no other field can tell us.
+logBundleMark();
 
 // ANDROID AUTO BLACK BOX (phone half). The native car entry points record any throw to
 // filesDir/aa_crash.txt; this uploads and clears it on the next launch, so nobody has to

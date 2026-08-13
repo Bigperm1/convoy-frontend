@@ -25,7 +25,6 @@ import { maneuverDir } from "./components/ManeuverArrow";
 import { setCarState, setCarSelfPosition, claimCarNavStrip, releaseCarNavStrip } from "./carplay/carStore";
 import { getSettings, getMapMode } from "./settings";
 import { updateSpeedLimit } from "./speedLimit";
-import { fetchMapboxLaneCues, pickLaneCue, type LaneCue } from "./mapboxDirections";
 import { recordTrip } from "./trips";
 import { logEvent } from "./crashBreadcrumb";
 
@@ -103,38 +102,9 @@ let _routeLookAt = 0;
 const COLD_STRIP_LOG_EVERY_MS = 30_000;
 let _coldStripLogAt = 0;
 
-// ── COLD lane guidance ("3D-lanes lite", CarPlay) ────────────────────────────
-// One Mapbox guidance fetch per nav session (keyed on the destination) gives us
-// per-maneuver lane arrows; each tick then matches the upcoming turn with the
-// SAME fail-closed pickLaneCue the phone banner uses. Only runs when the phone
-// TBT engine isn't active (warm drives mirror the phone's lanes instead). One
-// attempt per route — a fetch failure just means no lanes this session, never
-// wrong lanes and never a retry storm on the 3s tick.
-let _laneCues: LaneCue[] | null = null;
-let _laneKey = "";
-let _laneFetching = false;
-function ensureLaneCues(lat: number, lng: number, route: SlimRoute): void {
-  const last = route.steps[route.steps.length - 1];
-  if (!last) return;
-  const key = `${last.endLat},${last.endLng}`;
-  if (_laneKey === key || _laneFetching) return;
-  _laneFetching = true;
-  void (async () => {
-    try {
-      _laneCues = await fetchMapboxLaneCues({ lat, lng }, { lat: last.endLat, lng: last.endLng });
-    } catch {
-      _laneCues = null;
-    } finally {
-      _laneKey = key; // one attempt per route, success or not
-      _laneFetching = false;
-    }
-  })();
-}
-function resetLaneCues(): void {
-  _laneCues = null;
-  _laneKey = "";
-  _laneFetching = false;
-}
+// COLD lane guidance was REMOVED 2026-08-13 with the lane row it fed — Jeff: "lets
+// completely remove the turn arrow banner from phone and carplay/aa." That also drops
+// the one Mapbox guidance fetch per nav session it made on the cold path.
 
 function strip(s: string): string {
   return (s || "").replace(/<[^>]+>/g, "").trim();
@@ -450,9 +420,6 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
             distanceRemainingM: Math.round(remainM),
           }
         : {}),
-      // COLD lane guidance — its lanes are anchored to the richer route when the phone
-      // engine is driving, so they belong to the same owner; fail-closed → hidden.
-      lanes: pickLaneCue(_laneCues, { lat: steps[idx].endLat, lng: steps[idx].endLng }, d) || undefined,
     } : {}),
   });
   // Matching receipt for the COLD engine (see nav.ts's nav-eta line). `accepted` is the
@@ -467,7 +434,6 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
       );
     } catch {}
   }
-  if (!isPhoneTbtSpeaking()) ensureLaneCues(lat, lng, route);
 
   // ONLY surface the banner when the next maneuver is actually incoming (within
   // ANNOUNCE_DISTANCE) or we're arriving. Previously it popped on every step
@@ -904,7 +870,6 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
     _notifiedStep = -1; // -1 so the FIRST turn still announces when it's incoming
     resetColdArrival();  // a new route must be able to arrive again
     _routeLookAt = 0;    // and be discoverable by the other feed at once
-    resetLaneCues();    // fresh route → fresh lane-guidance fetch (cold CarPlay lanes)
     try {
       await AsyncStorage.setItem(ROUTE_KEY, JSON.stringify(slim));
       await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx: 0, notified: -1 }));
@@ -941,7 +906,6 @@ export async function stopNavBanner(): Promise<void> {
   _notifiedStep = -1;
   _coldSettleSince = null;
   if (_coldSettleTimer) { clearTimeout(_coldSettleTimer); _coldSettleTimer = null; }
-  resetLaneCues();
   try {
     await AsyncStorage.removeItem(ROUTE_KEY);
     await AsyncStorage.removeItem(PROGRESS_KEY);
@@ -955,7 +919,7 @@ export async function stopNavBanner(): Promise<void> {
   // whichever engine wrote last would keep the other locked out for STRIP_STALE_MS into
   // the NEXT drive. The clear below then lands unconditionally.
   releaseCarNavStrip();
-  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0, lanes: undefined });
+  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0 });
   // Release our hold; the shared task keeps running if CarPlay still needs it.
   await releaseBgLocation("nav");
   try { await Notifications.dismissNotificationAsync(NAV_NOTIF_ID); } catch {}

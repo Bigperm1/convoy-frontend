@@ -23,8 +23,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Animated } from "react-native";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import type { LaneArrow } from "../mapboxDirections";
+import { Ionicons } from "@expo/vector-icons";
 import { GlassFill, hudTint, glassLift } from "../Glass";
 import { ManeuverArrow, maneuverDir } from "./ManeuverArrow";
 import { speedLimitVisible } from "../speedLimit";
@@ -171,24 +170,6 @@ export function SpeedPill({ speedMs, unit, bottom, limitKmh }: { speedMs?: numbe
   );
 }
 
-// Map a Mapbox lane direction token to a MaterialCommunityIcons arrow glyph.
-// Unknown tokens fall back to a straight-up arrow (never throws / shows blank).
-// Exported: the CarPlay banner renders the same lane diagram (ConvoyCarPlay).
-export function laneIcon(dir: string): any {
-  switch (dir) {
-    case "left": return "arrow-top-left";
-    case "slight left": return "arrow-top-left";
-    case "sharp left": return "arrow-left";
-    case "right": return "arrow-top-right";
-    case "slight right": return "arrow-top-right";
-    case "sharp right": return "arrow-right";
-    case "uturn": return "arrow-down";
-    case "straight":
-    case "none":
-    default: return "arrow-up";
-  }
-}
-
 // ---- Turn-by-turn overlay (top banner + bottom ETA bar) ----
 type Props = {
   // Upcoming maneuver
@@ -205,12 +186,11 @@ type Props = {
   onToggleMute: () => void;
   onEnd: () => void;
   // Lane guidance for the upcoming maneuver (null = none / unknown → row hidden).
-  lanes?: LaneArrow[] | null;
 };
 
 export default function TurnByTurnNav({
   maneuverIcon, maneuverKey, distanceToTurn, instruction, eta, distanceRemaining, arrival,
-  muted, onToggleMute, onEnd, lanes,
+  muted, onToggleMute, onEnd,
 }: Props) {
   return (
     <>
@@ -233,25 +213,9 @@ export default function TurnByTurnNav({
           </TouchableOpacity>
         </View>
 
-        {/* Lane guidance row — appears only when Mapbox lane data matches the
-            upcoming turn (see pickLaneCue). Active lanes glow green; the rest
-            dim grey. Hidden entirely when there's no confident lane match. */}
-        {!!lanes && lanes.length > 0 && (
-          <View style={styles.laneRow}>
-            {lanes.map((lane, i) => {
-              const dir = (lane.active && lane.activeDir) ? lane.activeDir : (lane.dirs[0] || "straight");
-              return (
-                <MaterialCommunityIcons
-                  key={i}
-                  name={laneIcon(dir)}
-                  size={22}
-                  color={lane.active ? "#2DEC86" : "#5A5A5E"}
-                  style={styles.laneArrow}
-                />
-              );
-            })}
-          </View>
-        )}
+        {/* The lane ("arrow") row was REMOVED here 2026-08-13 — Jeff: "lets completely
+            remove the turn arrow banner from phone and carplay/aa." Removed on all four
+            surfaces in the same change so the phone and the head units stay identical. */}
       </View>
 
       {/* Bottom trip bar removed — the StepDrawer now owns the bottom bar
@@ -309,20 +273,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center", justifyContent: "center",
   },
-  // Lane guidance row (sits just under the maneuver banner).
-  laneRow: {
-    flexDirection: "row",
-    alignSelf: "center",
-    marginTop: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    backgroundColor: "#161618",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(45,236,134,0.22)",
-    marginRight: Platform.OS === "ios" ? 64 : 0,
-  },
-  laneArrow: { marginHorizontal: 2 },
 
   // ----- Bottom trip bar (thin convoy-yellow) -----
   bottomWrap: {

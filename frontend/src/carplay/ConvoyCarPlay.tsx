@@ -38,7 +38,6 @@ import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec } fro
 import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { fmtPitstop } from '../pitstop';
-import { laneIcon } from '../components/TurnByTurnNav';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
 import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, claimCarNavStrip, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
@@ -153,6 +152,13 @@ function logAaCanvas(w: number, h: number): void {
 // native CarPlay UI duplicated and covered them. Flip TRUE to restore native guidance.
 const CAR_NATIVE_GUIDANCE = false;
 
+// Ceiling for the live-map remount retry (see scheduleLiveRetry). 6 attempts with the
+// 1/2/4/8/8/8s backoff spans ~75s — longer than any legitimate head-unit boot, short
+// enough that a genuinely broken context stops burning GPU and battery for the rest of
+// the drive. Deliberately mirrors the native side's own bounded loop (0.4s tick, budget
+// 120, 40s ceiling in withConvoyCarPlay.js) — the JS side just never had one.
+const MAX_LIVE_ATTEMPTS = 6;
+
 // (maneuverArrow now lives in ../nav — shared with the phone banner so the arrow
 // glyph is identical on phone + CarPlay.)
 
@@ -264,9 +270,33 @@ export function CarSurface() {
   // CarMapView stays mounted (dark) — never a flat street raster.
   const [liveAttempt, setLiveAttempt] = useState(0);
   const liveAttemptRef = useRef(0);
+  const gaveUpRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleLiveRetry = (why?: string) => {
     if (retryTimerRef.current) return; // one pending retry at a time
+    // ── CEILING (2026-08-13) ────────────────────────────────────────────────────
+    // This loop had no ceiling of any kind: no attempt cap, no elapsed-time cap, no
+    // give-up. Telemetry caught one session at 223 retries over 80 minutes and another
+    // spanning 8 hours. Each retry is a full map bootstrap — a destroyed and rebuilt
+    // Metal view, the whole Standard style, sprites, glyphs, a fresh TileJSON, the GLB
+    // models and every peer image — roughly 3.5 per minute, at 60fps because a CarPlay
+    // phone is plugged in and therefore 'premium', in a hot car, for the whole drive,
+    // with zero pixels to show for it. (Plus one Supabase insert per attempt.)
+    //
+    // The native side of this feature has always been bounded — withConvoyCarPlay.js
+    // runs a 0.4s commit tick with a budget of 120 and a 40s ceiling. The JS side
+    // simply never matched that discipline. 6 attempts ≈ 75s, which covers any
+    // legitimate slow head-unit boot; past that we are not booting, we are thrashing.
+    //
+    // On give-up the LAST CarMapView stays mounted — we never fall back to a 2D map
+    // (standing rule), and a live map still trying is strictly better than a dead one.
+    if (liveAttemptRef.current >= MAX_LIVE_ATTEMPTS) {
+      if (!gaveUpRef.current) {
+        gaveUpRef.current = true;
+        try { logEvent(`carplay-live-giveup after=${liveAttemptRef.current} why=${why || 'gl'}`); } catch {}
+      }
+      return;
+    }
     const next = liveAttemptRef.current + 1;
     const delay = Math.min(1000 * 2 ** (next - 1), 8000);
     // LOG IT. This remount was completely silent, which cost a session: the car probe
@@ -275,7 +305,15 @@ export function CarSurface() {
     // Those want different fixes. Now the retries say so themselves — and the absence of
     // these rows next to duplicate probe rows is itself the answer (it means a second
     // mount, not a remount). Cheap: at most one row per failure, backoff-limited.
-    try { logEvent(`carplay-live-retry attempt=${next} in=${delay}ms why=${why || 'gl'}`); } catch {}
+    // `surf=` is here because a degenerate CarPlay window (the documented 70x264 sliver)
+    // and a healthy window that never resolved a frame produce byte-identical rows
+    // otherwise — and that ambiguity cost a whole session of guessing.
+    try {
+      logEvent(
+        `carplay-live-retry attempt=${next} in=${delay}ms why=${why || 'gl'}` +
+        ` surf=${Math.round(surfaceW)}x${Math.round(surfaceH)}`
+      );
+    } catch {}
     retryTimerRef.current = setTimeout(() => {
       retryTimerRef.current = null;
       liveAttemptRef.current = next;
@@ -597,24 +635,14 @@ export function CarSurface() {
           ]}
           pointerEvents="none"
         >
-          {/* LANE GUIDANCE ("3D-lanes lite") — the phone's glowing-lane diagram on
-              the head unit: active lanes brand green, the rest dim. Appears only
-              when Mapbox lane data confidently matches the upcoming turn (the
-              fail-closed pickLaneCue), warm via the phone mirror or cold via
-              navNotification — so it works with the phone in a pocket too. */}
-          {!!s.lanes && s.lanes.length > 0 ? (
-            <View style={[styles.laneRow, { backgroundColor: carHudFloor() }]}>
-              <GlassFill tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
-              {s.lanes.map((lane, i) => (
-                <MaterialCommunityIcons
-                  key={i}
-                  name={laneIcon((lane.active && lane.activeDir) ? lane.activeDir : (lane.dirs[0] || 'straight'))}
-                  size={laneIconSize(s.lanes!.length, navStackW)}
-                  color={lane.active ? '#2DEC86' : '#5A5A5E'}
-                />
-              ))}
-            </View>
-          ) : null}
+          {/* The LANE ("arrow") ROW used to sit here, above the ETA. REMOVED 2026-08-13
+              on Jeff's call: "lets completely remove the turn arrow banner from phone
+              and carplay/aa. this banner is usually above the eta banner". It was the
+              only element above the ETA pill and the only nav visual gated on distance
+              (pickLaneCue returned null beyond 600 m), which is why it was absent from
+              the 1.8 km photo he was pointing at. The maneuver box BELOW the ETA — the
+              "1.8 km / Turn right onto…" box — is a different element and STAYS; he
+              asked for its font to shrink in the same breath. */}
           {/* ETA — just above the maneuver banner. */}
           {metaLine ? (
             <View style={[styles.navEta, { backgroundColor: carHudFloor() }]}>
@@ -690,7 +718,7 @@ export function CarSurface() {
               threw it away. (Identity churn is a non-issue — scheduleLiveRetry is already
               redefined every render and has always been passed straight through.) */}
           <CarMapBoundary key={liveAttempt} onFail={() => scheduleLiveRetry('render-throw')}>
-            <CarMapView attempt={liveAttempt} onGLError={() => scheduleLiveRetry('gl-load')} />
+            <CarMapView attempt={liveAttempt} onGLError={(w) => scheduleLiveRetry(w)} />
           </CarMapBoundary>
           {mapOverlays}
         </>
@@ -714,7 +742,9 @@ export function CarSurface() {
           </Animated.View>
         ) : null}
         <Animated.View style={[styles.speedPill, { backgroundColor: speedoBg, opacity: speedPulse }]}>
-          <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
+          {/* 16 -> 14 to match speedPill's radius. Harmless behind the old 1pt hairline;
+              against the new 2pt black rule a 2pt-proud glass corner would show. */}
+          <GlassFill tintColor={undefined} style={{ borderRadius: 14, overflow: 'hidden' }} />
           <Text style={styles.speedNum} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{spd.value}</Text>
           <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
         </Animated.View>
@@ -780,7 +810,7 @@ export function CarSurface() {
               our bug — so it gets a permanent, glanceable tell right where the
               driver already reads the build number. Back to white the moment the
               permission is granted (re-read on every foreground). */}
-          <Text style={[styles.crewPillText, !s.alwaysLocation && styles.crewPillTextWarn]} numberOfLines={1}>
+          <Text style={[styles.crewPillText, !s.alwaysLocation && styles.crewPillTextWarn]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
             {crewCount} Crew · v{carBuildNo}{carRtv ? ` · ${carRtv}` : ''}{carOtaTag ? ` · ${carOtaTag}` : ''}
           </Text>
         </View>
@@ -1515,15 +1545,17 @@ const CAR_MAP_BUTTON_COL_W = 42;
 // EXPLICIT row heights. These were paddingVertical-derived, which made the stack's
 // total height depend on RN's font line-height and therefore impossible to align
 // against a fixed system button. Fixed heights make the arithmetic exact:
+// ⚠ HISTORICAL — the alignment this was derived from no longer renders. The lane
+// ("arrow") row was removed 2026-08-13 (Jeff), so the stack is now TURN + ETA only and
+// nothing is aligned to the mic any more. Kept because TURN_ROW_H's VALUE still comes
+// from that arithmetic and changing it blind would move the maneuver banner:
 //   lane centre from bottom = 8 + TURN + 8 + ETA + 8 + LANE/2
-//                           = 8 + 42  + 8 + 22  + 8 + 15   = 103pt
-//   mic centre from bottom  = 240 - 137                    = 103pt   <- aligned
-// LANE_ROW_H ~= the mic's own 27pt so the two read as one row, per Jeff's
-// "the arrow banner needs to be the same height/alignment of the mic".
-// TURN_ROW_H is the value that FALLS OUT of that alignment — it is why the
-// maneuver banner got shorter ("if the mic is too close to the eta banner then
-// narrow the height of the turn banner"). Content still fits: the maneuver box is
-// 30 and the two text lines ~34, both under 42.
+//                           = 8 + 42  + 8 + 22  + 8 + 15   = 103pt   (as-built)
+//   mic centre from bottom  = 240 - 137                    = 103pt
+// per Jeff's "the arrow banner needs to be the same height/alignment of the mic" and
+// "if the mic is too close to the eta banner then narrow the height of the turn banner".
+// Content still fits: the maneuver box is 30 and the two text lines ~34, both under 42.
+// ⚠ TURN_ROW_H is DUPLICATED as CAR_BANNER_GAP_SCALABLE in CarMapView.tsx — keep in sync.
 // Crew/alerts/build pill height — deliberately small; it is ambient info, not a control.
 const CREW_PILL_H = 22;
 // True top-centre for the pill (iOS 26 has no full-width nav bar to clear).
@@ -1566,7 +1598,6 @@ const CAR_BAR_TRAILING_W = IS_AA ? 0 : 126;
 // flex-end) rather than stretched to the stack width, which kills the empty padding
 // he saw beside "1:11pm · 3 min · 777 m" and pulls their left edge away from the car.
 const NAV_PILL_H = 24;
-const LANE_ROW_H = NAV_PILL_H;
 const ETA_ROW_H = NAV_PILL_H;
 // The turn banner keeps its own height — it carries the maneuver box plus two text
 // lines, so it cannot shrink to the pill height without clipping.
@@ -1614,18 +1645,6 @@ const NAV_STACK_ABS_MIN_W = 120;
 // on a 400pt canvas for one frame; the floor is the safe guess.
 const NAV_STACK_FALLBACK_W = NAV_STACK_ABS_MIN_W;
 
-// Lane guidance has to fit the (now measured) stack width. A 5-lane cue at the old
-// fixed size 26 overflowed a narrow head unit and the leftmost arrow was clipped —
-// which on a real junction is the one you need. Shrink to fit, floor 16 so it stays
-// legible at a glance; laneRow is paddingHorizontal 10 + gap 10 (see styles.laneRow).
-function laneIconSize(count: number, stackW: number): number {
-  if (count <= 0) return LANE_ROW_H - 6;
-  const avail = stackW - 20 /* padding */ - (count - 1) * 10 /* gaps */;
-  // Also capped by the row's own fixed height so a wide head unit can't grow the
-  // icons past the band the row occupies.
-  return Math.max(14, Math.min(LANE_ROW_H - 6, Math.floor(avail / count)));
-}
-
 const styles = StyleSheet.create({
   // padding 0 → overlays sit at the true screen edges (the CarPlay side bar still
   // covers the far left, so left-side elements keep a ~68pt offset).
@@ -1644,7 +1663,11 @@ const styles = StyleSheet.create({
   // Bottom-LEFT, tucked just right of the CarPlay side bar (~64pt). Smaller pill.
   speedDock: { position: 'absolute', left: CAR_DOCK_LEFT, bottom: SPEED_DOCK_BOTTOM, alignItems: 'flex-start' },
   // 58×48 — narrower (just fits "299") + the SAME height as the banner/weather/limit chips.
-  speedPill: { width: 58, height: SPEED_PILL_H, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
+  // Border matches speedLimitBadge below EXACTLY (borderWidth 2 / '#000000' / radius 14)
+  // — Jeff, 8/13: "make the speed button on carplay the same border as the speed limit".
+  // It was a 1pt 14%-white hairline, effectively invisible next to the limit sign's heavy
+  // black rule. Width/height/radius already matched; only the two border tokens moved.
+  speedPill: { width: 58, height: SPEED_PILL_H, borderRadius: 14, borderWidth: 2, borderColor: '#000000', alignItems: 'center', justifyContent: 'center' },
   speedNum: { color: '#F4F4F4', fontSize: 21, fontWeight: '800', letterSpacing: -0.5, lineHeight: 23 },
   speedUnit: { color: '#808080', fontSize: 9, fontWeight: '600', letterSpacing: 0.3, marginTop: 1 },
   // Posted speed-limit sign — white plate, black border. Tucked BEHIND the speedo (same
@@ -1687,8 +1710,19 @@ const styles = StyleSheet.create({
   // either button however long the text gets.
   topCenterRow: { position: 'absolute', top: CAR_PILL_TOP, left: CAR_BAR_LEADING_W, right: CAR_BAR_TRAILING_W, alignItems: 'center' },
   statusRow: { position: 'absolute', top: CAR_PILL_TOP + CREW_PILL_H + NAV_GAP, left: 0, right: 0, alignItems: 'center' },
-  crewPill: { flexDirection: 'row', alignItems: 'center', height: CREW_PILL_H, paddingHorizontal: 10, borderRadius: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
-  crewPillText: { color: '#C7CCD1', fontSize: 11, fontWeight: '700' },
+  // marginHorizontal is the STRUCTURAL half of the fix: the parent topCenterRow is
+  // alignItems:'center', so Yoga subtracts these margins from the pill's available width.
+  // That both caps the pill and guarantees 12pt of clear air to the mic on the left and
+  // Search/End on the right ON TOP of the measured nav-bar insets — so a mis-measured
+  // inset can no longer produce contact, rather than merely being unlikely to.
+  crewPill: { flexDirection: 'row', alignItems: 'center', height: CREW_PILL_H, paddingHorizontal: 10, marginHorizontal: 12, borderRadius: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
+  // 11 -> 9 on CarPlay (AA keeps 11 — its canvas is only 213dp wide and everything there
+  // is already scaled down by hudScale, so shrinking twice would make it unreadable).
+  // Jeff, 8/13: "the v72 banner needs to be shrunk so it never collides with the other
+  // buttons". The string is "0 Crew · v72 · 1.24.0 · <ota tag>" — every segment after
+  // "Crew" is load-bearing for identifying which binary and bundle a tester is on, so the
+  // fix is size and margin, never dropping a field.
+  crewPillText: { color: '#C7CCD1', fontSize: IS_AA ? 11 : 9, fontWeight: '600' },
   crewPillTextWarn: { color: '#FF453A' },
   scoutPill: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   scoutDot: { width: 10, height: 10, borderRadius: 5 },
@@ -1712,8 +1746,18 @@ const styles = StyleSheet.create({
   maneuverBox: { width: 30, height: 30, borderRadius: 8, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: NAV_GAP },
   maneuverArrow: { color: '#0B0B0C', fontSize: 24, fontWeight: '900', lineHeight: 28, marginTop: -1 },
   topTextCol: { flex: 1, minWidth: 0 },
-  topDist: { color: '#F4F4F4', fontSize: 17, fontWeight: '800' },
-  topInst: { color: '#F4F4F4', fontSize: 12, fontWeight: '600', flexShrink: 1 },
+  // 17 -> 15 alongside topInst. "1.8 km" still measures ~49pt and stays the largest
+  // glyph in the box, and the shorter line box is what buys the vertical room for a
+  // future 2-line instruction inside TURN_ROW_H (42) without touching TURN_ROW_H —
+  // which is duplicated in CarMapView.tsx's CAR_BANNER_GAP_SCALABLE and must stay in sync.
+  topDist: { color: '#F4F4F4', fontSize: 15, fontWeight: '800' },
+  // 12 -> 10, Jeff 8/13: "the turnbyturn banner font size for the turn right onto....
+  // needs to be smaller". 10 is the floor, not a starting point — it is the same size
+  // already shipping as a legible car glyph (the speed/limit unit labels). Measured
+  // against the real system font, this takes "Turn right onto Bruce Street" from 165pt
+  // to 141pt; the text column is ~113pt on a 431pt canvas, so a long street name can
+  // still truncate. Fixing THAT needs two lines, not a smaller font — see topDist.
+  topInst: { color: '#F4F4F4', fontSize: 10, fontWeight: '600', flexShrink: 1 },
   topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'transparent', borderRadius: 14, overflow: 'hidden' },
   topChipText: { color: '#2DEC86', fontSize: 15, fontWeight: '800', letterSpacing: 1 },
   // ETA / arrival — tucked into the BOTTOM-RIGHT corner, small.
@@ -1730,5 +1774,4 @@ const styles = StyleSheet.create({
   // (the ETA and maneuver banner clear them vertically), so it carries the offset
   // instead of insetting the whole stack. Jeff's explicit requirement: the lane
   // guidance banner must never touch the buttons.
-  laneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: LANE_ROW_H, paddingHorizontal: 10, borderRadius: 10, overflow: 'hidden' },
 });

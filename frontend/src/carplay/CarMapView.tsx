@@ -245,9 +245,34 @@ const DEFAULT_MODE = 'dusk';
 // component with a fresh GL context (the 3D-100% retry; there is no 2D fallback).
 // The secondary CarPlay window can leave the Metal map silently blank, and
 // rnmapbox's onDidFailLoadingMap is a DEAD event on iOS — so we trust a POSITIVE
-// paint signal (onDidFinishRenderingFrameFully) and treat its absence as failure,
-// rather than waiting for an error that never comes. Retries (attempt > 0) get a
-// wider window — a slow head-unit boot shouldn't churn contexts back to back.
+// paint signal and treat its absence as failure, rather than waiting for an error
+// that never comes. Retries (attempt > 0) get a wider window — a slow head-unit boot
+// shouldn't churn contexts back to back.
+//
+// ⚠ WHICH paint signal, and why it matters (2026-08-13, measured):
+// This used to trust ONLY onDidFinishRenderingFrameFully. On iOS that event fires only
+// when `renderMode == .full` (RNMBXMapView.swift ~1175) — i.e. a frame where EVERY tile
+// has arrived. On weak cellular in a moving car the map paints .partial frames
+// indefinitely and never reaches .full inside the window, so the watchdog fired,
+// remounted, and THREW AWAY the partial progress the map had made — then did it again.
+// The retry was the thing preventing the map from ever finishing.
+//
+// Telemetry over 7 days: of 53 sessions, 12 emitted a retry, 8 recovered within a few
+// attempts, and 4 NEVER recovered — one logging 223 retries across 80 minutes, another
+// spanning 8 hours. All four were iOS, and all four emitted no other telemetry at all.
+// iOS-only is the tell: the Android binding raises DID_FINISH_RENDERING_FRAME_FULLY
+// unconditionally without inspecting renderMode, so Android Auto could never hit this.
+//
+// The question the watchdog is meant to answer is "did this GL context ever draw
+// ANYTHING?", not "did every tile arrive in 9 seconds?" — so a partial frame and a
+// loaded style now both count as alive.
+// ⚠ iOS ONLY. The Android binding emits { error } with no tileId/sourceId
+// (RNMBXMapView.kt), so on Android/Android Auto the tile-error branch below never
+// matches and behaviour is exactly as before. That is acceptable: the retry storm this
+// change fixes is structurally impossible on Android, whose binding raises
+// DID_FINISH_RENDERING_FRAME_FULLY without inspecting renderMode. Measured telemetry
+// agrees — all four never-recovering sessions were iOS.
+const TILE_ERR_LOG_MAX = 3;
 const PAINT_WATCHDOG_MS = 6000;
 const RETRY_WATCHDOG_MS = 9000;
 // Route-snap heading gate (Phase 1 road-snap) — mirrors the phone (ConvoyMapbox). In
@@ -262,7 +287,9 @@ type Props = {
   // Called when the GL map fails or never paints on the CarPlay window, so the
   // parent (CarSurface) can schedule a REMOUNT retry. Driven by onMapLoadingError
   // AND the positive-frame watchdog below (NOT onDidFailLoadingMap — dead on iOS).
-  onGLError?: () => void;
+  // `why` names the trigger so a retry row is diagnosable without another drive —
+  // 'gl-load' alone could not tell a watchdog timeout from a tile error.
+  onGLError?: (why: string) => void;
   // Which retry this mount is (0 = first). Retries widen the paint watchdog.
   attempt?: number;
 };
@@ -278,29 +305,40 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // firedRef ensures onGLError fires at most once. The map can never get stuck
   // blank: either it paints (watchdog cleared) or the timeout demotes to static.
   const paintedRef = useRef(false);
+  // Bounded budget for tile-error breadcrumbs. logEvent() is a Supabase INSERT, not a
+  // console line, so an unthrottled call on a per-failed-TILE event would put an HTTPS
+  // POST on the very link whose tiles are already failing — and bury the next real
+  // incident in noise. Every other breadcrumb in this file is bounded the same way
+  // (congProbeKey once per route, hadFixRef on transitions only, the retry log by its
+  // own backoff); this one has no business being the exception.
+  const tileErrLogs = useRef(0);
   const firedRef = useRef(false);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // `painted` (state, not just the ref) so the FIRST rendered frame forces a
   // re-render — the cold-start snap effect below + lockReadyRef both re-derive.
   const [painted, setPainted] = useState(false);
 
-  const fail = () => {
+  const fail = (why: string) => {
     if (firedRef.current || paintedRef.current) return;
     firedRef.current = true;
-    onGLError?.();
+    onGLError?.(why);
   };
   const markPainted = () => {
     if (paintedRef.current) return; // first frame only
     paintedRef.current = true;
     if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
     setPainted(true);
+    // Receipt for the recovery. Without it "the retries stopped" is unreadable — you
+    // cannot tell whether the next attempt painted or the drive simply ended.
+    if (attempt > 0) { try { logEvent(`carplay-live-paint attempt=${attempt}`); } catch {} }
   };
 
   useEffect(() => {
     // Start the watchdog from MOUNT (after the CarPlay handshake), not connect.
+    const ms = attempt > 0 ? RETRY_WATCHDOG_MS : PAINT_WATCHDOG_MS;
     watchdogRef.current = setTimeout(() => {
-      if (!paintedRef.current) fail();
-    }, attempt > 0 ? RETRY_WATCHDOG_MS : PAINT_WATCHDOG_MS);
+      if (!paintedRef.current) fail(`watchdog${ms}`);
+    }, ms);
     return () => { if (watchdogRef.current) clearTimeout(watchdogRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1247,12 +1285,43 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
         const w = e?.nativeEvent?.layout?.width;
         if (typeof w === 'number' && w > 0 && Math.abs(w - mapW) > 1) setMapW(w);
       }}
-      // Real native iOS events (onDidFailLoadingMap is a no-op on iOS — do NOT use):
-      // a rendered frame clears the watchdog; a style/tile load error triggers the
-      // parent's remount-retry (fail → onGLError → fresh CarMapView).
+      // Real native iOS events (onDidFailLoadingMap is a no-op on iOS — do NOT use).
+      // THREE independent signals now count as "this GL context is alive", because the
+      // watchdog's question is whether it ever drew anything — not whether the whole
+      // world arrived. See the header for the 8-hour retry loop that trusting only
+      // `...Fully` produced.
+      //   ...FrameFully  — a fully-resolved frame (renderMode == .full). Best signal.
+      //   ...Frame       — ALSO fires for .partial, i.e. the map is drawing tiles as
+      //                    they land. That is a working context by any definition.
+      //   ...LoadingStyle— the style resolved; a context that can load a style is alive.
       onDidFinishRenderingFrameFully={markPainted}
-      onMapLoadingError={() => fail()}
+      onDidFinishRenderingFrame={markPainted}
+      // ONE TILE IS NOT A DEAD MAP. This payload carries tileId/sourceId and fires for a
+      // single failed tile — a routine transient on cellular — and we were treating it as
+      // total GL death and destroying the map. Only an error naming neither a tile nor a
+      // source is a genuine style/load failure worth a remount.
+      // ⚠ The library TYPES this as `() => void`, but it is wrong: MapView's
+      // _handleOnChange does `func(payload)` (node_modules/@rnmapbox/maps/src/components/
+      // MapView.tsx ~1167), so the handler really does receive the error payload with
+      // tileId/sourceId. Hence the cast — the runtime contract is richer than the .d.ts.
+      onMapLoadingError={(((e: any) => {
+        const pl = e?.payload ?? e;
+        if (pl?.tileId || pl?.sourceId) {
+          // Log at most TILE_ERR_LOG_MAX rows, and only BEFORE the first paint — which is
+          // the only window where a tile error tells us anything about the question this
+          // telemetry exists to answer ("why did this context never come up?"). After the
+          // map is alive they are routine cellular noise. Swallowing them is the point of
+          // this branch; the budget only bounds how loudly we narrate it.
+          if (!paintedRef.current && tileErrLogs.current < TILE_ERR_LOG_MAX) {
+            tileErrLogs.current += 1;
+            try { logEvent(`carplay-map-tile-err src=${pl?.sourceId ?? '-'}`); } catch {}
+          }
+          return;
+        }
+        fail('maploaderr');
+      }) as unknown as () => void)}
       onDidFinishLoadingStyle={() => {
+        markPainted();
         // Re-apply the StyleImport config now that the style (and its basemap
         // import) actually exists — kills the flat/unlit first paint (see the
         // styleGen comment above) — and guarantee the first visible frame is

@@ -20,13 +20,12 @@ Files: `src/carplay/ConvoyCarPlay.tsx` (surface + templates), `src/carplay/CarMa
 │                                                              │
 │                                                              │
 │  ┌────────┐                                                  │
-│  │ 21°C   │  weather                          ┌────────────┐ │
-│  └────────┘                                   │ lane/arrow │ │
-│  ┌────────┐                          🚗       ├────────────┤ │
-│  │  0     │  speedo                  car      │ ETA banner │ │
-│  │ km/h   │                        (on the    ├────────────┤ │  ← car sits on
-│  └────────┘                         gap line) │ turn banner│ │    THIS gap line
-│                                               └────────────┘ │
+│  │ 21°C   │  weather                                          │
+│  └────────┘                                   ┌────────────┐ │
+│  ┌────────┐                          🚗       │ ETA banner │ │
+│  │  0     │  speedo                  car      ├────────────┤ │  ← car sits on
+│  │ km/h   │                        (on the    │ turn banner│ │    THIS gap line
+│  └────────┘                         gap line) └────────────┘ │
 │                                                    (crew) ● │  map buttons
 │                                                 (compass) ● │  (system, bottom-right)
 └──────────────────────────────────────────────────────────────┘
@@ -38,8 +37,15 @@ renders as "Search End". Head-unit verified; do not "fix" it.
 
 **Bottom-right** — crew (upper) + compass (lower), a plain 2-button array.
 
-**Banner stack** — right-anchored, bottom-anchored, three rows sharing ONE width:
-lane/arrow, ETA, turn (bottom).
+**Banner stack** — right-anchored, bottom-anchored, TWO rows sharing ONE width:
+ETA, turn (bottom).
+
+> **The lane/arrow row was REMOVED 2026-08-13** on every surface — phone, CarPlay and
+> Android Auto — at Jeff's request ("lets completely remove the turn arrow banner from
+> phone and carplay/aa"). It used to be the top row of this stack and appeared only
+> within 600 m of a maneuver. Its whole data path went with it: `carStore.lanes`, the
+> cold engine's lane fetch in `navNotification.ts`, and map.tsx's per-session Mapbox
+> Directions call. Do NOT re-add it from this spec's history.
 
 ---
 
@@ -53,7 +59,7 @@ lane/arrow, ETA, turn (bottom).
 | `CAR_RIGHT_INSET` | 48 | banner right edge → screen edge. Glass buttons start ~41pt in, so this leaves ~7pt |
 | `NAV_STACK_BOTTOM` | 8 | banner stack → screen bottom |
 | `NAV_GAP` | 8 | gap between every row (matches the system's own button pitch) |
-| `NAV_PILL_H` | 24 | **lane row and ETA row share this height** |
+| `NAV_PILL_H` | 24 | ETA row height (was shared with the removed lane row) |
 | `TURN_ROW_H` | 42 | taller: maneuver box + two text lines |
 | `NAV_STACK_MAX_W` | 260 | upper clamp; the stack grows to this on wide units |
 | `NAV_STACK_ABS_MIN_W` | 120 | floor; below this it is unreadable |

@@ -164,11 +164,7 @@ export type CarState = {
   // Glyph (unicode arrow) for the upcoming maneuver, shown in the car banner's green
   // arrow box (mirrors the phone's maneuver icon). undefined when not navigating.
   maneuverIcon?: string;
-  // Lane guidance for the upcoming maneuver ("3D-lanes lite") — same fail-closed
-  // pickLaneCue data the phone's lane row shows: active lanes glow green on the
-  // car banner. Written by the phone mirror (warm) or navNotification (cold).
-  // undefined/[] → the lane row is hidden.
-  lanes?: { dirs: string[]; active: boolean; activeDir?: string }[];
+  // (The `lanes` field was removed 2026-08-13 with the lane row on every surface.)
   // On-screen diagnostic breadcrumb for the CarPlay surface (which feed last wrote a
   // position, or which call failed). Shown in the logo fallback so the head-unit screen
   // self-reports why hasFix is false — no Mac/device log needed. e.g. 'fgfeed',

@@ -43,7 +43,7 @@ import {
 import { getDepartureBearing, noteCourse, orderRoutesForward, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
 import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy } from "../../src/locationPrivacy";
 import { subscribeBgFix } from "../../src/navNotification";
-import { fetchMapboxLaneCues, pickLaneCue, type LaneCue, type CongestionLevel } from "../../src/mapboxDirections";
+import { type CongestionLevel } from "../../src/mapboxDirections";
 import { logEvent } from "../../src/crashBreadcrumb";
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from "../../src/routeOptimizer";
 import { usePitstop } from "../../src/pitstop";
@@ -1460,22 +1460,11 @@ export default function MapScreen() {
     });
   }, [navMode]);
 
-  // ===== Lane guidance (Mapbox) =====
-  // One Directions call per navigation session fetches per-maneuver lane cues;
-  // we match the upcoming Google maneuver to the nearest cue at render time and
-  // show lanes only when they agree (pickLaneCue is fail-closed).
-  const [laneCues, setLaneCues] = useState<LaneCue[] | null>(null);
-  useEffect(() => {
-    const steps = activeRoute?.steps;
-    if (!(navMode === "turn-by-turn") || !steps || steps.length === 0) { setLaneCues(null); return; }
-    const o = steps[0].start, d = steps[steps.length - 1].end;
-    let cancelled = false;
-    const ctrl = new AbortController();
-    fetchMapboxLaneCues(o, d, { signal: ctrl.signal })
-      .then((c) => { if (!cancelled) setLaneCues(c); })
-      .catch(() => {});
-    return () => { cancelled = true; ctrl.abort(); };
-  }, [activeRoute, navMode]);
+  // ===== Lane guidance (Mapbox) — REMOVED 2026-08-13 =====
+  // Jeff: "lets completely remove the turn arrow banner from phone and carplay/aa."
+  // The lane cues fed only that row, so the per-session Mapbox Directions call that
+  // fetched them went with it. fetchMapboxLaneCues/pickLaneCue still exist in
+  // src/mapboxDirections.ts; nothing calls them.
 
   // ===== Proactive reroute recommendation (Nova) =====
   // While navigating, every 60s we re-check live traffic from the current
@@ -2171,19 +2160,6 @@ export default function MapScreen() {
     const id = setInterval(push, 2000);   // bounded write rate, no render coupling
     return () => clearInterval(id);
   }, [carConnected]);
-
-  // Mirror LANE GUIDANCE onto the CarPlay banner ("3D-lanes lite") — the same
-  // fail-closed pickLaneCue the phone's lane row uses, so the head unit shows
-  // the identical glowing-lane diagram as the turn approaches. null → hidden.
-  // (Lives up here with the other hooks — the render-time maneuverCoord below
-  // sits past the no-coords early return, where hooks are illegal.)
-  useEffect(() => {
-    if (navMode !== "turn-by-turn" || !tbt.active) { setCarState({ lanes: undefined }); return; }
-    const steps = activeRoute?.steps;
-    const end = steps && tbt.stepIndex < steps.length - 1 ? steps[tbt.stepIndex]?.end : null;
-    const lanes = end ? pickLaneCue(laneCues, { lat: end.lat, lng: end.lng }, tbt.distanceToManeuverM) : null;
-    setCarState({ lanes: lanes || undefined });
-  }, [laneCues, activeRoute, tbt.stepIndex, tbt.distanceToManeuverM, tbt.active, navMode]);
 
   // ---- Plot a pre-designed cruise route (Hub P3) ----
   // Consumes the cruisePlot one-shot (set by the arrival push handler or the
@@ -4319,7 +4295,6 @@ export default function MapScreen() {
         const upcoming = activeRoute.steps[stepIdx];
         const verb = maneuverVerb(upcoming?.maneuver);
         const instruction = upcoming?.html ? upcoming.html : verb;
-        const lanes = pickLaneCue(laneCues, maneuverCoord, tbt.distanceToManeuverM);
         return (
           <TurnByTurnNav
             maneuverIcon={maneuverIcon(upcoming?.maneuver, upcoming?.html)}
@@ -4332,7 +4307,6 @@ export default function MapScreen() {
             muted={navMuted}
             onToggleMute={() => setNavMuted((m) => { const nv = !m; void updateGlobalSettings({ novaMuted: nv }); return nv; })}
             onEnd={endNav}
-            lanes={lanes}
           />
         );
       })()}

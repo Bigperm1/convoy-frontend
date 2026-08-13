@@ -904,6 +904,12 @@ function toCarPeers(peers?: Record<string, any> | null): CarPeer[] {
       lng: typeof p?.lng === 'number' ? p.lng : undefined,
       heading: typeof p?.heading === 'number' ? p.heading : undefined,
       status: (p?.status === 'parked' ? 'parked' : 'live') as 'live' | 'parked',
+      // Appearance, so a COLD connect draws each peer's real car too. Without this the
+      // head unit would show everyone in the default paint the moment the phone screen
+      // backgrounds and this fallback feed takes over — a visible, confusing flip.
+      marker: (p?.marker === 'class' || p?.marker === 'arrow') ? p.marker as 'class' | 'arrow' : undefined,
+      cls: typeof p?.cls === 'string' ? p.cls : undefined,
+      color: p?.activeColor || p?.carColor || undefined,
     }))
     .filter((p) => p.id && p.handle);
 }

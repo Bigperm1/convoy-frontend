@@ -2139,7 +2139,11 @@ export default function MapScreen() {
       const list = peerListRef.current || [];
       // Coordinates rounded to ~11 m so GPS jitter alone cannot retrigger a write.
       const sig = list
-        .map((p) => `${p.user_id}:${p.lat?.toFixed(4) ?? ''}:${p.lng?.toFixed(4) ?? ''}:${p.status ?? ''}`)
+        // Appearance is part of the signature: a peer repainting their car or switching
+        // marker style must reach the head unit, and it never moves them, so a
+        // position-only signature would suppress the write entirely.
+        .map((p) => `${p.user_id}:${p.lat?.toFixed(4) ?? ''}:${p.lng?.toFixed(4) ?? ''}:${p.status ?? ''}`
+          + `:${(p as any).marker ?? ''}:${(p as any).cls ?? ''}:${(p as any).activeColor || (p as any).carColor || ''}`)
         .join('|');
       if (sig === lastCrewSigRef.current) return;
       lastCrewSigRef.current = sig;
@@ -2153,6 +2157,12 @@ export default function MapScreen() {
             lng: typeof p.lng === 'number' ? p.lng : undefined,
             heading: typeof p.heading === 'number' ? p.heading : undefined,
             status: (p.status === 'parked' ? 'parked' : 'live') as 'live' | 'parked',
+            // Mirror the SAME fields the phone map derives its peer look from, so the
+            // two surfaces cannot drift into different answers.
+            marker: ((p as any).marker === 'class' || (p as any).marker === 'arrow')
+              ? (p as any).marker as 'class' | 'arrow' : undefined,
+            cls: typeof (p as any).cls === 'string' ? (p as any).cls : undefined,
+            color: (p as any).activeColor || (p as any).carColor || undefined,
           })),
         'phone',
       );

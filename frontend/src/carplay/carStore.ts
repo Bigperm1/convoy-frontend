@@ -21,6 +21,26 @@ export type CarPeer = {
   lng?: number;
   heading?: number;
   status?: 'live' | 'parked';
+  // ── PEER APPEARANCE ON THE CAR SURFACE (Jeff, 2026-08-12) ─────────────────
+  // "on CarPlay when I hit the crew, it doesn't show the high resolution car. It
+  //  shows green dots instead for my peers."
+  //
+  // Correct, and the root cause was here rather than in the renderer: CarPeer carried
+  // only a position, so the car map had nothing to draw a CAR with and fell back to a
+  // GL circle. The phone builds each peer's look from their broadcast marker choice
+  // (ConvoyMapbox: marker === 'class' | 'arrow', else the paint colour), so the same
+  // three fields are mirrored here and the car surface resolves them to the SAME
+  // static assets the phone uses. No new asset pipeline, no snapshot machinery.
+  //
+  // Deliberately NOT mirrored: clsPri/clsSec/arrPri/arrSec. The phone tints those live
+  // because a MarkerView is a real RN view; reproducing them on the car needs the
+  // MBXImage snapshot dance (see the self class sprite in ConvoyMapbox — onReady,
+  // refresh(), and an iOS remount counter), which is the fiddliest code on that path.
+  // A correctly-shaped car in the right colour beats a green dot today; paint tinting
+  // is a follow-up, tracked in the CarMapView comment.
+  marker?: 'class' | 'arrow' | null;
+  cls?: string;
+  color?: string;
 };
 
 export type CarState = {

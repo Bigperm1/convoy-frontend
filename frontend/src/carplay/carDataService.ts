@@ -88,6 +88,12 @@ function emitPeers() {
       lng: typeof p.lng === 'number' ? p.lng : undefined,
       heading: typeof p.heading === 'number' ? p.heading : undefined,
       status: p.status === 'parked' ? 'parked' : 'live',
+      // Appearance, same reason as the warm mirror: the head unit must draw each peer's
+      // real car whether the phone screen is up or the cold service is driving.
+      marker: ((p as any).marker === 'class' || (p as any).marker === 'arrow')
+        ? (p as any).marker as 'class' | 'arrow' : undefined,
+      cls: typeof (p as any).cls === 'string' ? (p as any).cls : undefined,
+      color: (p as any).activeColor || (p as any).carColor || undefined,
     }));
   setCarPeers(out, 'service');
 }

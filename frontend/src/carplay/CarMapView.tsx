@@ -25,14 +25,14 @@ import Mapbox, {
   Camera,
   ShapeSource,
   LineLayer,
-  CircleLayer,
+  SymbolLayer,
   VectorSource,
   Models,
 } from '@rnmapbox/maps';
 import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { usePowerMode } from '../powerMode';
-import { getVehicleModelUrl, getVehicleModelKey, getVehiclePngOrDefault, vehiclePngScale } from '../vehicleAssets';
+import { getVehicleModelUrl, getVehicleModelKey, getVehiclePngOrDefault, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
   ROUTE_GREEN_CORE,
@@ -391,6 +391,47 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // Sprite id for the flat car. Registered as a Mapbox image below — the car map had
   // no <Images> at all before this, so the sprite path could not have worked.
   const carFlatImg = 'self_car_flat_' + getVehicleModelKey(s.selfCarColor);
+
+  // ── PEERS AS REAL CARS, NOT GREEN DOTS (Jeff, 2026-08-12) ───────────────────
+  // "on CarPlay when I hit the crew, it doesn't show the high resolution car. It shows
+  //  green dots instead for my peers."
+  //
+  // They were a CircleLayer, and the comment there defended it as "cheap, view-sync-safe
+  // and glanceable". Cheap and view-sync-safe are real constraints — a MarkerView is an
+  // RN view and does NOT sync reliably on the CarPlay window, which is why the phone's
+  // peer component cannot simply be reused here. But "glanceable" was doing a lot of
+  // work: a green dot cannot tell you WHICH crew member it is, and this surface already
+  // draws a full 3D model for the driver's own car, so it was never a capability limit.
+  //
+  // Both appearance sources are ORDINARY STATIC ASSETS — CLASS_TOPDOWN[class] and the
+  // per-colour GRC photos are require()d PNGs — so they register through the same plain
+  // `Mapbox.Images` map the self flat car already uses on this surface, and a SymbolLayer
+  // draws them in GL. That keeps every property the circle had (GL, no view sync, one
+  // layer for all peers) while showing an actual car.
+  //
+  // Registering only DISTINCT images matters: a convoy of eight cars in three colours
+  // registers three, not eight.
+  const peerImages = React.useMemo(() => {
+    const out: Record<string, any> = {};
+    for (const p of s.peers || []) {
+      if (typeof p.lat !== 'number' || typeof p.lng !== 'number') continue;
+      const clsAsset = p.marker === 'class' && p.cls ? (CLASS_TOPDOWN as any)[p.cls] : undefined;
+      if (clsAsset) out['peer_cls_' + p.cls] = clsAsset;
+      else out['peer_car_' + getVehicleModelKey(p.color)] = getVehiclePngOrDefault(p.color);
+    }
+    return out;
+  }, [s.peers]);
+
+  // Which registered image (and how big) each peer draws with. Kept next to peerImages
+  // so the two can never disagree about a name.
+  const peerImageFor = (p: { marker?: string | null; cls?: string; color?: string }) => {
+    const clsAsset = p.marker === 'class' && p.cls ? (CLASS_TOPDOWN as any)[p.cls] : undefined;
+    if (clsAsset) return { img: 'peer_cls_' + p.cls, size: 1 };
+    // vehiclePngScale normalises the five photo crops to a common ink width, exactly as
+    // the phone does for its peer markers — without it the colours are visibly
+    // different sizes on the map.
+    return { img: 'peer_car_' + getVehicleModelKey(p.color), size: vehiclePngScale(p.color) };
+  };
 
   // ── CAR SIZED TO THE CANVAS (2026-07-30) ────────────────────────────────────
   // Say Phin, on the build-69 head unit: "the bones are there on the car screen,
@@ -1190,7 +1231,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
 
       {/* Top-down car PNG for the flat (not-routing) marker — the same asset and the
           same registration pattern the phone uses (ConvoyMapbox :2676). */}
-      <Mapbox.Images images={{ [carFlatImg]: getVehiclePngOrDefault(s.selfCarColor) }} />
+      <Mapbox.Images images={{ [carFlatImg]: getVehiclePngOrDefault(s.selfCarColor), ...peerImages }} />
 
       {/* 3D self car + the native location feed, BOTH driven off ONE rAF-eased pose
           (SelfCarModel, reused verbatim from the phone). This is THE smoothness fix:
@@ -1372,13 +1413,12 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           handlers are needed on the head unit (glanceable, and CarPlay doesn't deliver
           touches to this surface anyway). Keys are id-stable so the lockstep camera
           re-renders don't remount them. */}
-      {/* Convoy peers (CarPlay-standalone Wave 1) — the crew's live positions on the
-          head-unit map, fed warm by the phone mirror or cold by carDataService. GL
-          circles (not MarkerViews): cheap, view-sync-safe on the car window, and
-          glanceable. circleEmissiveStrength is REQUIRED — Standard's night/dusk
-          light preset renders unlit GL layers near-black (the "hazards are black"
-          bug). Parked peers dim to a fainter pin. Drawn in the 'top' slot so dots
-          never hide under the route ribbon. */}
+      {/* Convoy peers — the crew's live positions on the head-unit map, fed warm by the
+          phone mirror or cold by carDataService. Each peer draws as their ACTUAL car
+          (class photo, or the GRC photo in their paint) via a GL SymbolLayer over
+          registered static images — see peerImages / peerImageFor above for why this is
+          a symbol and not the MarkerView the phone uses. Kept in the 'top' slot so a
+          car never hides under the route ribbon. */}
       {(s.peers || []).some((p) => typeof p.lat === 'number' && typeof p.lng === 'number') && (
         <ShapeSource
           id="car-peers"
@@ -1396,23 +1436,41 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
                 // Mapbox feature ids must be numeric; nothing here uses feature-state,
                 // so the index is fine.
                 id: i,
-                properties: { parked: p.status === 'parked' ? 1 : 0 },
+                properties: {
+                  parked: p.status === 'parked' ? 1 : 0,
+                  ...peerImageFor(p),
+                  // A parked car has no meaningful heading; 0 would snap it north, so
+                  // keep whatever we last knew (the phone makes the same choice).
+                  hdg: typeof p.heading === 'number' && Number.isFinite(p.heading) ? p.heading : 0,
+                },
                 geometry: { type: 'Point' as const, coordinates: [p.lng as number, p.lat as number] },
               })),
           } as any}
         >
-          <CircleLayer
-            id="car-peer-dots"
+          <SymbolLayer
+            id="car-peer-cars"
             slot="top"
             style={{
-              circleRadius: 8,
-              circleColor: '#2DEC86',
-              circleOpacity: ['case', ['==', ['get', 'parked'], 1], 0.45, 1] as any,
-              circleStrokeWidth: 2.5,
-              circleStrokeColor: '#FFFFFF',
-              circleStrokeOpacity: ['case', ['==', ['get', 'parked'], 1], 0.45, 1] as any,
-              circlePitchAlignment: 'map',
-              circleEmissiveStrength: 1,
+              iconImage: ['get', 'img'] as any,
+              iconSize: ['get', 'size'] as any,
+              // MAP alignment for both, so a peer's car points down the road it is
+              // actually driving and stays glued to the tarmac as the chase camera
+              // rotates — screen alignment would leave them facing a fixed screen
+              // direction, which is what makes a marker read as a sticker.
+              iconRotate: ['get', 'hdg'] as any,
+              iconRotationAlignment: 'map',
+              iconPitchAlignment: 'map',
+              // Cars must never be dropped for crowding: two peers stopped at the same
+              // light is normal and losing one of them looks like the crew feed broke.
+              iconAllowOverlap: true,
+              iconIgnorePlacement: true,
+              // Same 0.45 parked dim the circle had, and the same rule the phone uses.
+              iconOpacity: ['case', ['==', ['get', 'parked'], 1], 0.45, 1] as any,
+              // REQUIRED, same as every other GL layer on this surface: Standard's
+              // night/dusk light preset renders unlit layers near-black — the original
+              // "hazards are black" bug. A car photo silently turning into a dark blob
+              // at dusk would be worse than the dot it replaced.
+              iconEmissiveStrength: 1,
             } as any}
           />
         </ShapeSource>

@@ -431,27 +431,50 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // device-scale snapshot "so per-class asset resolution never leaks into the map's iconSize
   // math". Deriving it means a future asset at any resolution is right without a magic
   // number to remember.
-  const iconSizeForAsset = (asset: any, targetPt = PEER_ICON_PT) => {
+  const iconSizeForAsset = (asset: any, targetPt: number) => {
     try {
       const r = RNImage.resolveAssetSource(asset);
-      const pt = (r?.width || 0) / (r?.scale || 1);      // the asset's size in POINTS
+      // ⚠ `width` IS ALREADY POINTS — do NOT divide it by `scale`.
+      // Round 2 of the review caught exactly that. Metro stores the registry width as
+      // pixels/scales[0] (metro/src/Assets.js), so JS already receives points; `scale` is
+      // separately the DEVICE variant picked by pickScale(asset.scales, PixelRatio.get())
+      // and has no relationship to `width`. Dividing gave iconSize 3.0 on a 3x phone — a
+      // 132pt car, which on the 213x107dp Android Auto canvas is taller than the canvas
+      // itself. The class asset only looked correct because classes-v2 is single-scale,
+      // the one family where width/scale happens to equal width.
+      // Two proofs live in this repo, and I had walked past both:
+      //  - ConvoyMapbox: "hazard/police PNGs are 512px (->0.078 for ~40pt), the
+      //    speed_camera PNG is 44px (->0.64 for ~28pt)" — and speed_camera IS multi-scale
+      //    (44/88/132). 28/44 = 0.64. Shipped, working code: the divisor is raw width.
+      //  - One line from here, the SAME GRC photo is drawn as the driver's own flat car at
+      //    spriteSize = vehiclePngScale (~1.0). Self 1.0 vs peer 3.0, same asset, same
+      //    registration, same layer.
+      const pt = r?.width || 0;
       if (pt > 0) return Math.round((targetPt / pt) * 1000) / 1000;
     } catch {}
-    // Unresolvable → assume it is already point-sized rather than risk a 512pt icon.
-    return 1;
+    // Unresolvable → 0 so the icon is INVISIBLE rather than 512pt. A missing car is a
+    // cosmetic gap; a car covering the head unit hides the route.
+    return 0;
   };
 
-  // Resolve a peer to { asset, image name }. ONE place, so peerImages and peerImageFor can
+  // Resolve a peer to { name, asset, kind }. ONE place, so peerImages and peerImageFor can
   // never disagree about a name — a feature naming an unregistered image draws nothing.
   // canonicalClass mirrors the phone: a legacy/unknown class name still maps to a real
   // class asset instead of silently falling back to the paint photo.
+  // `kind` reports what ACTUALLY resolved, not what was asked for: a class peer whose asset
+  // is missing falls through to the photo, and the ink correction below must follow the
+  // asset that resolved rather than the marker that was requested.
   const peerAppearance = (p: { marker?: string | null; cls?: string; color?: string }) => {
     if (p.marker === 'class') {
       const key = canonicalClass(p.cls);
       const asset = (CLASS_TOPDOWN as any)[key];
-      if (asset) return { name: 'peer_cls_' + key, asset };
+      if (asset) return { name: 'peer_cls_' + key, asset, kind: 'class' as const };
     }
-    return { name: 'peer_car_' + getVehicleModelKey(p.color), asset: getVehiclePngOrDefault(p.color) };
+    return {
+      name: 'peer_car_' + getVehicleModelKey(p.color),
+      asset: getVehiclePngOrDefault(p.color),
+      kind: 'photo' as const,
+    };
   };
 
   // Register only DISTINCT images: eight cars in three colours registers three, not eight.
@@ -463,14 +486,34 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
       if (asset) out[name] = asset;
     }
     return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.peers]);
 
-  const peerImageFor = (p: { marker?: string | null; cls?: string; color?: string }) => {
-    const { name, asset } = peerAppearance(p);
+  const allMapImages = React.useMemo(
+    () => ({ [carFlatImg]: getVehiclePngOrDefault(s.selfCarColor), ...peerImages }),
+    [carFlatImg, s.selfCarColor, peerImages],
+  );
+
+  // canvasScale is uiScale: the Android Auto canvas correction. Passed in rather than closed
+  // over because uiScale is declared below this point, and a TDZ bug here would be invisible
+  // until a peer appeared.
+  const peerImageFor = (
+    p: { marker?: string | null; cls?: string; color?: string },
+    canvasScale: number,
+  ) => {
+    const { name, asset, kind } = peerAppearance(p);
     // vehiclePngScale normalises the five photo crops to a common ink width (the phone does
-    // the same); it is an INK correction and multiplies the point-size correction above.
-    const ink = p.marker === 'class' ? 1 : vehiclePngScale(p.color);
-    return { img: name, size: Math.round(iconSizeForAsset(asset) * ink * 1000) / 1000 };
+    // the same). It is an INK correction and multiplies the point-size correction above —
+    // and it applies ONLY to the photos it was measured against.
+    const ink = kind === 'photo' ? vehiclePngScale(p.color) : 1;
+    // ⚠ THE ANDROID AUTO CORRECTION, and round 2 settled a round-1 contradiction to get
+    // here. uiScale = hudScaleFor(mapW, mapH) is 1 on CarPlay and ~0.446 on the measured
+    // 213x107dp AA canvas, and in this file it was applied ONLY to the self car's model
+    // scale and the camera padding — never to an icon. Without it a peer keeps a fixed 44pt
+    // while the driver's own car shrinks with the canvas, so on AA the crew would tower over
+    // the driver on a canvas a quarter the area of CarPlay's.
+    const target = PEER_ICON_PT * (canvasScale > 0 ? canvasScale : 1);
+    return { img: name, size: Math.round(iconSizeForAsset(asset, target) * ink * 1000) / 1000 };
   };
 
   // ── CAR SIZED TO THE CANVAS (2026-07-30) ────────────────────────────────────
@@ -1271,7 +1314,10 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
 
       {/* Top-down car PNG for the flat (not-routing) marker — the same asset and the
           same registration pattern the phone uses (ConvoyMapbox :2676). */}
-      <Mapbox.Images images={{ [carFlatImg]: getVehiclePngOrDefault(s.selfCarColor), ...peerImages }} />
+      {/* Memoised: this object is handed to the native image store, and a fresh identity on
+          every render (12 Hz while navigating) invites needless re-registration of every
+          car photo. Two review lenses flagged it independently. */}
+      <Mapbox.Images images={allMapImages} />
 
       {/* 3D self car + the native location feed, BOTH driven off ONE rAF-eased pose
           (SelfCarModel, reused verbatim from the phone). This is THE smoothness fix:
@@ -1478,7 +1524,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
                 id: i,
                 properties: {
                   parked: p.status === 'parked' ? 1 : 0,
-                  ...peerImageFor(p),
+                  ...peerImageFor(p, uiScale),
                   // ⚠ An ABSENT heading falls back to 0 = due north. The comment here used
                   // to claim it kept the last known value; it does not, and the store has no
                   // per-peer history to keep. Accepted because the feed sends a heading

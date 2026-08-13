@@ -30,7 +30,7 @@ import Mapbox, {
   Models,
 } from '@rnmapbox/maps';
 import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
-import { canonicalClass, autoMapMode } from '../settings';
+import { canonicalClass } from '../settings';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { usePowerMode } from '../powerMode';
 import { getVehicleModelUrl, getVehicleModelKey, getVehiclePngOrDefault, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
@@ -237,25 +237,23 @@ export function aaZoomOutFor(w: number): number {
   if (Platform.OS !== 'android' || !(w > 0) || w >= CAR_REF_W) return 0;
   return Math.min(AA_ZOOM_OUT_MAX, Math.log2(CAR_REF_W / w));
 }
-// Cache miss on a cold bg JS context can leave mapMode undefined, so the car needs a
+// Cache miss on a cold bg JS context can leave mapMode undefined, so the car needs SOME
 // fallback rather than a bare default style.
 //
-// ⚠ IT USED TO BE THE CONSTANT 'dusk', described in this comment as "the phone's default
-// look". That was WRONG, and provably so: DEFAULT_SETTINGS.mapMode is 'auto', and
-// settings.ts even MIGRATES a stored 'dusk' back to 'auto'. So the car fell back to the
-// one value the phone had deliberately moved away from — and because 'dusk' is a fixed
-// twilight preset, a driver whose mapMode never reached the car got a purple map in
-// broad daylight while their phone showed the day style. (Jeff's head-unit photo,
-// 2026-08-13, ~9am in full sun.) That also breaks the standing "CarPlay matches the
-// phone" rule in the most visible way possible.
+// ⚠ DO NOT "FIX" THIS TO autoMapMode(). I tried that on 2026-08-13 and it was a
+// regression. The reasoning was that 'dusk' is stale — DEFAULT_SETTINGS.mapMode is
+// 'auto', and load() migrates a stored 'dusk' to 'auto' — which is all true, and still
+// the wrong conclusion. That migration is ONE-TIME (guarded by baselineMigrated), so a
+// deliberate pick is preserved, and drivers do deliberately pick dusk: Jeff runs dusk
+// permanently ("I always have it on dusk"). For them a time-based fallback would hand
+// back a bright DAY map, while the constant happens to be exactly right.
 //
-// autoMapMode() is the SAME function the phone's own 'auto' default resolves through, so
-// the fallback now agrees with the phone by construction instead of by a hardcoded guess.
-// Called per render, never cached at module scope — a constant evaluated once at import
-// would freeze the preset at whatever time the app happened to launch and then be wrong
-// for the rest of a long drive. It never returns 'satellite', so the Standard-vs-imagery
-// branch below is unaffected.
-const defaultMapMode = () => autoMapMode();
+// Any hardcoded fallback is a guess. The only non-guess is the driver's own last-known
+// choice, persisted — worth building IF this fallback is ever shown to actually fire.
+// It has never been observed to: the purple-map-in-daylight that prompted the change
+// turned out to be mapMode arriving correctly and the car faithfully matching a phone
+// set to dusk. Nothing was broken. Leave it alone until there is evidence.
+const DEFAULT_MODE = 'dusk';
 // Positive-frame watchdog: if the GL map hasn't painted a real frame within this
 // window after mount, report failure via onGLError — the parent then REMOUNTS this
 // component with a fresh GL context (the 3D-100% retry; there is no 2D fallback).
@@ -405,7 +403,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // Base-map style — mirror the phone's useStandard logic so the car matches the
   // driver's chosen look. satellite → SatelliteStreet imagery; everything else →
   // Standard with the matching light preset (set via <StyleImport> below).
-  const mode = s.mapMode ?? defaultMapMode();
+  const mode = s.mapMode ?? DEFAULT_MODE;
   const useStandard = mode !== 'satellite';
   const styleURL = useStandard ? 'mapbox://styles/mapbox/standard' : Mapbox.StyleURL.SatelliteStreet;
   // Self-marker style mirrors the phone (settings.selfMarkerType). Arrow → the green

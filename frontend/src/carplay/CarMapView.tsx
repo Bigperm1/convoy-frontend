@@ -30,7 +30,7 @@ import Mapbox, {
   Models,
 } from '@rnmapbox/maps';
 import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
-import { canonicalClass } from '../settings';
+import { canonicalClass, autoMapMode } from '../settings';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { usePowerMode } from '../powerMode';
 import { getVehicleModelUrl, getVehicleModelKey, getVehiclePngOrDefault, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
@@ -237,9 +237,25 @@ export function aaZoomOutFor(w: number): number {
   if (Platform.OS !== 'android' || !(w > 0) || w >= CAR_REF_W) return 0;
   return Math.min(AA_ZOOM_OUT_MAX, Math.log2(CAR_REF_W / w));
 }
-// Cache miss on a cold bg JS context can leave mapMode undefined → fall back to the
-// phone's default look ('dusk'), so the car never shows a bare default style.
-const DEFAULT_MODE = 'dusk';
+// Cache miss on a cold bg JS context can leave mapMode undefined, so the car needs a
+// fallback rather than a bare default style.
+//
+// ⚠ IT USED TO BE THE CONSTANT 'dusk', described in this comment as "the phone's default
+// look". That was WRONG, and provably so: DEFAULT_SETTINGS.mapMode is 'auto', and
+// settings.ts even MIGRATES a stored 'dusk' back to 'auto'. So the car fell back to the
+// one value the phone had deliberately moved away from — and because 'dusk' is a fixed
+// twilight preset, a driver whose mapMode never reached the car got a purple map in
+// broad daylight while their phone showed the day style. (Jeff's head-unit photo,
+// 2026-08-13, ~9am in full sun.) That also breaks the standing "CarPlay matches the
+// phone" rule in the most visible way possible.
+//
+// autoMapMode() is the SAME function the phone's own 'auto' default resolves through, so
+// the fallback now agrees with the phone by construction instead of by a hardcoded guess.
+// Called per render, never cached at module scope — a constant evaluated once at import
+// would freeze the preset at whatever time the app happened to launch and then be wrong
+// for the rest of a long drive. It never returns 'satellite', so the Standard-vs-imagery
+// branch below is unaffected.
+const defaultMapMode = () => autoMapMode();
 // Positive-frame watchdog: if the GL map hasn't painted a real frame within this
 // window after mount, report failure via onGLError — the parent then REMOUNTS this
 // component with a fresh GL context (the 3D-100% retry; there is no 2D fallback).
@@ -389,7 +405,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // Base-map style — mirror the phone's useStandard logic so the car matches the
   // driver's chosen look. satellite → SatelliteStreet imagery; everything else →
   // Standard with the matching light preset (set via <StyleImport> below).
-  const mode = s.mapMode ?? DEFAULT_MODE;
+  const mode = s.mapMode ?? defaultMapMode();
   const useStandard = mode !== 'satellite';
   const styleURL = useStandard ? 'mapbox://styles/mapbox/standard' : Mapbox.StyleURL.SatelliteStreet;
   // Self-marker style mirrors the phone (settings.selfMarkerType). Arrow → the green

@@ -496,7 +496,26 @@ const ZOOM_MAX = CHASE_ZOOM_CLAMP_MAX;
 // so zoom + pitch are instead low-passed toward the speed target in pushCam — a
 // gradual premium glide to the correct zoom/angle instead of a snap. Larger =
 // smoother/laggier. OTA-tunable. (Position + heading stay instant/eased as before.)
-const CAM_SMOOTH_TAU_MS = 340;
+//
+// ── 340 -> 1400 (Jeff, 2026-08-14) ──────────────────────────────────────────────
+// "the zoom feels not buttery smooth, looks like we are trying to make it zoom in and
+// out (not native) or premium feeling."
+//
+// Cause: the zoom TARGET is derived from RAW GPS speed — `userSpeedMs={coords?.speed}`
+// on the phone, `s.speedMs` on the car — with no smoothing anywhere in between. A GPS
+// speed reading jitters constantly at a steady cruise (98, 102, 99, 103 km/h), and
+// chaseZoomForSpeed maps every one of those to a DIFFERENT zoom level. At tau 340 ms
+// this filter settles in about a second, so it faithfully chased each noisy target and
+// the camera crept in and out forever. The curve was never the problem; its input was.
+//
+// 1400 ms puts the filter well below the noise: a steady cruise now holds a steady
+// frame, while a real change (merging onto a highway, slowing for a turn) still arrives
+// over ~4 s, which is how native map apps feel. Nothing else changes — position and
+// heading remain instant/eased, so the car stays glued to the locked centre.
+//
+// This constant lives in SelfCarModel, which BOTH the phone map and CarMapView render,
+// so this one value fixes the phone, CarPlay and Android Auto together.
+const CAM_SMOOTH_TAU_MS = 1400;
 
 // Route-trim ease: linear from prev→cur over the measured fix gap, clamped at both
 // ends. Deliberately the SAME shape and clock as SelfCarModel's position ease, so the

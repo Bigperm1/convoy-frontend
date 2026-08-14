@@ -38,7 +38,7 @@ import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLat
 import { routeTrimLeadM, routeTrimFadeM } from "./routeTrim";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
-import { getPowerMode } from "./powerMode";
+import { getPowerMode, usePowerMode } from "./powerMode";
 import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
 import { ClassSprite } from "./classLayers";
 import { getPaintedArrowUri } from "./arrowModel";
@@ -1769,6 +1769,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // (once snapped, stay snapped out to the wider RELEASE distance). roadInputsRef feeds the
   // throttled interval with the latest raw pose without it re-subscribing each render.
   const mapRef = useRef<any>(null);
+  // Reactive power mode for the render-rate cap on <MapView> below (premium 60 / eco 30).
+  const phonePowerMode = usePowerMode();
   // The LOCKED road polyline. The render projects the LIVE raw fix onto it each frame, so the
   // marker slides smoothly along the road; the interval only swaps WHICH road is locked. A ref
   // mirror lets the interval read the current lock without re-subscribing.
@@ -2775,6 +2777,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         style={styles.map}
         styleURL={styleURL}
         projection="mercator"
+        // HEAT (2026-08-14). The CAR map has carried this cap since the powerMode work;
+        // the PHONE map — the surface actually in the driver's hand in a hot car — never
+        // did, so Mapbox rendered at the display's native refresh: up to 120fps on a
+        // ProMotion iPhone, uncapped, for the whole drive. Same values as CarMapView
+        // (premium 60 / eco 30) so plugged-in keeps the premium feel and battery keeps
+        // the eco cap. usePowerMode() is reactive — plugging in mid-drive re-renders.
+        preferredFramesPerSecond={phonePowerMode === 'premium' ? 60 : 30}
         scaleBarEnabled={false}
         compassEnabled={false}
         logoEnabled

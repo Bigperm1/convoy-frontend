@@ -530,6 +530,14 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   };
 
   // Register only DISTINCT images: eight cars in three colours registers three, not eight.
+  //
+  // HEAT (2026-08-14): this memo was keyed on `[s.peers]` — ARRAY IDENTITY — and the crew
+  // feeds push a fresh array every ~2 s even when nobody changed appearance. Every push
+  // minted a new peerImages object → new allMapImages → a prop change on <Mapbox.Images>
+  // → native re-registration of every car image, all drive long. Key the memo on the
+  // sorted IMAGE-NAME signature instead: same names → same object reference → no native
+  // churn. A peer changing paint/class changes their image name, so updates still land.
+  const peerImgSigRef = useRef<{ sig: string; images: Record<string, any> }>({ sig: '', images: {} });
   const peerImages = React.useMemo(() => {
     const out: Record<string, any> = {};
     for (const p of s.peers || []) {
@@ -537,6 +545,9 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
       const { name, asset } = peerAppearance(p);
       if (asset) out[name] = asset;
     }
+    const sig = Object.keys(out).sort().join('|');
+    if (sig === peerImgSigRef.current.sig) return peerImgSigRef.current.images;
+    peerImgSigRef.current = { sig, images: out };
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.peers]);

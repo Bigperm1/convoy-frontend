@@ -57,6 +57,12 @@ export type WeatherCondition = {
 };
 
 const REFRESH_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes (stationary refresh cadence)
+// HEAT (2026-08-14): floor between MOVEMENT-triggered fetches. The effect below re-runs on
+// every GPS-driven lat/lng change and doFetch() fires immediately, so the ~300 m movement
+// gate alone meant one HTTPS fetch every ~11 s at highway speed (~330/hr) — and the 3-min
+// interval was torn down and re-armed on every tick, so it never fired while moving. One
+// weather update per minute is indistinguishable on the chip; the request load is ~5x lower.
+const MOVE_FETCH_FLOOR_MS = 60 * 1000;
 const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
 // ---- Fetch current conditions from OpenWeather (/data/2.5/weather) ----
@@ -137,7 +143,10 @@ export function useWeatherLayer(
       // (60 calls/min) easily absorbs this even at highway speed.
       const dlat = Math.abs((lat ?? 0) - (lastLatRef.current ?? 0));
       const dlng = Math.abs((lng ?? 0) - (lastLngRef.current ?? 0));
-      return dlat > 0.003 || dlng > 0.003; // ~300 m in degrees
+      const moved = dlat > 0.003 || dlng > 0.003; // ~300 m in degrees
+      // Movement refetch rides the time floor; staleness (above) is unaffected, so a
+      // parked car still refreshes on the 3-min interval exactly as before.
+      return moved && Date.now() - (weather?.fetchedAt ?? 0) > MOVE_FETCH_FLOOR_MS;
     };
 
     const doFetch = async () => {

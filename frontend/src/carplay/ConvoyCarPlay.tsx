@@ -1151,7 +1151,19 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
     if ((getCarState().peers || []).length > 0) return;  // presence feed owns it
     setCarPeers(incoming, 'phone');
   }, [peers]);
-  useEffect(() => { setCarHazards(hazards || [], 'phone'); }, [hazards]);
+  // HEAT (2026-08-14): map.tsx passes `hazards.filter(isHazardVisible)` — a NEW array
+  // identity on every phone render — so this effect fired, and setCarHazards notified
+  // every car-surface listener, at the phone's render rate. Signature-gate it (same
+  // pattern as the crew push in map.tsx): write only when the CONTENT changes.
+  const hazardsSigRef = useRef('');
+  useEffect(() => {
+    const sig = (hazards || [])
+      .map((h: any) => `${h.id}:${h.confirms ?? 0}:${h.disputes ?? 0}`)
+      .join('|');
+    if (sig === hazardsSigRef.current) return;
+    hazardsSigRef.current = sig;
+    setCarHazards(hazards || [], 'phone');
+  }, [hazards]);
 
   // ---- position mirror: ADDITIVE ONLY ----
   // Writes selfLat/selfLng/heading ONLY when the phone has a real fix. carStore is a

@@ -133,6 +133,11 @@ protocol ConvoyHostedVC: AnyObject {
 
 enum ConvoyRNHost {
   static var started = false
+  // Cold-CarPlay host wait (see mount's CarPlay branch). 0.05 s x 400 = 20 s ceiling,
+  // comfortably past app.json's fallbackToCacheTimeout of 15 s so a slow-network cold
+  // launch still gets the OTA-selected bundle instead of falling back to embedded.
+  static let HOST_WAIT_INTERVAL: TimeInterval = 0.05
+  static let HOST_WAIT_MAX_TICKS = 400
 
   static weak var carWindowRef: UIWindow?
   static var carRepaintBudget = 0
@@ -336,8 +341,39 @@ enum ConvoyRNHost {
       let bootWindow = UIWindow(frame: UIScreen.main.bounds)
       appDelegate.window = bootWindow
       factory.startReactNative(withModuleName: moduleName, in: bootWindow, launchOptions: nil)
-      // Deferred one runloop so the freshly started host can mint the car surface.
-      DispatchQueue.main.async {
+      // ── WAIT FOR EXPO-UPDATES TO OWN BUNDLE SELECTION (2026-08-13) ──────────
+      // The comment here used to say "the freshly started host" and dispatch on the
+      // very next runloop turn. That premise was FALSE and it was silently shipping
+      // stale JS.
+      //
+      // Under expo-updates, startReactNative does NOT create a host: its react
+      // delegate's createReactRootView kicks off AppController.start() ASYNCHRONOUSLY
+      // and returns a DEFERRED splash view. So the 'superView(...)' below was the call
+      // that actually created the RCTHost — and it does so by going straight to
+      // [super viewWithModuleName:], bypassing the updates delegate. The host then
+      // resolves its bundle via '[reactDelegate bundleURL] ?: [super bundleURL]', and
+      // the delegate half is AppController.launchAssetUrl(), which is STILL NIL until
+      // the launcher resolves. It therefore fell through to the EMBEDDED main.jsbundle
+      // and pinned the whole process — phone surface included — to old JS.
+      //
+      // Expo's own guard against this is 'assert(reactHost == nil)', and Swift 'assert'
+      // is compiled out under -O, i.e. in every Release build. It never fired for us.
+      //
+      // Symptom that exposed it: a device provably on the OTA (native reports the OTA
+      // updateId, and our version pill printed the OTA tag) drew CarPlay peers with a
+      // CircleLayer that exists ONLY in build 72's embedded bundle. Every instrument
+      // reports native's INTENT; none of them reports the bundle actually evaluated.
+      //
+      // ⚠ It is a RACE, not a certainty — a CarPlay-first launch sometimes wins and
+      // runs the OTA correctly. That is why it looked intermittent and unreproducible.
+      //
+      // Fix: let expo-updates create the host (exactly as the phone branch does, which
+      // is why phone-first was never affected), and only mint the car surface once a
+      // host exists. Bounded, and it FALLS BACK to the old behaviour rather than
+      // leaving the head unit blank — a stale-JS car map beats no car map, and the
+      // no-2D-fallback rule means we must always end up with something live.
+      var hostWaitTicks = 0
+      func mountCarSurface() {
         let carRoot: UIView
         if let expoFactory = factory.rootViewFactory as? ExpoReactRootViewFactory {
           carRoot = expoFactory.superView(withModuleName: moduleName, initialProperties: nil, launchOptions: [:])
@@ -350,6 +386,30 @@ enum ConvoyRNHost {
         carVC.view.setNeedsLayout()
         carVC.view.layoutIfNeeded()
       }
+      // Poll the MAIN queue for the host expo-updates is creating. KVO on a private
+      // property would be sharper but also brittle across Expo versions; this is a
+      // cheap read on a path that runs once per cold CarPlay connect.
+      //
+      // HOST_WAIT_MAX_TICKS x HOST_WAIT_INTERVAL = the ceiling. Past it we mount
+      // anyway, which reproduces exactly today's behaviour (possibly stale JS) rather
+      // than a blank head unit. Deliberately generous: fallbackToCacheTimeout is
+      // 15 s in app.json, so a cold launch on bad signal can legitimately take that
+      // long to resolve a launcher, and cutting it short would just recreate the bug.
+      func mountCarWhenHostReady() {
+        let hostReady = (factory.rootViewFactory.value(forKey: "reactHost") as AnyObject?) != nil
+        if hostReady || hostWaitTicks >= ConvoyRNHost.HOST_WAIT_MAX_TICKS {
+          if !hostReady {
+            NSLog("[Convoy] car surface mounted WITHOUT an updates-created host after %d ticks - JS may be stale", hostWaitTicks)
+          }
+          mountCarSurface()
+          return
+        }
+        hostWaitTicks += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + ConvoyRNHost.HOST_WAIT_INTERVAL) {
+          mountCarWhenHostReady()
+        }
+      }
+      DispatchQueue.main.async { mountCarWhenHostReady() }
       return
     }
 

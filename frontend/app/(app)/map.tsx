@@ -3759,7 +3759,11 @@ export default function MapScreen() {
         fitCrewSignal={crewSignal}
         // Layer controls — driven by the bottom-right Layers FAB.
         mapMode={mapMode}
-        show3dBuildings={settings.show3dBuildings !== false && powerMode === "premium"}
+        // 3D BUILDINGS ARE NOT A POWER SETTING (Jeff, 2026-08-14): "i want 3d buildings no
+        // matter what in 3d view". The `powerMode === "premium"` half silently removed them
+        // the moment the phone came off the charger — the driver flips no switch and the
+        // world flattens. Now purely the user's own toggle.
+        show3dBuildings={settings.show3dBuildings !== false}
         mapType={mapType}
         mapDark={mapDark}
         peers={peerList}

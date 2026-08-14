@@ -764,7 +764,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // never run the line past the car.
   useEffect(() => {
     if (!s.navigating) return;
-    const period = powerMode === 'eco' ? TRIM_TICK_MS_ECO : TRIM_TICK_MS_PREMIUM;
+    const period = TRIM_TICK_MS_PREMIUM;   // always premium (2026-08-14)
     const id = setInterval(() => {
       const f = fixEaseRef.current;
       if (!f) return;
@@ -1297,7 +1297,8 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
       // Let the GL map present at the head unit's full refresh (clamped by the panel,
       // ~60Hz max — a car display can't do 120). Only meaningful WITH the SelfCarModel
       // interpolation above; on a raw 1Hz feed it just re-renders a stale pose.
-      preferredFramesPerSecond={powerMode === 'premium' ? 60 : 30}
+      // ALWAYS 60 (Jeff, 2026-08-14): no eco/premium split anywhere in the render path.
+      preferredFramesPerSecond={60}
       scaleBarEnabled={false}
       compassEnabled={false}
       rotateEnabled={false}
@@ -1372,13 +1373,11 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
       {useStandard && (
         // key={styleGen}: remounted on every style load so the config re-applies
         // AFTER the basemap import exists (the flat-first-paint race fix above).
-        // HEAT (2026-08-14): show3dObjects was hardcoded true here while the phone honours
-        // its own show3dBuildings setting. On a 213x107dp Android Auto canvas — and on
-        // CarPlay at ~400x240pt — extruded buildings are close to invisible and cost real
-        // GPU. Now shed in ECO (unplugged); PREMIUM (plugged in, which CarPlay always is)
-        // keeps them, so the premium look is untouched on the surface that shows it. The
-        // StyleImport already remounts on styleGen, so this re-applies.
-        <Mapbox.StyleImport key={'basemap' + styleGen} id="basemap" existing config={{ lightPreset: mode, show3dObjects: powerMode === 'premium' } as any} />
+        // 3D buildings ALWAYS ON (Jeff, 2026-08-14). I briefly keyed this to powerMode as a
+        // heat measure; an audit finding then pointed out it could never help CarPlay
+        // (always plugged => always 'premium'), and Jeff has since removed the eco/premium
+        // split outright. Reverted to unconditional so the car keeps the premium look.
+        <Mapbox.StyleImport key={'basemap' + styleGen} id="basemap" existing config={{ lightPreset: mode, show3dObjects: true } as any} />
       )}
 
       {/* Road-snap source (Phase 2) — invisible mapbox-streets-v8 roads, queried by the

@@ -81,9 +81,19 @@ public class HairpinSystemModule: Module {
         guard let screen = self.carPlayScreen() else { return }
         let link = screen.displayLink(withTarget: self, selector: #selector(self.carFrame))
         guard let link = link else { return }
-        // ~30 fps: matches the JS ticker's cadence and the eco frame cap, and a car
-        // display cannot present faster than 60 anyway.
-        link.preferredFramesPerSecond = 30
+        // 60 fps (Jeff, 2026-08-14). This was 30 "to match the JS ticker's cadence and the
+        // eco frame cap" — and that cap is the reason for a symptom Jeff has reported since
+        // this pump shipped: "when the phone screen turns off the carplay/aa was choppy."
+        //
+        // With the phone display ON, requestAnimationFrame drives the ease at 60 fps. The
+        // moment the display sleeps, rAF and setInterval both stop (see the note above) and
+        // THIS link becomes the only clock — so the car marker silently dropped from 60 fps
+        // to 30 fps at exactly the moment the driver stopped touching the phone. Not a
+        // stutter in the data; a halving of the frame rate.
+        //
+        // The eco/premium split it was matched to has since been removed outright, and a
+        // car display presents at 60, so 60 is both the honest match and the fix.
+        link.preferredFramesPerSecond = 60
         link.add(to: .main, forMode: .common)
         self.carLink = link
         ok = true

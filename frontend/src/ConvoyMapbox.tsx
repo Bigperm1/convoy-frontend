@@ -513,6 +513,18 @@ export function easedFrac(f: { prev: number; cur: number; at: number; gap: numbe
 // of the 60fps full-tree re-render the heat work exists to avoid. It runs ONLY while
 // navigating with an ease actually in flight, so a parked or free-driving map is
 // untouched.
+// ── ALWAYS PREMIUM (Jeff, 2026-08-14) ───────────────────────────────────────────
+// "lets get rid of the plugged in and not plugged in scnerios. lets just make everything
+// 60fps. i still want the premium fesl of silky ness."
+//
+// The eco/premium split existed to trade smoothness for battery when unplugged. That is
+// now an explicit product decision AGAINST: Hairpin is a driving app, the phone is nearly
+// always on a charger in the car, and a stuttering map is the thing the driver actually
+// sees. Heat is being paid down by REMOVING WORK (the carStore equality gate, the
+// screen-off pump scoping, the churn gates) rather than by degrading the render.
+//
+// powerMode itself is NOT deleted — it still exists and other callers may use it. Only the
+// RENDER-QUALITY branches are collapsed to premium.
 export const TRIM_TICK_MS_PREMIUM = 83;
 export const TRIM_TICK_MS_ECO = 125;
 
@@ -1113,15 +1125,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     a.stepped = true; // this ease has rendered ≥1 frame → the loop is alive for it
     const now = Date.now();
     const t = Math.min(1, (now - a.start) / a.dur);
-    // ECO (unplugged, build 63+): cap the smooth ease to ~30fps — halves the per-frame
-    // setCamera + full-component re-render (the app's single biggest thermal load) while
-    // on battery. PREMIUM (plugged, and every build without expo-battery) renders every
-    // frame exactly as before. The FINAL frame (t>=1) is never skipped, so the camera
-    // always lands precisely and the ease completes.
-    if (t < 1 && getPowerMode() === "eco" && now - lastFrameRef.current < 32) {
-      raf.current = requestAnimationFrame(step);
-      return;
-    }
+    // The ECO ~30fps ease cap was REMOVED 2026-08-14 (Jeff: everything 60fps, always).
+    // The sub-pixel skip below still runs — it drops frames that would change nothing on
+    // screen, which costs no smoothness at all, unlike a blanket rate cap.
     // SUB-PIXEL FRAME SKIP (heat, 2026-07-25). The comment above is right that the
     // per-frame setCamera + full re-render is the app's biggest thermal load — this
     // component re-renders its entire tree on every eased frame because the self-car
@@ -2253,7 +2259,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // fix) and when the step is too small to move the line a visible amount.
   useEffect(() => {
     if (!navigationActive) return;
-    const period = getPowerMode() === "eco" ? TRIM_TICK_MS_ECO : TRIM_TICK_MS_PREMIUM;
+    // Always the premium period (Jeff, 2026-08-14 — no eco/premium split).
+    const period = TRIM_TICK_MS_PREMIUM;
     const id = setInterval(() => {
       const f = fixEaseRef.current;
       if (!f) return;
@@ -2805,7 +2812,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         // ProMotion iPhone, uncapped, for the whole drive. Same values as CarMapView
         // (premium 60 / eco 30) so plugged-in keeps the premium feel and battery keeps
         // the eco cap. usePowerMode() is reactive — plugging in mid-drive re-renders.
-        preferredFramesPerSecond={phonePowerMode === 'premium' ? 60 : 30}
+        preferredFramesPerSecond={60}
         scaleBarEnabled={false}
         compassEnabled={false}
         logoEnabled

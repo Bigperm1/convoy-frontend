@@ -199,7 +199,37 @@ const initial: CarState = {
 let state: CarState = initial;
 const listeners = new Set<(s: CarState) => void>();
 
+// ── THE EQUALITY GATE (2026-08-14) ─────────────────────────────────────────────
+// Jeff: "why is the phone really heating up." This is the multiplier under a whole
+// family of heat findings, and it is four lines.
+//
+// Every one of the 45 setCarState call sites fanned out to EVERY listener on EVERY
+// call, whether or not a single value actually changed. Both car React trees
+// (CarSurface and, on Android, AndroidAutoRoot) re-render on that fanout. Measured
+// consequences, all from the same root:
+//   • the cold path writes 4-5 times per GPS fix — position, carDbg, an UNCHANGED
+//     mapMode/selfCarColor pair, the strip — so ~1 Hz of GPS became ~5 Hz of full
+//     car re-renders;
+//   • `setCarState({ carDbg: "fgfeed" })` re-rendered both trees ~2 Hz to restate a
+//     string that is hidden unless a debug flag is on;
+//   • updateNavBanner does a literal `setCarState({})` on every fix when the phone
+//     owns the strip — a guaranteed no-op that still redrew the head unit.
+//
+// A no-op write cannot be information: nothing can legitimately depend on being
+// notified that nothing changed. So skip the fanout when every key in the patch is
+// already `Object.is`-equal to what is stored.
+//
+// ⚠ Reference types (peers/hazards/routes/lanes arrays, routeCoordinates) compare by
+// IDENTITY, so a fresh array with identical contents still notifies — this gate does
+// NOT replace the content-signature gates upstream, it composes with them. And
+// `state` is still reassigned on a real change, so useCarStore's snapshot semantics
+// are untouched.
 export function setCarState(patch: Partial<CarState>) {
+  let changed = false;
+  for (const k in patch) {
+    if (!Object.is((state as any)[k], (patch as any)[k])) { changed = true; break; }
+  }
+  if (!changed) return;                 // nothing moved -> nobody needs telling
   state = { ...state, ...patch };
   listeners.forEach((l) => l(state));
 }

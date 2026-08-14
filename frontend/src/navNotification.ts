@@ -23,6 +23,7 @@ import {
 } from "./nav";
 import { maneuverDir } from "./components/ManeuverArrow";
 import { setCarState, setCarSelfPosition, claimCarNavStrip, releaseCarNavStrip } from "./carplay/carStore";
+import { CAR_DIAG_MODE } from "./carplay/carPlayShared";
 import { getSettings, getMapMode } from "./settings";
 import { updateSpeedLimit } from "./speedLimit";
 import { recordTrip } from "./trips";
@@ -552,7 +553,11 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
     typeof _sp === "number" && _sp >= 0 ? _sp : 0,
   );
   setCarState({
-    carDbg: "navtask#" + (++_navTaskTicks), // on-screen proof bg ticks are arriving
+    // HEAT (2026-08-14): this INCREMENTS, so it defeats carStore's equality gate and
+    // re-rendered BOTH car trees (CarSurface + AndroidAutoRoot) on every bg fix — ~2 Hz
+    // all drive — to restate a string that only renders when CAR_DIAG_MODE is true, and
+    // it is `false`. Gated on the flag so the diagnostic still works when turned on.
+    ...(CAR_DIAG_MODE ? { carDbg: "navtask#" + (++_navTaskTicks) } : {}),
   });
   // Hand the same fix to any foreground consumer (map.tsx -> useTurnByTurn), so
   // off-route detection and re-routing keep working with the screen off. Emitted
@@ -652,7 +657,9 @@ export async function startForegroundCarFeed(): Promise<void> {
           'fgwatch',
           typeof sp === "number" && sp >= 0 ? sp : 0,
         );
-        setCarState({ carDbg: "fgfeed" });
+        // Constant string, so carStore's equality gate already makes this a no-op after
+        // the first write; flag-gated too so it costs nothing at all when diag is off.
+        if (CAR_DIAG_MODE) setCarState({ carDbg: "fgfeed" });
         // Best-effort metadata — wrapped so it can never block the position write.
         try {
           setCarState({ selfCarColor: getSettings().carColor, mapMode: getMapMode(getSettings()) });

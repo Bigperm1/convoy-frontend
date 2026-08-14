@@ -316,6 +316,27 @@ let _searchTemplate: any | null = null;
 // stack, which is exactly the "keyboard up, nothing touchable, no buttons work"
 // freeze Jeff hit; (b) let the motion watcher know when to auto-dismiss.
 let _searchPresented = false;
+// ── WHY A SECOND FLAG (Jeff, 2026-08-14) ────────────────────────────────────────
+// Reported: "when driving and trying to press the carplay/aa search the keyboard doesn't
+// work cause your driving (perfect), keyboard disappears. but when coming to a stop the
+// keyboard pops out again everytime."
+//
+// `_searchPresented` tracks VISIBILITY (didAppear/didDisappear). The motion auto-dismiss
+// keyed off it and bailed with `if (!_searchPresented) return;` — so the moment iOS hid
+// the search UI because the car started moving, didDisappear fired, the flag went false,
+// and the pop we actually wanted NEVER RAN. The template stayed on the CarPlay stack for
+// the rest of the drive, and iOS re-presented it at every stop. The guard meant to make
+// the dismiss safe was the reason it never happened.
+//
+// This flag tracks OWNERSHIP instead: true from the moment we push until the template is
+// genuinely off the stack (we popped it, or the driver picked a destination). Visibility
+// can flap as much as iOS likes; ownership does not.
+//
+// ⚠ HYPOTHESIS, not verified on a head unit: that iOS fires didDisappear when it hides
+// the search UI for motion. What IS certain from the code is that the old condition can
+// only pop while the template is visible, and a driver who is moving is exactly when it
+// is not. Fixing it this way is correct under either mechanism.
+let _searchPushed = false;
 // Auto-dismiss search the moment the car is genuinely MOVING. CarPlay gates the
 // keyboard by drive-state, so a pushed search template while driving is a dead
 // modal that hides the map's own buttons — the driver is trapped and the HUD
@@ -331,13 +352,15 @@ function armSearchAutoDismiss(): void {
   if (_searchMotionArmed) return;
   _searchMotionArmed = true;
   subscribeCarState((st) => {
-    if (!_searchPresented) { _movingTicks = 0; return; }
+    // OWNERSHIP, not visibility — see _searchPushed. Popping when we do not own the stack
+    // would yank whatever else the driver is looking at.
+    if (!_searchPushed) { _movingTicks = 0; return; }
     if ((st.speedMs || 0) > _SEARCH_POP_SPEED_MS) {
       _movingTicks += 1;
       if (_movingTicks >= 2) {                 // ~2 position ticks of real motion
         _movingTicks = 0;
+        _searchPushed = false;                 // we own the pop; release before it lands
         try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
-        // _searchPresented flips false from the template's didDisappear.
       }
     } else {
       _movingTicks = 0;
@@ -397,7 +420,13 @@ function getSearchTemplate(): any | null {
           const p = _savedShown[index];
           if (!p) return;
           const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
-          if (ok) { try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {} }
+          // Release ownership ONLY when we actually pop. Releasing on a FAILED start would
+          // leave the template on the stack while we no longer own it — a re-tap would then
+          // push a second instance, which is the stack corruption that freezes CarPlay.
+          if (ok) {
+            _searchPushed = false;
+            try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
+          }
           return;
         }
         const picked = _lastResults[index];
@@ -406,12 +435,27 @@ function getSearchTemplate(): any | null {
         if (!dest) { toast('Could not load that place'); return; }
         const ok = await startCarNav({ ...dest, label: dest.label || picked.description });
         if (ok) {
+          _searchPushed = false;   // same rule: release only when the pop really happens
           try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
         }
       },
       onSearchButtonPressed: () => {},
+      // VISIBILITY only. Deliberately does NOT touch _searchPushed: iOS hides and
+      // re-shows this template on its own as the car moves and stops, and treating that
+      // as "gone from the stack" is the bug this pair used to cause.
       onDidAppear: () => { _searchPresented = true; _movingTicks = 0; },
-      onDidDisappear: () => { _searchPresented = false; _movingTicks = 0; },
+      onDidDisappear: () => {
+        _searchPresented = false;
+        _movingTicks = 0;
+        // GENUINE EXIT vs MOTION HIDE. Stationary => the driver backed out with the system
+        // back button, so the template is really gone and ownership MUST be released or
+        // Search can never be opened again this session (the old code relied on exactly
+        // this path). Moving => iOS is hiding it on its own; keep ownership so the motion
+        // pop can still take it off the stack, which is the whole point of the fix.
+        try {
+          if ((getCarState().speedMs || 0) <= _SEARCH_POP_SPEED_MS) _searchPushed = false;
+        } catch { _searchPushed = false; }
+      },
     });
   } catch {
     _searchTemplate = null;
@@ -606,14 +650,18 @@ export function handleCarBarButton(id: string): void {
   if (id === 'car-search') {
     // Already showing? Do NOT push it again — a second push of the same instance
     // corrupts the CarPlay stack (the freeze). A stray re-tap is a no-op.
-    if (_searchPresented) return;
+    // Guard on OWNERSHIP: if it is already on the stack, a re-tap must not push a second
+    // instance (that corrupts the CarPlay stack — the freeze). Visibility is irrelevant
+    // here; a hidden-but-stacked template still must not be pushed again.
+    if (_searchPushed) return;
     // Prime the cache BEFORE the template appears — the first updatedSearchText can
     // arrive before an await would have resolved.
     void ensureSavedPlacesLoaded().catch(() => {});
     const t = getSearchTemplate();
     if (!t) return;
     armSearchAutoDismiss();                    // idempotent
-    try { getLib()?.CarPlay?.pushTemplate?.(t, true); } catch {}
+    _searchPushed = true;
+    try { getLib()?.CarPlay?.pushTemplate?.(t, true); } catch { _searchPushed = false; }
   }
 }
 

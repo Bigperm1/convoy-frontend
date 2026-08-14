@@ -1372,7 +1372,13 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
       {useStandard && (
         // key={styleGen}: remounted on every style load so the config re-applies
         // AFTER the basemap import exists (the flat-first-paint race fix above).
-        <Mapbox.StyleImport key={'basemap' + styleGen} id="basemap" existing config={{ lightPreset: mode, show3dObjects: true } as any} />
+        // HEAT (2026-08-14): show3dObjects was hardcoded true here while the phone honours
+        // its own show3dBuildings setting. On a 213x107dp Android Auto canvas — and on
+        // CarPlay at ~400x240pt — extruded buildings are close to invisible and cost real
+        // GPU. Now shed in ECO (unplugged); PREMIUM (plugged in, which CarPlay always is)
+        // keeps them, so the premium look is untouched on the surface that shows it. The
+        // StyleImport already remounts on styleGen, so this re-applies.
+        <Mapbox.StyleImport key={'basemap' + styleGen} id="basemap" existing config={{ lightPreset: mode, show3dObjects: powerMode === 'premium' } as any} />
       )}
 
       {/* Road-snap source (Phase 2) — invisible mapbox-streets-v8 roads, queried by the
@@ -1426,6 +1432,10 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           heading={drawHdg}
           emissive={emissive}
           modelId={carModelId}
+          // THE CAR SURFACE OWNS THE NATIVE FRAME PUMP. Opt-in as of 2026-08-14: the
+          // phone instance also passes cameraRef, so an un-gated pump animated the
+          // invisible phone map at 30fps on every screen-off CarPlay drive.
+          carFramePump
           cameraRef={cameraRef}
           getCam={getCam}
           readyRef={lockReadyRef}

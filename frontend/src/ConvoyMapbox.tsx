@@ -862,7 +862,7 @@ const SELF_MARKER_SLOT = undefined;
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1 }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -882,6 +882,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // Omitted (e.g. the phone today) → no-op, camera unchanged. scale overrides the 3D
   // car's modelScale (CarPlay passes a smaller curve).
   cameraRef?: React.RefObject<any>;
+  // OPT-IN to the native CarPlay display-link pump below. ONLY CarMapView passes true.
+  carFramePump?: boolean;
   getCam?: () => { zoomLevel: number; pitch: number; heading: number; padding: any };
   // Optional CAMERA-heading override (the MODEL keeps its real heading). Read live
   // per frame; undefined = normal heading-up chase. CarPlay's compass north-up
@@ -1058,8 +1060,28 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   //
   // Degrades to exactly today's behaviour on any build without the native module
   // (requireOptionalNativeModule → undefined) and on Android.
+  // ⚠ HEAT (2026-08-14) — `carFramePump` is why this is opt-in.
+  //
+  // The gate used to be `!cameraRef`, and the comment above claimed phone instances have
+  // no cameraRef. That was STALE: the phone map has passed cameraRef since the imperative
+  // lockstep camera landed, so the PHONE instance subscribed too. HairpinSystem's
+  // CADisplayLink is bound to the CarPlay screen and fans `onCarFrame` out to EVERY JS
+  // listener — by design it keeps firing with the phone display OFF. So on a screen-off
+  // CarPlay drive the invisible phone map did pushCam -> setCamera plus a full
+  // SelfCarModel re-render 30x/sec, all drive, for pixels nobody can see.
+  //
+  // Second cost, every iOS user: `if (!arm()) retry = setInterval(arm, 3000)` never
+  // clears on a phone that never connects CarPlay, and startCarFrames is a
+  // DispatchQueue.main.sync scene enumeration — a permanent 3s main-thread hop.
+  //
+  // The phone's screen-off path is unaffected: it is served by the per-fix hard-snap
+  // fallback further down, which re-engages once lastBgTickAt goes stale.
+  //
+  // BONUS: stopCarFrames() in the cleanup is unconditional and NOT refcounted, so a
+  // phone-side unmount used to kill the CAR's pump with nothing to re-arm it (the car's
+  // retry had already been cleared). Scoping the subscription removes that hazard.
   useEffect(() => {
-    if (!cameraRef || Platform.OS !== 'ios') return;
+    if (!carFramePump || !cameraRef || Platform.OS !== 'ios') return;
     let sub: { remove: () => void } | null = null;
     let retry: ReturnType<typeof setInterval> | null = null;
     let HS: any = null;

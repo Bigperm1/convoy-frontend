@@ -57,5 +57,17 @@ try {
   const { initCarPlayBootstrap } = require('./src/carplay/carPlayBootstrap');
   initCarPlayBootstrap();
 } catch (e) {
+  // ⚠ A SILENT CATCH IS A BLIND SPOT, and this one already cost a drive (2026-08-15).
+  // The guard above is right — a throw here must not brick the app — but as first
+  // written its only trace was a console.error nobody can read from a car. If this
+  // fires, the cold CarPlay root never registers onBarButtonPressed and EVERY car
+  // button goes dead with no crash, no message, and nothing in telemetry: exactly the
+  // "buttons do nothing" report that has now recurred four times in this project.
+  // Degrading quietly is correct; degrading INVISIBLY is not. Send a row.
   console.error('[carplay] bootstrap init failed:', e);
+  try {
+    require('./src/crashBreadcrumb').logEvent(
+      `carplay-bootstrap-failed ${String((e && e.message) || e).slice(0, 160)}`,
+    );
+  } catch {}
 }

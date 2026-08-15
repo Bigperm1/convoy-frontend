@@ -16,23 +16,35 @@ import { setCarState, getCarState, emitCarGesture } from './carStore';
 import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
 import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
+import { logEvent } from '../crashBreadcrumb';
 
 let booted = false;
 
 export function initCarPlayBootstrap(): void {
   if (Platform.OS !== 'ios' || booted) return;
-  if (!(NativeModules as any).RNCarPlay) return;
+  // ⚠ EVERY BAIL BELOW USED TO BE SILENT, and that cost a drive (2026-08-15). This
+  // function registers the COLD root's onBarButtonPressed. If it returns early, every
+  // CarPlay button is dead — no crash, no message, nothing in telemetry — which is
+  // indistinguishable from "the taps never reach JS" and sends the next investigation
+  // straight at the native template layer. It is the difference between an OTA fix and
+  // a paid build, so the reason has to be on the record. One row per launch, iOS only.
+  const bail = (why: string) => { try { logEvent(`carplay-bootstrap-bail ${why}`); } catch {} };
+  if (!(NativeModules as any).RNCarPlay) { bail('no-native-module'); return; }
   booted = true;
 
   let lib: any;
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     lib = require('react-native-carplay');
-  } catch {
+  } catch (e) {
+    bail(`require-threw ${String((e as any)?.message || e).slice(0, 120)}`);
     return;
   }
   const { CarPlay, MapTemplate } = lib;
-  if (!CarPlay || !MapTemplate) return;
+  if (!CarPlay || !MapTemplate) {
+    bail(`missing-export carplay=${!!CarPlay} maptemplate=${!!MapTemplate}`);
+    return;
+  }
 
   setCarState({ cpDbg: 'boot' });
 

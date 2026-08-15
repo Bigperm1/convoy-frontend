@@ -71,8 +71,6 @@ export type CarState = {
   // car surface's status row; expiry is a TIMESTAMP COMPARISON at render, never a
   // setTimeout — iOS pauses JS timers while the phone is locked, which is precisely
   // when a driver is using CarPlay.
-  carTapEcho?: string;
-  carTapEchoAt?: number;
   carToast?: string;
   carToastUntil?: number;
   // PITSTOP mirror — the phone owns detection (src/pitstop.ts); the car just draws it.

@@ -5,10 +5,9 @@
 // real, traffic-aware NavRoute — your route, your way, even when it isn't the fastest.
 //
 // Local-only, no backend. Mirrors the storage shape of savedPlaces.ts: a module-level
-// cache + listener set + load promise, with imperative get/record helpers and a hook.
+// cache + load promise, with imperative get/record helpers.
 // One trace per saved place (last-good v1; most-frequent clustering can come later).
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useEffect, useState } from "react";
 
 const KEY = "convoy.aiRoutes.v1";
 
@@ -36,7 +35,6 @@ export type AiRoute = {
 
 let cached: AiRoute[] = [];
 let loaded = false;
-const listeners = new Set<(r: AiRoute[]) => void>();
 
 function isValid(r: any): r is AiRoute {
   return (
@@ -57,7 +55,6 @@ const loadPromise: Promise<AiRoute[]> = (async () => {
     }
   } catch {}
   loaded = true;
-  listeners.forEach((l) => l(cached));
   return cached;
 })();
 
@@ -65,15 +62,10 @@ async function persist(): Promise<void> {
   try {
     await AsyncStorage.setItem(KEY, JSON.stringify(cached));
   } catch {}
-  listeners.forEach((l) => l(cached));
 }
 
 export async function ensureAiRoutesLoaded(): Promise<AiRoute[]> {
   return loaded ? cached : loadPromise;
-}
-
-export function getAiRoutes(): AiRoute[] {
-  return cached;
 }
 
 export function getAiRouteForPlace(placeId: string): AiRoute | undefined {
@@ -183,22 +175,4 @@ export function viaPointsFor(r: AiRoute, maxVia = 8): [number, number][] {
   const step = interior.length / maxVia;
   for (let i = 0; i < maxVia; i++) out.push(interior[Math.floor(i * step + step / 2)]);
   return out;
-}
-
-export async function removeAiRoute(placeId: string): Promise<AiRoute[]> {
-  await ensureAiRoutesLoaded();
-  cached = cached.filter((r) => r.placeId !== placeId);
-  await persist();
-  return cached;
-}
-
-export function useAiRoutes(): AiRoute[] {
-  const [list, setList] = useState<AiRoute[]>(cached);
-  useEffect(() => {
-    let active = true;
-    if (!loaded) loadPromise.then((v) => { if (active) setList(v); });
-    listeners.add(setList);
-    return () => { active = false; listeners.delete(setList); };
-  }, []);
-  return list;
 }

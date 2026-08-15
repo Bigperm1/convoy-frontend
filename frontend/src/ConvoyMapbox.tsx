@@ -76,7 +76,6 @@ export interface Peer {
   online_at?: string;
   // "parked" peers (full-mode, head unit disconnected) render dimmed.
   status?: "live" | "parked";
-  onRoute?: React.Dispatch<any>;
 }
 
 export interface Hazard {
@@ -130,11 +129,8 @@ interface ConvoyMapboxProps {
   // white rim (runtime GLB recolor). Unset → the stock Hairpin arrow.
   selfArrowPaint?: { primary?: string; secondary?: string };
   mapView?: "heading_up" | "north_up";
-  // Base-map mode — drives the Mapbox style + light preset directly. mapType/
-  // mapDark are still accepted (shared MapEngine props) but unused by this engine.
+  // Base-map mode — drives the Mapbox style + light preset directly.
   mapMode?: "satellite" | "dawn" | "day" | "dusk" | "night";
-  mapType?: "hybrid" | "roadmap";
-  mapDark?: boolean;
   peers?: Record<string, Peer> | Peer[] | null;
   leaderUserId?: string | null;
   hazards?: Hazard[] | null;
@@ -143,7 +139,6 @@ interface ConvoyMapboxProps {
   roadEvents?: RoadEvent[];
   places?: { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean }[];
   showPlacePins?: boolean;
-  externalAlerts?: any[];
   highlightConvoy?: boolean;
   destination?: LatLng | null;
   // Pinned waypoints (Add stop). Drawn as numbered brand pins so the trip the driver
@@ -156,7 +151,6 @@ interface ConvoyMapboxProps {
   offerPill?: { lat: number; lng: number; savedMin: number; arrival?: string } | null;
   onOfferAccept?: () => void;
   onOfferDismiss?: () => void;
-  encodedPolyline?: string | null;
   routes?: { polyline: string; color?: string; congestion?: CongestionLevel[]; coordinates?: [number, number][] }[];
   selectedRouteIndex?: number;
   onSelectRoute?: (index: number) => void;
@@ -173,7 +167,6 @@ interface ConvoyMapboxProps {
   flatView?: boolean;
   distanceToManeuverM?: number;
   maneuverCoord?: { lat: number; lng: number } | null;
-  showTraffic?: boolean;
   // Delivers the tapped coordinate AND the on-screen tap point (sx/sy, px) so the
   // caller can implement gestures like double-tap-to-drop-a-pin in SCREEN space
   // (zoom-independent). undefined if unavailable. "Just tapped" callers ignore it.
@@ -187,8 +180,6 @@ interface ConvoyMapboxProps {
   onHazardLongPress?: (h: Hazard) => void;
   onPeerPress?: (p: Peer) => void;
   onPlacePress?: (p: any) => void;
-  onExternalAlertPress?: (a: any) => void;
-  onRoute?: (info: any) => void;
   onMapReady?: () => void;
   // Live map bearing readout (deg) — fired when the camera heading changes, for
   // the on-map compass needle. resetNorthSignal is a monotonic counter; each
@@ -274,28 +265,6 @@ export function carModelScale(size: number): any {
   );
 }
 export const CAR_MODEL_SCALE_SIZED: any = carModelScale(CAR_SIZE);
-// Continuous car scale driven from the LIVE camera zoom (see onCameraChanged),
-// instead of handing Mapbox the zoom-expression above — that snapped the model
-// size at integer zooms (not smooth). Geometric (log-space) interpolation
-// through the SAME stops: passes through every tuned value but ramps smoothly.
-const CAR_SCALE_STOPS: [number, number][] = [
-  [9, 3400], [10, 1700], [11, 820], [12, 400], [13, 195],
-  [14, 120], [15, 60], [16, 29], [17, 13], [18, 6.5], [20, 1.6],
-];
-function carScaleForZoom(z: number): number {
-  const s = CAR_SCALE_STOPS;
-  if (!Number.isFinite(z)) return 10;
-  if (z <= s[0][0]) return s[0][1];
-  if (z >= s[s.length - 1][0]) return s[s.length - 1][1];
-  for (let i = 0; i < s.length - 1; i++) {
-    const [z1, v1] = s[i]; const [z2, v2] = s[i + 1];
-    if (z >= z1 && z <= z2) {
-      const t = (z - z1) / (z2 - z1);
-      return v1 * Math.pow(v2 / v1, t); // geometric → smooth slope, no kinks
-    }
-  }
-  return s[s.length - 1][1];
-}
 export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° off (sideways across the road),
 // so we rotate it +90 to point along the direction of travel. If after this the car points exactly
 // BACKWARDS, flip to 270; if it's still sideways the other way, that means -90 didn't apply — but 90/270
@@ -315,8 +284,8 @@ export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° 
 // v9 — the tilt is FINALLY correct because it was VERIFIED IN THE iOS SIMULATOR
 // against the real @rnmapbox renderer (not a desktop GLB viewer that mispredicts
 // orientation, and not baked into the mesh which composed unpredictably with
-// Mapbox's own transform). The model is now FLAT (green-arrow-v9.glb = the v6
-// flush-white-body + green-inset construction, no baked tilt), and the standing
+// Mapbox's own transform). The model is now FLAT (the v6 flush-white-body +
+// green-inset construction, no baked tilt), and the standing
 // lean is applied at render time via Mapbox's modelRotation X = ARROW_MODEL_PITCH.
 // Ground truth from the sim: POSITIVE modelRotation-X stands the arrow UP to face
 // the chase camera (tip forward) — the Waze stance. +52° faces the camera cleanly
@@ -1535,19 +1504,6 @@ export function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
 // Official DriveBC road event (Open511) — a severity-tinted badge with a kind
 // glyph, visually distinct from crew hazard PNGs so drivers can tell an official
 // incident from a member report. Proximity voice alert lives in map.tsx.
-const INCIDENT_ICON: Record<RoadEventKind, string> = {
-  incident: "warning",
-  construction: "construct",
-  road: "close-circle",
-  weather: "rainy",
-  event: "flag",
-};
-const INCIDENT_KINDS: RoadEventKind[] = ["incident", "construction", "road", "weather", "event"];
-function incidentColor(sev: RoadEventSeverity): string {
-  if (sev === "MAJOR") return "#FF453A";     // red
-  if (sev === "MODERATE") return "#FF9F0A";   // amber
-  return "#8E8E93";                           // minor / unknown — grey
-}
 const INCIDENT_TITLE: Record<RoadEventKind, string> = {
   incident: "Incident", construction: "Roadwork", road: "Road closure",
   weather: "Weather hazard", event: "Road event",
@@ -1675,11 +1631,6 @@ function incidentPin(sev: RoadEventSeverity): { icon: string } {
   return sev === "MAJOR" || sev === "MODERATE"
     ? { icon: "brand_pin_red" }
     : { icon: "brand_pin_grey" };
-}
-// True for the severities that draw the RED pin (also used by map.tsx's
-// near-duplicate collapse so red always outranks grey).
-export function isRedIncident(sev: RoadEventSeverity): boolean {
-  return sev === "MAJOR" || sev === "MODERATE";
 }
 
 function GLPinLayers({
@@ -2199,17 +2150,6 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // gesture-rotated bearing and silently override the imperative heading:0 reset — the
   // "compass recenters but never flips north" bug. Heading-up keeps the smoothed bearing.
   const followHeadingDeg = headingUp ? (camHeadingRef.current ?? undefined) : 0;
-
-  // Android heading-up via the NATIVE engine. Under UserTrackingMode.Follow,
-  // Android ignores `followHeading` AND overrides our imperative setCamera bearing
-  // on every follow frame, so the map stayed frozen north-up. FollowWithCourse
-  // rotates the camera to the GPS course natively (heading-up) and the follow
-  // engine can't fight it. iOS honors followHeading under Follow, so it stays on
-  // the smoothed path. (Trade-off: FollowWithCourse uses raw course — watch for
-  // wobble; fallback is feeding the smoothed heading via CustomLocationProvider.)
-  const followMode = (Platform.OS === "android" && headingUp)
-    ? UserTrackingMode.FollowWithCourse
-    : UserTrackingMode.Follow;
 
   // RAW (unrounded) chase zoom target for the imperative lockstep — SelfCarModel's
   // pushCam low-passes toward it, so a continuous float reads smoothest.
@@ -3058,7 +2998,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           // lockReadyRef) instead of this native engine — so native follow is left ON
           // only for NORTH-UP, where there's no per-frame heading to lockstep.
           followUserLocation={followUser && !placesShown && coldLockDone && !headingUp}
-          followUserMode={followMode}
+          // Plain Follow on BOTH platforms: this engine only ever runs in NORTH-UP (see
+          // the line above), where we hand it the bearing via followHeading (0 = true
+          // north). There used to be an Android-only UserTrackingMode.FollowWithCourse
+          // branch here for heading-up; it was DEAD — @rnmapbox drops followUserMode
+          // entirely while followUserLocation is false (android RNMBXCamera
+          // _updateViewportState returns at `mFollowUserLocation == false`, before the
+          // mode switch), and heading-up is exactly when followUserLocation is false.
+          followUserMode={UserTrackingMode.Follow}
           followZoomLevel={followZoom}
           followHeading={followHeadingDeg}
           followPitch={followPitchDeg}
@@ -3320,11 +3267,6 @@ const styles = StyleSheet.create({
     borderRadius: 13,
   },
   etaPillTextAlt: { color: "#C9C9CE", fontSize: 12, fontWeight: "700" },
-  // Destination pin (red dot with white ring).
-  destPin: {
-    width: 22, height: 22, borderRadius: 11,
-    backgroundColor: "#FF453A", borderWidth: 3, borderColor: "#FFFFFF",
-  },
   // Hairpin brand pin (the wordmark's teardrop) — destination + place results.
   // 73x95 source → 34x44 keeps it crisp; badge centers on the pin's round head.
   brandPin: { width: 34, height: 44 },
@@ -3357,11 +3299,6 @@ const styles = StyleSheet.create({
   hazardIcon: { width: 40, height: 40 },
   cameraIconWrap: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
   cameraIcon: { width: 28, height: 28 },
-  incidentBadge: {
-    width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center",
-    borderWidth: 2, borderColor: "rgba(11,11,12,0.85)",
-    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 4,
-  },
   // Transparent wrapper for the incident glyph snapshotted into a GL symbol image
   // (drawn over the severity CircleLayer). Sized to the ionicon so the snapshot is tight.
   incidentGlyphSnap: { width: 18, height: 18, alignItems: "center", justifyContent: "center", backgroundColor: "transparent" },
@@ -3379,44 +3316,9 @@ const styles = StyleSheet.create({
     position: "absolute", top: 1, left: 3, right: 3, height: 9,
     borderRadius: 7, backgroundColor: "rgba(255,255,255,0.12)",
   },
-  // Place pins (gas price chips / fuel badges / named places).
-  placePinWrap: { alignItems: "center", maxWidth: 150 },
-  placeLabel: {
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 6, paddingVertical: 2,
-    borderRadius: 6, marginBottom: 1,
-    maxWidth: 150,
-    borderWidth: 1, borderColor: "rgba(0,0,0,0.55)",
-    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
-    elevation: 2,
-  },
-  placeLabelText: { color: "#000000", fontSize: 11, fontWeight: "700" },
-  placeTextCenter: { textAlign: "center" },
-  // Unified numbered result pin (green bg, thin grey border, Convoy font).
-  placeNumPin: {
-    minWidth: 30, height: 30, borderRadius: 15,
-    paddingHorizontal: 7,
-    backgroundColor: "#2DEC86",
-    borderWidth: 1, borderColor: "#8E8E93",
-    alignItems: "center", justifyContent: "center",
-    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 3, shadowOffset: { width: 0, height: 1 },
-    elevation: 4,
-  },
   // Brand green, NOT near-black: the number sits on the badge's dark #0A1A10
   // circle — dark-on-dark made the CarPlay PlaceMarker numbers invisible.
   placeNumText: { color: "#2DEC86", fontSize: 14, fontWeight: "800" },
-  locPin: { alignItems: "center", justifyContent: "center" },
-  locPinInner: { position: "absolute" },
-  placePriceLabel: { backgroundColor: "#FFD60A", borderWidth: 1, borderColor: "rgba(0,0,0,0.55)" },
-  placePriceCheapest: { backgroundColor: "#30D158", borderColor: "rgba(0,0,0,0.55)" },
-  placePriceText: { color: "#0A0A0A", fontSize: 13, fontWeight: "800" },
-  gasGlyph: {
-    width: 30, height: 30, borderRadius: 15,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(20,20,22,0.92)",
-    borderWidth: 1, borderColor: "rgba(255,214,10,0.6)",
-    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 2,
-  },
   // Arrival-weather chip.
   destWxChip: {
     flexDirection: "row", alignItems: "center", gap: 5,

@@ -3,13 +3,13 @@
 // Maps a color name (case-insensitive) to the corresponding GR Corolla
 // top-down PNG asset. Used by:
 //   - <CarMarker> Garage preview + native map self-marker
-//   - <ConvoyMap.web> user marker (via base64 SVG embed)
+//   - <ConvoyMapbox> / <CarMapView> self + peer PNG markers
 //
-// To add a new official GRC color: drop the PNG into /app/frontend/assets/vehicles/,
-// re-run the base64 generator at /app/frontend/src/vehicleAssetsB64.ts, and add
-// the require()/key here.
-
-import { GRC_PNG_B64 } from "./vehicleAssetsB64";
+// To add a new official GRC color: drop the PNG into /app/frontend/assets/vehicles/
+// and add the require()/key here.
+//
+// NOTE: the 139 KB base64 mirror (vehicleAssetsB64.ts) was deleted — its only
+// consumer was the retired <ConvoyMap.web> SVG-embed marker. require() alone now.
 
 export type GRCColorKey =
   | "supersonic_red"
@@ -104,25 +104,9 @@ export const DEFAULT_GRC_KEY: GRCColorKey = "heavy_metal";
 export function getDefaultVehiclePng() {
   return VEHICLE_PNG[DEFAULT_GRC_KEY];
 }
-export function getDefaultVehiclePngDataUri(): string {
-  const b64 = GRC_PNG_B64[DEFAULT_GRC_KEY];
-  return `data:image/png;base64,${b64}`;
-}
-
 /** Resolves to a GRC asset always — never null. Falls back to the default GRC. */
 export function getVehiclePngOrDefault(color?: string | null) {
   return getVehiclePng(color) || getDefaultVehiclePng();
-}
-export function getVehiclePngDataUriOrDefault(color?: string | null): string {
-  return getVehiclePngDataUri(color) || getDefaultVehiclePngDataUri();
-}
-
-/** Returns a base64 data URL for the GRC PNG — used by web SVG marker embed. */
-export function getVehiclePngDataUri(color?: string | null): string | null {
-  const key = resolveGRCKey(color);
-  if (!key) return null;
-  const b64 = GRC_PNG_B64[key];
-  return b64 ? `data:image/png;base64,${b64}` : null;
 }
 
 /** Convenience: is this color one of the 5 GRC official paints? */

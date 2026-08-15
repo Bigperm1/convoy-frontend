@@ -174,9 +174,6 @@ const CAR_NATIVE_GUIDANCE = false;
 // 120, 40s ceiling in withConvoyCarPlay.js) — the JS side just never had one.
 const MAX_LIVE_ATTEMPTS = 6;
 
-// (maneuverArrow now lives in ../nav — shared with the phone banner so the arrow
-// glyph is identical on phone + CarPlay.)
-
 // react-native-carplay's Android checkForConnection() emits a spurious
 // `didConnect` at startup even with NO head unit attached (it calls
 // eventEmitter.didConnect() unconditionally). Building any template before a
@@ -1532,7 +1529,6 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
 // plumbing into carStore, so it is queued for build 68; until then these constants
 // match the measured chrome and are deliberately generous. Erring large costs a
 // little map, erring small hides a turn instruction.
-const CAR_TOP_INSET = 58; // clears the CPMapTemplate navigation bar
 // The nav stack is back at the RIGHT EDGE. It only had to be inset by the whole
 // button column while police/mic sat in the bottom two slots; two invisible spacer
 // buttons now hold those slots (see CAR_MAP_BUTTON_CONFIG), lifting the real pair
@@ -1572,9 +1568,6 @@ const NAV_STACK_BOTTOM = IS_AA ? 4 : 8;
 //   leftmost glyph edge ........ x=366pt, i.e. 34pt in from the trailing edge
 // So 8pt is the system's own rhythm, and everything we draw matches it.
 const NAV_GAP = 8;
-// Lane row's right edge lands NAV_GAP clear of the leftmost glyph (400-366-8=26 ->
-// 42 from the edge once CAR_RIGHT_INSET is added back by the margin below).
-const CAR_MAP_BUTTON_COL_W = 42;
 
 // EXPLICIT row heights. These were paddingVertical-derived, which made the stack's
 // total height depend on RN's font line-height and therefore impossible to align
@@ -1768,23 +1761,12 @@ const styles = StyleSheet.create({
   scoutDot: { width: 10, height: 10, borderRadius: 5 },
   scoutPillText: { color: '#F4F4F4', fontSize: 14, fontWeight: '700' },
   weatherText: { color: '#F4F4F4', fontSize: 13, fontWeight: '800', marginTop: 1 },
-  // --- live static-map mode ---
-  preload: { position: 'absolute', width: 1, height: 1, opacity: 0 },
-  markerCenter: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
-  markerHalo: { position: 'absolute', width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(11,11,12,0.55)', borderWidth: 2, borderColor: 'rgba(45,236,134,0.55)' },
-  markerChevron: {
-    width: 0, height: 0, backgroundColor: 'transparent',
-    borderLeftWidth: 10, borderRightWidth: 10, borderBottomWidth: 18,
-    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#2DEC86',
-  },
   // Compact maneuver CARD (mirrors the phone banner), tucked TOP-RIGHT: a green arrow
   // box + a [meters / instruction] column. Smaller than the old full-bleed strip.
   // Single solid dark tint floor (GlassFill above is clear/untinted) at 0.5 — matches
   // the phone banner EXACTLY and is backdrop-independent, so no washout on the pale day
   // map. NO border (like the phone banner + other chips); shadow lifts it.
-  topStrip: { position: 'absolute', top: 8, right: 8, maxWidth: 300, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   maneuverBox: { width: 30, height: 30, borderRadius: 8, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: NAV_GAP },
-  maneuverArrow: { color: '#0B0B0C', fontSize: 24, fontWeight: '900', lineHeight: 28, marginTop: -1 },
   topTextCol: { flex: 1, minWidth: 0 },
   // 17 -> 15 alongside topInst. "1.8 km" still measures ~49pt and stays the largest
   // glyph in the box, and the shorter line box is what buys the vertical room for a
@@ -1798,10 +1780,7 @@ const styles = StyleSheet.create({
   // to 141pt; the text column is ~113pt on a 431pt canvas, so a long street name can
   // still truncate. Fixing THAT needs two lines, not a smaller font — see topDist.
   topInst: { color: '#F4F4F4', fontSize: 10, fontWeight: '600', flexShrink: 1 },
-  topChip: { position: 'absolute', top: 12, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 6, backgroundColor: 'transparent', borderRadius: 14, overflow: 'hidden' },
-  topChipText: { color: '#2DEC86', fontSize: 15, fontWeight: '800', letterSpacing: 1 },
   // ETA / arrival — tucked into the BOTTOM-RIGHT corner, small.
-  bottomMeta: { position: 'absolute', right: CAR_RIGHT_INSET, bottom: 8, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 10, overflow: 'hidden' },
   bottomText: { color: '#C7CCD1', fontSize: 12, fontWeight: '600' },
   // --- BOTTOM-RIGHT nav stack (live map): ETA pill above the maneuver banner, same width ---
   // width is the shared "length" of both banners — OTA-tunable. alignItems:'stretch' makes
@@ -1810,8 +1789,4 @@ const styles = StyleSheet.create({
   navStack: { position: 'absolute', right: CAR_RIGHT_INSET, bottom: NAV_STACK_BOTTOM, alignItems: 'stretch', gap: NAV_GAP },
   navBannerRow: { flexDirection: 'row', alignItems: 'center', height: TURN_ROW_H, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   navEta: { paddingHorizontal: 10, height: ETA_ROW_H, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-  // marginRight: the lane row is the ONLY stack element level with the map buttons
-  // (the ETA and maneuver banner clear them vertically), so it carries the offset
-  // instead of insetting the whole stack. Jeff's explicit requirement: the lane
-  // guidance banner must never touch the buttons.
 });

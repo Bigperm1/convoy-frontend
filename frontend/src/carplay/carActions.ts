@@ -620,8 +620,6 @@ export function carTap(id: string): void {
   try { logEvent(`carplay-tap:${id}`); } catch {}
   try {
     setCarState({
-      carTapEcho: id,
-      carTapEchoAt: Date.now(),
       // Visible receipt in the same non-blocking slot. Jeff can now tell the two
       // failure modes apart AT A GLANCE mid-drive, without waiting on a query:
       // pill appears but nothing happens = the action is broken (our JS, OTA-able);

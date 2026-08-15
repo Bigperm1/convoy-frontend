@@ -262,8 +262,6 @@ const styles = StyleSheet.create({
     backgroundColor: YELLOW,
     alignItems: "center", justifyContent: "center",
   },
-  // Dark turn glyph on the green tile — shared shape with the CarPlay strip (Option A).
-  maneuverGlyph: { color: "#0B0B0C", fontSize: 34, fontWeight: "900", lineHeight: 38 },
   // White distance + instruction over the banner's solid dark tint — matched exactly to
   // the CarPlay strip (topDist / topInst), which are also white on the same dark tint.
   distanceToTurn: { color: "#F4F4F4", fontSize: 28, fontWeight: "800", letterSpacing: -0.5, lineHeight: 32 },
@@ -273,39 +271,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center", justifyContent: "center",
   },
-
-  // ----- Bottom trip bar (thin convoy-yellow) -----
-  bottomWrap: {
-    position: "absolute",
-    left: 12, right: 12, bottom: 28,
-    zIndex: 60,
-  },
-  navYellowBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    backgroundColor: "#2DEC86",
-    borderRadius: 16,
-    paddingVertical: 7,
-    paddingLeft: 16,
-    paddingRight: 7,
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.18)",
-    shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 10,
-  },
-  navYellowTime: { color: "#1C1C1E", fontSize: 17, fontWeight: "800", letterSpacing: -0.3 },
-  navYellowMeta: { color: "#3A3A3C", fontSize: 14, fontWeight: "600" },
-  navExitBtn: {
-    marginLeft: "auto",
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: "#FF3B30",
-    alignItems: "center", justifyContent: "center",
-  },
-  navExitText: { color: "#F4F4F4", fontSize: 12, fontWeight: "700", letterSpacing: 0.2 },
 
   // ----- Speed pill (always-on, bottom-left) -----
   speedWrap: { position: "absolute", left: 12, bottom: 90, zIndex: 55 },

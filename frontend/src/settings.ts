@@ -105,7 +105,6 @@ novaQuietMigrated: boolean;
 // Cameras off) onto existing installs once, then never repeat.
 baselineMigrated: boolean;
 speedUnit: 'kmh' | 'mph';
-speedUnitManual: boolean;
 showWeatherLayer: boolean;
 weatherOnMigrated: boolean;
 speedCameras: boolean;
@@ -130,8 +129,6 @@ powerProfile?: "auto" | "eco";
 gasBrands?: Record<string, boolean>;          // brandKey -> shown; undefined = all shown
 gasOther: boolean;                            // show unbranded / unrecognized stations
 gasOctane?: '94' | '91' | '89' | '87' | null; // selected octane; null = show all
-feedNA: boolean;
-feedROW: boolean;
 carYear?: string;
 carMake?: string;
 carModel?: string;
@@ -229,7 +226,6 @@ departureIQ: true,
 novaQuietMigrated: true,
 baselineMigrated: true,
 speedUnit: 'kmh',
-speedUnitManual: false,
 showWeatherLayer: true,
 weatherOnMigrated: true,
 speedCameras: false,
@@ -242,8 +238,6 @@ showNearby: true,
 gasBrands: { shell: true, chevron: true, petrocan: true, esso: true, husky: false, mobil: false, coop: false, costco: false, canadiantire: false, ultramar: false, pioneer: false, circlek: false },
 gasOther: false,
 gasOctane: '94',
-feedNA: true,
-feedROW: false,
 carYear: undefined,
 carMake: undefined,
 carModel: undefined,
@@ -305,14 +299,6 @@ export function getMapMode(s: Settings): Exclude<MapMode, "auto"> {
   const choice = getMapModeChoice(s);
   return choice === "auto" ? autoMapMode() : choice;
 }
-// Derive the legacy mapType/mapDark the Google/web engines still consume.
-// dawn/day render light, dusk/night render dark on the (non-preset) Google map.
-export function mapModeToLegacy(mode: MapMode): { mapType: "hybrid" | "roadmap"; mapDark: boolean } {
-  const m = mode === "auto" ? autoMapMode() : mode;
-  if (m === "satellite") return { mapType: "hybrid", mapDark: false };
-  return { mapType: "roadmap", mapDark: m === "dusk" || m === "night" };
-}
-
 // ---- Avatar mode helpers (source of truth = settings.avatarMode) ----
 // MIGRATION, and the direction matters. Both retired names map to "visible" because
 // both BEHAVED as visible — this changes nobody's actual exposure, it only stops the

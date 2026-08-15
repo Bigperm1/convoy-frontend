@@ -43,10 +43,6 @@ export async function checkSubscription(): Promise<{
   return { canPlay: false, canSubscribe: false };
 }
 
-export async function searchSongs(_query: string): Promise<AppleSong[]> {
-  return [];
-}
-
 export async function searchSongsDiagnostic(
   _query: string
 ): Promise<{ songs: AppleSong[]; error?: string }> {
@@ -104,8 +100,6 @@ export async function playSong(_songId: string): Promise<void> {
   /* no-op off iOS */
 }
 
-export const play = (): void => {};
-export const pause = (): void => {};
 export const toggle = (): void => {};
 export const skipNext = (): void => {};
 export const skipPrev = (): void => {};

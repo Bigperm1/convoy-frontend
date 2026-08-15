@@ -112,11 +112,6 @@ function errText(e: any): string {
 
 // ---- Catalog search ------------------------------------------------------
 
-/** Search the Apple Music catalog for songs. Always resolves to an array. */
-export async function searchSongs(query: string): Promise<AppleSong[]> {
-  return (await searchSongsDiagnostic(query)).songs;
-}
-
 /**
  * Catalog search that DOES NOT swallow the native error.
  *
@@ -339,14 +334,6 @@ export async function playSong(songId: string): Promise<void> {
     console.warn("[applePlayer] playSong failed", e);
   }
 }
-
-export const play = (): void => {
-  try { Player.play(); } catch (e) { console.warn("[applePlayer] play failed", e); }
-};
-
-export const pause = (): void => {
-  try { Player.pause(); } catch (e) { console.warn("[applePlayer] pause failed", e); }
-};
 
 export const toggle = (): void => {
   try { Player.togglePlayerState(); } catch (e) { console.warn("[applePlayer] toggle failed", e); }

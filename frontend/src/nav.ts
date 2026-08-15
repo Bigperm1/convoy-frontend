@@ -68,8 +68,6 @@ export type NavRoute = {
   color?: string;
 };
 
-export type NavMode = "preview" | "turn-by-turn";
-
 // ---- Distance utils ----
 export function haversineMeters(a: LatLng, b: LatLng): number {
   const R = 6371000;
@@ -83,21 +81,6 @@ export function haversineMeters(a: LatLng, b: LatLng): number {
 }
 
 // ---- Maneuver → human verb ----
-// Shared turn glyph for the maneuver tile — used by BOTH the phone banner
-// (TurnByTurnNav) and the CarPlay strip so they render the SAME dark arrow on the
-// green tile (Option A). Unicode text renders reliably on the CarPlay Fabric
-// surface, where the vector-icon font is flaky — hence glyphs, not <Ionicons>.
-export function maneuverArrow(instruction: string): string {
-  const t = (instruction || "").toLowerCase();
-  if (/\bu[- ]?turn\b/.test(t)) return "⟲";       // ⟲
-  if (/\bslight left\b/.test(t)) return "↖";      // ↖
-  if (/\bslight right\b/.test(t)) return "↗";     // ↗
-  if (/\bleft\b/.test(t)) return "↰";             // ↰
-  if (/\bright\b/.test(t)) return "↱";            // ↱
-  if (/\bmerge\b/.test(t)) return "⤵";            // ⤵
-  if (/\b(ramp|exit|take)\b/.test(t)) return "↗"; // ↗
-  return "↑";                                     // ↑
-}
 
 export function maneuverVerb(m?: string): string {
   if (!m) return "Continue";
@@ -349,10 +332,6 @@ export async function fetchAiRoute(
   if (!mb || !mb.polyline) return null;
   return { ...mapboxToNavRoute(mb), kind: "ai" };
 }
-
-// Keep the old name as an alias so any remaining legacy callsites still compile.
-// New code should call fetchRoutes() directly.
-export const fetchDirections = fetchRoutes;
 
 export function formatDistance(m: number): string {
   // Imperial regions (mph): feet under ~1000 ft, else miles. Metric otherwise.
@@ -1343,7 +1322,6 @@ let _lastTextAt = 0;
 // told to take a right 3 times before through the corner). Two genuinely
 // distinct identical bare-verb turns within 12s are effectively one corner.
 const SAME_TEXT_DEDUPE_MS = 12000;
-let _lastRerouteSpoke = 0;
 type TtsItem = string | { _greetAudio: string; mime: string };
 const ttsQueue: TtsItem[] = [];
 let ttsPlaying = false;
@@ -1436,7 +1414,7 @@ AppState.addEventListener("change", (s) => {
 // instant routing begins the caller reserves a "greeting in flight" hold
 // (reserveGreeting). While that hold is up, turn callouts (e.g. the engine's
 // "Starting navigation\u2026") are PARKED — not dropped, not spoken. When the greeting
-// arrives, deliverGreeting leads the queue with the greeting + a pause + a
+// arrives, deliverGreetingAudio leads the queue with the greeting + a pause + a
 // sentinel that clears the hold and replays the parked callout. If the fetch
 // fails or times out, cancelGreeting releases the parked callout immediately.
 const PAUSE_TOKEN = "\u0000pause:";            // followed by milliseconds
@@ -1463,20 +1441,8 @@ export function reserveGreeting(): void {
   _greetingTimer = setTimeout(() => { if (_greetingInFlight) cancelGreeting(); }, 8000);
 }
 
-export function deliverGreeting(text: string): void {
-  if (_greetingTimer) { clearTimeout(_greetingTimer); _greetingTimer = null; }
-  if (!_greetingInFlight) return;             // already cancelled / timed out
-  if (getSettings().novaVoice === false) { cancelGreeting(); return; }  // master Nova off
-  const t = (text || "").trim();
-  if (!t) { cancelGreeting(); return; }
-  // Lead the queue: greeting, then a pause, then the hold-clear sentinel.
-  ttsQueue.unshift(toSpeech(t), PAUSE_TOKEN + GREETING_PAUSE_MS, GREETING_DONE_TOKEN);
-  _lastSpoke = Date.now();
-  if (!ttsPlaying) drainTtsQueue();
-}
-
-// Like deliverGreeting, but plays PRE-SYNTHESIZED audio (prepared during the
-// route preview) so the greeting starts instantly at Start with no /tts hop.
+// Plays PRE-SYNTHESIZED greeting audio (prepared during the route preview) so
+// the greeting starts instantly at Start with no /tts hop.
 export function deliverGreetingAudio(b64: string, mime: string): void {
   if (_greetingTimer) { clearTimeout(_greetingTimer); _greetingTimer = null; }
   if (!_greetingInFlight) return;
@@ -1570,17 +1536,9 @@ function resetSpeakGate() {
   if (getSettings().novaVoice !== false) void setIdleAudioMode();
 }
 
-// Reroute is intentionally SILENT. Convoy used to speak "Recalculating route."
-// here, but it was intrusive on drives, so the spoken callout is removed
-// entirely. The route itself still recomputes in the background via the
-// off-route handler in the map screen — we just never announce it out loud.
-// The throttle/timestamp is kept so stopSpeech() stays consistent.
-export function announceReroute() {
-  const now = Date.now();
-  if (now - _lastRerouteSpoke < 12000) return;
-  _lastRerouteSpoke = now;
-  // (no speech — see note above)
-}
+// (Reroute is intentionally SILENT — Convoy used to speak "Recalculating route."
+// and it was intrusive on drives. The off-route handler in the map screen still
+// recomputes the route in the background; we just never announce it out loud.)
 
 // General-purpose Nova announcement (e.g. hazard-report confirmations) — uses
 // the same queue as turn instructions so nothing ever talks over anything else.
@@ -1592,7 +1550,6 @@ export function announce(text: string) {
 // a half-spoken instruction doesn't linger after End / Clear.
 export function stopSpeech() {
   resetSpeakGate();
-  _lastRerouteSpoke = 0;
   try { _currentSound?.stopAsync?.(); } catch {}
   try { _currentSound?.unloadAsync?.(); } catch {}
   _currentSound = null;

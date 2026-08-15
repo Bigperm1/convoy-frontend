@@ -28,7 +28,7 @@ import { hailBus } from "../../src/hailBus";
 import { subscribeAvatarHold } from "../../src/avatarHoldBus";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { ensureLocationPermission as askLocationPermission, askPermission } from "../../src/permissionGate";
-import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, getMapModeChoice, mapModeToLegacy, getAvatarMode, setAvatarMode, getSelfMarkerType, getClassPaint, getVehicleClass, unitForCountry, getSpeedAlertMode, getRouteColor } from "../../src/settings";
+import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, getMapModeChoice, getAvatarMode, setAvatarMode, getSelfMarkerType, getClassPaint, getVehicleClass, unitForCountry, getSpeedAlertMode, getRouteColor } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import { BearingTracker } from "../../src/bearing";
@@ -36,7 +36,7 @@ import PeerModal from "../../src/PeerModal";
 import LiveRosterSheet from "../../src/LiveRosterSheet";
 import ShareSheet from "../../src/ShareSheet";
 import {
-  fetchRoutes, fetchDirections, fetchAiRoute, NavRoute, useTurnByTurn, maneuverVerb,
+  fetchRoutes, fetchAiRoute, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
   useRouteTrafficRefresh, fetchRouteViaStops,
 } from "../../src/nav";
@@ -90,9 +90,9 @@ const maneuverIcon = (m?: string, html?: string): any => {
   // arrow. Check the COMPOUND maneuvers (uturn/merge/ramp) before the bare
   // left/right tests, since their names also contain "left"/"right" and would
   // otherwise be drawn as a plain turn arrow.
-  // Keep this DIRECTIONALLY consistent with the CarPlay banner's maneuverArrow()
-  // (ConvoyCarPlay.tsx) so the phone + head unit never show a different arrow for
-  // the same turn. Ramp/exit was "swap-horizontal" (a ⇄) — wrong; it's a rightward
+  // Keep this DIRECTIONALLY consistent with the car banner's maneuverDir() feeding
+  // <ManeuverArrow> (ConvoyCarPlay.tsx) so the phone + head unit never show a
+  // different arrow for the same turn. Ramp/exit was "swap-horizontal" (a ⇄) — wrong; it's a rightward
   // exit like CarPlay's ↗.
   const fromCode = (s: string): string | null => {
     if (s.includes("uturn") || s.includes("u-turn")) return "arrow-undo";
@@ -568,7 +568,6 @@ export default function MapScreen() {
   const wsRef = useRef<WebSocket | null>(null);
 
   const activeRoute: NavRoute | null = routes[selectedRouteIndex] || null;
-  const encodedPolyline = activeRoute?.polyline || null;
 
   // Auto-hide the search bar when actually navigating (turn-by-turn engaged).
   // When nav stops, we don't auto-show — the driver explicitly taps the FAB
@@ -702,11 +701,11 @@ export default function MapScreen() {
   const [savedPlaces] = useSavedPlaces();
   // Base-map mode is the single source of truth (settings.mapMode), controllable
   // from the Settings screen AND the on-map Layers sheet. The Mapbox engine uses
-  // mapMode directly; the Google/web engines use the derived mapType/mapDark.
+  // mapMode directly (the Google/web engines that consumed the derived
+  // mapType/mapDark were retired along with ConvoyMap.tsx).
   const mapMode = getMapMode(settings);
   // The RAW chosen mode (may be "auto") — for the Layers sheet's radio selection.
   const mapModeChoice = getMapModeChoice(settings);
-  const { mapType, mapDark } = mapModeToLegacy(mapMode);
   // Live map bearing (deg) reported by the engine — drives the Compass FAB's
   // needle rotation. northSignal is a monotonic counter the Compass FAB bumps to
   // ask the engine to animate back to north-up (heading 0).
@@ -1464,8 +1463,8 @@ export default function MapScreen() {
   // ===== Lane guidance (Mapbox) — REMOVED 2026-08-13 =====
   // Jeff: "lets completely remove the turn arrow banner from phone and carplay/aa."
   // The lane cues fed only that row, so the per-session Mapbox Directions call that
-  // fetched them went with it. fetchMapboxLaneCues/pickLaneCue still exist in
-  // src/mapboxDirections.ts; nothing calls them.
+  // fetched them went with it; the fetch/match helpers were deleted from
+  // src/mapboxDirections.ts too.
 
   // ===== Proactive reroute recommendation (Nova) =====
   // While navigating, every 60s we re-check live traffic from the current
@@ -2609,9 +2608,9 @@ export default function MapScreen() {
   // BestForNavigation accuracy + 1s tick + 0m distance gate so the speedometer
   // updates every second instead of every ~4s/8m. Battery cost is acceptable
   // for a car-enthusiast app — this is the same cadence Google Maps uses.
-  // Border-detection: throttle the reverse-geocode lookup to once a minute,
-  // and only if the user hasn't manually picked a unit in Settings (see
-  // `settings.speedUnitManual` — set true when they tap a unit button).
+  // Border-detection: throttle the reverse-geocode lookup to once a minute.
+  // (There is no manual unit override any more — the detect is fully automatic;
+  // see the SPEED UNITS note further down.)
   const lastUnitCheckRef = useRef<number>(0);
   // Throttle backend /location POSTs (live-avatar publish) to ~once / 4s.
   const lastLocPostRef = useRef<number>(0);
@@ -2723,8 +2722,6 @@ export default function MapScreen() {
             // by the border-aware unit auto-detect just below.
             const now = Date.now();
             // Border-aware speed-unit auto-detect.
-            //   * Skips entirely if the user has manually chosen a unit
-            //     (settings.speedUnitManual === true).
             //   * Runs ONCE immediately (lastUnitCheckRef===0), then every
             //     60s while the watcher is active so a road-trip from BC
             //     into Washington flips KM/H → MPH within ~1 minute.
@@ -3774,19 +3771,15 @@ export default function MapScreen() {
         // a flat top-down sprite only reads correctly under a top-down camera.
         show3dBuildings={settings.show3dBuildings !== false && !view2D}
         flatView={view2D}
-        mapType={mapType}
-        mapDark={mapDark}
         peers={peerList}
         leaderUserId={leaderUserId}
         hazards={visibleHazards}
         speedCameras={speedCameras}
         roadEvents={roadEvents}
-        externalAlerts={[]}
         highlightConvoy={settings.highlightConvoy}
         destination={destination}
         stops={stops}
         destWeather={destWeather}
-        encodedPolyline={encodedPolyline}
         // While a reroute offer is up, append its line for DISPLAY (kind "offer" →
         // blue inline alternate, tappable during nav). Never lands in `routes`
         // state, so the turn engine / chips / CarPlay mirror are untouched.
@@ -3873,11 +3866,9 @@ export default function MapScreen() {
           // and topSpeed (PB showed "—"). livePeerById carries every field.
           setSelectedPeer((livePeerById.get(p.user_id) || p) as any);
         }}
-        onExternalAlertPress={(a: any) => Alert.alert(`${a.type}${a.subtype ? " · " + a.subtype : ""}`, "Live alert from Hairpin feed.")}
         places={placePins}
         showPlacePins={settings.showPlacePins !== false}
         onPlacePress={handlePlacePinPress}
-        onRoute={setRoute}
       />
 
       {/* Speed-limit + avatar/CarPlay diagnostics — gated by the Debug toggle in Settings. */}
@@ -4944,55 +4935,15 @@ function HazardKindIcon({ kind, size = 44 }: { kind: string; size?: number }) {
   );
 }
 
-// AlertItem — single row inside the Alerts bottom sheet. Icon chip + title +
-// subtitle + (optional) distance pill. Reused for police, hazards, and Waze
-// alerts so the visual rhythm is identical across categories.
-function AlertItem({ icon, iconColor, title, subtitle, distanceKm: dk }: {
-  icon: any; iconColor: string; title: string; subtitle?: string; distanceKm: number | null;
-}) {
-  return (
-    <View style={styles.alertItem}>
-      <View style={[styles.layerIcon, { backgroundColor: iconColor + "22" }]}>
-        <Ionicons name={icon} size={18} color={iconColor} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.layerLabel}>{title}</Text>
-        {!!subtitle && <Text style={styles.layerSub} numberOfLines={1}>{subtitle}</Text>}
-      </View>
-      {dk !== null && (
-        <View style={styles.distPill}>
-          <Text style={styles.distPillText}>{dk < 1 ? `${Math.round(dk * 1000)} m` : `${dk.toFixed(1)} km`}</Text>
-        </View>
-      )}
-    </View>
-  );
-}
-
-// Plain JS Haversine — meters between two lat/lng. Used by the Alerts sheet
-// to surface "how far away" without pulling in any geo library.
+// Plain JS Haversine — KILOMETRES between two lat/lng (callers ×1000 for
+// metres). Used by the hazard/pass-by proximity checks and the saved-place
+// match, without pulling in any geo library.
 function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371; // km
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLng = (lng2 - lng1) * Math.PI / 180;
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
-}
-
-// LayerRow — a single switch row in the Layers bottom sheet. Colored icon
-// chip + label/subtitle + native Switch. Tapping the row also toggles for
-// fat-finger friendliness while driving.
-function LayerRow({ icon, iconColor, label, value, onToggle }: {
-  icon: any; iconColor: string; label: string; value: boolean; onToggle: (v: boolean) => void;
-}) {
-  return (
-    <TouchableOpacity activeOpacity={0.7} onPress={() => onToggle(!value)} style={styles.layerRow}>
-      <View style={[styles.layerIcon, { backgroundColor: iconColor + "22" }]}>
-        <Ionicons name={icon} size={18} color={iconColor} />
-      </View>
-      <Text style={[styles.layerLabel, { flex: 1 }]}>{label}</Text>
-      <Switch value={value} onValueChange={onToggle} trackColor={{ false: "#3A3A3C", true: iconColor + "88" }} thumbColor={value ? iconColor : "#f4f3f4"} />
-    </TouchableOpacity>
-  );
 }
 
 function toHazard(s: SupaHazard): Hazard {
@@ -5033,63 +4984,11 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'ios' ? 52 : 28,
     paddingHorizontal: 12,
   },
-  // Header row container — lays out the Glass card and the Search/X square
-  // button side-by-side. Right padding gives the square button breathing room
-  // from the screen edge so it doesn't bleed into the Dynamic Island/notch.
-  topBarRow: { flexDirection: "row", alignItems: "stretch", gap: 8, paddingRight: 12 },
-  // ===== Compact "Control Cluster" header (slim, search-bar-height) =====
-  // Two stacked rows inside the Glass card: title strip on top, status line
-  // pinned to the bottom edge. Padding is intentionally tight so the card
-  // matches the search bar's vertical footprint and the X button to the right.
-  headerCard: { paddingVertical: 8, paddingHorizontal: 12 },
-  headerTopRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  headerMarkSm: { width: 22, height: 22 },
-  // Title shrinks to fit on small phones while keeping the "Convoy" identity
-  // anchor to the left. letterSpacing trimmed because the larger size already
-  // had personality; at 16px we don't need it.
-  titleSm: { color: COLORS.text, fontSize: 16, fontWeight: "700", letterSpacing: -0.2, marginLeft: 2 },
-  // Live status pill — same color logic as the old one, just smaller paddings
-  // so it nests cleanly inside the 22px title row.
-  livePillSm: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
+  // Live-status dot inside the crew/build overlay pill (see `liveOverlay`).
   liveDotSm: { width: 5, height: 5, borderRadius: 3 },
-  liveTextSm: { fontSize: 9, fontWeight: "700", letterSpacing: 0.4 },
-  // Refresh + Settings — a row of small icon buttons. 28×28 so the touch
-  // target stays usable while keeping the band slim. They sit immediately to
-  // the right of the title pill, just left of the X square.
-  iconBtnSm: {
-    width: 28, height: 28, borderRadius: 14,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(118,118,128,0.18)",
-  },
-  // Status footer — single-line band along the bottom edge of the header card.
-  // numberOfLines=1 + ellipsis keeps the layout stable when peer/alert counts
-  // hit double digits or the handle is long.
-  statusFooter: {
-    color: COLORS.textDim,
-    fontSize: 11,
-    marginTop: 4,
-    letterSpacing: 0.1,
-  },
-  topRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
-  headerMark: { width: 36, height: 36 },
-  title: { color: COLORS.text, fontSize: 26, fontWeight: "700", letterSpacing: -0.6 },
-  sub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
-  iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(118,118,128,0.32)", alignItems: "center", justifyContent: "center" },
-
-  livePill: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, borderWidth: 1, backgroundColor: "rgba(255,255,255,0.05)" },
-  liveDot: { width: 6, height: 6, borderRadius: 3 },
-  liveText: { fontSize: 10, fontWeight: "700", letterSpacing: 0.4 },
-
-  hazardBubble: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.85)" },
   // Bare-image container for the hazard/police art in the detail card + pass-by
-  // prompt. Same 48×48 footprint as hazardBubble so the card layout is unchanged.
+  // prompt. 48×48 keeps the card layout unchanged.
   hazardImgWrap: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
-
-  routeCard: { position: "absolute", left: 12, right: 12, bottom: 110, maxHeight: 460 },
 
   // ===== Google-Maps-style route preview bottom sheet =====
   // Floats just above the tab bar (bottom: TAB_BAR_H), full width, top corners
@@ -5137,121 +5036,8 @@ const styles = StyleSheet.create({
   bannerPillStartText: { color: "#1C1C1E", fontSize: 16, fontWeight: "700" },
   bannerPillBlue: { backgroundColor: "#0A84FF" },
   bannerPillBlueText: { color: "#F4F4F4", fontSize: 14, fontWeight: "600" },
-  sheetHeaderRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingBottom: 12 },
-  sheetDest: { color: COLORS.text, fontSize: 19, fontWeight: "700", letterSpacing: -0.3 },
-  sheetMeta: { color: COLORS.success, fontSize: 13, marginTop: 3, fontWeight: "500" },
-  sheetHeaderBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(118,118,128,0.22)" },
-  routeOptsRow: { flexDirection: "row", gap: 10, paddingBottom: 12 },
-  routeOpt: { flex: 1, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)" },
-  routeOptActive: { borderColor: "#2DEC86", backgroundColor: "rgba(45,236,134,0.12)" },
-  routeOptEta: { color: COLORS.text, fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
-  routeOptEtaActive: { color: "#2DEC86" },
-  routeOptSum: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
-  routeOptSumActive: { color: "rgba(45,236,134,0.85)" },
-  sheetActions: { flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 2 },
-  sheetSecBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 13, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(255,255,255,0.05)" },
-  sheetSecText: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
-  sheetStartBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 14, backgroundColor: "#2DEC86" },
-  sheetStartText: { color: "#0A0A0A", fontWeight: "800", fontSize: 16, letterSpacing: 0.2 },
-  routeRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
-  routeIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center" },
-  routeTo: { color: COLORS.text, fontWeight: "600", fontSize: 15 },
-  routeMeta: { color: COLORS.success, fontSize: 13, marginTop: 2, fontWeight: "500" },
-  // Alternates row
-  altsRow: { flexDirection: "row", paddingHorizontal: 10, paddingBottom: 8, gap: 8, flexWrap: "wrap" },
-  altChip: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1, borderColor: COLORS.hairline, backgroundColor: "rgba(255,255,255,0.04)" },
-  altChipActive: { borderColor: "#0A84FF", backgroundColor: "rgba(10,132,255,0.18)" },
-  altDot: { width: 8, height: 8, borderRadius: 4 },
-  altDur: { color: COLORS.textDim, fontWeight: "600", fontSize: 13 },
-  altSum: { color: COLORS.textDim, fontSize: 11, maxWidth: 130 },
-  // Action row (Steps + Start)
-  actionRow: { flexDirection: "row", paddingHorizontal: 12, paddingBottom: 12, gap: 10 },
-  secBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: COLORS.hairline, backgroundColor: "rgba(255,255,255,0.04)" },
-  secBtnText: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
-  startBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 14, backgroundColor: "#0A84FF" },
-  startBtnText: { color: "#F4F4F4", fontWeight: "700", fontSize: 15, letterSpacing: 0.3 },
-  // Steps
-  stepsList: { maxHeight: 220, paddingHorizontal: 14, paddingTop: 0 },
-  stepRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.hairline },
-  stepIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: COLORS.primary + "22", alignItems: "center", justifyContent: "center" },
-  stepText: { color: COLORS.text, flex: 1, fontSize: 13, lineHeight: 18 },
-  stepDist: { color: COLORS.textDim, fontSize: 12 },
-
-  // ---- Turn-by-turn nav overlays ----
-  // Turn-by-turn top maneuver banner. `marginTop: 8` adds clearance below the
-  // status bar / Dynamic Island so the banner doesn't crowd the camera cutout.
-  navTopWrap: { position: "absolute", top: 0, left: 0, right: 0 },
-  navTopCard: { marginHorizontal: 12, marginTop: 12 },
-  navTopRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
-  maneuverBig: { width: 64, height: 64, borderRadius: 16, backgroundColor: "#0A84FF", alignItems: "center", justifyContent: "center" },
-  navDist: { color: COLORS.text, fontSize: 26, fontWeight: "700", letterSpacing: -0.5 },
-  navInst: { color: COLORS.textDim, fontSize: 13, marginTop: 2 },
-  navIconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(118,118,128,0.32)", alignItems: "center", justifyContent: "center" },
-  navBottomCard: { position: "absolute", left: 12, right: 12, bottom: 110 },
-  navBottomRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 14 },
-  etaBlock: { alignItems: "flex-start" },
-
-  // Bottom-RIGHT trip data pill (turn-by-turn). ETA stacked over Remaining,
-  // tucked just above the rightmost "Hub" footer tab. Compact width so it
-  // doesn't span the screen — center stays clear for the chase view.
-  tripDataRight: {
-    position: "absolute",
-    right: 12,
-    bottom: 100,
-    zIndex: 6,
-  },
-  tripDataInner: {
-    minWidth: 110,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    alignItems: "flex-end",
-  },
-  tripDataValue: { color: COLORS.text, fontWeight: "800", fontSize: 18, letterSpacing: -0.3, lineHeight: 22 },
-  tripDataLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: "700", letterSpacing: 0.6, marginTop: -1 },
-  tripDataDivider: { height: 1, alignSelf: "stretch", backgroundColor: "rgba(255,255,255,0.08)", marginVertical: 6 },
-
-  // End-nav red pill — bottom-LEFT just above the speedometer. Small footprint
-  // so the speedometer + Map tab icon are still legible underneath.
-  endNavFab: {
-    position: "absolute",
-    left: 12,
-    bottom: 158,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 18,
-    backgroundColor: "#FF3B30",
-    zIndex: 7,
-    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
-    ...glassLift,
-  },
-  endNavFabText: { color: "#F4F4F4", fontWeight: "700", fontSize: 13, letterSpacing: 0.2 },
-  etaBig: { color: COLORS.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.4 },
-  etaLabel: { color: COLORS.textDim, fontSize: 11, marginTop: 2, letterSpacing: 0.4 },
-  etaDivider: { width: StyleSheet.hairlineWidth, height: 36, backgroundColor: COLORS.hairline },
-  endBtn: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#FF3B30", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 14 },
-  endBtnText: { color: "#F4F4F4", fontWeight: "700", letterSpacing: 0.3 },
 
   selectedCard: { position: "absolute", left: 12, right: 12, bottom: 200 },
-
-  // Square Search/X button — sits to the right of the Map bar in a single
-  // horizontal row. Matches the Glass card's vertical footprint so the two
-  // read as one continuous toolbar across the screen. Slightly tighter radius
-  // than the Glass card (16 vs 20) so the silhouette reads as "button" not
-  // "second card".
-  searchSquare: {
-    width: 56,
-    alignSelf: "stretch",       // grow to fill the row's intrinsic height
-    minHeight: 56,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(10,132,255,0.92)", // matches Apple Maps blue
-    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
-    ...glassLift,
-  },
 
   // Dark circular backing behind the brand logo on the MAP screen only.
   // The logo sits over live map imagery (roads/satellite), so unlike the
@@ -5273,13 +5059,6 @@ const styles = StyleSheet.create({
     ...glassLift,
   },
 
-  // Trip Summary pill — collapsed view of the route preview card. Renders at
-  // the very top, single line, tappable to expand back into the full card.
-  tripSummaryWrap: { position: "absolute", top: 0, left: 60, right: 60, paddingTop: 4, zIndex: 8 },
-  tripSummary: {},
-  tripSummaryRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 10, paddingHorizontal: 14 },
-  tripSummaryEta: { color: COLORS.text, fontWeight: "700", fontSize: 13, letterSpacing: 0.2 },
-  tripSummaryDest: { color: COLORS.textDim, fontSize: 12, flex: 1 },
   selRow: { padding: 14, flexDirection: "row", alignItems: "flex-start", gap: 12 },
   selTitle: { color: COLORS.text, fontWeight: "600", fontSize: 16 },
   selSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
@@ -5300,30 +5079,14 @@ const styles = StyleSheet.create({
   voteBtnConfirm: { backgroundColor: COLORS.success },
   voteBtnDispute: { backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,69,58,0.5)" },
   voteBtnText: { color: "#F4F4F4", fontWeight: "700", fontSize: 14, letterSpacing: 0.2 },
-  // (legacy, kept for reference but unused)
-  confirmBtn: { paddingHorizontal: 14, paddingVertical: 10, backgroundColor: COLORS.primary + "33", borderRadius: 12, borderWidth: 1, borderColor: COLORS.primary + "55" },
-  confirmText: { color: COLORS.primary, fontWeight: "700" },
 
-  // Right-edge "peek tab" wrapper. Anchored to right=0 so the slide-out animation
-  // tucks 67% of the square off-screen when inactive (33% peeking) and lands at
-  // x=0 when active. Square corners on the right edge, rounded on the left edge
-  // so it reads as a drawer pull rather than a button.
-  // Speedometer HUD — bottom-LEFT corner above the "Map" footer tab icon.
-  // Placed flush against the left edge so the chase-cam center is fully open.
-  // ===== Speedometer HUD (bottom-left) =====
-  // Square 64×64 badge mirroring the right-side FAB stack — same edge gutter
-  // (12) and same bottom anchor (90) for visual symmetry. Inner Text nodes
-  // render the speed number + unit label. Background color is set inline on
-  // the View (dark / orange / red) by SpeedometerHUD based on speed vs limit.
   // Bottom-right FAB buttons. These are flex children of `fabStack` (which
   // owns the absolute positioning + vertical-column layout), so they must NOT
   // be position:absolute themselves. The old style WAS absolute at a fixed
   // bottom/right, which collapsed every button onto the same spot — the blue
   // Directions FAB landed on top of the pile and read as a stray "blue dot"
   // floating over the map (and tapping it toggled the search bar + logo).
-  // Now: 48×48 rounded squares, semi-transparent dark fill, centered white
-  // icon. fabPrimary (blue Directions) / stopNavBtn (red Stop) / the inline
-  // recenter blue override just the fill.
+  // Now: 48×48 rounded squares, semi-transparent dark fill, centered white icon.
   fab: {
     width: 60, height: 60,
     borderRadius: 30,
@@ -5412,21 +5175,6 @@ const styles = StyleSheet.create({
     gap: 10,                     // a touch more breathing room between buttons
     alignItems: "center",
   },
-  fab2: {
-    width: 42, height: 42,
-    borderRadius: 10,
-    backgroundColor: 'rgba(28,28,30,0.88)',
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
-  },
-  // Directions = primary action → Convoy blue. Same 42×42 footprint as the
-  // others (was 44×44 in spec, but matching the rest reads cleaner).
-  fabPrimary: {},
-  // Stop Navigation — red 42×42 button shown LEFT of Directions while a trip
-  // is active. Same footprint, attention-grabbing red bg so the driver knows
-  // exactly where to tap to bail out of nav.
-  stopNavBtn: { backgroundColor: "#FF3B30", borderWidth: 0 },
   // ===== Layers / Settings sheet =====
   // New grouped section headers + row styles. The legacy `layerRow` (icon +
   // toggle + chevron) below is left intact for any other consumers, but the
@@ -5444,16 +5192,6 @@ const styles = StyleSheet.create({
   },
   layerRowLabel: { color: '#F4F4F4', fontSize: 15, fontWeight: '500' },
   layerRowSub: { color: '#808080', fontSize: 12, marginTop: 2 },
-  // Small badge with the active-alert count pinned to top-right of the Alerts FAB.
-  fabBadge: {
-    position: "absolute", top: -4, right: -4,
-    minWidth: 18, height: 18, borderRadius: 9,
-    backgroundColor: "#FF3B30",
-    alignItems: "center", justifyContent: "center",
-    paddingHorizontal: 5,
-    borderWidth: 2, borderColor: "rgba(28,28,30,0.85)",
-  },
-  fabBadgeText: { color: "#F4F4F4", fontSize: 10, fontWeight: "700" },
   // Tiny live-status pill that overlays the top edge of the search bar
   // (replaces the old dark header). Green dot + "X live · Y alerts" in a
   // glassy rounded chip — subtle, glanceable, never blocks the map.
@@ -5495,7 +5233,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)",
   },
   sheetGrip: { width: 38, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.25)", alignSelf: "center", marginBottom: 14 },
-  sheetTitle: { color: COLORS.text, fontSize: 18, fontWeight: "700", marginBottom: 12, letterSpacing: -0.2 },
   layerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -5521,8 +5258,6 @@ const styles = StyleSheet.create({
   nameModalSave: { backgroundColor: "#2DEC86" },
   nameModalSaveText: { color: "#1C1C1E", fontWeight: "800", fontSize: 15 },
   // Alerts sheet styles
-  alertsGroup: { color: COLORS.textDim, fontSize: 11, fontWeight: "700", letterSpacing: 0.7, marginTop: 14, marginBottom: 4, textTransform: "uppercase" },
-  alertsEmpty: { color: COLORS.textDim, fontSize: 13, textAlign: "center", marginTop: 22 },
   alertItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
   distPill: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, backgroundColor: "rgba(118,118,128,0.35)" },
   distPillText: { color: "#F4F4F4", fontSize: 11, fontWeight: "600" },

@@ -1553,7 +1553,14 @@ const CAR_TOP_INSET = 58; // clears the CPMapTemplate navigation bar
 // 12 -> 6 (2026-07-30, Jeff: "push everything over to the edges"). androidx keeps its
 // own chrome outside the stable area it hands us, so every dp we hold back here is
 // dead margin on the tightest canvas we ship to.
-const CAR_RIGHT_INSET = IS_AA ? 6 : 48;
+// AA 6 -> 50 (2026-08-14, Say Phin's video): androidx draws its OWN vertical
+// MapActionStrip (zoom/crew/compass) down the RIGHT edge of the canvas, ON TOP of our
+// surface — and our nav stack, hugging right at 6, rendered underneath its lower
+// buttons (Jeff's "banners are overlapping the crew and compass"). 50 clears the
+// measured strip (~18-22dp of visual chrome) under either scaling interpretation of
+// hudFit. Video-measured with perspective error; the android-auto-canvas telemetry now
+// re-logs per size, so the next drive verifies the number.
+const CAR_RIGHT_INSET = IS_AA ? 50 : 48;
 const NAV_STACK_BOTTOM = IS_AA ? 4 : 8;
 
 // ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────
@@ -1612,8 +1619,14 @@ const CAR_PILL_TOP = 4;
 // Perspective in a dashboard photo costs a few points of accuracy, so these carry a
 // small margin rather than being pinned to the raw reading. Both are OTA-tunable.
 // Android Auto draws no bar over our surface and keeps the full width.
-const CAR_BAR_LEADING_W = IS_AA ? 0 : 104;
-const CAR_BAR_TRAILING_W = IS_AA ? 0 : 126;
+// AA 0/0 -> 8/92 (2026-08-14, Say Phin's video): the zeros assumed Android Auto has no
+// top chrome — it does, it just draws it ON TOP of our surface: mic + Search + End float
+// top-RIGHT (measured starting ~128dp of 213). With no trailing inset our centred pill
+// ran underneath them (Jeff's "the v72 pill on top is under the search"). 92 keeps the
+// pill's box clear of that cluster whether or not the row's hudFit scale applies to the
+// text; the leading 8 stops it kissing the left bezel. CarPlay values untouched.
+const CAR_BAR_LEADING_W = IS_AA ? 8 : 104;
+const CAR_BAR_TRAILING_W = IS_AA ? 92 : 126;
 // Jeff (2026-07-24, second pass): all three rows share ONE WIDTH — he may add a
 // third button on the right, and a ragged stack would then need re-tuning. So the
 // rows STRETCH to the stack width (navStack alignItems:'stretch') and the width

@@ -294,6 +294,10 @@ const RETRY_WATCHDOG_MS = 9000;
 // addition to the ≤60 m distance test, the route bearing must be within tolerance of the
 // travel heading, so a turn onto a parallel/cross street un-snaps the car to raw GPS.
 // Hysteresis (lock 45° / release 60°) avoids flicker; skipped below ~walking speed.
+// Crew overview: peers farther than this from the car are left out of the FIT (not the
+// map). 100 km covers any real convoy spread on a highway run; beyond it the overview
+// stops being about driving together. See the runaway guard at the crewFit case.
+const CREW_FIT_MAX_KM = 100;
 const CAR_SNAP_HDG_LOCK = 45;
 const CAR_SNAP_HDG_UNLOCK = 60;
 const CAR_SNAP_MOVING_MS = 1.5;
@@ -830,6 +834,17 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
     // suspends JS timers while the phone is locked, which is how a phone sits in a
     // mount, so a timer-based release could strand the camera for the whole drive —
     // the same trap that once stranded the CarPlay alert modals over the map.
+    // ── OVERVIEW-EXIT SNAP (2026-08-14) ─────────────────────────────────────────
+    // When the crew-overview hold lapses, the chase cam takes the framing back through
+    // pushCam's zoom low-pass — which is now deliberately SLOW (CAM_SMOOTH_TAU_MS 1400,
+    // the GPS-noise fix), so the return from a wide overview would visibly crawl for
+    // seconds and read as "stuck", which is exactly what Say Phin's video shows the old
+    // recovery doing. Fire the one-shot deliberate-zoom flag on the expiry EDGE so the
+    // chase zoom LANDS, same as a button press. This runs at frame rate (getCam), so the
+    // edge is caught within one frame of expiring.
+    const holdActive = Date.now() < camHoldUntilRef.current;
+    if (camHoldWasActiveRef.current && !holdActive) zoomSnapRef.current = true;
+    camHoldWasActiveRef.current = holdActive;
     camHdgOverrideRef.current = (carNorthUpRef.current || Date.now() < camHoldUntilRef.current)
       ? 0
       : undefined;
@@ -938,6 +953,8 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // Set on every DRIVER-initiated zoom so pushCam lands it immediately rather than
   // low-passing it with the slow automatic-framing filter. See zoomSnapRef in SelfCarModel.
   const zoomSnapRef = useRef(false);
+  // Was the crew-overview hold active on the previous frame? (expiry-edge detector)
+  const camHoldWasActiveRef = useRef(false);
   const applyZoomNow = () => {
     zoomSnapRef.current = true;
     try {
@@ -1066,12 +1083,30 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           // has no other way to dismiss the overview than waiting).
           try {
             const cs = getCarState();
-            const pts: [number, number][] = [];
-            if (typeof cs.selfLat === 'number' && typeof cs.selfLng === 'number') pts.push([cs.selfLng, cs.selfLat]);
+            // ── RUNAWAY GUARD (2026-08-14, Say Phin's video + receipts) ─────────────
+            // Three crew taps + a zoom-out mash preceded the map zooming out to a
+            // ~500 km frame (Portland visible from Vancouver) and then sitting on
+            // solid land-cover green for over a minute. This fit had two open doors:
+            //   1. It framed EVERY peer, any distance away. A peer parked hundreds of
+            //      km out — or carrying a stale/bogus position — dragged the whole
+            //      overview out with it. A convoy overview is for cars driving
+            //      TOGETHER; someone 500 km away is not framing information.
+            //   2. The zoom floor was 3, which is CONTINENT scale.
+            // Peers farther than CREW_FIT_MAX_KM from the car are excluded from the
+            // fit (they still exist — the Comms list and the map still show them),
+            // and without a self fix there is nothing sane to frame, so bail rather
+            // than fly the camera to an arbitrary peer.
+            if (!(typeof cs.selfLat === 'number' && typeof cs.selfLng === 'number')) break;
+            const pts: [number, number][] = [[cs.selfLng, cs.selfLat]];
+            let dropped = 0;
             for (const pr of cs.peers || []) {
-              if (typeof pr?.lat === 'number' && typeof pr?.lng === 'number') pts.push([pr.lng, pr.lat]);
+              if (!(typeof pr?.lat === 'number' && typeof pr?.lng === 'number')) continue;
+              const dLat = (pr.lat - cs.selfLat) * 111.32;
+              const dLng = (pr.lng - cs.selfLng) * 111.32 * Math.cos((cs.selfLat * Math.PI) / 180);
+              if (Math.hypot(dLat, dLng) > CREW_FIT_MAX_KM) { dropped += 1; continue; }
+              pts.push([pr.lng, pr.lat]);
             }
-            if (pts.length === 0) break;
+            if (dropped > 0) { try { logEvent(`crew-fit dropped=${dropped} far peers`); } catch {} }
             // Engage the hold IMMEDIATELY — the render-time gate above only
             // recomputes on the next store tick (~1s); without this the chase cam
             // kept pushing frames over the overview and it never landed.
@@ -1104,7 +1139,10 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
             const w = mapW > 0 ? mapW : 400, h = mapH > 0 ? mapH : 240;
             const zx = Math.log2((w * 0.75 * 360) / (512 * lngSpan));
             const zy = Math.log2((h * 0.65 * 180) / (512 * latSpan));
-            const zoom = Math.max(3, Math.min(15, Math.min(zx, zy)));
+            // Floor 3 -> 8. Zoom 8 is a ~city-region frame — the widest a convoy
+            // overview can be and still mean anything on a 213dp canvas. 3 was the
+            // continent frame in the video.
+            const zoom = Math.max(8, Math.min(15, Math.min(zx, zy)));
             cameraRef.current?.setCamera({
               centerCoordinate: [cLng, cLat], zoomLevel: zoom,
               pitch: 0, heading: 0, animationDuration: 600, animationMode: 'easeTo',

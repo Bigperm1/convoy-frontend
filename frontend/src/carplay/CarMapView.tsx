@@ -466,6 +466,56 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // Receipt for the recovery. Without it "the retries stopped" is unreadable — you
     // cannot tell whether the next attempt painted or the drive simply ended.
     if (attempt > 0) { try { logEvent(`carplay-live-paint attempt=${attempt}`); } catch {} }
+    void measureViewportOnce();
+  };
+
+  // ── DOES THE MAP ACTUALLY SEE WHAT WE THINK IT SEES? (2026-08-15) ────────────────
+  // Jeff, today: he cannot rely on a tester driving on cue — Say Phin has a family and
+  // this is not his job — and Android Auto cannot be checked on this Mac. So the AA
+  // basemap-scale fix (aaMapScaleFor) has to verify ITSELF from an ordinary drive,
+  // with nobody asked to look at anything.
+  //
+  // ⚠ THIS RECORDS OBSERVATIONS, NOT CONCLUSIONS — deliberately, because the FIRST
+  // instrument written for this failed review for exactly that: mapScaleWant/mapPtWant
+  // are derived from the same `w` on the same line, so they report what we INTENDED to
+  // hand the map, never what the map did. That is the update_id trap this project
+  // already paid for once. getVisibleBounds() comes back from the NATIVE map, so it is
+  // the one number here that can contradict us.
+  //
+  // No formula is applied on-device on purpose: meters-per-point depends on zoom,
+  // latitude and Mapbox's tile-size convention, and baking a slightly-wrong constant in
+  // would produce a confident wrong reading that survives in the data. Log the raw
+  // bounds, the zoom and the latitude; derive off-device where the arithmetic can be
+  // checked and corrected without shipping anything.
+  //
+  // HOW TO READ IT: ground span at a given zoom is proportional to the map's LOGICAL
+  // viewport width. CarPlay rows are the reference (mapScale=1, ~400pt). If the AA fix
+  // works, an AA row at a comparable zoom/latitude shows a span in the same ballpark as
+  // CarPlay's; if the fix never applied, AA's span is roughly half of it.
+  // One row per session — this is a Supabase INSERT, not a console line.
+  const viewportLoggedRef = useRef(false);
+  const measureViewportOnce = async () => {
+    if (viewportLoggedRef.current) return;
+    viewportLoggedRef.current = true;
+    try {
+      // Let the first camera command settle: at paint the camera may still be on the
+      // cold seed rather than the follow pose, which would log a zoom we never show.
+      await new Promise((r) => setTimeout(r, 2500));
+      const m = carMapRef.current;
+      if (!m?.getVisibleBounds) return;
+      const [ne, sw] = await m.getVisibleBounds();     // [[lon,lat],[lon,lat]] from NATIVE
+      const zoom = typeof m.getZoom === 'function' ? await m.getZoom() : -1;
+      const f = (n: number) => (typeof n === 'number' ? n.toFixed(5) : 'na');
+      logEvent(
+        `car-viewport surf=${Math.round(surfaceW)}x${Math.round(surfaceH)} ` +
+        `scale=${mapScale.toFixed(3)} zoom=${typeof zoom === 'number' ? zoom.toFixed(2) : 'na'} ` +
+        `ne=${f(ne?.[0])},${f(ne?.[1])} sw=${f(sw?.[0])},${f(sw?.[1])}`,
+      );
+    } catch {
+      // A failed read must never touch the drive. Silence is itself a signal: an AA
+      // session with a paint row but no car-viewport row means getVisibleBounds is
+      // unavailable on that surface, which is worth knowing on its own.
+    }
   };
 
   useEffect(() => {

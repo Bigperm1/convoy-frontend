@@ -229,14 +229,85 @@ export function hudScaleFor(w: number, h: number): number {
 // difference no zoom value can fix, and folding it in here would over-zoom by a
 // further 0.26 levels. The clamp is a sanity rail on a bad layout report.
 //
-// NOT the complete fix: this restores the ground scale, but Mapbox draws label text
-// at a dp size, so road labels stay ~1.9x oversized. The real root fix is native —
-// MapOptions.Builder.pixelRatio(2f) on the AA MapView (verified present in the
-// bundled Mapbox Android SDK 11.25.0) — which needs a build, so it is queued for 71.
+// STILL NOT THE COMPLETE FIX ON ITS OWN — see aaMapScaleFor directly below, which is.
+// This corrects the GROUND SCALE (how much road is on the panel). It cannot touch the
+// SIZE Mapbox draws things at: labels, shields and line widths are specified in dp and
+// rasterised at the view's pixelRatio, for which rnmapbox exposes no prop. That was
+// going to need a native MapOptions.Builder.pixelRatio(2f) and a paid build (it was
+// queued for 71). aaMapScaleFor gets the same result over the air — and when it is
+// active THIS function returns 0 on its own, so the two can never double-correct. That
+// is by construction (the `w >= CAR_REF_W` guard below), not a flag anyone has to
+// remember to flip. (2026-08-15)
 export const AA_ZOOM_OUT_MAX = 1.5;
 export function aaZoomOutFor(w: number): number {
   if (Platform.OS !== 'android' || !(w > 0) || w >= CAR_REF_W) return 0;
   return Math.min(AA_ZOOM_OUT_MAX, Math.log2(CAR_REF_W / w));
+}
+
+// ── THE MAP GETS CARPLAY'S CANVAS, NOT THE HEAD UNIT'S (2026-08-15) ────────────
+// ⚠ FIRST, TWO THINGS THAT WERE WRITTEN DOWN WRONG AND ARE NOW VERIFIED IN SOURCE:
+//   1. pixelRatio 3.75 is SAY PHIN'S PHONE, not the head unit. RN sizes a surface from
+//      the Context it was created on, and react-native-carplay's bridgeless port builds
+//      the car surface on the APPLICATION context — VirtualRenderer.kt does
+//      `ContextThemeWrapper(appContext, …)` then reactHost.createSurface(themed, …).
+//      So AA dp = headUnitPx / PHONE density: 800/3.75 = 213, 400/3.75 = 107, which is
+//      exactly the measured row. The magnitude of this bug is PER-TESTER; on a
+//      2.0-density phone there is no error at all. Never bake 1.875 into anything.
+//   2. The virtual display's own density — createVirtualDisplay's `container.dpi` —
+//      reaches NOTHING. It is the only occurrence of that value in the whole library
+//      and nothing ever reads it back. Changing it would have been a paid no-op.
+//
+// THE ACTUAL DEFECT: Mapbox gets a 213-POINT canvas where CarPlay gets a 400-point one,
+// at the same physical 800px. Everything Mapbox rasterises at a dp size is therefore
+// 400/213 = 1.88x too large on the panel — one street name spanning the whole screen.
+//
+// THE FIX, WITH NO NATIVE CHANGE: lay the GL view out at 400 x ~201 POINTS and scale it
+// back onto the 213x107 panel with an RN transform. Mapbox's logical viewport becomes
+// CarPlay's exactly, and it renders 1500x754 px which composites down to 800x400. A
+// 12-point label rasterises at 12 x 3.75 = 45px and lands at 45 x 0.5325 = 24px — the
+// same 24px CarPlay draws it at (12 x 2.0). Ground scale, labels, line widths and
+// sprites all corrected in ONE move, over the air.
+//
+// WHAT THIS DOES *NOT* REQUIRE — the interlock, settled by arithmetic, not by unwinding:
+//   • aaZoomOutFor retires ITSELF. Its input is the map's own onLayout width, which is
+//     now 400, and its guard returns 0 at `w >= CAR_REF_W`. No double correction.
+//   • uiScale = hudScaleFor(mapW, mapH) re-derives 0.446 -> 0.837 and lands on the
+//     IDENTICAL physical size: a peer icon is 44 x 0.446 x 3.75 = 73.6px today and
+//     44 x 0.837 x 3.75 x 0.5325 = 73.6px after. Nothing to change.
+//   • The 3D car is actually FIXED here. It is sized in METRES, so it was shrunk TWICE —
+//     once by uiScale (0.446) and again by the 0.91-level zoom-out (1.881) — leaving the
+//     driver's own car at 0.445 of CarPlay's proportion while every chip beside it sat
+//     at 0.836. With aaZoomOut at 0 it comes out 0.7 x 0.837 x 3.75 x 0.5325 = 0.836 of
+//     CarPlay: the same number as the chips, which is the entire point of one shared
+//     scale. That defect is live on build 70 and needed no build to fix.
+//   • Every hardcoded AA dp inset in ConvoyCarPlay (CAR_RIGHT_INSET, CAR_BAR_*,
+//     CAR_DOCK_LEFT, SPEED_DOCK_BOTTOM, the IS_AA fontSize) is untouched. They live in
+//     the RN dp frame, which does not move, and several of them clear androidx chrome
+//     drawn at a fixed PHYSICAL size — rescaling them would actively break the layout.
+//
+// THE COST, stated honestly: the GL map renders 1.13 Mpx instead of 0.32 — 3.5x the
+// fragment work, on the surface with the known heat history. Context: the Android PHONE
+// map already renders 4.5 Mpx on the same GPU, so this is a quarter of that.
+// MAP_SCALE_FLOOR bounds the blow-up, and CAR_REF_W is an OTA dial if it proves too
+// expensive (320 would halve the extra pixels for labels 1.25x CarPlay's instead of 1.0).
+// fps is NOT a lever here — 60 stays 60.
+//
+// RISK, flagged as HYPOTHESIS: the AA map is a SurfaceView (rnmapbox defaults
+// surfaceView:true — src/components/MapView.tsx:501 — and we never override it), so the
+// downscale is done by SurfaceFlinger from the view→window matrix rather than by our own
+// draw. Android maps that matrix for translate+scale, which is all we use here. If a
+// head unit shows only the TOP-LEFT QUADRANT of an over-zoomed map, that is this and
+// nothing else, and the fix is the one-prop OTA `surfaceView={false}` (TextureView) —
+// deliberately NOT shipped up front, because it buys insurance we may not need at the
+// price of an extra GPU copy every frame on a surface that runs hot.
+export const MAP_SCALE_FLOOR = 0.5;
+export function aaMapScaleFor(surfaceWidthDp: number): number {
+  if (Platform.OS !== 'android' || !(surfaceWidthDp > 0)) return 1;
+  // Never ABOVE 1: a head unit already at/above the reference would otherwise be asked
+  // to render FEWER pixels than its panel and go soft. Floored so an absurd layout
+  // report cannot demand a 10x framebuffer — and below the floor aaZoomOutFor picks up
+  // the residual by itself, which is the right partial answer instead of a cliff.
+  return Math.min(1, Math.max(MAP_SCALE_FLOOR, surfaceWidthDp / CAR_REF_W));
 }
 // Cache miss on a cold bg JS context can leave mapMode undefined, so the car needs SOME
 // fallback rather than a bare default style.
@@ -311,14 +382,59 @@ type Props = {
   onGLError?: (why: string) => void;
   // Which retry this mount is (0 = first). Retries widen the paint watchdog.
   attempt?: number;
+  // ── THE SURFACE SIZE, PASSED DOWN (2026-08-15) ─────────────────────────────
+  // The RN dp frame the head unit actually gave us — 213x107 on Say Phin's Toyota —
+  // measured by ConvoyCarPlay's root onLayout. It CANNOT be measured in here, because
+  // this component's own layout is the thing aaMapScaleFor changes: the map is laid out
+  // oversized and scaled back down, so its onLayout reports the size WE chose, not the
+  // size the panel is. Chicken-and-egg, hence a prop.
+  // 0 until the parent's first onLayout, and every consumer below falls back to exactly
+  // today's behaviour at 0. On CarPlay these are simply never used (mapScale is 1).
+  surfaceW?: number;
+  surfaceH?: number;
 };
 
-export default function CarMapView({ onGLError, attempt = 0 }: Props) {
+export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfaceH = 0 }: Props) {
   const s = useCarStore();
   const powerMode = usePowerMode(); // premium (plugged) → 60fps; eco (unplugged) → 30fps
 
   const [mapH, setMapH] = useState(0);
   const [mapW, setMapW] = useState(0);
+
+  // ── THE MAP RENDERS IN CARPLAY'S POINT SPACE (2026-08-15) ───────────────────
+  // The reasoning is on aaMapScaleFor; this is the wiring. Lay the GL view out at
+  // surface/mapScale (400 x ~201 points on the measured canvas) and scale it back onto
+  // the panel. transformOrigin 'top left' with top/left 0 means the scaled box lands
+  // exactly on 0,0..surfaceW,surfaceH — nothing spills, so this needs no clipping
+  // wrapper and the surrounding tree is unchanged. (transformOrigin is already in use on
+  // this surface: ConvoyCarPlay's hudFit, :473.)
+  //
+  // MEMOISED for the same reason selfScale is: handing MapView a fresh style object
+  // every render re-uploads layout to the GL view, and this one runs at store-tick rate.
+  // mapScale is 1 on CarPlay and on any head unit already at/above the reference, and
+  // the object is then the identical StyleSheet.absoluteFill it has always been.
+  //
+  // ORDERING, deliberate: on the first render surfaceW is 0, so the map is absoluteFill
+  // at 213x107 and aaZoomOutFor still applies its 0.91 — i.e. exactly build 70. One
+  // render later surfaceW lands, the map relayouts to 400 points and aaZoomOutFor goes
+  // to 0 on its own. That transition is why the applyZoomNow effect keyed on mapW is NOT
+  // dead weight and must stay: a head unit that connects while the car is PARKED arms no
+  // ease, so without it the corrected framing would wait for the driver to pull away.
+  const mapScale = aaMapScaleFor(surfaceW);
+  const mapStyle: any = useMemo(
+    () => (mapScale >= 1 || !(surfaceW > 0) || !(surfaceH > 0)
+      ? StyleSheet.absoluteFill
+      : {
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: surfaceW / mapScale,
+          height: surfaceH / mapScale,
+          transform: [{ scale: mapScale }],
+          transformOrigin: 'top left',
+        }),
+    [mapScale, surfaceW, surfaceH],
+  );
 
   // Frame watchdog state. paintedRef flips on the first real rendered frame;
   // firedRef ensures onGLError fires at most once. The map can never get stuck
@@ -809,10 +925,14 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // centre instead of dropped down/left, and the speed-aware chase zoom never adapts.
   // Fix = keep the FUNCTION IDENTITY stable (so the frozen closure is harmless) and
   // read every input through a ref that is refreshed on each render.
-  const camInputsRef = useRef({ followZoom, followPitch, mapH, mapW, previewMulti, uiScale });
-  camInputsRef.current = { followZoom, followPitch, mapH, mapW, previewMulti, uiScale };
+  // mapScale rides in here for the same reason everything else does — getCam's closure
+  // is frozen at mount (see the block above), and mapScale changes one render AFTER the
+  // first when surfaceW arrives. Reading it off the ref is what keeps the camera anchor
+  // correct on that transition instead of stuck on the pre-layout value. (2026-08-15)
+  const camInputsRef = useRef({ followZoom, followPitch, mapH, mapW, previewMulti, uiScale, mapScale });
+  camInputsRef.current = { followZoom, followPitch, mapH, mapW, previewMulti, uiScale, mapScale };
   const getCam = useRef(() => {
-    const { followZoom: fz, followPitch: fp, mapH: h, mapW: w, previewMulti: pv, uiScale: us } = camInputsRef.current;
+    const { followZoom: fz, followPitch: fp, mapH: h, mapW: w, previewMulti: pv, uiScale: us, mapScale: ms } = camInputsRef.current;
     // ── CREW OVERVIEW RELEASE (2026-07-29) ────────────────────────────────────
     // Jeff: "hitting the crew button on CarPlay doesn't revert back to the chase
     // cam depending on the speed — it goes to a weird 3-D view."
@@ -895,7 +1015,20 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           // real banner top sat ~31dp up, leaving the car floating high on the head
           // unit (build-69 photo). Only the stack's own bottom inset is unscaled; the
           // row height and the half-gap above it shrink with the HUD, so re-derive.
-          const gap = CAR_BANNER_STACK_BOTTOM + CAR_BANNER_GAP_SCALABLE * us;
+          // ── THE ONE COUPLING THE MAP TRANSFORM INTRODUCES (2026-08-15) ────────
+          // This gap is the ONLY quantity on this surface that mixes the two frames:
+          // it positions the CAMERA (map points) against the RN-drawn banner stack
+          // (dp), and since aaMapScaleFor those are no longer the same unit — one map
+          // point is now `ms` dp. So the two terms convert differently:
+          //   • CAR_BANNER_STACK_BOTTOM is a real dp POSITION -> divide by ms.
+          //   • CAR_BANNER_GAP_SCALABLE * us is already in the map's frame, because us
+          //     re-derived against the new layout (0.446 -> 0.837) and us * ms is
+          //     exactly the HUD's hudScale (both are height-bound on a 2:1 panel).
+          // Measured canvas: 4/0.5325 + 46*0.837 = 46.0 points, which puts the car at
+          // (201+109)/2 = 155 points = 82.4dp down the panel — the same 82.5dp it sits
+          // at on build 70. Leave it unconverted and the car drifts ~2dp up into the
+          // banner. ms is 1 on CarPlay, so this stays the 8 + 46 = 54 it was tuned to.
+          const gap = CAR_BANNER_STACK_BOTTOM / ms + CAR_BANNER_GAP_SCALABLE * us;
           const anchored = H - 2 * gap;
           return Math.round(Math.max(H * CAR_LOWER_PAD_FRAC, Math.min(H * 0.72, anchored)));
         })(),
@@ -1380,7 +1513,10 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   return (
     <MapView
       ref={carMapRef}
-      style={StyleSheet.absoluteFill}
+      // Oversized-and-scaled-back on Android Auto so Mapbox lays out in CarPlay's point
+      // space; the identical StyleSheet.absoluteFill object everywhere else. This one
+      // line is the whole basemap fix — see aaMapScaleFor. (2026-08-15)
+      style={mapStyle}
       styleURL={styleURL}
       projection="mercator"
       // Let the GL map present at the head unit's full refresh (clamped by the panel,

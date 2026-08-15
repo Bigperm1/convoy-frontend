@@ -41,7 +41,7 @@ import { fmtPitstop } from '../pitstop';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
 import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, claimCarNavStrip, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
-import CarMapView, { CAR_LEFT_PAD_FRAC, hudScaleFor } from './CarMapView';
+import CarMapView, { CAR_LEFT_PAD_FRAC, hudScaleFor, aaMapScaleFor } from './CarMapView';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
 import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, AA_ACTION_STRIP, AA_MAP_BUTTONS, handleCarBarButton, handleCarMapButton, handleAaButton, carTap } from './carActions';
@@ -152,11 +152,32 @@ function logAaCanvas(w: number, h: number): void {
   try {
     const win = Dimensions.get('window');
     const ratio = PixelRatio.get();
+    // ⚠ READ px= AND pixelRatio= CORRECTLY (2026-08-15). Neither is a head-unit
+    // measurement. pixelRatio is PixelRatio.get(), a process-global seeded from the app
+    // context — i.e. THE PHONE's density — and px= is just dp x that. The 3.75 in the
+    // 2026-07-30 row is Say Phin's Galaxy, not his Toyota; window=384x832dp @3.75 =
+    // 1440x3120, which is a phone. The scale error is therefore per-tester, and 1.875
+    // must never be baked into anything.
+    //
+    // ⚠⚠ mapScaleWant/mapPtWant are DERIVED FROM `w` ON THIS LINE. They are the value we
+    // INTEND to hand the map, not an observation of what the map did — the same class of
+    // instrument as update_id, and it must be read that way. This row is only reached
+    // when w > 0 (the guard above), so mapScaleWant can read 1 ONLY on a head unit
+    // already >= CAR_REF_W wide; it can NEVER report 'the prop failed to reach
+    // CarMapView'. And mapPtWant is w/(w/CAR_REF_W) = CAR_REF_W identically unless
+    // MAP_SCALE_FLOOR binds, so its one real signal is 'the floor bound'.
+    // DO NOT use either field to decide whether the correction engaged. The only thing
+    // that can answer that is CarMapView's own measured onLayout width — 213 =
+    // uncorrected, ~400 = corrected — which is not visible from here. Until that is
+    // logged from CarMapView, the verification is the photograph, not this row.
+    const mapScale = aaMapScaleFor(w);
     logEvent(
       `android-auto-canvas surface=${Math.round(w)}x${Math.round(h)}dp `
       + `px=${Math.round(w * ratio)}x${Math.round(h * ratio)} `
       + `pixelRatio=${ratio} fontScale=${PixelRatio.getFontScale()} `
-      + `window=${Math.round(win.width)}x${Math.round(win.height)}dp`,
+      + `window=${Math.round(win.width)}x${Math.round(win.height)}dp `
+      + `mapScaleWant=${Math.round(mapScale * 1000) / 1000} `
+      + `mapPtWant=${Math.round(w / mapScale)}x${Math.round(h / mapScale)}`,
     );
   } catch {}
 }
@@ -730,7 +751,16 @@ export function CarSurface() {
               threw it away. (Identity churn is a non-issue — scheduleLiveRetry is already
               redefined every render and has always been passed straight through.) */}
           <CarMapBoundary key={liveAttempt} onFail={() => scheduleLiveRetry('render-throw')}>
-            <CarMapView attempt={liveAttempt} onGLError={(w) => scheduleLiveRetry(w)} />
+            {/* surfaceW/H are the head unit's REAL dp frame (this component's own
+                onLayout, :713-718). The map cannot measure it for itself any more —
+                since 2026-08-15 it lays itself out oversized and scales back, so its
+                onLayout reports what we chose. See aaMapScaleFor in CarMapView. */}
+            <CarMapView
+              attempt={liveAttempt}
+              surfaceW={surfaceW}
+              surfaceH={surfaceH}
+              onGLError={(w) => scheduleLiveRetry(w)}
+            />
           </CarMapBoundary>
           {mapOverlays}
         </>

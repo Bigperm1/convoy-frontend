@@ -166,6 +166,11 @@ interface ConvoyMapboxProps {
   // User-chosen route-line color (base hex). Defaults to brand green.
   routeColor?: string;
   userSpeedMs?: number;
+  // 2D CONVOY VIEW (Jeff, 2026-08-14). Forces the camera top-down and the self marker to
+  // its flat top-down PNG, EVEN WHILE ROUTING — the route line and guidance are untouched.
+  // A flat sprite lies ON the map, so it only reads correctly under a flat camera; the two
+  // halves are one decision, which is why this single flag drives both.
+  flatView?: boolean;
   distanceToManeuverM?: number;
   maneuverCoord?: { lat: number; lng: number } | null;
   showTraffic?: boolean;
@@ -1796,7 +1801,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const {
     center, user, peers, hideSelfMarker, selfParked, selfParkedAt, selfMarkerType = "car", selfClassPaint, selfVehicleClass = "hatchback", selfArrowPaint, mapView = "heading_up",
     mapMode = "satellite", leaderUserId, show3dBuildings = true,
-    followUser = false, onUserPan, navigationActive = false, userSpeedMs,
+    followUser = false, onUserPan, navigationActive = false, userSpeedMs, flatView = false,
     routeColor = DEFAULT_ROUTE_COLOR,
     distanceToManeuverM, onMapPress, onPoiPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination, stops,
@@ -2225,7 +2230,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Quantized to 0.1 for the NATIVE followZoomLevel (north-up) so the native follow
   // engine isn't re-nudged on every micro speed change.
   const followZoom = Math.round(chaseZoomRaw * 10) / 10;
-  const followPitchDeg = navigationActive && headingUp ? chasePitch(kmhFromMs(userSpeedMs)) : 0;
+  // flatView forces top-down even while routing — that IS the 2D view. The speed-driven
+  // ZOOM above is deliberately untouched: Jeff asked for "speed zoom features (like 3d
+  // zoom) but just zoom in and out not tilt".
+  const followPitchDeg = (!flatView && navigationActive && headingUp) ? chasePitch(kmhFromMs(userSpeedMs)) : 0;
 
   // Lower-third chase framing — top padding pushes the followed car DOWN the
   // screen so the driver sees more road ahead. Applies ONLY during active
@@ -2496,7 +2504,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const selfIsClass = waterBoat || (selfMarkerType === "class" && !navActive);
   // Flat GR Corolla top-down PNG — IDENTICAL to what peers see — in the chosen
   // color: a car/photo driver AT REST. In nav it becomes the 3D car GLB instead.
-  const selfIsFlatCar = (selfMarkerType === "car" || selfMarkerType === "photo") && !navActive && !waterBoat;
+  // `|| flatView` — in 2D the self car uses the SAME high-res top-down PNG the peers use,
+  // which is exactly what Jeff asked for ("2d cars (including peers)"). Arrow keeps its 3D
+  // model in both views (it has no flat twin), same rule the car surface follows.
+  const selfIsFlatCar = (selfMarkerType === "car" || selfMarkerType === "photo") && flatView && !waterBoat;
   const effVehicleClass = waterBoat ? "boat" : canonicalClass(selfVehicleClass);
   const effClassPaint = waterBoat && selfVehicleClass !== "boat"
     ? (getSettings().classPaint?.["boat"] ?? {})

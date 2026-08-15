@@ -31,8 +31,9 @@ import { startNavBanner, stopNavBanner, CAR_NAV_KEY } from '../navNotification';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
+import { toggleMapView2D } from '../mapViewMode';
 import { getDepartureBearing, orderRoutesForward } from '../departureBearing';
-import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED } from './carButtonIcons';
+import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_VIEW_2D } from './carButtonIcons';
 import { toggleCarComms } from './carComms';
 import { logEvent } from '../crashBreadcrumb';
 import { ensureSavedPlacesLoaded, getSavedPlaces, type SavedPlace } from '../savedPlaces';
@@ -471,8 +472,13 @@ export const CAR_BAR_BUTTON_CONFIG = {
   // TOP-LEFT: the crew-comms mic (tap-to-toggle transmit — carComms.ts). An IMAGE
   // bar button with our own mic glyph; CarPlay renders its own glass chrome around
   // bar buttons natively on iOS 26 (the "Liquid Glass" look is the system's).
+  // 2026-08-14: the 2D/3D view toggle sits immediately RIGHT of the mic, where Jeff
+  // asked for it ("beside the comms mic, to the right of it"). Leading buttons render
+  // in array order left-to-right — unlike the trailing array below, which is reversed.
+  // CarPlay allows two leading bar buttons, so this is the last slot on that side.
   leadingNavigationBarButtons: [
     { id: 'car-comms', type: 'image' as const, image: CAR_ICON_MIC },
+    { id: 'car-view', type: 'image' as const, image: CAR_ICON_VIEW_2D },
   ],
   // TOP-RIGHT: Search then End at the far corner. NOTE the array is REVERSED vs
   // the visual order — head-unit photo evidence: config [search, end] rendered as
@@ -566,6 +572,7 @@ export const CAR_MAP_BUTTON_CONFIG = {
 const AA_PERSISTENT = 'persistent' as const;
 export const AA_ACTION_STRIP = [
   { id: 'car-comms', icon: CAR_ICON_MIC, visibility: AA_PERSISTENT },
+  { id: 'car-view', icon: CAR_ICON_VIEW_2D, visibility: AA_PERSISTENT },
   { id: 'car-search', title: 'Search', visibility: AA_PERSISTENT },
   { id: 'car-end', title: 'End', visibility: AA_PERSISTENT },
 ];
@@ -598,7 +605,7 @@ export function handleAaButton(id?: string): void {
 // and the action did nothing" — the fork that three rounds of code-reading could
 // not settle for the recurring dead-buttons report.
 const TAP_LABEL: Record<string, string> = {
-  'car-crew': 'Crew', 'car-compass': 'Compass', 'car-comms': 'Comms',
+  'car-crew': 'Crew', 'car-compass': 'Compass', 'car-comms': 'Comms', 'car-view': 'View',
   'car-mic': 'Scout', 'car-search': 'Search', 'car-end': 'End',
   'car-zoom-in': 'Zoom in', 'car-zoom-out': 'Zoom out',
 };
@@ -623,6 +630,12 @@ export function carTap(id: string): void {
 
 export function handleCarMapButton(id: string): void {
   carTap(id);
+  if (id === 'car-view') {
+    // Pure VIEW toggle — routing, the route line and guidance are all untouched.
+    const twoD = toggleMapView2D();
+    toast(twoD ? '2D view' : '3D view');
+    return;
+  }
   if (id === 'car-crew') { emitCarGesture({ kind: 'crewFit' }); return; }
   if (id === 'car-compass') { emitCarGesture({ kind: 'compass' }); return; }
   // One zoom level per tap — CarMapView applies it through the same applyZoomNow the

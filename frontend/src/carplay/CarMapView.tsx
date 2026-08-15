@@ -31,6 +31,7 @@ import Mapbox, {
 } from '@rnmapbox/maps';
 import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
 import { canonicalClass } from '../settings';
+import { useMapView2D } from '../mapViewMode';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { usePowerMode } from '../powerMode';
 import { getVehicleModelUrl, getVehicleModelKey, getVehiclePngOrDefault, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
@@ -437,10 +438,27 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // surface previously took neither half — pitched at CRUISE_PITCH (45) with the 3D
   // model always on — so free-driving looked nothing like the phone.
   // Arrow keeps its 3D model in both modes, same as the phone (it has no flat twin).
-  const carFlat = !s.navigating && !isArrow;
-  const followPitch = s.navigating
-    ? Math.min(CAR_PITCH_MAX, chasePitch(kmh) + CAR_PITCH_BONUS)
-    : (carFlat ? 0 : CRUISE_PITCH);
+  // 2D CONVOY VIEW (Jeff, 2026-08-14). A second, DELIBERATE reason to go flat, on top of
+  // the July "flat when not routing" rule. Routing is untouched — the route line still
+  // draws and guidance keeps running; only the camera pitch and the marker art change.
+  // Arrow keeps its 3D model in both views (it has no flat twin), same as the phone.
+  const view2D = useMapView2D();
+  // ⚠ THE JULY AUTO-FLAT IS RETIRED (Jeff, 2026-08-14). This used to be
+  // `!s.navigating && !isArrow` — CarPlay flattened itself whenever a route was not
+  // running (his 2026-07-29 call, quoted above). With a manual button that rule becomes a
+  // second opinion: sit idle in auto-2D, press for 3D, and the auto rule argues back.
+  // The button is now the ONE source of truth on all four surfaces, which is what "default
+  // is unchanged, you press the button" means. Idle now looks the same as driving: 3D
+  // until the driver says otherwise.
+  const carFlat = view2D && !isArrow;
+  // 2D forces top-down even while routing — that is the whole point of the view. The
+  // speed-driven ZOOM curve above is deliberately left alone: Jeff asked for "speed zoom
+  // features (like 3d zoom) but just zoom in and out not tilt".
+  const followPitch = view2D
+    ? 0
+    : (s.navigating
+        ? Math.min(CAR_PITCH_MAX, chasePitch(kmh) + CAR_PITCH_BONUS)
+        : (carFlat ? 0 : CRUISE_PITCH));
   // Sprite id for the flat car. Registered as a Mapbox image below — the car map had
   // no <Images> at all before this, so the sprite path could not have worked.
   const carFlatImg = 'self_car_flat_' + getVehicleModelKey(s.selfCarColor);
@@ -1381,7 +1399,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
         // heat measure; an audit finding then pointed out it could never help CarPlay
         // (always plugged => always 'premium'), and Jeff has since removed the eco/premium
         // split outright. Reverted to unconditional so the car keeps the premium look.
-        <Mapbox.StyleImport key={'basemap' + styleGen} id="basemap" existing config={{ lightPreset: mode, show3dObjects: true } as any} />
+        <Mapbox.StyleImport key={'basemap' + styleGen} id="basemap" existing config={{ lightPreset: mode, show3dObjects: !view2D } as any} />
       )}
 
       {/* Road-snap source (Phase 2) — invisible mapbox-streets-v8 roads, queried by the

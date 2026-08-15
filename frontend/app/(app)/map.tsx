@@ -44,6 +44,7 @@ import { getDepartureBearing, noteCourse, orderRoutesForward, UTURN_ONLY_TOLERAN
 import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy } from "../../src/locationPrivacy";
 import { subscribeBgFix } from "../../src/navNotification";
 import { type CongestionLevel } from "../../src/mapboxDirections";
+import { useMapView2D, toggleMapView2D, resetMapView2D } from "../../src/mapViewMode";
 import { logEvent } from "../../src/crashBreadcrumb";
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from "../../src/routeOptimizer";
 import { usePitstop } from "../../src/pitstop";
@@ -1481,6 +1482,9 @@ export default function MapScreen() {
   // ref so the voiceBus subscription never answers from a stale closure).
   const tbtRef = useRef(tbt);
   useEffect(() => { tbtRef.current = tbt; }, [tbt]);
+  // 2D convoy view (see src/mapViewMode.ts). Drives the FAB label AND is handed to the
+  // map engine below so pitch + marker art follow it.
+  const view2D = useMapView2D();
   const hazardsRef = useRef<Hazard[]>([]);
   useEffect(() => { hazardsRef.current = hazards; }, [hazards]);
   const destRef = useRef(destination);
@@ -2037,6 +2041,9 @@ export default function MapScreen() {
   };
 
   const endNav = () => {
+    // A 2D choice lasts exactly as long as the drive did — Jeff: "it sticks till route
+    // ends or manually pushed button again."
+    resetMapView2D();
     stopSpeech();
     maybeLearnDrive();
     tripBaselineRef.current = null;
@@ -3763,7 +3770,10 @@ export default function MapScreen() {
         // matter what in 3d view". The `powerMode === "premium"` half silently removed them
         // the moment the phone came off the charger — the driver flips no switch and the
         // world flattens. Now purely the user's own toggle.
-        show3dBuildings={settings.show3dBuildings !== false}
+        // 2D view forces buildings off and the camera flat, whatever the setting says —
+        // a flat top-down sprite only reads correctly under a top-down camera.
+        show3dBuildings={settings.show3dBuildings !== false && !view2D}
+        flatView={view2D}
         mapType={mapType}
         mapDark={mapDark}
         peers={peerList}
@@ -4538,6 +4548,25 @@ export default function MapScreen() {
             NOTE this is the ONE place the usual "CarPlay matches the phone" rule runs
             the other way — CarPlay's order is fixed by the template, so the phone moved.
             If you reorder either surface, reorder BOTH. */}
+        {/* 2D / 3D VIEW TOGGLE (Jeff, 2026-08-14) — sits directly ABOVE Crew, exactly
+            where he asked for it. Pure VIEW switch: the route line stays drawn and
+            guidance keeps running; only the camera pitch and the marker art change.
+            Resets to 3D when the drive ends (endNav -> resetMapView2D), so a 2D choice
+            lasts exactly as long as the drive. The glyph shows what you GET if you press,
+            which is the convention for a view switch — cube while flat, flat while 3D. */}
+        <TouchableOpacity
+          testID="view-2d-3d-fab"
+          style={[styles.fab, styles.fabPolice]}
+          onPress={() => {
+            try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+            toggleMapView2D();
+          }}
+          activeOpacity={0.8}
+        >
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
+          <Ionicons name={view2D ? "cube-outline" : "square-outline"} size={24} color={COLORS.brand} />
+          <Text style={styles.fabCrewLabel}>{view2D ? "3D" : "2D"}</Text>
+        </TouchableOpacity>
         {/* Crew button (replaced the police FAB, 2026-07-23 — Jeff's call): one tap
             frames self + every live/partial peer in a north-up overview. Same round
             glass FAB as the compass below it. Police reporting still lives in voice

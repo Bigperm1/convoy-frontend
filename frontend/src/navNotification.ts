@@ -24,6 +24,7 @@ import {
 import { maneuverDir } from "./components/ManeuverArrow";
 import { setCarState, setCarSelfPosition, claimCarNavStrip, releaseCarNavStrip } from "./carplay/carStore";
 import { CAR_DIAG_MODE } from "./carplay/carPlayShared";
+import { resetMapView2D } from "./mapViewMode";
 import { getSettings, getMapMode } from "./settings";
 import { updateSpeedLimit } from "./speedLimit";
 import { recordTrip } from "./trips";
@@ -926,6 +927,10 @@ export async function stopNavBanner(): Promise<void> {
   // whichever engine wrote last would keep the other locked out for STRIP_STALE_MS into
   // the NEXT drive. The clear below then lands unconditionally.
   releaseCarNavStrip();
+  // The 2D view lasts exactly as long as the drive — and stopNavBanner is the UNIVERSAL
+  // teardown (phone endNav, car End button, cold arrival all funnel here), so resetting
+  // it here covers the surfaces map.tsx's endNav cannot reach.
+  resetMapView2D();
   setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0 });
   // Release our hold; the shared task keeps running if CarPlay still needs it.
   await releaseBgLocation("nav");

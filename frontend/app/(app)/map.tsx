@@ -2578,7 +2578,7 @@ export default function MapScreen() {
               setCoords((cur) => ({
                 lat: pos.coords.latitude,
                 lng: pos.coords.longitude,
-                heading: typeof h === "number" && h >= 0 ? h : cur?.heading,
+                heading: typeof h === "number" && h > 0 ? h : cur?.heading,
                 speed: typeof sp === "number" && sp >= 0 ? sp : (cur?.speed ?? 0),
               }));
             }
@@ -2657,7 +2657,7 @@ export default function MapScreen() {
             : { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 2 },
           (pos) => {
             const h = pos.coords.heading;
-            const heading = typeof h === "number" && h >= 0 ? h : undefined;
+            const heading = typeof h === "number" && h > 0 ? h : undefined;
             const sRaw = pos.coords.speed;
             const speed = typeof sRaw === "number" && sRaw >= 0 ? sRaw : 0;  // clamp negatives
             // Remember the last REAL travel course. It is the best "which way does
@@ -3067,7 +3067,7 @@ export default function MapScreen() {
         setCoords({
           lat,
           lng,
-          heading: typeof heading === "number" && heading >= 0 ? heading : (coords?.heading || 0),
+          heading: typeof heading === "number" && heading > 0 ? heading : (coords?.heading || 0),
           speed: typeof speed === "number" && speed >= 0 ? speed : 0,
         });
         // 2. Push the new fix to the backend so /users/nearby returns us live — but only
@@ -3076,7 +3076,7 @@ export default function MapScreen() {
         try {
           const share = await shareablePositionAsync({
             lat, lng,
-            heading: typeof heading === "number" && heading >= 0 ? heading : 0,
+            heading: typeof heading === "number" && heading > 0 ? heading : 0,
             speed: typeof speed === "number" && speed >= 0 ? speed : 0,
           });
           if (share.share) await api.post("/location", { lat: share.lat, lng: share.lng, speed: share.speed, heading: share.heading });

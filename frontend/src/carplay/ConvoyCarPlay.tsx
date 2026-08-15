@@ -1067,6 +1067,20 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
         distanceToTurn: fmtDistanceM(tbt.distanceToManeuverM),
         eta: fmtEtaSec(tbt.etaSeconds),
         distanceRemaining: fmtDistanceM(tbt.distanceRemainingM),
+        // MANEUVER GLYPH — MOVED INSIDE THE OWNERSHIP GATE (2026-08-15).
+        // It used to be written ungated at the bottom of this same object as
+        // `tbt.active ? maneuverDir(…) : undefined`. On a CAR-STARTED route the phone's
+        // tbt is idle, so this mirror wrote `undefined` over the COLD engine's arrow
+        // (navNotification.ts:441) on every one of its ticks — while the cold engine's
+        // WORDS stayed on screen, because those were already gated. ManeuverArrow
+        // coerces undefined to 'straight' (this file, ~line 678), so the driver got a
+        // straight-ahead arrow flickering beside "Turn left onto…" at roughly 1 Hz.
+        // Words, numbers and glyph now come from ONE owner — the whole point of
+        // claimCarNavStrip (carStore.ts, Olaf 8/13).
+        // ⚠ Inside the gate nothing writes `undefined` when the phone engine goes idle,
+        // so CLEARING is now stopNavBanner's job — see the PAIRED edit in
+        // src/navNotification.ts. Without it a dead arrow survives the whole drive.
+        maneuverIcon: maneuverDir(upcomingInstruction(route, tbt.stepIndex), upcomingManeuverKey(route, tbt.stepIndex)),
       } : {}),
       // NOTE: peers + hazards are NOT written here anymore — they go through the
       // gated setCarPeers/setCarHazards writes in the effect below, so the cold
@@ -1083,11 +1097,31 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       // it must NEVER be written here, because this metadata effect re-runs on ticks
       // where `user` is null (peers/route changes), and a null position would clobber
       // a good fix landed by the cold/foreground feed -> hasFix false -> CONVOY logo.
-      routePolyline: route?.polyline || '',
-      // Selected route's geometry + per-segment congestion → lets the CarPlay map paint
-      // the live traffic gradient (same as the phone). Mirrored in preview AND nav.
-      routeCoordinates: (route as any)?.coordinates || undefined,
-      routeCongestion: (route as any)?.congestion || undefined,
+      // ROUTE RIBBON — GATED ON ACTUALLY HAVING A ROUTE (2026-08-15).
+      // These three were written unconditionally, so on a CAR-STARTED route
+      // (CarPlay/AA search → carActions.startCarNav, which writes the ribbon itself at
+      // carActions.ts:270-277) this mirror ticked '' / undefined straight over it for the
+      // ENTIRE window before the phone adopts the route and `activeRoute` becomes
+      // non-null — the head unit lost its green ribbon for that whole stretch. Android
+      // Auto is where this bites hardest: car-started routes are the dominant case there.
+      //
+      // ⚠ THE CLEAR STILL HAS TO HAPPEN. `route` also goes null on a PREVIEW-ONLY Clear
+      // (map.tsx clearRoute → setRoute(null), and the onClear at map.tsx:3945) where nav
+      // never started — so stopNavBanner and carActions.endCarNav, the two owners of the
+      // clear, never run and nothing else would wipe the preview ribbon off the car.
+      // Hence the second spread: no route AND nothing navigating ⇒ clear explicitly; no
+      // route WHILE navigating ⇒ leave the cold engine's ribbon alone. The two spreads
+      // are mutually exclusive by construction.
+      ...(route ? {
+        routePolyline: route.polyline || '',
+        // Selected route's geometry + per-segment congestion → lets the CarPlay map paint
+        // the live traffic gradient (same as the phone). Mirrored in preview AND nav.
+        routeCoordinates: (route as any).coordinates || undefined,
+        routeCongestion: (route as any).congestion || undefined,
+      } : {}),
+      ...((!route && !getCarState().navigating)
+        ? { routePolyline: '', routeCoordinates: undefined, routeCongestion: undefined }
+        : {}),
       // All display routes (Best / Scenic / AI) with per-kind colors precomputed, so the
       // CarPlay preview mirrors the phone's 3-route fan-out. Drop "alt" routes (index >= 2,
       // unless explicitly tagged) — we only ever show the three. Empty during nav OR when
@@ -1127,8 +1161,9 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
         ? `${Math.round(getSettings().speedUnit === 'mph' ? weather.tempF : weather.tempC)}°${getSettings().speedUnit === 'mph' ? 'F' : 'C'}`
         : undefined,
       weatherKind: weather ? weatherKind(weather) : undefined,
-      // Arrow glyph for the car banner's maneuver box.
-      maneuverIcon: tbt.active ? maneuverDir(upcomingInstruction(route, tbt.stepIndex), upcomingManeuverKey(route, tbt.stepIndex)) : undefined,
+      // (maneuverIcon MOVED 2026-08-15 — it is now written inside the `ownStrip` spread
+      //  above, with the instruction text it belongs to. Written here it landed on every
+      //  tick regardless of ownership and erased the cold engine's arrow.)
     });
   }, [
     tbt.active,

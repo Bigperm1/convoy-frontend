@@ -574,7 +574,7 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   // the on-screen proof that bg ticks are arriving and must land regardless.
   setCarSelfPosition(
     loc.coords.latitude, loc.coords.longitude,
-    typeof _h === "number" && _h >= 0 ? _h : null,
+    typeof _h === "number" && _h > 0 ? _h : null,
     'bgtask',
     typeof _sp === "number" && _sp >= 0 ? _sp : 0,
   );
@@ -592,7 +592,7 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   _emitBgFix({
     lat: loc.coords.latitude,
     lng: loc.coords.longitude,
-    heading: typeof _h === "number" && _h >= 0 ? _h : undefined,
+    heading: typeof _h === "number" && _h > 0 ? _h : undefined,
     speed: typeof _sp === "number" && _sp >= 0 ? _sp : 0,
   });
   // Best-effort metadata — wrapped so it can never block the position write above.
@@ -679,7 +679,7 @@ export async function startForegroundCarFeed(): Promise<void> {
         // for why speed now rides the gate. carDbg stays ungated.
         setCarSelfPosition(
           loc.coords.latitude, loc.coords.longitude,
-          typeof h === "number" && h >= 0 ? h : null,
+          typeof h === "number" && h > 0 ? h : null,
           'fgwatch',
           typeof sp === "number" && sp >= 0 ? sp : 0,
         );
@@ -966,7 +966,21 @@ export async function stopNavBanner(): Promise<void> {
   // teardown (phone endNav, car End button, cold arrival all funnel here), so resetting
   // it here covers the surfaces map.tsx's endNav cannot reach.
   resetMapView2D();
-  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0 });
+  // THREE FIELDS ADDED 2026-08-15 — this is the UNIVERSAL teardown (phone endNav, the
+  // car's End button, and cold arrival all funnel here), so it is where they belong.
+  //  • maneuverIcon — PAIRED with the ConvoyCarPlay change that moved the glyph inside
+  //    the `ownStrip` ownership gate. Inside that gate nothing writes `undefined` when
+  //    the phone engine goes idle (that ungated erase was the 1 Hz flicker), so this
+  //    line is now the only thing that retires the arrow on the cold path. Ship both or
+  //    neither: without it a dead glyph outlives the drive.
+  //  • routeCoordinates / routeCongestion — never cleared here, and clearing
+  //    routePolyline was NOT enough: CarMapView's congestion FeatureCollection keys off
+  //    routeCoordinates ALONE (CarMapView.tsx:1342-1347 — not routePolyline, not
+  //    `navigating`), so on a cold arrival with the phone map unmounted the coloured
+  //    gradient stayed painted on the head unit. It also backstops the newly gated
+  //    ribbon mirror in ConvoyCarPlay, which deliberately stops clearing while
+  //    `navigating` is still true.
+  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0, maneuverIcon: undefined, routeCoordinates: undefined, routeCongestion: undefined });
   // Release our hold; the shared task keeps running if CarPlay still needs it.
   await releaseBgLocation("nav");
   try { await Notifications.dismissNotificationAsync(NAV_NOTIF_ID); } catch {}

@@ -37,5 +37,25 @@ void flushAndroidAutoCrashLog();
 // Sets a CarPlay root template on a COLD connect (CarPlay opened while the phone
 // app isn't running), where the phone map screen's useConvoyCarPlay hook isn't
 // mounted to do it. No-op on web/Android and on the warm path. See carPlayBootstrap.ts.
-import { initCarPlayBootstrap } from './src/carplay/carPlayBootstrap';
-initCarPlayBootstrap();
+//
+// GUARDED, and it is NOT redundant with the try/catch in registerAndroidAuto.ts /
+// registerCarSurface.ts. Measured: carPlayBootstrap's static import closure is 30
+// modules, 29 of which it SHARES with the AndroidAutoRoot tree (carStore, carActions,
+// navNotification, nav, api, supabase, settings, audioMode...). Those run real code at
+// module scope — carActions.ts:695 `armPosRing()`, navNotification.ts:531
+// `TaskManager.defineTask`, :782 `AppState.addEventListener`, api.ts:53's axios
+// interceptor, supabase.ts:40's createClient. The car-registration guards above run
+// FIRST, so a throw in a shared module is caught there — and then re-thrown right here
+// when this require re-evaluates the failed module, un-caught, killing the app at boot.
+// A boot crash trips expo-updates ErrorRecovery -> rollback to the embedded bundle ->
+// the device can no longer be reached by OTA at all. Degrade to "no cold-connect
+// bootstrap this session" instead.
+//
+// `expo-router/entry` above is deliberately left unguarded: it IS the app, and there is
+// nothing to degrade to if it fails.
+try {
+  const { initCarPlayBootstrap } = require('./src/carplay/carPlayBootstrap');
+  initCarPlayBootstrap();
+} catch (e) {
+  console.error('[carplay] bootstrap init failed:', e);
+}

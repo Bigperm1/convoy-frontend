@@ -30,7 +30,7 @@ import { api, getToken, wsUrl } from '../api';
 import { supabase, SUPABASE_ENABLED } from '../supabase';
 import { getSettings, getAvatarMode } from '../settings';
 import { toGRCSlug } from '../vehicleAssets';
-import { getCarState, setCarPeers, setCarHazards, subscribeCarState, type CarPeer } from './carStore';
+import { getCarState, setCarPeers, setCarHazards, subscribeCarState, carFeedWouldAccept, type CarPeer } from './carStore';
 import { joinPresence as hubJoinPresence, type PresenceHandle } from '../presenceHub';
 
 // ── throttle cadences (wall-clock, event-driven — NO timers) ────────────────
@@ -82,6 +82,16 @@ const visible = (h: SvcHazard) => (h.disputes || 0) < 2;
 
 function emitPeers() {
   if (!_running) return;
+  // The carStore freshness gate (carStore.ts:328 feedGateAllows) DROPS a 'service'
+  // write outright while the phone mirror has written within FEED_STALE_MS (12 s) —
+  // which, with map.tsx mounted and a car connected, is essentially the whole drive:
+  // its crew push re-signs on every ~11 m of peer movement (map.tsx:2137). Building
+  // `out` first and handing it to a gate that throws it away is pure waste on the
+  // hottest path in this file — this runs on EVERY WS location frame and every
+  // presence sync. So ask first. Nothing upstream is skipped: _peers/_presencePeers
+  // are already updated by the callers, so the moment the phone mirror goes quiet the
+  // next event emits the full merged set exactly as it does today.
+  if (!carFeedWouldAccept('peers', 'service')) return;
   // Merge WS/REST peers with presence peers — presence wins (live & most recent),
   // same as the phone's peerList merge (map.tsx:2703-2729). Self is excluded at
   // ingest (WS filter + presence key skip).
@@ -107,6 +117,11 @@ function emitPeers() {
 
 function emitHazards() {
   if (!_running) return;
+  // Same gate, same reason as emitPeers above: while the phone mirror is fresh this
+  // filter+map is built only to be dropped by carStore.setCarHazards. _hazards is
+  // already updated by the caller, so the service still has the full set the instant
+  // the phone goes quiet.
+  if (!carFeedWouldAccept('hazards', 'service')) return;
   setCarHazards(
     _hazards.filter(visible).map((h) => ({ id: h.id, kind: h.kind, lat: h.lat, lng: h.lng, confirms: h.confirms, disputes: h.disputes })),
     'service',

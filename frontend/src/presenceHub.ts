@@ -21,13 +21,54 @@ type Entry = {
   peers: RawPeer[];
   subs: Set<(peers: RawPeer[]) => void>;
   providers: Provider[];
+  // Single-throttle bookkeeping (see TRACK_MIN_MS below).
+  lastTrackAt: number;
+  lastIdKey: string;
 };
 
 const entries = new Map<string, Entry>();
 
+// ── THE SINGLE PRESENCE THROTTLE (2026-08-15) ──────────────────────────
+// Nothing throttled the CHANNEL — each CONSUMER throttled itself, at the same 1.5 s
+// but on its own independent phase: useConvoyPresence (convoyPresence.ts:193) and
+// carDataService (PRESENCE_TRACK_MS, carDataService.ts:39 → :359). Both call
+// handle.track(), and track() → doTrack() broadcasts the HIGHEST-priority provider's
+// payload no matter WHO called it — so while a head unit is connected the car
+// service's tick merely re-sends the phone map's payload, and the channel carries up
+// to two frames per 1.5 s window for one window's worth of movement.
+//
+// The hub is the only place that can see both callers, so the throttle belongs here.
+// It rate-limits POSITION churn ONLY: anything that is not "we moved" changes the
+// identity key below and bypasses the window outright.
+const TRACK_MIN_MS = 1500;
+
+// Identity/appearance signature — the payload MINUS the fields that keep changing on
+// their own while driving. lat/lng/heading are the churn being rate-limited. topSpeed
+// rides with them because map.tsx broadcasts
+// Math.max(user.top_speed_record, sessionMaxSpeed) (map.tsx:3444), which advances on
+// every fix while you accelerate past your old record — left in, ordinary acceleration
+// would bypass the throttle and restore the doubling. EVERYTHING else is a real event
+// that must reach peers immediately, and takes the bypass: status live↔parked (the
+// very case convoyPresence.ts:192's own bypass exists for), marker/cls/arrow paint,
+// handle, carColor — and the provider's whole field SHAPE, since Object.keys keeps
+// explicitly-undefined keys, so the map's payload (always carries
+// marker/cls/clsPri/clsSec/arrPri/arrSec) can never key-collide with the car
+// service's (never carries them). Keys are sorted so field ORDER alone cannot look
+// like a change.
+const idKeyOf = (p: Record<string, any>): string => {
+  try {
+    return JSON.stringify(
+      Object.keys(p)
+        .filter((k) => k !== "lat" && k !== "lng" && k !== "heading" && k !== "topSpeed")
+        .sort()
+        .map((k) => [k, p[k]]),
+    );
+  } catch { return ""; }   // never equal to a real key ("[]" at minimum) → always sends
+};
+
 const fanout = (e: Entry) => { e.subs.forEach((fn) => { try { fn(e.peers); } catch {} }); };
 
-function doTrack(e: Entry): void {
+function doTrack(e: Entry, force = false): void {
   if (!e.channel || e.status !== "SUBSCRIBED") return;
   const sorted = [...e.providers].sort((a, b) => b.priority - a.priority);
   if (!sorted.length) return;
@@ -47,6 +88,23 @@ function doTrack(e: Entry): void {
     if (v) { payload = v; break; }
   }
   if (!payload) return;
+  // ── SINGLE THROTTLE ──────────────────────────────────────────────
+  // Deliberately AFTER the provider loop above: WHICH tier's payload is broadcast is
+  // decided exactly as before, so this cannot resurrect the 2026-07-20 regression
+  // where a slim car payload stripped class-sprite paint off retained presence. Nor
+  // can it DELAY a rich payload that must overwrite a slim one — the two providers'
+  // field shapes differ (the map always sends marker/cls/…, the car service never
+  // does), so their identity keys can never match and the bypass always fires.
+  // `force` covers the post-SUBSCRIBE broadcast, where supabase holds no retained
+  // payload for us at all and a skip would leave us invisible to the convoy.
+  const idKey = idKeyOf(payload);
+  const now = Date.now();
+  const dt = now - e.lastTrackAt;
+  // dt < 0 = the wall clock stepped backward (NTP / manual set) — same convention as
+  // carStore's gates: treat the window as expired so a clock jump can never mute us.
+  if (!force && idKey === e.lastIdKey && dt >= 0 && dt < TRACK_MIN_MS) return;
+  e.lastTrackAt = now;
+  e.lastIdKey = idKey;
   try { e.channel.track({ ...payload, online_at: new Date().toISOString() }); } catch {}
 }
 
@@ -91,7 +149,7 @@ function ensureChannel(e: Entry): void {
       })
       .subscribe((s: string) => {
         e.status = s;
-        if (s === "SUBSCRIBED") doTrack(e);
+        if (s === "SUBSCRIBED") doTrack(e, true);   // fresh channel holds no retained payload — never throttle this one
         else if (s === "CLOSED" && e.channel === channel && e.subs.size > 0) {
           // Defensive rebuild: a hard CLOSE while consumers still need presence
           // would otherwise freeze peers until an app restart. supabase auto-
@@ -131,7 +189,7 @@ export function joinPresence(opts: {
   }
   let e = entries.get(topic);
   if (!e) {
-    e = { topic, selfId, channel: null, status: "idle", peers: [], subs: new Set(), providers: [] };
+    e = { topic, selfId, channel: null, status: "idle", peers: [], subs: new Set(), providers: [], lastTrackAt: 0, lastIdKey: "" };
     entries.set(topic, e);
   }
   const provider: Provider = { priority, get: getPayload };

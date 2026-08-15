@@ -29,6 +29,10 @@ const FETCH_RADIUS_M = 1500;    // pull maxspeed ways within ~1.5 km of the driv
 const REFETCH_MOVE_M = 1000;    // re-query once they've driven > ~1 km from the last pull
 const MIN_REFETCH_MS = 30000;   // and never more than once per 30s
 const SNAP_TOLERANCE_M = 30;    // how close a road must be to count as "the road you're on"
+// Re-run the LOCAL nearest-road scan only after ~10 m of travel. See the RESOLVE
+// DISTANCE GATE in updateSpeedLimit for why. Deliberately a third of
+// SNAP_TOLERANCE_M so the gate can never change which road we snap to.
+const RESOLVE_MOVE_M = 10;
 const FETCH_TIMEOUT_MS = 10000; // hard per-attempt timeout so a stalled mirror can't wedge the in-flight flag
 
 // ---- TEMP debug (remove before release) — diagnose Android no-limit ----
@@ -209,6 +213,10 @@ let _center: { lat: number; lng: number } | null = null;
 let _lastFetch = 0;
 let _inFlight = false;
 let _current: number | null = null;
+// Anchor for the RESOLVE DISTANCE GATE in updateSpeedLimit: the position of the
+// last LOCAL nearest-road scan. null until the first scan and after resetSpeedLimit,
+// so the first call after either always resolves.
+let _resolvedAt: { lat: number; lng: number } | null = null;
 
 function _emit(v: number | null): void {
   if (v === _current) return;          // only wake consumers on a real change
@@ -246,6 +254,41 @@ export function updateSpeedLimit(lat: number, lng: number): number | null {
       })
       .catch(() => { _inFlight = false; _center = null; });
   }
+  // ── RESOLVE DISTANCE GATE ───────────────────────────────────────────────────
+  // nearestLimit() is O(ways x segments) and MEASURED heavy. One 1500 m Overpass
+  // pull, run 2026-08-15 against overpass.kumi.systems with this file's exact query
+  // and maxspeed parser: Kelowna 104 ways / 453 segments; Victoria BC 868 ways /
+  // 4053 segments; Vancouver downtown at r=600 m 119 ways / 561 segments (the 1500 m
+  // downtown query 504'd on all three mirrors, so no figure for it — not extrapolated).
+  //
+  // THREE feeds call updateSpeedLimit per fix: map.tsx's useSpeedLimit (watch at
+  // 500 ms/2 m plugged, 1000 ms/8 m eco — map.tsx:2636-2643), navNotification's
+  // NAV_TASK (1 s/5 m — navNotification.ts:741-746, calls at :578), and
+  // startForegroundCarFeed (1 s/5 m — :644-647, calls at :668). With a car surface
+  // connected that is up to 4 resolves/second, i.e. ~16k segment-distance
+  // computations/second in a Victoria-density area, to re-derive a number that
+  // CANNOT change until the driver has actually moved.
+  //
+  // The gate keys on distance since the last RESOLVE and lives in this one shared
+  // module, so it also de-duplicates the three feeds against each other — they all
+  // report the same GPS fix within the same tick, and only the first one resolves.
+  //
+  // NOT gated, on purpose: the fetch trigger above (one haversine) and the .then()
+  // resolve inside it. So a STATIONARY driver on a stale cache still refetches, and
+  // still receives the new limit the instant that fetch lands.
+  // The stale-cache self-heal below IS behind the gate on purpose: its only input,
+  // _lastNearestM, is written by nearestLimit — on a skipped tick it would re-read an
+  // unchanged value and reach an identical conclusion, so skipping both together is
+  // correct rather than merely tolerable.
+  //
+  // Cost: at most RESOLVE_MOVE_M of sign latency — 10 m is 0.36 s at 100 km/h, 0.72 s
+  // at 50 km/h, and a third of SNAP_TOLERANCE_M (30 m), so it cannot change which road
+  // we snap to. The sign is hidden below SPEED_LIMIT_SHOW_KMH (2 km/h) anyway, so the
+  // largest saving (stopped at a light: 4 resolves/s -> 0) happens while it is off screen.
+  if (_resolvedAt && haversineM(_resolvedAt.lat, _resolvedAt.lng, lat, lng) < RESOLVE_MOVE_M) {
+    return _current;
+  }
+  _resolvedAt = { lat, lng };
   // Resolve against whatever is cached right now (instant; no network).
   _emit(nearestLimit(lat, lng, _ways));
   // Stale-cache self-heal: if the nearest cached road is implausibly far, the cache
@@ -260,7 +303,7 @@ export function updateSpeedLimit(lat: number, lng: number): number | null {
 }
 
 export function resetSpeedLimit(): void {
-  _ways = []; _center = null; _emit(null);
+  _ways = []; _center = null; _resolvedAt = null; _emit(null);
 }
 
 // Show the posted-limit sign only while actually moving. ONE rule, in km/h so it is

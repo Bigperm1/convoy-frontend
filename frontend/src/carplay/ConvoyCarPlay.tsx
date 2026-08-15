@@ -250,12 +250,12 @@ class CarMapBoundary extends React.Component<
 
 export function CarSurface() {
   const s = useCarStore();
-  const spd = formatSpeed(s.speedMs || 0, getSettings().speedUnit);
+  const spd = formatSpeed(s.speedMs || 0, s.speedUnit ?? getSettings().speedUnit);
   const nearby = s.peers.length;
   // Posted speed limit (PART 5), shown in the driver's unit. carStore.speedLimitKmh
   // is km/h; convert to mph if that's their setting. null → no badge.
   const limitVal = s.speedLimitKmh
-    ? (getSettings().speedUnit === 'mph' ? Math.round(s.speedLimitKmh / 1.609344) : Math.round(s.speedLimitKmh))
+    ? ((s.speedUnit ?? getSettings().speedUnit) === 'mph' ? Math.round(s.speedLimitKmh / 1.609344) : Math.round(s.speedLimitKmh))
     : null;
   // Arrival CLOCK, computed the SAME way the phone banner does (now + remaining
   // ETA). This is the number the driver compares to their phone — driving it from
@@ -1112,10 +1112,8 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       // Self-marker style → car live map renders the arrow when the phone does.
       selfMarkerType: getSelfMarkerType(getSettings()),
       // Mirrored map markers (gates already applied by the caller). undefined→[] so a
-      // cleared layer wipes the car too. (hazards moved to the gated write below.)
-      speedCameras: speedCameras || [],
-      roadEvents: roadEvents || [],
-      places: places || [],
+      // cleared layer wipes the car too. hazards / speedCameras / roadEvents / places
+      // are ALL written by the signature-gated effects below now, never from here.
       selfUserId,
       // Route-line color → car route matches the phone's chosen color.
       routeColor: getRouteColor(getSettings()),
@@ -1176,6 +1174,34 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
     hazardsSigRef.current = sig;
     setCarHazards(hazards || [], 'phone');
   }, [hazards]);
+  // SAME DEFECT, THREE MORE ARRAYS (2026-08-15). speedCameras / roadEvents / places
+  // used to ride the big metadata effect above, so a new array identity on a phone
+  // render re-ran a 25-field setCarState and re-rendered BOTH car trees. Verified
+  // per-render identities, not hypothetical:
+  //   • roadEvents — map.tsx:779 builds it in an IIFE that runs on EVERY render, so its
+  //     identity ALWAYS churns (this is the live one);
+  //   • places — map.tsx:2115 passes a fresh `[]` literal whenever showPlacePins is off;
+  //   • speedCameras — map.tsx:763 is useState-backed and identity-stable TODAY, but it
+  //     is one `.filter()` away from behaving like roadEvents, so it is gated with them
+  //     rather than left as the one unguarded path back to phone render rate.
+  // carStore's equality gate compares arrays by IDENTITY (see its header), so it cannot
+  // absorb these on its own — the content signature is what stops the churn. ONE shared
+  // ref and ONE write on purpose: a change in any of the three costs a single store
+  // notification instead of three.
+  const markersSigRef = useRef('');
+  useEffect(() => {
+    const sig =
+      (speedCameras || []).map((c) => `${c.id}:${c.lat}:${c.lng}`).join('|')
+      + '#' + (roadEvents || []).map((e) => `${e.id}:${e.kind}:${e.severity}:${e.lat}:${e.lng}`).join('|')
+      + '#' + (places || []).map((p) => `${p.id}:${p.lat}:${p.lng}:${p.label ?? ''}`).join('|');
+    if (sig === markersSigRef.current) return;
+    markersSigRef.current = sig;
+    setCarState({
+      speedCameras: speedCameras || [],
+      roadEvents: roadEvents || [],
+      places: places || [],
+    });
+  }, [speedCameras, roadEvents, places]);
 
   // ---- position mirror: ADDITIVE ONLY ----
   // Writes selfLat/selfLng/heading ONLY when the phone has a real fix. carStore is a

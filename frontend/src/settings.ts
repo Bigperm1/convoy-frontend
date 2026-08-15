@@ -451,6 +451,21 @@ return loaded ? cached : loadPromise;
 
 export function getSettings(): Settings { return cached; }
 
+// Imperative subscription for MODULE-SCOPE consumers (no React) — e.g. the CarPlay /
+// Android Auto settings mirror at the bottom of carplay/carStore.ts. useSettings() is
+// the React half of this same `listeners` set; this is the non-React half. Returns an
+// unsubscribe fn.
+//
+// ⚠ THE CALLBACK MUST NOT THROW. Both notify sites — the loadPromise hydration above
+// and updateSettings below — do a bare `listeners.forEach((l) => l(cached))` with no
+// per-listener guard, so one throwing subscriber aborts the loop and every listener
+// registered after it silently stops updating. That is exactly the failure mode the
+// updateSettings comment describes (a tap that registered but never repainted).
+export function subscribeSettings(fn: (s: Settings) => void): () => void {
+  listeners.add(fn);
+  return () => { listeners.delete(fn); };
+}
+
 // ---- Last-known GPS location (cold-start map framing) ----
 // Persisted SEPARATELY from Settings and WITHOUT notifying listeners, so the
 // frequent position writes from the map never trigger a settings re-render. Read

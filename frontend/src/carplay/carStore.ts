@@ -7,7 +7,11 @@
 // with useCarStore(). Plain pub/sub, platform-agnostic, safe on web.
 
 import { useEffect, useState } from 'react';
-import type { MapMode } from '../settings';
+import type { MapMode, Settings } from '../settings';
+// VALUE import (this used to be type-only): the settings→car mirror at the bottom of
+// this file needs the live accessors. No import cycle — settings.ts imports only
+// AsyncStorage and react (settings.ts:2-3).
+import { getSettings, getMapMode, getRouteColor, getSelfMarkerType, subscribeSettings } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
 
 // Peer entry for the car surface. `id`+`handle` feed the Comms list (the original
@@ -114,6 +118,14 @@ export type CarState = {
   // 'class' falls back to the 3D car on the head unit for now (the top-down
   // class sprite is phone-only until the CarPlay parity pass).
   selfMarkerType?: 'car' | 'arrow' | 'photo' | 'class';
+  // Driver's speed unit (mirror of settings.speedUnit). CarSurface reads
+  // getSettings().speedUnit directly at render — correct (one JS context, shared
+  // module cache) but NOT reactive: nothing re-renders the car tree when the unit
+  // changes, so the head unit kept the old unit until some unrelated carStore write
+  // happened to land. Mirrored here so the switch repaints immediately.
+  // undefined → CarSurface falls back to getSettings().speedUnit, so a state object
+  // written before this field existed still formats correctly.
+  speedUnit?: 'kmh' | 'mph';
   // Map markers mirrored from the phone so the CarPlay live map shows the SAME
   // hazards / DriveBC incidents / speed cameras / place pins the driver sees on the
   // phone. All optional; undefined → none. The 'when active' gating is applied on the
@@ -344,6 +356,23 @@ export function setCarHazards(hazards: NonNullable<CarState['hazards']>, source:
   setCarState({ hazards });
 }
 
+/**
+ * READ-ONLY: would a peers/hazards write from `source` be ACCEPTED right now?
+ *
+ * Ownership is unchanged — this is literally the predicate setCarPeers/setCarHazards
+ * already run, exposed so a writer that is about to be REJECTED can skip building the
+ * payload it would have thrown away. It stamps nothing (no ts, no rank), so asking can
+ * never claim the feed, and the real gate still runs on the real write.
+ *
+ * Why it exists: carDataService's emitPeers/emitHazards run on every WS frame, every
+ * presence sync and every REST refresh while a head unit is connected, and each one
+ * merges + maps the whole peer/hazard set before handing it to a gate that drops it
+ * outright while the phone mirror is fresh.
+ */
+export function carFeedWouldAccept(kind: 'peers' | 'hazards', source: ConvoyFeedSource): boolean {
+  return feedGateAllows(kind === 'peers' ? lastPeersWrite : lastHazardsWrite, FEED_RANK[source]);
+}
+
 // ── NAV-STRIP write GATE (2026-08-13) ───────────────────────────────────────
 // WHY: Olaf's drive on build 72 — the phone banner read "11 min" while CarPlay read
 // "43 min · 27 km" AT THE SAME MOMENT (photo of the head unit). Both surfaces are
@@ -473,3 +502,51 @@ export function subscribeCarGesture(fn: (g: CarGesture) => void): () => void {
   gestureListeners.add(fn);
   return () => { gestureListeners.delete(fn); };
 }
+
+// ── SETTINGS → CAR MIRROR (module scope, registered exactly once) ─────────────
+// WHY THIS EXISTS. Five car-surface values are settings-derived, and until now the
+// only thing that pushed them was useConvoyCarPlay's big metadata effect in
+// ConvoyCarPlay.tsx — i.e. they reached the head unit as a SIDE EFFECT of that effect
+// re-running, and only while the phone's map screen was mounted. Two consequences,
+// both read out of the code rather than guessed:
+//   1. COLD CAR SESSION (head unit connected without map.tsx ever mounting): nothing
+//      writes them. selfMarkerType stays undefined, so CarMapView.tsx:418
+//      (`s.selfMarkerType === 'arrow'`) is false and a driver set to ARROW gets the 3D
+//      car; routeColor stays undefined, so CarMapView.tsx:1282 falls back to
+//      ROUTE_GREEN_CORE and a custom route colour reverts to green.
+//      (navNotification.ts:576 and :666 do cover selfCarColor + mapMode on the cold
+//      feeds — those TWO only, and only from the first GPS fix onward.)
+//   2. Memoising that metadata effect removes the accidental refresh that was masking
+//      (1) on the warm path — so this mirror is its mandatory companion, not a nicety.
+//
+// Writes ONLY these five keys. Every other settings change (activeThreadId, the audio
+// sliders, gas brands…) lands on setCarState's equality short-circuit above and
+// notifies nobody.
+//
+// ⚠ THE try/catch IS LOAD-BEARING. settings.ts notifies with a bare
+// `listeners.forEach((l) => l(cached))` (settings.ts:458 and :496 — no per-listener
+// guard), so a throw in here would abort that loop and every listener added after us,
+// including live useSettings() subscribers, would stop updating. Never let it throw.
+//
+// ⚠ REGISTERED EXACTLY ONCE per JS context: this is module scope and Metro evaluates a
+// module once per context. settings' `listeners` is a Set, so even a repeat add of this
+// same reference is a no-op. (A dev Fast-Refresh re-evaluation would create a second,
+// distinct closure — harmless: it writes identical values and the equality gate above
+// drops the duplicate.)
+function mirrorSettingsToCar(s: Settings): void {
+  try {
+    setCarState({
+      selfCarColor: s.carColor,
+      mapMode: getMapMode(s),
+      selfMarkerType: getSelfMarkerType(s),
+      routeColor: getRouteColor(s),
+      speedUnit: s.speedUnit,
+    });
+  } catch {}
+}
+subscribeSettings(mirrorSettingsToCar);
+// Fire once for the CURRENT value. Required on BOTH orderings: evaluated before the
+// AsyncStorage hydration completes, this writes the defaults now and the hydration
+// notify (settings.ts:458) corrects them a moment later; evaluated after hydration,
+// that notify has already gone out and this call is the only thing that seeds the store.
+mirrorSettingsToCar(getSettings());

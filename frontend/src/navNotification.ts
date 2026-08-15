@@ -99,6 +99,31 @@ let _route: SlimRoute | null = null;
 let _stepIdx = 0;
 let _notifiedStep = -1;
 let _routeLookAt = 0;
+// ── PROGRESS PERSISTENCE CADENCE (2026-08-15) ───────────────────────────────
+// {idx, notified} was READ and WRITTEN on EVERY GPS fix — 1 Hz on a warm drive, 2 Hz on
+// a cold Android Auto one (the bg task AND startForegroundCarFeed both call
+// updateNavBanner) — for the whole drive. Neither needs that rate:
+//  • the WRITE is a pure function of (idx, notified), so between step transitions it
+//    rewrote identical bytes. persistProgress writes ONLY on change, with no throttle
+//    and no debounce — every change still reaches the disk the instant it happens, so
+//    what a crash or a cold context reads back is byte-identical to before.
+//  • the READ can only surface a value written by a DIFFERENT (headless) JS context —
+//    a handover, not a per-fix event. See updateNavBanner.
+// How often the progress mirror may be RE-read. The stamp starts at 0, so the first fix
+// in any context always reads: that is the cold-start hydration path, unchanged.
+const PROGRESS_REREAD_MS = 20_000;
+let _progressReadAt = 0;
+// Exact JSON last SUCCESSFULLY written, so an unchanged value costs nothing. Stamped
+// only after the setItem resolves, so a failed write is retried on the next fix.
+let _progressWritten = "";
+async function persistProgress(idx: number, notified: number): Promise<void> {
+  const next = JSON.stringify({ idx, notified });
+  if (next === _progressWritten) return;
+  try {
+    await AsyncStorage.setItem(PROGRESS_KEY, next);
+    _progressWritten = next;
+  } catch {}
+}
 // Cadence for the car-strip receipt. Timestamp compare, not a JS timer (suspended
 // while the phone is locked — see nav.ts).
 const COLD_STRIP_LOG_EVERY_MS = 30_000;
@@ -444,18 +469,18 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
   // banner now behaves like Google's "turn left in 400 m", once per turn.
   const incoming = arriving || d <= ANNOUNCE_DISTANCE_M;
   if (!incoming) {
-    try { await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx, notified })); } catch {}
+    await persistProgress(idx, notified);
     return;
   }
 
   // Already announced THIS turn's incoming banner → don't re-pop on every fix.
   if (stepKey === notified) {
     _notifiedStep = notified;
-    try { await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx, notified })); } catch {}
+    await persistProgress(idx, notified);
     return;
   }
   _notifiedStep = stepKey;
-  try { await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx, notified: stepKey })); } catch {}
+  await persistProgress(idx, stepKey);
 
   let title: string;
   let body: string;
@@ -878,6 +903,11 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
     _notifiedStep = -1; // -1 so the FIRST turn still announces when it's incoming
     resetColdArrival();  // a new route must be able to arrive again
     _routeLookAt = 0;    // and be discoverable by the other feed at once
+    // New route ⇒ new progress. Re-arm BOTH halves of the cadence: 0 so the next fix
+    // re-reads (matching today's per-fix behaviour exactly), "" so the first write of
+    // this route can never be suppressed by the previous route's cached value.
+    _progressReadAt = 0;
+    _progressWritten = "";
     try {
       await AsyncStorage.setItem(ROUTE_KEY, JSON.stringify(slim));
       await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx: 0, notified: -1 }));
@@ -912,6 +942,11 @@ export async function stopNavBanner(): Promise<void> {
   _route = null;
   _stepIdx = 0;
   _notifiedStep = -1;
+  // Re-arm the progress cadence: after a teardown this context can still DISCOVER a
+  // route persisted by ANOTHER one (updateNavBanner's throttled ROUTE_KEY lookup at the
+  // top), and that route must hydrate its progress on the first fix, not 20 s later.
+  _progressReadAt = 0;
+  _progressWritten = "";
   _coldSettleSince = null;
   if (_coldSettleTimer) { clearTimeout(_coldSettleTimer); _coldSettleTimer = null; }
   try {

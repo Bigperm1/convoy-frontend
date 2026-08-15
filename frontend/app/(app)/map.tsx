@@ -766,16 +766,28 @@ export default function MapScreen() {
   // Severity split (Settings → Map Layers): red = major/moderate, grey = minor.
   // Filtered HERE so hiding grey pins also silences their (nonexistent) callouts
   // and hiding red pins silences the major/moderate voice alerts below.
-  const roadEventsFiltered = roadEventsAll.filter((e: any) =>
+  // HEAT (identity, 2026-08-15): memoised. The inline .filter() minted a NEW ARRAY on
+  // every phone render. That chained ConvoyCarPlay's 25-field setCarState (roadEvents is
+  // in its dep list, src/carplay/ConvoyCarPlay.tsx:1151) to the phone's render rate, and
+  // defeated ConvoyMapbox's incidentFC memo (src/ConvoyMapbox.tsx:1697), which rebuilt the
+  // incident FeatureCollection — and re-uploaded the ShapeSource — every render.
+  // `settings` is the whole-object dep because the reads below go through `as any` (the
+  // exhaustive-deps rule can't form a member path through a TSAsExpression). useSettings
+  // hands out a BRAND NEW object on every write (src/settings.ts:483, `cached = {...}`),
+  // so this still recomputes the instant either toggle flips. Contents/order unchanged.
+  const roadEventsFiltered = useMemo(() => roadEventsAll.filter((e: any) =>
     e.severity === "MAJOR" || e.severity === "MODERATE"
       ? (settings as any).roadIncidentsRed !== false   // red: ON by default
       : (settings as any).roadIncidentsGrey === true   // grey: OPT-IN (off on first launch — "the grey is just too much")
-  );
+  ), [roadEventsAll, settings]);
   // Collapse near-duplicates (tester: red + grey pins stacking on each other —
   // DriveBC often files the same closure twice, once per direction/severity).
   // RED (major/moderate) sorts first so it always wins the spot; anything within
   // ~250 m of an already-kept event is dropped. O(n²) is fine at DriveBC counts.
-  const roadEvents = (() => {
+  // HEAT (identity, 2026-08-15): the O(n²) haversine dedupe now runs only when the
+  // filtered list actually changes, not on every phone render. Body is byte-for-byte the
+  // old IIFE — same sort, same 250 m rule, same order out.
+  const roadEvents = useMemo(() => {
     const sorted = [...roadEventsFiltered].sort((a: any, b: any) => {
       const ra = a.severity === "MAJOR" || a.severity === "MODERATE" ? 0 : 1;
       const rb = b.severity === "MAJOR" || b.severity === "MODERATE" ? 0 : 1;
@@ -787,7 +799,7 @@ export default function MapScreen() {
       kept.push(e);
     }
     return kept;
-  })();
+  }, [roadEventsFiltered]);
   // Posted speed limit for the road you're on (OpenStreetMap maxspeed via
   // Overpass). Feeds the speedometer's over-limit pulse; null when the road has
   // no maxspeed tag, in which case the pill simply stays neutral.

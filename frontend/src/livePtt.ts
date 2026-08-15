@@ -78,6 +78,21 @@ export const threadBus = {
 };
 
 let activeWs: WebSocket | null = null;
+
+// ---- Polling-fallback cadence (see the poll loop in useLiveWalkieListener) ----
+// PTT_POLL_FAST_MS is the original always-on rate, kept for exactly the case the
+// fallback exists for: the socket is NOT open. PTT_POLL_HEALTHY_MS applies while the
+// socket IS open, when the poll is pure redundancy.
+//
+// The ceiling is 20 s, not 30, and the reason is in this same file: the poll only
+// AUTO-PLAYS a recovered clip when `Date.now() - createdMs < 30000`. A clip recovered
+// outside that window is still emitted to the history bus but is never heard. Polling
+// at 30 s would land recovered clips right on that boundary and many would drop
+// silently. 20 s leaves ~10 s of margin for the server write plus the GET round-trip,
+// so a clip the socket lost still PLAYS rather than appearing mutely in history.
+const PTT_POLL_FAST_MS = 6000;
+const PTT_POLL_HEALTHY_MS = 20000;
+
 const floorState: Record<string, { holder_id: string; holder_handle: string; ts: number }> = {};
 
 function wsSend(obj: any): boolean {
@@ -340,8 +355,11 @@ export function useLiveWalkieListener(
     // The WS above is the primary, low-latency transport. But on flaky mobile
     // networks, app backgrounding, or Render free-tier socket idling, frames
     // get dropped and a transmission is "sent but never received". So we ALSO
-    // poll GET /api/ptt/{channel} every 5s and deliver anything the socket
-    // missed (deduped via handledIds so nothing double-plays). Mirrors the
+    // poll GET /api/ptt/{channel} and deliver anything the socket missed (deduped
+    // via handledIds so nothing double-plays). BACKOFF: while the socket is OPEN this
+    // is pure redundancy, so it runs at PTT_POLL_HEALTHY_MS (20 s); the moment the
+    // socket is anything other than OPEN it snaps straight back to PTT_POLL_FAST_MS
+    // (6 s), which is exactly when the fallback is actually load-bearing. Mirrors the
     // hazards screen's Realtime-plus-poll defense. The FIRST poll for a given
     // channel only SEEDS the seen-set (so we never replay the stored backlog);
     // after that, genuinely new + recent clips are auto-played.

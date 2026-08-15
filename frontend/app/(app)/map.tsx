@@ -2624,6 +2624,9 @@ export default function MapScreen() {
   // (There is no manual unit override any more — the detect is fully automatic;
   // see the SPEED UNITS note further down.)
   const lastUnitCheckRef = useRef<number>(0);
+  // Border-detection reverse-geocode is gated on BOTH the 60 s timer AND ~2 km of
+  // travel since the last lookup, so a parked or stop-and-go car stops paying for it.
+  const lastUnitCheckPosRef = useRef<{ lat: number; lng: number } | null>(null);
   // Throttle backend /location POSTs (live-avatar publish) to ~once / 4s.
   const lastLocPostRef = useRef<number>(0);
   useEffect(() => {
@@ -2693,12 +2696,30 @@ export default function MapScreen() {
             // throttle so every other driver's /users/nearby (polled by
             // loadPeers) shows us live. Pure REST â no Supabase Realtime needed.
             const nowPost = Date.now();
-            // Battery: while moving, publish every 1s so peers see smooth
-            // movement (the 1.1.4 "1s avatar" behavior). While effectively
-            // stationary (< ~2 km/h - parked, or GPS jitter), back off to one
-            // post every 12s: a parked car has nothing new to broadcast, and
-            // this slashes cellular-radio wakeups during meets and stops.
-            const postEveryMs = speed > 0.5 ? 1000 : 12000;
+            // ── /location CADENCE: PRESENCE-AWARE (2026-08-15) ────────────────────
+            // VERIFIED, because the obvious assumption is WRONG: /location is not just
+            // a write that the 10s /users/nearby poll later reads. The backend ALSO
+            // fans it out over the WebSocket as {type:"location"} to every co-member
+            // (convoy-backend/server.py:744-750), and BOTH clients ingest those frames
+            // straight into their peer map — this file's ws.onmessage below, and
+            // src/carplay/carDataService.ts:157 for the CarPlay/AA surfaces. So this
+            // POST IS a realtime peer feed; its cadence cannot be stretched blindly.
+            //
+            // What makes 4s safe: BOTH peer merges let Supabase presence WIN over the
+            // WS/REST entry — the peerList merge below ("Presence wins (live & most
+            // recent)") and carDataService's emitPeers (presence spread last, line 89)
+            // — and presence re-broadcasts every 1.5s (convoyPresence track throttle).
+            // So for any peer sharing our ACTIVE community the WS frame is already
+            // discarded at render. CarPlay-standalone has shipped on presence alone
+            // since Wave 1: carDataService posts no /location at all.
+            //
+            // Where the WS frame is still the ONLY sub-10s feed: with NO active
+            // community we never join a presence channel (presenceChannel === null
+            // below), so nothing of ours reaches peers except this POST. Keep 1 Hz
+            // there. Stationary stays 12s in every case — a parked car has nothing new
+            // to broadcast, and that back-off already slashed radio wakeups at meets.
+            const presenceCovering = SUPABASE_ENABLED && !!getSettings().activeCommunityId;
+            const postEveryMs = speed > 0.5 ? (presenceCovering ? 4000 : 1000) : 12000;
             if (nowPost - lastLocPostRef.current > postEveryMs) {
               lastLocPostRef.current = nowPost;
               // ── PRIVACY GATE (2026-07-31) ──────────────────────────────────
@@ -2742,8 +2763,13 @@ export default function MapScreen() {
             //   * Fully automatic — no manual override (the SPEED UNITS toggle
             //     was removed); re-checks the country with getSettings() inside
             //     the network callback to avoid the stale-closure trap.
-            if (lastUnitCheckRef.current === 0 || now - lastUnitCheckRef.current > 60000) {
+            const unitLast = lastUnitCheckPosRef.current;
+            const unitMovedM = unitLast
+              ? haversineMeters(unitLast, { lat: pos.coords.latitude, lng: pos.coords.longitude })
+              : Infinity;
+            if (lastUnitCheckRef.current === 0 || (now - lastUnitCheckRef.current > 60000 && unitMovedM >= 2000)) {
               lastUnitCheckRef.current = now;
+              lastUnitCheckPosRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
               const GKEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
               if (GKEY) {
                 fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${pos.coords.latitude},${pos.coords.longitude}&result_type=country&key=${GKEY}`)

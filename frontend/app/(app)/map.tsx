@@ -4629,8 +4629,11 @@ export default function MapScreen() {
           activeOpacity={0.8}
         >
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
-          <Ionicons name={view2D ? "cube-outline" : "square-outline"} size={24} color={COLORS.brand} />
-          <Text style={styles.fabCrewLabel}>{view2D ? "3D" : "2D"}</Text>
+          {/* TEXT ONLY — no glyph (Jeff, 2026-08-15: "remove the square in the button on
+              the phone and just make it 2D when 3D is active and vice versa"). The label
+              already showed what you GET rather than what you are in, which is the
+              convention for a view switch, so only the icon comes out. */}
+          <Text style={styles.fabViewLabel}>{view2D ? "3D" : "2D"}</Text>
         </TouchableOpacity>
         {/* Crew button (replaced the police FAB, 2026-07-23 — Jeff's call): one tap
             frames self + every live/partial peer in a north-up overview. Same round
@@ -5174,6 +5177,10 @@ const styles = StyleSheet.create({
   },
   // Tiny label under the people icon in the Crew FAB (round, bottom-right stack).
   fabCrewLabel: { color: "#FFFFFF", fontSize: 9, fontWeight: "700", letterSpacing: 0.2, marginTop: -1 },
+  // 2D/3D toggle label. Its own style because the glyph was removed (Jeff, 2026-08-15) —
+  // the text is now the ENTIRE control, so it carries the FAB on its own at the size the
+  // icon used to occupy, in brand green like every other glyph in this stack.
+  fabViewLabel: { color: COLORS.brand, fontSize: 17, fontWeight: "800", letterSpacing: 0.5 },
   // Hold-to-activate Avatar panel (bottom-left). Dark card matching the other
   // map glass; green-dot radio rows mirror the Settings MAP MODE selector.
   avatarPanel: {

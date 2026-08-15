@@ -129,11 +129,26 @@ function logCarGestureOnce(kind: string, detail?: number): void {
   } catch {}
 }
 
-let aaCanvasLogged = false;
+// Distinct canvas sizes already reported this process. A Set, not a boolean, so a
+// dual-screen switch gets its own row — see logAaCanvas.
+const aaCanvasSeen = new Set<string>();
 function logAaCanvas(w: number, h: number): void {
-  if (!IS_AA || aaCanvasLogged) return;
+  // ── RE-LOG ON EVERY DISTINCT SIZE (2026-08-14) ────────────────────────────────
+  // This was once-per-process, which is why we have canvas numbers for the normal AA
+  // layout and NONE for dual-screen. Say Phin's video shows the car pushed right when he
+  // switches to the split layout, and every remaining AA layout complaint — banners over
+  // the crew/compass buttons, the version pill under Search — is unanswerable without
+  // the real width in that mode.
+  //
+  // Now keyed on the SIZE, not a boolean: each distinct WxH logs exactly once, so a
+  // layout switch produces one new row and a resize storm cannot flood the table (the
+  // rule every breadcrumb in this codebase follows). A normal drive still emits exactly
+  // one row, so nothing gets noisier for the sessions we already understand.
+  if (!IS_AA) return;
   if (!(w > 0) || !(h > 0)) return;
-  aaCanvasLogged = true;
+  const sizeKey = `${Math.round(w)}x${Math.round(h)}`;
+  if (aaCanvasSeen.has(sizeKey)) return;
+  aaCanvasSeen.add(sizeKey);
   try {
     const win = Dimensions.get('window');
     const ratio = PixelRatio.get();

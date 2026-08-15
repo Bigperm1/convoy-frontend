@@ -675,6 +675,8 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // does the same — guidance is heading-up chase, not the compass hold).
   const [carNorthUp, setCarNorthUp] = useState(false);
   const camHdgOverrideRef = useRef<number | undefined>(undefined);
+  // Last heading actually drawn, kept live for the compass's direct camera push below.
+  const drawHdgRef = useRef(0);
   useEffect(() => { if (s.navigating) setCarNorthUp(false); }, [s.navigating]);
   // getCam() re-derives the override every FRAME (see the comment there); this ref is
   // how the frozen getCam closure reads the live compass-toggle state.
@@ -1020,18 +1022,43 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           // come home, so the chase cam takes back over immediately.
           camHoldUntilRef.current = 0;
           break;
-        case 'compass':
+        case 'compass': {
           // Mirror the PHONE compass (Jeff's ask): recenter on the car AND face
           // north, holding north-up until tapped again (or nav starts). Also
           // cancels a crew overview and resets any pinch bias, exactly like the
           // phone's recenterNow.
+          //
+          // ⚠ THE COMPASS DID NOTHING WHILE PARKED (Jeff via Say Phin, 2026-08-14:
+          // "the compass on AA does not work, but it does work on his android phone").
+          // Telemetry settles which half was broken: Android logged 29
+          // `carplay-tap:car-compass` receipts, so the PRESS always arrived — the ACTION
+          // was the problem. This case only mutated refs and called applyZoomNow(), and
+          // applyZoomNow pushes zoomLevel ONLY. The heading override therefore had to
+          // wait for the next EASED frame — and a stationary car arms no ease, so nothing
+          // moved. Exactly the trap that got build 65's zoom buttons pulled as "dead on
+          // the head unit" (abad793), noted a few lines above in this same file.
+          //
+          // Fix: compute the next state synchronously and push the heading DIRECTLY, the
+          // same way applyZoomNow pushes zoom. Both directions need it — engaging north-up
+          // and releasing back to heading-up are equally dead while parked.
+          const nextNorthUp = !carNorthUpRef.current;
+          carNorthUpRef.current = nextNorthUp;
+          camHdgOverrideRef.current = nextNorthUp ? 0 : undefined;
           userZoomRef.current = 0;
           zoomBaseRef.current = 0;
           zoomHoldUntilRef.current = 0;
           camHoldUntilRef.current = 0;
           applyZoomNow();
-          setCarNorthUp((v) => !v);
+          try {
+            cameraRef.current?.setCamera({
+              heading: nextNorthUp ? 0 : drawHdgRef.current,
+              animationDuration: 0,
+              animationMode: 'none',
+            });
+          } catch {}
+          setCarNorthUp(nextNorthUp);
           break;
+        }
         case 'crewFit': {
           // Frame self + every peer, north-up, and hold the chase cam off for 8s
           // (the lockstep re-grabs automatically when the hold expires — same
@@ -1200,6 +1227,8 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   const drawLat = carSnapped ? routeProj!.lat : (carRoadDraw ? carRoadDraw.lat : lat);
   const drawLng = carSnapped ? routeProj!.lng : (carRoadDraw ? carRoadDraw.lng : lng);
   const drawHdg = carSnapped ? routeProj!.bearing : hdg;
+  // Live copy for the compass's IMMEDIATE camera push (the gesture closure is frozen).
+  drawHdgRef.current = drawHdg;
   if (carSnapped) camHdgRef.current = routeProj!.bearing;
   const buildLineFade = (solid: string, clear: string): any => {
     if (routeTrimEndFrac == null) return null;

@@ -570,11 +570,17 @@ export const CAR_MAP_BUTTON_CONFIG = {
 // the way an over-long strip or an icon-less action can. A host that ignores the
 // flag simply behaves as it does today; there is no downside case.
 const AA_PERSISTENT = 'persistent' as const;
+// ⚠ ANDROID AUTO RENDERS THIS STRIP RIGHT-ALIGNED, so array order reads RIGHT-TO-LEFT
+// on the head unit — the mirror image of CarPlay's leading bar, where array[0] is
+// leftmost. Say Phin's video, 2026-08-14: "comms button on right side should be left
+// corner." With `car-comms` first it landed at the far RIGHT. Reversed so comms sits at
+// the LEFT end of the strip, matching CarPlay, where it has always been the leading
+// button. Same ids, same handlers — order only.
 export const AA_ACTION_STRIP = [
-  { id: 'car-comms', icon: CAR_ICON_MIC, visibility: AA_PERSISTENT },
-  { id: 'car-view', icon: CAR_ICON_VIEW_2D, visibility: AA_PERSISTENT },
-  { id: 'car-search', title: 'Search', visibility: AA_PERSISTENT },
   { id: 'car-end', title: 'End', visibility: AA_PERSISTENT },
+  { id: 'car-search', title: 'Search', visibility: AA_PERSISTENT },
+  { id: 'car-view', icon: CAR_ICON_VIEW_2D, visibility: AA_PERSISTENT },
+  { id: 'car-comms', icon: CAR_ICON_MIC, visibility: AA_PERSISTENT },
 ];
 // androidx ACTIONS_CONSTRAINTS_MAP: max 4, ICON ONLY (no titles accepted). Same order
 // rationale as CarPlay above. Note the key is `icon` here and `image` on iOS — they are

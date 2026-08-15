@@ -28,7 +28,10 @@
 
 import { api, getToken, wsUrl } from '../api';
 import { supabase, SUPABASE_ENABLED } from '../supabase';
-import { getSettings, getAvatarMode } from '../settings';
+import { getSettings, getAvatarMode, ensureSettingsLoaded } from '../settings';
+// THE gate (src/locationPrivacy). Every outbound position must ask it — this file was
+// the last transport that did not. See buildCarPayload and onStoreTick below.
+import { shareablePosition, noteFix, hydrateLocationPrivacy } from '../locationPrivacy';
 import { toGRCSlug } from '../vehicleAssets';
 import { getCarState, setCarPeers, setCarHazards, subscribeCarState, carFeedWouldAccept, type CarPeer } from './carStore';
 import { joinPresence as hubJoinPresence, type PresenceHandle } from '../presenceHub';
@@ -73,6 +76,9 @@ let _nearbyLastFetch = 0;
 let _hazardsLastFetch = 0;
 let _presenceLastTrack = 0;
 let _presenceHandle: PresenceHandle | null = null;
+// Has the privacy gate been hydrated from disk in THIS context? Presence may not join
+// (and therefore may not broadcast) until it has — see startCarDataService.
+let _privacyReady = false;
 let _hazardsChannel: any = null;
 let _unsubStore: (() => void) | null = null;
 
@@ -309,6 +315,26 @@ function buildCarPayload(): Record<string, any> | null {
   if (!_me?.id) return null;
   const st = getCarState();
   if (typeof st.selfLat !== 'number' || typeof st.selfLng !== 'number') return null;
+  // ── THE PRIVACY GATE, IN THE CAR CONTEXT (2026-08-15) ─────────────────────────
+  // This used to publish st.selfLat/st.selfLng RAW with a hardcoded status:'live', on
+  // the reasoning in this file's header: "this service runs only while CarPlay is
+  // connected = driving". That reasoning does not hold on Android. Nothing unmounts
+  // AndroidAutoRoot — CarPlaySession.onDestroy is a no-op and the didDisconnect listener
+  // needs build 71 (AndroidAutoRoot.tsx:116-142) — so stopCarDataService is never reached
+  // after an AA drive and this provider kept broadcasting the phone's live position while
+  // the driver walked away. That is precisely the class src/locationPrivacy exists to kill
+  // (its header: the 2026-07-20 house leak). Ask the gate instead.
+  const share = shareablePosition({
+    lat: st.selfLat,
+    lng: st.selfLng,
+    heading: st.heading ?? 0,
+    speed: st.speedMs ?? 0,
+  });
+  // Ghost, or parked with no known car spot -> broadcast NOTHING (absent beats exposed).
+  // null is already this provider's "not ready" signal and presenceHub.doTrack does
+  // `if (!payload) return` (presenceHub.ts:90), so the hub simply does not track for us
+  // this tick.
+  if (!share.share) return null;
   const s = getSettings();
   return {
     user_id: _me.id,
@@ -318,15 +344,38 @@ function buildCarPayload(): Record<string, any> | null {
     carColor: s.carColor || _me.carColor,
     activeColor: toGRCSlug(s.carColor || _me.carColor) || undefined,
     topSpeed: _me.topSpeed,
-    status: 'live', // this service runs only while CarPlay is connected = driving
-    lat: st.selfLat,
-    lng: st.selfLng,
-    heading: st.heading ?? undefined,
+    // Was hardcoded 'live'. The gate's own answer now — and NOTE the deliberate ASYMMETRY
+    // with the warm phone map, because the obvious reading is wrong: map.tsx calls
+    // noteCarConnected(true) (map.tsx:3409), so isParked() is false there and its peer
+    // stays 'live' at any standstill. This context asserts nothing (see the declined
+    // noteCarConnected item), so on a COLD drive a driver stopped past the 90 s hysteresis
+    // draws 'parked' (0.5 opacity) to the crew. Cosmetic, self-correcting on the next
+    // moving fix, and COLD-PATH ONLY — while map.tsx is mounted its provider (priority 2)
+    // owns the broadcast outright and this payload is never even read (presenceHub.ts:83-90
+    // breaks at the first non-top priority).
+    // `status` is NOT one of presenceHub's throttled keys (idKeyOf excludes only
+    // lat/lng/heading/topSpeed, presenceHub.ts:58-67), so a live<->parked flip still
+    // bypasses the 1.5 s window.
+    status: share.status,
+    lat: share.lat,
+    lng: share.lng,
+    // `|| undefined` preserves today's wire SHAPE: the gate returns heading 0 both for
+    // "no heading known" and for the car-spot branch, and a literal 0 on the wire is DUE
+    // NORTH — the bug d474ed3 just fixed on the AA surface.
+    heading: share.heading || undefined,
   };
 }
 
 function joinPresence(): void {
   if (!_running || _presenceHandle || !SUPABASE_ENABLED || !supabase || !_me?.id) return;
+  // The gate must be hydrated before our first payload can be built — registering the
+  // provider IS what exposes buildCarPayload to the hub, and presenceHub force-tracks
+  // once immediately on SUBSCRIBE (presenceHub.ts:152). Gating the JOIN, rather than the
+  // payload, is what turns "hydrated before the first track" from a race into a fact.
+  // Not a retry loop: startCarDataService's hydrate block calls joinPresence() itself
+  // when it lands, and ensureMe() calls it when identity arrives — whichever is last
+  // drives the join.
+  if (!_privacyReady) return;
   const channelName = presenceChannelName();
   if (!channelName) return;
   // The hub owns the single channel per topic — the phone map (priority 2) and
@@ -388,6 +437,19 @@ function onStoreTick(): void {
   if (st.selfLat === _lastTickLat && st.selfLng === _lastTickLng) return;
   _lastTickLat = st.selfLat;
   _lastTickLng = st.selfLng;
+  // FEED THE PRIVACY GATE (2026-08-15). In a COLD car context map.tsx never mounts, so
+  // nothing else calls noteFix: the driving latch never arms, no car spot is ever
+  // recorded, and buildCarPayload's shareablePosition would answer "no-car-spot" for the
+  // entire drive — i.e. the crew would not see you. This is the car context's own writer,
+  // and it is what makes a CarPlay/AA-only drive leave a correct parked pin afterwards
+  // (today such a drive records no car spot at all).
+  // Deliberately BEFORE trackPresence below, so the payload built on this tick reads a
+  // gate that already knows about this fix.
+  // Warm double-write is safe: carStore's 'mirror' source is map.tsx's `coords` object
+  // (map.tsx:2118 `user: coords` -> ConvoyCarPlay.tsx:1250), RAW GPS — the same value
+  // map.tsx feeds noteFix at map.tsx:3410 — and the fg/bg feeds write raw GPS too. Both
+  // writers agree; nothing snapped ever reaches the car spot.
+  noteFix(st.selfLat, st.selfLng, st.speedMs ?? 0);
   void ensureMe();
   void connectWs();       // reconnect (throttled) if the socket dropped
   void refreshNearby();   // ≤ every 10s
@@ -405,7 +467,40 @@ export function startCarDataService(): void {
   void refreshHazards(true);
   void refreshNearby();
   joinHazardsRealtime();
-  // presence joins from ensureMe() once identity is known
+  // ── HYDRATE THE PRIVACY GATE BEFORE THE FIRST BROADCAST ────────────────────────
+  // buildCarPayload now asks src/locationPrivacy, and that module answers out of MODULE
+  // state which, before this edit, ONLY app/(app)/map.tsx ever populated (verified: the
+  // sole importers of locationPrivacy are map.tsx and visitMonitor.ts). In a cold car
+  // context map.tsx never mounts, so:
+  //   • getSettings() is still DEFAULT_SETTINGS (avatarLive:true, avatarMode undefined ->
+  //     getAvatarMode returns "visible") — the gate would fail OPEN for a ghost user;
+  //   • _carSpot is null and _lastDrivingAt is 0 — so a stationary cold connect answers
+  //     "no-car-spot" and the crew cannot see you at all.
+  // Both are AsyncStorage reads. Await them HERE and hold the presence join until they
+  // land (joinPresence's _privacyReady guard). settings.ts already starts its load at
+  // module import, so this is normally a no-op await.
+  void (async () => {
+    // ONE try PER AWAIT, deliberately. settings.ts's loadPromise ends with an UNGUARDED
+    // `listeners.forEach((l) => l(cached))` (settings.ts:444), so a throwing settings
+    // listener REJECTS that promise. Under a single shared catch that rejection would
+    // skip hydrateLocationPrivacy() entirely, leaving _carSpot null for the whole drive
+    // and withholding our position from the crew — the exact regression this block exists
+    // to prevent. (No fail-OPEN risk either way: `loaded = true` is set at settings.ts:443,
+    // BEFORE that notify, so `cached` is always populated by the time a rejection is
+    // possible — a ghost user can never be read as visible through this path.)
+    try { await ensureSettingsLoaded(); } catch {}
+    try { await hydrateLocationPrivacy(); } catch {}
+    if (!_running) return;   // stopped while we were awaiting
+    _privacyReady = true;
+    // Identity may have arrived first, in which case ensureMe's joinPresence() bailed on
+    // !_privacyReady — and it is never retried, because ensureMe self-disables once _me
+    // is set. Re-drive it. (This also closes a PRE-EXISTING hole: joinPresence bails when
+    // presenceChannelName() is null, which it always is before settings load because
+    // activeCommunityId is unset — so if /auth/me ever resolved before AsyncStorage, this
+    // service silently never broadcast for the whole session.)
+    joinPresence();
+  })();
+  // presence joins from ensureMe() once identity is known AND the gate is hydrated
 }
 
 export function stopCarDataService(): void {
@@ -425,6 +520,7 @@ export function stopCarDataService(): void {
   _me = null;
   _lastTickLat = null;
   _lastTickLng = null;
+  _privacyReady = false;   // next start re-awaits (both hydrations are idempotent/cheap)
   // Deliberately NOT clearing carStore.peers/hazards here — the phone mirror (if
   // mounted) keeps owning them, and a momentary [] would blink the car UI during
   // a reconnect. Stale data ages out via the freshness gate on the next writer.

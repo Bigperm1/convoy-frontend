@@ -63,6 +63,35 @@ export const DRIVING_SPEED_MS = 2.5;          // ~9 km/h
 export const DRIVING_ENTER_SPEED_MS = 4.17;   // ~15 km/h
 // Hysteresis so a red light does not flap live<->parked mid-drive.
 export const DRIVING_HYSTERESIS_MS = 90_000;
+// ── THE HEAD-UNIT FLAG NOW EXPIRES (2026-08-15) ─────────────────────────
+// `connected` used to be a latch with no clock: whoever set it true owned the gate
+// until someone set it false, and on Android nobody ever did. Two ways that went
+// wrong, both READ IN THE CODE rather than inferred:
+//   1. react-native-carplay's checkForConnection() emits didConnect UNCONDITIONALLY
+//      (node_modules/react-native-carplay/android/.../CarPlayModule.kt:96-98), so
+//      CarPlay.connected is true on every Android launch with NO car attached.
+//      useConvoyCarPlay's spurious-connect guard is anchored to a module-scope
+//      libLoadedAt stamped once, so any LATER mount of the map screen re-runs
+//      `if (CarPlay.connected) onConnect()` past the 5 s window and latches
+//      connected true for the rest of the session — which told this gate a head unit
+//      was present and unblocked RAW live GPS while the user walked.
+//   2. Android emits no didDisconnect at all before build 71 (the emit is a native
+//      patch), and nothing unmounts AndroidAutoRoot — so a car session that ends
+//      leaves every flag it set standing for the life of the process.
+// A stamped flag that must be RE-ASSERTED turns both into a bounded window instead
+// of a permanent one.
+// 90 s deliberately REUSES DRIVING_HYSTERESIS_MS rather than inventing a second
+// dial: it is already this file's answer to "how long without evidence before we
+// call you parked", and every writer re-asserts far faster — map.tsx on every GPS
+// fix (watchPositionAsync distanceInterval 2 m / timeInterval 500 ms), and
+// AndroidAutoRoot on every carStore fanout.
+// THE COST, ACCEPTED AND NAMED: a phone sitting perfectly STILL with a head unit
+// attached stops receiving fixes (the OS drops sub-2 m jitter, by our own
+// distanceInterval), so after 90 s the flag lapses and we publish the car spot with
+// a "parked" label instead of live coordinates. The coordinates are the same place
+// either way — the spot was recorded on the last moving fix — so only peer opacity
+// changes, and erring toward parked is the direction this whole module errs in.
+const CAR_CONNECT_TTL_MS = DRIVING_HYSTERESIS_MS;
 const SPOT_SAVE_THROTTLE_MS = 15_000;
 // The driving stamp gets the SAME throttle as the car spot. It shipped unthrottled on
 // 2026-07-31 and that is a per-fix disk write — roughly 7,200 AsyncStorage writes on a
@@ -75,6 +104,9 @@ const SPOT_SAVE_THROTTLE_MS = 15_000;
 const DRIVING_SAVE_THROTTLE_MS = 15_000;
 
 let _carConnected = false;
+// When the flag was last ASSERTED. Paired with _carConnected so the signal is a
+// claim that expires, not a latch — see CAR_CONNECT_TTL_MS.
+let _carConnectedAt = 0;
 let _lastDrivingAt = 0;
 let _carSpot: { lat: number; lng: number } | null = null;
 let _spotSavedAt = 0;
@@ -104,6 +136,24 @@ export async function hydrateLocationPrivacy(): Promise<void> {
 /** Head unit attached/detached. Owned by map.tsx, which is the only thing that knows. */
 export function noteCarConnected(connected: boolean): void {
   _carConnected = !!connected;
+  // Stamp on every assertion, clear outright on release. The stamp is what makes
+  // this a claim that expires rather than a latch — see CAR_CONNECT_TTL_MS.
+  _carConnectedAt = _carConnected ? Date.now() : 0;
+}
+
+/**
+ * The ONLY read of the head-unit signal. True means "someone asserted a car is
+ * attached, recently enough to still believe it". Every decision in this file that
+ * used to read _carConnected directly now reads this, so a writer that dies without
+ * releasing — Android emits no didDisconnect before build 71, and the phone map can
+ * unmount mid-drive — cannot hold raw GPS open for the life of the process.
+ *
+ * ⚠ This is a BACKSTOP, not the fix for a false assertion: a writer that keeps
+ * re-asserting a wrong `true` keeps the stamp fresh. That is why the Android
+ * spurious-connect source is cut at the writer (app/(app)/map.tsx) as well.
+ */
+function carAttached(): boolean {
+  return _carConnected && Date.now() - _carConnectedAt < CAR_CONNECT_TTL_MS;
 }
 
 /**
@@ -139,7 +189,7 @@ export function noteFix(lat: number, lng: number, speedMs?: number): void {
   // Cost, accepted: >90 s stationary in gridlock drops the latch, and the pin then stops
   // tracking until the car next clears 30 km/h. Bounded and self-correcting — unlike a
   // phantom car on a trail, which persists as your parked location afterwards.
-  if (!_carConnected && !(driving)) return;
+  if (!carAttached() && !(driving)) return;
   _carSpot = { lat, lng };
   if (now - _spotSavedAt > SPOT_SAVE_THROTTLE_MS) {
     _spotSavedAt = now;
@@ -153,7 +203,7 @@ export function carSpot(): { lat: number; lng: number } | null {
 
 /** Parked = not attached to a head unit and not driving recently. */
 export function isParked(): boolean {
-  return !_carConnected && Date.now() - _lastDrivingAt >= DRIVING_HYSTERESIS_MS;
+  return !carAttached() && Date.now() - _lastDrivingAt >= DRIVING_HYSTERESIS_MS;
 }
 
 export type ShareResult =
@@ -191,7 +241,7 @@ export function shareablePosition(
   // "Provably in the car": the latch plus current movement. A jogger fails the latch, so
   // walking-pace-and-above alone can no longer publish a live position.
   const movingNow = _drivingLatched && (live?.speed ?? 0) >= DRIVING_SPEED_MS;
-  const inCar = _carConnected || movingNow;
+  const inCar = carAttached() || movingNow;
   const status: "live" | "parked" = isParked() ? "parked" : "live";
 
   if (inCar && live && typeof live.lat === "number" && typeof live.lng === "number") {

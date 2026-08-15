@@ -29,6 +29,7 @@ import { CarSurface } from './ConvoyCarPlay';
 import { useCarStore } from './carStore';
 import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
+import { noteCarConnected } from '../locationPrivacy';
 import { AA_ACTION_STRIP, AA_MAP_BUTTONS, handleAaButton, carTap } from './carActions';
 
 // ── updateTemplate WORKS NOW, AND THAT CHANGED EVERYTHING (2026-07-30) ───────
@@ -134,6 +135,14 @@ export default function AndroidAutoRoot() {
       const onDisconnect = () => {
         void releaseBgLocation('androidauto');
         stopCarDataService();
+        // RELEASE THE HEAD-UNIT FLAG TOO (2026-08-15). Without this the only thing
+        // ending the 'attached' claim after a real disconnect is CAR_CONNECT_TTL_MS
+        // expiring — a 90 s window in which the gate would still publish raw live
+        // coordinates for someone who has just parked and walked away. The mount
+        // asserts it, so the disconnect is the matching release; the TTL stays as the
+        // backstop for the case this event never arrives (build 70, where the native
+        // emit does not exist).
+        noteCarConnected(false);
       };
       CarPlay.registerOnDisconnect?.(onDisconnect);
       off = () => { try { CarPlay.unregisterOnDisconnect?.(onDisconnect); } catch {} };
@@ -146,9 +155,27 @@ export default function AndroidAutoRoot() {
     startCarDataService();                   // cold peers + hazards (WS/Supabase/REST)
     void startForegroundCarFeed();           // continuous GPS writer for the car map
     void hydrateCarRouteFromDisk();          // persisted route ribbon on cold connect
+    // THE head-unit signal for Android. This root's MOUNT is the only trustworthy proof
+    // a car session exists: CarPlaySession (Kotlin) runs it natively and only then —
+    // unlike the library's didConnect, which fires at every phone launch with no car
+    // (CarPlayModule.kt checkForConnection() emits it unconditionally). So
+    // locationPrivacy learns 'attached' from here and never from the phone screen's
+    // CarPlay.connected.
+    //
+    // ⚠ ASSERTED ONCE, DELIBERATELY — do NOT add a per-render re-assert. On build 70
+    // nothing unmounts this root and no didDisconnect arrives, while startForegroundCarFeed
+    // keeps writing positions at 1 s / 5 m (navNotification.ts:670-688) into carStore,
+    // which re-renders this root. A re-assert on render would therefore keep the flag
+    // permanently fresh AFTER the car session ended and publish raw walking GPS for the
+    // life of the process — the same 'the writer keeps lying so the TTL never decays'
+    // failure that was just removed from app/(app)/map.tsx. Instead the flag lapses after
+    // CAR_CONNECT_TTL_MS and the gate falls back to the driving latch, which is the
+    // private direction.
+    noteCarConnected(true);
     return () => {
       void releaseBgLocation('androidauto');
       stopCarDataService();
+      noteCarConnected(false);
     };
   }, []);
 

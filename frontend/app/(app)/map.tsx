@@ -3394,7 +3394,16 @@ export default function MapScreen() {
   useEffect(() => {
     const driving = (coords?.speed ?? 0) >= 2.5;
     if (driving) lastDrivingAtRef.current = Date.now();
-    if (coords && (carConnected || driving)) {
+    // SAME ANDROID RULE AS THE GATE CALL BELOW (2026-08-15). This screen is not
+    // entitled to assert a head unit on Android — see the long note further down for
+    // why (react-native-carplay emits didConnect unconditionally at library load).
+    // This is the SECOND writer of convoy.lastCarSpot.v1, the one locationPrivacy does
+    // not own, and it was left on the raw flag: without this the phantom still wrote
+    // the walking position to disk every 15 s and it HYDRATED AS THE CAR SPOT on the
+    // next launch — the house leak, closed on the live path but not on the persisted
+    // one. Both writers now agree on what "in the car" means.
+    const carAttachedHere = Platform.OS === "android" ? false : !!carConnected;
+    if (coords && (carAttachedHere || driving)) {
       lastCarLocRef.current = { lat: coords.lat, lng: coords.lng };
       const now = Date.now();
       if (now - lastCarLocSavedAtRef.current > 15000) {
@@ -3406,7 +3415,34 @@ export default function MapScreen() {
     // (the /location post above, CLVisit arrivals while the app is suspended).
     // Same key, same thresholds — this block stays the writer the presence payload
     // below already trusts; the module just makes the decision reachable elsewhere.
-    noteCarConnected(!!carConnected);
+    // ── ANDROID: THIS SCREEN IS NOT ENTITLED TO ASSERT A HEAD UNIT (2026-08-15) ──
+    // `carConnected` comes from useConvoyCarPlay, whose value on Android traces back
+    // to react-native-carplay's checkForConnection(), which emits didConnect
+    // UNCONDITIONALLY at library load (CarPlayModule.kt:96-98). So CarPlay.connected
+    // is true on every Android launch with no car in existence. The hook's
+    // spurious-connect guard only covers the first 5 s after the library loads
+    // (ANDROID_SPURIOUS_CONNECT_GUARD_MS against a module-scope libLoadedAt stamped
+    // once inside getLib()'s cache), so ANY later mount of this screen — a logout and
+    // sign back in, any remount of the (app) group inside one JS context — re-runs
+    // `if (CarPlay.connected) onConnect()`, sails past the window, and latches
+    // `connected` true for the rest of the session.
+    //
+    // Feeding that into the gate told locationPrivacy a head unit was attached, which
+    // sets inCar and publishes RAW live coordinates — the exact class this module was
+    // written to kill ("it is supposed to stay on my car which is on the street a
+    // block away"). It also made noteFix record a car spot at every fix while WALKING,
+    // so the parked pin drifted onto the driver's house.
+    //
+    // A freshness TTL in the gate does not save us here: this effect re-runs on every
+    // coords change, so a latched `true` is re-asserted about once a second — exactly
+    // while walking. The source has to be cut, and it is cut here.
+    //
+    // Nothing is lost on Android. ConvoyCarPlay builds NO templates on Android by
+    // construction (setRoot's whole body is inside `if (isIOS)`); the real car surface
+    // is AndroidAutoRoot, which CarPlaySession runs natively only when a genuine
+    // session exists. That root now asserts the flag itself, so Android Auto keeps a
+    // true head-unit signal by a shorter and honest path.
+    noteCarConnected(carAttachedHere);
     if (coords) noteFix(coords.lat, coords.lng, coords.speed ?? 0);
   }, [carConnected, coords?.lat, coords?.lng]);
 

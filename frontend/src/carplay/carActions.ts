@@ -628,8 +628,15 @@ export function handleCarMapButton(id: string): void {
   // One zoom level per tap — CarMapView applies it through the same applyZoomNow the
   // tap-zoom gesture uses, so a PARKED car responds (no camera ease is armed when
   // stationary, which is what made build 65's zoom buttons look dead).
-  if (id === 'car-zoom-in') { emitCarGesture({ kind: 'zoomStep', delta: 1 }); return; }
-  if (id === 'car-zoom-out') { emitCarGesture({ kind: 'zoomStep', delta: -1 }); return; }
+  // ── STEP SIZE (Jeff, 2026-08-14: "i also want to add more zoom increments") ──
+  // Was a FULL zoom level per tap — one press roughly halved or doubled the ground
+  // covered, which is why it read as coarse rather than premium. 0.5 gives twice as many
+  // stops across the same range, so the driver can actually settle on a framing.
+  // CAR_USER_ZOOM_BIAS_LIMIT (4 levels) is unchanged, so the range is the same — there
+  // are simply more steps inside it, and each one now LANDS immediately (zoomSnapRef)
+  // instead of crawling behind the slow automatic-framing filter.
+  if (id === 'car-zoom-in') { emitCarGesture({ kind: 'zoomStep', delta: 0.5 }); return; }
+  if (id === 'car-zoom-out') { emitCarGesture({ kind: 'zoomStep', delta: -0.5 }); return; }
   // Stale-template tolerance: an older cached template can still deliver these.
   if (id === 'car-police') { armPosRing(); void reportPoliceFromCar(); return; }
   if (id === 'car-mic') { emitCarGesture({ kind: 'scoutMic' }); return; }

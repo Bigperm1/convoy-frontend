@@ -893,7 +893,7 @@ const SELF_MARKER_SLOT = undefined;
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -915,6 +915,17 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   cameraRef?: React.RefObject<any>;
   // OPT-IN to the native CarPlay display-link pump below. ONLY CarMapView passes true.
   carFramePump?: boolean;
+  // ── DELIBERATE ZOOM CHANNEL (2026-08-14) ─────────────────────────────────────
+  // Set true by a caller when the DRIVER changed the zoom (a +/- button, a pinch, a
+  // double-tap). pushCam then lands that change immediately instead of low-passing it.
+  //
+  // WHY IT HAS TO EXIST: getCam() returns followZoom + the driver's bias as ONE number,
+  // so both ride the same filter. That filter is deliberately slow (CAM_SMOOTH_TAU_MS
+  // 1400) to stop the camera chasing GPS speed noise — correct for automatic framing,
+  // badly wrong for a button press, which would crawl for ~4 s while applyZoomNow's
+  // direct setCamera rubber-banded against it. Automatic framing drifts; the driver's
+  // own input lands. Cleared by pushCam once consumed.
+  zoomSnapRef?: React.MutableRefObject<boolean>;
   getCam?: () => { zoomLevel: number; pitch: number; heading: number; padding: any };
   // Optional CAMERA-heading override (the MODEL keeps its real heading). Read live
   // per frame; undefined = normal heading-up chase. CarPlay's compass north-up
@@ -980,7 +991,11 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     const now = Date.now();
     const dt = lastCamAt.current ? Math.max(0, Math.min(200, now - lastCamAt.current)) : 16;
     lastCamAt.current = now;
-    if (snap || camZoom.current == null || camPitch.current == null) {
+    // A driver-initiated zoom lands NOW (see zoomSnapRef). One-shot: cleared here so the
+    // very next frame resumes the slow automatic glide.
+    const userZoomed = !!zoomSnapRef?.current;
+    if (userZoomed && zoomSnapRef) zoomSnapRef.current = false;
+    if (snap || userZoomed || camZoom.current == null || camPitch.current == null) {
       camZoom.current = c.zoomLevel;
       camPitch.current = c.pitch;
     } else {

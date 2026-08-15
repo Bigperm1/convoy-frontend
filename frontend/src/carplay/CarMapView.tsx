@@ -915,7 +915,11 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
   // are deliberately omitted so Mapbox keeps whatever the lockstep last set, and the
   // next eased frame pushes the same value anyway (getCam adds the same bias), so the
   // two can never disagree.
+  // Set on every DRIVER-initiated zoom so pushCam lands it immediately rather than
+  // low-passing it with the slow automatic-framing filter. See zoomSnapRef in SelfCarModel.
+  const zoomSnapRef = useRef(false);
   const applyZoomNow = () => {
+    zoomSnapRef.current = true;
     try {
       const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
       cameraRef.current?.setCamera({
@@ -1435,6 +1439,7 @@ export default function CarMapView({ onGLError, attempt = 0 }: Props) {
           // phone instance also passes cameraRef, so an un-gated pump animated the
           // invisible phone map at 30fps on every screen-off CarPlay drive.
           carFramePump
+          zoomSnapRef={zoomSnapRef}
           cameraRef={cameraRef}
           getCam={getCam}
           readyRef={lockReadyRef}

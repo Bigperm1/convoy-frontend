@@ -421,27 +421,13 @@ export function CarSurface() {
     };
   }, []);
 
-  // Crew / alerts / build pill — the phone's map pill (map.tsx:3204), mirrored. Crew is
-  // OTHER crew only, matching the phone rule. Build number comes from the binary so it
-  // tracks every build without a manual edit.
+  // Crew pill — CREW COUNT ONLY on the car surfaces (Jeff, 2026-08-15: "just say crew
+  // with the amount of crew live... we can still have it on phones"). The build/runtime/
+  // OTA-tag segments moved OFF the car pill; the PHONE pill (map.tsx:3204) remains the
+  // place to read which binary and bundle a device runs — that identification job did
+  // not go away, it just has exactly one home now. Crew is OTHER crew only, matching
+  // the phone rule.
   const crewCount = (s.peers || []).length;
-  let carRtv = '';
-  try { carRtv = require('expo-updates').runtimeVersion || ''; } catch {}
-  if (!carRtv) carRtv = (Constants.expoConfig as any)?.runtimeVersion || '';
-  // Same publish-time tag as the phone pill (see map.tsx): comparable across iOS and
-  // Android, unlike the per-platform update id it replaced.
-  let carOtaTag = '';
-  try {
-    const U = require('expo-updates');
-    const ts = U.createdAt ? new Date(U.createdAt) : null;
-    const p2 = (n: number) => String(n).padStart(2, '0');
-    carOtaTag = U.isEmbeddedLaunch
-      ? 'emb'
-      : (ts ? `${p2(ts.getDate())}·${p2(ts.getHours())}${p2(ts.getMinutes())}` : '');
-  } catch {}
-  const carBuildNo = Constants.nativeBuildVersion
-    || Constants.expoConfig?.ios?.buildNumber
-    || String((Constants.expoConfig as any)?.android?.versionCode ?? '');
 
   // Measured CPWindow width -> bottom nav-stack width. See CAR_LEFT_INSET: the
   // stack has to fit BETWEEN the speed cluster and the system map buttons, and the
@@ -843,7 +829,9 @@ export function CarSurface() {
           (map.tsx:3204). Small and non-tappable by necessity: CarPlay routes touches
           through the template, so nothing we draw can ever be a control. Crew counts
           OTHER crew only, same rule as the phone. */}
-      <View style={[styles.topCenterRow, hudFit('center top')]} pointerEvents="none">
+      {/* AA scales about LEFT top — with the pill left-anchored there (Jeff, 2026-08-15),
+          a center origin would drag it back toward the middle as hudScale drops. */}
+      <View style={[styles.topCenterRow, hudFit(IS_AA ? 'left top' : 'center top')]} pointerEvents="none">
         <View style={[styles.crewPill, { backgroundColor: carHudFloor() }]}>
           <GlassFill tintColor={undefined} style={{ borderRadius: 9, overflow: 'hidden' }} />
           {/* RED until location is set to Always (Jeff, 2026-07-30). This is the one
@@ -853,7 +841,7 @@ export function CarSurface() {
               driver already reads the build number. Back to white the moment the
               permission is granted (re-read on every foreground). */}
           <Text style={[styles.crewPillText, !s.alwaysLocation && styles.crewPillTextWarn]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-            {crewCount} Crew · v{carBuildNo}{carRtv ? ` · ${carRtv}` : ''}{carOtaTag ? ` · ${carOtaTag}` : ''}
+            {crewCount} Crew
           </Text>
         </View>
       </View>
@@ -1707,7 +1695,15 @@ const CAR_PILL_TOP = 4;
 // ran underneath them (Jeff's "the v72 pill on top is under the search"). 92 keeps the
 // pill's box clear of that cluster whether or not the row's hudFit scale applies to the
 // text; the leading 8 stops it kissing the left bezel. CarPlay values untouched.
-const CAR_BAR_LEADING_W = IS_AA ? 8 : 104;
+// 104 → 158 (2026-08-15): 104 was measured off the photo era with ONE leading bar
+// button (mic spans 51..97 → 97 + 7pt margin). The leading side has held TWO image
+// buttons since 08-14 (then mic+view, now zoom −/+), so the pill has been centring
+// against a stale single-button inset — visibly left of the true gap. Derived, not
+// photo-measured: second button assumed same 46pt footprint after an ~8pt gap
+// (51..97, 105..151 → 151 + 7 margin ≈ 158). Jeff's ask: "center the new pill between
+// the search and zoom button exactly centered." OTA-tunable — if his next photo shows
+// it off, adjust HERE, one number.
+const CAR_BAR_LEADING_W = IS_AA ? 8 : 158;
 const CAR_BAR_TRAILING_W = IS_AA ? 92 : 126;
 // Jeff (2026-07-24, second pass): all three rows share ONE WIDTH — he may add a
 // third button on the right, and a ragged stack would then need re-tuning. So the
@@ -1831,7 +1827,10 @@ const styles = StyleSheet.create({
   // both sides by what each actually occupies centres the pill in the space that is
   // free, and as a bonus makes it structurally impossible for the pill to slide under
   // either button however long the text gets.
-  topCenterRow: { position: 'absolute', top: CAR_PILL_TOP, left: CAR_BAR_LEADING_W, right: CAR_BAR_TRAILING_W, alignItems: 'center' },
+  // AA: LEFT-anchored, not centred (Jeff, 2026-08-15: "for aa move the crew to the top
+  // left side"). AA's system chrome floats top-RIGHT (from ~128dp of 213), so top-left
+  // is the free corner there; CarPlay keeps gap-centred between the zoom pair and Search.
+  topCenterRow: { position: 'absolute', top: CAR_PILL_TOP, left: CAR_BAR_LEADING_W, right: CAR_BAR_TRAILING_W, alignItems: IS_AA ? 'flex-start' : 'center' },
   statusRow: { position: 'absolute', top: CAR_PILL_TOP + CREW_PILL_H + NAV_GAP, left: 0, right: 0, alignItems: 'center' },
   // marginHorizontal is the STRUCTURAL half of the fix: the parent topCenterRow is
   // alignItems:'center', so Yoga subtracts these margins from the pill's available width.
@@ -1841,10 +1840,10 @@ const styles = StyleSheet.create({
   crewPill: { flexDirection: 'row', alignItems: 'center', height: CREW_PILL_H, paddingHorizontal: 10, marginHorizontal: 12, borderRadius: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   // 11 -> 9 on CarPlay (AA keeps 11 — its canvas is only 213dp wide and everything there
   // is already scaled down by hudScale, so shrinking twice would make it unreadable).
-  // Jeff, 8/13: "the v72 banner needs to be shrunk so it never collides with the other
-  // buttons". The string is "0 Crew · v72 · 1.24.0 · <ota tag>" — every segment after
-  // "Crew" is load-bearing for identifying which binary and bundle a tester is on, so the
-  // fix is size and margin, never dropping a field.
+  // 2026-08-15: the string is now just "N Crew" — Jeff dropped the build/runtime/tag
+  // segments from the CAR surfaces ("remove the v73 1.25.0 15.2219"). The 8/13 note
+  // that called every segment load-bearing is superseded: bundle identification lives
+  // on the PHONE pill only now (map.tsx:3204). Do not re-add fields here.
   crewPillText: { color: '#C7CCD1', fontSize: IS_AA ? 11 : 9, fontWeight: '600' },
   crewPillTextWarn: { color: '#FF453A' },
   scoutPill: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },

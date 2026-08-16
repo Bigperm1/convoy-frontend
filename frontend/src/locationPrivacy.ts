@@ -27,6 +27,7 @@
 // the parked branch fell back to live coordinates and drew a peer on their own home.
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
 
 // Same key map.tsx has always used, so an existing install keeps its car spot and there
@@ -153,7 +154,38 @@ export function noteCarConnected(connected: boolean): void {
  * spurious-connect source is cut at the writer (app/(app)/map.tsx) as well.
  */
 function carAttached(): boolean {
-  return _carConnected && Date.now() - _carConnectedAt < CAR_CONNECT_TTL_MS;
+  if (!_carConnected) return false;
+  // ── THE TTL IS ANDROID-ONLY (2026-08-15, same day it was introduced) ────────────
+  // REGRESSION THIS FIXES, reported from a real drive: Jeff's phone published a
+  // position ~2 HOURS from where he was.
+  //
+  // Mechanism, verified: shareablePosition computes `inCar = carAttached() || movingNow`
+  // and, when that is false, publishes _carSpot — the last recorded car spot — instead
+  // of the live position. Making this flag EXPIRE therefore does not merely withhold a
+  // position, it substitutes a possibly very old one. The only writer that re-asserts it
+  // on iOS is an effect keyed on [carConnected, coords.lat, coords.lng]
+  // (app/(app)/map.tsx), so the moment coordinates stop arriving — phone stationary,
+  // screen off, app backgrounded — nothing re-asserts, the claim lapses after 90 s, and
+  // the driver teleports to wherever the car spot was last written.
+  //
+  // WHY ANDROID STILL NEEDS IT, and iOS does not:
+  //   Android — the ONLY asserter is AndroidAutoRoot (mount). Its releases are an
+  //     onDisconnect listener and an unmount cleanup, and on build 70 binaries NEITHER
+  //     fires: the native didDisconnect emit ships in the patch from build 71, and
+  //     nothing unmounts that root. So without a clock the flag would latch true for the
+  //     life of the process — the exact "head unit that was never there" leak this whole
+  //     module was hardened against. The TTL is the backstop for a writer that cannot
+  //     release, and it stays.
+  //   iOS — map.tsx writes `!!carConnected`, i.e. it writes FALSE on disconnect as well
+  //     as TRUE on connect (verified at app/(app)/map.tsx:3422 + :3462). There is a real
+  //     release path, so there is nothing for a timeout to rescue, and adding one only
+  //     created the failure above.
+  //
+  // ⚠ Do NOT "simplify" this back to a single expiring branch. The two platforms have
+  // genuinely different guarantees about hearing a disconnect, and that asymmetry — not
+  // tidiness — is what decides it.
+  if (Platform.OS !== 'android') return true;
+  return Date.now() - _carConnectedAt < CAR_CONNECT_TTL_MS;
 }
 
 /**

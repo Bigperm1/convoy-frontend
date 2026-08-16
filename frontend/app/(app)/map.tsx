@@ -75,6 +75,7 @@ import { startNavBanner, stopNavBanner, updateNavBanner, askAlwaysLocationOnce, 
 import { onCarNavStarted } from "../../src/carplay/carActions";
 import { PoliceBadgeIcon } from "../../src/components/MapControlIcons";
 import CompassNeedle from '../../src/components/CompassNeedle';
+import { startHeatProbe, stopHeatProbe } from '../../src/heatProbe';
 
 type RouteInfo = {
   distance_text: string;
@@ -1209,6 +1210,7 @@ export default function MapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navMode, activeRoute?.polyline]);
 
+
   useRouteTrafficRefresh(activeRoute, navMode === "turn-by-turn", useCallback((patch) => {
     probeCongestion(patch.congestion, "refresh");
     setRoutes((prev) => {
@@ -2125,6 +2127,21 @@ export default function MapScreen() {
     roadEvents,
     places: (settings.showPlacePins !== false ? placePins : []),
   });
+
+  // HEAT PROBE — one row per 60 s of guidance. Jeff's 2-hour drive on build 73 ended
+  // with the phone too hot to charge, and the analysis that followed is arithmetic, not
+  // measurement: it assumes rAF runs at 60 Hz, when app.json sets
+  // CADisableMinimumFrameDurationOnPhone and RN's display link caps nothing, while both
+  // MapViews are pinned to 60. If rAF is at 120 the whole budget doubles. This measures
+  // it, plus the battery tell that distinguishes "warm" from "iOS is refusing the
+  // charger". Scoped to guidance so an idle map never spends INSERTs, and keyed on
+  // carConnected so a car drive and a phone-only drive are comparable rows.
+  // See src/heatProbe.ts. Costs one row/minute while navigating and nothing otherwise.
+  useEffect(() => {
+    if (navMode !== "turn-by-turn") return;
+    startHeatProbe(`surface=${carConnected ? "car" : "phone"}`);
+    return stopHeatProbe;
+  }, [navMode, carConnected]);
 
   // ── CarPlay crew feed ──────────────────────────────────────────────────────
   // WHY: the car surface fed carStore from the LEGACY REST/WS `peers` map, which is

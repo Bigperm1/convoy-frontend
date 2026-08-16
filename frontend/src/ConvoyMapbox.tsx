@@ -32,6 +32,7 @@
 // handed to Mapbox below is [lng, lat].
 
 import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
+import { noteFrame, noteCam } from "./heatProbe";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
@@ -956,6 +957,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // ready surface (the CarPlay blank-with-bounds hazard). No-op unless wired.
   const pushCam = (la: number, ln: number, hdg?: number, snap = false) => {
     if (!cameraRef?.current || !getCam || !(readyRef?.current)) return;
+    // Counted AFTER the bail, so this measures camera pushes that actually cross the
+    // bridge — each one is a JSON encode here and a JSON decode in native.
+    noteCam();
     const c = getCam();
     // Glide zoom + pitch toward the LIVE speed target (getCam reads a fresh ref, so
     // this tracks acceleration even though this loop's closure is frozen). Position
@@ -1057,12 +1061,26 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     if (bgTimer.current != null) { clearInterval(bgTimer.current); bgTimer.current = null; }
   };
 
-  // ALWAYS-ON watchdog for the LOCKSTEP (CarPlay) instance: the ticker runs for the
-  // whole life of the surface and no-ops behind the heartbeat while rAF is alive.
-  // Phone instances (no cameraRef) keep the pure-rAF path — their display and their
-  // marker sleep together, so there's nothing to hand off to.
+  // ALWAYS-ON watchdog for the CAR instances: the ticker runs for the whole life of
+  // the surface and no-ops behind the 150 ms heartbeat while rAF is alive.
+  //
+  // ⚠ GATED ON carFramePump, NOT cameraRef (2026-08-16). The old gate was
+  // `if (!cameraRef) return`, and the comment above it claimed "Phone instances (no
+  // cameraRef) keep the pure-rAF path". THAT COMMENT WAS STALE: the phone passes
+  // cameraRef too (this file, ~line 3226), so the gate never returned there and BOTH
+  // PHONE MAPS HAVE BEEN RUNNING A 30 Hz BACKUP TICKER FOR THEIR ENTIRE LIFE —
+  // navigating or not, focused or not, screen on or off. Every one of those 30 ticks
+  // a second reached the heartbeat guard and returned, so it bought nothing and cost
+  // a timer callback each.
+  //
+  // carFramePump is the honest discriminator: it is passed by CarMapView and by
+  // nothing else, so it is true on CarPlay AND Android Auto (the native pump inside it
+  // is separately iOS-gated) and false on both phones. The car surfaces genuinely need
+  // this ticker — their display can sleep while the head unit keeps drawing, which is
+  // the whole hand-off. A phone's display and its marker sleep together, so there has
+  // never been anything to hand off to.
   useEffect(() => {
-    if (!cameraRef) return;
+    if (!carFramePump) return;
     startBgTimer();
     return stopBgTimer;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1128,6 +1146,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const step = () => {
     rafDead.current = false; // the loop ticked → the display is awake; smooth easing is live
     lastStepAtRef.current = Date.now(); // heartbeat for the always-on car watchdog below
+    // Measurement only, and deliberately the FIRST thing in the frame so it counts the
+    // frame even when the ease has ended and we bail below. No-ops unless a drive is
+    // being sampled. See src/heatProbe.ts for what question this answers.
+    noteFrame(Date.now());
     const a = anim.current;
     if (!a) { raf.current = null; return; }
     a.stepped = true; // this ease has rendered ≥1 frame → the loop is alive for it
@@ -2086,10 +2108,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   }), [routes, routeColor]);
 
   // Tap an alternate route line → select it (same as tapping its ETA pill).
-  const handleRoutePress = (e: any) => {
+  // useCallback is load-bearing, not tidiness (2026-08-16): this is handed to the
+  // `convoy-routes` ShapeSource, and AbstractSource is a PureComponent. A fresh closure
+  // every render made that shallow-compare miss on EVERY render — including all 12 of
+  // the trim ticker's per second during nav — so the source re-rendered and
+  // JSON.stringify'd the whole route FeatureCollection each time. Measured route sizes
+  // from telemetry: 200-700 coordinates typical, 4,132 max, i.e. 10-116 KB re-serialised
+  // 12x/sec for a polyline that had not changed. The memo above it (routeFC) was already
+  // correct; this closure was what defeated it.
+  const handleRoutePress = useCallback((e: any) => {
     const idx = e?.features?.[0]?.properties?.index;
     if (typeof idx === "number") onSelectRoute?.(idx);
-  };
+  }, [onSelectRoute]);
 
   // ===== Native follow / chase camera =====
   // Mapbox's NATIVE course-follow camera — the smooth, interpolated tracking its

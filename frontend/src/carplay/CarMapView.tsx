@@ -1466,12 +1466,19 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const carRouteColor = routeColorsFor((s.routeKind as any) || 'best', carBaseColor).color;
   const coreGrad = buildLineFade(routeRgba(carRouteColor, 1), routeRgba(carRouteColor, 0));
   const glowGrad = buildLineFade(routeRgba(carRouteColor, 1), routeRgba(carRouteColor, 0));
-  const routeFC: any = {
+  // MEMOISED (2026-08-16). This was a bare object literal, so every render minted a new
+  // FeatureCollection; ShapeSource is a PureComponent, so it missed its shallow-compare
+  // every time and re-ran toJSONString — a full JSON.stringify of the route. The 12 Hz
+  // trim ticker re-renders this whole component during nav, so an UNCHANGED polyline was
+  // being re-serialised 12x/sec on the car surface alone. Measured from telemetry:
+  // 200-700 coordinates typical, 4,132 max — 10-116 KB per stringify.
+  // routeCoords is the identity that actually matters; hasRoute is derived from it.
+  const routeFC: any = useMemo(() => ({
     type: 'FeatureCollection',
     features: hasRoute
       ? [{ type: 'Feature', properties: { index: SELECTED_INDEX }, geometry: { type: 'LineString', coordinates: routeCoords } }]
       : [],
-  };
+  }), [hasRoute, routeCoords]);
 
   // ===== Live congestion gradient (mirror of the phone) =====
   // The selected route's per-segment congestion + geometry are mirrored from the phone

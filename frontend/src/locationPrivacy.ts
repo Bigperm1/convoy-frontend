@@ -110,6 +110,7 @@ let _carConnected = false;
 let _carConnectedAt = 0;
 let _lastDrivingAt = 0;
 let _carSpot: { lat: number; lng: number } | null = null;
+let _parkWitnessed = false;   // see noteCarConnected / parkEndedByHeadUnit
 let _spotSavedAt = 0;
 let _drivingSavedAt = 0;
 let _hydrated = false;
@@ -127,19 +128,53 @@ export async function hydrateLocationPrivacy(): Promise<void> {
     // Never clobber a fresher in-memory value written while this was in flight.
     if (spotRaw && !_carSpot) {
       const p = JSON.parse(spotRaw);
-      if (typeof p?.lat === "number" && typeof p?.lng === "number") _carSpot = { lat: p.lat, lng: p.lng };
+      if (typeof p?.lat === "number" && typeof p?.lng === "number") {
+        _carSpot = { lat: p.lat, lng: p.lng };
+        // Same freshness rule as the spot itself: only adopt the persisted witnessed-park
+        // flag when the persisted spot was adopted. `hu` on disk can only have survived
+        // if nothing drove since the disconnect (drivers rewrite the key without it).
+        if (p?.hu) _parkWitnessed = true;
+      }
     }
     const t = drivingRaw ? Number(drivingRaw) : 0;
     if (Number.isFinite(t) && t > _lastDrivingAt) _lastDrivingAt = t;
   } catch {}
 }
 
-/** Head unit attached/detached. Owned by map.tsx, which is the only thing that knows. */
+/** Head unit attached/detached. Owned by map.tsx (iOS) / AndroidAutoRoot (Android) —
+ * the only writers entitled to assert a head unit on their platform. */
 export function noteCarConnected(connected: boolean): void {
-  _carConnected = !!connected;
+  const next = !!connected;
+  // A true→false TRANSITION is a WITNESSED park: the head unit released, so the drive
+  // ended at the current car spot. GPS alone cannot tell a walk-away from a >90 s crawl
+  // — that ambiguity is the entire reason the self-marker's 75 m separation gate exists
+  // (map.tsx, 2026-08-05) — but a disconnect is unambiguous, so it may bypass that gate.
+  // Cleared by the next CONNECT and by the next DRIVING fix (noteFix): a head unit
+  // unplugged mid-drive must not pin a stale spot through the crawl that follows.
+  // ⚠ Transition-based on purpose: a writer repeating `false` (or `true`) is a no-op
+  // here, so this stays correct even if a spurious repeat-writer ever returns.
+  if (_carConnected && !next) {
+    _parkWitnessed = true;
+    // Persisted with the spot so an app restart while parked still pins to the car.
+    // Every plain {lat,lng} writer of this key (noteFix, map.tsx's 15 s mirror) drops
+    // the flag on the next drive — which is exactly when it should expire.
+    if (_carSpot) void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, hu: 1 })).catch(() => {});
+  }
+  if (next) _parkWitnessed = false;
+  _carConnected = next;
   // Stamp on every assertion, clear outright on release. The stamp is what makes
   // this a claim that expires rather than a latch — see CAR_CONNECT_TTL_MS.
-  _carConnectedAt = _carConnected ? Date.now() : 0;
+  _carConnectedAt = next ? Date.now() : 0;
+}
+
+/**
+ * True from a witnessed head-unit disconnect until the next connect or driving fix.
+ * Lets the self marker pin to the car spot even within the 75 m separation gate: the
+ * disconnect proved the drive ended there ("worked in build 72" was never the build —
+ * it was parking farther than 75 m; close parks always followed the driver until this).
+ */
+export function parkEndedByHeadUnit(): boolean {
+  return _parkWitnessed;
 }
 
 /**
@@ -204,6 +239,10 @@ export function noteFix(lat: number, lng: number, speedMs?: number): void {
   const driving = _drivingLatched && aboveWalking;
   if (driving) {
     _lastDrivingAt = now;
+    // Driving expires a witnessed park: the car provably left the spot the head-unit
+    // disconnect vouched for (covers CarPlay unplugged mid-drive — the crawl that
+    // follows must fall back to the 75 m separation gate, not pin a stale spot).
+    _parkWitnessed = false;
     // Persisted so a suspended-app CLVisit can still tell parked from driving — throttled,
     // see DRIVING_SAVE_THROTTLE_MS.
     if (now - _drivingSavedAt > DRIVING_SAVE_THROTTLE_MS) {

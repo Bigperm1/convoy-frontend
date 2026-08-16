@@ -41,7 +41,7 @@ import {
   useRouteTrafficRefresh, fetchRouteViaStops,
 } from "../../src/nav";
 import { getDepartureBearing, noteCourse, orderRoutesForward, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
-import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy } from "../../src/locationPrivacy";
+import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit } from "../../src/locationPrivacy";
 import { subscribeBgFix } from "../../src/navNotification";
 import { type CongestionLevel } from "../../src/mapboxDirections";
 import { useMapView2D, toggleMapView2D, resetMapView2D } from "../../src/mapViewMode";
@@ -3457,9 +3457,16 @@ export default function MapScreen() {
     // Nothing is lost on Android. ConvoyCarPlay builds NO templates on Android by
     // construction (setRoot's whole body is inside `if (isIOS)`); the real car surface
     // is AndroidAutoRoot, which CarPlaySession runs natively only when a genuine
-    // session exists. That root now asserts the flag itself, so Android Auto keeps a
+    // session exists. That root asserts the flag itself, so Android Auto keeps a
     // true head-unit signal by a shorter and honest path.
-    noteCarConnected(carAttachedHere);
+    // ── ANDROID: SKIP THE CALL, don't write `false` (2026-08-15 night) ────────────
+    // Writing `false` here at every coords change (~1 Hz) CLOBBERED AndroidAutoRoot's
+    // one-time `true` within a second of a real AA session starting — the head-unit
+    // flag was effectively always false on Android whenever this screen was mounted,
+    // and it would also fake a true→false "witnessed park" transition mid-drive (see
+    // parkEndedByHeadUnit). This screen isn't entitled to ASSERT a head unit on
+    // Android; it isn't entitled to RELEASE one either. AndroidAutoRoot owns both.
+    if (Platform.OS !== "android") noteCarConnected(carAttachedHere);
     if (coords) noteFix(coords.lat, coords.lng, coords.speed ?? 0);
   }, [carConnected, coords?.lat, coords?.lng]);
 
@@ -3817,10 +3824,19 @@ export default function MapScreen() {
         //
         // privacyHydrated: the car spot loads from disk asynchronously, so without it
         // the marker seeds at live GPS and teleports one render later.
+        // ── WITNESSED PARK BEATS THE 75 m GATE (2026-08-15 night) ────────────
+        // The separation gate exists only because GPS can't tell a walk-away from a
+        // >90 s crawl. A head-unit DISCONNECT can: the drive provably ended at the
+        // spot. So a park that ended with CarPlay/AA detaching pins the marker to the
+        // car even from the couch 20 m away — "worked in build 72" was actually the
+        // >75 m case; close parks never pinned until this. A crawl can't regress: no
+        // disconnect happens mid-drive, and noteFix clears the flag on any driving fix
+        // (the unplugged-mid-drive case).
         selfParked={
           presenceParked && navMode !== "turn-by-turn" && privacyHydrated &&
           !!presencePos && !!coords &&
-          haversineMeters(coords, presencePos) > SELF_PIN_MIN_SEPARATION_M
+          (parkEndedByHeadUnit() ||
+            haversineMeters(coords, presencePos) > SELF_PIN_MIN_SEPARATION_M)
         }
         selfParkedAt={presencePos}
         user={{

@@ -41,7 +41,8 @@ import {
   useRouteTrafficRefresh, fetchRouteViaStops,
 } from "../../src/nav";
 import { getDepartureBearing, noteCourse, orderRoutesForward, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
-import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit } from "../../src/locationPrivacy";
+import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw } from "../../src/locationPrivacy";
+import CarDriveList from "../../src/CarDriveList";
 import { subscribeBgFix } from "../../src/navNotification";
 import { type CongestionLevel } from "../../src/mapboxDirections";
 import { useMapView2D, toggleMapView2D, resetMapView2D } from "../../src/mapViewMode";
@@ -2127,6 +2128,12 @@ export default function MapScreen() {
     roadEvents,
     places: (settings.showPlacePins !== false ? placePins : []),
   });
+  // Driver tapped "Show map" on the car-list face (see carListMode below). Resets on
+  // head-unit detach and on nav end, so every car drive STARTS in list mode.
+  const [carListMapOverride, setCarListMapOverride] = useState(false);
+  useEffect(() => {
+    if (!carConnected || navMode !== "turn-by-turn") setCarListMapOverride(false);
+  }, [carConnected, navMode]);
 
   // HEAT PROBE — one row per 60 s of guidance. Jeff's 2-hour drive on build 73 ended
   // with the phone too hot to charge, and the analysis that followed is arithmetic, not
@@ -3787,9 +3794,31 @@ export default function MapScreen() {
   // retired). Kept as `MapEngine` so the large props block below is untouched.
   const MapEngine = ConvoyMapbox;
 
+  // ── CAR-LIST MODE: the phone shows WRITTEN directions while a head unit navigates
+  // (Jeff, 2026-08-16). The whole point is the `!carListMode &&` on <MapEngine>
+  // below: unmounting the phone's Mapbox instance kills one of the two measured
+  // ~60 Hz camera pumps AND the entire second GL engine — the single biggest
+  // OTA-able heat lever (heat probe 2026-08-15: ~115 setCamera/s, two per-instance
+  // rAF loops; ConvoyMapbox cancels its loop + bg timer on unmount, verified
+  // ConvoyMapbox.tsx:1321). Everything else on this screen — GPS, nav engine, WS,
+  // presence, voice — is independent of the map view and stays mounted.
+  //
+  // Head-unit signal per platform: iOS `carConnected` is reliable (didConnect AND
+  // didDisconnect both fire). Android's carConnected traces to the library's
+  // unconditional didConnect (spurious-true — see the long note above
+  // noteCarConnected), so Android reads the RAW locationPrivacy latch, whose only
+  // Android writer is AndroidAutoRoot's genuine session. Raw, not carAttached():
+  // the 90 s Android TTL would flip the phone back to the map mid-drive. Fails
+  // safe — a killed process resets the latch to false and the phone shows the map.
+  // `carListMapOverride` is the driver's "Show map" escape hatch; it resets when
+  // the head unit detaches or nav ends, so the next car drive starts in list mode.
+  const headUnitHere = Platform.OS === "android" ? headUnitAttachedRaw() : !!carConnected;
+  const carListMode = headUnitHere && navMode === "turn-by-turn" && tbt.active
+    && !carListMapOverride && (activeRoute?.steps?.length ?? 0) > 0;
+
   return (
     <View style={styles.c}>
-      <MapEngine
+      {!carListMode && <MapEngine
         center={coords}
         // User-chosen route-line color (live; recolors the route core/glow/fade).
         routeColor={getRouteColor(settings)}
@@ -3976,7 +4005,27 @@ export default function MapScreen() {
         places={placePins}
         showPlacePins={settings.showPlacePins !== false}
         onPlacePress={handlePlacePinPress}
-      />
+      />}
+      {/* The written-directions face — see the carListMode note above. AFTER the map
+          overlays in source order won't hold here (they follow below), so it relies
+          on zIndex 50 to paint over every HUD chip; native modals/sheets still
+          present above it. */}
+      {carListMode && activeRoute && (
+        <CarDriveList
+          steps={activeRoute.steps}
+          stepIndex={tbt.stepIndex}
+          distanceToManeuverM={tbt.distanceToManeuverM}
+          distanceRemainingM={tbt.distanceRemainingM}
+          etaSeconds={tbt.etaSeconds}
+          arrivalText={fmtClock(new Date(Date.now() + tbt.etaSeconds * 1000))}
+          destinationLabel={destination?.label}
+          offer={rerouteOffer ? { title: rerouteOffer.title, subtitle: rerouteOffer.subtitle } : null}
+          onOfferAccept={acceptReroute}
+          onOfferDismiss={declineReroute}
+          onShowMap={() => setCarListMapOverride(true)}
+          onEnd={endNav}
+        />
+      )}
 
       {/* Speed-limit + avatar/CarPlay diagnostics — gated by the Debug toggle in Settings. */}
       {settings.debugOverlays === true && (

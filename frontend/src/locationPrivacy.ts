@@ -178,6 +178,17 @@ export function parkEndedByHeadUnit(): boolean {
 }
 
 /**
+ * RAW head-unit latch — no TTL, unlike carAttached(). For UI decisions only (the
+ * phone's step-list mode while projecting), where a 90 s Android expiry mid-drive
+ * would wrongly flip the phone back to the map. NOT for the privacy gate: the
+ * broadcast path must keep using carAttached(), whose Android TTL is the backstop
+ * for a writer that dies without releasing.
+ */
+export function headUnitAttachedRaw(): boolean {
+  return _carConnected;
+}
+
+/**
  * The ONLY read of the head-unit signal. True means "someone asserted a car is
  * attached, recently enough to still believe it". Every decision in this file that
  * used to read _carConnected directly now reads this, so a writer that dies without

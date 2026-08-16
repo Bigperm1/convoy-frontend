@@ -16,7 +16,7 @@ Files: `src/carplay/ConvoyCarPlay.tsx` (surface + templates), `src/carplay/CarMa
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ [mic]        « N Crew · v67 · 1.19.0 »        [Search] [End] │  nav bar (system)
+│ [−][+]       « N Crew · v67 · 1.19.0 »        [Search] [End] │  nav bar (system)
 │                                                              │
 │                                                              │
 │  ┌────────┐                                                  │
@@ -26,16 +26,22 @@ Files: `src/carplay/ConvoyCarPlay.tsx` (surface + templates), `src/carplay/CarMa
 │  │  0     │  speedo                  car      ├────────────┤ │  ← car sits on
 │  │ km/h   │                        (on the    │ turn banner│ │    THIS gap line
 │  └────────┘                         gap line) └────────────┘ │
-│                                                    (crew) ● │  map buttons
-│                                                 (compass) ● │  (system, bottom-right)
+│                                                     (mic) ● │  map buttons
+│                                                   (2D/3D) ● │  (system, right edge:
+│                                                    (crew) ● │   mic, view, crew,
+│                                                 (compass) ● │   compass — top→bottom)
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Top bar** — leading: comms mic. Centre: crew pill. Trailing: Search then End (End at the
-far corner). *The trailing array is REVERSED vs visual order* — `[car-end, car-search]`
-renders as "Search End". Head-unit verified; do not "fix" it.
+**Top bar** — leading: **zoom − then zoom +** (Jeff, 2026-08-15; the mic and 2D/3D that
+used to sit here moved to the map-button column). Centre: crew pill. Trailing: Search
+then End (End at the far corner). *The trailing array is REVERSED vs visual order* —
+`[car-end, car-search]` renders as "Search End". Head-unit verified; do not "fix" it.
 
-**Bottom-right** — crew (upper) + compass (lower), a plain 2-button array.
+**Right edge (map buttons, top→bottom)** — comms mic, 2D/3D view, crew, compass
+(4-button array; CarPlay's panning mode hides from the END, so crew/compass are the
+sacrificial pair and zoom always survives in the nav bar). The 2D/3D toggle only became
+functional with this move — as a bar button its id had no handler branch.
 
 **Banner stack** — right-anchored, bottom-anchored, TWO rows sharing ONE width:
 ETA, turn (bottom).

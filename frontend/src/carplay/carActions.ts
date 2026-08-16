@@ -778,16 +778,20 @@ function getSearchTemplate(): any | null {
 // no image assets on the head unit.
 export const CAR_BAR_BUTTON_CONFIG = {
   automaticallyHidesNavigationBar: false,
-  // TOP-LEFT: the crew-comms mic (tap-to-toggle transmit — carComms.ts). An IMAGE
-  // bar button with our own mic glyph; CarPlay renders its own glass chrome around
-  // bar buttons natively on iOS 26 (the "Liquid Glass" look is the system's).
-  // 2026-08-14: the 2D/3D view toggle sits immediately RIGHT of the mic, where Jeff
-  // asked for it ("beside the comms mic, to the right of it"). Leading buttons render
-  // in array order left-to-right — unlike the trailing array below, which is reversed.
-  // CarPlay allows two leading bar buttons, so this is the last slot on that side.
+  // TOP-LEFT: the ZOOM PAIR (Jeff, 2026-08-15: "zoom -/+ buttons in the top left
+  // corner" — minus LEFT, plus RIGHT, his stated order). Leading buttons render in
+  // array order left-to-right — unlike the trailing array below, which is reversed.
+  // CarPlay allows two leading bar buttons; the pair uses both. The comms mic and the
+  // 2D/3D toggle that used to live here moved to the round map-button column (see
+  // CAR_MAP_BUTTON_CONFIG). Their presses route through handleCarBarButton's
+  // cross-side dispatch, so a stale cached template delivering the OLD layout's ids
+  // from either side still lands on the right action.
+  // The pill WIDTH around each glyph is CarPlay's own bar-button chrome (iOS 26
+  // Liquid Glass) — we control only the artwork, and these zoom glyphs are compact
+  // centred bars on the shared 44pt canvas, the narrowest art we have.
   leadingNavigationBarButtons: [
-    { id: 'car-comms', type: 'image' as const, image: CAR_ICON_MIC },
-    { id: 'car-view', type: 'image' as const, image: CAR_ICON_VIEW_2D },
+    { id: 'car-zoom-out', type: 'image' as const, image: CAR_ICON_ZOOM_OUT },
+    { id: 'car-zoom-in', type: 'image' as const, image: CAR_ICON_ZOOM_IN },
   ],
   // TOP-RIGHT: Search then End at the far corner. NOTE the array is REVERSED vs
   // the visual order — head-unit photo evidence: config [search, end] rendered as
@@ -822,15 +826,21 @@ export const CAR_MAP_BUTTON_CONFIG = {
   // sim). The 4-slot trick is dead on iOS 26. Crew + compass now live in the two
   // bottom-trailing slots CarPlay gives a 2-button array, and the banner stack sits
   // BESIDE the column (CAR_RIGHT_INSET) instead of underneath phantom circles.
-  // ⚠ ZOOM FIRST, DELIBERATELY. CPMapTemplate.h on the panning interface: "a maximum
-  // of two mapButtons will be visible. If more than two mapButtons are visible when the
-  // template transitions to panning mode, the system will hide one or more map buttons
-  // BEGINNING FROM THE END of the mapButtons array." So the last two are the ones that
-  // disappear — and losing zoom would be worse than losing crew/compass.
+  // 2026-08-15 (Jeff): comms mic takes the old zoom-in slot, 2D/3D takes zoom-out's;
+  // zoom itself moved to the top-left nav bar. Moving car-view here is also what made
+  // the 2D/3D toggle WORK for the first time: as a bar button its presses went to
+  // handleCarBarButton, which never had a car-view branch — the tap logged a receipt
+  // and did nothing. Map-button presses go to handleCarMapButton, which owns the
+  // toggle.
+  // ⚠ COMMS + VIEW FIRST, DELIBERATELY. CPMapTemplate.h on the panning interface: "a
+  // maximum of two mapButtons will be visible... the system will hide one or more map
+  // buttons BEGINNING FROM THE END of the mapButtons array." So crew/compass are the
+  // pair that disappear in panning mode; zoom survives regardless, in the nav bar
+  // (automaticallyHidesNavigationBar is false above).
   // Max is 4 (CPMapTemplate.h:72). This uses all four.
   mapButtons: [
-    { id: 'car-zoom-in', image: CAR_ICON_ZOOM_IN, focusedImage: CAR_ICON_ZOOM_IN },
-    { id: 'car-zoom-out', image: CAR_ICON_ZOOM_OUT, focusedImage: CAR_ICON_ZOOM_OUT },
+    { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC },
+    { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D },
     { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW },
     { id: 'car-compass', image: CAR_ICON_COMPASS, focusedImage: CAR_ICON_COMPASS },
   ],
@@ -943,6 +953,14 @@ export function carTap(id: string): void {
 
 export function handleCarMapButton(id: string): void {
   carTap(id);
+  // Comms mic moved into the round map-button column (2026-08-15). Same behaviour it
+  // had as a bar button — tap-to-toggle transmit — kept inline rather than delegated
+  // to handleCarBarButton, which would log a second tap receipt for one press.
+  if (id === 'car-comms') {
+    armPosRing();
+    void toggleCarComms().then((msg) => { if (msg) toast(msg); });
+    return;
+  }
   if (id === 'car-view') {
     // Pure VIEW toggle — routing, the route line and guidance are all untouched.
     const twoD = toggleMapView2D();
@@ -969,6 +987,14 @@ export function handleCarMapButton(id: string): void {
 }
 
 export function handleCarBarButton(id: string): void {
+  // CROSS-SIDE DISPATCH (2026-08-15 layout swap): zoom is now a nav-bar pair but its
+  // action lives in handleCarMapButton; car-view can still arrive from a stale cached
+  // template that has it in its OLD bar slot. Route before carTap — the map handler
+  // logs its own receipt, and double-logging would corrupt the tap telemetry.
+  if (id === 'car-zoom-in' || id === 'car-zoom-out' || id === 'car-view') {
+    handleCarMapButton(id);
+    return;
+  }
   carTap(id);
   armPosRing(); // idempotent — make sure the 5s-ago buffer is running
   if (id === 'car-comms') {

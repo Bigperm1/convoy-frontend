@@ -1365,13 +1365,11 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // SHARED config so the warm and cold roots can never drift apart again
             // (they previously declared different sets with different ids, which is
             // exactly how "one button works and the others don't" kept happening).
-            // ⚠ The note that used to sit here said "Zoom ± was removed — it ate two of
-            // CarPlay's four map-button slots". That has been WRONG since 2026-08-06:
-            // zoom ± is back and is the FIRST TWO entries of CAR_MAP_BUTTON_CONFIG,
-            // deliberately, because CPMapTemplate hides map buttons from the END of the
-            // array when it enters panning mode. Read that config, not this comment —
-            // a stale comment here sent a debugging session looking for a removal that
-            // had already been reverted.
+            // ⚠ LAYOUT MOVED AGAIN 2026-08-15 (Jeff): zoom ± now lives in the TOP-LEFT
+            // nav bar; the map-button column is comms mic, 2D/3D, crew, compass. Read
+            // CAR_MAP_BUTTON_CONFIG / CAR_BAR_BUTTON_CONFIG in carActions.ts, not any
+            // comment here — a stale comment on this exact line once sent a debugging
+            // session hunting a removal that had already been reverted.
             ...(IS_AA ? {} : { mapButtons: CAR_MAP_BUTTON_CONFIG.mapButtons }),
             onMapButtonPressed: (e: { id: string }) => {
               // Warm root: prefer the live ref (reaches the mounted surface); anything
@@ -1793,7 +1791,8 @@ const styles = StyleSheet.create({
   // black rule. Width/height/radius already matched; only the two border tokens moved.
   speedPill: { width: 58, height: SPEED_PILL_H, borderRadius: 14, borderWidth: 2, borderColor: '#000000', alignItems: 'center', justifyContent: 'center' },
   speedNum: { color: '#F4F4F4', fontSize: 21, fontWeight: '800', letterSpacing: -0.5, lineHeight: 23 },
-  speedUnit: { color: '#808080', fontSize: 9, fontWeight: '600', letterSpacing: 0.3, marginTop: 1 },
+  // WHITE, not gray (Jeff, 2026-08-15: "the speedo km/h needs to be white").
+  speedUnit: { color: '#FFFFFF', fontSize: 9, fontWeight: '600', letterSpacing: 0.3, marginTop: 1 },
   // Posted speed-limit sign — white plate, black border. Tucked BEHIND the speedo (same
   // bottom baseline, left:0 within speedDock) and slid out to the right when moving.
   speedLimitBadge: { position: 'absolute', left: 0, bottom: 0, width: 58, height: SPEED_PILL_H, borderRadius: 14, backgroundColor: '#FFFFFF', borderColor: '#000000', borderWidth: 2, alignItems: 'center', justifyContent: 'center' },

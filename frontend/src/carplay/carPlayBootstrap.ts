@@ -16,7 +16,7 @@ import { setCarState, getCarState, emitCarGesture } from './carStore';
 import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
 import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
-import { logEvent } from '../crashBreadcrumb';
+import { logEventReliable } from '../crashBreadcrumb';
 
 let booted = false;
 
@@ -28,7 +28,13 @@ export function initCarPlayBootstrap(): void {
   // indistinguishable from "the taps never reach JS" and sends the next investigation
   // straight at the native template layer. It is the difference between an OTA fix and
   // a paid build, so the reason has to be on the record. One row per launch, iOS only.
-  const bail = (why: string) => { try { logEvent(`carplay-bootstrap-bail ${why}`); } catch {} };
+  // Reliable delivery (2026-08-16): plain logEvent silently DROPS rows while the
+  // Supabase client is not constructed yet — the normal state at app-root time, i.e.
+  // exactly when this function runs on a CarPlay-first cold launch. Every bail row
+  // logged here before this change could have vanished for that boring reason, so
+  // "zero bail rows" never proved the bootstrap didn't bail. logEventReliable queues
+  // to disk and delivers `late` when the client can't take the insert.
+  const bail = (why: string) => { try { logEventReliable(`carplay-bootstrap-bail ${why}`); } catch {} };
   if (!(NativeModules as any).RNCarPlay) { bail('no-native-module'); return; }
   booted = true;
 
@@ -48,8 +54,33 @@ export function initCarPlayBootstrap(): void {
 
   setCarState({ cpDbg: 'boot' });
 
+  // THE POSITIVE RECEIPT CHAIN (2026-08-16, HANDOFF-48H §2.2's "single most important
+  // instrument gap"). The bail rows log only FAILURE, and silence cannot distinguish
+  // "bootstrap succeeded" from "this code never ran" — which left the dead-buttons
+  // investigation unable to trust absence. These rows are OBSERVATIONS of each link
+  // in the chain a working button depends on, recorded from library/system state, not
+  // from our own success flags (an instrument that computes its answer from its own
+  // input cannot contradict you — §9). Once per JS context per link, so a drive adds
+  // at most four rows. Expected healthy cold sequence:
+  //   carplay-bootstrap-ok → carplay-onconnect → carplay-idleroot-set (or -skip) → carplay-tap:*
+  // The first link missing that a later link present would contradict localizes the
+  // fault; all links present + no taps on a pressed button = the press dies native-side.
+  const receiptOnce: Record<string, boolean> = {};
+  const receipt = (key: string, detail: string) => {
+    if (receiptOnce[key]) return;
+    receiptOnce[key] = true;
+    try { logEventReliable(`carplay-${key} ${detail}`); } catch {}
+  };
+
   const setIdleRoot = () => {
-    if (carPlayHookOwnsRoot) { setCarState({ cpDbg: 'idle:SKIP(hookOwns)' }); return; }
+    if (carPlayHookOwnsRoot) {
+      setCarState({ cpDbg: 'idle:SKIP(hookOwns)' });
+      // Not a failure — the warm root owns the template. Recorded because a session
+      // where NOTHING set a root (no -set, no -skip) is the invisible case that has
+      // eaten investigations before.
+      receipt('idleroot-skip', 'hookOwns=1');
+      return;
+    }
     try {
       const t = new MapTemplate({
         id: 'convoy-carplay-idle',
@@ -89,6 +120,9 @@ export function initCarPlayBootstrap(): void {
       });
       CarPlay.setRootTemplate(t);
       setCarState({ cpDbg: 'idle:SET conn=' + (CarPlay.connected ? '1' : '0') });
+      // setRootTemplate RETURNED — the template with our handlers is the root as far
+      // as the JS side can observe. conn is the library's own connect state.
+      receipt('idleroot-set', `conn=${CarPlay.connected ? 1 : 0}`);
     } catch (e: any) {
       // Full error + stack to the device log — the on-screen breadcrumb truncates,
       // and this throw is what prevents any CPMapTemplate from ever being created.
@@ -96,6 +130,9 @@ export function initCarPlayBootstrap(): void {
         console.error('[cpdiag] setIdleRoot THREW:', e?.message || String(e), '\nSTACK:\n' + (e?.stack || '(no stack)'));
       } catch {}
       setCarState({ cpDbg: 'idle:THREW ' + String(e?.message || e).slice(0, 40) });
+      // This throw used to reach ONLY the screen breadcrumb — invisible from a query,
+      // which is how a template-never-created session reads as "taps died native-side".
+      receipt('idleroot-threw', String(e?.message || e).slice(0, 120));
     }
   };
 
@@ -210,14 +247,28 @@ export function initCarPlayBootstrap(): void {
   };
 
   try {
-    CarPlay.registerOnConnect(() => { setCarState({ cpDbg: 'onConnect:FIRED' }); stopPolling(); onConnect(); });
+    CarPlay.registerOnConnect(() => {
+      setCarState({ cpDbg: 'onConnect:FIRED' });
+      // The head unit's connect reached JS. First one per launch is the signal; a
+      // reconnect mid-drive is ordinary and logging each would spend rows on noise.
+      receipt('onconnect', `conn=${CarPlay.connected ? 1 : 0}`);
+      stopPolling();
+      onConnect();
+    });
     CarPlay.registerOnDisconnect(() => { onDisconnect(); ensurePolling(); });
     setCarState({ cpDbg: 'wired conn=' + (CarPlay.connected ? '1' : '0') });
+    // THE POSITIVE BOOTSTRAP RECEIPT: both connect handlers registered without a
+    // throw. From here, a dead button can no longer be blamed on "the bootstrap
+    // never ran" — this row is the proof it did, on this exact launch.
+    receipt('bootstrap-ok', `conn=${CarPlay.connected ? 1 : 0} hookOwns=${carPlayHookOwnsRoot ? 1 : 0}`);
     if (CarPlay.connected) onConnect(); else { poke(); ensurePolling(); }
     // A head unit connecting often brings the app active — re-poke then, and resume
     // polling in case it had stopped.
     AppState.addEventListener('change', (s) => { if (s === 'active' && !CarPlay.connected) { poke(); ensurePolling(); } });
-  } catch {
-    // react-native-carplay not ready yet — ignore; the hook covers the warm path.
+  } catch (e: any) {
+    // This catch was SILENT — a registerOnConnect throw was dead buttons with zero
+    // telemetry, indistinguishable from every other absence. It is a bail like the
+    // ones at the top: the reason has to be on the record.
+    bail(`register-threw ${String(e?.message || e).slice(0, 120)}`);
   }
 }

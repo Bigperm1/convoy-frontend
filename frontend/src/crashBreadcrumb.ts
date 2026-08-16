@@ -228,6 +228,29 @@ export function logEvent(message: string): void {
   } catch {}
 }
 
+/**
+ * logEvent that cannot be lost for a boring reason. Plain logEvent DROPS the row when
+ * the Supabase client is not constructed yet (`if (!supabase) return`) — which is the
+ * normal state while app-root bootstraps run, i.e. exactly when a CarPlay-first cold
+ * launch executes carPlayBootstrap. For an instrument whose ABSENCE is read as a
+ * signal, that silent drop makes absence lie ("the code never ran" vs "it ran too
+ * early to report"). Same fallback as logBundleMark: on a missing client or a failed
+ * insert, persist to the crash queue and deliver `late` on a later launch.
+ * Use for receipts/bails whose absence will be interpreted; keep plain logEvent for
+ * high-volume breadcrumbs where losing one row is meaningless.
+ */
+export function logEventReliable(message: string): void {
+  try {
+    const report = { message, is_fatal: false, late: false, ...baseMeta() };
+    const { supabase } = require("./supabase");
+    if (!supabase) { void queue([report]); return; }
+    void supabase.from("crash_reports").insert([report]).then(
+      (res: any) => { if (res?.error) void queue([report]); },
+      () => { void queue([report]); },
+    );
+  } catch {}
+}
+
 export function installCrashBreadcrumb() {
   if (installed) return;
   installed = true;

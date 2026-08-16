@@ -38,9 +38,19 @@ import { toggleCarComms } from './carComms';
 import { logEvent } from '../crashBreadcrumb';
 import { ensureSavedPlacesLoaded, getSavedPlaces, type SavedPlace } from '../savedPlaces';
 
-// ── lazy react-native-carplay access (same guard style as carPlayBootstrap) ──
-function getLib(): any | null {
-  if (Platform.OS !== 'ios') return null;
+// ── lazy react-native-carplay access ────────────────────────────────────────
+// TWO accessors, deliberately.
+//
+// getCarLib() is CROSS-PLATFORM and asks only "is the native module present?".
+// getLib() keeps the iOS-only gate it has always had, because every one of its
+// existing callers is a genuinely iOS-only API: carAlert builds a CPAlertTemplate
+// (RNCarPlay.m), and CarPlay.popToRootTemplate is NOT a @ReactMethod in
+// CarPlayModule.kt at all — Android exposes setRootTemplate / pushTemplate /
+// popTemplate / popToTemplate / createTemplate / updateTemplate and nothing else.
+// Ungating getLib() would therefore change carAlert on Android AND call a method
+// that does not exist. ONLY the Android-Auto search path uses getCarLib().
+function getCarLib(): any | null {
+  if (Platform.OS === 'web') return null;
   if (!(NativeModules as any).RNCarPlay) return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -48,6 +58,10 @@ function getLib(): any | null {
   } catch {
     return null;
   }
+}
+function getLib(): any | null {
+  if (Platform.OS !== 'ios') return null;
+  return getCarLib();
 }
 
 // Visible confirmation on the head unit.
@@ -338,6 +352,298 @@ let _searchPresented = false;
 // only pop while the template is visible, and a driver who is moving is exactly when it
 // is not. Fixing it this way is correct under either mechanism.
 let _searchPushed = false;
+
+// ── ANDROID AUTO SEARCH (2026-08-15) ────────────────────────────────────────────
+// FILMED: the driver taps Search on the AA action strip, the green "Search ✓" receipt
+// appears — so the tap REACHES JS — and nothing opens. TWO defects stacked:
+//
+//  (1) OURS. getSearchTemplate() went through getLib(), which is iOS-only, so it
+//      returned null and the car-search branch hit `if (!t) return;` — a silent dead
+//      end AFTER carTap() had already drawn the receipt.
+//
+//  (2) THE LIBRARY'S. react-native-carplay's JS SearchTemplate computes
+//      config.onSearch(query) and then hands the rows to native only
+//      `if (Platform.OS === 'ios')` (src/templates/SearchTemplate.ts:47). There is NO
+//      Android branch: the results are computed and THROWN AWAY. Android's native
+//      template never wanted a callback result — RCTSearchTemplate.kt:29 reads them as
+//      a PROP, `props.getArray("items") -> setItemList(parseItemList(it,"row"))`.
+//
+// So Android does NOT construct a JS SearchTemplate at all. Everything below talks to
+// the @ReactMethods that DO exist on Android (CarPlayModule.kt): createTemplate (:100),
+// pushTemplate (:168), updateTemplate (:119, real since build 70), popToTemplate (:179).
+// Avoiding the JS class also avoids a trap: its constructor registers its own
+// 'updatedSearchText' listener that calls config.onSearch, so every keystroke would run
+// the Places lookup TWICE, once for a result that is discarded.
+//
+// iOS is untouched: _searchTemplate / getSearchTemplate() / the CPSearchTemplate
+// callbacks are unchanged, and every branch here is behind Platform.OS === 'android'.
+// A DIFFERENT template id from iOS's 'convoy-car-search' on purpose.
+const AA_SEARCH_ID = 'convoy-aa-search';
+// AndroidAutoRoot.tsx:80 — the NavigationTemplate id. It is pushed at session start and
+// nothing ever pops it, so it is always on the ScreenManager stack.
+const AA_NAV_ID = 'convoy-aa-nav';
+// androidx's own default list content limit is 6 (res/values content_limit_list in
+// androidx.car.app:app:1.4.0-beta02). Never send more.
+const AA_SEARCH_MAX_ROWS = 6;
+
+type AaRow = { id: string; text: string; detailText?: string; browsable: boolean };
+// rows + the EXACT lists those rows were built from. Committed together, so the list a
+// tap indexes into can never be a different generation from the list on screen.
+type AaList = { rows: AaRow[]; saved: SavedPlace[]; results: CarSearchResult[] };
+
+let _aaSaved: SavedPlace[] = [];
+let _aaResults: CarSearchResult[] = [];
+let _aaSearchSeq = 0;
+let _aaLastRowsKey = '';
+let _aaBridgeArmed = false;
+
+// The exact prop shape RCTSearchTemplate.parse consumes — nothing else is read.
+// updateTemplate REBUILDS the androidx template from scratch every call, so the whole
+// config must be re-sent each time; anything omitted reverts to a builder default.
+// `items` is OMITTED when empty (a driver with no saved places) rather than sent as an
+// empty array, so the host shows its own empty state instead of a zero-row list.
+function aaSearchConfig(items: AaRow[]) {
+  return {
+    type: 'search',
+    id: AA_SEARCH_ID,
+    searchHint: 'Where to?',
+    // Re-sent on EVERY refresh deliberately: omitting it would fall back to the
+    // builder default (false) and drop the keyboard mid-word.
+    showKeyboardByDefault: true,
+    // Action.BACK is the only header action that can pass androidx's
+    // ACTIONS_CONSTRAINTS_HEADER here — maxActions 1, requireActionIcons true,
+    // onClickListenerAllowed FALSE (disassembled from the 1.4.0-beta02 aar).
+    // validateOrThrow's icon requirement is guarded by Action.isStandard(), and
+    // RCTTemplate.parseAction returns the standard Action.BACK for type:'back' with no
+    // click listener attached, so it validates; a custom action with an id would not.
+    headerAction: { type: 'back' },
+    ...(items.length ? { items } : {}),
+  };
+}
+
+function aaRowsKey(rows: AaRow[]): string {
+  return rows.map((r) => r.id + '|' + r.text).join('');
+}
+
+// Home, then Work, then custom newest-first — the phone's ordering.
+// NO row images on Android, on purpose: RCTTemplate.parseCarIcon does a BLOCKING Fresco
+// decode (DataSources.waitForFinalResult) on the car's main thread, once per row, and a
+// decode failure would throw inside the parser — and a parser throw here is fatal (see
+// openAaSearch). androidx's ROW_CONSTRAINTS_SIMPLE does allow images, so this can be
+// revisited once the path has survived one real drive. Empty titles are filtered because
+// androidx Row.Builder throws "The title cannot be null or empty".
+function aaSavedList(): AaList {
+  const rank = (k: SavedPlace['kind']) => (k === 'home' ? 0 : k === 'work' ? 1 : 2);
+  const saved = getSavedPlaces()
+    .slice()
+    .filter((p) => !!p.label)
+    .sort((a, b) => rank(a.kind) - rank(b.kind) || b.createdAt - a.createdAt)
+    .slice(0, AA_SEARCH_MAX_ROWS);
+  return {
+    saved,
+    results: [],
+    rows: saved.map((p, i) => ({
+      id: `s:${i}`,
+      text: p.label,
+      ...(p.address ? { detailText: p.address } : {}),
+      // parseRowItem attaches its click listener ONLY when the row carries
+      // browsable:true (RCTTemplate.kt:170). Without it the row renders and is dead.
+      browsable: true,
+    })),
+  };
+}
+
+// PURE. It must NOT publish anything: two keystrokes can be in flight at once and the
+// slower one can land last, so only the winner (seq check at the call site) is allowed
+// to commit. Publishing here is how an index-addressed list ends up describing a
+// different generation than the rows on screen — i.e. the wrong destination.
+async function aaListFor(query: string): Promise<AaList> {
+  const q = (query || '').trim();
+  if (q.length < 2) {
+    try { await ensureSavedPlacesLoaded(); } catch {}
+    return aaSavedList();
+  }
+  let results: CarSearchResult[] = [];
+  try {
+    results = (await placesAutocomplete(q)).slice(0, AA_SEARCH_MAX_ROWS);
+  } catch {
+    results = [];
+  }
+  return {
+    saved: [],
+    results,
+    rows: results.map((r, i) => ({ id: `r:${i}`, text: r.description, browsable: true })),
+  };
+}
+
+function aaCommit(list: AaList): void {
+  _aaSaved = list.saved;
+  _aaResults = list.results;
+}
+
+function aaPushRows(rows: AaRow[]): void {
+  const bridge = getCarLib()?.CarPlay?.bridge;
+  if (!bridge?.updateTemplate) return;
+  const key = aaRowsKey(rows);
+  if (key === _aaLastRowsKey) return;   // identical list: do not spend a template refresh
+  _aaLastRowsKey = key;
+  try { bridge.updateTemplate(AA_SEARCH_ID, aaSearchConfig(rows)); } catch {}
+}
+
+// POP TO THE NAV SCREEN BY NAME — never a bare pop.
+// popTemplate removes whatever is on top, so a stale ownership claim (see the
+// didDisconnect reset below) would have the motion watcher pop the NAVIGATION screen and
+// strand the driver on CarPlaySession's "RNCarPlay loading..." placeholder for the rest
+// of the drive. ScreenManager.popTo pops `while (size > 1 && !foundMarker)`, and the AA
+// nav screen is pushed at session start and never popped, so this is idempotent: if our
+// search screen is already gone it does nothing at all.
+// (popToRootTemplate is not a @ReactMethod on Android, and "root" there is the session's
+// placeholder screen, not our map.)
+function aaPop(): void {
+  try { getCarLib()?.CarPlay?.popToTemplate?.({ id: AA_NAV_ID } as any, true); } catch {}
+}
+
+// One dismiss for both car surfaces.
+function dismissCarSearch(): void {
+  if (Platform.OS === 'android') { aaPop(); return; }
+  try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
+}
+
+async function aaSelect(rowId: string): Promise<void> {
+  const kind = rowId.slice(0, 1);
+  const idx = Number(rowId.slice(2));
+  if (!Number.isFinite(idx)) return;
+  if (kind === 's') {
+    const p = _aaSaved[idx];
+    if (!p) return;
+    const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
+    // SAME OWNERSHIP RULE AS iOS: release only when we actually pop. Releasing on a
+    // FAILED start would leave the screen on the stack with nobody owning it, and the
+    // re-tap would stack a second one.
+    if (ok) { _searchPushed = false; aaPop(); }
+    return;
+  }
+  const picked = _aaResults[idx];
+  if (!picked) return;
+  const dest = await placeDetails(picked.placeId).catch(() => null);
+  if (!dest) { toast('Could not load that place'); return; }
+  const ok = await startCarNav({ ...dest, label: dest.label || picked.description });
+  if (ok) { _searchPushed = false; aaPop(); }
+}
+
+function armAaSearchBridge(lib: any): void {
+  if (_aaBridgeArmed) return;
+  const em = lib?.CarPlay?.emitter;
+  if (!em?.addListener) return;
+  _aaBridgeArmed = true;
+
+  // PER KEYSTROKE. EventEmitter.updatedSearchText carries { searchText } and emit()
+  // stamps templateId from the SCREEN's own emitter (CarPlayModule.createCarScreenContext),
+  // so this can only ever be our search screen.
+  em.addListener('updatedSearchText', (e: any) => {
+    if (!e || e.templateId !== AA_SEARCH_ID) return;
+    const seq = ++_aaSearchSeq;
+    void (async () => {
+      const list = await aaListFor(String(e.searchText ?? ''));
+      if (seq !== _aaSearchSeq) return;   // a newer keystroke already won
+      if (!_searchPushed) return;         // never update a template we no longer own
+      aaCommit(list);                     // commit and draw the SAME generation
+      aaPushRows(list.rows);
+    })();
+  });
+
+  // ROW TAP. parseRowItem emits didSelectListItem — NOT the 'selectedResult' the
+  // library's JS SearchTemplate listens for. EventEmitter.selectedResult exists in
+  // Kotlin but NOTHING on Android ever calls it (grepped), which is why onItemSelect
+  // could never have fired up here.
+  em.addListener('didSelectListItem', (e: any) => {
+    if (!e || e.templateId !== AA_SEARCH_ID) return;
+    void aaSelect(String(e.id ?? ''));
+  });
+
+  // BACK — and this one is load-bearing. Verified in androidx.car.app 1.4.0-beta02:
+  // CarContext's OnBackPressedDispatcher is constructed with a FALLBACK Runnable, and
+  // that lambda (CarContext.lambda$new$10, disassembled) is literally
+  // getCarService(ScreenManager.class).pop(). A fallback runs ONLY when no enabled
+  // callback consumes the press — and CarPlayModule.setCarContext registers an
+  // always-enabled callback that merely emits backButtonPressed. ScreenManager itself
+  // registers no callback. So on Android Auto the host's Back NEVER pops a screen: if JS
+  // does not pop, the driver is trapped on the search screen for the rest of the drive.
+  em.addListener('backButtonPressed', (e: any) => {
+    if (!e) return;
+    if (e.templateId !== AA_SEARCH_ID) {
+      // Back arrived while something else is on top => our search is provably not on
+      // the stack. Self-heals a stale claim, so Search can never be permanently dead.
+      _searchPushed = false;
+      return;
+    }
+    if (!_searchPushed) return;
+    _searchPushed = false;
+    aaPop();
+  });
+
+  // THE OTHER STALE-CLAIM PATH, and the one that could strand a driver. Android has NO
+  // visibility signal at all — CarScreen.kt emits neither didAppear nor didDisappear —
+  // and AndroidAutoRoot never unmounts, so a session that ENDS with search open would
+  // carry _searchPushed === true into the next session inside the same JS process. The
+  // motion watcher would then fire a pop against a stack our search screen is not on.
+  // The didDisconnect emit is the build-71 native patch (CarPlaySession.onDestroy); on
+  // build 70 this listener is simply inert, which is why aaPop() pops BY NAME as well.
+  try {
+    lib?.CarPlay?.registerOnDisconnect?.(() => {
+      _searchPushed = false;
+      _aaSearchSeq += 1;
+      _aaLastRowsKey = '';
+    });
+  } catch {}
+}
+
+function openAaSearch(): void {
+  const lib = getCarLib();
+  const bridge = lib?.CarPlay?.bridge;
+  if (!bridge?.createTemplate || !bridge?.pushTemplate) { toast('Search unavailable'); return; }
+  armAaSearchBridge(lib);
+  armSearchAutoDismiss();                 // idempotent; shares _searchPushed with iOS
+  _searchPushed = true;                   // claim BEFORE the await so a double tap cannot double-push
+  _aaSearchSeq += 1;
+  void ensureSavedPlacesLoaded().catch(() => []).then(() => {
+    if (!_searchPushed) return;           // dismissed while we were loading
+    const list = aaSavedList();
+    aaCommit(list);
+    _aaLastRowsKey = aaRowsKey(list.rows); // the create IS the first draw; do not re-push it
+    try {
+      // ALWAYS RE-CREATE, never reuse: createTemplate rebuilds carTemplates AND
+      // constructs the CarScreen, so the id is guaranteed resolvable at push time even
+      // after a previous search screen was torn down.
+      //
+      // ⚠ THE PUSH LIVES INSIDE THE CALLBACK, DELIBERATELY. CarPlayModule.createTemplate
+      // catches an IllegalArgumentException from createScreen and registers NO screen —
+      // but pushTemplate would then call getScreen -> createScreen -> the SAME throw,
+      // this time inside a bare handler.post with no try/catch: an uncaught exception on
+      // the car's MAIN THREAD, i.e. Android Auto dies mid-drive. The callback is invoked
+      // on both branches, so gating on it costs nothing and turns a crash into a toast.
+      bridge.createTemplate(AA_SEARCH_ID, aaSearchConfig(list.rows), (res: any) => {
+        if (res?.error) {
+          _searchPushed = false;
+          try { logEvent(`aa-search-create-failed:${res.error}`); } catch {}
+          toast('Search unavailable');
+          return;
+        }
+        if (!_searchPushed) return;       // dismissed between create and push
+        try {
+          bridge.pushTemplate(AA_SEARCH_ID, true);
+          try { logEvent('aa-search-open'); } catch {}
+        } catch {
+          _searchPushed = false;
+          toast('Search unavailable');
+        }
+      });
+    } catch {
+      _searchPushed = false;
+      toast('Search unavailable');
+    }
+  });
+}
 // Auto-dismiss search the moment the car is genuinely MOVING. CarPlay gates the
 // keyboard by drive-state, so a pushed search template while driving is a dead
 // modal that hides the map's own buttons — the driver is trapped and the HUD
@@ -361,7 +667,10 @@ function armSearchAutoDismiss(): void {
       if (_movingTicks >= 2) {                 // ~2 position ticks of real motion
         _movingTicks = 0;
         _searchPushed = false;                 // we own the pop; release before it lands
-        try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
+        // Platform-correct dismiss. popToRootTemplate is an iOS-only @ReactMethod —
+        // CarPlayModule.kt does not expose it at all — and on Android "root" is the
+        // session's placeholder screen, not our map. See dismissCarSearch().
+        dismissCarSearch();
       }
     } else {
       _movingTicks = 0;
@@ -678,6 +987,11 @@ export function handleCarBarButton(id: string): void {
     // instance (that corrupts the CarPlay stack — the freeze). Visibility is irrelevant
     // here; a hidden-but-stacked template still must not be pushed again.
     if (_searchPushed) return;
+    // ANDROID AUTO LEAVES HERE. Its native SearchTemplate takes results as an `items`
+    // PROP, not from a callback, and the library's JS SearchTemplate only talks to
+    // native on iOS — so Android drives createTemplate / pushTemplate / updateTemplate
+    // itself. Everything below this line is the untouched iOS path.
+    if (Platform.OS === 'android') { openAaSearch(); return; }
     // Prime the cache BEFORE the template appears — the first updatedSearchText can
     // arrive before an await would have resolved.
     void ensureSavedPlacesLoaded().catch(() => {});

@@ -4450,8 +4450,12 @@ export default function MapScreen() {
       {/* ===== Turn-by-turn overlays — Google-Maps-style =====
           Top maneuver banner (always visible) + bottom ETA bar, rendered by
           TurnByTurnNav. All values come from the `tbt` engine. Replaced the
-          old right-edge pull-tab drawer. */}
-      {navMode === "turn-by-turn" && activeRoute && tbt.active && (() => {
+          old right-edge pull-tab drawer.
+          !carListMode: the banner painted OVER the car-list face (Say Phin's 10:56
+          screenshot — its z-order beats the list's). In list mode the current step
+          is already the highlighted row, so the banner is pure duplication there.
+          Jeff: "nothing should change when the phone map is active." */}
+      {!carListMode && navMode === "turn-by-turn" && activeRoute && tbt.active && (() => {
         const stepIdx = Math.min(tbt.stepIndex + 1, activeRoute.steps.length - 1);
         const upcoming = activeRoute.steps[stepIdx];
         const verb = maneuverVerb(upcoming?.maneuver);
@@ -4566,7 +4570,9 @@ export default function MapScreen() {
       {/* ===== Speedometer HUD (bottom-left glass overlay) =====
           Pulls live speed from coords.speed (m/s) → km/h. Floors small values
           to 0 so a stationary GPS jitter doesn't read "1 km/h". */}
-      <SpeedPill speedMs={coords?.speed} unit={settings.speedUnit} bottom={controlsBottom} limitKmh={speedLimitKmh} />
+      {/* Hidden in car-list mode (Jeff, off the 10:56 screenshot) — the speedo and
+          weather chips floated over the step list's rows. Map mode unchanged. */}
+      {!carListMode && <SpeedPill speedMs={coords?.speed} unit={settings.speedUnit} bottom={controlsBottom} limitKmh={speedLimitKmh} />}
       {/* Now-playing banner — beside the speedo, shifts right when the speed-limit
           sign slides out, ends before the police FAB. Shows only when music plays. */}
       <MapNowPlaying
@@ -4576,7 +4582,7 @@ export default function MapScreen() {
       />
       {/* Weather HUD — compact temp-only chip stacked just above the speedometer
           in the bottom-left HUD column (matches the speedo's box + opacity). */}
-      {showWeatherLayer && weather && (
+      {!carListMode && showWeatherLayer && weather && (
         <View style={{ position: 'absolute', bottom: weatherBottom, left: 12, zIndex: 70 }}>
           <WeatherHUD weather={weather} unit={settings.speedUnit} compact forecast={dailyForecast} onOpenChange={setWeatherForecastOpen} />
         </View>
@@ -4965,8 +4971,11 @@ export default function MapScreen() {
           are listed in a dark glassy panel that auto-tucks after 3s so the
           driver gets back to a clear chase-cam view. A small grab pill sits
           on the bottom edge to re-summon it; the drawer's top handle is
-          draggable to dismiss with a fling. */}
-      {navMode === "turn-by-turn" && activeRoute && tbt.active && (
+          draggable to dismiss with a fling.
+          !carListMode: the drawer duplicated the list's own header (ETA · distance ·
+          arrival) and painted over its bottom rows (10:56 screenshot). List mode has
+          its own Show-map footer + top End; the drawer stays exactly as-is on the map. */}
+      {!carListMode && navMode === "turn-by-turn" && activeRoute && tbt.active && (
         <StepDrawer
           ref={stepDrawerRef}
           route={activeRoute as any}

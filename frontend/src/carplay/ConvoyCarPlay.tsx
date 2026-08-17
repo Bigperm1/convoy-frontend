@@ -903,7 +903,8 @@ export function CarSurface() {
         <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
-            <View style={[styles.scoutDot, { backgroundColor: s.commsTx === 'recording' ? '#FF453A' : '#8E8E93' }]} />
+            {/* Candy-apple red (#E4002B) — the one red across phone/CarPlay/AA (Jeff, 2026-08-16). */}
+            <View style={[styles.scoutDot, { backgroundColor: s.commsTx === 'recording' ? '#E4002B' : '#8E8E93' }]} />
             <Text style={styles.scoutPillText}>{s.commsTx === 'recording' ? 'Transmitting…' : 'Sending…'}</Text>
           </View>
         </View>
@@ -1845,7 +1846,7 @@ const styles = StyleSheet.create({
   // that called every segment load-bearing is superseded: bundle identification lives
   // on the PHONE pill only now (map.tsx:3204). Do not re-add fields here.
   crewPillText: { color: '#C7CCD1', fontSize: IS_AA ? 11 : 9, fontWeight: '600' },
-  crewPillTextWarn: { color: '#FF453A' },
+  crewPillTextWarn: { color: '#E4002B' },  // candy-apple red — the one red everywhere
   scoutPill: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   scoutDot: { width: 10, height: 10, borderRadius: 5 },
   scoutPillText: { color: '#F4F4F4', fontSize: 14, fontWeight: '700' },

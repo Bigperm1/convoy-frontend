@@ -198,7 +198,9 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
                 style={[StyleSheet.absoluteFill, { borderRadius: 30 }]}
               />
               <GlassFill tintColor="#E4002B" style={{ borderRadius: 30, overflow: "hidden" }} />
-              <Text style={styles.barExitText}>Exit</Text>
+              {/* "End", not "Exit" (Jeff, 2026-08-16) — one verb across phone,
+                  CarPlay and AA for the same action. */}
+              <Text style={styles.barExitText}>End</Text>
             </TouchableOpacity>
           )}
         </View>

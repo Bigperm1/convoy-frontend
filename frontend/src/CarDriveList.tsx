@@ -14,9 +14,14 @@
 // already has. The only state is scroll position.
 
 import React, { useEffect, useRef } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { ManeuverArrow, maneuverDir } from "./components/ManeuverArrow";
 import { COLORS } from "./theme";
 import { NavStep, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec } from "./nav";
+
+// Candy-apple red — the SAME red as the phone speedo's speeding state (OVER_RED,
+// TurnByTurnNav.tsx). Jeff, 2026-08-16: every red button on phone/CarPlay/AA uses it.
+const CANDY_RED = "#E4002B";
 
 const strip = (h?: string) => (h || "").replace(/<[^>]+>/g, "").trim();
 
@@ -84,7 +89,12 @@ export default function CarDriveList(props: {
           const past = index < upcomingIdx;
           return (
             <View style={[styles.row, current && styles.rowCurrent, past && styles.rowPast]}>
-              <Text style={[styles.rowNum, current && styles.rowNumCurrent]}>{index + 1}</Text>
+              {/* Green square arrow — the EXACT component + colors the banner's
+                  maneuver box uses (ManeuverArrow, dark glyph on brand green), so
+                  the two can never disagree about a turn's direction. */}
+              <View style={styles.arrowBox}>
+                <ManeuverArrow dir={maneuverDir(strip(item.html), item.maneuver)} size={20} color="#0B0B0C" />
+              </View>
               <View style={styles.rowBody}>
                 <Text style={[styles.rowText, current && styles.rowTextCurrent]}>
                   {strip(item.html) || maneuverVerb(item.maneuver)}
@@ -101,10 +111,14 @@ export default function CarDriveList(props: {
         <Pressable onPress={props.onShowMap} style={styles.btnGhost} hitSlop={8}>
           <Text style={styles.btnGhostText}>Show map</Text>
         </Pressable>
-        <Pressable onPress={props.onEnd} style={styles.btnEnd} hitSlop={8}>
-          <Text style={styles.btnEndText}>End</Text>
-        </Pressable>
       </View>
+      {/* END — square, candy red, directly under the Hairpin logo and matching its
+          exact footprint (mapLogoBacking: 50×50 r14 at right 12, top 52/28 — the
+          logo is zIndex 100 so it paints above this screen, which is deliberate).
+          Named "End" to match CarPlay/AA. */}
+      <Pressable onPress={props.onEnd} style={styles.endSquare} hitSlop={8}>
+        <Text style={styles.endSquareText}>End</Text>
+      </Pressable>
     </View>
   );
 }
@@ -113,7 +127,8 @@ const styles = StyleSheet.create({
   // Opaque, above the map overlays (they stay mounted beneath; zIndex wins among
   // siblings). Modals/sheets still present above via the native modal layer.
   root: { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.bg, zIndex: 50, elevation: 50 },
-  header: { paddingTop: 64, paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: COLORS.hairline },
+  // paddingRight clears the logo + End column on the right edge.
+  header: { paddingTop: Platform.OS === "ios" ? 64 : 40, paddingLeft: 20, paddingRight: 76, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: COLORS.hairline },
   onCar: { color: COLORS.brand, fontSize: 12, fontWeight: "800", letterSpacing: 1.2 },
   eta: { color: "#F4F4F4", fontSize: 22, fontWeight: "800", marginTop: 8 },
   dest: { color: "#9BA1A6", fontSize: 14, fontWeight: "600", marginTop: 2 },
@@ -121,8 +136,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", paddingVertical: 14, paddingHorizontal: 20, gap: 12 },
   rowCurrent: { backgroundColor: "rgba(45,236,134,0.08)", borderLeftWidth: 3, borderLeftColor: COLORS.brand },
   rowPast: { opacity: 0.35 },
-  rowNum: { color: "#6B7075", fontSize: 13, fontWeight: "700", width: 24, textAlign: "right" },
-  rowNumCurrent: { color: COLORS.brand },
+  // Mirrors the banner's green maneuver box (30×30 r8, brand green, dark glyph).
+  arrowBox: { width: 30, height: 30, borderRadius: 8, backgroundColor: COLORS.brand, alignItems: "center", justifyContent: "center" },
   rowBody: { flex: 1, minWidth: 0 },
   rowText: { color: "#D7DBDE", fontSize: 16, fontWeight: "600" },
   rowTextCurrent: { color: "#FFFFFF", fontSize: 18, fontWeight: "800" },
@@ -135,8 +150,13 @@ const styles = StyleSheet.create({
   },
   btnGhost: { flex: 1, height: 48, borderRadius: 12, borderWidth: 1, borderColor: COLORS.hairlineStrong, alignItems: "center", justifyContent: "center" },
   btnGhostText: { color: "#F4F4F4", fontSize: 16, fontWeight: "700" },
-  btnEnd: { width: 96, height: 48, borderRadius: 12, backgroundColor: "#FF453A", alignItems: "center", justifyContent: "center" },
-  btnEndText: { color: "#FFFFFF", fontSize: 16, fontWeight: "800" },
+  // Same footprint as mapLogoBacking (50×50 r14, right 12), stacked 8pt beneath it.
+  endSquare: {
+    position: "absolute", right: 12, top: (Platform.OS === "ios" ? 52 : 28) + 50 + 8,
+    width: 50, height: 50, borderRadius: 14, backgroundColor: CANDY_RED,
+    alignItems: "center", justifyContent: "center", zIndex: 60,
+  },
+  endSquareText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
   offer: {
     flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 16, marginTop: 10,
     padding: 12, borderRadius: 12, borderWidth: 1, borderColor: COLORS.brandDim,

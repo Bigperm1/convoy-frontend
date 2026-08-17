@@ -80,3 +80,25 @@ Glance app widgets: crew snapshot (resizable) + mic launcher. Same data plumbing
    camera math, refresh triggers) stays JS and OTA-able; the SwiftUI views do not.
 3. **Phase 2**: Live Activity (ActivityKit + push updates; needs backend push work).
 4. **Phase 3**: Android Glance pair.
+
+## Apple Watch (added same day — Jeff: "turnbyturn wrist taps")
+
+**Tier 0 — free-ish, OTA:** iPhone local notifications MIRROR to a paired Watch when
+the phone is locked. Post a turn-approach local notification (glyph + street + dist)
+while navigating with the phone locked → wrist tap at every turn, zero native work.
+Limits: only when the phone is locked (pocket / dark mount — i.e. the CarPlay case),
+standard tap not directional, and it must respect the existing notification-permission
+gate. Suppress when the phone screen is on (the banner would double the in-app one).
+
+**Tier 1 — watchOS companion app (native target, build 74/75 with the widgets):**
+- Turn card: maneuver glyph + street + live countdown, over WatchConnectivity from
+  the SAME tbt state that feeds the car list. No new nav logic.
+- DIRECTIONAL wrist taps: WKInterfaceDevice .directionUp/.directionDown (Apple's own
+  turn-guidance haptic vocabulary) — distinct left vs right patterns at N metres.
+- Complication: crew-live count on the watch face.
+- Later: wrist PTT (watch mic → WCSession relay → livePtt) — real walkie from the
+  handlebars; and crew glance.
+- ⚠ SPIKE REQUIRED at build time: background-haptic keep-alive strategy — workout
+  session (komoot pattern, review risk for "driving") vs watch-local notifications
+  scheduled from the phone (cleaner, standard haptic only). Decide with a device in
+  hand; do not commit to either in code before the spike.

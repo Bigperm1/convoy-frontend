@@ -1,7 +1,8 @@
-# Hairpin Widgets — spec for the next native build (74+)
+# Hairpin Widgets + Watch — BUILD 75 roadmap (Jeff's call, 2026-08-16)
 
-**Status: SPECCED 2026-08-16 (Jeff: "YES, can we have it all with different size
-widgets too?"). NATIVE work — none of this is OTA-able. Ships as its own target in
+**Status: SPECCED 2026-08-16, SLOTTED FOR BUILD 75 (Jeff: "lets do for build 75 roadmap.
+lets dial in the current issues and resolve them first"). Build 74 remains the already-
+staged native items (dep removals, etc.). NATIVE work — none of this is OTA-able. Ships as its own target in
 the next paid build, runtime bump, BOTH platforms cut per the parity rule (the
 widget is iOS-first but Android must be rebuilt at the same runtime or it orphans).**
 
@@ -74,9 +75,9 @@ Glance app widgets: crew snapshot (resizable) + mic launcher. Same data plumbing
   screen with the normal staggered prompt, per permissionGate rules).
 
 ## Phasing
-1. **Build 74**: extension target + App Group + small/medium/large + lock screen
+1. **Build 75**: extension target + App Group + small/medium/large + lock screen
    accessories + mic-launcher intent + deep links + snapshot endpoint.
-2. **74.x OTA-tunable bits**: everything INSIDE the app (deep-link behavior, snapshot
+2. **75.x OTA-tunable bits**: everything INSIDE the app (deep-link behavior, snapshot
    camera math, refresh triggers) stays JS and OTA-able; the SwiftUI views do not.
 3. **Phase 2**: Live Activity (ActivityKit + push updates; needs backend push work).
 4. **Phase 3**: Android Glance pair.
@@ -90,7 +91,7 @@ Limits: only when the phone is locked (pocket / dark mount — i.e. the CarPlay 
 standard tap not directional, and it must respect the existing notification-permission
 gate. Suppress when the phone screen is on (the banner would double the in-app one).
 
-**Tier 1 — watchOS companion app (native target, build 74/75 with the widgets):**
+**Tier 1 — watchOS companion app (native target, build 75 with the widgets):**
 - Turn card: maneuver glyph + street + live countdown, over WatchConnectivity from
   the SAME tbt state that feeds the car list. No new nav logic.
 - DIRECTIONAL wrist taps: WKInterfaceDevice .directionUp/.directionDown (Apple's own

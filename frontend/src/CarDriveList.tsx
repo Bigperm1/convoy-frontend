@@ -15,13 +15,11 @@
 
 import React, { useEffect, useRef } from "react";
 import { FlatList, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import { GlassFill } from "./Glass";
 import { ManeuverArrow, maneuverDir } from "./components/ManeuverArrow";
 import { COLORS } from "./theme";
 import { NavStep, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec } from "./nav";
-
-// Candy-apple red — the SAME red as the phone speedo's speeding state (OVER_RED,
-// TurnByTurnNav.tsx). Jeff, 2026-08-16: every red button on phone/CarPlay/AA uses it.
-const CANDY_RED = "#E4002B";
 
 const strip = (h?: string) => (h || "").replace(/<[^>]+>/g, "").trim();
 
@@ -117,6 +115,15 @@ export default function CarDriveList(props: {
           logo is zIndex 100 so it paints above this screen, which is deliberate).
           Named "End" to match CarPlay/AA. */}
       <Pressable onPress={props.onEnd} style={styles.endSquare} hitSlop={8}>
+        {/* The CANDY-APPLE construction, copied exactly from StepDrawer's End circle
+            (Jeff, 2026-08-16: "way more premium looking" — the premium is not the hex,
+            it's the bright→deep gradient + red-tinted glass sheen + rosy border). */}
+        <LinearGradient
+          colors={["#FF3B5C", "#E4002B", "#B00020"]}
+          locations={[0, 0.5, 1]}
+          style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
+        />
+        <GlassFill tintColor="#E4002B" style={{ borderRadius: 14, overflow: "hidden" }} />
         <Text style={styles.endSquareText}>End</Text>
       </Pressable>
     </View>
@@ -151,9 +158,11 @@ const styles = StyleSheet.create({
   btnGhost: { flex: 1, height: 48, borderRadius: 12, borderWidth: 1, borderColor: COLORS.hairlineStrong, alignItems: "center", justifyContent: "center" },
   btnGhostText: { color: "#F4F4F4", fontSize: 16, fontWeight: "700" },
   // Same footprint as mapLogoBacking (50×50 r14, right 12), stacked 8pt beneath it.
+  // Container transparent + clipped: the color is the candy gradient child.
   endSquare: {
     position: "absolute", right: 12, top: (Platform.OS === "ios" ? 52 : 28) + 50 + 8,
-    width: 50, height: 50, borderRadius: 14, backgroundColor: CANDY_RED,
+    width: 50, height: 50, borderRadius: 14, backgroundColor: "transparent",
+    overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,90,120,0.9)",
     alignItems: "center", justifyContent: "center", zIndex: 60,
   },
   endSquareText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },

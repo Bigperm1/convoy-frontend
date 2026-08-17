@@ -57,7 +57,10 @@ export default function CarDriveList(props: {
     <View style={styles.root} pointerEvents="auto">
       <View style={styles.header}>
         <Text style={styles.onCar}>NAVIGATION IS ON YOUR CAR SCREEN</Text>
-        <Text style={styles.eta}>
+        {/* ONE line, always (Jeff, 2026-08-16: "the AM is on its own and doesn't look
+            polished") — same auto-shrink pattern as the speedo numbers: a long ETA or
+            "11:41 PM" scales the whole line down instead of wrapping its tail. */}
+        <Text style={styles.eta} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
           {fmtEtaSec(props.etaSeconds)} · {fmtDistanceM(props.distanceRemainingM)} · arrive {props.arrivalText}
         </Text>
         {!!props.destinationLabel && <Text style={styles.dest} numberOfLines={1}>{props.destinationLabel}</Text>}

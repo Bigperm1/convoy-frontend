@@ -40,6 +40,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { fmtPitstop } from '../pitstop';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
+import { LinearGradient } from 'expo-linear-gradient';
 import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, claimCarNavStrip, getCarState, useCarStore, emitCarGesture, type CarPeer } from './carStore';
 import CarMapView, { CAR_LEFT_PAD_FRAC, hudScaleFor, aaMapScaleFor } from './CarMapView';
 import { GlassFill, hudTint } from '../Glass';
@@ -770,9 +771,23 @@ export function CarSurface() {
           </Animated.View>
         ) : null}
         <Animated.View style={[styles.speedPill, { backgroundColor: speedoBg, opacity: speedPulse }]}>
+          {/* CANDY-APPLE over-limit (Jeff, 2026-08-16: "carplay/aa speeding is the same
+              candy red gradient too") — the StepDrawer End recipe: bright→deep gradient
+              with a red-tinted glass sheen refracting it. The flat #E4002B floor stays
+              UNDERNEATH as the fallback: if LinearGradient ever fails to paint on a
+              head unit (car-surface native views have form here — fitBounds silently
+              no-oped), the pill degrades to today's solid red, never to transparent.
+              One component serves CarPlay AND AA, so both get it. */}
+          {speedoOver && (
+            <LinearGradient
+              colors={["#FF3B5C", "#E4002B", "#B00020"]}
+              locations={[0, 0.5, 1]}
+              style={[StyleSheet.absoluteFill, { borderRadius: 12 }]}
+            />
+          )}
           {/* 16 -> 14 to match speedPill's radius. Harmless behind the old 1pt hairline;
               against the new 2pt black rule a 2pt-proud glass corner would show. */}
-          <GlassFill tintColor={undefined} style={{ borderRadius: 14, overflow: 'hidden' }} />
+          <GlassFill tintColor={speedoOver ? '#E4002B' : undefined} style={{ borderRadius: 14, overflow: 'hidden' }} />
           <Text style={styles.speedNum} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{spd.value}</Text>
           <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
         </Animated.View>

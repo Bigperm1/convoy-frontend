@@ -25,6 +25,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Animated } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { GlassFill, hudTint, glassLift } from "../Glass";
+import { LinearGradient } from "expo-linear-gradient";
 import { ManeuverArrow, maneuverDir } from "./ManeuverArrow";
 import { speedLimitVisible } from "../speedLimit";
 
@@ -161,6 +162,17 @@ export function SpeedPill({ speedMs, unit, bottom, limitKmh }: { speedMs?: numbe
         />
       )}
       <View style={[styles.speedPill, speeding && styles.speedPillOver]}>
+        {/* CANDY-APPLE over-limit (2026-08-16) — the same bright→deep gradient +
+            red-tinted glass the StepDrawer End button and the car speedo use, so
+            "speeding red" is ONE look on phone, CarPlay and AA. The flat OVER_RED
+            floor (speedPillOver) stays underneath as the fallback. */}
+        {speeding && (
+          <LinearGradient
+            colors={["#FF3B5C", "#E4002B", "#B00020"]}
+            locations={[0, 0.5, 1]}
+            style={[StyleSheet.absoluteFill, { borderRadius: 16 }]}
+          />
+        )}
         {/* Glass speedo; red-tinted glass when over the limit. */}
         <GlassFill tintColor={speeding ? OVER_RED : hudTint()} style={{ borderRadius: 16, overflow: "hidden" }} />
         <Text style={styles.speedValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{value}</Text>

@@ -778,7 +778,11 @@ export function CarSurface() {
               head unit (car-surface native views have form here — fitBounds silently
               no-oped), the pill degrades to today's solid red, never to transparent.
               One component serves CarPlay AND AA, so both get it. */}
-          {speedoOver && (
+          {/* ⚠ MITIGATION (2026-08-18): iOS-only for now — the other of the two Sunday
+              changes touching the AA surface (see the bisect note above). AA keeps the
+              flat #E4002B floor (visually near-identical). Restore after the crash
+              bisect clears it. */}
+          {Platform.OS === 'ios' && speedoOver && (
             <LinearGradient
               colors={["#FF3B5C", "#E4002B", "#B00020"]}
               locations={[0, 0.5, 1]}
@@ -844,9 +848,15 @@ export function CarSurface() {
           (map.tsx:3204). Small and non-tappable by necessity: CarPlay routes touches
           through the template, so nothing we draw can ever be a control. Crew counts
           OTHER crew only, same rule as the phone. */}
-      {/* AA scales about LEFT top — with the pill left-anchored there (Jeff, 2026-08-15),
-          a center origin would drag it back toward the middle as hudScale drops. */}
-      <View style={[styles.topCenterRow, hudFit(IS_AA ? 'left top' : 'center top')]} pointerEvents="none">
+      {/* ⚠ MITIGATION (2026-08-18): the AA left-anchor + 'left top' transformOrigin is
+          SUSPENDED. Say Phin's phone crash-loops at AA connect on every bundle since the
+          Sunday design OTAs, dying before any instrument fires; the emulator cannot repro
+          (stub AA, stale build), so this is a deliberate bisect: this line and the
+          alignItems below are one of only two Sunday changes that execute on the AA
+          surface at connect. AA pill temporarily back to CENTRED. If his connect works on
+          this bundle, the crash lives here; re-land the left-anchor behind a verified-safe
+          form afterwards. Do NOT restore without a passing head-unit test. */}
+      <View style={[styles.topCenterRow, hudFit('center top')]} pointerEvents="none">
         <View style={[styles.crewPill, { backgroundColor: carHudFloor() }]}>
           <GlassFill tintColor={undefined} style={{ borderRadius: 9, overflow: 'hidden' }} />
           {/* RED until location is set to Always (Jeff, 2026-07-30). This is the one
@@ -1846,7 +1856,10 @@ const styles = StyleSheet.create({
   // AA: LEFT-anchored, not centred (Jeff, 2026-08-15: "for aa move the crew to the top
   // left side"). AA's system chrome floats top-RIGHT (from ~128dp of 213), so top-left
   // is the free corner there; CarPlay keeps gap-centred between the zoom pair and Search.
-  topCenterRow: { position: 'absolute', top: CAR_PILL_TOP, left: CAR_BAR_LEADING_W, right: CAR_BAR_TRAILING_W, alignItems: IS_AA ? 'flex-start' : 'center' },
+  // alignItems: IS_AA flex-start SUSPENDED with the transformOrigin above (see the
+  // mitigation note at the render site) — centred everywhere until the AA crash bisect
+  // clears this pair.
+  topCenterRow: { position: 'absolute', top: CAR_PILL_TOP, left: CAR_BAR_LEADING_W, right: CAR_BAR_TRAILING_W, alignItems: 'center' },
   statusRow: { position: 'absolute', top: CAR_PILL_TOP + CREW_PILL_H + NAV_GAP, left: 0, right: 0, alignItems: 'center' },
   // marginHorizontal is the STRUCTURAL half of the fix: the parent topCenterRow is
   // alignItems:'center', so Yoga subtracts these margins from the pill's available width.

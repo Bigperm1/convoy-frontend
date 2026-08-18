@@ -72,7 +72,7 @@ import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
 import { shareInbox } from "../../src/shareInbox";
 import { cruisePlot } from "../../src/cruisePlot";
-import { startNavBanner, stopNavBanner, updateNavBanner, askAlwaysLocationOnce, getNavStartedAt, CAR_NAV_KEY } from "../../src/navNotification";
+import { startNavBanner, stopNavBanner, updateNavBanner, swapNavRoute, isNavSessionLive, acquireBgLocation, askAlwaysLocationOnce, getNavStartedAt, CAR_NAV_KEY } from "../../src/navNotification";
 import { onCarNavStarted } from "../../src/carplay/carActions";
 import { PoliceBadgeIcon } from "../../src/components/MapControlIcons";
 import CompassNeedle from '../../src/components/CompassNeedle';
@@ -1944,12 +1944,58 @@ export default function MapScreen() {
         c && typeof c.lat === "number" ? { lat: c.lat, lng: c.lng } : undefined);
     }
   }, [navMode, destination]);
+  // ── THE TEARDOWN FLAP, FIXED (2026-08-18) ──────────────────────────────────
+  // This effect used to depend on [navMode, activeRoute, destination?.label], so EVERY
+  // activeRoute identity change — a reroute, and every traffic refresh (which mints a
+  // new route object with identical geometry, see useRouteTrafficRefresh above) — ran
+  // stopNavBanner() + startNavBanner() mid-drive. stopNavBanner is the UNIVERSAL
+  // teardown: navigating:false (released the car's North-Up hold — Say Phin 8/17),
+  // ribbon + strip cleared and ownership dropped, bg-location hold released, and the
+  // restart re-anchored the cold engine at step 0 on a route whose first endpoint was
+  // already behind the driver (the rem-GROWING / inflated-ETA fork, seen twice 8/17).
+  // Now: the SESSION starts/stops ONLY on navMode; route changes swap IN PLACE.
+  // bannerSessionRef: has THIS component started a banner session for the current
+  // turn-by-turn stint? Start happens on the first (mode, route) pairing regardless of
+  // which arrives first; stop happens ONLY when navMode leaves turn-by-turn.
+  const bannerSessionRef = useRef(false);
+  useEffect(() => {
+    if (navMode !== "turn-by-turn") return;
+    // CLEANUP-ONLY BY DESIGN — do not merge this into the route effect below. Its one
+    // job is firing the teardown exactly when navMode leaves turn-by-turn (or the
+    // screen unmounts). Merging it back recreates the stop+start-on-every-traffic-
+    // refresh flap this pair of effects exists to kill (the 8/17 rem-GROWING bug).
+    return () => {
+      bannerSessionRef.current = false;
+      navBgActiveRef.current = false;
+      stopNavBanner();
+    };
+  }, [navMode]);
   useEffect(() => {
     if (navMode !== "turn-by-turn" || !activeRoute) return;
-    startNavBanner(activeRoute, destination?.label)
-      .then((bg) => { navBgActiveRef.current = bg; })
-      .catch(() => {});
-    return () => { navBgActiveRef.current = false; stopNavBanner(); };
+    // isNavSessionLive heals danglers (review fix): if an out-of-band teardown — a
+    // different JS context, a car-surface End — killed the session while navMode
+    // stayed turn-by-turn, re-START on the next route change instead of feeding
+    // swaps to a dead session. A start that threw also re-runs here (the .catch
+    // resets the flag) instead of silencing the stint.
+    if (!bannerSessionRef.current || !isNavSessionLive()) {
+      bannerSessionRef.current = true;
+      startNavBanner(activeRoute, destination?.label)
+        .then((bg) => { navBgActiveRef.current = bg; })
+        .catch(() => { bannerSessionRef.current = false; });
+    } else {
+      // In-place swap: keeps step progress on same-geometry swaps (traffic refresh),
+      // re-anchors at step 0 only for genuinely new geometry (a reroute, computed
+      // from the current position). Never touches navigating/holds/ownership.
+      void swapNavRoute(activeRoute, destination?.label);
+      // Bg-location retry (review fix): the old per-route-change restart accidentally
+      // re-acquired the background feed, healing a mid-drive "Always" grant or a
+      // transient first-acquire failure. Keep that healing on the same cadence.
+      if (!navBgActiveRef.current) {
+        acquireBgLocation("nav")
+          .then((ok) => { if (ok) navBgActiveRef.current = true; })
+          .catch(() => {});
+      }
+    }
   }, [navMode, activeRoute, destination?.label]);
   useEffect(() => {
     if (navMode === "turn-by-turn" && coords && !navBgActiveRef.current) {

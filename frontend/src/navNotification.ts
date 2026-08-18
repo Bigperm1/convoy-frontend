@@ -91,11 +91,23 @@ type SlimStep = { endLat: number; endLng: number; maneuver?: string; html: strin
 type SlimRoute = {
   steps: SlimStep[]; destLabel?: string; paceSPerM?: number;
   totalM?: number; startedAt?: number; destLat?: number; destLng?: number;
+  // Route GENERATION identity (review fix, 2026-08-18): minted at session start and at
+  // every NEW-GEOMETRY swap; persisted progress carries the routeId it applies to, so a
+  // progress row from a superseded route can never Math.max-pin the new one (the
+  // stale-tick-after-reroute clobber). Shared across JS contexts via ROUTE_KEY.
+  routeId?: number;
 };
 
 // Module-level cache. NOTE: a backgrounded location task can run in a separate
 // JS context where these reset, so progress is also mirrored to AsyncStorage.
 let _route: SlimRoute | null = null;
+// The live route's full overview polyline — the SAME "is this the same route" identity
+// nav.ts's useTurnByTurn keys its re-anchor on, so the two engines can never disagree
+// about whether a swap changed the route (review fix, 2026-08-18).
+let _routePolyline: string | null = null;
+// In-flight teardown, awaited by startNavBanner so a stop from the PREVIOUS stint can
+// never land its releases after the next stint's acquires (review fix, 2026-08-18).
+let _stopPromise: Promise<void> | null = null;
 let _stepIdx = 0;
 let _notifiedStep = -1;
 let _routeLookAt = 0;
@@ -117,7 +129,7 @@ let _progressReadAt = 0;
 // only after the setItem resolves, so a failed write is retried on the next fix.
 let _progressWritten = "";
 async function persistProgress(idx: number, notified: number): Promise<void> {
-  const next = JSON.stringify({ idx, notified });
+  const next = JSON.stringify({ idx, notified, rid: _route?.routeId });
   if (next === _progressWritten) return;
   try {
     await AsyncStorage.setItem(PROGRESS_KEY, next);
@@ -348,7 +360,15 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
   let notified = _notifiedStep;
   try {
     const raw = await AsyncStorage.getItem(PROGRESS_KEY);
-    if (raw) { const p = JSON.parse(raw); startIdx = Math.max(startIdx, p.idx ?? 0); notified = Math.max(notified, p.notified ?? -1); }
+    if (raw) {
+      const p = JSON.parse(raw);
+      // Only adopt persisted progress that belongs to THIS route generation. Legacy
+      // rows (no rid) are accepted so a mid-OTA cross-context handover still works.
+      if (p.rid == null || p.rid === route.routeId) {
+        startIdx = Math.max(startIdx, p.idx ?? 0);
+        notified = Math.max(notified, p.notified ?? -1);
+      }
+    }
   } catch {}
 
   let idx = Math.min(startIdx, steps.length - 1);
@@ -357,6 +377,12 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
     idx += 1;
     d = haversineMeters({ lat, lng }, { lat: steps[idx].endLat, lng: steps[idx].endLng });
   }
+  // STALE-TICK FENCE (review fix, 2026-08-18): if a swap/stop replaced the live route
+  // while this call was suspended at an await above, everything computed here belongs
+  // to the OLD route — writing it back would clobber the swap's reset and pin the new
+  // route at a stale idx. Cold contexts (route hydrated from disk, _route null) are
+  // exempt: they have no in-context route to be stale against.
+  if (_route && route !== _route) return;
   _stepIdx = idx;
 
   const arriving = idx >= steps.length - 1 && d < 60;
@@ -867,8 +893,123 @@ export async function releaseBgLocation(tag: string): Promise<void> {
 // Begin the nav banner for a route. Returns true if the background location task
 // started (banner will keep updating while backgrounded); false means it'll
 // only update while the app is foregrounded (caller drives it via updateNavBanner).
+/** ONE constructor for the persisted slim route — startNavBanner AND swapNavRoute
+ * both use it, so a future field cannot exist in one and silently vanish from the
+ * other at the first mid-drive swap (review fix, 2026-08-18). */
+function buildSlimRoute(route: NavRoute, destLabel: string | undefined, startedAt: number, routeId: number): SlimRoute {
+  return {
+    destLabel,
+    totalM: route.distance_m > 0 ? route.distance_m : undefined,
+    startedAt,
+    routeId,
+    destLat: route.steps?.[route.steps.length - 1]?.end?.lat,
+    destLng: route.steps?.[route.steps.length - 1]?.end?.lng,
+    paceSPerM: route.distance_m > 0 && route.duration_s > 0 ? route.duration_s / route.distance_m : undefined,
+    steps: (route.steps || []).map((s) => ({
+      endLat: s.end.lat, endLng: s.end.lng, maneuver: s.maneuver, html: s.html,
+      distanceM: typeof s.distance_m === "number" ? s.distance_m : undefined,
+    })),
+  };
+}
+
+/** True while a nav-banner session is live in THIS context. map.tsx uses it to heal
+ * danglers: if an out-of-band teardown (another context, a car surface) killed the
+ * session while navMode stayed turn-by-turn, the next route change re-STARTS instead
+ * of feeding swaps to a dead session (review fix, 2026-08-18). */
+export function isNavSessionLive(): boolean {
+  return !!_route && !_navEnding;
+}
+
+/**
+ * IN-PLACE route replacement for a LIVE nav session — reroutes and traffic refreshes.
+ * The fix for the teardown flap (2026-08-18): map.tsx used to stop+start the whole
+ * banner on every activeRoute identity change, and stopNavBanner is the UNIVERSAL
+ * teardown — navigating:false (which releases the car's North-Up hold), ribbon
+ * cleared, strip ownership dropped, bg-location hold released — all mid-drive, on
+ * every reroute AND every traffic refresh (which mints a new route object with
+ * identical geometry, map.tsx:~1222). This swaps the route without touching any of
+ * that session state.
+ *
+ * Progress: if the new route's GEOMETRY matches the current one (same step count +
+ * same step endpoints — a traffic refresh), _stepIdx and notifications are KEPT: the
+ * driver has not moved routes, only the metadata has. A genuinely new geometry (a
+ * reroute) re-anchors at 0 — correct because reroutes are computed FROM the current
+ * position, so step 0 starts where the driver is. This is what stops the cold engine
+ * restarting mid-route on a stale anchor (the rem-GROWING fork, 8/17 twice).
+ */
+export async function swapNavRoute(route: NavRoute, destLabel?: string): Promise<void> {
+  // A teardown in flight (or already done) wins outright — never resurrect keys or
+  // carStore state after an End/arrival (review fix, 2026-08-18).
+  if (_navEnding || !_route) return;
+  // SAMENESS = the polyline string, the exact rule useTurnByTurn re-anchors on
+  // (nav.ts) — so the phone engine and this one always agree on whether the route
+  // changed. Endpoint comparison stays as the fallback for a route with no polyline.
+  const sameGeometry = (route.polyline && _routePolyline)
+    ? route.polyline === _routePolyline
+    : (_route.steps.length === (route.steps?.length ?? 0) &&
+       _route.steps.every((st, i) => {
+         const n = route.steps[i];
+         return n && Math.abs(st.endLat - n.end.lat) < 1e-6 && Math.abs(st.endLng - n.end.lng) < 1e-6;
+       }));
+  const keepIdx = sameGeometry ? _stepIdx : 0;
+  const keepNotified = sameGeometry ? _notifiedStep : -1;
+  // startedAt is kept in BOTH arms: a reroute is the SAME DRIVE (review fix — the
+  // first version re-stamped on new geometry, which is exactly the trips.duration_s
+  // truncation this field exists to prevent). Cost, accepted and documented: a drive
+  // longer than MAX_PERSISTED_ROUTE_AGE_MS (6 h) can now age its persisted route out
+  // of the cross-context lookup even with reroutes — trips correctness outranks it.
+  const slim = buildSlimRoute(
+    route, destLabel, _route.startedAt ?? Date.now(),
+    sameGeometry ? (_route.routeId ?? Date.now()) : Date.now(),
+  );
+  _route = slim;
+  _routePolyline = route.polyline || _routePolyline;
+  _stepIdx = keepIdx;
+  _notifiedStep = keepNotified;
+  if (!sameGeometry) {
+    resetColdArrival();          // a new geometry must be able to arrive again
+    _progressWritten = "";       // first write of the new generation must not be suppressed
+  }
+  _routeLookAt = 0;
+  _progressReadAt = 0;
+  try {
+    await AsyncStorage.setItem(ROUTE_KEY, JSON.stringify(slim));
+    // PROGRESS/POLYLINE writes only when they actually changed: on the same-geometry
+    // path (every 2-minute traffic refresh, all drive long) both are byte-identical,
+    // and the polyline alone is tens of KB (review fix: redundant I/O on a device
+    // already fighting heat).
+    if (!sameGeometry) {
+      await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx: keepIdx, notified: keepNotified, rid: slim.routeId }));
+      await AsyncStorage.setItem(NAV_POLY_KEY, route.polyline || "");
+    }
+    // Re-check after the awaits: an End/arrival may have torn the session down while
+    // the writes were in flight — its clears must win on carStore.
+    if (_navEnding || _route !== slim) return;
+    if (!sameGeometry) setCarState({ routePolyline: route.polyline || "" });
+  } catch {}
+}
+
 export async function startNavBanner(route: NavRoute, destLabel?: string): Promise<boolean> {
   try {
+    // A stop from the PREVIOUS stint may still be mid-flight (its cleanup is
+    // un-awaited in map.tsx). Wait it out so its releases can never land after this
+    // session's acquires and strand the location feeds (review fix, 2026-08-18).
+    if (_stopPromise) { try { await _stopPromise; } catch {} }
+    // STATE FIRST, SYNCHRONOUSLY (review fix): _route used to be assigned only after
+    // the permission awaits below — seconds on a first drive with the dialog up — and
+    // any swap in that window silently no-oped, then the stale pre-swap route was
+    // installed. With the slim built and assigned before any await, a concurrent swap
+    // sees a live session; the generation guard below keeps this function's own later
+    // writes from clobbering a newer swap.
+    const slim = buildSlimRoute(route, destLabel, Date.now(), Date.now());
+    _route = slim;
+    _routePolyline = route.polyline || null;
+    _stepIdx = 0;
+    _notifiedStep = -1; // -1 so the FIRST turn still announces when it's incoming
+    resetColdArrival();  // a new route must be able to arrive again (also clears _navEnding)
+    _routeLookAt = 0;
+    _progressReadAt = 0;
+    _progressWritten = "";
     const perm = await Notifications.getPermissionsAsync();
     if (!perm.granted) { try { await Notifications.requestPermissionsAsync(); } catch {} }
 
@@ -883,39 +1024,20 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
       } catch {}
     }
 
-    const slim: SlimRoute = {
-      destLabel,
-      // Trip baseline for a COLD arrival's recordTrip (see recordColdTrip).
-      totalM: route.distance_m > 0 ? route.distance_m : undefined,
-      startedAt: Date.now(),
-      destLat: route.steps?.[route.steps.length - 1]?.end?.lat,
-      destLng: route.steps?.[route.steps.length - 1]?.end?.lng,
-      // Traffic-aware average pace (s/m) — lets the cold bg task turn remaining
-      // meters into a live ETA without the phone engine (Wave 2).
-      paceSPerM: route.distance_m > 0 && route.duration_s > 0 ? route.duration_s / route.distance_m : undefined,
-      steps: (route.steps || []).map((s) => ({
-        endLat: s.end.lat, endLng: s.end.lng, maneuver: s.maneuver, html: s.html,
-        distanceM: typeof s.distance_m === "number" ? s.distance_m : undefined,
-      })),
-    };
-    _route = slim;
-    _stepIdx = 0;
-    _notifiedStep = -1; // -1 so the FIRST turn still announces when it's incoming
-    resetColdArrival();  // a new route must be able to arrive again
-    _routeLookAt = 0;    // and be discoverable by the other feed at once
-    // New route ⇒ new progress. Re-arm BOTH halves of the cadence: 0 so the next fix
-    // re-reads (matching today's per-fix behaviour exactly), "" so the first write of
-    // this route can never be suppressed by the previous route's cached value.
-    _progressReadAt = 0;
-    _progressWritten = "";
+    // GENERATION GUARD: a swap may have superseded this session's route while the
+    // permission/channel awaits above were in flight. The CURRENT _route (not this
+    // function's captured slim) is what must reach disk and the car.
     try {
-      await AsyncStorage.setItem(ROUTE_KEY, JSON.stringify(slim));
-      await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx: 0, notified: -1 }));
-      // Persist the full overview polyline for the cold-CarPlay car map (PART 4).
-      await AsyncStorage.setItem(NAV_POLY_KEY, route.polyline || "");
-      // Feed it into carStore immediately too, so a car already connected draws it
-      // without waiting for the next cold read.
-      setCarState({ routePolyline: route.polyline || "" });
+      const live = _route;
+      if (live && !_navEnding) {
+        await AsyncStorage.setItem(ROUTE_KEY, JSON.stringify(live));
+        await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx: _stepIdx, notified: _notifiedStep, rid: live.routeId }));
+        // Persist the full overview polyline for the cold-CarPlay car map (PART 4).
+        await AsyncStorage.setItem(NAV_POLY_KEY, _routePolyline || "");
+        // Feed it into carStore immediately too, so a car already connected draws it
+        // without waiting for the next cold read.
+        if (!_navEnding) setCarState({ routePolyline: _routePolyline || "" });
+      }
     } catch {}
 
     // No "Navigation started" banner — the off-screen banner should appear ONLY
@@ -938,8 +1060,14 @@ export function getNavStartedAt(): number | null {
 }
 
 export async function stopNavBanner(): Promise<void> {
+  const p = stopNavBannerInner();
+  _stopPromise = p;
+  return p;
+}
+async function stopNavBannerInner(): Promise<void> {
   _navEnding = true;   // close the resurrect-from-storage window (see the flag's note)
   _route = null;
+  _routePolyline = null;
   _stepIdx = 0;
   _notifiedStep = -1;
   // Re-arm the progress cadence: after a teardown this context can still DISCOVER a

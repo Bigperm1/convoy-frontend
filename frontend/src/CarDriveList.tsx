@@ -15,6 +15,7 @@
 
 import React, { useEffect, useRef } from "react";
 import { FlatList, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { GlassFill } from "./Glass";
 import { ManeuverArrow, maneuverDir } from "./components/ManeuverArrow";
@@ -42,6 +43,12 @@ export default function CarDriveList(props: {
   onEnd: () => void;
 }) {
   const { steps, stepIndex } = props;
+  // The tab bar is position:'absolute' (app/(app)/_layout.tsx ~:285, 86pt iOS / 84pt
+  // Android + bottom inset), so screen content flows UNDER it — which put this
+  // footer's "Show map" beneath the bottom chrome on iOS (Jeff's 8/17 photo). Lift
+  // the footer to sit ON the tab bar's top edge; keep numbers in sync with _layout.
+  const insets = useSafeAreaInsets();
+  const tabBarH = (Platform.OS === "ios" ? 86 : 84) + (Platform.OS === "android" ? insets.bottom : 0);
   // The row that matters is the UPCOMING maneuver — same +1 convention as the
   // phone banner and the car strip (map.tsx:4406).
   const upcomingIdx = Math.min(stepIndex + 1, Math.max(0, steps.length - 1));
@@ -84,7 +91,7 @@ export default function CarDriveList(props: {
         data={steps}
         keyExtractor={(_, i) => String(i)}
         onScrollToIndexFailed={() => {}}
-        contentContainerStyle={styles.listPad}
+        contentContainerStyle={[styles.listPad, { paddingBottom: tabBarH + 84 }]}
         renderItem={({ item, index }) => {
           const current = index === upcomingIdx;
           const past = index < upcomingIdx;
@@ -108,7 +115,7 @@ export default function CarDriveList(props: {
           );
         }}
       />
-      <View style={styles.footer}>
+      <View style={[styles.footer, { bottom: tabBarH }]}>
         <Pressable onPress={props.onShowMap} style={styles.btnGhost} hitSlop={8}>
           <Text style={styles.btnGhostText}>Show map</Text>
         </Pressable>
@@ -142,7 +149,7 @@ const styles = StyleSheet.create({
   onCar: { color: COLORS.brand, fontSize: 12, fontWeight: "800", letterSpacing: 1.2 },
   eta: { color: "#F4F4F4", fontSize: 22, fontWeight: "800", marginTop: 8 },
   dest: { color: "#9BA1A6", fontSize: 14, fontWeight: "600", marginTop: 2 },
-  listPad: { paddingVertical: 8, paddingBottom: 120 },
+  listPad: { paddingVertical: 8 },
   row: { flexDirection: "row", alignItems: "center", paddingVertical: 14, paddingHorizontal: 20, gap: 12 },
   rowCurrent: { backgroundColor: "rgba(45,236,134,0.08)", borderLeftWidth: 3, borderLeftColor: COLORS.brand },
   rowPast: { opacity: 0.35 },
@@ -153,9 +160,10 @@ const styles = StyleSheet.create({
   rowTextCurrent: { color: "#FFFFFF", fontSize: 18, fontWeight: "800" },
   rowDist: { color: "#9BA1A6", fontSize: 13, fontWeight: "700" },
   rowDistCurrent: { color: COLORS.brand, fontSize: 15, fontWeight: "800" },
+  // `bottom` is set inline (tab bar height + inset — see tabBarH above).
   footer: {
-    position: "absolute", left: 0, right: 0, bottom: 0, flexDirection: "row", gap: 12,
-    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 34, backgroundColor: COLORS.bg,
+    position: "absolute", left: 0, right: 0, flexDirection: "row", gap: 12,
+    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: COLORS.bg,
     borderTopWidth: 1, borderTopColor: COLORS.hairline,
   },
   btnGhost: { flex: 1, height: 48, borderRadius: 12, borderWidth: 1, borderColor: COLORS.hairlineStrong, alignItems: "center", justifyContent: "center" },

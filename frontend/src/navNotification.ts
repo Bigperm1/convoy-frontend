@@ -24,7 +24,7 @@ import {
 import { maneuverDir } from "./components/ManeuverArrow";
 import { setCarState, setCarSelfPosition, claimCarNavStrip, releaseCarNavStrip } from "./carplay/carStore";
 import { CAR_DIAG_MODE } from "./carplay/carPlayShared";
-import { resetMapView2D } from "./mapViewMode";
+import { resetMapView2D, setMapView2D } from "./mapViewMode";
 import { getSettings, getMapMode } from "./settings";
 import { updateSpeedLimit } from "./speedLimit";
 import { recordTrip } from "./trips";
@@ -1010,6 +1010,12 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
     _routeLookAt = 0;
     _progressReadAt = 0;
     _progressWritten = "";
+    // 3D IS THE ROUTING VIEW (Jeff, 2026-08-18): idle sits in 2D with the sprite
+    // markers; a route starting is what earns the 3D chase + GLB car, on every
+    // surface. The 2D button stays available as a per-drive override; the universal
+    // teardown resets to the 2D idle default. Here (not map.tsx) because this is the
+    // ONE start every path funnels through — phone, adoption, car-started.
+    setMapView2D(false);
     const perm = await Notifications.getPermissionsAsync();
     if (!perm.granted) { try { await Notifications.requestPermissionsAsync(); } catch {} }
 

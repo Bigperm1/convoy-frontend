@@ -31,7 +31,7 @@ import { startNavBanner, stopNavBanner, CAR_NAV_KEY } from '../navNotification';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
-import { toggleMapView2D } from '../mapViewMode';
+import { toggleMapView2D, setMapView2D } from '../mapViewMode';
 import { getDepartureBearing, orderRoutesForward } from '../departureBearing';
 import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_VIEW_2D } from './carButtonIcons';
 import { toggleCarComms } from './carComms';
@@ -963,6 +963,13 @@ export function handleCarMapButton(id: string): void {
   }
   if (id === 'car-view') {
     // Pure VIEW toggle — routing, the route line and guidance are all untouched.
+    // 8/18 rule: 3D exists only while ROUTING. Idle press pins 2D instead of
+    // toggling, so the car can never sit in an idle 3D view.
+    if (!getCarState().navigating) {
+      setMapView2D(true);
+      toast('2D view');
+      return;
+    }
     const twoD = toggleMapView2D();
     toast(twoD ? '2D view' : '3D view');
     return;

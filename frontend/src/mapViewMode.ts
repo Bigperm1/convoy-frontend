@@ -31,8 +31,17 @@ import { useEffect, useState } from 'react';
 
 type Listener = (twoD: boolean) => void;
 
-// false = 3D (the default, unchanged from before this existed).
-let _twoD = false;
+// ── LIFECYCLE INVERTED (Jeff, 2026-08-18) ───────────────────────────────────────
+// "the non routing view is the 2d mode with the high res png files not the 3d with
+// the GLB marker. 3D should only be when routing with the option to 2D by pushing
+// the button."
+// So: IDLE (no route) = 2D flat + the 512px sprites, everywhere including the car
+// surfaces (their carFlat path already draws the same sprite art). Starting a route
+// forces 3D (startNavBanner — the universal start). The button remains a session
+// override DURING a drive; route end resets back to the 2D idle default
+// (resetMapView2D — the universal teardown already calls it).
+// true = 2D (the idle default per the 8/18 rule).
+let _twoD = true;
 const listeners = new Set<Listener>();
 
 /** Current view. true = flat 2D "convoy" view, false = 3D. */
@@ -66,8 +75,10 @@ export function toggleMapView2D(): boolean {
  * Back to 3D. Called from the nav teardown so the driver's 2D choice lasts exactly as
  * long as the drive did — "it sticks till route ends". Safe to call when already 3D.
  */
+/** Back to the IDLE default — 2D since the 8/18 rule (was 3D). Called by the
+ * universal nav teardown, so 3D lasts exactly as long as a drive. */
 export function resetMapView2D(): void {
-  setMapView2D(false);
+  setMapView2D(true);
 }
 
 export function subscribeMapView2D(fn: Listener): () => void {

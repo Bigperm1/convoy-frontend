@@ -4753,6 +4753,10 @@ export default function MapScreen() {
             Resets to 3D when the drive ends (endNav -> resetMapView2D), so a 2D choice
             lasts exactly as long as the drive. The glyph shows what you GET if you press,
             which is the convention for a view switch — cube while flat, flat while 3D. */}
+        {/* ONLY WHILE ROUTING (Jeff, 2026-08-18): idle is pinned to the 2D sprite view,
+            3D exists only during a drive — so the toggle has nothing to do when no
+            route is running and would only offer a rule-breaking idle 3D. */}
+        {navMode === "turn-by-turn" && (
         <TouchableOpacity
           testID="view-2d-3d-fab"
           style={[styles.fab, styles.fabPolice]}
@@ -4769,6 +4773,7 @@ export default function MapScreen() {
               convention for a view switch, so only the icon comes out. */}
           <Text style={styles.fabViewLabel}>{view2D ? "3D" : "2D"}</Text>
         </TouchableOpacity>
+        )}
         {/* Crew button (replaced the police FAB, 2026-07-23 — Jeff's call): one tap
             frames self + every live/partial peer in a north-up overview. Same round
             glass FAB as the compass below it. Police reporting still lives in voice

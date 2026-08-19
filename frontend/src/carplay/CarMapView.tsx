@@ -1666,7 +1666,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         // heat measure; an audit finding then pointed out it could never help CarPlay
         // (always plugged => always 'premium'), and Jeff has since removed the eco/premium
         // split outright. Reverted to unconditional so the car keeps the premium look.
-        <Mapbox.StyleImport key={'basemap' + styleGen} id="basemap" existing config={{ lightPreset: mode, show3dObjects: !view2D } as any} />
+        {/* showRoadLabels mirrors the phone (2026-08-18): names + shields off while
+            navigating — the ribbon and the card carry the wayfinding. */}
+        <Mapbox.StyleImport key={'basemap' + styleGen} id="basemap" existing config={{ lightPreset: mode, show3dObjects: !view2D, showRoadLabels: !s.navigating } as any} />
       )}
 
       {/* Road-snap source (Phase 2) — invisible mapbox-streets-v8 roads, queried by the

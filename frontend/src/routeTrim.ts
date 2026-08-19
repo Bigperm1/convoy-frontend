@@ -64,7 +64,19 @@ export function metersPerDp(zoom: number, lat: number): number {
 // z17 and latitude 49, metersPerDp is 0.392, so 76.6dp reproduces the 30 m lead
 // that was verified not to touch the marker. THE tuning knob — raise for more
 // clear road in front of the nose, lower to tuck the line closer.
-export const TRIM_LEAD_DP = 76.6;
+// ── 76.6 → 48 (Jeff, 2026-08-18: "do you think we are good enough now to get the
+// route line closer to the car?") — YES, and here is why it is safe NOW when it
+// wasn't before: the big buffer existed to absorb the trim/marker SAWTOOTH — the
+// line was anchored to the newest GPS fix while the car eased toward it, so the gap
+// jittered by a whole fix step (~15dp at 60 km/h) and a short lead let the line
+// swallow the car. Since the ease-riding fix the line start runs the SAME
+// interpolation on the SAME clock as the marker: the gap is constant in screen
+// space by construction. Residual error is one render frame (~0.4 m at 100 km/h ≈
+// 1dp). Measurement for 48: the car marker is ~62pt tall, center→nose ≈ 31dp, so
+// the line now starts ~17dp ahead of the nose — visibly clear of the car at any
+// speed, no longer a third of a screen away. OTA-tunable; if a drive photo shows a
+// kiss, raise toward 56 before rethinking.
+export const TRIM_LEAD_DP = 48;
 
 // Sanity rails on the METRE result. These exist only to stop a pathological camera
 // (a mid-pinch zoom spike, a bogus latitude) producing an absurd trim; in normal

@@ -9,20 +9,39 @@
 // camera pumps AND the entire second GL engine (heat probe, 2026-08-15: ~115
 // setCamera/s from exactly two per-instance rAF loops).
 //
-// Deliberately DUMB: no map, no GL, no timers, no animation. Everything live in it
+// Deliberately DUMB: no map, no GL, no per-frame animation. Everything live in it
 // (current step, distances, ETA) re-renders off the same tbt/coords ticks map.tsx
-// already has. The only state is scroll position.
+// already has. The only timer is the 5s manual-scroll hold below (Jeff, 2026-08-19:
+// "you can manually scroll it too but it always snaps back to the next turn at the
+// top") — it arms only on a user drag and never ticks otherwise.
 
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Image } from "expo-image";
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { GlassFill } from "./Glass";
 import { ManeuverArrow, maneuverDir } from "./components/ManeuverArrow";
 import { COLORS } from "./theme";
 import { NavStep, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec } from "./nav";
+import { toggle, skipNext, skipPrev, useCurrentSong, useIsPlaying } from "./applePlayer";
+import ShareSheet, { SharePayload } from "./ShareSheet";
 
 const strip = (h?: string) => (h || "").replace(/<[^>]+>/g, "").trim();
+
+// Resolve an Apple artwork template/url to a concrete square image URL (same
+// helper the Music screen uses — the API returns "{w}x{h}" templates).
+const artURL = (raw?: string, size = 96): string | undefined =>
+  raw && typeof raw === "string"
+    ? raw.replace("{w}", String(size)).replace("{h}", String(size)).replace("{f}", "jpg")
+    : undefined;
+
+// How long a manual scroll owns the list before it snaps back to the next turn.
+const SCROLL_HOLD_MS = 5000;
+// Music row height — the list's bottom padding and the footer offset both need it,
+// and only when a song is actually loaded (no song = no row = no dead space).
+const MUSIC_ROW_H = 60;
 
 export default function CarDriveList(props: {
   steps: NavStep[];
@@ -53,12 +72,46 @@ export default function CarDriveList(props: {
   // phone banner and the car strip (map.tsx:4406).
   const upcomingIdx = Math.min(stepIndex + 1, Math.max(0, steps.length - 1));
   const listRef = useRef<FlatList<NavStep>>(null);
+
+  // ── SNAP-TO-TOP (Jeff, 2026-08-19: "the next turn is always at the top,
+  // everything cycles to the top; manual scroll allowed but it snaps back") ────
+  // The upcoming step rides AT THE TOP (viewPosition 0) and each completed turn
+  // animates the list up one row — the "cycling" is the scroll animation itself.
+  // A manual drag takes ownership for SCROLL_HOLD_MS, then the list glides back.
+  const upcomingIdxRef = useRef(upcomingIdx);
+  const holdingRef = useRef(false);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const snapToCurrent = useCallback((animated = true) => {
+    try { listRef.current?.scrollToIndex({ index: upcomingIdxRef.current, animated, viewPosition: 0 }); } catch {}
+  }, []);
   useEffect(() => {
-    // Keep the upcoming step in view, one row of context above it. scrollToIndex
-    // can throw before first layout on variable-height rows — a missed scroll is
-    // cosmetic, never worth a crash.
-    try { listRef.current?.scrollToIndex({ index: Math.max(0, upcomingIdx - 1), animated: true, viewPosition: 0 }); } catch {}
-  }, [upcomingIdx]);
+    upcomingIdxRef.current = upcomingIdx;
+    if (!holdingRef.current) snapToCurrent();
+  }, [upcomingIdx, snapToCurrent]);
+  useEffect(() => () => { if (holdTimer.current) clearTimeout(holdTimer.current); }, []);
+  const onDragStart = useCallback(() => {
+    holdingRef.current = true;
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+  }, []);
+  const onDragSettle = useCallback(() => {
+    if (!holdingRef.current) return;
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = setTimeout(() => {
+      holdingRef.current = false;
+      snapToCurrent();
+    }, SCROLL_HOLD_MS);
+  }, [snapToCurrent]);
+
+  // ── Now-playing row (Jeff, 2026-08-19: "put in a music player between the show
+  // map and system drawer at the bottom" — art + share + transport, the same
+  // controls as the Music tab's bar). Hooks are the applePlayer pair the Music tab
+  // uses; on Android / no Apple Music session `song` stays null and the row simply
+  // doesn't exist, so nothing shifts for those drivers.
+  const { song } = useCurrentSong() as { song: any };
+  const { isPlaying } = useIsPlaying();
+  const [sharePayload, setSharePayload] = useState<SharePayload | null>(null);
+  const hasMusic = !!song;
+  const art = artURL(song?.artworkUrl ?? song?.artwork?.url, 96);
 
   return (
     <View style={styles.root} pointerEvents="auto">
@@ -90,8 +143,17 @@ export default function CarDriveList(props: {
         ref={listRef}
         data={steps}
         keyExtractor={(_, i) => String(i)}
-        onScrollToIndexFailed={() => {}}
-        contentContainerStyle={[styles.listPad, { paddingBottom: tabBarH + 84 }]}
+        onScrollBeginDrag={onDragStart}
+        onScrollEndDrag={onDragSettle}
+        onMomentumScrollEnd={onDragSettle}
+        // Variable-height rows: scrollToIndex throws for a not-yet-rendered index.
+        // Land near it by average offset, then retry once rendered — a missed snap
+        // is cosmetic, never worth a crash.
+        onScrollToIndexFailed={(info) => {
+          try { listRef.current?.scrollToOffset({ offset: Math.max(0, info.averageItemLength * info.index), animated: false }); } catch {}
+          setTimeout(() => { if (!holdingRef.current) snapToCurrent(); }, 250);
+        }}
+        contentContainerStyle={[styles.listPad, { paddingBottom: tabBarH + 84 + (hasMusic ? MUSIC_ROW_H : 0) }]}
         renderItem={({ item, index }) => {
           const current = index === upcomingIdx;
           const past = index < upcomingIdx;
@@ -116,9 +178,47 @@ export default function CarDriveList(props: {
         }}
       />
       <View style={[styles.footer, { bottom: tabBarH }]}>
-        <Pressable onPress={props.onShowMap} style={styles.btnGhost} hitSlop={8}>
-          <Text style={styles.btnGhostText}>Show map</Text>
-        </Pressable>
+        <View style={styles.footerRow}>
+          <Pressable onPress={props.onShowMap} style={styles.btnGhost} hitSlop={8}>
+            <Text style={styles.btnGhostText}>Show map</Text>
+          </Pressable>
+        </View>
+        {hasMusic && (
+          <View style={styles.musicRow}>
+            {art ? (
+              <Image source={{ uri: art }} style={styles.musicArt} contentFit="cover" />
+            ) : (
+              <View style={[styles.musicArt, styles.musicArtEmpty]}>
+                <Ionicons name="musical-notes" size={18} color="#9BA1A6" />
+              </View>
+            )}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.musicTitle} numberOfLines={1}>{song?.title ?? song?.name ?? "Now Playing"}</Text>
+              <Text style={styles.musicSub} numberOfLines={1}>{song?.artistName ?? song?.artist ?? ""}</Text>
+            </View>
+            <Pressable
+              onPress={() => setSharePayload({
+                kind: "music",
+                title: song?.title ?? song?.name,
+                artist: song?.artistName ?? song?.artist,
+                artworkUrl: song?.artworkUrl ?? song?.artwork?.url,
+                url: song?.url,
+              })}
+              hitSlop={8}
+            >
+              <Ionicons name="share-outline" size={20} color="#F4F4F4" />
+            </Pressable>
+            <Pressable onPress={() => skipPrev()} hitSlop={8} style={{ marginLeft: 16 }}>
+              <Ionicons name="play-skip-back" size={20} color="#F4F4F4" />
+            </Pressable>
+            <Pressable onPress={() => toggle()} hitSlop={8} style={{ marginHorizontal: 14 }}>
+              <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#F4F4F4" />
+            </Pressable>
+            <Pressable onPress={() => skipNext()} hitSlop={8}>
+              <Ionicons name="play-skip-forward" size={20} color="#F4F4F4" />
+            </Pressable>
+          </View>
+        )}
       </View>
       {/* END — square, candy red, directly under the Hairpin logo and matching its
           exact footprint (mapLogoBacking: 50×50 r14 at right 12, top 52/28 — the
@@ -143,6 +243,11 @@ export default function CarDriveList(props: {
         )}
         <Text style={styles.endSquareText}>End</Text>
       </Pressable>
+      <ShareSheet
+        visible={!!sharePayload}
+        onClose={() => setSharePayload(null)}
+        share={sharePayload}
+      />
     </View>
   );
 }
@@ -167,12 +272,22 @@ const styles = StyleSheet.create({
   rowTextCurrent: { color: "#FFFFFF", fontSize: 18, fontWeight: "800" },
   rowDist: { color: "#9BA1A6", fontSize: 13, fontWeight: "700" },
   rowDistCurrent: { color: COLORS.brand, fontSize: 15, fontWeight: "800" },
-  // `bottom` is set inline (tab bar height + inset — see tabBarH above).
+  // `bottom` is set inline (tab bar height + inset — see tabBarH above). Now a
+  // COLUMN: the Show map row, then (when a song is loaded) the now-playing row —
+  // "between the show map and the system drawer at the bottom".
   footer: {
-    position: "absolute", left: 0, right: 0, flexDirection: "row", gap: 12,
-    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: COLORS.bg,
-    borderTopWidth: 1, borderTopColor: COLORS.hairline,
+    position: "absolute", left: 0, right: 0,
+    backgroundColor: COLORS.bg, borderTopWidth: 1, borderTopColor: COLORS.hairline,
   },
+  footerRow: { flexDirection: "row", gap: 12, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12 },
+  musicRow: {
+    flexDirection: "row", alignItems: "center", height: MUSIC_ROW_H,
+    paddingHorizontal: 20, gap: 12, borderTopWidth: 1, borderTopColor: COLORS.hairline,
+  },
+  musicArt: { width: 40, height: 40, borderRadius: 8, backgroundColor: "#1C1C1E" },
+  musicArtEmpty: { alignItems: "center", justifyContent: "center" },
+  musicTitle: { color: "#F4F4F4", fontSize: 14, fontWeight: "700" },
+  musicSub: { color: "#9BA1A6", fontSize: 12, fontWeight: "600", marginTop: 1 },
   btnGhost: { flex: 1, height: 48, borderRadius: 12, borderWidth: 1, borderColor: COLORS.hairlineStrong, alignItems: "center", justifyContent: "center" },
   btnGhostText: { color: "#F4F4F4", fontSize: 16, fontWeight: "700" },
   // Same footprint as mapLogoBacking (50×50 r14, right 12), stacked 8pt beneath it.

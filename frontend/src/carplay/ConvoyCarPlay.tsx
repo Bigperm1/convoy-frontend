@@ -1942,7 +1942,10 @@ const styles = StyleSheet.create({
   // navCard overrides navBannerRow's row direction/fixed height; the turn row keeps
   // TURN_ROW_H inside, the ETA line adds ~21pt under a hairline. Same glass, same
   // floor, same radius — a consolidation, not a restyle.
-  navCard: { flexDirection: 'column', alignItems: 'stretch', height: undefined, paddingHorizontal: 0, paddingBottom: 0 },
+  // Border matches the speedo/weather chips EXACTLY (borderWidth 2 / '#000000') —
+  // Jeff 8/19: "the new banner bar is perfect. lets try putting the same black
+  // outline as the speedo on it."
+  navCard: { flexDirection: 'column', alignItems: 'stretch', height: undefined, paddingHorizontal: 0, paddingBottom: 0, borderWidth: 2, borderColor: '#000000' },
   navCardTurn: { flexDirection: 'row', alignItems: 'center', height: TURN_ROW_H, paddingHorizontal: 8 },
   navCardEta: { paddingBottom: 3, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
   // The phone StepDrawer's progress bar, card-sized (track 3pt, green fill, caret tip).

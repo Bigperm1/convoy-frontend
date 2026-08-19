@@ -303,6 +303,14 @@ export async function startCarNav(dest: { lat: number; lng: number; label?: stri
 export async function endCarNav(): Promise<void> {
   if (!getCarState().navigating) { toast('No active route'); return; }
   try { await stopNavBanner(); } catch {} // also clears CAR_NAV_KEY (owner: navNotification)
+  // Ending a route must also clean the template stack: Jeff's 8/19 drive ended with
+  // the stranded search keyboard STILL covering the map because nothing here popped
+  // it. iOS-only — Android's dismiss path pops to the AA nav template by id, and on
+  // AA endCarNav can run while other templates are legitimately stacked.
+  if (Platform.OS !== 'android' && (_searchPushed || _searchPresented)) {
+    _searchPushed = false;
+    try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
+  }
   setCarState({
     navigating: false,
     routePolyline: '',
@@ -655,13 +663,36 @@ function openAaSearch(): void {
 const _SEARCH_POP_SPEED_MS = 2.5;
 let _searchMotionArmed = false;
 let _movingTicks = 0;
+// Pop the search template AFTER the library finishes its selected-result handshake.
+// Our onItemSelect runs INSIDE the lib's handler; the lib calls the native
+// reactToSelectedResult completion right after we return. Popping synchronously in
+// the handler tears the template out from under that pending completion block —
+// deferring one macrotask lets the handshake land on a still-live template first.
+function popCarSearchDeferred(): void {
+  _searchPushed = false;
+  setTimeout(() => { try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {} }, 350);
+}
 function armSearchAutoDismiss(): void {
   if (_searchMotionArmed) return;
   _searchMotionArmed = true;
+  // A disconnect ends the interface-controller stack, but these module flags survive
+  // the session. Stranded true, they made the Search button dead for the whole NEXT
+  // drive (the AA arm had this reset since build 71; iOS never did — until 8/19).
+  try {
+    getLib()?.CarPlay?.registerOnDisconnect?.(() => {
+      _searchPushed = false;
+      _searchPresented = false;
+      _movingTicks = 0;
+    });
+  } catch {}
   subscribeCarState((st) => {
-    // OWNERSHIP, not visibility — see _searchPushed. Popping when we do not own the stack
-    // would yank whatever else the driver is looking at.
-    if (!_searchPushed) { _movingTicks = 0; return; }
+    // OWNERSHIP or VISIBILITY — either says the template is (or may be) on the stack.
+    // Ownership alone was the 8/19 trap: a wrong release left _searchPushed=false while
+    // the template sat stacked, and this guard then bailed forever. _searchPresented is
+    // native ground truth (didAppear), so "visible right now while moving" always pops
+    // even when ownership mis-tracked. Popping when neither flag is set stays forbidden —
+    // that would yank whatever else the driver is looking at.
+    if (!_searchPushed && !_searchPresented) { _movingTicks = 0; return; }
     if ((st.speedMs || 0) > _SEARCH_POP_SPEED_MS) {
       _movingTicks += 1;
       if (_movingTicks >= 2) {                 // ~2 position ticks of real motion
@@ -733,10 +764,7 @@ function getSearchTemplate(): any | null {
           // Release ownership ONLY when we actually pop. Releasing on a FAILED start would
           // leave the template on the stack while we no longer own it — a re-tap would then
           // push a second instance, which is the stack corruption that freezes CarPlay.
-          if (ok) {
-            _searchPushed = false;
-            try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
-          }
+          if (ok) popCarSearchDeferred();
           return;
         }
         const picked = _lastResults[index];
@@ -744,24 +772,31 @@ function getSearchTemplate(): any | null {
         const dest = await placeDetails(picked.placeId).catch(() => null);
         if (!dest) { toast('Could not load that place'); return; }
         const ok = await startCarNav({ ...dest, label: dest.label || picked.description });
-        if (ok) {
-          _searchPushed = false;   // same rule: release only when the pop really happens
-          try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
-        }
+        if (ok) popCarSearchDeferred();   // same rule: release only when the pop really happens
       },
       onSearchButtonPressed: () => {},
-      // VISIBILITY only. Deliberately does NOT touch _searchPushed: iOS hides and
-      // re-shows this template on its own as the car moves and stops, and treating that
-      // as "gone from the stack" is the bug this pair used to cause.
-      onDidAppear: () => { _searchPresented = true; _movingTicks = 0; },
+      // ── SELF-HEALING OWNERSHIP (2026-08-19, Jeff's drive) ─────────────────────
+      // The 8/14 fix released ownership in onDidDisappear whenever speed <= 2.5 m/s,
+      // assuming "stationary hide = driver backed out". Jeff's drive proved the hole:
+      // iOS hides the keyboard EARLY in acceleration — while still creeping under
+      // 9 km/h — so the motion-hide took the release branch, the watcher's
+      // `if (!_searchPushed) return` then bailed forever, and the dead template
+      // re-presented at every stop for the rest of the drive (and survived ending
+      // the route, because endCarNav never touched the stack — also fixed today).
+      //
+      // The two flags now CONVERGE instead of trapping: if the template APPEARS, it
+      // is on the interface-controller stack — no heuristic involved — so didAppear
+      // re-arms ownership unconditionally. A wrong release in didDisappear (creep-
+      // speed motion-hide mistaken for a back-out) is healed at the very next
+      // re-present, and the next motion tick pops it for good. A RIGHT release
+      // (genuine back-out) never re-appears, so ownership stays released. Every
+      // ordering ends correct within one stop/go cycle.
+      onDidAppear: () => { _searchPresented = true; _searchPushed = true; _movingTicks = 0; },
       onDidDisappear: () => {
         _searchPresented = false;
         _movingTicks = 0;
-        // GENUINE EXIT vs MOTION HIDE. Stationary => the driver backed out with the system
-        // back button, so the template is really gone and ownership MUST be released or
-        // Search can never be opened again this session (the old code relied on exactly
-        // this path). Moving => iOS is hiding it on its own; keep ownership so the motion
-        // pop can still take it off the stack, which is the whole point of the fix.
+        // Best-guess release for a genuine stationary back-out — safe to be wrong
+        // now, because didAppear self-heals the motion-hide-at-creep case above.
         try {
           if ((getCarState().speedMs || 0) <= _SEARCH_POP_SPEED_MS) _searchPushed = false;
         } catch { _searchPushed = false; }
@@ -1014,12 +1049,21 @@ export function handleCarBarButton(id: string): void {
   if (id === 'car-police') { void reportPoliceFromCar(); return; }
   if (id === 'car-end') { void endCarNav(); return; }
   if (id === 'car-search') {
-    // Already showing? Do NOT push it again — a second push of the same instance
-    // corrupts the CarPlay stack (the freeze). A stray re-tap is a no-op.
-    // Guard on OWNERSHIP: if it is already on the stack, a re-tap must not push a second
-    // instance (that corrupts the CarPlay stack — the freeze). Visibility is irrelevant
-    // here; a hidden-but-stacked template still must not be pushed again.
-    if (_searchPushed) return;
+    // Already on the stack? NEVER push a second instance (that corrupts the CarPlay
+    // stack — the freeze). But a plain `return` made the Search button permanently
+    // dead whenever the flag was stranded true. Recovery instead: pop to root (clears
+    // a stuck/hidden search template), release ownership, and let the driver's NEXT
+    // tap open it fresh. One tap heals, two taps searches — never a double push.
+    if (_searchPushed || (Platform.OS !== 'android' && _searchPresented)) {
+      _searchPushed = false;
+      // Clear visibility too (review find F4): if didDisappear was lost and the
+      // template is NOT actually stacked, the pop below no-ops and nothing else
+      // would ever clear the flag — every future tap would re-enter this branch
+      // and Search would be dead for good, the exact bug class this fixes.
+      _searchPresented = false;
+      if (Platform.OS !== 'android') { try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {} }
+      return;
+    }
     // ANDROID AUTO LEAVES HERE. Its native SearchTemplate takes results as an `items`
     // PROP, not from a callback, and the library's JS SearchTemplate only talks to
     // native on iOS — so Android drives createTemplate / pushTemplate / updateTemplate

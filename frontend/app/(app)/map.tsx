@@ -1470,7 +1470,10 @@ export default function MapScreen() {
         lat: f.lat,
         lng: f.lng,
         heading: typeof f.heading === "number" ? f.heading : cur?.heading,
-        speed: typeof f.speed === "number" ? f.speed : (cur?.speed ?? 0),
+        // >= 0: CoreLocation reports an INVALID speed as -1 — the fg watcher clamps
+        // it (:2732) but this feed passed it through, and downstream the scatter
+        // gate treats any sub-creep speed as "stopped" (review find F1, 8/19).
+        speed: typeof f.speed === "number" && f.speed >= 0 ? f.speed : (cur?.speed ?? 0),
       }));
     });
   }, [navMode]);

@@ -30,7 +30,10 @@ export const VEHICLE_PNG: Record<GRCColorKey, number | { uri: string }> = {
   // GRMN Gravel (6X9 "Master's Khaki") — sprite rendered top-down from the NEW
   // authored GR model (2026-08-18), not a photo crop like the five older ones; ink is
   // a clean 132-length so it needs no normalisation correction.
-  gravel:               require("../assets/vehicles/v2/gravel.png"),
+  // gravel_khaki (8/19): re-render with the warm khaki paint + bronze GRMN wheels.
+  // NEW FILENAME on purpose — the OTA asset path-key trap means changing gravel.png's
+  // CONTENT would never reach installed builds; only a new path ships.
+  gravel:               require("../assets/vehicles/v2/gravel_khaki.png"),
 };
 
 // Color name aliases — maps free-form user input to a canonical key.
@@ -134,7 +137,11 @@ export const VEHICLE_TINT: Record<GRCColorKey, { color: string; mix: number }> =
   supersonic_red:       { color: "#C8102E", mix: 1.0 },  // 3U5 — tricoat red
   blue_flame:           { color: "#1B9DD9", mix: 1.0 },  // 8W9 — metallic cyan/blue
   precious_black_pearl: { color: "#17191C", mix: 0.92 }, // 202 — gloss black
-  gravel:               { color: "#717A7C", mix: 0.9 },  // 6X9 — GRMN matte khaki-grey (measured swatch)
+  // 6X9 "Master's Khaki". The swatch-measured #717A7C was a cool blue-grey that
+  // rendered IDENTICAL to Heavy Metal on the map (Jeff, 8/19 drive) — so the hex is
+  // now a deliberate legibility choice, not a measurement: a warm khaki lean that
+  // reads as its name, plus the bronze GRMN wheels as the unmistakable tell.
+  gravel:               { color: "#72705E", mix: 0.9 },
 };
 
 /** modelColor + mix for the 3D car. Falls back to the default GRC paint. */
@@ -163,7 +170,10 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
   supersonic_red:       "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_supersonic_red.glb",
   blue_flame:           "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_blue_flame.glb",
   precious_black_pearl: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_precious_black_pearl.glb",
-  gravel:               "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gravel.glb",
+  // out_gravel2 (8/19): khaki repaint + bronze GRMN wheels. New FILENAME, not an
+  // overwrite — devices cache the old GLB by URL, so a same-URL content swap could
+  // keep serving the blue-grey car forever. Same rule as the sprite path-key trap.
+  gravel:               "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gravel2.glb",
 };
 
 // ── PER-COLOUR FLAT-SPRITE NORMALISATION (2026-07-30) ────────────────────────
@@ -229,10 +239,19 @@ export function vehiclePngScale(color?: string | null): number {
 }
 
 
-/** Hosted 3D car model URL for the chosen paint. Falls back to the default GRC. */
-export function getVehicleModelUrl(color?: string | null): string {
+/** Hosted 3D car model URL for the chosen paint. Falls back to the default GRC.
+ * `lit` picks the headlights/taillights-ON bake (out_<key>_lit.glb, same bucket) —
+ * the map passes it when the basemap lightPreset is dawn/dusk/night so the car
+ * drives with its lights on after dark (Jeff, 8/19). */
+export function getVehicleModelUrl(color?: string | null, lit?: boolean): string {
   const key = resolveGRCKey(color) || DEFAULT_GRC_KEY;
-  return VEHICLE_MODEL_URL[key];
+  const url = VEHICLE_MODEL_URL[key];
+  return lit ? url.replace(/\.glb$/, "_lit.glb") : url;
+}
+
+/** True when the basemap light preset calls for headlights (dawn/dusk/night). */
+export function isLitPreset(preset?: string | null): boolean {
+  return preset === "dusk" || preset === "night" || preset === "dawn";
 }
 
 // The resolved model KEY for a color (e.g. "grc_heavy_metal"). Used to build a

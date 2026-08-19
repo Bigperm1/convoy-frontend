@@ -40,7 +40,7 @@ import { routeTrimLeadM, routeTrimFadeM } from "./routeTrim";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getPowerMode, usePowerMode } from "./powerMode";
-import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
+import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
 import { ClassSprite } from "./classLayers";
 import { getPaintedArrowUri } from "./arrowModel";
 import type { WeatherKind } from "./weatherLayer";
@@ -929,6 +929,17 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const anim = useRef<{ fromLat: number; fromLng: number; fromHdg: number; toLat: number; toLng: number; toHdg: number; start: number; dur: number; armedAt: number; stepped: boolean } | null>(null);
   const raf = useRef<number | null>(null);
   const seeded = useRef(false);
+  // The last RAW incoming fix (pre-dead-band), for the stationary scatter gate below:
+  // cold-start GPS throws fixes 20–50m apart that a fixed 9m band can't absorb, so a
+  // stopped marker "drifted everywhere" easing between them (Jeff's 8/19 drive). A real
+  // relocation produces CONSISTENT fixes; scatter produces fixes far from each other.
+  const lastRawFix = useRef<{ lat: number; lng: number } | null>(null);
+  // Bounded-failure escape (review find F1): if speed misreports "stopped" while the
+  // car is genuinely moving (sustained invalid GPS speed), disagreeing fixes would be
+  // rejected forever and the marker would freeze. Cap consecutive rejections — after
+  // the cap, accept the newest fix. Real parked scatter rarely sustains 3 straight
+  // mutually-disagreeing fixes, and a wrongly-held marker unfreezes within ~3s.
+  const scatterRejects = useRef(0);
   const lastFixAt = useRef(0);
   const fixGap = useRef(1000);
   const rafDead = useRef(false); // latched true while the rAF loop is paused (phone display asleep)
@@ -1243,6 +1254,11 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     if (!seeded.current || jumpDeg > 0.01 || inResumeSnap) {
       seeded.current = true;
       render.current = { lat, lng, heading };
+      // Keep the scatter gate's reference current through the snap paths (review
+      // find F3) — comparing the next fix against a stale pre-snap fix would hold
+      // it one extra tick for nothing.
+      lastRawFix.current = { lat, lng };
+      scatterRejects.current = 0;
       anim.current = null;
       if (raf.current != null) { cancelAnimationFrame(raf.current); raf.current = null; }
       // NOTE: do NOT stop the bg watchdog here — for the lockstep (CarPlay)
@@ -1264,9 +1280,41 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     const dLngM = (lng - prev.lng) * 111320 * Math.cos(prev.lat * Math.PI / 180);
     // Speed-scaled dead-band: a wide band when stopped (absorb parked jitter →
     // no idle roam), the tight band when moving (track real driving 1:1).
-    const band = (speedMs ?? 99) < SELF_CREEP_MS ? SELF_DEADBAND_STOP_M : SELF_DEADBAND_M;
-    if (Math.hypot(dLatM, dLngM) < band && Math.abs(angDelta(prev.heading, heading)) < SELF_DEADBAND_HDG) {
+    // `?? 0` (was `?? 99`): a MISSING speed now counts as STOPPED, not moving. Speed
+    // is only absent on the first cold-start fixes — precisely when accuracy is worst
+    // and the wide band + scatter gate below are needed most. Every live feed passes a
+    // real number (map.tsx clamps negatives to 0; CarMapView has the parity pass), so
+    // driving never sees this arm.
+    const stopped = (speedMs ?? 0) < SELF_CREEP_MS;
+    const band = stopped ? SELF_DEADBAND_STOP_M : SELF_DEADBAND_M;
+    const moveM = Math.hypot(dLatM, dLngM);
+    if (moveM < band && Math.abs(angDelta(prev.heading, heading)) < SELF_DEADBAND_HDG) {
+      lastRawFix.current = { lat, lng };
+      scatterRejects.current = 0;
       return;
+    }
+    // STATIONARY SCATTER GATE (2026-08-19, "at the beginning the car was drifting
+    // everywhere"). Stopped, and this fix wants to move the marker past the band:
+    // only follow it if it AGREES with the previous raw fix (< 6m apart) — a genuine
+    // relocation (GPS settling on the true spot) repeats consistently and passes on
+    // the second fix (~1s); cold-start scatter disagrees fix-to-fix and is held.
+    // Moving is untouched — real driving never enters this branch. Rejections are
+    // CAPPED at 3 (scatterRejects) so a misreported "stopped" can never freeze the
+    // marker — worst case it resumes easing on the 4th fix.
+    if (stopped && moveM >= band) {
+      const lr = lastRawFix.current;
+      const agreeM = lr
+        ? Math.hypot((lat - lr.lat) * 111320, (lng - lr.lng) * 111320 * Math.cos(lat * Math.PI / 180))
+        : Infinity;
+      lastRawFix.current = { lat, lng };
+      if (agreeM >= 6 && scatterRejects.current < 3) {
+        scatterRejects.current += 1;
+        return; // scatter — hold the pose, wait for two fixes that agree
+      }
+      scatterRejects.current = 0;
+    } else {
+      lastRawFix.current = { lat, lng };
+      scatterRejects.current = 0;
     }
     // Ease from the current drawn pose to the new fix over ~the fix interval
     // (compressed a touch so the car keeps pace instead of trailing the camera).
@@ -2509,16 +2557,20 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Arrow = the BUNDLED asset, or the runtime-recolored copy (file:// URI) when
   // the driver saved arrow paint; car = per-color remote GLB URL. <Models>
   // accepts all three.
+  // Headlights/taillights ON after dark (Jeff, 8/19): dawn/dusk/night presets load
+  // the _lit bake of the same model. The id carries the suffix too — Mapbox caches
+  // models BY ID, so the day↔night swap must register as a different model.
+  const selfLit = !selfIsArrow && isLitPreset(mapMode);
   const selfModelUrl: string | number = selfIsArrow
     ? (paintedArrowUri ?? GREEN_ARROW_MODEL)
-    : getVehicleModelUrl(selfCar?.color);
+    : getVehicleModelUrl(selfCar?.color, selfLit);
   // Paint/color-specific model id so a change swaps the model LIVE (Mapbox
   // caches a model by id — a fixed id won't reload a new .glb until remount).
   const selfModelId = selfIsArrow
     ? (paintedArrowUri ? ARROW_MODEL_ID + "_" + paintedArrowUri.split("arrow_").pop()!.replace(".glb", "") : ARROW_MODEL_ID)
     // convoyCar2_: generation bump — Mapbox caches models BY ID; without new ids
     // devices would keep drawing the cached old GLBs forever.
-    : "convoyCar2_" + getVehicleModelKey(selfCar?.color);
+    : "convoyCar2_" + getVehicleModelKey(selfCar?.color) + (selfLit ? "_lit" : "");
   // Lift the paint out of the dark on the dim light presets (dawn/night). The ARROW
   // is always FULLY self-lit (1): it's a UI marker, not a realistic car — scene
   // lighting at day/dusk (0/0.55) washed its brand green pale.

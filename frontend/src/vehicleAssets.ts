@@ -22,15 +22,15 @@ export type GRCColorKey =
 // require() bundles the asset for native (Image component memory-friendly).
 // On web Metro returns a `{ uri }` object — works either way.
 export const VEHICLE_PNG: Record<GRCColorKey, number | { uri: string }> = {
-  supersonic_red:       require("../assets/vehicles/supersonic_red.png"),
-  blue_flame:           require("../assets/vehicles/blue_flame.png"),
-  ice_cap_white:        require("../assets/vehicles/ice_cap_white.png"),
-  heavy_metal:          require("../assets/vehicles/heavy_metal.png"),
-  precious_black_pearl: require("../assets/vehicles/precious_black_pearl.png"),
+  supersonic_red:       require("../assets/vehicles/v2/supersonic_red.png"),
+  blue_flame:           require("../assets/vehicles/v2/blue_flame.png"),
+  ice_cap_white:        require("../assets/vehicles/v2/ice_cap_white.png"),
+  heavy_metal:          require("../assets/vehicles/v2/heavy_metal.png"),
+  precious_black_pearl: require("../assets/vehicles/v2/precious_black_pearl.png"),
   // GRMN Gravel (6X9 "Master's Khaki") — sprite rendered top-down from the NEW
   // authored GR model (2026-08-18), not a photo crop like the five older ones; ink is
   // a clean 132-length so it needs no normalisation correction.
-  gravel:               require("../assets/vehicles/gravel.png"),
+  gravel:               require("../assets/vehicles/v2/gravel.png"),
 };
 
 // Color name aliases — maps free-form user input to a canonical key.
@@ -150,16 +150,22 @@ export function getVehicleTint(color?: string | null): { color: string; mix: num
 // model by color instead of tinting the whole thing at runtime. The paint (body
 // only) is glossy/metallic via a body-masked metallic-roughness map; tires, glass,
 // grille and lights stay matte.
-export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
-  ice_cap_white:        "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/841618c8-5243-4967-b360-da80505b23b1.glb",
-  heavy_metal:          "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/0fcc0c3a-d161-41ed-b5a5-1d400e70cd91.glb",
-  supersonic_red:       "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/05332668-05b6-413d-8ca7-81d8893f000a.glb",
-  blue_flame:           "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/9ae47fc9-aab6-4073-865f-d6f9f8535a70.glb",
-  precious_black_pearl: "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/cc1aa16b-7d5a-437b-a01e-a7a0bca3f9ff.glb",
-  // INTERIM: gravel has no old-model GLB (the old 5 are fixed renders). Nearest
-  // grey stands in until the NEW authored-model six-pack ships (gravel included,
-  // matte-tuned) — that rollout replaces every URL here at once.
-  gravel:               "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/0fcc0c3a-d161-41ed-b5a5-1d400e70cd91.glb",
+// ── THE AUTHORED MODEL (2026-08-18, "yes lets do it") ────────────────────────
+// Jeff's own GR_Corolla.glb (Drive/GLB/BLENDER 3D): real topology, modeled rear,
+// carbon roof panel, per-color BodyPaint factors (gravel matte), normalized to the
+// old asset's exact 1.9101 m length and nose direction (orientation VERIFIED by
+// rendering old vs new through one camera — the raw model faces the other way).
+// BUNDLED, not remote: <Models> resolves require() natively (the arrow proved it),
+// expo-updates content-addresses assets so each device fetches the ~30 MB once,
+// and the car works offline. Replaces the AI-generated higgsfield URLs whose rear
+// was hallucinated mush (see the 8/18 bake investigation).
+export const VEHICLE_MODEL_URL: Record<GRCColorKey, string | number> = {
+  ice_cap_white:        require("../assets/models/grc_v2/ice_cap_white.glb"),
+  heavy_metal:          require("../assets/models/grc_v2/heavy_metal.glb"),
+  supersonic_red:       require("../assets/models/grc_v2/supersonic_red.glb"),
+  blue_flame:           require("../assets/models/grc_v2/blue_flame.glb"),
+  precious_black_pearl: require("../assets/models/grc_v2/precious_black_pearl.glb"),
+  gravel:               require("../assets/models/grc_v2/gravel.glb"),
 };
 
 // ── PER-COLOUR FLAT-SPRITE NORMALISATION (2026-07-30) ────────────────────────
@@ -202,11 +208,11 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
 // Normalising on length gives 0.977-1.000 — small, and correct in the axis that
 // matters. Full parity needs the art re-rendered; queued for build 71.
 const VEHICLE_PNG_INK_LEN: Record<GRCColorKey, number> = {
-  heavy_metal: 129,
-  ice_cap_white: 130,
-  precious_black_pearl: 130,
-  blue_flame: 130,
-  supersonic_red: 132,
+  heavy_metal: 132,  // v2 render — full-length ink by construction
+  ice_cap_white: 132,  // v2 render — full-length ink by construction
+  precious_black_pearl: 132,  // v2 render — full-length ink by construction
+  blue_flame: 132,  // v2 render — full-length ink by construction
+  supersonic_red: 132,  // v2 render — full-length ink by construction
   gravel: 132,   // rendered (not photographed) — full-length ink by construction
 };
 const VEHICLE_PNG_REF_LEN = VEHICLE_PNG_INK_LEN.heavy_metal;   // grey is the reference
@@ -226,7 +232,7 @@ export function vehiclePngScale(color?: string | null): number {
 
 
 /** Hosted 3D car model URL for the chosen paint. Falls back to the default GRC. */
-export function getVehicleModelUrl(color?: string | null): string {
+export function getVehicleModelUrl(color?: string | null): string | number {
   const key = resolveGRCKey(color) || DEFAULT_GRC_KEY;
   return VEHICLE_MODEL_URL[key];
 }

@@ -1385,7 +1385,14 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const trimZoom = camZoomRef.current != null
     ? Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, camZoomRef.current))
     : Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, followZoom + userZoomRef.current));
-  const trimLeadM = routeTrimLeadM(trimZoom, lat);
+  // × mapScale (2026-08-18, Say Phin's head-unit photo): routeTrimLeadM computes the
+  // lead in LOGICAL screen points, but on AA the whole map is laid out at
+  // surfaceW/mapScale and transformed down — so the ~76-logical-dp gap that reads
+  // proportionate against the phone's 62pt car rendered as roughly TWICE the (also
+  // scaled) car's length on the head unit: the ribbon visibly ended a car-length
+  // behind the marker. Scaling the lead by the same factor keeps the on-screen gap
+  // the same fraction of the car everywhere. mapScale is 1 on CarPlay — no change.
+  const trimLeadM = routeTrimLeadM(trimZoom, lat) * mapScale;
   // TRIM RIDES THE MARKER'S EASE — see the matching block in ConvoyMapbox.tsx for the
   // full reasoning. The trim was anchored to the NEWEST fix while the marker eases
   // toward it, so the gap sawtoothed by one whole step per fix (~15dp of 76.6 at
@@ -1414,7 +1421,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     ? Math.max(0, Math.min(0.999, fracDrawn + trimLeadM / routeProj.totalM))
     : null;
   const fadeSpanFrac = routeProj
-    ? Math.max(0.0008, Math.min(0.06, routeTrimFadeM(trimZoom, lat) / routeProj.totalM))
+    ? Math.max(0.0008, Math.min(0.06, (routeTrimFadeM(trimZoom, lat) * mapScale) / routeProj.totalM))
     : 0;
   // Snap the car to the line + lock its heading to the route bearing when on-route (≤60 m),
   // matching the phone — stops the low-speed position drift + heading spin. Steer the

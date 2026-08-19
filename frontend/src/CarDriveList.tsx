@@ -133,7 +133,14 @@ export default function CarDriveList(props: {
           locations={[0, 0.5, 1]}
           style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
         />
-        <GlassFill tintColor="#E4002B" style={{ borderRadius: 14, overflow: "hidden" }} />
+        {/* iOS only (Say Phin's 8/18 screenshot): on Android the glass layer rendered
+            the red visibly INSET/narrower than the logo square above it — the same
+            elevation/halo artifact class as android-glass-elevation-halo. The candy
+            gradient alone carries the look on Android; the UIGlassEffect sheen is an
+            iOS material anyway. */}
+        {Platform.OS === "ios" && (
+          <GlassFill tintColor="#E4002B" style={{ borderRadius: 14, overflow: "hidden" }} />
+        )}
         <Text style={styles.endSquareText}>End</Text>
       </Pressable>
     </View>

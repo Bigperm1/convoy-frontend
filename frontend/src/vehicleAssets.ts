@@ -54,6 +54,12 @@ const ALIASES: Record<string, GRCColorKey> = {
   "precious black pearl": "precious_black_pearl",
   "black onyx":           "precious_black_pearl", // Garage label for the black GRC paint
   "onyx":                 "precious_black_pearl",
+  // ⚠ Gravel was MISSING here from the day it shipped (found 8/19): resolveGRCKey
+  // returned null and every surface silently fell back to heavy_metal — which is
+  // why "gravel looks identical to heavy metal" (Jeff). It literally WAS.
+  "gravel":               "gravel",
+  "master's khaki":       "gravel",
+  "masters khaki":        "gravel",
   // Snake_case keys
   "supersonic_red":       "supersonic_red",
   "blue_flame":           "blue_flame",
@@ -73,6 +79,8 @@ const ALIASES: Record<string, GRCColorKey> = {
   "grc_heavymetal":       "heavy_metal",
   "grc_precious_black_pearl": "precious_black_pearl",
   "grc_preciousblackpearl":   "precious_black_pearl",
+  "grc_gravel":               "gravel",
+  "gravel_khaki":             "gravel",
 };
 
 export function resolveGRCKey(color?: string | null): GRCColorKey | null {

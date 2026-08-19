@@ -36,7 +36,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated, TouchableOpacity, processColor, Dimensions, PixelRatio } from 'react-native';
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec } from '../nav';
 import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { fmtPitstop } from '../pitstop';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
@@ -693,6 +693,15 @@ export function CarSurface() {
             </View>
             {metaLine ? (
               <View style={styles.navCardEta}>
+                {/* The divider IS the drive's progress (Jeff 8/18): the phone route
+                    drawer's green line + caret tip, riding routeProgress from
+                    whichever strip engine owns the numbers above it. */}
+                <View style={styles.cardProgressTrack}>
+                  <View style={[styles.cardProgressFill, { width: `${Math.round(Math.max(0, Math.min(1, s.routeProgress || 0)) * 100)}%` }]} />
+                  <View style={[styles.cardProgressTip, { left: `${Math.round(Math.max(0, Math.min(1, s.routeProgress || 0)) * 100)}%` }]}>
+                    <Ionicons name="caret-forward" size={11} color="#2DEC86" />
+                  </View>
+                </View>
                 {/* Jeff's spec: eta/time/distance must FIT, not truncate to "27…". */}
                 <Text
                   style={styles.etaLineText}
@@ -869,7 +878,7 @@ export function CarSurface() {
           surface at connect. AA pill temporarily back to CENTRED. If his connect works on
           this bundle, the crash lives here; re-land the left-anchor behind a verified-safe
           form afterwards. Do NOT restore without a passing head-unit test. */}
-      <View style={[styles.topCenterRow, hudFit('center top')]} pointerEvents="none">
+      <View style={[styles.topCenterRow, hudFit(IS_AA ? 'left top' : 'center top')]} pointerEvents="none">
         <View style={[styles.crewPill, { backgroundColor: carHudFloor() }]}>
           <GlassFill tintColor={undefined} style={{ borderRadius: 9, overflow: 'hidden' }} />
           {/* RED until location is set to Always (Jeff, 2026-07-30). This is the one
@@ -1148,6 +1157,8 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
         distanceToTurnM: tbt.distanceToManeuverM,
         distanceRemainingM: tbt.distanceRemainingM,
         etaSeconds: tbt.etaSeconds,
+        routeProgress: route && route.distance_m > 0
+          ? Math.max(0, Math.min(1, 1 - tbt.distanceRemainingM / route.distance_m)) : 0,
       } : {}),
       // Route polyline (preview or nav) for the car map ribbon. NOTE: position
       // (selfLat/selfLng/heading) is mirrored in a SEPARATE additive effect below —
@@ -1672,7 +1683,10 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
 // measured strip (~18-22dp of visual chrome) under either scaling interpretation of
 // hudFit. Video-measured with perspective error; the android-auto-canvas telemetry now
 // re-logs per size, so the next drive verifies the number.
-const CAR_RIGHT_INSET = IS_AA ? 50 : 48;
+// AA 50 -> 40 (same 8/18 ask): closes the dead air between the card and the
+// androidx button rail. CarPlay stays 48 — its rail is iOS's own map buttons and 48
+// is the measured clearance ([CARPLAY.md]).
+const CAR_RIGHT_INSET = IS_AA ? 40 : 48;
 const NAV_STACK_BOTTOM = IS_AA ? 4 : 8;
 
 // ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────
@@ -1790,7 +1804,10 @@ const SPEED_PILL_H = 48;
 const NAV_STACK_MAX_W = 260;
 // Largest share of the Android Auto canvas the right-hand nav stack may occupy.
 // OTA-tunable; lower it if the stack still crowds the map on a wide head unit.
-const AA_NAV_STACK_MAX_FRAC = 0.42;
+// 0.42 -> 0.60 (Jeff 8/18, off Say Phin's photo: "it needs to be wider towards the
+// compass and crew") — the card now reaches toward the right rail; the inset below
+// still keeps it clear of the buttons themselves.
+const AA_NAV_STACK_MAX_FRAC = 0.60;
 // Absolute floor — readability past this point is already lost, and going lower
 // would be worse than a narrow banner. Deliberately NOT a "preferred" width: see
 // the clamp-downward comment at the navStackW computation.
@@ -1846,7 +1863,7 @@ const styles = StyleSheet.create({
   // top-left is better left as MAP: nothing we draw there can ever be tapped (CarPlay
   // routes touches through the template only), so a readout parked in the most reachable
   // corner is wasted space. Rail is now just weather 130-178 + speed 182-230.
-  weatherChip: { position: 'absolute', left: CAR_DOCK_LEFT, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
+  weatherChip: { position: 'absolute', left: CAR_DOCK_LEFT, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 2, borderColor: '#000000', overflow: 'hidden' },
   // top was 10 -> INSIDE the CPMapTemplate nav bar, i.e. the one signal that says
   // Scout is listening was hidden behind system chrome. Left-anchored at
   // CAR_LEFT_INSET rather than centred so it also clears the weather chip.
@@ -1869,10 +1886,11 @@ const styles = StyleSheet.create({
   // AA: LEFT-anchored, not centred (Jeff, 2026-08-15: "for aa move the crew to the top
   // left side"). AA's system chrome floats top-RIGHT (from ~128dp of 213), so top-left
   // is the free corner there; CarPlay keeps gap-centred between the zoom pair and Search.
-  // alignItems: IS_AA flex-start SUSPENDED with the transformOrigin above (see the
-  // mitigation note at the render site) — centred everywhere until the AA crash bisect
-  // clears this pair.
-  topCenterRow: { position: 'absolute', top: CAR_PILL_TOP, left: CAR_BAR_LEADING_W, right: CAR_BAR_TRAILING_W, alignItems: 'center' },
+  // RE-LANDED 8/18 evening (Jeff's ask, and the suspects are EXONERATED: the 6:29
+  // cold-connect crash reproduced with BOTH suspended — the crash exists without
+  // them). The aa-crumb tracer is live; if this is ever implicated the crumbs will
+  // name it instead of a bisect.
+  topCenterRow: { position: 'absolute', top: CAR_PILL_TOP, left: CAR_BAR_LEADING_W, right: CAR_BAR_TRAILING_W, alignItems: IS_AA ? 'flex-start' : 'center' },
   statusRow: { position: 'absolute', top: CAR_PILL_TOP + CREW_PILL_H + NAV_GAP, left: 0, right: 0, alignItems: 'center' },
   // marginHorizontal is the STRUCTURAL half of the fix: the parent topCenterRow is
   // alignItems:'center', so Yoga subtracts these margins from the pill's available width.
@@ -1926,10 +1944,11 @@ const styles = StyleSheet.create({
   // floor, same radius — a consolidation, not a restyle.
   navCard: { flexDirection: 'column', alignItems: 'stretch', height: undefined, paddingHorizontal: 0, paddingBottom: 0 },
   navCardTurn: { flexDirection: 'row', alignItems: 'center', height: TURN_ROW_H, paddingHorizontal: 8 },
-  navCardEta: {
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.18)',
-    paddingVertical: 3, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center',
-  },
+  navCardEta: { paddingBottom: 3, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
+  // The phone StepDrawer's progress bar, card-sized (track 3pt, green fill, caret tip).
+  cardProgressTrack: { alignSelf: 'stretch', height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.12)', marginBottom: 3, position: 'relative', overflow: 'visible' },
+  cardProgressFill: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#2DEC86', borderRadius: 2 },
+  cardProgressTip: { position: 'absolute', top: -4.5, marginLeft: -5, width: 11, height: 12, alignItems: 'center', justifyContent: 'center' },
   // +1 over bottomText and brighter: the whole point is arm's-length legibility on
   // the scaled AA canvas (12 × 0.533 was ~6.4pt; 13 lands ~7 → with the card's
   // extra width the fit-shrink rarely engages, unlike the old 60%-width pill).

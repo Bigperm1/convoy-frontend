@@ -92,6 +92,10 @@ export type CarState = {
   distanceToTurnM: number; // meters to the next maneuver
   distanceRemainingM: number; // meters to the destination
   etaSeconds: number; // seconds remaining to the destination
+  // 0..1 fraction of the route completed — drives the green progress divider in the
+  // car nav card (Jeff 8/18: the phone drawer's moving green line, on the car).
+  // Written by BOTH strip engines inside their ownership-gated writes.
+  routeProgress: number;
   // --- Live map (CarPlay static-map background) ---
   // Self position + heading for centering the car map and rotating the car
   // marker, plus the encoded route geometry. routePolyline is Google's
@@ -200,6 +204,7 @@ const initial: CarState = {
   distanceToTurnM: 0,
   distanceRemainingM: 0,
   etaSeconds: 0,
+  routeProgress: 0,
   selfLat: null,
   selfLng: null,
   heading: null,

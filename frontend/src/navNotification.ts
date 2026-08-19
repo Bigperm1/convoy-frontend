@@ -471,6 +471,8 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
             etaSeconds: etaS,
             distanceRemaining: fmtDistanceM(Math.round(remainM)),
             distanceRemainingM: Math.round(remainM),
+            routeProgress: route.totalM && route.totalM > 0
+              ? Math.max(0, Math.min(1, 1 - remainM / route.totalM)) : 0,
           }
         : {}),
     } : {}),
@@ -1114,7 +1116,7 @@ async function stopNavBannerInner(): Promise<void> {
   //    gradient stayed painted on the head unit. It also backstops the newly gated
   //    ribbon mirror in ConvoyCarPlay, which deliberately stops clearing while
   //    `navigating` is still true.
-  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0, maneuverIcon: undefined, routeCoordinates: undefined, routeCongestion: undefined });
+  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0, routeProgress: 0, maneuverIcon: undefined, routeCoordinates: undefined, routeCongestion: undefined });
   // Release our hold; the shared task keeps running if CarPlay still needs it.
   await releaseBgLocation("nav");
   try { await Notifications.dismissNotificationAsync(NAV_NOTIF_ID); } catch {}

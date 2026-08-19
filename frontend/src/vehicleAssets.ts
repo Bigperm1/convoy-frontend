@@ -150,22 +150,20 @@ export function getVehicleTint(color?: string | null): { color: string; mix: num
 // model by color instead of tinting the whole thing at runtime. The paint (body
 // only) is glossy/metallic via a body-masked metallic-roughness map; tires, glass,
 // grille and lights stay matte.
-// ── THE AUTHORED MODEL (2026-08-18, "yes lets do it") ────────────────────────
-// Jeff's own GR_Corolla.glb (Drive/GLB/BLENDER 3D): real topology, modeled rear,
-// carbon roof panel, per-color BodyPaint factors (gravel matte), normalized to the
-// old asset's exact 1.9101 m length and nose direction (orientation VERIFIED by
-// rendering old vs new through one camera — the raw model faces the other way).
-// BUNDLED, not remote: <Models> resolves require() natively (the arrow proved it),
-// expo-updates content-addresses assets so each device fetches the ~30 MB once,
-// and the car works offline. Replaces the AI-generated higgsfield URLs whose rear
-// was hallucinated mush (see the 8/18 bake investigation).
-export const VEHICLE_MODEL_URL: Record<GRCColorKey, string | number> = {
-  ice_cap_white:        require("../assets/models/grc_v2/ice_cap_white.glb"),
-  heavy_metal:          require("../assets/models/grc_v2/heavy_metal.glb"),
-  supersonic_red:       require("../assets/models/grc_v2/supersonic_red.glb"),
-  blue_flame:           require("../assets/models/grc_v2/blue_flame.glb"),
-  precious_black_pearl: require("../assets/models/grc_v2/precious_black_pearl.glb"),
-  gravel:               require("../assets/models/grc_v2/gravel.glb"),
+// ── 3D model URLs — REVERTED TO REMOTE (2026-08-19 00:05, ~30 min after e22f432) ──
+// The bundled require() attempt BLACK-SCREENED the Android map: OTA-delivered assets
+// resolve to file:/ URIs and Mapbox Android's model loader (Cronet) rejects any
+// non-http scheme (ERR_UNKNOWN_URL_SCHEME, verified in logcat), then its 2 s retry
+// loop starved the renderer. The arrow's require() works only because that asset
+// ships INSIDE the binary. Until the authored six-pack is hosted over https, the
+// old remote models stay. DO NOT re-bundle GLBs for OTA delivery on Android.
+export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
+  ice_cap_white:        "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/841618c8-5243-4967-b360-da80505b23b1.glb",
+  heavy_metal:          "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/0fcc0c3a-d161-41ed-b5a5-1d400e70cd91.glb",
+  supersonic_red:       "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/05332668-05b6-413d-8ca7-81d8893f000a.glb",
+  blue_flame:           "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/9ae47fc9-aab6-4073-865f-d6f9f8535a70.glb",
+  precious_black_pearl: "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/cc1aa16b-7d5a-437b-a01e-a7a0bca3f9ff.glb",
+  gravel:               "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/0fcc0c3a-d161-41ed-b5a5-1d400e70cd91.glb",
 };
 
 // ── PER-COLOUR FLAT-SPRITE NORMALISATION (2026-07-30) ────────────────────────
@@ -232,7 +230,7 @@ export function vehiclePngScale(color?: string | null): number {
 
 
 /** Hosted 3D car model URL for the chosen paint. Falls back to the default GRC. */
-export function getVehicleModelUrl(color?: string | null): string | number {
+export function getVehicleModelUrl(color?: string | null): string {
   const key = resolveGRCKey(color) || DEFAULT_GRC_KEY;
   return VEHICLE_MODEL_URL[key];
 }

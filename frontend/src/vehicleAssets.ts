@@ -21,19 +21,22 @@ export type GRCColorKey =
 
 // require() bundles the asset for native (Image component memory-friendly).
 // On web Metro returns a `{ uri }` object — works either way.
+// v3 (8/19): the v2 renders tone-matched to the ORIGINAL photo sprite Jeff
+// missed ("the grey is darker and richer") — measured: old body meanLum 66 vs
+// v2's 103, corrected with gamma 1.43 + 12% saturation (heavy metal now 73).
+// New DIRECTORY per the OTA asset path-key trap.
 export const VEHICLE_PNG: Record<GRCColorKey, number | { uri: string }> = {
-  supersonic_red:       require("../assets/vehicles/v2/supersonic_red.png"),
-  blue_flame:           require("../assets/vehicles/v2/blue_flame.png"),
-  ice_cap_white:        require("../assets/vehicles/v2/ice_cap_white.png"),
-  heavy_metal:          require("../assets/vehicles/v2/heavy_metal.png"),
-  precious_black_pearl: require("../assets/vehicles/v2/precious_black_pearl.png"),
+  supersonic_red:       require("../assets/vehicles/v3/supersonic_red.png"),
+  blue_flame:           require("../assets/vehicles/v3/blue_flame.png"),
+  ice_cap_white:        require("../assets/vehicles/v3/ice_cap_white.png"),
+  heavy_metal:          require("../assets/vehicles/v3/heavy_metal.png"),
+  precious_black_pearl: require("../assets/vehicles/v3/precious_black_pearl.png"),
   // GRMN Gravel (6X9 "Master's Khaki") — sprite rendered top-down from the NEW
   // authored GR model (2026-08-18), not a photo crop like the five older ones; ink is
   // a clean 132-length so it needs no normalisation correction.
-  // gravel_grmn (8/19 pm): re-render with the MEASURED 06X9 grey-green + bronze
-  // wheels. NEW FILENAME per re-render on purpose — the OTA asset path-key trap
-  // means changing an existing png's CONTENT never reaches installed builds.
-  gravel:               require("../assets/vehicles/v2/gravel_grmn.png"),
+  // gravel (v3, 8/19 pm): the MEASURED 06X9 grey-green + bronze wheels render,
+  // tone-matched with the rest of the set. New path per re-render (path-key trap).
+  gravel:               require("../assets/vehicles/v3/gravel.png"),
 };
 
 // Color name aliases — maps free-form user input to a canonical key.

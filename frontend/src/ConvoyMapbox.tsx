@@ -1410,10 +1410,14 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           modelEmissiveStrength: emissive,
           modelScale: scale ?? CAR_MODEL_SCALE_SIZED,
           modelRotation: [pitchTilt, 0, (r.heading ?? 0) + headingOffset],
-          // Grounding contact shadow (2026-08-18, from the photoreal research): the
-          // single cheapest realism win the renderer actually supports. Arrow stays
-          // shadowless — it is a UI glyph, not a vehicle.
-          modelCastShadows: modelId !== ARROW_MODEL_ID && !modelId.startsWith(ARROW_MODEL_ID + "_"),
+          // ⚠ modelCastShadows MUST STAY FALSE (2026-08-19, found by sim bisect):
+          // enabling it black-screened the ENTIRE map on Android the moment the
+          // ModelLayer mounted (i.e. whenever 3D guidance started — idle draws the
+          // 2D sprite, no ModelLayer, which is why idle always looked fine). It
+          // shipped inside e22f432 and SURVIVED the revert as a "harmless renderer
+          // prop", which made the model-hosting change look guilty. The grounding
+          // shadow stays OFF until proven on a device.
+          modelCastShadows: false,
           modelReceiveShadows: false,
         }}
       />

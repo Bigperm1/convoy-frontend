@@ -29,6 +29,24 @@ if (Platform.OS === 'android' && (NativeModules as any).RNCarPlay) {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const AndroidAutoRoot = require('./AndroidAutoRoot').default;
     AppRegistry.registerComponent('AndroidAuto', () => AndroidAutoRoot);
+    // ── THE FIRST-CONNECT CRASH, ROOT-CAUSED (2026-08-19, Say Phin's captured
+    // fatal: `"convoy-aa-nav" has not been registered`) ────────────────────────
+    // The lib renders the nav template's map through a ReactSurface named by the
+    // TEMPLATE ID (VirtualRenderer.kt: reactHost.createSurface(themed, moduleName)),
+    // and that name is normally registered only inside AndroidAutoRoot's mount
+    // effect (NavigationTemplate's constructor). When JS RELOADS while the car
+    // session is live — an OTA apply, or expo-updates ErrorRecovery mid-crash —
+    // the EXISTING native surface restarts against the new bundle BEFORE that
+    // effect runs: AppRegistry.runApplication('convoy-aa-nav') throws, the process
+    // dies, Android Auto blocklists the app, and every recovery reload repeats
+    // the race (the 8/18 crash-loop night). Registering the surface component
+    // HERE — module scope, app entry, same import graph — closes the window to
+    // zero: any surface restart finds a valid component the instant the bundle
+    // evaluates. The lib's later registerComponent with the same id is a
+    // harmless replace (same component).
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { CarSurface } = require('./ConvoyCarPlay');
+    AppRegistry.registerComponent('convoy-aa-nav', () => CarSurface);
   } catch (e) {
     console.error('[androidauto] AndroidAuto root registration failed:', e);
     // Console-only was invisible from a car (2026-08-18 tracer work): a failed

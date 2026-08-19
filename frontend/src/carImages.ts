@@ -19,6 +19,11 @@ const GR_COROLLA_IMAGES: Record<string, any> = {
 'icecapwhite': require('../assets/cars/gr_corolla/icecap_white.jpg'),
 'blueflame': require('../assets/cars/gr_corolla/blue_flame.jpg'),
 'blackonyx': require('../assets/cars/gr_corolla/black_onyx.jpg'),
+// GRMN hero (8/19): Toyota's official Gravel press shot, cropped to this set's
+// framing, GRMN wordmark composited lower-left (above the caption overlay zone —
+// heroCaption draws over the image's bottom ~29%). Same dark-studio look as the
+// other five by construction: it's the same photographic series.
+'gravel': require('../assets/cars/gr_corolla/gravel.jpg'),
 };
 
 // Top-down map marker images (existing vehicle presets)

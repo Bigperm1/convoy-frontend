@@ -269,7 +269,15 @@ export default function GarageScreen() {
   };
 
   // Color selection drives the hero image; collapse after pick.
-  const handleColor = (v: string) => { setColor(v); save({ carColor: v }); setOpenField(null); };
+  // Gravel = the GRMN, and the GRMN exists ONLY as a 2027 model (Jeff, 8/19) —
+  // picking it pins the year with it so the hero title reads "2027 Toyota GR
+  // Corolla". Picking any other paint leaves the year alone.
+  const handleColor = (v: string) => {
+    setColor(v);
+    if (v === 'Gravel') { setYear('2027'); save({ carColor: v, carYear: '2027' }); }
+    else save({ carColor: v });
+    setOpenField(null);
+  };
 
   // ---- Appearance (how you're drawn on the map: car / arrow / photo) ----
   // Persist the choice locally AND to the backend profile (avatar_type) so peers,

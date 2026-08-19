@@ -186,7 +186,8 @@ export const CAR_DATABASE: CarMake[] = [
   },
 ];
 
-export const YEARS = ['2023', '2024', '2025', '2026'];
+// 2027: the GRMN's model year (selecting Gravel auto-pins it — garage.tsx handleColor).
+export const YEARS = ['2023', '2024', '2025', '2026', '2027'];
 
 export function getModelsForMake(make: string): CarModel[] {
   return CAR_DATABASE.find(m => m.name === make)?.models ?? [];

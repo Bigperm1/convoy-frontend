@@ -31,5 +31,15 @@ if (Platform.OS === 'android' && (NativeModules as any).RNCarPlay) {
     AppRegistry.registerComponent('AndroidAuto', () => AndroidAutoRoot);
   } catch (e) {
     console.error('[androidauto] AndroidAuto root registration failed:', e);
+    // Console-only was invisible from a car (2026-08-18 tracer work): a failed
+    // registration means the native session has NOTHING to run at connect — a
+    // candidate for the silent first-connect death — so it must reach telemetry.
+    // Lazy require: this file runs at app entry, crashBreadcrumb pulls RN deps.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('../crashBreadcrumb').logEventReliable(
+        `aa-crumb register-failed ${String((e as any)?.message || e).slice(0, 100)}`,
+      );
+    } catch {}
   }
 }

@@ -31,6 +31,20 @@ import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startFor
 import { startCarDataService, stopCarDataService } from './carDataService';
 import { noteCarConnected } from '../locationPrivacy';
 import { AA_ACTION_STRIP, AA_MAP_BUTTONS, handleAaButton, carTap } from './carActions';
+import { logEventReliable } from '../crashBreadcrumb';
+
+// ── COLD-CONNECT TRACER (2026-08-18 night) ──────────────────────────────────
+// The first-connect crash dies BETWEEN js-mark and every other instrument — no
+// fatal, no bail, nothing. These crumbs (reliable delivery: the queue survives the
+// process death and flushes `late` on the healthy relaunch) mark each stage of the
+// connect path, so the NEXT crash names the stage it died in: the furthest crumb
+// present is where it got to. Once per JS context per stage — a drive adds ≤4 rows.
+const _crumbed: Record<string, boolean> = {};
+function aaCrumb(stage: string): void {
+  if (_crumbed[stage]) return;
+  _crumbed[stage] = true;
+  try { logEventReliable(`aa-crumb ${stage}`); } catch {}
+}
 
 // ── updateTemplate WORKS NOW, AND THAT CHANGED EVERYTHING (2026-07-30) ───────
 // It used to be a silent no-op: CarPlayModule.kt looked up `carScreens[name]`
@@ -65,6 +79,10 @@ import { AA_ACTION_STRIP, AA_MAP_BUTTONS, handleAaButton, carTap } from './carAc
 // Both reuse CarPlay's button ids so the existing handlers take them unchanged.
 
 export default function AndroidAutoRoot() {
+  // FIRST RENDER = the native session actually ran this root (AppRegistry
+  // .runApplication from CarPlaySession). Death before this row = native session
+  // create / register; after = our JS tree.
+  aaCrumb('root-render');
   const s = useCarStore();
   const templateRef = useRef<any>(null);
 
@@ -94,8 +112,12 @@ export default function AndroidAutoRoot() {
       } as any);
       templateRef.current = template;
       CarPlay.setRootTemplate(template);
+      aaCrumb('template-set');
     } catch (e) {
       console.warn('[AndroidAuto] root template setup failed', e);
+      // A swallowed template failure is a blank car screen with no telemetry —
+      // the exact invisibility class the receipt chain fixed on iOS.
+      try { logEventReliable(`aa-crumb template-threw ${String((e as any)?.message || e).slice(0, 100)}`); } catch {}
     }
     return () => {
       templateRef.current = null;
@@ -151,6 +173,7 @@ export default function AndroidAutoRoot() {
   }, []);
 
   useEffect(() => {
+    aaCrumb('root-mount');
     void acquireBgLocation('androidauto');   // shared bg task + fg car feed
     startCarDataService();                   // cold peers + hazards (WS/Supabase/REST)
     void startForegroundCarFeed();           // continuous GPS writer for the car map

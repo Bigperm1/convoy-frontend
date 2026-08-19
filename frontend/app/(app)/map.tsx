@@ -4185,7 +4185,12 @@ export default function MapScreen() {
             {/* Stranded-OTA escape hatch: appears the moment a newer update finishes
                 downloading (expo-updates "pending" state — see UpdateReadyPill).
                 Hidden mid-drive so a tap can never reload during turn-by-turn. */}
-            <UpdateReadyPill hidden={navMode === "turn-by-turn"} />
+            {/* Also hidden while a HEAD UNIT is attached (2026-08-18): tapping the
+                pill calls reloadAsync, which kills the whole JS context — including
+                the live AA/CarPlay surface. On Android that reads as a connect crash
+                and feeds AA's blocklist (the "Hairpin gone from the launcher" report).
+                Update lands on the next launch after the drive instead. */}
+            <UpdateReadyPill hidden={navMode === "turn-by-turn" || headUnitHere} />
             {/* PITSTOP stopwatch — sits under the crew pill in the free top-centre
                 strip, clear of the bottom-left speed/weather HUD and the bottom-right
                 FAB stack. Only mounts while a stop is actually confirmed, so it costs

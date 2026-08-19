@@ -49,7 +49,7 @@ import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, AA_ACTION_STRIP, AA_MAP_B
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import { speedLimitVisible } from '../speedLimit';
 import type { RoadEvent } from '../driveBcEvents';
-import { logEvent } from '../crashBreadcrumb';
+import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
 // CarPlay HUD floor — a solid dark tint ONLY on light basemaps (dawn / day / satellite),
 // where clear glass over the bright map would wash out. On DARK basemaps (dusk / night)
@@ -270,7 +270,14 @@ class CarMapBoundary extends React.Component<
   render() { return this.state.dead ? null : this.props.children; }
 }
 
+let _aaSurfaceCrumbed = false;
 export function CarSurface() {
+  // Cold-connect tracer stage 4 (see AndroidAutoRoot.aaCrumb): the car surface's
+  // own React tree started rendering. AA only — CarPlay has the iOS receipt chain.
+  if (IS_AA && !_aaSurfaceCrumbed) {
+    _aaSurfaceCrumbed = true;
+    try { logEventReliable('aa-crumb surface-render'); } catch {}
+  }
   const s = useCarStore();
   const spd = formatSpeed(s.speedMs || 0, s.speedUnit ?? getSettings().speedUnit);
   const nearby = s.peers.length;

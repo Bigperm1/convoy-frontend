@@ -670,32 +670,38 @@ export function CarSurface() {
               the 1.8 km photo he was pointing at. The maneuver box BELOW the ETA — the
               "1.8 km / Turn right onto…" box — is a different element and STAYS; he
               asked for its font to shrink in the same breath. */}
-          {/* ETA — just above the maneuver banner. */}
-          {metaLine ? (
-            <View style={[styles.navEta, { backgroundColor: carHudFloor() }]}>
-              <GlassFill tintColor={undefined} style={{ borderRadius: 10, overflow: 'hidden' }} />
-              {/* Jeff's spec: eta/time/distance must FIT, not truncate to "27…".
-                  adjustsFontSizeToFit shrinks the last few points on a narrow head
-                  unit rather than cutting; a marquee here made a fixed 3-field
-                  readout crawl, which is worse for a glanceable number. */}
-              <Text
-                style={styles.bottomText}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.7}
-              >{metaLine}</Text>
-            </View>
-          ) : null}
-          {/* Maneuver banner — bottom of the stack. */}
-          <View style={[styles.navBannerRow, { backgroundColor: carHudFloor() }]}>
+          {/* ── ONE NAV CARD (Jeff, 2026-08-18: "finally fix this" — off Say Phin's
+              head-unit photo). The old layout was TWO separate elements: a tiny
+              content-sized ETA pill (24pt × hudScale ≈ 13pt effective on the AA
+              canvas — ~8pt text, unreadable at arm's length) floating above the turn
+              banner with no shared width or edge. Now the turn row and the ETA line
+              live INSIDE one card, split by a hairline: one width, one edge, and the
+              ETA text at bottomText+1 reads at ~13pt effective on the head unit.
+              Supersedes the 7/24 content-sized-pill decision — Jeff's call today.
+              Total height ≈ 42 + ~21 = ~63 vs the old 24+8+42 = 74, so every
+              clearance constant derived from the old stack still clears. */}
+          <View style={[styles.navBannerRow, styles.navCard, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
-            <View style={styles.maneuverBox}>
-              <ManeuverArrow dir={(s.maneuverIcon as ManeuverDir) || 'straight'} size={24} color="#0B0B0C" />
+            <View style={styles.navCardTurn}>
+              <View style={styles.maneuverBox}>
+                <ManeuverArrow dir={(s.maneuverIcon as ManeuverDir) || 'straight'} size={24} color="#0B0B0C" />
+              </View>
+              <View style={styles.topTextCol}>
+                <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
+                <MarqueeText text={s.instruction || 'Continue'} style={styles.topInst} />
+              </View>
             </View>
-            <View style={styles.topTextCol}>
-              <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
-              <MarqueeText text={s.instruction || 'Continue'} style={styles.topInst} />
-            </View>
+            {metaLine ? (
+              <View style={styles.navCardEta}>
+                {/* Jeff's spec: eta/time/distance must FIT, not truncate to "27…". */}
+                <Text
+                  style={styles.etaLineText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.7}
+                >{metaLine}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -1914,4 +1920,18 @@ const styles = StyleSheet.create({
   navStack: { position: 'absolute', right: CAR_RIGHT_INSET, bottom: NAV_STACK_BOTTOM, alignItems: 'stretch', gap: NAV_GAP },
   navBannerRow: { flexDirection: 'row', alignItems: 'center', height: TURN_ROW_H, paddingHorizontal: 8, borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   navEta: { paddingHorizontal: 10, height: ETA_ROW_H, borderRadius: 10, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  // ── The one-card layout (2026-08-18) ──────────────────────────────────────
+  // navCard overrides navBannerRow's row direction/fixed height; the turn row keeps
+  // TURN_ROW_H inside, the ETA line adds ~21pt under a hairline. Same glass, same
+  // floor, same radius — a consolidation, not a restyle.
+  navCard: { flexDirection: 'column', alignItems: 'stretch', height: undefined, paddingHorizontal: 0, paddingBottom: 0 },
+  navCardTurn: { flexDirection: 'row', alignItems: 'center', height: TURN_ROW_H, paddingHorizontal: 8 },
+  navCardEta: {
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.18)',
+    paddingVertical: 3, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center',
+  },
+  // +1 over bottomText and brighter: the whole point is arm's-length legibility on
+  // the scaled AA canvas (12 × 0.533 was ~6.4pt; 13 lands ~7 → with the card's
+  // extra width the fit-shrink rarely engages, unlike the old 60%-width pill).
+  etaLineText: { color: '#F4F4F4', fontSize: 13, fontWeight: '700' },
 });

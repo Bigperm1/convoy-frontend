@@ -11,6 +11,9 @@ const GR_COROLLA_COLORS: CarColor[] = [
   { name: 'Icecap White',   hex: '#F0F0F0' },
   { name: 'Blue Flame',     hex: '#0099D8' },
   { name: 'Black Onyx',     hex: '#1A1A1A' },
+  // GRMN exclusive (2026): paint code 6X9 "Master's Khaki", marketed as Gravel.
+  // Hex MEASURED from the official paint vendor's 6X9 swatch, not guessed.
+  { name: 'Gravel',         hex: '#717A7C' },
 ];
 
 const DEFAULT_COLORS: CarColor[] = [

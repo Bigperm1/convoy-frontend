@@ -16,7 +16,8 @@ export type GRCColorKey =
   | "blue_flame"
   | "ice_cap_white"
   | "heavy_metal"
-  | "precious_black_pearl";
+  | "precious_black_pearl"
+  | "gravel";
 
 // require() bundles the asset for native (Image component memory-friendly).
 // On web Metro returns a `{ uri }` object — works either way.
@@ -26,6 +27,10 @@ export const VEHICLE_PNG: Record<GRCColorKey, number | { uri: string }> = {
   ice_cap_white:        require("../assets/vehicles/ice_cap_white.png"),
   heavy_metal:          require("../assets/vehicles/heavy_metal.png"),
   precious_black_pearl: require("../assets/vehicles/precious_black_pearl.png"),
+  // GRMN Gravel (6X9 "Master's Khaki") — sprite rendered top-down from the NEW
+  // authored GR model (2026-08-18), not a photo crop like the five older ones; ink is
+  // a clean 132-length so it needs no normalisation correction.
+  gravel:               require("../assets/vehicles/gravel.png"),
 };
 
 // Color name aliases — maps free-form user input to a canonical key.
@@ -129,6 +134,7 @@ export const VEHICLE_TINT: Record<GRCColorKey, { color: string; mix: number }> =
   supersonic_red:       { color: "#C8102E", mix: 1.0 },  // 3U5 — tricoat red
   blue_flame:           { color: "#1B9DD9", mix: 1.0 },  // 8W9 — metallic cyan/blue
   precious_black_pearl: { color: "#17191C", mix: 0.92 }, // 202 — gloss black
+  gravel:               { color: "#717A7C", mix: 0.9 },  // 6X9 — GRMN matte khaki-grey (measured swatch)
 };
 
 /** modelColor + mix for the 3D car. Falls back to the default GRC paint. */
@@ -150,6 +156,10 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
   supersonic_red:       "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/05332668-05b6-413d-8ca7-81d8893f000a.glb",
   blue_flame:           "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/9ae47fc9-aab6-4073-865f-d6f9f8535a70.glb",
   precious_black_pearl: "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/cc1aa16b-7d5a-437b-a01e-a7a0bca3f9ff.glb",
+  // INTERIM: gravel has no old-model GLB (the old 5 are fixed renders). Nearest
+  // grey stands in until the NEW authored-model six-pack ships (gravel included,
+  // matte-tuned) — that rollout replaces every URL here at once.
+  gravel:               "https://upload.higgsfield.ai/user_3Esn44ZOJFPf9WVoTekRPGSBe28/0fcc0c3a-d161-41ed-b5a5-1d400e70cd91.glb",
 };
 
 // ── PER-COLOUR FLAT-SPRITE NORMALISATION (2026-07-30) ────────────────────────
@@ -197,6 +207,7 @@ const VEHICLE_PNG_INK_LEN: Record<GRCColorKey, number> = {
   precious_black_pearl: 130,
   blue_flame: 130,
   supersonic_red: 132,
+  gravel: 132,   // rendered (not photographed) — full-length ink by construction
 };
 const VEHICLE_PNG_REF_LEN = VEHICLE_PNG_INK_LEN.heavy_metal;   // grey is the reference
 

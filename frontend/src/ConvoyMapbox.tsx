@@ -2512,7 +2512,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // caches a model by id — a fixed id won't reload a new .glb until remount).
   const selfModelId = selfIsArrow
     ? (paintedArrowUri ? ARROW_MODEL_ID + "_" + paintedArrowUri.split("arrow_").pop()!.replace(".glb", "") : ARROW_MODEL_ID)
-    : "convoyCar_" + getVehicleModelKey(selfCar?.color);
+    // convoyCar2_: generation bump — Mapbox caches models BY ID; without new ids
+    // devices would keep drawing the cached old GLBs forever.
+    : "convoyCar2_" + getVehicleModelKey(selfCar?.color);
   // Lift the paint out of the dark on the dim light presets (dawn/night). The ARROW
   // is always FULLY self-lit (1): it's a UI marker, not a realistic car — scene
   // lighting at day/dusk (0/0.55) washed its brand green pale.

@@ -30,10 +30,10 @@ export const VEHICLE_PNG: Record<GRCColorKey, number | { uri: string }> = {
   // GRMN Gravel (6X9 "Master's Khaki") — sprite rendered top-down from the NEW
   // authored GR model (2026-08-18), not a photo crop like the five older ones; ink is
   // a clean 132-length so it needs no normalisation correction.
-  // gravel_khaki (8/19): re-render with the warm khaki paint + bronze GRMN wheels.
-  // NEW FILENAME on purpose — the OTA asset path-key trap means changing gravel.png's
-  // CONTENT would never reach installed builds; only a new path ships.
-  gravel:               require("../assets/vehicles/v2/gravel_khaki.png"),
+  // gravel_grmn (8/19 pm): re-render with the MEASURED 06X9 grey-green + bronze
+  // wheels. NEW FILENAME per re-render on purpose — the OTA asset path-key trap
+  // means changing an existing png's CONTENT never reaches installed builds.
+  gravel:               require("../assets/vehicles/v2/gravel_grmn.png"),
 };
 
 // Color name aliases — maps free-form user input to a canonical key.
@@ -145,11 +145,13 @@ export const VEHICLE_TINT: Record<GRCColorKey, { color: string; mix: number }> =
   supersonic_red:       { color: "#C8102E", mix: 1.0 },  // 3U5 — tricoat red
   blue_flame:           { color: "#1B9DD9", mix: 1.0 },  // 8W9 — metallic cyan/blue
   precious_black_pearl: { color: "#17191C", mix: 0.92 }, // 202 — gloss black
-  // 6X9 "Master's Khaki". The swatch-measured #717A7C was a cool blue-grey that
-  // rendered IDENTICAL to Heavy Metal on the map (Jeff, 8/19 drive) — so the hex is
-  // now a deliberate legibility choice, not a measurement: a warm khaki lean that
-  // reads as its name, plus the bronze GRMN wheels as the unmistakable tell.
-  gravel:               { color: "#72705E", mix: 0.9 },
+  // 6X9 Gravel — MEASURED from Toyota's own studio asset (8/19, filename carries the
+  // paint code: MY26_GR-Corolla_US_GRMN-Gas-4WD-MT_6285_06X9_03_6K.png; four body
+  // regions sampled, flat-lit panel median #585F60). Dark grey with a GREEN lean
+  // (G≈B, R about 8 under) — Jeff: "like heavy metal but more of a green tint".
+  // History: swatch #717A7C (blue-grey twin of Heavy Metal) → khaki #72705E (too
+  // warm, wrong direction) → this. Bronze wheels remain the unmistakable tell.
+  gravel:               { color: "#565E5F", mix: 0.9 },
 };
 
 /** modelColor + mix for the 3D car. Falls back to the default GRC paint. */
@@ -178,10 +180,11 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
   supersonic_red:       "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_supersonic_red.glb",
   blue_flame:           "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_blue_flame.glb",
   precious_black_pearl: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_precious_black_pearl.glb",
-  // out_gravel2 (8/19): khaki repaint + bronze GRMN wheels. New FILENAME, not an
-  // overwrite — devices cache the old GLB by URL, so a same-URL content swap could
-  // keep serving the blue-grey car forever. Same rule as the sprite path-key trap.
-  gravel:               "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gravel2.glb",
+  // out_gravel3 (8/19 pm): the MEASURED 06X9 grey-green (see VEHICLE_TINT.gravel) +
+  // bronze GRMN wheels. New FILENAME per re-bake, never an overwrite — devices cache
+  // the old GLB by URL. (gravel2 was the khaki miss; gravel1 never rendered at all —
+  // see the resolver-alias memory.)
+  gravel:               "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gravel3.glb",
 };
 
 // ── PER-COLOUR FLAT-SPRITE NORMALISATION (2026-07-30) ────────────────────────

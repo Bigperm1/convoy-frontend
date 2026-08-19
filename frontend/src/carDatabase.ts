@@ -13,9 +13,9 @@ const GR_COROLLA_COLORS: CarColor[] = [
   { name: 'Black Onyx',     hex: '#1A1A1A' },
   // GRMN exclusive (2026): paint code 6X9 "Master's Khaki", marketed as Gravel.
   // Hex MEASURED from the official paint vendor's 6X9 swatch, not guessed.
-  // Warm khaki lean (was the swatch's #717A7C, which rendered identical to Heavy
-  // Metal on the map — Jeff 8/19). Kept in lockstep with VEHICLE_TINT.gravel.
-  { name: 'Gravel',         hex: '#72705E' },
+  // Measured from Toyota's official 06X9 studio asset (8/19) — dark grey-green.
+  // Kept in lockstep with VEHICLE_TINT.gravel.
+  { name: 'Gravel',         hex: '#565E5F' },
 ];
 
 const DEFAULT_COLORS: CarColor[] = [

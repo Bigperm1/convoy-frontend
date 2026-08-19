@@ -2917,14 +2917,16 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             dark); harmless no-op for the satellite/street styles. 3D buildings
             are on by default in Standard, so only the light preset is set. */}
         {useStandard && (
-          {/* showRoadLabels drops road NAMES and the highway SHIELDS (Hwy 1 / Hwy 5)
-              while guidance is active (Jeff, 2026-08-18: "when a route line is drawn
-              it should make the font highway/road names disappear as well as the road
-              signs") — the route line + banner carry the wayfinding during a drive,
-              and Standard exposes exactly this switch. Preview keeps labels so
-              alternatives can be judged; satellite mode is a different style with no
-              such config and keeps its labels. */}
-          <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: mapMode, show3dObjects: show3dBuildings, showRoadLabels: !navigationActive } as any} />
+          <>
+            {/* showRoadLabels drops road NAMES and the highway SHIELDS (Hwy 1 / Hwy 5)
+                while guidance is active (Jeff, 2026-08-18: "when a route line is drawn
+                it should make the font highway/road names disappear as well as the
+                road signs") — the route line + banner carry the wayfinding during a
+                drive, and Standard exposes exactly this switch. Preview keeps labels
+                so alternatives can be judged; satellite mode is a different style
+                with no such config and keeps its labels. */}
+            <Mapbox.StyleImport id="basemap" existing config={{ lightPreset: mapMode, show3dObjects: show3dBuildings, showRoadLabels: !navigationActive } as any} />
+          </>
         )}
 
         {/* Road-snap source (Phase 2): mapbox-streets-v8 roads. Standard v3 hides its own

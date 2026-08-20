@@ -372,6 +372,10 @@ const CREW_FIT_MAX_KM = 100;
 const CAR_SNAP_HDG_LOCK = 45;
 const CAR_SNAP_HDG_UNLOCK = 60;
 const CAR_SNAP_MOVING_MS = 1.5;
+// Keep in sync with SNAP_HDG_GRACE_MS in ConvoyMapbox — both surfaces must let a
+// corner finish before the marker un-snaps, or the phone and the head unit
+// disagree about where the car is mid-turn.
+const CAR_SNAP_HDG_GRACE_MS = 4000;
 
 type Props = {
   // Called when the GL map fails or never paints on the CarPlay window, so the
@@ -801,6 +805,16 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const followHeadingDeg = camHdgRef.current;
   // Hysteresis latch for the route-snap heading gate (see carSnapped below).
   const carSnapHdgOkRef = useRef(true);
+  // Accumulated MOVING ms of heading disagreement + its tick clock — the corner
+  // grace, mirroring the phone exactly (pauses below the speed gate instead of
+  // resetting, so stop-and-go can't hand out a fresh grace on every crawl).
+  const carSnapHdgBadMsRef = useRef(0);
+  const carSnapHdgTickRef = useRef<number | null>(null);
+  // Windowed-projection state: last arc position, the line it belongs to, and the
+  // previous fix (the window is sized by metres actually travelled).
+  const carProjAtRef = useRef<number | null>(null);
+  const carProjLineRef = useRef<any>(null);
+  const carProjPrevFixRef = useRef<{ lat: number; lng: number } | null>(null);
 
   // Seed the FIRST rendered frame at the driver's location so the GL map never
   // paints the world/default view before the lockstep snap lands — that's the
@@ -1364,9 +1378,32 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // Also memoised: projectOntoRoute WALKS the whole decoded line, so at 12 Hz it was
   // the second half of the same stall. It only changes when the car moves or the
   // route does — never on a trim tick.
+  // WINDOWED, exactly like the phone (8/19). CarPlay/AA compute their OWN
+  // projection from raw carStore position — nothing is mirrored from the phone —
+  // so the corner-cut fix has to land here too or the head unit keeps swinging the
+  // marker and the camera onto the outgoing leg before the driver reaches the
+  // intersection. That is the surface the driver is actually watching.
   const routeProj = useMemo(
-    () => ((s.navigating && hasFix && hasRoute) ? projectOntoRoute(lat, lng, routeLL) : null),
-    [s.navigating, hasFix, hasRoute, lat, lng, routeLL],
+    () => {
+      if (!(s.navigating && hasFix && hasRoute)) { carProjAtRef.current = null; return null; }
+      // routeLL is memoised on the polyline, so identity IS the reroute signal.
+      if (carProjLineRef.current !== routeLL) {
+        carProjLineRef.current = routeLL;
+        carProjAtRef.current = null;
+        carProjPrevFixRef.current = null;
+      }
+      const prev = carProjPrevFixRef.current;
+      const movedM = prev
+        ? Math.hypot((lat - prev.lat) * 111320,
+                     (lng - prev.lng) * 111320 * Math.cos((lat * Math.PI) / 180))
+        : null;
+      carProjPrevFixRef.current = { lat, lng };
+      const p = projectOntoRoute(lat, lng, routeLL, carProjAtRef.current, movedM,
+                                 typeof s.heading === 'number' ? s.heading : null);
+      carProjAtRef.current = p ? p.frac * p.totalM : null;
+      return p;
+    },
+    [s.navigating, hasFix, hasRoute, lat, lng, routeLL, s.heading],
   );
   // ONE trim for all three surfaces (2026-07-29, src/routeTrim.ts). This used to be
   // its OWN formula — clamp(10 + speed*1.1, 10, 55) — against the phone's
@@ -1438,7 +1475,21 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   let _carHdgOk = true;
   if (_carDistSnap && _carTravelHdg != null && (s.speedMs || 0) >= CAR_SNAP_MOVING_MS) {
     const _hd = Math.abs(((((_carTravelHdg - routeProj!.bearing) % 360) + 540) % 360) - 180);
-    _carHdgOk = carSnapHdgOkRef.current ? _hd <= CAR_SNAP_HDG_UNLOCK : _hd <= CAR_SNAP_HDG_LOCK;
+    const _instantOk = carSnapHdgOkRef.current ? _hd <= CAR_SNAP_HDG_UNLOCK : _hd <= CAR_SNAP_HDG_LOCK;
+    // SUSTAINED disagreement only — the same corner grace as the phone. Rounding a
+    // real corner puts the course ~45° off BOTH legs at the apex, and releasing on
+    // that instant is what stopped the nose following the road mid-turn.
+    const _now = Date.now();
+    const _dt = carSnapHdgTickRef.current != null ? Math.min(1000, _now - carSnapHdgTickRef.current) : 0;
+    carSnapHdgTickRef.current = _now;
+    if (_instantOk) { carSnapHdgBadMsRef.current = 0; _carHdgOk = true; }
+    else {
+      carSnapHdgBadMsRef.current += _dt;
+      _carHdgOk = carSnapHdgBadMsRef.current < CAR_SNAP_HDG_GRACE_MS;
+    }
+  } else {
+    carSnapHdgTickRef.current = null;                       // pause, don't forgive
+    if (!_carDistSnap) carSnapHdgBadMsRef.current = 0;
   }
   carSnapHdgOkRef.current = _carDistSnap ? _carHdgOk : true;
   const carSnapped = _carDistSnap && _carHdgOk;

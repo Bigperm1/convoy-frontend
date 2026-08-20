@@ -42,8 +42,7 @@ const VEHICLE_CLASSES: { key: VehicleClass; label: string; icon: string }[] = [
   { key: 'truck',      label: 'Truck',      icon: 'car-pickup' },
   { key: 'electric',   label: 'Electric',   icon: 'car-electric' },
   { key: 'jeep',       label: 'Jeep',       icon: 'car-estate' },
-  { key: 'motorcycle', label: 'Motorcycle', icon: 'motorbike' },
-  // ATV / SxS / Boat pulled from the picker 8/20 (Jeff: parked for a future
+  // Motorcycle / ATV / SxS / Boat pulled from the picker 8/20 (Jeff: parked for a future
   // release; the class ladder goes 3D and these have no 3D model planned).
   // The TYPES stay valid so anyone who already picked one keeps rendering.
 ];

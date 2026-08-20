@@ -164,6 +164,7 @@ export function GlassFill({
   tint = "dark",
   tintColor,
   style,
+  glassStyle = "clear",
 }: {
   intensity?: number;
   tint?: "light" | "dark" | "default";
@@ -172,6 +173,12 @@ export function GlassFill({
   // Extra style (e.g. borderRadius + overflow) so callers with rounded corners can
   // clip the glass. Merged on top of absoluteFill.
   style?: any;
+  // iOS-26 material choice. "clear" (default, every pre-existing caller) is the
+  // subtle lens; "regular" is the luminous adaptive frosted material — the look
+  // people mean by "Apple glass" (the music now-playing bar uses it). Jeff, 8/20:
+  // the CarPlay HUD chips move to "regular" so they match that, not the near-
+  // invisible clear lens they had.
+  glassStyle?: "clear" | "regular";
 }) {
   const fill = [StyleSheet.absoluteFill, style];
   if (Platform.OS === "web") {
@@ -190,7 +197,7 @@ export function GlassFill({
     // button content on top.
     return (
       <GlassContainer style={fill} pointerEvents="none">
-        <GlassView glassEffectStyle="clear" colorScheme="dark" tintColor={tintColor} style={fill} />
+        <GlassView glassEffectStyle={glassStyle} colorScheme="dark" tintColor={tintColor} style={fill} />
       </GlassContainer>
     );
   }

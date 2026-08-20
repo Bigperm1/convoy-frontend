@@ -681,7 +681,7 @@ export function CarSurface() {
               Total height ≈ 42 + ~21 = ~63 vs the old 24+8+42 = 74, so every
               clearance constant derived from the old stack still clears. */}
           <View style={[styles.navBannerRow, styles.navCard, { backgroundColor: carHudFloor() }]}>
-            <GlassFill tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
+            <GlassFill glassStyle="regular" tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
             <View style={styles.navCardTurn}>
               <View style={styles.maneuverBox}>
                 <ManeuverArrow dir={(s.maneuverIcon as ManeuverDir) || 'straight'} size={24} color="#0B0B0C" />
@@ -813,7 +813,7 @@ export function CarSurface() {
           )}
           {/* 16 -> 14 to match speedPill's radius. Harmless behind the old 1pt hairline;
               against the new 2pt black rule a 2pt-proud glass corner would show. */}
-          <GlassFill tintColor={speedoOver ? '#E4002B' : undefined} style={{ borderRadius: 14, overflow: 'hidden' }} />
+          <GlassFill glassStyle="regular" tintColor={speedoOver ? '#E4002B' : undefined} style={{ borderRadius: 14, overflow: 'hidden' }} />
           <Text style={styles.speedNum} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{spd.value}</Text>
           <Text style={styles.speedUnit}>{spd.label.toLowerCase()}</Text>
         </Animated.View>
@@ -838,7 +838,7 @@ export function CarSurface() {
           ]}
           pointerEvents="none"
         >
-          <GlassFill tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
+          <GlassFill glassStyle="regular" tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
           {s.weatherKind ? <WeatherGlyph kind={s.weatherKind as WeatherKind} size={20} /> : null}
           <Text style={styles.weatherText}>{s.weatherTemp}</Text>
         </View>
@@ -880,7 +880,7 @@ export function CarSurface() {
           form afterwards. Do NOT restore without a passing head-unit test. */}
       <View style={[styles.topCenterRow, hudFit(IS_AA ? 'left top' : 'center top')]} pointerEvents="none">
         <View style={[styles.crewPill, { backgroundColor: carHudFloor() }]}>
-          <GlassFill tintColor={undefined} style={{ borderRadius: 9, overflow: 'hidden' }} />
+          <GlassFill glassStyle="regular" tintColor={undefined} style={{ borderRadius: 9, overflow: 'hidden' }} />
           {/* RED until location is set to Always (Jeff, 2026-07-30). This is the one
               setting that decides whether the car marker keeps tracking with the
               phone locked in a mount, and when it is wrong the symptom looks like

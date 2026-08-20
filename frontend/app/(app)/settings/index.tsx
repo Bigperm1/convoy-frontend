@@ -33,6 +33,16 @@ export default function SettingsMenu() {
   const scoutVal = settings.novaVoice !== false ? "On" : "Off";
   const routeColor = getRouteColor(settings);
 
+  // Jeff 8/20: donations live at the BOTTOM of Settings. External link during
+  // beta; store builds must swap this to an IAP tip jar (Apple rejects tip
+  // links that bypass IAP — RevenueCat consumables ride build 74's track).
+  const openDonate = useCallback(() => {
+    const url = "https://hairpin.app/donate"; // placeholder until Jeff supplies the real donation link
+    Linking.openURL(url).catch(() =>
+      Alert.alert("Couldn't open the page", "Visit hairpin.app/donate in your browser.")
+    );
+  }, []);
+
   const sendFeedback = useCallback(() => {
     const url = "mailto:support@hairpin.app?subject=Hairpin%20Feedback";
     Linking.openURL(url).catch(() =>
@@ -148,6 +158,27 @@ export default function SettingsMenu() {
         <MenuRow icon="bug" iconColor="#8E8E93" title="Developer" subtitle="Debug overlays" onPress={() => go("/(app)/settings/developer")} />
       </SettingsCard>
 
+      {/* DONATIONS — Jeff's ask: a word about what it costs to keep Hairpin
+          running, but never a cost breakdown. */}
+      <SectionLabel>SUPPORT THE ROAD</SectionLabel>
+      <SettingsCard>
+        <Text style={styles.donateBlurb}>
+          Hairpin is built and run by one person. Every drive you take runs on
+          real infrastructure — live maps, routing, voice and the servers that
+          keep your convoy connected — and those bills arrive every single day,
+          whether or not anyone pays for the app. If Hairpin makes your drives
+          better, a donation of any size genuinely helps keep it on the road.
+        </Text>
+        <Divider />
+        <MenuRow
+          icon="heart"
+          iconColor="#FF375F"
+          title="Donate"
+          subtitle="Help cover the daily running costs"
+          onPress={openDonate}
+        />
+      </SettingsCard>
+
       {/* SIGN OUT */}
       <TouchableOpacity onPress={confirmSignOut} activeOpacity={0.85} style={styles.signOut} testID="settings-signout">
         <GlassFill tintColor="rgba(20,20,24,0.5)" style={{ borderRadius: 16, overflow: "hidden" }} />
@@ -158,6 +189,10 @@ export default function SettingsMenu() {
 }
 
 const styles = StyleSheet.create({
+  donateBlurb: {
+    color: "#B9B9BF", fontSize: 12.5, lineHeight: 18,
+    paddingHorizontal: 14, paddingTop: 12, paddingBottom: 10,
+  },
   signOut: {
     marginTop: 26, height: 52, borderRadius: 16, overflow: "hidden",
     alignItems: "center", justifyContent: "center", backgroundColor: "transparent",

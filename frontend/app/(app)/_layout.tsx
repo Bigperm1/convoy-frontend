@@ -13,6 +13,24 @@ import VoiceController from "../../src/VoiceController";
 // solid dark surface.
 const LIQUID_GLASS = isLiquidGlassAvailable();
 import VoiceTabButton from "../../src/VoiceTabButton";
+import { Image } from "expo-image";
+
+// ── PREMIUM TAB GLYPHS (2026-08-20) ─────────────────────────────────────────
+// Jeff: the CarPlay buttons went dimensional (candy gradient + gloss + rim, the
+// compass's language) — "should we add this to the phone system drawer too so it
+// doesn't look flat?" Yes: same treatment, SAME Ionicons silhouettes (rendered
+// from the font so the shapes are pixel-identical to what shipped before),
+// active = candy green, inactive = muted silver. Pre-rendered pairs because a
+// baked gradient can't ride tabBarActiveTintColor — `focused` picks the file.
+// New asset paths on purpose (OTA path-key trap).
+const TAB_ICON = {
+  map:   { on: require("../../assets/images/tabicons/map_on.png"),   off: require("../../assets/images/tabicons/map_off.png") },
+  mic:   { on: require("../../assets/images/tabicons/mic_on.png"),   off: require("../../assets/images/tabicons/mic_off.png") },
+  music: { on: require("../../assets/images/tabicons/music_on.png"), off: require("../../assets/images/tabicons/music_off.png") },
+} as const;
+function TabGlyph({ kind, focused, size = 30 }: { kind: keyof typeof TAB_ICON; focused: boolean; size?: number }) {
+  return <Image source={focused ? TAB_ICON[kind].on : TAB_ICON[kind].off} style={{ width: size, height: size }} contentFit="contain" />;
+}
 import CommsTabButton from "../../src/components/CommsTabButton";
 import MapTabButton from "../../src/components/MapTabButton";
 import CommsTalkingToast from "../../src/components/CommsTalkingToast";
@@ -308,7 +326,7 @@ export default function AppLayout() {
           tabBarLabel: "Map",
           tabBarButtonTestID: "tab-map",
           tabBarButton: (props) => <MapTabButton {...props} />,
-          tabBarIcon: ({ color }) => <Ionicons name="navigate" size={30} color={color} />,
+          tabBarIcon: ({ focused }) => <TabGlyph kind="map" focused={focused} />,
         }} />
         <Tabs.Screen name="talk" options={{
           tabBarLabel: ({ color }) => (
@@ -316,7 +334,7 @@ export default function AppLayout() {
           ),
           tabBarButtonTestID: "tab-talk",
           tabBarButton: (props) => <CommsTabButton {...props} selfId={user?.id} />,
-          tabBarIcon: ({ color }) => <Ionicons name="mic" size={Platform.OS === 'ios' ? 30 : 32} color={color} />,
+          tabBarIcon: ({ focused }) => <TabGlyph kind="mic" focused={focused} size={Platform.OS === 'ios' ? 30 : 32} />,
         }} />
         {/* Voice screen is no longer represented in the bottom tab bar — the
             press-and-hold mic now lives inside the map's search bar (Google
@@ -326,7 +344,7 @@ export default function AppLayout() {
         <Tabs.Screen name="music" options={{
           tabBarLabel: "Music",
           tabBarButtonTestID: "tab-music",
-          tabBarIcon: ({ color }) => <Ionicons name="musical-notes" size={30} color={color} />,
+          tabBarIcon: ({ focused }) => <TabGlyph kind="music" focused={focused} />,
         }} />
         {/* Hub is now reached via the circular profile avatar on the right
             edge of the map search bar (mirrors Google Maps). Hidden from the

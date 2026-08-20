@@ -1686,7 +1686,14 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
 // AA 50 -> 40 (same 8/18 ask): closes the dead air between the card and the
 // androidx button rail. CarPlay stays 48 — its rail is iOS's own map buttons and 48
 // is the measured clearance ([CARPLAY.md]).
-const CAR_RIGHT_INSET = IS_AA ? 40 : 48;
+// AA 40 -> 28 (Jeff 8/19, off Say Phin's video: the banner/ETA "shrunk from the
+// right side" — the destination line was truncating with an ellipsis and the ETA
+// row was squeezed, while a wide dead band sat between the card and the host's
+// right-hand zoom rail). This inset is BOTH the card's right anchor and part of
+// the available-width sum, so pulling it in moves the card right AND widens it.
+// 28 keeps roughly the rail's own width in clearance. OTA-tunable: if a head-unit
+// photo ever shows the card touching the +/- buttons, put it back toward 40.
+const CAR_RIGHT_INSET = IS_AA ? 28 : 48;
 const NAV_STACK_BOTTOM = IS_AA ? 4 : 8;
 
 // ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────
@@ -1807,7 +1814,10 @@ const NAV_STACK_MAX_W = 260;
 // 0.42 -> 0.60 (Jeff 8/18, off Say Phin's photo: "it needs to be wider towards the
 // compass and crew") — the card now reaches toward the right rail; the inset below
 // still keeps it clear of the buttons themselves.
-const AA_NAV_STACK_MAX_FRAC = 0.60;
+// 0.60 -> 0.70 (8/19). With the inset pulled in, the width sum (navAvail) is what
+// binds on a 213dp canvas, not this cap — raising it just stops the cap becoming
+// the new limiter and re-truncating the destination line.
+const AA_NAV_STACK_MAX_FRAC = 0.70;
 // Absolute floor — readability past this point is already lost, and going lower
 // would be worse than a narrow banner. Deliberately NOT a "preferred" width: see
 // the clamp-downward comment at the navStackW computation.
@@ -1890,14 +1900,22 @@ const styles = StyleSheet.create({
   // cold-connect crash reproduced with BOTH suspended — the crash exists without
   // them). The aa-crumb tracer is live; if this is ever implicated the crumbs will
   // name it instead of a bisect.
-  topCenterRow: { position: 'absolute', top: CAR_PILL_TOP, left: CAR_BAR_LEADING_W, right: CAR_BAR_TRAILING_W, alignItems: IS_AA ? 'flex-start' : 'center' },
+  // AA anchors the crew pill to the SAME left rail as the weather/speedo dock
+  // (Jeff 8/19, off Say Phin's video: "move the crew pill more left so its inline
+  // with the weather and speedo"). It used to start at CAR_BAR_LEADING_W (8) plus
+  // the pill's own 12pt margin = 20, i.e. 14 units right of the dock's
+  // CAR_DOCK_LEFT (6), which read as a stagger against the left column. CarPlay is
+  // untouched — it centres this row between the bar buttons.
+  topCenterRow: { position: 'absolute', top: CAR_PILL_TOP, left: IS_AA ? CAR_DOCK_LEFT : CAR_BAR_LEADING_W, right: CAR_BAR_TRAILING_W, alignItems: IS_AA ? 'flex-start' : 'center' },
   statusRow: { position: 'absolute', top: CAR_PILL_TOP + CREW_PILL_H + NAV_GAP, left: 0, right: 0, alignItems: 'center' },
   // marginHorizontal is the STRUCTURAL half of the fix: the parent topCenterRow is
   // alignItems:'center', so Yoga subtracts these margins from the pill's available width.
   // That both caps the pill and guarantees 12pt of clear air to the mic on the left and
   // Search/End on the right ON TOP of the measured nav-bar insets — so a mis-measured
   // inset can no longer produce contact, rather than merely being unlikely to.
-  crewPill: { flexDirection: 'row', alignItems: 'center', height: CREW_PILL_H, paddingHorizontal: 10, marginHorizontal: 12, borderRadius: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
+  // marginHorizontal 0 on AA so the pill's left edge lands exactly on the row's
+  // left (= CAR_DOCK_LEFT); the 12pt margin is what centres it on CarPlay.
+  crewPill: { flexDirection: 'row', alignItems: 'center', height: CREW_PILL_H, paddingHorizontal: 10, marginHorizontal: IS_AA ? 0 : 12, borderRadius: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   // 11 -> 9 on CarPlay (AA keeps 11 — its canvas is only 213dp wide and everything there
   // is already scaled down by hudScale, so shrinking twice would make it unreadable).
   // 2026-08-15: the string is now just "N Crew" — Jeff dropped the build/runtime/tag

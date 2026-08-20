@@ -507,8 +507,34 @@ function aaPushRows(rows: AaRow[]): void {
 // search screen is already gone it does nothing at all.
 // (popToRootTemplate is not a @ReactMethod on Android, and "root" there is the session's
 // placeholder screen, not our map.)
+// ⚠ popToTemplate IS A TRAP ON ANDROID — it threw Say Phin out of the app.
+// (Root-caused 8/19 from his video + the library source.) The comment that used
+// to live here assumed ScreenManager.popTo finds our nav screen by id. It cannot:
+// popTo matches a screen's MARKER, and react-native-carplay NEVER calls
+// Screen.setMarker anywhere (the only setMarker in the package is on a Place
+// builder). With no marker, androidx's contract is "pop everything except the
+// ROOT" — and the root here is CarPlaySession's own placeholder screen, whose
+// template renders "RNCarPlay loading...". So every dismiss (motion auto-dismiss,
+// back, or after picking a destination) evicted the driver from our map entirely:
+//   "I can't back out into the map, have to go to app drawer and select app again."
+// A SINGLE pop is correct instead: our stack is only ever
+// [session root, nav, search] because openAaSearch pushes exactly one search
+// screen and the double-push guard keeps it that way — so popping once lands
+// precisely on the nav screen. Guarded to only fire while we believe our search
+// screen is on top, so a stale call can never eat the nav screen itself.
+// A proper Screen.setMarker is the native fix; queued for build 74.
+// TRACKED SEPARATELY FROM _searchPushed on purpose. _searchPushed is an OWNERSHIP
+// claim that callers deliberately release BEFORE dismissing (aaSelect does
+// `_searchPushed = false; aaPop()`), so it cannot gate the pop. This flag answers
+// a narrower question — "is our search screen actually on the stack?" — and it is
+// what makes a single pop safe: without it, one stale call would pop the NAV
+// screen and drop the driver on the session placeholder, which is the very
+// failure being fixed here.
+let _aaSearchOnStack = false;
 function aaPop(): void {
-  try { getCarLib()?.CarPlay?.popToTemplate?.({ id: AA_NAV_ID } as any, true); } catch {}
+  if (!_aaSearchOnStack) return;
+  _aaSearchOnStack = false;
+  try { getCarLib()?.CarPlay?.popTemplate?.(true); } catch {}
 }
 
 // One dismiss for both car surfaces.
@@ -596,10 +622,15 @@ function armAaSearchBridge(lib: any): void {
   // carry _searchPushed === true into the next session inside the same JS process. The
   // motion watcher would then fire a pop against a stack our search screen is not on.
   // The didDisconnect emit is the build-71 native patch (CarPlaySession.onDestroy); on
-  // build 70 this listener is simply inert, which is why aaPop() pops BY NAME as well.
+  // build 70 this listener is simply inert — which is why _aaSearchOnStack, not the
+  // disconnect signal, is what actually keeps aaPop() honest.
   try {
     lib?.CarPlay?.registerOnDisconnect?.(() => {
       _searchPushed = false;
+      // The whole screen stack dies with the session, so our screen is provably
+      // gone — clearing this stops the next session's first dismiss from popping
+      // the fresh nav screen.
+      _aaSearchOnStack = false;
       _aaSearchSeq += 1;
       _aaLastRowsKey = '';
     });
@@ -640,6 +671,7 @@ function openAaSearch(): void {
         if (!_searchPushed) return;       // dismissed between create and push
         try {
           bridge.pushTemplate(AA_SEARCH_ID, true);
+          _aaSearchOnStack = true;          // exactly one screen; aaPop() pops exactly it
           try { logEvent('aa-search-open'); } catch {}
         } catch {
           _searchPushed = false;
@@ -1055,13 +1087,21 @@ export function handleCarBarButton(id: string): void {
     // a stuck/hidden search template), release ownership, and let the driver's NEXT
     // tap open it fresh. One tap heals, two taps searches — never a double push.
     if (_searchPushed || (Platform.OS !== 'android' && _searchPresented)) {
+      // RECOVERY, and it MUST actually dismiss on both platforms.
+      // ⚠ REGRESSION I SHIPPED THIS MORNING (found in Say Phin's 6:06 PM
+      // telemetry): this branch cleared the ownership flag but only popped on
+      // iOS, so on Android Auto the search screen stayed on the stack with
+      // nobody owning it — and the NEXT tap sailed past the guard and pushed a
+      // SECOND search screen on top of the first. His receipts show
+      // aa-search-open three times in six seconds, which is three stacked
+      // search screens and exactly why Back could not get him home.
       _searchPushed = false;
       // Clear visibility too (review find F4): if didDisappear was lost and the
       // template is NOT actually stacked, the pop below no-ops and nothing else
       // would ever clear the flag — every future tap would re-enter this branch
       // and Search would be dead for good, the exact bug class this fixes.
       _searchPresented = false;
-      if (Platform.OS !== 'android') { try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {} }
+      dismissCarSearch();   // iOS: pop to root · Android: single pop to the nav screen
       return;
     }
     // ANDROID AUTO LEAVES HERE. Its native SearchTemplate takes results as an `items`

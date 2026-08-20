@@ -42,10 +42,10 @@ const VEHICLE_CLASSES: { key: VehicleClass; label: string; icon: string }[] = [
   { key: 'truck',      label: 'Truck',      icon: 'car-pickup' },
   { key: 'electric',   label: 'Electric',   icon: 'car-electric' },
   { key: 'jeep',       label: 'Jeep',       icon: 'car-estate' },
-  { key: 'atv',        label: 'ATV',        icon: 'atv' },
   { key: 'motorcycle', label: 'Motorcycle', icon: 'motorbike' },
-  { key: 'sxs',        label: 'SxS',        icon: 'go-kart' },
-  { key: 'boat',       label: 'Boat',       icon: 'sail-boat' },
+  // ATV / SxS / Boat pulled from the picker 8/20 (Jeff: parked for a future
+  // release; the class ladder goes 3D and these have no 3D model planned).
+  // The TYPES stay valid so anyone who already picked one keeps rendering.
 ];
 // Same palette as Settings → Route Color, per Jeff ("use the color swatch from
 // the route line").
@@ -335,7 +335,12 @@ export default function GarageScreen() {
     // Build-80 free tier: Class and 3D are premium (green arrow stays free).
     // No-ops while ENTITLEMENTS_ENFORCED is false.
     if (type === 'class' && !classUnlocked) { openPaywall('class_marker'); return; }
-    if (type === 'car' && !car3dUnlocked) { openPaywall('car_3d'); return; }
+    if (type === 'car' && !car3dUnlocked) {
+      // Jeff 8/20: locked 3D doesn't get the plain sheet — it opens the
+      // Apple-style animated Ultra pitch (the Garage Scan experience).
+      router.push('/(app)/garage-scan' as any);
+      return;
+    }
     if (type === 'photo' && !avatarUrl) { pickAndUploadAvatar(); return; }
     applyMarkerType(type);
   };

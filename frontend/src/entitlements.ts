@@ -6,11 +6,13 @@
 // the whole free/premium split at once. Do not flip it before the backend can
 // hand out tiers by email — existing testers would see locks.
 //
-// Tiers (build-80 plan, Jeff 8/20):
-//   beta_og      — original beta testers; personal codes, never expire.
-//   club_founder — GRC club members; full access until the store launch flag.
-//   premium      — paid subscriber (RevenueCat lands with build 74).
-//   free         — the store-launch free tier.
+// Tiers (build-80 plan, Jeff 8/20; three-rung ladder confirmed 8/20 evening):
+//   beta_og      — original beta testers; personal codes, never expire. All access.
+//   club_founder — GRC club members; all access until the store launch flag.
+//   ultra        — paid top tier: YOUR exact car on the map (the authored car
+//                  library today, Garage Scan when it ships).
+//   premium      — paid subscriber: Class 3D + palette and every other lock.
+//   free         — green arrow, the store-launch free tier.
 //
 // The truth lives server-side against the account email; this module only
 // caches it. `syncEntitlement()` refreshes the cache from the backend (endpoint
@@ -23,14 +25,14 @@ import { api } from "./api";
 // ── Master switch ────────────────────────────────────────────────────────────
 export const ENTITLEMENTS_ENFORCED = false;
 
-export type Tier = "free" | "premium" | "club_founder" | "beta_og";
+export type Tier = "free" | "premium" | "ultra" | "club_founder" | "beta_og";
 
 // Every gated surface names its feature here — one key per lock in the app.
 // (Jeff's free-tier list, 8/20.)
 export type PremiumFeature =
   | "arrow_colors"      // arrow paint — green stays free
-  | "class_marker"      // Class map appearance
-  | "car_3d"            // 3D garage cars on the map
+  | "class_marker"      // Class 3D map appearance (premium)
+  | "car_3d"            // ULTRA — your exact car (authored library / Garage Scan)
   | "club_create"       // creating Clubs/Events/Cruises (viewing is free)
   | "top_speed"         // Top Cruise Speed card
   | "map_modes"         // map styles beyond Day
@@ -69,7 +71,7 @@ async function hydrate() {
     const dev = await AsyncStorage.getItem(DEV_KEY);
     const stored = await AsyncStorage.getItem(STORE_KEY);
     const t = (dev || stored) as Tier | null;
-    if (t === "free" || t === "premium" || t === "club_founder" || t === "beta_og") {
+    if (t === "free" || t === "premium" || t === "ultra" || t === "club_founder" || t === "beta_og") {
       tier = t;
       emit();
     }
@@ -104,9 +106,24 @@ export async function __setDevTier(t: Tier | null) {
 }
 
 // ── Gating ───────────────────────────────────────────────────────────────────
-export function isUnlocked(_feature: PremiumFeature): boolean {
+// Rank ladder: a feature is unlocked at its required rank or above. beta_og and
+// club_founder sit above ultra — all access, per Jeff (their reward tiers).
+const TIER_RANK: Record<Tier, number> = {
+  free: 0,
+  premium: 1,
+  ultra: 2,
+  club_founder: 99,
+  beta_og: 99,
+};
+
+// Everything defaults to premium (rank 1); only the exact-car experience is ultra.
+const FEATURE_RANK: Partial<Record<PremiumFeature, number>> = {
+  car_3d: 2,
+};
+
+export function isUnlocked(feature: PremiumFeature): boolean {
   if (!ENTITLEMENTS_ENFORCED) return true;
-  return tier !== "free"; // every non-free tier currently unlocks everything
+  return TIER_RANK[tier] >= (FEATURE_RANK[feature] ?? 1);
 }
 
 // Free accounts convoy with up to 3 cars total (them + 2). The check belongs at
@@ -121,7 +138,7 @@ export async function syncEntitlement(): Promise<Tier | null> {
   try {
     const r = await api.get("/entitlement");
     const t = r?.data?.tier as Tier | undefined;
-    if (t === "free" || t === "premium" || t === "club_founder" || t === "beta_og") {
+    if (t === "free" || t === "premium" || t === "ultra" || t === "club_founder" || t === "beta_og") {
       await setTier(t);
       return t;
     }

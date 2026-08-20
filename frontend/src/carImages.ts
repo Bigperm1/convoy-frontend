@@ -27,6 +27,17 @@ const GR_COROLLA_IMAGES: Record<string, any> = {
 'gravel': require('../assets/cars/gr_corolla/gravel_grmn27.jpg'),
 };
 
+// GR Yaris 3/4 heroes — Toyota's official scene7 configurator renders (transparent
+// alpha, one consistent facelift front-3/4 series) composited onto the same
+// dark-studio background language as the GR Corolla set. Built 8/20.
+const GR_YARIS_IMAGES: Record<string, any> = {
+'purewhite': require('../assets/cars/gr_yaris/pure_white.jpg'),
+'platinumwhitepearl': require('../assets/cars/gr_yaris/platinum_pearl.jpg'),
+'preciousmetal': require('../assets/cars/gr_yaris/precious_metal.jpg'),
+'preciousblack': require('../assets/cars/gr_yaris/precious_black.jpg'),
+'scarletflare': require('../assets/cars/gr_yaris/scarlet_flare.jpg'),
+};
+
 // Top-down map marker images (existing vehicle presets)
 const TOP_DOWN_IMAGES: Record<string, any> = {
 'heavymetal': require('../assets/vehicles/heavy_metal.png'),
@@ -52,6 +63,10 @@ const makeModel = normalize(make + model);
 if (makeModel.includes('grcorolla') || makeModel.includes('grcorolla') ||
 (makeModel.includes('gr') && makeModel.includes('corolla'))) {
 return GR_COROLLA_IMAGES[key] ?? DEFAULT_GARAGE;
+}
+
+if (makeModel.includes('gryaris') || (makeModel.includes('gr') && makeModel.includes('yaris'))) {
+return GR_YARIS_IMAGES[key] ?? DEFAULT_GARAGE;
 }
 
 // Fallback for unknown models — use top-down as placeholder

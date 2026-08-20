@@ -32,6 +32,15 @@ export const CAR_DATABASE: CarMake[] = [
     name: 'Toyota',
     models: [
       { name: 'GR Corolla', colors: GR_COROLLA_COLORS },
+      // GR Yaris (XP210, union MY2023-26; UK-market names, codes in comments).
+      // Hexes measured from Toyota's own configurator data — researched 8/20.
+      { name: 'GR Yaris', colors: [
+        { name: 'Pure White',           hex: '#E9E7E6' }, // 040
+        { name: 'Platinum White Pearl', hex: '#EDF0E8' }, // 089
+        { name: 'Precious Metal',       hex: '#8A8E8B' }, // 1L5 (2024+)
+        { name: 'Precious Black',       hex: '#1C1C1C' }, // 219
+        { name: 'Scarlet Flare',        hex: '#AB000D' }, // 3U5
+      ]},
       { name: 'GR86',       colors: [
         { name: 'Raven',          hex: '#1A1A1A' },
         { name: 'Crystal White',  hex: '#F0F0F0' },

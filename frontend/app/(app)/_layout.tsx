@@ -38,6 +38,7 @@ import ShareToast from "../../src/ShareToast";
 import { GlobalListeningGlow } from "../../src/components/ListeningEdgeGlow";
 import { useLiveWalkieListener } from "../../src/livePtt";
 import { useSettings, hydrateCarFromProfile } from "../../src/settings";
+import PaywallSheet from "../../src/PaywallSheet";
 import { registerPushToken, reportDevice } from "../../src/pushRegistration";
 import { LocationDisclosureHost } from "../../src/locationDisclosure";
 import { hailBus } from "../../src/hailBus";
@@ -374,6 +375,9 @@ export default function AppLayout() {
           useVoice via the glow bus — covers Comms hold-to-talk AND the CarPlay
           mic button). pointerEvents:none, so it never blocks a tap. */}
       <GlobalListeningGlow />
+      {/* Build-80 plan: the one upgrade sheet, opened via openPaywall() from any
+          locked surface. Inert while ENTITLEMENTS_ENFORCED is false. */}
+      <PaywallSheet />
     </View>
   );
 }

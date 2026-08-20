@@ -10,6 +10,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { getSettings, updateSettings, getSelfMarkerType, getVehicleClass, getClassPaint, type VehicleClass } from '../../src/settings';
+import { useFeature, openPaywall, PremiumCornerBadge } from '../../src/PremiumBadge';
 import { getVehiclePngOrDefault, CLASS_TOPDOWN } from '../../src/vehicleAssets';
 import { TopDownClassSnap } from '../../src/ConvoyMapbox';
 import { ClassSprite, PAINT_COLORS } from '../../src/classLayers';
@@ -150,6 +151,8 @@ export default function GarageScreen() {
   const [color, setColor] = useState('');
   const [topSpeed, setTopSpeed] = useState<number | null>(null);
   const [callSign, setCallSign] = useState('');
+  const classUnlocked = useFeature('class_marker');
+  const car3dUnlocked = useFeature('car_3d');
   // How the driver appears on the convoy map: arrow / class sprite / 3D car / photo.
   const [markerType, setMarkerType] = useState<'car' | 'arrow' | 'photo' | 'class'>('car');
   // Paint drafts (PRIMARY + SECONDARY slots; null = original / stock). The
@@ -329,6 +332,10 @@ export default function GarageScreen() {
   // Tap an appearance option. Photo: if we don't have a picture yet, open the
   // picker; otherwise just switch back to the saved photo.
   const handleAppearance = (type: 'car' | 'arrow' | 'photo' | 'class') => {
+    // Build-80 free tier: Class and 3D are premium (green arrow stays free).
+    // No-ops while ENTITLEMENTS_ENFORCED is false.
+    if (type === 'class' && !classUnlocked) { openPaywall('class_marker'); return; }
+    if (type === 'car' && !car3dUnlocked) { openPaywall('car_3d'); return; }
     if (type === 'photo' && !avatarUrl) { pickAndUploadAvatar(); return; }
     applyMarkerType(type);
   };
@@ -612,6 +619,7 @@ export default function GarageScreen() {
             >
               <MaterialCommunityIcons name="car-hatchback" size={25} color={markerType === 'class' ? '#000' : YELLOW} />
               <Text style={[styles.apLabel, markerType === 'class' && styles.apLabelSel]}>Class</Text>
+              {!classUnlocked && <PremiumCornerBadge />}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -621,6 +629,7 @@ export default function GarageScreen() {
             >
               <Ionicons name="car-sport" size={25} color={markerType === 'car' ? '#000' : YELLOW} />
               <Text style={[styles.apLabel, markerType === 'car' && styles.apLabelSel]}>3D</Text>
+              {!car3dUnlocked && <PremiumCornerBadge />}
             </TouchableOpacity>
 
             {PHOTO_AVATAR_ENABLED ? (

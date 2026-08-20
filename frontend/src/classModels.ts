@@ -26,8 +26,12 @@ export type ClassModel3D = {
   palette: ClassPaletteEntry[];
 };
 
+// Archetypes locked by Jeff 8/20: Hot Hatch = GR Corolla, Supercar = 911
+// GT3 RS, Exotic = LFA (all three already authored — palette rows route to the
+// per-colour GLBs), Muscle = the generated coupe (tint palette; upgrade to an
+// authored pack model if one lands). Jeff is sourcing Electric/Truck/Jeep
+// packs; Sedan (M3 CS sits in the m2 pack) awaiting his confirmation.
 export const CLASS_MODEL_3D: Partial<Record<string, ClassModel3D>> = {
-  // The GR Corolla palette, verbatim — modelKey routes to the authored GLBs.
   hatchback: {
     palette: [
       { name: "Heavy Metal",    hex: "#6B6E72", modelKey: "heavy_metal" },
@@ -37,7 +41,38 @@ export const CLASS_MODEL_3D: Partial<Record<string, ClassModel3D>> = {
       { name: "Black Onyx",     hex: "#1A1A1A", modelKey: "precious_black_pearl" },
     ],
   },
-  // muscle / sedan / supercar / truck / suv: generic unbranded models in
-  // authoring (text-to-3D through the glb-pipeline, same QC gate). Each gets
-  // { baseUrl, palette: shared 20-swatch tint list } when its bake passes.
+  supercar: {
+    palette: [
+      { name: "Guards Red",     hex: "#D5001C", modelKey: "gt3rs_guards_red" },
+      { name: "GT Silver",      hex: "#9EA1A4", modelKey: "gt3rs_gt_silver" },
+      { name: "Carrara White",  hex: "#F4F4F0", modelKey: "gt3rs_carrara_white" },
+      { name: "Jet Black",      hex: "#1C1C1E", modelKey: "gt3rs_jet_black" },
+      { name: "Miami Blue",     hex: "#00B2D8", modelKey: "gt3rs_miami_blue" },
+      { name: "Python Green",   hex: "#4EC53F", modelKey: "gt3rs_python_green" },
+      { name: "Shark Blue",     hex: "#2E64B8", modelKey: "gt3rs_shark_blue" },
+    ],
+  },
+  exotic: {
+    palette: [
+      { name: "Whitest White",  hex: "#F7F8F4", modelKey: "lfa_whitest_white" },
+      { name: "Absolutely Red", hex: "#C41230", modelKey: "lfa_absolutely_red" },
+      { name: "Pearl Yellow",   hex: "#E8C63E", modelKey: "lfa_pearl_yellow" },
+      { name: "Pearl Blue",     hex: "#35589E", modelKey: "lfa_pearl_blue" },
+      { name: "Matte Black",    hex: "#141518", modelKey: "lfa_matte_black" },
+    ],
+  },
+  // Generated coupe, neutral grey — colours come from live model tint (dark
+  // glass/wheels barely take tint, so the body carries the colour). No lit
+  // variant (single baked material). Day model after dark is the accepted v1.
+  muscle: {
+    baseUrl: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_class_muscle.glb",
+    palette: [
+      { name: "Graphite",   hex: "#6B6E72" },
+      { name: "Rally Red",  hex: "#C8102E" },
+      { name: "White",      hex: "#F2F2EF" },
+      { name: "Petrol Blue",hex: "#2E64B8" },
+      { name: "Black",      hex: "#17191C" },
+      { name: "Verde",      hex: "#3E8E4E" },
+    ],
+  },
 };

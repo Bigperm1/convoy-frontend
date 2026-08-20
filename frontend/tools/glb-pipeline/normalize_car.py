@@ -31,6 +31,7 @@ TARGET_LEN = float(os.environ.get('TARGET_LEN', '1.9101'))   # marker world leng
 TRI_BUDGET = int(os.environ.get('TRI_BUDGET', '6000'))       # per-object cap before decimation
 IMG_MAX = int(os.environ.get('IMG_MAX', '0'))                 # >0: downscale embedded textures to this max edge (map cars don't need 1024+ logos)
 SKIP_PAINT = os.environ.get('SKIP_PAINT') == '1'              # scanned/generated cars: KEEP the baked photo-texture, never repaint the body (Garage Scan PoC)
+AUTO_ORIENT = os.environ.get('AUTO_ORIENT') == '1'            # generated inputs bake 90 deg off the pack convention — swing the long axis onto X
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=os.path.join(BASE, SRC))
@@ -286,6 +287,17 @@ for o in [x for x in bpy.data.objects if x.type == 'MESH']:
     final_tris += len(me.loop_triangles)
     ev.to_mesh_clear()
 mn, mx = wbb([x for x in bpy.data.objects if x.type == 'MESH'])
+
+if AUTO_ORIENT and (mx - mn).y > (mx - mn).x:
+    # Long axis landed on Y — generated models face a different way than the
+    # packs. One more quarter turn puts them on the map convention.
+    rot = mathutils.Matrix.Rotation(math.radians(-90), 4, 'Z')  # -90: verified against the GRC sprite (nose must match the pack convention)
+    for o in [x for x in bpy.data.objects if x.type == 'MESH']:
+        # matrix_world, not rotation_euler: glTF imports arrive in QUATERNION
+        # rotation mode and silently ignore euler edits.
+        o.matrix_world = rot @ o.matrix_world
+    bpy.context.view_layer.update()
+    mn, mx = wbb([x for x in bpy.data.objects if x.type == 'MESH'])
 
 print("HALVES_MIRRORED", len(halves), halves[:12])
 print("DROPPED", len(dropped))

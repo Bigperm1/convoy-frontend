@@ -34,7 +34,7 @@ const PHOTO_AVATAR_ENABLED = false;
 // Top-down vehicle classes. Hatchback previews with the GR Corolla asset; the
 // rest use MCI glyph PLACEHOLDERS until Jeff's top-down class photos land.
 const VEHICLE_CLASSES: { key: VehicleClass; label: string; icon: string }[] = [
-  { key: 'hatchback',  label: 'Hatchback',  icon: 'car-hatchback' },
+  { key: 'hatchback',  label: 'Hot Hatch',  icon: 'car-hatchback' }, // storage key stays 'hatchback'
   { key: 'muscle',     label: 'Muscle',     icon: 'car-side' },
   { key: 'supercar',   label: 'Supercar',   icon: 'car-sports' },
   { key: 'exotic',     label: 'Exotic',     icon: 'car-convertible' },

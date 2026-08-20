@@ -54,14 +54,14 @@ const GT3RS_IMAGES: Record<string, any> = {
 // S2000 / M2 / LC 500 / LFA heroes — rendered from the full-detail authored
 // models (no official per-colour configurator source), same dark studio. 8/20.
 const S2000_IMAGES: Record<string, any> = {
-'grandprixwhite': require('../assets/cars/s2000/grand_prix_white.jpg'),
-'berlinablack': require('../assets/cars/s2000/berlina_black.jpg'),
-'silverstone': require('../assets/cars/s2000/silverstone.jpg'),
-'rioyellowpearl': require('../assets/cars/s2000/rio_yellow.jpg'),
-'spayellow': require('../assets/cars/s2000/spa_yellow.jpg'),
-'lagunablue': require('../assets/cars/s2000/laguna_blue.jpg'),
-'suzukablue': require('../assets/cars/s2000/suzuka_blue.jpg'),
-'nogarosilver': require('../assets/cars/s2000/nogaro_silver.jpg'),
+'grandprixwhite': require('../assets/cars/s2000/grand_prix_white_b.jpg'),
+'berlinablack': require('../assets/cars/s2000/berlina_black_b.jpg'),
+'silverstone': require('../assets/cars/s2000/silverstone_b.jpg'),
+'rioyellowpearl': require('../assets/cars/s2000/rio_yellow_b.jpg'),
+'spayellow': require('../assets/cars/s2000/spa_yellow_b.jpg'),
+'lagunablue': require('../assets/cars/s2000/laguna_blue_b.jpg'),
+'suzukablue': require('../assets/cars/s2000/suzuka_blue_b.jpg'),
+'nogarosilver': require('../assets/cars/s2000/nogaro_silver_b.jpg'),
 };
 const M2_IMAGES: Record<string, any> = {
 'zandvoortblue': require('../assets/cars/m2/zandvoort_blue.jpg'),

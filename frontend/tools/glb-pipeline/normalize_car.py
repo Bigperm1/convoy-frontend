@@ -94,6 +94,8 @@ for o in [x for x in bpy.data.objects if x.type == 'MESH']:
     plus  = abs(mn.x) <= EPS and mx.x >  EPS
     minus = abs(mx.x) <= EPS and mn.x < -EPS
     if plus or minus:
+        if o.data.users > 1:
+            o.data = o.data.copy()   # modifier_apply refuses multi-user data (S2000 shares wheel meshes)
         m = o.modifiers.new('mir', 'MIRROR')
         m.use_axis = (True, False, False)
         m.mirror_object = pivot
@@ -145,6 +147,8 @@ if os.environ.get('MIRROR_ORPHANS') == '1':
                 twin = True; break
         if twin:
             continue
+        if o.data.users > 1:
+            o.data = o.data.copy()   # modifier_apply refuses multi-user data (S2000 shares wheel meshes)
         m = o.modifiers.new('mir', 'MIRROR')
         m.use_axis = (True, False, False)
         m.mirror_object = pivot

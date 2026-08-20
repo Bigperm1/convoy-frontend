@@ -38,6 +38,19 @@ const GR_YARIS_IMAGES: Record<string, any> = {
 'scarletflare': require('../assets/cars/gr_yaris/scarlet_flare.jpg'),
 };
 
+// 911 GT3 RS heroes — rendered from the full-detail authored model (no official
+// per-colour configurator render exists), studio-lit, composited on the same
+// dark-studio background as the rest of the garage. Built 8/20.
+const GT3RS_IMAGES: Record<string, any> = {
+'guardsred': require('../assets/cars/gt3rs/guards_red.jpg'),
+'gtsilver': require('../assets/cars/gt3rs/gt_silver.jpg'),
+'carrarawhite': require('../assets/cars/gt3rs/carrara_white.jpg'),
+'jetblack': require('../assets/cars/gt3rs/jet_black.jpg'),
+'miamiblue': require('../assets/cars/gt3rs/miami_blue.jpg'),
+'pythongreen': require('../assets/cars/gt3rs/python_green.jpg'),
+'sharkblue': require('../assets/cars/gt3rs/shark_blue.jpg'),
+};
+
 // Top-down map marker images (existing vehicle presets)
 const TOP_DOWN_IMAGES: Record<string, any> = {
 'heavymetal': require('../assets/vehicles/heavy_metal.png'),
@@ -67,6 +80,10 @@ return GR_COROLLA_IMAGES[key] ?? DEFAULT_GARAGE;
 
 if (makeModel.includes('gryaris') || (makeModel.includes('gr') && makeModel.includes('yaris'))) {
 return GR_YARIS_IMAGES[key] ?? DEFAULT_GARAGE;
+}
+
+if (makeModel.includes('gt3rs') || (makeModel.includes('gt3') && makeModel.includes('rs'))) {
+return GT3RS_IMAGES[key] ?? DEFAULT_GARAGE;
 }
 
 // Fallback for unknown models — use top-down as placeholder

@@ -177,6 +177,16 @@ export const CAR_DATABASE: CarMake[] = [
         { name: 'Python Green',   hex: '#1A6A1A' },
         { name: 'Shark Blue',     hex: '#003D7A' },
       ]},
+      // 992 GT3 RS — authored 3D model (8/20), swatches match the baked paints
+      { name: '911 GT3 RS', colors: [
+        { name: 'Guards Red',     hex: '#D5001C' },
+        { name: 'GT Silver',      hex: '#9EA1A4' },
+        { name: 'Carrara White',  hex: '#F4F4F0' },
+        { name: 'Jet Black',      hex: '#1C1C1E' },
+        { name: 'Miami Blue',     hex: '#00B2D8' },
+        { name: 'Python Green',   hex: '#4EC53F' },
+        { name: 'Shark Blue',     hex: '#2E64B8' },
+      ]},
     ],
   },
   {

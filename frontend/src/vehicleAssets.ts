@@ -23,7 +23,14 @@ export type GRCColorKey =
   | "yaris_platinum_pearl"
   | "yaris_precious_metal"
   | "yaris_precious_black"
-  | "yaris_scarlet_flare";
+  | "yaris_scarlet_flare"
+  | "gt3rs_guards_red"
+  | "gt3rs_gt_silver"
+  | "gt3rs_carrara_white"
+  | "gt3rs_jet_black"
+  | "gt3rs_miami_blue"
+  | "gt3rs_python_green"
+  | "gt3rs_shark_blue";
 
 // require() bundles the asset for native (Image component memory-friendly).
 // On web Metro returns a `{ uri }` object — works either way.
@@ -51,6 +58,13 @@ export const VEHICLE_PNG: Record<GRCColorKey, number | { uri: string }> = {
   yaris_precious_metal: require("../assets/vehicles/v3/yaris_precious_metal.png"),
   yaris_precious_black: require("../assets/vehicles/v3/yaris_precious_black2.png"),
   yaris_scarlet_flare:  require("../assets/vehicles/v3/yaris_scarlet_flare2.png"),
+  gt3rs_guards_red:     require("../assets/vehicles/v3/gt3rs_guards_red.png"),
+  gt3rs_gt_silver:      require("../assets/vehicles/v3/gt3rs_gt_silver.png"),
+  gt3rs_carrara_white:  require("../assets/vehicles/v3/gt3rs_carrara_white.png"),
+  gt3rs_jet_black:      require("../assets/vehicles/v3/gt3rs_jet_black.png"),
+  gt3rs_miami_blue:     require("../assets/vehicles/v3/gt3rs_miami_blue.png"),
+  gt3rs_python_green:   require("../assets/vehicles/v3/gt3rs_python_green.png"),
+  gt3rs_shark_blue:     require("../assets/vehicles/v3/gt3rs_shark_blue.png"),
 };
 
 // Color name aliases — maps free-form user input to a canonical key.
@@ -118,6 +132,27 @@ const ALIASES: Record<string, GRCColorKey> = {
   "yaris_precious_metal":  "yaris_precious_metal",
   "yaris_precious_black":  "yaris_precious_black",
   "yaris_scarlet_flare":   "yaris_scarlet_flare",
+  // Porsche 911 GT3 RS (992) — DB colour names. NOTE: "jet black" also exists on
+  // other makes' palettes; those cars had no model of their own anyway (they fell
+  // back to the heavy-metal GRC), so resolving them to the GT3 RS is the lesser
+  // wrong until colour resolution becomes model-aware.
+  "guards red":            "gt3rs_guards_red",
+  "gt silver":             "gt3rs_gt_silver",
+  "gt silver metallic":    "gt3rs_gt_silver",
+  "carrara white":         "gt3rs_carrara_white",
+  "carrara white metallic":"gt3rs_carrara_white",
+  "jet black":             "gt3rs_jet_black",
+  "jet black metallic":    "gt3rs_jet_black",
+  "miami blue":            "gt3rs_miami_blue",
+  "python green":          "gt3rs_python_green",
+  "shark blue":            "gt3rs_shark_blue",
+  "gt3rs_guards_red":      "gt3rs_guards_red",
+  "gt3rs_gt_silver":       "gt3rs_gt_silver",
+  "gt3rs_carrara_white":   "gt3rs_carrara_white",
+  "gt3rs_jet_black":       "gt3rs_jet_black",
+  "gt3rs_miami_blue":      "gt3rs_miami_blue",
+  "gt3rs_python_green":    "gt3rs_python_green",
+  "gt3rs_shark_blue":      "gt3rs_shark_blue",
 };
 
 export function resolveGRCKey(color?: string | null): GRCColorKey | null {
@@ -202,6 +237,14 @@ export const VEHICLE_TINT: Record<GRCColorKey, { color: string; mix: number }> =
   yaris_precious_metal: { color: "#8A8E8B", mix: 0.9 },  // 1L5 — genuinely a dark silver, verified vs heavy_metal
   yaris_precious_black: { color: "#17191C", mix: 0.92 }, // 219 — approved GRC black treatment
   yaris_scarlet_flare:  { color: "#C8102E", mix: 1.0 },  // 3U5 — same paint as supersonic_red
+  // 992 GT3 RS — vivid marketing-leaning hexes, QC-rendered 8/20 (richness rule)
+  gt3rs_guards_red:     { color: "#D5001C", mix: 1.0 },
+  gt3rs_gt_silver:      { color: "#9EA1A4", mix: 0.9 },
+  gt3rs_carrara_white:  { color: "#F4F4F0", mix: 0.3 },
+  gt3rs_jet_black:      { color: "#17191C", mix: 0.92 }, // approved GRC black treatment
+  gt3rs_miami_blue:     { color: "#00B2D8", mix: 1.0 },
+  gt3rs_python_green:   { color: "#4EC53F", mix: 1.0 },
+  gt3rs_shark_blue:     { color: "#2E64B8", mix: 1.0 },
 };
 
 /** modelColor + mix for the 3D car. Falls back to the default GRC paint. */
@@ -242,6 +285,13 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
   yaris_precious_metal: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_yaris_precious_metal.glb",
   yaris_precious_black: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_yaris_precious_black2.glb",
   yaris_scarlet_flare:  "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_yaris_scarlet_flare2.glb",
+  gt3rs_guards_red:     "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_guards_red.glb",
+  gt3rs_gt_silver:      "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_gt_silver.glb",
+  gt3rs_carrara_white:  "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_carrara_white.glb",
+  gt3rs_jet_black:      "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_jet_black.glb",
+  gt3rs_miami_blue:     "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_miami_blue.glb",
+  gt3rs_python_green:   "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_python_green.glb",
+  gt3rs_shark_blue:     "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_shark_blue.glb",
 };
 
 // ── PER-COLOUR FLAT-SPRITE NORMALISATION (2026-07-30) ────────────────────────
@@ -298,6 +348,14 @@ const VEHICLE_PNG_INK_LEN: Record<GRCColorKey, number> = {
   yaris_precious_metal: 132,
   yaris_precious_black: 132,
   yaris_scarlet_flare: 132,
+  // GT3 RS — measured 132 at alpha>0 on the @3x renders (8/20)
+  gt3rs_guards_red: 132,
+  gt3rs_gt_silver: 132,
+  gt3rs_carrara_white: 132,
+  gt3rs_jet_black: 132,
+  gt3rs_miami_blue: 132,
+  gt3rs_python_green: 132,
+  gt3rs_shark_blue: 132,
 };
 const VEHICLE_PNG_REF_LEN = VEHICLE_PNG_INK_LEN.heavy_metal;   // grey is the reference
 

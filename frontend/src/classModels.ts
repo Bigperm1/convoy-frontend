@@ -31,24 +31,33 @@ export type ClassModel3D = {
 // per-colour GLBs), Muscle = the generated coupe (tint palette; upgrade to an
 // authored pack model if one lands). Jeff is sourcing Electric/Truck/Jeep
 // packs; Sedan (M3 CS sits in the m2 pack) awaiting his confirmation.
-// The tint palette for classes without per-colour bakes — the colours car
-// people already know by name (Jeff 8/20: "a bright green from Lambo or the
-// Ferrari Yellow or the BMW Purple... names car enthusiasts will recognize").
-// hex = the swatch/intent colour; tintHex = the brightened multiplier actually
-// sent to the model tint (it MULTIPLIES a mid-grey texture, so it runs ~2x hot
-// to land the intended paint on the car).
-export const ICONIC_PALETTE: ClassPaletteEntry[] = [
-  { name: "Nardo Grey",           hex: "#686D70" },
-  { name: "Rosso Corsa",          hex: "#D40000" },
-  { name: "Giallo Modena",        hex: "#FFD500" },
-  { name: "Verde Mantis",         hex: "#8DBE22" },
-  { name: "Bayside Blue",         hex: "#1268B3" },
-  { name: "Midnight Purple",      hex: "#35155D" },
-  { name: "British Racing Green", hex: "#004225" },
-  { name: "Championship White",   hex: "#F7F4EA" },
-  { name: "Arancio Borealis",     hex: "#F47B20" },
-  { name: "Shadow Black",         hex: "#17191C" },
+// Palette doctrine (Jeff 8/20 night): every class palette (1) covers the core
+// colours — black/white/grey/red/blue/green and the scene's signatures — and
+// (2) names every swatch after a REAL paint from that class's marques.
+// hex = swatch/intent; the tint multiplier sent to the model runs ~2x hot
+// because it MULTIPLIES a mid-grey texture.
+
+// MUSCLE — Mopar/Ford/Chevy heritage (Camaro/Challenger/Mustang, Jeff's call).
+export const MUSCLE_PALETTE: ClassPaletteEntry[] = [
+  { name: "Pitch Black",     hex: "#17191C" },
+  { name: "Wimbledon White", hex: "#F4F1E4" },
+  { name: "Lead Foot Grey",  hex: "#7D8083" },
+  { name: "TorRed",          hex: "#D2232A" },
+  { name: "Grabber Blue",    hex: "#1E90D6" },
+  { name: "B5 Blue",         hex: "#3B9EE2" },
+  { name: "Rally Green",     hex: "#3F5C48" },
+  { name: "Plum Crazy",      hex: "#6C3082" },
+  { name: "Go Mango",        hex: "#E96B23" },
+  { name: "Sublime",         hex: "#8CC63E" },
 ];
+
+// SUPERCAR additions to the GT3 RS factory seven (bakes queued): Nardo Grey,
+// Rosso Corsa, Giallo Modena, Verde Mantis, Midnight Purple, Riviera Blue,
+// Arancio Borealis — fills the yellow/orange/purple gaps with legend paints.
+// HOT HATCH additions to the GRC six (bakes queued): Liquid Yellow (Renault),
+// Nitrous Blue (Focus RS), WR Blue Pearl (Subaru), Ultimate Green (Focus RS).
+// EXOTIC additions to the LFA five (bakes queued): Rosso Corsa, Verde Mantis,
+// Papaya Spark (McLaren), French Racing Blue (Bugatti), Grigio Telesto (Lambo).
 
 export const CLASS_MODEL_3D: Partial<Record<string, ClassModel3D>> = {
   hatchback: {
@@ -83,11 +92,11 @@ export const CLASS_MODEL_3D: Partial<Record<string, ClassModel3D>> = {
       { name: "Matte Black",    hex: "#141518", modelKey: "lfa_matte_black" },
     ],
   },
-  // Generated coupe, neutral grey — colours come from live model tint (dark
-  // glass/wheels barely take tint, so the body carries the colour). No lit
+  // Generated coupe with surgically dark wheels (wheels_dark.py — flood-fill
+  // from measured axle centres; whole-model tint leaves them gunmetal). No lit
   // variant (single baked material). Day model after dark is the accepted v1.
   muscle: {
-    baseUrl: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_class_muscle.glb",
-    palette: ICONIC_PALETTE,
+    baseUrl: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_class_muscle2.glb",
+    palette: MUSCLE_PALETTE,
   },
 };

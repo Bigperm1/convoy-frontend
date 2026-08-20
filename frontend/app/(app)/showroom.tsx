@@ -29,7 +29,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { COLORS } from "../../src/theme";
 import { PremiumBadge, useFeature, openPaywall } from "../../src/PremiumBadge";
-import { CLASS_MODEL_3D, ICONIC_PALETTE, type ClassPaletteEntry } from "../../src/classModels";
+import { CLASS_MODEL_3D, MUSCLE_PALETTE, type ClassPaletteEntry } from "../../src/classModels";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const CARD_W = Math.round(SCREEN_W * 0.82);
@@ -65,16 +65,16 @@ const HEROES: Record<string, Record<string, any>> = {
     "Matte Black": require("../../assets/cars/lfa/matte_black.jpg"),
   },
   muscle: {
-    "Nardo Grey": require("../../assets/cars/classes/muscle_nardo_grey.jpg"),
-    "Rosso Corsa": require("../../assets/cars/classes/muscle_rosso_corsa.jpg"),
-    "Giallo Modena": require("../../assets/cars/classes/muscle_giallo_modena.jpg"),
-    "Verde Mantis": require("../../assets/cars/classes/muscle_verde_mantis.jpg"),
-    "Bayside Blue": require("../../assets/cars/classes/muscle_bayside_blue.jpg"),
-    "Midnight Purple": require("../../assets/cars/classes/muscle_midnight_purple.jpg"),
-    "British Racing Green": require("../../assets/cars/classes/muscle_brg.jpg"),
-    "Championship White": require("../../assets/cars/classes/muscle_championship_white.jpg"),
-    "Arancio Borealis": require("../../assets/cars/classes/muscle_arancio.jpg"),
-    "Shadow Black": require("../../assets/cars/classes/muscle_shadow_black.jpg"),
+    "Pitch Black": require("../../assets/cars/classes/muscle_pitch_black.jpg"),
+    "Wimbledon White": require("../../assets/cars/classes/muscle_wimbledon_white.jpg"),
+    "Lead Foot Grey": require("../../assets/cars/classes/muscle_lead_foot_grey.jpg"),
+    TorRed: require("../../assets/cars/classes/muscle_torred.jpg"),
+    "Grabber Blue": require("../../assets/cars/classes/muscle_grabber_blue.jpg"),
+    "B5 Blue": require("../../assets/cars/classes/muscle_b5_blue.jpg"),
+    "Rally Green": require("../../assets/cars/classes/muscle_rally_green.jpg"),
+    "Plum Crazy": require("../../assets/cars/classes/muscle_plum_crazy.jpg"),
+    "Go Mango": require("../../assets/cars/classes/muscle_go_mango.jpg"),
+    Sublime: require("../../assets/cars/classes/muscle_sublime.jpg"),
   },
 };
 
@@ -87,7 +87,7 @@ type Card =
 const CARDS: Card[] = [
   { kind: "arrow", title: "Arrow", sub: "The classic. Always free." },
   { kind: "class", classKey: "hatchback", title: "Hot Hatch", sub: "GR Corolla", palette: CLASS_MODEL_3D.hatchback!.palette },
-  { kind: "class", classKey: "muscle", title: "Muscle", sub: "V8 coupe", palette: ICONIC_PALETTE },
+  { kind: "class", classKey: "muscle", title: "Muscle", sub: "V8 coupe", palette: MUSCLE_PALETTE },
   { kind: "class", classKey: "supercar", title: "Supercar", sub: "911 GT3 RS", palette: CLASS_MODEL_3D.supercar!.palette },
   { kind: "class", classKey: "exotic", title: "Exotic", sub: "LFA", palette: CLASS_MODEL_3D.exotic!.palette },
   { kind: "soon", title: "Sedan", sub: "In the paint booth" },

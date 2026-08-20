@@ -31,6 +31,25 @@ export type ClassModel3D = {
 // per-colour GLBs), Muscle = the generated coupe (tint palette; upgrade to an
 // authored pack model if one lands). Jeff is sourcing Electric/Truck/Jeep
 // packs; Sedan (M3 CS sits in the m2 pack) awaiting his confirmation.
+// The tint palette for classes without per-colour bakes — the colours car
+// people already know by name (Jeff 8/20: "a bright green from Lambo or the
+// Ferrari Yellow or the BMW Purple... names car enthusiasts will recognize").
+// hex = the swatch/intent colour; tintHex = the brightened multiplier actually
+// sent to the model tint (it MULTIPLIES a mid-grey texture, so it runs ~2x hot
+// to land the intended paint on the car).
+export const ICONIC_PALETTE: ClassPaletteEntry[] = [
+  { name: "Nardo Grey",           hex: "#686D70" },
+  { name: "Rosso Corsa",          hex: "#D40000" },
+  { name: "Giallo Modena",        hex: "#FFD500" },
+  { name: "Verde Mantis",         hex: "#8DBE22" },
+  { name: "Bayside Blue",         hex: "#1268B3" },
+  { name: "Midnight Purple",      hex: "#35155D" },
+  { name: "British Racing Green", hex: "#004225" },
+  { name: "Championship White",   hex: "#F7F4EA" },
+  { name: "Arancio Borealis",     hex: "#F47B20" },
+  { name: "Shadow Black",         hex: "#17191C" },
+];
+
 export const CLASS_MODEL_3D: Partial<Record<string, ClassModel3D>> = {
   hatchback: {
     palette: [
@@ -39,6 +58,9 @@ export const CLASS_MODEL_3D: Partial<Record<string, ClassModel3D>> = {
       { name: "Icecap White",   hex: "#F0F0F0", modelKey: "ice_cap_white" },
       { name: "Blue Flame",     hex: "#0099D8", modelKey: "blue_flame" },
       { name: "Black Onyx",     hex: "#1A1A1A", modelKey: "precious_black_pearl" },
+      // The GRMN paint, real name kept (Jeff 8/20: "not sure if we can use the
+      // exact names but lets do it anyways").
+      { name: "Gravel",         hex: "#565E5F", modelKey: "gravel" },
     ],
   },
   supercar: {
@@ -66,13 +88,6 @@ export const CLASS_MODEL_3D: Partial<Record<string, ClassModel3D>> = {
   // variant (single baked material). Day model after dark is the accepted v1.
   muscle: {
     baseUrl: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_class_muscle.glb",
-    palette: [
-      { name: "Graphite",   hex: "#6B6E72" },
-      { name: "Rally Red",  hex: "#C8102E" },
-      { name: "White",      hex: "#F2F2EF" },
-      { name: "Petrol Blue",hex: "#2E64B8" },
-      { name: "Black",      hex: "#17191C" },
-      { name: "Verde",      hex: "#3E8E4E" },
-    ],
+    palette: ICONIC_PALETTE,
   },
 };

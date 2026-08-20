@@ -357,6 +357,8 @@ export default function AppLayout() {
         {/* Garage Scan capture guide — staged build-80+ ultra feature; linked
             from nowhere yet, navigable only by route. */}
         <Tabs.Screen name="garage-scan" options={{ href: null }} />
+        {/* Showroom — the swipeable appearance-ladder picker; staged, unlinked. */}
+        <Tabs.Screen name="showroom" options={{ href: null }} />
         {/* Drives (trip history) — reached from the logo menu, not a bottom tab. */}
         <Tabs.Screen name="trips" options={{ href: null }} />
         <Tabs.Screen name="admin" options={{ href: null }} />

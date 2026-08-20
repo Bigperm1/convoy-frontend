@@ -27,6 +27,32 @@ def tune(mat, base=None, metallic=None, rough=None, emissive=None, strength=None
     b = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
     if not b: return
     if base is not None:
+        if os.environ.get('KEEP_TEX') == '1':
+            # Tint mode (generated single-material cars). In Blender a texture
+            # LINK overrides the socket value, so setting default_value does
+            # nothing — the first tint pass rendered ten identical chrome cars.
+            # Do it properly: multiply the texture through a Mix node (that IS
+            # the glTF factor semantics Mapbox applies on the map), and CUT the
+            # metallic/roughness links (their texture read near-metal and
+            # chromed the whole car under studio light).
+            links_in = list(b.inputs['Base Color'].links)
+            if links_in:
+                src_sock = links_in[0].from_socket
+                mat.node_tree.links.remove(links_in[0])
+                mix = mat.node_tree.nodes.new('ShaderNodeMixRGB')
+                mix.blend_type = 'MULTIPLY'
+                mix.inputs['Fac'].default_value = 1.0
+                mix.inputs['Color2'].default_value = (*base, 1)
+                mat.node_tree.links.new(src_sock, mix.inputs['Color1'])
+                mat.node_tree.links.new(mix.outputs['Color'], b.inputs['Base Color'])
+            else:
+                b.inputs['Base Color'].default_value = (*base, 1)
+            for inp in ('Metallic', 'Roughness'):
+                for lk in list(b.inputs[inp].links):
+                    mat.node_tree.links.remove(lk)
+            b.inputs['Metallic'].default_value = metallic if metallic is not None else 0.25
+            b.inputs['Roughness'].default_value = rough if rough is not None else 0.35
+            return
         # A baseColorTexture MULTIPLIES the factor — the LFA ships a carbon-weave
         # texture on its body, and painting the factor alone rendered charcoal.
         # ...and its normal/roughness/metallic maps (carbon weave embossed the

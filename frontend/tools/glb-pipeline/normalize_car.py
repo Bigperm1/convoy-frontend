@@ -30,6 +30,7 @@ DIAG  = os.environ.get('DIAG') == '1'
 TARGET_LEN = float(os.environ.get('TARGET_LEN', '1.9101'))   # marker world length
 TRI_BUDGET = int(os.environ.get('TRI_BUDGET', '6000'))       # per-object cap before decimation
 IMG_MAX = int(os.environ.get('IMG_MAX', '0'))                 # >0: downscale embedded textures to this max edge (map cars don't need 1024+ logos)
+SKIP_PAINT = os.environ.get('SKIP_PAINT') == '1'              # scanned/generated cars: KEEP the baked photo-texture, never repaint the body (Garage Scan PoC)
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=os.path.join(BASE, SRC))
@@ -241,8 +242,10 @@ body_lin = tuple(v/12.92 if v <= 0.04045 else ((v + 0.055)/1.055) ** 2.4 for v i
 # .strip(): the S2000 pack ships 'CarPaint ' with a TRAILING SPACE — an
 # exact match silently skips the whole body.
 BODY_MATS = set(x.strip() for x in BODY_MAT.split('|'))
-painted = False
+painted = SKIP_PAINT  # scanned cars carry their look in the texture; tuning applies to everything EXCEPT the body repaint
 for m in bpy.data.materials:
+    if SKIP_PAINT and m.name.strip() in BODY_MATS:
+        continue
     n = m.name
     if n.strip() in BODY_MATS:
         tune(m, base=body_lin, metallic=0.1 if MATTE else 0.25, rough=0.55 if MATTE else 0.35)

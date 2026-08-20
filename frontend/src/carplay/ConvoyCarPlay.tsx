@@ -838,7 +838,9 @@ export function CarSurface() {
           ]}
           pointerEvents="none"
         >
-          <GlassFill glassStyle="regular" tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
+          {/* radius 14 = the chip's own — a mismatched glass shape gets clipped and
+              shows the diagonal edge-crease artifact (see GlassFill's radius note). */}
+          <GlassFill glassStyle="regular" tintColor={undefined} style={{ borderRadius: 14, overflow: 'hidden' }} />
           {s.weatherKind ? <WeatherGlyph kind={s.weatherKind as WeatherKind} size={20} /> : null}
           <Text style={styles.weatherText}>{s.weatherTemp}</Text>
         </View>
@@ -1851,7 +1853,8 @@ const styles = StyleSheet.create({
   // — Jeff, 8/13: "make the speed button on carplay the same border as the speed limit".
   // It was a 1pt 14%-white hairline, effectively invisible next to the limit sign's heavy
   // black rule. Width/height/radius already matched; only the two border tokens moved.
-  speedPill: { width: 58, height: SPEED_PILL_H, borderRadius: 14, borderWidth: 2, borderColor: '#000000', alignItems: 'center', justifyContent: 'center' },
+  // Borderless 8/20 (glass-edge rule, see navCard). The SIGN below keeps its ring.
+  speedPill: { width: 58, height: SPEED_PILL_H, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   speedNum: { color: '#F4F4F4', fontSize: 21, fontWeight: '800', letterSpacing: -0.5, lineHeight: 23 },
   // WHITE, not gray (Jeff, 2026-08-15: "the speedo km/h needs to be white").
   speedUnit: { color: '#FFFFFF', fontSize: 9, fontWeight: '600', letterSpacing: 0.3, marginTop: 1 },
@@ -1873,7 +1876,10 @@ const styles = StyleSheet.create({
   // top-left is better left as MAP: nothing we draw there can ever be tapped (CarPlay
   // routes touches through the template only), so a readout parked in the most reachable
   // corner is wasted space. Rail is now just weather 130-178 + speed 182-230.
-  weatherChip: { position: 'absolute', left: CAR_DOCK_LEFT, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18,18,22,0.5)', borderRadius: 14, borderWidth: 2, borderColor: '#000000', overflow: 'hidden' },
+  // Borderless + NO baked-in fill (8/20): the hardcoded rgba(...,0.5) wash kept
+  // this chip slab-dark on night maps where every other chip goes fully clear —
+  // it now takes carHudFloor() inline like the rest, so the regular glass shows.
+  weatherChip: { position: 'absolute', left: CAR_DOCK_LEFT, bottom: 62, width: 58, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 14, overflow: 'hidden' },
   // top was 10 -> INSIDE the CPMapTemplate nav bar, i.e. the one signal that says
   // Scout is listening was hidden behind system chrome. Left-anchored at
   // CAR_LEFT_INSET rather than centred so it also clears the weather chip.
@@ -1960,10 +1966,11 @@ const styles = StyleSheet.create({
   // navCard overrides navBannerRow's row direction/fixed height; the turn row keeps
   // TURN_ROW_H inside, the ETA line adds ~21pt under a hairline. Same glass, same
   // floor, same radius — a consolidation, not a restyle.
-  // Border matches the speedo/weather chips EXACTLY (borderWidth 2 / '#000000') —
-  // Jeff 8/19: "the new banner bar is perfect. lets try putting the same black
-  // outline as the speedo on it."
-  navCard: { flexDirection: 'column', alignItems: 'stretch', height: undefined, paddingHorizontal: 0, paddingBottom: 0, borderWidth: 2, borderColor: '#000000' },
+  // BORDERLESS (Jeff 8/20: "the black border may take away the effect of the
+  // glass" — agreed): Liquid Glass's signature is the edge lensing at the rim,
+  // and a 2pt opaque ring paints over exactly that rim, so the chip read as a
+  // slab whatever material was inside. Supersedes the 8/19 black outline.
+  navCard: { flexDirection: 'column', alignItems: 'stretch', height: undefined, paddingHorizontal: 0, paddingBottom: 0 },
   navCardTurn: { flexDirection: 'row', alignItems: 'center', height: TURN_ROW_H, paddingHorizontal: 8 },
   navCardEta: { paddingBottom: 3, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
   // The phone StepDrawer's progress bar, card-sized (track 3pt, green fill, caret tip).

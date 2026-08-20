@@ -30,7 +30,30 @@ export type GRCColorKey =
   | "gt3rs_jet_black"
   | "gt3rs_miami_blue"
   | "gt3rs_python_green"
-  | "gt3rs_shark_blue";
+  | "gt3rs_shark_blue"
+  | "s2k_grand_prix_white"
+  | "s2k_berlina_black"
+  | "s2k_silverstone"
+  | "s2k_rio_yellow"
+  | "s2k_spa_yellow"
+  | "s2k_laguna_blue"
+  | "s2k_suzuka_blue"
+  | "s2k_nogaro_silver"
+  | "m2_zandvoort_blue"
+  | "m2_toronto_red"
+  | "m2_alpine_white"
+  | "m2_black_sapphire"
+  | "m2_brooklyn_grey"
+  | "lc_infrared"
+  | "lc_ultra_white"
+  | "lc_caviar"
+  | "lc_atomic_silver"
+  | "lc_nightfall_mica"
+  | "lfa_whitest_white"
+  | "lfa_absolutely_red"
+  | "lfa_pearl_yellow"
+  | "lfa_pearl_blue"
+  | "lfa_matte_black";
 
 // require() bundles the asset for native (Image component memory-friendly).
 // On web Metro returns a `{ uri }` object — works either way.
@@ -65,6 +88,29 @@ export const VEHICLE_PNG: Record<GRCColorKey, number | { uri: string }> = {
   gt3rs_miami_blue:     require("../assets/vehicles/v3/gt3rs_miami_blue.png"),
   gt3rs_python_green:   require("../assets/vehicles/v3/gt3rs_python_green.png"),
   gt3rs_shark_blue:     require("../assets/vehicles/v3/gt3rs_shark_blue.png"),
+  s2k_grand_prix_white: require("../assets/vehicles/v3/s2k_grand_prix_white.png"),
+  s2k_berlina_black: require("../assets/vehicles/v3/s2k_berlina_black.png"),
+  s2k_silverstone: require("../assets/vehicles/v3/s2k_silverstone.png"),
+  s2k_rio_yellow: require("../assets/vehicles/v3/s2k_rio_yellow.png"),
+  s2k_spa_yellow: require("../assets/vehicles/v3/s2k_spa_yellow.png"),
+  s2k_laguna_blue: require("../assets/vehicles/v3/s2k_laguna_blue.png"),
+  s2k_suzuka_blue: require("../assets/vehicles/v3/s2k_suzuka_blue.png"),
+  s2k_nogaro_silver: require("../assets/vehicles/v3/s2k_nogaro_silver.png"),
+  m2_zandvoort_blue: require("../assets/vehicles/v3/m2_zandvoort_blue.png"),
+  m2_toronto_red: require("../assets/vehicles/v3/m2_toronto_red.png"),
+  m2_alpine_white: require("../assets/vehicles/v3/m2_alpine_white.png"),
+  m2_black_sapphire: require("../assets/vehicles/v3/m2_black_sapphire.png"),
+  m2_brooklyn_grey: require("../assets/vehicles/v3/m2_brooklyn_grey.png"),
+  lc_infrared: require("../assets/vehicles/v3/lc_infrared.png"),
+  lc_ultra_white: require("../assets/vehicles/v3/lc_ultra_white.png"),
+  lc_caviar: require("../assets/vehicles/v3/lc_caviar.png"),
+  lc_atomic_silver: require("../assets/vehicles/v3/lc_atomic_silver.png"),
+  lc_nightfall_mica: require("../assets/vehicles/v3/lc_nightfall_mica.png"),
+  lfa_whitest_white: require("../assets/vehicles/v3/lfa_whitest_white.png"),
+  lfa_absolutely_red: require("../assets/vehicles/v3/lfa_absolutely_red.png"),
+  lfa_pearl_yellow: require("../assets/vehicles/v3/lfa_pearl_yellow.png"),
+  lfa_pearl_blue: require("../assets/vehicles/v3/lfa_pearl_blue.png"),
+  lfa_matte_black: require("../assets/vehicles/v3/lfa_matte_black.png"),
 };
 
 // Color name aliases — maps free-form user input to a canonical key.
@@ -153,6 +199,60 @@ const ALIASES: Record<string, GRCColorKey> = {
   "gt3rs_miami_blue":      "gt3rs_miami_blue",
   "gt3rs_python_green":    "gt3rs_python_green",
   "gt3rs_shark_blue":      "gt3rs_shark_blue",
+  // Honda S2000 (AP1/AP2)
+  "grand prix white":      "s2k_grand_prix_white",
+  "berlina black":         "s2k_berlina_black",
+  "silverstone":           "s2k_silverstone",
+  "rio yellow pearl":      "s2k_rio_yellow",
+  "rio yellow":            "s2k_rio_yellow",
+  "spa yellow":            "s2k_spa_yellow",
+  "laguna blue":           "s2k_laguna_blue",
+  "suzuka blue":           "s2k_suzuka_blue",
+  "nogaro silver":         "s2k_nogaro_silver",
+  // BMW M2 (G87). "alpine white" also lives on the M3 palette — the M3 has no
+  // model of its own (heavy-metal GRC fallback today), so the M2 is the lesser wrong.
+  "zandvoort blue":        "m2_zandvoort_blue",
+  "toronto red":           "m2_toronto_red",
+  "alpine white":          "m2_alpine_white",
+  "black sapphire":        "m2_black_sapphire",
+  "brooklyn grey":         "m2_brooklyn_grey",
+  "brooklyn gray":         "m2_brooklyn_grey",
+  // Lexus LC 500
+  "infrared":              "lc_infrared",
+  "ultra white":           "lc_ultra_white",
+  "caviar":                "lc_caviar",
+  "atomic silver":         "lc_atomic_silver",
+  "nightfall mica":        "lc_nightfall_mica",
+  // Lexus LFA — colour is "matte black", NEVER a bare "black" alias (it would
+  // capture every generic black car in the DB).
+  "whitest white":         "lfa_whitest_white",
+  "absolutely red":        "lfa_absolutely_red",
+  "pearl yellow":          "lfa_pearl_yellow",
+  "pearl blue":            "lfa_pearl_blue",
+  "matte black":           "lfa_matte_black",
+  "s2k_grand_prix_white": "s2k_grand_prix_white",
+  "s2k_berlina_black": "s2k_berlina_black",
+  "s2k_silverstone": "s2k_silverstone",
+  "s2k_rio_yellow": "s2k_rio_yellow",
+  "s2k_spa_yellow": "s2k_spa_yellow",
+  "s2k_laguna_blue": "s2k_laguna_blue",
+  "s2k_suzuka_blue": "s2k_suzuka_blue",
+  "s2k_nogaro_silver": "s2k_nogaro_silver",
+  "m2_zandvoort_blue": "m2_zandvoort_blue",
+  "m2_toronto_red": "m2_toronto_red",
+  "m2_alpine_white": "m2_alpine_white",
+  "m2_black_sapphire": "m2_black_sapphire",
+  "m2_brooklyn_grey": "m2_brooklyn_grey",
+  "lc_infrared": "lc_infrared",
+  "lc_ultra_white": "lc_ultra_white",
+  "lc_caviar": "lc_caviar",
+  "lc_atomic_silver": "lc_atomic_silver",
+  "lc_nightfall_mica": "lc_nightfall_mica",
+  "lfa_whitest_white": "lfa_whitest_white",
+  "lfa_absolutely_red": "lfa_absolutely_red",
+  "lfa_pearl_yellow": "lfa_pearl_yellow",
+  "lfa_pearl_blue": "lfa_pearl_blue",
+  "lfa_matte_black": "lfa_matte_black",
 };
 
 export function resolveGRCKey(color?: string | null): GRCColorKey | null {
@@ -245,6 +345,30 @@ export const VEHICLE_TINT: Record<GRCColorKey, { color: string; mix: number }> =
   gt3rs_miami_blue:     { color: "#00B2D8", mix: 1.0 },
   gt3rs_python_green:   { color: "#4EC53F", mix: 1.0 },
   gt3rs_shark_blue:     { color: "#2E64B8", mix: 1.0 },
+  // S2000 / M2 / LC 500 / LFA — vivid bake hexes (8/20), lockstep with the GLBs
+  s2k_grand_prix_white: { color: "#FAFAF6", mix: 0.0 },
+  s2k_berlina_black:    { color: "#17191C", mix: 0.92 },
+  s2k_silverstone:      { color: "#A9ADB2", mix: 0.9 },
+  s2k_rio_yellow:       { color: "#E8C51F", mix: 1.0 },
+  s2k_spa_yellow:       { color: "#E0BC00", mix: 1.0 },
+  s2k_laguna_blue:      { color: "#2A6E9F", mix: 1.0 },
+  s2k_suzuka_blue:      { color: "#2C63B8", mix: 1.0 },
+  s2k_nogaro_silver:    { color: "#B4B7BA", mix: 0.9 },
+  m2_zandvoort_blue:    { color: "#46AEE0", mix: 1.0 },
+  m2_toronto_red:       { color: "#C4232E", mix: 1.0 },
+  m2_alpine_white:      { color: "#FFFFFF", mix: 0.0 },
+  m2_black_sapphire:    { color: "#17191C", mix: 0.92 },
+  m2_brooklyn_grey:     { color: "#82868A", mix: 0.9 },
+  lc_infrared:          { color: "#BA1E30", mix: 1.0 },
+  lc_ultra_white:       { color: "#F7F8F4", mix: 0.3 },
+  lc_caviar:            { color: "#17191C", mix: 0.92 },
+  lc_atomic_silver:     { color: "#9CA0A5", mix: 0.9 },
+  lc_nightfall_mica:    { color: "#2B4877", mix: 1.0 },
+  lfa_whitest_white:    { color: "#F7F8F4", mix: 0.0 },
+  lfa_absolutely_red:   { color: "#C41230", mix: 1.0 },
+  lfa_pearl_yellow:     { color: "#E8C63E", mix: 1.0 },
+  lfa_pearl_blue:       { color: "#35589E", mix: 1.0 },
+  lfa_matte_black:      { color: "#101214", mix: 0.92 },
 };
 
 /** modelColor + mix for the 3D car. Falls back to the default GRC paint. */
@@ -292,6 +416,29 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
   gt3rs_miami_blue:     "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_miami_blue.glb",
   gt3rs_python_green:   "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_python_green.glb",
   gt3rs_shark_blue:     "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_shark_blue.glb",
+  s2k_grand_prix_white: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_grand_prix_white2.glb",
+  s2k_berlina_black: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_berlina_black2.glb",
+  s2k_silverstone: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_silverstone2.glb",
+  s2k_rio_yellow: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_rio_yellow2.glb",
+  s2k_spa_yellow: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_spa_yellow2.glb",
+  s2k_laguna_blue: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_laguna_blue2.glb",
+  s2k_suzuka_blue: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_suzuka_blue2.glb",
+  s2k_nogaro_silver: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_nogaro_silver2.glb",
+  m2_zandvoort_blue: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_m2_zandvoort_blue.glb",
+  m2_toronto_red: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_m2_toronto_red.glb",
+  m2_alpine_white: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_m2_alpine_white.glb",
+  m2_black_sapphire: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_m2_black_sapphire.glb",
+  m2_brooklyn_grey: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_m2_brooklyn_grey.glb",
+  lc_infrared: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_lc_infrared.glb",
+  lc_ultra_white: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_lc_ultra_white.glb",
+  lc_caviar: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_lc_caviar.glb",
+  lc_atomic_silver: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_lc_atomic_silver.glb",
+  lc_nightfall_mica: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_lc_nightfall_mica.glb",
+  lfa_whitest_white: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_lfa_whitest_white2.glb",
+  lfa_absolutely_red: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_lfa_absolutely_red2.glb",
+  lfa_pearl_yellow: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_lfa_pearl_yellow2.glb",
+  lfa_pearl_blue: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_lfa_pearl_blue2.glb",
+  lfa_matte_black: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_lfa_matte_black2.glb",
 };
 
 // ── PER-COLOUR FLAT-SPRITE NORMALISATION (2026-07-30) ────────────────────────
@@ -356,6 +503,30 @@ const VEHICLE_PNG_INK_LEN: Record<GRCColorKey, number> = {
   gt3rs_miami_blue: 132,
   gt3rs_python_green: 132,
   gt3rs_shark_blue: 132,
+  // S2000/M2/LC/LFA — VERIFY against the measured @3x before every publish
+  s2k_grand_prix_white: 132,
+  s2k_berlina_black: 132,
+  s2k_silverstone: 132,
+  s2k_rio_yellow: 132,
+  s2k_spa_yellow: 132,
+  s2k_laguna_blue: 132,
+  s2k_suzuka_blue: 132,
+  s2k_nogaro_silver: 132,
+  m2_zandvoort_blue: 132,
+  m2_toronto_red: 132,
+  m2_alpine_white: 132,
+  m2_black_sapphire: 132,
+  m2_brooklyn_grey: 132,
+  lc_infrared: 132,
+  lc_ultra_white: 132,
+  lc_caviar: 132,
+  lc_atomic_silver: 132,
+  lc_nightfall_mica: 132,
+  lfa_whitest_white: 132,
+  lfa_absolutely_red: 132,
+  lfa_pearl_yellow: 132,
+  lfa_pearl_blue: 132,
+  lfa_matte_black: 132,
 };
 const VEHICLE_PNG_REF_LEN = VEHICLE_PNG_INK_LEN.heavy_metal;   // grey is the reference
 

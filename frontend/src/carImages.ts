@@ -51,6 +51,40 @@ const GT3RS_IMAGES: Record<string, any> = {
 'sharkblue': require('../assets/cars/gt3rs/shark_blue.jpg'),
 };
 
+// S2000 / M2 / LC 500 / LFA heroes — rendered from the full-detail authored
+// models (no official per-colour configurator source), same dark studio. 8/20.
+const S2000_IMAGES: Record<string, any> = {
+'grandprixwhite': require('../assets/cars/s2000/grand_prix_white.jpg'),
+'berlinablack': require('../assets/cars/s2000/berlina_black.jpg'),
+'silverstone': require('../assets/cars/s2000/silverstone.jpg'),
+'rioyellowpearl': require('../assets/cars/s2000/rio_yellow.jpg'),
+'spayellow': require('../assets/cars/s2000/spa_yellow.jpg'),
+'lagunablue': require('../assets/cars/s2000/laguna_blue.jpg'),
+'suzukablue': require('../assets/cars/s2000/suzuka_blue.jpg'),
+'nogarosilver': require('../assets/cars/s2000/nogaro_silver.jpg'),
+};
+const M2_IMAGES: Record<string, any> = {
+'zandvoortblue': require('../assets/cars/m2/zandvoort_blue.jpg'),
+'torontored': require('../assets/cars/m2/toronto_red.jpg'),
+'alpinewhite': require('../assets/cars/m2/alpine_white.jpg'),
+'blacksapphire': require('../assets/cars/m2/black_sapphire.jpg'),
+'brooklyngrey': require('../assets/cars/m2/brooklyn_grey.jpg'),
+};
+const LC500_IMAGES: Record<string, any> = {
+'infrared': require('../assets/cars/lc500/infrared.jpg'),
+'ultrawhite': require('../assets/cars/lc500/ultra_white.jpg'),
+'caviar': require('../assets/cars/lc500/caviar.jpg'),
+'atomicsilver': require('../assets/cars/lc500/atomic_silver.jpg'),
+'nightfallmica': require('../assets/cars/lc500/nightfall_mica.jpg'),
+};
+const LFA_IMAGES: Record<string, any> = {
+'whitestwhite': require('../assets/cars/lfa/whitest_white.jpg'),
+'absolutelyred': require('../assets/cars/lfa/absolutely_red.jpg'),
+'pearlyellow': require('../assets/cars/lfa/pearl_yellow.jpg'),
+'pearlblue': require('../assets/cars/lfa/pearl_blue.jpg'),
+'matteblack': require('../assets/cars/lfa/matte_black.jpg'),
+};
+
 // Top-down map marker images (existing vehicle presets)
 const TOP_DOWN_IMAGES: Record<string, any> = {
 'heavymetal': require('../assets/vehicles/heavy_metal.png'),
@@ -84,6 +118,22 @@ return GR_YARIS_IMAGES[key] ?? DEFAULT_GARAGE;
 
 if (makeModel.includes('gt3rs') || (makeModel.includes('gt3') && makeModel.includes('rs'))) {
 return GT3RS_IMAGES[key] ?? DEFAULT_GARAGE;
+}
+
+if (makeModel.includes('s2000')) {
+return S2000_IMAGES[key] ?? DEFAULT_GARAGE;
+}
+
+if (makeModel.includes('bmwm2')) {
+return M2_IMAGES[key] ?? DEFAULT_GARAGE;
+}
+
+if (makeModel.includes('lc500') || (makeModel.includes('lexus') && makeModel.includes('lc'))) {
+return LC500_IMAGES[key] ?? DEFAULT_GARAGE;
+}
+
+if (makeModel.includes('lfa')) {
+return LFA_IMAGES[key] ?? DEFAULT_GARAGE;
 }
 
 // Fallback for unknown models — use top-down as placeholder

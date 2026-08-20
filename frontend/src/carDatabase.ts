@@ -60,15 +60,16 @@ export const CAR_DATABASE: CarMake[] = [
   {
     name: 'Honda',
     models: [
+      // Swatches synced to the authored 3D paints (8/20)
       { name: 'S2000', colors: [
-        { name: 'Grand Prix White', hex: '#F0F0F0' },
-        { name: 'Berlina Black',    hex: '#1A1A1A' },
-        { name: 'Silverstone',      hex: '#A8A8A8' },
-        { name: 'Rio Yellow Pearl', hex: '#E8C800' },
-        { name: 'Spa Yellow',       hex: '#D4B800' },
-        { name: 'Laguna Blue',      hex: '#1E5C8A' },
-        { name: 'Suzuka Blue',      hex: '#003D7A' },
-        { name: 'Nogaro Silver',    hex: '#B0B0B0' },
+        { name: 'Grand Prix White', hex: '#FAFAF6' },
+        { name: 'Berlina Black',    hex: '#1C1C1E' },
+        { name: 'Silverstone',      hex: '#A9ADB2' },
+        { name: 'Rio Yellow Pearl', hex: '#E8C51F' },
+        { name: 'Spa Yellow',       hex: '#E0BC00' },
+        { name: 'Laguna Blue',      hex: '#2A6E9F' },
+        { name: 'Suzuka Blue',      hex: '#2C63B8' },
+        { name: 'Nogaro Silver',    hex: '#B4B7BA' },
       ]},
       { name: 'Civic Type R', colors: [
         { name: 'Championship White', hex: '#F0F0F0' },
@@ -155,6 +156,14 @@ export const CAR_DATABASE: CarMake[] = [
   {
     name: 'BMW',
     models: [
+      // G87 M2 — authored 3D model (8/20)
+      { name: 'M2', colors: [
+        { name: 'Zandvoort Blue', hex: '#46AEE0' },
+        { name: 'Toronto Red',    hex: '#C4232E' },
+        { name: 'Alpine White',   hex: '#F5F5F2' },
+        { name: 'Black Sapphire', hex: '#1C1C20' },
+        { name: 'Brooklyn Grey',  hex: '#82868A' },
+      ]},
       { name: 'M3', colors: [
         { name: 'Interlagos Blue',  hex: '#003D7A' },
         { name: 'Alpine White',     hex: '#F0F0F0' },
@@ -162,6 +171,28 @@ export const CAR_DATABASE: CarMake[] = [
         { name: 'Frozen Grey',      hex: '#787878' },
         { name: 'Isle of Man Green',hex: '#1A4A1A' },
         { name: 'Sao Paulo Yellow', hex: '#E8C800' },
+      ]},
+    ],
+  },
+  {
+    name: 'Lexus',
+    models: [
+      // Both authored 3D models (8/20)
+      { name: 'LC 500', colors: [
+        { name: 'Infrared',       hex: '#BA1E30' },
+        { name: 'Ultra White',    hex: '#F7F8F4' },
+        { name: 'Caviar',         hex: '#1C1C1E' },
+        { name: 'Atomic Silver',  hex: '#9CA0A5' },
+        { name: 'Nightfall Mica', hex: '#2B4877' },
+      ]},
+      { name: 'LFA', colors: [
+        { name: 'Whitest White',  hex: '#F7F8F4' },
+        { name: 'Absolutely Red', hex: '#C41230' },
+        { name: 'Pearl Yellow',   hex: '#E8C63E' },
+        { name: 'Pearl Blue',     hex: '#35589E' },
+        // "Matte Black" not plain "Black": a bare 'black' colour-name alias would
+        // hijack every generic black car in the DB onto the LFA model.
+        { name: 'Matte Black',    hex: '#141518' },
       ]},
     ],
   },

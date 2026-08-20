@@ -116,6 +116,53 @@ for o in [x for x in bpy.data.objects if x.type == 'MESH']:
                 bpy.ops.object.mode_set(mode='OBJECT')
         halves.append((o.name, round(mn.x, 3), round(mx.x, 3)))
 
+
+# ── 3b. ORPHAN-MIRROR (env MIRROR_ORPHANS=1) ─────────────────────────────────
+# The LFA ships its ENTIRE left side missing — 26 right-only panels, none with
+# an edge on the centreline, so the half-panel rule above can't see them. In
+# this mode, any mesh sitting wholly on +X is mirrored UNLESS a left-side twin
+# already exists (bbox centre ≈ mirrored, similar size) — the twin check is what
+# keeps wheels/mirrors from being duplicated onto their real counterparts.
+if os.environ.get('MIRROR_ORPHANS') == '1':
+    meshes_all = [x for x in bpy.data.objects if x.type == 'MESH']
+    boxes = {}
+    for o in meshes_all:
+        mn2, mx2 = wbb([o])
+        boxes[o.name] = (mn2, mx2)
+    lefts = [(n, b) for n, b in boxes.items() if b[1].x < EPS]
+    for o in list(meshes_all):
+        mn2, mx2 = boxes[o.name]
+        if mn2.x < -EPS or (mx2.x - mn2.x) < 1e-4:
+            continue  # not wholly right-side
+        c2 = (mn2 + mx2) / 2
+        s2 = mx2 - mn2
+        twin = False
+        for n, (lmn, lmx) in lefts:
+            lc = (lmn + lmx) / 2
+            lsz = lmx - lmn
+            if abs(lc.x + c2.x) < 0.1 and abs(lc.y - c2.y) < 0.15 and abs(lc.z - c2.z) < 0.15 \
+               and abs(lsz.x - s2.x) < 0.2 and abs(lsz.y - s2.y) < 0.2:
+                twin = True; break
+        if twin:
+            continue
+        m = o.modifiers.new('mir', 'MIRROR')
+        m.use_axis = (True, False, False)
+        m.mirror_object = pivot
+        m.use_clip = True
+        bpy.ops.object.select_all(action='DESELECT')
+        bpy.context.view_layer.objects.active = o
+        o.select_set(True)
+        bpy.ops.object.modifier_apply(modifier=m.name)
+        try:
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.normals_make_consistent(inside=False)
+            bpy.ops.object.mode_set(mode='OBJECT')
+        except Exception:
+            if bpy.context.object and bpy.context.object.mode != 'OBJECT':
+                bpy.ops.object.mode_set(mode='OBJECT')
+        halves.append((o.name + '(orphan)', round(mn2.x, 3), round(mx2.x, 3)))
+
 # ── 4. DROP DETAIL A 44-132px MARKER CANNOT SHOW ─────────────────────────────
 DROP_PREFIX = ('BrakeDisk', 'Brake Disk', 'Toyota Logo', 'Brembo', 'WheelBolts',
                'Bolts.', 'Wheelbrake', 'WheelBrake', 'Caliper')
@@ -163,7 +210,15 @@ def tune(mat, base=None, metallic=None, rough=None, emissive=None, strength=None
     if not mat.use_nodes: return
     b = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
     if not b: return
-    if base is not None:     b.inputs['Base Color'].default_value = (*base, 1)
+    if base is not None:
+        # A baseColorTexture MULTIPLIES the factor — the LFA ships a carbon-weave
+        # texture on its body, and painting the factor alone rendered charcoal.
+        # ...and its normal/roughness/metallic maps (carbon weave embossed the
+        # paint even after the base texture was cut).
+        for inp in ('Base Color', 'Normal', 'Roughness', 'Metallic'):
+            for lk in list(b.inputs[inp].links):
+                mat.node_tree.links.remove(lk)
+        b.inputs['Base Color'].default_value = (*base, 1)
     if metallic is not None: b.inputs['Metallic'].default_value = metallic
     if rough is not None:    b.inputs['Roughness'].default_value = rough
     if emissive is not None:
@@ -179,11 +234,13 @@ body_lin = tuple(v/12.92 if v <= 0.04045 else ((v + 0.055)/1.055) ** 2.4 for v i
 # 36% of exterior pixels, 'Rough-rubber.001' 31%, 'Gears' 11% — the flanks and
 # the bonnet), so the paint target is whatever paintscan.py measured, not a name
 # anyone could have guessed.
-BODY_MATS = set(BODY_MAT.split('|'))
+# .strip(): the S2000 pack ships 'CarPaint ' with a TRAILING SPACE — an
+# exact match silently skips the whole body.
+BODY_MATS = set(x.strip() for x in BODY_MAT.split('|'))
 painted = False
 for m in bpy.data.materials:
     n = m.name
-    if n in BODY_MATS:
+    if n.strip() in BODY_MATS:
         tune(m, base=body_lin, metallic=0.1 if MATTE else 0.25, rough=0.55 if MATTE else 0.35)
         painted = True
     elif 'red' in n.lower() and ('light' in n.lower() or 'glass' in n.lower()):
@@ -191,7 +248,7 @@ for m in bpy.data.materials:
         # be caught BEFORE the generic glass rule or they render as clear glass and
         # the tail never glows.
         tune(m, emissive=(1.0, 0.06, 0.06), strength=(5.0 if LIT else 2.0), rough=0.3)
-    elif 'glass' in n.lower() and 'head' not in n.lower():
+    elif ('glass' in n.lower() or n.lower().startswith('vidrio')) and 'head' not in n.lower():
         # Base forced DARK: this pack authors glass with a WHITE base + transmission,
         # which Mapbox's renderer ignores — the Yaris rendered chalk-white windows
         # until this. Near-black tinted glass matches the GR Corolla's look.
@@ -200,7 +257,8 @@ for m in bpy.data.materials:
         tune(m, emissive=(1.0, 0.06, 0.06), strength=(5.0 if LIT else 2.0), rough=0.3)
     elif 'white emission' in n.lower() or n.lower().startswith(('light', 'headlight')):  # startswith: this pack names its lamps 'Light.001'
         tune(m, emissive=(1.0, 0.97, 0.9), strength=(5.0 if LIT else 1.0))
-    elif 'headlightglass' in n.lower().replace(' ', ''):
+    elif 'headlightglass' in n.lower().replace(' ', '') or ('glass' in n.lower() and 'head' in n.lower()):
+        # 'glass headlights' (S2000 pack) — any glass+head combo, else chalk lenses
         tune(m, emissive=((1.0, 0.95, 0.8) if LIT else None), strength=(2.5 if LIT else None), rough=0.15)
     elif n.lower().startswith(('rubber', 'tire', 'tyre')):
         tune(m, metallic=0.0, rough=0.9)

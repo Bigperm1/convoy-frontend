@@ -25,7 +25,10 @@ import { GlassFill } from "./Glass";
 import { ManeuverArrow, maneuverDir } from "./components/ManeuverArrow";
 import { COLORS } from "./theme";
 import { NavStep, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec } from "./nav";
-import { toggle, skipNext, skipPrev, useCurrentSong, useIsPlaying } from "./applePlayer";
+import { skipNext, skipPrev } from "./applePlayer";
+import { spotify } from "./spotify";
+import { useNowPlaying } from "./nowPlaying";
+import { useSettings } from "./settings";
 import ShareSheet, { SharePayload } from "./ShareSheet";
 
 const strip = (h?: string) => (h || "").replace(/<[^>]+>/g, "").trim();
@@ -103,12 +106,18 @@ export default function CarDriveList(props: {
   }, [snapToCurrent]);
 
   // ── Now-playing row (Jeff, 2026-08-19: "put in a music player between the show
-  // map and system drawer at the bottom" — art + share + transport, the same
-  // controls as the Music tab's bar). Hooks are the applePlayer pair the Music tab
-  // uses; on Android / no Apple Music session `song` stays null and the row simply
-  // doesn't exist, so nothing shifts for those drivers.
-  const { song } = useCurrentSong() as { song: any };
-  const { isPlaying } = useIsPlaying();
+  // map and system drawer at the bottom" — art + share + transport).
+  // SOURCE-AGNOSTIC on purpose: useNowPlaying is the same unified hook the map's
+  // banner uses, so this row follows settings.musicSource (Apple Music OR
+  // Spotify). It started on the Apple-only hooks, which would have shown a
+  // Spotify driver an EMPTY footer the moment the map banner was hidden in
+  // car-list mode — one player replacing the other has to cover both sources.
+  // No song (either source) → no row, and nothing shifts.
+  const { song, isPlaying, toggle } = useNowPlaying() as { song: any; isPlaying: boolean; toggle: () => void };
+  const [settings] = useSettings();
+  const isSpotify = settings?.musicSource === "spotify";
+  const next = useCallback(() => { if (isSpotify) void spotify.next(); else skipNext(); }, [isSpotify]);
+  const prev = useCallback(() => { if (isSpotify) void spotify.previous(); else skipPrev(); }, [isSpotify]);
   const [sharePayload, setSharePayload] = useState<SharePayload | null>(null);
   const hasMusic = !!song;
   const art = artURL(song?.artworkUrl ?? song?.artwork?.url, 96);
@@ -208,13 +217,13 @@ export default function CarDriveList(props: {
             >
               <Ionicons name="share-outline" size={20} color="#F4F4F4" />
             </Pressable>
-            <Pressable onPress={() => skipPrev()} hitSlop={8} style={{ marginLeft: 16 }}>
+            <Pressable onPress={prev} hitSlop={8} style={{ marginLeft: 16 }}>
               <Ionicons name="play-skip-back" size={20} color="#F4F4F4" />
             </Pressable>
-            <Pressable onPress={() => toggle()} hitSlop={8} style={{ marginHorizontal: 14 }}>
+            <Pressable onPress={toggle} hitSlop={8} style={{ marginHorizontal: 14 }}>
               <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#F4F4F4" />
             </Pressable>
-            <Pressable onPress={() => skipNext()} hitSlop={8}>
+            <Pressable onPress={next} hitSlop={8}>
               <Ionicons name="play-skip-forward" size={20} color="#F4F4F4" />
             </Pressable>
           </View>

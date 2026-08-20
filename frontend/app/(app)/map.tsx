@@ -4628,12 +4628,20 @@ export default function MapScreen() {
           weather chips floated over the step list's rows. Map mode unchanged. */}
       {!carListMode && <SpeedPill speedMs={coords?.speed} unit={settings.speedUnit} bottom={controlsBottom} limitKmh={speedLimitKmh} />}
       {/* Now-playing banner — beside the speedo, shifts right when the speed-limit
-          sign slides out, ends before the police FAB. Shows only when music plays. */}
-      <MapNowPlaying
-        bottom={controlsBottom}
-        shifted={((coords?.speed ?? 0) * 3.6) > 0.5 && (speedLimitKmh ?? 0) > 0}
-        onOpen={() => router.push("/(app)/music")}
-      />
+          sign slides out, ends before the police FAB. Shows only when music plays.
+          !carListMode (Jeff's 5:33 screenshot): this floated OVER the car-list face,
+          so both music players were on screen at once — this pill sitting on top of
+          the list's own footer player. The two are mutually exclusive by design:
+          the map face owns this pill, the car-list face owns its footer row, and
+          carListMode already unmounts the list (and its player) when the driver
+          taps "Show map". Same gate the SpeedPill and WeatherHUD use above. */}
+      {!carListMode && (
+        <MapNowPlaying
+          bottom={controlsBottom}
+          shifted={((coords?.speed ?? 0) * 3.6) > 0.5 && (speedLimitKmh ?? 0) > 0}
+          onOpen={() => router.push("/(app)/music")}
+        />
+      )}
       {/* Weather HUD — compact temp-only chip stacked just above the speedometer
           in the bottom-left HUD column (matches the speedo's box + opacity). */}
       {!carListMode && showWeatherLayer && weather && (

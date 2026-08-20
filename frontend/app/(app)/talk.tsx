@@ -755,7 +755,21 @@ export default function TalkScreen() {
                 contrast for the mic glyph. */}
             <GlassFill style={{ borderRadius: MIC_D / 2, overflow: 'hidden' }} />
             <View style={[styles.pttInner, pressed && styles.pttInnerActive]}>
-              <Ionicons name={floorHolder ? 'lock-closed' : 'mic'} size={MIC_ICON_SIZE} color={pressed ? '#fff' : floorHolder ? '#8E8E93' : channelId ? YELLOW : 'rgba(45,236,134,0.5)'} />
+              {/* Premium mic (8/20, the CarPlay-glyph language): chrome at rest,
+                  candy green while TRANSMITTING (pressed or VOX-live) — the state
+                  reads at a glance without a colour legend. Floor-locked keeps the
+                  lock glyph; no channel dims the chrome. */}
+              {floorHolder ? (
+                <Ionicons name="lock-closed" size={MIC_ICON_SIZE} color="#8E8E93" />
+              ) : (
+                <Image
+                  source={(pressed || ptt.voxActive)
+                    ? require('../../assets/images/premium/mic_candy.png')
+                    : require('../../assets/images/premium/mic_chrome.png')}
+                  style={{ width: MIC_ICON_SIZE, height: MIC_ICON_SIZE, opacity: channelId ? 1 : 0.45 }}
+                  resizeMode="contain"
+                />
+              )}
             </View>
           </Pressable>
         </Animated.View>

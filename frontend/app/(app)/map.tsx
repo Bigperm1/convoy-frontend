@@ -4787,7 +4787,13 @@ export default function MapScreen() {
               the phone and just make it 2D when 3D is active and vice versa"). The label
               already showed what you GET rather than what you are in, which is the
               convention for a view switch, so only the icon comes out. */}
-          <Text style={styles.fabViewLabel}>{view2D ? "3D" : "2D"}</Text>
+          {/* Candy 2D/3D lettering — the CarPlay view button's exact art (8/20).
+              Still shows what you GET, per the 8/15 convention. */}
+          <Image
+            source={view2D ? require("../../assets/images/premium/view3d_candy.png") : require("../../assets/images/premium/view2d_candy.png")}
+            style={{ width: 34, height: 34 }}
+            resizeMode="contain"
+          />
         </TouchableOpacity>
         )}
         {/* Crew button (replaced the police FAB, 2026-07-23 — Jeff's call): one tap
@@ -4809,7 +4815,8 @@ export default function MapScreen() {
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
           {/* Brand-green people glyph over a white "Crew" label (Jeff, 2026-07-25).
               The CarPlay crew map button uses the SAME green — see CAR_ICON_CREW. */}
-          <Ionicons name="people" size={26} color={COLORS.brand} />
+          {/* Candy crew glyph — the SAME art as the CarPlay crew button (8/20). */}
+          <Image source={require("../../assets/images/premium/crew_candy.png")} style={{ width: 26, height: 26 }} resizeMode="contain" />
           <Text style={styles.fabCrewLabel}>Crew</Text>
         </TouchableOpacity>
         {/* Compass — bottom of stack. The needle rotates opposite the live map

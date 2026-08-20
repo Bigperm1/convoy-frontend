@@ -354,6 +354,9 @@ export default function AppLayout() {
         <Tabs.Screen name="settings" options={{ href: null }} />
         <Tabs.Screen name="drive-mode" options={{ href: null }} />
         <Tabs.Screen name="garage" options={{ href: null }} />
+        {/* Garage Scan capture guide — staged build-80+ ultra feature; linked
+            from nowhere yet, navigable only by route. */}
+        <Tabs.Screen name="garage-scan" options={{ href: null }} />
         {/* Drives (trip history) — reached from the logo menu, not a bottom tab. */}
         <Tabs.Screen name="trips" options={{ href: null }} />
         <Tabs.Screen name="admin" options={{ href: null }} />

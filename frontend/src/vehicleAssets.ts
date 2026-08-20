@@ -46,11 +46,11 @@ export const VEHICLE_PNG: Record<GRCColorKey, number | { uri: string }> = {
   // GR Yaris sprites — rendered from Jeff's authored model through the SAME
   // pipeline (normalize_car + sprite + the v3 tone pass), so they sit in the
   // same visual family. Ink length is 114 (vs the GRC 132) — see the ink table.
-  yaris_pure_white:     require("../assets/vehicles/v3/yaris_pure_white.png"),
-  yaris_platinum_pearl: require("../assets/vehicles/v3/yaris_platinum_pearl.png"),
+  yaris_pure_white:     require("../assets/vehicles/v3/yaris_pure_white2.png"),
+  yaris_platinum_pearl: require("../assets/vehicles/v3/yaris_platinum_pearl2.png"),
   yaris_precious_metal: require("../assets/vehicles/v3/yaris_precious_metal.png"),
-  yaris_precious_black: require("../assets/vehicles/v3/yaris_precious_black.png"),
-  yaris_scarlet_flare:  require("../assets/vehicles/v3/yaris_scarlet_flare.png"),
+  yaris_precious_black: require("../assets/vehicles/v3/yaris_precious_black2.png"),
+  yaris_scarlet_flare:  require("../assets/vehicles/v3/yaris_scarlet_flare2.png"),
 };
 
 // Color name aliases — maps free-form user input to a canonical key.
@@ -192,11 +192,16 @@ export const VEHICLE_TINT: Record<GRCColorKey, { color: string; mix: number }> =
   // GR Yaris — hexes MEASURED from Toyota's own configurator data (toyota.jp
   // bodyColor.json / toyota.co.uk swatches / Toyota AU JSON), paint codes in
   // comments. Researched + cross-market verified 8/20.
-  yaris_pure_white:     { color: "#E9E7E6", mix: 0.0 },  // 040 solid
-  yaris_platinum_pearl: { color: "#EDF0E8", mix: 0.3 },  // 089 pearl
-  yaris_precious_metal: { color: "#8A8E8B", mix: 0.9 },  // 1L5 metallic
-  yaris_precious_black: { color: "#1C1C1C", mix: 0.92 }, // 219 metallic black
-  yaris_scarlet_flare:  { color: "#AB000D", mix: 1.0 },  // 3U5 red metallic
+  // Richness pass 8/20: 040 and 3U5 are the SAME paints as the GR Corolla's
+  // Ice Cap and Supersonic Red, so they carry the field-approved GRC values
+  // verbatim; 219 borrows the approved GRC black RENDERING (#17191C blue-black,
+  // GRC's own black is code 202); the configurator hexes we launched with
+  // measured visibly darker than the approved set on the map.
+  yaris_pure_white:     { color: "#FFFFFF", mix: 0.0 },  // 040 — same paint as ice_cap_white
+  yaris_platinum_pearl: { color: "#F6F8EE", mix: 0.3 },  // 089 pearl, lifted
+  yaris_precious_metal: { color: "#8A8E8B", mix: 0.9 },  // 1L5 — genuinely a dark silver, verified vs heavy_metal
+  yaris_precious_black: { color: "#17191C", mix: 0.92 }, // 219 — approved GRC black treatment
+  yaris_scarlet_flare:  { color: "#C8102E", mix: 1.0 },  // 3U5 — same paint as supersonic_red
 };
 
 /** modelColor + mix for the 3D car. Falls back to the default GRC paint. */
@@ -232,11 +237,11 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
   gravel:               "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gravel3.glb",
   // GR Yaris — Jeff's authored model (facelift XP210), five paints + _lit pairs,
   // same bucket, same naming rules (URLs immutable; new filename per re-bake).
-  yaris_pure_white:     "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_yaris_pure_white.glb",
-  yaris_platinum_pearl: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_yaris_platinum_pearl.glb",
+  yaris_pure_white:     "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_yaris_pure_white2.glb",
+  yaris_platinum_pearl: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_yaris_platinum_pearl2.glb",
   yaris_precious_metal: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_yaris_precious_metal.glb",
-  yaris_precious_black: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_yaris_precious_black.glb",
-  yaris_scarlet_flare:  "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_yaris_scarlet_flare.glb",
+  yaris_precious_black: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_yaris_precious_black2.glb",
+  yaris_scarlet_flare:  "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_yaris_scarlet_flare2.glb",
 };
 
 // ── PER-COLOUR FLAT-SPRITE NORMALISATION (2026-07-30) ────────────────────────
@@ -285,14 +290,14 @@ const VEHICLE_PNG_INK_LEN: Record<GRCColorKey, number> = {
   blue_flame: 132,  // v2 render — full-length ink by construction
   supersonic_red: 132,  // v2 render — full-length ink by construction
   gravel: 132,   // rendered (not photographed) — full-length ink by construction
-  // GR Yaris — MEASURED 114 on the @3x renders (alpha bbox, threshold 24). The
-  // Yaris frames shorter in its own canvas, so vehiclePngScale upsizes these
-  // ~1.16x and every car reads the same length on the map, per the system.
-  yaris_pure_white: 114,
-  yaris_platinum_pearl: 114,
-  yaris_precious_metal: 114,
-  yaris_precious_black: 114,
-  yaris_scarlet_flare: 114,
+  // GR Yaris — RE-MEASURED 8/20: 132 at the table's alpha>0 threshold on the
+  // @3x renders, identical to the GRC set (the 114 shipped on 8/20 morning was
+  // a mismeasurement and drew the Yaris ~16% oversized on the map).
+  yaris_pure_white: 132,
+  yaris_platinum_pearl: 132,
+  yaris_precious_metal: 132,
+  yaris_precious_black: 132,
+  yaris_scarlet_flare: 132,
 };
 const VEHICLE_PNG_REF_LEN = VEHICLE_PNG_INK_LEN.heavy_metal;   // grey is the reference
 

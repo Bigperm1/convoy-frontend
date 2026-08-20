@@ -26,7 +26,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Platform, Animated } from "re
 import { Ionicons } from "@expo/vector-icons";
 import { GlassFill, hudTint, glassLift } from "../Glass";
 import { LinearGradient } from "expo-linear-gradient";
-import { ManeuverArrow, maneuverDir } from "./ManeuverArrow";
+import { ManeuverArrow, ManeuverBox, maneuverDir } from "./ManeuverArrow";
 import { speedLimitVisible } from "../speedLimit";
 
 const YELLOW = "#2DEC86";
@@ -213,9 +213,9 @@ export default function TurnByTurnNav({
               readable over bright/day basemaps (regular glass otherwise adapts to
               the backdrop and washes out light). */}
           <GlassFill tintColor={undefined} style={{ borderRadius: 18, overflow: "hidden" }} />
-          <View style={styles.maneuverIconWrap}>
+          <ManeuverBox size={54} radius={14}>
             <ManeuverArrow dir={maneuverDir(instruction, maneuverKey)} size={34} color="#0B0B0C" />
-          </View>
+          </ManeuverBox>
           <View style={{ flex: 1 }}>
             <Text style={styles.distanceToTurn}>{distanceToTurn}</Text>
             <Text style={styles.instruction} numberOfLines={2}>{instruction}</Text>
@@ -268,11 +268,6 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
     elevation: 12,
-  },
-  maneuverIconWrap: {
-    width: 54, height: 54, borderRadius: 14,
-    backgroundColor: YELLOW,
-    alignItems: "center", justifyContent: "center",
   },
   // White distance + instruction over the banner's solid dark tint — matched exactly to
   // the CarPlay strip (topDist / topInst), which are also white on the same dark tint.

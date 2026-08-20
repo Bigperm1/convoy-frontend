@@ -35,7 +35,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform, View, Text, Image, StyleSheet, Animated, TouchableOpacity, processColor, Dimensions, PixelRatio } from 'react-native';
 import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec } from '../nav';
-import { ManeuverArrow, maneuverDir, type ManeuverDir } from '../components/ManeuverArrow';
+import { ManeuverArrow, maneuverDir, type ManeuverDir, ManeuverBox } from '../components/ManeuverArrow';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { fmtPitstop } from '../pitstop';
 import { MarqueeText } from '../components/MarqueeText';
@@ -683,9 +683,9 @@ export function CarSurface() {
           <View style={[styles.navBannerRow, styles.navCard, { backgroundColor: carHudFloor() }]}>
             <GlassFill glassStyle="regular" tintColor={undefined} style={{ borderRadius: 12, overflow: 'hidden' }} />
             <View style={styles.navCardTurn}>
-              <View style={styles.maneuverBox}>
+              <ManeuverBox size={30} radius={8} style={{ marginRight: NAV_GAP }}>
                 <ManeuverArrow dir={(s.maneuverIcon as ManeuverDir) || 'straight'} size={24} color="#0B0B0C" />
-              </View>
+              </ManeuverBox>
               <View style={styles.topTextCol}>
                 <Text style={styles.topDist}>{s.distanceToTurn || '—'}</Text>
                 <MarqueeText text={s.instruction || 'Continue'} style={styles.topInst} />
@@ -1939,7 +1939,6 @@ const styles = StyleSheet.create({
   // Single solid dark tint floor (GlassFill above is clear/untinted) at 0.5 — matches
   // the phone banner EXACTLY and is backdrop-independent, so no washout on the pale day
   // map. NO border (like the phone banner + other chips); shadow lifts it.
-  maneuverBox: { width: 30, height: 30, borderRadius: 8, backgroundColor: '#2DEC86', alignItems: 'center', justifyContent: 'center', marginRight: NAV_GAP },
   topTextCol: { flex: 1, minWidth: 0 },
   // 17 -> 15 alongside topInst. "1.8 km" still measures ~49pt and stays the largest
   // glyph in the box, and the shorter line box is what buys the vertical room for a

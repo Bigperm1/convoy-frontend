@@ -6,6 +6,8 @@
 // works on the CarPlay window where icon fonts were flaky.
 
 import React from "react";
+import { View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Path, Circle, G } from "react-native-svg";
 
 export type ManeuverDir =
@@ -92,6 +94,44 @@ export function ManeuverArrow({
         <Path key={i} d={d} {...stroke} />
       ))}
     </Svg>
+  );
+}
+
+// ── ManeuverBox: THE green maneuver square, shared by every surface ──────────
+// (Jeff 8/20: "add a gradient look to the turnbyturn green squares... for all
+// surfaces — they look plain and flat.") One component so the phone banner, the
+// phone drive-list rows, and the CarPlay/AA nav card can never drift apart —
+// same rule as ManeuverArrow itself. The construction is the candy language the
+// End button established: vertical mint→brand→deep gradient + a pale-green
+// hairline rim; the dark glyph rides on top. LinearGradient is proven on every
+// surface including the AA canvas (the 8/18 bisect exonerated it).
+export function ManeuverBox({
+  size = 30,
+  radius = 8,
+  style,
+  children,
+}: {
+  size?: number;
+  radius?: number;
+  style?: any;
+  children: React.ReactNode;
+}) {
+  return (
+    <View
+      style={[{
+        width: size, height: size, borderRadius: radius,
+        alignItems: "center", justifyContent: "center",
+        overflow: "hidden",
+        borderWidth: 1, borderColor: "rgba(150,255,200,0.55)",
+      }, style]}
+    >
+      <LinearGradient
+        colors={["#8CFFC4", "#2DEC86", "#0E9B58"]}
+        locations={[0, 0.45, 1]}
+        style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+      />
+      {children}
+    </View>
   );
 }
 

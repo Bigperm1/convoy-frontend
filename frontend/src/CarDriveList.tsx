@@ -22,7 +22,7 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { GlassFill } from "./Glass";
-import { ManeuverArrow, maneuverDir } from "./components/ManeuverArrow";
+import { ManeuverArrow, ManeuverBox, maneuverDir } from "./components/ManeuverArrow";
 import { COLORS } from "./theme";
 import { NavStep, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec } from "./nav";
 import { skipNext, skipPrev } from "./applePlayer";
@@ -168,12 +168,22 @@ export default function CarDriveList(props: {
           const past = index < upcomingIdx;
           return (
             <View style={[styles.row, current && styles.rowCurrent, past && styles.rowPast]}>
+              {/* Gradient wash for the NEXT-turn row (8/20, with the ManeuverBox pass):
+                  green glow strongest at the arrow edge, fading across — replaces the
+                  flat rgba fill that read as a plain stripe. */}
+              {current && (
+                <LinearGradient
+                  colors={["rgba(45,236,134,0.20)", "rgba(45,236,134,0.02)"]}
+                  start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
+                  style={StyleSheet.absoluteFill}
+                />
+              )}
               {/* Green square arrow — the EXACT component + colors the banner's
                   maneuver box uses (ManeuverArrow, dark glyph on brand green), so
                   the two can never disagree about a turn's direction. */}
-              <View style={styles.arrowBox}>
+              <ManeuverBox size={30} radius={8}>
                 <ManeuverArrow dir={maneuverDir(strip(item.html), item.maneuver)} size={20} color="#0B0B0C" />
-              </View>
+              </ManeuverBox>
               <View style={styles.rowBody}>
                 <Text style={[styles.rowText, current && styles.rowTextCurrent]}>
                   {strip(item.html) || maneuverVerb(item.maneuver)}
@@ -272,10 +282,9 @@ const styles = StyleSheet.create({
   dest: { color: "#9BA1A6", fontSize: 14, fontWeight: "600", marginTop: 2 },
   listPad: { paddingVertical: 8 },
   row: { flexDirection: "row", alignItems: "center", paddingVertical: 14, paddingHorizontal: 20, gap: 12 },
-  rowCurrent: { backgroundColor: "rgba(45,236,134,0.08)", borderLeftWidth: 3, borderLeftColor: COLORS.brand },
+  // Fill comes from the gradient wash in renderItem; this keeps the brand spine.
+  rowCurrent: { borderLeftWidth: 3, borderLeftColor: COLORS.brand, overflow: "hidden" },
   rowPast: { opacity: 0.35 },
-  // Mirrors the banner's green maneuver box (30×30 r8, brand green, dark glyph).
-  arrowBox: { width: 30, height: 30, borderRadius: 8, backgroundColor: COLORS.brand, alignItems: "center", justifyContent: "center" },
   rowBody: { flex: 1, minWidth: 0 },
   rowText: { color: "#D7DBDE", fontSize: 16, fontWeight: "600" },
   rowTextCurrent: { color: "#FFFFFF", fontSize: 18, fontWeight: "800" },

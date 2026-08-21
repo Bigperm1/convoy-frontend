@@ -3875,6 +3875,11 @@ export default function MapScreen() {
   const headUnitHere = Platform.OS === "android" ? headUnitAttachedRaw() : !!carConnected;
   const carListMode = headUnitHere && navMode === "turn-by-turn" && tbt.active
     && !carListMapOverride && (activeRoute?.steps?.length ?? 0) > 0;
+  // The list face exists but the driver tapped "Show map": offer the way back
+  // (StepDrawer's "Directions" button). Jeff, 8/21: "no button to go back to the
+  // turn by turn on the phone".
+  const carListHidden = headUnitHere && navMode === "turn-by-turn" && tbt.active
+    && carListMapOverride && (activeRoute?.steps?.length ?? 0) > 0;
 
   return (
     <View style={styles.c}>
@@ -5069,6 +5074,7 @@ export default function MapScreen() {
           distanceRemaining={fmtDistanceM(tbt.distanceRemainingM)}
           arrival={fmtClock(new Date(Date.now() + tbt.etaSeconds * 1000))}
           onEnd={endNav}
+          onShowList={carListHidden ? () => setCarListMapOverride(false) : undefined}
           onVisibilityChange={setStepsExpanded}
         />
       )}

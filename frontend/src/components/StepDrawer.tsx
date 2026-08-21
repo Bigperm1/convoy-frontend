@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassFill, drawerTint } from "../Glass";
 import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 
 export const DRAWER_HEIGHT = 300;   // height of the slide-up step list
 // Must match the real tab bar in app/(app)/_layout.tsx EXACTLY: height (86 iOS / 84 Android)
@@ -57,6 +57,11 @@ type Props = {
   distanceRemaining?: string;   // e.g. "8.4 km"
   arrival?: string;             // arrival clock, e.g. "10:42 AM"
   onEnd?: () => void;           // red Exit button
+  // Phone + head unit only: the written-directions face (CarDriveList) has a
+  // "Show map" button, but once the driver was on the map there was no way back
+  // (Jeff, 8/21 drive to work). When provided, a "Directions" button sits left
+  // of End and returns to the list face.
+  onShowList?: () => void;
   // Live fraction of the route travelled (0..1). Optional precise override; when
   // omitted it's derived from distanceRemaining vs the route total.
   progress?: number;
@@ -65,7 +70,7 @@ type Props = {
 };
 
 const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
-  { route, maneuverIcon, eta, distanceRemaining, arrival, onEnd, progress, onVisibilityChange },
+  { route, maneuverIcon, eta, distanceRemaining, arrival, onEnd, onShowList, progress, onVisibilityChange },
   ref
 ) {
   // 0 = step list hidden (tucked behind the bar), 1 = fully open.
@@ -186,6 +191,27 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
             {!!distanceRemaining && <Text style={styles.barMeta}>{compact(distanceRemaining)}</Text>}
             {!!arrival && <Text style={styles.barMeta}>{compact(arrival).toLowerCase()}</Text>}
           </View>
+          {onShowList && (
+            /* Turn-by-turn button (Jeff, 8/21): a round glass twin of End, green,
+               carrying the classic turn-arrow "directions" glyph — the universal
+               turn-by-turn symbol — so it reads at a glance while driving. */
+            <TouchableOpacity
+              onPress={onShowList}
+              style={styles.barTurns}
+              activeOpacity={0.85}
+              testID="turn-by-turn"
+              hitSlop={6}
+              accessibilityLabel="Turn-by-turn directions"
+            >
+              <LinearGradient
+                colors={["#3DFF9A", "#1FC96E", "#0E8F4C"]}
+                locations={[0, 0.5, 1]}
+                style={[StyleSheet.absoluteFill, { borderRadius: 30 }]}
+              />
+              <GlassFill tintColor="#1FC96E" style={{ borderRadius: 30, overflow: "hidden" }} />
+              <MaterialCommunityIcons name="directions" size={32} color="#04150B" />
+            </TouchableOpacity>
+          )}
           {onEnd && (
             <TouchableOpacity onPress={onEnd} style={styles.barExit} activeOpacity={0.85} testID="end-nav">
               {/* Candy-apple button: a glossy red gradient base (bright top → deep
@@ -263,6 +289,18 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   barExitText: { color: "#F4F4F4", fontSize: 15, fontWeight: "800", letterSpacing: 0.2 },
+  // "Directions" pill left of End — same glass language, green-tinted so it reads
+  // as "go somewhere" next to the red stop. Pushed right with the End circle.
+  // Turn-by-turn circle left of End — same candy construction in green. It takes
+  // the marginLeft:auto so the pair sits flush right; End keeps its own as a
+  // no-op when both are present.
+  barTurns: {
+    marginLeft: "auto", marginRight: 10,
+    width: 60, height: 60, borderRadius: 30,
+    backgroundColor: "transparent", overflow: "hidden",
+    borderWidth: 1, borderColor: "rgba(120,255,180,0.9)",
+    alignItems: "center", justifyContent: "center",
+  },
 
   // Live distance-travelled bar under the summary row: faint full-width track,
   // green fill to the current progress, green arrow tip at the leading edge.

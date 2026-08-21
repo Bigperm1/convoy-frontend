@@ -18,6 +18,8 @@ import { useAuth } from '../../src/auth';
 import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
 import { getGarageImage } from '../../src/carImages';
+import CarViewer3D from '../../src/CarViewer3D';
+import { resolveGRCKey, getVehicleModelUrl } from '../../src/vehicleAssets';
 import { GlassFill } from '../../src/Glass';
 import GlassBackdrop from '../../src/components/GlassBackdrop';
 import { YEARS, getMakeNames, getModelsForMake, getColorsForModel } from '../../src/carDatabase';
@@ -507,6 +509,15 @@ export default function GarageScreen() {
   };
 
   const carImage = getGarageImage(make, model, color);
+  // Interactive 3D (8/20): tap the hero to orbit the ACTUAL map model with a
+  // finger. Only offered when this colour has a hosted GLB.
+  const [viewer3D, setViewer3D] = useState(false);
+  const heroModelUrl = (() => {
+    try {
+      const k = resolveGRCKey(color);
+      return k ? getVehicleModelUrl(color) : null;
+    } catch { return null; }
+  })();
   const displayColor = colors.find(c => c.name === color);
 
   return (
@@ -544,6 +555,12 @@ export default function GarageScreen() {
           </View>
         ) : (
         <View style={styles.heroWrap}>
+          <TouchableOpacity
+            activeOpacity={0.92}
+            disabled={!heroModelUrl}
+            onPress={() => { Haptics.selectionAsync(); setViewer3D(true); }}
+            style={StyleSheet.absoluteFill ? undefined : undefined}
+          >
           <ImageBackground source={carImage} style={styles.heroBg} resizeMode="cover">
             {/* Subtle top vignette + strong bottom fade to black so the image
                 blends into the #000 background like the onboarding slides. */}
@@ -565,9 +582,23 @@ export default function GarageScreen() {
                 <Text style={styles.heroHint}>Pick your year, make & model below</Text>
               )}
             </View>
+            {heroModelUrl && (
+              <View style={styles.badge360}>
+                <Ionicons name="sync" size={12} color="#04150B" />
+                <Text style={styles.badge360Text}>360°</Text>
+              </View>
+            )}
           </ImageBackground>
+          </TouchableOpacity>
         </View>
         )}
+
+        <CarViewer3D
+          visible={viewer3D}
+          glbUrl={heroModelUrl}
+          title={color || undefined}
+          onClose={() => setViewer3D(false)}
+        />
 
         {/* Top speed badge */}
         {topSpeed ? (
@@ -788,6 +819,13 @@ export default function GarageScreen() {
 }
 
 const styles = StyleSheet.create({
+  badge360: {
+    position: 'absolute', top: 14, right: 14,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: COLORS.brand, borderRadius: 999,
+    paddingHorizontal: 9, paddingVertical: 4,
+  },
+  badge360Text: { color: '#04150B', fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
   safe:               { flex: 1, backgroundColor: '#000' },
   scroll:             { paddingBottom: 60 },
   header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },

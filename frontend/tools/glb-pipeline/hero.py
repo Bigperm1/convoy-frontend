@@ -74,7 +74,7 @@ for m in bpy.data.materials:
     n = m.name
     if n.strip() in BODY_MATS:
         METALLIC = float(os.environ.get('HERO_METALLIC', '0.15'))
-        tune(m, base=body_lin, metallic=METALLIC, rough=0.3)
+        tune(m, base=body_lin, metallic=METALLIC, rough=float(os.environ.get('HERO_ROUGH', '0.3')))
     elif 'red' in n.lower() and ('light' in n.lower() or 'glass' in n.lower()):
         tune(m, emissive=(1.0, 0.06, 0.06), strength=1.2, rough=0.3)
     elif ('glass' in n.lower() or n.lower().startswith('vidrio')) and 'head' not in n.lower():
@@ -86,7 +86,7 @@ for m in bpy.data.materials:
 world = bpy.data.worlds.new("Studio"); bpy.context.scene.world = world
 world.use_nodes = True
 bg = world.node_tree.nodes["Background"]
-bg.inputs["Color"].default_value = (0.28, 0.29, 0.31, 1.0)
+bg.inputs["Color"].default_value = (0.30, 0.30, 0.30, 1.0)  # NEUTRAL: the blue-tinted dome was cooling blacks (Jeff: "rims are blurple")
 bg.inputs["Strength"].default_value = 0.4
 
 def lamp(kind, energy, size, loc, rot):
@@ -114,9 +114,10 @@ for o in meshes:
 center = (mn+mx)/2; size = mx-mn; L = max(size)
 
 # key + fill + rim, scaled to the car
-lamp('key',  330*L*L, L*1.4, (center.x - L*0.9, center.y - L*1.1, center.z + L*1.2), (math.radians(50), 0, math.radians(-35)))
-lamp('fill', 120*L*L, L*1.8, (center.x + L*1.2, center.y - L*0.7, center.z + L*0.8), (math.radians(60), 0, math.radians(55)))
-lamp('rim',  170*L*L, L*1.0, (center.x, center.y + L*1.2, center.z + L*1.4), (math.radians(-45), 0, math.radians(180)))
+LS=float(os.environ.get('HERO_LIGHT','1.0'))
+lamp('key',  330*LS*L*L, L*1.4, (center.x - L*0.9, center.y - L*1.1, center.z + L*1.2), (math.radians(50), 0, math.radians(-35)))
+lamp('fill', 120*LS*L*L, L*1.8, (center.x + L*1.2, center.y - L*0.7, center.z + L*0.8), (math.radians(60), 0, math.radians(55)))
+lamp('rim',  170*LS*L*L, L*1.0, (center.x, center.y + L*1.2, center.z + L*1.4), (math.radians(-45), 0, math.radians(180)))
 
 cam_data = bpy.data.cameras.new("Cam"); cam_data.lens = 62
 cam = bpy.data.objects.new("Cam", cam_data)

@@ -32,6 +32,7 @@
 // handed to Mapbox below is [lng, lat].
 
 import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
+import { reportDraw } from "./drawTelemetry";
 import { noteFrame, noteCam } from "./heatProbe";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
@@ -2797,6 +2798,15 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const selfHeadingLocked = selfSnapped
     ? routeProj!.bearing
     : (camHeadingRef.current != null ? camHeadingRef.current : (selfCar?.heading ?? 0));
+  // Drawn-vs-raw breadcrumb (8/20): one bounded row / 10 s while moving. Taps only.
+  reportDraw(
+    'phone',
+    selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null,
+    selfDraw,
+    selfPinned ? 'pin' : selfSnapped ? 'route' : roadDraw ? 'road' : 'raw',
+    userSpeedMs,
+    !!navigationActive,
+  );
 
   // Memoized so the downstream GL FeatureCollection memo can actually cache (a bare
   // .filter() returns a fresh array every render). Number.isFinite also drops NaN coords.

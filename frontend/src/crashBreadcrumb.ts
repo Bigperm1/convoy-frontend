@@ -208,6 +208,32 @@ export function logBundleMark(): void {
   }
 }
 
+// ── OTA REGRESSION DETECTOR (8/20) ───────────────────────────────────────────
+// Jeff's drift drive vanished from telemetry and the NEXT launch ran an OLDER
+// update than the previous one — the expo-updates ErrorRecovery-rollback
+// fingerprint, observed only by manually decoding UUIDv7 timestamps. Make it
+// self-announcing: remember the last update id (UUIDv7 = lexicographically
+// chronological) and emit a RELIABLE row whenever a launch runs an older one.
+export function logUpdateRegression(): void {
+  try {
+    const U = require("expo-updates");
+    const cur: string = String(U.updateId || "");
+    if (!cur || U.isEmbeddedLaunch) return; // embedded fallback is its own known story
+    const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+    void AsyncStorage.getItem("convoy.lastUpdateId").then((prev: string | null) => {
+      if (prev && cur < prev) {
+        try {
+          const { logEventReliable } = require("./crashBreadcrumb");
+          logEventReliable(`ota-regressed prev=${prev} now=${cur}`);
+        } catch {}
+      }
+      void AsyncStorage.setItem("convoy.lastUpdateId", cur);
+    });
+  } catch {
+    // instrument must never hurt the app
+  }
+}
+
 let installed = false;
 // ── NON-FATAL EVENT LOG ──────────────────────────────────────────────────────
 // Fire-and-forget row into the same crash_reports table with is_fatal:false.

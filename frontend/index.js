@@ -16,7 +16,7 @@ import './src/carplay/registerCarSurface';
 // Fatal-JS-error breadcrumbs: queue message+stack on a fatal (expo-updates'
 // ~5s recovery window gives the write time to land), harvest expo-updates'
 // own error log next launch, deliver to Supabase. See src/crashBreadcrumb.ts.
-import { installCrashBreadcrumb, logBundleMark } from './src/crashBreadcrumb';
+import { installCrashBreadcrumb, logBundleMark, logUpdateRegression } from './src/crashBreadcrumb';
 installCrashBreadcrumb();
 
 // WHICH JS IS ACTUALLY RUNNING. One row per JS context, from the bundle ENTRY so it
@@ -26,6 +26,7 @@ installCrashBreadcrumb();
 // OTA. See the long note in src/crashBreadcrumb.ts for the CarPlay-first host-boot race
 // that makes this possible, and why no other field can tell us.
 logBundleMark();
+logUpdateRegression();
 
 // ANDROID AUTO BLACK BOX (phone half). The native car entry points record any throw to
 // filesDir/aa_crash.txt; this uploads and clears it on the next launch, so nobody has to

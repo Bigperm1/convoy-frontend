@@ -19,6 +19,7 @@
 // drop back to the static-image fallback (ConvoyCarPlay's showLive/glFailed).
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { reportDraw } from "../drawTelemetry";
 import { Platform, StyleSheet, Image as RNImage } from 'react-native';
 import Mapbox, {
   MapView,
@@ -1457,6 +1458,15 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // for everything else — this only moves the drawn car.)
   const drawLat = carSnapped ? routeProj!.lat : (carRoadDraw ? carRoadDraw.lat : lat);
   const drawLng = carSnapped ? routeProj!.lng : (carRoadDraw ? carRoadDraw.lng : lng);
+  // Drawn-vs-raw breadcrumb (8/20) — CarPlay/AA surface. Taps only.
+  reportDraw(
+    'car',
+    hasFix ? { lat, lng } : null,
+    { lat: drawLat, lng: drawLng },
+    carSnapped ? 'route' : carRoadDraw ? 'road' : 'raw',
+    (s0 => (typeof s0 === 'number' ? s0 : 0))((s as any).speedMs ?? (s as any).speed),
+    !!s.navigating,
+  );
   const drawHdg = carSnapped ? routeProj!.bearing : hdg;
   // Live copy for the compass's IMMEDIATE camera push (the gesture closure is frozen).
   drawHdgRef.current = drawHdg;

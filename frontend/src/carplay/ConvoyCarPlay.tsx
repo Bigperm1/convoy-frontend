@@ -1313,21 +1313,12 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
   // shallow merge, so this can never null out a fix that the cold/foreground location
   // feed (navNotification) already landed — which is what was bouncing the warm car
   // surface back to the CONVOY logo. speedMs stays in the metadata effect above.
-  useEffect(() => {
-    if (typeof user?.lat !== 'number' || typeof user?.lng !== 'number') return;
-    // Gated by source priority — the phone mirror (BestForNavigation/0m) is the most
-    // accurate feed, so it wins over the fg/bg car feeds while the phone is foreground.
-    setCarSelfPosition(
-      user.lat, user.lng,
-      typeof user?.heading === 'number' ? user.heading : null,
-      'mirror',
-      // Speed rides the position gate as of 2026-07-30 (see carStore). It used to be
-      // written ungated in the metadata effect above, which meant a feed whose position
-      // the gate REJECTED could still move the chase-zoom target — framing from one
-      // track, position from another.
-      typeof user?.speed === 'number' ? user.speed : undefined,
-    );
-  }, [user?.lat, user?.lng, user?.heading, user?.speed]);
+  // REMOVED 8/20: the React-state mirror. map.tsx now writes 'mirror' DIRECTLY from
+  // its GPS callback (same tick as the phone marker, stamped with the fix's own
+  // timestamp). This effect was the measured 2-6 s middleman — user.lat propagated
+  // through React state and re-render before reaching the store, and its writes
+  // carried no fix time, so at every feed handoff the car surface could jump
+  // seconds backwards down the road. fgwatch/bgtask remain the background feeds.
 
   // ---- connect / disconnect lifecycle ----
   useEffect(() => {

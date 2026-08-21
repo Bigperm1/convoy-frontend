@@ -273,7 +273,7 @@ const SELF_SOURCE_RANK: Record<SelfPosSource, number> = { mirror: 3, fgwatch: 2,
 // rejects those interleaves; screen-off handoff now takes ≤2.6 s once, then the
 // lower feed owns the marker (and the SelfCarModel watchdog keeps it easing).
 const SELF_STALE_MS = 2600;
-let lastSelfPos: { ts: number; rank: number } | null = null;
+let lastSelfPos: { ts: number; rank: number; fixTs?: number } | null = null;
 
 export function setCarSelfPosition(
   lat: number,
@@ -288,6 +288,11 @@ export function setCarSelfPosition(
   // one track and framing from another. Passing it here keeps the two in agreement: if
   // the fix is not good enough to move the car, it is not good enough to move the zoom.
   speedMs?: number | null,
+  // The FIX's own timestamp (Location.timestamp, unix ms). 8/20 drive-home data:
+  // CarPlay ran a MEASURED 2-6 s behind the phone because this gate compared
+  // writer priority and writer freshness but never fix time — an older queued
+  // fix from one GPS stream legally replaced a newer one at every feed handoff.
+  fixTs?: number,
 ) {
   const now = Date.now();
   const rank = SELF_SOURCE_RANK[source];
@@ -301,7 +306,14 @@ export function setCarSelfPosition(
   // write (cur null → stale) and every post-staleness write are accepted, so selfLat/selfLng
   // are never left null → the CONVOY-logo fallback cannot return.
   if (cur && !stale && rank < cur.rank) return;
-  lastSelfPos = { ts: now, rank };
+  // NEVER DRAW TIME BACKWARDS (8/20). Whatever the priority outcome, a fix that is
+  // OLDER than the one already on screen is rejected while the incumbent is fresh —
+  // the marker may pause a beat at a feed handoff but can no longer teleport
+  // backwards down the road. Staleness stays the escape hatch: if nothing has been
+  // accepted for SELF_STALE_MS (dead feed / clock step), any fix is accepted.
+  const ts = typeof fixTs === "number" && Number.isFinite(fixTs) ? fixTs : now;
+  if (cur && !stale && typeof cur.fixTs === "number" && ts < cur.fixTs) return;
+  lastSelfPos = { ts: now, rank, fixTs: ts };
   // STICKY HEADING (2026-07-30). iOS reports course = -1 whenever it cannot determine
   // one — at low speed, at a standstill, and on the first fixes after a restart — and
   // both the fg and bg feeds translate that to `null` (navNotification.ts:306, :389).

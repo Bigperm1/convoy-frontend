@@ -605,6 +605,7 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
     typeof _h === "number" && _h > 0 ? _h : null,
     'bgtask',
     typeof _sp === "number" && _sp >= 0 ? _sp : 0,
+    loc.timestamp, // fix time — the gate now refuses to draw time backwards (8/20)
   );
   setCarState({
     // HEAT (2026-08-14): this INCREMENTS, so it defeats carStore's equality gate and
@@ -710,6 +711,7 @@ export async function startForegroundCarFeed(): Promise<void> {
           typeof h === "number" && h > 0 ? h : null,
           'fgwatch',
           typeof sp === "number" && sp >= 0 ? sp : 0,
+          loc.timestamp, // fix time — see the gate (8/20)
         );
         // Constant string, so carStore's equality gate already makes this a no-op after
         // the first write; flag-gated too so it costs nothing at all when diag is off.

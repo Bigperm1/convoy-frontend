@@ -52,7 +52,7 @@ import { usePitstop } from "../../src/pitstop";
 import { recordTrip, consumeTakeAgain, cachePeerPbs } from "../../src/trips";
 import PitstopCard from "../../src/components/PitstopCard";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
-import { setCarState, setCarPeers, subscribeCarGesture } from "../../src/carplay/carStore";
+import { setCarState, setCarPeers, subscribeCarGesture, setCarSelfPosition } from '../../src/carplay/carStore';
 import { useVoice } from "../../src/useVoice";
 import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
@@ -2759,6 +2759,17 @@ export default function MapScreen() {
               }
             }
             lastFgFixAtRef.current = Date.now();   // see the bg-fix subscriber below
+            // DIRECT car-surface feed (8/20). CarPlay used to receive this fix via
+            // React state -> ConvoyCarPlay's mirror effect, a middleman MEASURED at
+            // 2-6 s of lag on the drive-home data (draw-cmp) — the car marker ran
+            // up to 100 m behind the phone at highway speed. Feed the store here,
+            // same tick as the phone marker, stamped with the fix's own timestamp.
+            try {
+              setCarSelfPosition(
+                pos.coords.latitude, pos.coords.longitude,
+                heading ?? null, 'mirror', speed, pos.timestamp,
+              );
+            } catch {}
             setCoords((cur) => ({
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,

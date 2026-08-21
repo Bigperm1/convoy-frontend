@@ -32,6 +32,7 @@ TRI_BUDGET = int(os.environ.get('TRI_BUDGET', '6000'))       # per-object cap be
 IMG_MAX = int(os.environ.get('IMG_MAX', '0'))                 # >0: downscale embedded textures to this max edge (map cars don't need 1024+ logos)
 SKIP_PAINT = os.environ.get('SKIP_PAINT') == '1'              # scanned/generated cars: KEEP the baked photo-texture, never repaint the body (Garage Scan PoC)
 AUTO_ORIENT = os.environ.get('AUTO_ORIENT') == '1'            # generated inputs bake 90 deg off the pack convention — swing the long axis onto X
+NOSE_FLIP = os.environ.get('NOSE_FLIP') == '1'                # generator conventions differ (Meshy noses opposite to Tripo) — extra 180 after auto-orient; ALWAYS verify against the heavy_metal sprite
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=os.path.join(BASE, SRC))
@@ -244,6 +245,27 @@ body_lin = tuple(v/12.92 if v <= 0.04045 else ((v + 0.055)/1.055) ** 2.4 for v i
 # exact match silently skips the whole body.
 BODY_MATS = set(x.strip() for x in BODY_MAT.split('|'))
 painted = SKIP_PAINT  # scanned cars carry their look in the texture; tuning applies to everything EXCEPT the body repaint
+if SKIP_PAINT:
+    # CHROME TAMER (8/20, Jeff: "why does the car look chrome"). Generated scans
+    # ship PBR maps that read glossy photo paint as near-metal mirror. glTF
+    # factors MULTIPLY the textures, so clamping the factors calms the whole
+    # model without touching the baked look.
+    for m in bpy.data.materials:
+        if not m.use_nodes: continue
+        b = next((n for n in m.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+        if not b: continue
+        try:
+            # A texture LINK overrides the socket value (the muscle-hero lesson,
+            # re-verified here: factors exported as 1 with the MR texture live).
+            # Cut the MR links and set flat values — the base colour texture
+            # (the car's whole look) stays untouched.
+            for inp in ('Metallic', 'Roughness'):
+                for lk in list(b.inputs[inp].links):
+                    m.node_tree.links.remove(lk)
+            b.inputs['Metallic'].default_value = 0.25
+            b.inputs['Roughness'].default_value = 0.5
+        except Exception:
+            pass
 for m in bpy.data.materials:
     if SKIP_PAINT and m.name.strip() in BODY_MATS:
         continue
@@ -298,6 +320,12 @@ if AUTO_ORIENT and (mx - mn).y > (mx - mn).x:
         o.matrix_world = rot @ o.matrix_world
     bpy.context.view_layer.update()
     mn, mx = wbb([x for x in bpy.data.objects if x.type == 'MESH'])
+
+if NOSE_FLIP:
+    rot180 = mathutils.Matrix.Rotation(math.radians(180), 4, 'Z')
+    for o in [x for x in bpy.data.objects if x.type == 'MESH']:
+        o.matrix_world = rot180 @ o.matrix_world
+    bpy.context.view_layer.update()
 
 print("HALVES_MIRRORED", len(halves), halves[:12])
 print("DROPPED", len(dropped))

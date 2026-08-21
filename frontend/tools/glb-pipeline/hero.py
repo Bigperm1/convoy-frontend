@@ -97,13 +97,13 @@ def lamp(kind, energy, size, loc, rot):
 
 scene = bpy.context.scene
 scene.render.engine = 'CYCLES'; scene.cycles.device = 'CPU'
-scene.cycles.samples = 160; scene.cycles.use_denoising = True
+scene.cycles.samples = int(os.environ.get('HERO_SAMPLES','160')); scene.cycles.use_denoising = True  # HERO_SAMPLES=24 for fast previews
 # Standard, not AgX: AgX pastelizes saturated paint in highlights (Guards Red
 # rendered salmon). Same lesson as paintscan's ID decode.
 scene.view_settings.view_transform = 'Standard'
 scene.view_settings.look = 'None'
 scene.render.film_transparent = True
-scene.render.resolution_x = 1580; scene.render.resolution_y = 960
+scene.render.resolution_x = 1580; scene.render.resolution_y = 960; scene.render.resolution_percentage = int(os.environ.get('HERO_SCALE','100'))
 
 meshes = [o for o in bpy.data.objects if o.type == 'MESH']
 mn = mathutils.Vector((1e9,)*3); mx = mathutils.Vector((-1e9,)*3)

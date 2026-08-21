@@ -16,6 +16,9 @@ const GR_COROLLA_COLORS: CarColor[] = [
   // Measured from Toyota's official 06X9 studio asset (8/19) — dark grey-green.
   // Kept in lockstep with VEHICLE_TINT.gravel.
   { name: 'Gravel',         hex: '#565E5F' },
+  // Jeff's actual widebody GRC — Garage-Scanned (Meshy-7, 8/20) and baked in
+  // Heavy Metal. The first scanned car to reach the app.
+  { name: 'Widebody',       hex: '#6B6E72' },
 ];
 
 const DEFAULT_COLORS: CarColor[] = [

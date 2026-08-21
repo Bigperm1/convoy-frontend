@@ -25,6 +25,8 @@ const GR_COROLLA_IMAGES: Record<string, any> = {
 // the other five by construction: it's the same photographic series. New
 // filename per revision — the OTA asset path-key trap.
 'gravel': require('../assets/cars/gr_corolla/gravel_grmn27.jpg'),
+// Garage Scan hero — rendered from Jeff's scanned car, Heavy Metal tint.
+'widebody': require('../assets/cars/gr_corolla/widebody.jpg'),
 };
 
 // GR Yaris 3/4 heroes — Toyota's official scene7 configurator renders (transparent

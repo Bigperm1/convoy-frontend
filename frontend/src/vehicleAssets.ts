@@ -89,7 +89,7 @@ export const VEHICLE_PNG: Record<GRCColorKey, number | { uri: string }> = {
   gt3rs_miami_blue:     require("../assets/vehicles/v3/gt3rs_miami_blue.png"),
   gt3rs_python_green:   require("../assets/vehicles/v3/gt3rs_python_green.png"),
   gt3rs_shark_blue:     require("../assets/vehicles/v3/gt3rs_shark_blue.png"),
-  grc_widebody:         require("../assets/vehicles/v3/grc_widebody.png"),
+  grc_widebody:         require("../assets/vehicles/v3/grc_widebody2.png"),
   s2k_grand_prix_white: require("../assets/vehicles/v3/s2k_grand_prix_whiteb.png"),
   s2k_berlina_black: require("../assets/vehicles/v3/s2k_berlina_blackb.png"),
   s2k_silverstone: require("../assets/vehicles/v3/s2k_silverstoneb.png"),
@@ -423,7 +423,7 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
   gt3rs_shark_blue:     "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_shark_blue.glb",
   // Jeff's Garage-Scanned widebody (Meshy-7, full mesh + 2K tex, HM tint baked).
   // Heavier than the authored fleet (~9 MB vs ~15 MB) — his personal test car.
-  grc_widebody:         "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_jeff_widebody2.glb",
+  grc_widebody:         "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_jeff_widebody3.glb",
   s2k_grand_prix_white: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_grand_prix_white3.glb",
   s2k_berlina_black: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_berlina_black3.glb",
   s2k_silverstone: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_silverstone3.glb",

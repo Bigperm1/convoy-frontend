@@ -4,6 +4,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api, saveToken, getToken, clearToken } from "./api";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { signInWithGoogle } from "./googleAuth";
+import { setBreadcrumbHandle } from "./crashBreadcrumb";
 
 export type User = {
   id: string;
@@ -82,6 +83,8 @@ function isAuthRejection(e: any): boolean {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [token, setToken] = useState<string | null>(null);
+  // Telemetry rows carry the signed-in handle (crash_reports.handle, 2026-08-21).
+  useEffect(() => { try { setBreadcrumbHandle(user?.handle ?? null); } catch {} }, [user]);
 
   // True when the last refresh failed for a REACHABILITY reason, so we are running on
   // the cached profile and should try again the next time the app comes forward.

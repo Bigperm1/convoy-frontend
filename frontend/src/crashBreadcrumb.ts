@@ -44,6 +44,12 @@ const DELIVER_DELAY_MS = 3000;
 //     liveAttempt key in ConvoyCarPlay) resets that ref and re-logs too.
 // With an instance id both become one query: two ids overlapping in event_at = two
 // contexts; one id logging twice = a remount. No inference required.
+let currentHandle: string | null = null;
+/** AuthProvider calls this whenever the user changes; every later row carries it. */
+export function setBreadcrumbHandle(h: string | null | undefined): void {
+  currentHandle = h ? String(h).slice(0, 64) : null;
+}
+
 const INSTANCE_ID = (() => {
   try {
     return Math.random().toString(36).slice(2, 8) + "-" + String(Date.now()).slice(-6);
@@ -67,6 +73,10 @@ type Report = {
   emergency_reason?: string | null;
   channel?: string | null;
   instance_id?: string | null;
+  // Signed-in handle (2026-08-21). instance_id is random per JS reload, so without
+  // this a tester's report could not be pulled by name — it took an hour on 8/21 to
+  // narrow one drive to "one of two users". Set by AuthProvider; null before login.
+  handle?: string | null;
   // Client-side event time. created_at is the SERVER insert time and a slow connection
   // can delay it by minutes, so ordering must never be argued from created_at again.
   event_at?: string | null;
@@ -122,6 +132,7 @@ function baseMeta() {
     emergency_reason,
     channel,
     instance_id: INSTANCE_ID,
+    handle: currentHandle,
     event_at: new Date().toISOString(),
   };
 }
@@ -265,6 +276,39 @@ export function logEvent(message: string): void {
  * Use for receipts/bails whose absence will be interpreted; keep plain logEvent for
  * high-volume breadcrumbs where losing one row is meaningless.
  */
+/**
+ * Awaitable twin of logEventReliable for the one caller that must know the row is
+ * on the server BEFORE it destroys the queue the fallback would use: Reset app data.
+ * Resolves when the insert settles (never rejects); queueOnFail=false drops the row
+ * rather than writing it into a store that is about to be wiped.
+ */
+export async function logEventReliableAsync(message: string, queueOnFail = true): Promise<void> {
+  try {
+    const report = { message, is_fatal: false, late: false, ...baseMeta() };
+    const { supabase } = require("./supabase");
+    if (!supabase) { if (queueOnFail) await queue([report]); return; }
+    const res: any = await supabase.from("crash_reports").insert([report]);
+    if (res?.error && queueOnFail) await queue([report]);
+  } catch {}
+}
+
+// Seed the handle from the cached profile at module load (2026-08-21 review): the
+// AuthProvider effect only runs once /auth/me answers, so boot rows, Android Auto
+// cold-connect rows and headless contexts — the ones you most want by name — would
+// stay null. Reads the key directly; importing auth.tsx here would pull the Google
+// sign-in native module into the headless car context.
+(() => {
+  try {
+    const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+    void AsyncStorage.getItem("convoy_user").then((raw: string | null) => {
+      try {
+        const u = raw ? JSON.parse(raw) : null;
+        if (currentHandle == null && u && typeof u.handle === "string" && u.handle) currentHandle = u.handle.slice(0, 64);
+      } catch {}
+    }, () => {});
+  } catch {}
+})();
+
 export function logEventReliable(message: string): void {
   try {
     const report = { message, is_fatal: false, late: false, ...baseMeta() };

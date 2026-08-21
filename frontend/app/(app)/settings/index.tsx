@@ -3,6 +3,9 @@ import { Text, StyleSheet, TouchableOpacity, Linking, Alert } from "react-native
 import { useRouter } from "expo-router";
 import { GlassFill } from "../../../src/Glass";
 import { useAuth } from "../../../src/auth";
+import { resetAppData } from "../../../src/resetAppData";
+import { isNavSessionLive } from "../../../src/navNotification";
+import { headUnitAttachedRaw } from "../../../src/locationPrivacy";
 import {
   useSettings,
   updateSettings,
@@ -50,6 +53,25 @@ export default function SettingsMenu() {
     );
   }, []);
 
+
+  const confirmReset = useCallback(() => {
+    // Not mid-drive: a reload would orphan the native location task / Android
+    // foreground notification / car session (review, 8/21). Same rule the red pill uses.
+    if (isNavSessionLive() || headUnitAttachedRaw()) {
+      Alert.alert("End navigation first", "Finish the drive and disconnect from CarPlay / Android Auto, then reset.");
+      return;
+    }
+    Alert.alert("Reset app data", "This wipes all of Hairpin's saved data on this phone — settings, saved sign-in, cached routes and places — and restarts the app. Your account and drives on the server are untouched. You'll sign in again.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Reset and restart", style: "destructive", onPress: () => {
+        void resetAppData().then((restarted) => {
+          if (restarted) return;                 // the JS context is already being torn down
+          void logout();
+          Alert.alert("Data wiped", "Close Hairpin completely and reopen it to finish the reset.");
+        });
+      } },
+    ]);
+  }, [logout]);
 
   const confirmSignOut = useCallback(() => {
     Alert.alert("Sign out", "Sign out of Hairpin on this device?", [
@@ -156,6 +178,17 @@ export default function SettingsMenu() {
         <MenuRow icon="chatbox-ellipses" iconColor="#0A84FF" title="Send Feedback" onPress={sendFeedback} />
         <Divider />
         <MenuRow icon="bug" iconColor="#8E8E93" title="Developer" subtitle="Debug overlays" onPress={() => go("/(app)/settings/developer")} />
+        <Divider />
+        {/* The one-tap fresh install (2026-08-21). See src/resetAppData.ts. */}
+        <MenuRow
+          icon="refresh-circle"
+          iconColor="#FF9F0A"
+          title="Reset app data"
+          subtitle="Wipes every saved setting and session on this phone and restarts — like a fresh install"
+          onPress={confirmReset}
+          destructive
+          testID="settings-reset-app-data"
+        />
       </SettingsCard>
 
       {/* DONATIONS — Jeff's ask: a word about what it costs to keep Hairpin

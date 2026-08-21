@@ -8,6 +8,7 @@ import { Platform, AppState } from "react-native";
 import { api } from "./api";
 import { fetchMapboxRoutes, fetchMapboxRouteVia, refreshMapboxRoute, arrivesOnFarSide, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
 import { logEvent } from "./crashBreadcrumb";
+import { anchorStepIndex } from "./navAnchor";
 import { getSettings, getNovaVoice, getAudioVol } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
@@ -162,20 +163,31 @@ export async function fetchRoutes(
   // Routes API. Same signature + NavRoute/NavStep shape, so every caller (map.tsx,
   // the turn-by-turn machine, the greeting, CarPlay formatters) is unchanged.
   let mbRoutes: MapboxRoute[] = [];
+  // TIMEOUT (2026-08-21). Verified on rkoji7-061995's drive: 20 off-route refetches
+  // issued 06:29-06:33 PT ALL resolved in one 300 ms burst at 06:36:24 while Supabase
+  // inserts from the same phone flowed within 0.2 s — the route fetches hung, the
+  // stale one that resolved last became the live route, and nav never recovered.
+  // No fetch here had any timeout. 15 s is well past a normal Directions round
+  // trip; a hung request now fails instead of surfacing minutes later.
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ROUTE_FETCH_TIMEOUT_MS);
   try {
     mbRoutes = await fetchMapboxRoutes(
       origin,
       destination,
       { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
+      { signal: ctl.signal },
     );
+    if (!mbRoutes.length) return [];
+    mbRoutes = await preferCurbArrival(origin, destination, avoid, mbRoutes, ctl.signal);
   } catch {
     return [];
+  } finally {
+    clearTimeout(timer);
   }
-  if (!mbRoutes.length) return [];
-
-  mbRoutes = await preferCurbArrival(origin, destination, avoid, mbRoutes);
   return mbRoutes.map(mapboxToNavRoute).filter((r: NavRoute) => r.polyline);
 }
+const ROUTE_FETCH_TIMEOUT_MS = 15000;
 
 // ── ARRIVE ON THE DRIVER'S SIDE, WHEN IT IS CHEAP (2026-07-31) ──────────────
 // Jeff: "the GPS needs to be a little mindful on which side of the road the
@@ -225,6 +237,7 @@ async function preferCurbArrival(
   destination: LatLng,
   avoid: AvoidPrefs | undefined,
   routes: MapboxRoute[],
+  signal?: AbortSignal,
 ): Promise<MapboxRoute[]> {
   try {
     const best = routes[0];
@@ -233,7 +246,7 @@ async function preferCurbArrival(
       origin,
       destination,
       { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
-      { curbApproach: true },
+      { curbApproach: true, signal },
     );
     const alt = curb[0];
     if (!alt || !alt.polyline || arrivesOnFarSide(alt)) return routes;  // no better
@@ -762,6 +775,11 @@ export function useTurnByTurn(
   // Recent perpendicular distances, for the divergence trend (see DIVERGE_*).
   const divergeRef = useRef<{ t: number; d: number }[]>([]);
   const polyCacheRef = useRef<{ key: string; pts: LatLng[] }>({ key: "", pts: [] });
+  const lastUserRef = useRef(user);
+  lastUserRef.current = user;
+  // Step-end segments of the current route, for the along-route heal below.
+  const endSegsRef = useRef<{ key: string; endSegs: number[] }>({ key: "", endSegs: [] });
+  const healStreakRef = useRef(0);
   // Segment-ETA state. `suffix` is rebuilt whenever the route's segment durations
   // change — which includes a live traffic REFRESH, not just a new route, so a refresh
   // takes effect on the very next GPS tick. `cursor` keeps the per-tick segment search
@@ -863,7 +881,23 @@ export function useTurnByTurn(
       settleSinceRef.current = null;
       if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
       swapSuppressUntilRef.current = Date.now() + 8000;
-      const reAnchored: TbtState = { ...stateRef.current, active: true, stepIndex: 0 };
+      // ANCHOR BY POSITION ALONG THE NEW LINE, NOT 0 (2026-08-21). A swapped-in route
+      // is not always computed from where the car is now — rkoji7's was computed from
+      // a point the car had left minutes earlier (car at seg 84/219 at install, step 0's
+      // end already behind it). stepIndex 0 then froze for 3h10m because the advance
+      // loop only ever tests the CURRENT step's end. See src/navAnchor.ts.
+      let idx = 0;
+      try {
+        const u = lastUserRef.current;
+        const coords = route?.coordinates;
+        const steps = route?.steps;
+        if (u && coords && coords.length >= 2 && steps?.length) {
+          const a = anchorStepIndex(coords, steps, u);
+          idx = a.onRoute ? a.index : 0;
+          logEvent(`route-swap steps=${steps.length} coords=${coords.length} carSeg=${a.carSeg} onRoute=${a.onRoute ? 1 : 0} anchored=${idx}`);
+        }
+      } catch {}
+      const reAnchored: TbtState = { ...stateRef.current, active: true, stepIndex: idx };
       stateRef.current = reAnchored;
       setState(reAnchored);
     }
@@ -1069,6 +1103,7 @@ export function useTurnByTurn(
         const now = Date.now();
         if (now - lastOffRouteAtRef.current > 8000) {
           lastOffRouteAtRef.current = now;
+          try { logEvent(`off-route tripped d=${Math.round(dRoute)}m streak=${offRouteStreakRef.current} why=${missedManeuver ? 'missed' : diverging ? 'diverging' : conclusivelyOff ? 'far' : headingOff ? 'heading' : 'sustained'} step=${stepIdx}`); } catch {}
           offRouteStreakRef.current = 0;
           divergeRef.current = [];  // fresh trend against the NEW line
           missRef.current = null; // one miss = one reroute; re-arm on the new route
@@ -1134,6 +1169,29 @@ export function useTurnByTurn(
         const hit = findRouteSegment(segCoords, user.lat, user.lng, segCursorRef.current);
         if (hit) {
           segCursorRef.current = hit.seg;
+          // ALONG-ROUTE HEAL (2026-08-21). The projection walked 84 -> 218/219 on
+          // rkoji7's drive while stepIndex sat at 0: the cursor knew where the car was,
+          // the step index did not. If the car's segment is past the current step's
+          // end segment on three consecutive moving ticks, re-anchor by position.
+          try {
+            if (endSegsRef.current.key !== r.polyline) {
+              const a = anchorStepIndex(segCoords, steps, user);
+              endSegsRef.current = { key: r.polyline, endSegs: a.endSegs };
+            }
+            const endSeg = endSegsRef.current.endSegs[stepIdx] ?? -1;
+            const moving = (user.speed ?? 0) > 2;
+            const past = endSeg >= 0 && hit.seg > endSeg + 2 && hit.distM < 100;
+            healStreakRef.current = past && moving ? healStreakRef.current + 1 : 0;
+            if (healStreakRef.current >= 3 && stepIdx < steps.length - 1) {
+              const a = anchorStepIndex(segCoords, steps, user);
+              if (a.onRoute && a.index > stepIdx) {
+                logEvent(`step-heal from=${stepIdx} to=${a.index} carSeg=${hit.seg} endSeg=${endSeg}`);
+                healStreakRef.current = 0;
+                stateRef.current = { ...stateRef.current, stepIndex: a.index };
+                return;   // next tick runs on the healed index
+              }
+            }
+          } catch {}
           // Time left = the un-driven remainder of the segment we're standing on,
           // plus every segment after it (O(1) via the suffix table).
           const inSeg = (segDur[hit.seg] || 0) * (1 - hit.t);

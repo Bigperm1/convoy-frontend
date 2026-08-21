@@ -319,6 +319,11 @@ function maneuverNear(route: NavRoute | null, lat: number, lng: number): string 
 // How long the map stays where the driver put it before the chase cam takes back
 // over. Expressed once so the timestamp and the fast-path timer cannot drift.
 const PAN_RECENTER_MS = 20000;
+// Off-route refetch results older than this, or asked from further back than this,
+// are discarded (2026-08-21). 30 s is 2x a slow Directions round trip; 500 m is
+// ~16 s at 110 km/h — a result from further back describes a road already driven.
+const REROUTE_MAX_AGE_MS = 30000;
+const REROUTE_MAX_MOVE_M = 500;
 // How quiet the foreground watch must go before background fixes take over. The nav
 // watch delivers at ~1-2 Hz, so 3s means "the fg watch has genuinely stopped" (a
 // locked screen) rather than "we're between fixes".
@@ -1419,10 +1424,25 @@ export default function MapScreen() {
         ferries: settings.avoidFerries,
       };
       const pinned = stopsRef.current;
+      // SUPERSESSION + STALENESS GUARD (2026-08-21). Each refetch is stamped; a result
+      // is applied only if it is still the newest request, fresh, and the car has not
+      // driven far since it was asked. rkoji7's drive: 20 of these resolved together
+      // 3-7 minutes late and the last one — computed from a point the car had left —
+      // became the live route. No guard existed here.
+      const reqId = ++offRouteReqSeqRef.current;
+      const issuedAt = Date.now();
+      const from = { lat: coords.lat, lng: coords.lng };
       (pinned.length
         ? fetchRouteViaStops(coords, pinned, destination, avoid).then((r) => (r ? [r] : []))
         : fetchRoutes(coords, destination, avoid)
       ).then((res) => {
+        const ageMs = Date.now() - issuedAt;
+        const nowC = coordsRef.current;
+        const movedM = nowC ? haversineMeters(from, nowC) : 0;
+        const superseded = reqId !== offRouteReqSeqRef.current;
+        const stale = ageMs > REROUTE_MAX_AGE_MS || movedM > REROUTE_MAX_MOVE_M;
+        try { logEvent(`reroute-result id=${reqId} age=${Math.round(ageMs / 1000)}s moved=${Math.round(movedM)}m n=${res.length} ${superseded ? 'superseded' : stale ? 'stale' : 'applied'}`); } catch {}
+        if (superseded || stale) return;   // the next off-route tick (>=8 s) asks again from here
         if (res.length > 0) {
           // Prefer the fastest reroute that continues in the direction the car is
           // already facing, so going off-course never auto-selects a U-turn line.
@@ -1539,6 +1559,7 @@ export default function MapScreen() {
   // the live map (the old RerouteCard modal is gone — Jeff: no popups). null = none.
   type RerouteOffer = { route: NavRoute; title: string; subtitle: string; savedMin: number; etaMin: number; arrival: string; lateMin: number; divLat: number; divLng: number };
   const [rerouteOffer, setRerouteOffer] = useState<RerouteOffer | null>(null);
+  const offRouteReqSeqRef = useRef(0);   // see the off-route handler's supersession guard
   // STABLE IDENTITY for the map's `routes` prop. This was previously built inline in
   // the JSX — `rerouteOffer ? [...routes, {...}] : routes` — which minted a BRAND NEW
   // ARRAY on every single render for as long as an offer was on screen. Every consumer

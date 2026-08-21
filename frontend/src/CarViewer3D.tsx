@@ -38,7 +38,7 @@ export default function CarViewer3D({
   auto-rotate
   auto-rotate-delay="1200"
   rotation-per-second="8deg"
-  camera-orbit="215deg 76deg 105%"
+  camera-orbit="325deg 76deg 100%"
   min-camera-orbit="auto 55deg auto"
   max-camera-orbit="auto 92deg auto"
   min-field-of-view="18deg"

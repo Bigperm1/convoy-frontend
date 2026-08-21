@@ -559,7 +559,7 @@ export default function GarageScreen() {
             activeOpacity={0.92}
             disabled={!heroModelUrl}
             onPress={() => { Haptics.selectionAsync(); setViewer3D(true); }}
-            style={StyleSheet.absoluteFill ? undefined : undefined}
+            style={{ flex: 1 }}  // heroBg is flex:1 — an unsized wrapper collapsed the hero to 0 height (8/20)
           >
           <ImageBackground source={carImage} style={styles.heroBg} resizeMode="cover">
             {/* Subtle top vignette + strong bottom fade to black so the image

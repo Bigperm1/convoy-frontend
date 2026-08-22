@@ -423,7 +423,7 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
   gt3rs_shark_blue:     "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_shark_blue.glb",
   // Jeff's Garage-Scanned widebody (Meshy-7, full mesh + 2K tex, HM tint baked).
   // Heavier than the authored fleet (~9 MB vs ~15 MB) — his personal test car.
-  grc_widebody:         "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_jeff_widebody4.glb",
+  grc_widebody:         "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_jeff_widebody3.glb",
   s2k_grand_prix_white: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_grand_prix_white3.glb",
   s2k_berlina_black: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_berlina_black3.glb",
   s2k_silverstone: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_silverstone3.glb",

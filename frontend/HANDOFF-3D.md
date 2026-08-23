@@ -52,7 +52,54 @@ session scratchpad and is **gone** — recreate with `python3 -m venv` + `pip in
 **DONE (verified by render + measurement):** Jeff's 10-point spec is fully applied to the Tripo
 base. See the table under "The 10 points" for the per-point measured before → after.
 
-**NOT DONE — and this is the next session's first job:**
+## 🛑 JEFF HAS NOT APPROVED THIS LOOK — 2026-08-22
+
+**Jeff's words: "i do not approve the 3D look i am still making a decision on which 3d program to
+use and need to build more samples."**
+
+**Do NOT decimate, upload, or wire TRIPO10g into the app.** The vendor choice is still open. The
+next job is a **bake-off to pick the program**, not ship-prep on this model. Everything below about
+decimation stays valid but is **parked** until a vendor is chosen and a look is approved.
+
+### What a fair bake-off needs
+
+Jeff's own complaint from this session is the design constraint:
+*"we did nothing to that car where as the others were tweaked."* A comparison where I have polished
+one entrant and not the others measures **my tweaking**, not the vendors.
+
+So: **same photos in, same post-process, same render rig, side by side.**
+
+1. **Same input set** — the 4 corrected black-plate views from `photos/` (all three vendors cap at
+   4; see the table below). Don't give one vendor a better crop.
+2. **Same post-process** — run `scripts/apply10b.py` on each, or on none. Not one polished and the
+   rest raw.
+3. **Same render rig** — `scripts/qc4.py` for all, plus `scripts/flat.py` (albedo, no lighting) so
+   a vendor isn't rewarded for baking sunlight into its texture.
+4. **Judge on what actually matters here:** silhouette accuracy, panel cleanliness, whether the
+   plate/badges are hallucinated as geometry, texture honesty (is lighting baked in?), poly count
+   and index width — a vendor that emits uint32 costs an extra conversion step every time.
+
+### What is already known about each — measured, not recalled
+
+| vendor | max views | result | notes |
+|---|---|---|---|
+| **Meshy-7** | 4 | **the only one proven in-app** — `out_jeff_widebody3.glb`, 6.5 MB, 2K tex, uint16 | this is what ships today |
+| **Tripo** | 4 | 1.93M tris, 8K tex, **uint32** | MR map is a mirror (rough p50 **0.01**); plate hallucinated as **protruding geometry** |
+| **Hunyuan 3.1 Pro Multiview** (via Scenario) | **4** — 8 slots exist in the UI but 6- and 8-view runs FAIL | 499K tris, 4K tex, PBR | failure isolated to the two front-quarter photos |
+
+⚠ **Meshy-7 is the incumbent and the bar.** It is the only vendor whose output has survived the
+whole chain to a rendering car marker on a real device. A challenger has to beat that, not just
+look good in a render.
+
+⚠ **No vendor tested accepts 8 photos.** I told Jeff three of them did, before testing. That was
+wrong and it cost the session.
+
+**Spend so far:** 150 Scenario credits (4,880 → 4,730). Tripo Professional $19.90 was already
+Jeff's. Budget any further bake-off in credits before running it.
+
+---
+
+## Parked: what shipping would take (only after a vendor + look are approved)
 
 `TRIPO10g.glb` is a **look-approval build, not a shippable asset.**
 

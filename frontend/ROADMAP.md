@@ -221,8 +221,13 @@ press reached JS. The receipt chain is shipped (`83600a09`) — a full crumb cha
 button and **no tap row** means the press died native-side, which makes it a build fix. Needs Jeff
 to say whether a pill appeared.
 
-**3 · The 3D model is not shippable yet** — see `HANDOFF-3D.md`. 87 MB against a 6.5 MB budget, and
-uint32 indices which Mapbox silently drops. Needs Jeff's yes on the look, then decimation.
+**3 · 3D car — VENDOR NOT CHOSEN. Jeff has NOT approved the look (2026-08-22).**
+His words: *"i do not approve the 3D look i am still making a decision on which 3d program to use
+and need to build more samples."* **Do not decimate, upload or wire anything in.** The next job is a
+**bake-off to pick the program** — same photos, same post-process, same render rig for every
+entrant, or it measures my tweaking instead of the vendors. Meshy-7 is the incumbent and the bar:
+it produced `out_jeff_widebody3.glb`, the only model proven end-to-end on a real device. Details and
+the comparison method are in `HANDOFF-3D.md`.
 
 **4 · Premium gates not wired** — map modes, route colours, cameras, voices, speed alert, VOX,
 club-create, top speed, convoy size. Backend entitlement endpoints live in `~/convoy-backend`
@@ -252,8 +257,9 @@ done: it reverses an earlier call about the robotic device voice.
 1. **Read `RULES.md`, then this file.** Do not trust `HANDOFF.md`'s header.
 2. **Re-verify §1 and §2 live** (`eas build:list` both platforms, `eas update:list --branch
    mapbox-migration`, `git status`). These numbers age.
-3. **Get Jeff's verdict on the 3D look** (`~/Documents/hairpin-3d/renders/BEFORE_AFTER.jpg`).
-   If yes → decimate to ≤7 MB + uint16 → upload to the Supabase bucket under a **new filename** →
-   wire in `vehicleAssets.ts` → **sim-verify the map before OTA** (black map is the failure mode).
+3. **3D: build more samples so Jeff can pick a vendor.** He has NOT approved the current look and
+   the program is undecided — see `HANDOFF-3D.md`. Run every entrant through the *same* photos,
+   post-process and render rig. **Do not decimate or ship anything until he picks.** Ask what his
+   credit budget is before spending on generations.
 4. **Commit the three new docs** if not already done (`RULES.md`, `ROADMAP.md`, `HANDOFF-3D.md`).
 5. Then the ranked list in §6.

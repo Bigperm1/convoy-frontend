@@ -60,18 +60,18 @@ base. See the table under "The 10 points" for the per-point measured before → 
 |---|---|---|
 | triangles | 1,886,793 | — (Meshy-7 bake) |
 | albedo | 8192² PNG | 2K |
-| file size | **87 MB** | **6,814,544 B = 6.5 MB** (verified by live HEAD request) |
+| file size | **90,219,512 B = 86.0 MB** | **6,814,544 B = 6.5 MB** (verified by live HEAD request) |
 | indices | **uint32 (5125)** | uint16 |
 
 Peers for scale, same bucket: `out_heavy_metal.glb` **4.8 MB**, `out_gravel3.glb` **4.8 MB**.
-**Budget: ~5–7 MB.** TRIPO10g is 13× over.
+**Budget: ~5–7 MB.** TRIPO10g is **13.2×** over.
 
 Two hard blockers:
 
 1. **uint32 indices are silently dropped by Mapbox's renderer.** A uint32 GLB on the car map
    renders as *nothing* — no error, no warning. Must be converted to uint16 (5123), which means
    splitting into ≤65,535-vertex primitives (`tools/glb-pipeline/split_u16.py` exists for this).
-2. **87 MB is far too heavy** for either the garage viewer or an OTA. Target ~200k tris and a
+2. **86 MB is far too heavy** for either the garage viewer or an OTA. Target ~200k tris and a
    2–4K texture.
 
 **Quality can regress in that decimation step.** Get Jeff's yes on the look *first*, then decimate,

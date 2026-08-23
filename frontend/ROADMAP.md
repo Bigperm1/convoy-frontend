@@ -221,13 +221,12 @@ press reached JS. The receipt chain is shipped (`83600a09`) — a full crumb cha
 button and **no tap row** means the press died native-side, which makes it a build fix. Needs Jeff
 to say whether a pill appeared.
 
-**3 · 3D car — VENDOR NOT CHOSEN. Jeff has NOT approved the look (2026-08-22).**
-His words: *"i do not approve the 3D look i am still making a decision on which 3d program to use
-and need to build more samples."* **Do not decimate, upload or wire anything in.** The next job is a
-**bake-off to pick the program** — same photos, same post-process, same render rig for every
-entrant, or it measures my tweaking instead of the vendors. Meshy-7 is the incumbent and the bar:
-it produced `out_jeff_widebody3.glb`, the only model proven end-to-end on a real device. Details and
-the comparison method are in `HANDOFF-3D.md`.
+**3 · ✅ 3D car — TRIPO PICKED, look approved 2026-08-23.**
+Jeff: *"this current widebody is by far the best… this is the #1 pick so far."* The asset and
+its irreplaceable source generation are saved at `~/Documents/hairpin-3d/PICKS/` with a full
+recipe in `PICKS/MANIFEST.md`. 190,000 tris · uint16 · 6.47 MB · 2K maps — inside the fleet
+budget. **Not yet uploaded to the Supabase bucket and not referenced in `vehicleAssets.ts`;**
+Mapbox caches by URL so any rebake needs a new filename. Details in `HANDOFF-3D.md`.
 
 **4 · Premium gates not wired** — map modes, route colours, cameras, voices, speed alert, VOX,
 club-create, top speed, convoy size. Backend entitlement endpoints live in `~/convoy-backend`

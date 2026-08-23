@@ -52,14 +52,71 @@ session scratchpad and is **gone** — recreate with `python3 -m venv` + `pip in
 **DONE (verified by render + measurement):** Jeff's 10-point spec is fully applied to the Tripo
 base. See the table under "The 10 points" for the per-point measured before → after.
 
-## 🛑 JEFF HAS NOT APPROVED THIS LOOK — 2026-08-22
+## ✅ PICK #1 CHOSEN — TRIPO — 2026-08-23
 
-**Jeff's words: "i do not approve the 3D look i am still making a decision on which 3d program to
-use and need to build more samples."**
+**Jeff's words: "this current widebody is by far the best… this is the #1 pick so far."**
 
-**Do NOT decimate, upload, or wire TRIPO10g into the app.** The vendor choice is still open. The
-next job is a **bake-off to pick the program**, not ship-prep on this model. Everything below about
-decimation stays valid but is **parked** until a vendor is chosen and a look is approved.
+The vendor bake-off is settled for now: **Tripo**. The approved asset and its
+irreplaceable source generation are saved outside git at
+**`~/Documents/hairpin-3d/PICKS/`** — see `PICKS/MANIFEST.md` for the full recipe,
+every measured number, and the traps. Verify against `PICKS/CHECKSUMS.txt`.
+
+| | the pick |
+|---|---|
+| file | `PICK1_grc_widebody_tripo_2026-08-23.glb` |
+| size | 6,784,496 B = **6.47 MB** (fleet budget 4.8–6.5 MB) |
+| triangles | 190,000 · **uint16** · 4 chunks, largest 38,556 verts |
+| textures | 2048² base colour + normal + remapped roughness |
+| generation | Tripo v3.1 Best Quality, multi-view 4 views, Ultra Mesh, 4K texture, PBR, 55 credits |
+
+**Still NOT done:** not uploaded to the Supabase `models` bucket and not referenced in
+`vehicleAssets.ts`. Mapbox caches by URL, so any rebake needs a NEW filename.
+
+### The three findings that produced the pick
+
+**1. Every vendor's albedo came back ~2× too bright.** The car's real paint measures
+RGB **86,87,87** (value 0.345) across all eight photos; the vendors returned 0.67–0.72.
+That is golden-hour sun baked into the texture. A hue-preserving value curve anchored on
+the measurement pulls it back (Tripo now 0.373).
+
+**2. Tripo's metallic-roughness map is a mirror — remap it, don't delete it.**
+Measured roughness p50: Tripo **0.039**, Hunyuan **0.227**. Deleting Tripo's map kills the
+chrome but also every bit of material variation, leaving flat clay. Stretching it into
+0.14–0.62 (p50 → 0.257) with metallic forced to 0 restores real paint/plastic/glass
+separation. This is what closed most of the visual gap to Hunyuan.
+
+**3. The body-panel warping was OUR decimation, not Tripo.** Adjacent-face angle p50:
+raw 1.97M = **2.30°**, our 190k collapse = **8.58°**, an authored fleet car at 149,968 tris
+= **3.88°**. Fixed with `WEIGHTED_NORMAL` — recomputes vertex normals only.
+
+> 🛑 **A metric passed a destroyed model.** `CORRECTIVE_SMOOTH` measured 8.58° → **3.36°**,
+> *better than the authored fleet*, while visibly shredding the mesh into inverted faces and
+> scrambled UVs. The number would have shipped it; the render caught it.
+> **Never move vertices to fix decimation waviness, and never trust a smoothing metric
+> without a rear + raking-light panel render.** Any smoothing must also run BEFORE the
+> uint16 split — smoothing across chunk seams tears them.
+
+### Hunyuan — second, and it fabricates plates
+
+Hunyuan 3.1 Pro placed second on the same four photos and the same pipeline. Two reasons it
+lost: fine cracking across the panels, and it **invented a white licence plate with fake
+characters** at both ends from sources that were masked solid black. For a feature where
+strangers scan their own cars, that is a privacy defect wearing a convincing disguise.
+
+⚠ **Scenario caps out at 4 views in practice.** A 6-view run (adding both front quarters)
+was submitted 2026-08-23, **failed**, and the 150 CU were refunded — reproducing the earlier
+finding. Its 8 slots include Top and Bottom, which the photo set does not have. The 8-view
+capability documented for Tencent's direct `ai3d` API was never reachable through Scenario.
+
+### Meshy — third, and round one was unfair to it
+
+Given proper settings Meshy‑7 produced **1,928,390 faces** against the 151,824 in the file we
+had been shipping, and 4K instead of its 2K default. It still finished third, on surface
+tearing rather than capability.
+
+---
+
+### If the bake-off is reopened
 
 ### What a fair bake-off needs
 

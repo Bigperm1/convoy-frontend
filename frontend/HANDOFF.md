@@ -19,8 +19,22 @@
 
 # HANDOFF — Hairpin (Convoy) frontend
 
-**Written 2026-07-25, end of an overnight session. Read this first, then `CLAUDE.md`
-(build/release rules) and `CARPLAY.md` (the locked CarPlay spec).**
+> # ⛔ THIS FILE IS STALE — HISTORY ONLY
+>
+> **Everything below describes build 70 · runtime 1.22.0. Shipped state is now
+> build 73 · v3.9.0 · runtime 1.25.0** (verified against EAS 2026-08-22).
+> This document's last section is *"Build 71 — QUEUED, NOT CUT"*; builds 72 and 73 both
+> shipped after it was written, and it has never been updated.
+>
+> **➜ For current state and what ships next, read [`ROADMAP.md`](ROADMAP.md).**
+> **➜ For how to work, read [`RULES.md`](RULES.md).**
+> **➜ For the 3D car pipeline, read [`HANDOFF-3D.md`](HANDOFF-3D.md).**
+>
+> Keep this file: the root-cause write-ups below (screen-off jitter, the AA canvas
+> measurements, the CarPlay traps, the patch-package lesson) are still correct and still
+> load-bearing. It is the *state* at the top that has expired, not the *reasoning*.
+
+**Written 2026-07-25, end of an overnight session.**
 
 Shipped state: **build 70 · v3.6.0 · runtime 1.22.0** (cut 2026-07-30 — iOS store→TestFlight,
 Android APK + Android AAB), OTA branch **`mapbox-migration`**.

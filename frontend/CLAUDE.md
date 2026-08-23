@@ -21,9 +21,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**➜ Read `HANDOFF.md` first** — current shipped state, every open issue (Android Auto, CarPlay
-crash-remount, heat), the local test rigs, and the traps that have each cost a bad session.
-`CARPLAY.md` is the locked CarPlay/Android Auto spec.
+**➜ Read `RULES.md` first** (how to work — Rule #1 and every standing rule), **then `ROADMAP.md`**
+(current shipped state, the OTA position, what ships next, open issues ranked).
+
+Then, as needed:
+- `HANDOFF-3D.md` — the photo → GLB car pipeline and the 3D model work.
+- `HANDOFF-48H-2026-08-16.md` — the 08-14 → 08-16 window (heat, the location regression).
+- `HANDOFF.md` — the long chronological log. **⛔ Its header state is STALE (build 70).**
+  Read it for the root-cause write-ups and traps, never for current state.
+- `CARPLAY.md` — the locked CarPlay/Android Auto spec.
+- `WHY-IT-HEATS.md` — thermal analysis.
 
 ## What this is
 

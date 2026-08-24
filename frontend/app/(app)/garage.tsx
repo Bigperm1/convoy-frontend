@@ -692,6 +692,18 @@ export default function GarageScreen() {
             </TouchableOpacity>
           ) : null}
 
+          {/* Scan your car — the Ultra pitch, which hands off to the guided
+              eight-shot lap. Shown to everyone while testers shoot the colour
+              reference cars; it becomes an entitlement gate at build 80. */}
+          <TouchableOpacity
+            onPress={() => { Haptics.selectionAsync(); router.push('/(app)/garage-scan' as any); }}
+            style={styles.apChange}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="scan-outline" size={15} color={YELLOW} />
+            <Text style={styles.apChangeText}>Scan your car — build your real car in 3D</Text>
+          </TouchableOpacity>
+
           {/* ---- Arrow panel: primary (body) + secondary (rim) paint ---- */}
           {markerType === 'arrow' && (
             <View style={styles.clsPanel}>

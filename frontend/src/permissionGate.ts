@@ -87,6 +87,26 @@ export async function ensureMicPermission(): Promise<boolean> {
 }
 
 /**
+ * Ask for the camera, but only if iOS/Android hasn't already decided. Same rule
+ * as the mic: gate on "undetermined" so a revoked-but-previously-asked Android
+ * permission is never re-prompted. Raised by the Garage Scan capture flow, which
+ * is always user-initiated — the shell never asks for this.
+ */
+export async function ensureCameraPermission(): Promise<boolean> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ImagePicker = require("expo-image-picker");
+    const perm = await ImagePicker.getCameraPermissionsAsync();
+    if (perm.granted) return true;
+    if (!perm.canAskAgain || perm.status !== "undetermined") return !!perm.granted;
+    const res = await askPermission(() => ImagePicker.requestCameraPermissionsAsync(), perm);
+    return !!res?.granted;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Ask for notification permission, but only on the very first launch (status still
  * "undetermined"). Later launches just read the saved status so the sheet never
  * reappears. Returns the final status string.

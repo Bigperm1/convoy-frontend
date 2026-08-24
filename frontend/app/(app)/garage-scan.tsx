@@ -1,14 +1,20 @@
 // Garage Scan — the ultra-premium capture guide. "Your actual car. On the map."
 //
-// STAGED (build-80+ feature, Jeff 8/20): this screen is registered with
-// href:null and linked from NOWHERE yet — navigable only by route. It teaches
-// the four-shot capture exactly as validated in the 8/20 PoC (Tripo H3.1
-// through our own GLB pipeline): four ordered 3/4+side views, phone at head
-// height tilted slightly down (the map's chase cam looks AT the roof and hood —
+// The pitch half of the feature; Start Capture hands off to garage-capture.tsx.
+//
+// The stations are IMPORTED from src/carScan.ts rather than restated here, so
+// this screen cannot promise a walk the capture flow does not run. That matters
+// because the copy was wrong before: it taught "four ordered 3/4+side views",
+// but the 2026-08-23 bake-off winner was reconstructed from four STRAIGHT-ON
+// views (Tripo's Multi-view slots are Front/Left/Right/Back and it wants them
+// orthogonal). The lap is now eight — those four plus the four 3/4 angles, kept
+// for retexturing and for vendors that accept more views.
+//
+// The rest of the coaching is unchanged and still measured: phone at head height
+// tilted slightly down (the map's chase cam looks AT the roof and hood —
 // eye-level photos make the model guess the surfaces we show most), 3-4 m back
 // on the 1x lens (wide lenses warp proportions — the PoC's one weakness), even
-// light. The Start Capture CTA stubs until the capture+upload flow and the
-// server-side worker exist.
+// light.
 //
 // Design brief: "premium like if Apple built it" — big type, one idea per
 // screen-third, the diagram animates the instruction instead of describing it.
@@ -24,7 +30,6 @@ import {
   Text,
   TouchableOpacity,
   View,
-  Alert,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -33,25 +38,23 @@ import Svg, { Circle, Line, Path } from "react-native-svg";
 import * as Haptics from "expo-haptics";
 import { COLORS } from "../../src/theme";
 import { PremiumBadge } from "../../src/PremiumBadge";
+import { SCAN_SHOTS, SHOTS_TOTAL } from "../../src/carScan";
 
 const TOPDOWN = require("../../assets/vehicles/v3/heavy_metal@3x.png");
 
 const RING = 230;            // orbit diagram outer size
 const CAR = 96;              // top-down sprite size inside the ring
-// The four capture stations, in shooting order. Angles are screen-space:
-// 0° = straight up (the car's nose in the sprite points up).
-const STATIONS = [
-  { angle: 315, label: "Front ¾" },
-  { angle: 225, label: "Rear ¾" },
-  { angle: 90, label: "Right side" },
-  { angle: 270, label: "Left side" },
-];
+// The capture stations, in shooting order — derived from the capture flow itself
+// so the pitch and the thing it pitches can never drift apart. Angles are
+// screen-space and 0° = straight up, which is also carScan's bearing convention
+// (the car's nose in the sprite points up).
+const STATIONS = SCAN_SHOTS.map((s) => ({ angle: s.bearing, label: s.label, key: s.feedsModel }));
 
 const STEPS: { icon: keyof typeof Ionicons.glyphMap; title: string; body: string }[] = [
   {
     icon: "camera",
-    title: "Four shots, one lap",
-    body: "Front three-quarter, rear three-quarter, then each side. Walk the car — same spot, same light, all four.",
+    title: "Eight shots, one lap",
+    body: "Start at the nose and walk clockwise. Four square-on — front, both sides, rear — build the model; the four angles between them carry the detail.",
   },
   {
     icon: "phone-portrait",
@@ -123,7 +126,7 @@ export default function GarageScan() {
 
   const startCapture = () => {
     Haptics.selectionAsync();
-    Alert.alert("Almost here", "Guided capture arrives with a future update. This is the preview.");
+    router.push("/(app)/garage-capture" as any);
   };
 
   return (
@@ -266,7 +269,7 @@ export default function GarageScan() {
             </LinearGradient>
           </Animated.View>
         </TouchableOpacity>
-        <Text style={styles.finePrint}>About four minutes · one rescan included</Text>
+        <Text style={styles.finePrint}>{SHOTS_TOTAL} photos · about five minutes · one rescan included</Text>
       </ScrollView>
     </SafeAreaView>
   );

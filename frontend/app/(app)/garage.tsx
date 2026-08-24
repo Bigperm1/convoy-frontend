@@ -18,8 +18,10 @@ import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
 import CarViewer3D from '../../src/CarViewer3D';
 import CarHero3D from '../../src/CarHero3D';
+import GarageHeroCarousel from '../../src/GarageHeroCarousel';
 import { CandyCta } from '../../src/components/CandyCta';
-import { CANDY_COLORS, CANDY_LOCATIONS, CANDY_RIM, CANDY_INK } from '../../src/components/ManeuverArrow';
+import { CANDY_RIM, CANDY_INK } from '../../src/components/ManeuverArrow';
+import { skin, type VisualTier } from '../../src/tierTheme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { resolveGRCKey, getVehicleModelUrl } from '../../src/vehicleAssets';
 import { GlassFill } from '../../src/Glass';
@@ -27,6 +29,7 @@ import GlassBackdrop from '../../src/components/GlassBackdrop';
 import { getColorsForModel } from '../../src/carDatabase';
 
 const { width: SCREEN_W } = Dimensions.get('window');
+const HERO_H = 300;   // one height for every hero page — the carousel cannot jump
 const YELLOW = '#2DEC86';
 
 // Photo avatars are parked until the backend upload endpoint + Supabase Storage
@@ -62,13 +65,16 @@ const CLASS_PRESETS = [
   '#FF2D95', '#FF3B30', '#FF9500', '#FFD60A', '#FFFFFF',
 ];
 
-// The map banner's candy fill, as an absolute layer. Any tile/chip that wants
-// the treatment drops one of these in as its first child (Jeff 8/23).
-function CandyFill({ radius }: { radius?: number }) {
+// The candy fill as an absolute layer. Any tile/chip drops one in as its first
+// child. `tier` picks the metal: the appearance tiles each wear their own —
+// Arrow is free so it stays brand green, Class is Premium silver, 3D is Ultra
+// gold (Jeff 8/23). The tile therefore states its price before you tap it.
+function CandyFill({ radius, tier = 'brand' }: { radius?: number; tier?: VisualTier }) {
+  const sk = skin(tier);
   return (
     <LinearGradient
-      colors={CANDY_COLORS}
-      locations={CANDY_LOCATIONS}
+      colors={sk.colors}
+      locations={sk.locations}
       style={[StyleSheet.absoluteFill, radius ? { borderRadius: radius } : null]}
     />
   );
@@ -149,12 +155,19 @@ export default function GarageScreen() {
   const [arrPriDraft, setArrPriDraft] = useState<string | null>(getSettings().arrowPaint?.primary ?? null);
   const [arrSecDraft, setArrSecDraft] = useState<string | null>(getSettings().arrowPaint?.secondary ?? null);
   const [classHexDraft, setClassHexDraft] = useState<string>('');
-  // Auto-boat-on-water toggle (persists immediately; the map polls it live).
-  const [autoBoat, setAutoBoat] = useState<boolean>(() => getSettings().autoBoatOnWater !== false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const [saved, setSaved] = useState(false);
+  // Which hero page is showing. Kept in sync with markerType so the tiles below
+  // and the carousel always agree.
+  const [heroIndex, setHeroIndex] = useState(0);
+  // markerType -> page. Selecting a tile below slides the carousel to match, so
+  // the two controls can never disagree about what you have chosen.
+  useEffect(() => {
+    const i = markerType === 'arrow' ? 0 : markerType === 'class' ? 1 : 2;
+    setHeroIndex(i);
+  }, [markerType]);
 
   // Only used to put a colour dot next to a paint we happen to recognise. The
   // field itself accepts anything, so an unknown paint simply gets no dot.
@@ -317,7 +330,7 @@ export default function GarageScreen() {
   const pickColor = useCallback((color: string | null, arrow: boolean) => {
     Haptics.selectionAsync();
     if (arrow) { (paintSlot === 'primary' ? setArrPriDraft : setArrSecDraft)(color); }
-    else { (paintSlot === 'primary' ? setPriDraft : setSecDraft)(color); }
+    else { setPriDraft(color); }   // class = single colour, always primary
   }, [paintSlot]);
   const saveClassPaint = useCallback(async () => {
     const s = getSettings();
@@ -352,24 +365,31 @@ export default function GarageScreen() {
   const renderPaintPicker = (arrow: boolean) => {
     const pri = arrow ? arrPriDraft : priDraft;
     const sec = arrow ? arrSecDraft : secDraft;
-    const activeColor = paintSlot === 'primary' ? pri : sec;
+    // Class has no slot row, so its paint always lands on primary.
+    const slot = arrow ? paintSlot : 'primary';
+    const activeColor = slot === 'primary' ? pri : sec;
     return (
       <>
-        <View style={styles.slotRow}>
-          {(['primary', 'secondary'] as const).map((slot) => {
-            const on = paintSlot === slot;
-            const col = slot === 'primary' ? pri : sec;
-            return (
-              <TouchableOpacity key={slot} style={[styles.slotBtn, on && styles.slotBtnOn]} activeOpacity={0.85}
-                onPress={() => { Haptics.selectionAsync(); setPaintSlot(slot); }}>
-                <View style={[styles.slotDot, { backgroundColor: col ?? 'transparent', borderStyle: col ? 'solid' : 'dashed' }]} />
-                <Text style={[styles.slotText, on && styles.slotTextOn]}>
-                  {slot === 'primary' ? 'Primary' : 'Secondary'}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        {/* Two paint slots are an ARROW thing (body + rim). A class sprite is
+            one colour, so the slot row was asking a question with one answer —
+            removed for class (Jeff 8/23). */}
+        {arrow && (
+          <View style={styles.slotRow}>
+            {(['primary', 'secondary'] as const).map((slot) => {
+              const on = paintSlot === slot;
+              const col = slot === 'primary' ? pri : sec;
+              return (
+                <TouchableOpacity key={slot} style={[styles.slotBtn, on && styles.slotBtnOn]} activeOpacity={0.85}
+                  onPress={() => { Haptics.selectionAsync(); setPaintSlot(slot); }}>
+                  <View style={[styles.slotDot, { backgroundColor: col ?? 'transparent', borderStyle: col ? 'solid' : 'dashed' }]} />
+                  <Text style={[styles.slotText, on && styles.slotTextOn]}>
+                    {slot === 'primary' ? 'Primary' : 'Secondary'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
         <View style={styles.clsSwatchRow}>
           <TouchableOpacity
             activeOpacity={0.8}
@@ -392,7 +412,7 @@ export default function GarageScreen() {
             );
           })}
         </View>
-        <Text style={styles.clsHint}>Have a paint code? Enter the hex — applies to the selected slot</Text>
+        <Text style={styles.clsHint}>Have a paint code? Enter the hex</Text>
         <View style={styles.clsHexRow}>
           <Text style={styles.clsHexHash}>#</Text>
           <TextInput
@@ -411,24 +431,6 @@ export default function GarageScreen() {
             <Text style={styles.clsSaveText}>Apply</Text>
           </TouchableOpacity>
         </View>
-        {/* Auto-boat: while driving ON WATER the map marker switches itself to
-            the boat sprite (saved boat paint), and back on land. Class panel
-            only — arrow has its own panel. */}
-        {!arrow && (
-          <TouchableOpacity
-            style={styles.clsToggleRow}
-            activeOpacity={0.8}
-            onPress={() => {
-              Haptics.selectionAsync();
-              const next = !autoBoat;
-              setAutoBoat(next);
-              void updateSettings({ autoBoatOnWater: next });
-            }}
-          >
-            <Ionicons name={autoBoat ? 'checkbox' : 'square-outline'} size={20} color={autoBoat ? '#2DEC86' : '#8E8E93'} />
-            <Text style={styles.clsToggleText}>Auto-switch to boat on water</Text>
-          </TouchableOpacity>
-        )}
         {/* Arrow keeps its own Save; the CLASS paint commits through the main
             garage Save button below (Jeff: "just have the original save"). */}
         {arrow && (
@@ -532,41 +534,73 @@ export default function GarageScreen() {
                       rotated nose-LEFT (showroom profile pose)
               arrow → the Hairpin word logo
               3D car / photo → the original showroom image (untouched) */}
-        {markerType === 'class' && CLASS_TOPDOWN[vehClass] ? (
-          <View style={[styles.heroTall, styles.heroAlt]}>
-            <View style={{ transform: [{ rotate: '-90deg' }] }}>
-              <ClassSprite vehicleClass={vehClass} primary={priDraft} secondary={secDraft} size={360} />
-            </View>
-          </View>
-        ) : markerType === 'arrow' ? (
-          <View style={[styles.heroTall, styles.heroAlt]}>
-            <Image
-              source={require('../../assets/images/hairpin-word.png')}
-              style={styles.heroWordLogo}
-              resizeMode="contain"
-            />
-          </View>
-        ) : (
-        <View style={styles.heroWrap}>
-          {/* The hero IS the 3D view now (Jeff 8/23) — spin it with a finger
-              right here, no modal to open. Drag sideways to orbit, up/down to
-              scroll the page; see CarHero3D for how that split is arbitrated. */}
-          <CarHero3D
-            glbUrl={heroModelUrl}
-            style={StyleSheet.absoluteFill}
-            onExpand={heroModelUrl ? () => { Haptics.selectionAsync(); setViewer3D(true); } : undefined}
-            emptyLabel={scanPending ? 'Building your car…' : 'No car yet'}
-            emptyHint={scanPending ? 'It appears here when it is ready' : 'Scan yours to put it on the map'}
-            onEmptyPress={scanPending ? undefined : () => { Haptics.selectionAsync(); router.push('/(app)/garage-scan' as any); }}
-          />
-        </View>
-        )}
+        {/* The hero is a SHOWROOM, not a preview of the one thing you own.
+            Arrow / Class / your car sit side by side and you swipe between them
+            — the locked ones render in full with the tier's H on top, because
+            you cannot want what you cannot see (Jeff 8/23). */}
+        <GarageHeroCarousel
+          height={HERO_H}
+          index={heroIndex}
+          onIndexChange={(i) => setHeroIndex(i)}
+          onSelect={(page) => {
+            Haptics.selectionAsync();
+            handleAppearance(page.key as 'arrow' | 'class' | 'car');
+          }}
+          pages={[
+            {
+              key: 'arrow',
+              label: 'Arrow',
+              tier: 'brand',
+              render: () => (
+                <View style={styles.heroPage}>
+                  <Image
+                    source={require('../../assets/images/hairpin-word.png')}
+                    style={styles.heroWordLogo}
+                    resizeMode="contain"
+                  />
+                </View>
+              ),
+            },
+            {
+              key: 'class',
+              label: 'Class',
+              tier: classTier,
+              locked: !classUnlocked,
+              render: () => (
+                <View style={styles.heroPage}>
+                  <View style={{ transform: [{ rotate: '-90deg' }] }}>
+                    <ClassSprite vehicleClass={vehClass} primary={priDraft} secondary={secDraft} size={260} />
+                  </View>
+                </View>
+              ),
+            },
+            {
+              key: 'car',
+              label: 'Your car',
+              tier: car3dTier,
+              locked: !car3dUnlocked,
+              render: () => (
+                <CarHero3D
+                  glbUrl={heroModelUrl}
+                  // Non-interactive INSIDE the carousel — a pager and a
+                  // finger-spinnable model both want horizontal drags and the
+                  // model wins, which would trap you on this page. It still
+                  // auto-rotates; tap to spin it full screen.
+                  interactive={false}
+                  style={StyleSheet.absoluteFill}
+                  emptyLabel={scanPending ? 'Building your car…' : 'No car yet'}
+                  emptyHint={scanPending ? 'It appears here when it is ready' : 'Scan yours to put it on the map'}
+                />
+              ),
+            },
+          ]}
+        />
 
         {/* Year / make / model / colour sit BELOW the car, not on top of it
             (Jeff 8/23: "move the year make model color under the car down so you
             see the whole car"). They used to be an absolute overlay with a fade
             behind them, which cropped the rear wheels on every model. */}
-        {markerType !== 'arrow' && markerType !== 'class' && (
+        {heroIndex === 2 && (
           <View style={styles.heroCaption}>
             <Text style={styles.heroTitle}>
               {year && make && model ? `${year} ${make} ${model}` : 'Your car'}
@@ -629,33 +663,33 @@ export default function GarageScreen() {
           {/* Order per Jeff: Arrow · Class · 3D (3D slated to become premium). */}
           <View style={styles.apRow}>
             <TouchableOpacity
-              style={[styles.apCard, markerType === 'arrow' && styles.apCardSel]}
+              style={[styles.apCard, markerType === 'arrow' && styles.apCardSel, markerType === 'arrow' && styles.apCardSelBrand]}
               activeOpacity={0.85}
               onPress={() => handleAppearance('arrow')}
             >
-              {markerType === 'arrow' && <CandyFill />}
-              <Ionicons name="navigate" size={25} color={markerType === 'arrow' ? CANDY_INK : YELLOW} />
+              {markerType === 'arrow' && <CandyFill tier="brand" />}
+              <Ionicons name="navigate" size={25} color={markerType === 'arrow' ? skin('brand').ink : YELLOW} />
               <Text style={[styles.apLabel, markerType === 'arrow' && styles.apLabelSel]}>Arrow</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.apCard, markerType === 'class' && styles.apCardSel]}
+              style={[styles.apCard, markerType === 'class' && styles.apCardSel, markerType === 'class' && styles.apCardSelPremium]}
               activeOpacity={0.85}
               onPress={() => handleAppearance('class')}
             >
-              {markerType === 'class' && <CandyFill />}
-              <MaterialCommunityIcons name="car-hatchback" size={25} color={markerType === 'class' ? CANDY_INK : YELLOW} />
+              {markerType === 'class' && <CandyFill tier="premium" />}
+              <MaterialCommunityIcons name="car-hatchback" size={25} color={markerType === 'class' ? skin('premium').ink : skin('premium').accent} />
               <Text style={[styles.apLabel, markerType === 'class' && styles.apLabelSel]}>Class</Text>
               {!classUnlocked && <TierCornerLock tier={classTier} size={24} />}
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.apCard, markerType === 'car' && styles.apCardSel]}
+              style={[styles.apCard, markerType === 'car' && styles.apCardSel, markerType === 'car' && styles.apCardSelUltra]}
               activeOpacity={0.85}
               onPress={() => handleAppearance('car')}
             >
-              {markerType === 'car' && <CandyFill />}
-              <Ionicons name="car-sport" size={25} color={markerType === 'car' ? CANDY_INK : YELLOW} />
+              {markerType === 'car' && <CandyFill tier="ultra" />}
+              <Ionicons name="car-sport" size={25} color={markerType === 'car' ? skin('ultra').ink : skin('ultra').accent} />
               <Text style={[styles.apLabel, markerType === 'car' && styles.apLabelSel]}>3D</Text>
               {!car3dUnlocked && <TierCornerLock tier={car3dTier} size={24} />}
             </TouchableOpacity>
@@ -685,9 +719,13 @@ export default function GarageScreen() {
             </TouchableOpacity>
           ) : null}
 
-          {/* Scan your car — the Ultra pitch, which hands off to the guided
-              eight-shot lap. Shown to everyone while testers shoot the colour
-              reference cars; it becomes an entitlement gate at build 80. */}
+          {/* Scan your car — the Ultra pitch. 3D ONLY: it advertises the
+              exact-car scan, which has nothing to do with the arrow or a class
+              sprite, and sat under both of them looking like a global action. */}
+          {/* Follows the VISIBLE hero page, not the saved markerType — swiping
+              changes what you are looking at, and this line has to belong to
+              what is on screen or it reads as a global action again. */}
+          {heroIndex === 2 && (
           <TouchableOpacity
             onPress={() => { Haptics.selectionAsync(); router.push('/(app)/garage-scan' as any); }}
             style={styles.apChange}
@@ -696,6 +734,7 @@ export default function GarageScreen() {
             <Ionicons name="scan-outline" size={15} color={YELLOW} />
             <Text style={styles.apChangeText}>Scan your car — build your real car in 3D</Text>
           </TouchableOpacity>
+          )}
 
           {/* ---- Arrow panel: primary (body) + secondary (rim) paint ---- */}
           {markerType === 'arrow' && (
@@ -822,6 +861,7 @@ export default function GarageScreen() {
 }
 
 const styles = StyleSheet.create({
+  heroPage:           { width: SCREEN_W, height: HERO_H, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
   saveCta:            { marginHorizontal: 16, marginTop: 8, marginBottom: 28 },
   requiredHint:       { color: COLORS.warning, fontSize: 13, fontWeight: '600', textAlign: 'center', marginTop: 14, marginHorizontal: 16 },
   badge360: {
@@ -914,7 +954,10 @@ const styles = StyleSheet.create({
   clsHexInput:        { flex: 1, height: 42, borderRadius: 13, borderWidth: 1, borderColor: '#1E1E1E', color: '#F4F4F4', paddingHorizontal: 12, fontSize: 15, fontWeight: '700', letterSpacing: 1 },
   clsHexSave:         { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 13, backgroundColor: YELLOW },
   apCard:             { flex: 1, height: 86, borderRadius: 16, borderWidth: 1, borderColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  apCardSel:          { borderColor: CANDY_RIM, overflow: 'hidden' },
+  apCardSel:          { overflow: 'hidden' },
+  apCardSelBrand:     { borderColor: CANDY_RIM },
+  apCardSelPremium:   { borderColor: 'rgba(255,255,255,0.62)' },
+  apCardSelUltra:     { borderColor: 'rgba(255,231,163,0.62)' },
   apLabel:            { color: '#808080', fontSize: 13, fontWeight: '600' },
   apLabelSel:         { color: '#000', fontWeight: '800' },
   apPhoto:            { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: 'rgba(0,0,0,0.25)' },

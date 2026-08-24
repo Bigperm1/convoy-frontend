@@ -27,8 +27,9 @@ import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
 
-export function carViewerHtml(glbUrl: string, opts?: { inline?: boolean }): string {
+export function carViewerHtml(glbUrl: string, opts?: { inline?: boolean; interactive?: boolean }): string {
   const inline = opts?.inline ?? false;
+  const interactive = opts?.interactive ?? true;
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
@@ -38,7 +39,7 @@ export function carViewerHtml(glbUrl: string, opts?: { inline?: boolean }): stri
 </style></head><body>
 <model-viewer
   src="${glbUrl}"
-  camera-controls
+  ${interactive ? "camera-controls" : "disable-pan disable-zoom disable-tap"}
   auto-rotate
   auto-rotate-delay="${inline ? 600 : 1200}"
   rotation-per-second="${inline ? "12deg" : "8deg"}"
@@ -51,7 +52,7 @@ export function carViewerHtml(glbUrl: string, opts?: { inline?: boolean }): stri
   exposure="1.05"
   shadow-intensity="0.9"
   shadow-softness="0.7"
-  touch-action="${inline ? "pan-y" : "none"}">
+  touch-action="${!interactive ? "pan-y" : inline ? "pan-y" : "none"}">
 </model-viewer>
 </body></html>`;
 }
@@ -63,6 +64,7 @@ export default function CarHero3D({
   emptyLabel = "No car yet",
   emptyHint = "Scan yours to put it on the map",
   onEmptyPress,
+  interactive = true,
 }: {
   glbUrl: string | null;
   style?: StyleProp<ViewStyle>;
@@ -70,6 +72,15 @@ export default function CarHero3D({
   emptyLabel?: string;
   emptyHint?: string;
   onEmptyPress?: () => void;
+  /**
+   * false = auto-rotate only, finger orbit OFF.
+   *
+   * Inside a horizontal carousel this MUST be false: a pager and a
+   * finger-spinnable model both want horizontal drags, and model-viewer wins —
+   * the page would become impossible to swipe off. Non-interactive still spins
+   * itself, and tapping expands to the full-screen viewer where you can grab it.
+   */
+  interactive?: boolean;
 }) {
   const [ready, setReady] = useState(false);
 
@@ -93,8 +104,9 @@ export default function CarHero3D({
   return (
     <View style={[styles.wrap, style]}>
       <WebView
+        pointerEvents={interactive ? "auto" : "none"}
         originWhitelist={["*"]}
-        source={{ html: carViewerHtml(glbUrl, { inline: true }), baseUrl: "https://localhost" }}
+        source={{ html: carViewerHtml(glbUrl, { inline: true, interactive }), baseUrl: "https://localhost" }}
         style={styles.web}
         javaScriptEnabled
         domStorageEnabled
@@ -123,9 +135,11 @@ export default function CarHero3D({
       )}
 
       {/* Non-interactive so it never steals a drag from the model. */}
-      <Text style={styles.hint} pointerEvents="none">
-        Drag to spin
-      </Text>
+      {interactive && (
+        <Text style={styles.hint} pointerEvents="none">
+          Drag to spin
+        </Text>
+      )}
 
       {onExpand && (
         <TouchableOpacity style={styles.expand} onPress={onExpand} hitSlop={10} activeOpacity={0.8}>

@@ -139,3 +139,61 @@ add `feature=` to their rows when their tiering is settled.
 ⚠️ `ENTITLEMENTS_ENFORCED = false` in `src/entitlements.ts`, so **none of this
 renders for today's testers** — every gate answers "unlocked". To see it, flip
 that flag and use `__setDevTier('free' | 'premium' | 'ultra')`.
+
+---
+
+## 6 · Class colour palettes — the naming rule
+
+Every class carries a **named** palette. Two doctrines, both Jeff's (2026-08-20 night):
+
+1. **Cover the core colours** — black / white / grey / red / blue / green plus that
+   scene's signature paints.
+2. **Name every swatch after a REAL paint from that class's marques.** Never
+   "Blue 2". A hot-hatch blue is *Nitrous Blue* or *WR Blue Pearl*; a muscle purple
+   is *Plum Crazy*. The name is half the product.
+
+`hex` is the swatch **and** the live tint intent. ⚠️ The tint multiplier sent to the
+model runs roughly **2× hot** because it MULTIPLIES a mid-grey texture — the swatch
+hex is not the number the shader receives.
+
+Two kinds of class, and they are not interchangeable:
+
+| kind | how colour works | classes |
+|---|---|---|
+| **Authored per-colour** | each swatch routes to its OWN baked GLB via `modelKey` | hatchback · supercar · exotic |
+| **Tinted base** | one neutral GLB (`baseUrl`), tinted live per swatch | muscle (+ future packs) |
+
+### Live palettes — `src/classModels.ts`
+
+| class | archetype | colours | source |
+|---|---|---|---|
+| **hatchback** "Hot Hatch" | GR Corolla | **6** — Heavy Metal · Supersonic Red · Icecap White · Blue Flame · Black Onyx · Gravel | authored GLB per colour |
+| **supercar** | 911 GT3 RS | **7** — Guards Red · GT Silver · Carrara White · Jet Black · Miami Blue · Python Green · Shark Blue | authored GLB per colour |
+| **exotic** | LFA | **5** — Whitest White · Absolutely Red · Pearl Yellow · Pearl Blue · Matte Black | authored GLB per colour |
+| **muscle** | generated coupe | **10** — Pitch Black · Wimbledon White · Lead Foot Grey · TorRed · Grabber Blue · B5 Blue · Rally Green · Plum Crazy · Go Mango · Sublime | tinted base GLB |
+
+**Hot Hatch IS the GR Corolla** — its palette is the real GRC colour list, so a tester
+who already picked a paint keeps their exact colour when the tiers land. Its six
+`modelKey`s are the same authored GLBs 3D mode renders today.
+
+Bakes queued, not yet in the palettes: Hot Hatch +Liquid Yellow, Nitrous Blue,
+WR Blue Pearl, Ultimate Green · Supercar +Nardo Grey, Rosso Corsa, Giallo Modena,
+Verde Mantis, Midnight Purple, Riviera Blue, Arancio Borealis · Exotic +Rosso Corsa,
+Verde Mantis, Papaya Spark, French Racing Blue, Grigio Telesto.
+
+**Classes with no `CLASS_MODEL_3D` row fall back to the top-down sprite** and have no
+palette at all — sedan, truck, electric, jeep. Do not invent one; the row appears when
+the model is authored.
+
+⚠️ **`CLASS_MODEL_3D` is read by NOTHING on the map today** — `markerType === 'class'`
+renders the flat top-down sprite, and the only consumer is `showroom.tsx`, which is
+registered `href: null` with nothing routing to it. The class-3D map rendering is still
+to be built.
+
+---
+
+## 7 · Class paints ONE colour
+
+The Primary/Secondary slot pair is an **arrow** control — the arrow has a body and a
+rim. A class sprite is a single colour, so the slot row asked a question with one
+answer. Removed for class 2026-08-23; the arrow keeps both.

@@ -1,18 +1,20 @@
 // Car Scan — the guided photo capture that feeds the photo -> GLB pipeline.
 //
-// WHY THESE EIGHT SHOTS, IN THIS ORDER
-// The 2026-08-23 bake-off winner (Tripo H3.1, saved as PICK1_grc_widebody) was
-// built from FOUR straight-on views: front centre, driver side, rear centre,
-// passenger side. Tripo's Multi-view Images-to-3D exposes exactly four slots —
-// Front / Left / Right / Back — and it wants them ORTHOGONAL. Three-quarter
-// views pushed into those slots is what the earlier attempts did, and they
-// reconstructed worse. So the four that feed the model are the straight-ons,
-// flagged `feedsModel` below.
+// WHY EXACTLY FOUR SHOTS
+// The 2026-08-23 bake-off winner (Tripo v3.1 Best Quality, saved as
+// PICK1_grc_widebody) was generated with *Multi-view Images to 3D* from four
+// views: front / left / right / back. That mode exposes exactly FOUR slots and
+// wants them ORTHOGONAL — straight-on, not three-quarter. Earlier attempts that
+// pushed 3/4 views into those slots reconstructed worse.
 //
-// The four 3/4 shots in between are NOT wasted: they are what a retexture pass
-// and any future vendor (which may take 6 or 8 views) will need, and re-shooting
-// a tester's car is not a thing we get to do twice. The walk is one clockwise
-// lap so the driver never backtracks.
+// So four is not a starting point to grow from, it is the tool's actual input
+// shape. Asking a tester for more photos than the pipeline consumes buys nothing
+// and doubles the chance of a bad frame; extra views were briefly added on the
+// theory that a future vendor might take 6 or 8, which is speculation — the one
+// time that was tested, a 6-view run failed outright. Add stations again only
+// when a shipping pipeline actually reads them.
+//
+// The walk is one clockwise lap so the driver never backtracks.
 //
 // PLATE PRIVACY: photos land in a PRIVATE, write-only bucket. The licence plate
 // is masked to pure black by tools/glb-pipeline before any frame is handed to a
@@ -33,28 +35,21 @@ export type ScanShot = {
   hint: string;
   /** Degrees clockwise around the car; 0 = standing at the nose looking back. */
   bearing: number;
-  /** True for the four straight-on views Tripo actually reconstructs from. */
-  feedsModel: boolean;
-  slot?: ScanSlot;
+  /** Which Tripo Multi-view slot this photo is fed into. */
+  slot: ScanSlot;
 };
 
 /**
- * One clockwise lap, starting at the nose. Straight-ons feed the model.
- *
- * Every label must be UNIQUE and name the SIDE. Two stations reading "Front
- * three-quarter" tells a driver standing in a car park nothing about which of
- * them they are on — and it also collided as a React key in the pitch screen's
- * station ring, which is how the duplication was caught.
+ * One clockwise lap, starting at the nose. All four feed the model — there are
+ * no optional shots. Labels must stay UNIQUE and name the SIDE: they are read
+ * outdoors, one-handed, by someone walking around a car, and the pitch screen's
+ * station ring also keys off them.
  */
 export const SCAN_SHOTS: ScanShot[] = [
-  { id: "front",       label: "Front",             hint: "Square to the nose. Centre the badge.",       bearing: 0,   feedsModel: true,  slot: "Front" },
-  { id: "front_right", label: "Passenger front ¾", hint: "Half a step round. Nose and flank together.", bearing: 45,  feedsModel: false },
-  { id: "right",       label: "Passenger side",    hint: "Square to the flank. Both wheels in frame.",  bearing: 90,  feedsModel: true,  slot: "Right" },
-  { id: "rear_right",  label: "Passenger rear ¾",  hint: "Half a step round. Tail and flank together.", bearing: 135, feedsModel: false },
-  { id: "rear",        label: "Rear",              hint: "Square to the tail. Centre the plate.",       bearing: 180, feedsModel: true,  slot: "Back" },
-  { id: "rear_left",   label: "Driver rear ¾",     hint: "Driver side now. Tail and flank together.",   bearing: 225, feedsModel: false },
-  { id: "left",        label: "Driver side",       hint: "Square to the flank. Both wheels in frame.",  bearing: 270, feedsModel: true,  slot: "Left" },
-  { id: "front_left",  label: "Driver front ¾",    hint: "Last one. Nose and flank together.",          bearing: 315, feedsModel: false },
+  { id: "front", label: "Front",          hint: "Square to the nose. Centre the badge.",      bearing: 0,   slot: "Front" },
+  { id: "right", label: "Passenger side", hint: "Square to the flank. Both wheels in frame.", bearing: 90,  slot: "Right" },
+  { id: "rear",  label: "Rear",           hint: "Square to the tail. Centre the plate.",      bearing: 180, slot: "Back" },
+  { id: "left",  label: "Driver side",    hint: "Square to the flank. Both wheels in frame.", bearing: 270, slot: "Left" },
 ];
 
 export const SHOTS_TOTAL = SCAN_SHOTS.length;

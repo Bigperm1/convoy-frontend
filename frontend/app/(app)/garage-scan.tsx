@@ -7,8 +7,7 @@
 // because the copy was wrong before: it taught "four ordered 3/4+side views",
 // but the 2026-08-23 bake-off winner was reconstructed from four STRAIGHT-ON
 // views (Tripo's Multi-view slots are Front/Left/Right/Back and it wants them
-// orthogonal). The lap is now eight — those four plus the four 3/4 angles, kept
-// for retexturing and for vendors that accept more views.
+// orthogonal). Still four shots — the count was never the error, the ANGLE was.
 //
 // The rest of the coaching is unchanged and still measured: phone at head height
 // tilted slightly down (the map's chase cam looks AT the roof and hood —
@@ -53,8 +52,8 @@ const STATIONS = SCAN_SHOTS.map((s) => ({ id: s.id, angle: s.bearing, label: s.l
 const STEPS: { icon: keyof typeof Ionicons.glyphMap; title: string; body: string }[] = [
   {
     icon: "camera",
-    title: "Eight shots, one lap",
-    body: "Start at the nose and walk clockwise. Four square-on — front, both sides, rear — build the model; the four angles between them carry the detail.",
+    title: "Four shots, one lap",
+    body: "Start at the nose and walk clockwise — front, passenger side, rear, driver side. Square-on each time, not on an angle.",
   },
   {
     icon: "phone-portrait",
@@ -269,7 +268,7 @@ export default function GarageScan() {
             </LinearGradient>
           </Animated.View>
         </TouchableOpacity>
-        <Text style={styles.finePrint}>{SHOTS_TOTAL} photos · about five minutes · one rescan included</Text>
+        <Text style={styles.finePrint}>{SHOTS_TOTAL} photos · about three minutes · one rescan included</Text>
       </ScrollView>
     </SafeAreaView>
   );

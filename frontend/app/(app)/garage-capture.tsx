@@ -242,16 +242,8 @@ export default function GarageCaptureScreen() {
 
         <Text style={styles.stationLabel}>{shot.label}</Text>
         <Text style={styles.stationHint}>{shot.hint}</Text>
-        {shot.feedsModel ? (
-          <View style={styles.keyPill}>
-            <Ionicons name="star" size={11} color="#04150B" />
-            <Text style={styles.keyPillText}>Builds the model — take your time</Text>
-          </View>
-        ) : (
-          <View style={styles.softPill}>
-            <Text style={styles.softPillText}>Detail shot</Text>
-          </View>
-        )}
+        {/* No pill marking "important" shots: all four are fed to the model,
+            so singling any of them out would be a lie. */}
 
         {/* Every frame, every car. */}
         <View style={styles.reminder}>
@@ -380,27 +372,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     maxWidth: 300,
   },
-
-  keyPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: COLORS.brand,
-    borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 5,
-    marginTop: 12,
-  },
-  keyPillText: { color: "#04150B", fontSize: 11, fontWeight: "800" },
-  softPill: {
-    borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 5,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: "#2A2A2A",
-  },
-  softPillText: { color: COLORS.textDim, fontSize: 11, fontWeight: "700" },
 
   reminder: {
     flexDirection: "row",

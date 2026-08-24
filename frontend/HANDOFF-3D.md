@@ -33,7 +33,6 @@ Scratchpad copies are gone. This directory is the only surviving copy.
              tripo_RAW_untouched.glb  ← Tripo's original download, never modified
              tripo_cut_noplate.glb    ← raw + plate slab removed, original texture
              tripo10_albedo_8k.png    ← the finished 8192² albedo
-             hunyuan_WIDEBODY3.glb    ← the Hunyuan branch (see "dead ends")
   photos/    IMG_6909…6916.JPG     ← the 8 golden-hour source photos
   renders/   BEFORE_AFTER.jpg  MASKVIS.jpg  SMOOTHCMP.jpg  SLABCHECK.jpg  FLAT10g.jpg  …
   scripts/   masks.py apply10b.py cutslab.py swaptex.py smooth7.py qc4.py flat.py
@@ -56,8 +55,11 @@ base. See the table under "The 10 points" for the per-point measured before → 
 
 **Jeff's words: "this current widebody is by far the best… this is the #1 pick so far."**
 
-The vendor bake-off is settled for now: **Tripo**. The approved asset and its
-irreplaceable source generation are saved outside git at
+**The vendor is TRIPO and the question is CLOSED** — Jeff, 2026-08-23:
+*"we are working with Tripo now."* Do not benchmark other modelers, re-open a
+comparison, or suggest an alternative unless he asks for one.
+
+The approved asset and its irreplaceable source generation are saved outside git at
 **`~/Documents/hairpin-3d/PICKS/`** — see `PICKS/MANIFEST.md` for the full recipe,
 every measured number, and the traps. Verify against `PICKS/CHECKSUMS.txt`.
 
@@ -74,16 +76,16 @@ every measured number, and the traps. Verify against `PICKS/CHECKSUMS.txt`.
 
 ### The three findings that produced the pick
 
-**1. Every vendor's albedo came back ~2× too bright.** The car's real paint measures
-RGB **86,87,87** (value 0.345) across all eight photos; the vendors returned 0.67–0.72.
+**1. The albedo comes back ~2× too bright.** The car's real paint measures
+RGB **86,87,87** (value 0.345) across all eight photos; the generation returned 0.67–0.72.
 That is golden-hour sun baked into the texture. A hue-preserving value curve anchored on
-the measurement pulls it back (Tripo now 0.373).
+the measurement pulls it back (now 0.373).
 
 **2. Tripo's metallic-roughness map is a mirror — remap it, don't delete it.**
-Measured roughness p50: Tripo **0.039**, Hunyuan **0.227**. Deleting Tripo's map kills the
-chrome but also every bit of material variation, leaving flat clay. Stretching it into
-0.14–0.62 (p50 → 0.257) with metallic forced to 0 restores real paint/plastic/glass
-separation. This is what closed most of the visual gap to Hunyuan.
+Measured roughness p50 **0.039**, where car paint should sit near 0.23. Deleting the map
+kills the chrome but also every bit of material variation, leaving flat clay. Stretching it
+into 0.14–0.62 (p50 → 0.257) with metallic forced to 0 restores real paint/plastic/glass
+separation. This is what closed most of the remaining visual gap.
 
 **3. The body-panel warping was OUR decimation, not Tripo.** Adjacent-face angle p50:
 raw 1.97M = **2.30°**, our 190k collapse = **8.58°**, an authored fleet car at 149,968 tris
@@ -96,73 +98,42 @@ raw 1.97M = **2.30°**, our 190k collapse = **8.58°**, an authored fleet car at
 > without a rear + raking-light panel render.** Any smoothing must also run BEFORE the
 > uint16 split — smoothing across chunk seams tears them.
 
-### Hunyuan — second, and it fabricates plates
+### ⛔ The vendor comparison that used to live here has been REMOVED
 
-Hunyuan 3.1 Pro placed second on the same four photos and the same pipeline. Two reasons it
-lost: fine cracking across the panels, and it **invented a white licence plate with fake
-characters** at both ends from sources that were masked solid black. For a feature where
-strangers scan their own cars, that is a privacy defect wearing a convincing disguise.
+It held head-to-head results for competing modelers and a protocol for re-running the
+comparison. **Jeff closed that on 2026-08-23** — *"we are working with Tripo now"* — and asked
+for the alternatives to be taken out so they cannot resurface as a suggestion. They are gone
+deliberately. Do not rebuild the table, do not benchmark alternatives, do not name other
+modelers.
 
-⚠ **Scenario caps out at 4 views in practice.** A 6-view run (adding both front quarters)
-was submitted 2026-08-23, **failed**, and the 150 CU were refunded — reproducing the earlier
-finding. Its 8 slots include Top and Bottom, which the photo set does not have. The 8-view
-capability documented for Tencent's direct `ai3d` API was never reachable through Scenario.
+What carried forward from it, because it is about **Tripo** and still binding:
 
-### Meshy — third, and round one was unfair to it
+- **Tripo Multi-view takes exactly 4 views, and wants them ORTHOGONAL** — front / left /
+  right / back, straight-on. Three-quarter views pushed into those slots reconstruct worse.
+  Its Multi-view entry is the **2nd** toolbar icon; the 3rd is batch mode, which makes four
+  separate single-image models and costs 4×.
+- **A UI slot existing is not a run completing.** I once told Jeff, from a screenshot rather
+  than a test, that 8 photos were accepted. Test the real limit before quoting it.
+- **Build for the input shape the shipping pipeline consumes.** Repeated on 2026-08-23 by
+  padding the in-app capture to 8 stations for a hypothetical future vendor; Jeff caught it and
+  it is back to 4. Add more only when something shipping actually reads them.
+- **Tripo emits uint32** — an extra conversion step every time, and Mapbox drops uint32
+  silently (see the split-for-uint16 stage in `shipify.py`).
+- **It hallucinated the licence plate as protruding GEOMETRY**, not texture. Masking failed 4×;
+  the fix was cutting the triangles.
 
-Given proper settings Meshy‑7 produced **1,928,390 faces** against the 151,824 in the file we
-had been shipping, and 4K instead of its 2K default. It still finished third, on surface
-tearing rather than capability.
-
----
-
-### If the bake-off is reopened
-
-### What a fair bake-off needs
-
-Jeff's own complaint from this session is the design constraint:
-*"we did nothing to that car where as the others were tweaked."* A comparison where I have polished
-one entrant and not the others measures **my tweaking**, not the vendors.
-
-So: **same photos in, same post-process, same render rig, side by side.**
-
-1. **Same input set** — the 4 corrected black-plate views from `photos/` (all three vendors cap at
-   4; see the table below). Don't give one vendor a better crop.
-2. **Same post-process** — run `scripts/apply10b.py` on each, or on none. Not one polished and the
-   rest raw.
-3. **Same render rig** — `scripts/qc4.py` for all, plus `scripts/flat.py` (albedo, no lighting) so
-   a vendor isn't rewarded for baking sunlight into its texture.
-4. **Judge on what actually matters here:** silhouette accuracy, panel cleanliness, whether the
-   plate/badges are hallucinated as geometry, texture honesty (is lighting baked in?), poly count
-   and index width — a vendor that emits uint32 costs an extra conversion step every time.
-
-### What is already known about each — measured, not recalled
-
-| vendor | max views | result | notes |
-|---|---|---|---|
-| **Meshy-7** | 4 | **the only one proven in-app** — `out_jeff_widebody3.glb`, 6.5 MB, 2K tex, uint16 | this is what ships today |
-| **Tripo** | 4 | 1.93M tris, 8K tex, **uint32** | MR map is a mirror (rough p50 **0.01**); plate hallucinated as **protruding geometry** |
-| **Hunyuan 3.1 Pro Multiview** (via Scenario) | **4** — 8 slots exist in the UI but 6- and 8-view runs FAIL | 499K tris, 4K tex, PBR | failure isolated to the two front-quarter photos |
-
-⚠ **Meshy-7 is the incumbent and the bar.** It is the only vendor whose output has survived the
-whole chain to a rendering car marker on a real device. A challenger has to beat that, not just
-look good in a render.
-
-⚠ **No vendor tested accepts 8 photos.** I told Jeff three of them did, before testing. That was
-wrong and it cost the session.
-
-**Spend so far:** 150 Scenario credits (4,880 → 4,730). Tripo Professional $19.90 was already
-Jeff's. Budget any further bake-off in credits before running it.
+**Spend:** Tripo Professional $19.90 was already Jeff's; PICK 1 cost 55 credits, the ALT V3
+retopology run another 55. Ask his credit budget before spending on further generations.
 
 ---
 
-## Parked: what shipping would take (only after a vendor + look are approved)
+## What shipping still takes (vendor and look are both approved — this is the remaining work)
 
 `TRIPO10g.glb` is a **look-approval build, not a shippable asset.**
 
 | | TRIPO10g | what ships today (`out_jeff_widebody3.glb`) |
 |---|---|---|
-| triangles | 1,886,793 | — (Meshy-7 bake) |
+| triangles | 1,886,793 | — (the shipped widebody bake) |
 | albedo | 8192² PNG | 2K |
 | file size | **90,219,512 B = 86.0 MB** | **6,814,544 B = 6.5 MB** (verified by live HEAD request) |
 | indices | **uint32 (5125)** | uint16 |
@@ -324,31 +295,22 @@ from the Principled BSDF's Base Color input.
 
 ## Dead ends — do not repeat these
 
-**Nobody accepts 8 photos. Verified by testing, 2026-08-21:**
+**Tripo v3.1 Multi-view takes 4 views. Verified by testing, 2026-08-21.**
 
-| vendor | multi-view input |
-|---|---|
-| Tripo v3.1 | **4 views** max |
-| Meshy-7 | **4 views** max |
-| Hunyuan 3D 3.1 Pro (via Scenario) | **8 named slots in the UI — but 6-view and 8-view runs FAIL. Only 4 completes.** |
-
-The failure was isolated by one-variable testing to the **two front-quarter views**. The 8 slots in
-Hunyuan's UI are why this was believed possible; the belief was stated before it was tested, which
-is exactly the Rule #1 failure. **Test the vendor's limit before telling Jeff what it can do.**
+I told Jeff 8 photos were accepted, from a UI screenshot rather than a test run — exactly the
+Rule #1 failure. **Test the real limit before telling Jeff what it can do**, and remember that a
+UI slot existing is not a run completing. Repeated in a different shape on 2026-08-23, when I
+padded the in-app capture to 8 stations for a hypothetical: **build for the input shape the
+shipping pipeline actually consumes.**
 
 **Also worth knowing:**
 
-- `remove_lighting` is a **meshy-6 only** parameter. It does not exist on meshy-7.
-- A Google ad keyed to "hunyuan 3d 3.1" lands on **Tripo's** checkout. The $19.90 receipt
-  (#2147-7158) is a *Tripo AI Professional Plan*. There was never a Hunyuan purchase.
-  Hunyuan was reached through **Scenario** (5,000 credits; a 4-view 500K-face PBR run costs **150**).
+- The $19.90 receipt (#2147-7158) is a *Tripo AI Professional Plan*.
 - **The plate must be masked black in the source photos before any third-party upload.**
   Masks must be pure `(0,0,0)` and plate-tight. Detecting a plate *after* generation, in the UV
   atlas, failed four times — it catches window glass or nothing. Fix it at the source.
-
-**The Hunyuan branch** (`models/hunyuan_WIDEBODY3.glb`) reached a similar quality by the same
-methods and is kept for reference only. Jeff's instruction was to work from Tripo, because that
-model was never tweaked. Tripo is the base.
+  Do NOT mask at capture time: a blacked-out plate also destroys the rear-panel geometry the
+  reconstruction needs.
 
 ---
 
@@ -366,8 +328,8 @@ model was never tweaked. Tripo is the base.
 - `app/(app)/garage.tsx` — the hero tap opens the viewer. The wrapper **must carry
   `style={{ flex: 1 }}`**; `heroBg` is `flex: 1`, and an unsized wrapper collapses the hero to
   0 px height (cost a whole debugging round on 2026-08-20).
-- `src/vehicleAssets.ts:426` — `grc_widebody` points at **`out_jeff_widebody3.glb`**, described in
-  the file's own comment as a **Meshy-7** bake (full mesh + 2K texture, Heavy Metal tint baked in).
+- `src/vehicleAssets.ts:426` — `grc_widebody` points at **`out_jeff_widebody3.glb`** (full mesh +
+  2K texture, Heavy Metal tint baked in) — the pre-Tripo asset still live on the map today.
   Its map-marker tint entry is `{ color: "#6B6E72", mix: 0.9 }` at line 352.
   It was moved to widebody4 and **reverted in `c5fa646`**: widebody4 does not render on the car map.
   **The cause was never established.** It is uint16 and structurally identical to widebody3, and it

@@ -36,9 +36,16 @@ it is, list what you actually checked, then ask. Cost three wrong answers in one
 A "no" about the outside world needs outside-world evidence. Jeff found the winning 3D vendor himself
 after being told "no" twice.
 
-**Test a vendor's real limit before telling Jeff what it can do.** 2026-08-21: three 3D services were
-described as accepting 8 photos. None do — Tripo 4, Meshy 4, Hunyuan has 8 UI slots but only 4-view
-runs complete. The claim was made from a UI screenshot instead of a test run. See `HANDOFF-3D.md`.
+**Test a vendor's real limit before telling Jeff what it can do.** 2026-08-21: I told him 3D services
+accepted 8 photos, from a UI screenshot instead of a test run. **Tripo takes 4**, and its Multi-view
+mode wants them ORTHOGONAL — front / left / right / back, straight-on, not three-quarter. A UI slot
+existing is not a run completing. 2026-08-23 repeat of the same mistake: I padded the in-app capture
+to 8 shots on the theory a future vendor might read more, and Jeff caught it — **build for the input
+shape the shipping pipeline actually consumes.** See `HANDOFF-3D.md`.
+
+**The 3D vendor is Tripo, and that question is CLOSED.** Jeff, 2026-08-23: *"we are working with
+Tripo now."* Do not benchmark alternatives, re-open a comparison, or suggest another modeler unless
+he asks.
 
 **Other agents can be wrong.** Subagent and review output is evidence, not verdict. Re-check
 load-bearing claims yourself.

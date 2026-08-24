@@ -126,7 +126,7 @@ The `preview` branch is frozen at runtime **1.13.2** (last update 2026-07-06); `
 5. Widebody panels smoothed (widebody4) + new hero — `0a1d2e13` ← **reverted by #1**
 6. Garage hero restored (0px wrapper) + 360 viewer front-left — `20fd3b2e`
 7. Garage: tap the hero to spin your car in 3D + Widebody hero fixes — `fdaac006`
-8. Widebody: nose direction fixed (Meshy convention flip) — `76310e38`
+8. Widebody: nose direction fixed (exporter convention flip) — `76310e38`
 9. Widebody fix: 16-bit indices (now visible on map) + hero orientation — `18c206ec`
 10. Garage Scan first light: Jeff's Widebody GRC as a pickable colour — `4aacf533`
 11. CarPlay/AA sync fix: same-tick position feed + never-rewind gate — `d4990384`
@@ -256,9 +256,11 @@ done: it reverses an earlier call about the robotic device voice.
 1. **Read `RULES.md`, then this file.** Do not trust `HANDOFF.md`'s header.
 2. **Re-verify §1 and §2 live** (`eas build:list` both platforms, `eas update:list --branch
    mapbox-migration`, `git status`). These numbers age.
-3. **3D: build more samples so Jeff can pick a vendor.** He has NOT approved the current look and
-   the program is undecided — see `HANDOFF-3D.md`. Run every entrant through the *same* photos,
-   post-process and render rig. **Do not decimate or ship anything until he picks.** Ask what his
-   credit budget is before spending on generations.
+3. **3D: the vendor is TRIPO and the look is APPROVED.** Jeff picked PICK 1 on 2026-08-23
+   (*"this current widebody is by far the best"*) and closed the vendor question the same day
+   (*"we are working with Tripo now"*). **Do not benchmark other modelers or re-open a comparison.**
+   Tripo Multi-view takes **4 orthogonal views** — front / left / right / back. The approved asset
+   lives in `~/Documents/hairpin-3d/PICKS/`; it is NOT yet uploaded to the `models` bucket or wired
+   into `vehicleAssets.ts`. Ask his credit budget before spending on generations.
 4. **Commit the three new docs** if not already done (`RULES.md`, `ROADMAP.md`, `HANDOFF-3D.md`).
 5. Then the ranked list in §6.

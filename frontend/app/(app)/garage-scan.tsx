@@ -37,14 +37,17 @@ import Svg, { Circle, Line, Path } from "react-native-svg";
 import * as Haptics from "expo-haptics";
 import { COLORS } from "../../src/theme";
 import { CandyCta } from "../../src/components/CandyCta";
-import { CANDY_COLORS, CANDY_LOCATIONS, CANDY_INK } from "../../src/components/ManeuverArrow";
 
-import { PremiumBadge } from "../../src/PremiumBadge";
+import { PremiumBadge, TierTitle } from "../../src/PremiumBadge";
+import { skin } from "../../src/tierTheme";
 import { SCAN_SHOTS, SHOTS_TOTAL } from "../../src/carScan";
 
-/** The map banner's candy fill as an absolute layer (Jeff 8/23). */
+// This is an ULTRA PREMIUM page, so it is GOLD, not brand green (Jeff 8/23).
+const ULTRA = skin("ultra");
+
+/** The tier fill as an absolute layer, same candy construction in gold. */
 function CandyFillAbs() {
-  return <LinearGradient colors={CANDY_COLORS} locations={CANDY_LOCATIONS} style={StyleSheet.absoluteFill} />;
+  return <LinearGradient colors={ULTRA.colors} locations={ULTRA.locations} style={StyleSheet.absoluteFill} />;
 }
 
 const TOPDOWN = require("../../assets/vehicles/v3/heavy_metal@3x.png");
@@ -146,10 +149,11 @@ export default function GarageScan() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
             <Ionicons name="chevron-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
-          <PremiumBadge size="md" />
+          <PremiumBadge size="md" tier="ultra" />
           <View style={styles.backBtn} />
         </View>
 
+        <TierTitle tier="ultra" style={styles.tierTitle} />
         <Text style={styles.title}>Garage Scan</Text>
         <Text style={styles.subtitle}>Your actual car. On the map.</Text>
 
@@ -161,13 +165,13 @@ export default function GarageScan() {
               cx={RING / 2}
               cy={RING / 2}
               r={RING / 2 - 14}
-              stroke="rgba(255,255,255,0.14)"
+              stroke="rgba(255,231,163,0.20)"
               strokeWidth={1.5}
               strokeDasharray="3 7"
               fill="none"
             />
             {/* soft stage floor */}
-            <Circle cx={RING / 2} cy={RING / 2} r={RING / 2 - 52} fill="rgba(45,236,134,0.05)" />
+            <Circle cx={RING / 2} cy={RING / 2} r={RING / 2 - 52} fill="rgba(224,169,62,0.06)" />
           </Svg>
 
           {/* capture stations */}
@@ -214,9 +218,9 @@ export default function GarageScan() {
             <Line x1={6} y1={86} x2={294} y2={86} stroke="rgba(255,255,255,0.14)" strokeWidth={1.5} />
             {/* photographer: post + phone held high */}
             <Line x1={40} y1={86} x2={40} y2={30} stroke="rgba(255,255,255,0.45)" strokeWidth={2} strokeLinecap="round" />
-            <Path d="M33 20 h14 a3 3 0 0 1 3 3 v6 a3 3 0 0 1 -3 3 h-14 a3 3 0 0 1 -3 -3 v-6 a3 3 0 0 1 3 -3 Z" fill={COLORS.brand} />
+            <Path d="M33 20 h14 a3 3 0 0 1 3 3 v6 a3 3 0 0 1 -3 3 h-14 a3 3 0 0 1 -3 -3 v-6 a3 3 0 0 1 3 -3 Z" fill={ULTRA.accent} />
             {/* sightline, gently down onto the car */}
-            <Line x1={52} y1={28} x2={222} y2={62} stroke={COLORS.brand} strokeWidth={1.5} strokeDasharray="4 5" opacity={0.8} />
+            <Line x1={52} y1={28} x2={222} y2={62} stroke={ULTRA.accent} strokeWidth={1.5} strokeDasharray="4 5" opacity={0.8} />
             {/* car silhouette */}
             <Path
               d="M212 78 q2 -10 14 -11 l10 -9 q10 -8 26 -8 q16 0 24 8 l8 8 q10 2 10 12 l0 4 q0 3 -3 3 l-86 0 q-3 0 -3 -3 Z"
@@ -245,7 +249,7 @@ export default function GarageScan() {
             >
               <View style={styles.stepIcon}>
                 <CandyFillAbs />
-                <Ionicons name={s.icon} size={17} color={CANDY_INK} />
+                <Ionicons name={s.icon} size={17} color={ULTRA.ink} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.stepTitle}>{s.title}</Text>
@@ -260,14 +264,14 @@ export default function GarageScan() {
           style={[
             styles.ctaWrap,
             {
-              shadowColor: COLORS.brand,
+              shadowColor: ULTRA.accent,
               shadowOpacity: ctaGlow.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.5] }),
               shadowRadius: 18,
               shadowOffset: { width: 0, height: 0 },
             },
           ]}
         >
-          <CandyCta label="Start Capture" icon="scan" onPress={startCapture} />
+          <CandyCta label="Start Capture" icon="scan" onPress={startCapture} tier="ultra" />
         </Animated.View>
         <Text style={styles.finePrint}>{SHOTS_TOTAL} photos · about three minutes · one rescan included</Text>
       </ScrollView>
@@ -277,6 +281,7 @@ export default function GarageScan() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
+  tierTitle: { marginBottom: 6 },
   scroll: { paddingHorizontal: 22, paddingBottom: 48, alignItems: "center" },
   headerRow: {
     alignSelf: "stretch",
@@ -298,27 +303,27 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: "rgba(255,255,255,0.28)",
   },
-  stationDotActive: { backgroundColor: COLORS.brand },
+  stationDotActive: { backgroundColor: ULTRA.accent },
   stationPulse: {
     position: "absolute",
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: COLORS.brand,
+    backgroundColor: ULTRA.accent,
   },
   orbiter: { position: "absolute", top: 2, left: RING / 2 - 12, width: 24, height: 24 },
   orbiterInner: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: COLORS.brand,
+    backgroundColor: ULTRA.accent,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1.5,
     borderColor: "rgba(255,255,255,0.5)",
   },
   stationLabel: {
-    color: COLORS.brand,
+    color: ULTRA.accent,
     fontSize: 13,
     fontWeight: "700",
     letterSpacing: 1.4,

@@ -30,6 +30,8 @@ Then, as needed:
 - `HANDOFF.md` — the long chronological log. **⛔ Its header state is STALE (build 70).**
   Read it for the root-cause write-ups and traps, never for current state.
 - `CARPLAY.md` — the locked CarPlay/Android Auto spec.
+- `DESIGN.md` — the locked tier visual language: Gold = Ultra Premium, Silver = Premium,
+  the Hairpin-H locks, and where each may appear.
 - `WHY-IT-HEATS.md` — thermal analysis.
 
 ## What this is
@@ -153,6 +155,8 @@ Native deps are patched at install time via `patch-package` (postinstall hook): 
 
 - TypeScript `strict`. Path aliases: `@/*` → repo root, `~/*` → `src/*` (though most code uses relative imports).
 - Dark UI only (`userInterfaceStyle: "dark"`). Shared colors in `src/theme.ts` (`COLORS`); frosted panels via `src/Glass.tsx` (`expo-blur`).
+- **Tier colours are NOT in `theme.ts`** — Gold (Ultra Premium) and Silver (Premium) live in
+  `src/tierTheme.ts`, spec in `DESIGN.md`. Green is for untiered surfaces only.
 - User preferences persist through `src/settings.ts` (`useSettings` / `getSettings` / `updateSettings`, AsyncStorage key `convoy.settings.v3` — bump the key version on breaking shape changes).
 - Platform-specific files use the `.ios.ts` / `.web.tsx` suffix convention (e.g. `applePlayer.ios.ts` vs `applePlayer.ts`, `RerouteCard.web.tsx`).
 - Many native APIs throw on web — guard with `Platform.OS !== "web"` (push notifications, CarPlay, audio recording all do this).

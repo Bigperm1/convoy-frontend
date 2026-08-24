@@ -22,7 +22,7 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { CANDY_COLORS, CANDY_LOCATIONS, CANDY_RIM, CANDY_INK } from "./ManeuverArrow";
+import { skin, type VisualTier } from "../tierTheme";
 
 export function CandyCta({
   label,
@@ -32,6 +32,7 @@ export function CandyCta({
   busy,
   height = 54,
   radius = 16,
+  tier = "brand",
   style,
 }: {
   label: string;
@@ -41,9 +42,12 @@ export function CandyCta({
   busy?: boolean;
   height?: number;
   radius?: number;
+  /** brand = green (untiered). premium = silver. ultra = gold. See tierTheme.ts. */
+  tier?: VisualTier;
   style?: StyleProp<ViewStyle>;
 }) {
   const off = !!disabled;
+  const sk = skin(tier);
   return (
     <TouchableOpacity
       activeOpacity={0.9}
@@ -53,20 +57,26 @@ export function CandyCta({
       accessibilityRole="button"
       accessibilityState={{ disabled: off }}
     >
-      <View style={[styles.wrap, { height, borderRadius: radius }, off && styles.wrapOff]}>
+      <View
+        style={[
+          styles.wrap,
+          { height, borderRadius: radius, borderColor: sk.rim },
+          off && styles.wrapOff,
+        ]}
+      >
         {!off && (
           <LinearGradient
-            colors={CANDY_COLORS}
-            locations={CANDY_LOCATIONS}
+            colors={sk.colors}
+            locations={sk.locations}
             style={[StyleSheet.absoluteFill, { borderRadius: radius }]}
           />
         )}
         {busy ? (
-          <ActivityIndicator color={off ? "#4A4A4A" : CANDY_INK} />
+          <ActivityIndicator color={off ? "#4A4A4A" : sk.ink} />
         ) : (
           <>
-            {icon ? <Ionicons name={icon} size={19} color={off ? "#4A4A4A" : CANDY_INK} /> : null}
-            <Text style={[styles.label, off && styles.labelOff]}>{label}</Text>
+            {icon ? <Ionicons name={icon} size={19} color={off ? "#4A4A4A" : sk.ink} /> : null}
+            <Text style={[styles.label, { color: sk.ink }, off && styles.labelOff]}>{label}</Text>
           </>
         )}
       </View>
@@ -82,10 +92,9 @@ const styles = StyleSheet.create({
     gap: 9,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: CANDY_RIM,
   },
   wrapOff: { borderColor: "#242424", backgroundColor: "transparent" },
-  label: { color: CANDY_INK, fontSize: 17, fontWeight: "800" },
+  label: { fontSize: 17, fontWeight: "800" },
   labelOff: { color: "#4A4A4A" },
 });
 

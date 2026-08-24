@@ -19,6 +19,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { COLORS } from "../theme";
+import { TierLock, useFeature, useFeatureTier, openPaywall } from "../PremiumBadge";
+import type { PremiumFeature } from "../entitlements";
 import Glass from "../Glass";
 import GlassBackdrop from "./GlassBackdrop";
 
@@ -121,6 +123,7 @@ export function ToggleRow({
   value,
   onChange,
   badge,
+  feature,
 }: {
   icon: any;
   iconColor: string;
@@ -129,15 +132,30 @@ export function ToggleRow({
   value: boolean;
   onChange: (v: boolean) => void;
   badge?: string;
+  /**
+   * Premium-gate this row. When the tier does not cover it the switch is
+   * replaced by the tier's H — SILVER for Premium, GOLD for Ultra Premium — and
+   * tapping the row opens the paywall instead of toggling.
+   *
+   * Jeff, 2026-08-23: the H marks are "the visual locks for the Setting toggles
+   * that are locked under each Premium service." Passing the FEATURE (not a
+   * tier) is deliberate: the metal is derived from the entitlement ladder, so a
+   * feature that moves between tiers can never end up wearing the wrong one.
+   */
+  feature?: PremiumFeature;
 }) {
-  return (
-    <View style={styles.row}>
-      <View style={[styles.iconWrap, { backgroundColor: iconColor + "22" }]}>
-        <Ionicons name={icon} size={18} color={iconColor} />
+  const unlocked = useFeature(feature ?? "arrow_colors");
+  const tier = useFeatureTier(feature ?? "arrow_colors");
+  const locked = !!feature && !unlocked;
+
+  const body = (
+    <>
+      <View style={[styles.iconWrap, { backgroundColor: iconColor + "22" }, locked && styles.iconWrapLocked]}>
+        <Ionicons name={icon} size={18} color={locked ? COLORS.textDim : iconColor} />
       </View>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Text style={styles.title}>{title}</Text>
+          <Text style={[styles.title, locked && styles.titleLocked]}>{title}</Text>
           {badge && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{badge}</Text>
@@ -146,15 +164,29 @@ export function ToggleRow({
         </View>
         {!!subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
       </View>
-      <Switch
-        value={value}
-        onValueChange={onChange}
-        trackColor={{ false: "#3A3A3C", true: COLORS.brand }}
-        thumbColor="#FFFFFF"
-        ios_backgroundColor="#3A3A3C"
-      />
-    </View>
+      {locked ? (
+        <TierLock tier={tier} size={24} />
+      ) : (
+        <Switch
+          value={value}
+          onValueChange={onChange}
+          trackColor={{ false: "#3A3A3C", true: COLORS.brand }}
+          thumbColor="#FFFFFF"
+          ios_backgroundColor="#3A3A3C"
+        />
+      )}
+    </>
   );
+
+  // A locked row is a BUY button, not a dead row — the whole row opens the sheet.
+  if (locked) {
+    return (
+      <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={() => openPaywall(feature!)}>
+        {body}
+      </TouchableOpacity>
+    );
+  }
+  return <View style={styles.row}>{body}</View>;
 }
 
 // ---- RadioRow: mutually-exclusive choice ------------------------------------
@@ -211,6 +243,8 @@ const styles = StyleSheet.create({
   swatch: { width: 20, height: 20, borderRadius: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.3)", marginRight: 2 },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: COLORS.hairline, marginLeft: 60 },
   helpText: { color: COLORS.textMute || COLORS.textDim, fontSize: 11, lineHeight: 16, paddingHorizontal: 6, paddingTop: 8 },
+  iconWrapLocked: { opacity: 0.5 },
+  titleLocked: { color: COLORS.textDim },
   badge: {
     backgroundColor: "#2DEC8622", borderColor: "#2DEC8688", borderWidth: 1,
     borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1,

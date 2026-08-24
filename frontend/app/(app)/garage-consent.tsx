@@ -19,15 +19,20 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 
 import { COLORS } from "../../src/theme";
 import { CandyCta } from "../../src/components/CandyCta";
-import { ManeuverBox, CANDY_INK } from "../../src/components/ManeuverArrow";
+import { TierTitle } from "../../src/PremiumBadge";
+import { skin } from "../../src/tierTheme";
 import { getSettings, updateSettings } from "../../src/settings";
 import { SCAN_SHOTS, SCAN_RULES, MAX_SCAN_ATTEMPTS } from "../../src/carScan";
+
+// This is an ULTRA PREMIUM page — gold, not brand green (Jeff 8/23).
+const ULTRA = skin("ultra");
 
 export default function GarageConsentScreen() {
   const [agreed, setAgreed] = useState(false);
@@ -63,12 +68,14 @@ export default function GarageConsentScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <TierTitle tier="ultra" style={styles.tierTitle} />
+
         {/* ── attempts ───────────────────────────────────────────────────── */}
         <View style={[styles.attemptCard, isSecond && styles.attemptCardWarn]}>
           <Ionicons
             name={exhausted ? "lock-closed" : isSecond ? "warning" : "sparkles"}
             size={19}
-            color={isSecond ? COLORS.warning : COLORS.brand}
+            color={isSecond ? COLORS.warning : ULTRA.accent}
           />
           <View style={{ flex: 1 }}>
             <Text style={[styles.attemptTitle, isSecond && styles.attemptTitleWarn]}>
@@ -115,9 +122,14 @@ export default function GarageConsentScreen() {
             <View key={s.id}>
               {i > 0 && <Divider />}
               <View style={styles.shotRow}>
-                <ManeuverBox size={26} radius={13}>
+                <View style={styles.shotNum}>
+                  <LinearGradient
+                    colors={ULTRA.colors}
+                    locations={ULTRA.locations}
+                    style={StyleSheet.absoluteFill}
+                  />
                   <Text style={styles.shotNumText}>{i + 1}</Text>
-                </ManeuverBox>
+                </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.shotLabel}>{s.label}</Text>
                   <Text style={styles.shotHint}>{s.hint}</Text>
@@ -146,13 +158,18 @@ export default function GarageConsentScreen() {
               setAgreed((v) => !v);
             }}
           >
-            {agreed ? (
-              <ManeuverBox size={24} radius={7}>
-                <Ionicons name="checkmark" size={16} color={CANDY_INK} />
-              </ManeuverBox>
-            ) : (
-              <View style={styles.checkbox} />
-            )}
+            <View style={[styles.checkbox, agreed && styles.checkboxOn]}>
+              {agreed && (
+                <>
+                  <LinearGradient
+                    colors={ULTRA.colors}
+                    locations={ULTRA.locations}
+                    style={StyleSheet.absoluteFill}
+                  />
+                  <Ionicons name="checkmark" size={16} color={ULTRA.ink} />
+                </>
+              )}
+            </View>
             <Text style={styles.checkText}>
               I understand my car will not be an exact replica, and that
               {isSecond ? " this render replaces the one I have now." : ` I get ${MAX_SCAN_ATTEMPTS} renders and the second replaces the first.`}
@@ -170,6 +187,7 @@ export default function GarageConsentScreen() {
             icon="camera"
             onPress={proceed}
             disabled={!agreed}
+            tier="ultra"
           />
         )}
       </ScrollView>
@@ -180,7 +198,7 @@ export default function GarageConsentScreen() {
 function Row({ icon, title, body }: { icon: any; title: string; body: string }) {
   return (
     <View style={styles.row}>
-      <Ionicons name={icon} size={18} color={COLORS.brand} style={{ marginTop: 1 }} />
+      <Ionicons name={icon} size={18} color={ULTRA.accent} style={{ marginTop: 1 }} />
       <View style={{ flex: 1 }}>
         <Text style={styles.rowTitle}>{title}</Text>
         <Text style={styles.rowBody}>{body}</Text>
@@ -193,6 +211,7 @@ const Divider = () => <View style={styles.divider} />;
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
+  tierTitle: { marginTop: 2, marginBottom: 12 },
   scroll: { paddingHorizontal: 18, paddingBottom: 44 },
 
   headerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingBottom: 8 },
@@ -203,9 +222,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
     alignItems: "flex-start",
-    backgroundColor: "rgba(45,236,134,0.07)",
+    backgroundColor: "rgba(224,169,62,0.09)",
     borderWidth: 1,
-    borderColor: "rgba(45,236,134,0.28)",
+    borderColor: "rgba(224,169,62,0.34)",
     borderRadius: 16,
     padding: 14,
     marginTop: 6,
@@ -214,7 +233,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,159,10,0.08)",
     borderColor: "rgba(255,159,10,0.34)",
   },
-  attemptTitle: { color: COLORS.brand, fontSize: 15, fontWeight: "800", marginBottom: 3 },
+  attemptTitle: { color: ULTRA.accent, fontSize: 15, fontWeight: "800", marginBottom: 3 },
   attemptTitleWarn: { color: COLORS.warning },
   attemptBody: { color: COLORS.textDim, fontSize: 13, lineHeight: 19 },
 
@@ -240,17 +259,18 @@ const styles = StyleSheet.create({
     height: 26,
     borderRadius: 13,
     borderWidth: 1,
-    borderColor: "#2A2A2A",
+    borderColor: ULTRA.rim,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
-  shotNumText: { color: CANDY_INK, fontSize: 12.5, fontWeight: "800" },
+  shotNumText: { color: ULTRA.ink, fontSize: 12.5, fontWeight: "800" },
   shotLabel: { color: COLORS.text, fontSize: 14.5, fontWeight: "700" },
   shotHint: { color: COLORS.textDim, fontSize: 12.5, marginTop: 1 },
 
   rulesBox: { marginTop: 12, gap: 7, paddingHorizontal: 2 },
   ruleRow: { flexDirection: "row", gap: 8 },
-  ruleDot: { color: COLORS.brand, fontSize: 13, lineHeight: 19 },
+  ruleDot: { color: ULTRA.accent, fontSize: 13, lineHeight: 19 },
   ruleText: { flex: 1, color: COLORS.textDim, fontSize: 12.5, lineHeight: 19 },
 
   checkRow: { flexDirection: "row", gap: 11, alignItems: "flex-start", marginTop: 26, marginBottom: 16 },
@@ -262,7 +282,9 @@ const styles = StyleSheet.create({
     borderColor: "#3A3A3A",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
+  checkboxOn: { borderColor: ULTRA.rim },
   checkText: { flex: 1, color: COLORS.text, fontSize: 13.5, lineHeight: 20 },
 
   cta: {

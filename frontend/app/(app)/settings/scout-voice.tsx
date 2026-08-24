@@ -58,7 +58,7 @@ export default function ScoutVoicePage() {
 
       <SectionLabel>SPOKEN EXTRAS</SectionLabel>
       <SettingsCard>
-        <ToggleRow icon="chatbubbles" iconColor="#BF5AF2" title="Hands-free replies" subtitle="Answer Scout out loud — say “yes” / “no” to her prompts (e.g. a faster route) instead of tapping" value={settings.scoutHandsFree !== false} onChange={(v) => setSettings({ scoutHandsFree: v })} />
+        <ToggleRow icon="chatbubbles" iconColor="#BF5AF2" title="Hands-free replies" subtitle="Answer Scout out loud — say “yes” / “no” to her prompts (e.g. a faster route) instead of tapping" value={settings.scoutHandsFree !== false} onChange={(v) => setSettings({ scoutHandsFree: v })} feature="comms_handsfree" />
         <Divider />
         <ToggleRow icon="car-sport" iconColor="#BF5AF2" title="Convoy alerts" subtitle="On a shared convoy route, Scout flags when the crew spreads out — plus a heads-up when a club member comes within 5 km" value={settings.convoyAlerts !== false} onChange={(v) => setSettings({ convoyAlerts: v })} />
         <Divider />

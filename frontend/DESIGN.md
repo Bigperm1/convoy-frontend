@@ -1,0 +1,141 @@
+<!-- ═════════ RULE #1 — READ THIS BEFORE ANYTHING ELSE ═════════ -->
+# 🛑 NO GUESSING. NO THEORIZING. NO HALLUCINATING.
+
+**Every claim is VERIFIED, or the word HYPOTHESIS is said out loud. No exceptions.**
+
+- **VERIFIED** = I ran the query · read the file · measured it · asked Jeff — and I can show the receipt.
+- Reading code and reasoning about it is **NOT** verification. Neither is *"it would explain the symptom."*
+- **Never** state a root cause, a fix, or a conclusion I have not tested. Not even a likely-sounding one.
+- **Check the instrumentation that ALREADY EXISTS** before inventing an explanation. It usually answers it.
+- Separate cleanly: *what the data shows* vs *what I don't know*. Put the unknowns in writing.
+- **"I don't know — here is the ONE check that would settle it"** is a GOOD answer.
+  A confident wrong answer costs a day and burns trust.
+<!-- ═════════ END RULE #1 ═════════ -->
+
+# DESIGN — the tier visual language
+
+**STATUS: LOCKED as of 2026-08-23** (Jeff's call). Same standing as `CARPLAY.md`:
+change the values here only with his say-so, and change them *here* — never per screen.
+
+> Jeff, 2026-08-23: *"change the ultra Premium colours to Gold and the Premium colours
+> to Silver replacing the green… create a GoldSilver H hairpin logo as the Lock Ultra
+> Premium/Premium Locks."*
+
+---
+
+## 1 · The three metals
+
+| Treatment | Means | Where it comes from |
+|---|---|---|
+| **Green** (brand) | "This is yours." Untiered. | `CANDY_COLORS` in `src/components/ManeuverArrow.tsx` |
+| **Silver** | **Premium** — rank 1 | `TIER_SKIN.premium` in `src/tierTheme.ts` |
+| **Gold** | **Ultra Premium** — rank 2 | `TIER_SKIN.ultra` in `src/tierTheme.ts` |
+
+**The rule: green means yours, metal means a tier.** Mixing them is what makes a
+paywall feel like a feature and a feature feel like a paywall. A screen is one
+metal all the way through — a gold page has no green accents left on it.
+
+### Measured stops
+
+All three are the same construction — the map banner's candy language: a
+three-stop vertical gradient at `locations [0, 0.45, 1]` plus a pale hairline rim.
+A gold CTA and a green one are the same object in different metal.
+
+| | light | mid | deep | rim | ink |
+|---|---|---|---|---|---|
+| brand | `#8CFFC4` | `#2DEC86` | `#0E9B58` | `rgba(150,255,200,0.55)` | `#04150B` |
+| premium | `#FFFFFF` | `#C9D2D8` | `#7E878E` | `rgba(255,255,255,0.62)` | `#14181B` |
+| ultra | `#F6D77A` | `#E0A93E` | `#B97F1F` | `rgba(255,231,163,0.62)` | `#3A2A05` |
+
+The gold stops are **not new** — they are the ones `PremiumBadge` has always used,
+lifted into `tierTheme.ts` so the pill and the page can never disagree about what
+gold is.
+
+`accent` is the mid-tone for text/icons on a DARK ground (`#2DEC86` / `#C9D2D8` /
+`#E0A93E`); `ink` is for glyphs riding ON the fill. Never use `ink` on black.
+
+---
+
+## 2 · The H is the lock
+
+`assets/images/tier/h-silver.png` and `h-gold.png` (@1x/@2x/@3x). The Hairpin H
+cut from `assets/hairpin-adaptive.png` — green-dominance mask, largest connected
+component, holes filled, then re-metalled with the ramps above while keeping the
+original bevel's luma so it still reads dimensional.
+
+**A silver H means Premium. A gold H means Ultra Premium.**
+
+Why the H and not a padlock: a padlock says *"you can't have this."* The H says
+*"this is the part of Hairpin you haven't got yet"* — the same mark the app wears
+everywhere, in a different metal. It sells; a padlock only refuses.
+
+Components in `src/PremiumBadge.tsx`:
+
+| Component | Use |
+|---|---|
+| `TierLock` | the H on its own — settings rows, inline |
+| `TierCornerLock` | absolute corner mount for option tiles/cards |
+| `PremiumBadge` | the metal pill; `tier` picks metal **and** wording |
+| `TierTitle` | the page header — H + "PREMIUM" / "ULTRA PREMIUM" |
+
+**Legibility floor: 20 px.** Verified at 44/28/20 px on black. Below 20 the bowl
+of the H closes up — use the pill instead.
+
+---
+
+## 3 · Every tiered page says which tier it is
+
+> Jeff: *"lets put a title up top of the Ultra Premium pages 'Ultra Premium' same
+> with the 'Premium' pages."*
+
+`<TierTitle tier="ultra" />` at the top of the content, above the page's own H1.
+A customer must never have to infer the tier from colour alone — colour is
+reinforcement, the word is the fact. (It is also the accessible path: the metals
+differ in hue but both are light-on-dark, so colour alone fails anyone who can't
+separate them.)
+
+Today: the Garage Scan flow (`garage-scan` → `garage-consent` → `garage-capture`)
+is **Ultra Premium / gold**. The Garage itself is untiered and stays green.
+
+---
+
+## 4 · Never hardcode the metal
+
+The tier comes from the entitlement ladder, always:
+
+```ts
+const tier = useFeatureTier('class_marker');   // -> "premium"  -> silver
+const tier = useFeatureTier('car_3d');         // -> "ultra"    -> gold
+```
+
+`featureTier()` (`src/entitlements.ts`) reads `FEATURE_RANK`, so moving a feature
+between tiers changes its metal everywhere at once. Writing `tier="ultra"` next to
+a *feature gate* is a bug waiting to happen — pass the feature and let it derive.
+
+**What this fixed:** before 2026-08-23 the Class tile (premium) and the 3D tile
+(ultra) rendered an **identical gold `PREMIUM` badge**. The screen was quietly
+telling customers the two cost the same thing.
+
+A locked row is a **buy button, not a dead row** — the whole row opens the paywall.
+
+---
+
+## 5 · Where the locks are
+
+| Surface | Feature | Metal |
+|---|---|---|
+| Garage → Map Appearance → Class | `class_marker` | silver |
+| Garage → Map Appearance → 3D | `car_3d` | **gold** |
+| Settings → Map Layers → Speed cameras | `speed_cameras` | silver |
+| Settings → Map Layers → Road incidents | `road_incidents` | silver |
+| Settings → Scout & Voice → Hands-free replies | `comms_handsfree` | silver |
+| Showroom cards | `class_marker` / `car_3d` | silver / gold |
+
+`ToggleRow` takes a `feature` prop — that is the whole integration. The rest of
+the ladder's keys (`map_modes`, `route_colors`, `voice_extras`, `spoken_extras`,
+`speed_alert`, `top_speed`, `club_create`, `convoy_size`) are **not wired yet**;
+add `feature=` to their rows when their tiering is settled.
+
+⚠️ `ENTITLEMENTS_ENFORCED = false` in `src/entitlements.ts`, so **none of this
+renders for today's testers** — every gate answers "unlocked". To see it, flip
+that flag and use `__setDevTier('free' | 'premium' | 'ultra')`.

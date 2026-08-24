@@ -33,6 +33,7 @@ at the time of writing, not recalled. Re-verify before acting — this file ages
 | `HANDOFF.md` | the long chronological log | **STALE at build 70** — history only |
 | `CLAUDE.md` | architecture + release rules | current |
 | `CARPLAY.md` | the locked CarPlay / Android Auto spec | current |
+| `DESIGN.md` | the locked tier visual language (Gold/Silver/H locks) | **2026-08-23** |
 | `WHY-IT-HEATS.md` | thermal analysis | current |
 
 > ⚠ `HANDOFF.md`'s own header claims *"Shipped state: build 70 · v3.6.0 · runtime 1.22.0"*.

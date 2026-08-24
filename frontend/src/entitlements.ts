@@ -121,6 +121,20 @@ const FEATURE_RANK: Partial<Record<PremiumFeature, number>> = {
   car_3d: 2,
 };
 
+/**
+ * WHICH tier gates a feature — the visual axis, not the unlocked axis.
+ *
+ * isUnlocked() answers "can I use this"; this answers "what would I buy". The UI
+ * needs both, and until 2026-08-23 it only had the first: the Class tile
+ * (premium) and the 3D tile (ultra) rendered an IDENTICAL gold badge, so the
+ * screen quietly told customers the two cost the same thing.
+ *
+ * Gold = ultra, Silver = premium. See src/tierTheme.ts and DESIGN.md.
+ */
+export function featureTier(feature: PremiumFeature): "premium" | "ultra" {
+  return (FEATURE_RANK[feature] ?? 1) >= TIER_RANK.ultra ? "ultra" : "premium";
+}
+
 export function isUnlocked(feature: PremiumFeature): boolean {
   if (!ENTITLEMENTS_ENFORCED) return true;
   return TIER_RANK[tier] >= (FEATURE_RANK[feature] ?? 1);

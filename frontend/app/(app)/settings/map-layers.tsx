@@ -10,9 +10,9 @@ export default function MapLayersPage() {
       <SettingsCard>
         <ToggleRow icon="cloudy" iconColor="#5AC8FA" title="Weather" subtitle="Temperature, wind & precipitation overlay on the map" value={settings.showWeatherLayer} onChange={(v) => setSettings({ showWeatherLayer: v })} />
         <Divider />
-        <ToggleRow icon="camera" iconColor="#FF453A" title="Speed cameras" subtitle="Show fixed speed cameras and get a Scout voice alert as you approach (OpenStreetMap)" value={settings.speedCameras !== false} onChange={(v) => setSettings({ speedCameras: v })} />
+        <ToggleRow icon="camera" iconColor="#FF453A" title="Speed cameras" subtitle="Show fixed speed cameras and get a Scout voice alert as you approach (OpenStreetMap)" value={settings.speedCameras !== false} onChange={(v) => setSettings({ speedCameras: v })} feature="speed_cameras" />
         <Divider />
-        <ToggleRow icon="warning" iconColor="#FF9F0A" title="Road incidents" subtitle="Official BC accidents, construction & closures with a Scout callout for major ones (DriveBC). British Columbia only." value={settings.roadIncidents !== false} onChange={(v) => setSettings({ roadIncidents: v })} />
+        <ToggleRow icon="warning" iconColor="#FF9F0A" title="Road incidents" subtitle="Official BC accidents, construction & closures with a Scout callout for major ones (DriveBC). British Columbia only." value={settings.roadIncidents !== false} onChange={(v) => setSettings({ roadIncidents: v })} feature="road_incidents" />
         {settings.roadIncidents !== false && (
           <>
             <Divider />

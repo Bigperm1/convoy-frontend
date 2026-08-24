@@ -171,3 +171,8 @@ These are settled. Do not relitigate them without Jeff reopening them.
   **4:5 for Instagram**).
 - **Always preview socials before sending** — a *rendered* mockup of every platform and its card,
   never the draft file. A dry run is not a preview. Publishing needs its own explicit go-ahead.
+- **Green means yours. Metal means a tier.** GOLD = Ultra Premium, SILVER = Premium, and the
+  **Hairpin H is the lock** — a silver H on Premium, a gold H on Ultra. A screen is one metal all
+  the way through; a gold page has no green accents left on it. Never hardcode the metal next to a
+  feature gate — derive it with `useFeatureTier(feature)`. Every tiered page carries a
+  `<TierTitle>` saying which tier it is, because colour alone is not the fact. Values: **`DESIGN.md`**.

@@ -29,11 +29,15 @@ import { router } from "expo-router";
 
 import { COLORS } from "../../src/theme";
 import { CandyCta } from "../../src/components/CandyCta";
-import { CANDY_RIM, CANDY_INK } from "../../src/components/ManeuverArrow";
+import { TierTitle } from "../../src/PremiumBadge";
+import { skin } from "../../src/tierTheme";
 import { useAuth } from "../../src/auth";
 import { getSettings, updateSettings } from "../../src/settings";
 import { ensureCameraPermission } from "../../src/permissionGate";
 import { SCAN_SHOTS, SHOTS_TOTAL, newScanId, uploadScan, type CapturedShot } from "../../src/carScan";
+
+// This is an ULTRA PREMIUM page — gold, not brand green (Jeff 8/23).
+const ULTRA = skin("ultra");
 
 const TOPDOWN = require("../../assets/vehicles/v3/heavy_metal@3x.png");
 
@@ -160,7 +164,7 @@ export default function GarageCaptureScreen() {
         <View style={styles.centre}>
           {uploading ? (
             <>
-              <ActivityIndicator size="large" color={COLORS.brand} />
+              <ActivityIndicator size="large" color={ULTRA.accent} />
               <Text style={styles.bigTitle}>Building your car</Text>
               <Text style={styles.centreBody}>
                 {sent} of {SHOTS_TOTAL} photos uploaded
@@ -173,7 +177,7 @@ export default function GarageCaptureScreen() {
                 <Ionicons
                   name={result?.ok ? "checkmark" : "alert"}
                   size={44}
-                  color={result?.ok ? COLORS.brand : COLORS.warning}
+                  color={result?.ok ? ULTRA.accent : COLORS.warning}
                 />
               </View>
               <Text style={styles.bigTitle}>{result?.ok ? "Your car is in the queue" : "Partly sent"}</Text>
@@ -193,11 +197,11 @@ export default function GarageCaptureScreen() {
               )}
               {!result?.ok && (
                 <TouchableOpacity style={styles.ghostBtn} onPress={send} activeOpacity={0.85}>
-                  <Ionicons name="refresh" size={17} color={COLORS.brand} />
+                  <Ionicons name="refresh" size={17} color={ULTRA.accent} />
                   <Text style={styles.ghostText}>Try again</Text>
                 </TouchableOpacity>
               )}
-              <CandyCta label="Done" onPress={() => router.back()} height={52} style={styles.doneBtn} />
+              <CandyCta label="Done" onPress={() => router.back()} height={52} tier="ultra" style={styles.doneBtn} />
             </>
           )}
         </View>
@@ -221,6 +225,7 @@ export default function GarageCaptureScreen() {
       <View style={styles.track}>
         <View style={[styles.trackFill, { width: `${(captured / SHOTS_TOTAL) * 100}%` }]} />
       </View>
+      <TierTitle tier="ultra" style={styles.tierTitle} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Overhead ring — where to stand for this shot. */}
@@ -248,7 +253,7 @@ export default function GarageCaptureScreen() {
                 ]}
               >
                 {done && !isActive ? (
-                  <Ionicons name="checkmark" size={15} color={CANDY_INK} />
+                  <Ionicons name="checkmark" size={15} color={ULTRA.ink} />
                 ) : (
                   <Text style={[styles.dotNum, isActive && styles.dotNumActive]}>{i + 1}</Text>
                 )}
@@ -299,6 +304,7 @@ export default function GarageCaptureScreen() {
           label={shots[shot.id] ? `Re-shoot ${shot.label.toLowerCase()}` : "Take photo"}
           icon="camera"
           onPress={takePhoto}
+          tier="ultra"
           style={styles.shutterWrap}
         />
 
@@ -308,6 +314,7 @@ export default function GarageCaptureScreen() {
           onPress={send}
           disabled={!complete}
           height={50}
+          tier="ultra"
           style={styles.sendBtn}
         />
       </ScrollView>
@@ -339,7 +346,8 @@ const styles = StyleSheet.create({
   },
 
   track: { height: 3, backgroundColor: "#1A1A1A", marginHorizontal: 22, borderRadius: 2, overflow: "hidden" },
-  trackFill: { height: 3, backgroundColor: COLORS.brand },
+  trackFill: { height: 3, backgroundColor: ULTRA.accent },
+  tierTitle: { marginTop: 12 },
 
   ring: {
     width: RING,
@@ -361,15 +369,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#2A2A2A",
   },
-  dotDone: { backgroundColor: COLORS.brand, borderColor: CANDY_RIM },
+  dotDone: { backgroundColor: ULTRA.accent, borderColor: ULTRA.rim },
   dotActive: {
-    backgroundColor: CANDY_INK,
-    borderColor: COLORS.brand,
+    backgroundColor: ULTRA.ink,
+    borderColor: ULTRA.accent,
     borderWidth: 2,
     transform: [{ scale: 1.18 }],
   },
   dotNum: { color: COLORS.textDim, fontSize: 12, fontWeight: "700" },
-  dotNumActive: { color: COLORS.brand },
+  dotNumActive: { color: ULTRA.accent },
 
   stationLabel: { color: COLORS.text, fontSize: 27, fontWeight: "800", marginTop: 8, textAlign: "center" },
   stationHint: {
@@ -403,7 +411,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     overflow: "hidden",
   },
-  tileActive: { borderColor: COLORS.brand, borderWidth: 2 },
+  tileActive: { borderColor: ULTRA.accent, borderWidth: 2 },
   tileImg: { width: "100%", height: "100%" },
   tileNum: { color: "#4A4A4A", fontSize: 13, fontWeight: "700" },
 
@@ -426,10 +434,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: COLORS.brand,
+    borderColor: ULTRA.accent,
   },
   sendBtnOff: { borderColor: "#242424" },
-  sendText: { color: COLORS.brand, fontSize: 16, fontWeight: "700" },
+  sendText: { color: ULTRA.accent, fontSize: 16, fontWeight: "700" },
   sendTextOff: { color: "#4A4A4A" },
 
   centre: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 34, gap: 14 },
@@ -442,20 +450,20 @@ const styles = StyleSheet.create({
     height: 92,
     borderRadius: 46,
     borderWidth: 2,
-    borderColor: COLORS.brand,
+    borderColor: ULTRA.accent,
     alignItems: "center",
     justifyContent: "center",
   },
   resultRingBad: { borderColor: COLORS.warning },
 
   ghostBtn: { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 10, marginTop: 4 },
-  ghostText: { color: COLORS.brand, fontSize: 15, fontWeight: "700" },
+  ghostText: { color: ULTRA.accent, fontSize: 15, fontWeight: "700" },
 
   doneBtn: {
     alignSelf: "stretch",
     height: 52,
     borderRadius: 16,
-    backgroundColor: COLORS.brand,
+    backgroundColor: ULTRA.accent,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 10,

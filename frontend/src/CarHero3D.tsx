@@ -145,11 +145,13 @@ const styles = StyleSheet.create({
   emptyLabel: { color: COLORS.textDim, fontSize: 16, fontWeight: "700" },
   emptyHint: { color: "#4A4A4A", fontSize: 13 },
 
+  // Top-left, opposite the expand button — the bottom belongs to the host's
+  // caption (year/make/model), and centring this collided with it.
   hint: {
     position: "absolute",
-    bottom: 10,
-    alignSelf: "center",
-    color: "rgba(255,255,255,0.34)",
+    top: 16,
+    left: 16,
+    color: "rgba(255,255,255,0.30)",
     fontSize: 11.5,
     fontWeight: "600",
   },

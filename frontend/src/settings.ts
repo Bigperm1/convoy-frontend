@@ -107,6 +107,7 @@ baselineMigrated: boolean;
 speedUnit: 'kmh' | 'mph';
 showWeatherLayer: boolean;
 weatherOnMigrated: boolean;
+widebodyRetiredMigrated?: boolean;
 speedCameras: boolean;
 // Official BC road events (DriveBC Open511): accidents, construction, closures,
 // weather. Map pins + a Scout callout for major/moderate. BC-only; auto-gated by
@@ -241,6 +242,7 @@ baselineMigrated: true,
 speedUnit: 'kmh',
 showWeatherLayer: true,
 weatherOnMigrated: true,
+widebodyRetiredMigrated: undefined,
 speedCameras: false,
 roadIncidents: false,  // OFF at first launch (Jeff, 2026-07-25)
 showPlacePins: true,
@@ -452,6 +454,16 @@ cached.speedCameras = false;
 cached.novaGreeting = false;
 if (parsed.mapMode === undefined || parsed.mapMode === "dusk") cached.mapMode = "auto";
 cached.baselineMigrated = true;
+try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
+}
+// One-time: the "Widebody" colour WAS Jeff's own scanned car and was retired
+// 2026-08-23 ("remove the widebody and start fresh. including my car"). Anyone
+// still holding it has a dead value — resolveGRCKey returns null for it, so the
+// Garage prints a colour name that maps to no model. Clear it so they pick again;
+// every other colour a user chose is left exactly as it was.
+if (parsed.widebodyRetiredMigrated === undefined) {
+if (cached.carColor === "Widebody") cached.carColor = undefined;
+cached.widebodyRetiredMigrated = true;
 try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
 }
 }

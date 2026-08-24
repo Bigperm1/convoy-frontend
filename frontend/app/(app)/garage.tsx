@@ -194,7 +194,14 @@ export default function GarageScreen() {
     const y  = s.carYear  || (user?.car_year != null ? String(user.car_year) : '');
     const mk = s.carMake  || user?.car_make  || '';
     const md = s.carModel || user?.car_model || '';
-    const cl = s.carColor || user?.car_color || '';
+    // A stored colour can name a paint that no longer exists — "Widebody" was
+    // retired 2026-08-23, and clearing it locally is not enough because the
+    // BACKEND profile still holds it and the patch below would write it straight
+    // back. So validate against the model's real colour list and drop anything
+    // that is no longer offered, wherever it came from.
+    const rawColor = s.carColor || user?.car_color || '';
+    const validColors = mk && md ? getColorsForModel(mk, md).map((c) => c.name) : [];
+    const cl = !rawColor || validColors.length === 0 || validColors.includes(rawColor) ? rawColor : '';
     if (y)  setYear(y);
     if (mk) setMake(mk);
     if (md) setModel(md);
@@ -217,7 +224,8 @@ export default function GarageScreen() {
     const patch: Record<string, any> = {};
     if (!s.carMake  && user?.car_make)  patch.carMake  = user.car_make;
     if (!s.carModel && user?.car_model) patch.carModel = user.car_model;
-    if (!s.carColor && user?.car_color) patch.carColor = user.car_color;
+    if (!s.carColor && cl) patch.carColor = cl;          // cl, not user.car_color — a retired paint must not come back
+    if (s.carColor && !cl) patch.carColor = undefined;   // stored paint is dead — clear it so the picker reopens
     if (!s.carYear  && user?.car_year != null) patch.carYear = String(user.car_year);
     if (Object.keys(patch).length) updateSettings(patch);
 
@@ -860,7 +868,10 @@ const styles = StyleSheet.create({
   heroAlt:            { alignItems: 'center', justifyContent: 'center' },
   heroWordLogo:       { width: '94%', height: 240 },
   heroBg:             { flex: 1, justifyContent: 'flex-end' },
-  heroCaption:        { paddingHorizontal: 24, paddingBottom: 22 },
+  // Absolute since the hero became the live 3D view — it used to be a flow
+  // child of an ImageBackground that pushed it to the bottom; as a plain child
+  // of heroWrap it rendered at the TOP, over the car.
+  heroCaption:        { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 24, paddingBottom: 22 },
   heroTitle:          { color: '#F4F4F4', fontSize: 26, fontWeight: '800', letterSpacing: -0.3 },
   heroColorRow:       { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 8 },
   heroColorDot:       { width: 12, height: 12, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },

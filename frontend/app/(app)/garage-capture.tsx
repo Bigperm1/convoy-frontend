@@ -23,7 +23,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
@@ -35,8 +35,11 @@ import { getSettings } from "../../src/settings";
 import { ensureCameraPermission } from "../../src/permissionGate";
 import { SCAN_SHOTS, SHOTS_TOTAL, newScanId, uploadScan, type CapturedShot } from "../../src/carScan";
 
+const TOPDOWN = require("../../assets/vehicles/v3/heavy_metal@3x.png");
+
 const RING = 200;          // diagram box
 const RING_R = 78;         // station orbit radius
+const CAR = 96;            // top-down sprite size inside the ring
 
 type Phase = "capture" | "uploading" | "done";
 
@@ -205,12 +208,10 @@ export default function GarageCaptureScreen() {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Overhead ring — where to stand for this shot. */}
         <View style={styles.ring}>
-          <MaterialCommunityIcons
-            name="car-sports"
-            size={62}
-            color="#2A2A2A"
-            style={{ transform: [{ rotate: "-90deg" }] }}
-          />
+          {/* The same top-down sprite the pitch screen orbits. A side-profile
+              icon rotated 90 degrees reads as a sliver, not a car, and the ring
+              only makes sense if the car in it is seen from above. */}
+          <Image source={TOPDOWN} style={styles.carSprite} resizeMode="contain" />
           {dots.map((d, i) => {
             const done = !!shots[d.id];
             const isActive = i === active;
@@ -348,6 +349,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  carSprite: { width: CAR, height: CAR, opacity: 0.5 },
   dot: {
     position: "absolute",
     width: 30,

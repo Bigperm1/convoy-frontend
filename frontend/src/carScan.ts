@@ -38,16 +38,23 @@ export type ScanShot = {
   slot?: ScanSlot;
 };
 
-/** One clockwise lap, starting at the nose. Straight-ons feed the model. */
+/**
+ * One clockwise lap, starting at the nose. Straight-ons feed the model.
+ *
+ * Every label must be UNIQUE and name the SIDE. Two stations reading "Front
+ * three-quarter" tells a driver standing in a car park nothing about which of
+ * them they are on — and it also collided as a React key in the pitch screen's
+ * station ring, which is how the duplication was caught.
+ */
 export const SCAN_SHOTS: ScanShot[] = [
-  { id: "front",       label: "Front",               hint: "Square to the nose. Centre the badge.",          bearing: 0,   feedsModel: true,  slot: "Front" },
-  { id: "front_right", label: "Front three-quarter", hint: "Half a step round. Nose and flank together.",    bearing: 45,  feedsModel: false },
-  { id: "right",       label: "Passenger side",      hint: "Square to the flank. Both wheels in frame.",     bearing: 90,  feedsModel: true,  slot: "Right" },
-  { id: "rear_right",  label: "Rear three-quarter",  hint: "Half a step round. Tail and flank together.",    bearing: 135, feedsModel: false },
-  { id: "rear",        label: "Rear",                hint: "Square to the tail. Centre the plate.",          bearing: 180, feedsModel: true,  slot: "Back" },
-  { id: "rear_left",   label: "Rear three-quarter",  hint: "Driver side now. Tail and flank together.",      bearing: 225, feedsModel: false },
-  { id: "left",        label: "Driver side",         hint: "Square to the flank. Both wheels in frame.",     bearing: 270, feedsModel: true,  slot: "Left" },
-  { id: "front_left",  label: "Front three-quarter", hint: "Last one. Nose and flank together.",             bearing: 315, feedsModel: false },
+  { id: "front",       label: "Front",             hint: "Square to the nose. Centre the badge.",       bearing: 0,   feedsModel: true,  slot: "Front" },
+  { id: "front_right", label: "Passenger front ¾", hint: "Half a step round. Nose and flank together.", bearing: 45,  feedsModel: false },
+  { id: "right",       label: "Passenger side",    hint: "Square to the flank. Both wheels in frame.",  bearing: 90,  feedsModel: true,  slot: "Right" },
+  { id: "rear_right",  label: "Passenger rear ¾",  hint: "Half a step round. Tail and flank together.", bearing: 135, feedsModel: false },
+  { id: "rear",        label: "Rear",              hint: "Square to the tail. Centre the plate.",       bearing: 180, feedsModel: true,  slot: "Back" },
+  { id: "rear_left",   label: "Driver rear ¾",     hint: "Driver side now. Tail and flank together.",   bearing: 225, feedsModel: false },
+  { id: "left",        label: "Driver side",       hint: "Square to the flank. Both wheels in frame.",  bearing: 270, feedsModel: true,  slot: "Left" },
+  { id: "front_left",  label: "Driver front ¾",    hint: "Last one. Nose and flank together.",          bearing: 315, feedsModel: false },
 ];
 
 export const SHOTS_TOTAL = SCAN_SHOTS.length;

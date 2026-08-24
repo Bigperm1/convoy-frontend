@@ -48,7 +48,7 @@ const CAR = 96;              // top-down sprite size inside the ring
 // so the pitch and the thing it pitches can never drift apart. Angles are
 // screen-space and 0° = straight up, which is also carScan's bearing convention
 // (the car's nose in the sprite points up).
-const STATIONS = SCAN_SHOTS.map((s) => ({ angle: s.bearing, label: s.label, key: s.feedsModel }));
+const STATIONS = SCAN_SHOTS.map((s) => ({ id: s.id, angle: s.bearing, label: s.label }));
 
 const STEPS: { icon: keyof typeof Ionicons.glyphMap; title: string; body: string }[] = [
   {
@@ -169,7 +169,7 @@ export default function GarageScan() {
             const y = RING / 2 + r * Math.sin(rad);
             const active = i === station;
             return (
-              <View key={s.label} style={[styles.station, { left: x - 5, top: y - 5 }]}>
+              <View key={s.id} style={[styles.station, { left: x - 5, top: y - 5 }]}>
                 {active && (
                   <Animated.View
                     style={[styles.stationPulse, { transform: [{ scale: pulseScale }], opacity: pulseFade }]}

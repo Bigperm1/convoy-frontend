@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  SafeAreaView, Dimensions, TextInput, LayoutAnimation,
-  Platform, UIManager, Image, ActivityIndicator, Alert,
+  SafeAreaView, Dimensions, TextInput,
+  Image, ActivityIndicator, Alert,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -22,7 +21,7 @@ import CarHero3D from '../../src/CarHero3D';
 import { resolveGRCKey, getVehicleModelUrl } from '../../src/vehicleAssets';
 import { GlassFill } from '../../src/Glass';
 import GlassBackdrop from '../../src/components/GlassBackdrop';
-import { YEARS, getMakeNames, getModelsForMake, getColorsForModel } from '../../src/carDatabase';
+import { getColorsForModel } from '../../src/carDatabase';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const YELLOW = '#2DEC86';
@@ -31,6 +30,11 @@ const YELLOW = '#2DEC86';
 // exist (they need server-side work). Flip to true to re-enable the Photo option;
 // the picker/upload code below is already wired for it.
 const PHOTO_AVATAR_ENABLED = false;
+
+// Paints that no longer exist and must never be restored from any source — not
+// local settings, not the backend profile. "Widebody" was Jeff's own scanned car,
+// retired 2026-08-23 ("remove the widebody and start fresh. including my car").
+const RETIRED_COLORS = new Set<string>(['Widebody']);
 
 // ---- "Class" map appearance ----
 // Top-down vehicle classes. Hatchback previews with the GR Corolla asset; the
@@ -55,89 +59,50 @@ const CLASS_PRESETS = [
   '#FF2D95', '#FF3B30', '#FF9500', '#FFD60A', '#FFFFFF',
 ];
 
-// Enable LayoutAnimation on Android for the smooth dropdown expand/collapse.
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
-// ---- Tap-to-expand dropdown (Year / Make / Model / Color) ----
-type DropdownProps = {
+// ---- Typed identity field (Year / Make / Model / Color) ----
+// Was a dropdown bound to carDatabase. Jeff, 2026-08-23: "it should be fillable
+// from the user not a picker" — a scanned car can be ANY car, so a list of the
+// few models we happen to ship is the wrong control entirely.
+type TextFieldProps = {
   label: string;
-  items: string[];
-  selected: string;
-  open: boolean;
-  onToggle: () => void;
-  onSelect: (val: string) => void;
+  value: string;
+  onChangeText: (v: string) => void;
+  onBlur: () => void;
   placeholder?: string;
-  // Optional color swatch hex per item (used by the Color dropdown).
-  swatchFor?: (val: string) => string | undefined;
+  keyboardType?: 'default' | 'number-pad';
+  maxLength?: number;
+  /** Hex for a leading colour dot, when the typed paint happens to be one we know. */
+  swatch?: string;
 };
 
-function Dropdown({
-  label, items, selected, open, onToggle, onSelect, placeholder, swatchFor,
-}: DropdownProps) {
-  const disabled = items.length === 0;
-  const displayValue = selected || (placeholder ?? 'Select');
-  const selectedSwatch = swatchFor?.(selected);
-
+function TextField({
+  label, value, onChangeText, onBlur, placeholder, keyboardType, maxLength, swatch,
+}: TextFieldProps) {
   return (
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>{label}</Text>
-
-      {/* Collapsed field — tap to expand */}
-      <TouchableOpacity
-        style={[styles.fieldRow, open && styles.fieldRowOpen, disabled && styles.fieldRowDisabled]}
-        activeOpacity={0.8}
-        disabled={disabled}
-        onPress={() => {
-          if (disabled) return;
-          Haptics.selectionAsync();
-          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-          onToggle();
-        }}
-      >
+      <View style={styles.fieldRow}>
         <GlassFill style={{ borderRadius: 16, overflow: 'hidden' }} />
-        <View style={styles.fieldValueRow}>
-          {selectedSwatch ? <View style={[styles.swatchDot, { backgroundColor: selectedSwatch }]} /> : null}
-          <Text style={[styles.fieldValue, !selected && styles.fieldPlaceholder]}>
-            {disabled ? (placeholder ?? 'Select above first') : displayValue}
-          </Text>
-        </View>
-        <Ionicons
-          name={open ? 'chevron-up' : 'chevron-down'}
-          size={20}
-          color={disabled ? '#444' : YELLOW}
+        {swatch ? <View style={[styles.swatchDot, { backgroundColor: swatch, marginRight: 9 }]} /> : null}
+        <TextInput
+          style={styles.fieldInput}
+          value={value}
+          onChangeText={onChangeText}
+          onBlur={onBlur}
+          onEndEditing={onBlur}
+          placeholder={placeholder}
+          placeholderTextColor="#808080"
+          keyboardType={keyboardType ?? 'default'}
+          maxLength={maxLength}
+          autoCapitalize="words"
+          autoCorrect={false}
+          returnKeyType="done"
+          // Free text needs a way out — retyping a long model name because you
+          // fat-fingered one character is the kind of small cruelty that makes
+          // people give up on a form.
+          clearButtonMode="while-editing"
         />
-      </TouchableOpacity>
-
-      {/* Expanded option list */}
-      {open && !disabled ? (
-        <View style={styles.optionList}>
-          <GlassFill style={StyleSheet.absoluteFill} />
-          {items.map((item) => {
-            const isSel = item === selected;
-            const sw = swatchFor?.(item);
-            return (
-              <TouchableOpacity
-                key={item}
-                style={[styles.optionRow, isSel && styles.optionRowSel]}
-                activeOpacity={0.7}
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                  onSelect(item);
-                }}
-              >
-                <View style={styles.fieldValueRow}>
-                  {sw ? <View style={[styles.swatchDot, { backgroundColor: sw }]} /> : null}
-                  <Text style={[styles.optionText, isSel && styles.optionTextSel]}>{item}</Text>
-                </View>
-                {isSel ? <Ionicons name="checkmark" size={18} color={YELLOW} /> : null}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      ) : null}
+      </View>
     </View>
   );
 }
@@ -170,18 +135,12 @@ export default function GarageScreen() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
-  // Which dropdown is currently expanded ('year' | 'make' | 'model' | 'color' | null).
-  // Only one open at a time keeps the screen tidy.
-  const [openField, setOpenField] = useState<string | null>(null);
-  const toggle = (field: string) => setOpenField(prev => (prev === field ? null : field));
-
   const [saved, setSaved] = useState(false);
 
-  const makes      = getMakeNames();
-  const models     = make ? getModelsForMake(make).map(m => m.name) : [];
-  const colors     = (make && model) ? getColorsForModel(make, model) : [];
-  const colorNames = colors.map(c => c.name);
-  const swatchFor  = (name: string) => colors.find(c => c.name === name)?.hex;
+  // Only used to put a colour dot next to a paint we happen to recognise. The
+  // field itself accepts anything, so an unknown paint simply gets no dot.
+  const colors    = (make && model) ? getColorsForModel(make, model) : [];
+  const swatchFor = (name: string) => colors.find(c => c.name === name)?.hex;
 
   // Load saved settings — prefer locally-saved values, but fall back to the
   // backend profile so a fresh install / new build (local storage wiped) still
@@ -194,14 +153,12 @@ export default function GarageScreen() {
     const y  = s.carYear  || (user?.car_year != null ? String(user.car_year) : '');
     const mk = s.carMake  || user?.car_make  || '';
     const md = s.carModel || user?.car_model || '';
-    // A stored colour can name a paint that no longer exists — "Widebody" was
-    // retired 2026-08-23, and clearing it locally is not enough because the
-    // BACKEND profile still holds it and the patch below would write it straight
-    // back. So validate against the model's real colour list and drop anything
-    // that is no longer offered, wherever it came from.
+    // Colour is free text, so it cannot be validated against a list — but a
+    // RETIRED paint must still not come back. Clearing it locally is not enough:
+    // the BACKEND profile still holds it and the patch below would write it
+    // straight back, which is exactly how "Widebody" survived its own migration.
     const rawColor = s.carColor || user?.car_color || '';
-    const validColors = mk && md ? getColorsForModel(mk, md).map((c) => c.name) : [];
-    const cl = !rawColor || validColors.length === 0 || validColors.includes(rawColor) ? rawColor : '';
+    const cl = RETIRED_COLORS.has(rawColor) ? '' : rawColor;
     if (y)  setYear(y);
     if (mk) setMake(mk);
     if (md) setModel(md);
@@ -260,36 +217,18 @@ export default function GarageScreen() {
     }
   }, []);
 
-  const handleYear = (v: string) => { setYear(v); save({ carYear: v }); setOpenField(null); };
-
-  const handleMake = (v: string) => {
-    setMake(v); setModel(''); setColor('');
-    save({ carMake: v, carModel: '', carColor: '' });
-    setOpenField(null);
-  };
-
-  const handleModel = (v: string) => {
-    setModel(v); setColor('');
-    save({ carModel: v, carColor: '' });
-    // Auto-select first color so the hero immediately shows a real photo
-    const cols = getColorsForModel(make, v);
-    if (cols.length > 0) {
-      setColor(cols[0].name);
-      save({ carModel: v, carColor: cols[0].name });
-    }
-    setOpenField(null);
-  };
-
-  // Color selection drives the hero image; collapse after pick.
-  // Gravel = the GRMN, and the GRMN exists ONLY as a 2027 model (Jeff, 8/19) —
-  // picking it pins the year with it so the hero title reads "2027 Toyota GR
-  // Corolla". Picking any other paint leaves the year alone.
-  const handleColor = (v: string) => {
-    setColor(v);
-    if (v === 'Gravel') { setYear('2027'); save({ carColor: v, carYear: '2027' }); }
-    else save({ carColor: v });
-    setOpenField(null);
-  };
+  // Year / Make / Model / Colour are TYPED, not picked (Jeff, 2026-08-23). A
+  // dropdown limited to the handful of cars in carDatabase contradicts the whole
+  // premise of scanning YOUR car — the 3D marker can be any car in the world, so
+  // the identity fields have to accept any car in the world.
+  //
+  // Committed on blur rather than per keystroke: save() mirrors to the backend
+  // profile, and one PUT per character would hammer it. The Save button commits
+  // too, so a field left focused is not lost.
+  const commitYear  = () => save({ carYear: year.trim() });
+  const commitMake  = () => save({ carMake: make.trim() });
+  const commitModel = () => save({ carModel: model.trim() });
+  const commitColor = () => save({ carColor: color.trim() });
 
   // ---- Appearance (how you're drawn on the map: car / arrow / photo) ----
   // Persist the choice locally AND to the backend profile (avatar_type) so peers,
@@ -584,18 +523,17 @@ export default function GarageScreen() {
             emptyHint={scanPending ? 'It appears here when it is ready' : 'Scan yours to put it on the map'}
             onEmptyPress={scanPending ? undefined : () => { Haptics.selectionAsync(); router.push('/(app)/garage-scan' as any); }}
           />
-          {/* Bottom fade so the caption stays readable over the model. Both
-              layers are pointerEvents:none so they never eat a spin drag —
-              on the PROP, not the style (see invisible-overlay gotcha). */}
-          <LinearGradient
-            pointerEvents="none"
-            colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.96)']}
-            locations={[0.55, 0.82, 1]}
-            style={StyleSheet.absoluteFill}
-          />
-          <View style={styles.heroCaption} pointerEvents="none">
+        </View>
+        )}
+
+        {/* Year / make / model / colour sit BELOW the car, not on top of it
+            (Jeff 8/23: "move the year make model color under the car down so you
+            see the whole car"). They used to be an absolute overlay with a fade
+            behind them, which cropped the rear wheels on every model. */}
+        {markerType !== 'arrow' && markerType !== 'class' && (
+          <View style={styles.heroCaption}>
             <Text style={styles.heroTitle}>
-              {year && make && model ? `${year} ${make} ${model}` : 'Select your car'}
+              {year && make && model ? `${year} ${make} ${model}` : 'Your car'}
             </Text>
             {color ? (
               <View style={styles.heroColorRow}>
@@ -603,10 +541,9 @@ export default function GarageScreen() {
                 <Text style={styles.heroSub}>{color}</Text>
               </View>
             ) : (
-              <Text style={styles.heroHint}>Pick your year, make & model below</Text>
+              <Text style={styles.heroHint}>Fill in your year, make &amp; model below</Text>
             )}
           </View>
-        </View>
         )}
 
         <CarViewer3D
@@ -783,47 +720,43 @@ export default function GarageScreen() {
             Shown ONLY in 3D mode (Jeff 2026-07-17): Arrow and Class replace
             them with the primary/secondary paint picker. */}
         {markerType !== 'arrow' && markerType !== 'class' && (<>
-        <Dropdown
+        <TextField
           label="Year"
-          items={YEARS}
-          selected={year}
-          open={openField === 'year'}
-          onToggle={() => toggle('year')}
-          onSelect={handleYear}
+          value={year}
+          onChangeText={setYear}
+          onBlur={commitYear}
+          placeholder="e.g. 2019"
+          keyboardType="number-pad"
+          maxLength={4}
         />
 
-        <Dropdown
+        <TextField
           label="Make"
-          items={makes}
-          selected={make}
-          open={openField === 'make'}
-          onToggle={() => toggle('make')}
-          onSelect={handleMake}
-          placeholder="Select a make"
+          value={make}
+          onChangeText={setMake}
+          onBlur={commitMake}
+          placeholder="e.g. Subaru"
+          maxLength={28}
         />
 
-        <Dropdown
+        <TextField
           label="Model"
-          items={models}
-          selected={model}
-          open={openField === 'model'}
-          onToggle={() => toggle('model')}
-          onSelect={handleModel}
-          placeholder="Select a make first"
+          value={model}
+          onChangeText={setModel}
+          onBlur={commitModel}
+          placeholder="e.g. WRX STI"
+          maxLength={32}
         />
 
-        {colorNames.length > 0 && (
-          <Dropdown
-            label="Color"
-            items={colorNames}
-            selected={color}
-            open={openField === 'color'}
-            onToggle={() => toggle('color')}
-            onSelect={handleColor}
-            placeholder="Select a color"
-            swatchFor={swatchFor}
-          />
-        )}
+        <TextField
+          label="Color"
+          value={color}
+          onChangeText={setColor}
+          onBlur={commitColor}
+          placeholder="e.g. World Rally Blue"
+          maxLength={28}
+          swatch={swatchFor(color)}
+        />
         </>)}
 
         {/* Save */}
@@ -862,16 +795,14 @@ const styles = StyleSheet.create({
 
   // Premium full-bleed hero — image fades to black (welcome-carousel style),
   // no card/LED border. The car name overlays the bottom fade.
-  heroWrap:           { width: SCREEN_W, height: 240, marginBottom: 14, backgroundColor: '#000' },
+  heroWrap:           { width: SCREEN_W, height: 260, marginBottom: 0, backgroundColor: '#000' },
   // heroTall: the class-sprite / arrow-logo hero fills most of the screen
   heroTall:           { width: SCREEN_W, height: 430, marginBottom: 14, backgroundColor: '#000' },
   heroAlt:            { alignItems: 'center', justifyContent: 'center' },
   heroWordLogo:       { width: '94%', height: 240 },
   heroBg:             { flex: 1, justifyContent: 'flex-end' },
-  // Absolute since the hero became the live 3D view — it used to be a flow
-  // child of an ImageBackground that pushed it to the bottom; as a plain child
-  // of heroWrap it rendered at the TOP, over the car.
-  heroCaption:        { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 24, paddingBottom: 22 },
+  // Normal flow, UNDER the hero — never an overlay, so it can't cover the car.
+  heroCaption:        { paddingHorizontal: 24, paddingTop: 2, paddingBottom: 18 },
   heroTitle:          { color: '#F4F4F4', fontSize: 26, fontWeight: '800', letterSpacing: -0.3 },
   heroColorRow:       { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 8 },
   heroColorDot:       { width: 12, height: 12, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
@@ -894,6 +825,7 @@ const styles = StyleSheet.create({
   fieldRowDisabled:   { opacity: 0.5 },
   fieldValueRow:      { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   fieldValue:         { color: '#F4F4F4', fontSize: 17, fontWeight: '600' },
+  fieldInput:         { flex: 1, color: '#F4F4F4', fontSize: 17, fontWeight: '600', paddingVertical: 14 },
   fieldPlaceholder:   { color: '#808080', fontWeight: '400' },
   swatchDot:          { width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
 

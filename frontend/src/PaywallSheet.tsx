@@ -20,6 +20,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
 import { PremiumBadge, subscribePaywall } from "./PremiumBadge";
+import { featureTier } from "./entitlements";
 import { redeemCode, type PremiumFeature } from "./entitlements";
 
 // What the sheet leads with, per feature that opened it.
@@ -52,6 +53,10 @@ const PERKS = [
 export default function PaywallSheet() {
   const [visible, setVisible] = useState(false);
   const [hook, setHook] = useState<string | null>(null);
+  // The sheet wears the metal of the feature that OPENED it — silver for a
+  // Premium lock, gold for an Ultra one. A gold "ULTRA PREMIUM" badge over a
+  // Premium feature quotes the customer the wrong tier.
+  const [tier, setTier] = useState<"premium" | "ultra">("ultra");
   const [code, setCode] = useState("");
   const [redeeming, setRedeeming] = useState(false);
   const [showCode, setShowCode] = useState(false);
@@ -60,6 +65,7 @@ export default function PaywallSheet() {
     () =>
       subscribePaywall((feature) => {
         setHook(FEATURE_HOOKS[feature] ?? null);
+        setTier(featureTier(feature));
         setShowCode(false);
         setCode("");
         setVisible(true);
@@ -91,7 +97,7 @@ export default function PaywallSheet() {
             <Ionicons name="close" size={22} color={COLORS.textDim} />
           </TouchableOpacity>
 
-          <PremiumBadge size="md" style={{ alignSelf: "center" }} />
+          <PremiumBadge size="md" tier={tier} style={{ alignSelf: "center" }} />
           <Text style={styles.title}>{hook ?? "Unlock all of Hairpin"}</Text>
           <Text style={styles.sub}>One membership. The whole garage.</Text>
 

@@ -38,7 +38,7 @@ import * as Haptics from "expo-haptics";
 import { COLORS } from "../../src/theme";
 import { CandyCta } from "../../src/components/CandyCta";
 
-import { PremiumBadge, TierTitle } from "../../src/PremiumBadge";
+import { TierTitle } from "../../src/PremiumBadge";
 import { skin } from "../../src/tierTheme";
 import { SCAN_SHOTS, SHOTS_TOTAL } from "../../src/carScan";
 
@@ -149,7 +149,7 @@ export default function GarageScan() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
             <Ionicons name="chevron-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
-          <PremiumBadge size="md" tier="ultra" />
+          <View style={styles.backBtn} />
           <View style={styles.backBtn} />
         </View>
 

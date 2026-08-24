@@ -14,8 +14,16 @@
 -- nobody can read back — not the ability to see a single tester's photos. Scans
 -- are pulled down from the workstation with the service-role key.
 --
--- Apply with: supabase db push, or paste into the SQL editor for project
--- pgtbjiszjglznjagolse.
+-- APPLIED 2026-08-23 to project pgtbjiszjglznjagolse, then probed with the real
+-- shipped anon key. Measured, in order: upload JPEG 200 · read back 400 ·
+-- public URL without a key 400 · list [] · text/plain 415 invalid_mime_type ·
+-- delete 400. Write-only, exactly as intended.
+--
+-- INSERT-ONLY MEANS NO UPSERT. Overwriting an existing path is an UPDATE, which
+-- anon does not have: `x-upsert: true` on a path already in the bucket returns
+-- 403 "new row violates row-level security policy". src/carScan.ts therefore
+-- uploads with upsert:false and treats the resulting 409 as success. If you ever
+-- grant UPDATE here, you also let one client overwrite another's photos.
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (

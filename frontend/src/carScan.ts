@@ -128,6 +128,17 @@ function utf8Bytes(s: string): Uint8Array {
   return new Uint8Array(out);
 }
 
+/**
+ * A path that is already in the bucket. Measured against the live bucket
+ * 2026-08-23: re-POSTing an existing path returns 409 "The resource already
+ * exists" (KeyAlreadyExists). That is a SUCCESS for our purposes — the photo is
+ * in there — and it is what makes the retry below safe to run blind.
+ */
+function isDuplicate(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return m.includes("already exists") || m.includes("duplicate") || m.includes("keyalreadyexists");
+}
+
 async function uploadOne(scanId: string, shot: ScanShot, index: number, uri: string): Promise<void> {
   if (!supabase) throw new Error("Supabase client unavailable");
   // ArrayBuffer, NOT Blob/File/FormData: storage-js documents that the other
@@ -137,18 +148,26 @@ async function uploadOne(scanId: string, shot: ScanShot, index: number, uri: str
   // purpose — downscaling costs reconstruction detail, which is the whole point.
   const buf = await new File(uri).arrayBuffer();
   const path = `${scanId}/${String(index + 1).padStart(2, "0")}-${shot.id}.jpg`;
+  // upsert MUST stay false. The bucket policy grants INSERT only, so an upsert
+  // is an UPDATE the anon key does not have — measured against the live bucket
+  // 2026-08-23: `x-upsert: true` on an existing path returns 403 "new row
+  // violates row-level security policy", while a plain re-POST returns a clean
+  // 409. Without this, a first attempt that succeeded server-side but timed out
+  // client-side would have its retry denied and the shot reported as lost —
+  // when the photo was in the bucket all along.
   const { error } = await supabase.storage
     .from(SCAN_BUCKET)
-    .upload(path, buf, { contentType: "image/jpeg", upsert: true });
-  if (error) throw new Error(error.message);
+    .upload(path, buf, { contentType: "image/jpeg", upsert: false });
+  if (error && !isDuplicate(error.message)) throw new Error(error.message);
 }
 
 async function uploadManifest(scanId: string, meta: Record<string, unknown>): Promise<void> {
   if (!supabase) return;
   const body = utf8Bytes(JSON.stringify(meta, null, 2)).buffer as ArrayBuffer;
+  // Same insert-only rule as the photos — see uploadOne.
   await supabase.storage
     .from(SCAN_BUCKET)
-    .upload(`${scanId}/manifest.json`, body, { contentType: "application/json", upsert: true });
+    .upload(`${scanId}/manifest.json`, body, { contentType: "application/json", upsert: false });
 }
 
 /**

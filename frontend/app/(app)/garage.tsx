@@ -427,8 +427,12 @@ export default function GarageScreen() {
             returnKeyType="done"
             onSubmitEditing={applyClassHex}
           />
-          <TouchableOpacity style={styles.clsHexSave} activeOpacity={0.85} onPress={applyClassHex}>
-            <Text style={styles.clsSaveText}>Apply</Text>
+          <TouchableOpacity
+            style={[styles.clsHexSave, { backgroundColor: skin(arrow ? 'brand' : pageTier).accent }]}
+            activeOpacity={0.85}
+            onPress={applyClassHex}
+          >
+            <Text style={[styles.clsSaveText, { color: skin(arrow ? 'brand' : pageTier).ink }]}>Apply</Text>
           </TouchableOpacity>
         </View>
         {/* Arrow keeps its own Save; the CLASS paint commits through the main
@@ -515,6 +519,11 @@ export default function GarageScreen() {
     : [];
   const canSave = missingFields.length === 0;
 
+  // The whole page follows the appearance you are looking at (Jeff 8/23: "the
+  // top speed/icon and save buttons should follow the same gold/silver
+  // colours"). Arrow is free -> green, Class -> silver, 3D -> gold.
+  const pageTier: VisualTier = heroIndex === 1 ? 'premium' : heroIndex === 2 ? 'ultra' : 'brand';
+
   return (
     <SafeAreaView style={styles.safe}>
       <GlassBackdrop source={require("../../assets/images/glass-bgt.png")} />
@@ -541,7 +550,16 @@ export default function GarageScreen() {
         <GarageHeroCarousel
           height={HERO_H}
           index={heroIndex}
-          onIndexChange={(i) => setHeroIndex(i)}
+          onIndexChange={(i) => {
+            setHeroIndex(i);
+            // Map Appearance follows the carousel. Only to a tier you OWN,
+            // and never via handleAppearance — that opens the paywall, and
+            // browsing must not fire a purchase sheet on every swipe. A
+            // locked page previews; the tile below stays where it was.
+            const key = (['arrow', 'class', 'car'] as const)[i];
+            const owned = key === 'arrow' || (key === 'class' ? classUnlocked : car3dUnlocked);
+            if (owned && key !== markerType) applyMarkerType(key);
+          }}
           onSelect={(page) => {
             Haptics.selectionAsync();
             handleAppearance(page.key as 'arrow' | 'class' | 'car');
@@ -626,9 +644,9 @@ export default function GarageScreen() {
         {/* Top speed badge */}
         {topSpeed ? (
           <View style={styles.speedCard}>
-            <View style={styles.speedIcon}>
-              <CandyFill />
-              <Ionicons name="speedometer" size={22} color={CANDY_INK} />
+            <View style={[styles.speedIcon, { borderColor: skin(pageTier).rim }]}>
+              <CandyFill tier={pageTier} />
+              <Ionicons name="speedometer" size={22} color={skin(pageTier).ink} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.speedLabel}>Top Cruise Speed</Text>
@@ -754,7 +772,7 @@ export default function GarageScreen() {
                   return (
                     <TouchableOpacity
                       key={c.key}
-                      style={[styles.clsTile, sel && styles.clsTileSel]}
+                      style={[styles.clsTile, sel && styles.clsTileSel, sel && { borderColor: skin(pageTier).rim }]}
                       activeOpacity={0.85}
                       onPress={() => {
                         Haptics.selectionAsync();
@@ -765,6 +783,7 @@ export default function GarageScreen() {
                         setPaintSlot('primary');
                       }}
                     >
+                      {sel && <CandyFill tier={pageTier} radius={13} />}
                       {CLASS_TOPDOWN[c.key] ? (
                         // Real top-down class photo (keyed + nose-up).
                         <Image source={CLASS_TOPDOWN[c.key]} style={styles.clsTileImg} resizeMode="contain" />
@@ -852,6 +871,7 @@ export default function GarageScreen() {
           icon={saved ? 'checkmark-circle' : 'save-outline'}
           onPress={handleSave}
           disabled={!canSave}
+          tier={pageTier}
           style={styles.saveCta}
         />
 
@@ -930,7 +950,7 @@ const styles = StyleSheet.create({
   clsHint:            { color: '#808080', fontSize: 12, fontWeight: '600', marginBottom: 8, marginTop: 4 },
   clsGrid:            { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   clsTile:            { width: '23%', flexGrow: 1, height: 66, borderRadius: 13, borderWidth: 1, borderColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  clsTileSel:         { backgroundColor: YELLOW, borderColor: YELLOW },
+  clsTileSel:         { overflow: 'hidden' },
   clsTileImg:         { width: 40, height: 26 },
   clsTileLabel:       { color: '#808080', fontSize: 10.5, fontWeight: '600' },
   clsTileLabelSel:    { color: '#000' },

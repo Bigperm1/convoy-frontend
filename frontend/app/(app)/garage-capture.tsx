@@ -1,13 +1,12 @@
-// Garage Capture — the guided eight-shot lap that Garage Scan pitches.
+// Garage Capture — the guided four-shot lap that Garage Scan pitches.
 //
 // One station at a time, in a clockwise walk around the car. The tester never
 // decides what to shoot or in what order; the ring diagram shows where to stand
 // and the camera opens straight into the next station. Any tile can be re-shot
 // before sending, because the whole set goes up in one batch at the end.
 //
-// The four straight-on views carry a "feeds the model" mark — those are the ones
-// Tripo reconstructs from (see src/carScan.ts for why). The other four are for
-// the retexture pass and for vendors that accept more views.
+// All four are straight-on and all four feed the model — Tripo's Multi-view mode
+// takes exactly these (see src/carScan.ts for why four, and why orthogonal).
 
 import React, { useCallback, useMemo, useState } from "react";
 import {
@@ -26,10 +25,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
-import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 
 import { COLORS } from "../../src/theme";
+import { CandyCta } from "../../src/components/CandyCta";
+import { CANDY_RIM, CANDY_INK } from "../../src/components/ManeuverArrow";
 import { useAuth } from "../../src/auth";
 import { getSettings, updateSettings } from "../../src/settings";
 import { ensureCameraPermission } from "../../src/permissionGate";
@@ -197,9 +197,7 @@ export default function GarageCaptureScreen() {
                   <Text style={styles.ghostText}>Try again</Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity style={styles.doneBtn} onPress={() => router.back()} activeOpacity={0.9}>
-                <Text style={styles.doneText}>Done</Text>
-              </TouchableOpacity>
+              <CandyCta label="Done" onPress={() => router.back()} height={52} style={styles.doneBtn} />
             </>
           )}
         </View>
@@ -250,7 +248,7 @@ export default function GarageCaptureScreen() {
                 ]}
               >
                 {done && !isActive ? (
-                  <Ionicons name="checkmark" size={15} color="#04150B" />
+                  <Ionicons name="checkmark" size={15} color={CANDY_INK} />
                 ) : (
                   <Text style={[styles.dotNum, isActive && styles.dotNumActive]}>{i + 1}</Text>
                 )}
@@ -297,30 +295,21 @@ export default function GarageCaptureScreen() {
           ))}
         </ScrollView>
 
-        <TouchableOpacity activeOpacity={0.9} onPress={takePhoto} style={styles.shutterWrap}>
-          <LinearGradient
-            colors={[COLORS.brand, COLORS.brandDim]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={styles.shutter}
-          >
-            <Ionicons name="camera" size={20} color="#04150B" />
-            <Text style={styles.shutterText}>
-              {shots[shot.id] ? `Re-shoot ${shot.label.toLowerCase()}` : "Take photo"}
-            </Text>
-          </LinearGradient>
-        </TouchableOpacity>
+        <CandyCta
+          label={shots[shot.id] ? `Re-shoot ${shot.label.toLowerCase()}` : "Take photo"}
+          icon="camera"
+          onPress={takePhoto}
+          style={styles.shutterWrap}
+        />
 
-        <TouchableOpacity
-          activeOpacity={0.9}
+        <CandyCta
+          label={complete ? "Generate my car" : `${SHOTS_TOTAL - captured} to go`}
+          icon={complete ? "sparkles" : undefined}
           onPress={send}
           disabled={!complete}
-          style={[styles.sendBtn, !complete && styles.sendBtnOff]}
-        >
-          <Text style={[styles.sendText, !complete && styles.sendTextOff]}>
-            {complete ? "Generate my car" : `${SHOTS_TOTAL - captured} to go`}
-          </Text>
-        </TouchableOpacity>
+          height={50}
+          style={styles.sendBtn}
+        />
       </ScrollView>
     </SafeAreaView>
   );
@@ -372,9 +361,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#2A2A2A",
   },
-  dotDone: { backgroundColor: COLORS.brand, borderColor: COLORS.brand },
+  dotDone: { backgroundColor: COLORS.brand, borderColor: CANDY_RIM },
   dotActive: {
-    backgroundColor: "#04150B",
+    backgroundColor: CANDY_INK,
     borderColor: COLORS.brand,
     borderWidth: 2,
     transform: [{ scale: 1.18 }],

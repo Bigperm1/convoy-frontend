@@ -18,6 +18,9 @@ import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
 import CarViewer3D from '../../src/CarViewer3D';
 import CarHero3D from '../../src/CarHero3D';
+import { CandyCta } from '../../src/components/CandyCta';
+import { CANDY_COLORS, CANDY_LOCATIONS, CANDY_RIM, CANDY_INK } from '../../src/components/ManeuverArrow';
+import { LinearGradient } from 'expo-linear-gradient';
 import { resolveGRCKey, getVehicleModelUrl } from '../../src/vehicleAssets';
 import { GlassFill } from '../../src/Glass';
 import GlassBackdrop from '../../src/components/GlassBackdrop';
@@ -58,6 +61,18 @@ const CLASS_PRESETS = [
   '#2DEC86', '#0A84FF', '#00D6E0', '#5E5CE6', '#BF5CFF',
   '#FF2D95', '#FF3B30', '#FF9500', '#FFD60A', '#FFFFFF',
 ];
+
+// The map banner's candy fill, as an absolute layer. Any tile/chip that wants
+// the treatment drops one of these in as its first child (Jeff 8/23).
+function CandyFill({ radius }: { radius?: number }) {
+  return (
+    <LinearGradient
+      colors={CANDY_COLORS}
+      locations={CANDY_LOCATIONS}
+      style={[StyleSheet.absoluteFill, radius ? { borderRadius: radius } : null]}
+    />
+  );
+}
 
 // ---- Typed identity field (Year / Make / Model / Color) ----
 // Was a dropdown bound to carDatabase. Jeff, 2026-08-23: "it should be fillable
@@ -426,6 +441,11 @@ export default function GarageScreen() {
   // ALSO commits the paint drafts (the panel has no Save of its own — Jeff:
   // "just have the original save button").
   const handleSave = async () => {
+    if (!canSave) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      Alert.alert('Finish your car', `Add your ${missingFields.join(', ').replace(/, ([^,]*)$/, ' and $1').toLowerCase()} first.`);
+      return;
+    }
     if (markerType === 'class') await saveClassPaint();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const sign = callSign.trim();
@@ -476,6 +496,18 @@ export default function GarageScreen() {
     } catch { return null; }
   })();
   const displayColor = colors.find(c => c.name === color);
+
+  // Year / Make / Model / Colour are MANDATORY (Jeff, 2026-08-23). They are what
+  // peers see on the map and what a scan is filed against, so a half-filled car
+  // is worse than none. Only enforced where the fields are actually shown —
+  // Arrow and Class hide them, and blocking Save on invisible fields would be a
+  // dead button with no explanation.
+  const carFieldsShown = markerType !== 'arrow' && markerType !== 'class';
+  const missingFields = carFieldsShown
+    ? ([['Year', year], ['Make', make], ['Model', model], ['Color', color]] as const)
+        .filter(([, v]) => !v.trim()).map(([k]) => k)
+    : [];
+  const canSave = missingFields.length === 0;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -557,7 +589,8 @@ export default function GarageScreen() {
         {topSpeed ? (
           <View style={styles.speedCard}>
             <View style={styles.speedIcon}>
-              <Ionicons name="speedometer" size={22} color={YELLOW} />
+              <CandyFill />
+              <Ionicons name="speedometer" size={22} color={CANDY_INK} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.speedLabel}>Top Cruise Speed</Text>
@@ -596,7 +629,8 @@ export default function GarageScreen() {
               activeOpacity={0.85}
               onPress={() => handleAppearance('arrow')}
             >
-              <Ionicons name="navigate" size={25} color={markerType === 'arrow' ? '#000' : YELLOW} />
+              {markerType === 'arrow' && <CandyFill />}
+              <Ionicons name="navigate" size={25} color={markerType === 'arrow' ? CANDY_INK : YELLOW} />
               <Text style={[styles.apLabel, markerType === 'arrow' && styles.apLabelSel]}>Arrow</Text>
             </TouchableOpacity>
 
@@ -605,7 +639,8 @@ export default function GarageScreen() {
               activeOpacity={0.85}
               onPress={() => handleAppearance('class')}
             >
-              <MaterialCommunityIcons name="car-hatchback" size={25} color={markerType === 'class' ? '#000' : YELLOW} />
+              {markerType === 'class' && <CandyFill />}
+              <MaterialCommunityIcons name="car-hatchback" size={25} color={markerType === 'class' ? CANDY_INK : YELLOW} />
               <Text style={[styles.apLabel, markerType === 'class' && styles.apLabelSel]}>Class</Text>
               {!classUnlocked && <PremiumCornerBadge />}
             </TouchableOpacity>
@@ -615,7 +650,8 @@ export default function GarageScreen() {
               activeOpacity={0.85}
               onPress={() => handleAppearance('car')}
             >
-              <Ionicons name="car-sport" size={25} color={markerType === 'car' ? '#000' : YELLOW} />
+              {markerType === 'car' && <CandyFill />}
+              <Ionicons name="car-sport" size={25} color={markerType === 'car' ? CANDY_INK : YELLOW} />
               <Text style={[styles.apLabel, markerType === 'car' && styles.apLabelSel]}>3D</Text>
               {!car3dUnlocked && <PremiumCornerBadge />}
             </TouchableOpacity>
@@ -632,7 +668,7 @@ export default function GarageScreen() {
                 ) : avatarUrl ? (
                   <Image source={{ uri: avatarUrl }} style={styles.apPhoto} />
                 ) : (
-                  <Ionicons name="person-circle" size={26} color={markerType === 'photo' ? '#000' : YELLOW} />
+                  <Ionicons name="person-circle" size={26} color={markerType === 'photo' ? CANDY_INK : YELLOW} />
                 )}
                 <Text style={[styles.apLabel, markerType === 'photo' && styles.apLabelSel]}>Photo</Text>
               </TouchableOpacity>
@@ -691,7 +727,7 @@ export default function GarageScreen() {
                         <Image source={CLASS_TOPDOWN[c.key]} style={styles.clsTileImg} resizeMode="contain" />
                       ) : (
                         // Placeholder glyph until Jeff's photo lands for this class.
-                        <MaterialCommunityIcons name={c.icon as any} size={26} color={sel ? '#000' : YELLOW} />
+                        <MaterialCommunityIcons name={c.icon as any} size={26} color={sel ? CANDY_INK : YELLOW} />
                       )}
                       <Text style={[styles.clsTileLabel, sel && styles.clsTileLabelSel]} numberOfLines={1}>{c.label}</Text>
                     </TouchableOpacity>
@@ -759,20 +795,22 @@ export default function GarageScreen() {
         />
         </>)}
 
-        {/* Save */}
-        <TouchableOpacity
-          style={[styles.saveBtn, saved && styles.saveBtnDone]}
-          activeOpacity={0.85}
+        {/* Tell them WHICH field is missing — a dead Save button with no reason
+            is the most common way a form loses someone. */}
+        {!canSave && (
+          <Text style={styles.requiredHint}>
+            {missingFields.join(', ').replace(/, ([^,]*)$/, ' and $1')} required
+          </Text>
+        )}
+
+        {/* Save — the map banner's candy gradient (Jeff 8/23) */}
+        <CandyCta
+          label={saved ? 'Saved' : 'Save'}
+          icon={saved ? 'checkmark-circle' : 'save-outline'}
           onPress={handleSave}
-        >
-          <Ionicons
-            name={saved ? 'checkmark-circle' : 'save-outline'}
-            size={20}
-            color="#000"
-            style={{ marginRight: 8 }}
-          />
-          <Text style={styles.saveBtnText}>{saved ? 'Saved' : 'Save'}</Text>
-        </TouchableOpacity>
+          disabled={!canSave}
+          style={styles.saveCta}
+        />
 
       </ScrollView>
     </SafeAreaView>
@@ -780,6 +818,8 @@ export default function GarageScreen() {
 }
 
 const styles = StyleSheet.create({
+  saveCta:            { marginHorizontal: 16, marginTop: 8, marginBottom: 28 },
+  requiredHint:       { color: COLORS.warning, fontSize: 13, fontWeight: '600', textAlign: 'center', marginTop: 14, marginHorizontal: 16 },
   badge360: {
     position: 'absolute', top: 14, right: 14,
     flexDirection: 'row', alignItems: 'center', gap: 4,
@@ -810,7 +850,7 @@ const styles = StyleSheet.create({
   heroHint:           { color: '#808080', fontSize: 14, marginTop: 6 },
 
   speedCard:          { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 16, backgroundColor: '#111', borderRadius: 16, padding: 14, gap: 12 },
-  speedIcon:          { width: 44, height: 44, borderRadius: 12, backgroundColor: '#1A1A00', alignItems: 'center', justifyContent: 'center' },
+  speedIcon:          { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 1, borderColor: CANDY_RIM },
   speedLabel:         { color: '#F4F4F4', fontSize: 15, fontWeight: '600' },
   speedSub:           { color: '#808080', fontSize: 12, marginTop: 2 },
   speedValue:         { color: '#2DEC86', fontSize: 28, fontWeight: '700' },
@@ -870,7 +910,7 @@ const styles = StyleSheet.create({
   clsHexInput:        { flex: 1, height: 42, borderRadius: 13, borderWidth: 1, borderColor: '#1E1E1E', color: '#F4F4F4', paddingHorizontal: 12, fontSize: 15, fontWeight: '700', letterSpacing: 1 },
   clsHexSave:         { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 13, backgroundColor: YELLOW },
   apCard:             { flex: 1, height: 86, borderRadius: 16, borderWidth: 1, borderColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  apCardSel:          { backgroundColor: YELLOW, borderColor: YELLOW },
+  apCardSel:          { borderColor: CANDY_RIM, overflow: 'hidden' },
   apLabel:            { color: '#808080', fontSize: 13, fontWeight: '600' },
   apLabelSel:         { color: '#000', fontWeight: '800' },
   apPhoto:            { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: 'rgba(0,0,0,0.25)' },

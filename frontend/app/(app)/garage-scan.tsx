@@ -36,8 +36,16 @@ import { Ionicons } from "@expo/vector-icons";
 import Svg, { Circle, Line, Path } from "react-native-svg";
 import * as Haptics from "expo-haptics";
 import { COLORS } from "../../src/theme";
+import { CandyCta } from "../../src/components/CandyCta";
+import { CANDY_COLORS, CANDY_LOCATIONS, CANDY_INK } from "../../src/components/ManeuverArrow";
+
 import { PremiumBadge } from "../../src/PremiumBadge";
 import { SCAN_SHOTS, SHOTS_TOTAL } from "../../src/carScan";
+
+/** The map banner's candy fill as an absolute layer (Jeff 8/23). */
+function CandyFillAbs() {
+  return <LinearGradient colors={CANDY_COLORS} locations={CANDY_LOCATIONS} style={StyleSheet.absoluteFill} />;
+}
 
 const TOPDOWN = require("../../assets/vehicles/v3/heavy_metal@3x.png");
 
@@ -236,7 +244,8 @@ export default function GarageScan() {
               ]}
             >
               <View style={styles.stepIcon}>
-                <Ionicons name={s.icon} size={17} color={COLORS.brand} />
+                <CandyFillAbs />
+                <Ionicons name={s.icon} size={17} color={CANDY_INK} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.stepTitle}>{s.title}</Text>
@@ -247,29 +256,19 @@ export default function GarageScan() {
         </View>
 
         {/* ── CTA ────────────────────────────────────────────────────────── */}
-        <TouchableOpacity activeOpacity={0.9} onPress={startCapture}>
-          <Animated.View
-            style={[
-              styles.ctaWrap,
-              {
-                shadowColor: COLORS.brand,
-                shadowOpacity: ctaGlow.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.5] }),
-                shadowRadius: 18,
-                shadowOffset: { width: 0, height: 0 },
-              },
-            ]}
-          >
-            <LinearGradient
-              colors={[COLORS.brand, COLORS.brandDim]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-              style={styles.cta}
-            >
-              <Ionicons name="scan" size={19} color="#04150B" />
-              <Text style={styles.ctaText}>Start Capture</Text>
-            </LinearGradient>
-          </Animated.View>
-        </TouchableOpacity>
+        <Animated.View
+          style={[
+            styles.ctaWrap,
+            {
+              shadowColor: COLORS.brand,
+              shadowOpacity: ctaGlow.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.5] }),
+              shadowRadius: 18,
+              shadowOffset: { width: 0, height: 0 },
+            },
+          ]}
+        >
+          <CandyCta label="Start Capture" icon="scan" onPress={startCapture} />
+        </Animated.View>
         <Text style={styles.finePrint}>{SHOTS_TOTAL} photos · about three minutes · one rescan included</Text>
       </ScrollView>
     </SafeAreaView>

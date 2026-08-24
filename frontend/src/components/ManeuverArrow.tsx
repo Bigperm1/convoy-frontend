@@ -97,6 +97,17 @@ export function ManeuverArrow({
   );
 }
 
+// ── The CANDY language ───────────────────────────────────────────────────────
+// Exported so other surfaces can wear the map banner's look WITHOUT re-typing
+// the stops. Jeff 2026-08-23 asked for this gradient on the Garage CTAs and
+// icons; copying three hex values into four more screens is exactly how the
+// phone and CarPlay drifted apart before ManeuverBox existed.
+export const CANDY_COLORS = ["#8CFFC4", "#2DEC86", "#0E9B58"] as const;
+export const CANDY_LOCATIONS = [0, 0.45, 1] as const;
+export const CANDY_RIM = "rgba(150,255,200,0.55)";
+/** The dark glyph/label colour that rides on top of the candy fill. */
+export const CANDY_INK = "#04150B";
+
 // ── ManeuverBox: THE green maneuver square, shared by every surface ──────────
 // (Jeff 8/20: "add a gradient look to the turnbyturn green squares... for all
 // surfaces — they look plain and flat.") One component so the phone banner, the
@@ -105,6 +116,7 @@ export function ManeuverArrow({
 // End button established: vertical mint→brand→deep gradient + a pale-green
 // hairline rim; the dark glyph rides on top. LinearGradient is proven on every
 // surface including the AA canvas (the 8/18 bisect exonerated it).
+
 export function ManeuverBox({
   size = 30,
   radius = 8,
@@ -122,12 +134,12 @@ export function ManeuverBox({
         width: size, height: size, borderRadius: radius,
         alignItems: "center", justifyContent: "center",
         overflow: "hidden",
-        borderWidth: 1, borderColor: "rgba(150,255,200,0.55)",
+        borderWidth: 1, borderColor: CANDY_RIM,
       }, style]}
     >
       <LinearGradient
-        colors={["#8CFFC4", "#2DEC86", "#0E9B58"]}
-        locations={[0, 0.45, 1]}
+        colors={CANDY_COLORS}
+        locations={CANDY_LOCATIONS}
         style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
       />
       {children}

@@ -21,10 +21,11 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 
 import { COLORS } from "../../src/theme";
+import { CandyCta } from "../../src/components/CandyCta";
+import { ManeuverBox, CANDY_INK } from "../../src/components/ManeuverArrow";
 import { getSettings, updateSettings } from "../../src/settings";
 import { SCAN_SHOTS, SCAN_RULES, MAX_SCAN_ATTEMPTS } from "../../src/carScan";
 
@@ -114,9 +115,9 @@ export default function GarageConsentScreen() {
             <View key={s.id}>
               {i > 0 && <Divider />}
               <View style={styles.shotRow}>
-                <View style={styles.shotNum}>
+                <ManeuverBox size={26} radius={13}>
                   <Text style={styles.shotNumText}>{i + 1}</Text>
-                </View>
+                </ManeuverBox>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.shotLabel}>{s.label}</Text>
                   <Text style={styles.shotHint}>{s.hint}</Text>
@@ -145,9 +146,13 @@ export default function GarageConsentScreen() {
               setAgreed((v) => !v);
             }}
           >
-            <View style={[styles.checkbox, agreed && styles.checkboxOn]}>
-              {agreed && <Ionicons name="checkmark" size={16} color="#04150B" />}
-            </View>
+            {agreed ? (
+              <ManeuverBox size={24} radius={7}>
+                <Ionicons name="checkmark" size={16} color={CANDY_INK} />
+              </ManeuverBox>
+            ) : (
+              <View style={styles.checkbox} />
+            )}
             <Text style={styles.checkText}>
               I understand my car will not be an exact replica, and that
               {isSecond ? " this render replaces the one I have now." : ` I get ${MAX_SCAN_ATTEMPTS} renders and the second replaces the first.`}
@@ -160,17 +165,12 @@ export default function GarageConsentScreen() {
             <Text style={styles.secondaryText}>Go back</Text>
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity activeOpacity={0.9} onPress={proceed} disabled={!agreed}>
-            <LinearGradient
-              colors={agreed ? [COLORS.brand, COLORS.brandDim] : ["#1A1A1A", "#141414"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-              style={styles.cta}
-            >
-              <Ionicons name="camera" size={19} color={agreed ? "#04150B" : "#4A4A4A"} />
-              <Text style={[styles.ctaText, !agreed && styles.ctaTextOff]}>Start the photo sequence</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+          <CandyCta
+            label="Start the photo sequence"
+            icon="camera"
+            onPress={proceed}
+            disabled={!agreed}
+          />
         )}
       </ScrollView>
     </SafeAreaView>
@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  shotNumText: { color: COLORS.brand, fontSize: 12.5, fontWeight: "800" },
+  shotNumText: { color: CANDY_INK, fontSize: 12.5, fontWeight: "800" },
   shotLabel: { color: COLORS.text, fontSize: 14.5, fontWeight: "700" },
   shotHint: { color: COLORS.textDim, fontSize: 12.5, marginTop: 1 },
 
@@ -263,7 +263,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  checkboxOn: { backgroundColor: COLORS.brand, borderColor: COLORS.brand },
   checkText: { flex: 1, color: COLORS.text, fontSize: 13.5, lineHeight: 20 },
 
   cta: {

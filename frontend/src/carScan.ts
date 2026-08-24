@@ -54,6 +54,17 @@ export const SCAN_SHOTS: ScanShot[] = [
 
 export const SHOTS_TOTAL = SCAN_SHOTS.length;
 
+/**
+ * Renders a customer gets. Jeff, 2026-08-23: "they get 2 tries to finalize. if
+ * they choose a 2nd render they loose the first try."
+ *
+ * The second is DESTRUCTIVE — it replaces the first, which cannot be recovered.
+ * That is stated on the consent screen before the first photo rather than at the
+ * moment it bites. ⚠️ Enforced in local settings today, which means a reinstall
+ * resets it; a real entitlement needs a server-side counter.
+ */
+export const MAX_SCAN_ATTEMPTS = 2;
+
 /** Coaching that applies to every frame — the PoC's measured failure modes. */
 export const SCAN_RULES = [
   "Stand three to four metres back and use the 1x lens — pinching to zoom or stepping in warps the proportions.",

@@ -133,6 +133,19 @@ carYear?: string;
 carMake?: string;
 carModel?: string;
 carColor?: string;
+// ── Car Scan (Ultra) ──────────────────────────────────────────────────────
+// The driver's OWN car, rebuilt from four photos. Since the authored widebody
+// was retired there is no stock 3D model, so carScanModelUrl is the ONLY source
+// for the Garage hero and the 3D map marker — undefined means "no car yet",
+// which is a normal first-run state, not an error.
+carScanModelUrl?: string;                        // https URL of the finished GLB
+carScanStatus?: 'none' | 'submitted' | 'ready' | 'failed';
+carScanId?: string;                              // the scan folder in the car-scans bucket
+carScanSubmittedAt?: string;                     // ISO, when Generate was tapped
+carScanConsentAt?: string;                       // ISO, when the disclaimer was accepted
+// Renders used, capped at MAX_SCAN_ATTEMPTS (2). The 2nd REPLACES the 1st.
+// ⚠️ Local-only today: a reinstall resets it. Real entitlement needs a server counter.
+carScanAttemptsUsed?: number;
 // How the driver is DRAWN on the convoy map — separate from avatarMode, which is
 // privacy/visibility (whether you appear at all). 'car' = the 3D GRC model (default),
 // 'arrow' = a 3D green arrow, 'photo' = a circular uploaded profile photo. undefined
@@ -242,6 +255,12 @@ carYear: undefined,
 carMake: undefined,
 carModel: undefined,
 carColor: undefined,
+carScanModelUrl: undefined,
+carScanStatus: undefined,
+carScanId: undefined,
+carScanSubmittedAt: undefined,
+carScanConsentAt: undefined,
+carScanAttemptsUsed: undefined,
 selfMarkerType: undefined,
 avatarUrl: undefined,
 topSpeed: undefined,

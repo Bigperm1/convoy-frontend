@@ -31,7 +31,7 @@ import { router } from "expo-router";
 
 import { COLORS } from "../../src/theme";
 import { useAuth } from "../../src/auth";
-import { getSettings } from "../../src/settings";
+import { getSettings, updateSettings } from "../../src/settings";
 import { ensureCameraPermission } from "../../src/permissionGate";
 import { SCAN_SHOTS, SHOTS_TOTAL, newScanId, uploadScan, type CapturedShot } from "../../src/carScan";
 
@@ -135,6 +135,16 @@ export default function GarageCaptureScreen() {
       },
       (done) => setSent(done),
     );
+    // An attempt is only spent when the photos are actually IN the bucket. A
+    // failed upload must not burn one of the two renders.
+    if (r.ok) {
+      await updateSettings({
+        carScanId: scanId,
+        carScanStatus: "submitted",
+        carScanSubmittedAt: new Date().toISOString(),
+        carScanAttemptsUsed: (s.carScanAttemptsUsed ?? 0) + 1,
+      });
+    }
     setResult({ ok: r.ok, uploaded: r.uploaded, error: r.error });
     setPhase("done");
     Haptics.notificationAsync(
@@ -151,7 +161,7 @@ export default function GarageCaptureScreen() {
           {uploading ? (
             <>
               <ActivityIndicator size="large" color={COLORS.brand} />
-              <Text style={styles.bigTitle}>Sending your car</Text>
+              <Text style={styles.bigTitle}>Building your car</Text>
               <Text style={styles.centreBody}>
                 {sent} of {SHOTS_TOTAL} photos uploaded
               </Text>
@@ -166,12 +176,21 @@ export default function GarageCaptureScreen() {
                   color={result?.ok ? COLORS.brand : COLORS.warning}
                 />
               </View>
-              <Text style={styles.bigTitle}>{result?.ok ? "Got it" : "Partly sent"}</Text>
+              <Text style={styles.bigTitle}>{result?.ok ? "Your car is in the queue" : "Partly sent"}</Text>
               <Text style={styles.centreBody}>
+                {/* Say only what actually happens. There is no automatic
+                    build pipeline yet — a person collects these and runs them
+                    through by hand — so this must not promise a car appearing
+                    on its own. */}
                 {result?.ok
-                  ? `All ${SHOTS_TOTAL} photos are in. We'll build your car and let you know when it lands on the map.`
+                  ? `All ${SHOTS_TOTAL} photos are in. Your car is built by hand right now, so give it a day or two — we'll message you when it's ready. Nothing more to do; you can close the app.`
                   : `${result?.uploaded ?? 0} of ${SHOTS_TOTAL} photos went up.${result?.error ? ` ${result.error}` : ""}`}
               </Text>
+              {!result?.ok && (
+                <Text style={styles.finePrint}>
+                  This did not use up one of your renders.
+                </Text>
+              )}
               {!result?.ok && (
                 <TouchableOpacity style={styles.ghostBtn} onPress={send} activeOpacity={0.85}>
                   <Ionicons name="refresh" size={17} color={COLORS.brand} />
@@ -299,7 +318,7 @@ export default function GarageCaptureScreen() {
           style={[styles.sendBtn, !complete && styles.sendBtnOff]}
         >
           <Text style={[styles.sendText, !complete && styles.sendTextOff]}>
-            {complete ? `Send ${SHOTS_TOTAL} photos` : `${SHOTS_TOTAL - captured} to go`}
+            {complete ? "Generate my car" : `${SHOTS_TOTAL - captured} to go`}
           </Text>
         </TouchableOpacity>
       </ScrollView>

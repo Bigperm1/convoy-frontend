@@ -357,6 +357,7 @@ export default function AppLayout() {
         {/* Garage Scan capture guide + the guided lap it hands off to. Reached
             from the Garage's "Scan your car" link, never a bottom tab. */}
         <Tabs.Screen name="garage-scan" options={{ href: null }} />
+        <Tabs.Screen name="garage-consent" options={{ href: null }} />
         <Tabs.Screen name="garage-capture" options={{ href: null }} />
         {/* Showroom — the swipeable appearance-ladder picker; staged, unlinked. */}
         <Tabs.Screen name="showroom" options={{ href: null }} />

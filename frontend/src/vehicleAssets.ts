@@ -53,8 +53,7 @@ export type GRCColorKey =
   | "lfa_absolutely_red"
   | "lfa_pearl_yellow"
   | "lfa_pearl_blue"
-  | "lfa_matte_black"
-  | "grc_widebody";
+  | "lfa_matte_black";
 
 // require() bundles the asset for native (Image component memory-friendly).
 // On web Metro returns a `{ uri }` object — works either way.
@@ -89,7 +88,6 @@ export const VEHICLE_PNG: Record<GRCColorKey, number | { uri: string }> = {
   gt3rs_miami_blue:     require("../assets/vehicles/v3/gt3rs_miami_blue.png"),
   gt3rs_python_green:   require("../assets/vehicles/v3/gt3rs_python_green.png"),
   gt3rs_shark_blue:     require("../assets/vehicles/v3/gt3rs_shark_blue.png"),
-  grc_widebody:         require("../assets/vehicles/v3/grc_widebody2.png"),
   s2k_grand_prix_white: require("../assets/vehicles/v3/s2k_grand_prix_whiteb.png"),
   s2k_berlina_black: require("../assets/vehicles/v3/s2k_berlina_blackb.png"),
   s2k_silverstone: require("../assets/vehicles/v3/s2k_silverstoneb.png"),
@@ -201,8 +199,6 @@ const ALIASES: Record<string, GRCColorKey> = {
   "gt3rs_miami_blue":      "gt3rs_miami_blue",
   "gt3rs_python_green":    "gt3rs_python_green",
   "gt3rs_shark_blue":      "gt3rs_shark_blue",
-  "widebody":              "grc_widebody",
-  "grc_widebody":          "grc_widebody",
   // Honda S2000 (AP1/AP2)
   "grand prix white":      "s2k_grand_prix_white",
   "berlina black":         "s2k_berlina_black",
@@ -349,7 +345,6 @@ export const VEHICLE_TINT: Record<GRCColorKey, { color: string; mix: number }> =
   gt3rs_miami_blue:     { color: "#00B2D8", mix: 1.0 },
   gt3rs_python_green:   { color: "#4EC53F", mix: 1.0 },
   gt3rs_shark_blue:     { color: "#2E64B8", mix: 1.0 },
-  grc_widebody:         { color: "#6B6E72", mix: 0.9 }, // scanned car — HM baked into the GLB
   // S2000 / M2 / LC 500 / LFA — vivid bake hexes (8/20), lockstep with the GLBs
   s2k_grand_prix_white: { color: "#FAFAF6", mix: 0.0 },
   s2k_berlina_black:    { color: "#17191C", mix: 0.92 },
@@ -421,9 +416,6 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
   gt3rs_miami_blue:     "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_miami_blue.glb",
   gt3rs_python_green:   "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_python_green.glb",
   gt3rs_shark_blue:     "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_gt3rs_shark_blue.glb",
-  // Jeff's Garage-Scanned widebody (Meshy-7, full mesh + 2K tex, HM tint baked).
-  // Heavier than the authored fleet (~9 MB vs ~15 MB) — his personal test car.
-  grc_widebody:         "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_jeff_widebody3.glb",
   s2k_grand_prix_white: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_grand_prix_white3.glb",
   s2k_berlina_black: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_berlina_black3.glb",
   s2k_silverstone: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_s2k_silverstone3.glb",
@@ -511,7 +503,6 @@ const VEHICLE_PNG_INK_LEN: Record<GRCColorKey, number> = {
   gt3rs_miami_blue: 132,
   gt3rs_python_green: 132,
   gt3rs_shark_blue: 132,
-  grc_widebody: 132, // measured at bake (sprite alpha>0)
   // S2000/M2/LC/LFA — VERIFY against the measured @3x before every publish
   s2k_grand_prix_white: 132,
   s2k_berlina_black: 132,

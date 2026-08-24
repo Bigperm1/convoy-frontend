@@ -125,7 +125,9 @@ export default function GarageScan() {
 
   const startCapture = () => {
     Haptics.selectionAsync();
-    router.push("/(app)/garage-capture" as any);
+    // Straight to the disclaimer, never to the camera. The two-render rule is
+    // destructive and has to be read and acknowledged before the first photo.
+    router.push("/(app)/garage-consent" as any);
   };
 
   return (

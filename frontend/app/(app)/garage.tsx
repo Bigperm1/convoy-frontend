@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ImageBackground, SafeAreaView, Dimensions, TextInput, LayoutAnimation,
+  SafeAreaView, Dimensions, TextInput, LayoutAnimation,
   Platform, UIManager, Image, ActivityIndicator, Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,8 +17,8 @@ import { ClassSprite, PAINT_COLORS } from '../../src/classLayers';
 import { useAuth } from '../../src/auth';
 import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
-import { getGarageImage } from '../../src/carImages';
 import CarViewer3D from '../../src/CarViewer3D';
+import CarHero3D from '../../src/CarHero3D';
 import { resolveGRCKey, getVehicleModelUrl } from '../../src/vehicleAssets';
 import { GlassFill } from '../../src/Glass';
 import GlassBackdrop from '../../src/components/GlassBackdrop';
@@ -508,11 +508,21 @@ export default function GarageScreen() {
     setTimeout(() => router.back(), 650);
   };
 
-  const carImage = getGarageImage(make, model, color);
-  // Interactive 3D (8/20): tap the hero to orbit the ACTUAL map model with a
-  // finger. Only offered when this colour has a hosted GLB.
   const [viewer3D, setViewer3D] = useState(false);
+  // The driver's OWN scanned car wins over the authored fleet model. Since the
+  // widebody was retired there is no personal car baked into the app any more —
+  // it comes from a scan or not at all.
+  const [scanModelUrl, setScanModelUrl] = useState<string | null>(null);
+  const [scanPending, setScanPending] = useState(false);
+  useEffect(() => {
+    (async () => {
+      const s = await getSettings();
+      setScanModelUrl(s.carScanModelUrl ?? null);
+      setScanPending(s.carScanStatus === 'submitted');
+    })();
+  }, []);
   const heroModelUrl = (() => {
+    if (scanModelUrl) return scanModelUrl;
     try {
       const k = resolveGRCKey(color);
       return k ? getVehicleModelUrl(color) : null;
@@ -555,41 +565,39 @@ export default function GarageScreen() {
           </View>
         ) : (
         <View style={styles.heroWrap}>
-          <TouchableOpacity
-            activeOpacity={0.92}
-            disabled={!heroModelUrl}
-            onPress={() => { Haptics.selectionAsync(); setViewer3D(true); }}
-            style={{ flex: 1 }}  // heroBg is flex:1 — an unsized wrapper collapsed the hero to 0 height (8/20)
-          >
-          <ImageBackground source={carImage} style={styles.heroBg} resizeMode="cover">
-            {/* Subtle top vignette + strong bottom fade to black so the image
-                blends into the #000 background like the onboarding slides. */}
-            <LinearGradient
-              colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0)', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.97)']}
-              locations={[0, 0.28, 0.62, 1]}
-              style={StyleSheet.absoluteFill}
-            />
-            <View style={styles.heroCaption}>
-              <Text style={styles.heroTitle}>
-                {year && make && model ? `${year} ${make} ${model}` : 'Select your car'}
-              </Text>
-              {color ? (
-                <View style={styles.heroColorRow}>
-                  {displayColor && <View style={[styles.heroColorDot, { backgroundColor: displayColor.hex }]} />}
-                  <Text style={styles.heroSub}>{color}</Text>
-                </View>
-              ) : (
-                <Text style={styles.heroHint}>Pick your year, make & model below</Text>
-              )}
-            </View>
-            {heroModelUrl && (
-              <View style={styles.badge360}>
-                <Ionicons name="sync" size={12} color="#04150B" />
-                <Text style={styles.badge360Text}>360°</Text>
+          {/* The hero IS the 3D view now (Jeff 8/23) — spin it with a finger
+              right here, no modal to open. Drag sideways to orbit, up/down to
+              scroll the page; see CarHero3D for how that split is arbitrated. */}
+          <CarHero3D
+            glbUrl={heroModelUrl}
+            style={StyleSheet.absoluteFill}
+            onExpand={heroModelUrl ? () => { Haptics.selectionAsync(); setViewer3D(true); } : undefined}
+            emptyLabel={scanPending ? 'Building your car…' : 'No car yet'}
+            emptyHint={scanPending ? 'It appears here when it is ready' : 'Scan yours to put it on the map'}
+            onEmptyPress={scanPending ? undefined : () => { Haptics.selectionAsync(); router.push('/(app)/garage-scan' as any); }}
+          />
+          {/* Bottom fade so the caption stays readable over the model. Both
+              layers are pointerEvents:none so they never eat a spin drag —
+              on the PROP, not the style (see invisible-overlay gotcha). */}
+          <LinearGradient
+            pointerEvents="none"
+            colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.96)']}
+            locations={[0.55, 0.82, 1]}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={styles.heroCaption} pointerEvents="none">
+            <Text style={styles.heroTitle}>
+              {year && make && model ? `${year} ${make} ${model}` : 'Select your car'}
+            </Text>
+            {color ? (
+              <View style={styles.heroColorRow}>
+                {displayColor && <View style={[styles.heroColorDot, { backgroundColor: displayColor.hex }]} />}
+                <Text style={styles.heroSub}>{color}</Text>
               </View>
+            ) : (
+              <Text style={styles.heroHint}>Pick your year, make & model below</Text>
             )}
-          </ImageBackground>
-          </TouchableOpacity>
+          </View>
         </View>
         )}
 

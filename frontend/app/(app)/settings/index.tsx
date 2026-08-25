@@ -96,6 +96,8 @@ export default function SettingsMenu() {
       {/* NAVIGATION */}
       <SectionLabel>NAVIGATION</SectionLabel>
       <SettingsCard>
+        <MenuRow icon="color-palette" iconColor="#E0A93E" title="App Skin" subtitle="The metal the whole app wears" onPress={() => go("/(app)/settings/app-skin")} />
+        <Divider />
         <MenuRow icon="map" iconColor="#0A84FF" title="Map Mode" value={mapModeVal} onPress={() => go("/(app)/settings/map-mode")} />
         <Divider />
         <MenuRow icon="navigate" iconColor="#0A84FF" title="Map View" value={mapViewVal} onPress={() => go("/(app)/settings/map-view")} />

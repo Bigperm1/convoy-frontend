@@ -153,6 +153,12 @@ carScanAttemptsUsed?: number;
 // → 'car' via getSelfMarkerType(). Mirrored to the backend profile (avatar_type) +
 // presence so peers render you the same way you chose in the Garage.
 selfMarkerType?: 'car' | 'arrow' | 'photo' | 'class';
+// The app-wide metal (src/appSkin.ts). 'auto' — the default — follows whatever tier the
+// account holds, so gold/silver ARRIVES with the purchase without the customer touching
+// a setting. An explicit choice is CLAMPED to entitlement at read time, so this can never
+// hold a metal they no longer pay for. Deliberately NOT in DEFAULT_SETTINGS: undefined
+// already means 'auto', so no migration flag is needed for existing installs.
+appSkin?: 'auto' | 'brand' | 'premium' | 'ultra';
 // "Class" map appearance (Garage): a top-down sprite of the vehicle class,
 // painted with user-picked PRIMARY (accent band) + SECONDARY (second band)
 // colors. Stored PER CLASS so switching class remembers each one's paint.

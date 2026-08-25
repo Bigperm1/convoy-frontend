@@ -43,7 +43,14 @@ export type PremiumFeature =
   | "spoken_extras"
   | "speed_alert"
   | "comms_handsfree"   // VOX — push-to-talk stays free
-  | "convoy_size";      // >3 cars in a live convoy
+  | "convoy_size"       // >3 cars in a live convoy
+  // The app-wide metal (src/appSkin.ts). TWO features, not one, because the skin is a
+  // LADDER and a single FEATURE_RANK entry cannot express two gates: silver unlocks at
+  // premium, gold only at ultra. Modelling it this way means the Settings rows get the
+  // right H and the right paywall for free, via the same useFeature/useFeatureTier path
+  // every other gate uses.
+  | "app_skin_silver"    // PREMIUM — the silver app skin
+  | "app_skin_gold";     // ULTRA — the gold app skin (silver can never reach it)
 
 const STORE_KEY = "convoy.entitlement.v1";
 const DEV_KEY = "convoy.entitlement.devTier"; // manual QA override, survives reload
@@ -119,6 +126,7 @@ const TIER_RANK: Record<Tier, number> = {
 // Everything defaults to premium (rank 1); only the exact-car experience is ultra.
 const FEATURE_RANK: Partial<Record<PremiumFeature, number>> = {
   car_3d: 2,
+  app_skin_gold: 2,
 };
 
 /**

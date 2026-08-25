@@ -197,6 +197,7 @@ export function RadioRow({
   subtitle,
   selected,
   onSelect,
+  feature,
 }: {
   icon: any;
   iconColor: string;
@@ -204,19 +205,35 @@ export function RadioRow({
   subtitle?: string;
   selected: boolean;
   onSelect: () => void;
+  /** Premium-gate this choice. Same contract as ToggleRow: the radio is replaced by the
+   *  tier's H (silver = Premium, gold = Ultra Premium) and the whole row opens the
+   *  paywall instead of selecting. Pass the FEATURE, never a tier — the metal is derived
+   *  from the ladder so a feature that moves tiers can't wear the wrong one. */
+  feature?: PremiumFeature;
 }) {
+  const unlocked = useFeature(feature ?? "arrow_colors");
+  const tier = useFeatureTier(feature ?? "arrow_colors");
+  const locked = !!feature && !unlocked;
   return (
-    <TouchableOpacity onPress={onSelect} activeOpacity={0.7} style={styles.row}>
-      <View style={[styles.iconWrap, { backgroundColor: iconColor + "22" }]}>
-        <Ionicons name={icon} size={20} color={iconColor} />
+    <TouchableOpacity
+      onPress={() => (locked ? openPaywall(feature!) : onSelect())}
+      activeOpacity={0.7}
+      style={styles.row}
+    >
+      <View style={[styles.iconWrap, { backgroundColor: iconColor + "22" }, locked && styles.iconWrapLocked]}>
+        <Ionicons name={icon} size={20} color={locked ? COLORS.textDim : iconColor} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={styles.title}>{title}</Text>
+        <Text style={[styles.title, locked && styles.titleLocked]}>{title}</Text>
         {!!subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
       </View>
-      <View style={[styles.radioOuter, selected && { borderColor: "#00C46A" }]}>
-        {selected && <View style={styles.radioInner} />}
-      </View>
+      {locked ? (
+        <TierLock tier={tier} size={24} />
+      ) : (
+        <View style={[styles.radioOuter, selected && { borderColor: iconColor }]}>
+          {selected && <View style={[styles.radioInner, { backgroundColor: iconColor }]} />}
+        </View>
+      )}
     </TouchableOpacity>
   );
 }

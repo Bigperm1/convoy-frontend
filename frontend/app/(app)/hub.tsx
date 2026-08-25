@@ -111,7 +111,7 @@ export default function HubScreen() {
   return (
     <>
     <SafeAreaView style={styles.c} edges={["top"]}>
-      <GlassBackdrop source={require("../../assets/images/glass-bgt.png")} />
+      <GlassBackdrop />
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={COLORS.primary} />}>
         <View style={styles.headerRow}>

@@ -37,7 +37,7 @@ export function SettingsPage({
   const router = useRouter();
   return (
     <View style={styles.container}>
-      <GlassBackdrop source={require("../../assets/images/glass-bgt.png")} />
+      <GlassBackdrop />
       <SafeAreaView edges={["top"]} style={styles.headerWrap}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn} testID="settings-back">

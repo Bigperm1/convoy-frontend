@@ -23,9 +23,28 @@ import { registerPushToken } from '../../src/pushRegistration';
 import { livePttBus, setCommsScreenFocused, acquireFloor, releaseFloor, getFloorHolder, floorBus, threadBus } from '../../src/livePtt';
 import { commsRead } from '../../src/commsRead';
 import { setPlaybackAudioMode, setIdleAudioMode } from '../../src/audioMode';
-import { useAccentAlpha } from '../../src/appSkin';
+import { useAccent, useAccentAlpha, useAppSkin } from '../../src/appSkin';
 
 const YELLOW = '#2DEC86';
+
+// ── THE MIC WEARS THE APP SKIN (Jeff, 2026-08-25) ────────────────────────────
+// "the comms page needs to be silver and gold too including the wallpaper."
+// The halo is a pre-rendered DONUT png and the pressed mic face is a baked candy
+// gradient — neither can ride a tintColor, so the skin needs its own baked pairs or
+// the mic would stay green on a gold page while everything around it moved. Both are
+// hue-rotations of the same artwork (green sits at ~145deg -> ultra's 40deg; silver is
+// desaturated and lifted). mic_chrome (the UNPRESSED face) is already neutral grey and
+// is skin-independent by construction. New asset paths on purpose (OTA path-key trap).
+const MIC_GLOW = {
+  brand:   require('../../assets/images/mic-glow.png'),
+  premium: require('../../assets/images/mic-glow_silver.png'),
+  ultra:   require('../../assets/images/mic-glow_gold.png'),
+} as const;
+const MIC_CANDY = {
+  brand:   require('../../assets/images/premium/mic_candy.png'),
+  premium: require('../../assets/images/premium/mic_candy_silver.png'),
+  ultra:   require('../../assets/images/premium/mic_candy_gold.png'),
+} as const;
 
 type Community = {
   id: string; name: string; member_count: number;
@@ -68,6 +87,8 @@ export default function TalkScreen() {
   const { tier } = useLatestTier();
   // App skin (silver at Premium, gold at Ultra) for the chrome on this screen.
   // One hook per distinct alpha — the tint stays a tint, never a solid disc.
+  const accent = useAccent();
+  const skinTier = useAppSkin();
   const accentTint = useAccentAlpha(0.12);
   const accentEdge = useAccentAlpha(0.4);
   const accentRing = useAccentAlpha(0.45);
@@ -573,7 +594,7 @@ export default function TalkScreen() {
   return (
     <>
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <GlassBackdrop source={require("../../assets/images/glass-bgt.png")} />
+      <GlassBackdrop />
       {/* Community header — live active convoy */}
       <View style={styles.header}>
         {active ? (
@@ -582,13 +603,13 @@ export default function TalkScreen() {
               {active.logo_b64 ? (
                 <Image source={{ uri: active.logo_b64 }} style={styles.avatarImg} />
               ) : (
-                <Ionicons name="people" size={20} color={YELLOW} />
+                <Ionicons name="people" size={20} color={accent} />
               )}
             </View>
             <View style={{ flexShrink: 1 }}>
               <Text style={styles.communityName} numberOfLines={1}>{active.name}</Text>
               <View style={styles.subRow}>
-                <Text style={styles.connected}>{connectedText}</Text>
+                <Text style={[styles.connected, { color: accent }]}>{connectedText}</Text>
                 <View style={[styles.tierPill, { backgroundColor: tierMeta.color + '22' }]}>
                   <Ionicons name="radio" size={10} color={tierMeta.color} />
                   <Text style={[styles.tierText, { color: tierMeta.color }]}>{tierMeta.label}</Text>
@@ -634,7 +655,7 @@ export default function TalkScreen() {
           <Text style={styles.switcherTitle}>Your clubs</Text>
           {communities.length === 0 ? (
             <TouchableOpacity onPress={() => { setDropdownOpen(false); router.push('/(app)/hub'); }} style={styles.switcherEmpty}>
-              <Ionicons name="add-circle-outline" size={18} color={YELLOW} />
+              <Ionicons name="add-circle-outline" size={18} color={accent} />
               <Text style={styles.switcherEmptyText}>Go to the Hub to create or join a club</Text>
             </TouchableOpacity>
           ) : (
@@ -647,7 +668,7 @@ export default function TalkScreen() {
                       {c.logo_b64 ? (
                         <Image source={{ uri: c.logo_b64 }} style={styles.switcherAvatarImg} />
                       ) : (
-                        <Ionicons name="people" size={18} color={isActive ? YELLOW : '#8E8E93'} />
+                        <Ionicons name="people" size={18} color={isActive ? accent : '#8E8E93'} />
                       )}
                     </View>
                     <View style={{ flex: 1 }}>
@@ -686,25 +707,25 @@ export default function TalkScreen() {
             contentContainerStyle={styles.strip}
           >
             {active ? (
-              <Pressable onPress={selectCrew} style={({ pressed }) => [styles.chip, !activeThreadId && styles.chipActive, pressed && { opacity: 0.85 }]}>
-                <Ionicons name="people" size={15} color={!activeThreadId ? '#000' : YELLOW} />
+              <Pressable onPress={selectCrew} style={({ pressed }) => [styles.chip, !activeThreadId && [styles.chipActive, { backgroundColor: accent, borderColor: accent }], pressed && { opacity: 0.85 }]}>
+                <Ionicons name="people" size={15} color={!activeThreadId ? '#000' : accent} />
                 <Text style={[styles.chipText, !activeThreadId && styles.chipTextActive]} numberOfLines={1}>Crew</Text>
-                {!!activeThreadId && !!active && commsRead.channelHasUnread(active.id) && <View style={styles.chipDot} />}
+                {!!activeThreadId && !!active && commsRead.channelHasUnread(active.id) && <View style={[styles.chipDot, { backgroundColor: accent }]} />}
               </Pressable>
             ) : null}
             {threads.map((t) => {
               const on = t.id === activeThreadId;
               return (
-                <Pressable key={t.id} onPress={() => selectThread(t)} onLongPress={() => confirmDeleteThread(t)} delayLongPress={400} style={({ pressed }) => [styles.chip, on && styles.chipActive, pressed && { opacity: 0.85 }]}>
+                <Pressable key={t.id} onPress={() => selectThread(t)} onLongPress={() => confirmDeleteThread(t)} delayLongPress={400} style={({ pressed }) => [styles.chip, on && [styles.chipActive, { backgroundColor: accent, borderColor: accent }], pressed && { opacity: 0.85 }]}>
                   <Ionicons name={t.is_group ? 'people-circle' : 'person'} size={15} color={on ? '#000' : '#bbb'} />
                   <Text style={[styles.chipText, on && styles.chipTextActive]} numberOfLines={1}>{t.title}</Text>
-                  {!on && commsRead.channelHasUnread(t.id) && <View style={styles.chipDot} />}
+                  {!on && commsRead.channelHasUnread(t.id) && <View style={[styles.chipDot, { backgroundColor: accent }]} />}
                 </Pressable>
               );
             })}
             <Pressable onPress={openThreadPicker} style={({ pressed }) => [styles.chipNew, { backgroundColor: accentTint, borderColor: accentEdge }, pressed && { opacity: 0.85 }]}>
-              <Ionicons name="add" size={16} color={YELLOW} />
-              <Text style={styles.chipNewText}>New</Text>
+              <Ionicons name="add" size={16} color={accent} />
+              <Text style={[styles.chipNewText, { color: accent }]}>New</Text>
             </Pressable>
           </ScrollView>
         </View>
@@ -740,7 +761,7 @@ export default function TalkScreen() {
             not accept a pointerEvents prop, hence the wrapper. */}
         <View pointerEvents="none" style={styles.micGlowWrap}>
           <Animated.Image
-            source={require('../../assets/images/mic-glow.png')}
+            source={MIC_GLOW[skinTier]}
             resizeMode="contain"
             style={[styles.micGlowImg, { opacity: glowOpacity }]}
           />
@@ -770,7 +791,7 @@ export default function TalkScreen() {
               ) : (
                 <Image
                   source={(pressed || ptt.voxActive)
-                    ? require('../../assets/images/premium/mic_candy.png')
+                    ? MIC_CANDY[skinTier]
                     : require('../../assets/images/premium/mic_chrome.png')}
                   style={{ width: MIC_ICON_SIZE, height: MIC_ICON_SIZE, opacity: channelId ? 1 : 0.45 }}
                   resizeMode="contain"
@@ -781,7 +802,7 @@ export default function TalkScreen() {
         </Animated.View>
         </View>
 
-        <Text style={[styles.pttLabel, (pressed || ptt.voxActive) && { color: YELLOW }]} numberOfLines={1}>
+        <Text style={[styles.pttLabel, (pressed || ptt.voxActive) && { color: accent }]} numberOfLines={1}>
           {!channelId
             ? 'Pick a convoy to talk'
             : ptt.voxActive
@@ -801,12 +822,12 @@ export default function TalkScreen() {
             tap-to-open and a 3s-silence gap auto-sends the turn and closes. */}
         {activeThread && (
           <TouchableOpacity
-            style={[styles.voxToggle, { borderColor: accentEdge }, voxOn && styles.voxToggleOn]}
+            style={[styles.voxToggle, { borderColor: accentEdge }, voxOn && [styles.voxToggleOn, { backgroundColor: accent, borderColor: accent }]]}
             activeOpacity={0.85}
             onPress={toggleVox}
           >
-            <Ionicons name={voxOn ? 'radio' : 'hand-right'} size={14} color={voxOn ? '#000' : YELLOW} />
-            <Text style={[styles.voxToggleText, voxOn && styles.voxToggleTextOn]}>
+            <Ionicons name={voxOn ? 'radio' : 'hand-right'} size={14} color={voxOn ? '#000' : accent} />
+            <Text style={[styles.voxToggleText, { color: accent }, voxOn && styles.voxToggleTextOn]}>
               {voxOn ? 'Hands-free on' : 'Hands-free off'}
             </Text>
           </TouchableOpacity>
@@ -821,11 +842,11 @@ export default function TalkScreen() {
             activeOpacity={0.85}
             onPress={() => { Haptics.selectionAsync(); setTxOpen((o) => !o); }}
           >
-            <Ionicons name="radio" size={15} color={YELLOW} />
+            <Ionicons name="radio" size={15} color={accent} />
             <Text style={styles.txToggleText}>
               Recent Transmissions{ptt.history.length ? `  ·  ${ptt.history.length}` : ''}
             </Text>
-            {ptt.sending && <Text style={styles.txSending}>Sending…</Text>}
+            {ptt.sending && <Text style={[styles.txSending, { color: accent }]}>Sending…</Text>}
             <Ionicons name={txOpen ? 'chevron-down' : 'chevron-up'} size={16} color="#888" />
           </TouchableOpacity>
         )}
@@ -845,7 +866,7 @@ export default function TalkScreen() {
                   {ptt.history.map((m) => (
                     <View key={m.id} style={styles.convoRow}>
                       <View style={styles.convoTop}>
-                        <TouchableOpacity onPress={() => playConvo(m)} style={styles.playBtn} activeOpacity={0.8}>
+                        <TouchableOpacity onPress={() => playConvo(m)} style={[styles.playBtn, { backgroundColor: accent }]} activeOpacity={0.8}>
                           <Ionicons name={playingId === m.id ? 'pause' : 'play'} size={18} color="#000" />
                         </TouchableOpacity>
                         <View style={{ flex: 1 }}>
@@ -854,10 +875,10 @@ export default function TalkScreen() {
                         </View>
                         {playingId === m.id ? (
                           <View style={[styles.playingPill, { backgroundColor: accentTint }]}>
-                            <Ionicons name="volume-high" size={13} color={YELLOW} />
+                            <Ionicons name="volume-high" size={13} color={accent} />
                           </View>
                         ) : (m.user_id !== user?.id && !commsRead.clipPlayed(m.id)) ? (
-                          <View style={styles.unreadDot} />
+                          <View style={[styles.unreadDot, { backgroundColor: accent }]} />
                         ) : null}
                       </View>
                     </View>
@@ -886,18 +907,18 @@ export default function TalkScreen() {
                   const on = picked.includes(m.id);
                   return (
                     <TouchableOpacity key={m.id} onPress={() => toggleMember(m.id)} style={styles.pickRow} activeOpacity={0.8}>
-                      <View style={[styles.pickAvatar, on && styles.pickAvatarOn]}>
+                      <View style={[styles.pickAvatar, on && [styles.pickAvatarOn, { backgroundColor: accent }]]}>
                         <Ionicons name="person" size={16} color={on ? '#000' : '#8E8E93'} />
                       </View>
                       <Text style={styles.pickName} numberOfLines={1}>{m.handle}</Text>
-                      <Ionicons name={on ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={on ? YELLOW : '#48484A'} />
+                      <Ionicons name={on ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={on ? accent : '#48484A'} />
                     </TouchableOpacity>
                   );
                 })}
               </ScrollView>
             )}
             <TouchableOpacity
-              style={[styles.startBtn, (picked.length === 0 || creating) && styles.startBtnDisabled]}
+              style={[styles.startBtn, { backgroundColor: accent }, (picked.length === 0 || creating) && styles.startBtnDisabled]}
               disabled={picked.length === 0 || creating}
               onPress={startThread}
               activeOpacity={0.85}

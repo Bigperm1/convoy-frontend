@@ -77,7 +77,30 @@ import { onCarNavStarted } from "../../src/carplay/carActions";
 import { PoliceBadgeIcon } from "../../src/components/MapControlIcons";
 import CompassNeedle from '../../src/components/CompassNeedle';
 import { startHeatProbe, stopHeatProbe } from '../../src/heatProbe';
-import { useAccent, useAccentAlpha } from "../../src/appSkin";
+import { useAccent, useAccentAlpha, useAppSkin } from "../../src/appSkin";
+
+// ── MAP FURNITURE WEARS THE APP SKIN (Jeff, 2026-08-25) ──────────────────────
+// "we should also do the crew/2D/3D/compass tiered too". These three are baked candy
+// PNGs — a tintColor cannot ride a gradient — so the skin needs its own pairs, exactly
+// like the tab glyphs and the mic. Hue-rotations of the same art (green ~145deg ->
+// ultra 40deg; silver desaturated and lifted). The compass is SVG and follows directly.
+// NOTE: these are map FURNITURE, not map DATA — the route line, congestion, hazards and
+// the green arrow are untouched, per src/appSkin.ts.
+const CREW_ART = {
+  brand:   require("../../assets/images/premium/crew_candy.png"),
+  premium: require("../../assets/images/premium/crew_candy_silver.png"),
+  ultra:   require("../../assets/images/premium/crew_candy_gold.png"),
+} as const;
+const VIEW2D_ART = {
+  brand:   require("../../assets/images/premium/view2d_candy.png"),
+  premium: require("../../assets/images/premium/view2d_candy_silver.png"),
+  ultra:   require("../../assets/images/premium/view2d_candy_gold.png"),
+} as const;
+const VIEW3D_ART = {
+  brand:   require("../../assets/images/premium/view3d_candy.png"),
+  premium: require("../../assets/images/premium/view3d_candy_silver.png"),
+  ultra:   require("../../assets/images/premium/view3d_candy_gold.png"),
+} as const;
 
 type RouteInfo = {
   distance_text: string;
@@ -439,6 +462,7 @@ export default function MapScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const accent = useAccent();
+  const skinTier = useAppSkin();
   const accentTint12 = useAccentAlpha(0.12);
   const navInset = Platform.OS === "android" ? insets.bottom : 0;
   const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number; speed?: number } | null>(null);
@@ -4833,7 +4857,7 @@ export default function MapScreen() {
           {/* Candy 2D/3D lettering — the CarPlay view button's exact art (8/20).
               Still shows what you GET, per the 8/15 convention. */}
           <Image
-            source={view2D ? require("../../assets/images/premium/view3d_candy.png") : require("../../assets/images/premium/view2d_candy.png")}
+            source={view2D ? VIEW3D_ART[skinTier] : VIEW2D_ART[skinTier]}
             style={{ width: 34, height: 34 }}
             resizeMode="contain"
           />
@@ -4859,7 +4883,7 @@ export default function MapScreen() {
           {/* Brand-green people glyph over a white "Crew" label (Jeff, 2026-07-25).
               The CarPlay crew map button uses the SAME green — see CAR_ICON_CREW. */}
           {/* Candy crew glyph — the SAME art as the CarPlay crew button (8/20). */}
-          <Image source={require("../../assets/images/premium/crew_candy.png")} style={{ width: 26, height: 26 }} resizeMode="contain" />
+          <Image source={CREW_ART[skinTier]} style={{ width: 26, height: 26 }} resizeMode="contain" />
           <Text style={styles.fabCrewLabel}>Crew</Text>
         </TouchableOpacity>
         {/* Compass — bottom of stack. The needle rotates opposite the live map

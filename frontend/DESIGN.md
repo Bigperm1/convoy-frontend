@@ -268,6 +268,28 @@ disc, a regression at green tier too.
 the map pin. The pin can't follow the skin, so the badge doesn't either — fill, ring and
 numeral stay green together. Any pair like this moves as one or not at all.
 
+### Baked artwork needs its own metal pairs
+
+A `tintColor` cannot ride a baked gradient, so every pre-rendered green asset needs
+`_gold` / `_silver` twins or it strands green on a metal page. All are hue-rotations of
+the same art (green sits at ~145°; gold is the ultra ramp's 40°, silver is desaturated
+and lifted), so bevels and gradients survive — a flat tint would destroy them.
+
+| asset | where |
+|---|---|
+| `tabicons/{map,mic,music}_on` | tab bar |
+| `mic-glow`, `premium/mic_candy` | Comms PTT |
+| `premium/crew_candy` | map Crew FAB |
+| `premium/{view2d,view3d}_candy` | map 2D/3D button |
+| `glass-bgt` | every page wallpaper |
+
+Skin-independent by construction: `*_off` tab glyphs and `mic_chrome` (already neutral),
+and `CompassNeedle` (SVG — it takes the accent directly).
+
+⚠ **CarPlay's button icons are baked base64 PNGs** in `carplay/carButtonIcons.ts` — they
+cannot read a hook and are NOT yet re-baked per metal, so an Ultra driver gets a gold
+phone and a green head unit. `CompassNeedle` takes a `north` prop for exactly this case.
+
 ### The tab bar needed new assets, and a fix
 
 `tabBarActiveTintColor` cannot reach the glyphs — they are pre-rendered PNG pairs. So

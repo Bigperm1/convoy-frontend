@@ -155,6 +155,9 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      {/* Pinned GREEN on purpose: this screen is a brand lockup around the Hairpin
+          wordmark PNG (hairpin-word.png), which is itself green and cannot follow a
+          skin. Signed-in pages get the skin's road by omitting `source`. */}
       <GlassBackdrop source={require('../../assets/images/glass-bgt.png')} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

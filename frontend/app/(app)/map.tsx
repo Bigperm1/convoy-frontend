@@ -77,6 +77,7 @@ import { onCarNavStarted } from "../../src/carplay/carActions";
 import { PoliceBadgeIcon } from "../../src/components/MapControlIcons";
 import CompassNeedle from '../../src/components/CompassNeedle';
 import { startHeatProbe, stopHeatProbe } from '../../src/heatProbe';
+import { useAccent, useAccentAlpha } from "../../src/appSkin";
 
 type RouteInfo = {
   distance_text: string;
@@ -437,6 +438,8 @@ export default function MapScreen() {
   const { user, token, refresh } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const accent = useAccent();
+  const accentTint12 = useAccentAlpha(0.12);
   const navInset = Platform.OS === "android" ? insets.bottom : 0;
   const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number; speed?: number } | null>(null);
 
@@ -4379,10 +4382,10 @@ export default function MapScreen() {
 
             {/* Header — Drive (yellow) · share to community · close */}
             <View style={styles.bannerHeader}>
-              <Text style={styles.bannerDrive}>Drive</Text>
+              <Text style={[styles.bannerDrive, { color: accent }]}>Drive</Text>
               <View style={styles.bannerHeaderRight}>
                 <TouchableOpacity testID="save-destination" onPress={() => { if (savedMatch) { void removeSavedPlace(savedMatch.id); try { Haptics.selectionAsync(); } catch {} } else { saveCurrentDestination(); } }} hitSlop={10}>
-                  <Ionicons name={savedMatch ? "bookmark" : "bookmark-outline"} size={21} color={savedMatch ? "#2DEC86" : "#EBEBF5"} />
+                  <Ionicons name={savedMatch ? "bookmark" : "bookmark-outline"} size={21} color={savedMatch ? accent : "#EBEBF5"} />
                 </TouchableOpacity>
                 <TouchableOpacity testID="share-route" onPress={() => { Haptics.selectionAsync().catch(() => {}); setRouteShareOpen(true); }} hitSlop={10}>
                   <Ionicons name="share-outline" size={22} color="#EBEBF5" />
@@ -4401,8 +4404,8 @@ export default function MapScreen() {
               Math.abs(destination.lat - sharedRouteMeta.lat) < 1e-6 &&
               Math.abs(destination.lng - sharedRouteMeta.lng) < 1e-6 && (
                 <View style={styles.sharedByRow}>
-                  <Ionicons name="share-social" size={14} color="#2DEC86" />
-                  <Text style={styles.sharedByText} numberOfLines={1}>
+                  <Ionicons name="share-social" size={14} color={accent} />
+                  <Text style={[styles.sharedByText, { color: accent }]} numberOfLines={1}>
                     Shared by {sharedRouteMeta.handle || "a member"}
                     {sharedRouteMeta.at ? ` · ${shareRelTime(sharedRouteMeta.at)}` : ""} · from your location — press Start
                   </Text>
@@ -4418,6 +4421,9 @@ export default function MapScreen() {
               <View style={styles.stopList}>
                 {stops.map((st, i) => (
                   <View key={`${st.lat},${st.lng},${i}`} style={styles.stopRow}>
+                    {/* NOT skinned: this numbered badge is the drawer half of a LEGEND — ConvoyMapbox draws the
+                        same numeral on the map pin (placeNumText), and a map pin cannot follow the skin. Fill,
+                        ring and numeral stay brand green together or the pairing breaks. */}
                     <View style={styles.stopDot}><Text style={styles.stopDotText}>{i + 1}</Text></View>
                     <TouchableOpacity
                       style={{ flex: 1, minWidth: 0 }}
@@ -4458,7 +4464,7 @@ export default function MapScreen() {
                         handleSelectRoute(c.idx);
                       }
                     }}
-                    style={[styles.routeOptChip, active && styles.routeOptChipActive, c.disabled && styles.routeOptChipDisabled]}
+                    style={[styles.routeOptChip, active && styles.routeOptChipActive, active && { borderColor: accent, backgroundColor: accentTint12 }, c.disabled && styles.routeOptChipDisabled]}
                   >
                     <View style={[
                       styles.routeOptChipSwatch,
@@ -4493,7 +4499,7 @@ export default function MapScreen() {
 
             {/* Pills — Start (yellow). Add stops + Saved designed but hidden. */}
             <View style={styles.bannerPills}>
-              <TouchableOpacity testID="start-nav" onPress={startNav} style={[styles.bannerPill, styles.bannerPillStart]} activeOpacity={0.9}>
+              <TouchableOpacity testID="start-nav" onPress={startNav} style={[styles.bannerPill, styles.bannerPillStart, { backgroundColor: accent }]} activeOpacity={0.9}>
                 <Ionicons name="navigate" size={18} color="#1C1C1E" />
                 <Text style={styles.bannerPillStartText}>Start</Text>
               </TouchableOpacity>
@@ -4716,7 +4722,7 @@ export default function MapScreen() {
             return (
               <TouchableOpacity key={m.key} style={styles.avatarRow} activeOpacity={0.7}
                 onPress={() => { void setAvatarMode(m.key); armAvatarPanelDismiss(); }}>
-                <Ionicons name={active ? "radio-button-on" : "radio-button-off"} size={20} color={active ? "#2DEC86" : "#808080"} />
+                <Ionicons name={active ? "radio-button-on" : "radio-button-off"} size={20} color={active ? accent : "#808080"} />
                 <View style={{ flex: 1, marginLeft: 10 }}>
                   <Text style={styles.avatarRowLabel}>{m.label}</Text>
                   <Text style={styles.avatarRowSub}>{m.sub}</Text>
@@ -4918,7 +4924,7 @@ export default function MapScreen() {
                     <Text style={styles.layerRowSub}>{m.sub}</Text>
                   </View>
                   <Ionicons name={mapModeChoice === m.key ? "radio-button-on" : "radio-button-off"} size={22}
-                    color={mapModeChoice === m.key ? "#2DEC86" : "#808080"} />
+                    color={mapModeChoice === m.key ? accent : "#808080"} />
                 </TouchableOpacity>
               ))}
               <View style={styles.layerRow}>
@@ -4927,7 +4933,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Live congestion colors</Text>
                 </View>
                 <Switch value={showTraffic} onValueChange={setShowTraffic}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               {/* Weather layer */}
               <View style={styles.layerRow}>
@@ -4938,7 +4944,7 @@ export default function MapScreen() {
                 <Switch
                   value={showWeatherLayer}
                   onValueChange={(v) => { void updateSettings({ showWeatherLayer: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>
@@ -4946,7 +4952,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Show community + Waze pins</Text>
                 </View>
                 <Switch value={showHazards} onValueChange={setShowHazards}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               {/* Official BC road events (DriveBC Open511). BC-only; auto-gated by location. */}
               <View style={styles.layerRow}>
@@ -4956,7 +4962,7 @@ export default function MapScreen() {
                 </View>
                 <Switch value={settings.roadIncidents !== false}
                   onValueChange={(v) => { void updateGlobalSettings({ roadIncidents: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
 
               {/* 3D Buildings (Mapbox Standard modes only). Toggle off to
@@ -4968,7 +4974,7 @@ export default function MapScreen() {
                 </View>
                 <Switch value={settings.show3dBuildings !== false}
                   onValueChange={(v) => { void updateGlobalSettings({ show3dBuildings: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
 
               {/* ----- PRIVACY ----- */}
@@ -4983,7 +4989,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Mute push-to-talk audio</Text>
                 </View>
                 <Switch value={settings.commsLive !== false} onValueChange={(v) => { void updateGlobalSettings({ commsLive: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
 
               {/* ----- MAP VIEW (radio, not toggle) ----- */}
@@ -5004,7 +5010,7 @@ export default function MapScreen() {
                     </Text>
                   </View>
                   {settings.mapView === mode && (
-                    <Ionicons name="checkmark" size={18} color="#2DEC86" />
+                    <Ionicons name="checkmark" size={18} color={accent} />
                   )}
                 </TouchableOpacity>
               ))}
@@ -5017,7 +5023,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Route around toll roads</Text>
                 </View>
                 <Switch value={!!settings.avoidTolls} onValueChange={(v) => { void updateGlobalSettings({ avoidTolls: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>
@@ -5025,7 +5031,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Prefer surface streets</Text>
                 </View>
                 <Switch value={!!settings.avoidHighways} onValueChange={(v) => { void updateGlobalSettings({ avoidHighways: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={styles.layerRow}>
                 <View style={{ flex: 1 }}>
@@ -5033,7 +5039,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Skip water crossings</Text>
                 </View>
                 <Switch value={!!settings.avoidFerries} onValueChange={(v) => { void updateGlobalSettings({ avoidFerries: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
 
               {/* ----- ALERTS ----- */}
@@ -5044,7 +5050,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Chime on new hazard nearby</Text>
                 </View>
                 <Switch value={!!settings.alertSound} onValueChange={(v) => { void updateGlobalSettings({ alertSound: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
               <View style={[styles.layerRow, { borderBottomWidth: 0 }]}>
                 <View style={{ flex: 1 }}>
@@ -5052,7 +5058,7 @@ export default function MapScreen() {
                   <Text style={styles.layerRowSub}>Gold border on community pins</Text>
                 </View>
                 <Switch value={!!settings.highlightConvoy} onValueChange={(v) => { void updateGlobalSettings({ highlightConvoy: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: '#2DEC86' }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
+                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
               </View>
             </ScrollView>
             <TouchableOpacity onPress={() => setLayersOpen(false)} style={styles.sheetClose}>
@@ -5158,7 +5164,7 @@ export default function MapScreen() {
                   if (nm) setStops((p) => p.map((st) => (st.lat === renameStop.lat && st.lng === renameStop.lng ? { ...st, label: nm } : st)));
                   setRenameStop(null);
                 }}
-                style={[styles.nameModalBtn, styles.nameModalSave, !(renameStop?.name || "").trim() && { opacity: 0.5 }]}
+                style={[styles.nameModalBtn, styles.nameModalSave, { backgroundColor: accent }, !(renameStop?.name || "").trim() && { opacity: 0.5 }]}
                 activeOpacity={0.9}
                 disabled={!(renameStop?.name || "").trim()}
               >
@@ -5189,7 +5195,7 @@ export default function MapScreen() {
               <TouchableOpacity onPress={() => setSavePlaceModal(null)} style={[styles.nameModalBtn, styles.nameModalCancel]} activeOpacity={0.85}>
                 <Text style={styles.nameModalCancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={commitCustomSave} style={[styles.nameModalBtn, styles.nameModalSave, !savePlaceName.trim() && { opacity: 0.5 }]} activeOpacity={0.9} disabled={!savePlaceName.trim()}>
+              <TouchableOpacity onPress={commitCustomSave} style={[styles.nameModalBtn, styles.nameModalSave, { backgroundColor: accent }, !savePlaceName.trim() && { opacity: 0.5 }]} activeOpacity={0.9} disabled={!savePlaceName.trim()}>
                 <Text style={styles.nameModalSaveText}>Save</Text>
               </TouchableOpacity>
             </View>

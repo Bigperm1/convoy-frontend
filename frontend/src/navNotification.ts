@@ -29,6 +29,7 @@ import { getSettings, getMapMode } from "./settings";
 import { updateSpeedLimit } from "./speedLimit";
 import { recordTrip } from "./trips";
 import { logEvent } from "./crashBreadcrumb";
+import { accentNow } from "./appSkin";
 
 const NAV_TASK = "convoy-nav-location";
 const NAV_NOTIF_ID = "convoy-nav-banner";
@@ -157,7 +158,7 @@ async function postBanner(title: string, body: string): Promise<void> {
         title,
         body,
         data: { nav: true },
-        color: "#2DEC86",
+        color: accentNow(),
         sticky: Platform.OS === "android",
         priority: Notifications.AndroidNotificationPriority.HIGH,
         // (no sound — Nova already speaks the turn; iOS shows a silent banner)
@@ -814,7 +815,7 @@ async function tryStartBgUpdates(force = false): Promise<boolean> {
       foregroundService: {
         notificationTitle: "Hairpin navigation",
         notificationBody: "Turn-by-turn directions are active",
-        notificationColor: "#2DEC86",
+        notificationColor: accentNow(),
       },
     });
     return true;

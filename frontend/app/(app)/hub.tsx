@@ -19,6 +19,7 @@ import LogoMenu from "../../src/components/LogoMenu";
 import { getGarageImage, getTopDownImage } from "../../src/carImages";
 import { fetchClubLeaderboard, getPeerPbs, fmtKm } from "../../src/trips";
 import { useSettings, updateSettings } from "../../src/settings";
+import { useAccent, useAccentAlpha, useAppSkinColors } from "../../src/appSkin";
 
 type Community = {
   id: string; name: string; description: string; member_count: number;
@@ -239,6 +240,7 @@ function CommunityCard({ c, onPress, active, mode = "mine", onJoin }: {
   mode?: "mine" | "explore"; onJoin?: (c: Community) => void;
 }) {
   const tags = (c.tags || []).slice(0, 4);
+  const carGlyph = useAccentAlpha(0.35);
   return (
     <TouchableOpacity testID={`community-${c.id}`} onPress={onPress} activeOpacity={0.9} style={{ marginBottom: 14 }}>
       <Glass radius={20}>
@@ -248,7 +250,7 @@ function CommunityCard({ c, onPress, active, mode = "mine", onJoin }: {
             <Image source={{ uri: c.banner_b64 }} style={styles.clubBanner} resizeMode="cover" />
           ) : (
             <LinearGradient colors={["#0F2A22", "#12352A", "#0B0B0C"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.clubBanner}>
-              <Ionicons name="car-sport" size={40} color="rgba(45,236,134,0.35)" />
+              <Ionicons name="car-sport" size={40} color={carGlyph} />
             </LinearGradient>
           )}
           {active && (
@@ -305,6 +307,8 @@ function CommunityCard({ c, onPress, active, mode = "mine", onJoin }: {
 }
 
 function CreateModal({ visible, onClose, onCreated }: any) {
+  const skinColors = useAppSkinColors();
+  const tagTint = useAccentAlpha(0.18);
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [isPublic, setIsPublic] = useState(true);
@@ -424,7 +428,7 @@ function CreateModal({ visible, onClose, onCreated }: any) {
               {SUGGESTED_TAGS.map((t) => {
                 const on = tags.includes(t);
                 return (
-                  <TouchableOpacity key={t} onPress={() => toggleTag(t)} style={[styles.tagChip, on && styles.tagChipOn]}>
+                  <TouchableOpacity key={t} onPress={() => toggleTag(t)} style={[styles.tagChip, on && styles.tagChipOn, on && { backgroundColor: tagTint }]}>
                     <Text style={[styles.tagChipText, on && styles.tagChipTextOn]}>{t}</Text>
                   </TouchableOpacity>
                 );
@@ -465,7 +469,7 @@ function CreateModal({ visible, onClose, onCreated }: any) {
             />
 
             <TouchableOpacity testID="cc-submit" onPress={submit} disabled={busy} style={styles.btn} activeOpacity={0.85}>
-              <LinearGradient colors={["#7DF0B0", "#2DEC86", "#00C46A"]} style={styles.btnGrad}>
+              <LinearGradient colors={skinColors.colors} locations={skinColors.locations} style={styles.btnGrad}>
                 <Text style={[styles.btnText, { color: "#1a1a1a" }]}>{busy ? "Creating…" : "Create club"}</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -478,6 +482,7 @@ function CreateModal({ visible, onClose, onCreated }: any) {
 
 // Reusable iOS-style switch row used inside CreateModal.
 function FeatureToggle({ testID, icon, iconColor, title, sub, value, onChange }: any) {
+  const accent = useAccent();
   return (
     <View style={styles.featureRow}>
       <View style={[styles.featureIco, { backgroundColor: iconColor + "22" }]}>
@@ -491,7 +496,7 @@ function FeatureToggle({ testID, icon, iconColor, title, sub, value, onChange }:
         testID={testID}
         value={value}
         onValueChange={onChange}
-        trackColor={{ false: "rgba(255,255,255,0.12)", true: "#2DEC86" }}
+        trackColor={{ false: "rgba(255,255,255,0.12)", true: accent }}
         thumbColor={value ? "#1a1a1a" : "#999"}
       />
     </View>
@@ -560,6 +565,12 @@ function SearchModal({ visible, onClose, onChanged }: any) {
 }
 
 function CommunityDetailModal({ community, onClose, onChanged }: any) {
+  const accent = useAccent();
+  const activeBtnTint = useAccentAlpha(0.12);
+  const activeBtnEdge = useAccentAlpha(0.4);
+  const tagTint = useAccentAlpha(0.18);
+  const boardTabTint = useAccentAlpha(0.20);
+  const boardMeEdge = useAccentAlpha(0.55);
   const [settings] = useSettings();
   const { user } = useAuth();
   const [c, setC] = useState<any>(null);
@@ -835,7 +846,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                 testID="set-active-community"
                 onPress={toggleActive}
                 activeOpacity={0.85}
-                style={[styles.activeBtn, isActive && styles.activeBtnOn]}
+                style={[styles.activeBtn, { backgroundColor: activeBtnTint, borderColor: activeBtnEdge }, isActive && styles.activeBtnOn]}
               >
                 <Ionicons name={isActive ? "radio" : "radio-outline"} size={18} color={isActive ? "#0A0A0A" : COLORS.primary} />
                 <Text style={[styles.activeBtnText, isActive && { color: "#0A0A0A" }]} numberOfLines={1}>
@@ -907,7 +918,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                   {SUGGESTED_TAGS.map((t) => {
                     const on = (c.tags || []).includes(t);
                     return (
-                      <TouchableOpacity key={t} onPress={() => toggleTagSave(t)} style={[styles.tagChip, on && styles.tagChipOn]}>
+                      <TouchableOpacity key={t} onPress={() => toggleTagSave(t)} style={[styles.tagChip, on && styles.tagChipOn, on && { backgroundColor: tagTint }]}>
                         <Text style={[styles.tagChipText, on && styles.tagChipTextOn]}>{t}</Text>
                       </TouchableOpacity>
                     );
@@ -967,9 +978,9 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                       <TouchableOpacity
                         key={m}
                         onPress={() => setBoardMode(m)}
-                        style={[styles.boardTab, boardMode === m && styles.boardTabOn]}
+                        style={[styles.boardTab, boardMode === m && styles.boardTabOn, boardMode === m && { backgroundColor: boardTabTint }]}
                       >
-                        <Text style={[styles.boardTabText, boardMode === m && styles.boardTabTextOn]}>
+                        <Text style={[styles.boardTabText, boardMode === m && styles.boardTabTextOn, boardMode === m && { color: accent }]}>
                           {label}
                         </Text>
                       </TouchableOpacity>
@@ -979,8 +990,8 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                 {board.slice(0, 10).map((row, i) => {
                   const me = user?.id != null && String(user.id) === row.userId;
                   return (
-                    <View key={row.userId} style={[styles.boardRow, me && styles.boardRowMe]}>
-                      <Text style={[styles.boardRank, i < 3 && styles.boardRankTop]}>{i + 1}</Text>
+                    <View key={row.userId} style={[styles.boardRow, me && styles.boardRowMe, me && { borderColor: boardMeEdge }]}>
+                      <Text style={[styles.boardRank, i < 3 && styles.boardRankTop, i < 3 && { color: accent }]}>{i + 1}</Text>
                       <Text style={[styles.boardHandle, me && { fontWeight: "800" }]} numberOfLines={1}>
                         {row.handle}{me ? " · you" : ""}
                       </Text>
@@ -991,11 +1002,11 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                           shows only what it ranks on, so nothing competes with the number
                           the order actually reflects. */}
                       {boardMode === 'pb' ? (
-                        <Text style={styles.boardKm}>{row.pb > 0 ? `${Math.round(row.pb)} km/h` : "—"}</Text>
+                        <Text style={[styles.boardKm, { color: accent }]}>{row.pb > 0 ? `${Math.round(row.pb)} km/h` : "—"}</Text>
                       ) : (
                         <>
                           <Text style={styles.boardDrives}>{row.drives}{row.drives === 1 ? " drive" : " drives"}</Text>
-                          <Text style={styles.boardKm}>{fmtKm(row.km)}</Text>
+                          <Text style={[styles.boardKm, { color: accent }]}>{fmtKm(row.km)}</Text>
                         </>
                       )}
                     </View>
@@ -1034,8 +1045,8 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                       <Text style={styles.pendingName}>{m.handle || "anon"}{isSelf ? " (you)" : ""}</Text>
                       {m.is_owner ? (
-                        <View style={[styles.adminBadge, { backgroundColor: "#2DEC8622" }]}>
-                          <Text style={[styles.adminBadgeText, { color: "#2DEC86" }]}>OWNER</Text>
+                        <View style={[styles.adminBadge, { backgroundColor: accent + "22" }]}>
+                          <Text style={[styles.adminBadgeText, { color: accent }]}>OWNER</Text>
                         </View>
                       ) : m.is_admin ? (
                         <View style={styles.adminBadge}>
@@ -1053,7 +1064,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                   {c?.is_owner && !isSelf && !m.is_owner && (
                     <>
                       <TouchableOpacity onPress={() => toggleAdmin(m)} hitSlop={8} style={styles.memberAction} testID={`toggle-admin-${m.id}`}>
-                        <Ionicons name={m.is_admin ? "star" : "star-outline"} size={18} color="#2DEC86" />
+                        <Ionicons name={m.is_admin ? "star" : "star-outline"} size={18} color={accent} />
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => transfer(m)} hitSlop={8} style={styles.memberAction} testID={`transfer-${m.id}`}>
                         <Ionicons name="ribbon-outline" size={18} color={COLORS.primary} />

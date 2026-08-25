@@ -7,6 +7,7 @@ import { COLORS } from "./theme";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
 import { api } from "./api";
 import { getSettings } from "./settings";
+import { useAccentAlpha } from "./appSkin";
 import type { Peer } from "./ConvoyMapbox";
 
 type Props = {
@@ -61,6 +62,13 @@ export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed
     }
   }, [visible]);
 
+  // App skin (silver at Premium, gold at Ultra) for this modal's CHROME only — the
+  // avatar ring and the "Drive to" well/hairline. Alpha is carried through so a tint
+  // stays a tint; one call per distinct alpha, above the early return so the hook
+  // order can never change between renders.
+  const skinHairline = useAccentAlpha(0.55); // was rgba(45,236,134,0.55)
+  const skinWell = useAccentAlpha(0.1); // was rgba(45,236,134,0.10)
+
   if (!peer) return null;
   const distKm = myCoords ? haversineKm(myCoords, { lat: peer.lat, lng: peer.lng }) : null;
   // Hail button content (icon+text) color: dark glyphs on the yellow idle/
@@ -103,7 +111,7 @@ export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed
             )}
             <View style={styles.inner}>
               <View style={styles.header}>
-                <View style={styles.avatar}>
+                <View style={[styles.avatar, { borderColor: skinHairline }]}>
                   <Image
                     source={getVehiclePngOrDefault(peer.activeColor ?? peer.carColor)}
                     style={styles.avatarImg}
@@ -183,7 +191,7 @@ export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed
                 <TouchableOpacity
                   testID="peer-drive-to"
                   onPress={onDriveTo}
-                  style={styles.driveBtn}
+                  style={[styles.driveBtn, { backgroundColor: skinWell, borderColor: skinHairline }]}
                   activeOpacity={0.85}
                 >
                   <Ionicons name="navigate" size={18} color={COLORS.brand} />

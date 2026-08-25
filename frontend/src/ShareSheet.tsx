@@ -17,6 +17,7 @@ import { COLORS } from "./theme";
 import { api, formatErr } from "./api";
 import { getSettings } from "./settings";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
+import { useAccentAlpha } from "./appSkin";
 
 // A share payload is discriminated by `kind`. The music player passes a
 // "music" payload; the map (routes) and comms screens can reuse this same
@@ -54,6 +55,7 @@ type Props = {
  * Convoy) + handle. Delivery is POST /notifications/share (WS + push).
  */
 export default function ShareSheet({ visible, onClose, share }: Props) {
+  const rowOnTint = useAccentAlpha(0.16);
   const [members, setMembers] = useState<Member[]>([]);
   const [communityId, setCommunityId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -209,7 +211,7 @@ export default function ShareSheet({ visible, onClose, share }: Props) {
                 return (
                   <TouchableOpacity
                     key={m.id}
-                    style={[styles.row, on && styles.rowOn]}
+                    style={[styles.row, on && styles.rowOn, on && { backgroundColor: rowOnTint }]}
                     onPress={() => toggle(m.id)}
                     activeOpacity={0.7}
                   >

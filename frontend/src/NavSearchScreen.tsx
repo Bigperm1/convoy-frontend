@@ -27,6 +27,7 @@ import { autocompletePlaces, placeDetails, Suggestion } from "./places";
 import { getRecentRoutes, removeRecentRoute, RecentRoute } from "./recentRoutes";
 import MemberCarousel, { CarouselMember } from "./components/MemberCarousel";
 import { useSavedPlaces, predictDestination, type Prediction } from "./savedPlaces";
+import { useAccent } from "./appSkin";
 import { Swipeable, GestureHandlerRootView } from "react-native-gesture-handler";
 
 type Props = {
@@ -53,6 +54,7 @@ export default function NavSearchScreen({
   const inputRef = useRef<TextInput>(null);
   const tRef = useRef<any>(null);
   const [saved, , removeSavedPlace] = useSavedPlaces();
+  const accent = useAccent();
   // Time-of-day prediction over the Home/Work anchors — shown as a one-tap
   // "PREDICTIVE" row at the top of the idle list (replaces the old always-on
   // map banner). null when there's no confident guess (no anchors saved, etc.).
@@ -182,9 +184,9 @@ export default function NavSearchScreen({
                     activeOpacity={0.7}
                   >
                     <View style={styles.pinWrap}>
-                      <Ionicons name="navigate-circle" size={18} color="#2DEC86" />
+                      <Ionicons name="navigate-circle" size={18} color={accent} />
                     </View>
-                    <Text style={[styles.resultText, styles.predictiveText]} numberOfLines={1}>
+                    <Text style={[styles.resultText, styles.predictiveText, { color: accent }]} numberOfLines={1}>
                       {prediction.place.label}
                     </Text>
                   </TouchableOpacity>

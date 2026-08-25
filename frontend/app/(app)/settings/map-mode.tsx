@@ -1,6 +1,7 @@
 import React from "react";
 import { useSettings, getMapModeChoice } from "../../../src/settings";
 import { SettingsPage, SectionLabel, SettingsCard, RadioRow, Divider, HelpText } from "../../../src/components/settingsKit";
+import { useAccent } from "../../../src/appSkin";
 
 const MODES = [
   { key: "auto", icon: "time", color: "#2DEC86", title: "Auto", sub: "Follows the time of day — dawn / day / dusk / night" },
@@ -13,6 +14,7 @@ const MODES = [
 
 export default function MapModePage() {
   const [settings, setSettings] = useSettings();
+  const accent = useAccent();
   return (
     <SettingsPage title="Map Mode">
       <SectionLabel>APPEARANCE</SectionLabel>
@@ -21,7 +23,7 @@ export default function MapModePage() {
           <React.Fragment key={m.key}>
             {i > 0 && <Divider />}
             <RadioRow
-              icon={m.icon} iconColor={m.color} title={m.title} subtitle={m.sub}
+              icon={m.icon} iconColor={m.key === "auto" ? accent : m.color} title={m.title} subtitle={m.sub}
               selected={getMapModeChoice(settings) === m.key}
               onSelect={() => setSettings({ mapMode: m.key })}
             />

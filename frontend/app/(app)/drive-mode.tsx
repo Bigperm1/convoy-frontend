@@ -9,10 +9,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { COLORS } from "../../src/theme";
+import { useAccent } from "../../src/appSkin";
 import Glass from "../../src/Glass";
 
 export default function DriveMode() {
   const router = useRouter();
+  const accent = useAccent();
 
   const Tile = ({ icon, label, color, onPress, testID }: { icon: any; label: string; color: string; onPress: () => void; testID: string }) => (
     <TouchableOpacity testID={testID} onPress={onPress} activeOpacity={0.85} style={styles.tileWrap}>
@@ -37,7 +39,7 @@ export default function DriveMode() {
       <View style={styles.grid}>
         <View style={styles.row}>
           <Tile testID="dm-map" icon="map" label="Map" color="#0A84FF" onPress={() => router.replace("/(app)/map")} />
-          <Tile testID="dm-coms" icon="flash" label="Comms" color="#2DEC86" onPress={() => router.replace("/(app)/talk")} />
+          <Tile testID="dm-coms" icon="flash" label="Comms" color={accent} onPress={() => router.replace("/(app)/talk")} />
         </View>
         <View style={styles.row}>
           <Tile testID="dm-music" icon="musical-notes" label="Music" color="#FF9F0A" onPress={() => router.replace("/(app)/music")} />

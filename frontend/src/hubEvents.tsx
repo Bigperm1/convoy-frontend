@@ -21,6 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import Glass, { GlassFill } from './Glass';
 import { COLORS } from './theme';
+import { useAccentAlpha } from './appSkin';
 import { api, formatErr } from './api';
 import { autocompletePlaces, placeDetails, type Suggestion } from './places';
 import WhenPicker, { fmtWhen } from './components/WhenPicker';
@@ -150,12 +151,13 @@ export function EventsSection({ kind, openEventId }: { kind: Kind; openEventId?:
 
 // ── Card ─────────────────────────────────────────────────────────────────────
 function EventCard({ event: e, onPress }: { event: HubEvent; onPress: () => void }) {
+  const iconWell = useAccentAlpha(0.12);
   const copy = KIND_COPY[e.kind] || KIND_COPY.event;
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={{ marginBottom: 12 }}>
       <Glass radius={20}>
         <View style={styles.card}>
-          <View style={styles.cardIcon}>
+          <View style={[styles.cardIcon, { backgroundColor: iconWell }]}>
             <Ionicons name={copy.icon} size={20} color={COLORS.primary} />
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
@@ -178,6 +180,8 @@ function EventCard({ event: e, onPress }: { event: HubEvent; onPress: () => void
 
 // ── Venue search field (inline autocomplete — Places v1) ────────────────────
 function VenueField({ label, value, onPick }: { label: string; value: EventPoint | null; onPick: (p: EventPoint) => void }) {
+  const venueWell = useAccentAlpha(0.10);
+  const venueHairline = useAccentAlpha(0.35);
   const [q, setQ] = useState('');
   const [sugs, setSugs] = useState<Suggestion[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -203,7 +207,7 @@ function VenueField({ label, value, onPick }: { label: string; value: EventPoint
     <View style={{ marginTop: 14 }}>
       <Text style={styles.label}>{label}</Text>
       {value ? (
-        <View style={styles.venuePicked}>
+        <View style={[styles.venuePicked, { backgroundColor: venueWell, borderColor: venueHairline }]}>
           <Ionicons name="location" size={16} color={COLORS.primary} />
           <Text style={styles.venuePickedText} numberOfLines={1}>{value.label || `${value.lat.toFixed(4)}, ${value.lng.toFixed(4)}`}</Text>
           <TouchableOpacity onPress={() => onPick(null as any)} hitSlop={8}>
@@ -642,6 +646,7 @@ function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEdit }: {
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const ctaBorder = useAccentAlpha(0.5);
   if (!e) return null;
   const copy = KIND_COPY[e.kind] || KIND_COPY.event;
 
@@ -744,12 +749,12 @@ function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEdit }: {
                     </LinearGradient>
                   </TouchableOpacity>
                 )}
-                <TouchableOpacity onPress={routeThere} activeOpacity={0.85} style={styles.secondaryBtn}>
+                <TouchableOpacity onPress={routeThere} activeOpacity={0.85} style={[styles.secondaryBtn, { borderColor: ctaBorder }]}>
                   <Ionicons name="navigate" size={16} color={COLORS.primary} />
                   <Text style={styles.secondaryBtnText}>Route to the meet</Text>
                 </TouchableOpacity>
                 {e.kind === 'cruise' && (e.end || (e.stops || []).length > 0) && (
-                  <TouchableOpacity onPress={plotCruise} activeOpacity={0.85} style={styles.secondaryBtn}>
+                  <TouchableOpacity onPress={plotCruise} activeOpacity={0.85} style={[styles.secondaryBtn, { borderColor: ctaBorder }]}>
                     <Ionicons name="git-branch" size={16} color={COLORS.primary} />
                     <Text style={styles.secondaryBtnText}>Plot the cruise route</Text>
                   </TouchableOpacity>

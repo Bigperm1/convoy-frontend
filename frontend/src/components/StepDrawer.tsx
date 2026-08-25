@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassFill, drawerTint } from "../Glass";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useAccent } from "../appSkin";
 
 export const DRAWER_HEIGHT = 300;   // height of the slide-up step list
 // Must match the real tab bar in app/(app)/_layout.tsx EXACTLY: height (86 iOS / 84 Android)
@@ -82,6 +83,7 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
   // area and floated the drawer ~36px above the tab bar (a map sliver showed through).
   const insets = useSafeAreaInsets();
   const navInset = Platform.OS === "android" ? insets.bottom : 0;
+  const accent = useAccent();
 
   const slideUp = React.useCallback(() => {
     setExpanded(true);
@@ -179,7 +181,7 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
       )}
 
       {/* Collapsed summary bar — always visible during nav, sits above the tab bar. */}
-      <View style={[styles.bar, { bottom: TAB_BAR_H + navInset }]}>
+      <View style={[styles.bar, { bottom: TAB_BAR_H + navInset, borderTopColor: accent }]}>
         {/* Liquid Glass behind the nav bar — clipped to the rounded top. */}
         <GlassFill tintColor={drawerTint()} style={{ borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: "hidden" }} />
         <View {...openPan.panHandlers} style={styles.barGrabZone} testID="step-drawer-handle">
@@ -232,9 +234,9 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
         </View>
         {progressFrac != null && (
           <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${progressFrac * 100}%` }]} />
+            <View style={[styles.progressFill, { width: `${progressFrac * 100}%`, backgroundColor: accent }]} />
             <View style={[styles.progressTip, { left: `${progressFrac * 100}%` }]}>
-              <Ionicons name="caret-forward" size={16} color="#2DEC86" />
+              <Ionicons name="caret-forward" size={16} color={accent} />
             </View>
           </View>
         )}

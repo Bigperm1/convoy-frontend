@@ -3,6 +3,7 @@ import { TouchableOpacity, View, StyleSheet, Animated, Easing, Platform, Activit
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useVoice } from "./useVoice";
+import { useAccent } from "./appSkin";
 
 // Elevated, oversized brand-yellow mic that lives in the middle of the tab bar.
 // Press-and-hold records; release transcribes. Pulses bigger while recording.
@@ -17,6 +18,9 @@ const REC_COLORS = ["#FF6B35", "#FF3B30", "#A6201E"];
 
 export default function VoiceTabButton() {
   const { recording, busy, start, stop, transcribe } = useVoice();
+  const accent = useAccent();
+  // Middle stop was the hardcoded brand green — it now follows the app skin.
+  const idleColors = [IDLE_COLORS[0], accent, IDLE_COLORS[2]];
   const pulse = useRef(new Animated.Value(1)).current;
   const press = useRef(new Animated.Value(1)).current;
   // Halo ring that ripples outward while recording (extra "I'm listening" cue).
@@ -79,7 +83,7 @@ export default function VoiceTabButton() {
           style={styles.btn}
         >
           <LinearGradient
-            colors={(recording ? REC_COLORS : IDLE_COLORS) as [string, string, ...string[]]}
+            colors={(recording ? REC_COLORS : idleColors) as [string, string, ...string[]]}
             start={{ x: 0.2, y: 0 }}
             end={{ x: 0.8, y: 1 }}
             style={StyleSheet.absoluteFill}

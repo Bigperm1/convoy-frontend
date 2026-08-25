@@ -7,6 +7,7 @@ import { COLORS } from "./theme";
 import { getVehiclePngOrDefault } from "./vehicleAssets";
 import { api } from "./api";
 import { getSettings } from "./settings";
+import { useAccentAlpha } from "./appSkin";
 import type { Peer } from "./ConvoyMapbox";
 
 // Who's-on roster, opened from the "N live" pill under the search bar (tester
@@ -39,6 +40,12 @@ export default function LiveRosterSheet({ visible, onClose, peers, myCoords, onD
   useEffect(() => {
     if (!visible) { setHailing(new Set()); setHailed(new Set()); }
   }, [visible]);
+
+  // Skin: sheet chrome follows the user's metal. Alphas kept EXACTLY as authored —
+  // the avatar ring is a hairline, the Drive pill is a tint well, not a solid disc.
+  const avatarRing = useAccentAlpha(0.45);
+  const driveTint = useAccentAlpha(0.12);
+  const driveHairline = useAccentAlpha(0.55);
 
   const hail = async (p: Peer) => {
     const id = p.user_id;
@@ -93,7 +100,7 @@ export default function LiveRosterSheet({ visible, onClose, peers, myCoords, onD
                   const busy = !!p.user_id && hailing.has(p.user_id);
                   return (
                     <View key={id} style={styles.row}>
-                      <View style={styles.avatar}>
+                      <View style={[styles.avatar, { borderColor: avatarRing }]}>
                         <Image
                           source={getVehiclePngOrDefault(p.activeColor ?? p.carColor)}
                           style={styles.avatarImg}
@@ -120,7 +127,7 @@ export default function LiveRosterSheet({ visible, onClose, peers, myCoords, onD
                       </TouchableOpacity>
                       <TouchableOpacity
                         onPress={() => onDriveTo(p)}
-                        style={[styles.actBtn, styles.driveBtn]}
+                        style={[styles.actBtn, styles.driveBtn, { backgroundColor: driveTint, borderColor: driveHairline }]}
                         activeOpacity={0.85}
                       >
                         <Ionicons name="navigate" size={16} color={COLORS.brand} />

@@ -23,6 +23,7 @@ import { api } from '../../src/api';
 import Constants from 'expo-constants';
 import GlassBackdrop from '../../src/components/GlassBackdrop';
 import { GlassFill } from '../../src/Glass';
+import { useAccent } from '../../src/appSkin';
 
 const CREDS_KEY = 'convoy.saved.credentials';
 const SAVE_CREDS_KEY = 'convoy.save.credentials';
@@ -37,6 +38,7 @@ export default function LoginScreen() {
   const [appleAvailable, setAppleAvailable] = useState(false);
   const router = useRouter();
   const { login, loginWithApple, loginWithGoogle } = useAuth();
+  const accent = useAccent();
 
   const appVersion = Constants.expoConfig?.version ?? '?';
   const buildNumber =
@@ -222,7 +224,7 @@ export default function LoginScreen() {
               disabled={loading}
               activeOpacity={0.7}
             >
-              <View style={[styles.checkbox, saveCredentials && styles.checkboxChecked]}>
+              <View style={[styles.checkbox, saveCredentials && styles.checkboxChecked, saveCredentials && { backgroundColor: accent, borderColor: accent }]}>
                 {saveCredentials && <Text style={styles.checkmark}>✓</Text>}
               </View>
               <Text style={styles.checkboxLabel}>Save credentials</Text>
@@ -235,7 +237,7 @@ export default function LoginScreen() {
               activeOpacity={0.85}
             >
               <LinearGradient
-                colors={['#7DF0B0', '#2DEC86', '#00C46A']}
+                colors={['#7DF0B0', accent, '#00C46A']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.buttonGradient}
@@ -277,22 +279,22 @@ export default function LoginScreen() {
               <Text style={styles.linkText}>
                 New here?{' '}
                 <Text
-                  style={styles.linkHighlight}
+                  style={[styles.linkHighlight, { color: accent }]}
                   onPress={() => router.push('/(auth)/signup')}
                 >
                   Create account
                 </Text>
               </Text>
               <TouchableOpacity onPress={handleForgotPassword} disabled={loading}>
-                <Text style={styles.forgotLink}>Forgot password?</Text>
+                <Text style={[styles.forgotLink, { color: accent }]}>Forgot password?</Text>
               </TouchableOpacity>
             </View>
 
             <Text style={styles.termsText}>
               By continuing, you agree to our{' '}
-              <Text style={styles.termsLink} onPress={() => router.push('/(auth)/terms' as any)}>Terms of Service</Text>
+              <Text style={[styles.termsLink, { color: accent }]} onPress={() => router.push('/(auth)/terms' as any)}>Terms of Service</Text>
               {' '}and{' '}
-              <Text style={styles.termsLink} onPress={() => router.push('/(auth)/privacy-policy' as any)}>Privacy Policy</Text>.
+              <Text style={[styles.termsLink, { color: accent }]} onPress={() => router.push('/(auth)/privacy-policy' as any)}>Privacy Policy</Text>.
             </Text>
           </View>
         </ScrollView>

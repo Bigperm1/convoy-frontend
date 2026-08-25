@@ -8,6 +8,7 @@ import { geocodeQuery } from "./voiceBus";
 import { useAuth } from "./auth";
 import { GOOGLE_MAPS_KEY } from "./api";
 import { GlassFill, hudTint } from "./Glass";
+import { useAccent, useAccentAlpha } from "./appSkin";
 
 const KEY = GOOGLE_MAPS_KEY;
 
@@ -125,6 +126,9 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
   const tRef = useRef<any>(null);
+  const accent = useAccent();
+  // Green floor under the "Let's go" glass — follows the skin, keeps its 62% alpha.
+  const letsGoFloor = useAccentAlpha(0.62);
 
   useEffect(() => {
     if (Platform.OS !== "web") return;
@@ -240,12 +244,12 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           {profileSlot ? (
             <View style={styles.logoSlot}>{profileSlot}</View>
           ) : (
-            <Ionicons name="search" size={18} color="#2DEC86" />
+            <Ionicons name="search" size={18} color={accent} />
           )}
           {aiSuggest ? (
             // Departure IQ pre-fill — premium "AI" badge + the suggestion text.
             <View style={styles.aiRow}>
-              <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>
+              <View style={[styles.aiBadge, { backgroundColor: accent }]}><Text style={styles.aiBadgeText}>AI</Text></View>
               <Text style={styles.aiText} numberOfLines={1}>
                 {aiSuggest.label}{aiSuggest.eta ? `  ·  ${aiSuggest.eta}` : ""}
               </Text>
@@ -277,8 +281,8 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
               green pills show/hide toggle in the idle read-only state. */}
           {aiSuggest ? (
             <>
-              <TouchableOpacity testID="ai-lets-go" onPress={onAiGo} style={styles.letsGoBtn} activeOpacity={0.85}>
-                <GlassFill tintColor="#2DEC86" style={{ borderRadius: 10, overflow: "hidden" }} />
+              <TouchableOpacity testID="ai-lets-go" onPress={onAiGo} style={[styles.letsGoBtn, { backgroundColor: letsGoFloor }]} activeOpacity={0.85}>
+                <GlassFill tintColor={accent} style={{ borderRadius: 10, overflow: "hidden" }} />
                 <Ionicons name="navigate" size={14} color="#06281A" />
                 <Text style={styles.letsGoText}>Let's go</Text>
               </TouchableOpacity>
@@ -299,7 +303,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
             </>
           ) : onPillsToggle ? (
             <TouchableOpacity testID="pills-toggle" onPress={onPillsToggle} hitSlop={6} style={styles.pillsToggle}>
-              <Ionicons name={pillsVisible ? "apps" : "apps-outline"} size={20} color="#2DEC86" />
+              <Ionicons name={pillsVisible ? "apps" : "apps-outline"} size={20} color={accent} />
             </TouchableOpacity>
           ) : null}
         </View>

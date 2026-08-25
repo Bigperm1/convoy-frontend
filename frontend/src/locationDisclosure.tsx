@@ -23,6 +23,7 @@ import React, { useEffect, useState } from "react";
 import { Modal, View, Text, Pressable, StyleSheet, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
+import { useAccent, useAccentAlpha } from "./appSkin";
 
 type Resolver = (ok: boolean) => void;
 let openFn: (() => void) | null = null;
@@ -71,6 +72,8 @@ export function requestLocationDisclosure(): Promise<boolean> {
 /** Mount ONCE, high in the tree. Renders nothing until a disclosure is requested. */
 export function LocationDisclosureHost() {
   const [visible, setVisible] = useState(false);
+  const accent = useAccent();
+  const iconTint = useAccentAlpha(0.12);
 
   useEffect(() => {
     openFn = () => setVisible(true);
@@ -88,8 +91,8 @@ export function LocationDisclosureHost() {
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => answer(false)}>
       <View style={styles.backdrop}>
         <View style={styles.card}>
-          <View style={styles.iconWrap}>
-            <Ionicons name="location" size={26} color="#2DEC86" />
+          <View style={[styles.iconWrap, { backgroundColor: iconTint }]}>
+            <Ionicons name="location" size={26} color={accent} />
           </View>
 
           <Text style={styles.title}>Hairpin uses your location</Text>
@@ -116,7 +119,7 @@ export function LocationDisclosureHost() {
 
           <Pressable
             onPress={() => answer(true)}
-            style={({ pressed }) => [styles.primary, pressed && { opacity: 0.85 }]}
+            style={({ pressed }) => [styles.primary, { backgroundColor: accent }, pressed && { opacity: 0.85 }]}
           >
             <Text style={styles.primaryText}>Continue</Text>
           </Pressable>

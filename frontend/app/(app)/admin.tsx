@@ -10,6 +10,7 @@ import { api, formatErr } from '../../src/api';
 import { useAuth } from '../../src/auth';
 import Constants from 'expo-constants';
 import { COLORS } from '../../src/theme';
+import { useAccent } from '../../src/appSkin';
 
 const OWNER_EMAIL = 'jwellsmorton@gmail.com';
 const PERMANENT_INSTALL_URL = 'https://convoy-backend-j9q1.onrender.com/api/install/android';
@@ -99,6 +100,7 @@ function ago(iso?: string | null): string {
 export default function AdminScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const accent = useAccent();
   const isOwner = (user?.email || '').trim().toLowerCase() === OWNER_EMAIL;
 
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -206,13 +208,13 @@ export default function AdminScreen() {
             </Text>
           </View>
           {code && (
-            <Text selectable style={styles.codePill}>
+            <Text selectable style={[styles.codePill, { color: accent }]}>
               Code {code.code} · relay now
             </Text>
           )}
         </View>
         <TouchableOpacity
-          style={[styles.resetBtn, busy && { opacity: 0.6 }]}
+          style={[styles.resetBtn, { backgroundColor: accent }, busy && { opacity: 0.6 }]}
           onPress={() => genCode(item)}
           disabled={busy}
           activeOpacity={0.85}
@@ -223,7 +225,7 @@ export default function AdminScreen() {
         </TouchableOpacity>
       </View>
     );
-  }, [codes, busyEmail, genCode]);
+  }, [codes, busyEmail, genCode, accent]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -285,7 +287,7 @@ export default function AdminScreen() {
                 <Text style={styles.installHint}>
                   Share this one link / QR with testers — it always opens whichever build you set below. You never have to hand out a new link again.
                 </Text>
-                <Text selectable style={styles.installPerm}>{PERMANENT_INSTALL_URL}</Text>
+                <Text selectable style={[styles.installPerm, { color: accent }]}>{PERMANENT_INSTALL_URL}</Text>
                 <Text style={styles.installLabel}>After each build, paste its Expo build URL here</Text>
                 <TextInput
                   style={styles.installInput}
@@ -297,7 +299,7 @@ export default function AdminScreen() {
                   autoCorrect={false}
                 />
                 <TouchableOpacity
-                  style={[styles.installSave, installSaving && { opacity: 0.6 }]}
+                  style={[styles.installSave, { backgroundColor: accent }, installSaving && { opacity: 0.6 }]}
                   onPress={saveInstallUrl}
                   disabled={installSaving}
                   activeOpacity={0.85}

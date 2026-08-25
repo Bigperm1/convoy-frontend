@@ -12,6 +12,7 @@ import { View, Text, StyleSheet, Animated, Easing } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { GlassFill, glassLift } from "../Glass";
 import { fmtPitstop, type PitstopKind } from "../pitstop";
+import { useAccent, useAccentAlpha } from "../appSkin";
 
 // Candy red — the SAME red as UpdateReadyPill's banner, so the app has one "attention"
 // red rather than two near-misses.
@@ -40,6 +41,9 @@ export default function PitstopCard({
   totalS: number;
   tint?: string;
 }) {
+  const accent = useAccent();
+  const hairline = useAccentAlpha(0.45);
+  const iconWell = useAccentAlpha(0.14);
   // Slow pulse on the dot so the card reads as LIVE at a glance, without the
   // attention-grabbing flash of anything safety-related.
   const pulse = useRef(new Animated.Value(0.35)).current;
@@ -55,11 +59,11 @@ export default function PitstopCard({
   }, [pulse]);
 
   return (
-    <View style={[styles.wrap, glassLift]}>
+    <View style={[styles.wrap, glassLift, { borderColor: hairline }]}>
       <GlassFill tintColor={tint} style={{ borderRadius: 16, overflow: "hidden" }} />
       <View style={styles.row}>
-        <View style={styles.iconWrap}>
-          <MaterialCommunityIcons name={ICON[kind] || "parking"} size={20} color="#2DEC86" />
+        <View style={[styles.iconWrap, { backgroundColor: iconWell }]}>
+          <MaterialCommunityIcons name={ICON[kind] || "parking"} size={20} color={accent} />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <View style={styles.titleRow}>

@@ -50,6 +50,7 @@ import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType 
 import { speedLimitVisible } from '../speedLimit';
 import type { RoadEvent } from '../driveBcEvents';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
+import { useAccent } from '../appSkin';
 
 // CarPlay HUD floor — a solid dark tint ONLY on light basemaps (dawn / day / satellite),
 // where clear glass over the bright map would wash out. On DARK basemaps (dusk / night)
@@ -279,6 +280,7 @@ export function CarSurface() {
     try { logEventReliable('aa-crumb surface-render'); } catch {}
   }
   const s = useCarStore();
+  const accent = useAccent();
   const spd = formatSpeed(s.speedMs || 0, s.speedUnit ?? getSettings().speedUnit);
   const nearby = s.peers.length;
   // Posted speed limit (PART 5), shown in the driver's unit. carStore.speedLimitKmh
@@ -697,9 +699,9 @@ export function CarSurface() {
                     drawer's green line + caret tip, riding routeProgress from
                     whichever strip engine owns the numbers above it. */}
                 <View style={styles.cardProgressTrack}>
-                  <View style={[styles.cardProgressFill, { width: `${Math.round(Math.max(0, Math.min(1, s.routeProgress || 0)) * 100)}%` }]} />
+                  <View style={[styles.cardProgressFill, { width: `${Math.round(Math.max(0, Math.min(1, s.routeProgress || 0)) * 100)}%`, backgroundColor: accent }]} />
                   <View style={[styles.cardProgressTip, { left: `${Math.round(Math.max(0, Math.min(1, s.routeProgress || 0)) * 100)}%` }]}>
-                    <Ionicons name="caret-forward" size={11} color="#2DEC86" />
+                    <Ionicons name="caret-forward" size={11} color={accent} />
                   </View>
                 </View>
                 {/* Jeff's spec: eta/time/distance must FIT, not truncate to "27…". */}

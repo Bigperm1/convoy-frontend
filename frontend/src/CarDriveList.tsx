@@ -24,6 +24,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { GlassFill } from "./Glass";
 import { ManeuverArrow, ManeuverBox, maneuverDir } from "./components/ManeuverArrow";
 import { COLORS } from "./theme";
+import { useAccentAlpha } from "./appSkin";
 import { NavStep, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec } from "./nav";
 import { skipNext, skipPrev } from "./applePlayer";
 import { spotify } from "./spotify";
@@ -121,6 +122,10 @@ export default function CarDriveList(props: {
   const [sharePayload, setSharePayload] = useState<SharePayload | null>(null);
   const hasMusic = !!song;
   const art = artURL(song?.artworkUrl ?? song?.artwork?.url, 96);
+  // App skin: the next-turn wash follows the user's chrome accent (silver/gold at
+  // tier), at the SAME opacities the brand-green rgba carried.
+  const washStrong = useAccentAlpha(0.20);
+  const washFade = useAccentAlpha(0.02);
 
   return (
     <View style={styles.root} pointerEvents="auto">
@@ -173,7 +178,7 @@ export default function CarDriveList(props: {
                   flat rgba fill that read as a plain stripe. */}
               {current && (
                 <LinearGradient
-                  colors={["rgba(45,236,134,0.20)", "rgba(45,236,134,0.02)"]}
+                  colors={[washStrong, washFade]}
                   start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
                   style={StyleSheet.absoluteFill}
                 />

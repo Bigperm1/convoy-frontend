@@ -12,6 +12,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAccent } from '../src/appSkin';
 
 // Router gate (app/index.tsx) imports this key to decide first-launch routing.
 export const ONBOARDING_KEY = 'convoy:onboarded:v1';
@@ -49,6 +50,7 @@ export default function Onboarding() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
   const router = useRouter();
+  const accent = useAccent();
 
   const finish = async () => {
     try {
@@ -74,7 +76,7 @@ export default function Onboarding() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <Text style={styles.logo}>HAIRPIN</Text>
+        <Text style={[styles.logo, { color: accent }]}>HAIRPIN</Text>
         <TouchableOpacity onPress={finish}>
           <Text style={styles.skip}>Skip</Text>
         </TouchableOpacity>
@@ -107,12 +109,12 @@ export default function Onboarding() {
       <View style={styles.footer}>
         <View style={styles.dots}>
           {screens.map((_, idx) => (
-            <View key={idx} style={[styles.dot, idx === currentIdx && styles.dotActive]} />
+            <View key={idx} style={[styles.dot, idx === currentIdx && styles.dotActive, idx === currentIdx && { backgroundColor: accent }]} />
           ))}
         </View>
         <TouchableOpacity onPress={goNext} style={styles.btn} activeOpacity={0.85}>
           <LinearGradient
-            colors={['#7DF0B0', '#2DEC86', '#00C46A']}
+            colors={['#7DF0B0', accent, '#00C46A']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.btnGradient}

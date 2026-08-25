@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import ConvoyLogo from './ConvoyLogo';
 import { useAuth } from '../auth';
+import { useAccent, useAccentAlpha } from '../appSkin';
 
 const YELLOW = '#2DEC86';
 const OWNER_EMAIL = 'jwellsmorton@gmail.com';
@@ -54,6 +55,9 @@ type Props = {
 export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
   const router = useRouter();
   const { user } = useAuth();
+  const accent = useAccent();
+  const cardBorder = useAccentAlpha(0.25);
+  const iconWell = useAccentAlpha(0.10);
   const [open, setOpen] = useState(false);
   const btnRef = useRef<any>(null);
   const [anchor, setAnchor] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -143,6 +147,7 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
               styles.card,
               { top },
               horiz,
+              { borderColor: cardBorder },
               {
                 opacity: drop,
                 transform: [
@@ -161,8 +166,8 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
                   onPress={() => go(item.route)}
                   testID={`logo-menu-${item.label.toLowerCase()}`}
                 >
-                  <View style={styles.rowIcon}>
-                    <Ionicons name={item.icon} size={20} color={YELLOW} />
+                  <View style={[styles.rowIcon, { backgroundColor: iconWell }]}>
+                    <Ionicons name={item.icon} size={20} color={accent} />
                   </View>
                   <Text style={styles.rowLabel}>{item.label}</Text>
                   <Ionicons name="chevron-forward" size={18} color="#555" />

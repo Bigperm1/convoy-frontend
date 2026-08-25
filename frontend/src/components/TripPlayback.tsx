@@ -20,6 +20,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform } from "react
 import { Ionicons } from "@expo/vector-icons";
 import Mapbox, { MapView, Camera, ShapeSource, LineLayer, MarkerView } from "@rnmapbox/maps";
 import { COLORS } from "../theme";
+import { useAccent, useAccentAlpha } from "../appSkin";
 import { decodePolyline } from "../nav";
 import { fmtKm, fmtDur, type Trip } from "../trips";
 
@@ -36,6 +37,10 @@ export default function TripPlayback({
   onClose: () => void;
   onTakeAgain: (t: Trip) => void;
 }) {
+  const accent = useAccent();
+  const againTint = useAccentAlpha(0.12);
+  const againEdge = useAccentAlpha(0.55);
+
   // [lng,lat] for Mapbox (decodePolyline returns {lat,lng}).
   const coords = useMemo<[number, number][]>(() => {
     if (!trip?.polyline) return [];
@@ -177,10 +182,10 @@ export default function TripPlayback({
         {/* Controls */}
         <View style={styles.footer}>
           <View style={styles.scrubTrack}>
-            <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
+            <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%`, backgroundColor: accent }]} />
           </View>
           <View style={styles.btnRow}>
-            <TouchableOpacity onPress={toggle} style={styles.playBtn} activeOpacity={0.85}>
+            <TouchableOpacity onPress={toggle} style={[styles.playBtn, { backgroundColor: accent }]} activeOpacity={0.85}>
               <Ionicons
                 name={progress >= 1 ? "refresh" : playing ? "pause" : "play"}
                 size={20}
@@ -188,9 +193,9 @@ export default function TripPlayback({
               />
               <Text style={styles.playText}>{progress >= 1 ? "Replay" : playing ? "Pause" : "Play"}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => onTakeAgain(trip)} style={styles.againBtn} activeOpacity={0.85}>
-              <Ionicons name="navigate" size={18} color={BRAND} />
-              <Text style={styles.againText}>Take it again</Text>
+            <TouchableOpacity onPress={() => onTakeAgain(trip)} style={[styles.againBtn, { backgroundColor: againTint, borderColor: againEdge }]} activeOpacity={0.85}>
+              <Ionicons name="navigate" size={18} color={accent} />
+              <Text style={[styles.againText, { color: accent }]}>Take it again</Text>
             </TouchableOpacity>
           </View>
         </View>

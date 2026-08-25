@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { GlassFill } from "./Glass";
 import { useRouter, usePathname } from "expo-router";
 import { COLORS } from "./theme";
+import { useAccentAlpha } from "./appSkin";
 import { voiceBus, VoiceCommand } from "./voiceBus";
 
 // Maps intent → tab route. Used for global "open_*" voice intents.
@@ -44,6 +45,8 @@ export default function VoiceController() {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(-20)).current;
   const hideTimer = useRef<any>(null);
+  const hairline = useAccentAlpha(0.35);
+  const iconWell = useAccentAlpha(0.16);
 
   useEffect(() => {
     const unsubscribe = voiceBus.subscribe((cmd: VoiceCommand) => {
@@ -90,14 +93,14 @@ export default function VoiceController() {
             { opacity, transform: [{ translateY }] },
           ]}
         >
-          <View style={styles.banner}>
+          <View style={[styles.banner, { borderColor: hairline }]}>
             {Platform.OS === "ios" ? (
               <GlassFill intensity={70} />
             ) : (
               <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(20,20,22,0.92)" }]} />
             )}
             <View style={styles.bannerInner}>
-              <View style={styles.bannerIcon}>
+              <View style={[styles.bannerIcon, { backgroundColor: iconWell }]}>
                 <Ionicons
                   name={banner!.intent ? "checkmark-circle" : "mic"}
                   size={20}

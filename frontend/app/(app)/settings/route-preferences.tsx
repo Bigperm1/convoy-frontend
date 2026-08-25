@@ -1,9 +1,11 @@
 import React from "react";
 import { useSettings } from "../../../src/settings";
+import { useAccent } from "../../../src/appSkin";
 import { SettingsPage, SectionLabel, SettingsCard, ToggleRow, Divider, HelpText } from "../../../src/components/settingsKit";
 
 export default function RoutePreferencesPage() {
   const [settings, setSettings] = useSettings();
+  const accent = useAccent();
   return (
     <SettingsPage title="Route Preferences">
       <SectionLabel>AVOID</SectionLabel>
@@ -20,7 +22,7 @@ export default function RoutePreferencesPage() {
       <SettingsCard>
         <ToggleRow
           icon="timer-outline"
-          iconColor="#2DEC86"
+          iconColor={accent}
           title="Pitstop timer"
           subtitle="Start a stopwatch when you park at a gas station or food stop"
           value={settings.pitstop !== false}

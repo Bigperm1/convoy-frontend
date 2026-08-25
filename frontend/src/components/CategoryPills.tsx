@@ -16,6 +16,7 @@ import { GOOGLE_MAPS_KEY } from "../api";
 import { getSettings } from "../settings";
 import { passesGasFilters, type Octane } from "../gasJockey";
 import { GlassFill, hudTint, drawerTint } from "../Glass";
+import { useAccent, useAccentAlpha } from "../appSkin";
 
 export type PlaceResult = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean; address?: string; rating?: number; ratingCount?: number; distanceM?: number };
 
@@ -208,6 +209,9 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
     }
   }, [activeKey, dropAnim]);
 
+  const accent = useAccent();
+  const accentWell = useAccentAlpha(0.14);
+  const accentHairline = useAccentAlpha(0.35);
   const unit = getSettings().speedUnit;
 
   const closeDropdown = () => {
@@ -258,13 +262,13 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         onPress={() => { setListOpen(false); run(cat); }}
         onLongPress={() => { setListOpen(true); if (activeKey !== cat.key) run(cat); }}
         delayLongPress={250}
-        style={[styles.pill, active && styles.pillActive]}
+        style={[styles.pill, active && styles.pillActive, active && { backgroundColor: accent }]}
       >
         {!active && <GlassFill tintColor={hudTint()} style={{ borderRadius: 13, overflow: "hidden" }} />}
         {loading ? (
-          <ActivityIndicator size="small" color={active ? "#1C1C1E" : "#2DEC86"} />
+          <ActivityIndicator size="small" color={active ? "#1C1C1E" : accent} />
         ) : (
-          <MaterialCommunityIcons name={cat.icon} size={15} color={active ? "#1C1C1E" : "#2DEC86"} />
+          <MaterialCommunityIcons name={cat.icon} size={15} color={active ? "#1C1C1E" : accent} />
         )}
         <Text style={[styles.pillText, active && styles.pillTextActive]}>{cat.label}</Text>
       </TouchableOpacity>
@@ -283,7 +287,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         {/* More pill — always last, opens the overflow sheet. */}
         <TouchableOpacity testID="cat-pill-more" activeOpacity={0.8} onPress={() => setMoreOpen(true)} style={styles.pill}>
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 13, overflow: "hidden" }} />
-          <MaterialCommunityIcons name="dots-horizontal" size={16} color="#2DEC86" />
+          <MaterialCommunityIcons name="dots-horizontal" size={16} color={accent} />
           <Text style={styles.pillText}>More</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -306,7 +310,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
           </View>
           {loadingKey ? (
             <View style={styles.dropLoading}>
-              <ActivityIndicator size="small" color="#2DEC86" />
+              <ActivityIndicator size="small" color={accent} />
               <Text style={styles.dropLoadingText}>Searching…</Text>
             </View>
           ) : results.length === 0 ? (
@@ -327,11 +331,11 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
                   </View>
                   <View style={styles.resultRight}>
                     {r.isGas ? (
-                      <Text style={styles.gasPrice} numberOfLines={1}>{r.price ? `Premium ${r.price}` : "Premium —"}</Text>
+                      <Text style={[styles.gasPrice, { color: accent }]} numberOfLines={1}>{r.price ? `Premium ${r.price}` : "Premium —"}</Text>
                     ) : (
                       <View style={styles.ratingRow}>
                         {[0, 1, 2, 3, 4].map((d) => (
-                          <View key={d} style={[styles.dot, d < Math.round(r.rating ?? 0) ? styles.dotOn : styles.dotOff]} />
+                          <View key={d} style={[styles.dot, d < Math.round(r.rating ?? 0) ? [styles.dotOn, { backgroundColor: accent }] : styles.dotOff]} />
                         ))}
                         {typeof r.ratingCount === "number" && <Text style={styles.ratingCount}>{r.ratingCount}</Text>}
                       </View>
@@ -360,8 +364,8 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
                   style={styles.gridItem}
                   onPress={() => { setMoreOpen(false); run(cat); }}
                 >
-                  <View style={styles.gridIcon}>
-                    <MaterialCommunityIcons name={cat.icon} size={22} color="#2DEC86" />
+                  <View style={[styles.gridIcon, { backgroundColor: accentWell, borderColor: accentHairline }]}>
+                    <MaterialCommunityIcons name={cat.icon} size={22} color={accent} />
                   </View>
                   <Text style={styles.gridLabel} numberOfLines={1}>{cat.label}</Text>
                 </TouchableOpacity>

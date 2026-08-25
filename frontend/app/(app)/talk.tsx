@@ -23,6 +23,7 @@ import { registerPushToken } from '../../src/pushRegistration';
 import { livePttBus, setCommsScreenFocused, acquireFloor, releaseFloor, getFloorHolder, floorBus, threadBus } from '../../src/livePtt';
 import { commsRead } from '../../src/commsRead';
 import { setPlaybackAudioMode, setIdleAudioMode } from '../../src/audioMode';
+import { useAccentAlpha } from '../../src/appSkin';
 
 const YELLOW = '#2DEC86';
 
@@ -65,6 +66,11 @@ export default function TalkScreen() {
   const [settings, setSettings] = useSettings();
   const { user } = useAuth();
   const { tier } = useLatestTier();
+  // App skin (silver at Premium, gold at Ultra) for the chrome on this screen.
+  // One hook per distinct alpha — the tint stays a tint, never a solid disc.
+  const accentTint = useAccentAlpha(0.12);
+  const accentEdge = useAccentAlpha(0.4);
+  const accentRing = useAccentAlpha(0.45);
 
   const [communities, setCommunities] = useState<Community[]>([]);
   const [pressed, setPressed] = useState(false);
@@ -572,7 +578,7 @@ export default function TalkScreen() {
       <View style={styles.header}>
         {active ? (
           <Pressable style={styles.communityBtn} onPress={toggleDropdown}>
-            <View style={styles.avatar}>
+            <View style={[styles.avatar, { borderColor: accentRing }]}>
               {active.logo_b64 ? (
                 <Image source={{ uri: active.logo_b64 }} style={styles.avatarImg} />
               ) : (
@@ -595,7 +601,7 @@ export default function TalkScreen() {
           </Pressable>
         ) : (
           <Pressable style={styles.communityBtn} onPress={toggleDropdown}>
-            <View style={styles.avatar}>
+            <View style={[styles.avatar, { borderColor: accentRing }]}>
               <Ionicons name="people" size={20} color="#8E8E93" />
             </View>
             <View style={{ flexShrink: 1 }}>
@@ -696,7 +702,7 @@ export default function TalkScreen() {
                 </Pressable>
               );
             })}
-            <Pressable onPress={openThreadPicker} style={({ pressed }) => [styles.chipNew, pressed && { opacity: 0.85 }]}>
+            <Pressable onPress={openThreadPicker} style={({ pressed }) => [styles.chipNew, { backgroundColor: accentTint, borderColor: accentEdge }, pressed && { opacity: 0.85 }]}>
               <Ionicons name="add" size={16} color={YELLOW} />
               <Text style={styles.chipNewText}>New</Text>
             </Pressable>
@@ -795,7 +801,7 @@ export default function TalkScreen() {
             tap-to-open and a 3s-silence gap auto-sends the turn and closes. */}
         {activeThread && (
           <TouchableOpacity
-            style={[styles.voxToggle, voxOn && styles.voxToggleOn]}
+            style={[styles.voxToggle, { borderColor: accentEdge }, voxOn && styles.voxToggleOn]}
             activeOpacity={0.85}
             onPress={toggleVox}
           >
@@ -847,7 +853,7 @@ export default function TalkScreen() {
                           <Text style={styles.convoMeta}>{fmtClock(m.created_at)} · {fmtDur(m.duration_ms)}</Text>
                         </View>
                         {playingId === m.id ? (
-                          <View style={styles.playingPill}>
+                          <View style={[styles.playingPill, { backgroundColor: accentTint }]}>
                             <Ionicons name="volume-high" size={13} color={YELLOW} />
                           </View>
                         ) : (m.user_id !== user?.id && !commsRead.clipPlayed(m.id)) ? (

@@ -136,6 +136,30 @@ export function useAccent(): string {
   return skin(useAppSkin()).accent;
 }
 
+/**
+ * The accent at a given opacity, for tint wells, hairline borders and glows.
+ *
+ * WHY THIS EXISTS: a large share of the brand green in this codebase is not written as
+ * "#2DEC86" at all — it is `rgba(45, 236, 134, 0.14)` and friends (45,236,134 IS
+ * 0x2D,0xEC,0x86). A hex-only search misses every one of them, and a naive
+ * `{ backgroundColor: accent }` override would turn a 14% tint WELL into a solid disc —
+ * a visual regression at green tier too, not just under a metal. So alpha must be
+ * carried through, never dropped.
+ *
+ * React Native accepts 8-digit #RRGGBBAA on every platform we ship, so this is a string
+ * concat rather than a parse — cheap enough to call in a render.
+ */
+export function withAlpha(hex: string, alpha: number): string {
+  const a = Math.max(0, Math.min(1, alpha));
+  return hex + Math.round(a * 255).toString(16).padStart(2, "0");
+}
+
+/** The skin accent at a given opacity. `useAccentAlpha(0.14)` replaces a hardcoded
+ *  `rgba(45,236,134,0.14)` and keeps the tint a tint. */
+export function useAccentAlpha(alpha: number): string {
+  return withAlpha(useAccent(), alpha);
+}
+
 /** Non-React read, for the car surfaces' imperative template builders. */
 export function accentNow(): string {
   return skin(appSkinNow()).accent;

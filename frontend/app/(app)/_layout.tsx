@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { useAppSkin, useAccent } from "../../src/appSkin";
 import { Tabs, useRouter, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
@@ -23,13 +24,38 @@ import { Image } from "expo-image";
 // active = candy green, inactive = muted silver. Pre-rendered pairs because a
 // baked gradient can't ride tabBarActiveTintColor — `focused` picks the file.
 // New asset paths on purpose (OTA path-key trap).
+// ── THE ACTIVE GLYPH WEARS THE APP SKIN (Jeff, 2026-08-24) ────────────────────
+// The tint below can't reach these — a baked gradient can't ride
+// tabBarActiveTintColor, which is exactly why the pairs exist. So the SKIN needs its
+// own baked pairs too, or a gold app would keep a green tab bar and the lockup would
+// read as a bug. `_gold` / `_silver` are hue-rotations of the same artwork (green sits
+// at ~145deg; gold is the ultra ramp's 40deg, silver is desaturated and LIFTED so the
+// active state still out-brightens the already-muted `off`). New asset paths on
+// purpose (OTA path-key trap). The `off` state is skin-independent: an inactive tab is
+// not wearing your metal, it is absent.
 const TAB_ICON = {
-  map:   { on: require("../../assets/images/tabicons/map_on.png"),   off: require("../../assets/images/tabicons/map_off.png") },
-  mic:   { on: require("../../assets/images/tabicons/mic_on.png"),   off: require("../../assets/images/tabicons/mic_off.png") },
-  music: { on: require("../../assets/images/tabicons/music_on.png"), off: require("../../assets/images/tabicons/music_off.png") },
+  map: {
+    brand:   require("../../assets/images/tabicons/map_on.png"),
+    premium: require("../../assets/images/tabicons/map_on_silver.png"),
+    ultra:   require("../../assets/images/tabicons/map_on_gold.png"),
+    off:     require("../../assets/images/tabicons/map_off.png"),
+  },
+  mic: {
+    brand:   require("../../assets/images/tabicons/mic_on.png"),
+    premium: require("../../assets/images/tabicons/mic_on_silver.png"),
+    ultra:   require("../../assets/images/tabicons/mic_on_gold.png"),
+    off:     require("../../assets/images/tabicons/mic_off.png"),
+  },
+  music: {
+    brand:   require("../../assets/images/tabicons/music_on.png"),
+    premium: require("../../assets/images/tabicons/music_on_silver.png"),
+    ultra:   require("../../assets/images/tabicons/music_on_gold.png"),
+    off:     require("../../assets/images/tabicons/music_off.png"),
+  },
 } as const;
 function TabGlyph({ kind, focused, size = 30 }: { kind: keyof typeof TAB_ICON; focused: boolean; size?: number }) {
-  return <Image source={focused ? TAB_ICON[kind].on : TAB_ICON[kind].off} style={{ width: size, height: size }} contentFit="contain" />;
+  const tier = useAppSkin();
+  return <Image source={focused ? TAB_ICON[kind][tier] : TAB_ICON[kind].off} style={{ width: size, height: size }} contentFit="contain" />;
 }
 import CommsTabButton from "../../src/components/CommsTabButton";
 import MapTabButton from "../../src/components/MapTabButton";
@@ -99,6 +125,7 @@ if (Platform.OS !== "web") {
 }
 
 export default function AppLayout() {
+  const tabAccent = useAccent();
   const { user } = useAuth();
   const router = useRouter();
   const [settings] = useSettings();
@@ -310,8 +337,14 @@ export default function AppLayout() {
           tabBarBackground: LIQUID_GLASS
             ? () => <GlassView glassEffectStyle="regular" colorScheme="dark" style={StyleSheet.absoluteFill} />
             : () => null,
-          tabBarActiveTintColor: "#2DEC86",
-          tabBarInactiveTintColor: "#FFFFFF",
+          // Moves WITH the glyph above, never on its own: the label and the icon are one
+          // lockup, and skinning either alone is what would actually look broken.
+          tabBarActiveTintColor: tabAccent,
+          // Was "#FFFFFF" — pure white, i.e. BRIGHTER than the active label. Green got
+          // away with it because hue alone separated the two, but silver is the same hue
+          // as white, so the selected tab read as the dim one. Inactive is now genuinely
+          // recessive, which is what the already-muted `off` glyphs were doing anyway.
+          tabBarInactiveTintColor: "#8E8E93",
           // Center the icon+label block and give the word room: a small gap under
           // the icon (marginTop), padding + lineHeight under the label so the text
           // is never clipped at the bar's bottom edge.

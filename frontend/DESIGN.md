@@ -217,7 +217,68 @@ to be built.
 
 ---
 
-## 7 · Only CLASS has a flat sprite
+## 7 · The APP SKIN — the whole app wears your tier's metal
+
+> Jeff, 2026-08-24: *"could we make it so everything on the app turns to silver and
+> gold when the tier are purchased… when silver is purchased you can switch back to
+> green but cant get gold? another Ultra feature???"*
+
+Yes — and **the ladder is the feature.** The metal ARRIVES with the tier; the CHOICE
+is what Ultra buys.
+
+| tier | app skin | may switch to |
+|---|---|---|
+| Free | green | — |
+| Premium | **silver** | green |
+| Ultra | **gold** | gold · silver · green |
+
+`Settings → App Skin`. Default is **Automatic**, so the metal appears on purchase with
+nothing to find. Mechanism is `src/appSkin.ts` (`useAccent`, `useAccentAlpha`,
+`useAppSkin`, `accentNow`) — a module bus, because CarPlay and Android Auto are separate
+React trees with no shared provider. `app_skin_silver` (rank 1) and `app_skin_gold`
+(rank 2) are TWO features, because one `FEATURE_RANK` entry cannot express two gates.
+
+The ladder is enforced in `setSkinChoice()`, not merely hidden in the UI, and a stored
+choice is **clamped to entitlement at read time** — a lapsed subscription falls back on
+its own instead of leaving a gold app behind a dead card, while remembering the pick.
+
+### ⛔ What the skin must NEVER touch
+
+1. **The map.** `CONGESTION_COLOR` is clear `#2DEC86` → slowing `#FFD60A` → congested
+   `#FF9500`, and our gold `#E0A93E` **lands between the last two**. A gold route line
+   reads as traffic ahead at speed. Route line, congestion, hazards, speed-camera pins,
+   the reroute-offer pill and the green arrow all stay brand green.
+2. **Tier locks.** They follow `useFeatureTier(feature)`. A gold H must keep meaning
+   *Ultra* — if the whole app is already gold, the lock stops selling anything.
+   **Chrome wears YOUR metal; paywall surfaces wear the FEATURE's metal.** That is how
+   this coexists with §1's "green means yours, metal means a tier".
+3. **Success states**, where green means *good* — gold reads as a warning.
+4. **Anything pinned to a baked green asset** that cannot follow: the Hairpin wordmark
+   and app icon (brand marks stay green — like every app whose logo survives its
+   themes), the CarPlay base64 button icons, and the mic-glow PNG.
+
+### Two traps this uncovered
+
+**The green is often not written as green.** ~50 sites use `rgba(45, 236, 134, α)` —
+which IS `#2DEC86` (45,236,134 = 0x2D,0xEC,0x86) — so a hex-only search misses them.
+Use `useAccentAlpha(α)`: a naive opaque override turns a 14% tint WELL into a solid
+disc, a regression at green tier too.
+
+**A legend has two halves.** The drawer's numbered stop badge pairs with the numeral on
+the map pin. The pin can't follow the skin, so the badge doesn't either — fill, ring and
+numeral stay green together. Any pair like this moves as one or not at all.
+
+### The tab bar needed new assets, and a fix
+
+`tabBarActiveTintColor` cannot reach the glyphs — they are pre-rendered PNG pairs. So
+`_gold` / `_silver` variants exist alongside each `_on`, and the tint moves WITH them;
+skinning either alone is what would look broken. Inactive was also changed from
+`#FFFFFF` to `#8E8E93`: pure white was *brighter* than the active label, which green got
+away with on hue alone but silver could not.
+
+---
+
+## 8 · Only CLASS has a flat sprite
 
 > Jeff, 2026-08-24: *"the sprite is only for the classes section the ultra premium
 > will not have a sprite."*
@@ -247,7 +308,7 @@ performance question and was NOT changed here.
 
 ---
 
-## 8 · Class paints ONE colour
+## 9 · Class paints ONE colour
 
 The Primary/Secondary slot pair is an **arrow** control — the arrow has a body and a
 rim. A class sprite is a single colour, so the slot row asked a question with one

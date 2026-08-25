@@ -9,6 +9,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
 import { formatErr } from "../../src/api";
+import { useAccent } from "../../src/appSkin";
 import Glass from "../../src/Glass";
 
 // ===== Signup screen =====
@@ -42,6 +43,7 @@ export default function Signup() {
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const { register } = useAuth();
+  const accent = useAccent();
   const router = useRouter();
 
   // Stable toggle callback so the memoized password Field doesn't see a
@@ -155,7 +157,7 @@ export default function Signup() {
             >
               {/* Convoy yellow CTA — dark text for contrast. */}
               <LinearGradient
-                colors={["#7DF0B0", "#2DEC86", "#00C46A"]}
+                colors={["#7DF0B0", accent, "#00C46A"]}
                 start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
                 style={styles.btnGrad}
               >

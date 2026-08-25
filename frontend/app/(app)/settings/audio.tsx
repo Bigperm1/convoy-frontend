@@ -13,6 +13,7 @@ import { previewNovaVoice, stopNovaPreview } from "../../../src/novaVoices";
 import { playSpeedDing } from "../../../src/speedDing";
 import { SettingsPage, SectionLabel, SettingsCard, Divider, HelpText } from "../../../src/components/settingsKit";
 import VolumeSlider from "../../../src/components/VolumeSlider";
+import { useAccent } from "../../../src/appSkin";
 
 function AudioRow({
   icon, color, title, subtitle, value, disabled, onChange, onComplete, onPreview,
@@ -42,6 +43,7 @@ function AudioRow({
 
 export default function AudioPage() {
   const [settings] = useSettings();
+  const accent = useAccent();
   // Live drag state (persists to settings on release). Seeded from saved volumes.
   const [voice, setVoice] = useState(getAudioVol(settings, "volVoice"));
   const [dings, setDings] = useState(getAudioVol(settings, "volDings"));
@@ -87,7 +89,7 @@ export default function AudioPage() {
         />
         <Divider />
         <AudioRow
-          icon="mic" color="#2DEC86" title="Transmission" subtitle="Replaying a saved transmission"
+          icon="mic" color={accent} title="Transmission" subtitle="Replaying a saved transmission"
           value={tx} onChange={setTx} onComplete={persist("volTransmission")}
         />
       </SettingsCard>

@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { COLORS } from "../../src/theme";
 import { getTrips, tripTotals, removeTrip, setTakeAgain, fmtKm, fmtDur, type Trip } from "../../src/trips";
 import TripPlayback from "../../src/components/TripPlayback";
+import { useAccent, useAccentAlpha } from "../../src/appSkin";
 
 function whenLabel(ms: number): string {
   const d = new Date(ms);
@@ -29,6 +30,8 @@ function whenLabel(ms: number): string {
 
 export default function TripsPage() {
   const router = useRouter();
+  const accent = useAccent();
+  const iconTint = useAccentAlpha(0.14);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [totals, setTotals] = useState({ km: 0, drives: 0, hours: 0 });
   const [busy, setBusy] = useState(false);
@@ -59,22 +62,22 @@ export default function TripsPage() {
 
       <ScrollView
         contentContainerStyle={{ paddingBottom: 40 }}
-        refreshControl={<RefreshControl refreshing={busy} onRefresh={load} tintColor="#2DEC86" />}
+        refreshControl={<RefreshControl refreshing={busy} onRefresh={load} tintColor={accent} />}
       >
         {/* Lifetime totals */}
         <View style={styles.totalsRow}>
           <View style={styles.totalCell}>
-            <Text style={styles.totalNum}>{fmtKm(totals.km)}</Text>
+            <Text style={[styles.totalNum, { color: accent }]}>{fmtKm(totals.km)}</Text>
             <Text style={styles.totalLabel}>recorded</Text>
           </View>
           <View style={styles.totalDivider} />
           <View style={styles.totalCell}>
-            <Text style={styles.totalNum}>{totals.drives}</Text>
+            <Text style={[styles.totalNum, { color: accent }]}>{totals.drives}</Text>
             <Text style={styles.totalLabel}>{totals.drives === 1 ? "drive" : "drives"}</Text>
           </View>
           <View style={styles.totalDivider} />
           <View style={styles.totalCell}>
-            <Text style={styles.totalNum}>{totals.hours < 1 ? `${Math.round(totals.hours * 60)}m` : `${Math.round(totals.hours)}h`}</Text>
+            <Text style={[styles.totalNum, { color: accent }]}>{totals.hours < 1 ? `${Math.round(totals.hours * 60)}m` : `${Math.round(totals.hours)}h`}</Text>
             <Text style={styles.totalLabel}>driving</Text>
           </View>
         </View>
@@ -90,8 +93,8 @@ export default function TripsPage() {
         ) : (
           trips.map((t) => (
             <View key={t.id} style={styles.row}>
-              <View style={styles.rowIcon}>
-                <Ionicons name="navigate" size={18} color="#2DEC86" />
+              <View style={[styles.rowIcon, { backgroundColor: iconTint }]}>
+                <Ionicons name="navigate" size={18} color={accent} />
               </View>
               {/* Tap the drive to watch it play back — the geometry is already local. */}
               <TouchableOpacity style={{ flex: 1, minWidth: 0 }} activeOpacity={0.7} onPress={() => setPlaying(t)}>

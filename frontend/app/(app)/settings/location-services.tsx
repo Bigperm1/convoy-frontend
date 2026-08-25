@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { COLORS } from "../../../src/theme";
 import { SettingsPage, SectionLabel, SettingsCard, HelpText } from "../../../src/components/settingsKit";
+import { useAccent } from "../../../src/appSkin";
 
 // Map the iOS foreground+background permission pair to a single readable state.
 function statusFor(fg: string, bg: string): { text: string; color: string; icon: any } {
@@ -15,6 +16,7 @@ function statusFor(fg: string, bg: string): { text: string; color: string; icon:
 export default function LocationServicesPage() {
   const [fg, setFg] = useState("undetermined");
   const [bg, setBg] = useState("undetermined");
+  const accent = useAccent();
 
   const refresh = useCallback(async () => {
     try {
@@ -58,7 +60,7 @@ export default function LocationServicesPage() {
       </SettingsCard>
 
       {fg === "undetermined" ? (
-        <TouchableOpacity onPress={requestPerm} activeOpacity={0.85} style={[styles.cta, { backgroundColor: "#2DEC86" }]}>
+        <TouchableOpacity onPress={requestPerm} activeOpacity={0.85} style={[styles.cta, { backgroundColor: accent }]}>
           <Text style={[styles.ctaText, { color: "#06281A" }]}>Allow Location</Text>
         </TouchableOpacity>
       ) : (

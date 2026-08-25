@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { api, formatErr } from '../../src/api';
+import { useAccent } from '../../src/appSkin';
 
 // Two-step password reset:
 //   1. "request" — enter email -> POST /auth/forgot-password emails a 6-digit code.
@@ -24,6 +25,7 @@ import { api, formatErr } from '../../src/api';
 // reveal which addresses are registered; we advance to step 2 either way.
 export default function ForgotPasswordScreen() {
   const router = useRouter();
+  const accent = useAccent();
   const [step, setStep] = useState<'request' | 'reset'>('request');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -85,8 +87,8 @@ export default function ForgotPasswordScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={12}>
-            <Ionicons name="chevron-back" size={24} color="#2DEC86" />
-            <Text style={styles.backText}>Back</Text>
+            <Ionicons name="chevron-back" size={24} color={accent} />
+            <Text style={[styles.backText, { color: accent }]}>Back</Text>
           </TouchableOpacity>
 
           <View style={styles.head}>
@@ -164,7 +166,7 @@ export default function ForgotPasswordScreen() {
               activeOpacity={0.85}
             >
               <LinearGradient
-                colors={['#7DF0B0', '#2DEC86', '#00C46A']}
+                colors={['#7DF0B0', accent, '#00C46A']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.buttonGradient}
@@ -181,7 +183,7 @@ export default function ForgotPasswordScreen() {
 
             {step === 'reset' && (
               <TouchableOpacity onPress={requestCode} disabled={loading} style={{ alignItems: 'center' }}>
-                <Text style={styles.resendLink}>Didn't get it? Resend code</Text>
+                <Text style={[styles.resendLink, { color: accent }]}>Didn't get it? Resend code</Text>
               </TouchableOpacity>
             )}
           </View>

@@ -12,6 +12,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { GlassFill } from '../Glass';
+import { useAccent } from '../appSkin';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -43,6 +44,7 @@ export default function Onboarding() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
   const router = useRouter();
+  const accent = useAccent();
 
   const goNext = () => {
     if (currentIdx < screens.length - 1) {
@@ -59,7 +61,7 @@ export default function Onboarding() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <Text style={styles.logo}>HAIRPIN</Text>
+        <Text style={[styles.logo, { color: accent }]}>HAIRPIN</Text>
         <TouchableOpacity onPress={() => router.replace('/(auth)/login')}>
           <Text style={styles.skip}>Skip</Text>
         </TouchableOpacity>
@@ -94,18 +96,25 @@ export default function Onboarding() {
       <View style={styles.footer}>
         <View style={styles.dots}>
           {screens.map((_, idx) => (
-            <View key={idx} style={[styles.dot, idx === currentIdx && styles.dotActive]} />
+            <View
+              key={idx}
+              style={[
+                styles.dot,
+                idx === currentIdx && styles.dotActive,
+                idx === currentIdx && { backgroundColor: accent },
+              ]}
+            />
           ))}
         </View>
         <TouchableOpacity onPress={goNext} style={styles.btn} activeOpacity={0.85}>
           {/* Green gradient base + green-tinted Liquid Glass sheen, copy on top. */}
           <LinearGradient
-            colors={['#7DF0B0', '#2DEC86', '#00C46A']}
+            colors={['#7DF0B0', accent, '#00C46A']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={StyleSheet.absoluteFill}
           />
-          <GlassFill tintColor="#2DEC86" style={StyleSheet.absoluteFill} />
+          <GlassFill tintColor={accent} style={StyleSheet.absoluteFill} />
           <View style={styles.btnGradient}>
             <Text style={styles.btnText}>{current.btnText}</Text>
           </View>

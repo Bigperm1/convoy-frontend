@@ -5,13 +5,14 @@
 // disabled → greyed, non-interactive (used for the fixed "Music" reference row).
 import React, { useRef, useState } from "react";
 import { View, StyleSheet, PanResponder, LayoutChangeEvent, GestureResponderEvent, PanResponderGestureState } from "react-native";
+import { useAccent } from "../appSkin";
 
 const THUMB = 22;
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 export default function VolumeSlider({
   value, onChange, onComplete, disabled = false,
-  color = "#2DEC86", trackColor = "rgba(255,255,255,0.14)", height = 6,
+  color: colorProp, trackColor = "rgba(255,255,255,0.14)", height = 6,
 }: {
   value: number;
   onChange?: (v: number) => void;
@@ -21,6 +22,8 @@ export default function VolumeSlider({
   trackColor?: string;
   height?: number;
 }) {
+  const accent = useAccent();
+  const color = colorProp ?? accent;
   const [w, setW] = useState(0);
   const wRef = useRef(0);
   const valRef = useRef(value);

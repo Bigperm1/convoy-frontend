@@ -192,7 +192,37 @@ to be built.
 
 ---
 
-## 7 · Class paints ONE colour
+## 7 · Only CLASS has a flat sprite
+
+> Jeff, 2026-08-24: *"the sprite is only for the classes section the ultra premium
+> will not have a sprite."*
+
+| tier | at rest (2D view) | routing (3D view) |
+|---|---|---|
+| Arrow (free) | green arrow GLB | green arrow GLB |
+| **Class** (silver) | **flat top-down sprite** | arrow GLB |
+| **3D / Ultra** (gold) | **its GLB** | its GLB |
+
+**Why the Ultra car lost its sprite.** The flat sprite is the *authored* GR Corolla
+PNG. From build 74 the 3D tier is a **Tripo scan of the driver's own car**, which has
+no flat twin — so drawing the sprite at rest put *somebody else's car* on the map for
+every scanned driver. The arrow already followed exactly this rule ("it has no flat
+twin"), and the 3D tier now does too.
+
+⚠️ **This narrows the 2026-08-18 rule in `src/mapViewMode.ts`** ("IDLE = 2D flat + the
+512px sprites, everywhere including the car surfaces"). That rule now applies to
+**Class and peers only** — the 2D/3D button still flattens the *camera* for the Ultra
+tier, it just no longer swaps the car's artwork. Both `ConvoyMapbox.tsx` and
+`carplay/CarMapView.tsx` were changed together; do not fix one without the other.
+
+🔎 **OPEN — what do PEERS see of a scanned car?** Peer markers still resolve through
+`getVehiclePngOrDefault(car.color)`, i.e. the authored PNG, so a scanned driver still
+appears to *others* as a stock GR Corolla. Rendering N peer GLBs is a separate
+performance question and was NOT changed here.
+
+---
+
+## 8 · Class paints ONE colour
 
 The Primary/Secondary slot pair is an **arrow** control — the arrow has a body and a
 rim. A class sprite is a single colour, so the slot row asked a question with one

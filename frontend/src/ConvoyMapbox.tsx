@@ -41,7 +41,7 @@ import { routeTrimLeadM, routeTrimFadeM } from "./routeTrim";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getPowerMode, usePowerMode } from "./powerMode";
-import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
+import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey, vehicleHasLitBake, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
 import { ClassSprite } from "./classLayers";
 import { getPaintedArrowUri } from "./arrowModel";
 import type { WeatherKind } from "./weatherLayer";
@@ -2531,12 +2531,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   //  • no photo yet           → the tinted silhouette placeholder
   // Image name carries class+paint so changing either re-registers live.
   const selfIsClass = waterBoat || (selfMarkerType === "class" && !navActive);
-  // Flat GR Corolla top-down PNG — IDENTICAL to what peers see — in the chosen
-  // color: a car/photo driver AT REST. In nav it becomes the 3D car GLB instead.
-  // `|| flatView` — in 2D the self car uses the SAME high-res top-down PNG the peers use,
-  // which is exactly what Jeff asked for ("2d cars (including peers)"). Arrow keeps its 3D
-  // model in both views (it has no flat twin), same rule the car surface follows.
-  const selfIsFlatCar = (selfMarkerType === "car" || selfMarkerType === "photo") && flatView && !waterBoat;
+  // ── ULTRA PREMIUM HAS NO SPRITE (Jeff, 2026-08-24) ──────────────────────────
+  // "the sprite is only for the classes section the ultra premium will not have a sprite"
+  // The 3D tier is the driver's OWN car — from build 74 that is a Tripo scan of it. The
+  // flat top-down PNG is the AUTHORED GR Corolla, so drawing it at rest put SOMEBODY
+  // ELSE'S CAR on the map for every scanned driver. Same rule the arrow already followed
+  // ("it has no flat twin"): no sprite, so the GLB renders in 2D view and 3D view alike.
+  // The flat sprite now belongs to CLASS only (selfIsClass, just above).
   const effVehicleClass = waterBoat ? "boat" : canonicalClass(selfVehicleClass);
   const effClassPaint = waterBoat && selfVehicleClass !== "boat"
     ? (getSettings().classPaint?.["boat"] ?? {})
@@ -2572,19 +2573,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // caches a model by id — a fixed id won't reload a new .glb until remount).
   const selfModelId = selfIsArrow
     ? (paintedArrowUri ? ARROW_MODEL_ID + "_" + paintedArrowUri.split("arrow_").pop()!.replace(".glb", "") : ARROW_MODEL_ID)
-    // convoyCar2_: generation bump — Mapbox caches models BY ID; without new ids
-    // devices would keep drawing the cached old GLBs forever.
-    : "convoyCar2_" + getVehicleModelKey(selfCar?.color) + (selfLit ? "_lit" : "");
+    // convoyCar3_: generation bump — Mapbox caches models BY ID; without new ids
+    // devices would keep drawing the cached old GLBs forever. Bumped 2026-08-24 when
+    // heavy_metal was repointed at the GRC.glb scan (the URL changed but the id would
+    // not have, so every existing install would have kept the old bake).
+    // The `_lit` suffix is gated on the SAME predicate as the URL — a scan has no night
+    // twin, and an id claiming `_lit` while the URL is the day bake is a lie that costs
+    // a wasted model registration.
+    : "convoyCar3_" + getVehicleModelKey(selfCar?.color) + (selfLit && vehicleHasLitBake(selfCar?.color) ? "_lit" : "");
   // Lift the paint out of the dark on the dim light presets (dawn/night). The ARROW
   // is always FULLY self-lit (1): it's a UI marker, not a realistic car — scene
   // lighting at day/dusk (0/0.55) washed its brand green pale.
   const selfEmissive = selfIsArrow ? 1 : (CAR_EMISSIVE_BY_MODE[mapMode] ?? 0);
-  // Flat self-car sprite: the SAME per-color GR Corolla top-down PNG peers see,
-  // registered as a Mapbox image so SelfCarModel can lay it flat on the map (it
-  // rides the same eased pose + camera lockstep as the 3D model). Keyed by color
-  // so a paint change swaps it live.
-  const selfCarFlatImg = "self_car_flat_" + getVehicleModelKey(selfCar?.color);
-
   // Project the car onto the selected route while navigating. Drives two things:
   // (1) trimming the line behind the car (3D car reads on top), and (2) snapping
   // the drawn car onto the line so it stays glued to the road. null in preview /
@@ -3070,13 +3070,6 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           </Images>
         ))}
 
-        {/* Flat self-car (at rest): register the per-color GR Corolla top-down PNG
-            — the exact asset peers see — so SelfCarModel can draw it as a flat
-            map-plane sprite. Only while idle car/photo; nav swaps to the 3D GLB. */}
-        {selfIsFlatCar && (
-          <Mapbox.Images images={{ [selfCarFlatImg]: getVehiclePngOrDefault(selfCar?.color) }} />
-        )}
-
         {/* Mapbox's native location layer — REQUIRED to power the Camera's
             followUserLocation (a hidden/unmounted location component doesn't start
             the native engine, which stops the chase cam). So we keep it VISIBLE
@@ -3329,12 +3322,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             scale={selfIsArrow ? ARROW_MODEL_SCALE : undefined}
             headingOffset={selfIsArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
             pitchTilt={selfIsArrow ? ARROW_MODEL_PITCH : 0}
-            // Flat sprite when at rest (class sprite OR the GR Corolla top-down
-            // PNG); undefined → the 3D GLB model (nav / chase-cam).
-            sprite={selfIsClass ? selfClassImg : (selfIsFlatCar ? selfCarFlatImg : undefined)}
-            // class photo → 0.9 (66pt snapshot); silhouette → 1; flat car PNG is a
-            // 44pt asset, so iconSize 1 ≈ the 46pt peer marker.
-            spriteSize={selfIsFlatCar ? vehiclePngScale(selfCar?.color) : (selfClassAsShot ? 0.9 : 1)}
+            // CLASS is the only tier with a flat sprite now — the 3D/Ultra car always
+            // draws its GLB. undefined → the 3D model.
+            sprite={selfIsClass ? selfClassImg : undefined}
+            // class photo → 0.9 (66pt snapshot); silhouette → 1.
+            spriteSize={selfClassAsShot ? 0.9 : 1}
             speedMs={userSpeedMs}
             cameraRef={cameraRef}
             getCam={getCam}

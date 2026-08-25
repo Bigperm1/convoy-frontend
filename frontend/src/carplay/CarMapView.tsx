@@ -35,7 +35,7 @@ import { canonicalClass } from '../settings';
 import { useMapView2D } from '../mapViewMode';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { usePowerMode } from '../powerMode';
-import { getVehicleModelUrl, getVehicleModelKey, getVehiclePngOrDefault, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
+import { getVehicleModelUrl, getVehicleModelKey, vehicleHasLitBake, getVehiclePngOrDefault, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
   ROUTE_GREEN_CORE,
@@ -591,7 +591,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // Lights-on after dark, same rule as the phone (isLitPreset ⇒ the _lit bake; the
   // id must carry the suffix so Mapbox's by-id model cache reloads on day↔night).
   const carLit = !isArrow && isLitPreset(mode);
-  const carModelId = isArrow ? ARROW_MODEL_ID : ('convoyCar_' + getVehicleModelKey(s.selfCarColor) + (carLit ? '_lit' : ''));
+  // convoyCar3_: generation bump, in step with the phone (ConvoyMapbox.tsx). CarPlay
+  // sat a generation behind at 'convoyCar_', so it cached its own stale copies.
+  const carModelId = isArrow ? ARROW_MODEL_ID : ('convoyCar3_' + getVehicleModelKey(s.selfCarColor) + (carLit && vehicleHasLitBake(s.selfCarColor) ? '_lit' : ''));
 
   // Speed-aware zoom for BOTH nav AND cruise — chaseZoom with no turn distance is a pure
   // speed→zoom curve (city tighter, highway wider), so cruise now dynamically zooms in/out
@@ -624,7 +626,13 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // The button is now the ONE source of truth on all four surfaces, which is what "default
   // is unchanged, you press the button" means. Idle now looks the same as driving: 3D
   // until the driver says otherwise.
-  const carFlat = view2D && !isArrow;
+  // ── ULTRA PREMIUM HAS NO SPRITE (Jeff, 2026-08-24) ──────────────────────────
+  // "the sprite is only for the classes section the ultra premium will not have a sprite"
+  // Was `view2D && !isArrow`, which flattened the 3D/Ultra car too — and that sprite is
+  // the AUTHORED GR Corolla, so a driver whose 3D model is a scan of their own car saw
+  // somebody else's car whenever the view was 2D. CLASS keeps the flat sprite; the Ultra
+  // car now draws its GLB in both views, matching the phone (ConvoyMapbox.tsx).
+  const carFlat = view2D && s.selfMarkerType === 'class';
   // 2D forces top-down even while routing — that is the whole point of the view. The
   // speed-driven ZOOM curve above is deliberately left alone: Jeff asked for "speed zoom
   // features (like 3d zoom) but just zoom in and out not tilt".

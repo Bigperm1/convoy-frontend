@@ -393,7 +393,9 @@ export function getVehicleTint(color?: string | null): { color: string; mix: num
 // the AI-generated higgsfield set whose rear was hallucinated mush.
 export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
   ice_cap_white:        "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_ice_cap_white.glb",
-  heavy_metal:          "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_heavy_metal.glb",
+  // heavy_metal is the ONLY scanned car so far (Jeff, 8/23) — a Tripo photogrammetry
+  // bake from his own 4-shot lap, not an authored model. See NO_LIT_BAKE below.
+  heavy_metal:          "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/GRC.glb",
   supersonic_red:       "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_supersonic_red.glb",
   blue_flame:           "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_blue_flame.glb",
   precious_black_pearl: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_precious_black_pearl.glb",
@@ -548,10 +550,27 @@ export function vehiclePngScale(color?: string | null): number {
  * `lit` picks the headlights/taillights-ON bake (out_<key>_lit.glb, same bucket) —
  * the map passes it when the basemap lightPreset is dawn/dusk/night so the car
  * drives with its lights on after dark (Jeff, 8/19). */
+/** Keys with NO `_lit` night bake. An authored car carries 18 named materials, and the
+ *  lit bake is just emissive raised on four of them (HeadlightGlass, Light, TailLight,
+ *  LightRed) — same geometry, ~168 bytes apart. A photogrammetry SCAN exports ONE
+ *  material (`tripo_material_<uuid>`), so there is no headlight material to light up and
+ *  the fleet's lit method cannot be applied at all. Asking for the twin 404s, and
+ *  `<Models>` has no error path — a 404 model is simply an invisible car.
+ *  Verified 2026-08-24 by diffing out_heavy_metal.glb against out_heavy_metal_lit.glb.
+ *  EVERY car the Ultra scan feature produces lands here until scan light-segmentation
+ *  exists; this is not a heavy_metal special case. */
+const NO_LIT_BAKE = new Set<GRCColorKey>(["heavy_metal"]);
+
+/** Whether this paint's model has a headlights-ON twin. Callers building a Mapbox model
+ *  ID must use this too, so the id never says `_lit` while the URL is the day bake. */
+export function vehicleHasLitBake(color?: string | null): boolean {
+  return !NO_LIT_BAKE.has(resolveGRCKey(color) || DEFAULT_GRC_KEY);
+}
+
 export function getVehicleModelUrl(color?: string | null, lit?: boolean): string {
   const key = resolveGRCKey(color) || DEFAULT_GRC_KEY;
   const url = VEHICLE_MODEL_URL[key];
-  return lit ? url.replace(/\.glb$/, "_lit.glb") : url;
+  return lit && !NO_LIT_BAKE.has(key) ? url.replace(/\.glb$/, "_lit.glb") : url;
 }
 
 /** True when the basemap light preset calls for headlights (dawn/dusk/night). */

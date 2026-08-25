@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   SafeAreaView, Dimensions, TextInput,
-  Image, ActivityIndicator, Alert,
+  Image, ActivityIndicator, Alert, type ImageSourcePropType,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -31,6 +31,19 @@ import { getColorsForModel } from '../../src/carDatabase';
 const { width: SCREEN_W } = Dimensions.get('window');
 const HERO_H = 300;   // one height for every hero page — the carousel cannot jump
 const YELLOW = '#2DEC86';
+
+// ── THE PAGE'S WALLPAPER WEARS THE PAGE'S METAL (Jeff, 2026-08-24) ────────────
+// "change the background wallpaper to have a gold line too". DESIGN.md: a screen is
+// ONE metal all the way through, so the neon road behind the glass follows the
+// carousel tier instead of staying green under a gold page. Hue-rotated from the
+// green original (trail sits at 125deg) to the ultra ramp's 40deg; silver is the same
+// road desaturated with the premium ramp's cool cast. requires MUST be static and
+// live here so Metro bundles all three.
+const TIER_WALLPAPER: Record<VisualTier, ImageSourcePropType> = {
+  brand:   require("../../assets/images/glass-bgt.png"),
+  premium: require("../../assets/images/glass-bgt-silver.png"),
+  ultra:   require("../../assets/images/glass-bgt-gold.png"),
+};
 
 // Photo avatars are parked until the backend upload endpoint + Supabase Storage
 // exist (they need server-side work). Flip to true to re-enable the Photo option;
@@ -526,7 +539,7 @@ export default function GarageScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <GlassBackdrop source={require("../../assets/images/glass-bgt.png")} />
+      <GlassBackdrop source={TIER_WALLPAPER[pageTier]} />
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* Header */}
@@ -652,7 +665,7 @@ export default function GarageScreen() {
               <Text style={styles.speedLabel}>Top Cruise Speed</Text>
               <Text style={styles.speedSub}>Personal best - beat it on your next drive.</Text>
             </View>
-            <Text style={styles.speedValue}>{topSpeed}</Text>
+            <Text style={[styles.speedValue, { color: skin(pageTier).accent }]}>{topSpeed}</Text>
             <Text style={styles.speedUnit}>km/h</Text>
           </View>
         ) : null}
@@ -661,7 +674,7 @@ export default function GarageScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Call Sign</Text>
           <View style={styles.fieldRow}>
-            <Ionicons name="person-circle-outline" size={20} color={YELLOW} style={{ marginRight: 8 }} />
+            <Ionicons name="person-circle-outline" size={20} color={skin(pageTier).accent} style={{ marginRight: 8 }} />
             <TextInput
               style={styles.callSignInput}
               value={callSign}

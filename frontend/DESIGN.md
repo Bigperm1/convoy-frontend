@@ -51,6 +51,31 @@ The gold stops are **not new** — they are the ones `PremiumBadge` has always u
 lifted into `tierTheme.ts` so the pill and the page can never disagree about what
 gold is.
 
+### The page's wallpaper wears the page's metal
+
+> Jeff, 2026-08-24: *"change the background wallpaper to have a gold line too."*
+
+`glass-bgt.png` is the neon road behind the glass. A green road under a gold page
+broke "a screen is ONE metal", so it is now three assets picked by tier:
+
+| tier | asset |
+|---|---|
+| brand | `assets/images/glass-bgt.png` (original) |
+| premium | `assets/images/glass-bgt-silver.png` |
+| ultra | `assets/images/glass-bgt-gold.png` |
+
+Both derived from the original by **hue rotation, not tint** — `tintColor` flattens
+every non-transparent pixel to one colour and destroys the image. The trail sits at
+125°; gold rotates it to the ultra ramp's 40°, silver desaturates to 16% with the
+premium ramp's cool cast. Only ~3.6% of the image is lit, so the rotation only ever
+touches the road and grid. `TIER_WALLPAPER` in `app/(app)/garage.tsx` holds the three
+`require()`s — they **must** be static and at module level or Metro cannot bundle them.
+
+Everything tier-coloured on the page follows the same `skin(pageTier).accent`: the
+personal-best number, the call-sign icon, the speed badge, the Apply/Save CTAs.
+The Arrow/Class/3D option tiles keep their OWN artwork colours — a green arrow glyph
+on a gold page is the arrow's identity, not a stray accent.
+
 `accent` is the mid-tone for text/icons on a DARK ground (`#2DEC86` / `#C9D2D8` /
 `#E0A93E`); `ink` is for glyphs riding ON the fill. Never use `ink` on black.
 

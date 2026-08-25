@@ -9,7 +9,6 @@ import ConvoyLogo from './ConvoyLogo';
 import { useAuth } from '../auth';
 import { useAccent, useAccentAlpha } from '../appSkin';
 
-const YELLOW = '#2DEC86';
 const OWNER_EMAIL = 'jwellsmorton@gmail.com';
 const CARD_W = 230;
 const GAP = 8; // gap between the logo's bottom and the dropdown's top

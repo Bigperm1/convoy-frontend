@@ -71,7 +71,7 @@ import {
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
 import { routeTrimLeadM, routeTrimFadeM } from '../routeTrim';
-import { logEvent } from '../crashBreadcrumb';
+import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
 // (index != 0) and the casing/core draw it (index == 0), exactly like the phone.
@@ -466,7 +466,27 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     setPainted(true);
     // Receipt for the recovery. Without it "the retries stopped" is unreadable — you
     // cannot tell whether the next attempt painted or the drive simply ended.
-    if (attempt > 0) { try { logEvent(`carplay-live-paint attempt=${attempt}`); } catch {} }
+    //
+    // ── LOG ATTEMPT 0 TOO (2026-08-25) ────────────────────────────────────────
+    // This used to be `if (attempt > 0)`, so a HEALTHY first paint left no row at
+    // all. That made the two states we most need to tell apart look identical in
+    // the data: "the surface never painted" and "it painted, then went away".
+    // Say Phin's 08-24 blank car screens are exactly that ambiguity — no GL error,
+    // no retry, no give-up, and no way to know whether a frame ever landed.
+    // logEventReliable, NOT logEvent. crashBreadcrumb's own rule: "Use for
+    // receipts/bails whose absence will be interpreted." That is precisely this row —
+    // its whole job is that a MISSING one means no frame landed. Plain logEvent returns
+    // early when the Supabase client is not constructed yet, which is the normal state
+    // during an Android-Auto-first cold start, i.e. exactly the session we are chasing.
+    // It would recreate the ambiguity this edit exists to remove.
+    //
+    // BOUNDING, stated accurately: paintedRef makes this at most ONE row per mount, and
+    // mounts within a CarSurface are capped at 7 by MAX_LIVE_ATTEMPTS (key={liveAttempt}).
+    // It is NOT capped per drive — CarSurface is an AppRegistry root the head unit
+    // starts, and nothing here limits how often it connects. That is fine and deliberate:
+    // one row per connect is the signal. A module-level once-guard (aaCanvasSeen-style)
+    // would defeat the instrument, because the bug we are hunting is per-connect.
+    try { logEventReliable(`carplay-live-paint attempt=${attempt}`); } catch {}
     void measureViewportOnce();
   };
 
@@ -496,26 +516,40 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // One row per session — this is a Supabase INSERT, not a console line.
   const viewportLoggedRef = useRef(false);
   const measureViewportOnce = async () => {
+    // ── THE FLAG IS BURNED ON SUCCESS, NOT ON ENTRY (2026-08-25) ──────────────
+    // It used to be set here, before the 2.5s await. So if carMapRef was gone when
+    // the timer fired, the function returned silently AND the instrument was
+    // disarmed for the rest of the session — a missing car-viewport row could mean
+    // "the map never drew" or "the read simply failed", with no way to tell. That
+    // ambiguity is what made Say Phin's 08-24 blanks unresolvable from telemetry.
+    // Now every exit path says WHY, and the once-flag is only set on a real read.
     if (viewportLoggedRef.current) return;
-    viewportLoggedRef.current = true;
     try {
       // Let the first camera command settle: at paint the camera may still be on the
       // cold seed rather than the follow pose, which would log a zoom we never show.
       await new Promise((r) => setTimeout(r, 2500));
       const m = carMapRef.current;
-      if (!m?.getVisibleBounds) return;
+      if (!m?.getVisibleBounds) {
+        // Not silence any more. "ref gone" means the surface was torn down between
+        // the first frame and 2.5s later — the eviction signature. "no method" means
+        // getVisibleBounds is unavailable on this surface, which is a different bug.
+        viewportLoggedRef.current = true;
+        try { logEventReliable(`car-viewport-miss why=${m ? 'no-method' : 'ref-gone'} painted=${paintedRef.current ? 1 : 0} attempt=${attempt}`); } catch {}
+        return;
+      }
       const [ne, sw] = await m.getVisibleBounds();     // [[lon,lat],[lon,lat]] from NATIVE
       const zoom = typeof m.getZoom === 'function' ? await m.getZoom() : -1;
       const f = (n: number) => (typeof n === 'number' ? n.toFixed(5) : 'na');
-      logEvent(
+      viewportLoggedRef.current = true;
+      logEventReliable(
         `car-viewport surf=${Math.round(surfaceW)}x${Math.round(surfaceH)} ` +
         `scale=${mapScale.toFixed(3)} zoom=${typeof zoom === 'number' ? zoom.toFixed(2) : 'na'} ` +
         `ne=${f(ne?.[0])},${f(ne?.[1])} sw=${f(sw?.[0])},${f(sw?.[1])}`,
       );
-    } catch {
-      // A failed read must never touch the drive. Silence is itself a signal: an AA
-      // session with a paint row but no car-viewport row means getVisibleBounds is
-      // unavailable on that surface, which is worth knowing on its own.
+    } catch (e: any) {
+      // A failed read must never touch the drive — but it must not be SILENT either.
+      viewportLoggedRef.current = true;
+      try { logEventReliable(`car-viewport-miss why=threw msg=${String(e?.message ?? e).slice(0, 60)} attempt=${attempt}`); } catch {}
     }
   };
 
@@ -525,7 +559,17 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     watchdogRef.current = setTimeout(() => {
       if (!paintedRef.current) fail(`watchdog${ms}`);
     }, ms);
-    return () => { if (watchdogRef.current) clearTimeout(watchdogRef.current); };
+    return () => {
+      if (watchdogRef.current) clearTimeout(watchdogRef.current);
+      // ── TEARDOWN RECEIPT (2026-08-25) ──────────────────────────────────────
+      // There was NO crumb for the car surface going away, so an Android Auto
+      // eviction (the driver dropped onto the session placeholder — Say Phin's
+      // 0e43bbe bug, whose native half still needs Screen.setMarker) looked
+      // identical in telemetry to a map that simply never came up. `painted` says
+      // which: unmount with painted=1 means we HAD a frame and lost the surface.
+      // One row per mount, same as the paint receipt — see the bounding note there.
+      try { logEventReliable(`car-surface-gone painted=${paintedRef.current ? 1 : 0} attempt=${attempt}`); } catch {}
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

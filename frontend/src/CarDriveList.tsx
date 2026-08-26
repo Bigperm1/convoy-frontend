@@ -24,7 +24,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { GlassFill } from "./Glass";
 import { ManeuverArrow, ManeuverBox, maneuverDir } from "./components/ManeuverArrow";
 import { COLORS } from "./theme";
-import { useAccentAlpha } from "./appSkin";
+import { useAccent, useAccentAlpha } from "./appSkin";
 import { NavStep, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec } from "./nav";
 import { skipNext, skipPrev } from "./applePlayer";
 import { spotify } from "./spotify";
@@ -124,13 +124,14 @@ export default function CarDriveList(props: {
   const art = artURL(song?.artworkUrl ?? song?.artwork?.url, 96);
   // App skin: the next-turn wash follows the user's chrome accent (silver/gold at
   // tier), at the SAME opacities the brand-green rgba carried.
+  const accent = useAccent();
   const washStrong = useAccentAlpha(0.20);
   const washFade = useAccentAlpha(0.02);
 
   return (
     <View style={styles.root} pointerEvents="auto">
       <View style={styles.header}>
-        <Text style={styles.onCar}>NAVIGATION IS ON YOUR CAR SCREEN</Text>
+        <Text style={[styles.onCar, { color: accent }]}>NAVIGATION IS ON YOUR CAR SCREEN</Text>
         {/* ONE line, always (Jeff, 2026-08-16: "the AM is on its own and doesn't look
             polished") — same auto-shrink pattern as the speedo numbers: a long ETA or
             "11:41 PM" scales the whole line down instead of wrapping its tail. */}
@@ -172,7 +173,7 @@ export default function CarDriveList(props: {
           const current = index === upcomingIdx;
           const past = index < upcomingIdx;
           return (
-            <View style={[styles.row, current && styles.rowCurrent, past && styles.rowPast]}>
+            <View style={[styles.row, current && [styles.rowCurrent, { borderLeftColor: accent }], past && styles.rowPast]}>
               {/* Gradient wash for the NEXT-turn row (8/20, with the ManeuverBox pass):
                   green glow strongest at the arrow edge, fading across — replaces the
                   flat rgba fill that read as a plain stripe. */}
@@ -194,7 +195,7 @@ export default function CarDriveList(props: {
                   {strip(item.html) || maneuverVerb(item.maneuver)}
                 </Text>
               </View>
-              <Text style={[styles.rowDist, current && styles.rowDistCurrent]}>
+              <Text style={[styles.rowDist, current && [styles.rowDistCurrent, { color: accent }]]}>
                 {current ? fmtManeuverDist(props.distanceToManeuverM) : item.distance_text}
               </Text>
             </View>

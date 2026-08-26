@@ -841,9 +841,27 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const uiScale = hudScaleFor(mapW, mapH);
   // Memoised: carModelScale builds a fresh zoom-expression ARRAY, and handing Mapbox a
   // new array every render re-uploads the layer's paint properties each frame.
+  //
+  // ── ARROW SIZE (Jeff, 2026-08-25, off two head-unit photos) ────────────────
+  // "in the arrow mode the arrow is too big especially on 2d but 3d is too big too."
+  //
+  // It was 1.0 against the car's 0.7 — the arrow rendered 43% LARGER than the car it
+  // stands in for, which is why it dominates. 0.78 brings that ratio to 1.11: still
+  // bigger than the car (a chevron needs more area than a car silhouette to read at a
+  // glance) but no longer the loudest thing on the canvas.
+  //
+  // 2D is a SEPARATE number because it is a genuinely different projection, not a
+  // preference. ARROW_MODEL_PITCH = 90 lays the arrow FLAT on the road; in 3D the
+  // pitched camera foreshortens that footprint, and in 2D (pitch 0, straight down)
+  // you see all of it. Same world-space scale, visibly bigger marker — which is
+  // exactly the "especially on 2d" in the report. 0.60 restores the 3D read.
+  //
+  // NOT touched: the PHONE's ARROW_MODEL_SCALE (ConvoyMapbox.tsx:311, currently 1.25).
+  // That constant has its own tuning history at Jeff's hand (1.9 -> 1.6 -> 1.25) and
+  // he photographed CarPlay, not the phone. One surface per report.
   const selfScale = useMemo(
-    () => carModelScale((isArrow ? 1.0 : 0.7) * uiScale),
-    [isArrow, uiScale],
+    () => carModelScale((isArrow ? (view2D ? 0.60 : 0.78) : 0.7) * uiScale),
+    [isArrow, uiScale, view2D],
   );
 
   // MANDATORY heading-up — mirror the phone: plain Follow + a HELD heading, NOT

@@ -312,6 +312,9 @@ export const ARROW_MODEL_SCALE: any = carModelScale(1.25);
 // CarPlay self-arrow scale — the head-unit camera sits tighter than the phone, so the shared
 // phone scale rendered the arrow enormous (drive feedback 2026-07-11). 1.0 brings it in line with
 // the CarPlay car (carModelScale(0.7)) at a sane arrow/car ratio. OTA-tunable.
+// ⚠ DEAD as of 2026-08-25 — kept only so the number's history is not lost. The car
+// surface computes its own arrow scale inline (CarMapView.tsx, selfScale) because it
+// needs the 2D/3D split this constant cannot express. Do not wire this back up.
 export const CARPLAY_ARROW_SCALE: any = carModelScale(1.0);
 // Self-marker jitter dead-band: when a new GPS fix is within SELF_DEADBAND_M meters AND
 // SELF_DEADBAND_HDG degrees of the current drawn pose, the marker HOLDS instead of easing

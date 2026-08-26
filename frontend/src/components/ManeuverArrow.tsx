@@ -6,6 +6,8 @@
 // works on the CarPlay window where icon fonts were flaky.
 
 import React from "react";
+import { useAppSkin } from "../appSkin";
+import { TIER_SKIN, type VisualTier } from "../tierTheme";
 import { View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Path, Circle, G } from "react-native-svg";
@@ -117,29 +119,49 @@ export const CANDY_INK = "#04150B";
 // hairline rim; the dark glyph rides on top. LinearGradient is proven on every
 // surface including the AA canvas (the 8/18 bisect exonerated it).
 
+/**
+ * ── THE TURN SQUARE WEARS THE APP SKIN (Jeff, 2026-08-25) ────────────────────
+ * "make sure the turn banner square and the phone turnbyturn (map replacement)
+ *  follow the skin too."
+ *
+ * The candy language and TIER_SKIN are the SAME construction — a three-stop
+ * vertical gradient at [0, 0.45, 1] plus a pale hairline rim (DESIGN.md §1) — so
+ * the box just reads its stops from the skin instead of the brand constants. One
+ * component means the phone banner, the phone drive-list rows and the CarPlay /
+ * AA nav card cannot drift apart, which is the whole reason ManeuverBox exists.
+ *
+ * `tier` overrides it for a surface that must stay brand green regardless.
+ * NOTE this is deliberately NOT map paint: the route line, congestion and hazards
+ * are untouched (src/appSkin.ts). This is a UI card that happens to sit over the
+ * map, and Jeff asked for it explicitly.
+ */
 export function ManeuverBox({
   size = 30,
   radius = 8,
   style,
+  tier,
   children,
 }: {
   size?: number;
   radius?: number;
   style?: any;
+  tier?: VisualTier;
   children: React.ReactNode;
 }) {
+  const skinTier = useAppSkin();
+  const sk = TIER_SKIN[tier ?? skinTier];
   return (
     <View
       style={[{
         width: size, height: size, borderRadius: radius,
         alignItems: "center", justifyContent: "center",
         overflow: "hidden",
-        borderWidth: 1, borderColor: CANDY_RIM,
+        borderWidth: 1, borderColor: sk.rim,
       }, style]}
     >
       <LinearGradient
-        colors={CANDY_COLORS}
-        locations={CANDY_LOCATIONS}
+        colors={sk.colors}
+        locations={sk.locations}
         style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
       />
       {children}

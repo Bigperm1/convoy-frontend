@@ -19,6 +19,7 @@ import { Audio } from "expo-av";
 import { api } from "../api";
 import { getPttRecordingOptions, getLatestTier } from "../proximityAudio";
 import { setRecordingAudioMode, setIdleAudioMode } from "../audioMode";
+import { acquireMic, micOwner, type MicLease } from "../micArbiter";
 import { duckMusicFor, unduckMusicFor } from "../applePlayer";
 import { getSettings } from "../settings";
 import { getCarState, setCarState } from "./carStore";
@@ -27,6 +28,8 @@ const MAX_TX_MS = 25000;
 const MIN_TX_MS = 300; // ignore accidental taps — nothing meaningful was said
 
 let _rec: Audio.Recording | null = null;
+// Held for exactly as long as _rec is non-null. Released on BOTH exit paths below.
+let _lease: MicLease | null = null;
 let _startedAt = 0;
 let _capTimer: ReturnType<typeof setTimeout> | null = null;
 let _busy = false; // serialize toggles — a double-tap mid-transition must not race
@@ -69,7 +72,12 @@ async function start(): Promise<string | null> {
   const s = getCarState();
   // Mic guard: Scout owns the mic right now — see header. (scoutThinking means
   // the recorder is already released, so only listening blocks.)
+  // The hand-rolled Scout check is now the ARBITER's job — it covers all four
+  // recorders (scout, voice, ptt, carComms), not just Scout, and it is the same
+  // lease audioMode consults before it flips allowsRecordingIOS off under us.
   if (s.scoutListening) return "Scout is using the mic";
+  const held = micOwner();
+  if (held) return held === "scout" ? "Scout is using the mic" : "Mic is busy";
   const st = getSettings();
   const channel = st.activeThreadId || st.activeCommunityId;
   if (!channel) return "No comms channel — pick one on the phone";
@@ -81,6 +89,9 @@ async function start(): Promise<string | null> {
     return "Allow the microphone on your phone first";
   }
   try {
+    // 25s cap + the arbiter's own grace: a tap-and-forget cannot strand the mic.
+    _lease = acquireMic("carComms", MAX_TX_MS);
+    if (!_lease) return "Mic is busy";
     await setRecordingAudioMode();
     const rec = new Audio.Recording();
     await rec.prepareToRecordAsync(getPttRecordingOptions(getLatestTier().tier));
@@ -99,6 +110,7 @@ async function start(): Promise<string | null> {
     setCarState({ commsTx: "idle" });
     // prepare/start threw AFTER the ducked .playAndRecord session was armed —
     // restore idle or music stays quiet/mono (the phone had this exact bug).
+    _lease?.release(); _lease = null;   // before the idle flip, or it defers
     void setIdleAudioMode();
     return "Mic failed to start";
   }
@@ -108,7 +120,13 @@ async function stopAndSend(): Promise<string | null> {
   if (_capTimer) { clearTimeout(_capTimer); _capTimer = null; }
   const rec = _rec;
   _rec = null;
-  if (!rec) { setCarState({ commsTx: "idle" }); return null; }
+  if (!rec) {
+    // No Recording, but start() may still hold a lease from an attempt that never
+    // opened one — free it rather than waiting on the lease deadline.
+    if (_lease) { _lease.release(); _lease = null; void setIdleAudioMode(); }
+    setCarState({ commsTx: "idle" });
+    return null;
+  }
   let uri: string | null = null;
   let durationMs = Date.now() - _startedAt;
   try {
@@ -122,6 +140,7 @@ async function stopAndSend(): Promise<string | null> {
     uri = rec.getURI?.() ?? null;
   } finally {
     // Session back to idle + resume music — the exact restore pair the phone uses.
+    _lease?.release(); _lease = null;   // before the idle flip, or it defers
     void setIdleAudioMode();
     void unduckMusicFor("ptt-tx");
   }

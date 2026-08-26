@@ -26,6 +26,7 @@
 
 import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from "expo-av";
 import { AppState } from "react-native";
+import { micIsHot, subscribeMic } from "./micArbiter";
 
 /** RECORDING state — mic is hot. Call BEFORE `Recording.startAsync()`. */
 async function _applyRecordingMode() {
@@ -143,19 +144,99 @@ let _desiredMode: _DuckMode = "idle";
 let _duckBackstop: ReturnType<typeof setTimeout> | null = null;
 const DUCK_BACKSTOP_MS = 10000;
 
+// ── ONE QUEUE, LAST INTENT WINS (2026-08-26) ──────────────────────────────────
+// The three _apply* helpers are all `Audio.setAudioModeAsync` calls, and nothing
+// orders two in-flight ones. That matters now that a release can FIRE a deferred flip:
+// acquireMic reaps a dead lease -> the arbiter emits -> a deferred idle starts applying
+// -> the new owner immediately applies recording. If the idle resolved second the new
+// recorder would be killed by the previous one's queued flip.
+//
+// So every mode change goes through one chain and re-checks the intent at apply time:
+// a superseded flip is dropped rather than landing late.
+let _applyChain: Promise<void> = Promise.resolve();
+function _queueApply(mode: _DuckMode): Promise<void> {
+  _desiredMode = mode;
+  _applyChain = _applyChain
+    .then(async () => {
+      if (_desiredMode !== mode) return;   // superseded while we waited
+      if (mode === "idle") await _applyIdleMode();
+      else if (mode === "playback") await _applyPlaybackMode();
+      else await _applyRecordingMode();
+    })
+    .catch(() => {});
+  return _applyChain;
+}
+
 function _clearDuckBackstop() { if (_duckBackstop) { clearTimeout(_duckBackstop); _duckBackstop = null; } }
 function _armDuckBackstop() {
   _clearDuckBackstop();
   _duckBackstop = setTimeout(() => {
     _duckBackstop = null;
-    if (_desiredMode !== "idle") { _desiredMode = "idle"; void _applyIdleMode(); }
+    // ── NEVER UN-DUCK A HOT MIC (2026-08-26) ──────────────────────────────────
+    // This backstop used to force idle unconditionally. Idle means
+    // `allowsRecordingIOS: false`, i.e. the iOS category drops from
+    // `.playAndRecord` to `.playback` — which KILLS a live recording. And
+    // setRecordingAudioMode() arms this very timer, so every recording longer
+    // than DUCK_BACKSTOP_MS (10s) had its session pulled out from under it. The
+    // PTT caps are 25s (CarPlay) and 60s (phone): both were always over the line.
+    // While the arbiter says the mic is hot we simply re-arm; the lease has its
+    // own hard deadline, so this cannot spin forever.
+    if (micIsHot()) { _armDuckBackstop(); return; }
+    if (_desiredMode !== "idle") void _queueApply("idle");
   }, DUCK_BACKSTOP_MS);
 }
 
-export async function setRecordingAudioMode() { _desiredMode = "recording"; _armDuckBackstop(); await _applyRecordingMode(); }
-export async function setPlaybackAudioMode() { _desiredMode = "playback"; _armDuckBackstop(); await _applyPlaybackMode(); }
-export async function setIdleAudioMode() { _desiredMode = "idle"; _clearDuckBackstop(); await _applyIdleMode(); }
+// ── BOTH DESTRUCTIVE FLIPS DEFER WHILE THE MIC IS HOT (2026-08-26) ────────────
+// A mode change that arrived while a mic lease was held. Remembered, not dropped:
+// the caller's intent is still valid, it just cannot be honoured until the recording
+// ends. It is a MODE, not a boolean, because idle is not the only destructive flip —
+// `_applyPlaybackMode` sets the identical `allowsRecordingIOS: false` (audioMode.ts:68
+// and :112 are byte-identical on that field), so a Nova sample or a turn announcement
+// starting mid-transmission would cut the mic exactly the way a ding does. Last intent
+// wins, which is correct: a clip's own idle call follows its playback call.
+let _deferred: "idle" | "playback" | null = null;
+
+export async function setRecordingAudioMode() {
+  // A new recording invalidates any flip queued against the previous one.
+  _deferred = null;
+  _armDuckBackstop(); await _queueApply("recording");
+}
+
+/** PLAYBACK — and see setIdleAudioMode's note: this flip is destructive to a hot mic
+ *  for the same reason, so it defers too. While a lease is held the session is already
+ *  in `.playAndRecord` and audible, so a clip still plays; it just plays without us
+ *  yanking the category out from under a live transmission first. */
+export async function setPlaybackAudioMode() {
+  if (micIsHot()) { _deferred = "playback"; _armDuckBackstop(); return; }
+  _deferred = null;
+  _armDuckBackstop(); await _queueApply("playback");
+}
+
+/**
+ * ── DEFERS WHILE THE MIC IS HOT (2026-08-26) ─────────────────────────────────
+ * Recorders are not the only callers. Every playback path calls this on its way
+ * out — a speed ding, a Nova sample, a turn announcement, an incoming crew clip —
+ * and none of them know a mic is open. Applying idle there flips
+ * `allowsRecordingIOS: false` and cuts a live transmission mid-sentence.
+ * So while a lease is held we record the intent and return; the arbiter
+ * subscription below applies it the instant the mic frees up. Every existing
+ * caller keeps working unchanged and simply stops being destructive.
+ */
+export async function setIdleAudioMode() {
+  if (micIsHot()) { _deferred = "idle"; return; }
+  _deferred = null;
+  _clearDuckBackstop(); await _queueApply("idle");
+}
+
+// Flush a deferred flip the moment the mic is released or its lease expires.
+subscribeMic((owner) => {
+  if (owner !== null) return;
+  const want = _deferred;
+  _deferred = null;
+  if (want === "idle") void setIdleAudioMode();
+  else if (want === "playback") void setPlaybackAudioMode();
+});
 
 // Resume self-heal: if we intend to be idle but a background suspension may have
 // stranded a duck, re-apply idle the moment we're active again. Registered once.
-AppState.addEventListener("change", (s) => { if (s === "active" && _desiredMode === "idle") void _applyIdleMode(); });
+AppState.addEventListener("change", (s) => { if (s === "active" && _desiredMode === "idle") void _queueApply("idle"); });

@@ -21,6 +21,7 @@ import { api } from "./api";
 import { getPttRecordingOptions, type ProximityTier } from "./proximityAudio";
 import { livePttBus, type PTTMessage } from "./livePtt";
 import { setRecordingAudioMode, setIdleAudioMode } from "./audioMode";
+import { acquireMic, type MicLease } from "./micArbiter";
 import { duckMusicFor, unduckMusicFor } from "./applePlayer";
 
 export type { PTTMessage };
@@ -57,6 +58,8 @@ async function uriToBase64(uri: string): Promise<string> {
 
 export function usePttChannel(channel: string | null | undefined, tier: ProximityTier = "far") {
   const recRef = useRef<Audio.Recording | null>(null);
+  // Mic lease, held exactly as long as recRef is non-null.
+  const leaseRef = useRef<MicLease | null>(null);
   const startedAtRef = useRef<number>(0);
   // True while the user is holding the button. Lets the async start() detect a
   // release that arrived BEFORE recording actually began (runaway-mic fix).
@@ -149,13 +152,32 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
     // is observed in the post-start check below.
     wantRef.current = true;
     if (recRef.current) return;            // already recording
+    // ...and if a start() is already in flight (lease taken, Recording not open yet),
+    // do NOT run a second one: acquireMic would deny us and the `leaseRef.current =`
+    // assignment below would overwrite the LIVE lease with null, orphaning it.
+    if (leaseRef.current?.active) return;
+    // Take the mic BEFORE ensurePerm, not after. ensurePerm's granted branch applies
+    // setRecordingAudioMode() — the ducked .playAndRecord session — and if we then got
+    // DENIED we would have mutated the session of whoever is actually recording, with
+    // no restore on the way out. carComms.ts:93 already acquires in this order.
+    leaseRef.current = acquireMic("ptt", 60000);
+    if (!leaseRef.current) { wantRef.current = false; return; }
+    const dropLease = () => { leaseRef.current?.release(); leaseRef.current = null; };
     const perm = await ensurePerm();
     // If we just showed the OS mic prompt (or it's denied), do NOT start a
     // recording in this gesture — starting one while the iOS audio session is
     // re-activating right after the prompt crashes the app. Permission is now
-    // granted, so the user's NEXT press records normally.
-    if (perm !== "granted") { wantRef.current = false; return; }
-    if (!wantRef.current) return;          // released during the permission check
+    // granted, so the user's NEXT press records normally. Nothing touched the
+    // session on this branch (only the granted branch flips it), so no restore.
+    if (perm !== "granted") { wantRef.current = false; dropLease(); return; }
+    if (!wantRef.current) {
+      // Released during the permission check. ensurePerm DID flip the session to the
+      // ducked .playAndRecord, so restore it — release first or the flip defers
+      // against our own lease and the music stays quiet.
+      dropLease();
+      void setIdleAudioMode();
+      return;
+    }
     try {
       const rec = new Audio.Recording();
       await rec.prepareToRecordAsync(getPttRecordingOptions(tier));
@@ -166,6 +188,10 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
       // now. This was the cause of the 13-minute recording.
       if (!wantRef.current) {
         try { await rec.stopAndUnloadAsync(); } catch {}
+        // Release BEFORE the idle flip below. Holding the lease here would make
+        // setIdleAudioMode() DEFER, which is exactly the "music stuck quiet /
+        // Bluetooth stuck on mono HFP" bug the flip was added to fix.
+        dropLease();
         // RESTORE the session: setRecordingAudioMode() already armed the ducked
         // .playAndRecord session (mono HFP on Bluetooth, Apple Music interrupted), but
         // we never kept this recording — flip back to idle/.playback or the music stays
@@ -191,6 +217,10 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
       maxTimerRef.current = setTimeout(() => { stopAndSendRef.current?.(); }, 60000);
     } catch {
       recRef.current = null;
+      // Release BEFORE the idle flip. Holding it here would make setIdleAudioMode()
+      // defer against our own orphan — and since nothing else releases on this path,
+      // the session would sit in the ducked .playAndRecord for the lease's full 62s.
+      dropLease();
       // Recording start threw AFTER setRecordingAudioMode() armed the ducked
       // .playAndRecord session — restore idle so external/Apple-Music audio + Bluetooth
       // stereo aren't left stuck quiet/mono. This path had no restore + no watchdog.
@@ -205,7 +235,16 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
     if (maxTimerRef.current) { clearTimeout(maxTimerRef.current); maxTimerRef.current = null; }
     const rec = recRef.current;
     recRef.current = null;
-    if (!rec) { setRecording(false); return false; }
+    if (!rec) {
+      // Nothing was recording — but start() may still hold a lease from a press whose
+      // Recording never opened. Free it, and restore the session ensurePerm flipped.
+      if (leaseRef.current) {
+        leaseRef.current.release(); leaseRef.current = null;
+        void setIdleAudioMode();
+      }
+      setRecording(false);
+      return false;
+    }
     let uri: string | null = null;
     let durationMs = Date.now() - startedAtRef.current;
     try {
@@ -221,6 +260,10 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
       uri = rec.getURI?.() ?? null;
     } finally {
       setRecording(false);
+      // Release AFTER stopAndUnloadAsync above (so the mic is never natively hot with
+      // no lease guarding it) and BEFORE the idle flip (so the flip is not deferred
+      // against our own lease). Both halves of that ordering matter.
+      leaseRef.current?.release(); leaseRef.current = null;
       // Recording is done — drop the ducking session back to non-ducking idle so
       // external music (Spotify, podcasts) returns to full volume right away
       // instead of staying quiet until the next clip / app restart.
@@ -256,8 +299,20 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
     const rec = recRef.current;
     recRef.current = null;
     setRecording(false);
-    if (!rec) return;
+    if (!rec) {
+      // No Recording, but a lease can still be open (a start() that never got one).
+      if (leaseRef.current) {
+        leaseRef.current.release(); leaseRef.current = null;
+        void setIdleAudioMode();
+      }
+      return;
+    }
     try { await rec.stopAndUnloadAsync(); } catch {}
+    // Release after the recorder is actually stopped, before the idle flip — same
+    // ordering as stopAndSend. cancel() is NOT an edge case: it is the floor-race
+    // loser (talk.tsx) and every silent VOX turn (finishVox), so a lease leaked here
+    // would block the mic for 62s on an ordinary drive.
+    leaseRef.current?.release(); leaseRef.current = null;
     // Cancelled recording — release the ducking session so external music
     // returns to full volume immediately.
     void setIdleAudioMode();
@@ -338,6 +393,12 @@ export function usePttChannel(channel: string | null | undefined, tier: Proximit
     const rec = recRef.current;
     recRef.current = null;
     if (rec) { rec.stopAndUnloadAsync().catch(() => {}); }
+    // Killing the Recording without releasing the lease would leave the arbiter
+    // believing Comms still owns the mic — every other recorder refused, and every
+    // setIdleAudioMode() deferring against an owner that no longer exists.
+    const hadLease = !!leaseRef.current;
+    leaseRef.current?.release(); leaseRef.current = null;
+    if (rec || hadLease) void setIdleAudioMode();
   }, []);
 
   return { recording, sending, history, start, stopAndSend, cancel, remove, voxActive, startVox, stopVox };

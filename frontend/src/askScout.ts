@@ -20,6 +20,7 @@ import { getNovaVoice, getSettings, getAudioVol } from "./settings";
 import { isAudioBusy } from "./nav";
 import { callSilence } from "./callState";
 import { setPlaybackAudioMode, setRecordingAudioMode, setIdleAudioMode } from "./audioMode";
+import { acquireMic, micOwner, type MicLease } from "./micArbiter";
 import { getPttRecordingOptions } from "./proximityAudio";
 
 export type AskResult = {
@@ -57,20 +58,41 @@ export async function askScout(prompt: string, opts?: { listenMs?: number }): Pr
     if (perm.status !== "granted") return null;
   } catch { return null; }
 
+  // Don't speak a question we cannot hear the answer to: if comms is already
+  // transmitting, bail before the prompt. This is a CHECK, not an acquire — the lease
+  // itself is taken after the prompt, below, because a lease has a hard deadline and
+  // the spoken prompt's length is not ours to bound (a /tts round-trip plus up to the
+  // 12s speak safety timeout). A 9s lease taken here expired mid-RECORDING: the mic
+  // was handed to the next caller and the deferred idle flip landed on a live
+  // recorder — the arbiter switching itself off for the one span it exists to guard.
+  if (micOwner()) return null;
+
   _busy = true;
   let rec: Audio.Recording | null = null;
+  let lease: MicLease | null = null;
   try {
     await speakAndWait(prompt);
+
+    // NOW take the mic, sized to the window we actually record for. Someone could have
+    // started transmitting while the prompt played — a denial here is the right answer.
+    const listenMs = Math.max(2000, Math.min(8000, opts?.listenMs ?? 4500));
+    lease = acquireMic("scout", listenMs + 4000);
+    if (!lease) return null;
 
     // Flip to a recording session and capture a short window.
     await setRecordingAudioMode();
     rec = new Audio.Recording();
     await rec.prepareToRecordAsync(getPttRecordingOptions("far"));
     await rec.startAsync();
-    await new Promise((r) => setTimeout(r, Math.max(2000, Math.min(8000, opts?.listenMs ?? 4500))));
+    await new Promise((r) => setTimeout(r, listenMs));
     await rec.stopAndUnloadAsync();
     const uri = rec.getURI();
     rec = null;
+    // The mic is done — free it before the network leg below, so a slow /transcribe
+    // can't keep comms locked out. Release first, then restore the session (a held
+    // lease makes setIdleAudioMode defer).
+    lease?.release(); lease = null;
+    void setIdleAudioMode();
     if (!uri) return null;
 
     // Transcribe.
@@ -98,6 +120,8 @@ export async function askScout(prompt: string, opts?: { listenMs?: number }): Pr
     return null;
   } finally {
     try { if (rec) await rec.stopAndUnloadAsync(); } catch {}
+    // Release BEFORE the idle flip, or the arbiter defers our own restore.
+    lease?.release(); lease = null;
     void setIdleAudioMode(); // restore session no matter what
     _busy = false;
   }

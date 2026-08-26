@@ -62,18 +62,33 @@ stranded Android for six OTAs on 2026-07-06 — it is currently satisfied.
 Receipts: `npx eas build:list --platform ios|android` — iOS id `03312faa-a709-4cd0-97a0-1d109104b485`,
 Android id `a9722059-4116-46b2-8a16-c7b154101c49`; `app.json` lines 5/11/15/40.
 
-### ⚠ Build 73 has NO Android internal APK
+### ✅ Android ships through PLAY INTERNAL TESTING — the APK/QR rule is retired
 
-Build 73 exists **only as the store `.aab`** (profile `mapbox-android-store`). Every earlier
-runtime — 1.24.0, 1.22.0, 1.21.0, 1.20.0, 1.19.0 — was cut as **both** an `.aab` and an internal
-`.apk` (profile `mapbox`). At 1.25.0 the `.apk` was never cut.
+**Corrected 2026-08-26** after Jeff challenged it: *"I THOUGHT ANDROID/AA WAS INTERNAL TESTING ONLY
+AND NO APK ANYMORE?"* He was right. This section previously read build 73's missing `.apk` as a
+**regression**; it is the **intended state**.
 
-**Consequence:** the standing *"always provide an APK + QR"* rule cannot be satisfied for 73.
-Android testers who sideload have no artifact at this runtime. If any Android tester needs a direct
-install, `eas build --profile mapbox --platform android` must be run — **that is a paid build and
-needs Jeff's go-ahead.**
-(Android Auto testers are unaffected by this either way — AA hides non-Play installs, so AA has
-always required the Play track.)
+Verified 2026-08-26 (Play API + `eas build:list`):
+
+| | |
+|---|---|
+| Play **internal** track | **build 73 (3.9.0), status `completed`** — released to testers |
+| last sideload `.apk` ever cut | **build 72, runtime 1.24.0, 2026-08-12** (profile `mapbox`) |
+| build 73 | `mapbox-android-store` **AAB only** |
+| `play-store-service-account.json` | present, added **2026-08-12** — the same day the APKs stopped |
+| channel on `mapbox-android-store` | **`mapbox-migration`** — Play installs receive our OTAs normally |
+
+The service-account key is what used to block Play submits. It landed 08-12, and the sideload route
+stopped being used that same day. Nobody recorded the change, so the old rule kept propagating.
+
+**Why the APK is not just unnecessary but harmful:** Android Auto never listed sideloads at all
+(tester-confirmed, 68 vs 69); a sideload **blocks** the Play update because the two are signed with
+different keys, forcing an uninstall that **wipes the tester's local settings**; and it is a second
+paid Android build every release.
+
+**The only remaining reason to cut one:** an Android tester who is not on the internal email list
+("Android Hairpin Beta Testers", 6 addresses incl. `sayphinl` as of 08-13). **Adding someone to that
+list is free — cutting an APK is a paid build.** Check the list first.
 
 ---
 
@@ -155,7 +170,10 @@ Native payload for 74:
   the session ROOT placeholder — which is how every Android Auto search dismiss threw the driver out
   to the app drawer. A guarded single `popTemplate` shipped as the JS workaround (`0e43bbe`); the
   marker is the real fix.
-- **Android internal APK** at the new runtime (see §1) — so the APK/QR rule can be met again.
+- **Android delivery = the store AAB (`mapbox-android-store`) + a Play internal submit.** NOT a
+  sideload APK — see §1; that rule is retired. `eas submit` needs Jeff's explicit go-ahead every
+  time. Android Auto in particular has never worked from a sideload, so 74's AA fixes only reach
+  testers through the Play internal track.
 
 **JS deliberately riding 74 instead of an OTA** (this is a choice, not a constraint — each of these
 *could* ship OTA today):

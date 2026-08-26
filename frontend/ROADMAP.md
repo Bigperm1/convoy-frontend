@@ -157,6 +157,19 @@ Native payload for 74:
   marker is the real fix.
 - **Android internal APK** at the new runtime (see §1) — so the APK/QR rule can be met again.
 
+**JS deliberately riding 74 instead of an OTA** (this is a choice, not a constraint — each of these
+*could* ship OTA today):
+
+- **The mic arbiter** — `src/micArbiter.ts` + `audioMode` / `pttChannel` / `useVoice` / `askScout` /
+  `carComms`, committed `b7b633c` and pushed, **not published**. Jeff, 2026-08-26: *"hold it for the
+  next build."* It changes mic ownership on iOS phone, CarPlay and Android phone simultaneously, and
+  it lands after seven OTAs in twenty hours — the 0731 rule says one change per real drive, so it
+  gets validated on a build rather than pushed at the crew mid-week. Verified before commit: 25/25 in
+  an offline clock-controlled simulation (including the lock-screen case — timers frozen two minutes,
+  lease still reaped), a negative control failing for every fix, typecheck clean, lint at baseline,
+  no import cycles, and a clean sim boot through a Comms mount/unmount. **NOT verified on a real
+  device or a real Bluetooth car stereo** — that is exactly what cutting it with 74 buys.
+
 ⚠ When regenerating patches: `npx patch-package react-native-carplay --exclude 'android/build/'`,
 then verify `grep -ac '^diff --git' patches/<name>.patch` is unchanged. This has silently destroyed
 the whole Android Auto port once.
@@ -235,9 +248,14 @@ club-create, top speed, convoy size. Backend entitlement endpoints live in `~/co
 
 **5 · Class colour batch** — GT3 RS +7, GRC +4, LFA +5. Baked, needs QC + wiring.
 
-**6 · Mic arbiter is a LIVE bug.** expo-av allows one recorder; the loser's `setIdleAudioMode()`
-**pauses the winner**. There is no arbiter anywhere. Hold-to-talk on CarPlay is impossible with the
-current single-press handler.
+**6 · Mic arbiter — FIXED, held for build 74.** ~~There is no arbiter anywhere.~~ There is now:
+`src/micArbiter.ts` (`b7b633c`, 2026-08-26). One lease at a time across all four recorders (scout /
+voice / ptt / carComms), and `audioMode`'s two destructive flips defer while a lease is held. The
+change is **JS-only and OTA-able**, but Jeff's call on 2026-08-26 was **"hold it for the next
+build"** — it touches the mic on every surface at once and follows seven OTAs in twenty hours, so it
+wants a real drive behind it rather than another same-day push. See §4.
+**Still open underneath it:** hold-to-talk on CarPlay remains impossible — `react-native-carplay`
+exposes a single-press handler, not press/release. That is a separate native problem, untouched.
 
 **7 · Leaderboard misses free drives.** `recordTrip` fires **only** from `onArrive`, so `trips` is
 an exact usage counter — but personal bests never record on a free drive. Crew has been told the

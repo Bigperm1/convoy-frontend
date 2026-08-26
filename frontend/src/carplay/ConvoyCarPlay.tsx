@@ -444,6 +444,24 @@ export function CarSurface() {
   // CarPlay canvas is far narrower than a phone (~431pt on the iOS 18.6 sim), so a
   // fixed width silently collides on the small end.
   const [surfaceW, setSurfaceW] = useState(0);
+  // Has onLayout ever reported a real box? This is the ONLY thing stored — the
+  // zero-width VERDICT is derived below, never held in state.
+  //
+  // ── WHY DERIVED, NOT STORED (2026-08-25 review, blocker) ───────────────────
+  // The first cut kept `const [zeroWidth, setZeroWidth]` and recomputed it in
+  // onLayout. That can strand a HEALTHY head unit on the boot dashboard, two ways:
+  //   1. Two layout events in one React batch both read the same stale render-scope
+  //      value, so the recovering one is dropped and `zeroWidth=true` commits
+  //      alongside `surfaceW=470` — a contradiction nothing reconciles.
+  //   2. Worse and needing no batching at all: if the LAST layout before things go
+  //      quiet reports w<=0, the verdict sticks. `styles.surface` is `flex: 1`, so
+  //      unmounting CarMapView cannot change THIS View's frame and cannot
+  //      self-trigger a corrective onLayout. Nothing ever clears it.
+  // Deriving from surfaceW closes both by construction: surfaceW is MONOTONIC
+  // UPWARD (the `w > 0` guard below lets it go 0->470 but never 470->0), so once a
+  // real width lands the surface can never be suppressed again.
+  const zeroLoggedRef = useRef(0);
+  const [measured, setMeasured] = useState(false);
   // Clamp DOWNWARD only. A hard MIN floor that exceeds the space available would
   // push the stack's left edge back over the speed cluster — the very collision
   // CAR_LEFT_INSET exists to prevent — so on a canvas too narrow to satisfy the
@@ -582,7 +600,29 @@ export function CarSurface() {
   //   - hasFix: we have a GPS position.
   // A GL failure no longer gates this — it schedules a live-map REMOUNT instead
   // (liveAttempt above), so the car always converges on the 3D map.
-  const showLive = CAR_LIVE_MAP_ENABLED && hasFix;
+  // One row per surface that turns out to be degenerate. Bounded by the ref, and
+  // logEventReliable because its ABSENCE is what tells us the suppression never fired.
+  // Derived, so it cannot latch: any layout with a real width raises surfaceW, and
+  // surfaceW never falls. A 470-wide surface therefore can NEVER be suppressed.
+  const zeroWidth = measured && !(surfaceW > 0);
+
+  useEffect(() => {
+    // Per TRANSITION into the suppressed state, not once per process: a surface that
+    // degenerates, recovers and degenerates again is a different (worse) story than one
+    // that does it once, and a once-per-process bound cannot tell them apart. Hard cap
+    // at 3 keeps the Supabase INSERT bounded either way.
+    if (!zeroWidth || zeroLoggedRef.current >= 3) return;
+    zeroLoggedRef.current += 1;
+    try { logEventReliable(`car-surface-zerow h=${Math.round(surfaceH)} n=${zeroLoggedRef.current} suppressed=1`); } catch {}
+  }, [zeroWidth, surfaceH]);
+
+  // `&& !zeroWidth`: a surface that has been MEASURED at zero width has no pixels to
+  // draw into, so a live map there is pure cost — a second Metal view, the whole
+  // Standard style, sprites, glyphs, TileJSON, the GLBs and every peer image, at 60fps
+  // because the phone is plugged in and therefore 'premium'. This does NOT delay the
+  // real surface: zeroWidth starts false and only flips once a layout pass has actually
+  // reported a zero-width box, so a cold first render is untouched.
+  const showLive = CAR_LIVE_MAP_ENABLED && hasFix && !zeroWidth;
 
   // GROUND-TRUTH RENDER TEST. If this paints, the CarPlay React surface is alive and
   // the bug is downstream (content/layout); if the head unit stays the bare logo, the
@@ -744,6 +784,20 @@ export function CarSurface() {
       onLayout={(e) => {
         const w = e?.nativeEvent?.layout?.width;
         const h = e?.nativeEvent?.layout?.height;
+        // ── A MEASURED ZERO IS NOT THE SAME AS "NOT MEASURED YET" (2026-08-25) ──
+        // The `w > 0` guards below reject a zero, so surfaceW keeps its useState(0)
+        // initial value — which makes a surface that has NEVER been laid out and one
+        // that HAS been laid out at zero width byte-identical downstream. That is why
+        // a degenerate surface still bootstrapped a whole live GL map: nothing could
+        // tell it apart from a cold first render.
+        // Field evidence (crash_reports, 2026-08-25): Jeff and Enablewhore each logged
+        // TWO `car-viewport` rows in the same second from the SAME instance_id —
+        // `surf=470x265` (the real head unit) and `surf=0x932` at zoom 1.50 spanning
+        // latitude -86..+36, i.e. a world view on a zero-width canvas. Two full map
+        // bootstraps, on a plugged-in phone, in a hot car, for zero visible pixels.
+        if (typeof w === 'number' && typeof h === 'number' && (w > 0 || h > 0) && !measured) {
+          setMeasured(true);
+        }
         if (typeof w === 'number' && w > 0 && Math.abs(w - surfaceW) > 1) setSurfaceW(w);
         if (typeof h === 'number' && h > 0 && Math.abs(h - surfaceH) > 1) setSurfaceH(h);
         // Android Auto only, once per process — see logAaCanvas.

@@ -18,7 +18,22 @@
 // hairline rim, so a gold CTA and a green one are visibly the same object in
 // different metal. Full spec: DESIGN.md.
 
-import { CANDY_COLORS, CANDY_LOCATIONS, CANDY_RIM, CANDY_INK } from "./components/ManeuverArrow";
+// ── NO LOCAL IMPORTS IN THIS FILE. EVER. (2026-08-25) ────────────────────────
+// These four used to be imported from components/ManeuverArrow. On 2026-08-25
+// ManeuverArrow started importing TIER_SKIN from here so the turn square could wear
+// the app skin — which closed a CYCLE: tierTheme -> ManeuverArrow -> tierTheme.
+// Whichever module loads second sees the other's exports as undefined, so
+// TIER_SKIN.brand.colors evaluated to undefined and <LinearGradient colors={undefined}>
+// threw "Cannot read property 'map' of undefined" the moment Settings rendered.
+// Jeff hit it twice in a row on a shipped build.
+// tierTheme is the ROOT of the visual language, so it owns the values and everything
+// else imports FROM it. ManeuverArrow re-exports these names so its existing consumers
+// are unaffected.
+export const CANDY_COLORS = ["#8CFFC4", "#2DEC86", "#0E9B58"] as const;
+export const CANDY_LOCATIONS = [0, 0.45, 1] as const;
+export const CANDY_RIM = "rgba(150,255,200,0.55)";
+/** The dark glyph/label colour that rides on top of the candy fill. */
+export const CANDY_INK = "#04150B";
 
 /** The two treatments a customer can see, plus the untiered brand green. */
 export type VisualTier = "brand" | "premium" | "ultra";

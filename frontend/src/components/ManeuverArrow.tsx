@@ -104,11 +104,10 @@ export function ManeuverArrow({
 // the stops. Jeff 2026-08-23 asked for this gradient on the Garage CTAs and
 // icons; copying three hex values into four more screens is exactly how the
 // phone and CarPlay drifted apart before ManeuverBox existed.
-export const CANDY_COLORS = ["#8CFFC4", "#2DEC86", "#0E9B58"] as const;
-export const CANDY_LOCATIONS = [0, 0.45, 1] as const;
-export const CANDY_RIM = "rgba(150,255,200,0.55)";
-/** The dark glyph/label colour that rides on top of the candy fill. */
-export const CANDY_INK = "#04150B";
+// RE-EXPORTED, not defined here — tierTheme.ts owns them. Defining them here while
+// tierTheme imported them, AND importing TIER_SKIN back from tierTheme, is the cycle
+// that crashed Settings on 2026-08-25. Keep the arrow pointing one way.
+export { CANDY_COLORS, CANDY_LOCATIONS, CANDY_RIM, CANDY_INK } from "../tierTheme";
 
 // ── ManeuverBox: THE green maneuver square, shared by every surface ──────────
 // (Jeff 8/20: "add a gradient look to the turnbyturn green squares... for all

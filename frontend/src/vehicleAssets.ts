@@ -395,7 +395,20 @@ export const VEHICLE_MODEL_URL: Record<GRCColorKey, string> = {
   ice_cap_white:        "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_ice_cap_white.glb",
   // heavy_metal is the ONLY scanned car so far (Jeff, 8/23) — a Tripo photogrammetry
   // bake from his own 4-shot lap, not an authored model. See NO_LIT_BAKE below.
-  heavy_metal:          "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/GRC.glb",
+  //
+  // ── GRC2, NOT GRC (2026-08-25) ────────────────────────────────────────────────
+  // GRC.glb shipped SIDEWAYS and at HALF SIZE, and Jeff caught it on his own CarPlay
+  // screen. A Tripo export does not share the authored fleet's axis convention:
+  //   authored out_*.glb : length on X = 1.910, tail at +X    (measured, 3 models)
+  //   GRC.glb            : length on Y = 0.981, tail at +Y
+  // So it was rotated 90 degrees and 51% of the right size. GRC2 is the same mesh
+  // rotated -90 about Z (which puts the tail back on +X — the +90 option faces it
+  // BACKWARDS, verified by sampling the red taillight pixels) and scaled 1.9469 so
+  // its length matches the fleet exactly. New FILENAME, never an overwrite: devices
+  // cache the old GLB by URL.
+  //
+  // ⚠ ANY future scan needs this same normalise step. Tripo's axes are its own.
+  heavy_metal:          "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/GRC2.glb",
   supersonic_red:       "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_supersonic_red.glb",
   blue_flame:           "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_blue_flame.glb",
   precious_black_pearl: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/out_precious_black_pearl.glb",

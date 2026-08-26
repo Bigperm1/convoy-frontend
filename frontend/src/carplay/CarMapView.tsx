@@ -637,7 +637,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const carLit = !isArrow && isLitPreset(mode);
   // convoyCar3_: generation bump, in step with the phone (ConvoyMapbox.tsx). CarPlay
   // sat a generation behind at 'convoyCar_', so it cached its own stale copies.
-  const carModelId = isArrow ? ARROW_MODEL_ID : ('convoyCar3_' + getVehicleModelKey(s.selfCarColor) + (carLit && vehicleHasLitBake(s.selfCarColor) ? '_lit' : ''));
+  const carModelId = isArrow ? ARROW_MODEL_ID : ('convoyCar4_' + getVehicleModelKey(s.selfCarColor) + (carLit && vehicleHasLitBake(s.selfCarColor) ? '_lit' : ''));
 
   // Speed-aware zoom for BOTH nav AND cruise — chaseZoom with no turn distance is a pure
   // speed→zoom curve (city tighter, highway wider), so cruise now dynamically zooms in/out

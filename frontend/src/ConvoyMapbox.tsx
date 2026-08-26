@@ -2580,7 +2580,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     // The `_lit` suffix is gated on the SAME predicate as the URL — a scan has no night
     // twin, and an id claiming `_lit` while the URL is the day bake is a lie that costs
     // a wasted model registration.
-    : "convoyCar3_" + getVehicleModelKey(selfCar?.color) + (selfLit && vehicleHasLitBake(selfCar?.color) ? "_lit" : "");
+    : "convoyCar4_" + getVehicleModelKey(selfCar?.color) + (selfLit && vehicleHasLitBake(selfCar?.color) ? "_lit" : "");
   // Lift the paint out of the dark on the dim light presets (dawn/night). The ARROW
   // is always FULLY self-lit (1): it's a UI marker, not a realistic car — scene
   // lighting at day/dusk (0/0.55) washed its brand green pale.

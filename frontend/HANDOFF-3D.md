@@ -354,3 +354,92 @@ shipping pipeline actually consumes.**
    was never rendered at all.
 6. Confirm **uint16 indices** and file size before wiring it into `vehicleAssets.ts`.
 7. After any map-affecting OTA, verify on the simulator — a black map is the failure mode.
+
+---
+
+# 🔬 END-TO-END PIPELINE AUDIT — 2026-08-26
+
+**Trigger.** Jeff: *"i want to make sure that the whole 3D camera set up is installed in build 74
+and the pipeline built for the testers to take the 4 photos and it gets sent to Tripo for you to
+build the car and send back to there device and the ultra premium 3d render."*
+
+Seven lanes audited (capture · upload · handoff · Tripo · delivery · render · native), every
+MISSING and every NATIVE claim adversarially re-verified against the files and the live services.
+
+## The headline: the camera was already shipped, and the chain is cut in the middle
+
+**`expo-image-picker@~17.0.11` and `NSCameraUsageDescription` were BOTH present in `dd789bd`, the
+commit build 73 was cut from.** The 4-shot capture is on testers' phones today and needs no build.
+
+**And the return leg does not exist.** `settings.carScanModelUrl` is declared (`settings.ts:142`),
+defaulted (`:266`), and read twice (`garage.tsx:498`, `garage-consent.tsx:46`) — and **nothing in
+the repo ever writes it**. `carScanStatus` only ever becomes `'submitted'`
+(`garage-capture.tsx:147`); nothing sets `'ready'`. The device has a slot for the finished car and
+no mechanism that can fill it.
+
+## 🛑 Three findings that change the plan
+
+**1. THE FLOW HAS NEVER RUN. NOT ONCE.** Live `storage.objects` for `car-scans` holds exactly one
+object — `_selftest/probe.jpg` (4,163 B, 2026-08-24) — and `crash_reports` (45k+ rows) has **zero**
+`carscan%` rows. Capture has been live on testers' devices for ~2 days at zero use. **Every claim
+about capture below is a code read of an unexecuted path**, not field evidence.
+⚠ Caveat on the second half of that: `carScan.ts:232` uses `logEvent`, which early-returns and
+swallows both promise callbacks — the documented absence-interpreted case that must use
+`logEventReliable`. So "zero breadcrumb rows" is weak evidence; **the empty bucket is the strong
+evidence**, and it is independent.
+
+**2. PLATE PRIVACY IS A COMMENT, NOT CODE.** `carScan.ts:19-22` asserts the plate "is masked to
+pure black by `tools/glb-pipeline` before any frame is handed to a third-party reconstruction
+service." **No such script exists** — `tools/glb-pipeline/` holds 11 files, none plate-related.
+Meanwhile `carScan.ts:50` instructs the tester: *"Square to the tail. **Centre the plate.**"* So
+today a scan would send Tripo four photos with a readable plate, against the standing rule. The
+consent screen also carries no third-party/data-handling disclosure — a Play/ASC data-safety
+exposure at 170 club members, independent of the mask.
+
+**3. A SCAN HAS NO NIGHT TWIN, AND A 404 IS AN INVISIBLE CAR.** `NO_LIT_BAKE` is typed
+`Set<GRCColorKey>` (`vehicleAssets.ts:575`) so it can only ever name an authored fleet paint — a
+per-user URL cannot be expressed in it. Its own comment claims *"EVERY car the Ultra scan feature
+produces lands here."* It cannot. Asking for the `_lit` twin 404s, and `<Models>` has **no error
+path** — so the car silently vanishes at dusk.
+
+## Other verified breaks, in the order a photo travels
+
+- **Capture does not survive process death.** Shots live only in `useState`
+  (`garage-capture.tsx:52`); no `getPendingResultAsync` anywhere, which expo-image-picker documents
+  as required on Android where MainActivity can be destroyed during the camera hand-off.
+- **Nothing gates capture by tier**, and flipping `ENTITLEMENTS_ENFORCED` would not fix it — the
+  live entry (`garage.tsx:747-749`) has no entitlement check at all.
+- **The 2-render cap is device-local AsyncStorage** — a reinstall grants unlimited paid Tripo runs.
+- **The handoff fires nothing.** Zero Supabase edge functions (live: `{"functions":[]}`), no storage
+  trigger, `pg_net` not installed so a Database Webhook cannot even be configured yet, and
+  `~/convoy-backend/server.py` has zero hits for scan/bucket/storage/glb.
+- **There is no Tripo integration.** Every "tripo" string in the repo is prose. No key, no endpoint,
+  no task id, no poll. `garage-capture.tsx:185-190` is honest about it in the UI copy.
+- **No downloader and no publisher.** Nothing pulls a scan down from the private bucket; nothing
+  pushes a finished GLB into the public `models` bucket.
+- **Normalise is mandatory and hand-run.** Measured: the authored fleet is length-on-X 1.910 with
+  the tail at +X; the raw Tripo export was length-on-Y 0.981, tail at +Y — **sideways and at 51%
+  scale**. GRC2 is that mesh rotated −90° about Z and scaled 1.9469. Any future scan needs it.
+- **Vertex budget** (carried forward from `mapbox-glb-real-limits`, NOT re-measured here): hard
+  limit 65,536/mesh, Mapbox recommends <25,000 for an ego vehicle, the fleet is already 5–8× over.
+  A Tripo Ultra Mesh export will be far over. Heat suspect.
+- **Model ID collides.** The Mapbox id derives from PAINT, not the model, so every scanned tester
+  shares one id — and Mapbox caches BY ID, so the first GLB fetched wins and a tester's second
+  render (`MAX_SCAN_ATTEMPTS = 2`) could never appear. The id must key off the scan.
+- **The map never reads the scan URL.** `ConvoyMapbox.tsx:2572` and `carplay/CarMapView.tsx` both go
+  colour → fleet table. Only the Garage hero prefers a per-user model (`garage.tsx:502-507`).
+- **The app promises a message it cannot send.** `garage-capture.tsx:190` — *"we'll message you when
+  it's ready"* — with no send route on either end, and the Garage reads *"Building your car… It
+  appears here when it is ready"* forever.
+
+## Build-scope verdict
+
+**Everything above is JS or backend and ships OTA against build 73 — with ONE exception.**
+
+Jeff's decision, 2026-08-26: **a bespoke guided viewfinder** (live preview, translucent car outline,
+horizon/tilt level, auto-capture when square) rather than the system camera. That needs
+**`expo-camera`, a new native module → it must be written before build 74 is cut.** It is the only
+part of this feature that is genuinely build-bound.
+
+`expo-gl` is installed and **imported nowhere** — dead. Do not plan 3D work around it; the shipping
+paths are Mapbox `ModelLayer` (map) and WebView model-viewer (garage).

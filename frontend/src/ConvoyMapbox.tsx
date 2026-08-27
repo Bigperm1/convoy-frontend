@@ -250,10 +250,23 @@ const SELF_ID = "self";
 const CAL_LAT = 49.25;
 const CAR_LEN_UNITS = 1.910;     // GRC2 / GRC2_map1 long axis, measured 2026-08-26
 const ARROW_LEN_UNITS = 1.289;   // green-arrow-v10.glb long axis, measured 2026-08-27
-/** The self marker's on-screen length in POINTS. 59 == the self class sprite
- *  (ClassSprite size 66 x spriteSize 0.9), so car, arrow and class all read the
- *  same. ONE number — OTA-tunable, and it is the only knob this needs. */
-const SELF_MARKER_PT = 59;
+/** EVERY self marker's on-screen length, in POINTS. ONE number, OTA-tunable.
+ *
+ *  44 (Jeff, 2026-08-27: "everything uniform"). It was 59 — the self class sprite's
+ *  size — which made all three self appearances agree with each other but still left
+ *  the driver's own marker ~1.35x a crew car. 44 IS the peer class size, so your car
+ *  now reads exactly like everyone else's on the map.
+ *
+ *  For reference, the peer markers this matches (all MarkerView, constant screen
+ *  size): class 44 (CarMarker ClassSprite), arrow ~40 (40pt box / 38pt icon), car
+ *  photo 46 (styles.car, normalised by vehiclePngScale). They sit within 10% of each
+ *  other and are deliberately tuned; 44 lands in the middle of that range. */
+const SELF_MARKER_PT = 44;
+/** The two SELF class snapshot sources, in points — the divisors that turn
+ *  SELF_MARKER_PT into an iconSize. Keep in step with the JSX below (the
+ *  <ClassSprite size={66}> snapshot and TopDownClassSnap's 34x62 box). */
+const SELF_CLASS_PHOTO_PT = 66;
+const SELF_CLASS_SILHOUETTE_PT = 62;
 /** Scale stops holding `targetPt` on screen at every zoom. Half-steps so a pinch
  *  reads smooth (the reason the legacy table was dense). */
 function scaleCurveForPoints(targetPt: number, modelLenUnits: number): any {
@@ -3380,7 +3393,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             // draws its GLB. undefined → the 3D model.
             sprite={selfIsClass ? selfClassImg : undefined}
             // class photo → 0.9 (66pt snapshot); silhouette → 1.
-            spriteSize={selfClassAsShot ? 0.9 : 1}
+            // Derived, not hand-set (2026-08-27): these were 0.9 / 1, i.e. 59.4pt
+            // and 62pt — the class marker was its own size and did not match the
+            // car or the arrow. Dividing the ONE target by each snapshot's own
+            // point size is what actually makes all three equal.
+            spriteSize={selfClassAsShot
+              ? SELF_MARKER_PT / SELF_CLASS_PHOTO_PT
+              : SELF_MARKER_PT / SELF_CLASS_SILHOUETTE_PT}
             speedMs={userSpeedMs}
             cameraRef={cameraRef}
             getCam={getCam}

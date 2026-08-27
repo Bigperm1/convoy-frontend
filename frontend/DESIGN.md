@@ -414,7 +414,7 @@ Four ladders on `garage-capture`'s paint phase, narrowest (most accurate) first:
 |---|---|---|
 | Factory colours for the typed model | `factory` | `carDatabase.ts` — 48 models, ~340 verified paints |
 | Main colours — 22, the universal spectrum | `main` | `paintPalettes.ts` `MAIN_COLORS` |
-| Club colours — the legendary paints, by scene | `club` | `paintPalettes.ts` `CLUB_PALETTES` |
+| Club colours — the legendary paints, by scene | `club` | `paintPalettes.ts` `CLUB_PALETTES` — 13 clubs, 130 paints |
 | Paint code (hex) | `custom` | free entry — the real universal escape hatch |
 
 **The naming rule differs by ladder, deliberately.** Factory and club swatches must
@@ -422,6 +422,10 @@ be REAL paint names (§6's doctrine — every one web-researched and adversarial
 fact-checked). MAIN_COLORS are plain words — Black, Silver, Teal — because this is
 the "my car is just blue" ladder and inventing a marketing name there would be a
 lie, not a flourish.
+
+The 13 clubs, in chip order: Corvette · Mustang · Camaro · Mopar · BMW M · Porsche ·
+Audi / AMG · Nissan · JDM Legends · Lexus · Ferrari · Lamborghini · British & Hyper
+(McLaren, Aston, Jaguar, Lotus, Bugatti).
 
 Club palettes are a **chip row**, not a wall: ~13 scenes × ~9 paints is far too many
 swatches to show at once, so tapping a chip opens that scene's paints and tapping it

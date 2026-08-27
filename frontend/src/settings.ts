@@ -139,7 +139,8 @@ carColor?: string;
 // was retired there is no stock 3D model, so carScanModelUrl is the ONLY source
 // for the Garage hero and the 3D map marker — undefined means "no car yet",
 // which is a normal first-run state, not an error.
-carScanModelUrl?: string;                        // https URL of the finished GLB
+carScanModelUrl?: string;                        // https URL of the finished GLB (Garage hero)
+carScanMapUrl?: string;                          // decimated map twin (wired to the map later)
 carScanStatus?: 'none' | 'submitted' | 'ready' | 'failed';
 carScanId?: string;                              // the scan folder in the car-scans bucket
 carScanSubmittedAt?: string;                     // ISO, when Generate was tapped
@@ -264,6 +265,7 @@ carMake: undefined,
 carModel: undefined,
 carColor: undefined,
 carScanModelUrl: undefined,
+carScanMapUrl: undefined,
 carScanStatus: undefined,
 carScanId: undefined,
 carScanSubmittedAt: undefined,

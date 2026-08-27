@@ -34,7 +34,7 @@ import { skin } from "../../src/tierTheme";
 import { useAuth } from "../../src/auth";
 import { getSettings, updateSettings } from "../../src/settings";
 import { ensureCameraPermission } from "../../src/permissionGate";
-import { SCAN_SHOTS, SHOTS_TOTAL, newScanId, uploadScan, type CapturedShot } from "../../src/carScan";
+import { SCAN_SHOTS, SHOTS_TOTAL, newScanId, uploadScan, registerScan, type CapturedShot } from "../../src/carScan";
 // SAFE to import statically on every build: CarViewfinder never imports expo-camera at
 // module scope — it goes through guidedCamera's probe and renders null without it.
 // See src/guidedCamera.ts for why a static expo-camera import would be a rollback bomb.
@@ -134,6 +134,21 @@ export default function GarageCaptureScreen() {
     setSent(0);
     const s = await getSettings();
     const scanId = newScanId(user?.handle);
+    // SERVER-SIDE CAP (Jeff, 2026-08-27): the device counter resets on reinstall, so
+    // the bucket is the ledger and register-scan is the gate. FAILS CLOSED — the cap
+    // protects paid Tripo credits, so no verdict means no upload, with a retry path.
+    const gate = await registerScan(user?.handle, scanId);
+    if (!gate.ok) {
+      setPhase("capture");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert(
+        gate.reason === "cap" ? "No renders left" : "Can't reach the scan service",
+        gate.reason === "cap"
+          ? `You've used both of your renders (${gate.used}/${gate.max}). Ask Jeff if you need another.`
+          : "Check your connection and try again — your photos are still here.",
+      );
+      return;
+    }
     const payload: CapturedShot[] = SCAN_SHOTS.filter((x) => shots[x.id]).map((x) => ({
       shotId: x.id,
       uri: shots[x.id],

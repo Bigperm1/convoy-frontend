@@ -23,6 +23,8 @@ import { CandyCta } from '../../src/components/CandyCta';
 import { CANDY_RIM, CANDY_INK } from '../../src/components/ManeuverArrow';
 import { skin, type VisualTier } from '../../src/tierTheme';
 import { setSkinChoice } from '../../src/appSkin';
+import { checkScanReady } from '../../src/carScan';
+import { logEventReliable } from '../../src/crashBreadcrumb';
 import { LinearGradient } from 'expo-linear-gradient';
 import { resolveGRCKey, getVehicleModelUrl } from '../../src/vehicleAssets';
 import { GlassFill } from '../../src/Glass';
@@ -522,6 +524,27 @@ export default function GarageScreen() {
       const s = await getSettings();
       setScanModelUrl(s.carScanModelUrl ?? null);
       setScanPending(s.carScanStatus === 'submitted');
+      // THE RETURN LEG (2026-08-27). "Building your car… it appears here when it is
+      // ready" was a promise with no mechanism — nothing anywhere wrote
+      // carScanModelUrl. Now: while a scan is submitted, HEAD the pipeline's
+      // convention URLs (scan_<scanId>.glb in the public models bucket). The moment
+      // the finished car is published, this flips the scan to ready and the hero
+      // above picks it up — no backend column, no push, one free HEAD per Garage
+      // open. scanId is per-attempt unique, so a second render is a new URL and the
+      // model cache can never pin the old car.
+      if (s.carScanStatus === 'submitted' && s.carScanId) {
+        const ready = await checkScanReady(s.carScanId);
+        if (ready) {
+          await updateSettings({
+            carScanModelUrl: ready.heroUrl,
+            carScanMapUrl: ready.mapUrl,
+            carScanStatus: 'ready',
+          });
+          setScanModelUrl(ready.heroUrl);
+          setScanPending(false);
+          try { logEventReliable(`carscan-delivered id=${s.carScanId} map=${ready.mapUrl ? 1 : 0}`); } catch {}
+        }
+      }
     })();
   }, []);
   const heroModelUrl = (() => {

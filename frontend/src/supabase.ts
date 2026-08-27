@@ -55,6 +55,9 @@ if (isClientRuntime && URL && KEY) {
 
 export const supabase: SupabaseClient | null = _client;
 export const SUPABASE_ENABLED = !!(URL && KEY && isClientRuntime);
+// The anon key itself, for edge-function calls (register-scan) that authenticate
+// with it as the Bearer. Public by design — it ships in the client and is RLS-gated.
+export const SUPABASE_ANON_KEY = KEY;
 
 export type SupaHazard = {
   id: string;

@@ -48,10 +48,66 @@
 // texture — if that ever stops being true, this decision has to be revisited.
 
 import { File } from "expo-file-system";
-import { supabase, SUPABASE_ENABLED } from "./supabase";
+import { supabase, SUPABASE_ENABLED, SUPABASE_ANON_KEY } from "./supabase";
 import { logEvent } from "./crashBreadcrumb";
 
 export const SCAN_BUCKET = "car-scans";
+
+// ── SERVER-SIDE ATTEMPT CAP + THE RETURN LEG (2026-08-27) ─────────────────────
+// Jeff: "cap them at two instances max so they can't … burn up my credits" and
+// "tell me how long it would take for the photos to reach their phone."
+//
+// The cap: MAX_SCAN_ATTEMPTS below is device-local AsyncStorage — a reinstall
+// resets it. The truth that survives reinstalls is the BUCKET, so the app asks
+// the register-scan edge function (service-role folder count per handle) BEFORE
+// uploading, and the function FAILS CLOSED: no verdict = no upload, because the
+// cap protects paid Tripo credits. Registration also drops a carscan-registered
+// breadcrumb, so a new scan shows up in the telemetry Jeff already queries.
+//
+// The return leg: the pipeline publishes finished cars to the PUBLIC models
+// bucket under a NAME CONVENTION —
+//     scan_<scanId>.glb        the Garage hero (full quality)
+//     scan_<scanId>_map.glb    the decimated map twin
+// scanId is per-attempt unique (handle+timestamp), so a second render is a NEW
+// name and Mapbox's cache-by-URL can never pin the old car. The app polls with
+// a HEAD request (free, public bucket) while carScanStatus === 'submitted' and
+// flips itself to 'ready' — no backend column, no push infrastructure needed.
+const FN_BASE = "https://pgtbjiszjglznjagolse.supabase.co/functions/v1";
+const MODELS_PUBLIC = "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models";
+
+export type ScanGate = { ok: boolean; used: number; max: number; reason?: string };
+
+/** Ask the server whether this handle may start (or retry) a scan. FAILS CLOSED. */
+export async function registerScan(handle: string | null | undefined, scanId: string): Promise<ScanGate> {
+  try {
+    const res = await fetch(`${FN_BASE}/register-scan`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: handle || "anon", scanId }),
+    });
+    const j = await res.json().catch(() => null);
+    if (j && typeof j.ok === "boolean") return j as ScanGate;
+    return { ok: false, used: 0, max: MAX_SCAN_ATTEMPTS, reason: "bad-response" };
+  } catch {
+    return { ok: false, used: 0, max: MAX_SCAN_ATTEMPTS, reason: "offline" };
+  }
+}
+
+export function scanHeroUrl(scanId: string): string { return `${MODELS_PUBLIC}/scan_${scanId}.glb`; }
+export function scanMapUrl(scanId: string): string { return `${MODELS_PUBLIC}/scan_${scanId}_map.glb`; }
+
+/** Poll the convention URLs for a submitted scan. Returns the hero URL once the
+ *  finished car is published, plus the map twin's URL when that exists too. */
+export async function checkScanReady(scanId: string): Promise<{ heroUrl: string; mapUrl?: string } | null> {
+  try {
+    const head = (u: string) => fetch(u, { method: "HEAD" }).then((r) => r.ok).catch(() => false);
+    if (!(await head(scanHeroUrl(scanId)))) return null;
+    const hasMap = await head(scanMapUrl(scanId));
+    return { heroUrl: scanHeroUrl(scanId), mapUrl: hasMap ? scanMapUrl(scanId) : undefined };
+  } catch {
+    return null;
+  }
+}
 
 export type ScanSlot = "Front" | "Left" | "Right" | "Back";
 

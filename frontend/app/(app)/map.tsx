@@ -46,7 +46,7 @@ import CarDriveList from "../../src/CarDriveList";
 import { subscribeBgFix } from "../../src/navNotification";
 import { type CongestionLevel } from "../../src/mapboxDirections";
 import { useMapView2D, toggleMapView2D, resetMapView2D } from "../../src/mapViewMode";
-import { logEvent } from "../../src/crashBreadcrumb";
+import { logEvent, logEventReliable } from "../../src/crashBreadcrumb";
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from "../../src/routeOptimizer";
 import { usePitstop } from "../../src/pitstop";
 import { recordTrip, consumeTakeAgain, cachePeerPbs } from "../../src/trips";
@@ -500,6 +500,46 @@ export default function MapScreen() {
   // `label` is editable — the whole point of the rename is that "Stop 1" is useless
   // on a road trip but "Tim's in Hope" tells you what the stop IS.
   const [stops, setStops] = useState<{ lat: number; lng: number; label: string }[]>([]);
+  // ── VISITED STOPS (Olaf's reroute loop, 2026-08-27) ─────────────────────────
+  // "…wanting to turn back at a old direction for looping me back around in a weird
+  // way so my kilometres are getting farther away again." Root cause, verified from
+  // the field trace: NOTHING ever marked a stop as passed, so every mid-drive replot
+  // (the off-route handler, the stops-keyed route effect, the optimizer) fed the
+  // FULL stop list back to the router — including stops behind the car — and a via
+  // request returns exactly ONE route, so orderRoutesForward's U-turn guard had
+  // nothing to demote (n=1 no-op). The router dutifully dragged him back.
+  //
+  // The fix is a ref, deliberately NOT state: flipping state would re-run the
+  // stops-keyed route effect and re-trigger the optimizer mid-drive — churn with no
+  // benefit. The chips keep showing every stop (the driver's plan); only what gets
+  // FED TO THE ROUTER is filtered, at all three call sites, at call time.
+  //
+  // Marking is ORDER-GATED: only the FIRST unvisited stop can be marked. Stops are
+  // visited in array order (the optimizer's whole job), and without the gate a grid
+  // city marks stop 3 as you drive past it on the way to stop 1 — pruning a stop
+  // the driver still wants. 60 m: via points snap onto the road, so actually passing
+  // one goes through ~0-30 m; urban GPS noise stays under 60.
+  const visitedStopsRef = useRef<Set<string>>(new Set());
+  const stopKey = (st: { lat: number; lng: number }) => `${st.lat.toFixed(5)},${st.lng.toFixed(5)}`;
+  const pendingStops = (list: { lat: number; lng: number; label: string }[]) =>
+    list.filter((st) => !visitedStopsRef.current.has(stopKey(st)));
+  const STOP_VISITED_M = 60;
+  // rawKey -> ROAD-SNAPPED via coordinate, refreshed from every via-route response.
+  // ⚠ THE BLOCKER THE REVIEW CAUGHT (live API probe, 2026-08-27): the router snaps
+  // vias to the nearest road at UNLIMITED radius — a pin 167 m off-road produced a
+  // route that never came within 167 m of the pin. The car drives through the
+  // SNAPPED point, so marking against the raw pin alone can simply never fire for
+  // off-road pins and big-POI centroids — and the order gate would then wedge every
+  // later stop too, shipping the field loop "fixed" but alive. Marking measures
+  // min(raw, snapped).
+  const snappedStopsRef = useRef<Map<string, { lat: number; lng: number }>>(new Map());
+  const noteViaSnapped = (fed: { lat: number; lng: number }[], snapped?: ({ lat: number; lng: number } | null)[]) => {
+    if (!snapped) return;
+    for (let i = 0; i < fed.length && i < snapped.length; i++) {
+      const sn = snapped[i];
+      if (sn && Number.isFinite(sn.lat) && Number.isFinite(sn.lng)) snappedStopsRef.current.set(stopKey(fed[i]), sn);
+    }
+  };
   const [stopPickerOpen, setStopPickerOpen] = useState(false);
   // Keyed by the stop's COORDINATES, not its array index: Scout can reorder `stops`
   // while this modal is open (2026-07-29), and an index would then rename whichever
@@ -931,6 +971,36 @@ export default function MapScreen() {
   // or route options change, reading the live origin from this ref.
   const coordsRef = useRef(coords);
   useEffect(() => { coordsRef.current = coords; }, [coords]);
+  // Mark the NEXT stop visited when the car passes it. Only during turn-by-turn — a
+  // preview pan or parking next to tomorrow's first stop must not consume it. Cheap:
+  // one haversine per fix against a single stop.
+  useEffect(() => {
+    if (navMode !== "turn-by-turn" || !coords) return;
+    const pending = stops.filter((st) => !visitedStopsRef.current.has(stopKey(st)));
+    if (!pending.length) return;
+    const near = (st: { lat: number; lng: number }) => {
+      const sn = snappedStopsRef.current.get(stopKey(st));
+      const d = Math.min(
+        haversineMeters(coords, st),
+        sn ? haversineMeters(coords, sn) : Number.POSITIVE_INFINITY,
+      );
+      return d <= STOP_VISITED_M;
+    };
+    // Window of TWO, not one (review, 2026-08-27): with only the first unvisited stop
+    // markable, a single unmarkable or deliberately SKIPPED stop wedges all marking
+    // forever and revives the loop. The via route visits stops strictly in order, so
+    // arriving at stop k+1's ROAD point implies stop k is behind — mark it skipped.
+    // The window stays at two (not all) so a grid city cannot mark stop 3 while
+    // genuinely driving to stop 1.
+    if (near(pending[0])) {
+      visitedStopsRef.current.add(stopKey(pending[0]));
+      try { logEventReliable(`stop-visited "${pending[0].label}" why=reached left=${pending.length - 1}`); } catch {}
+    } else if (pending.length > 1 && near(pending[1])) {
+      visitedStopsRef.current.add(stopKey(pending[0]));
+      visitedStopsRef.current.add(stopKey(pending[1]));
+      try { logEventReliable(`stop-visited "${pending[1].label}" why=reached left=${pending.length - 2}; "${pending[0].label}" why=skipped`); } catch {}
+    }
+  }, [coords, navMode, stops]);
 
   // Dedupe key so Nova announces the route options at most once per destination.
   const announcedRoutesForRef = useRef<string>("");
@@ -957,8 +1027,12 @@ export default function MapScreen() {
       // shape of the trip, "alternate ways through your own waypoints" is meaningless.
       // The via route is an ordinary NavRoute (segment durations, congestion, refresh
       // uuid) so the accurate ETA and live traffic keep working through stops.
-      if (stops.length) {
-        const viaRoute = await fetchRouteViaStops(origin, stops, destination, avoid);
+      // Router sees PENDING stops only (see visitedStopsRef). All visited → plain
+      // origin→destination, exactly as if the list were empty.
+      const routable = pendingStops(stops);
+      if (routable.length) {
+        const viaRoute = await fetchRouteViaStops(origin, routable, destination, avoid);
+        if (viaRoute) noteViaSnapped(routable, viaRoute.viaSnapped);
         if (cancelled) return;
         if (viaRoute) {
           const only = [{ ...viaRoute, color: '#2DEC86' }] as any[];
@@ -1149,6 +1223,9 @@ export default function MapScreen() {
       } catch {}
     })();
     return () => { cancelled = true; };
+    // pendingStops deliberately not a dep: it is a stable-by-construction helper over
+    // a ref; listing it (a per-render closure) would re-fetch routes on EVERY render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [destination, stops, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
 
   // When a destination is picked, drop follow-mode so the camera can zoom out to
@@ -1267,6 +1344,8 @@ export default function MapScreen() {
     const t = consumeTakeAgain();
     if (!t) return;
     if (typeof t.destLat === "number" && typeof t.destLng === "number") {
+      visitedStopsRef.current = new Set();   // a re-taken drive starts unvisited
+      snappedStopsRef.current = new Map();
       setStops(t.stops?.length ? t.stops.map((st) => ({ lat: st.lat, lng: st.lng, label: st.label })) : []);
       setDestination({ lat: t.destLat, lng: t.destLng, label: t.destLabel || "Drive" });
       setShowSteps(true);
@@ -1295,15 +1374,19 @@ export default function MapScreen() {
   // forever. A genuinely new or removed stop changes the set and earns a fresh pass.
   const optimizedSetRef = useRef<string>("");
   useEffect(() => {
-    if (!destination || stops.length < 2) { optimizedSetRef.current = ""; return; }
-    const sig = stops
+    // Optimize the stops still AHEAD (see visitedStopsRef): adding stop #4 after
+    // passing stop #1 must not let the optimizer route back through #1 — the same
+    // loop as the reroute door, through a different call site.
+    const ahead = pendingStops(stops);
+    if (!destination || ahead.length < 2) { optimizedSetRef.current = ""; return; }
+    const sig = ahead
       .map((st) => `${st.lat.toFixed(5)},${st.lng.toFixed(5)}`)
       .sort()
       .join("|");
     if (optimizedSetRef.current === sig) return;
     const origin = coordsRef.current;
     if (!origin) return;
-    if (stops.length > ROUTABLE_MAX_STOPS) {
+    if (ahead.length > ROUTABLE_MAX_STOPS) {
       // Directions itself refuses more than 25 coordinates, so this many stops cannot
       // be drawn as one route at all — say so rather than silently dropping any.
       optimizedSetRef.current = sig;
@@ -1315,7 +1398,7 @@ export default function MapScreen() {
     (async () => {
       const res = await optimizeStopOrder(
         origin,
-        stops,
+        ahead,
         destination,
         { tolls: settings.avoidTolls, highways: settings.avoidHighways, ferries: settings.avoidFerries },
         { signal: ctrl.signal },
@@ -1323,7 +1406,15 @@ export default function MapScreen() {
       if (cancelled || !res) return;
       optimizedSetRef.current = sig;                 // set handled, whatever the answer
       if (isSameOrder(res.order)) return;            // already optimal — stay quiet
-      const reordered = res.order.map((i) => stops[i]);
+      // res.order indexes into `ahead`. Partition by MEMBERSHIP IN THE OPTIMIZER
+      // OUTPUT, not by the live visited set (review, 2026-08-27): the await above is a
+      // network round-trip, and a stop marked visited mid-flight would otherwise land
+      // in BOTH halves — a duplicated chip and a duplicated via point. Keyed against
+      // the same launch-time `stops` closure, the two halves reassemble to exactly the
+      // launch list, whatever the ref did meanwhile.
+      const optimizedKeys = new Set(res.order.map((i) => stopKey(ahead[i])));
+      const front = stops.filter((st) => !optimizedKeys.has(stopKey(st)));
+      const reordered = [...front, ...res.order.map((i) => ahead[i])];
       setStops(reordered);
       const n = reordered.length;
       const savedMin = res.savedSec ? Math.round(res.savedSec / 60) : 0;
@@ -1424,6 +1515,14 @@ export default function MapScreen() {
       tripBaselineRef.current = null;
       pendingRerouteRef.current = null;
       clearOffer();
+      // Stops + visited keys go with the trip (review, 2026-08-27). This teardown's
+      // own comment promises "the SAME full teardown the Clear button does", but it
+      // never cleared stops — and a lingering visited KEY is worse than a lingering
+      // chip: add the same coffee shop to tonight's drive and pendingStops silently
+      // never routes there, with the chip on screen claiming it will.
+      visitedStopsRef.current = new Set();
+      snappedStopsRef.current = new Map();
+      setStops([]);
       setDestination(null);
       setRoutes([]);
       setRoute(null);
@@ -1450,7 +1549,9 @@ export default function MapScreen() {
         highways: settings.avoidHighways,
         ferries: settings.avoidFerries,
       };
-      const pinned = stopsRef.current;
+      // PENDING only — feeding a passed stop here is what looped Olaf back (the via
+      // request returns one route, so the U-turn guard below cannot save it).
+      const pinned = pendingStops(stopsRef.current);
       // SUPERSESSION + STALENESS GUARD (2026-08-21). Each refetch is stamped; a result
       // is applied only if it is still the newest request, fresh, and the car has not
       // driven far since it was asked. rkoji7's drive: 20 of these resolved together
@@ -1460,7 +1561,7 @@ export default function MapScreen() {
       const issuedAt = Date.now();
       const from = { lat: coords.lat, lng: coords.lng };
       (pinned.length
-        ? fetchRouteViaStops(coords, pinned, destination, avoid).then((r) => (r ? [r] : []))
+        ? fetchRouteViaStops(coords, pinned, destination, avoid).then((r) => { if (r) noteViaSnapped(pinned, r.viaSnapped); return r ? [r] : []; })
         : fetchRoutes(coords, destination, avoid)
       ).then((res) => {
         const ageMs = Date.now() - issuedAt;
@@ -1468,7 +1569,7 @@ export default function MapScreen() {
         const movedM = nowC ? haversineMeters(from, nowC) : 0;
         const superseded = reqId !== offRouteReqSeqRef.current;
         const stale = ageMs > REROUTE_MAX_AGE_MS || movedM > REROUTE_MAX_MOVE_M;
-        try { logEvent(`reroute-result id=${reqId} age=${Math.round(ageMs / 1000)}s moved=${Math.round(movedM)}m n=${res.length} ${superseded ? 'superseded' : stale ? 'stale' : 'applied'}`); } catch {}
+        try { logEvent(`reroute-result id=${reqId} age=${Math.round(ageMs / 1000)}s moved=${Math.round(movedM)}m n=${res.length} stops=${pinned.length}/${stopsRef.current.length} ${superseded ? 'superseded' : stale ? 'stale' : 'applied'}`); } catch {}
         if (superseded || stale) return;   // the next off-route tick (>=8 s) asks again from here
         if (res.length > 0) {
           // Prefer the fastest reroute that continues in the direction the car is
@@ -2180,6 +2281,10 @@ export default function MapScreen() {
   // the selected route as well — the same trio the phone's own Clear button uses.
   const endNavFromCar = useCallback(() => {
     endNav();
+    // Visited keys are DRIVE-scoped: ending the drive un-visits everything so a
+    // re-Go through the same chips routes the full plan again (review, 2026-08-27).
+    visitedStopsRef.current = new Set();
+    snappedStopsRef.current = new Map();
     setDestination(null);
     setRoute(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2474,7 +2579,11 @@ export default function MapScreen() {
     setShowSteps(false);
     setNavMode("preview");
     // Stops belong to THIS trip — clearing the route drops them too, otherwise the
-    // next destination silently inherits the last trip's waypoints.
+    // next destination silently inherits the last trip's waypoints. The visited set
+    // goes with them: it describes THIS drive, and a stale entry would silently
+    // pre-visit the same coordinates on tomorrow's trip.
+    visitedStopsRef.current = new Set();
+    snappedStopsRef.current = new Map();
     setStops([]);
     // Also retract the step drawer so it doesn't dangle on a destination-less map.
     slideStepDrawerDown();
@@ -4173,7 +4282,7 @@ export default function MapScreen() {
               <DestinationSearch
                 origin={coords}
                 onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
-                onClear={() => { setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
+                onClear={() => { visitedStopsRef.current = new Set(); snappedStopsRef.current = new Map(); setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
                 onProfilePress={() => router.push("/(app)/hub" as any)}
                 onPressField={() => setNavSearchOpen(true)}
                 // Departure IQ now lives IN the bar: an "AI" pre-fill + green "Let's go".
@@ -4458,7 +4567,16 @@ export default function MapScreen() {
                       <Text style={styles.stopHint}>Tap to rename</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      onPress={() => { Haptics.selectionAsync().catch(() => {}); setStops((p) => p.filter((_, k) => k !== i)); }}
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        // Drop the visited key too — deleting and re-adding the same
+                        // spot must start it fresh, not pre-visited.
+                        setStops((p) => {
+                          const gone = p[i];
+                          if (gone) visitedStopsRef.current.delete(stopKey(gone));
+                          return p.filter((_, k) => k !== i);
+                        });
+                      }}
                       hitSlop={10}
                       testID={`stop-remove-${i}`}
                     >

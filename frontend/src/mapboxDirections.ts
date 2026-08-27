@@ -283,6 +283,11 @@ export type MapboxRoute = {
   // is how the ETA keeps up with traffic and construction mid-drive without ever
   // re-routing the driver. Verified against the live API 2026-07-26.
   refreshUuid?: string;
+  /** Via routes only: the ROAD-SNAPPED interior waypoints, in via order, from the
+   *  response's `waypoints[]`. null per slot when the API omitted a location. The
+   *  visited-stop marking MUST use these, not the raw pins — snapping is unlimited-
+   *  radius, so a raw pin can sit 167 m (measured) from anywhere the car drives. */
+  viaSnapped?: ({ lat: number; lng: number } | null)[];
   routeIndex: number;
   // ── WHICH SIDE OF THE ROAD THE DESTINATION LANDS ON (2026-07-31) ───────────
   // Jeff: "the GPS needs to be a little mindful on which side of the road the
@@ -540,6 +545,19 @@ export async function fetchMapboxRouteVia(
 
     const durationS = typeof route?.duration === "number" ? route.duration : 0;
     const freeflowS = typeof route?.duration_typical === "number" ? route.duration_typical : durationS;
+    // SNAPPED VIA COORDINATES (2026-08-27, the visited-stops blocker). The request
+    // carries no `radiuses`, so Mapbox snaps every via to the nearest routable road at
+    // UNLIMITED distance — live-probed with this exact request shape: a pin 167 m
+    // off-road returns Ok with waypoints[i].distance = 167.37 and a route that never
+    // comes closer than that to the raw pin. The car drives through the SNAPPED
+    // point, so any passed-the-stop test against the RAW pin can simply never fire.
+    // json.waypoints = [origin, ...vias, destination]; keep the interior ones, in
+    // via order, as {lat,lng} for the caller's visited-marking.
+    const wp: any[] = Array.isArray(json?.waypoints) ? json.waypoints : [];
+    const viaSnapped = wp.slice(1, Math.max(1, wp.length - 1))
+      .map((w: any) => (Array.isArray(w?.location) && w.location.length >= 2
+        ? { lat: Number(w.location[1]), lng: Number(w.location[0]) }
+        : null));
     return {
       polyline,
       coordinates,
@@ -552,6 +570,7 @@ export async function fetchMapboxRouteVia(
           segDurations,
       refreshUuid: typeof json?.uuid === "string" ? json.uuid : undefined,
       routeIndex: 0,
+      viaSnapped,
 };
   } catch {
     return null; // includes AbortError

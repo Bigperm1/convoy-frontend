@@ -67,6 +67,8 @@ export type NavRoute = {
   kind?: "best" | "scenic" | "ai" | "alt";
   // Optional per-route preview color (legacy field, still set by map.tsx's rank-color).
   color?: string;
+  /** Via routes: road-snapped interior waypoints (see MapboxRoute.viaSnapped). */
+  viaSnapped?: ({ lat: number; lng: number } | null)[];
 };
 
 // ---- Distance utils ----
@@ -282,6 +284,7 @@ export function mapboxToNavRoute(r: MapboxRoute): NavRoute {
 
   return {
     polyline: r.polyline,
+    viaSnapped: r.viaSnapped,
     summary: r.summary,
     distance_text: formatDistance(r.distance_m),
     duration_text: formatDuration(durS),

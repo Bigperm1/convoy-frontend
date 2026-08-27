@@ -443,3 +443,37 @@ part of this feature that is genuinely build-bound.
 
 `expo-gl` is installed and **imported nowhere** — dead. Do not plan 3D work around it; the shipping
 paths are Mapbox `ModelLayer` (map) and WebView model-viewer (garage).
+
+## ✅ VERIFIED ON THE SIM 2026-08-26: Blender is NOT required for a scan to reach the map
+
+Jeff: *"just confirming if we need blender with tripo to make the car appear on the app?"*
+Answer: **no — proven on-surface, not argued.** The full chain ran with zero Blender:
+
+    raw Tripo (PICK1_SOURCE, 57 MB, 1,063,428 verts, u32 = Mapbox-invisible)
+      → gltf-transform weld + simplify + resize (npm, headless)
+      → orient/scale/ground via @gltf-transform/core + gl-matrix (a matrix bake)
+      → 1.74 MB · 36,499 verts · u16 · X-long 1.910 · floor y=0
+      → rendered by the REAL Mapbox loader on the iOS sim, side by side with GRC2.
+
+At map scale the two are near-indistinguishable (screenshot in the session record).
+36,499 verts is under the 65,536 hard limit, under the 42,449 field ceiling, and near the
+25,000 Mapbox ego-car recommendation — vs the 217,651 the fleet ships today.
+
+**What Blender still buys (why the toolkit stays):** meshoptimizer will not weld across UV
+seams, so headless simplify FLOORS around ~112k verts on an ALREADY-Blender-processed mesh;
+on raw Tripo it reached 36k cleanly. Blender also does the artistic QC, re-unwraps, and the
+`_lit` night bakes. Keep it for authored fleet cars; scans do not need it.
+
+**Traps found while proving it (each cost a bisect):**
+- **`require()` of a GLB does NOT render through `<Models>` in DEV** — even the known-good
+  GRC2 bytes vanish. Dev resolveAssetSource yields the Metro
+  `http://localhost:8081/assets/?unstable_path=...glb?platform=ios` URL (double `?`), Metro
+  serves it (curl 200, full bytes), Mapbox core silently never draws it. No error anywhere.
+  file:// (the painted-arrow mechanism) works on iOS; https works. ⚠ Means the STOCK
+  unpainted arrow is likely invisible on dev sims too — release resolves assets to file
+  paths, so shipped builds are unaffected. Do not burn a day on "arrow missing" on a dev sim.
+- **Set `metallicFactor: 0` in the headless pipeline** — Tripo's material omits it (glTF
+  default = fully metallic); GRC2's Blender export sets 0. Renders fine either way at map
+  scale but the shading is visibly lighter; match GRC2.
+- The browser (model-viewer) happily rendered files Mapbox drops — which is WHY the sim is
+  the only QC surface (see never-verify-hairpin-in-browser).

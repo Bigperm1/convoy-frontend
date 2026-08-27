@@ -13,6 +13,7 @@ import { useFeature, useFeatureTier, openPaywall, TierCornerLock } from '../../s
 import { getVehiclePngOrDefault, CLASS_TOPDOWN } from '../../src/vehicleAssets';
 import { TopDownClassSnap } from '../../src/ConvoyMapbox';
 import { ClassSprite, PAINT_COLORS } from '../../src/classLayers';
+import { CLASS_SWATCHES, classPaintName } from '../../src/classModels';
 import { useAuth } from '../../src/auth';
 import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
@@ -68,6 +69,13 @@ const VEHICLE_CLASSES: { key: VehicleClass; label: string; icon: string }[] = [
   // release; the class ladder goes 3D and these have no 3D model planned).
   // The TYPES stay valid so anyone who already picked one keeps rendering.
 ];
+// Check-mark contrast on an arbitrary palette hex — the old two-hex
+// special-case (white/yellow) can't scale to per-class palettes.
+const isLightHex = (hex: string) => {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 160;
+};
+
 // Same palette as Settings → Route Color, per Jeff ("use the color swatch from
 // the route line").
 const CLASS_PRESETS = [
@@ -388,14 +396,21 @@ export default function GarageScreen() {
   }, [classHexDraft, pickColor, markerType]);
 
   // Shared Primary/Secondary paint picker (class + arrow panels): two slot
-  // buttons (each shows its current color dot), the 7-swatch palette + an
+  // buttons (each shows its current color dot), the swatch palette + an
   // "Original/Stock" chip, and a hex field that applies to the ACTIVE slot.
+  // CLASS panels show the CLASS's own palette — real factory paints from that
+  // class's marques (CLASS_SWATCHES; Jeff 2026-08-27). Arrow isn't a class,
+  // so it keeps the generic PAINT_COLORS ramp.
   const renderPaintPicker = (arrow: boolean) => {
     const pri = arrow ? arrPriDraft : priDraft;
     const sec = arrow ? arrSecDraft : secDraft;
     // Class has no slot row, so its paint always lands on primary.
     const slot = arrow ? paintSlot : 'primary';
     const activeColor = slot === 'primary' ? pri : sec;
+    const entries: { name?: string; hex: string }[] =
+      !arrow && CLASS_SWATCHES[vehClass]
+        ? CLASS_SWATCHES[vehClass]!
+        : PAINT_COLORS.map((hex) => ({ hex }));
     return (
       <>
         {/* Two paint slots are an ARROW thing (body + rim). A class sprite is
@@ -426,16 +441,16 @@ export default function GarageScreen() {
           >
             <Ionicons name="ban-outline" size={15} color="#9A9A9E" />
           </TouchableOpacity>
-          {PAINT_COLORS.map((hex) => {
+          {entries.map(({ name, hex }) => {
             const active = (activeColor ?? '').toLowerCase() === hex.toLowerCase();
             return (
               <TouchableOpacity
-                key={hex}
+                key={name ? name + hex : hex}
                 activeOpacity={0.8}
                 onPress={() => pickColor(hex, arrow)}
                 style={[styles.clsSwatch, { backgroundColor: hex }, active && styles.clsSwatchSel]}
               >
-                {active && <Ionicons name="checkmark" size={16} color={hex === '#FFFFFF' || hex === '#FFD60A' ? '#000' : '#FFF'} />}
+                {active && <Ionicons name="checkmark" size={16} color={isLightHex(hex) ? '#000' : '#FFF'} />}
               </TouchableOpacity>
             );
           })}
@@ -858,7 +873,7 @@ export default function GarageScreen() {
                   <TopDownClassSnap color={priDraft ?? '#2DEC86'} />
                 )}
                 <Text style={styles.clsPreviewText}>
-                  {VEHICLE_CLASSES.find((c) => c.key === vehClass)?.label} · {priDraft ? priDraft.toUpperCase() : 'Original'}{secDraft ? ` / ${secDraft.toUpperCase()}` : ''}
+                  {VEHICLE_CLASSES.find((c) => c.key === vehClass)?.label} · {priDraft ? (classPaintName(vehClass, priDraft) ?? priDraft.toUpperCase()) : 'Original'}{secDraft ? ` / ${classPaintName(vehClass, secDraft) ?? secDraft.toUpperCase()}` : ''}
                 </Text>
               </View>
 

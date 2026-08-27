@@ -206,9 +206,40 @@ WR Blue Pearl, Ultimate Green · Supercar +Nardo Grey, Rosso Corsa, Giallo Moden
 Verde Mantis, Midnight Purple, Riviera Blue, Arancio Borealis · Exotic +Rosso Corsa,
 Verde Mantis, Papaya Spark, French Racing Blue, Grigio Telesto.
 
-**Classes with no `CLASS_MODEL_3D` row fall back to the top-down sprite** and have no
-palette at all — sedan, truck, electric, jeep. Do not invent one; the row appears when
-the model is authored.
+**Classes with no `CLASS_MODEL_3D` row fall back to the top-down sprite.** A
+`CLASS_MODEL_3D` row still only appears when a 3D model is authored — but as of
+2026-08-27 every picker class DOES have a named 2D swatch palette (below).
+
+### The 2D picker palettes — `CLASS_SWATCHES` (Jeff 2026-08-27)
+
+> *"each class has the main colors from the popular models/makes from those brands
+> as well as black, white, gray, red, etcetera"*
+
+`CLASS_SWATCHES` in `src/classModels.ts` is what **Garage → Class actually shows** —
+the flat 20-swatch `PAINT_COLORS` list is retired for classes (Arrow keeps it; it
+isn't a class). Same two doctrines as above; every name was web-verified as a real
+factory paint (adversarial fact-check pass, 2026-08-27), hexes are good-faith sRGB
+approximations. The preview line shows the paint NAME ("Truck · Race Red").
+
+| class | swatches | marques |
+|---|---|---|
+| hatchback | GRC 6 + Liquid Yellow · Nitrous Blue · WR Blue Pearl · Ultimate Green · Orange Mango · Sorrento Green (12) | Toyota GR, Renault, Ford Focus, Subaru, Citroën, Peugeot |
+| muscle | the locked 10 | Ford/Chevy/Mopar |
+| supercar | GT3 RS 7 + Nardo Grey · Rosso Corsa · Giallo Modena · Verde Mantis · Midnight Purple · Riviera Blue · Arancio Borealis (14) | Porsche + legend paints |
+| exotic | LFA 5 + Rosso Corsa · Verde Mantis · Papaya Spark · French Racing Blue · Grigio Telesto (10) | Lexus, Ferrari, Lambo, McLaren, Bugatti |
+| sedan | Black Sapphire · Alpine White · Nardo Grey · Selenite Grey Magno · Rosso Competizione · Yas Marina Blue · Ultrasonic Blue · Isle of Man Green · Austin Yellow · Blaze Orange (10) | BMW M, AMG, Audi RS, Alfa, Lexus F, Cadillac V |
+| truck | Agate Black · Oxford White · Silver Ice · Granite Crystal · Race Red · Red Hot · Velocity Blue · Northsky Blue · Hydro Blue Pearl · Army Green · Code Orange · Baja Yellow (12) | Ford, Chevy, RAM, Toyota TRD |
+| electric | Solid Black · Pearl White · Midnight Silver · Ultra Red · Deep Blue · Launch Green · Rivian Blue · Compass Yellow · Cyber Orange · Frozen Blue · Digital Teal (11) | Tesla, Rivian, Mach-E, Taycan, Ioniq 5 |
+| jeep | Black Clear Coat · Bright White · Sting-Gray · Granite Crystal · Firecracker Red · Hydro Blue Pearl · Sarge Green · Gecko · Tuscadero · High Velocity · Snazzberry · Cyber Orange (12) | Jeep JL/JT + one Bronco |
+
+Consistency rules baked in: one physical paint = one hex everywhere (Nardo Grey
+`#8E9492` — the reposted `#C0C6C8` is actually Audi Suzuka Gray; Hydro Blue Pearl
+`#2E7DBC`; Granite Crystal `#565A5F`; Cyber Orange `#E8781E`). Midnight Purple's
+grounded `#280137` reads BLACK at swatch size, so the chip carries the deliberate
+daylight flip tone `#3A2A5D`. Verified-but-cut for hue duplication (recorded in the
+source comments): Ginster Yellow, Championship White, Frozen Portimao Blue, Electric
+Blue, Grabber Blue Metallic. A saved hex outside the palette still renders (paint is
+hex passthrough); it just shows no check mark and no name.
 
 ⚠️ **`CLASS_MODEL_3D` is read by NOTHING on the map today** — `markerType === 'class'`
 renders the flat top-down sprite, and the only consumer is `showroom.tsx`, which is

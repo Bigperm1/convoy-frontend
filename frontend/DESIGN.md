@@ -385,3 +385,49 @@ performance question and was NOT changed here.
 The Primary/Secondary slot pair is an **arrow** control — the arrow has a body and a
 rim. A class sprite is a single colour, so the slot row asked a question with one
 answer. Removed for class 2026-08-23; the arrow keeps both.
+
+---
+
+## 10 · The CAR SCAN paint ladders (backend only)
+
+> Jeff, 2026-08-27: *"should we also have a hex code that the customer can put in
+> to make sure that the correct layer of color is on their three d car… this color
+> code should be put in before this three d scan is finished."* Then, after we
+> established that no public source publishes a verified colour list for every car
+> ever made: *"lets just do main colour swatches for cars and popular car club
+> colours like corvette, mustang, camaro, bmw, nissan, jdm, porsche, lambo,
+> ferarri etc."*
+
+**Why a declared paint at all:** phone photos shift massively with light, white
+balance and reflections, and our own colour-correction history proves corrections
+do NOT generalise across paints. So the photos supply geometry and shading; the
+declared paint supplies the TRUTH the pipeline corrects toward. It is collected
+BEFORE the send because the pipeline needs it before it bakes and publishes.
+
+**⚠ This is BACKEND ONLY.** The pick rides in the scan manifest as
+`paint: {name, hex, source, group} | null` and nothing in the app renders from it.
+`null` = the tester tapped "Skip — match my photos", which is the old behaviour.
+
+Four ladders on `garage-capture`'s paint phase, narrowest (most accurate) first:
+
+| ladder | source | where |
+|---|---|---|
+| Factory colours for the typed model | `factory` | `carDatabase.ts` — 48 models, ~340 verified paints |
+| Main colours — 22, the universal spectrum | `main` | `paintPalettes.ts` `MAIN_COLORS` |
+| Club colours — the legendary paints, by scene | `club` | `paintPalettes.ts` `CLUB_PALETTES` |
+| Paint code (hex) | `custom` | free entry — the real universal escape hatch |
+
+**The naming rule differs by ladder, deliberately.** Factory and club swatches must
+be REAL paint names (§6's doctrine — every one web-researched and adversarially
+fact-checked). MAIN_COLORS are plain words — Black, Silver, Teal — because this is
+the "my car is just blue" ladder and inventing a marketing name there would be a
+lie, not a flourish.
+
+Club palettes are a **chip row**, not a wall: ~13 scenes × ~9 paints is far too many
+swatches to show at once, so tapping a chip opens that scene's paints and tapping it
+again closes them. Selection identity is (source, group, name, hex) — two marques can
+ship the same paint name, and a bare hex compare would tick both.
+
+⚠️ A single hex cannot hold a colour-shift paint (Midnight Purple, Bayside Blue).
+Those carry their **daylight body read**; the flip is unrepresentable and that is
+recorded next to each such entry.

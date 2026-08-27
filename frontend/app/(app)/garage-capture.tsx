@@ -36,7 +36,8 @@ import { useAuth } from "../../src/auth";
 import { getSettings, updateSettings } from "../../src/settings";
 import { ensureCameraPermission } from "../../src/permissionGate";
 import { SCAN_SHOTS, SHOTS_TOTAL, newScanId, uploadScan, registerScan, type CapturedShot } from "../../src/carScan";
-import { findColorsForTyped, GENERIC_COLORS, type CarColor } from "../../src/carDatabase";
+import { findColorsForTyped, type CarColor } from "../../src/carDatabase";
+import { MAIN_COLORS, CLUB_PALETTES } from "../../src/paintPalettes";
 // SAFE to import statically on every build: CarViewfinder never imports expo-camera at
 // module scope — it goes through guidedCamera's probe and renders null without it.
 // See src/guidedCamera.ts for why a static expo-camera import would be a rollback bomb.
@@ -62,7 +63,14 @@ type Phase = "capture" | "paint" | "uploading" | "done";
 // 3D reconstruction's body to this hex (photos alone shift massively with
 // lighting; the declared paint is the ground truth). BACKEND-ONLY: it rides in
 // the scan manifest and touches nothing else in the app.
-type ScanPaint = { name?: string; hex: string; source: "factory" | "generic" | "custom" };
+type ScanPaint = {
+  name?: string;
+  hex: string;
+  source: "factory" | "main" | "club" | "custom";
+  /** Which club palette it came from, when source is "club" — the pipeline gets
+   *  "Bayside Blue (Nissan)", not a bare name shared across marques. */
+  group?: string;
+};
 
 const HEX_RE = /^[0-9a-fA-F]{6}$/;
 const isLightHex = (hex: string) => {
@@ -81,6 +89,8 @@ export default function GarageCaptureScreen() {
   // free-typed make/model; generic basics always offered; hex = paint code.
   const [paintSel, setPaintSel] = useState<ScanPaint | null>(null);
   const [paintHexDraft, setPaintHexDraft] = useState("");
+  // Which club palette is open. Null = none; the chips are a filter, not a mode.
+  const [clubOpen, setClubOpen] = useState<string | null>(null);
   // The guided viewfinder (build 74+). On an older binary this stays false forever and
   // the system-camera path below runs instead — identical output, no crash.
   const [viewfinder, setViewfinder] = useState(false);
@@ -192,7 +202,9 @@ export default function GarageCaptureScreen() {
         // corrects the reconstruction's body color toward this hex, keeping
         // the photo texture's shading — and sanity-checks it against the
         // photos' median body color before applying.
-        paint: paint ? { name: paint.name ?? null, hex: paint.hex, source: paint.source } : null,
+        paint: paint
+          ? { name: paint.name ?? null, hex: paint.hex, source: paint.source, group: paint.group ?? null }
+          : null,
         capturedAt: new Date().toISOString(),
       },
       (done) => setSent(done),
@@ -218,14 +230,16 @@ export default function GarageCaptureScreen() {
   if (phase === "paint") {
     const st = getSettings();
     const factory = findColorsForTyped(st.carMake, st.carModel);
-    // Factory list first, then the basics — minus basics a factory name already covers.
+    // A factory match already names this car's version of black/white/silver, so
+    // the universal row drops any duplicate NAME rather than showing both.
     const factoryNames = new Set(factory.map((c) => c.name.toLowerCase()));
-    const generic = GENERIC_COLORS.filter((c) => !factoryNames.has(c.name.toLowerCase()));
+    const main = MAIN_COLORS.filter((c) => !factoryNames.has(c.name.toLowerCase()));
     const carLine = [st.carYear, st.carMake, st.carModel].filter(Boolean).join(" ");
-    const pick = (c: CarColor, source: ScanPaint["source"]) => {
+    const club = CLUB_PALETTES.find((g) => g.label === clubOpen);
+    const pick = (c: CarColor, source: ScanPaint["source"], group?: string) => {
       Haptics.selectionAsync();
       setPaintHexDraft("");
-      setPaintSel({ name: c.name, hex: c.hex, source });
+      setPaintSel({ name: c.name, hex: c.hex, source, group });
     };
     const hexValid = HEX_RE.test(paintHexDraft.trim().replace(/^#/, ""));
     const applyHex = () => {
@@ -234,13 +248,17 @@ export default function GarageCaptureScreen() {
       Haptics.selectionAsync();
       setPaintSel({ hex: "#" + raw.toUpperCase(), source: "custom" });
     };
-    const swatch = (c: CarColor, source: ScanPaint["source"]) => {
-      const on = paintSel?.source !== "custom" && paintSel?.hex.toLowerCase() === c.hex.toLowerCase() && paintSel?.name === c.name;
+    const swatch = (c: CarColor, source: ScanPaint["source"], group?: string) => {
+      const on =
+        paintSel?.source === source &&
+        paintSel?.group === group &&
+        paintSel?.name === c.name &&
+        paintSel?.hex.toLowerCase() === c.hex.toLowerCase();
       return (
         <TouchableOpacity
-          key={source + c.name + c.hex}
+          key={source + (group ?? "") + c.name + c.hex}
           activeOpacity={0.8}
-          onPress={() => pick(c, source)}
+          onPress={() => pick(c, source, group)}
           style={[styles.paintSwatch, { backgroundColor: c.hex }, on && styles.paintSwatchOn]}
         >
           {on && <Ionicons name="checkmark" size={16} color={isLightHex(c.hex) ? "#000" : "#FFF"} />}
@@ -258,14 +276,51 @@ export default function GarageCaptureScreen() {
             Phone photos shift with lighting. Pick your real paint and the 3D build gets
             color-matched to it{carLine ? ` — ${carLine}` : ""}.
           </Text>
+
           {factory.length > 0 && (
             <>
               <Text style={styles.paintGroup}>Factory colors{st.carModel ? ` — ${st.carModel}` : ""}</Text>
               <View style={styles.paintRow}>{factory.map((c) => swatch(c, "factory"))}</View>
             </>
           )}
-          <Text style={styles.paintGroup}>Basics</Text>
-          <View style={styles.paintRow}>{generic.map((c) => swatch(c, "generic"))}</View>
+
+          <Text style={styles.paintGroup}>Main colors</Text>
+          <View style={styles.paintRow}>{main.map((c) => swatch(c, "main"))}</View>
+
+          {CLUB_PALETTES.length > 0 && (
+            <>
+              <Text style={styles.paintGroup}>Club colors — the ones people name</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.clubChipScroll}
+                contentContainerStyle={styles.clubChipRow}
+              >
+                {CLUB_PALETTES.map((g) => {
+                  const on = clubOpen === g.label;
+                  return (
+                    <TouchableOpacity
+                      key={g.label}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        Haptics.selectionAsync();
+                        setClubOpen(on ? null : g.label);
+                      }}
+                      style={[styles.clubChip, on && styles.clubChipOn]}
+                    >
+                      <Text style={[styles.clubChipText, on && styles.clubChipTextOn]}>{g.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              {club ? (
+                <View style={styles.paintRow}>{club.colors.map((c) => swatch(c, "club", club.label))}</View>
+              ) : (
+                <Text style={styles.clubHint}>Pick a club to see its legendary paints.</Text>
+              )}
+            </>
+          )}
+
           <Text style={styles.paintGroup}>Have the paint code? Enter the hex</Text>
           <View style={styles.paintHexRow}>
             <Text style={styles.paintHexHash}>#</Text>
@@ -290,11 +345,12 @@ export default function GarageCaptureScreen() {
               <Text style={styles.paintHexApplyText}>Use</Text>
             </TouchableOpacity>
           </View>
+
           <Text style={styles.paintPicked}>
             {paintSel
               ? paintSel.source === "custom"
                 ? `Custom paint ${paintSel.hex}`
-                : `${paintSel.name}`
+                : `${paintSel.name}${paintSel.group ? ` · ${paintSel.group}` : ""}`
               : "No paint picked yet"}
           </Text>
           <CandyCta
@@ -506,6 +562,13 @@ const styles = StyleSheet.create({
   paintHexApply: { borderWidth: 1, borderColor: ULTRA.accent, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
   paintHexApplyText: { color: ULTRA.accent, fontSize: 14, fontWeight: "700" },
   paintPicked: { color: "#EDEDED", fontSize: 14, fontWeight: "600", marginTop: 16, marginBottom: 4 },
+  clubChipScroll: { alignSelf: "stretch", marginBottom: 10 },
+  clubChipRow: { gap: 8, paddingRight: 8 },
+  clubChip: { borderWidth: 1, borderColor: "#2A2A2A", borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: "#131313" },
+  clubChipOn: { borderColor: ULTRA.accent, backgroundColor: "rgba(224,169,62,0.12)" },
+  clubChipText: { color: "#9A9A9E", fontSize: 13, fontWeight: "600" },
+  clubChipTextOn: { color: ULTRA.accent },
+  clubHint: { color: "#606060", fontSize: 12, alignSelf: "flex-start", marginTop: 2 },
   scroll: { paddingHorizontal: 22, paddingBottom: 44, alignItems: "center" },
 
   headerRow: {

@@ -44,7 +44,11 @@ import { guidedCameraAvailable } from "../../src/guidedCamera";
 // This is an ULTRA PREMIUM page — gold, not brand green (Jeff 8/23).
 const ULTRA = skin("ultra");
 
-const TOPDOWN = require("../../assets/vehicles/v3/heavy_metal@3x.png");
+// BASE name, not @3x (build-74 failure, 2026-08-27): an explicit density-suffixed
+// require resolves in dev Metro but "Unable to resolve module" kills the RELEASE
+// export:embed — it killed the first build-74 Android cut. Metro picks @2x/@3x from
+// the base name itself.
+const TOPDOWN = require("../../assets/vehicles/v3/heavy_metal.png");
 
 const RING = 200;          // diagram box
 const RING_R = 78;         // station orbit radius

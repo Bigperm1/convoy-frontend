@@ -50,7 +50,11 @@ function CandyFillAbs() {
   return <LinearGradient colors={ULTRA.colors} locations={ULTRA.locations} style={StyleSheet.absoluteFill} />;
 }
 
-const TOPDOWN = require("../../assets/vehicles/v3/heavy_metal@3x.png");
+// BASE name, not @3x (build-74 failure, 2026-08-27): an explicit density-suffixed
+// require resolves in dev Metro but "Unable to resolve module" kills the RELEASE
+// export:embed — it killed the first build-74 Android cut. Metro picks @2x/@3x from
+// the base name itself.
+const TOPDOWN = require("../../assets/vehicles/v3/heavy_metal.png");
 
 const RING = 230;            // orbit diagram outer size
 const CAR = 96;              // top-down sprite size inside the ring

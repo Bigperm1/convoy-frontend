@@ -19,7 +19,7 @@
 
 # ROADMAP — where we are, what ships next
 
-**Written 2026-08-22.** Every number below was queried live from EAS / git / the Supabase bucket
+**Written 2026-08-22, shipped-state section refreshed 2026-08-27 (build 74).** Every number below was queried live from EAS / git / the Supabase bucket
 at the time of writing, not recalled. Re-verify before acting — this file ages.
 
 **Doc map — read in this order:**
@@ -43,24 +43,39 @@ at the time of writing, not recalled. Re-verify before acting — this file ages
 
 ---
 
-## 1 · Shipped state — VERIFIED 2026-08-22
+## 1 · Shipped state — VERIFIED 2026-08-27
 
 | | value |
 |---|---|
-| **Build** | **73** (iOS build number 73 · Android versionCode 73) |
-| **runtimeVersion** | **1.25.0** |
-| **version** | 3.9.0 |
+| **Build** | **74** (iOS build number 74 · Android versionCode 74) |
+| **runtimeVersion** | **1.26.0** |
+| **version** | 3.10.0 |
 | **channel** | `mapbox-migration` |
-| **cut from commit** | `dd789bd` |
-| **cut** | 2026-08-15 — iOS 15:33, Android 15:39 |
-| **status** | finished, both platforms |
+| **cut** | 2026-08-27 (second cut — the first errored, see below) |
+| **status** | finished both platforms · **Play internal `completed`** · TestFlight submitted (by Jeff) |
 
-**Runtime parity holds.** iOS 73 and Android 73 are both at runtime **1.25.0**, and that matches
-`app.json`. An OTA to `--branch mapbox-migration` reaches both platforms. This is the rule that
-stranded Android for six OTAs on 2026-07-06 — it is currently satisfied.
+**Runtime parity holds.** iOS 74 and Android 74 are both at runtime **1.26.0**, matching `app.json`.
+An OTA to `--branch mapbox-migration` reaches both platforms. First 1.26.0 OTA is already out:
+group `96cfc25f` (the gold/silver H-metal fix, commit `4f26aad`).
 
-Receipts: `npx eas build:list --platform ios|android` — iOS id `03312faa-a709-4cd0-97a0-1d109104b485`,
-Android id `a9722059-4116-46b2-8a16-c7b154101c49`; `app.json` lines 5/11/15/40.
+Receipts: `npx eas build:list` — iOS id `f4a527b3`, Android id `2beda99e`; Play API read live
+(track=internal, status=completed, versionCodes=[74]).
+
+**In 74** (announced to the crew 2026-08-27, 3D car scan deliberately excluded): dead-man GPS sweep
+(the Rodrigo/Olaf battery drain), the visited-stops reroute fix (`32da873`), the mic arbiter,
+marker-size uniformity, app skins (H logo + Arrow/Class/3D sets the look), the GRC2 two-tier car
+model, and the full car-scan pipeline (viewfinder, server-side 2-scan cap, return leg to the Garage).
+
+**Moved to build 75** (not in 74): RevenueCat SDK, the `Screen.setMarker` CarPlay patch, the native
+AA `isConnected` getter.
+
+⚠ **The trap that errored the first 74 cut:** a density-suffixed require
+(`assets/vehicles/v3/heavy_metal@3x.png`) resolves in dev Metro but fails release
+`expo export:embed` on both platforms. Require the base asset name; verify by running the failing
+export locally before re-cutting a paid build.
+
+> Installs on 73 and below are frozen at their last 1.25.0 OTA until they install 74 from
+> TestFlight / Play internal — post-74 OTAs reach only 1.26.0 installs.
 
 ### ✅ Android ships through PLAY INTERNAL TESTING — the APK/QR rule is retired
 
@@ -92,7 +107,7 @@ list is free — cutting an APK is a paid build.** Check the list first.
 
 ---
 
-## 2 · OTA position — VERIFIED
+## 2 · OTA position — VERIFIED 2026-08-22 (73-era snapshot; the branch/channel trap below is still current)
 
 **Nothing is waiting. Git and the published bundle are the same commit.**
 

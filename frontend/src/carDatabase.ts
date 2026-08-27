@@ -250,3 +250,30 @@ export function getColorsForModel(make: string, model: string): CarColor[] {
 export function getMakeNames(): string[] {
   return CAR_DATABASE.map(m => m.name);
 }
+
+// ── Typed-field lookup (car scan) ────────────────────────────────────────────
+// The garage's make/model fields are FREE TEXT since 2026-08-23, so the scan
+// flow can't join on exact strings. Normalize (case/space/punct-blind), match
+// the make exactly, then the model exactly first and by containment second —
+// "corolla" finds "GR Corolla", but "911 gt3 rs" still lands on "911 GT3 RS"
+// (exact pass) rather than "911" (containment pass).
+const norm = (x?: string | null) => (x ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+export function findColorsForTyped(make?: string | null, model?: string | null): CarColor[] {
+  const nMake = norm(make), nModel = norm(model);
+  if (!nMake || !nModel) return [];
+  const mk = CAR_DATABASE.find(m => norm(m.name) === nMake);
+  if (!mk) return [];
+  const exact = mk.models.find(m => norm(m.name) === nModel);
+  if (exact) return exact.colors;
+  if (nModel.length < 3) return [];
+  const partial = mk.models.find(m => {
+    const n = norm(m.name);
+    return n.includes(nModel) || nModel.includes(n);
+  });
+  return partial?.colors ?? [];
+}
+
+// The generic fallback set, exported for flows (car scan) that show it beside
+// or instead of factory colors.
+export const GENERIC_COLORS: CarColor[] = DEFAULT_COLORS;

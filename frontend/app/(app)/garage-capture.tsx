@@ -18,6 +18,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -35,6 +36,7 @@ import { useAuth } from "../../src/auth";
 import { getSettings, updateSettings } from "../../src/settings";
 import { ensureCameraPermission } from "../../src/permissionGate";
 import { SCAN_SHOTS, SHOTS_TOTAL, newScanId, uploadScan, registerScan, type CapturedShot } from "../../src/carScan";
+import { findColorsForTyped, GENERIC_COLORS, type CarColor } from "../../src/carDatabase";
 // SAFE to import statically on every build: CarViewfinder never imports expo-camera at
 // module scope — it goes through guidedCamera's probe and renders null without it.
 // See src/guidedCamera.ts for why a static expo-camera import would be a rollback bomb.
@@ -54,7 +56,19 @@ const RING = 200;          // diagram box
 const RING_R = 78;         // station orbit radius
 const CAR = 96;            // top-down sprite size inside the ring
 
-type Phase = "capture" | "uploading" | "done";
+type Phase = "capture" | "paint" | "uploading" | "done";
+
+// The paint the tester declares before sending — the pipeline color-matches the
+// 3D reconstruction's body to this hex (photos alone shift massively with
+// lighting; the declared paint is the ground truth). BACKEND-ONLY: it rides in
+// the scan manifest and touches nothing else in the app.
+type ScanPaint = { name?: string; hex: string; source: "factory" | "generic" | "custom" };
+
+const HEX_RE = /^[0-9a-fA-F]{6}$/;
+const isLightHex = (hex: string) => {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 160;
+};
 
 export default function GarageCaptureScreen() {
   const { user } = useAuth();
@@ -63,6 +77,10 @@ export default function GarageCaptureScreen() {
   const [phase, setPhase] = useState<Phase>("capture");
   const [sent, setSent] = useState(0);
   const [result, setResult] = useState<{ ok: boolean; uploaded: number; error?: string } | null>(null);
+  // Paint declaration (the "paint" phase). Factory list is matched from the
+  // free-typed make/model; generic basics always offered; hex = paint code.
+  const [paintSel, setPaintSel] = useState<ScanPaint | null>(null);
+  const [paintHexDraft, setPaintHexDraft] = useState("");
   // The guided viewfinder (build 74+). On an older binary this stays false forever and
   // the system-camera path below runs instead — identical output, no crash.
   const [viewfinder, setViewfinder] = useState(false);
@@ -132,7 +150,7 @@ export default function GarageCaptureScreen() {
     }
   }, [acceptShot]);
 
-  const send = useCallback(async () => {
+  const send = useCallback(async (paint: ScanPaint | null) => {
     Haptics.selectionAsync();
     setPhase("uploading");
     setSent(0);
@@ -170,6 +188,11 @@ export default function GarageCaptureScreen() {
           color: s.carColor ?? null,
           vehicleClass: s.vehicleClass ?? null,
         },
+        // The declared paint target (null = "match my photos"). The pipeline
+        // corrects the reconstruction's body color toward this hex, keeping
+        // the photo texture's shading — and sanity-checks it against the
+        // photos' median body color before applying.
+        paint: paint ? { name: paint.name ?? null, hex: paint.hex, source: paint.source } : null,
         capturedAt: new Date().toISOString(),
       },
       (done) => setSent(done),
@@ -190,6 +213,106 @@ export default function GarageCaptureScreen() {
       r.ok ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error,
     );
   }, [shots, user]);
+
+  // ── paint declaration (between capture and upload) ─────────────────────────
+  if (phase === "paint") {
+    const st = getSettings();
+    const factory = findColorsForTyped(st.carMake, st.carModel);
+    // Factory list first, then the basics — minus basics a factory name already covers.
+    const factoryNames = new Set(factory.map((c) => c.name.toLowerCase()));
+    const generic = GENERIC_COLORS.filter((c) => !factoryNames.has(c.name.toLowerCase()));
+    const carLine = [st.carYear, st.carMake, st.carModel].filter(Boolean).join(" ");
+    const pick = (c: CarColor, source: ScanPaint["source"]) => {
+      Haptics.selectionAsync();
+      setPaintHexDraft("");
+      setPaintSel({ name: c.name, hex: c.hex, source });
+    };
+    const hexValid = HEX_RE.test(paintHexDraft.trim().replace(/^#/, ""));
+    const applyHex = () => {
+      const raw = paintHexDraft.trim().replace(/^#/, "");
+      if (!HEX_RE.test(raw)) return;
+      Haptics.selectionAsync();
+      setPaintSel({ hex: "#" + raw.toUpperCase(), source: "custom" });
+    };
+    const swatch = (c: CarColor, source: ScanPaint["source"]) => {
+      const on = paintSel?.source !== "custom" && paintSel?.hex.toLowerCase() === c.hex.toLowerCase() && paintSel?.name === c.name;
+      return (
+        <TouchableOpacity
+          key={source + c.name + c.hex}
+          activeOpacity={0.8}
+          onPress={() => pick(c, source)}
+          style={[styles.paintSwatch, { backgroundColor: c.hex }, on && styles.paintSwatchOn]}
+        >
+          {on && <Ionicons name="checkmark" size={16} color={isLightHex(c.hex) ? "#000" : "#FFF"} />}
+        </TouchableOpacity>
+      );
+    };
+    return (
+      <SafeAreaView style={styles.safe}>
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+          <TouchableOpacity onPress={() => setPhase("capture")} style={styles.backBtn} hitSlop={10}>
+            <Ionicons name="chevron-back" size={26} color="#EDEDED" />
+          </TouchableOpacity>
+          <Text style={styles.bigTitle}>Confirm your paint</Text>
+          <Text style={styles.centreBody}>
+            Phone photos shift with lighting. Pick your real paint and the 3D build gets
+            color-matched to it{carLine ? ` — ${carLine}` : ""}.
+          </Text>
+          {factory.length > 0 && (
+            <>
+              <Text style={styles.paintGroup}>Factory colors{st.carModel ? ` — ${st.carModel}` : ""}</Text>
+              <View style={styles.paintRow}>{factory.map((c) => swatch(c, "factory"))}</View>
+            </>
+          )}
+          <Text style={styles.paintGroup}>Basics</Text>
+          <View style={styles.paintRow}>{generic.map((c) => swatch(c, "generic"))}</View>
+          <Text style={styles.paintGroup}>Have the paint code? Enter the hex</Text>
+          <View style={styles.paintHexRow}>
+            <Text style={styles.paintHexHash}>#</Text>
+            <TextInput
+              style={styles.paintHexInput}
+              value={paintHexDraft}
+              onChangeText={setPaintHexDraft}
+              placeholder="C0152A"
+              placeholderTextColor="#606060"
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={7}
+              returnKeyType="done"
+              onSubmitEditing={applyHex}
+            />
+            <TouchableOpacity
+              style={[styles.paintHexApply, !hexValid && { opacity: 0.4 }]}
+              activeOpacity={0.85}
+              disabled={!hexValid}
+              onPress={applyHex}
+            >
+              <Text style={styles.paintHexApplyText}>Use</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.paintPicked}>
+            {paintSel
+              ? paintSel.source === "custom"
+                ? `Custom paint ${paintSel.hex}`
+                : `${paintSel.name}`
+              : "No paint picked yet"}
+          </Text>
+          <CandyCta
+            label="Lock in paint & send"
+            icon="sparkles"
+            onPress={() => send(paintSel)}
+            disabled={!paintSel}
+            height={50}
+            tier="ultra"
+            style={styles.sendBtn}
+          />
+          <TouchableOpacity style={styles.ghostBtn} onPress={() => send(null)} activeOpacity={0.85}>
+            <Text style={styles.ghostText}>Skip — match my photos</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   // ── uploading / done ───────────────────────────────────────────────────────
   if (phase !== "capture") {
@@ -231,7 +354,7 @@ export default function GarageCaptureScreen() {
                 </Text>
               )}
               {!result?.ok && (
-                <TouchableOpacity style={styles.ghostBtn} onPress={send} activeOpacity={0.85}>
+                <TouchableOpacity style={styles.ghostBtn} onPress={() => send(paintSel)} activeOpacity={0.85}>
                   <Ionicons name="refresh" size={17} color={ULTRA.accent} />
                   <Text style={styles.ghostText}>Try again</Text>
                 </TouchableOpacity>
@@ -359,7 +482,7 @@ export default function GarageCaptureScreen() {
         <CandyCta
           label={complete ? "Generate my car" : `${SHOTS_TOTAL - captured} to go`}
           icon={complete ? "sparkles" : undefined}
-          onPress={send}
+          onPress={() => setPhase("paint")}
           disabled={!complete}
           height={50}
           tier="ultra"
@@ -372,6 +495,17 @@ export default function GarageCaptureScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
+  // ── paint phase ──
+  paintGroup: { color: "#808080", fontSize: 12, fontWeight: "600", alignSelf: "flex-start", marginTop: 18, marginBottom: 8 },
+  paintRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, alignSelf: "flex-start" },
+  paintSwatch: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  paintSwatchOn: { borderColor: ULTRA.accent, borderWidth: 2 },
+  paintHexRow: { flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "stretch" },
+  paintHexHash: { color: "#808080", fontSize: 16, fontWeight: "700" },
+  paintHexInput: { flex: 1, color: "#EDEDED", fontSize: 15, borderWidth: 1, borderColor: "#2A2A2A", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: "#131313" },
+  paintHexApply: { borderWidth: 1, borderColor: ULTRA.accent, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
+  paintHexApplyText: { color: ULTRA.accent, fontSize: 14, fontWeight: "700" },
+  paintPicked: { color: "#EDEDED", fontSize: 14, fontWeight: "600", marginTop: 16, marginBottom: 4 },
   scroll: { paddingHorizontal: 22, paddingBottom: 44, alignItems: "center" },
 
   headerRow: {

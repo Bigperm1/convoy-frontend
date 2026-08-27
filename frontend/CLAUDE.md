@@ -149,6 +149,22 @@ directory is NOT enough: patch-package's pristine reference still carries it. Af
 regenerating, always verify the file list is unchanged:
 `grep -ac '^diff --git' patches/<name>.patch` (2026-07-24: this nearly destroyed the CarPlay patch).
 
+**⚠ `patch-package <package-name>` REGENERATES the patch — it does NOT apply it.**
+Only the bare `npx patch-package` (no arguments) applies. Passing a name rewrites
+`patches/<name>.patch` from whatever is in `node_modules` right now, so running it against an
+UNPATCHED tree silently overwrites a good patch with a smaller one. (2026-08-26: reaching for
+`npx patch-package @lomray/react-native-apple-music --reverse` to undo a failed apply regenerated
+the patch instead, dropping `CatalogService.swift` — 7 diffs became 6 and the Apple Music playlist
+search vanished. Same catastrophe as the `android/build/` trap, different mechanism.)
+
+**To check whether a patch is applied, never re-run patch-package — ask git:**
+```bash
+git apply --check --reverse patches/<name>.patch   # exit 0 = fully applied. Writes nothing.
+```
+**To recover a patch you clobbered:** `git checkout -- patches/`, delete the package from
+`node_modules`, then `yarn install --check-files` (a plain `yarn install` will NOT re-fetch a
+deleted package — it considers the lockfile satisfied), and re-verify with the command above.
+
 Native deps are patched at install time via `patch-package` (postinstall hook): `react-native-carplay` (RN 0.81 / New Arch null-safety fixes — see recent commits) and `@lomray/react-native-apple-music`. If you change a patched package, regenerate with `npx patch-package <name>`.
 
 ## Conventions

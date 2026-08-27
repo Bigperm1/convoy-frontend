@@ -744,14 +744,18 @@ export default function GarageScreen() {
           {/* Follows the VISIBLE hero page, not the saved markerType — swiping
               changes what you are looking at, and this line has to belong to
               what is on screen or it reads as a global action again. */}
+          {/* Wears the PAGE tier (gold here — the gate is heroIndex === 2), not
+              brand green: DESIGN.md locks one metal per page, and green means
+              "yours" while metal means "a tier". apChangeText is shared with
+              "Change photo", so the accent is overridden inline, not in it. */}
           {heroIndex === 2 && (
           <TouchableOpacity
             onPress={() => { Haptics.selectionAsync(); router.push('/(app)/garage-scan' as any); }}
             style={styles.apChange}
             activeOpacity={0.7}
           >
-            <Ionicons name="scan-outline" size={15} color={YELLOW} />
-            <Text style={styles.apChangeText}>Scan your car — build your real car in 3D</Text>
+            <Ionicons name="scan-outline" size={15} color={skin(pageTier).accent} />
+            <Text style={[styles.apChangeText, { color: skin(pageTier).accent }]}>Scan your car — build your real car in 3D</Text>
           </TouchableOpacity>
           )}
 

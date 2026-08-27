@@ -16,10 +16,36 @@
 //
 // The walk is one clockwise lap so the driver never backtracks.
 //
-// PLATE PRIVACY: photos land in a PRIVATE, write-only bucket. The licence plate
-// is masked to pure black by tools/glb-pipeline before any frame is handed to a
-// third-party reconstruction service — never at capture time, because a masked
-// plate would also destroy the rear-panel geometry the model needs.
+// PLATE PRIVACY — THE HONEST VERSION (corrected 2026-08-26).
+// This comment used to claim the licence plate "is masked to pure black by
+// tools/glb-pipeline before any frame is handed to a third-party reconstruction
+// service". THAT WAS NEVER TRUE. No such script has ever existed — tools/glb-pipeline
+// holds eleven files and none of them touch a plate. A comment asserting a privacy
+// control that does not exist is worse than having no control, because it stops
+// anyone from asking the question again.
+//
+// Jeff's call, 2026-08-26, on being shown the gap: don't build the mask.
+// The reasoning holds up, and it was checked rather than assumed:
+//   • MEASURED on GRC2.glb, the one finished Tripo model we have (Jeff's own car):
+//     the 2048x2048 basecolor is a heavily fragmented UV atlas. Sampling it found
+//     body decals and trim — no legible plate anywhere. The plate does not survive
+//     reconstruction as readable text, so nothing readable ships in the model.
+//     (Sampled, not exhaustively scanned, and n=1 model. Re-check if a future bake
+//     ever shows plate characters.)
+//   • On the map the car draws a few dozen pixels tall. There is nothing to read.
+//   • The plate is visible to anyone standing near the car in a public car park,
+//     and the driver is deliberately photographing their own vehicle.
+// Masking at CAPTURE time would also be actively harmful: it destroys the rear-panel
+// geometry the reconstruction needs, which is why the original note ruled it out too.
+//
+// What replaces it is DISCLOSURE, not redaction: the consent screen names the
+// third-party 3D service, which is what the Play / App Store data-safety
+// declarations actually require. Photos still land in a PRIVATE, write-only bucket.
+//
+// ⚠ One thing to keep in mind when hosting a finished per-user model: the `models`
+// bucket is PUBLIC (/object/public/models/...), so any GLB there is fetchable by
+// anyone holding the URL. That is fine precisely because no plate is legible in the
+// texture — if that ever stops being true, this decision has to be revisited.
 
 import { File } from "expo-file-system";
 import { supabase, SUPABASE_ENABLED } from "./supabase";

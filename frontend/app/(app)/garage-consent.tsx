@@ -113,6 +113,17 @@ export default function GarageConsentScreen() {
             title="Shoot it clean and closed"
             body="Doors and windows shut, wheels straight, nothing leaning on it, nobody in frame. Anything touching the car may be modelled into it."
           />
+
+          {/* DISCLOSURE, not redaction (Jeff, 2026-08-26). We do not mask the plate —
+              it does not survive reconstruction as readable text, and on the map the car
+              is a few dozen pixels tall. See the long note in src/carScan.ts. What the
+              driver is owed instead is knowing a third party sees the photos, which is
+              also exactly what the Play / App Store data-safety declarations require. */}
+          <Row
+            icon="cloud-upload"
+            title="Your photos go to our 3D partner"
+            body="The four photos are uploaded and passed to the outside service that builds the model. They are photos of your car, taken in public — but they do leave your phone, so we would rather say so than not."
+          />
         </View>
 
         {/* ── requirements ───────────────────────────────────────────────── */}

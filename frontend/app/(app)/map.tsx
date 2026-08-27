@@ -2590,29 +2590,64 @@ export default function MapScreen() {
   };
 
   // ----- Saved places: long-press the map to save Home / Work -----
+  // Long-press anywhere on the map. Home / Work / Custom save the spot; "Add stop"
+  // puts it on the CURRENT drive (Jeff, 2026-08-27).
+  //
+  // ⚠ ADD STOP GOES THROUGH `setStops` AND NOTHING ELSE — the same single line the
+  // double-tap gesture uses. That is what keeps it inside the build-74 visited-stops
+  // algorithm rather than beside it: `stops` is the one source the whole system reads.
+  // The marking effect recomputes `pending` from `stops` on every fix, and all three
+  // router consumers call `pendingStops(stops)` at call time, so a stop appended
+  // mid-drive is automatically pending, automatically routed to, and automatically
+  // marked when the car reaches it (or skipped by the window-of-two rule). Feeding a
+  // stop anywhere else — straight to the router, or into a second list — is exactly
+  // the shape of the bug that made Olaf's route loop back.
+  //
+  // Offered only WITH a destination: a stop is a via on the way to somewhere, so
+  // without a destination there is nothing for it to be on the way to. Deliberately
+  // NOT gated on turn-by-turn — mid-drive is when you actually need fuel or food.
   const handleMapLongPress = (c: { lat: number; lng: number }) => {
+    const buttons: any[] = [];
+    if (destination) {
+      buttons.push({
+        text: "Add stop here",
+        onPress: () => {
+          setStops((prev) => [...prev, { lat: c.lat, lng: c.lng, label: `Stop ${prev.length + 1}` }]);
+          try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+        },
+      });
+    }
+    buttons.push(
+      {
+        text: "Home",
+        onPress: () => {
+          void saveSavedPlace({ kind: "home", lat: c.lat, lng: c.lng });
+          try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+          Alert.alert("Saved", "This spot is now your Home.");
+        },
+      },
+      {
+        text: "Work",
+        onPress: () => {
+          void saveSavedPlace({ kind: "work", lat: c.lat, lng: c.lng });
+          try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+          Alert.alert("Saved", "This spot is now your Work.");
+        },
+      },
+      {
+        // Same naming modal the Drive shelf's "Save place" uses, so a custom spot
+        // saved from the map and one saved from a destination are the same thing.
+        text: "Custom…",
+        onPress: () => { setSavePlaceName(""); setSavePlaceModal({ lat: c.lat, lng: c.lng }); },
+      },
+      { text: "Cancel", style: "cancel" },
+    );
     Alert.alert(
-      "Save this spot",
-      "Set it as a quick destination for predictions and your Scout greeting.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Home",
-          onPress: () => {
-            void saveSavedPlace({ kind: "home", lat: c.lat, lng: c.lng });
-            try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
-            Alert.alert("Saved", "This spot is now your Home.");
-          },
-        },
-        {
-          text: "Work",
-          onPress: () => {
-            void saveSavedPlace({ kind: "work", lat: c.lat, lng: c.lng });
-            try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
-            Alert.alert("Saved", "This spot is now your Work.");
-          },
-        },
-      ]
+      destination ? "This spot" : "Save this spot",
+      destination
+        ? "Add it to the drive you're on, or save it as a quick destination."
+        : "Set it as a quick destination for predictions and your Scout greeting.",
+      buttons,
     );
   };
 

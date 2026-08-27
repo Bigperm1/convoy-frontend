@@ -35,6 +35,11 @@ import { useAuth } from "../../src/auth";
 import { getSettings, updateSettings } from "../../src/settings";
 import { ensureCameraPermission } from "../../src/permissionGate";
 import { SCAN_SHOTS, SHOTS_TOTAL, newScanId, uploadScan, type CapturedShot } from "../../src/carScan";
+// SAFE to import statically on every build: CarViewfinder never imports expo-camera at
+// module scope — it goes through guidedCamera's probe and renders null without it.
+// See src/guidedCamera.ts for why a static expo-camera import would be a rollback bomb.
+import CarViewfinder from "../../src/components/CarViewfinder";
+import { guidedCameraAvailable } from "../../src/guidedCamera";
 
 // This is an ULTRA PREMIUM page — gold, not brand green (Jeff 8/23).
 const ULTRA = skin("ultra");
@@ -54,6 +59,9 @@ export default function GarageCaptureScreen() {
   const [phase, setPhase] = useState<Phase>("capture");
   const [sent, setSent] = useState(0);
   const [result, setResult] = useState<{ ok: boolean; uploaded: number; error?: string } | null>(null);
+  // The guided viewfinder (build 74+). On an older binary this stays false forever and
+  // the system-camera path below runs instead — identical output, no crash.
+  const [viewfinder, setViewfinder] = useState(false);
 
   const captured = Object.keys(shots).length;
   const complete = captured === SHOTS_TOTAL;
@@ -81,6 +89,13 @@ export default function GarageCaptureScreen() {
     }
   }, []);
 
+  /** Both camera paths land here: record the shot and move to the next empty station. */
+  const acceptShot = useCallback((uri: string) => {
+    const next = { ...shots, [shot.id]: uri };
+    setShots(next);
+    advance(active, next);
+  }, [shots, shot, active, advance]);
+
   const takePhoto = useCallback(async () => {
     Haptics.selectionAsync();
     const granted = await ensureCameraPermission();
@@ -94,6 +109,9 @@ export default function GarageCaptureScreen() {
         ],
       );
     }
+    // Build 74+: our own viewfinder, with the station ghost, the level and auto-capture.
+    if (guidedCameraAvailable()) { setViewfinder(true); return; }
+    // Build 73 and earlier: the system camera. Same contract — a URI for this station.
     try {
       const res = await ImagePicker.launchCameraAsync({
         // No cropping and no compression worth speaking of: framing and detail
@@ -103,14 +121,12 @@ export default function GarageCaptureScreen() {
         exif: false,
       });
       if (res.canceled || !res.assets?.[0]?.uri) return;
-      const next = { ...shots, [shot.id]: res.assets[0].uri };
-      setShots(next);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      advance(active, next);
+      acceptShot(res.assets[0].uri);
     } catch {
       Alert.alert("Camera failed", "Could not open the camera. Please try again.");
     }
-  }, [shots, shot, active, advance]);
+  }, [acceptShot]);
 
   const send = useCallback(async () => {
     Haptics.selectionAsync();
@@ -206,6 +222,19 @@ export default function GarageCaptureScreen() {
           )}
         </View>
       </SafeAreaView>
+    );
+  }
+
+  // ── the guided viewfinder owns the whole screen while it is open ───────────
+  if (viewfinder) {
+    return (
+      <CarViewfinder
+        shot={shot}
+        index={active}
+        total={SHOTS_TOTAL}
+        onCancel={() => setViewfinder(false)}
+        onCapture={(uri) => { setViewfinder(false); acceptShot(uri); }}
+      />
     );
   }
 

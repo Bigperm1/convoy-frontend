@@ -102,7 +102,7 @@ export default function AppSkinPage() {
       </SettingsCard>
 
       <HelpText>
-        {`Your metal arrives with your tier — buy Premium and the app turns silver, buy Ultra Premium and it turns gold. You can always drop back down (gold can wear silver or green), but you can never wear a metal above your tier.\n\nThe map never changes: the route line, traffic colours and hazards stay exactly as they are, because those colours mean something at speed.`}
+        {`Your metal arrives with your tier — buy Premium and the app turns silver, buy Ultra Premium and it turns gold. You can always drop back down (gold can wear silver or green), but you can never wear a metal above your tier.\n\nOn the map, the colours that MEAN something never change: the route line, traffic colours, hazards and speed cameras stay exactly as they are, because you read those at speed. Your search pins do wear your metal.`}
       </HelpText>
     </SettingsPage>
   );

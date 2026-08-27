@@ -275,10 +275,23 @@ its own instead of leaving a gold app behind a dead card, while remembering the 
 
 ### ⛔ What the skin must NEVER touch
 
-1. **The map.** `CONGESTION_COLOR` is clear `#2DEC86` → slowing `#FFD60A` → congested
-   `#FF9500`, and our gold `#E0A93E` **lands between the last two**. A gold route line
-   reads as traffic ahead at speed. Route line, congestion, hazards, speed-camera pins,
-   the reroute-offer pill and the green arrow all stay brand green.
+1. **The map — the parts that MEAN something.** `CONGESTION_COLOR` is clear `#2DEC86`
+   → slowing `#FFD60A` → congested `#FF9500`, and our gold `#E0A93E` **lands between the
+   last two**. A gold route line reads as traffic ahead at speed. Route line, congestion,
+   hazards, speed-camera pins, the reroute-offer pill and the green arrow all stay brand
+   green.
+   **⚠ NARROWED 2026-08-27 — CATEGORY/SEARCH pins are not on this list.** Jeff: *"the
+   pins in the search bar on the map for, say, car wash or gas station… in gold, silver
+   skin, the pins are still green."* A car-wash pin carries no traffic or hazard meaning,
+   so a gold one cannot be misread the way a gold route line can. The category pins wear
+   the metal via `PLACE_PIN_SKIN` (ConvoyMapbox), on the phone's GL layer AND CarPlay's
+   `PlaceMarker`, so the two surfaces agree.
+   **Still green, deliberately: the DESTINATION pin and the STOP pins** — they belong to
+   the route, and the route is green. Same three baked-asset trick as the H tile:
+   `brand-pin-gold.png` / `-silver.png`, ramped in **HSV** (hue + saturation held, only
+   value shades). An RGB ramp toward white desaturated gold to 47% against its accent's
+   72%; the calibration target is the relationship the GREEN pin already has to brand
+   green — saturation ×1.17, value ×0.97.
 2. **Tier locks.** They follow `useFeatureTier(feature)`. A gold H must keep meaning
    *Ultra* — if the whole app is already gold, the lock stops selling anything.
    **Chrome wears YOUR metal; paywall surfaces wear the FEATURE's metal.** That is how

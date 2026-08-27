@@ -49,6 +49,8 @@ import { fetchMapboxCongestion, buildCongestionGradient, type CongestionLevel } 
 import { getCarState } from "./carplay/carStore";
 import { getLastLocation, setLastLocation, getSettings, canonicalClass } from "./settings";
 import { haversineMeters } from "./nav";
+import { useAppSkin } from "./appSkin";
+import type { VisualTier } from "./tierTheme";
 
 // 1×1 fully transparent PNG — a REAL bundled asset, not a data-URI (@rnmapbox's
 // Images may not load a data-URI at runtime, which would let the default dot fall
@@ -1712,6 +1714,8 @@ export function IncidentMarker({ event, scale = 1 }: { event: RoadEvent; scale?:
 // a name, gas-pump badge) while ALWAYS keeping price chips and name labels. A
 // no-price gas station with pins off has nothing to draw → no marker at all.
 export function PlaceMarker({ place, index, onPress, scale = 1 }: { place: PlacePoint; index: number; onPress?: (p: PlacePoint) => void; scale?: number }) {
+  // Same metal as the phone's GL pin — CarPlay must match the phone.
+  const skin = PLACE_PIN_SKIN[useAppSkin()] ?? PLACE_PIN_SKIN.brand;
   // Unified numbered result pin — green background, thin grey border, Convoy
   // font. The number matches the row order in the Results dropdown so the list
   // and the map line up (1, 2, 3 …). Gas premium price + ratings live in the
@@ -1724,10 +1728,10 @@ export function PlaceMarker({ place, index, onPress, scale = 1 }: { place: Place
         {/* Hairpin brand pin + the result number badged on its head, so the map
             pins, the results list, and the logo all speak the same language. */}
         <View style={{ width: W, height: H, alignItems: "center" }}>
-          <Image source={require("../assets/images/brand-pin.png")} style={{ width: W, height: H }} resizeMode="contain" />
+          <Image source={PIN_IMAGE_MAP[skin.image]} style={{ width: W, height: H }} resizeMode="contain" />
           {/* Badge centre = the pin-head hole centre (alpha-centroid: x 0.5w, y 0.38h). */}
-          <View style={[styles.brandPinBadgeDyn, { top: H * 0.38 - 10 * scale, left: W / 2 - 10 * scale, width: 20 * scale, height: 20 * scale, borderRadius: 10 * scale }]}>
-            <Text style={[styles.placeNumText, { fontSize: 14 * scale }]}>{index + 1}</Text>
+          <View style={[styles.brandPinBadgeDyn, { backgroundColor: skin.badge, top: H * 0.38 - 10 * scale, left: W / 2 - 10 * scale, width: 20 * scale, height: 20 * scale, borderRadius: 10 * scale }]}>
+            <Text style={[styles.placeNumText, { color: skin.num, fontSize: 14 * scale }]}>{index + 1}</Text>
           </View>
         </View>
       </Pressable>
@@ -1785,6 +1789,26 @@ const PIN_IMAGE_MAP: Record<string, any> = {
   // the green pin, shading preserved): red = major/moderate, grey = minor/info.
   brand_pin_red: require("../assets/images/brand-pin-red.png"),
   brand_pin_grey: require("../assets/images/brand-pin-grey.png"),
+  // Tier metals for the CATEGORY pins (Jeff, 2026-08-27: "in gold, silver skin,
+  // the pins are still green"). Baked the same way as red/grey, but ramped in HSV
+  // so hue and saturation hold and only VALUE shades — an RGB ramp toward white
+  // desaturated gold to 47% against its accent's 72%. Calibrated to the
+  // relationship the GREEN pin already has to brand green (saturation x1.17,
+  // value x0.97), not to the accent itself.
+  brand_pin_gold: require("../assets/images/brand-pin-gold.png"),
+  brand_pin_silver: require("../assets/images/brand-pin-silver.png"),
+};
+
+/** Category-pin dressing per app skin. ⚠ ONLY the category/search pins take the
+ *  metal. The DESTINATION and STOP pins stay brand green because they belong to
+ *  the ROUTE, and DESIGN.md's map carve-out keeps the route line green (gold sits
+ *  between the "slowing" and "congested" congestion colours — a gold route reads
+ *  as traffic ahead). Hazards and speed cameras keep their own semantic colours
+ *  for the same reason. */
+const PLACE_PIN_SKIN: Record<VisualTier, { image: string; num: string; badge: string }> = {
+  brand:   { image: "brand_pin",        num: "#2DEC86", badge: "#0A1A10" },
+  premium: { image: "brand_pin_silver", num: "#C9D2D8", badge: "#111517" },
+  ultra:   { image: "brand_pin_gold",   num: "#E0A93E", badge: "#1B1409" },
 };
 // DriveBC severity → the red (major/moderate, system red #FF453A) or grey
 // (minor/unknown) pin. The wrench glyph draws straight into the pin's head
@@ -1810,6 +1834,7 @@ function GLPinLayers({
   const cameraFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: cameras.map((c) => fcPoint(c.id, c.lng, c.lat, {})) }), [cameras]);
   const incidentFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: incidents.map((e) => fcPoint(e.id, e.lng, e.lat, { icon: incidentPin(e.severity).icon, kind: e.kind, road: e.road || "", headline: e.headline })) }), [incidents]);
   const placeFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: places.map((p, i) => fcPoint(p.id, p.lng, p.lat, { num: String(i + 1) })) }), [places]);
+  const placeSkin = PLACE_PIN_SKIN[useAppSkin()] ?? PLACE_PIN_SKIN.brand;
 
   const tapHazard = useCallback((e: any) => { const id = e?.features?.[0]?.properties?.id; const h = hazards.find((x) => x.id === id); if (h) onHazardPress?.(h); }, [hazards, onHazardPress]);
   const tapPlace = useCallback((e: any) => { const id = e?.features?.[0]?.properties?.id; const p = places.find((x) => x.id === id); if (p) onPlacePress?.(p); }, [places, onPlacePress]);
@@ -1899,12 +1924,12 @@ function GLPinLayers({
           pin stays bright under the dusk/night light presets. */}
       {places.length > 0 && (
         <ShapeSource id="gl-places" shape={placeFC} onPress={tapPlace}>
-          <SymbolLayer id="gl-places-pin" slot="top" style={{ iconImage: "brand_pin", iconSize: 0.466, iconAnchor: "bottom", iconRotationAlignment: "viewport", iconPitchAlignment: "viewport", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          <SymbolLayer id="gl-places-pin" slot="top" style={{ iconImage: placeSkin.image, iconSize: 0.466, iconAnchor: "bottom", iconRotationAlignment: "viewport", iconPitchAlignment: "viewport", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
           {/* Badge circle behind the number: translate anchored to the VIEWPORT
               (default is "map", which drifted the circle off the pin head as the
               map rotated — the same bug that hit the DriveBC badge). */}
-          <CircleLayer id="gl-places-bg" slot="top" style={{ circleColor: "#0A1A10", circleRadius: 10, circleTranslate: [0, -28] as any, circleTranslateAnchor: "viewport", circlePitchAlignment: "viewport", circleEmissiveStrength: 1 }} />
-          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: 13, textColor: "#2DEC86", textOffset: [0, -28 / 13] as any, textRotationAlignment: "viewport", textPitchAlignment: "viewport", textEmissiveStrength: 1, textAllowOverlap: true, textIgnorePlacement: true }} />
+          <CircleLayer id="gl-places-bg" slot="top" style={{ circleColor: placeSkin.badge, circleRadius: 10, circleTranslate: [0, -28] as any, circleTranslateAnchor: "viewport", circlePitchAlignment: "viewport", circleEmissiveStrength: 1 }} />
+          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: 13, textColor: placeSkin.num, textOffset: [0, -28 / 13] as any, textRotationAlignment: "viewport", textPitchAlignment: "viewport", textEmissiveStrength: 1, textAllowOverlap: true, textIgnorePlacement: true }} />
         </ShapeSource>
       )}
     </>

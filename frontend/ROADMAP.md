@@ -178,6 +178,15 @@ Native payload for 74:
 **JS deliberately riding 74 instead of an OTA** (this is a choice, not a constraint — each of these
 *could* ship OTA today):
 
+- **The two-tier car models** — `97debd1` + `466f47e`, Jeff 2026-08-28: **"hold for 74."**
+  Garage hero keeps the full GRC2; map + CarPlay load the decimated `GRC2_map1.glb` twin
+  (48,760 verts / 2.21 MB vs 217,651 / 9.24 MB — the ego car drops from 8.7× to 2× over
+  Mapbox's vert budget; heat lever). The publish gate is CLEARED: the twin is live in the
+  bucket, byte-identical, sim-verified through the committed code and the real https URL.
+  Includes the convoyCar4_→convoyCar5_ model-id generation bump and the new `publish-model`
+  edge function + `tools/glb-pipeline/publish_model.sh` (how ALL finished models reach the
+  bucket from now on).
+
 - **The mic arbiter** — `src/micArbiter.ts` + `audioMode` / `pttChannel` / `useVoice` / `askScout` /
   `carComms`, committed `b7b633c` and pushed, **not published**. Jeff, 2026-08-26: *"hold it for the
   next build."* It changes mic ownership on iOS phone, CarPlay and Android phone simultaneously, and

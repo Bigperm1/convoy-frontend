@@ -268,11 +268,28 @@ const SELF_MARKER_PT = 44;
 const SELF_CLASS_PHOTO_PT = 66;
 const SELF_CLASS_SILHOUETTE_PT = 62;
 /** Scale stops holding `targetPt` on screen at every zoom. Half-steps so a pinch
- *  reads smooth (the reason the legacy table was dense). */
+ *  reads smooth (the reason the legacy table was dense).
+ *
+ *  ⚠ THE RANGE IS THE WHOLE POINT — it must cover every zoom the CAMERA can reach,
+ *  not just the driving ones. A Mapbox `interpolate` CLAMPS outside its stops, and a
+ *  clamped model scale is a fixed size in WORLD units, so it halves on screen with
+ *  every zoom level beyond the end stop. Peers never do this (they are MarkerViews,
+ *  i.e. screen space at a constant point size), so the two diverge fast.
+ *
+ *  Measured, 2026-08-27: with the stops starting at z=9, the crew overview — which
+ *  computes its own zoom and clamps only at 2 (see the fitCrew effect) — put a
+ *  Vancouver-to-Abbotsford crew at z 7.86, drawing the driver's own car at 20pt beside
+ *  44pt peers. Jeff: "My marker is a lot smaller than [Enablewhore's]." Reproduced on
+ *  the sim by pinching out, where it degenerates to a speck.
+ *
+ *  So the floor here is Z_FLOOR = 2, matching the crew fit's own clamp. Do not raise
+ *  it to "tidy up" the big numbers at the bottom: 44pt at z=2 legitimately needs a
+ *  ~294,000x model scale, because the model is metres and the viewport is continents. */
+const Z_FLOOR = 2;
 function scaleCurveForPoints(targetPt: number, modelLenUnits: number): any {
   const mpp = (z: number) => (78271.517 * Math.cos((CAL_LAT * Math.PI) / 180)) / Math.pow(2, z);
   const out: any[] = ["interpolate", ["linear"], ["zoom"]];
-  for (let z = 9; z <= 20; z += 0.5) {
+  for (let z = Z_FLOOR; z <= 20; z += 0.5) {
     const v = Math.round(((targetPt * mpp(z)) / modelLenUnits) * 100) / 100;
     out.push(z, [v, v, v]);
   }

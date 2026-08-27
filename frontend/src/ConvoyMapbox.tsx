@@ -222,6 +222,50 @@ const SELF_ID = "self";
 // over geometrically-spaced values kinks at every stop. Half-step stops follow
 // the same ~2x-per-zoom curve closely enough that scaling reads smooth through a
 // pinch. All OTA-tunable.
+// ── SELF-MARKER SIZE: ONE TARGET IN POINTS, CURVE COMPUTED (2026-08-27) ──────
+// Jeff: "make sure the 2D view of the 3D car is the same size as the classes and
+// generally the same size as the arrow." MEASURED first, at lat 49.25:
+//     self 3D car 61-73pt | self arrow 52-62pt | self class 59.4pt | peer class 44pt
+// Two faults in that one line. The car ran BIGGER than the class sprite it should
+// match — and it did not hold still: the hand-tuned stops below are geometric by eye,
+// so the car's on-screen size WOBBLED ~20% (61pt at z12, 73pt at z14). It grew and
+// shrank as you pinched, against sprites that never move. Eyeballing a geometric
+// table is exactly the kind of thing to compute instead.
+//
+// modelScale is in MODEL UNITS, rendered as METRES, so a fixed scale shrinks as you
+// zoom out and the table existed to cancel that. Derive it from the projection and
+// the error goes away:
+//     metres-per-point (512px tiles) = 78271.517 * cos(lat) / 2^zoom
+//     scale = targetPt * metresPerPoint / modelLengthInUnits
+//
+// ⚠ LATITUDE. Web Mercator metres-per-pixel varies with latitude, so a metre-sized
+// object is not a fixed pixel size worldwide. The old table had this property too,
+// silently — this only makes it explicit. Calibrated where the testers drive; away
+// from CAL_LAT the marker scales by cos(lat) exactly as it always did.
+//
+// ⚠ The legacy table + carModelScale() below are UNTOUCHED on purpose: CarPlay calls
+// carModelScale() with MULTIPLIERS (CarMapView.tsx:864 — 0.7 car / 0.78-0.60 arrow,
+// tuned on the head unit 2026-08-25). Re-basing them here would silently resize the
+// car surface, which nobody asked for. Only the PHONE's two self markers move.
+const CAL_LAT = 49.25;
+const CAR_LEN_UNITS = 1.910;     // GRC2 / GRC2_map1 long axis, measured 2026-08-26
+const ARROW_LEN_UNITS = 1.289;   // green-arrow-v10.glb long axis, measured 2026-08-27
+/** The self marker's on-screen length in POINTS. 59 == the self class sprite
+ *  (ClassSprite size 66 x spriteSize 0.9), so car, arrow and class all read the
+ *  same. ONE number — OTA-tunable, and it is the only knob this needs. */
+const SELF_MARKER_PT = 59;
+/** Scale stops holding `targetPt` on screen at every zoom. Half-steps so a pinch
+ *  reads smooth (the reason the legacy table was dense). */
+function scaleCurveForPoints(targetPt: number, modelLenUnits: number): any {
+  const mpp = (z: number) => (78271.517 * Math.cos((CAL_LAT * Math.PI) / 180)) / Math.pow(2, z);
+  const out: any[] = ["interpolate", ["linear"], ["zoom"]];
+  for (let z = 9; z <= 20; z += 0.5) {
+    const v = Math.round(((targetPt * mpp(z)) / modelLenUnits) * 100) / 100;
+    out.push(z, [v, v, v]);
+  }
+  return out;
+}
+
 const CAR_MODEL_SCALE_BY_ZOOM: any = [
   "interpolate", ["linear"], ["zoom"],
   9,    [3400, 3400, 3400],
@@ -253,7 +297,9 @@ const CAR_MODEL_SCALE_BY_ZOOM: any = [
 // above now reads too big. Rather than re-tune every stop, scale the whole curve
 // by one factor: lower = smaller. 1.0 == the (too-big) table above. The map uses
 // CAR_MODEL_SCALE_SIZED below — adjust CAR_SIZE and OTA to resize.
-const CAR_SIZE = 1.00;
+// ⚠ CAR_SIZE RETIRED 2026-08-27 and DELETED — the phone's self car is sized by
+// SELF_MARKER_PT above, in POINTS. The legacy table + carModelScale() below live on
+// only for CarPlay's multipliers, which do not want a phone-side size knob.
 // Build the model-scale zoom curve at a given size multiplier (lower = smaller). The
 // phone uses CAR_SIZE; CarPlay passes a smaller value (carModelScale(0.8)) so the car
 // reads a touch smaller on the head unit. Only the [x,y,z] numeric tuples are scaled —
@@ -266,7 +312,7 @@ export function carModelScale(size: number): any {
       : v,
   );
 }
-export const CAR_MODEL_SCALE_SIZED: any = carModelScale(CAR_SIZE);
+export const CAR_MODEL_SCALE_SIZED: any = scaleCurveForPoints(SELF_MARKER_PT, CAR_LEN_UNITS);
 export const CAR_MODEL_HEADING_OFFSET = 90; // deg. The GLB exports facing 90° off (sideways across the road),
 // so we rotate it +90 to point along the direction of travel. If after this the car points exactly
 // BACKWARDS, flip to 270; if it's still sideways the other way, that means -90 didn't apply — but 90/270
@@ -308,7 +354,10 @@ export const ARROW_MODEL_PITCH = 90;
 // 1.9 → 1.6 (2026-07-11) → 1.25 (Jeff, 8/19: "shrink the size a bit cause it is a
 // little too big and touches the turnbyturn banner"). Survived the 8/20 revert of
 // the projection changes on purpose — it is cosmetic and explicitly requested.
-export const ARROW_MODEL_SCALE: any = carModelScale(1.25);
+// Same SELF_MARKER_PT as the car — the arrow GLB is a different length (1.289 vs
+// 1.910), which is why the old hand-set 1.25 multiplier landed it at 52-62pt instead.
+// Passing its real length makes "same size" actually true rather than approximated.
+export const ARROW_MODEL_SCALE: any = scaleCurveForPoints(SELF_MARKER_PT, ARROW_LEN_UNITS);
 // CarPlay self-arrow scale — the head-unit camera sits tighter than the phone, so the shared
 // phone scale rendered the arrow enormous (drive feedback 2026-07-11). 1.0 brings it in line with
 // the CarPlay car (carModelScale(0.7)) at a sane arrow/car ratio. OTA-tunable.

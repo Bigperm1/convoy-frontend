@@ -857,7 +857,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // you see all of it. Same world-space scale, visibly bigger marker — which is
   // exactly the "especially on 2d" in the report. 0.60 restores the 3D read.
   //
-  // NOT touched: the PHONE's ARROW_MODEL_SCALE (ConvoyMapbox.tsx:311, currently 1.25).
+  // NOT touched: the PHONE's ARROW_MODEL_SCALE, which as of 2026-08-27 is a computed
+  // point-size curve (scaleCurveForPoints(SELF_MARKER_PT, ARROW_LEN_UNITS)) rather than
+  // the old 1.25 multiplier. The car surface keeps its own multipliers below.
   // That constant has its own tuning history at Jeff's hand (1.9 -> 1.6 -> 1.25) and
   // he photographed CarPlay, not the phone. One surface per report.
   const selfScale = useMemo(

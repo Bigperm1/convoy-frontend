@@ -53,6 +53,42 @@ export const AIM_TOL = 0.35;
 /** Frame-to-frame delta ceiling; above this the driver is still moving. */
 export const MOTION_TOL = 0.06;
 
+// ── SMOOTHING (2026-08-27, Jeff: "the level in the camera is very jittery") ────
+// The raw gravity vector carries hand tremor and sensor noise, and the readout
+// multiplies it: a wobble of 0.01 in |gx| moved the horizon bar by 0.6 viewBox
+// units every single sample. Two fixes, both here so they stay testable offline:
+//
+//   1. An exponential moving average over the NORMALISED vector, re-normalised so
+//      the result stays unit length (readLevel's own normalise() rejects anything
+//      under magnitude 1, and float drift would otherwise trip it).
+//   2. A display deadband — under ~1.5 degrees the bar snaps flat. Without it a
+//      perfectly steady phone still shows micro-movement, which is what reads as
+//      "jittery" even after averaging.
+//
+// Alpha 0.16 at a 60 ms cadence is a ~370 ms time constant: visibly calm, still
+// quick enough that turning the phone moves the bar immediately.
+
+/** Portion of each new sample admitted into the smoothed vector. */
+export const LEVEL_ALPHA = 0.16;
+/** Below this |gx| the bar is drawn flat (~1.5 degrees). */
+export const LEVEL_DEADBAND = 0.026;
+
+/** EMA toward `sample`, kept unit length. `prev` null = first frame, adopt it whole. */
+export function smoothUnit(prev: Vec3 | null, sample: Vec3, alpha: number = LEVEL_ALPHA): Vec3 {
+  if (!prev) return sample;
+  const x = prev.x + (sample.x - prev.x) * alpha;
+  const y = prev.y + (sample.y - prev.y) * alpha;
+  const z = prev.z + (sample.z - prev.z) * alpha;
+  const m = Math.hypot(x, y, z);
+  if (!Number.isFinite(m) || m < 1e-6) return sample;
+  return { x: x / m, y: y / m, z: z / m };
+}
+
+/** Roll as drawn: deadbanded so a steady hand gives a dead-flat bar. */
+export function displayRoll(roll: number): number {
+  return roll <= LEVEL_DEADBAND ? 0 : roll;
+}
+
 /** Unit-length copy, or null when the sample is degenerate (freefall, no sensor). */
 export function normalise(g: Vec3 | null | undefined): Vec3 | null {
   if (!g) return null;
@@ -74,6 +110,13 @@ export function normalise(g: Vec3 | null | undefined): Vec3 | null {
 export function readLevel(raw: Vec3 | null | undefined, prev: Vec3 | null): LevelReading {
   const g = normalise(raw);
   if (!g) return { roll: 1, aim: 1, motion: 1, ready: false };
+  return readLevelUnit(g, prev);
+}
+
+/** Same reading from an ALREADY normalised vector — the path the viewfinder uses,
+ *  because a smoothed unit vector can land a hair under magnitude 1 and normalise()
+ *  would reject it as degenerate. */
+export function readLevelUnit(g: Vec3, prev: Vec3 | null): LevelReading {
   const roll = Math.abs(g.x);
   const aim = Math.abs(g.z);
   const motion = prev ? Math.hypot(g.x - prev.x, g.y - prev.y, g.z - prev.z) : 0;

@@ -160,6 +160,40 @@ export default function GarageCaptureScreen() {
     }
   }, [acceptShot]);
 
+  // Upload into the ACTIVE station from the photo library (Jeff, 2026-08-27: "could
+  // we add a upload feature to each photo slot as well if they decide to take a photo
+  // with the stock camera?"). Same contract as the camera paths — a URI for this
+  // station — so the send/upload half never learns where a frame came from.
+  // allowsEditing stays OFF: cropping is exactly what wrecks the reconstruction's
+  // framing, and the guided shots are uncropped too.
+  const uploadPhoto = useCallback(async () => {
+    Haptics.selectionAsync();
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== "granted") {
+        return Alert.alert(
+          "Photo access needed",
+          "Allow photo access to upload a shot you already took.",
+          [
+            { text: "Not now", style: "cancel" },
+            { text: "Open Settings", onPress: () => Linking.openSettings() },
+          ],
+        );
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.9,
+        exif: false,
+      });
+      if (res.canceled || !res.assets?.[0]?.uri) return;
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      acceptShot(res.assets[0].uri);
+    } catch {
+      Alert.alert("Upload failed", "Could not open your photos. Please try again.");
+    }
+  }, [acceptShot]);
+
   const send = useCallback(async (paint: ScanPaint | null) => {
     Haptics.selectionAsync();
     setPhase("uploading");
@@ -523,6 +557,15 @@ export default function GarageCaptureScreen() {
               ) : (
                 <Text style={styles.tileNum}>{i + 1}</Text>
               )}
+              {/* Per-slot upload. Selecting the station first means the picker always
+                  lands the frame where the driver tapped, with no second target. */}
+              <TouchableOpacity
+                onPress={() => { setActive(i); void uploadPhoto(); }}
+                hitSlop={6}
+                style={styles.tileUpload}
+              >
+                <Ionicons name="image-outline" size={13} color={ULTRA.accent} />
+              </TouchableOpacity>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -534,6 +577,11 @@ export default function GarageCaptureScreen() {
           tier="ultra"
           style={styles.shutterWrap}
         />
+
+        <TouchableOpacity style={styles.uploadBtn} activeOpacity={0.85} onPress={uploadPhoto}>
+          <Ionicons name="image-outline" size={17} color={ULTRA.accent} />
+          <Text style={styles.uploadText}>Upload {shot.label.toLowerCase()} from photos</Text>
+        </TouchableOpacity>
 
         <CandyCta
           label={complete ? "Generate my car" : `${SHOTS_TOTAL - captured} to go`}
@@ -671,6 +719,19 @@ const styles = StyleSheet.create({
   },
   shutterText: { color: "#04150B", fontSize: 17, fontWeight: "800" },
 
+  tileUpload: {
+    position: "absolute", right: 3, bottom: 3,
+    width: 22, height: 22, borderRadius: 11,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.66)",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(224,169,62,0.5)",
+  },
+  uploadBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    alignSelf: "stretch", marginTop: 12,
+    borderWidth: 1, borderColor: "#2A2A2A", borderRadius: 12, paddingVertical: 12,
+  },
+  uploadText: { color: ULTRA.accent, fontSize: 14, fontWeight: "600" },
   sendBtn: {
     alignSelf: "stretch",
     height: 50,

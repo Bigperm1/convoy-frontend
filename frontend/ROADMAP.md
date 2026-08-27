@@ -164,6 +164,11 @@ later OTA.
 Native payload for 74:
 
 - **RevenueCat SDK** — a native module, cannot ride an OTA. Gates the whole monetization sequence.
+- **A sync native `isConnected` getter in the react-native-carplay patch** — RNCarPlay.m flips its
+  native store false BEFORE the bridge-guarded didDisconnect emit, so a sync getter is ground truth
+  the JS events can't fake. Closes the one half of the 8/26 background-GPS leak the OTA dead-man
+  switch can't reach (an in-context lost didDisconnect leaves the JS `CarPlay.connected` probe
+  answering true). See `_sweepBgConsumers`' header in navNotification.ts.
 - **`Screen.setMarker(templateId)` in the react-native-carplay patch.** react-native-carplay never
   calls `Screen.setMarker` anywhere (the only `setMarker` in the package is on a *Place* builder,
   `RCTTemplate.kt:215`). With no marker, androidx's `popTo` finds nothing and pops everything except

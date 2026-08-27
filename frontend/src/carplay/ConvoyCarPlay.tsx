@@ -45,7 +45,7 @@ import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, claimCarNa
 import CarMapView, { CAR_LEFT_PAD_FRAC, hudScaleFor, aaMapScaleFor } from './CarMapView';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
-import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, AA_ACTION_STRIP, AA_MAP_BUTTONS, handleCarBarButton, handleCarMapButton, handleAaButton, carTap } from './carActions';
+import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, AA_ACTION_STRIP, AA_MAP_BUTTONS, handleCarBarButton, handleCarMapButton, handleAaButton, carTap, isDupCarPress } from './carActions';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import { speedLimitVisible } from '../speedLimit';
 import type { RoadEvent } from '../driveBcEvents';
@@ -604,7 +604,15 @@ export function CarSurface() {
   // logEventReliable because its ABSENCE is what tells us the suppression never fired.
   // Derived, so it cannot latch: any layout with a real width raises surfaceW, and
   // surfaceW never falls. A 470-wide surface therefore can NEVER be suppressed.
-  const zeroWidth = measured && !(surfaceW > 0);
+  // EXTENDED 2026-08-26: zero width was not the only ghost shape. Post-OTA telemetry
+  // (Rodrigo, 08-27 02:21 UTC) shows a SECOND live GL instance passing this gate at
+  // 244x852 — a PHONE-SHAPED portrait window that is not a head-unit canvas.
+  // ⚠ NOT bare h>w (review, 2026-08-26): portrait car displays exist (some AA head
+  // units), at car-like aspects ~1.2-1.7:1. The ghost is 3.49:1 — a phone shape no
+  // car canvas has — so the gate keys on that: h > 2w kills the ghost with margin
+  // and spares any plausible real portrait unit. Still fully derived: surfaceH
+  // re-measures in both directions, so nothing latches.
+  const zeroWidth = measured && (!(surfaceW > 0) || surfaceH > surfaceW * 2);
 
   useEffect(() => {
     // Per TRANSITION into the suppressed state, not once per process: a surface that
@@ -613,8 +621,8 @@ export function CarSurface() {
     // at 3 keeps the Supabase INSERT bounded either way.
     if (!zeroWidth || zeroLoggedRef.current >= 3) return;
     zeroLoggedRef.current += 1;
-    try { logEventReliable(`car-surface-zerow h=${Math.round(surfaceH)} n=${zeroLoggedRef.current} suppressed=1`); } catch {}
-  }, [zeroWidth, surfaceH]);
+    try { logEventReliable(`car-surface-zerow w=${Math.round(surfaceW)} h=${Math.round(surfaceH)} n=${zeroLoggedRef.current} suppressed=1`); } catch {}
+  }, [zeroWidth, surfaceW, surfaceH]);
 
   // `&& !zeroWidth`: a surface that has been MEASURED at zero width has no pixels to
   // draw into, so a live map there is pure cost — a second Metal view, the whole
@@ -1444,8 +1452,10 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
               // mirror immediately re-populated the car route — End looked dead).
               // onEndRef reaches map.tsx's endNav; everything else falls through
               // to the shared handler so cold behaviour is identical.
-              if (e?.id === 'car-end') { carTap('car-end'); onEndRef.current?.(); return; }
-              handleCarBarButton(e?.id);
+              // isDupCarPress: these intercepts return BEFORE the deduped funnels, and END was
+              // one of the field-doubled ids — share the same stamp (review, 2026-08-26).
+              if (e?.id === 'car-end') { if (isDupCarPress('car-end', 'warm')) return; carTap('car-end'); onEndRef.current?.(); return; }
+              handleCarBarButton(e?.id, 'warm');
             },
             onDidCancelNavigation: () => onEndRef.current?.(),
             // Round CPMapButtons — POLICE + SCOUT MIC in OUR OWN artwork, from the
@@ -1462,8 +1472,8 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
               // Warm root: prefer the live ref (reaches the mounted surface); anything
               // else falls through so cold-root behaviour stays identical. (Police was
               // removed from CarPlay at Jeff's request, 2026-07-20.)
-              if (e?.id === 'car-mic') { carTap('car-mic'); onScoutMicRef.current?.(); return; }
-              handleCarMapButton(e?.id);
+              if (e?.id === 'car-mic') { if (isDupCarPress('car-mic', 'warm')) return; carTap('car-mic'); onScoutMicRef.current?.(); return; }
+              handleCarMapButton(e?.id, 'warm');
             },
             // iOS-26 raw pinch/zoom on the CarPlay map (react-native-carplay patch +
             // CPMapTemplate.h gesture delegate). Forwarded to CarMapView via the

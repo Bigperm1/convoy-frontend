@@ -28,7 +28,7 @@ import { resetMapView2D, setMapView2D } from "./mapViewMode";
 import { getSettings, getMapMode } from "./settings";
 import { updateSpeedLimit } from "./speedLimit";
 import { recordTrip } from "./trips";
-import { logEvent } from "./crashBreadcrumb";
+import { logEvent, logEventReliable } from "./crashBreadcrumb";
 import { accentNow } from "./appSkin";
 
 const NAV_TASK = "convoy-nav-location";
@@ -269,7 +269,15 @@ async function fireColdArrival(late: boolean): Promise<void> {
     || AppState.currentState === 'active';
   // The slim route persists destLabel (startNavBanner receives it from map.tsx), so the
   // cold/AA arrival names the place too rather than falling back to the generic line.
-  if (!late && liveDrive) { try { announce(arrivalLine(done?.destLabel)); } catch {} }
+  // BANNER MUTE (tester report 2026-08-26, "driving with the AI voice off but it
+  // announced when I got to my destination"): the cold engine never saw
+  // settings.novaMuted — the map's speaker-button mute — because only the warm
+  // engine's call sites pass it as options.mute. speak() checks novaVoice (the
+  // master switch) but novaMuted is a map.tsx-only concept, so cold arrivals
+  // talked through the banner mute. Gate it here exactly like the warm path does.
+  const bannerMuted = !!getSettings().novaMuted;
+  try { logEventReliable(`arrive-speak engine=cold late=${late ? 1 : 0} live=${liveDrive ? 1 : 0} muted=${bannerMuted ? 1 : 0}`); } catch {}
+  if (!late && liveDrive && !bannerMuted) { try { announce(arrivalLine(done?.destLabel)); } catch {} }
   // Before the teardown, and never allowed to block it — a failed upload must cost a
   // leaderboard row, never leave the route stuck on the head unit.
   try { await recordColdTrip(done, poly); } catch {}
@@ -531,7 +539,8 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
   // music ducking, mute-during-calls all apply). isPhoneTbtSpeaking() is the
   // double-speak guard — while map.tsx's useTurnByTurn is actively guiding, it
   // owns the voice and this stays silent.
-  if (!isPhoneTbtSpeaking()) {
+  // Same banner-mute gate as the cold arrival — this is the other cold speech site.
+  if (!isPhoneTbtSpeaking() && !getSettings().novaMuted) {
     announce(
       arriving
         ? (route.destLabel ? `Arriving at ${route.destLabel}` : "Arriving at your destination")
@@ -625,6 +634,11 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
     heading: typeof _h === "number" && _h > 0 ? _h : undefined,
     speed: typeof _sp === "number" && _sp >= 0 ? _sp : 0,
   });
+  // DEAD-MAN AUDIT (see _sweepBgConsumers): every delivery batch, the task checks
+  // whether anyone still legitimately consumes it — in the leaked state THIS callback
+  // is the only code guaranteed to still run, so it is where the self-stop must live.
+  // Fire-and-forget and self-throttled; never blocks the position write above.
+  void _sweepBgConsumers("task");
   // Best-effort metadata — wrapped so it can never block the position write above.
   // (cache may be unhydrated in a separate bg JS context → defaults, which is fine.)
   try {
@@ -644,6 +658,111 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
 // feed used FOREGROUND location, which iOS starves when the app is backgrounded
 // behind the head unit). Needs "Always" location permission.
 const _locConsumers = new Set<string>();
+
+// ── DEAD-MAN SWITCH FOR THE SHARED GPS (2026-08-26, Rodrigo's 5-hour battery day) ──
+// The refcount above is JS-MODULE MEMORY, but the task itself is OS-PERSISTED:
+// expo-task-manager stores NAV_TASK in NSUserDefaults and natively restarts
+// full-rate GPS (High / 1s / 5m, pausesUpdatesAutomatically:false) at EVERY app
+// launch before a line of JS runs — and expo-location's consumer also starts
+// significant-location-change monitoring, the one service Apple documents as
+// RELAUNCHING a terminated app. So one missed release (process death while a
+// consumer was held, a lost CarPlay didDisconnect, a release racing acquire's
+// awaited tail) orphans the task with an empty Set, and force-closing the app
+// does not stop it — iOS resurrects the app on the next tower-scale move and the
+// task resumes. Verified in the field 2026-08-26: a tester's nav ended 11:40 AM
+// and draw-cmp rows kept flowing for 11.2 hours; iOS billed Hairpin "background
+// activity 4h 56min".
+//
+// The fix cannot be a timer (iOS suspends JS timers in the background) and cannot
+// be an event (missing events ARE the failure). It is the task's own deliveries:
+// in the leaked state the NAV_TASK callback keeps running by definition, so the
+// callback audits its own right to exist. Throttled to once a minute; a startup
+// grace lets legitimate boot-time acquires land first.
+//
+// Consumer validity: each car surface REGISTERS a liveness probe (injected, so
+// this module never imports CarPlay/AA code — that direction would be a cycle).
+// ⚠ COVERAGE SPLIT (review, 2026-08-26): the probes read CarPlay.connected — a JS
+// field written by the SAME didConnect/didDisconnect events whose loss is one of
+// the failure shapes. So within one live JS context, a lost didDisconnect leaves
+// the probe answering true and the sweep cannot reap that tag; what the sweep DOES
+// close is every RELAUNCH shape (force-quit, crash, jetsam — the Set is empty and
+// the zero-consumer path stops the task), which is the field-verified 8/26 leak.
+// The in-context shape needs ground truth events can't fake: RNCarPlay.m flips its
+// NATIVE store false before the bridge-guarded emit, so a sync native getter on the
+// react-native-carplay patch is the build-74 close for that half.
+// 'nav' is validated against this module's own session state. A tag with no
+// probe is treated as valid — the sweep then only handles the zero-consumer case,
+// which is the relaunch shape. A reaped tag or an orphaned task logs RELIABLY:
+// these rows are absence-interpreted (logEvent would drop them pre-client).
+const _consumerProbes = new Map<string, () => boolean>();
+export function registerBgConsumerProbe(tag: string, alive: () => boolean): void {
+  _consumerProbes.set(tag, alive);
+}
+const _bootAt = Date.now();
+let _lastSweepAt = 0;
+const SWEEP_EVERY_MS = 60_000;
+const SWEEP_BOOT_GRACE_MS = 20_000;
+
+async function _sweepBgConsumers(source: string): Promise<void> {
+  const now = Date.now();
+  if (now - _bootAt < SWEEP_BOOT_GRACE_MS) return;
+  if (now - _lastSweepAt < SWEEP_EVERY_MS) return;
+  _lastSweepAt = now;
+  try {
+    for (const tag of Array.from(_locConsumers)) {
+      let alive = true;
+      if (tag === "nav") {
+        // The module's own ground truth: a live slim route that is not ending.
+        alive = isNavSessionLive();
+      } else {
+        const probe = _consumerProbes.get(tag);
+        if (probe) { try { alive = !!probe(); } catch { alive = true; } }
+      }
+      if (!alive) {
+        _locConsumers.delete(tag);
+        try { logEventReliable(`bgloc-reaped tag=${tag} src=${source}`); } catch {}
+      }
+    }
+    if (_locConsumers.size === 0) {
+      // ⚠ THE COLD ENGINE IS A LEGITIMATE ZERO-CONSUMER STATE. After a mid-drive
+      // force-close, the relaunched headless context has an empty Set by design —
+      // the persisted slim route is what proves a drive is still live, and the cold
+      // arrival/teardown NEEDS the task running to fire at all. Stopping here would
+      // kill cold arrivals (the exact feature field-validated on 8/19). So the stop
+      // requires BOTH no in-memory session AND no fresh persisted route. The >6h
+      // stale-drop in updateNavBanner already bounds how long a persisted route can
+      // hold the task after an abandoned drive.
+      if (isNavSessionLive()) return;
+      // ⚠ FAIL OPEN (review blocker, 2026-08-26). This is a KILL SWITCH: if the
+      // persisted-route read THROWS, the truth is UNKNOWN — and unknown must keep
+      // the GPS, not stop it. The first cut's empty catch fell through to the stop,
+      // so one storage hiccup mid cold drive would have killed guidance permanently
+      // (a stopped task never delivers, so the sweep never runs again and nothing
+      // re-acquires until the app opens). Failing open costs at most 60 more
+      // seconds of a leaked task; failing closed kills a live drive.
+      try {
+        const raw = await AsyncStorage.getItem(ROUTE_KEY);
+        if (raw) {
+          const startedAt = (JSON.parse(raw) as SlimRoute | null)?.startedAt;
+          if (startedAt && Date.now() - startedAt <= MAX_PERSISTED_ROUTE_AGE_MS) return;
+        }
+      } catch {
+        try { logEventReliable(`bgloc-sweep-readfail src=${source}`); } catch {}
+        return;
+      }
+      // A car surface can legitimately acquire during the awaits above — re-check
+      // before pulling the trigger (review, 2026-08-26).
+      if (_locConsumers.size > 0) return;
+      const started = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
+      if (started) {
+        _stopStallWatchdog();
+        stopForegroundCarFeed();
+        await Location.stopLocationUpdatesAsync(NAV_TASK).catch(() => {});
+        try { logEventReliable(`bgloc-deadman stopped=1 src=${source} upMin=${Math.round((now - _bootAt) / 60000)}`); } catch {}
+      }
+    }
+  } catch {}
+}
 
 // ===== GPS stall watchdog (CarPlay screen-off freeze, 2026-07-16) =====
 // "The GPS still stops on CarPlay when the phone screen is off." Whatever kills
@@ -878,6 +997,25 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
     // whenever the phone backgrounded behind the head unit while idle (not navigating).
     await startForegroundCarFeed();
     const started = await tryStartBgUpdates();
+    // RACE GUARD (2026-08-26): every await above is a window for a release to land.
+    // If the LAST consumer released while we were mid-acquire, the size-0 stop already
+    // ran against a task we are about to (or just did) start — leaving it orphaned
+    // with an empty Set. Re-check after the start and undo our own work if so.
+    if (_locConsumers.size === 0) {
+      // Undo EVERYTHING this call started, not just the task (review, 2026-08-26):
+      // the first cut left startForegroundCarFeed's 1s/5m watch running with zero
+      // consumers — a smaller cousin of the very leak this file now kills.
+      _stopStallWatchdog();
+      stopForegroundCarFeed();
+      try {
+        const stillOn = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
+        if (stillOn) {
+          await Location.stopLocationUpdatesAsync(NAV_TASK).catch(() => {});
+          try { logEventReliable("bgloc-acquire-raced stopped=1"); } catch {}
+        }
+      } catch {}
+      return false;
+    }
     return started || canBg;
   } catch {
     return false;

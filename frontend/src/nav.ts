@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Platform, AppState } from "react-native";
 import { api } from "./api";
 import { fetchMapboxRoutes, fetchMapboxRouteVia, refreshMapboxRoute, arrivesOnFarSide, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
-import { logEvent } from "./crashBreadcrumb";
+import { logEvent, logEventReliable } from "./crashBreadcrumb";
 import { anchorStepIndex } from "./navAnchor";
 import { getSettings, getNovaVoice, getAudioVol } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
@@ -1274,6 +1274,17 @@ export function useTurnByTurn(
       if (announcedRef.current.has(arriveKey)) return;
       announcedRef.current.add(arriveKey);   // fire once, not on every parked GPS tick
       if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
+      // RECEIPT (2026-08-26, "it announced when I got to my destination despite being
+      // off"): the arrival spoke through *some* mute for a tester and the gates here
+      // could not be told apart after the fact. One reliable row per arrival records
+      // every gate's state at fire time, so the next report is a one-query answer.
+      try {
+        const st = getSettings();
+        logEventReliable(
+          `arrive-speak engine=warm late=${late ? 1 : 0} optMute=${options?.mute ? 1 : 0} ` +
+          `novaMuted=${st.novaMuted ? 1 : 0} novaVoice=${st.novaVoice === false ? 0 : 1} vol=${getAudioVol(st, "volVoice").toFixed(2)}`,
+        );
+      } catch {}
       if (!options?.mute && !late) speak(arrivalLine(options?.destLabel));
       options?.onArrive?.();
     };

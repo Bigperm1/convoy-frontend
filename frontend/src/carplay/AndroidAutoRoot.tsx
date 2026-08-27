@@ -27,7 +27,7 @@
 import { useEffect, useRef } from 'react';
 import { CarSurface } from './ConvoyCarPlay';
 import { useCarStore } from './carStore';
-import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
+import { acquireBgLocation, releaseBgLocation, registerBgConsumerProbe, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
 import { noteCarConnected } from '../locationPrivacy';
 import { AA_ACTION_STRIP, AA_MAP_BUTTONS, handleAaButton, carTap } from './carActions';
@@ -155,6 +155,7 @@ export default function AndroidAutoRoot() {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { CarPlay } = require('react-native-carplay');
       const onDisconnect = () => {
+        aaAliveRef.current = false;
         void releaseBgLocation('androidauto');
         stopCarDataService();
         // RELEASE THE HEAD-UNIT FLAG TOO (2026-08-15). Without this the only thing
@@ -172,8 +173,15 @@ export default function AndroidAutoRoot() {
     return () => { if (off) off(); };
   }, []);
 
+  // Liveness for the dead-man sweep — true only while this root is mounted AND no
+  // didDisconnect has arrived. A plain ref: the probe is called from module scope.
+  const aaAliveRef = useRef(false);
   useEffect(() => {
     aaCrumb('root-mount');
+    aaAliveRef.current = true;
+    // Dead-man probe: the 'androidauto' hold is legitimate only while this root is
+    // mounted (see carplay probe note — 2026-08-26 background-GPS leak).
+    registerBgConsumerProbe('androidauto', () => aaAliveRef.current);
     void acquireBgLocation('androidauto');   // shared bg task + fg car feed
     startCarDataService();                   // cold peers + hazards (WS/Supabase/REST)
     void startForegroundCarFeed();           // continuous GPS writer for the car map
@@ -196,6 +204,7 @@ export default function AndroidAutoRoot() {
     // private direction.
     noteCarConnected(true);
     return () => {
+      aaAliveRef.current = false;
       void releaseBgLocation('androidauto');
       stopCarDataService();
       noteCarConnected(false);

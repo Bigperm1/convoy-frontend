@@ -1018,7 +1018,40 @@ export function carTap(id: string): void {
   } catch {}
 }
 
-export function handleCarMapButton(id: string): void {
+// ── DOUBLE-DISPATCH DEDUPE (2026-08-26, telemetry-proven) ──────────────────────
+// Rodrigo's head unit delivers every map-button press TWICE, 0.5-11 ms apart
+// (paired carplay-tap rows for crew, compass, zoom-out, end, search — while other
+// testers log singles). A doubled compass toggles north-up ON then OFF within 4 ms
+// and reads as a dead button; a doubled crew runs the fit twice. The double is two
+// live listeners for one native press (warm root + cold root is the leading
+// suspect — the `src` tag on the crumb below settles it from his next drive).
+// Whatever the emitter count, one PHYSICAL press cannot arrive twice inside 250 ms
+// of itself, so collapse them here at the single funnel both roots call.
+let _lastTapId = "";
+let _lastTapAt = 0;
+// 50 ms, not 250 (review, 2026-08-26): the measured hardware doubles are 0.5-18 ms,
+// and 250 ate DELIBERATE rapid same-button presses — three quick zoom taps became
+// two, silently (the drop skips the toast receipt too). 50 is ~3x the worst
+// measured double and far below any intentional repeat-press cadence.
+const TAP_DEDUPE_MS = 50;
+
+/** One press cannot physically arrive twice inside the window. TRUE = duplicate —
+ *  callers drop the press. Exported so the warm root's car-end/car-mic intercepts
+ *  (which return before these funnels) share the same stamp instead of staying
+ *  doubled (review, 2026-08-26 — END and MIC are two of the ids that measured
+ *  doubled in the field). */
+export function isDupCarPress(id: string, src = "?"): boolean {
+  const now = Date.now();
+  if (id === _lastTapId && now - _lastTapAt < TAP_DEDUPE_MS) {
+    try { logEvent(`carplay-tap-deduped:${id} src=${src} dt=${now - _lastTapAt}`); } catch {}
+    return true;
+  }
+  _lastTapId = id; _lastTapAt = now;
+  return false;
+}
+
+export function handleCarMapButton(id: string, src = "?"): void {
+  if (isDupCarPress(id, src)) return;
   carTap(id);
   // Comms mic moved into the round map-button column (2026-08-15). Same behaviour it
   // had as a bar button — tap-to-toggle transmit — kept inline rather than delegated
@@ -1060,15 +1093,17 @@ export function handleCarMapButton(id: string): void {
   if (id === 'car-mic') { emitCarGesture({ kind: 'scoutMic' }); return; }
 }
 
-export function handleCarBarButton(id: string): void {
+export function handleCarBarButton(id: string, src = "?"): void {
   // CROSS-SIDE DISPATCH (2026-08-15 layout swap): zoom is now a nav-bar pair but its
   // action lives in handleCarMapButton; car-view can still arrive from a stale cached
   // template that has it in its OLD bar slot. Route before carTap — the map handler
   // logs its own receipt, and double-logging would corrupt the tap telemetry.
   if (id === 'car-zoom-in' || id === 'car-zoom-out' || id === 'car-view') {
-    handleCarMapButton(id);
+    handleCarMapButton(id, src);
     return;
   }
+  // Same physical-press dedupe as the map buttons (his end/search doubled too).
+  if (isDupCarPress(id, src)) return;
   carTap(id);
   armPosRing(); // idempotent — make sure the 5s-ago buffer is running
   if (id === 'car-comms') {

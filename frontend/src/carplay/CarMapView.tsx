@@ -1401,6 +1401,16 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             // overview can be and still mean anything on a 213dp canvas. 3 was the
             // continent frame in the video.
             const zoom = Math.max(8, Math.min(15, Math.min(zx, zy)));
+            // TRIM RUNS ON THE REAL ZOOM DURING THE HOLD (2026-08-26, Rodrigo's
+            // "route overlaps weirdly when the map zooms out to show all the crew").
+            // The crew hold stands pushCam down (lockReadyRef=false), and pushCam is
+            // the ONLY writer of camZoomRef — so for the whole 15 s the trim math ran
+            // at the stale chase zoom (~16-17) while the camera sat at fit zoom
+            // (8-15). routeTrimLeadM/fade computed at the wrong zoom collapse to
+            // ~1-3 dp on screen (or inflate in the co-located corner), which is the
+            // "hard-starts on the car / overlaps weirdly" report. The camera's target
+            // zoom IS known right here — publish it to the ref the trim reads.
+            camZoomRef.current = zoom;
             cameraRef.current?.setCamera({
               centerCoordinate: [cLng, cLat], zoomLevel: zoom,
               pitch: 0, heading: 0, animationDuration: 600, animationMode: 'easeTo',
@@ -1988,6 +1998,20 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           car never hides under the route ribbon. */}
       {(s.peers || []).some((p) => typeof p.lat === 'number' && typeof p.lng === 'number') && (
         <ShapeSource
+          // key=: REMOUNT IN LOCKSTEP WITH THE ROUTE BRANCH (2026-08-26, "the route
+          // would overlap weirdly when the map zooms out to show all the crew").
+          // car-peer-cars and the route sel layers share slot 'top', where stacking is
+          // pure INSERTION ORDER — and the route source's branch flip (distinct keys,
+          // see above) re-creates its layers, appending them ABOVE the already-mounted
+          // peers. Exactly the insertion-order class d888154 fixed inside the route
+          // source itself. Keying the peers on the same discriminator makes every
+          // route remount also remount the peers — declared after the routes, so they
+          // re-append above the ribbon and the crew stays visible at crew zoom-out.
+          // All THREE route-source states (review, 2026-08-26): the route ternary is
+          // previewMulti / hasRoute / null, and the first cut keyed only two — so a
+          // null→nav flip (cold connect, idle→Go) mounted route layers above peers
+          // with no peer remount. One discriminator per arm closes it.
+          key={'car-peers-' + (previewMulti ? 'preview' : hasRoute ? 'nav' : 'none')}
           id="car-peers"
           shape={{
             type: 'FeatureCollection',

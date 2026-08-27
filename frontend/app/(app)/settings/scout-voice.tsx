@@ -91,7 +91,11 @@ export default function ScoutVoicePage() {
         <Divider />
         <ToggleRow icon="trending-up" iconColor="#FF9F0A" title="Adaptive alerts" subtitle="Learn your usual pace so the first nudge stops nagging at speeds you always drive (the firmer alert stays fixed)" value={settings.adaptiveSpeedAlerts !== false} onChange={(v) => setSettings({ adaptiveSpeedAlerts: v })} />
       </SettingsCard>
-      <HelpText>{`These control Scout's extra spoken touches. Turn-by-turn directions aren't affected — silence those with the mute button on the map.`}</HelpText>
+      {/* Corrected 2026-08-26: the old copy said turn-by-turn "isn't affected" by the
+          master switch — false, speak() gates every spoken line on it (nav.ts) — and it
+          steered testers to the map mute as the only nav silencer. Say what each
+          control actually does. */}
+      <HelpText>{`The Scout voice switch is the master: off silences everything Scout says, turn-by-turn directions included. The speaker button on the map mutes just the drive callouts and arrival announcements, and the Voice level lives in Settings → Audio.`}</HelpText>
     </SettingsPage>
   );
 }

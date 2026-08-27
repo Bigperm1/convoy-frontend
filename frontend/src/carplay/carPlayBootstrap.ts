@@ -13,7 +13,7 @@ import { NativeModules, Platform, AppState, processColor } from 'react-native';
 import * as Location from 'expo-location';
 import { carPlayHookOwnsRoot } from './carPlayShared';
 import { setCarState, getCarState, emitCarGesture } from './carStore';
-import { acquireBgLocation, releaseBgLocation, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
+import { acquireBgLocation, releaseBgLocation, registerBgConsumerProbe, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
 import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
 import { logEventReliable } from '../crashBreadcrumb';
@@ -100,12 +100,12 @@ export function initCarPlayBootstrap(): void {
         // CPMapButtons don't; see carActions.ts header). Cold-capable: these
         // handlers run entirely at module scope.
         ...CAR_BAR_BUTTON_CONFIG,
-        onBarButtonPressed: ({ id }: { id: string }) => handleCarBarButton(id),
+        onBarButtonPressed: ({ id }: { id: string }) => handleCarBarButton(id, 'cold'),
         // Round CPMapButtons (zoom ± / Scout mic) — SF symbols via the build-65
         // systemImage patch (custom PNGs resolve nil under bridgeless; see
         // carActions.CAR_MAP_BUTTON_CONFIG). Ignored harmlessly on older builds.
         ...CAR_MAP_BUTTON_CONFIG,
-        onMapButtonPressed: ({ id }: { id: string }) => handleCarMapButton(id),
+        onMapButtonPressed: ({ id }: { id: string }) => handleCarMapButton(id, 'cold'),
         // iOS-26 pinch/zoom — the COLD root was missing these entirely, so a driver
         // who connected the head unit without opening the phone app first had no
         // pinch at all (the warm root in ConvoyCarPlay.tsx has had them since
@@ -135,6 +135,14 @@ export function initCarPlayBootstrap(): void {
       receipt('idleroot-threw', String(e?.message || e).slice(0, 120));
     }
   };
+
+  // Liveness ground truth for the dead-man sweep: the 'carplay' GPS hold is only
+  // legitimate while the head unit is actually attached. A lost didDisconnect (or a
+  // force-quit mid-session) used to strand the hold forever — 2026-08-26, the 5-hour
+  // background-GPS day. CarPlay.connected is the library's live scene state.
+  registerBgConsumerProbe('carplay', () => {
+    try { return !!CarPlay.connected; } catch { return true; }
+  });
 
   const onConnect = () => {
     setIdleRoot();

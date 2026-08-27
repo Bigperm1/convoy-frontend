@@ -28,10 +28,18 @@ import { useAppSkin } from '../appSkin';
 import type { VisualTier } from '../tierTheme';
 
 // Static requires — Metro needs literal paths, and all three ship in the bundle.
+// -gold2/-silver2, not -gold/-silver (2026-08-27): two reasons. (1) The first bake's
+// green-dominance mask was centred on the WRONG hue (the tile's body is 162deg, not
+// the brand swatch's 152), so every metal pixel kept ~21% of the original green —
+// Jeff: "it is not the same gold as the rest of the app." Rebaked byte-exact against
+// the tier accent (#E0A93E body, verified by median). (2) NEW file names because of
+// the OTA asset path-key trap: changing a require()'d image's CONTENT under the same
+// path does NOTHING over OTA — the path must change for build-74 installs to get the
+// fixed pixels.
 const TILE: Record<VisualTier, any> = {
   brand: require('../../assets/HAIRPIN.png'),
-  premium: require('../../assets/HAIRPIN-silver.png'),
-  ultra: require('../../assets/HAIRPIN-gold.png'),
+  premium: require('../../assets/HAIRPIN-silver2.png'),
+  ultra: require('../../assets/HAIRPIN-gold2.png'),
 };
 
 interface Props {

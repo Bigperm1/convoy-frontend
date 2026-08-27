@@ -586,6 +586,40 @@ export function getVehicleModelUrl(color?: string | null, lit?: boolean): string
   return lit && !NO_LIT_BAKE.has(key) ? url.replace(/\.glb$/, "_lit.glb") : url;
 }
 
+// ── TWO-TIER MODELS: the MAP gets a decimated twin, the GARAGE keeps the full bake ──
+// Jeff, 2026-08-28: "i want to use the one that is in the hero shot app right now with
+// the scaled down version for the mapbox."
+//
+// The map draws the car a few dozen pixels tall, and the full GRC2 bake is 217,651
+// verts — 8.7× Mapbox's <25k ego-vehicle recommendation and the standing HEAT suspect.
+// The twin is the SAME model through gltf-transform weld + simplify(0.15) + 1024
+// textures: 48,760 verts (max 6,574/mesh, u16), 2.21 MB vs 9.24 MB, orientation and
+// metallicFactor preserved. QC'd on the iOS sim through the real Mapbox loader
+// 2026-08-28 — black roof, taillights, scale and heading all correct at map size.
+//
+// The GARAGE hero (model-viewer in a WebView — a different renderer with none of
+// Mapbox's limits) deliberately keeps VEHICLE_MODEL_URL, i.e. the full-quality bake.
+//
+// Partial: colors without a twin fall back to the full model on the map too, so this
+// can roll out one bake at a time. A twin must ALWAYS be paired with a MODEL-ID
+// generation bump at the call sites — Mapbox caches by id, and re-pointing an old id
+// at the twin would keep drawing the cached full model forever.
+export const VEHICLE_MODEL_URL_MAP: Partial<Record<GRCColorKey, string>> = {
+  heavy_metal: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/GRC2_map1.glb",
+};
+
+/** The model the MAP surfaces load: the decimated twin when one exists, else the full
+ *  bake. Lit twins don't exist yet — a lit request falls back to the full pipeline's
+ *  behaviour so dusk/night keep working unchanged for colors with a _lit bake. */
+export function getVehicleMapModelUrl(color?: string | null, lit?: boolean): string {
+  const key = resolveGRCKey(color) || DEFAULT_GRC_KEY;
+  if (!lit || NO_LIT_BAKE.has(key)) {
+    const twin = VEHICLE_MODEL_URL_MAP[key];
+    if (twin) return twin;
+  }
+  return getVehicleModelUrl(color, lit);
+}
+
 /** True when the basemap light preset calls for headlights (dawn/dusk/night). */
 export function isLitPreset(preset?: string | null): boolean {
   return preset === "dusk" || preset === "night" || preset === "dawn";

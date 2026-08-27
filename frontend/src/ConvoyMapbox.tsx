@@ -41,7 +41,7 @@ import { routeTrimLeadM, routeTrimFadeM } from "./routeTrim";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getPowerMode, usePowerMode } from "./powerMode";
-import { getVehiclePngOrDefault, getVehicleModelUrl, getVehicleModelKey, vehicleHasLitBake, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
+import { getVehiclePngOrDefault, getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
 import { ClassSprite } from "./classLayers";
 import { getPaintedArrowUri } from "./arrowModel";
 import type { WeatherKind } from "./weatherLayer";
@@ -2571,7 +2571,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const selfLit = !selfIsArrow && isLitPreset(mapMode);
   const selfModelUrl: string | number = selfIsArrow
     ? (paintedArrowUri ?? GREEN_ARROW_MODEL)
-    : getVehicleModelUrl(selfCar?.color, selfLit);
+    : getVehicleMapModelUrl(selfCar?.color, selfLit);
   // Paint/color-specific model id so a change swaps the model LIVE (Mapbox
   // caches a model by id — a fixed id won't reload a new .glb until remount).
   const selfModelId = selfIsArrow
@@ -2583,7 +2583,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     // The `_lit` suffix is gated on the SAME predicate as the URL — a scan has no night
     // twin, and an id claiming `_lit` while the URL is the day bake is a lie that costs
     // a wasted model registration.
-    : "convoyCar4_" + getVehicleModelKey(selfCar?.color) + (selfLit && vehicleHasLitBake(selfCar?.color) ? "_lit" : "");
+    // convoyCar5_: generation bump 2026-08-28 — the map's heavy_metal now loads the
+    // decimated GRC2_map1 twin. Same-id would keep serving the cached full GRC2.
+    : "convoyCar5_" + getVehicleModelKey(selfCar?.color) + (selfLit && vehicleHasLitBake(selfCar?.color) ? "_lit" : "");
   // Lift the paint out of the dark on the dim light presets (dawn/night). The ARROW
   // is always FULLY self-lit (1): it's a UI marker, not a realistic car — scene
   // lighting at day/dusk (0/0.55) washed its brand green pale.

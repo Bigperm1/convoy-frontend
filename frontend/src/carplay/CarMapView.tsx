@@ -35,7 +35,7 @@ import { canonicalClass } from '../settings';
 import { useMapView2D } from '../mapViewMode';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { usePowerMode } from '../powerMode';
-import { getVehicleModelUrl, getVehicleModelKey, vehicleHasLitBake, getVehiclePngOrDefault, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
+import { getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, getVehiclePngOrDefault, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
   ROUTE_GREEN_CORE,
@@ -637,7 +637,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const carLit = !isArrow && isLitPreset(mode);
   // convoyCar3_: generation bump, in step with the phone (ConvoyMapbox.tsx). CarPlay
   // sat a generation behind at 'convoyCar_', so it cached its own stale copies.
-  const carModelId = isArrow ? ARROW_MODEL_ID : ('convoyCar4_' + getVehicleModelKey(s.selfCarColor) + (carLit && vehicleHasLitBake(s.selfCarColor) ? '_lit' : ''));
+  // convoyCar5_: generation bump with the decimated map twin (cache-by-id, see phone).
+  const carModelId = isArrow ? ARROW_MODEL_ID : ('convoyCar5_' + getVehicleModelKey(s.selfCarColor) + (carLit && vehicleHasLitBake(s.selfCarColor) ? '_lit' : ''));
 
   // Speed-aware zoom for BOTH nav AND cruise — chaseZoom with no turn distance is a pure
   // speed→zoom curve (city tighter, highway wider), so cruise now dynamically zooms in/out
@@ -1785,7 +1786,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
 
       {/* Register the self 3D model for the chosen marker: the arrow GLB, or the
           per-color car. key={carModelId} remounts <Models> when the id flips. */}
-      <Models key={carModelId} models={{ [carModelId]: isArrow ? GREEN_ARROW_MODEL : getVehicleModelUrl(s.selfCarColor, carLit) }} />
+      <Models key={carModelId} models={{ [carModelId]: isArrow ? GREEN_ARROW_MODEL : getVehicleMapModelUrl(s.selfCarColor, carLit) }} />
 
       {/* Top-down car PNG for the flat (not-routing) marker — the same asset and the
           same registration pattern the phone uses (ConvoyMapbox :2676). */}

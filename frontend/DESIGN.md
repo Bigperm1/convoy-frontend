@@ -256,6 +256,25 @@ its own instead of leaving a gold app behind a dead card, while remembering the 
 4. **Anything pinned to a baked green asset** that cannot follow: the Hairpin wordmark
    and app icon (brand marks stay green — like every app whose logo survives its
    themes), the CarPlay base64 button icons, and the mic-glow PNG.
+   **⚠ NARROWED 2026-08-27 — the H TILE is not on this list.** Jeff: *"the hairpin logo
+   in the top right corner changes from green to silver to gold based on the skin."*
+   That tile is the map / Comms / Music **menu button** — chrome, and chrome wears YOUR
+   metal (§1). The carve-out keeps its two real members: the login **wordmark** and the
+   **home-screen app icon**, both still green. Three baked files, because the mark is a
+   rendered 3D object and `tintColor` would flatten the bevel away:
+   `assets/HAIRPIN.png` / `-silver.png` / `-gold.png`, cut the same way as the tier
+   locks (green-dominance mask, re-metalled, original bevel luma preserved).
+   `src/components/ConvoyLogo.tsx` picks by `useAppSkin()`.
+
+### Choosing a marker chooses the metal (2026-08-27)
+
+Jeff: *"if you select from the arrow, the class, or the 3D it should also change the
+skin."* The three Map Appearances already ARE the ladder — Arrow free, Class Premium,
+3D Ultra — so `applyMarkerType` (Garage) calls `setSkinChoice` with the matching metal:
+**Arrow → green · Class → silver · 3D → gold.** `photo` is deliberately excluded: it is
+not one of the three tiered appearances. `setSkinChoice` still clamps to entitlement, so
+this can never hand out a metal the account has not bought, and Settings → App Skin
+remains the explicit override (both write the same setting).
 
 ### Two traps this uncovered
 

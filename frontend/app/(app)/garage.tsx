@@ -22,11 +22,18 @@ import GarageHeroCarousel from '../../src/GarageHeroCarousel';
 import { CandyCta } from '../../src/components/CandyCta';
 import { CANDY_RIM, CANDY_INK } from '../../src/components/ManeuverArrow';
 import { skin, type VisualTier } from '../../src/tierTheme';
+import { setSkinChoice } from '../../src/appSkin';
 import { LinearGradient } from 'expo-linear-gradient';
 import { resolveGRCKey, getVehicleModelUrl } from '../../src/vehicleAssets';
 import { GlassFill } from '../../src/Glass';
 import GlassBackdrop, { TIER_WALLPAPER } from '../../src/components/GlassBackdrop';
 import { getColorsForModel } from '../../src/carDatabase';
+/** Appearance -> metal. Module scope: a constant the useCallback below closes over,
+ *  so it can never be a stale dependency. 'photo' is absent on purpose (see
+ *  applyMarkerType). */
+const SKIN_FOR_MARKER: Partial<Record<'car' | 'arrow' | 'photo' | 'class', VisualTier>> = {
+  arrow: 'brand', class: 'premium', car: 'ultra',
+};
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const HERO_H = 300;   // one height for every hero page — the carousel cannot jump
@@ -267,11 +274,29 @@ export default function GarageScreen() {
   // Persist the choice locally AND to the backend profile (avatar_type) so peers,
   // /users/nearby and the live /location broadcast all render you the same way —
   // exactly like carColor is mirrored above.
+  // ── PICKING A MARKER PICKS THE APP'S METAL (Jeff, 2026-08-27) ──────────────
+  // "if you select from the arrow, the class, or the 3D it should also change the
+  //  skin to that class or 3D or arrow."
+  //
+  // The three appearances ALREADY carry a tier in this screen — pageTier below
+  // paints the whole page from the carousel, and DESIGN.md fixes the ladder:
+  // Arrow is free (green), Class is Premium (silver), 3D is Ultra (gold). So the
+  // choice a driver makes here is a tier statement, and the app now follows it
+  // instead of making them set the same thing twice in Settings → App Skin.
+  //
+  // 'photo' is deliberately ABSENT: it is not one of the three tiered appearances
+  // (Jeff named arrow/class/3D), so choosing it leaves the metal alone.
+  //
+  // setSkinChoice CLAMPS to what the account is entitled to and persists the pick,
+  // so this can never hand out a metal the tier has not bought — and Settings →
+  // App Skin still overrides afterwards, because both write the same setting.
   const applyMarkerType = useCallback((type: 'car' | 'arrow' | 'photo' | 'class') => {
     Haptics.selectionAsync();
     setMarkerType(type);
     updateSettings({ selfMarkerType: type });
     api.put('/auth/profile', { avatar_type: type }).catch(() => {});
+    const metal = SKIN_FOR_MARKER[type];
+    if (metal) void setSkinChoice(metal);
   }, []);
 
   // Photo mode: pick a square photo → send as base64 to the backend, which stores

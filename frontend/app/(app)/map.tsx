@@ -40,7 +40,7 @@ import {
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
   useRouteTrafficRefresh, fetchRouteViaStops,
 } from "../../src/nav";
-import { getDepartureBearing, noteCourse, orderRoutesForward, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
+import { getDepartureBearing, noteCourse, orderRoutesForward, routeInitialBearing, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
 import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw } from "../../src/locationPrivacy";
 import CarDriveList from "../../src/CarDriveList";
 import { subscribeBgFix } from "../../src/navNotification";
@@ -1074,6 +1074,17 @@ export default function MapScreen() {
       // around. When nothing departs forward the order is unchanged: sometimes a
       // U-turn genuinely is the only way out.
       const sorted = orderRoutesForward(raw, facing ?? undefined);
+      // depart-rank crumb (2026-08-27, Jeff: "it told me to go the opposite direction
+      // I was facing" — off-route 55m within 7s of nav start, instant reroute). The
+      // ranker has two SILENT give-up paths — n<=1 routes, or facing=null — and no
+      // telemetry said which fired. This names it: the next backwards start carries
+      // its own diagnosis. src/departureBearing.ts owns why `bearings=` can't fix it.
+      try {
+        const _b0 = routeInitialBearing(sorted[0] as any);
+        const _off = (typeof facing === 'number' && _b0 != null)
+          ? Math.round(Math.abs(((_b0 - facing + 540) % 360) - 180)) : -1;
+        logEvent(`depart-rank n=${raw.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off}`);
+      } catch {}
       // Color-rank: green (fastest) → orange (mid) → red (slowest). Cast to
       // any so we can attach an extra `color` field without modifying the
       // shared NavRoute type in src/nav.ts.

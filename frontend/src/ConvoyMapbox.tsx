@@ -869,7 +869,72 @@ function distPointToSegM(pLat: number, pLng: number, aLat: number, aLng: number,
 // line BEHIND the car so the 3D car reads on top, and (b) SNAPPING the drawn car
 // onto the line so it stays glued to the road instead of drifting on raw GPS.
 // Local equirectangular metres centred on the car (accurate at street scale).
-export function projectOntoRoute(pLat: number, pLng: number, coords: { latitude: number; longitude: number }[]): { frac: number; lat: number; lng: number; distM: number; totalM: number; bearing: number } | null {
+// ── RE-LANDED 2026-08-27 (first shipped d220778, reverted e4d67e0 the same night).
+// Jeff, tonight: "the car kind blows through the intersection then does a floating
+// slide … it now slides and does a 90d turn" — receipts in draw-cmp (12.2 m offset
+// at 16:27:51, 9.2 m mid-corner at 16:29:24). The revert's own checklist is now
+// satisfied: the drawn-vs-raw breadcrumb EXISTS (draw-cmp, 8/20), and this re-land
+// was run through a FULL-CHAIN node harness (projection → snap gate → scatter gate
+// → deadband → ease), including the parked-scatter case suspected of causing the
+// original "drifting like crazy" rollback. PHONE SURFACE ONLY on this pass — the
+// checklist's one-surface-at-a-time rule; CarMapView ports after a validated drive.
+// ── CORNER-CUTTING, and why `nearAtM` exists (Jeff's 8/19 drive home) ────────
+// "when I got to the King Rd intersection the arrow was past the intersection."
+// A GLOBAL nearest-point scan does that by construction: as you approach a corner
+// the perpendicular distance to the OUTGOING leg shrinks below the distance to the
+// leg you are still driving, so the projection — and with it the drawn marker and
+// the line trim — hops around the corner BEFORE you reach it. The same hop flips
+// `bearing` to the new leg early, which is half of "the nose doesn't face the
+// road" (the other half is the snap gate, see SELF_SNAP_HDG_* at the call site).
+//
+// `nearAtM` (optional) is the arc position we believe the car is at — the previous
+// frame's answer. When supplied, candidate segments are restricted to a window
+// around it: a little behind (GPS noise) and a bounded distance ahead (real travel
+// between frames). That makes the projection LOCAL and monotonic-ish, so it can no
+// longer leap to a far leg — including the outgoing leg of the corner you are
+// still approaching, or a parallel stretch of road later in the route.
+// If nothing in the window is plausibly close, it falls back to the global scan,
+// so a reroute / GPS teleport / first fix still attaches correctly instead of
+// sticking to a stale window. Display-only: nav.ts's off-route + step logic reads
+// RAW GPS and never this.
+// ── THE WINDOW IS SIZED BY MEASURED TRAVEL, not a fixed distance ─────────────
+// A fixed forward window CANNOT fix corner-cutting, which was proved by
+// simulating the corner (500 m north into the vertex, then east, 3-30 m lateral
+// GPS offset): with a 160 m window the output was IDENTICAL to the global scan at
+// every sample. The geometry says why — the hop fires when the car is within its
+// own lateral offset `d` of the vertex, and the offending candidate sits only
+// ~2d of arc ahead, so any window wide enough to allow normal progress also
+// admits it.
+// What separates the two is PHYSICS: the car cannot have advanced further along
+// the route than it actually moved. So the window is ±(1.5 x metres travelled
+// since the last projection), floored so a stopped or crawling car still has one.
+// The outgoing leg of a corner you have not reached yet is further ahead than you
+// travelled this tick, so it is excluded — while genuine progress always fits.
+// Floor: a stopped/crawling car still needs a window. MEASURED against the King Rd
+// corner shape (500 m north into the vertex, then east) by running this exact
+// function over it: at realistic ~12 m/fix the projection overshoots the corner by
+// 5.5 m with the window vs 19.4 m on the old global scan (20 m lateral offset), and
+// at ~8 m/fix a 10 m floor removes the overshoot entirely where 15 left 2.5 m.
+const PROJ_WINDOW_MIN_M = 10;
+const PROJ_WINDOW_TRAVEL_MULT = 1.5;
+// A CLAMPED answer (best candidate pinned to the window edge) means the true
+// nearest point lies outside what this pass could see. That is expected at a
+// corner — and there the clamped point is still physically NEAR the car, so it is
+// trustworthy. It is NOT expected after a GPS spike, where the clamped point is
+// far away; that case must fall through to the global scan or the car gets drawn
+// tens of metres up the road (measured: up to 59 m before this rule existed).
+const PROJ_CLAMP_TRUST_M = 60;
+// How far off-line a WINDOWED answer may be before we distrust the window itself
+// and re-scan globally (reroute, teleport, a window gone stale).
+const PROJ_WINDOW_ABANDON_M = 120;
+export function projectOntoRoute(
+  pLat: number,
+  pLng: number,
+  coords: { latitude: number; longitude: number }[],
+  nearAtM?: number | null,
+  movedM?: number | null,
+  travelHdg?: number | null,
+): { frac: number; lat: number; lng: number; distM: number; totalM: number; bearing: number } | null {
   if (!coords || coords.length < 2) return null;
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -878,27 +943,85 @@ export function projectOntoRoute(pLat: number, pLng: number, coords: { latitude:
   const Y = (lat: number) => toRad(lat - pLat) * R;
   const invLng = (x: number) => pLng + (x / (cosLat * R)) * (180 / Math.PI); // local metres → lng
   const invLat = (y: number) => pLat + (y / R) * (180 / Math.PI);            // local metres → lat
+  // Two passes over the same geometry: the first honours the window (when given),
+  // the second is the unrestricted global scan used as the fallback. Written as a
+  // loop over both modes so the maths lives in exactly one place.
   let acc = 0;            // cumulative length from origin up to prev vertex
   let bestD2 = Infinity;  // nearest squared distance car→route
   let bestArc = 0;        // arc length from origin to that nearest point
   let bestX = 0, bestY = 0; // nearest point on the route, in local metres
   let bestDx = 0, bestDy = 0; // direction of the segment the projection landed on (east, north)
-  let prevX = X(coords[0].longitude), prevY = Y(coords[0].latitude);
-  for (let i = 1; i < coords.length; i++) {
-    const cx = X(coords[i].longitude), cy = Y(coords[i].latitude);
-    const dx = cx - prevX, dy = cy - prevY;
-    const len = Math.hypot(dx, dy);
-    if (len > 0) {
-      let t = ((0 - prevX) * dx + (0 - prevY) * dy) / (len * len); // project car (origin) onto seg
-      t = Math.max(0, Math.min(1, t));
-      const projX = prevX + t * dx, projY = prevY + t * dy;
-      const d2 = projX * projX + projY * projY;
-      if (d2 < bestD2) { bestD2 = d2; bestArc = acc + t * len; bestX = projX; bestY = projY; bestDx = dx; bestDy = dy; }
-      acc += len;
+  let total = 0;
+  let bestClamped = false;
+  const windowed = typeof nearAtM === 'number' && Number.isFinite(nearAtM);
+  const span = Math.max(PROJ_WINDOW_MIN_M, (movedM ?? 0) * PROJ_WINDOW_TRAVEL_MULT);
+  const lo = windowed ? (nearAtM as number) - span : 0;
+  const hi = windowed ? (nearAtM as number) + span : Infinity;
+  for (let pass = 0; pass < 2; pass++) {
+    const limit = pass === 0 && windowed;
+    acc = 0; bestD2 = Infinity; bestArc = 0; bestX = 0; bestY = 0; bestDx = 0; bestDy = 0;
+    bestClamped = false;
+    let prevX = X(coords[0].longitude), prevY = Y(coords[0].latitude);
+    for (let i = 1; i < coords.length; i++) {
+      const cx = X(coords[i].longitude), cy = Y(coords[i].latitude);
+      const dx = cx - prevX, dy = cy - prevY;
+      const len = Math.hypot(dx, dy);
+      if (len > 0) {
+        // Skip segments wholly outside the window on the first pass.
+        const segStart = acc, segEnd = acc + len;
+        if (!limit || (segEnd >= lo && segStart <= hi)) {
+          let t = ((0 - prevX) * dx + (0 - prevY) * dy) / (len * len); // project car (origin) onto seg
+          t = Math.max(0, Math.min(1, t));
+          // CLAMP THE ARC, not merely the segment. Filtering whole segments is not
+          // enough: the outgoing leg of a corner overlaps the window at its very
+          // start, so its projection could still land far past `hi` and reproduce
+          // the exact leap this window exists to stop.
+          let clamped = false;
+          if (limit) {
+            const tLo = (lo - segStart) / len, tHi = (hi - segStart) / len;
+            const tC = Math.min(Math.max(t, Math.max(0, tLo)), Math.min(1, tHi));
+            if (tC !== t) { t = tC; clamped = true; }
+          }
+          const projX = prevX + t * dx, projY = prevY + t * dy;
+          const d2 = projX * projX + projY * projY;
+          if (d2 < bestD2) {
+            bestD2 = d2; bestArc = acc + t * len; bestX = projX; bestY = projY;
+            bestDx = dx; bestDy = dy; bestClamped = clamped;
+          }
+        }
+        acc += len;
+      }
+      prevX = cx; prevY = cy;
     }
-    prevX = cx; prevY = cy;
+    total = acc;
+    if (!limit) break;
+    const dist = bestD2 < Infinity ? Math.sqrt(bestD2) : Infinity;
+    // ── ANTIPARALLEL LATCH GUARD ─────────────────────────────────────────────
+    // The distance test alone only asks "is the answer near the car?". Where the
+    // route doubles back on itself a few metres away — a divided-road U-turn, an
+    // out-and-back scenic leg, a cloverleaf, a Scout route reusing a street —
+    // that distance is merely the carriageway separation, so a window seeded onto
+    // the WRONG leg by one biased fix is accepted forever: the arc then runs
+    // BACKWARD while the car drives forward (measured: 884 m of drift, never
+    // recovering) and, worse, the route-line trim is derived from frac alone and
+    // is NOT gated by the snap — so the green line un-trims and marches back
+    // toward the route origin. The old global scan glitched for one frame here
+    // and self-corrected; the window would make it permanent.
+    // Two signals identify this and only this: the tracked bearing OPPOSED to the
+    // car's real course, AND a receding arc. A corner advances the arc; a genuine
+    // U-turn traversal advances the arc; neither trips it.
+    const _brg = (Math.atan2(bestDx, bestDy) * 180 / Math.PI + 360) % 360;
+    const _antiparallel = typeof travelHdg === 'number' && (movedM ?? 0) >= 1
+      && Math.abs(((((travelHdg - _brg) % 360) + 540) % 360) - 180) > 120;
+    const _latched = _antiparallel && bestArc < (nearAtM as number) - 0.25 * (movedM ?? 0);
+    // Accept the windowed answer when it is either a genuine interior optimum, or
+    // a clamp that still puts the car near the line (the corner case). Anything
+    // else — nothing found, a far clamp, a wildly off-line result, or the latch
+    // above — means the window no longer describes where the car is, so re-scan.
+    if (dist <= PROJ_WINDOW_ABANDON_M && !_latched && (!bestClamped || dist <= PROJ_CLAMP_TRUST_M)) break;
   }
-  if (acc <= 0) return null;
+  if (total <= 0) return null;
+  acc = total;
   // bearing of the route AT the projected point (compass degrees, 0..360). Lets the car
   // point ALONG the line instead of spinning with jittery low-speed GPS heading.
   const bearing = (Math.atan2(bestDx, bestDy) * 180 / Math.PI + 360) % 360;
@@ -1985,6 +2108,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // last gate decision so the snap locks in at 45° but only releases past 60°, preventing
   // flicker when the travel heading hovers near the boundary.
   const snapHdgOkRef = useRef(true);
+  // Accumulated MOVING milliseconds of heading disagreement, plus the tick clock it
+  // advances on. Not a "since" timestamp: below the speed gate the clock PAUSES
+  // rather than resetting, so stop-and-go traffic after a wrong turn cannot hand
+  // out a fresh grace on every crawl — see SNAP_HDG_GRACE_MS.
+  const snapHdgBadMsRef = useRef(0);
+  const snapHdgTickRef = useRef<number | null>(null);
   // ── Phase-2 road-snap state ──
   // mapRef → querySourceFeatures on the invisible road source. roadSnap holds the last snap
   // point + the raw fix it was computed for (staleness gate). roadStickyRef = hysteresis
@@ -2715,12 +2844,45 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // (1) trimming the line behind the car (3D car reads on top), and (2) snapping
   // the drawn car onto the line so it stays glued to the road. null in preview /
   // free-drive → full line + raw GPS position.
+  // Arc position (metres from route origin) of the LAST projection, fed back in so
+  // the next one searches locally instead of globally — the corner-cut fix; see the
+  // header on projectOntoRoute. Reset whenever the route itself changes, so a
+  // reroute never carries the old line's arc position into the new geometry.
+  const projAtRef = useRef<number | null>(null);
+  const projRouteKeyRef = useRef<string>('');
+  const projPrevFixRef = useRef<{ lat: number; lng: number } | null>(null);
   const routeProj = useMemo(() => {
-    if (!navigationActive || !selfCar) return null;
+    if (!navigationActive || !selfCar) {
+      // Clear the window when guidance stops, so a nav restart on the SAME route
+      // cannot inherit a stale arc position.
+      projAtRef.current = null;
+      projPrevFixRef.current = null;
+      projRouteKeyRef.current = '';
+      return null;
+    }
     const poly = routes?.[selectedRouteIndex]?.polyline;
     if (!poly) return null;
-    return projectOntoRoute(selfCar.lat, selfCar.lng, decodePolyline(poly));
-  }, [navigationActive, selfCar?.lat, selfCar?.lng, routes, selectedRouteIndex]);
+    const key = String(selectedRouteIndex) + ':' + poly.length + ':' + poly.slice(0, 24);
+    if (key !== projRouteKeyRef.current) {
+      projRouteKeyRef.current = key;
+      projAtRef.current = null;
+      projPrevFixRef.current = null;
+    }
+    // Metres actually covered since the previous projection — the window's size.
+    // Equirectangular is exact enough at a single fix's scale.
+    const prev = projPrevFixRef.current;
+    const movedM = prev
+      ? Math.hypot((selfCar.lat - prev.lat) * 111320,
+                   (selfCar.lng - prev.lng) * 111320 * Math.cos((selfCar.lat * Math.PI) / 180))
+      : null;
+    projPrevFixRef.current = { lat: selfCar.lat, lng: selfCar.lng };
+    const p = projectOntoRoute(
+      selfCar.lat, selfCar.lng, decodePolyline(poly),
+      projAtRef.current, movedM, selfCar.heading ?? null,
+    );
+    projAtRef.current = p ? p.frac * p.totalM : null;
+    return p;
+  }, [navigationActive, selfCar?.lat, selfCar?.lng, selfCar?.heading, routes, selectedRouteIndex]);
 
   // Trim end: where the line starts, ahead of the car's nose.
   //
@@ -2866,13 +3028,45 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const SELF_SNAP_HDG_LOCK = 45;
   const SELF_SNAP_HDG_UNLOCK = 60;
   const SELF_SNAP_MOVING_MS = 1.5; // ~5.4 km/h
+  // How long the heading may disagree before the snap actually releases. Sized to
+  // cover a normal intersection turn (a 90° corner at city speed is ~2-3 s from
+  // "course leaves the incoming leg" to "course matches the outgoing leg") without
+  // covering a wrong turn, which keeps disagreeing and also runs out past the 60 m
+  // distance gate. OTA-tunable. (Re-landed from d220778 — see projectOntoRoute.)
+  const SNAP_HDG_GRACE_MS = 4000;
   const _distSnap = navigationActive && routeProj != null && routeProj.distM <= SELF_SNAP_M;
-  const _travelHdg = camHeadingRef.current != null ? camHeadingRef.current : (selfCar?.heading ?? null);
+  // ⚠ RAW COURSE, NOT THE CAMERA HEADING: the camera heading is low-passed and lags
+  // through a corner by design, so gating on it released the snap exactly mid-turn.
+  // The gate exists to catch a WRONG turn onto a parallel street; the driver's real
+  // course is the honest input, and it is only consulted above SELF_SNAP_MOVING_MS
+  // where a GPS course is trustworthy. Camera heading remains the no-course fallback.
+  const _travelHdg = (selfCar?.heading ?? null) != null ? (selfCar!.heading as number)
+    : (camHeadingRef.current != null ? camHeadingRef.current : null);
   let _hdgOk = true;
   if (_distSnap && _travelHdg != null && (userSpeedMs ?? 0) >= SELF_SNAP_MOVING_MS) {
     // Absolute shortest-arc angle between travel heading and the route segment bearing.
     const _hd = Math.abs(((((_travelHdg - routeProj!.bearing) % 360) + 540) % 360) - 180);
-    _hdgOk = snapHdgOkRef.current ? _hd <= SELF_SNAP_HDG_UNLOCK : _hd <= SELF_SNAP_HDG_LOCK;
+    const _instantOk = snapHdgOkRef.current ? _hd <= SELF_SNAP_HDG_UNLOCK : _hd <= SELF_SNAP_HDG_LOCK;
+    // SUSTAINED disagreement only. Rounding a real corner ON the route produces a
+    // big instantaneous angle — at the apex of a 90° turn the course is ~45° off
+    // BOTH legs — so an instant test un-snaps the marker during exactly the
+    // manoeuvre the driver is watching. A wrong turn keeps disagreeing (and pulls
+    // past the 60 m distance gate, which still releases immediately).
+    const nowMs = Date.now();
+    // dt clamped so a backgrounded/throttled render gap cannot dump seconds into
+    // the accumulator in a single frame.
+    const dt = snapHdgTickRef.current != null ? Math.min(1000, nowMs - snapHdgTickRef.current) : 0;
+    snapHdgTickRef.current = nowMs;
+    if (_instantOk) { snapHdgBadMsRef.current = 0; _hdgOk = true; }
+    else {
+      snapHdgBadMsRef.current += dt;
+      _hdgOk = snapHdgBadMsRef.current < SNAP_HDG_GRACE_MS;
+    }
+  } else {
+    // PAUSE, don't reset: a stopped car banks nothing, but neither does it forgive
+    // what it already banked. Only a genuine distance release clears the debt.
+    snapHdgTickRef.current = null;
+    if (!_distSnap) snapHdgBadMsRef.current = 0;
   }
   snapHdgOkRef.current = _distSnap ? _hdgOk : true; // reset the latch when not distance-snapped
   const selfSnapped = _distSnap && _hdgOk;

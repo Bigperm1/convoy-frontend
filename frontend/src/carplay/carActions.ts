@@ -32,7 +32,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
 import { toggleMapView2D, setMapView2D } from '../mapViewMode';
-import { getDepartureBearing, orderRoutesForward } from '../departureBearing';
+import { getDepartureBearing, orderRoutesForward, routeInitialBearing } from '../departureBearing';
 import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_VIEW_2D } from './carButtonIcons';
 import { toggleCarComms } from './carComms';
 import { logEvent } from '../crashBreadcrumb';
@@ -274,6 +274,13 @@ export async function startCarNav(dest: { lat: number; lng: number; label?: stri
     // fix. Falls back to plain fastest-first when the facing is unknown.
     const facing = await getDepartureBearing();
     const ordered = orderRoutesForward(routes, facing ?? undefined);
+    // Same depart-rank crumb as the phone (map.tsx) — src=car marks the CarPlay path.
+    try {
+      const _b0 = routeInitialBearing(ordered[0] as any);
+      const _off = (typeof facing === 'number' && _b0 != null)
+        ? Math.round(Math.abs(((_b0 - facing + 540) % 360) - 180)) : -1;
+      logEvent(`depart-rank src=car n=${routes.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off}`);
+    } catch {}
     const best: NavRoute = ordered[0];
     // Persist the hand-off BEFORE starting the banner so a crash between the two
     // can't leave guidance running with no adoptable session.

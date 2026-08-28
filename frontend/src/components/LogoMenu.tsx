@@ -25,8 +25,6 @@ type Item = {
 const ITEMS: Item[] = [
   { label: 'Garage',    icon: 'car-sport',        route: '/(app)/garage' },
   { label: 'Hub',       icon: 'people',           route: '/(app)/hub' },
-  // TEMP — Hub redesign preview. Delete with hub-preview.tsx.
-  { label: 'Hub NEW',   icon: 'sparkles',         route: '/(app)/hub-preview' },
   { label: 'Drives',    icon: 'navigate',         route: '/(app)/trips' },
   { label: 'Settings',  icon: 'settings-sharp',   route: '/(app)/settings' },
 ];

@@ -524,6 +524,20 @@ export default function MapScreen() {
   const pendingStops = (list: { lat: number; lng: number; label: string }[]) =>
     list.filter((st) => !visitedStopsRef.current.has(stopKey(st)));
   const STOP_VISITED_M = 60;
+  // THE RADIUS IS NO LONGER ONE NUMBER (2026-08-28, Olaf's Brentwood loop).
+  // 60 m is right for the SNAPPED point — that sits on the road and the car drives
+  // straight through it, ~0-30 m, GPS noise under 60. It is hopeless for the RAW
+  // pin: a mall centroid is off the routable network by construction, so the car can
+  // never get within 60 m of it and the stop never marks. Mapbox hands us the exact
+  // offset (viaSnapDistM), so the raw radius is now "the tolerance we always used,
+  // plus how far this particular pin provably sits off-road" — every extra metre is
+  // paid for by a measurement, not a guess. A pin already on a road snaps ~0 and
+  // keeps today's 60 m exactly, so on-road stops carry ZERO regression risk.
+  // CAP is a chosen bound (not measured): past this a "stop" is too vague to auto-mark.
+  const STOP_VISITED_RAW_CAP_M = 260;
+  // Only when the response carried no snap distance at all — we are blind, so widen
+  // modestly and SAY SO in the crumb (blind=1) rather than silently guessing.
+  const STOP_VISITED_RAW_BLIND_M = 120;
   // rawKey -> ROAD-SNAPPED via coordinate, refreshed from every via-route response.
   // ⚠ THE BLOCKER THE REVIEW CAUGHT (live API probe, 2026-08-27): the router snaps
   // vias to the nearest road at UNLIMITED radius — a pin 167 m off-road produced a
@@ -532,12 +546,23 @@ export default function MapScreen() {
   // off-road pins and big-POI centroids — and the order gate would then wedge every
   // later stop too, shipping the field loop "fixed" but alive. Marking measures
   // min(raw, snapped).
-  const snappedStopsRef = useRef<Map<string, { lat: number; lng: number }>>(new Map());
-  const noteViaSnapped = (fed: { lat: number; lng: number }[], snapped?: ({ lat: number; lng: number } | null)[]) => {
+  const snappedStopsRef = useRef<Map<string, { lat: number; lng: number; snapM: number | null }>>(new Map());
+  // Closest approach seen per stop, for the WATCH crumb below. Read-only telemetry:
+  // nothing about driving behaviour depends on it.
+  const stopNearRef = useRef<Map<string, number>>(new Map());
+  const noteViaSnapped = (
+    fed: { lat: number; lng: number }[],
+    snapped?: ({ lat: number; lng: number } | null)[],
+    snapDistM?: (number | null)[],
+  ) => {
     if (!snapped) return;
     for (let i = 0; i < fed.length && i < snapped.length; i++) {
       const sn = snapped[i];
-      if (sn && Number.isFinite(sn.lat) && Number.isFinite(sn.lng)) snappedStopsRef.current.set(stopKey(fed[i]), sn);
+      if (sn && Number.isFinite(sn.lat) && Number.isFinite(sn.lng)) {
+        const raw = snapDistM?.[i];
+        const snapM = typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? raw : null;
+        snappedStopsRef.current.set(stopKey(fed[i]), { lat: sn.lat, lng: sn.lng, snapM });
+      }
     }
   };
   const [stopPickerOpen, setStopPickerOpen] = useState(false);
@@ -978,14 +1003,47 @@ export default function MapScreen() {
     if (navMode !== "turn-by-turn" || !coords) return;
     const pending = stops.filter((st) => !visitedStopsRef.current.has(stopKey(st)));
     if (!pending.length) return;
-    const near = (st: { lat: number; lng: number }) => {
-      const sn = snappedStopsRef.current.get(stopKey(st));
-      const d = Math.min(
-        haversineMeters(coords, st),
-        sn ? haversineMeters(coords, sn) : Number.POSITIVE_INFINITY,
-      );
-      return d <= STOP_VISITED_M;
+    // Distances AND the radius this particular stop earns, split out so the watch
+    // crumb below can report exactly what the test saw rather than just its verdict.
+    const gauge = (st: { lat: number; lng: number }) => {
+      const rec = snappedStopsRef.current.get(stopKey(st));
+      const dRaw = haversineMeters(coords, st);
+      const dSnap = rec ? haversineMeters(coords, rec) : Number.POSITIVE_INFINITY;
+      const snapM = rec ? rec.snapM : null;
+      const rawR = snapM == null
+        ? STOP_VISITED_RAW_BLIND_M
+        : Math.min(STOP_VISITED_RAW_CAP_M, STOP_VISITED_M + snapM);
+      return {
+        dRaw, dSnap, snapM, rawR, hasSnap: !!rec,
+        hit: dSnap <= STOP_VISITED_M || dRaw <= rawR,
+      };
     };
+    const near = (st: { lat: number; lng: number }) => gauge(st).hit;
+    // ── THE WATCH (2026-08-28) ───────────────────────────────────────────────────
+    // stop-visited only ever logged on SUCCESS, so a marker that never fires was
+    // perfectly silent — which is why Olaf's loop burned a whole commute and STILL
+    // left the "why" unknown afterwards. This records the closest approach instead,
+    // carrying every input the test used, so a single drive separates
+    // radius-too-tight (d=180, rawR=120) from logic-broken (d=8, hit=0).
+    // Bounded by construction: inside 400 m only, and only on a >=25 m improvement,
+    // so one stop emits at most ~16 rows no matter how long the drive runs.
+    {
+      const g = gauge(pending[0]);
+      const dBest = Math.min(g.dRaw, g.dSnap);
+      const nk = stopKey(pending[0]);
+      const prevBest = stopNearRef.current.get(nk);
+      if (dBest <= 400 && (prevBest === undefined || dBest <= prevBest - 25)) {
+        stopNearRef.current.set(nk, dBest);
+        try {
+          logEventReliable(
+            `stop-near "${pending[0].label}" d=${Math.round(dBest)}m raw=${Math.round(g.dRaw)}m ` +
+            `snap=${g.hasSnap ? Math.round(g.dSnap) + "m" : "none"} ` +
+            `snapM=${g.snapM == null ? "none" : Math.round(g.snapM)} rawR=${Math.round(g.rawR)} ` +
+            `blind=${g.snapM == null ? 1 : 0} hit=${g.hit ? 1 : 0}`,
+          );
+        } catch {}
+      }
+    }
     // Window of TWO, not one (review, 2026-08-27): with only the first unvisited stop
     // markable, a single unmarkable or deliberately SKIPPED stop wedges all marking
     // forever and revives the loop. The via route visits stops strictly in order, so
@@ -1032,7 +1090,7 @@ export default function MapScreen() {
       const routable = pendingStops(stops);
       if (routable.length) {
         const viaRoute = await fetchRouteViaStops(origin, routable, destination, avoid);
-        if (viaRoute) noteViaSnapped(routable, viaRoute.viaSnapped);
+        if (viaRoute) noteViaSnapped(routable, viaRoute.viaSnapped, viaRoute.viaSnapDistM);
         if (cancelled) return;
         if (viaRoute) {
           const only = [{ ...viaRoute, color: '#2DEC86' }] as any[];
@@ -1356,7 +1414,7 @@ export default function MapScreen() {
     if (!t) return;
     if (typeof t.destLat === "number" && typeof t.destLng === "number") {
       visitedStopsRef.current = new Set();   // a re-taken drive starts unvisited
-      snappedStopsRef.current = new Map();
+      snappedStopsRef.current = new Map(); stopNearRef.current = new Map();
       setStops(t.stops?.length ? t.stops.map((st) => ({ lat: st.lat, lng: st.lng, label: st.label })) : []);
       setDestination({ lat: t.destLat, lng: t.destLng, label: t.destLabel || "Drive" });
       setShowSteps(true);
@@ -1532,7 +1590,7 @@ export default function MapScreen() {
       // chip: add the same coffee shop to tonight's drive and pendingStops silently
       // never routes there, with the chip on screen claiming it will.
       visitedStopsRef.current = new Set();
-      snappedStopsRef.current = new Map();
+      snappedStopsRef.current = new Map(); stopNearRef.current = new Map();
       setStops([]);
       setDestination(null);
       setRoutes([]);
@@ -1572,7 +1630,7 @@ export default function MapScreen() {
       const issuedAt = Date.now();
       const from = { lat: coords.lat, lng: coords.lng };
       (pinned.length
-        ? fetchRouteViaStops(coords, pinned, destination, avoid).then((r) => { if (r) noteViaSnapped(pinned, r.viaSnapped); return r ? [r] : []; })
+        ? fetchRouteViaStops(coords, pinned, destination, avoid).then((r) => { if (r) noteViaSnapped(pinned, r.viaSnapped, r.viaSnapDistM); return r ? [r] : []; })
         : fetchRoutes(coords, destination, avoid)
       ).then((res) => {
         const ageMs = Date.now() - issuedAt;
@@ -2295,7 +2353,7 @@ export default function MapScreen() {
     // Visited keys are DRIVE-scoped: ending the drive un-visits everything so a
     // re-Go through the same chips routes the full plan again (review, 2026-08-27).
     visitedStopsRef.current = new Set();
-    snappedStopsRef.current = new Map();
+    snappedStopsRef.current = new Map(); stopNearRef.current = new Map();
     setDestination(null);
     setRoute(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2594,7 +2652,7 @@ export default function MapScreen() {
     // goes with them: it describes THIS drive, and a stale entry would silently
     // pre-visit the same coordinates on tomorrow's trip.
     visitedStopsRef.current = new Set();
-    snappedStopsRef.current = new Map();
+    snappedStopsRef.current = new Map(); stopNearRef.current = new Map();
     setStops([]);
     // Also retract the step drawer so it doesn't dangle on a destination-less map.
     slideStepDrawerDown();
@@ -4328,7 +4386,7 @@ export default function MapScreen() {
               <DestinationSearch
                 origin={coords}
                 onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
-                onClear={() => { visitedStopsRef.current = new Set(); snappedStopsRef.current = new Map(); setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
+                onClear={() => { visitedStopsRef.current = new Set(); snappedStopsRef.current = new Map(); stopNearRef.current = new Map(); setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
                 onProfilePress={() => router.push("/(app)/hub" as any)}
                 onPressField={() => setNavSearchOpen(true)}
                 // Departure IQ now lives IN the bar: an "AI" pre-fill + green "Let's go".

@@ -521,20 +521,21 @@ export function CreateEventModal({ kind, visible, editing, onClose, onCreated }:
                               key={k}
                               onPress={() => setRouteStyle(k)}
                               disabled={!r}
-                              style={[styles.styleChip, on && styles.styleChipOn, !r && styles.styleChipOff]}
+                              style={[styles.styleChip, on && styles.styleChipOn,
+                                      on && { backgroundColor: accent, borderColor: accent }, !r && styles.styleChipOff]}
                               activeOpacity={0.85}
                             >
                               <Ionicons
                                 name={k === 'scenic' ? 'leaf' : 'flash'}
                                 size={13}
-                                color={on ? '#0B0B0C' : COLORS.textMute}
+                                color={on ? skinColors.ink : COLORS.textMute}
                               />
                               <View style={{ minWidth: 0 }}>
-                                <Text style={[styles.styleChipTitle, on && styles.styleChipTitleOn]}>
+                                <Text style={[styles.styleChipTitle, on && { color: skinColors.ink }]}>
                                   {k === 'scenic' ? 'Scenic' : 'Direct'}
                                   {quicker === k ? ' · quickest' : ''}
                                 </Text>
-                                <Text style={[styles.styleChipSub, on && styles.styleChipSubOn]} numberOfLines={1}>
+                                <Text style={[styles.styleChipSub, on && { color: skinColors.ink, opacity: 0.75 }]} numberOfLines={1}>
                                   {k === 'scenic' && scenicAbsurd ? 'no back-road route' : fmtLeg(r)}
                                 </Text>
                               </View>
@@ -617,8 +618,10 @@ export function CreateEventModal({ kind, visible, editing, onClose, onCreated }:
               ) : (
                 <View style={styles.clubChips}>
                   {clubs.map((c) => (
-                    <TouchableOpacity key={c.id} onPress={() => setClubId(c.id)} style={[styles.clubChip, clubId === c.id && styles.clubChipOn]}>
-                      <Text style={[styles.clubChipText, clubId === c.id && styles.clubChipTextOn]} numberOfLines={1}>{c.name}</Text>
+                    <TouchableOpacity key={c.id} onPress={() => setClubId(c.id)}
+                      style={[styles.clubChip, clubId === c.id && styles.clubChipOn,
+                              clubId === c.id && { backgroundColor: accent, borderColor: accent }]}>
+                      <Text style={[styles.clubChipText, clubId === c.id && { color: skinColors.ink }]} numberOfLines={1}>{c.name}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>

@@ -288,6 +288,10 @@ export type MapboxRoute = {
    *  visited-stop marking MUST use these, not the raw pins — snapping is unlimited-
    *  radius, so a raw pin can sit 167 m (measured) from anywhere the car drives. */
   viaSnapped?: ({ lat: number; lng: number } | null)[];
+  /** Via routes only: metres Mapbox moved each pin to reach a routable road, in via
+   *  order. null per slot when the API omitted it. Lets the visited radius scale to
+   *  how far off-road the pin actually sits (see the note at the producer). */
+  viaSnapDistM?: (number | null)[];
   routeIndex: number;
   // ── WHICH SIDE OF THE ROAD THE DESTINATION LANDS ON (2026-07-31) ───────────
   // Jeff: "the GPS needs to be a little mindful on which side of the road the
@@ -554,9 +558,21 @@ export async function fetchMapboxRouteVia(
     // json.waypoints = [origin, ...vias, destination]; keep the interior ones, in
     // via order, as {lat,lng} for the caller's visited-marking.
     const wp: any[] = Array.isArray(json?.waypoints) ? json.waypoints : [];
-    const viaSnapped = wp.slice(1, Math.max(1, wp.length - 1))
+    const wpVia = wp.slice(1, Math.max(1, wp.length - 1));
+    const viaSnapped = wpVia
       .map((w: any) => (Array.isArray(w?.location) && w.location.length >= 2
         ? { lat: Number(w.location[1]), lng: Number(w.location[0]) }
+        : null));
+    // HOW FAR OFF-ROAD EACH PIN SAT (2026-08-28, Olaf's Brentwood loop). The very
+    // same waypoint carries `distance` — the metres Mapbox moved the pin to reach a
+    // routable road — and we were throwing it away. We paid for that: the visited
+    // test ran a flat 60 m around a mall centroid no car can legally reach, so the
+    // stop never marked, and all 19 reroutes that drive re-fed it (stops=1/1 every
+    // time). Keeping the number lets the radius self-calibrate per stop instead of
+    // guessing one constant that has to serve both a gas pump and a shopping mall.
+    const viaSnapDistM = wpVia
+      .map((w: any) => (typeof w?.distance === "number" && Number.isFinite(w.distance)
+        ? w.distance
         : null));
     return {
       polyline,
@@ -571,6 +587,7 @@ export async function fetchMapboxRouteVia(
       refreshUuid: typeof json?.uuid === "string" ? json.uuid : undefined,
       routeIndex: 0,
       viaSnapped,
+      viaSnapDistM,
 };
   } catch {
     return null; // includes AbortError

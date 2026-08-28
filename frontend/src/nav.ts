@@ -80,6 +80,8 @@ export type NavRoute = {
   color?: string;
   /** Via routes: road-snapped interior waypoints (see MapboxRoute.viaSnapped). */
   viaSnapped?: ({ lat: number; lng: number } | null)[];
+  /** Via routes: metres each pin was snapped to reach a road (see MapboxRoute.viaSnapDistM). */
+  viaSnapDistM?: (number | null)[];
 };
 
 // ---- Distance utils ----
@@ -295,6 +297,7 @@ export function mapboxToNavRoute(r: MapboxRoute): NavRoute {
   return {
     polyline: r.polyline,
     viaSnapped: r.viaSnapped,
+    viaSnapDistM: r.viaSnapDistM,
     summary: r.summary,
     distance_text: formatDistance(r.distance_m),
     duration_text: formatDuration(durS),

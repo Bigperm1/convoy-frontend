@@ -9,8 +9,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth";
-import { EventsSection, EventDetailModal, CreateEventModal, whenText } from "../../src/hubEvents";
+import { EventDetailModal, CreateEventModal, whenText } from "../../src/hubEvents";
 import { getEvent, myEvents, discoverEvents, type HubEvent } from "../../src/eventsApi";
+import { updateWidgetFeed } from "../../src/widgetFeed";
 import { api, formatErr } from "../../src/api";
 import { COLORS } from "../../src/theme";
 import Glass, { GlassFill } from "../../src/Glass";
@@ -24,6 +25,8 @@ import { useAccent, useAccentAlpha, useAppSkinColors } from "../../src/appSkin";
 type Community = {
   id: string; name: string; description: string; member_count: number;
   pending_count: number; is_admin: boolean; is_member: boolean; is_pending: boolean;
+  // is_admin is TRUE for co-admins too; only is_owner may delete the club.
+  is_owner?: boolean;
   is_public: boolean; admin_handle?: string; invite_code?: string;
   logo_b64?: string | null;
   banner_b64?: string | null;
@@ -69,6 +72,11 @@ export default function HubScreen() {
   const [openEvent, setOpenEvent] = useState<HubEvent | null>(null);
   const [createKind, setCreateKind] = useState<"event" | "cruise" | null>(null);
   const [showCreateSheet, setShowCreateSheet] = useState(false);
+  // The event being EDITED. EventsSection used to own this wiring; when the Club
+  // rewrite stopped rendering it, "Edit meet"/"Edit cruise" became a dead button
+  // app-wide and PUT /events/{id} lost its last caller. CreateEventModal already
+  // supports editing — it just needed something to hand it.
+  const [editingEvent, setEditingEvent] = useState<HubEvent | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,49 +84,50 @@ export default function HubScreen() {
     setLoading(false);
   }, []);
 
-  // Hub sections (Hub P2): Clubs (the original hub) · Events · Cruises. Each has
-  // its own discover/create/mine. Events + Cruises live in src/hubEvents.tsx.
-  const [section, setSection] = useState<"clubs" | "events" | "cruises">("clubs");
   // Deep-open an event/cruise from a push notification (hub?event=<id> — set by
-  // the notification-response handler in _layout.tsx). We fetch it first to learn
-  // its kind so the right section mounts, then hand the id down to auto-open.
+  // the notification-response handler in _layout.tsx).
+  // ⚠ 2026-08-28: this used to resolve the event and then write `section` +
+  // `openEventId`, two pieces of state the OLD three-section shell read. The Club
+  // rewrite deleted that shell, so both became write-only and every push deep link
+  // silently did nothing. The fetched event now goes straight into the sheet that
+  // actually exists. `kind` no longer needs pre-resolving — one sheet renders both.
   const params = useLocalSearchParams<{ event?: string }>();
-  const [openEventId, setOpenEventId] = useState<string | null>(null);
   useEffect(() => {
     const eid = typeof params.event === "string" ? params.event : null;
     if (!eid) return;
-    getEvent(eid)
-      .then((e) => { setSection(e.kind === "cruise" ? "cruises" : "events"); setOpenEventId(eid); })
-      .catch(() => {});
+    getEvent(eid).then((e) => setOpenEvent(e)).catch(() => {});
   }, [params.event]);
 
   // Explore tab — browse PUBLIC clubs (empty search query returns all public).
   const [tab, setTab] = useState<"mine" | "explore">("mine");
   const [explore, setExplore] = useState<Community[]>([]);
   const [exploreLoading, setExploreLoading] = useState(false);
-  const loadExplore = useCallback(async () => {
+  // ONE fetch for Discover, shared by the initial load, the debounced search and
+  // the post-join refresh — so a refresh can never silently change the query.
+  const [exploreQ, setExploreQ] = useState("");
+  const exploreQRef = useRef("");
+  const runExploreSearch = useCallback(async (q: string) => {
     setExploreLoading(true);
-    try { const { data } = await api.get("/communities/search", { params: { q: "" } }); setExplore(data); } catch {}
+    try { const { data } = await api.get("/communities/search", { params: { q: q.trim() } }); setExplore(data); } catch {}
     setExploreLoading(false);
   }, []);
+  const loadExplore = useCallback(() => runExploreSearch(""), [runExploreSearch]);
   const joinCommunity = useCallback(async (c: Community) => {
     try {
       await api.post(`/communities/${c.id}/request`);
       Alert.alert("Request sent", "The admin will review your request.");
-      loadExplore();
+      // Re-run the CURRENT query, not a blank one — refreshing with q:"" wiped the
+      // user's search results the moment they joined from a filtered list.
+      runExploreSearch(exploreQRef.current);
     } catch (e) { Alert.alert("Failed", formatErr(e)); }
-  }, [loadExplore]);
+  }, [runExploreSearch]);
   // Inline Discover search (debounced) — replaces the old Discover action card.
-  const [exploreQ, setExploreQ] = useState("");
   const exploreDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onExploreSearch = (text: string) => {
     setExploreQ(text);
+    exploreQRef.current = text;
     if (exploreDebounceRef.current) clearTimeout(exploreDebounceRef.current);
-    exploreDebounceRef.current = setTimeout(async () => {
-      setExploreLoading(true);
-      try { const { data } = await api.get("/communities/search", { params: { q: text.trim() } }); setExplore(data); } catch {}
-      setExploreLoading(false);
-    }, 250);
+    exploreDebounceRef.current = setTimeout(() => { runExploreSearch(text); }, 250);
   };
 
   useEffect(() => { load(); }, [load]);
@@ -136,6 +145,10 @@ export default function HubScreen() {
         discoverEvents("").catch(() => [] as HubEvent[]),
       ]);
       setFeedMine(m);
+      // The widget's only updater used to live inside EventsSection, which the Club
+      // rewrite stopped rendering — the iOS "Next up" widget then froze. No-op on
+      // Android by construction (widgetFeed.ts).
+      try { updateWidgetFeed(m); } catch {}
       const byId = new Map<string, HubEvent>();
       for (const e of d) byId.set(e.id, e);
       for (const e of m) byId.set(e.id, e);   // mine last: is_attending must win
@@ -175,12 +188,20 @@ export default function HubScreen() {
   const chipSeeded = useRef(false);
   useEffect(() => {
     if (chipSeeded.current || feedLoading) return;
-    if (feedAll.length || feedMine.length) {
-      chipSeeded.current = true;
-      if (feedMine.some((e) => e.is_attending)) setChip("going");
-    }
+    // Latch on the first SETTLED load, empty or not. Gating the latch on
+    // "did anything arrive" left it false forever for a brand-new member, so a
+    // later refresh could yank them off a chip they had deliberately tapped.
+    chipSeeded.current = true;
+    if (feedMine.some((e) => e.is_attending)) setChip("going");
   }, [feedAll, feedMine, feedLoading]);
-  useEffect(() => { if (tab === "explore" && explore.length === 0) loadExplore(); }, [tab, explore.length, loadExplore]);
+  // Load Discover ONCE per visit. Keying on `explore.length === 0` meant a search
+  // that legitimately returned nothing was immediately overwritten by the full list.
+  const exploreLoadedRef = useRef(false);
+  useEffect(() => {
+    if (tab !== "explore" || exploreLoadedRef.current) return;
+    exploreLoadedRef.current = true;
+    loadExplore();
+  }, [tab, loadExplore]);
 
   return (
     <>
@@ -278,7 +299,10 @@ export default function HubScreen() {
         ) : (
           <FeedList
             events={feedShown} loading={feedLoading} accent={accent}
-            onOpen={(e) => setOpenEvent(e)}
+            onOpen={async (e) => {
+              setOpenEvent(e);                                    // instant open
+              try { setOpenEvent(await getEvent(e.id)); } catch {} // then hydrate (attendees)
+            }}
             emptyLabel={chip === "going" ? "Nothing you're going to yet — tap All to see what's on."
               : chip === "event" ? "No meets posted yet."
               : chip === "cruise" ? "No cruises planned yet."
@@ -303,14 +327,16 @@ export default function HubScreen() {
         }}
       />
       <CreateEventModal
-        kind={createKind ?? "event"} visible={showCreateSheet} editing={null}
-        onClose={() => setShowCreateSheet(false)}
-        onCreated={() => { setShowCreateSheet(false); loadFeed(); }}
+        kind={editingEvent?.kind ?? createKind ?? "event"}
+        visible={showCreateSheet || !!editingEvent}
+        editing={editingEvent}
+        onClose={() => { setShowCreateSheet(false); setEditingEvent(null); }}
+        onCreated={() => { setShowCreateSheet(false); setEditingEvent(null); loadFeed(); }}
       />
       <EventDetailModal
         event={openEvent}
         onClose={() => setOpenEvent(null)}
-        onChanged={loadFeed}
+        onChanged={(e) => { setOpenEvent(e); loadFeed(); }}
         onDeleted={() => { setOpenEvent(null); loadFeed(); }}
         onEdit={() => {}}
       />
@@ -619,6 +645,12 @@ function CommunityCard({ c, onPress, active, mode = "mine", onJoin }: {
   const tags = (c.tags || []).slice(0, 4);
   const carGlyph = useAccentAlpha(0.35);
   const accent = useAccent();
+  const skinColors = useAppSkinColors();
+  // The de-blue pass swapped opaque accent fills for translucent white but left the
+  // DARK ink that only worked on the accent — Join measured 1.33:1, ACTIVE 2.27:1.
+  // Every one of these takes its fill from the accent and its ink from the skin.
+  const bannerWash = useAccentAlpha(0.22);
+  const bannerWash2 = useAccentAlpha(0.08);
   return (
     <TouchableOpacity testID={`community-${c.id}`} onPress={onPress} activeOpacity={0.9} style={{ marginBottom: 14 }}>
       <Glass radius={20}>
@@ -627,14 +659,14 @@ function CommunityCard({ c, onPress, active, mode = "mine", onJoin }: {
           {c.banner_b64 ? (
             <Image source={{ uri: c.banner_b64 }} style={styles.clubBanner} resizeMode="cover" />
           ) : (
-            <LinearGradient colors={["#0F2A22", "#12352A", "#0B0B0C"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.clubBanner}>
+            <LinearGradient colors={[bannerWash, bannerWash2, "rgba(0,0,0,0.96)"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.clubBanner}>
               <Ionicons name="car-sport" size={40} color={carGlyph} />
             </LinearGradient>
           )}
           {active && (
-            <View style={styles.clubActivePill}>
-              <Ionicons name="radio" size={11} color="#0A0A0A" />
-              <Text style={styles.clubActivePillText}>ACTIVE</Text>
+            <View style={[styles.clubActivePill, { backgroundColor: accent }]}>
+              <Ionicons name="radio" size={11} color={skinColors.ink} />
+              <Text style={[styles.clubActivePillText, { color: skinColors.ink }]}>ACTIVE</Text>
             </View>
           )}
 
@@ -661,8 +693,8 @@ function CommunityCard({ c, onPress, active, mode = "mine", onJoin }: {
                 ) : c.is_pending ? (
                   <View style={styles.pendingPill}><Text style={styles.pendingPillText}>Pending</Text></View>
                 ) : (
-                  <TouchableOpacity testID={`join-${c.id}`} onPress={() => onJoin?.(c)} style={styles.joinBtn}>
-                    <Text style={styles.joinBtnText}>Join</Text>
+                  <TouchableOpacity testID={`join-${c.id}`} onPress={() => onJoin?.(c)} style={[styles.joinBtn, { backgroundColor: accent }]}>
+                    <Text style={[styles.joinBtnText, { color: skinColors.ink }]}>Join</Text>
                   </TouchableOpacity>
                 )
               ) : (
@@ -816,7 +848,7 @@ function CreateModal({ visible, onClose, onCreated }: any) {
 
             <TouchableOpacity testID="cc-public" onPress={() => setIsPublic((v) => !v)} style={styles.toggleRow}>
               <View style={[styles.toggleBox, isPublic && { backgroundColor: accent, borderColor: accent }]}>
-                {isPublic && <Ionicons name="checkmark" size={14} color="#fff" />}
+                {isPublic && <Ionicons name="checkmark" size={14} color={skinColors.ink} />}
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.toggleTitle}>Public</Text>
@@ -896,8 +928,14 @@ function SearchModal({ visible, onClose, onChanged }: any) {
   }, [q, visible]);
 
   const requestJoin = async (c: Community) => {
-    try { await api.post(`/communities/${c.id}/request`); onChanged(); Alert.alert("Sent", "Join request sent. The admin will review it."); }
-    catch (e) { Alert.alert("Failed", formatErr(e)); }
+    try {
+      await api.post(`/communities/${c.id}/request`);
+      // onChanged() only refreshes "my clubs" — this modal's own `results` were never
+      // touched, so the row kept offering Join and a second tap re-POSTed. Flip it here.
+      setResults((rs: Community[]) => rs.map((x) => (x.id === c.id ? { ...x, is_pending: true } : x)));
+      onChanged();
+      Alert.alert("Sent", "Join request sent. The admin will review it.");
+    } catch (e) { Alert.alert("Failed", formatErr(e)); }
   };
 
   const joinByCode = async () => {
@@ -945,6 +983,7 @@ function SearchModal({ visible, onClose, onChanged }: any) {
 
 function CommunityDetailModal({ community, onClose, onChanged }: any) {
   const accent = useAccent();
+  const skinColors = useAppSkinColors();   // ink for every dark-on-accent label
   const activeBtnTint = useAccentAlpha(0.12);
   const activeBtnEdge = useAccentAlpha(0.4);
   const tagTint = useAccentAlpha(0.18);
@@ -1133,26 +1172,43 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
     finally { setDescSaving(false); }
   };
 
+  // The approve/reject responses are public_community shapes — they carry counts but
+  // NO members_users, so merging them alone left the roster showing the old list with
+  // a bumped member count. Optimistic filter for responsiveness, then re-read.
   const approve = async (uid: string) => {
-    try { const { data } = await api.post(`/communities/${community.id}/approve/${uid}`); setC({ ...c, ...data, pending_users: c.pending_users.filter((u: any) => u.id !== uid) }); onChanged(); } catch (e) { Alert.alert("Failed", formatErr(e)); }
+    try {
+      const { data } = await api.post(`/communities/${community.id}/approve/${uid}`);
+      setC({ ...c, ...data, pending_users: c.pending_users.filter((u: any) => u.id !== uid) });
+      await refreshDetail(); onChanged();
+    } catch (e) { Alert.alert("Failed", formatErr(e)); }
   };
   const reject = async (uid: string) => {
-    try { const { data } = await api.post(`/communities/${community.id}/reject/${uid}`); setC({ ...c, ...data, pending_users: c.pending_users.filter((u: any) => u.id !== uid) }); onChanged(); } catch (e) { Alert.alert("Failed", formatErr(e)); }
+    try {
+      const { data } = await api.post(`/communities/${community.id}/reject/${uid}`);
+      setC({ ...c, ...data, pending_users: c.pending_users.filter((u: any) => u.id !== uid) });
+      await refreshDetail(); onChanged();
+    } catch (e) { Alert.alert("Failed", formatErr(e)); }
   };
   const shareInvite = async () => {
     if (!c?.invite_code) return;
     try { await Share.share({ message: `Join my Hairpin club "${c.name}". Use invite code: ${c.invite_code}` }); }
     catch {}
   };
+  // Clear the active pin on the way out, or the Club screen keeps rendering
+  // STANDINGS for a club you just left (activeCommunityId outlived membership).
+  const clearActiveIfThis = () => {
+    const id = c?.id || community?.id;
+    if (id && settings.activeCommunityId === id) updateSettings({ activeCommunityId: null });
+  };
   const leave = async () => {
-    try { await api.post(`/communities/${community.id}/leave`); onChanged(); onClose(); }
+    try { await api.post(`/communities/${community.id}/leave`); clearActiveIfThis(); onChanged(); onClose(); }
     catch (e) { Alert.alert("Failed", formatErr(e)); }
   };
   const remove = async () => {
     Alert.alert("Delete club?", "This cannot be undone.", [
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: async () => {
-        try { await api.delete(`/communities/${community.id}`); onChanged(); onClose(); }
+        try { await api.delete(`/communities/${community.id}`); clearActiveIfThis(); onChanged(); onClose(); }
         catch (e) { Alert.alert("Failed", formatErr(e)); }
       }},
     ]);
@@ -1225,10 +1281,11 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                 testID="set-active-community"
                 onPress={toggleActive}
                 activeOpacity={0.85}
-                style={[styles.activeBtn, { backgroundColor: activeBtnTint, borderColor: activeBtnEdge }, isActive && styles.activeBtnOn]}
+                style={[styles.activeBtn, { backgroundColor: activeBtnTint, borderColor: activeBtnEdge },
+                        isActive && { backgroundColor: accent, borderColor: accent }]}
               >
-                <Ionicons name={isActive ? "radio" : "radio-outline"} size={18} color={isActive ? "#0A0A0A" : accent} />
-                <Text style={[styles.activeBtnText, isActive && { color: "#0A0A0A" }]} numberOfLines={1}>
+                <Ionicons name={isActive ? "radio" : "radio-outline"} size={18} color={isActive ? skinColors.ink : accent} />
+                <Text style={[styles.activeBtnText, isActive && { color: skinColors.ink }]} numberOfLines={1}>
                   {isActive ? "Active convoy — you're driving with this crew" : "Set as active convoy"}
                 </Text>
               </TouchableOpacity>
@@ -1245,7 +1302,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                     <View style={styles.adminLogoPlaceholder}><Ionicons name="image-outline" size={22} color={COLORS.textDim} /></View>
                   )}
                   <View style={styles.adminLogoEditBadge}>
-                    <Ionicons name={logoSaving ? "hourglass" : "camera"} size={12} color="#0A0A0A" />
+                    <Ionicons name={logoSaving ? "hourglass" : "camera"} size={12} color={skinColors.ink} />
                   </View>
                 </TouchableOpacity>
                 <View style={{ flex: 1 }}>
@@ -1290,7 +1347,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                       <Text style={styles.logoHint}>Add cover image</Text>
                     </View>
                   )}
-                  <View style={styles.detailBannerBadge}><Ionicons name="camera" size={12} color="#0A0A0A" /></View>
+                  <View style={[styles.detailBannerBadge, { backgroundColor: accent }]}><Ionicons name="camera" size={12} color={skinColors.ink} /></View>
                 </TouchableOpacity>
                 <Text style={[styles.label, { marginTop: 12 }]}>Tags</Text>
                 <View style={styles.tagWrap}>
@@ -1488,14 +1545,16 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                   </View>
                 ))}
 
-                <TouchableOpacity testID="delete-community" onPress={remove} style={styles.dangerBtn}>
-                  <Ionicons name="trash" size={16} color={COLORS.danger} />
-                  <Text style={styles.dangerText}>Delete club</Text>
-                </TouchableOpacity>
+                {c?.is_owner && (
+                  <TouchableOpacity testID="delete-community" onPress={remove} style={styles.dangerBtn}>
+                    <Ionicons name="trash" size={16} color={COLORS.danger} />
+                    <Text style={styles.dangerText}>Delete club</Text>
+                  </TouchableOpacity>
+                )}
               </>
             )}
 
-            {c && !c.is_admin && c.is_member && (
+            {c && !c.is_owner && c.is_member && (
               <TouchableOpacity testID="leave-community" onPress={leave} style={[styles.dangerBtn, { marginTop: 18 }]}>
                 <Ionicons name="exit" size={16} color={COLORS.danger} />
                 <Text style={styles.dangerText}>Leave club</Text>
@@ -1603,7 +1662,7 @@ function ProfileModal({ visible, onClose, onSaved, onSignOut }: any) {
             <ProfileField testID="profile-color" label="Color" value={color} onChange={setColor} />
             <TouchableOpacity testID="profile-save" onPress={save} disabled={busy} style={styles.btn} activeOpacity={0.85}>
               <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.btnGrad}>
-                <Text style={styles.btnText}>{busy ? "Saving…" : "Save"}</Text>
+                <Text style={[styles.btnText, { color: skinColors.ink }]}>{busy ? "Saving…" : "Save"}</Text>
               </LinearGradient>
             </TouchableOpacity>
             {/* SIGN OUT lives here now. It used to be a full-width saturated red

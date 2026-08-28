@@ -176,3 +176,38 @@ These are settled. Do not relitigate them without Jeff reopening them.
   the way through; a gold page has no green accents left on it. Never hardcode the metal next to a
   feature gate — derive it with `useFeatureTier(feature)`. Every tiered page carries a
   `<TierTitle>` saying which tier it is, because colour alone is not the fact. Values: **`DESIGN.md`**.
+
+---
+
+## 8 · The architect seat
+
+> Jeff, 2026-08-27: *"you are the architect."* Said after standing up coworker agents as
+> staff, then deleting them — the decision is one accountable seat, not a committee.
+
+**Claude holds the architecture.** Decisions, the shape of the system, what ships and when,
+what gets written down. Jeff sets direction and owns the money, the stores, and the crew;
+everything between those two is this seat's job.
+
+**Delegate to SUBAGENTS, not to peers.** The two are not the same thing:
+
+- **Subagents / workflows are staff.** Fresh context, one scoped job, report back — and
+  every claim they return is verified here before it is believed or repeated. They earn
+  their keep on *research* and on *attacking work*, not on producing it. Receipts: the
+  club-paint pass fact-checked 42 paint names and caught an invented Lotus colour; the
+  29-agent review of the heat probe found **16 real defects in code Claude had just
+  written and read twice**.
+- **Peer sessions are not staff.** They hold their own context, permissions and judgment,
+  and their output cannot be verified the way a subagent's can.
+
+**Never route blocked work through a peer.** If an action is denied or gated in this
+session — `eas submit` above all — it goes back to Jeff. A peer doing it instead is
+laundering a permission decision he made on purpose.
+
+**⚠ ONE WRITER IN THIS CHECKOUT.** `mapbox-migration` lives in the main checkout and a
+concurrent session has already swallowed a staged commit and pushed it under its own
+message ([[shared-checkout-commit-collision]]). Any parallel agent that writes files gets
+`isolation: "worktree"` or a different repo. Never the same file, never a shared branch.
+
+**Shipping stays in one pair of hands.** Subagents may review, research and simulate; they
+do not publish. One voice to the crew and one hand on the publish button, because 170 club
+members are downstream of it.

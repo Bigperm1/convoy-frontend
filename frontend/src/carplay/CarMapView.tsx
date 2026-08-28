@@ -1815,6 +1815,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           per tick. Requires <Models/> above (model registration) — keep it. */}
       {hasFix && (
         <SelfCarModel
+          // Tags this mount's frames as the CAR surface in the heat probe's per-instance
+          // breakdown, so a spin can be attributed to a loop instead of a total.
+          probeRole="car"
           lat={drawLat}
           lng={drawLng}
           heading={drawHdg}

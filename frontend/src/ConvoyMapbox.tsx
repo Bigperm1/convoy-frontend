@@ -33,7 +33,7 @@
 
 import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import { reportDraw } from "./drawTelemetry";
-import { noteFrame, noteCam } from "./heatProbe";
+import { noteFrame, noteCam, noteTick, retireInstance } from "./heatProbe";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
@@ -956,7 +956,10 @@ const SELF_MARKER_SLOT = undefined;
 // long way), giving 60fps motion that matches the smooth native follow-camera.
 // Snaps instead of animating on the very first fix and on big jumps (initial
 // fix / recenter / GPS glitch) so the car never "drives" across the map.
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef }: {
+/** Monotonic mount counter — see probeKeyRef inside SelfCarModel. */
+let _selfCarMountSeq = 0;
+
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -1006,6 +1009,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // iconSize for the sprite (real 44px photos need ~1.35 to match the 62pt
   // silhouette's on-map footprint). Default 1.
   spriteSize?: number;
+  /** "phone" or "car" — which surface this mount belongs to, for the heat probe's
+   *  per-instance breakdown. Only the CarPlay mount passes "car". */
+  probeRole?: string;
   // PARKED DIMMING (2026-07-31). Peers have always drawn a parked car at 0.5 opacity
   // (CarMarker); the SELF marker had no path to it at all — it was pushed into cars[]
   // with no `status` field. Jeff: "i should be translucent, correct?" Yes: your own
@@ -1015,6 +1021,16 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
 }) {
   const render = useRef({ lat, lng, heading });
   const anim = useRef<{ fromLat: number; fromLng: number; fromHdg: number; toLat: number; toLng: number; toHdg: number; start: number; dur: number; armedAt: number; stepped: boolean } | null>(null);
+  // Per-MOUNT probe key. The sequence number is the whole point: a remount gets a NEW
+  // number, so if an OLD number is still counting frames the loop it belongs to was
+  // never cancelled — a leak, which the probe prints with a `!`.
+  const probeKeyRef = useRef<string>("");
+  if (!probeKeyRef.current) probeKeyRef.current = `${probeRole}#${++_selfCarMountSeq}`;
+  useEffect(() => {
+    const k = probeKeyRef.current;
+    return () => { try { retireInstance(k); } catch {} };
+  }, []);
+
   const raf = useRef<number | null>(null);
   const seeded = useRef(false);
   // The last RAW incoming fix (pre-dead-band), for the stationary scatter gate below:
@@ -1058,7 +1074,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     if (!cameraRef?.current || !getCam || !(readyRef?.current)) return;
     // Counted AFTER the bail, so this measures camera pushes that actually cross the
     // bridge — each one is a JSON encode here and a JSON decode in native.
-    noteCam();
+    noteCam(probeKeyRef.current);
     const c = getCam();
     // Glide zoom + pitch toward the LIVE speed target (getCam reads a fresh ref, so
     // this tracks acceleration even though this loop's closure is frozen). Position
@@ -1150,7 +1166,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       heading: a.fromHdg + (a.toHdg - a.fromHdg) * t,
     };
     pushCam(render.current.lat, render.current.lng, render.current.heading);
-    setTick((n) => (n + 1) & 0xffff);
+    noteTick(); setTick((n) => (n + 1) & 0xffff);
     if (t >= 1) anim.current = null;
   };
   const startBgTimer = () => {
@@ -1248,7 +1264,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // Measurement only, and deliberately the FIRST thing in the frame so it counts the
     // frame even when the ease has ended and we bail below. No-ops unless a drive is
     // being sampled. See src/heatProbe.ts for what question this answers.
-    noteFrame(Date.now());
+    noteFrame(Date.now(), probeKeyRef.current);
     const a = anim.current;
     if (!a) { raf.current = null; return; }
     a.stepped = true; // this ease has rendered ≥1 frame → the loop is alive for it
@@ -1292,7 +1308,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     lastFrameRef.current = now;
     render.current = { lat: _nLat, lng: _nLng, heading: _nHdg };
     pushCam(render.current.lat, render.current.lng, render.current.heading); // LOCKSTEP: camera rides the eased pose
-    setTick((n) => (n + 1) & 0xffff);
+    noteTick(); setTick((n) => (n + 1) & 0xffff);
     if (t < 1) {
       raf.current = requestAnimationFrame(step);
     } else {
@@ -1354,7 +1370,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       // would disarm it for the rest of the drive. anim=null + the heartbeat
       // guard make a running-but-idle timer free.
       pushCam(lat, lng, heading, true); // hard-snap the camera with the car (first fix / recenter / resume) — zoom/pitch jump too
-      setTick((n) => (n + 1) & 0xffff);
+      noteTick(); setTick((n) => (n + 1) & 0xffff);
       // Probe: a live display ticks step() → rafDead clears → the next fix eases
       // smoothly again. While asleep the probe never fires, so the latch holds.
       if (rafStale) raf.current = requestAnimationFrame(step);
@@ -1445,7 +1461,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         // a framing POP on each of those teleports. Left to glide, dt clamps to 200 ms so
         // it still closes ~44% of any gap per fix, which is smooth enough to be invisible.
         pushCam(render.current.lat, render.current.lng, render.current.heading, false);
-        setTick((n) => (n + 1) & 0xffff);
+        noteTick(); setTick((n) => (n + 1) & 0xffff);
       }
     } else if (raf.current == null) {
       raf.current = requestAnimationFrame(step);

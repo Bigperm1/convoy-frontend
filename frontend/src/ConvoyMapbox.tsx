@@ -2703,9 +2703,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     // The `_lit` suffix is gated on the SAME predicate as the URL — a scan has no night
     // twin, and an id claiming `_lit` while the URL is the day bake is a lie that costs
     // a wasted model registration.
-    // convoyCar5_: generation bump 2026-08-28 — the map's heavy_metal now loads the
-    // decimated GRC2_map1 twin. Same-id would keep serving the cached full GRC2.
-    : "convoyCar5_" + getVehicleModelKey(selfCar?.color) + (selfLit && vehicleHasLitBake(selfCar?.color) ? "_lit" : "");
+    // convoyCar6_: generation bump 2026-08-27 — GRC2_map2 replaces map1 (whose
+    // decimation had crushed the panels; see vehicleAssets). Same-id would keep
+    // serving the cached crumpled model forever.
+    : "convoyCar6_" + getVehicleModelKey(selfCar?.color) + (selfLit && vehicleHasLitBake(selfCar?.color) ? "_lit" : "");
   // Lift the paint out of the dark on the dim light presets (dawn/night). The ARROW
   // is always FULLY self-lit (1): it's a UI marker, not a realistic car — scene
   // lighting at day/dusk (0/0.55) washed its brand green pale.

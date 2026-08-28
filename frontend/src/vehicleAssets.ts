@@ -605,7 +605,13 @@ export function getVehicleModelUrl(color?: string | null, lit?: boolean): string
 // generation bump at the call sites — Mapbox caches by id, and re-pointing an old id
 // at the twin would keep drawing the cached full model forever.
 export const VEHICLE_MODEL_URL_MAP: Partial<Record<GRCColorKey, string>> = {
-  heavy_metal: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/GRC2_map1.glb",
+  // GRC2_map2 (2026-08-27): map1's simplify-0.15 decimation had CRUSHED the panels —
+  // Jeff saw the car "deform" as the CarPlay chase cam swept a roundabout, because the
+  // damage lives on the front-left quarter angles a straight road never shows. Verified
+  // by orbit-rendering map1 vs the hero at 12 yaws (hero clean, map1 crumpled). map2 =
+  // weld + simplify ratio 0.30 error 0.01 + 1024 textures: 83,689 verts (max 10,704/mesh,
+  // u16-safe), 3.68 MB, clean at every orbit angle that map1 failed.
+  heavy_metal: "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models/GRC2_map2.glb",
 };
 
 /** The model the MAP surfaces load: the decimated twin when one exists, else the full

@@ -51,7 +51,7 @@ const KIND_COPY: Record<Kind, { one: string; title: string; icon: keyof typeof I
   },
 };
 
-function whenText(iso: string): string {
+export function whenText(iso: string): string {
   try { return fmtWhen(new Date(iso)); } catch { return iso; }
 }
 
@@ -249,7 +249,7 @@ type ClubLite = { id: string; name: string };
 // had NO CALLER. So this is a UI gap, not a missing feature: pass `editing` and the same
 // form (including the whole cruise stop planner and route-style picker) becomes the edit
 // screen. Duplicating it would have guaranteed the two drifted.
-function CreateEventModal({ kind, visible, editing, onClose, onCreated }: {
+export function CreateEventModal({ kind, visible, editing, onClose, onCreated }: {
   kind: Kind; visible: boolean; editing?: HubEvent | null;
   onClose: () => void; onCreated: (e: HubEvent) => void;
 }) {
@@ -646,7 +646,7 @@ function CreateEventModal({ kind, visible, editing, onClose, onCreated }: {
 }
 
 // ── Detail sheet ─────────────────────────────────────────────────────────────
-function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEdit }: {
+export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEdit }: {
   event: HubEvent | null; onClose: () => void; onChanged: (e: HubEvent) => void; onDeleted: () => void;
   onEdit: (e: HubEvent) => void;
 }) {

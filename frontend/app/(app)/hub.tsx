@@ -9,8 +9,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth";
-import { EventsSection } from "../../src/hubEvents";
-import { getEvent } from "../../src/eventsApi";
+import { EventsSection, EventDetailModal, CreateEventModal, whenText } from "../../src/hubEvents";
+import { getEvent, myEvents, discoverEvents, type HubEvent } from "../../src/eventsApi";
 import { api, formatErr } from "../../src/api";
 import { COLORS } from "../../src/theme";
 import Glass, { GlassFill } from "../../src/Glass";
@@ -35,6 +35,10 @@ type Community = {
 
 // Curated category chips admins pick from (Velox-style). Kept as a flat list so a
 // tapped chip maps 1:1 to a stored tag string.
+const CHIPS: [string, string][] = [
+  ["going", "Going"], ["all", "All"], ["event", "Meets"], ["cruise", "Cruises"], ["clubs", "Clubs"],
+];
+
 const SUGGESTED_TAGS = [
   "Just for Fun", "Meetup", "Weekend Runs", "Cars & Coffee", "Beginner-Friendly",
   "JDM", "Euro", "Domestic", "Trucks", "Track Days", "Show & Shine", "Cruises", "Organization",
@@ -55,6 +59,16 @@ export default function HubScreen() {
   const [showSearch, setShowSearch] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showDetail, setShowDetail] = useState<Community | null>(null);
+  // ── CLUB REDESIGN state (2026-08-28) ──────────────────────────────────────
+  // ONE chip rail replaces the old two stacked nav rows (Clubs|Events|Cruises
+  // pills over a Discover|Mine segment). `chip` is the single taxonomy.
+  const [chip, setChip] = useState<"going" | "all" | "event" | "cruise" | "clubs">("all");
+  const [feedMine, setFeedMine] = useState<HubEvent[]>([]);
+  const [feedAll, setFeedAll] = useState<HubEvent[]>([]);
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [openEvent, setOpenEvent] = useState<HubEvent | null>(null);
+  const [createKind, setCreateKind] = useState<"event" | "cruise" | null>(null);
+  const [showCreateSheet, setShowCreateSheet] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,14 +122,72 @@ export default function HubScreen() {
   };
 
   useEffect(() => { load(); }, [load]);
+
+  // ── The unified feed. myEvents() returns BOTH kinds; discoverEvents('')
+  // returns every public one. They are merged, de-duped (yours wins so the
+  // GOING state survives) and sorted by time — kind becomes the card's shape,
+  // not a tab you pre-select. Fixes the known gap where pull-to-refresh
+  // reloaded clubs but never events.
+  const loadFeed = useCallback(async () => {
+    setFeedLoading(true);
+    try {
+      const [m, d] = await Promise.all([
+        myEvents().catch(() => [] as HubEvent[]),
+        discoverEvents("").catch(() => [] as HubEvent[]),
+      ]);
+      setFeedMine(m);
+      const byId = new Map<string, HubEvent>();
+      for (const e of d) byId.set(e.id, e);
+      for (const e of m) byId.set(e.id, e);   // mine last: is_attending must win
+      setFeedAll([...byId.values()]);
+    } finally { setFeedLoading(false); }
+  }, []);
+  useEffect(() => { loadFeed(); }, [loadFeed]);
+  const [fabOpen, setFabOpen] = useState(false);
+
+  // NEXT UP — soonest thing you're attending; else the soonest public thing.
+  // Same rule as the widget: an item stays "next" until start_at + 3h.
+  const nextUp = React.useMemo(() => {
+    const live = (e: HubEvent) => new Date(e.start_at).getTime() + 3 * 3600_000 > Date.now();
+    const byTime = (a: HubEvent, b: HubEvent) => +new Date(a.start_at) - +new Date(b.start_at);
+    const mineSoon = feedMine.filter((e) => live(e) && e.is_attending).sort(byTime);
+    if (mineSoon.length) return mineSoon[0];
+    const anySoon = feedAll.filter(live).sort(byTime);
+    return anySoon[0] ?? null;
+  }, [feedMine, feedAll]);
+
+  // Standings follow the ACTIVE club, falling back to the first one you are in,
+  // so a member with one club always sees their board.
+  const standingsClubId = settings.activeCommunityId || mine[0]?.id || null;
+
+  const feedShown = React.useMemo(() => {
+    const live = (e: HubEvent) => new Date(e.start_at).getTime() + 3 * 3600_000 > Date.now();
+    const byTime = (a: HubEvent, b: HubEvent) => +new Date(a.start_at) - +new Date(b.start_at);
+    let list = feedAll.filter(live);
+    if (chip === "going") list = list.filter((e) => e.is_attending);
+    if (chip === "event" || chip === "cruise") list = list.filter((e) => e.kind === chip);
+    return list.sort(byTime);
+  }, [feedAll, chip]);
+
+  // EMPTY-STATE RULE: a brand-new member with nothing RSVP'd must never be shown
+  // their own emptiness. If "Going" would be empty on FIRST load, land on All.
+  // First load only — never override a deliberate tap.
+  const chipSeeded = useRef(false);
+  useEffect(() => {
+    if (chipSeeded.current || feedLoading) return;
+    if (feedAll.length || feedMine.length) {
+      chipSeeded.current = true;
+      if (feedMine.some((e) => e.is_attending)) setChip("going");
+    }
+  }, [feedAll, feedMine, feedLoading]);
   useEffect(() => { if (tab === "explore" && explore.length === 0) loadExplore(); }, [tab, explore.length, loadExplore]);
 
   return (
     <>
     <SafeAreaView style={styles.c} edges={["top"]}>
       <GlassBackdrop />
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 110 }}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={accent} />}>
+      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 168 }}
+        refreshControl={<RefreshControl refreshing={loading || feedLoading} onRefresh={() => { load(); loadFeed(); }} tintColor={accent} />}>
         <View style={styles.headerRow}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
             <TouchableOpacity
@@ -126,103 +198,125 @@ export default function HubScreen() {
             >
               <Ionicons name="chevron-back" size={26} color={COLORS.text} />
             </TouchableOpacity>
-            <Text style={styles.title}>Hub</Text>
+            {/* "Club", not "Hub" (Jeff, 2026-08-28). The ROUTE stays /(app)/hub so
+                every push deep link, LogoMenu entry and voice intent keeps working. */}
+            <Text style={styles.title}>Club</Text>
           </View>
         </View>
-        <Text style={styles.sub}>{user?.handle} · {[user?.car_year, user?.car_make, user?.car_model].filter(Boolean).join(" ") || "Tap the car icon to set up your Garage"}</Text>
 
-        {/* Hub section selector — Clubs · Events · Cruises (Hub P2) */}
-        <View style={styles.hubTabsRow}>
-          {([["clubs", "people", "Clubs"], ["events", "calendar", "Events"], ["cruises", "car-sport", "Cruises"]] as const).map(([key, icon, label]) => (
-            <TouchableOpacity key={key} testID={`hub-section-${key}`} onPress={() => setSection(key)} style={[styles.hubTabBtn, section === key && styles.hubTabBtnOn, section === key && { backgroundColor: accent, borderColor: accent }]} activeOpacity={0.85}>
-              <Ionicons name={icon as any} size={16} color={section === key ? skinColors.ink : "#D9D9DE"} />
-              <Text style={[styles.hubTabText, section === key && styles.hubTabTextOn, section === key && { color: skinColors.ink }]}>{label}</Text>
+        {/* ── DRIVER BAND ────────────────────────────────────────────────────
+            Also the only entry point to ProfileModal, which was unreachable:
+            setShowProfile(true) was called NOWHERE before this. */}
+        <TouchableOpacity testID="hub-profile" onPress={() => setShowProfile(true)} activeOpacity={0.85} style={styles.driverBand}>
+          <Image source={getTopDownImage(user?.car_color || "")} style={styles.driverCar} resizeMode="contain" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.driverName}>{user?.handle || "Driver"}</Text>
+            <Text style={[styles.driverCarTxt, { color: accent }]} numberOfLines={1}>
+              {[user?.car_year, user?.car_make, user?.car_model].filter(Boolean).join(" ") || "Set up your Garage"}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#5A5A5E" />
+        </TouchableOpacity>
+
+        {/* ── NEXT UP ────────────────────────────────────────────────────────
+            Answers "what is my club doing next" with zero taps. Same pick the
+            iOS widget already computes (widgetFeed.nextUp) but never showed. */}
+        <NextUp
+          event={nextUp}
+          accent={accent}
+          skinColors={skinColors}
+          onOpen={(e) => setOpenEvent(e)}
+          onPlan={() => { setCreateKind("cruise"); setShowCreateSheet(true); }}
+        />
+
+        {/* ── YOUR CLUBS — a rail, so ONE club reads deliberate, not lonely ── */}
+        <Text style={styles.sectionLabel}>YOUR CLUBS</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.clubRail}>
+          {mine.map((c) => (
+            <TouchableOpacity key={c.id} onPress={() => setShowDetail(c)} activeOpacity={0.85} style={styles.railItem}>
+              <View style={[styles.railCrest, { borderColor: c.id === settings.activeCommunityId ? accent : "transparent" }]}>
+                {c.logo_b64
+                  ? <Image source={{ uri: c.logo_b64 }} style={styles.railLogo} />
+                  : <Ionicons name="people" size={24} color={accent} />}
+              </View>
+              <Text style={styles.railName} numberOfLines={1}>{c.name}</Text>
+              <Text style={styles.railMeta}>{c.member_count}</Text>
             </TouchableOpacity>
           ))}
-        </View>
-
-        {section === "events" && <EventsSection kind="event" openEventId={openEventId} />}
-        {section === "cruises" && <EventsSection kind="cruise" openEventId={openEventId} />}
-
-        {section === "clubs" && (<>
-        {/* Clubs — mirrors the Events/Cruises section layout (segment → Create row
-            → list). The old Garage/Create/Discover action grid is gone: Garage
-            lives in the logo menu, Create is the row below, Discover is the tab. */}
-        <View style={styles.segment}>
-          <TouchableOpacity testID="tab-explore" onPress={() => setTab("explore")} style={[styles.segmentBtn, tab === "explore" && styles.segmentBtnOn]}>
-            <Text style={[styles.segmentText, tab === "explore" && styles.segmentTextOn]}>Discover</Text>
-          </TouchableOpacity>
-          <TouchableOpacity testID="tab-mine" onPress={() => setTab("mine")} style={[styles.segmentBtn, tab === "mine" && styles.segmentBtnOn]}>
-            <Text style={[styles.segmentText, tab === "mine" && styles.segmentTextOn]}>My Clubs</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity testID="create-community" onPress={() => setShowCreate(true)} activeOpacity={0.85} style={{ marginBottom: 14 }}>
-          <Glass radius={16}>
-            <View style={styles.createClubRow}>
-              <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.createClubIcon}>
-                <Ionicons name="add" size={22} color="#0A1A10" />
-              </LinearGradient>
-              <Text style={styles.createClubText}>Create club</Text>
+          <TouchableOpacity testID="rail-find" onPress={() => { setChip("clubs"); setTab("explore"); }} activeOpacity={0.85} style={styles.railItem}>
+            <View style={[styles.railCrest, styles.railCrestDashed]}>
+              <Ionicons name="search" size={22} color="#7A7A7E" />
             </View>
-          </Glass>
-        </TouchableOpacity>
+            <Text style={styles.railName}>Find</Text>
+          </TouchableOpacity>
+        </ScrollView>
 
-        {tab === "mine" ? (
-          <>
-            {mine.length === 0 && (
-              <Glass radius={20}>
-                <View style={{ padding: 22, alignItems: "center" }}>
-                  <Image source={heroImg} style={styles.emptyHero} resizeMode="cover" />
-                  <Text style={styles.emptyTitle}>No clubs yet</Text>
-                  <Text style={styles.emptyText}>Create your own crew, or tap Discover to find public clubs to join.</Text>
-                </View>
-              </Glass>
-            )}
-            {mine.map((c) => (
-              <CommunityCard key={c.id} c={c} active={c.id === settings.activeCommunityId} onPress={() => setShowDetail(c)} />
-            ))}
-          </>
+        {/* ── STANDINGS — promoted out of the detail sheet (Jeff picked A + B's
+            standings). Structurally cannot be empty: every member is seeded. */}
+        {!!standingsClubId && <ClubStandings communityId={standingsClubId} />}
+
+        {/* ── ONE CHIP RAIL — replaces BOTH old nav rows ─────────────────── */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRail}>
+          {CHIPS.map(([key, label]) => {
+            const on = chip === key;
+            return (
+              <TouchableOpacity key={key} testID={`club-chip-${key}`} onPress={() => setChip(key as any)} activeOpacity={0.85}
+                style={[styles.chip, on && { backgroundColor: accent, borderColor: accent }]}>
+                <Text style={[styles.chipTxt, on && { color: skinColors.ink, fontWeight: "800" }]}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {chip === "clubs" ? (
+          <ClubsPane
+            mine={mine} explore={explore} exploreLoading={exploreLoading} exploreQ={exploreQ}
+            tab={tab} setTab={setTab} onSearch={onExploreSearch} onJoin={joinCommunity}
+            onOpen={setShowDetail} onCode={() => setShowSearch(true)}
+            activeId={settings.activeCommunityId} heroImg={heroImg} accent={accent}
+          />
         ) : (
-          <>
-            {/* Inline search + invite-code entry (replaces the old Discover modal
-                button; the SearchModal still handles the code-join flow). */}
-            <TextInput
-              testID="club-search"
-              style={styles.clubSearchInput}
-              placeholder="Search public clubs…"
-              placeholderTextColor={COLORS.textMute}
-              value={exploreQ}
-              onChangeText={onExploreSearch}
-            />
-            <TouchableOpacity testID="search-community" onPress={() => setShowSearch(true)} style={styles.inviteLink}>
-              <Ionicons name="key-outline" size={14} color={accent} />
-              <Text style={styles.inviteLinkText}>Have an invite code?</Text>
-            </TouchableOpacity>
-            {explore.length === 0 && !exploreLoading && (
-              <Text style={styles.emptyText}>No public clubs found yet. Be the first — tap Create.</Text>
-            )}
-            {explore.map((c) => (
-              <CommunityCard key={c.id} c={c} mode="explore" onJoin={joinCommunity} onPress={() => setShowDetail(c)} />
-            ))}
-          </>
+          <FeedList
+            events={feedShown} loading={feedLoading} accent={accent}
+            onOpen={(e) => setOpenEvent(e)}
+            emptyLabel={chip === "going" ? "Nothing you're going to yet — tap All to see what's on."
+              : chip === "event" ? "No meets posted yet."
+              : chip === "cruise" ? "No cruises planned yet."
+              : "Nothing posted near you yet — be the first."}
+          />
         )}
-        </>)}
-
-        <TouchableOpacity testID="logout-btn" style={styles.logoutBtn} onPress={logout} activeOpacity={0.85}>
-          {/* Candy-apple-red glossy fill (matches the nav Exit button): a red
-              gradient base + red-tinted Liquid Glass on top, white content. */}
-          <LinearGradient colors={["#FF3B5C", "#E4002B", "#B00020"]} locations={[0, 0.5, 1]} style={[StyleSheet.absoluteFill, { borderRadius: 14 }]} />
-          <GlassFill tintColor="#E4002B" style={{ borderRadius: 14, overflow: "hidden" }} />
-          <Ionicons name="log-out" size={18} color="#fff" />
-          <Text style={styles.logoutText}>Sign out</Text>
-        </TouchableOpacity>
       </ScrollView>
 
       {/* Modals */}
+      {/* CREATE is a FAB now, not a permanent full-width row above the content. */}
+      <TouchableOpacity testID="club-fab" onPress={() => setFabOpen(true)} activeOpacity={0.9} style={styles.fab}>
+        <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={StyleSheet.absoluteFill as any} />
+        <Ionicons name="add" size={30} color={skinColors.ink} />
+      </TouchableOpacity>
+      <CreateSheet
+        visible={fabOpen} accent={accent}
+        onClose={() => setFabOpen(false)}
+        onPick={(what) => {
+          setFabOpen(false);
+          if (what === "club") setShowCreate(true);
+          else { setCreateKind(what); setShowCreateSheet(true); }
+        }}
+      />
+      <CreateEventModal
+        kind={createKind ?? "event"} visible={showCreateSheet} editing={null}
+        onClose={() => setShowCreateSheet(false)}
+        onCreated={() => { setShowCreateSheet(false); loadFeed(); }}
+      />
+      <EventDetailModal
+        event={openEvent}
+        onClose={() => setOpenEvent(null)}
+        onChanged={loadFeed}
+        onDeleted={() => { setOpenEvent(null); loadFeed(); }}
+        onEdit={() => {}}
+      />
       <CreateModal visible={showCreate} onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); load(); }} />
       <SearchModal visible={showSearch} onClose={() => setShowSearch(false)} onChanged={load} />
-      <ProfileModal visible={showProfile} onClose={() => setShowProfile(false)} onSaved={async () => { await refresh(); setShowProfile(false); }} />
+      <ProfileModal visible={showProfile} onClose={() => setShowProfile(false)} onSignOut={logout} onSaved={async () => { await refresh(); setShowProfile(false); }} />
       <CommunityDetailModal community={showDetail} onClose={() => setShowDetail(null)} onChanged={load} />
     </SafeAreaView>
     <View style={styles.logoBacking}><LogoMenu size={38} align="right" /></View>
@@ -233,6 +327,287 @@ export default function HubScreen() {
 // (The old ActionCard grid — Garage / Create / Discover — was removed when the
 // Clubs section adopted the Events/Cruises layout: Garage lives in the logo
 // menu, Create is the glass row, Discover is the segment tab.)
+
+
+/* ═══════════ CLUB REDESIGN COMPONENTS (2026-08-28) ═══════════
+   Jeff picked concept A ("Roll Call") with B's standings promoted onto the page.
+   Everything below is NEW SHELL only — every modal, card and API call the old
+   Hub had is untouched and still mounted, because the audit counted 324 live
+   capabilities and a rewrite that re-implements them is how you lose them. */
+
+/** NEXT UP — the one large object on the screen. The empty state is the SAME
+ *  shape and weight as the populated one, so the screen never visibly deflates
+ *  for a member with nothing on. */
+function NextUp({ event: e, accent, skinColors, onOpen, onPlan }: {
+  event: HubEvent | null; accent: string; skinColors: any;
+  onOpen: (e: HubEvent) => void; onPlan: () => void;
+}) {
+  const wash = useAccentAlpha(0.28);
+  const washMid = useAccentAlpha(0.09);
+  const glyph = useAccentAlpha(0.10);
+  const when = e ? whenText(e.start_at) : "";
+  return (
+    <TouchableOpacity
+      testID="club-nextup"
+      activeOpacity={e ? 0.9 : 1}
+      onPress={() => e && onOpen(e)}
+      style={styles.heroCard}
+    >
+      {e?.banner_b64
+        ? <Image source={{ uri: e.banner_b64 }} style={StyleSheet.absoluteFill as any} resizeMode="cover" />
+        : <LinearGradient colors={[wash, washMid, "rgba(0,0,0,0.96)"]} start={{ x: 0, y: 0 }} end={{ x: 0.9, y: 1 }} style={StyleSheet.absoluteFill} />}
+      <Ionicons
+        name={e?.kind === "cruise" ? "git-branch" : "location"}
+        size={180} color={glyph}
+        style={{ position: "absolute", right: -30, top: -10 }}
+      />
+      {!!e && (
+        <View style={[styles.heroCountdown, { backgroundColor: accent }]}>
+          <Text style={[styles.heroCountdownTxt, { color: skinColors.ink }]}>{when.toUpperCase()}</Text>
+        </View>
+      )}
+      <View style={styles.heroFoot}>
+        <Text style={styles.heroTitle} numberOfLines={1}>{e ? e.title : "Nothing on the calendar yet"}</Text>
+        <Text style={styles.heroSub} numberOfLines={1}>
+          {e ? (e.venue?.label || "Tap for details") : "Pick a road, set a time — your crew gets the push."}
+        </Text>
+        <View style={styles.heroRow}>
+          {e ? (
+            <>
+              <Text style={styles.heroGoing}>
+                {e.attendee_count} going{e.confirmed_count ? ` · ${e.confirmed_count} confirmed` : ""}
+              </Text>
+              <View style={{ flex: 1 }} />
+              <View style={[styles.heroCta, { backgroundColor: accent }]}>
+                <Text style={[styles.heroCtaTxt, { color: skinColors.ink }]}>
+                  {e.is_attending ? "You're in" : "Details"}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <TouchableOpacity onPress={onPlan} activeOpacity={0.9} style={[styles.heroCta, { backgroundColor: accent }]}>
+              <Text style={[styles.heroCtaTxt, { color: skinColors.ink }]}>Plan a cruise</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+/** ONE time-ordered list. Meets and cruises interleaved — KIND IS THE ROW'S
+ *  SHAPE (a cruise draws a route glyph, a meet draws a place), not a tab you
+ *  pre-select. That single move is what deletes both old nav rows. */
+function FeedList({ events, loading, accent, onOpen, emptyLabel }: {
+  events: HubEvent[]; loading: boolean; accent: string;
+  onOpen: (e: HubEvent) => void; emptyLabel: string;
+}) {
+  const well = useAccentAlpha(0.14);
+  const edge = useAccentAlpha(0.35);
+  if (loading && events.length === 0) {
+    return <View style={styles.sheetList}><Text style={styles.feedEmpty}>Loading…</Text></View>;
+  }
+  return (
+    <View style={styles.sheetList}>
+      {events.length === 0 && <Text style={styles.feedEmpty}>{emptyLabel}</Text>}
+      {events.map((e, i) => (
+        <TouchableOpacity
+          key={e.id} testID={`club-feed-${e.id}`} activeOpacity={0.85} onPress={() => onOpen(e)}
+          style={[styles.feedRow, i > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.08)" } : null]}
+        >
+          <View style={styles.feedGlyph}>
+            <Ionicons name={e.kind === "cruise" ? "git-branch" : "location"} size={20} color={accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.feedTitle} numberOfLines={1}>{e.title}</Text>
+            <Text style={styles.feedSub} numberOfLines={1}>
+              <Text style={{ color: accent, fontWeight: "700" }}>{whenText(e.start_at)}</Text>
+              {e.venue?.label ? <Text>{"  ·  " + e.venue.label}</Text> : null}
+            </Text>
+          </View>
+          {e.is_attending
+            ? <View style={[styles.goingPill, { backgroundColor: well, borderColor: edge }]}>
+                <Text style={[styles.goingTxt, { color: accent }]}>{e.is_confirmed ? "CONFIRMED" : "GOING"}</Text>
+              </View>
+            : <View style={styles.countWell}><Text style={styles.countTxt}>{e.attendee_count}</Text></View>}
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+/** STANDINGS, promoted out of the detail sheet onto the page.
+ *  ⚠ The PB resolution below is LIFTED VERBATIM from CommunityDetailModal — three
+ *  sources (roster profile, the live /users/nearby feed, the local cache) with
+ *  tolerant field names, because no single source covers a whole club and a
+ *  half-covered board renders as broken rather than empty. Do not "simplify" it. */
+function ClubStandings({ communityId }: { communityId: string }) {
+  const accent = useAccent();
+  const { user } = useAuth();
+  const [rows, setRows] = useState<{ userId: string; handle: string; km: number; drives: number; pb: number }[]>([]);
+  const [mode, setMode] = useState<"drives" | "pb">("drives");
+  const [roster, setRoster] = useState<any[]>([]);
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      try {
+        const { data } = await api.get(`/communities/${communityId}`);
+        if (!dead) setRoster(data?.members_users || []);
+      } catch {}
+    })();
+    return () => { dead = true; };
+  }, [communityId]);
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      const board = await fetchClubLeaderboard(String(communityId));
+      if (dead) return;
+      const pbCache = await getPeerPbs();
+      let pbLive: Record<string, number> = {};
+      try {
+        const { data } = await api.get("/users/nearby", { params: { radius_km: 20000 } });
+        for (const u of (Array.isArray(data) ? data : [])) {
+          const v = Number(u?.top_speed_record) || 0;
+          if (u?.id && v > 0) pbLive[String(u.id)] = v;
+        }
+      } catch {}
+      if (dead) return;
+      const byId = new Map(board.map((r) => [r.userId, { ...r }]));
+      for (const m of roster) {
+        const id = String(m?.id ?? "");
+        if (!id) continue;
+        const profilePb =
+          Number(m?.top_speed_record) || Number(m?.topSpeed) || Number(m?.top_speed) ||
+          Number(m?.pb) || Number(pbLive[id]) || Number(pbCache[id]) || 0;
+        const cur = byId.get(id);
+        if (cur) {
+          cur.pb = Math.max(cur.pb || 0, profilePb);
+          if (!cur.handle || cur.handle === "Driver") cur.handle = m?.handle || cur.handle;
+        } else {
+          byId.set(id, { userId: id, handle: m?.handle || "anon", km: 0, drives: 0, pb: profilePb });
+        }
+      }
+      setRows([...byId.values()].sort((a, b) =>
+        mode === "pb" ? (b.pb - a.pb) || (b.km - a.km) : (b.km - a.km) || (b.pb - a.pb)));
+    })();
+    return () => { dead = true; };
+  }, [communityId, mode, roster]);
+
+  if (!rows.length) return null;      // conditional section: never a header over a void
+  return (
+    <>
+      <Text style={styles.sectionLabel}>STANDINGS</Text>
+      <View style={styles.standToggle}>
+        {(["drives", "pb"] as const).map((m) => (
+          <TouchableOpacity key={m} onPress={() => setMode(m)} activeOpacity={0.85}
+            style={[styles.standTog, mode === m && { backgroundColor: accent, borderColor: accent }]}>
+            <Text style={[styles.standTogTxt, mode === m && { color: "#111" }]}>{m === "drives" ? "Drives" : "Top speed"}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <View style={styles.sheetList}>
+        {rows.slice(0, 5).map((r, i) => (
+          <View key={r.userId} style={[styles.standRow, i > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.08)" } : null]}>
+            <View style={[styles.standRank, { backgroundColor: i === 0 ? accent : "rgba(255,255,255,0.08)" }]}>
+              <Text style={[styles.standRankTxt, { color: i === 0 ? "#111" : "#C7C7CC" }]}>{i + 1}</Text>
+            </View>
+            <Image source={getTopDownImage("")} style={styles.standCar} resizeMode="contain" />
+            <Text style={styles.standName} numberOfLines={1}>
+              {r.handle}{r.userId === String(user?.id ?? "") ? " (you)" : ""}
+            </Text>
+            <Text style={[styles.standVal, { color: accent }]}>
+              {mode === "pb" ? (r.pb ? r.pb.toFixed(1) : "—") : fmtKm(r.km)}
+              {mode === "pb" && !!r.pb && <Text style={styles.standUnit}> km/h</Text>}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </>
+  );
+}
+
+/** The Clubs lens — the directory. Everything the old Discover/My Clubs segment
+ *  did, including the invite-code path, which is the ONLY way into a private
+ *  club and the ONLY instant join (public joins are approval-gated). */
+function ClubsPane({ mine, explore, exploreLoading, exploreQ, tab, setTab, onSearch, onJoin, onOpen, onCode, activeId, heroImg, accent }: any) {
+  return (
+    <>
+      <View style={styles.segment}>
+        <TouchableOpacity testID="tab-mine" onPress={() => setTab("mine")} style={[styles.segmentBtn, tab === "mine" && styles.segmentBtnOn]}>
+          <Text style={[styles.segmentText, tab === "mine" && styles.segmentTextOn]}>My Clubs</Text>
+        </TouchableOpacity>
+        <TouchableOpacity testID="tab-explore" onPress={() => setTab("explore")} style={[styles.segmentBtn, tab === "explore" && styles.segmentBtnOn]}>
+          <Text style={[styles.segmentText, tab === "explore" && styles.segmentTextOn]}>Discover</Text>
+        </TouchableOpacity>
+      </View>
+      {tab === "mine" ? (
+        <>
+          {mine.length === 0 && (
+            <Glass radius={20}>
+              <View style={{ padding: 22, alignItems: "center" }}>
+                <Image source={heroImg} style={styles.emptyHero} resizeMode="cover" />
+                <Text style={styles.emptyTitle}>No clubs yet</Text>
+                <Text style={styles.emptyText}>Find a crew to roll with, or start your own — tap +.</Text>
+              </View>
+            </Glass>
+          )}
+          {mine.map((c: any) => (
+            <CommunityCard key={c.id} c={c} active={c.id === activeId} onPress={() => onOpen(c)} />
+          ))}
+        </>
+      ) : (
+        <>
+          <TextInput
+            testID="club-search" style={styles.clubSearchInput}
+            placeholder="Search public clubs…" placeholderTextColor={COLORS.textMute}
+            value={exploreQ} onChangeText={onSearch}
+          />
+          <TouchableOpacity testID="search-community" onPress={onCode} style={styles.inviteLink}>
+            <Ionicons name="key-outline" size={14} color={accent} />
+            <Text style={[styles.inviteLinkText, { color: accent }]}>Have an invite code?</Text>
+          </TouchableOpacity>
+          {explore.length === 0 && !exploreLoading && (
+            <Text style={styles.emptyText}>No public clubs found yet. Be the first — tap +.</Text>
+          )}
+          {explore.map((c: any) => (
+            <CommunityCard key={c.id} c={c} mode="explore" onJoin={onJoin} onPress={() => onOpen(c)} />
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+/** The FAB's sheet. Create moved off the page: it owned the best real estate for
+ *  the rarest action. */
+function CreateSheet({ visible, accent, onClose, onPick }: {
+  visible: boolean; accent: string; onClose: () => void;
+  onPick: (what: "cruise" | "event" | "club") => void;
+}) {
+  const well = useAccentAlpha(0.14);
+  const ROWS: [string, string, "cruise" | "event" | "club"][] = [
+    ["git-branch", "Plan a cruise", "cruise"],
+    ["location", "Post a meet", "event"],
+    ["people", "Start a club", "club"],
+  ];
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={onClose}>
+        <View style={styles.createSheet}>
+          {ROWS.map(([icon, label, what], i) => (
+            <TouchableOpacity key={what} testID={`create-${what}`} activeOpacity={0.85} onPress={() => onPick(what)}
+              style={[styles.createSheetRow, i > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.10)" } : null]}>
+              <View style={[styles.feedGlyph, { backgroundColor: well }]}>
+                <Ionicons name={icon as any} size={20} color={accent} />
+              </View>
+              <Text style={styles.createSheetTxt}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
 
 // Velox-style club card: full-width cover banner → logo + name + member count →
 // description → category tag chips. `mode` swaps the trailing control: a chevron on
@@ -1187,7 +1562,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
   );
 }
 
-function ProfileModal({ visible, onClose, onSaved }: any) {
+function ProfileModal({ visible, onClose, onSaved, onSignOut }: any) {
   const { user } = useAuth();
   const skinColors = useAppSkinColors();
   const [handle, setHandle] = useState(user?.handle || "");
@@ -1231,6 +1606,13 @@ function ProfileModal({ visible, onClose, onSaved }: any) {
                 <Text style={styles.btnText}>{busy ? "Saving…" : "Save"}</Text>
               </LinearGradient>
             </TouchableOpacity>
+            {/* SIGN OUT lives here now. It used to be a full-width saturated red
+                button in the middle of the Hub — the most destructive action given
+                the most visual weight, and the ONLY colour on an empty tab. */}
+            <TouchableOpacity testID="logout-btn" onPress={onSignOut} activeOpacity={0.8} style={styles.signOutRow}>
+              <Ionicons name="log-out-outline" size={17} color={COLORS.danger} />
+              <Text style={styles.signOutTxt}>Sign out</Text>
+            </TouchableOpacity>
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
@@ -1248,6 +1630,60 @@ function ProfileField({ label, value, onChange, keyboard, testID }: any) {
 }
 
 const styles = StyleSheet.create({
+  // ── Club redesign (2026-08-28) ──
+  sheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end", paddingBottom: 40, paddingHorizontal: 18 },
+  createSheet: { backgroundColor: "#141416", borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)", overflow: "hidden" },
+  driverBand: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, marginBottom: 14 },
+  driverCar: { width: 52, height: 40 },
+  driverName: { color: "#fff", fontSize: 19, fontWeight: "800" },
+  driverCarTxt: { fontSize: 12.5, fontWeight: "600", marginTop: 1 },
+  sectionLabel: { color: "#7A7A7E", fontSize: 11, fontWeight: "700", letterSpacing: 1.1, marginBottom: 10, marginTop: 4 },
+  clubRail: { gap: 14, paddingBottom: 20, paddingRight: 18 },
+  railItem: { alignItems: "center", width: 66 },
+  railCrest: { width: 56, height: 56, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "transparent", backgroundColor: "rgba(255,255,255,0.07)", overflow: "hidden" },
+  railCrestDashed: { borderColor: "rgba(255,255,255,0.18)", borderStyle: "dashed" },
+  railLogo: { width: 52, height: 52, borderRadius: 16 },
+  railName: { color: "#EDEDED", fontSize: 11, fontWeight: "700", marginTop: 6 },
+  railMeta: { color: "#7A7A7E", fontSize: 10 },
+  chipRail: { gap: 8, paddingBottom: 14, paddingRight: 18 },
+  chip: { paddingHorizontal: 15, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(255,255,255,0.06)" },
+  chipTxt: { color: "#C7C7CC", fontSize: 13.5, fontWeight: "600" },
+  fab: { position: "absolute", right: 18, bottom: 96, width: 58, height: 58, borderRadius: 29, overflow: "hidden", alignItems: "center", justifyContent: "center",
+    ...Platform.select({ ios: { shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } }, android: { elevation: 8 } }) },
+  heroCard: { height: 196, borderRadius: 22, overflow: "hidden", justifyContent: "flex-end", marginBottom: 20 },
+  heroCountdown: { position: "absolute", top: 12, left: 12, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  heroCountdownTxt: { fontSize: 11, fontWeight: "900", letterSpacing: 0.5 },
+  heroFoot: { padding: 14 },
+  heroTitle: { color: "#fff", fontSize: 21, fontWeight: "800" },
+  heroSub: { color: "#C7C7CC", fontSize: 12.5, marginTop: 2 },
+  heroRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12 },
+  heroGoing: { color: "#C7C7CC", fontSize: 12, fontWeight: "600" },
+  heroCta: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 999 },
+  heroCtaTxt: { fontSize: 14, fontWeight: "800" },
+  sheetList: { backgroundColor: "rgba(20,20,22,0.92)", borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.1)", overflow: "hidden", marginBottom: 22 },
+  feedRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 13 },
+  feedGlyph: { width: 42, height: 42, borderRadius: 13, backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center", justifyContent: "center" },
+  feedTitle: { color: "#fff", fontSize: 15, fontWeight: "700" },
+  feedSub: { color: "#8A8A8E", fontSize: 12, marginTop: 2 },
+  goingPill: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth },
+  goingTxt: { fontSize: 10, fontWeight: "900", letterSpacing: 0.4 },
+  countWell: { minWidth: 30, height: 26, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.07)", alignItems: "center", justifyContent: "center", paddingHorizontal: 7 },
+  countTxt: { color: "#C7C7CC", fontSize: 12, fontWeight: "700" },
+  feedEmpty: { color: "#8A8A8E", fontSize: 13, textAlign: "center", paddingVertical: 26, paddingHorizontal: 20 },
+  standRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 11 },
+  standRank: { width: 24, height: 24, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+  standRankTxt: { fontSize: 12, fontWeight: "800" },
+  standCar: { width: 40, height: 30 },
+  standName: { flex: 1, color: "#fff", fontSize: 15, fontWeight: "700" },
+  standVal: { fontSize: 17, fontWeight: "800" },
+  standUnit: { fontSize: 10, color: "#8A8A8E", fontWeight: "600" },
+  standToggle: { flexDirection: "row", gap: 6, marginBottom: 10 },
+  standTog: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  standTogTxt: { fontSize: 12, fontWeight: "700", color: "#C7C7CC" },
+  createSheetRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 16, paddingHorizontal: 18 },
+  createSheetTxt: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  signOutRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, marginTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.10)" },
+  signOutTxt: { color: COLORS.danger, fontSize: 15, fontWeight: "700" },
   c: { flex: 1, backgroundColor: COLORS.bg },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { color: COLORS.text, fontSize: 34, fontWeight: "700", letterSpacing: -1 },

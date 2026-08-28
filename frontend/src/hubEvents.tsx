@@ -21,7 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import Glass, { GlassFill } from './Glass';
 import { COLORS } from './theme';
-import { useAccentAlpha } from './appSkin';
+import { useAccentAlpha, useAccent, useAppSkinColors } from './appSkin';
 import { api, formatErr } from './api';
 import { autocompletePlaces, placeDetails, type Suggestion } from './places';
 import WhenPicker, { fmtWhen } from './components/WhenPicker';
@@ -57,6 +57,8 @@ function whenText(iso: string): string {
 
 // ── Section (mine/discover lists + create + detail) ─────────────────────────
 export function EventsSection({ kind, openEventId }: { kind: Kind; openEventId?: string | null }) {
+  const accent = useAccent();
+  const skinColors = useAppSkinColors();
   const copy = KIND_COPY[kind];
   const [tab, setTab] = useState<'discover' | 'mine'>('mine');
   const [mine, setMine] = useState<HubEvent[]>([]);
@@ -106,7 +108,7 @@ export function EventsSection({ kind, openEventId }: { kind: Kind; openEventId?:
       <TouchableOpacity onPress={() => setShowCreate(true)} activeOpacity={0.85} style={{ marginBottom: 14 }}>
         <Glass radius={16}>
           <View style={styles.createRow}>
-            <LinearGradient colors={[COLORS.primary, '#18B368']} style={styles.createIcon}>
+            <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.createIcon}>
               <Ionicons name="add" size={22} color="#0A1A10" />
             </LinearGradient>
             <Text style={styles.createText}>{`Create ${copy.one}`}</Text>
@@ -115,7 +117,7 @@ export function EventsSection({ kind, openEventId }: { kind: Kind; openEventId?:
       </TouchableOpacity>
 
       {loading && list.length === 0 ? (
-        <ActivityIndicator color={COLORS.primary} style={{ marginVertical: 28 }} />
+        <ActivityIndicator color={accent} style={{ marginVertical: 28 }} />
       ) : list.length === 0 ? (
         <Glass radius={20}>
           <View style={styles.emptyBox}>
@@ -152,13 +154,14 @@ export function EventsSection({ kind, openEventId }: { kind: Kind; openEventId?:
 // ── Card ─────────────────────────────────────────────────────────────────────
 function EventCard({ event: e, onPress }: { event: HubEvent; onPress: () => void }) {
   const iconWell = useAccentAlpha(0.12);
+  const accent = useAccent();
   const copy = KIND_COPY[e.kind] || KIND_COPY.event;
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={{ marginBottom: 12 }}>
       <Glass radius={20}>
         <View style={styles.card}>
           <View style={[styles.cardIcon, { backgroundColor: iconWell }]}>
-            <Ionicons name={copy.icon} size={20} color={COLORS.primary} />
+            <Ionicons name={copy.icon} size={20} color={accent} />
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -181,6 +184,7 @@ function EventCard({ event: e, onPress }: { event: HubEvent; onPress: () => void
 // ── Venue search field (inline autocomplete — Places v1) ────────────────────
 function VenueField({ label, value, onPick }: { label: string; value: EventPoint | null; onPick: (p: EventPoint) => void }) {
   const venueWell = useAccentAlpha(0.10);
+  const accent = useAccent();
   const venueHairline = useAccentAlpha(0.35);
   const [q, setQ] = useState('');
   const [sugs, setSugs] = useState<Suggestion[]>([]);
@@ -208,7 +212,7 @@ function VenueField({ label, value, onPick }: { label: string; value: EventPoint
       <Text style={styles.label}>{label}</Text>
       {value ? (
         <View style={[styles.venuePicked, { backgroundColor: venueWell, borderColor: venueHairline }]}>
-          <Ionicons name="location" size={16} color={COLORS.primary} />
+          <Ionicons name="location" size={16} color={accent} />
           <Text style={styles.venuePickedText} numberOfLines={1}>{value.label || `${value.lat.toFixed(4)}, ${value.lng.toFixed(4)}`}</Text>
           <TouchableOpacity onPress={() => onPick(null as any)} hitSlop={8}>
             <Ionicons name="close-circle" size={18} color={COLORS.textMute} />
@@ -249,6 +253,8 @@ function CreateEventModal({ kind, visible, editing, onClose, onCreated }: {
   kind: Kind; visible: boolean; editing?: HubEvent | null;
   onClose: () => void; onCreated: (e: HubEvent) => void;
 }) {
+  const accent = useAccent();
+  const skinColors = useAppSkinColors();
   const copy = KIND_COPY[kind];
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
@@ -544,7 +550,7 @@ function CreateEventModal({ kind, visible, editing, onClose, onCreated }: {
                         ends and drops them in as stops. Distinct from the Scenic chip,
                         which only changes HOW the line travels between what you pinned. */}
                     <TouchableOpacity onPress={askScoutForRoads} disabled={asking} style={styles.bestOrderBtn} activeOpacity={0.85}>
-                      <Ionicons name={asking ? 'hourglass-outline' : 'sparkles'} size={15} color={COLORS.primary} />
+                      <Ionicons name={asking ? 'hourglass-outline' : 'sparkles'} size={15} color={accent} />
                       <Text style={styles.bestOrderText}>
                         {asking ? 'Scout is thinking…' : 'Ask Scout for good roads'}
                       </Text>
@@ -577,7 +583,7 @@ function CreateEventModal({ kind, visible, editing, onClose, onCreated }: {
                         here and automatic on a live route. */}
                     {stops.length >= 2 && !!end && (
                       <TouchableOpacity onPress={bestOrder} disabled={ordering} style={styles.bestOrderBtn} activeOpacity={0.85}>
-                        <Ionicons name={ordering ? 'hourglass-outline' : 'swap-vertical'} size={15} color={COLORS.primary} />
+                        <Ionicons name={ordering ? 'hourglass-outline' : 'swap-vertical'} size={15} color={accent} />
                         <Text style={styles.bestOrderText}>
                           {ordering ? 'Working out the best order…' : 'Let Scout pick the best order'}
                         </Text>
@@ -603,7 +609,7 @@ function CreateEventModal({ kind, visible, editing, onClose, onCreated }: {
                 <Text style={styles.toggleTitle}>Public</Text>
                 <Text style={styles.toggleSub}>{isPublic ? `Anyone can discover this ${copy.one}` : 'Only members of the club below can see it'}</Text>
               </View>
-              <Switch value={isPublic} onValueChange={setIsPublic} trackColor={{ false: '#3A3A3C', true: COLORS.primary + '88' }} thumbColor={isPublic ? COLORS.primary : '#f4f3f4'} />
+              <Switch value={isPublic} onValueChange={setIsPublic} trackColor={{ false: '#3A3A3C', true: accent + '88' }} thumbColor={isPublic ? accent : '#f4f3f4'} />
             </View>
             {!isPublic && (
               clubs.length === 0 ? (
@@ -624,11 +630,11 @@ function CreateEventModal({ kind, visible, editing, onClose, onCreated }: {
                 <Text style={styles.toggleTitle}>Attendee notifications</Text>
                 <Text style={styles.toggleSub}>{`24h "are you coming?" check-in + a route to the meet 2h before`}</Text>
               </View>
-              <Switch value={notify} onValueChange={setNotify} trackColor={{ false: '#3A3A3C', true: COLORS.primary + '88' }} thumbColor={notify ? COLORS.primary : '#f4f3f4'} />
+              <Switch value={notify} onValueChange={setNotify} trackColor={{ false: '#3A3A3C', true: accent + '88' }} thumbColor={notify ? accent : '#f4f3f4'} />
             </View>
 
             <TouchableOpacity onPress={create} disabled={busy} activeOpacity={0.85} style={{ marginTop: 18, marginBottom: 26 }}>
-              <LinearGradient colors={[COLORS.primary, '#18B368']} style={styles.createBtn}>
+              <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.createBtn}>
                 <Text style={styles.createBtnText}>{busy ? (editing ? 'Saving…' : 'Creating…') : (editing ? 'Save changes' : `Create ${copy.one}`)}</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -647,6 +653,8 @@ function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEdit }: {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const ctaBorder = useAccentAlpha(0.5);
+  const accent = useAccent();
+  const skinColors = useAppSkinColors();
   if (!e) return null;
   const copy = KIND_COPY[e.kind] || KIND_COPY.event;
 
@@ -690,7 +698,7 @@ function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEdit }: {
         <View style={styles.sheet}>
           <View style={styles.sheetHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
-              <Ionicons name={copy.icon} size={18} color={COLORS.primary} />
+              <Ionicons name={copy.icon} size={18} color={accent} />
               <Text style={styles.sheetTitle} numberOfLines={1}>{e.title}</Text>
             </View>
             <TouchableOpacity onPress={onClose} hitSlop={10}><Ionicons name="close" size={24} color={COLORS.text} /></TouchableOpacity>
@@ -728,7 +736,7 @@ function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEdit }: {
                 <Text style={styles.countLabel}>attending</Text>
               </View>
               <View style={styles.countBox}>
-                <Text style={[styles.countNum, { color: COLORS.primary }]}>{e.confirmed_count}</Text>
+                <Text style={[styles.countNum, { color: accent }]}>{e.confirmed_count}</Text>
                 <Text style={styles.countLabel}>confirmed</Text>
               </View>
             </View>
@@ -736,7 +744,7 @@ function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEdit }: {
             {/* RSVP actions */}
             {!e.is_attending ? (
               <TouchableOpacity onPress={() => act(() => attendEvent(e.id))} activeOpacity={0.85}>
-                <LinearGradient colors={[COLORS.primary, '#18B368']} style={styles.createBtn}>
+                <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.createBtn}>
                   <Text style={styles.createBtnText}>{busy ? '…' : "I'm interested — attend"}</Text>
                 </LinearGradient>
               </TouchableOpacity>
@@ -744,18 +752,18 @@ function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEdit }: {
               <>
                 {!e.is_confirmed && (
                   <TouchableOpacity onPress={() => act(() => confirmEvent(e.id))} activeOpacity={0.85}>
-                    <LinearGradient colors={[COLORS.primary, '#18B368']} style={styles.createBtn}>
+                    <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.createBtn}>
                       <Text style={styles.createBtnText}>{busy ? '…' : "✓ I'm showing up"}</Text>
                     </LinearGradient>
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity onPress={routeThere} activeOpacity={0.85} style={[styles.secondaryBtn, { borderColor: ctaBorder }]}>
-                  <Ionicons name="navigate" size={16} color={COLORS.primary} />
+                  <Ionicons name="navigate" size={16} color={accent} />
                   <Text style={styles.secondaryBtnText}>Route to the meet</Text>
                 </TouchableOpacity>
                 {e.kind === 'cruise' && (e.end || (e.stops || []).length > 0) && (
                   <TouchableOpacity onPress={plotCruise} activeOpacity={0.85} style={[styles.secondaryBtn, { borderColor: ctaBorder }]}>
-                    <Ionicons name="git-branch" size={16} color={COLORS.primary} />
+                    <Ionicons name="git-branch" size={16} color={accent} />
                     <Text style={styles.secondaryBtnText}>Plot the cruise route</Text>
                   </TouchableOpacity>
                 )}
@@ -817,9 +825,9 @@ const styles = StyleSheet.create({
   cardIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: 'rgba(45,236,134,0.12)', alignItems: 'center', justifyContent: 'center' },
   cardTitle: { color: COLORS.text, fontWeight: '800', fontSize: 15.5, flexShrink: 1 },
   clubPill: { color: '#0A1A10', backgroundColor: '#FFD60A', fontSize: 9.5, fontWeight: '900', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
-  cardWhen: { color: COLORS.primary, fontWeight: '700', fontSize: 12.5, marginTop: 2 },
+  cardWhen: { color: COLORS.text, fontWeight: '700', fontSize: 12.5, marginTop: 2 },
   cardVenue: { color: COLORS.textMute, fontSize: 12.5, marginTop: 2 },
-  countPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORS.primary, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  countPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
   countText: { color: '#0A1A10', fontWeight: '900', fontSize: 12.5 },
 
   modalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
@@ -832,7 +840,7 @@ const styles = StyleSheet.create({
 
   venuePicked: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(45,236,134,0.10)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(45,236,134,0.35)', paddingHorizontal: 12, paddingVertical: 11 },
   stopRow: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 6 },
-  stopNum: { color: '#0A1A10', backgroundColor: COLORS.primary, width: 20, height: 20, borderRadius: 10, textAlign: 'center', fontWeight: '900', fontSize: 12, lineHeight: 20, overflow: 'hidden' },
+  stopNum: { color: COLORS.text, backgroundColor: 'rgba(255,255,255,0.14)', width: 20, height: 20, borderRadius: 10, textAlign: 'center', fontWeight: '900', fontSize: 12, lineHeight: 20, overflow: 'hidden' },
   stopLabel: { color: COLORS.text, fontSize: 13.5, flex: 1 },
   // Editable stop name (cruise planner). Borderless so the row still reads as a list
   // rather than a form, but it IS a text field.
@@ -842,16 +850,16 @@ const styles = StyleSheet.create({
   bestOrderBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 8,
     paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10,
-    borderWidth: 1, borderColor: COLORS.primary + '55', backgroundColor: COLORS.primary + '14',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.28)', backgroundColor: 'rgba(255,255,255,0.08)',
   },
-  bestOrderText: { color: COLORS.primary, fontSize: 13, fontWeight: '700' },
+  bestOrderText: { color: COLORS.text, fontSize: 13, fontWeight: '700' },
   styleRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
   styleChip: {
     flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7,
     paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', backgroundColor: 'rgba(255,255,255,0.04)',
   },
-  styleChipOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  styleChipOn: { backgroundColor: 'rgba(255,255,255,0.14)', borderColor: 'rgba(255,255,255,0.28)' },
   styleChipOff: { opacity: 0.45 },
   styleChipTitle: { color: COLORS.text, fontSize: 13, fontWeight: '700' },
   styleChipTitleOn: { color: '#0B0B0C' },
@@ -867,18 +875,18 @@ const styles = StyleSheet.create({
   helpText: { color: COLORS.textMute, fontSize: 12.5, marginTop: 8, lineHeight: 18 },
   clubChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   clubChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', maxWidth: '100%' },
-  clubChipOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  clubChipOn: { backgroundColor: 'rgba(255,255,255,0.14)', borderColor: 'rgba(255,255,255,0.28)' },
   clubChipText: { color: '#D9D9DE', fontSize: 13, fontWeight: '700' },
   clubChipTextOn: { color: '#0A1A10' },
 
   createBtn: { borderRadius: 14, paddingVertical: 13, alignItems: 'center', marginTop: 10 },
   createBtnText: { color: '#0A1A10', fontWeight: '900', fontSize: 15.5 },
   secondaryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 14, paddingVertical: 12, marginTop: 10, borderWidth: 1.5, borderColor: 'rgba(45,236,134,0.5)' },
-  secondaryBtnText: { color: COLORS.primary, fontWeight: '800', fontSize: 14.5 },
+  secondaryBtnText: { color: COLORS.text, fontWeight: '800', fontSize: 14.5 },
   linkBtn: { alignItems: 'center', paddingVertical: 10 },
   linkBtnText: { color: COLORS.textMute, fontWeight: '700', fontSize: 13.5 },
 
-  detailWhen: { color: COLORS.primary, fontWeight: '800', fontSize: 15, marginBottom: 8 },
+  detailWhen: { color: COLORS.text, fontWeight: '800', fontSize: 15, marginBottom: 8 },
   detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
   detailRowText: { color: COLORS.text, fontSize: 13.5, flex: 1 },
   detailDesc: { color: COLORS.textMute, fontSize: 13.5, lineHeight: 19, marginTop: 8 },
@@ -890,5 +898,5 @@ const styles = StyleSheet.create({
   rosterRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.07)' },
   rosterHandle: { color: COLORS.text, fontWeight: '700', fontSize: 14, flexShrink: 1 },
   rosterCar: { color: COLORS.textMute, fontSize: 12.5, flex: 1 },
-  confirmedPill: { color: '#0A1A10', backgroundColor: COLORS.primary, fontSize: 9.5, fontWeight: '900', paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: 7, overflow: 'hidden' },
+  confirmedPill: { color: COLORS.text, backgroundColor: 'rgba(255,255,255,0.16)', fontSize: 9.5, fontWeight: '900', paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: 7, overflow: 'hidden' },
 });

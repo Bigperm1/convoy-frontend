@@ -42,6 +42,8 @@ const SUGGESTED_TAGS = [
 
 export default function HubScreen() {
   const { user, logout, refresh } = useAuth();
+  const accent = useAccent();
+  const skinColors = useAppSkinColors();
   const router = useRouter();
   const [settings] = useSettings();
   // The driver's Garage hero photo (their car) — used as their avatar in the
@@ -113,7 +115,7 @@ export default function HubScreen() {
     <SafeAreaView style={styles.c} edges={["top"]}>
       <GlassBackdrop />
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 110 }}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={COLORS.primary} />}>
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={accent} />}>
         <View style={styles.headerRow}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
             <TouchableOpacity
@@ -132,9 +134,9 @@ export default function HubScreen() {
         {/* Hub section selector — Clubs · Events · Cruises (Hub P2) */}
         <View style={styles.hubTabsRow}>
           {([["clubs", "people", "Clubs"], ["events", "calendar", "Events"], ["cruises", "car-sport", "Cruises"]] as const).map(([key, icon, label]) => (
-            <TouchableOpacity key={key} testID={`hub-section-${key}`} onPress={() => setSection(key)} style={[styles.hubTabBtn, section === key && styles.hubTabBtnOn]} activeOpacity={0.85}>
-              <Ionicons name={icon as any} size={16} color={section === key ? "#0A1A10" : "#D9D9DE"} />
-              <Text style={[styles.hubTabText, section === key && styles.hubTabTextOn]}>{label}</Text>
+            <TouchableOpacity key={key} testID={`hub-section-${key}`} onPress={() => setSection(key)} style={[styles.hubTabBtn, section === key && styles.hubTabBtnOn, section === key && { backgroundColor: accent, borderColor: accent }]} activeOpacity={0.85}>
+              <Ionicons name={icon as any} size={16} color={section === key ? skinColors.ink : "#D9D9DE"} />
+              <Text style={[styles.hubTabText, section === key && styles.hubTabTextOn, section === key && { color: skinColors.ink }]}>{label}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -158,7 +160,7 @@ export default function HubScreen() {
         <TouchableOpacity testID="create-community" onPress={() => setShowCreate(true)} activeOpacity={0.85} style={{ marginBottom: 14 }}>
           <Glass radius={16}>
             <View style={styles.createClubRow}>
-              <LinearGradient colors={[COLORS.primary, "#18B368"]} style={styles.createClubIcon}>
+              <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.createClubIcon}>
                 <Ionicons name="add" size={22} color="#0A1A10" />
               </LinearGradient>
               <Text style={styles.createClubText}>Create club</Text>
@@ -194,7 +196,7 @@ export default function HubScreen() {
               onChangeText={onExploreSearch}
             />
             <TouchableOpacity testID="search-community" onPress={() => setShowSearch(true)} style={styles.inviteLink}>
-              <Ionicons name="key-outline" size={14} color={COLORS.primary} />
+              <Ionicons name="key-outline" size={14} color={accent} />
               <Text style={styles.inviteLinkText}>Have an invite code?</Text>
             </TouchableOpacity>
             {explore.length === 0 && !exploreLoading && (
@@ -241,6 +243,7 @@ function CommunityCard({ c, onPress, active, mode = "mine", onJoin }: {
 }) {
   const tags = (c.tags || []).slice(0, 4);
   const carGlyph = useAccentAlpha(0.35);
+  const accent = useAccent();
   return (
     <TouchableOpacity testID={`community-${c.id}`} onPress={onPress} activeOpacity={0.9} style={{ marginBottom: 14 }}>
       <Glass radius={20}>
@@ -265,7 +268,7 @@ function CommunityCard({ c, onPress, active, mode = "mine", onJoin }: {
               {c.logo_b64 ? (
                 <Image source={{ uri: c.logo_b64 }} style={styles.clubLogo} />
               ) : (
-                <View style={styles.clubLogoPlaceholder}><Ionicons name="people" size={20} color={COLORS.primary} /></View>
+                <View style={styles.clubLogoPlaceholder}><Ionicons name="people" size={20} color={accent} /></View>
               )}
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -308,6 +311,7 @@ function CommunityCard({ c, onPress, active, mode = "mine", onJoin }: {
 
 function CreateModal({ visible, onClose, onCreated }: any) {
   const skinColors = useAppSkinColors();
+  const accent = useAccent();
   const tagTint = useAccentAlpha(0.18);
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
@@ -436,7 +440,7 @@ function CreateModal({ visible, onClose, onCreated }: any) {
             </View>
 
             <TouchableOpacity testID="cc-public" onPress={() => setIsPublic((v) => !v)} style={styles.toggleRow}>
-              <View style={[styles.toggleBox, isPublic && { backgroundColor: COLORS.primary, borderColor: COLORS.primary }]}>
+              <View style={[styles.toggleBox, isPublic && { backgroundColor: accent, borderColor: accent }]}>
                 {isPublic && <Ionicons name="checkmark" size={14} color="#fff" />}
               </View>
               <View style={{ flex: 1 }}>
@@ -848,7 +852,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                 activeOpacity={0.85}
                 style={[styles.activeBtn, { backgroundColor: activeBtnTint, borderColor: activeBtnEdge }, isActive && styles.activeBtnOn]}
               >
-                <Ionicons name={isActive ? "radio" : "radio-outline"} size={18} color={isActive ? "#0A0A0A" : COLORS.primary} />
+                <Ionicons name={isActive ? "radio" : "radio-outline"} size={18} color={isActive ? "#0A0A0A" : accent} />
                 <Text style={[styles.activeBtnText, isActive && { color: "#0A0A0A" }]} numberOfLines={1}>
                   {isActive ? "Active convoy — you're driving with this crew" : "Set as active convoy"}
                 </Text>
@@ -1025,7 +1029,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                   onPress={() => { setSearchOpen(true); setSearchQ(""); setSearchResults([]); }}
                   style={styles.addMemberBtn}
                 >
-                  <Ionicons name="person-add" size={15} color={COLORS.primary} />
+                  <Ionicons name="person-add" size={15} color={accent} />
                   <Text style={styles.addMemberText}>Add</Text>
                 </TouchableOpacity>
               )}
@@ -1067,7 +1071,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                         <Ionicons name={m.is_admin ? "star" : "star-outline"} size={18} color={accent} />
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => transfer(m)} hitSlop={8} style={styles.memberAction} testID={`transfer-${m.id}`}>
-                        <Ionicons name="ribbon-outline" size={18} color={COLORS.primary} />
+                        <Ionicons name="ribbon-outline" size={18} color={accent} />
                       </TouchableOpacity>
                     </>
                   )}
@@ -1185,6 +1189,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
 
 function ProfileModal({ visible, onClose, onSaved }: any) {
   const { user } = useAuth();
+  const skinColors = useAppSkinColors();
   const [handle, setHandle] = useState(user?.handle || "");
   const [make, setMake] = useState(user?.car_make || "");
   const [model, setModel] = useState(user?.car_model || "");
@@ -1222,7 +1227,7 @@ function ProfileModal({ visible, onClose, onSaved }: any) {
             <ProfileField testID="profile-year" label="Year" value={year} onChange={setYear} keyboard="number-pad" />
             <ProfileField testID="profile-color" label="Color" value={color} onChange={setColor} />
             <TouchableOpacity testID="profile-save" onPress={save} disabled={busy} style={styles.btn} activeOpacity={0.85}>
-              <LinearGradient colors={[COLORS.primary, COLORS.primaryDim]} style={styles.btnGrad}>
+              <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.btnGrad}>
                 <Text style={styles.btnText}>{busy ? "Saving…" : "Save"}</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -1271,7 +1276,7 @@ const styles = StyleSheet.create({
   emptyText: { color: COLORS.text, textAlign: "center", marginTop: 6, fontSize: 13 },
 
   commCard: { flexDirection: "row", alignItems: "center", padding: 12, gap: 12 },
-  commIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: COLORS.primary + "22", alignItems: "center", justifyContent: "center" },
+  commIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.10)", alignItems: "center", justifyContent: "center" },
   commLogo: { width: 44, height: 44, borderRadius: 14 },
   commName: { color: COLORS.text, fontWeight: "600", fontSize: 16 },
   commMeta: { color: COLORS.text, fontSize: 12, marginTop: 2 },
@@ -1284,7 +1289,7 @@ const styles = StyleSheet.create({
   adminBadge: { backgroundColor: COLORS.warning + "33", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   adminBadgeText: { color: COLORS.warning, fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
   addMemberBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.14)" },
-  addMemberText: { color: COLORS.primary, fontSize: 12, fontWeight: "700" },
+  addMemberText: { color: COLORS.text, fontSize: 12, fontWeight: "700" },
   memberAction: { paddingHorizontal: 6, paddingVertical: 4 },
   adminHint: { color: COLORS.textMute, fontSize: 10, marginTop: 8, lineHeight: 14 },
   activeBadge: { backgroundColor: COLORS.success + "33", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
@@ -1298,8 +1303,8 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: "rgba(45,236,134,0.4)",
     marginBottom: 14,
   },
-  activeBtnOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  activeBtnText: { flex: 1, color: COLORS.primary, fontWeight: "700", fontSize: 14 },
+  activeBtnOn: { backgroundColor: "rgba(255,255,255,0.10)", borderColor: "rgba(255,255,255,0.24)" },
+  activeBtnText: { flex: 1, color: COLORS.text, fontWeight: "700", fontSize: 14 },
 
   // Admin identity editor (logo + name) at the top of the detail sheet.
   adminIdentity: { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 14 },
@@ -1314,7 +1319,7 @@ const styles = StyleSheet.create({
   adminLogoEditBadge: {
     position: "absolute", right: -4, bottom: -4,
     width: 22, height: 22, borderRadius: 11,
-    backgroundColor: COLORS.primary,
+    backgroundColor: "rgba(255,255,255,0.12)",
     alignItems: "center", justifyContent: "center",
     borderWidth: 2, borderColor: "#1A1A1C",
   },
@@ -1363,7 +1368,7 @@ const styles = StyleSheet.create({
   btnGrad: { paddingVertical: 14, alignItems: "center" },
   btnText: { color: "#F4F4F4", fontWeight: "600", fontSize: 16 },
 
-  smallBtn: { flexDirection: "row", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: COLORS.primary, alignItems: "center" },
+  smallBtn: { flexDirection: "row", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.12)", alignItems: "center" },
   smallBtnText: { color: "#F4F4F4", fontWeight: "600", fontSize: 13 },
 
   statusBadge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: COLORS.success + "33" },
@@ -1372,7 +1377,7 @@ const styles = StyleSheet.create({
   detailDesc: { color: COLORS.text, fontSize: 14, marginTop: 6 },
   detailMeta: { color: COLORS.text, fontSize: 12, marginTop: 6 },
   inviteBox: { flexDirection: "row", alignItems: "center", padding: 14, borderRadius: 12, backgroundColor: "rgba(118,118,128,0.18)", gap: 12 },
-  inviteCode: { flex: 1, color: COLORS.primary, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 15, fontWeight: "600", letterSpacing: 1 },
+  inviteCode: { flex: 1, color: COLORS.text, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 15, fontWeight: "600", letterSpacing: 1 },
 
   pendingRow: { flexDirection: "row", alignItems: "center", padding: 10, borderRadius: 12, backgroundColor: "rgba(118,118,128,0.16)", marginTop: 8, gap: 8 },
   pendingAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: COLORS.accent, alignItems: "center", justifyContent: "center" },
@@ -1389,7 +1394,7 @@ const styles = StyleSheet.create({
   // (hubTab* — "section*" names were already taken by the detail modal's rows.)
   hubTabsRow: { flexDirection: "row", gap: 8, marginTop: 16, marginBottom: 16 },
   hubTabBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
-  hubTabBtnOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  hubTabBtnOn: { backgroundColor: "rgba(255,255,255,0.14)", borderColor: "rgba(255,255,255,0.28)" },
   hubTabText: { color: "#D9D9DE", fontWeight: "800", fontSize: 13.5 },
   hubTabTextOn: { color: "#0A1A10" },
   // Segment restyled to MATCH the Events/Cruises sections (hubEvents.tsx) so the
@@ -1402,7 +1407,7 @@ const styles = StyleSheet.create({
   createClubText: { color: COLORS.text, fontWeight: "800", fontSize: 15.5 },
   clubSearchInput: { backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 12, paddingHorizontal: 13, paddingVertical: 11, color: COLORS.text, fontSize: 15 },
   inviteLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, marginBottom: 4 },
-  inviteLinkText: { color: COLORS.primary, fontWeight: "700", fontSize: 13 },
+  inviteLinkText: { color: COLORS.text, fontWeight: "700", fontSize: 13 },
   segmentBtn: { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: "center" },
   segmentBtnOn: { backgroundColor: "rgba(255,255,255,0.12)" },
   segmentText: { color: COLORS.textMute, fontWeight: "700", fontSize: 13.5 },
@@ -1410,11 +1415,11 @@ const styles = StyleSheet.create({
 
   clubCardInner: { borderRadius: 20, overflow: "hidden" },
   clubBanner: { width: "100%", height: 130, alignItems: "center", justifyContent: "center", backgroundColor: "#0F1512" },
-  clubActivePill: { position: "absolute", top: 10, right: 10, flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: COLORS.primary, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  clubActivePill: { position: "absolute", top: 10, right: 10, flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(255,255,255,0.14)", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
   clubActivePillText: { color: "#0A0A0A", fontSize: 9, fontWeight: "800", letterSpacing: 0.5 },
   clubBody: { padding: 14 },
   clubLogo: { width: 42, height: 42, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.15)" },
-  clubLogoPlaceholder: { width: 42, height: 42, borderRadius: 12, backgroundColor: COLORS.primary + "22", alignItems: "center", justifyContent: "center" },
+  clubLogoPlaceholder: { width: 42, height: 42, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.10)", alignItems: "center", justifyContent: "center" },
   clubName: { color: COLORS.text, fontWeight: "700", fontSize: 17, letterSpacing: -0.3, flexShrink: 1 },
   // Club CONTENT text is white, not textDim (Jeff, 2026-07-25: "in the hub club
   // the fonts are grey"). #808080 at 12-13pt over the dark card was the least
@@ -1445,7 +1450,7 @@ const styles = StyleSheet.create({
   clubTag: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
   clubTagText: { color: "#D8D8DC", fontSize: 11, fontWeight: "600" },
 
-  joinBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  joinBtn: { backgroundColor: "rgba(255,255,255,0.12)", paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
   joinBtnText: { color: "#06281A", fontWeight: "800", fontSize: 13 },
   joinedPill: { backgroundColor: COLORS.success + "33", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 },
   joinedPillText: { color: COLORS.success, fontWeight: "700", fontSize: 12 },
@@ -1458,12 +1463,12 @@ const styles = StyleSheet.create({
   bannerPlaceholder: { flex: 1, backgroundColor: "rgba(118,118,128,0.18)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: COLORS.hairline, borderStyle: "dashed", borderRadius: 16 },
   tagWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   tagChip: { backgroundColor: "rgba(118,118,128,0.20)", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: "transparent" },
-  tagChipOn: { backgroundColor: "rgba(45,236,134,0.18)", borderColor: COLORS.primary },
+  tagChipOn: { backgroundColor: "rgba(255,255,255,0.14)", borderColor: "rgba(255,255,255,0.28)" },
   tagChipText: { color: COLORS.text, fontSize: 12, fontWeight: "600" },
-  tagChipTextOn: { color: COLORS.primary },
+  tagChipTextOn: { color: COLORS.text },
 
   detailBannerEdit: { width: "100%", height: 120, borderRadius: 16, overflow: "hidden" },
   detailBannerImg: { width: "100%", height: "100%" },
   detailBannerPlaceholder: { flex: 1, backgroundColor: "rgba(118,118,128,0.18)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: COLORS.hairline, borderStyle: "dashed", borderRadius: 16 },
-  detailBannerBadge: { position: "absolute", right: 8, bottom: 8, width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.primary, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#1A1A1C" },
+  detailBannerBadge: { position: "absolute", right: 8, bottom: 8, width: 24, height: 24, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.14)", alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#1A1A1C" },
 });

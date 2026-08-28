@@ -153,8 +153,17 @@ interface ConvoyMapboxProps {
   // point where the offer route peels off the active one. Tap the pill (or the
   // blue offer line itself) → accept; ✕ → dismiss. null → nothing renders.
   offerPill?: { lat: number; lng: number; savedMin: number; arrival?: string } | null;
+  /** Manual "I actually stopped here" confirm, pinned on the pending stop. The
+   *  visited test is a heuristic and a big-venue pin can sit hundreds of metres
+   *  from anywhere you can drive (Olaf's mall, 2026-08-28) — this is the driver's
+   *  override so a stop that will not auto-trigger can never strand them. */
+  stopPill?: { lat: number; lng: number; label: string } | null;
   onOfferAccept?: () => void;
   onOfferDismiss?: () => void;
+  /** Body tap: mark the pending stop reached and carry on to the next one. */
+  onStopArrived?: () => void;
+  /** × : hide the confirm for this approach (re-arms if you leave and come back). */
+  onStopDismiss?: () => void;
   routes?: { polyline: string; color?: string; congestion?: CongestionLevel[]; coordinates?: [number, number][] }[];
   selectedRouteIndex?: number;
   onSelectRoute?: (index: number) => void;
@@ -2084,6 +2093,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     distanceToManeuverM, onMapPress, onPoiPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination, stops,
     offerPill, onOfferAccept, onOfferDismiss,
+    stopPill, onStopArrived, onStopDismiss,
     hazards, speedCameras, roadEvents, places, showPlacePins = true, destWeather,
     onHazardPress, onPlacePress, onHeading, resetNorthSignal, fitCrewSignal,
     zoomOffset = 0,
@@ -3580,6 +3590,25 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
                 </Text>
               </View>
               <TouchableOpacity onPress={onOfferDismiss} hitSlop={10} style={styles.offerClose}>
+                <Ionicons name="close" size={15} color="#8E8E93" />
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </MarkerView>
+        )}
+
+        {stopPill && (
+          <MarkerView coordinate={[stopPill.lng, stopPill.lat]} anchor={{ x: 0.5, y: 1.15 }} allowOverlap>
+            <TouchableOpacity onPress={onStopArrived} activeOpacity={0.85} style={styles.offerPill}>
+              <View style={styles.offerBolt}>
+                <Ionicons name="checkmark" size={15} color="#0A1A10" />
+              </View>
+              <View style={{ minWidth: 0 }}>
+                <Text style={styles.offerTitle}>Arrived here?</Text>
+                <Text style={styles.offerSub} numberOfLines={1}>
+                  {`Tap to continue past ${stopPill.label}`}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={onStopDismiss} hitSlop={10} style={styles.offerClose}>
                 <Ionicons name="close" size={15} color="#8E8E93" />
               </TouchableOpacity>
             </TouchableOpacity>

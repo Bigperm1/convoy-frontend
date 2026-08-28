@@ -550,6 +550,28 @@ export default function MapScreen() {
   // Closest approach seen per stop, for the WATCH crumb below. Read-only telemetry:
   // nothing about driving behaviour depends on it.
   const stopNearRef = useRef<Map<string, number>>(new Map());
+  // ── THE DRIVER'S OVERRIDE (2026-08-28, Jeff) ───────────────────────────────
+  // The visited test is a heuristic, and a heuristic on a 200 m-wide shopping mall
+  // will always have an edge: Olaf's pin sat 237 m from anywhere he could drive, so
+  // it could never auto-trigger and every reroute dragged him back. Worse, the stops
+  // drawer is preview-only, so mid-drive he had NOTHING to tap. This pill rides on
+  // the pending stop inside STOP_PILL_M and lets him say "I went, carry on".
+  // Same shell as the switch-route offer, by Jeff's call.
+  const STOP_PILL_M = 400;
+  const [stopPill, setStopPill] = useState<{ lat: number; lng: number; label: string } | null>(null);
+  const stopPillKeyRef = useRef<string | null>(null);
+  const dismissedStopPillRef = useRef<string | null>(null);
+  // The effect below runs on EVERY fix; setState unconditionally would re-render the
+  // whole map screen at GPS rate. Only write when the pill actually changes.
+  const setStopPillIf = (v: { lat: number; lng: number; label: string } | null) => {
+    const k = v ? `${v.lat},${v.lng}` : null;
+    if (k === stopPillKeyRef.current) return;
+    stopPillKeyRef.current = k;
+    setStopPill(v);
+  };
+  // Marking mutates a REF, which cannot re-run the route effect — without this the
+  // driver would tap "Arrived" and watch nothing happen until the next off-route trip.
+  const [stopsVersion, setStopsVersion] = useState(0);
   const noteViaSnapped = (
     fed: { lat: number; lng: number }[],
     snapped?: ({ lat: number; lng: number } | null)[],
@@ -1000,9 +1022,9 @@ export default function MapScreen() {
   // preview pan or parking next to tomorrow's first stop must not consume it. Cheap:
   // one haversine per fix against a single stop.
   useEffect(() => {
-    if (navMode !== "turn-by-turn" || !coords) return;
+    if (navMode !== "turn-by-turn" || !coords) { setStopPillIf(null); return; }
     const pending = stops.filter((st) => !visitedStopsRef.current.has(stopKey(st)));
-    if (!pending.length) return;
+    if (!pending.length) { setStopPillIf(null); return; }
     // Distances AND the radius this particular stop earns, split out so the watch
     // crumb below can report exactly what the test saw rather than just its verdict.
     const gauge = (st: { lat: number; lng: number }) => {
@@ -1058,7 +1080,58 @@ export default function MapScreen() {
       visitedStopsRef.current.add(stopKey(pending[1]));
       try { logEventReliable(`stop-visited "${pending[1].label}" why=reached left=${pending.length - 2}; "${pending[0].label}" why=skipped`); } catch {}
     }
+
+    // ── THE PILL, LAST AND FROM A FRESH LIST ─────────────────────────────────
+    // `pending` was snapshotted at the top of this run, and the auto-mark above can
+    // consume pending[0] — or TWO of them via the skip window — inside this same run.
+    // Computing the pill from that stale snapshot left it pointing at a stop already
+    // marked, and a tap would then silently eat the NEXT one. Recompute.
+    {
+      const live = stops.filter((st) => !visitedStopsRef.current.has(stopKey(st)));
+      const head = live[0];
+      if (!head) { setStopPillIf(null); return; }
+      const g0 = gauge(head);
+      const dBest0 = Math.min(g0.dRaw, g0.dSnap);
+      const k0 = stopKey(head);
+      if (dBest0 > STOP_PILL_M) {
+        // Left the area — re-arm, so a dismissal never sticks for a later approach.
+        if (dismissedStopPillRef.current === k0) dismissedStopPillRef.current = null;
+        setStopPillIf(null);
+      } else {
+        setStopPillIf(dismissedStopPillRef.current === k0
+          ? null
+          : { lat: head.lat, lng: head.lng, label: head.label });
+      }
+    }
   }, [coords, navMode, stops]);
+
+  // Driver says they got there. Same end state as an automatic mark, so the router
+  // drops it and continues to the next stop or the destination — plus the replot the
+  // ref mutation cannot trigger on its own. `why=manual` keeps it separable in the
+  // telemetry from an automatic `why=reached`.
+  const lastStopMarkAtRef = useRef(0);
+  const markStopArrived = () => {
+    // The pill unmounts on the state write, but React batches — two taps in one frame
+    // both read pendingStops() and the second would consume the NEXT stop. Latch it.
+    if (Date.now() - lastStopMarkAtRef.current < 1200) return;
+    const list = pendingStops(stopsRef.current);
+    const st = list[0];
+    if (!st) return;
+    lastStopMarkAtRef.current = Date.now();
+    visitedStopsRef.current.add(stopKey(st));
+    try { logEventReliable(`stop-visited "${st.label}" why=manual left=${list.length - 1}`); } catch {}
+    dismissedStopPillRef.current = null;
+    stopPillKeyRef.current = null;
+    setStopPill(null);
+    setStopsVersion((v) => v + 1);
+    Haptics.selectionAsync().catch(() => {});
+  };
+  const dismissStopPill = () => {
+    const st = pendingStops(stopsRef.current)[0];
+    if (st) dismissedStopPillRef.current = stopKey(st);
+    stopPillKeyRef.current = null;
+    setStopPill(null);
+  };
 
   // Dedupe key so Nova announces the route options at most once per destination.
   const announcedRoutesForRef = useRef<string>("");
@@ -1131,7 +1204,12 @@ export default function MapScreen() {
       // the selected, green route — is the quickest one that does NOT turn you
       // around. When nothing departs forward the order is unchanged: sometimes a
       // U-turn genuinely is the only way out.
-      const sorted = orderRoutesForward(raw, facing ?? undefined);
+      // Mid-drive the fastest continuation routinely starts with an ordinary turn, and
+      // the 75° DEPARTURE gate demotes those below slower straight-on lines — the repo
+      // documents this at the off-route handler. Now that a manual stop mark can re-enter
+      // this path while driving, it has to make the same distinction.
+      const sorted = orderRoutesForward(raw, facing ?? undefined,
+        navActiveRef.current ? UTURN_ONLY_TOLERANCE_DEG : undefined);
       // depart-rank crumb (2026-08-27, Jeff: "it told me to go the opposite direction
       // I was facing" — off-route 55m within 7s of nav start, instant reroute). The
       // ranker has two SILENT give-up paths — n<=1 routes, or facing=null — and no
@@ -1151,6 +1229,16 @@ export default function MapScreen() {
         ...r,
         color: i === 0 ? '#2DEC86' : '#9AA0A6',
       })) as any[];
+      // ⛔ NEVER BLANK A LIVE ROUTE (review, 2026-08-28). fetchRoutes swallows every
+      // failure and returns [] after up to a 15 s timeout (nav.ts), so ONE dead-zone
+      // request would set routes=[] mid-drive → activeRoute null → the maneuver
+      // banner, the step drawer AND its End button all unmount while navMode is
+      // still "turn-by-turn", leaving a bare map with no on-screen way to end the
+      // drive. That is an underground parkade — precisely where the Arrived pill
+      // exists to be used. The off-route handler has guarded this since 2026-08-18
+      // with `if (res.length > 0)`; this plot path never did, and making the manual
+      // mark re-enter it turned a rare double-failure into a one-tap path.
+      if (!results.length && navActiveRef.current) return;
       setRoutes(results);
       setSelectedRouteIndex(0);
       // ── A REAL SCENIC ROUTE (2026-07-29) ──────────────────────────────────
@@ -1201,7 +1289,9 @@ export default function MapScreen() {
       // Nova announces the route options at plot time (C). Only when there's a
       // real choice (>=2 routes), not muted, once per destination, and only while
       // stopped/slow so it doesn't talk over the Start greeting on auto-start.
-      if (results.length >= 2 && !getSettings().novaMuted) {
+      // …and never mid-drive: this is a PLOT-TIME announcement, and a manual stop mark
+      // can now re-run this effect while the driver is already navigating.
+      if (results.length >= 2 && !getSettings().novaMuted && !navActiveRef.current) {
         const destKey = `${destination.lat.toFixed(5)},${destination.lng.toFixed(5)}`;
         const slowEnough = ((coordsRef.current?.speed ?? 0) * 3.6) < 5;
         if (announcedRoutesForRef.current !== destKey && slowEnough) {
@@ -1295,7 +1385,7 @@ export default function MapScreen() {
     // pendingStops deliberately not a dep: it is a stable-by-construction helper over
     // a ref; listing it (a per-render closure) would re-fetch routes on EVERY render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destination, stops, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
+  }, [destination, stops, stopsVersion, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
 
   // When a destination is picked, drop follow-mode so the camera can zoom out to
   // frame all route options (ConvoyMap fits to the polylines). The Recenter FAB
@@ -1414,7 +1504,7 @@ export default function MapScreen() {
     if (!t) return;
     if (typeof t.destLat === "number" && typeof t.destLng === "number") {
       visitedStopsRef.current = new Set();   // a re-taken drive starts unvisited
-      snappedStopsRef.current = new Map(); stopNearRef.current = new Map();
+      snappedStopsRef.current = new Map(); stopNearRef.current = new Map(); dismissedStopPillRef.current = null;
       setStops(t.stops?.length ? t.stops.map((st) => ({ lat: st.lat, lng: st.lng, label: st.label })) : []);
       setDestination({ lat: t.destLat, lng: t.destLng, label: t.destLabel || "Drive" });
       setShowSteps(true);
@@ -1590,7 +1680,7 @@ export default function MapScreen() {
       // chip: add the same coffee shop to tonight's drive and pendingStops silently
       // never routes there, with the chip on screen claiming it will.
       visitedStopsRef.current = new Set();
-      snappedStopsRef.current = new Map(); stopNearRef.current = new Map();
+      snappedStopsRef.current = new Map(); stopNearRef.current = new Map(); dismissedStopPillRef.current = null;
       setStops([]);
       setDestination(null);
       setRoutes([]);
@@ -2353,7 +2443,7 @@ export default function MapScreen() {
     // Visited keys are DRIVE-scoped: ending the drive un-visits everything so a
     // re-Go through the same chips routes the full plan again (review, 2026-08-27).
     visitedStopsRef.current = new Set();
-    snappedStopsRef.current = new Map(); stopNearRef.current = new Map();
+    snappedStopsRef.current = new Map(); stopNearRef.current = new Map(); dismissedStopPillRef.current = null;
     setDestination(null);
     setRoute(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2652,7 +2742,7 @@ export default function MapScreen() {
     // goes with them: it describes THIS drive, and a stale entry would silently
     // pre-visit the same coordinates on tomorrow's trip.
     visitedStopsRef.current = new Set();
-    snappedStopsRef.current = new Map(); stopNearRef.current = new Map();
+    snappedStopsRef.current = new Map(); stopNearRef.current = new Map(); dismissedStopPillRef.current = null;
     setStops([]);
     // Also retract the step drawer so it doesn't dangle on a destination-less map.
     slideStepDrawerDown();
@@ -4249,6 +4339,9 @@ export default function MapScreen() {
         selectedRouteIndex={selectedRouteIndex}
         onSelectRoute={handleSelectRoute}
         offerPill={rerouteOffer ? { lat: rerouteOffer.divLat, lng: rerouteOffer.divLng, savedMin: rerouteOffer.savedMin, arrival: rerouteOffer.arrival } : null}
+        stopPill={stopPill}
+        onStopArrived={markStopArrived}
+        onStopDismiss={dismissStopPill}
         onOfferAccept={acceptReroute}
         onOfferDismiss={declineReroute}
         // Follow-mode logic, driven by the single `isFollowing` flag (true even
@@ -4386,7 +4479,7 @@ export default function MapScreen() {
               <DestinationSearch
                 origin={coords}
                 onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
-                onClear={() => { visitedStopsRef.current = new Set(); snappedStopsRef.current = new Map(); stopNearRef.current = new Map(); setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
+                onClear={() => { visitedStopsRef.current = new Set(); snappedStopsRef.current = new Map(); stopNearRef.current = new Map(); dismissedStopPillRef.current = null; setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
                 onProfilePress={() => router.push("/(app)/hub" as any)}
                 onPressField={() => setNavSearchOpen(true)}
                 // Departure IQ now lives IN the bar: an "AI" pre-fill + green "Let's go".

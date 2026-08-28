@@ -384,6 +384,8 @@ export default function AppLayout() {
             edge of the map search bar (mirrors Google Maps). Hidden from the
             bottom bar but still navigable via router.push("/(app)/hub"). */}
         <Tabs.Screen name="hub" options={{ href: null }} />
+        {/* TEMP preview for the Hub redesign — delete with hub-preview.tsx. */}
+        <Tabs.Screen name="hub-preview" options={{ href: null }} />
         <Tabs.Screen name="settings" options={{ href: null }} />
         <Tabs.Screen name="drive-mode" options={{ href: null }} />
         <Tabs.Screen name="garage" options={{ href: null }} />

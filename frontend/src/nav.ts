@@ -1,7 +1,18 @@
-// Navigation engine — Routes API (computeRoutes) + turn-by-turn step machine.
-// Replaces the legacy Directions API with the Google Routes API v2 which
-// provides richer traffic data, better polyline quality and is the
-// forward-looking Google-recommended routing endpoint.
+// Navigation engine — MAPBOX Directions + turn-by-turn step machine.
+//
+// ⚠ THIS HEADER USED TO SAY "Google Routes API v2 (computeRoutes)". That was TRUE
+// until 2026-06-14 (`fcaebc8`), when routing moved to Mapbox alongside the map
+// engine — and the comment was never updated, so for two months the file's own
+// header contradicted its imports. It got repeated back to Jeff as fact on
+// 2026-08-27. There is now NO Google routing call anywhere in the app: grep
+// `computeRoutes|routes.googleapis` and the only hits are comments.
+//
+// Routing is 100% Mapbox: fetchMapboxRoutes (alternatives), fetchMapboxRouteVia
+// (stops + the AI route's habitual-path replay), refreshMapboxRoute (live ETA).
+// Google is still used, but NOT for routing — Places autocomplete
+// (DestinationSearch), voice place/geocode lookups (voiceBus), one reverse-geocode
+// for country->units (map.tsx), and Sign in with Google (auth). Those are separate
+// decisions from the routing engine; do not "consolidate" them by assuming.
 
 import { useEffect, useRef, useState } from "react";
 import { Platform, AppState } from "react-native";
@@ -151,11 +162,10 @@ export type AvoidPrefs = {
   ferries?: boolean;
 };
 
-// ---- Routes API v2 (computeRoutes) ----
-// On web: proxied through FastAPI /api/routes (CORS limitation).
-// On native: calls the Routes API directly for minimum latency.
-// Returns the same NavRoute[] shape as the old Directions-based function
-// so all callers (map.tsx, NavigationPanel, etc.) need zero changes.
+// ---- Route fetch (MAPBOX Directions — see the file header) ----
+// Returns NavRoute[], the shape every caller (map.tsx, the car surfaces, the turn
+// engine) consumes. The "Routes API v2 / computeRoutes" this comment used to name
+// is Google's and has not been called since 2026-06-14.
 export async function fetchRoutes(
   origin: LatLng,
   destination: LatLng,

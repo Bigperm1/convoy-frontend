@@ -118,7 +118,7 @@ Cross-screen coordination uses lightweight module-level `Set<Listener>` buses in
 
 ### Navigation engine
 
-`src/nav.ts` — uses the **Google Routes API v2** (`computeRoutes`), not the legacy Directions API. Provides `fetchRoutes`, the `useTurnByTurn` step machine, distance/ETA formatters, and TTS announcements (which duck the music player via `applePlayer`). `src/novaGreeting.ts` prepares/plays the Nova voice greeting at route start.
+`src/nav.ts` — uses the **Mapbox Directions API** (`src/mapboxDirections.ts`): `fetchMapboxRoutes` for alternatives, `fetchMapboxRouteVia` for stops + the AI route's habitual-path replay, `refreshMapboxRoute` for live ETA. ⚠ **This line used to say "Google Routes API v2 (computeRoutes)"** — stale since the 2026-06-14 move to Mapbox (`fcaebc8`) and repeated back to Jeff as fact on 2026-08-27. **There is no Google routing call left in the app.** Google survives only for Places autocomplete, voice place/geocode lookups, one country lookup for units, and Sign in with Google. Provides `fetchRoutes`, the `useTurnByTurn` step machine, distance/ETA formatters, and TTS announcements (which duck the music player via `applePlayer`). `src/novaGreeting.ts` prepares/plays the Nova voice greeting at route start.
 
 ### Voice / Nova
 

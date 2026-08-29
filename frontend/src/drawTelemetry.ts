@@ -74,11 +74,27 @@ export function reportDraw(
     // out loud instead of leaving it to be derived from two coordinates.
     const sep = gps ? haversineM(gps.lat, gps.lng, drawn.lat, drawn.lng) : null;
     const acc = typeof gps?.accM === "number" && isFinite(gps.accM) && gps.accM >= 0 ? gps.accM : null;
+    // ── DO NOT LOG A STATIONARY PINNED FIX'S COORDINATES (2026-08-29) ────────────
+    // `gps` is RAW coords — it has not been through shareablePosition(), so it is not
+    // subject to the one privacy gate (src/locationPrivacy.ts). logEvent is a Supabase
+    // INSERT carrying the user's handle, so this row leaves the device.
+    //
+    // Stationary + pinned is EXACTLY the walked-away case: map.tsx only pins when the
+    // phone is >75 m from the car spot, which is the driver standing somewhere that is
+    // not a road — their house, their office. Publishing that coordinate is the house
+    // leak this whole module exists to prevent.
+    //
+    // It was hidden before only by accident: the MIN_SPEED_MS floor meant no stationary
+    // row ever existed, so lifting that floor for `pin` rows (which the diagnosis needed)
+    // opened it. Withhold the COORDINATE only — sep=, acc= and the latch/parked/hu/
+    // spotAge state all still emit, and those are every diagnostic this row is for.
+    // A moving pin row is on a road and keeps its coordinate.
+    const hideGps = slow && mode === "pin";
     const p = privacyDebug();
     logEvent(
       `draw-cmp surf=${surface} mode=${mode} d=${d.toFixed(1)}m spd=${(spd * 3.6).toFixed(0)} nav=${navActive ? 1 : 0} ` +
         `acc=${acc == null ? "?" : acc.toFixed(0) + "m"} sep=${sep == null ? "?" : sep.toFixed(0) + "m"} ` +
-        `gps=${gps ? gps.lat.toFixed(6) + "," + gps.lng.toFixed(6) : "?"} ` +
+        `gps=${gps && !hideGps ? gps.lat.toFixed(6) + "," + gps.lng.toFixed(6) : hideGps ? "withheld" : "?"} ` +
         `raw=${raw.lat.toFixed(6)},${raw.lng.toFixed(6)} drawn=${drawn.lat.toFixed(6)},${drawn.lng.toFixed(6)} ` +
         `latch=${p.latch ? 1 : 0} parked=${p.parked ? 1 : 0} hu=${p.hu ? 1 : 0} spotAge=${p.spotAgeS == null ? "?" : p.spotAgeS + "s"}`,
     );

@@ -35,9 +35,13 @@ import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
 //
 // ⚠ THIS MODULE IS THE SOLE WRITER OF THIS KEY (2026-08-29). map.tsx used to write it
 // too, guarded on `speed >= 2.5` with NO latch — and its own comment claimed "both
-// writers now agree on what 'in the car' means", which was false. That second writer is
-// how a single bad fix reached disk: see the SPOT_MAX_AGE_MS note below. If you are
-// about to add another writer, don't — call noteFix().
+// writers now agree on what 'in the car' means", which was false.
+//
+// ⚠ CORRECTION, same day, from the review: that second writer was REDUNDANT, not causal.
+// It sat in the same effect body as the noteFix() call, fed the same `coords`, so every
+// fix that reached it reached noteFix() two lines later. Removing it narrows the surface;
+// it did NOT close the 8/29 poisoning. See the arm-and-record note in noteFix() for what
+// actually let the bad fix through. Don't add a third writer — call noteFix().
 const CAR_SPOT_KEY = "convoy.lastCarSpot.v1";
 // ── THE SPOT MUST BE ABLE TO GO STALE (2026-08-29) ─────────────────────────────
 // Until today the spot persisted as a bare {lat,lng} with no timestamp, and hydrate
@@ -137,6 +141,10 @@ let _spotSavedAt = 0;
 let _drivingSavedAt = 0;
 let _hydrated = false;
 let _drivingLatched = false;
+// True when the latch was RESTORED from disk on hydrate rather than earned by a real
+// >= 15 km/h fix in this process. A provisional latch cannot refresh _lastDrivingAt —
+// see the note in noteFix(). Cleared by the first genuine vehicular fix.
+let _latchProvisional = false;
 
 /** Hydrate the persisted car spot + driving stamp. Idempotent; safe to call anywhere. */
 export async function hydrateLocationPrivacy(): Promise<void> {
@@ -183,11 +191,22 @@ export async function hydrateLocationPrivacy(): Promise<void> {
     // _drivingLatched is in-memory only, so every force-quit cleared it while
     // _lastDrivingAt survived on disk. With the latch clear, `inCar` in
     // shareablePosition() is unconditionally false, so a restart mid-drive published the
-    // CAR SPOT instead of the live position for the next 90 s — a force-quit strictly
-    // increased pin bias, which is why Jeff force-quitting three times made it worse.
-    // Only ever re-arms inside the window isParked() already trusts, so this can't
-    // resurrect a latch that had legitimately expired.
-    if (_lastDrivingAt > 0 && Date.now() - _lastDrivingAt < DRIVING_HYSTERESIS_MS) _drivingLatched = true;
+    // CAR SPOT instead of the live position — and NOT merely for 90 s, as this comment
+    // first claimed: nothing re-arms the latch except a fix above 15 km/h, so a restart
+    // followed by a crawl that never clears it publishes the stale spot indefinitely.
+    // (The 90 s hysteresis governs the parked STATUS LABEL, not the position — that split
+    // is documented in shareablePosition.) A force-quit therefore strictly increased pin
+    // bias, which is why Jeff force-quitting three times made it worse.
+    //
+    // Restored PROVISIONALLY: it cannot renew its own window (see noteFix), and
+    // `age >= 0` rejects a device whose clock moved backwards, which would otherwise make
+    // the expiry test on line ~320 permanently false and pin the latch on for the life of
+    // the process.
+    const age = Date.now() - _lastDrivingAt;
+    if (_lastDrivingAt > 0 && age >= 0 && age < DRIVING_HYSTERESIS_MS) {
+      _drivingLatched = true;
+      _latchProvisional = true;
+    }
   } catch {}
 }
 
@@ -293,13 +312,42 @@ export function noteFix(lat: number, lng: number, speedMs?: number): void {
   if (typeof lat !== "number" || typeof lng !== "number") return;
   const spd = speedMs ?? 0;
   const now = Date.now();
+  // ── ARM AND RECORD MUST NOT HAPPEN IN THE SAME CALL (2026-08-29) ──────────────
+  // Until today they did: line 1 armed the latch off this fix's own speed, and 25 lines
+  // later the SAME fix was recorded as the car spot. The latch's whole job is to prove
+  // "this phone is in a car", and a fix was allowed to prove that about ITSELF — so one
+  // isolated outlier was self-authorising. Jeff's 8/29 multipath fix (337 m in 11 s while
+  // reporting 51 km/h) walked straight through on a cold start with the latch at false.
+  //
+  // So recording now requires the latch to have been armed by an EARLIER fix. Cost to a
+  // real driver: the first vehicular fix after pulling away is not recorded — the next
+  // one, ~1 s later, is. Nothing else changes.
+  //
+  // ⚠ THIS IS NOT SUFFICIENT ON ITS OWN and must not be described as a fix for the 8/29
+  // incident: that episode had TWO fixes at the bad coordinate 41 s apart, so the second
+  // one would still be recorded. Rejecting a SUSTAINED bad episode needs the fix's own
+  // horizontal accuracy, which is plumbed (coords.acc) but deliberately not gated yet —
+  // we have never measured what testers' phones report, so a threshold today would be
+  // invented. Measure `acc=` from draw-cmp first, then gate here.
+  const latchedBefore = _drivingLatched;
   // The latch: only a vehicular speed can ARM it; once armed, above-walking keeps it.
-  if (spd >= DRIVING_ENTER_SPEED_MS) _drivingLatched = true;
+  if (spd >= DRIVING_ENTER_SPEED_MS) { _drivingLatched = true; _latchProvisional = false; }
   else if (_lastDrivingAt > 0 && now - _lastDrivingAt >= DRIVING_HYSTERESIS_MS) _drivingLatched = false;
   const aboveWalking = spd >= DRIVING_SPEED_MS;
   const driving = _drivingLatched && aboveWalking;
   if (driving) {
-    _lastDrivingAt = now;
+    // ── A PROVISIONAL LATCH MAY NOT EXTEND ITS OWN WINDOW (2026-08-29) ──────────
+    // hydrate re-arms the latch from the persisted stamp so a force-quit mid-drive
+    // stops publishing the stale car spot. But that restored latch is a GUESS, and
+    // refreshing _lastDrivingAt from it makes the guess self-sustaining: a runner who
+    // genuinely drove 80 s ago, force-quit, then jogged at 10 km/h would hold the latch
+    // for the whole run — recording a car spot down the footpath and broadcasting live
+    // GPS the entire time. The review caught this; it is a privacy regression, not just
+    // a wrong pin.
+    // So a provisional latch is spent, not renewed: the 90 s window expires on schedule
+    // unless a genuine >= 15 km/h fix confirms it (which clears the flag above, within
+    // seconds for any real driver).
+    if (!_latchProvisional) _lastDrivingAt = now;
     // Driving expires a witnessed park: the car provably left the spot the head-unit
     // disconnect vouched for (covers CarPlay unplugged mid-drive — the crawl that
     // follows must fall back to the 75 m separation gate, not pin a stale spot).
@@ -321,7 +369,16 @@ export function noteFix(lat: number, lng: number, speedMs?: number): void {
   // Cost, accepted: >90 s stationary in gridlock drops the latch, and the pin then stops
   // tracking until the car next clears 30 km/h. Bounded and self-correcting — unlike a
   // phantom car on a trail, which persists as your parked location afterwards.
-  if (!carAttached() && !(driving)) return;
+  // Two conditions beyond `driving`, and they close different holes:
+  //  • `latchedBefore` — a fix may not be recorded on the strength of a latch it armed
+  //    itself (the arm-and-record note at the top of this function).
+  //  • `!_latchProvisional` — a latch RESTORED from disk may prove "keep publishing this
+  //    driver's live position" (that is the force-quit fix, and it runs through
+  //    shareablePosition's `movingNow`), but it may NOT prove "this phone is in a car"
+  //    strongly enough to write a durable car spot. Simulation caught the difference: a
+  //    runner who drove 80 s ago and force-quit still recorded their FIRST jogging fix
+  //    to disk. A real driver clears provisional within seconds of pulling away.
+  if (!carAttached() && !(driving && latchedBefore && !_latchProvisional)) return;
   _carSpot = { lat, lng };
   _carSpotAt = now;
   if (now - _spotSavedAt > SPOT_SAVE_THROTTLE_MS) {

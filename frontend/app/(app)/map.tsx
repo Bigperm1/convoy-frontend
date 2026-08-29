@@ -41,7 +41,7 @@ import {
   useRouteTrafficRefresh, fetchRouteViaStops,
 } from "../../src/nav";
 import { getDepartureBearing, noteCourse, orderRoutesForward, routeInitialBearing, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
-import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw } from "../../src/locationPrivacy";
+import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw, carSpot } from "../../src/locationPrivacy";
 import CarDriveList from "../../src/CarDriveList";
 import { subscribeBgFix } from "../../src/navNotification";
 import { type CongestionLevel } from "../../src/mapboxDirections";
@@ -3005,11 +3005,16 @@ export default function MapScreen() {
             if (pos?.coords) {
               const h = pos.coords.heading;
               const sp = pos.coords.speed;
+              // Read this fix's OWN accuracy. Never carry cur?.acc forward — stamping the
+              // last fix's uncertainty onto a different fix is the same instrument lie as
+              // the stale-speed carry-forward on the line below.
+              const a = pos.coords.accuracy;
               setCoords((cur) => ({
                 lat: pos.coords.latitude,
                 lng: pos.coords.longitude,
                 heading: typeof h === "number" && h > 0 ? h : cur?.heading,
                 speed: typeof sp === "number" && sp >= 0 ? sp : (cur?.speed ?? 0),
+                acc: typeof a === "number" && isFinite(a) && a >= 0 ? a : undefined,
               }));
             }
           } catch {}
@@ -3510,11 +3515,13 @@ export default function MapScreen() {
         const lng = (pos as any).coords.longitude;
         const heading = (pos as any).coords.heading;
         const speed = (pos as any).coords.speed;
+        const acc0 = (pos as any).coords.accuracy;
         setCoords({
           lat,
           lng,
           heading: typeof heading === "number" && heading > 0 ? heading : (coords?.heading || 0),
           speed: typeof speed === "number" && speed >= 0 ? speed : 0,
+          acc: typeof acc0 === "number" && isFinite(acc0) && acc0 >= 0 ? acc0 : undefined,
         });
         // 2. Push the new fix to the backend so /users/nearby returns us live — but only
         //    what the avatarMode contract allows. This was ungated too, so a manual
@@ -3828,21 +3835,24 @@ export default function MapScreen() {
   // live position with it is a lie about where they are. 75 m is well beyond GPS scatter
   // and stop-and-go creep, and well inside "I walked into that building".
   const SELF_PIN_MIN_SEPARATION_M = 75;
-  const LAST_CAR_SPOT_KEY = "convoy.lastCarSpot.v1";
+  // (convoy.lastCarSpot.v1 is no longer named here — locationPrivacy owns it end to end,
+  // reads included. 2026-08-29.)
   const [privacyHydrated, setPrivacyHydrated] = useState(false);
   // Read-only mirror of the car spot for the debug pill. The write-throttle ref that
   // used to sit beside this went with the second AsyncStorage writer (2026-08-29).
   const lastCarLocRef = useRef<{ lat: number; lng: number } | null>(null);
   useEffect(() => {
-    // Hydrate once; never clobber a fresher in-memory value.
-    AsyncStorage.getItem(LAST_CAR_SPOT_KEY)
-      .then((raw) => {
-        if (!raw || lastCarLocRef.current) return;
-        const p = JSON.parse(raw);
-        if (typeof p?.lat === "number" && typeof p?.lng === "number") lastCarLocRef.current = { lat: p.lat, lng: p.lng };
-      })
-      .catch(() => {});
-    void hydrateLocationPrivacy().then(() => setPrivacyHydrated(true)).catch(() => setPrivacyHydrated(true));
+    // ── ONE SOURCE FOR THE SPOT, INCLUDING THE DEBUG PILL (2026-08-29) ────────────
+    // This used to read convoy.lastCarSpot.v1 straight off disk with no age gate. Once
+    // locationPrivacy started REJECTING stale and unstamped spots, that made the AV pill
+    // report `spot=Y` while the module held null — the one instrument in this change
+    // still disagreeing with the module it reports on. It now mirrors carSpot(), so if
+    // hydrate rejected the spot the pill says so too.
+    const seed = () => {
+      setPrivacyHydrated(true);
+      if (!lastCarLocRef.current) lastCarLocRef.current = carSpot();
+    };
+    void hydrateLocationPrivacy().then(seed).catch(seed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const lastDrivingAtRef = useRef(0);

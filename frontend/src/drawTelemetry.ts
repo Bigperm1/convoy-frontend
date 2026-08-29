@@ -8,9 +8,27 @@
 //
 // This TAPS the existing draw path — it changes nothing about what draws.
 
+// ── WHAT THIS ROW WAS MISSING, AND WHAT IT COST (2026-08-29) ───────────────────
+// The row reported this instrument's OUTPUT while hiding both its INPUTS.
+//
+// In `mode=pin`, `raw=` is not GPS at all — ConvoyMapbox passes `selfCar`, which when
+// pinned IS the parked spot (ConvoyMapbox.tsx:2736-2746). So `d=0.0m` is a tautology
+// (the pin compared against itself) and the driver's live fix — the one number needed to
+// see that the marker was 345 m from the phone — appeared nowhere. Jeff's stale-pin
+// report took nine agents and ten queries to settle, and one term of it (the fix's own
+// horizontal accuracy) could not be settled at all, because it is never logged anywhere.
+//
+// So: `gps=` and `acc=` now ride EVERY row regardless of mode, `sep=` states the
+// separation the 75 m pin gate actually tests, and latch/parked/hu/spotAge expose the
+// locationPrivacy state that was invisible from outside that module.
+
 import { logEvent } from "./crashBreadcrumb";
+import { privacyDebug } from "./locationPrivacy";
 
 const INTERVAL_MS = 10_000;
+// Stationary rows are throttled harder — a parked phone would otherwise emit all night.
+// 60 s bounds it at ~60 rows/hour while still catching a wrong pin within a minute.
+const SLOW_INTERVAL_MS = 60_000;
 const MIN_SPEED_MS = 1.5;
 
 const lastAt: Record<string, number> = {};
@@ -32,18 +50,37 @@ export function reportDraw(
   mode: "route" | "road" | "raw" | "pin",
   speedMs: number | null | undefined,
   navActive: boolean,
+  /** The LIVE fix, always — even when `raw` is the pin. Plus its own uncertainty. */
+  gps?: { lat: number; lng: number; accM?: number | null } | null,
 ): void {
   try {
     if (!raw || !drawn) return;
     const spd = typeof speedMs === "number" && isFinite(speedMs) ? speedMs : 0;
-    if (spd < MIN_SPEED_MS) return; // parked/crawling — scatter there is a separate, known story
+    // ── THE SPEED FLOOR USED TO CENSOR THE EVIDENCE ──────────────────────────────
+    // Dropping every sub-creep sample meant the only rows that ever survived were ones
+    // carrying phantom speed, so the 2026-08-29 evidence set was a biased subset by
+    // construction — it could not contain a single correct-behaviour sample to compare
+    // against. A pinned marker on a STATIONARY phone is precisely the bug this
+    // instrument exists to catch, so `pin` now survives the floor (on the slow
+    // throttle). Everything else below creep is scatter noise and still drops.
+    const slow = spd < MIN_SPEED_MS;
+    if (slow && mode !== "pin") return;
     const now = Date.now();
-    if (now - (lastAt[surface] ?? 0) < INTERVAL_MS) return;
+    if (now - (lastAt[surface] ?? 0) < (slow ? SLOW_INTERVAL_MS : INTERVAL_MS)) return;
     lastAt[surface] = now;
     const d = haversineM(raw.lat, raw.lng, drawn.lat, drawn.lng);
+    // Separation between the phone and what we DREW — the quantity map.tsx's 75 m
+    // SELF_PIN_MIN_SEPARATION_M gate tests, and the one that says "the marker is wrong"
+    // out loud instead of leaving it to be derived from two coordinates.
+    const sep = gps ? haversineM(gps.lat, gps.lng, drawn.lat, drawn.lng) : null;
+    const acc = typeof gps?.accM === "number" && isFinite(gps.accM) && gps.accM >= 0 ? gps.accM : null;
+    const p = privacyDebug();
     logEvent(
       `draw-cmp surf=${surface} mode=${mode} d=${d.toFixed(1)}m spd=${(spd * 3.6).toFixed(0)} nav=${navActive ? 1 : 0} ` +
-        `raw=${raw.lat.toFixed(6)},${raw.lng.toFixed(6)} drawn=${drawn.lat.toFixed(6)},${drawn.lng.toFixed(6)}`,
+        `acc=${acc == null ? "?" : acc.toFixed(0) + "m"} sep=${sep == null ? "?" : sep.toFixed(0) + "m"} ` +
+        `gps=${gps ? gps.lat.toFixed(6) + "," + gps.lng.toFixed(6) : "?"} ` +
+        `raw=${raw.lat.toFixed(6)},${raw.lng.toFixed(6)} drawn=${drawn.lat.toFixed(6)},${drawn.lng.toFixed(6)} ` +
+        `latch=${p.latch ? 1 : 0} parked=${p.parked ? 1 : 0} hu=${p.hu ? 1 : 0} spotAge=${p.spotAgeS == null ? "?" : p.spotAgeS + "s"}`,
     );
   } catch {
     // never let the instrument disturb the draw path

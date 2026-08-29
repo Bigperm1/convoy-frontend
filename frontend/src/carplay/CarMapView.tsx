@@ -1549,6 +1549,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     carSnapped ? 'route' : carRoadDraw ? 'road' : 'raw',
     (s0 => (typeof s0 === 'number' ? s0 : 0))((s as any).speedMs ?? (s as any).speed),
     !!s.navigating,
+    // On this surface `lat`/`lng` ARE the raw fix (the car store never pins), so gps
+    // duplicates raw — but it keeps the row shape identical across both surfaces, which
+    // is what lets one query compare them. Accuracy isn't carried in carStore yet.
+    hasFix ? { lat, lng, accM: null } : null,
   );
   const drawHdg = carSnapped ? routeProj!.bearing : hdg;
   // Live copy for the compass's IMMEDIATE camera push (the gesture closure is frozen).

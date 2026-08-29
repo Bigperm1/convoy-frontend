@@ -101,6 +101,10 @@ export interface UserLocation {
   lat?: number;
   lng?: number;
   speed?: number;
+  /** CoreLocation horizontal accuracy, metres. Telemetry only — nothing gates on it
+   *  yet, deliberately: we have never measured what testers' phones report, so any
+   *  threshold today would be folklore. Logged first (draw-cmp `acc=`), gated later. */
+  acc?: number;
 }
 
 // Mapbox is now the only engine. This is the single source of truth for the map
@@ -3129,6 +3133,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     ? routeProj!.bearing
     : (camHeadingRef.current != null ? camHeadingRef.current : (selfCar?.heading ?? 0));
   // Drawn-vs-raw breadcrumb (8/20): one bounded row / 10 s while moving. Taps only.
+  // `gps` is passed SEPARATELY from `raw` on purpose: when pinned, selfCar IS the parked
+  // spot, so raw= and drawn= are the same point and the driver's real fix would otherwise
+  // never appear on the row. That gap is what made the 8/29 stale-pin report unreadable.
   reportDraw(
     'phone',
     selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null,
@@ -3136,6 +3143,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     selfPinned ? 'pin' : selfSnapped ? 'route' : roadDraw ? 'road' : 'raw',
     userSpeedMs,
     !!navigationActive,
+    user && typeof user.lat === 'number' && typeof user.lng === 'number'
+      ? { lat: user.lat, lng: user.lng, accM: user.acc ?? null }
+      : null,
   );
 
   // Memoized so the downstream GL FeatureCollection memo can actually cache (a bare

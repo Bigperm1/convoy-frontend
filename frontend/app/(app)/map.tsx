@@ -466,7 +466,12 @@ export default function MapScreen() {
   const skinTier = useAppSkin();
   const accentTint12 = useAccentAlpha(0.12);
   const navInset = Platform.OS === "android" ? insets.bottom : 0;
-  const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number; speed?: number } | null>(null);
+  // `acc` = CoreLocation horizontal accuracy in metres, plumbed 2026-08-29 for telemetry
+  // ONLY (draw-cmp `acc=`). Nothing gates on it yet and that is deliberate: we have never
+  // measured what a tester's phone actually reports, so any threshold today would be
+  // invented rather than derived. Set by the main foreground watcher; the one-shot seeds
+  // leave it undefined.
+  const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number; speed?: number; acc?: number } | null>(null);
 
   // ---- Personal Best speed tracking ----
   // sessionMaxSpeed: highest km/h seen since the screen mounted (in-memory only).
@@ -3085,6 +3090,10 @@ export default function MapScreen() {
             const heading = typeof h === "number" && h > 0 ? h : undefined;
             const sRaw = pos.coords.speed;
             const speed = typeof sRaw === "number" && sRaw >= 0 ? sRaw : 0;  // clamp negatives
+            // Telemetry only — see the `coords` declaration. CoreLocation reports an
+            // unavailable accuracy as a negative, same sentinel convention as speed.
+            const aRaw = pos.coords.accuracy;
+            const acc = typeof aRaw === "number" && isFinite(aRaw) && aRaw >= 0 ? aRaw : undefined;
             // Remember the last REAL travel course. It is the best "which way does
             // the car face" answer for the first 90s after stopping — no compass
             // calibration, no interference from the car's own steel — and it is what
@@ -3127,6 +3136,7 @@ export default function MapScreen() {
               lng: pos.coords.longitude,
               heading: heading ?? cur?.heading,
               speed,
+              acc,
             }));
             // Live-avatar publish â push our position to the backend on a ~4s
             // throttle so every other driver's /users/nearby (polled by
@@ -3820,8 +3830,9 @@ export default function MapScreen() {
   const SELF_PIN_MIN_SEPARATION_M = 75;
   const LAST_CAR_SPOT_KEY = "convoy.lastCarSpot.v1";
   const [privacyHydrated, setPrivacyHydrated] = useState(false);
+  // Read-only mirror of the car spot for the debug pill. The write-throttle ref that
+  // used to sit beside this went with the second AsyncStorage writer (2026-08-29).
   const lastCarLocRef = useRef<{ lat: number; lng: number } | null>(null);
-  const lastCarLocSavedAtRef = useRef(0);
   useEffect(() => {
     // Hydrate once; never clobber a fresher in-memory value.
     AsyncStorage.getItem(LAST_CAR_SPOT_KEY)
@@ -3841,19 +3852,20 @@ export default function MapScreen() {
     // SAME ANDROID RULE AS THE GATE CALL BELOW (2026-08-15). This screen is not
     // entitled to assert a head unit on Android — see the long note further down for
     // why (react-native-carplay emits didConnect unconditionally at library load).
-    // This is the SECOND writer of convoy.lastCarSpot.v1, the one locationPrivacy does
-    // not own, and it was left on the raw flag: without this the phantom still wrote
-    // the walking position to disk every 15 s and it HYDRATED AS THE CAR SPOT on the
-    // next launch — the house leak, closed on the live path but not on the persisted
-    // one. Both writers now agree on what "in the car" means.
+    //
+    // ── THIS NO LONGER PERSISTS. locationPrivacy IS THE SOLE WRITER (2026-08-29) ──────
+    // It used to be the SECOND writer of convoy.lastCarSpot.v1, and the comment that
+    // stood here claimed "both writers now agree on what 'in the car' means". That was
+    // FALSE and it is the whole bug: noteFix() requires `_drivingLatched && speed >= 2.5`
+    // — the latch is what stops a jogger, and a phone that has never seen 15 km/h — while
+    // this block required ONLY `speed >= 2.5`. So any fix reporting above 9 km/h wrote the
+    // car spot straight to disk with no latch, and hydrate then adopted it as truth.
+    // Jeff, 2026-08-29: one multipath fix (337 m in 11 s, reported 51 km/h) landed on
+    // disk and pinned his marker 345 m away for 23 minutes and three force-quits.
+    // The ref itself stays — the debug pill reads it — but ONLY noteFix() writes the key.
     const carAttachedHere = Platform.OS === "android" ? false : !!carConnected;
     if (coords && (carAttachedHere || driving)) {
       lastCarLocRef.current = { lat: coords.lat, lng: coords.lng };
-      const now = Date.now();
-      if (now - lastCarLocSavedAtRef.current > 15000) {
-        lastCarLocSavedAtRef.current = now;
-        AsyncStorage.setItem(LAST_CAR_SPOT_KEY, JSON.stringify(lastCarLocRef.current)).catch(() => {});
-      }
     }
     // Mirror into src/locationPrivacy, which is what every OTHER transport asks
     // (the /location post above, CLVisit arrivals while the app is suspended).

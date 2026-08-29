@@ -32,7 +32,26 @@ import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
 
 // Same key map.tsx has always used, so an existing install keeps its car spot and there
 // is no migration to get wrong.
+//
+// ⚠ THIS MODULE IS THE SOLE WRITER OF THIS KEY (2026-08-29). map.tsx used to write it
+// too, guarded on `speed >= 2.5` with NO latch — and its own comment claimed "both
+// writers now agree on what 'in the car' means", which was false. That second writer is
+// how a single bad fix reached disk: see the SPOT_MAX_AGE_MS note below. If you are
+// about to add another writer, don't — call noteFix().
 const CAR_SPOT_KEY = "convoy.lastCarSpot.v1";
+// ── THE SPOT MUST BE ABLE TO GO STALE (2026-08-29) ─────────────────────────────
+// Until today the spot persisted as a bare {lat,lng} with no timestamp, and hydrate
+// adopted it unconditionally, so it could never expire. Jeff, 2026-08-29: one CoreLocation
+// multipath fix at 13:01:28 jumped 337 m in 11 s while REPORTING 51 km/h. 51 cleared
+// DRIVING_ENTER_SPEED_MS, so it was written as the car spot — and that coordinate
+// (49.173307,-122.660864) then came back byte-identical as his pin for the next 23
+// minutes and across three force-quits, 345 m from where he was standing.
+//
+// 24 h is a product choice, not a measurement: longer than any overnight park the
+// "where did I park" feature has to answer for, and short enough that a spot can never
+// outlive the trip it belongs to. A rejected spot costs "no pin"; an adopted stale one
+// costs a confident lie about where the driver is.
+const SPOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // Persisted so a COLD context (visitMonitor firing while the app was suspended, a
 // background task) can tell "parked" from "driving" instead of guessing.
 const LAST_DRIVING_KEY = "convoy.lastDrivingAt.v1";
@@ -110,6 +129,9 @@ let _carConnected = false;
 let _carConnectedAt = 0;
 let _lastDrivingAt = 0;
 let _carSpot: { lat: number; lng: number } | null = null;
+// When _carSpot was RECORDED (not when it was last written to disk). Persisted with the
+// spot so hydrate can age it out — see SPOT_MAX_AGE_MS.
+let _carSpotAt = 0;
 let _parkWitnessed = false;   // see noteCarConnected / parkEndedByHeadUnit
 let _spotSavedAt = 0;
 let _drivingSavedAt = 0;
@@ -129,15 +151,43 @@ export async function hydrateLocationPrivacy(): Promise<void> {
     if (spotRaw && !_carSpot) {
       const p = JSON.parse(spotRaw);
       if (typeof p?.lat === "number" && typeof p?.lng === "number") {
-        _carSpot = { lat: p.lat, lng: p.lng };
-        // Same freshness rule as the spot itself: only adopt the persisted witnessed-park
-        // flag when the persisted spot was adopted. `hu` on disk can only have survived
-        // if nothing drove since the disconnect (drivers rewrite the key without it).
-        if (p?.hu) _parkWitnessed = true;
+        // AGE GATE — and an UNSTAMPED spot is rejected, not grandfathered.
+        //
+        // `t` is absent on every spot written before 2026-08-29. The tempting kindness is
+        // to adopt those once so no existing install loses its park pin. Don't: a spot
+        // whose age cannot be established is exactly the class of data this gate exists
+        // to distrust, and we KNOW at least one poisoned spot is in the field (Jeff's,
+        // 345 m wrong) with no way to tell which other installs carry one. Grandfathering
+        // would ship the fix and leave the damage.
+        //
+        // Cost, accepted and bounded: on the FIRST launch after this OTA, anyone parked
+        // loses their car pin — their own map and their peers' — until they next drive
+        // above 15 km/h, which rewrites it. One launch, self-healing, and it purges every
+        // poisoned spot in the fleet at once. Peers see nothing rather than something
+        // wrong, which is this module's stated rule: absent beats exposed.
+        const at = typeof p?.t === "number" && isFinite(p.t) ? p.t : 0;
+        const fresh = at > 0 && Date.now() - at <= SPOT_MAX_AGE_MS;
+        if (fresh) {
+          _carSpot = { lat: p.lat, lng: p.lng };
+          _carSpotAt = at;
+          // Same freshness rule as the spot itself: only adopt the persisted witnessed-park
+          // flag when the persisted spot was adopted. `hu` on disk can only have survived
+          // if nothing drove since the disconnect (drivers rewrite the key without it).
+          if (p?.hu) _parkWitnessed = true;
+        }
       }
     }
     const t = drivingRaw ? Number(drivingRaw) : 0;
     if (Number.isFinite(t) && t > _lastDrivingAt) _lastDrivingAt = t;
+    // ── RESTORE THE LATCH, DON'T JUST THE STAMP (2026-08-29) ────────────────────
+    // _drivingLatched is in-memory only, so every force-quit cleared it while
+    // _lastDrivingAt survived on disk. With the latch clear, `inCar` in
+    // shareablePosition() is unconditionally false, so a restart mid-drive published the
+    // CAR SPOT instead of the live position for the next 90 s — a force-quit strictly
+    // increased pin bias, which is why Jeff force-quitting three times made it worse.
+    // Only ever re-arms inside the window isParked() already trusts, so this can't
+    // resurrect a latch that had legitimately expired.
+    if (_lastDrivingAt > 0 && Date.now() - _lastDrivingAt < DRIVING_HYSTERESIS_MS) _drivingLatched = true;
   } catch {}
 }
 
@@ -158,7 +208,7 @@ export function noteCarConnected(connected: boolean): void {
     // Persisted with the spot so an app restart while parked still pins to the car.
     // Every plain {lat,lng} writer of this key (noteFix, map.tsx's 15 s mirror) drops
     // the flag on the next drive — which is exactly when it should expire.
-    if (_carSpot) void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, hu: 1 })).catch(() => {});
+    if (_carSpot) void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, t: _carSpotAt || Date.now(), hu: 1 })).catch(() => {});
   }
   if (next) _parkWitnessed = false;
   _carConnected = next;
@@ -273,14 +323,36 @@ export function noteFix(lat: number, lng: number, speedMs?: number): void {
   // phantom car on a trail, which persists as your parked location afterwards.
   if (!carAttached() && !(driving)) return;
   _carSpot = { lat, lng };
+  _carSpotAt = now;
   if (now - _spotSavedAt > SPOT_SAVE_THROTTLE_MS) {
     _spotSavedAt = now;
-    void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify(_carSpot)).catch(() => {});
+    // `t` is what lets hydrate age this out — see SPOT_MAX_AGE_MS. Writing a plain
+    // {lat,lng} here (as the deleted map.tsx writer did) puts an immortal spot on disk.
+    void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, t: now })).catch(() => {});
   }
 }
 
 export function carSpot(): { lat: number; lng: number } | null {
   return _carSpot;
+}
+
+/**
+ * READ-ONLY state dump for telemetry. Nothing here changes behaviour.
+ *
+ * Why it exists: on 2026-08-29 a stale car spot pinned Jeff's marker 345 m from where he
+ * was standing, and the field data could not settle WHICH mechanism did it, because
+ * `_drivingLatched`, `_parkWitnessed` and the spot's age were all unobservable from
+ * outside this module. Every candidate explanation was consistent with the rows we had.
+ * These four fields make the next occurrence a one-query answer instead of a nine-agent
+ * investigation. Consumed by src/drawTelemetry.ts.
+ */
+export function privacyDebug(): { latch: boolean; parked: boolean; hu: boolean; spotAgeS: number | null } {
+  return {
+    latch: _drivingLatched,
+    parked: isParked(),
+    hu: _parkWitnessed,
+    spotAgeS: _carSpotAt > 0 ? Math.round((Date.now() - _carSpotAt) / 1000) : null,
+  };
 }
 
 /** Parked = not attached to a head unit and not driving recently. */

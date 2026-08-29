@@ -7,7 +7,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { getSettings, updateSettings, getSelfMarkerType, getVehicleClass, getClassPaint, type VehicleClass } from '../../src/settings';
 import { useFeature, useFeatureTier, openPaywall, TierCornerLock } from '../../src/PremiumBadge';
 import { getVehiclePngOrDefault, CLASS_TOPDOWN } from '../../src/vehicleAssets';
@@ -19,6 +19,7 @@ import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
 import CarViewer3D from '../../src/CarViewer3D';
 import CarHero3D from '../../src/CarHero3D';
+import { ScanPlaceholder, ScanCountdown, ScanReadyOverlay } from '../../src/ScanHero';
 import GarageHeroCarousel from '../../src/GarageHeroCarousel';
 import { CandyCta } from '../../src/components/CandyCta';
 import { CANDY_RIM, CANDY_INK } from '../../src/components/ManeuverArrow';
@@ -534,19 +535,30 @@ export default function GarageScreen() {
   // it comes from a scan or not at all.
   const [scanModelUrl, setScanModelUrl] = useState<string | null>(null);
   const [scanPending, setScanPending] = useState(false);
-  useEffect(() => {
-    (async () => {
-      const s = await getSettings();
+  const [scanSubmittedAt, setScanSubmittedAt] = useState<string | null>(null);
+  const [scanJustReady, setScanJustReady] = useState(false);
+  // THE RETURN LEG, v2 (2026-08-29). The 2026-08-27 version ran ONCE on mount — and
+  // this screen lives in a Tabs navigator, so "mount" is the first visit of the whole
+  // session. Jeff's first real scan finished and the app never noticed until he
+  // force-quit ("for mine to show up i had to force close the app and restart. does
+  // this have to happen?" — no, it never did; this is the defect). Now: re-check on
+  // every FOCUS, and while a scan is submitted keep a 20 s interval running so the
+  // car appears while the driver is sitting on this very screen watching the clock.
+  // A HEAD against the public bucket is free and misses are never CDN-cached, so the
+  // interval costs nothing and is always accurate.
+  const scanPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // In-flight guard: a HEAD slower than the 20 s interval (or a blur/refocus racing a
+  // tick) would otherwise run two refreshScans concurrently and double-write settings
+  // + double-emit the delivered probe (review find, 2026-08-29).
+  const scanBusyRef = useRef(false);
+  const refreshScan = useCallback(async () => {
+    if (scanBusyRef.current) return;
+    scanBusyRef.current = true;
+    try {
+      const s = getSettings();
       setScanModelUrl(s.carScanModelUrl ?? null);
       setScanPending(s.carScanStatus === 'submitted');
-      // THE RETURN LEG (2026-08-27). "Building your car… it appears here when it is
-      // ready" was a promise with no mechanism — nothing anywhere wrote
-      // carScanModelUrl. Now: while a scan is submitted, HEAD the pipeline's
-      // convention URLs (scan_<scanId>.glb in the public models bucket). The moment
-      // the finished car is published, this flips the scan to ready and the hero
-      // above picks it up — no backend column, no push, one free HEAD per Garage
-      // open. scanId is per-attempt unique, so a second render is a new URL and the
-      // model cache can never pin the old car.
+      setScanSubmittedAt(s.carScanSubmittedAt ?? null);
       if (s.carScanStatus === 'submitted' && s.carScanId) {
         const ready = await checkScanReady(s.carScanId);
         if (ready) {
@@ -557,11 +569,44 @@ export default function GarageScreen() {
           });
           setScanModelUrl(ready.heroUrl);
           setScanPending(false);
-          try { logEventReliable(`carscan-delivered id=${s.carScanId} map=${ready.mapUrl ? 1 : 0}`); } catch {}
+          // The settings write above is also what flips the MAP marker live —
+          // map.tsx and carStore subscribe to settings, so the car lands on every
+          // surface in the same instant this Garage page updates.
+          try { logEventReliable(`carscan-delivered id=${s.carScanId} map=1`); } catch {}
         }
       }
-    })();
+      // HEAL a pre-fix latch: an install that flipped ready while the map twin was
+      // still publishing has carScanMapUrl stuck undefined and nothing re-checking.
+      // One extra HEAD per Garage focus, only while in that broken state.
+      if (s.carScanStatus === 'ready' && !s.carScanMapUrl && s.carScanId) {
+        const healed = await checkScanReady(s.carScanId);
+        if (healed) await updateSettings({ carScanMapUrl: healed.mapUrl });
+      }
+      // The one-shot celebration. Keyed on the PERSISTED flag, not the transition:
+      // a force-quit between the ready-flip and the dismissal must not silently
+      // turn the one-shot into a zero-shot (review find, 2026-08-29).
+      const after = getSettings();
+      if (after.carScanStatus === 'ready' && after.carScanModelUrl && !after.carScanCelebrated) {
+        setScanJustReady(true);
+      }
+    } finally {
+      scanBusyRef.current = false;
+    }
   }, []);
+  useFocusEffect(useCallback(() => {
+    void refreshScan();
+    // Poll only while something is actually pending — an idle Garage runs no timer.
+    if (getSettings().carScanStatus === 'submitted') {
+      scanPollRef.current = setInterval(() => { void refreshScan(); }, 20000);
+      // Capture hands back to this screen mid-build ("puts you back to the 3D
+      // screen") — land the carousel on the car page so the countdown is what
+      // the driver sees, not the arrow.
+      setHeroIndex(2);
+    }
+    return () => {
+      if (scanPollRef.current) { clearInterval(scanPollRef.current); scanPollRef.current = null; }
+    };
+  }, [refreshScan]));
   const heroModelUrl = (() => {
     if (scanModelUrl) return scanModelUrl;
     try {
@@ -661,18 +706,37 @@ export default function GarageScreen() {
               label: 'Your car',
               tier: car3dTier,
               locked: !car3dUnlocked,
+              // Three states (Jeff, 2026-08-29): building → the clock countdown;
+              // no car at all → the animated invitation; car → the auto-rotating
+              // model, with the one-shot "here's what happened" overlay the first
+              // time a scan lands.
               render: () => (
-                <CarHero3D
-                  glbUrl={heroModelUrl}
-                  // Non-interactive INSIDE the carousel — a pager and a
-                  // finger-spinnable model both want horizontal drags and the
-                  // model wins, which would trap you on this page. It still
-                  // auto-rotates; tap to spin it full screen.
-                  interactive={false}
-                  style={StyleSheet.absoluteFill}
-                  emptyLabel={scanPending ? 'Building your car…' : 'No car yet'}
-                  emptyHint={scanPending ? 'It appears here when it is ready' : 'Scan yours to put it on the map'}
-                />
+                <View style={StyleSheet.absoluteFill}>
+                  {scanPending ? (
+                    <ScanCountdown submittedAt={scanSubmittedAt} />
+                  ) : heroModelUrl ? (
+                    <CarHero3D
+                      glbUrl={heroModelUrl}
+                      // Non-interactive INSIDE the carousel — a pager and a
+                      // finger-spinnable model both want horizontal drags and the
+                      // model wins, which would trap you on this page. It still
+                      // auto-rotates; tap to spin it full screen.
+                      interactive={false}
+                      style={StyleSheet.absoluteFill}
+                    />
+                  ) : (
+                    <ScanPlaceholder />
+                  )}
+                  {scanJustReady && !scanPending && (
+                    <ScanReadyOverlay
+                      onDismiss={() => {
+                        setScanJustReady(false);
+                        void updateSettings({ carScanCelebrated: true });
+                        router.push('/(app)/map');
+                      }}
+                    />
+                  )}
+                </View>
               ),
             },
           ]}

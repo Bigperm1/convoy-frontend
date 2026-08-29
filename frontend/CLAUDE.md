@@ -25,7 +25,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 (current shipped state, the OTA position, what ships next, open issues ranked).
 
 Then, as needed:
-- `HANDOFF-3D.md` — the photo → GLB car pipeline and the 3D model work.
+- `SCAN-PIPELINE.md` — **THE photo → car pipeline** (Tripo CLI only; measured recipe,
+  traps, QC gates). `HANDOFF-3D.md` is that work's historical log — lessons only.
 - `HANDOFF-48H-2026-08-16.md` — the 08-14 → 08-16 window (heat, the location regression).
 - `HANDOFF.md` — the long chronological log. **⛔ Its header state is STALE (build 70).**
   Read it for the root-cause write-ups and traps, never for current state.

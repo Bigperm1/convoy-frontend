@@ -635,10 +635,17 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // Lights-on after dark, same rule as the phone (isLitPreset ⇒ the _lit bake; the
   // id must carry the suffix so Mapbox's by-id model cache reloads on day↔night).
   const carLit = !isArrow && isLitPreset(mode);
+  // The scanned car wins here exactly as on the phone (ConvoyMapbox, 2026-08-29).
+  // ⚠ A scan has NO _lit twin — the lit branch must be bypassed for it, because a
+  // 404'd model is an INVISIBLE car on the head unit at dusk. scan_<scanId> is
+  // per-attempt unique, so the cache-by-id generation bumps below never apply.
+  const carHasScan = !isArrow && !!s.selfScanMapUrl;
   // convoyCar3_: generation bump, in step with the phone (ConvoyMapbox.tsx). CarPlay
   // sat a generation behind at 'convoyCar_', so it cached its own stale copies.
   // convoyCar6_: generation bump — GRC2_map2 replaces the crushed map1 (cache-by-id, see phone).
-  const carModelId = isArrow ? ARROW_MODEL_ID : ('convoyCar6_' + getVehicleModelKey(s.selfCarColor) + (carLit && vehicleHasLitBake(s.selfCarColor) ? '_lit' : ''));
+  const carModelId = isArrow ? ARROW_MODEL_ID
+    : carHasScan ? ('scan_' + (s.selfScanId || 'self'))
+    : ('convoyCar6_' + getVehicleModelKey(s.selfCarColor) + (carLit && vehicleHasLitBake(s.selfCarColor) ? '_lit' : ''));
 
   // Speed-aware zoom for BOTH nav AND cruise — chaseZoom with no turn distance is a pure
   // speed→zoom curve (city tighter, highway wider), so cruise now dynamically zooms in/out
@@ -1802,7 +1809,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
 
       {/* Register the self 3D model for the chosen marker: the arrow GLB, or the
           per-color car. key={carModelId} remounts <Models> when the id flips. */}
-      <Models key={carModelId} models={{ [carModelId]: isArrow ? GREEN_ARROW_MODEL : getVehicleMapModelUrl(s.selfCarColor, carLit) }} />
+      <Models key={carModelId} models={{ [carModelId]: isArrow ? GREEN_ARROW_MODEL : (carHasScan ? s.selfScanMapUrl! : getVehicleMapModelUrl(s.selfCarColor, carLit)) }} />
 
       {/* Top-down car PNG for the flat (not-routing) marker — the same asset and the
           same registration pattern the phone uses (ConvoyMapbox :2676). */}

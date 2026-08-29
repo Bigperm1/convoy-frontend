@@ -123,6 +123,15 @@ interface ConvoyMapboxProps {
   // is literally the broadcast, rendered.
   selfParked?: boolean;
   selfParkedAt?: { lat: number; lng: number } | null;
+  // ── THE DRIVER'S OWN SCANNED CAR (2026-08-29) ──────────────────────────────
+  // The decimated map twin from the scan pipeline (scan_<scanId>_map.glb, public
+  // models bucket). When set it REPLACES the fleet model as the self marker.
+  // selfScanId feeds the Mapbox model id — MUST be per-scan unique: Mapbox caches
+  // models BY ID, so a fixed id would draw the first-ever cached car forever, and
+  // every scanned tester would collide on one model. A rescan is a new scanId, so
+  // the swap happens live with no cache fight.
+  selfScanModelUrl?: string | null;
+  selfScanId?: string | null;
   // How the driver draws THEMSELVES on the map: 'car' (3D GRC model, default) or
   // 'arrow' (3D green arrow), 'class' (flat top-down class sprite in a chosen
   // color). ('photo' is parked.) Mirrors settings.selfMarkerType.
@@ -2090,7 +2099,7 @@ function GLPinLayers({
 
 function ConvoyMapbox(props: ConvoyMapboxProps) {
   const {
-    center, user, peers, hideSelfMarker, selfParked, selfParkedAt, selfMarkerType = "car", selfClassPaint, selfVehicleClass = "hatchback", selfArrowPaint, mapView = "heading_up",
+    center, user, peers, hideSelfMarker, selfParked, selfParkedAt, selfScanModelUrl, selfScanId, selfMarkerType = "car", selfClassPaint, selfVehicleClass = "hatchback", selfArrowPaint, mapView = "heading_up",
     mapMode = "satellite", leaderUserId, show3dBuildings = true,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs, flatView = false,
     routeColor = DEFAULT_ROUTE_COLOR,
@@ -2832,9 +2841,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // the _lit bake of the same model. The id carries the suffix too — Mapbox caches
   // models BY ID, so the day↔night swap must register as a different model.
   const selfLit = !selfIsArrow && isLitPreset(mapMode);
+  // The driver's own scanned car beats the fleet model — that is the entire point
+  // of the scan feature ("it should go directly into… the 3D top view on the map",
+  // Jeff 2026-08-29). ⚠ A scan has ONE bake and NO _lit night twin, so the lit
+  // branch must be bypassed entirely for it: asking for scan_…_lit.glb would 404,
+  // and <Models> has no error path — a 404 model is an INVISIBLE car. The scanned
+  // car still reads at night via CAR_EMISSIVE_BY_MODE like every other model.
+  const selfHasScan = !selfIsArrow && !!selfScanModelUrl;
   const selfModelUrl: string | number = selfIsArrow
     ? (paintedArrowUri ?? GREEN_ARROW_MODEL)
-    : getVehicleMapModelUrl(selfCar?.color, selfLit);
+    : selfHasScan
+      ? selfScanModelUrl!
+      : getVehicleMapModelUrl(selfCar?.color, selfLit);
   // Paint/color-specific model id so a change swaps the model LIVE (Mapbox
   // caches a model by id — a fixed id won't reload a new .glb until remount).
   const selfModelId = selfIsArrow
@@ -2849,7 +2867,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     // convoyCar6_: generation bump 2026-08-27 — GRC2_map2 replaces map1 (whose
     // decimation had crushed the panels; see vehicleAssets). Same-id would keep
     // serving the cached crumpled model forever.
-    : "convoyCar6_" + getVehicleModelKey(selfCar?.color) + (selfLit && vehicleHasLitBake(selfCar?.color) ? "_lit" : "");
+    // scan_<scanId>: per-attempt unique BY CONSTRUCTION (handle+timestamp), so a
+    // rescan is a new id and the cache-by-id trap that forced every convoyCarN_
+    // generation bump above simply cannot happen here. Never `_lit` — see selfHasScan.
+    : selfHasScan
+      ? "scan_" + (selfScanId || "self")
+      : "convoyCar6_" + getVehicleModelKey(selfCar?.color) + (selfLit && vehicleHasLitBake(selfCar?.color) ? "_lit" : "");
   // Lift the paint out of the dark on the dim light presets (dawn/night). The ARROW
   // is always FULLY self-lit (1): it's a UI marker, not a realistic car — scene
   // lighting at day/dusk (0/0.55) washed its brand green pale.

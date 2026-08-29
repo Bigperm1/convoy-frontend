@@ -1,3 +1,7 @@
+<!-- ⛔ HISTORICAL LOG. The scan pipeline is defined in SCAN-PIPELINE.md — Tripo CLI
+     only, no Blender anywhere on the scan path (Jeff, 2026-08-29: "this is the
+     pipeline"). Everything below is the authored-fleet era; read it for lessons,
+     never for the current pipeline. -->
 <!-- ═════════ RULE #1 — READ THIS BEFORE ANYTHING ELSE ═════════ -->
 # 🛑 NO GUESSING. NO THEORIZING. NO HALLUCINATING.
 

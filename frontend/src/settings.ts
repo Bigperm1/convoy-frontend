@@ -140,8 +140,12 @@ carColor?: string;
 // for the Garage hero and the 3D map marker — undefined means "no car yet",
 // which is a normal first-run state, not an error.
 carScanModelUrl?: string;                        // https URL of the finished GLB (Garage hero)
-carScanMapUrl?: string;                          // decimated map twin (wired to the map later)
+carScanMapUrl?: string;                          // decimated map twin — IS the map marker when status is 'ready' (wired 2026-08-29)
 carScanStatus?: 'none' | 'submitted' | 'ready' | 'failed';
+// One-shot: the "your car is ready, here's what happens now" overlay has been
+// shown and dismissed. Without this the celebration would replay on every
+// Garage visit for the life of the install.
+carScanCelebrated?: boolean;
 carScanId?: string;                              // the scan folder in the car-scans bucket
 carScanSubmittedAt?: string;                     // ISO, when Generate was tapped
 carScanConsentAt?: string;                       // ISO, when the disclaimer was accepted

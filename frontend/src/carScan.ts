@@ -110,18 +110,26 @@ export async function registerScan(handle: string | null | undefined, scanId: st
 export function scanHeroUrl(scanId: string): string { return `${MODELS_PUBLIC}/scan_${scanId}.glb`; }
 export function scanMapUrl(scanId: string): string { return `${MODELS_PUBLIC}/scan_${scanId}_map.glb`; }
 
-/** Poll the convention URLs for a submitted scan. Returns the hero URL once the
- *  finished car is published, plus the map twin's URL when that exists too. */
-export async function checkScanReady(scanId: string): Promise<{ heroUrl: string; mapUrl?: string } | null> {
+/** Poll the convention URLs for a submitted scan. Ready means BOTH files exist.
+ *
+ *  ⚠ BOTH, not hero-only — the 2026-08-29 review caught the race this closes: the
+ *  caller writes carScanStatus:'ready' ONCE and never re-checks, so a poll landing in
+ *  the gap between the two publishes would latch carScanMapUrl undefined and the map
+ *  marker would stay the fleet car for the life of the install, while the "it's your
+ *  marker on the map" overlay lied. The pipeline publishes the twin FIRST
+ *  (SCAN-PIPELINE.md) precisely so hero-present implies twin-present — but that is a
+ *  process convention, and this is the code that stops depending on it. A hero with
+ *  no twin is "still building", which is simply true: the publish isn't finished. */
+export async function checkScanReady(scanId: string): Promise<{ heroUrl: string; mapUrl: string } | null> {
   try {
     const head = (u: string) => fetch(u, { method: "HEAD" }).then((r) => r.ok).catch(() => false);
     if (!(await head(scanHeroUrl(scanId)))) return null;
     const hasMap = await head(scanMapUrl(scanId));
-    // PROBE: fires ONCE, on the poll that first sees the hero. Tripo's wall-time has
-    // never been measured (build-74 note: "Tripo wall-time unmeasured") and the map
-    // twin can lag the hero — which would show a car in the garage but not on the map.
+    // PROBE: fires on the poll that first sees the hero (map=0 rows = the publish-order
+    // race being survived — each one is a worker bug to chase, not a tester problem).
     try { logEventReliable(`carscan-ready id=${scanId} hero=1 map=${hasMap ? 1 : 0}`); } catch {}
-    return { heroUrl: scanHeroUrl(scanId), mapUrl: hasMap ? scanMapUrl(scanId) : undefined };
+    if (!hasMap) return null;
+    return { heroUrl: scanHeroUrl(scanId), mapUrl: scanMapUrl(scanId) };
   } catch (e: any) {
     try { logEvent(`carscan-ready id=${scanId} threw err=${String(e?.message ?? e).slice(0, 100)}`); } catch {}
     return null;

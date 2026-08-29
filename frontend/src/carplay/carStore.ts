@@ -112,6 +112,13 @@ export type CarState = {
   // falls back to the default GRC model. Set from the phone mirror feed and the
   // background/foreground location feeds (best-effort on the cold-connect path).
   selfCarColor?: string;
+  // The driver's scanned car (mirror of settings.carScanMapUrl / carScanId, only
+  // while carScanStatus === 'ready'). When set, the car surface draws THIS model
+  // instead of the fleet car — same rule as the phone (ConvoyMapbox). Mirrored
+  // here because a cold head-unit session renders before map.tsx ever mounts, so
+  // CarPlay/AA cannot read React state; the store is their only settings view.
+  selfScanMapUrl?: string;
+  selfScanId?: string;
   // Base-map mode (mirror of the phone's getMapMode(settings)). Lets the car map
   // match the phone's style: 'satellite' → SatelliteStreet, else Standard with the
   // matching light preset. undefined → car falls back to the phone default 'dusk'.
@@ -536,7 +543,7 @@ export function subscribeCarGesture(fn: (g: CarGesture) => void): () => void {
 //   2. Memoising that metadata effect removes the accidental refresh that was masking
 //      (1) on the warm path — so this mirror is its mandatory companion, not a nicety.
 //
-// Writes ONLY these five keys. Every other settings change (activeThreadId, the audio
+// Writes ONLY these seven keys (five + the scan pair, 2026-08-29). Every other settings change (activeThreadId, the audio
 // sliders, gas brands…) lands on setCarState's equality short-circuit above and
 // notifies nobody.
 //
@@ -554,6 +561,10 @@ function mirrorSettingsToCar(s: Settings): void {
   try {
     setCarState({
       selfCarColor: s.carColor,
+      // Same ready-gate as the phone (map.tsx): a submitted-but-unfinished scan, or
+      // a stale URL from a prior attempt, must never reach a head unit.
+      selfScanMapUrl: s.carScanStatus === "ready" && s.carScanMapUrl ? s.carScanMapUrl : undefined,
+      selfScanId: s.carScanId,
       mapMode: getMapMode(s),
       selfMarkerType: getSelfMarkerType(s),
       routeColor: getRouteColor(s),

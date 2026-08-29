@@ -4335,6 +4335,13 @@ export default function MapScreen() {
         selfMarkerType={getSelfMarkerType(settings)}
         selfClassPaint={getClassPaint(settings)}
         selfVehicleClass={getVehicleClass(settings)}
+        // The scanned car (2026-08-29). Gated on status==='ready' so a half-written
+        // settings state (submitted with a stale URL from a previous attempt) can
+        // never draw the wrong model. `settings` is the LIVE useSettings() value, so
+        // the moment the Garage poll flips the scan to ready this re-renders and the
+        // marker swaps — no relaunch, no force-quit.
+        selfScanModelUrl={settings.carScanStatus === "ready" ? settings.carScanMapUrl ?? null : null}
+        selfScanId={settings.carScanId ?? null}
         selfArrowPaint={settings.arrowPaint}
         // Map view mode (radio choice from Settings → MAP VIEW). Drives the
         // chase-cam tilt + bearing. Defaults to "heading_up" so nav feels like

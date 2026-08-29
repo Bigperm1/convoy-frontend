@@ -738,19 +738,13 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: "#2A2A2A", borderRadius: 12, paddingVertical: 12,
   },
   uploadText: { color: ULTRA.accent, fontSize: 14, fontWeight: "600" },
-  sendBtn: {
-    alignSelf: "stretch",
-    height: 50,
-    borderRadius: 16,
-    marginTop: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: ULTRA.accent,
-  },
-  sendBtnOff: { borderColor: "#242424" },
-  sendText: { color: ULTRA.accent, fontSize: 16, fontWeight: "700" },
-  sendTextOff: { color: "#4A4A4A" },
+  // ⚠ LAYOUT ONLY (2026-08-29). This is passed to CandyCta's OUTER TouchableOpacity —
+  // the pill (height, radius, border, gradient) is the component's own. The old
+  // pre-CandyCta chrome that lived here (height/border/alignItems) shrink-wrapped the
+  // gradient pill and centred it inside a second outlined shell: the "small gold pill
+  // floating in an outline" Jeff screenshotted on Lock-in-paint and Generate-my-car.
+  // shutterWrap below is the reference — that button always rendered right.
+  sendBtn: { alignSelf: "stretch", marginTop: 12 },
 
   centre: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 34, gap: 14 },
   bigTitle: { color: COLORS.text, fontSize: 26, fontWeight: "800", textAlign: "center", marginTop: 6 },
@@ -771,14 +765,8 @@ const styles = StyleSheet.create({
   ghostBtn: { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 10, marginTop: 4 },
   ghostText: { color: ULTRA.accent, fontSize: 15, fontWeight: "700" },
 
-  doneBtn: {
-    alignSelf: "stretch",
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: ULTRA.accent,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 10,
-  },
+  // Same rule as sendBtn: layout only. The flat gold backgroundColor here used to
+  // paint a solid slab BEHIND CandyCta's gradient pill.
+  doneBtn: { alignSelf: "stretch", marginTop: 10 },
   doneText: { color: "#04150B", fontSize: 17, fontWeight: "800" },
 });

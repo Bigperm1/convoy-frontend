@@ -36,6 +36,7 @@ import { useAuth } from "../../src/auth";
 import { getSettings, updateSettings } from "../../src/settings";
 import { ensureCameraPermission } from "../../src/permissionGate";
 import { SCAN_SHOTS, SHOTS_TOTAL, newScanId, uploadScan, registerScan, type CapturedShot } from "../../src/carScan";
+import { logEvent } from "../../src/crashBreadcrumb";
 import { findColorsForTyped, type CarColor } from "../../src/carDatabase";
 import { MAIN_COLORS, CLUB_PALETTES } from "../../src/paintPalettes";
 // SAFE to import statically on every build: CarViewfinder never imports expo-camera at
@@ -124,6 +125,11 @@ export default function GarageCaptureScreen() {
   /** Both camera paths land here: record the shot and move to the next empty station. */
   const acceptShot = useCallback((uri: string) => {
     const next = { ...shots, [shot.id]: uri };
+    // PROBE (2026-08-29): the lap is 4 stations and a tester who gives up mid-lap
+    // leaves NOTHING behind today — the upload never runs, so carScan never logs.
+    // Abandonment is invisible without a crumb per accepted shot. `n=` is how far
+    // round they got; a run that stops at n=2 is a usability finding, not a bug report.
+    try { logEvent(`carscan-shot-taken shot=${shot.id} n=${Object.keys(next).length}/${SHOTS_TOTAL}`); } catch {}
     setShots(next);
     advance(active, next);
   }, [shots, shot, active, advance]);

@@ -49,7 +49,7 @@
 
 import { File } from "expo-file-system";
 import { supabase, SUPABASE_ENABLED, SUPABASE_ANON_KEY } from "./supabase";
-import { logEvent } from "./crashBreadcrumb";
+import { logEvent, logEventReliable } from "./crashBreadcrumb";
 
 export const SCAN_BUCKET = "car-scans";
 
@@ -79,6 +79,11 @@ export type ScanGate = { ok: boolean; used: number; max: number; reason?: string
 
 /** Ask the server whether this handle may start (or retry) a scan. FAILS CLOSED. */
 export async function registerScan(handle: string | null | undefined, scanId: string): Promise<ScanGate> {
+  // PROBE (2026-08-29): the gate decides whether a tester burns one of two paid
+  // Tripo renders, and every failure path here used to collapse to the word
+  // "offline" with no status, no body and no timing. A tester saying "it wouldn't
+  // let me scan" was unanswerable.
+  const t0 = Date.now();
   try {
     const res = await fetch(`${FN_BASE}/register-scan`, {
       method: "POST",
@@ -86,9 +91,18 @@ export async function registerScan(handle: string | null | undefined, scanId: st
       body: JSON.stringify({ handle: handle || "anon", scanId }),
     });
     const j = await res.json().catch(() => null);
-    if (j && typeof j.ok === "boolean") return j as ScanGate;
+    const ms = Date.now() - t0;
+    if (j && typeof j.ok === "boolean") {
+      const g = j as ScanGate;
+      try { logEventReliable(`carscan-register id=${scanId} ok=${g.ok ? 1 : 0} used=${g.used}/${g.max} reason=${g.reason ?? "-"} http=${res.status} ms=${ms}`); } catch {}
+      return g;
+    }
+    try { logEventReliable(`carscan-register id=${scanId} ok=0 reason=bad-response http=${res.status} ms=${ms}`); } catch {}
     return { ok: false, used: 0, max: MAX_SCAN_ATTEMPTS, reason: "bad-response" };
-  } catch {
+  } catch (e: any) {
+    // Was a bare `catch {}` reporting "offline" — which was a GUESS. Record what
+    // actually threw; a DNS failure, a TLS error and a real outage are different bugs.
+    try { logEventReliable(`carscan-register id=${scanId} ok=0 reason=threw ms=${Date.now() - t0} err=${String(e?.message ?? e).slice(0, 120)}`); } catch {}
     return { ok: false, used: 0, max: MAX_SCAN_ATTEMPTS, reason: "offline" };
   }
 }
@@ -103,8 +117,13 @@ export async function checkScanReady(scanId: string): Promise<{ heroUrl: string;
     const head = (u: string) => fetch(u, { method: "HEAD" }).then((r) => r.ok).catch(() => false);
     if (!(await head(scanHeroUrl(scanId)))) return null;
     const hasMap = await head(scanMapUrl(scanId));
+    // PROBE: fires ONCE, on the poll that first sees the hero. Tripo's wall-time has
+    // never been measured (build-74 note: "Tripo wall-time unmeasured") and the map
+    // twin can lag the hero — which would show a car in the garage but not on the map.
+    try { logEventReliable(`carscan-ready id=${scanId} hero=1 map=${hasMap ? 1 : 0}`); } catch {}
     return { heroUrl: scanHeroUrl(scanId), mapUrl: hasMap ? scanMapUrl(scanId) : undefined };
-  } catch {
+  } catch (e: any) {
+    try { logEvent(`carscan-ready id=${scanId} threw err=${String(e?.message ?? e).slice(0, 100)}`); } catch {}
     return null;
   }
 }
@@ -241,8 +260,11 @@ async function uploadOne(scanId: string, shot: ScanShot, index: number, uri: str
   // anything `instanceof Blob` into FormData. File.arrayBuffer() is a native
   // read with no base64 round-trip. Photos go up at native resolution on
   // purpose — downscaling costs reconstruction detail, which is the whole point.
+  const tRead = Date.now();
   const buf = await new File(uri).arrayBuffer();
+  const readMs = Date.now() - tRead;
   const path = `${scanId}/${String(index + 1).padStart(2, "0")}-${shot.id}.jpg`;
+  const tPut = Date.now();
   // upsert MUST stay false. The bucket policy grants INSERT only, so an upsert
   // is an UPDATE the anon key does not have — measured against the live bucket
   // 2026-08-23: `x-upsert: true` on an existing path returns 403 "new row
@@ -253,6 +275,16 @@ async function uploadOne(scanId: string, shot: ScanShot, index: number, uri: str
   const { error } = await supabase.storage
     .from(SCAN_BUCKET)
     .upload(path, buf, { contentType: "image/jpeg", upsert: false });
+  // PROBE: photos go up at NATIVE resolution on purpose, so a slow lap could be a
+  // fat frame or a bad connection — bytes and ms separate those. `dup=1` is the clean
+  // 409 that means the retry found the photo already there (see the upsert note above),
+  // which is a SUCCESS and must never be read as a failure.
+  const dup = !!(error && isDuplicate(error.message));
+  try {
+    logEvent(`carscan-shot id=${scanId} i=${index + 1} shot=${shot.id} kb=${Math.round(buf.byteLength / 1024)}`
+      + ` readMs=${readMs} putMs=${Date.now() - tPut} dup=${dup ? 1 : 0}`
+      + (error && !dup ? ` err=${String(error.message).slice(0, 100)}` : ""));
+  } catch {}
   if (error && !isDuplicate(error.message)) throw new Error(error.message);
 }
 
@@ -281,6 +313,9 @@ export async function uploadScan(
   const failed: string[] = [];
   let uploaded = 0;
   let firstError = "";
+  let retries = 0;
+  const tScan = Date.now();
+  try { logEventReliable(`carscan-begin id=${scanId} shots=${shots.length}/${SCAN_SHOTS.length}`); } catch {}
 
   for (let i = 0; i < SCAN_SHOTS.length; i++) {
     const shot = SCAN_SHOTS[i];
@@ -292,7 +327,12 @@ export async function uploadScan(
     try {
       try {
         await uploadOne(scanId, shot, i, got.uri);
-      } catch {
+      } catch (e1: any) {
+        // The retry exists because one flaky frame on cellular should not cost the
+        // whole lap. Record that it FIRED and why — a lap that only survives on
+        // retries is a connection story we would otherwise never see.
+        try { logEvent(`carscan-retry id=${scanId} i=${i + 1} shot=${shot.id} why=${String(e1?.message ?? e1).slice(0, 90)}`); } catch {}
+        retries++;
         await uploadOne(scanId, shot, i, got.uri); // one retry
       }
       uploaded++;
@@ -311,6 +351,12 @@ export async function uploadScan(
     }
   }
 
-  logEvent(`carscan id=${scanId} up=${uploaded}/${SCAN_SHOTS.length} fail=${failed.length}`);
+  // Upgraded to RELIABLE + timed: this is the row we interpret by ABSENCE ("the tester
+  // says they scanned and there is no record"), and plain logEvent drops pre-client rows.
+  try {
+    logEventReliable(`carscan id=${scanId} up=${uploaded}/${SCAN_SHOTS.length} fail=${failed.length}`
+      + ` retries=${retries} ms=${Date.now() - tScan}`
+      + (firstError ? ` err=${firstError.slice(0, 120)}` : ""));
+  } catch {}
   return { ok: failed.length === 0, scanId, uploaded, failed, error: firstError || undefined };
 }

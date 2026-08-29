@@ -150,7 +150,36 @@ function strip(s: string): string {
   return (s || "").replace(/<[^>]+>/g, "").trim();
 }
 
+// ── WRIST TAPS ON APPLE WATCH — WIDGETS.md Tier 0 (2026-08-28) ──────────────
+// Jeff: "turnbyturn wrist taps". The spec calls this the free tier, and it is: iOS
+// MIRRORS a local notification to a paired Watch whenever the phone is locked, so the
+// per-turn banner this file already posts IS the wrist tap. No watchOS target, no
+// WatchConnectivity, no native work — the mechanism has been shipping since the banner
+// did. What was missing is the other half of the spec: "Suppress when the phone screen
+// is on (the banner would double the in-app one)."
+//
+// ⚠ THE OBVIOUS SUPPRESSION IS WRONG, AND IT WOULD HAVE KILLED THE FEATURE. Gating on
+// AppState === 'active' alone looks right, but during a CarPlay/Android Auto drive the
+// phone app is typically ACTIVE while the phone itself is face-down in a mount or in a
+// pocket — which is precisely the case the spec names ("pocket / dark mount — i.e. the
+// CarPlay case"). Suppressing there would silence the wrist for every car drive, the
+// exact scenario the feature exists for.
+//
+// So the test is "is the driver actually LOOKING at this phone": foregrounded AND no car
+// surface attached. With a head unit attached we always post, because the phone is not
+// the screen being read. The car-consumer set is the same one the arrival speak uses.
+function phoneInHand(): boolean {
+  const carAttached = _locConsumers.has('carplay') || _locConsumers.has('androidauto');
+  return AppState.currentState === 'active' && !carAttached;
+}
+
 async function postBanner(title: string, body: string): Promise<void> {
+  // In-app HUD already shows this turn; a banner over it is noise, and on a paired
+  // Watch it is a wrist tap for something the driver is already looking at.
+  if (phoneInHand()) {
+    try { logEvent(`nav-banner skipped why=phone-in-hand`); } catch {}
+    return;
+  }
   try {
     await Notifications.scheduleNotificationAsync({
       identifier: NAV_NOTIF_ID,
@@ -159,6 +188,11 @@ async function postBanner(title: string, body: string): Promise<void> {
         body,
         data: { nav: true },
         color: accentNow(),
+        // WATCH HAPTIC (WIDGETS.md Tier 0): the mirrored notification only taps the
+        // wrist at `active` or above — `passive` delivers silently to Notification
+        // Centre with no haptic, which would look identical in the phone UI and fail
+        // only on the Watch. Stated explicitly rather than relying on the default.
+        interruptionLevel: 'active',
         sticky: Platform.OS === "android",
         priority: Notifications.AndroidNotificationPriority.HIGH,
         // (no sound — Nova already speaks the turn; iOS shows a silent banner)

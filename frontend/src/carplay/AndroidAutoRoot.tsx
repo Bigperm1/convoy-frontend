@@ -30,7 +30,7 @@ import { useCarStore } from './carStore';
 import { acquireBgLocation, releaseBgLocation, registerBgConsumerProbe, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
 import { noteCarConnected } from '../locationPrivacy';
-import { AA_ACTION_STRIP, AA_MAP_BUTTONS, handleAaButton, carTap } from './carActions';
+import { AA_ACTION_STRIP, aaMapButtons, handleAaButton, carTap } from './carActions';
 import { logEventReliable } from '../crashBreadcrumb';
 
 // ── COLD-CONNECT TRACER (2026-08-18 night) ──────────────────────────────────
@@ -98,7 +98,7 @@ export default function AndroidAutoRoot() {
         id: 'convoy-aa-nav',
         component: CarSurface,
         actions: AA_ACTION_STRIP,
-        mapButtons: AA_MAP_BUTTONS,
+        mapButtons: aaMapButtons(),
         onButtonPressed: (e: { buttonId: string }) => {
           const id = e?.buttonId;
           // Do NOT carTap here when we have an id: handleAaButton always lands in
@@ -223,7 +223,7 @@ export default function AndroidAutoRoot() {
       template.updateTemplate({
         component: CarSurface,
         actions: AA_ACTION_STRIP,
-        mapButtons: AA_MAP_BUTTONS,
+        mapButtons: aaMapButtons(),
       } as any);
     } catch (e) {
       console.warn('[AndroidAuto] updateTemplate failed', e);

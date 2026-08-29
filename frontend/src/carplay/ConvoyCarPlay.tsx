@@ -45,7 +45,7 @@ import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, claimCarNa
 import CarMapView, { CAR_LEFT_PAD_FRAC, hudScaleFor, aaMapScaleFor } from './CarMapView';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
-import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, AA_ACTION_STRIP, AA_MAP_BUTTONS, handleCarBarButton, handleCarMapButton, handleAaButton, carTap, isDupCarPress } from './carActions';
+import { CAR_BAR_BUTTON_CONFIG, carMapButtonConfig, AA_ACTION_STRIP, aaMapButtons, handleCarBarButton, handleCarMapButton, handleAaButton, carTap, isDupCarPress } from './carActions';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import { speedLimitVisible } from '../speedLimit';
 import type { RoadEvent } from '../driveBcEvents';
@@ -1432,7 +1432,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // with neither title nor icon is fatal to an androidx screen, so the
             // wrong shape is worse than none. See carActions.AA_ACTION_STRIP.
             ...(IS_AA
-              ? { actions: AA_ACTION_STRIP, mapButtons: AA_MAP_BUTTONS }
+              ? { actions: AA_ACTION_STRIP, mapButtons: aaMapButtons() }
               : {
                   leadingNavigationBarButtons: CAR_BAR_BUTTON_CONFIG.leadingNavigationBarButtons,
                   trailingNavigationBarButtons: CAR_BAR_BUTTON_CONFIG.trailingNavigationBarButtons,
@@ -1467,7 +1467,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // CAR_MAP_BUTTON_CONFIG / CAR_BAR_BUTTON_CONFIG in carActions.ts, not any
             // comment here — a stale comment on this exact line once sent a debugging
             // session hunting a removal that had already been reverted.
-            ...(IS_AA ? {} : { mapButtons: CAR_MAP_BUTTON_CONFIG.mapButtons }),
+            ...(IS_AA ? {} : { mapButtons: carMapButtonConfig().mapButtons }),
             onMapButtonPressed: (e: { id: string }) => {
               // Warm root: prefer the live ref (reaches the mounted surface); anything
               // else falls through so cold-root behaviour stays identical. (Police was

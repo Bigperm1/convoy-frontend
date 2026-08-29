@@ -33,7 +33,8 @@ import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
 import { toggleMapView2D, setMapView2D } from '../mapViewMode';
 import { getDepartureBearing, orderRoutesForward, routeInitialBearing } from '../departureBearing';
-import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_VIEW_2D } from './carButtonIcons';
+import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_VIEW_2D, carIcon } from './carButtonIcons';
+import { appSkinNow } from '../appSkin';
 import { toggleCarComms } from './carComms';
 import { logEvent } from '../crashBreadcrumb';
 import { ensureSavedPlacesLoaded, getSavedPlaces, type SavedPlace } from '../savedPlaces';
@@ -920,6 +921,32 @@ export const CAR_MAP_BUTTON_CONFIG = {
   ],
 };
 
+// SKIN-AWARE map buttons (2026-08-28). Same array, same order, same ids — only the
+// metal changes. The comms mic is deliberately NOT skinned: it is already chrome and
+// is a COMMS affordance, not a tier surface.
+//
+// ⚠ RESOLVED AT TEMPLATE-BUILD TIME, i.e. on CarPlay CONNECT. The MapTemplate is
+// constructed inside the connect/disconnect lifecycle effect in ConvoyCarPlay.tsx, so
+// changing the skin mid-drive does NOT restyle the buttons — it takes effect on the
+// next connect. That is deliberate: rebuilding the root template to recolour a button
+// means setRootTemplate/popToTemplate churn while someone is driving, and this repo
+// has already had a template pop EVICT the driver to the app drawer (2026-08-19).
+// A button that wears last drive's metal for one trip is not worth that risk.
+//
+// appSkinNow() (not the hook) because this is module-scope, called outside React.
+export function carMapButtonConfig() {
+  const s = appSkinNow();
+  return {
+    ...CAR_MAP_BUTTON_CONFIG,
+    mapButtons: [
+      { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC },
+      { id: 'car-view', image: carIcon('view2d', s), focusedImage: carIcon('view2d', s) },
+      { id: 'car-crew', image: carIcon('crew', s), focusedImage: carIcon('crew', s) },
+      { id: 'car-compass', image: carIcon('compass', s), focusedImage: carIcon('compass', s) },
+    ],
+  };
+}
+
 // ── ANDROID AUTO BUTTONS (2026-07-30) ────────────────────────────────────────
 // Jeff: "next on the list is getting the touch buttons on AA like CarPlay."
 //
@@ -984,6 +1011,20 @@ export const AA_MAP_BUTTONS = [
   { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT },
   { id: 'car-compass', icon: CAR_ICON_COMPASS, visibility: AA_PERSISTENT },
 ];
+
+// The AA twin. ⚠ Currently a NO-OP visually: androidx tints MapActionStrip icons to a
+// flat white silhouette, and the CarIcon tint override is a native patch that has never
+// landed (grep patches/ — nothing). Wired now so AA inherits the metal the moment that
+// patch ships, rather than needing a second pass then.
+export function aaMapButtons() {
+  const s = appSkinNow();
+  return [
+    { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT },
+    { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT },
+    { id: 'car-crew', icon: carIcon('crew', s), visibility: AA_PERSISTENT },
+    { id: 'car-compass', icon: carIcon('compass', s), visibility: AA_PERSISTENT },
+  ];
+}
 
 // One dispatcher for an Android Auto press. The ids are shared with CarPlay, so this
 // just picks whichever existing handler owns each id — no duplicated behaviour.

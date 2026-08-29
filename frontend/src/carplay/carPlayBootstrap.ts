@@ -15,7 +15,7 @@ import { carPlayHookOwnsRoot } from './carPlayShared';
 import { setCarState, getCarState, emitCarGesture } from './carStore';
 import { acquireBgLocation, releaseBgLocation, registerBgConsumerProbe, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
-import { CAR_BAR_BUTTON_CONFIG, CAR_MAP_BUTTON_CONFIG, handleCarBarButton, handleCarMapButton } from './carActions';
+import { CAR_BAR_BUTTON_CONFIG, carMapButtonConfig, handleCarBarButton, handleCarMapButton } from './carActions';
 import { logEventReliable } from '../crashBreadcrumb';
 
 let booted = false;
@@ -104,7 +104,10 @@ export function initCarPlayBootstrap(): void {
         // Round CPMapButtons (zoom ± / Scout mic) — SF symbols via the build-65
         // systemImage patch (custom PNGs resolve nil under bridgeless; see
         // carActions.CAR_MAP_BUTTON_CONFIG). Ignored harmlessly on older builds.
-        ...CAR_MAP_BUTTON_CONFIG,
+        // Skin-metalled (2026-08-28): the COLD root builds its own template, so it
+        // needs the same resolver as the warm one or a Silver/Gold driver who connects
+        // the head unit WITHOUT opening the phone app first gets green buttons.
+        ...carMapButtonConfig(),
         onMapButtonPressed: ({ id }: { id: string }) => handleCarMapButton(id, 'cold'),
         // iOS-26 pinch/zoom — the COLD root was missing these entirely, so a driver
         // who connected the head unit without opening the phone app first had no

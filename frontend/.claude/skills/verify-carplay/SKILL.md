@@ -89,6 +89,42 @@ Prove the instrument can see the failure. When testing the modal fix: fire the N
 `Requesting present template`). Without the control you can't tell "fixed" from
 "not measuring".
 
+## 5b. CAPTURE THE CAR SCREEN FROM THE CLI — no Simulator GUI access needed
+
+`simctl io` takes `--display`, and the CarPlay screen is capturable by NAME:
+
+```bash
+xcrun simctl io <UDID> enumerate | grep -E "Screen ID|Screen Type"   # list screens
+xcrun simctl io <UDID> screenshot --display CarPlay  /tmp/cp.png     # the car screen
+xcrun simctl io <UDID> screenshot --display internal /tmp/phone.png  # the phone
+```
+`--display 101` FAILS ("does not have a '101' display port") even though enumerate prints
+that ID — use the NAME (`CarPlay`) or the alias (`external`).
+
+Order matters, and getting it wrong wastes a cycle:
+1. The CarPlay display must be attached BEFORE the app launches, or the scene never binds
+   and the capture returns **"Timeout waiting for screen surfaces"**.
+2. Attaching it is Simulator → I/O → External Displays → CarPlay. There is NO simctl
+   command to create one, and `SimulatorExternalDisplay` in
+   `defaults read com.apple.iphonesimulator` does NOT re-attach it on its own.
+3. **Do not reboot the sim once it is attached** — a reboot drops the display and you have
+   to ask for the menu click again.
+
+## 5c. THE APP DOES NOT FOREGROUND ON THE CARPLAY SIM (2026-08-28, build 67)
+
+The CarPlay display renders the CarPlay HOME SCREEN with the Hairpin icon, and tapping it
+does not open the app — for Claude OR for Jeff. The phone screen renders BLACK across two
+cold launches (so not the post-swap settle artifact).
+
+**VERIFIED PRE-EXISTING, by running the control**: restoring the original shipped
+`main.jsbundle` reproduces it exactly — phone mean brightness 0.5 (vs 7.8 with the new
+bundle), same CarPlay home screen, same 2x "Setting root template". So this is the sim, not
+your change. Templates DO mount and the log is clean, so everything except the final
+compositing can still be verified here.
+
+⚠ Run that control before concluding a CarPlay change broke anything. It costs one launch
+and it is the difference between "my change is fine" and shipping a rollback.
+
 ## 6. What cannot be verified here
 
 - **iOS 26 CarPlay** — `carkitd` crashes in the iOS 26 sim, and Jeff's head unit is 26.x. So

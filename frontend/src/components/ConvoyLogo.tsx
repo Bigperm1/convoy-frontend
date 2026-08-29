@@ -36,10 +36,31 @@ import type { VisualTier } from '../tierTheme';
 // the OTA asset path-key trap: changing a require()'d image's CONTENT under the same
 // path does NOTHING over OTA — the path must change for build-74 installs to get the
 // fixed pixels.
+// ── REBUILT FROM THE LIQUID-GLASS ICON (2026-08-29, Jeff's call) ─────────────
+// The -2 tiles were the full app-icon render: the H over the black CITY GRID. At the
+// 32-38pt this button actually draws, that grid is noise — it muddies into texture and
+// the mark stops reading. These are the composition from the new Icon Composer icon
+// instead: the same bevelled H, centred on the icon's own near-black ground, no grid.
+//
+// The H itself is a CLEANER cut than the -2 bake. The old mask keyed on saturation
+// alone, which discarded the render's white specular RIM (it is bright but nearly
+// colourless) and left a dark seam down the stem; a radius-9 morphological open then
+// chewed the foot. This cut recovers the rim as "bright pixels adjacent to the body"
+// and severs debris at radius 5: edge partial-alpha went 8.0% -> 0.3%.
+//
+// Metals are the same transplant the -2 comment describes and the CarPlay glyphs use:
+// hue+saturation from the tier ramp, the bevel's own luma preserved, so the mark stays
+// dimensional instead of flattening. VERIFIED by median against BOTH the accent and the
+// shipped tiles: silver 204.7 vs 204.0 (shipped 204.0), gold 38.4 vs 39.6 (shipped 39.7).
+// Brand stays the artwork's native 162deg green — same as today, see the -2 note.
+//
+// ⚠ NEW FILE NAMES AGAIN (-3), for the same reason as -2: the OTA asset path-key trap.
+// Changing a require()'d image's CONTENT under an unchanged path ships NOTHING over the
+// air. assets/HAIRPIN.png is untouched — it is still the app icon in app.json.
 const TILE: Record<VisualTier, any> = {
-  brand: require('../../assets/HAIRPIN.png'),
-  premium: require('../../assets/HAIRPIN-silver2.png'),
-  ultra: require('../../assets/HAIRPIN-gold2.png'),
+  brand: require('../../assets/HAIRPIN-tile3.png'),
+  premium: require('../../assets/HAIRPIN-silver3.png'),
+  ultra: require('../../assets/HAIRPIN-gold3.png'),
 };
 
 interface Props {

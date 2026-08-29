@@ -1,6 +1,9 @@
 import React, { useEffect } from "react";
 import { useAppSkin, useAccent } from "../../src/appSkin";
 import { Tabs, useRouter, Redirect } from "expo-router";
+import * as Linking from "expo-linking";
+import { parseDeepLink, setIntent } from "../../src/deepLinks";
+import { logEvent } from "../../src/crashBreadcrumb";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
@@ -239,6 +242,29 @@ export default function AppLayout() {
     });
     return () => sub.remove();
   }, []);
+
+  // ── WIDGET / SHORTCUTS DEEP LINKS (WIDGETS.md, build 75) ────────────────────
+  // Routed HERE, in the always-mounted authenticated shell, not in map.tsx. A cold
+  // launch from a widget delivers the URL before any tab has mounted, so a handler
+  // that lives on a screen simply never sees it — the existing convoy://go handler
+  // in map.tsx works only because the map happens to be the landing tab.
+  //
+  // The shell navigates immediately; the ACTION half is parked in deepLinks and
+  // claimed by the destination screen once it is ready (see setIntent's note).
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const handle = (url: string | null) => {
+      const intent = parseDeepLink(url);
+      if (!intent) return;   // ordinary expo-router URLs fall through untouched
+      setIntent(intent);
+      try { logEvent(`deeplink ${intent.kind}${intent.kind === "drive" ? ` to=${intent.to}` : ""}`); } catch {}
+      // comms/transmit -> Comms; crew and drive both live on the map.
+      router.push((intent.kind === "transmit" ? "/(app)/talk" : "/(app)/map") as any);
+    };
+    Linking.getInitialURL().then(handle).catch(() => {});
+    const sub = Linking.addEventListener("url", (e) => handle(e.url));
+    return () => { try { sub.remove(); } catch {} };
+  }, [router]);
 
   // Tap-to-open listener — fires when the user taps the OS notification
   // banner while the app is backgrounded or killed. For Hails we route to

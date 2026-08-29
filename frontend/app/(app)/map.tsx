@@ -47,6 +47,7 @@ import { subscribeBgFix } from "../../src/navNotification";
 import { type CongestionLevel } from "../../src/mapboxDirections";
 import { useMapView2D, toggleMapView2D, resetMapView2D } from "../../src/mapViewMode";
 import { logEvent, logEventReliable } from "../../src/crashBreadcrumb";
+import { takeIntent, subscribeIntent } from "../../src/deepLinks";
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from "../../src/routeOptimizer";
 import { usePitstop } from "../../src/pitstop";
 import { recordTrip, consumeTakeAgain, cachePeerPbs } from "../../src/trips";
@@ -3750,22 +3751,30 @@ export default function MapScreen() {
   }, [coords?.lat, coords?.lng, roadEvents, roadIncidentsEnabled, navMuted]);
 
 
-  // ----- Deep link: convoy://go?to=work -----
-  // Opens straight into a route to a saved place (powers the iOS Shortcuts
-  // "when CarPlay connects -> Open Convoy" stopgap). Resolves the ?to= target
-  // against saved places and routes there exactly like a picked search result.
+  // ----- Deep links the MAP owns: drive?to= (a.k.a. go?to=) and crew -----
+  // Parsing moved to the shell (app/(app)/_layout.tsx) so a COLD launch from a widget
+  // is handled before any tab mounts; this screen just claims the parked intent when
+  // it is ready. That also fixes the old convoy://go handler, which only worked
+  // because the map happens to be the landing tab — from a widget it could arrive
+  // before this effect existed and be lost.
   useEffect(() => {
-    const handleUrl = async (url: string | null) => {
-      if (!url || !/[?&]to=/i.test(url) || !/\bgo\b/i.test(url)) return;
-      const m = url.match(/[?&]to=([^&]+)/i);
-      if (!m) return;
-      await ensureSavedPlacesLoaded();
-      const place = resolveTarget(decodeURIComponent(m[1]));
-      if (place) onSearchSelectPlace({ lat: place.lat, lng: place.lng, label: place.label });
+    const run = async (i: { kind: string; to?: string }) => {
+      if (i.kind === "crew") { setCrewSignal((n) => n + 1); return; }
+      if (i.kind === "drive" && i.to) {
+        await ensureSavedPlacesLoaded();
+        const place = resolveTarget(i.to);
+        if (place) onSearchSelectPlace({ lat: place.lat, lng: place.lng, label: place.label });
+      }
     };
-    Linking.getInitialURL().then(handleUrl).catch(() => {});
-    const sub = Linking.addEventListener("url", (e) => { void handleUrl(e.url); });
-    return () => { try { sub.remove(); } catch {} };
+    // Cold launch: the shell parked it before we mounted.
+    const cold = takeIntent("crew") || takeIntent("drive");
+    if (cold) void run(cold as any);
+    // Warm tap: the app was already open.
+    return subscribeIntent((i) => {
+      if (i.kind !== "crew" && i.kind !== "drive") return;
+      if (takeIntent(i.kind)) void run(i as any);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ----- Convoy Realtime Presence (Supabase) -----

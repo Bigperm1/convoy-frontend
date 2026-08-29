@@ -19,6 +19,8 @@ import { useSettings } from '../../src/settings';
 import { useLatestTier, type ProximityTier } from '../../src/proximityAudio';
 import { usePttChannel, type PTTMessage } from '../../src/pttChannel';
 import { ensureMicPermission, ensureNotificationPermission } from '../../src/permissionGate';
+import { takeIntent, subscribeIntent } from '../../src/deepLinks';
+import { logEvent } from '../../src/crashBreadcrumb';
 import { registerPushToken } from '../../src/pushRegistration';
 import { livePttBus, setCommsScreenFocused, acquireFloor, releaseFloor, getFloorHolder, floorBus, threadBus } from '../../src/livePtt';
 import { commsRead } from '../../src/commsRead';
@@ -407,6 +409,45 @@ export default function TalkScreen() {
     if (ptt.voxActive) { ptt.stopVox(); setPressed(false); }
     setVoxOn((v) => !v);
   };
+
+  // ── DEEP LINK: convoy://comms/transmit (WIDGETS.md, build 75) ───────────────
+  // The widget's mic button and the Action Button both land here. A widget process
+  // can never capture audio, so the intent is openAppWhenRun + arm — "one tap →
+  // talking in about a second".
+  //
+  // ⚠ NEVER PROMPT FROM A WIDGET TAP. ensureMicPermission() ASKS when the status is
+  // undetermined, and a permission sheet thrown up by a cold launch off a home-screen
+  // tap is exactly the reflexive-deny the permissionGate rules exist to prevent. So
+  // read the status without asking; if it is not already granted the driver simply
+  // lands on Comms and this screen's own staggered gate handles it on its schedule.
+  //
+  // Claims the intent only once channelId exists — channels load async, and a claim is
+  // destructive, so claiming early would consume the intent and then bail with nothing
+  // to transmit on. The 20 s TTL in deepLinks drops it if the load takes too long.
+  useEffect(() => {
+    const arm = async () => {
+      let granted = false;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { Audio } = require('expo-av');
+        granted = !!(await Audio.getPermissionsAsync()).granted;
+      } catch {}
+      if (!granted) return;
+      if (!channelId || floorHolder || ptt.voxActive) return;   // someone else holds the floor
+      try { logEvent('deeplink transmit armed'); } catch {}
+      setDropdownOpen(false);
+      setPressed(true);
+      acquireFloor(channelId);
+      // Hands-free, exactly as onMicTap does it: VOX self-terminates on silence, so
+      // there is no held button to release and no way to leave the mic open.
+      ptt.startVox(() => { releaseFloor(channelId); setPressed(false); });
+    };
+    if (channelId && takeIntent('transmit')) void arm();
+    return subscribeIntent((i) => {
+      if (i.kind === 'transmit' && takeIntent('transmit')) void arm();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelId, floorHolder]);
 
   const toggleDropdown = () => { Haptics.selectionAsync(); setDropdownOpen((o) => !o); };
 

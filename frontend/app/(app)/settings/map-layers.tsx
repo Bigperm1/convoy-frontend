@@ -8,7 +8,33 @@ export default function MapLayersPage() {
     <SettingsPage title="Map Layers">
       <SectionLabel>OVERLAYS</SectionLabel>
       <SettingsCard>
-        <ToggleRow icon="cloudy" iconColor="#5AC8FA" title="Weather" subtitle="Temperature, wind & precipitation overlay on the map" value={settings.showWeatherLayer} onChange={(v) => setSettings({ showWeatherLayer: v })} />
+        {/* ⚠ THIS SUBTITLE PROMISED A MAP OVERLAY THAT HAS NEVER EXISTED (fixed 2026-08-30).
+            It read "Temperature, wind & precipitation overlay on the map". There is no
+            overlay: `showWeatherLayer` gates the HUD CHIP only (src/weatherLayer.ts — a
+            current-conditions fetch, no RasterSource anywhere in the app). The copy now
+            says what the switch does.
+
+            THE OVERLAY IS PARKED, and here is the research so nobody re-runs it:
+            • The Weather Company (ex-IBM, now Francisco Partners) sells radar tiles at a
+              published $500/mo on an annual term — and their own docs say their CANADIAN
+              radar carries ECCC attribution, i.e. we would pay $6k/yr to be resold
+              Canadian government data that is free direct. A CarPlay app (Storm Radar,
+              shipped 2026-08-30) exposes no API to other apps either way.
+            • The free, no-key source that WOULD work: ECCC GeoMet `RADAR_1KM_RRAI`.
+              Probed live 2026-08-30 — HTTP 200, RGBA PNG with real alpha, ~0.36 s, licence
+              explicitly permits commercial use with attribution. GetFeatureInfo at Seattle
+              returns class "Undetected" exactly as Vancouver does, so it covers BC AND the
+              Washington run in one layer.
+            • WHY IT IS PARKED ANYWAY — the zoom argument, not the cost one. CHASE_ZOOM_STOPS
+              runs z17 parked → z14 highway → z12.8 fast. At 49°N, z17 spans ~304 m across
+              the WHOLE screen against 1 km data: the entire display is less than one radar
+              cell. A flat colour wash. Radar only becomes a picture around z8-10, i.e. a
+              route-overview camera we do not have yet. Build it there, or not at all.
+            • And animation is independently out: ECCC's usage policy prohibits "bulk and
+              batch retrieval of WMS tiles" and thresholds at 86,400 req/day. Static single
+              frame at 170 members ≈ 27,200/day (fine); a 10-frame loop ≈ 272,000/day —
+              3.1× over, and the exact behaviour they block for. */}
+        <ToggleRow icon="cloudy" iconColor="#5AC8FA" title="Weather" subtitle="Current conditions in the map HUD — temperature, wind & precipitation" value={settings.showWeatherLayer} onChange={(v) => setSettings({ showWeatherLayer: v })} />
         <Divider />
         <ToggleRow icon="camera" iconColor="#FF453A" title="Speed cameras" subtitle="Show fixed speed cameras and get a Scout voice alert as you approach (OpenStreetMap)" value={settings.speedCameras !== false} onChange={(v) => setSettings({ speedCameras: v })} feature="speed_cameras" />
         <Divider />

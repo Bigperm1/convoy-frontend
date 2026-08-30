@@ -1,4 +1,9 @@
-// Weather Layer — OpenWeather API integration for Convoy map overlay.
+// Weather Layer — OpenWeather current-conditions data for the map HUD CHIP.
+// ⚠ THE NAME IS A MISNOMER AND HAS ALWAYS BEEN ONE. There is no map layer here:
+// no RasterSource, no tiles, nothing rendered onto the map. It is a data fetch that
+// feeds a chip. The Settings copy promised "precipitation overlay on the map" until
+// 2026-08-30 — see the parked-overlay research in app/(app)/settings/map-layers.tsx
+// before anyone tries to build the thing this filename implies.
 // Fetches current conditions (temperature, precipitation, wind, description)
 // for the user's current GPS location and exposes them via a React hook.
 // The data is displayed as a compact HUD chip on the map when the

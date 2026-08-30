@@ -20,6 +20,7 @@ import LogoMenu from "../../src/components/LogoMenu";
 import { getGarageImage, getTopDownImage } from "../../src/carImages";
 import { fetchClubLeaderboard, getPeerPbs, fmtKm } from "../../src/trips";
 import { useSettings, updateSettings } from "../../src/settings";
+import JoinCelebration, { celebrateJoin, subscribeJoin } from "../../src/JoinCelebration";
 import { useAccent, useAccentAlpha, useAppSkinColors } from "../../src/appSkin";
 
 type Community = {
@@ -57,6 +58,11 @@ export default function HubScreen() {
   // My communities section. Falls back to the showroom image when no car is set.
   const heroImg = getGarageImage(user?.car_make || "", user?.car_model || "", user?.car_color || "");
   const [mine, setMine] = useState<Community[]>([]);
+  // The join celebration. Rendered at the SCREEN root (below) so it covers the
+  // whole hub including any open modal — the join call itself lives inside
+  // SearchModal and reaches us over the bus.
+  const [joinedName, setJoinedName] = useState<string | null>(null);
+  useEffect(() => subscribeJoin(setJoinedName), []);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -344,6 +350,9 @@ export default function HubScreen() {
       <SearchModal visible={showSearch} onClose={() => setShowSearch(false)} onChanged={load} />
       <ProfileModal visible={showProfile} onClose={() => setShowProfile(false)} onSignOut={logout} onSaved={async () => { await refresh(); setShowProfile(false); }} />
       <CommunityDetailModal community={showDetail} onClose={() => setShowDetail(null)} onChanged={load} />
+      {joinedName != null && (
+        <JoinCelebration clubName={joinedName} onDone={() => setJoinedName(null)} />
+      )}
     </SafeAreaView>
     <View style={styles.logoBacking}><LogoMenu size={38} align="right" /></View>
     </>
@@ -941,9 +950,12 @@ function SearchModal({ visible, onClose, onChanged }: any) {
   const joinByCode = async () => {
     if (!code.trim()) return;
     try {
-      await api.post("/communities/join", null, { params: { code: code.trim() } });
+      const { data } = await api.post("/communities/join", null, { params: { code: code.trim() } });
       setCode(""); onChanged(); onClose();
-      Alert.alert("Joined", "Welcome to the club");
+      // Was Alert.alert("Joined", "Welcome to the club") — a system dialog on the
+      // one screen where arriving should feel earned (Jeff, 2026-08-29). Fired on
+      // the bus so it renders at the SCREEN root, above this modal's own layer.
+      celebrateJoin(data?.name || "your new club");
     } catch (e) { Alert.alert("Failed", formatErr(e)); }
   };
 

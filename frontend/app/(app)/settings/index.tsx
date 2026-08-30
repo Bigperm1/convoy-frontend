@@ -125,12 +125,19 @@ export default function SettingsMenu() {
           value={settings.muteDuringCalls !== false}
           onChange={(v) => updateSettings({ muteDuringCalls: v })}
         />
-        {/* Battery Saver REMOVED 2026-08-29 (Jeff). Its subtitle promised "lighter GPS
-            & frame rate"; the frame-rate half had been dead since 08-14, so the toggle
-            was advertising something it no longer did. Measured, eco also gave zero
-            protection against the open heat defect (7.94% runaway unplugged vs 6.72%
-            plugged) while silently degrading the location feed for the half of the crew
-            that drives unplugged. See the note in map.tsx's watchPositionAsync. */}
+        <Divider />
+        {/* Restored 2026-08-30, one day after being removed — Say Phin reported heavy
+            drain on a 106-minute unplugged Android Auto drive. The old subtitle claimed
+            "lighter GPS & frame rate"; the frame-rate half had been dead since 08-14, so
+            it advertised a saving it no longer delivered. This copy states only what the
+            switch actually does, with the real measured numbers. */}
+        <ToggleRow
+          icon="battery-half" iconColor="#FFD60A"
+          title="Battery Saver"
+          subtitle="Lighter GPS — about 10 m accuracy instead of 4 m. Worth it on long drives without a charger."
+          value={settings.liteGps === true}
+          onChange={(v) => updateSettings({ liteGps: v })}
+        />
       </SettingsCard>
 
       {/* MAP & FUEL */}

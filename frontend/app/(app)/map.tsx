@@ -3078,33 +3078,44 @@ export default function MapScreen() {
         // is fed independently by carPlayBootstrap's acquireBgLocation +
         // startForegroundCarFeed → carStore, so the car map tracks without this watcher.)
         if (!appActive && !navActiveRef.current) return;
-        // ── BATTERY SAVER REMOVED (2026-08-29). ONE FEED, ALWAYS NAV-GRADE. ────────
-        // This was the last LIVE eco branch: unplugged phones silently dropped to
-        // High @ 1 s / 8 m. The render half had already been collapsed to premium on
-        // 08-14, so eco bought nothing but a degraded location feed.
+        // ── THE ONE LOCATION FEED, AND ITS ONE SWITCH ─────────────────────────────
+        // Default (liteGps off): BestForNavigation @ 500 ms / 2 m. Measured p50
+        // accuracy ~4 m.
+        //   distanceInterval 2 (was 0): let the OS drop sub-2 m stationary jitter
+        //   before it reaches the marker — BestForNavigation is tuned for motion and
+        //   roams when parked. That is the OTA half of the idle-drift fix; the
+        //   marker's speed-scaled dead-band is the other half.
+        // Battery Saver on (liteGps): High @ 1 s / 8 m. Measured p50 ~10 m — still
+        // comfortably nav-grade, and roughly half the GPS duty cycle.
         //
-        // Measured before deleting it, and both numbers argue for removal:
-        //  • Eco gave ZERO protection against the open iOS rAF heat defect — the
-        //    runaway fires at 7.94% of unplugged windows vs 6.72% plugged (n=2,829).
-        //    Unplugged is exactly when eco was active.
-        //  • ConvoyMapbox's justification for always-premium rendering — "the phone is
-        //    nearly always on a charger in the car" — is FALSE. Per tester, unplugged
-        //    driving: SMSGRC 100%, (null) 65%, SPL_GRC 58%, Enablewhore 41%, Rodrigo
-        //    30%, Jeff 20%. Half the crew was quietly driving on the degraded feed —
-        //    including on WIRELESS CarPlay, which feeds the head unit from this very
-        //    watcher (setCarSelfPosition below).
+        // ⚠ THE 24-HOUR ROUND TRIP THIS ENCODES. On 08-29 the automatic version of
+        // this branch was deleted outright: eco had also carried dead frame-rate
+        // branches (collapsed to premium on 08-14) and a Settings subtitle promising
+        // frame-rate savings it no longer delivered. The morning after, Say Phin —
+        // 58% of his driving unplugged, Android Auto, screen on — reported his battery
+        // "absolutely ATE": 106 minutes, 80% → 39%, ~23%/hr against a ~15%/hr baseline
+        // over nine prior unplugged sessions. HYPOTHESIS rather than proof (3 sessions,
+        // coarse battery reporting, no control for screen time) but the mechanism is
+        // known and the removal commit predicted this failure by name.
         //
-        // Cost, stated honestly: unplugged GPS duty cycle roughly doubles. Nobody
-        // measured eco's saving when it shipped and nobody has measured its removal;
-        // HYPOTHESIS is single-digit percent of drive-time drain, dominated by screen
-        // and GL. If a tester reports faster drain, this comment is where to start.
+        // The error that caused it: eco was measured to give no protection against the
+        // rAF RUNAWAY, and I concluded it did nothing for BATTERY. Different claims —
+        // a runaway-rate measurement says nothing about GPS radio drain.
         //
-        // distanceInterval 2 (was 0): let the OS drop sub-2m stationary jitter before
-        // it reaches the marker (BestForNavigation is tuned for motion and roams when
-        // parked) — the OTA half of the idle-drift fix; the marker's speed-scaled
-        // dead-band is the other half. 2 m is well below nav needs.
+        // So the useful half is back as a USER SWITCH, and only that half. No
+        // charge-state detection (that was powerMode.ts, and it stays deleted), no
+        // re-subscribe on plug/unplug, no dead render branches.
+        //
+        // `settings.liteGps` IS in this effect's dep array, so flipping the switch
+        // tears down and re-subscribes the watcher immediately — the driver does not
+        // have to relaunch. That is one re-subscribe per deliberate toggle, which is
+        // nothing like the old `powerMode` dep that re-subscribed on every plug and
+        // unplug of the charger.
+        const liteGps = settings.liteGps === true;
         sub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 2 },
+          liteGps
+            ? { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 8 }
+            : { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 2 },
           (pos) => {
             const h = pos.coords.heading;
             const heading = typeof h === "number" && h > 0 ? h : undefined;
@@ -3262,7 +3273,7 @@ export default function MapScreen() {
     return () => { try { sub?.remove?.(); } catch {} };
     // Re-subscribe only on foreground/background change (not on every nav
     // start/stop — that's read via navActiveRef to avoid GPS blips mid-drive).
-  }, [appActive]);
+  }, [appActive, settings.liteGps]);
 
   // ----- Hazard/Police reporting (Waze-style "5s ago" anchor) -----
   // Drivers usually notice a hazard a beat after they pass it. Snapping the

@@ -121,15 +121,37 @@ roadIncidentsRed?: boolean;
 roadIncidentsGrey?: boolean;
 showPlacePins: boolean;
 showNearby: boolean;
-// ⚠ RETIRED 2026-08-29 — Battery Saver was removed (src/powerMode.ts deleted, the
-// Settings toggle deleted, the last live eco branch in map.tsx's watchPositionAsync
-// collapsed to premium). NOTHING READS THIS ANY MORE.
-// It is deliberately NOT deleted from the type: existing installs still carry
-// `powerProfile: "eco"` on disk, and per the settings rule a stored value outlives
-// its writer. Leaving the key declared and unread means that stale value is inert.
-// ⛔ Never re-use this key name for a new setting — it would inherit "eco" from
-// every install that ever toggled the old switch.
+// ⚠ RETIRED 2026-08-29, STILL RETIRED. Nothing reads this. Kept declared so the
+// `"eco"` value sitting on disk in old installs stays inert, per the settings rule
+// that a stored value outlives its writer.
+// ⛔ Do NOT re-use this key — see `liteGps` below, which deliberately did not.
 powerProfile?: "auto" | "eco";
+// ── Lite GPS (Settings → Driving → Battery Saver), restored 2026-08-30 ──────────
+// TRUE = sample location once a second with an 8 m filter instead of twice a second
+// at the highest accuracy tier. Measured effect: position accuracy p50 goes from
+// ~4 m to ~10 m; still comfortably nav-grade.
+//
+// WHY IT CAME BACK, ONE DAY AFTER I DELETED IT. Say Phin reported his battery
+// "absolutely ATE" on a 106-minute unplugged Android Auto drive the morning after the
+// removal — 80% → 39%, ~23%/hr against a ~15%/hr baseline across nine prior unplugged
+// sessions. HYPOTHESIS, not proven (3 sessions, coarse battery reporting, no control
+// for screen-on time) — but the mechanism is known and I predicted this exact failure
+// in the removal commit.
+//
+// The reasoning error worth remembering: I measured that eco gave no protection
+// against the rAF RUNAWAY and concluded it did nothing for BATTERY. Those are
+// different claims. The runaway measurement said nothing about GPS radio drain.
+//
+// ⚠ A SETTING ONLY — no charge-state detection. The deleted powerMode.ts watched
+// battery state to flip this automatically, and carried dead frame-rate branches, a
+// subtitle that promised frame-rate savings it no longer delivered, and a GPS
+// re-subscribe on every plug/unplug. None of that comes back. If you plug in and want
+// the sharper feed, turn the switch off.
+//
+// ⛔ NEW KEY ON PURPOSE. Reusing `powerProfile` would have silently resurrected
+// "eco" for every install that ever toggled the old switch — a behaviour change
+// nobody asked for. Default undefined = off = everyone keeps the 4 m feed.
+liteGps?: boolean;
 // Gas Jockey — declutter the map's Gas pins by favorite brand + octane.
 gasBrands?: Record<string, boolean>;          // brandKey -> shown; undefined = all shown
 gasOther: boolean;                            // show unbranded / unrecognized stations

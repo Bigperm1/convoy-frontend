@@ -46,6 +46,33 @@ for runtime, devs in sorted(d['devices'].items(), reverse=True):
 raise SystemExit('no such device: ' + want)
 ")
 xcrun simctl boot "$UDID" 2>/dev/null || true   # already-booted is not an error
+
+# ── ONE BOOTED SIM, OR YOU WILL LOOK AT THE WRONG WINDOW (2026-08-29) ──────────
+# This cost a real round trip. iPhone 16 Pro (app installed, running) and iPhone 16
+# Pro Max (empty) were both booted, so Simulator.app had TWO windows and the empty
+# one was in front. From the desk it read as "the app is not running" while every
+# check here said it was up. The device was fine; the window was the wrong device.
+OTHERS=$(xcrun simctl list devices booted -j | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+me='''$UDID'''
+out=[f\"{x['name']} ({x['udid']})\" for v in d['devices'].values() for x in v
+     if x.get('state')=='Booted' and x['udid']!=me]
+print('\n'.join(out))
+")
+if [ -n "$OTHERS" ]; then
+  echo "!!  OTHER SIMULATORS ARE ALSO BOOTED — Simulator.app will show several windows,"
+  echo "!!  and the front one may not be the device this script just installed to:"
+  echo "$OTHERS" | sed 's/^/!!    /'
+  if [ "${SHUTDOWN_OTHERS:-0}" = "1" ]; then
+    echo "$OTHERS" | grep -oE '\(([0-9A-F-]{36})\)' | tr -d '()' \
+      | xargs -I{} xcrun simctl shutdown {} 2>/dev/null || true
+    echo "!!  shut them down (SHUTDOWN_OTHERS=1)"
+  else
+    echo "!!  re-run with SHUTDOWN_OTHERS=1 to close them, or pick the right window by name."
+  fi
+fi
+
 open -a Simulator || true
 
 if [ "${SKIP_BUILD:-0}" != "1" ]; then

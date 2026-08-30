@@ -43,7 +43,7 @@
 //   ⚠ THE THERMAL TELL: level FLAT or FALLING while state=CHARGING means iOS is refusing
 //   the charger — which is exactly the symptom Jeff reported, captured automatically.
 
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { logEvent } from './crashBreadcrumb';
 
 const WINDOW_MS = 60_000;
@@ -104,6 +104,41 @@ const _retiredBase = new Map<string, number>();
  *  nothing past thinning to every 4th sample. */
 const DTS_MAX = 3600;
 
+// ── THE LOAD-BEARING UNKNOWN, MADE OBSERVABLE (2026-08-29) ───────────────────
+// Measured: the runaway is 100% iOS — 205 windows over 12,500 callbacks on iOS
+// (peak 3,226,867), and ZERO on Android in 796 windows, max 12,459. The JS is
+// byte-identical on both, so no pure-JS loop leak can produce that split.
+//
+// The mechanism that CAN (source-verified in RN 0.81.5): under the New Architecture
+// requestAnimationFrame is `createTimer(delay 0)` (TimerManager.cpp), display-paced
+// only while RCTTiming's CADisplayLink is running. Once iOS posts WillResignActive /
+// DidEnterBackground, RCTTiming sets _inBackground and routes every new 0-delay timer
+// to a PAST-DATED NSTimer on the JS runloop — so a self-re-arming rAF chain runs at
+// runloop speed instead of vsync. Android's rAF is Choreographer-only and structurally
+// cannot do this, which is exactly what the 0/796 says.
+//
+// It fits the exposure data too: normalised per window, `surface=phone` (i.e. CarPlay
+// NOT connected — a phone-only drive with the screen off, which IS backgrounded) runs
+// 42.4% fast vs 6.1% on the car surface. 7x.
+//
+// But the app logs AppState NOWHERE, so "was it backgrounded during a runaway?" has
+// never been answerable. This latch answers it. Zero cost inside the step — it is an
+// event listener, not a poll.
+let _winAt = 0;      // wall-clock window start: every cb/s figure to date ASSUMED 60 s
+let _gaps = 0;       // rAF intervals >= 2 ms == pump passes this window
+let _gapMax = 0;     // largest interval, unthinned, whole window
+let _appSeen = '';   // states this window touched, in order: 'a' active 'b' background 'i' inactive
+let _appSub: any = null;
+
+function armAppWatch(): void {
+  if (_appSub || Platform.OS === 'web') return;
+  _appSeen = String(AppState.currentState ?? '?').slice(0, 1);
+  _appSub = AppState.addEventListener('change', (s) => {
+    const c = String(s ?? '?').slice(0, 1);
+    if (_appSeen.slice(-1) !== c) _appSeen += c;   // 'aba' = active -> background -> active
+  });
+}
+
 /** Called from the rAF step. Must stay trivial — it runs up to 120x/sec (and, during
  *  the bug this exists to catch, ~50,000x/sec). */
 export function noteFrame(now: number, inst?: string): void {
@@ -112,6 +147,20 @@ export function noteFrame(now: number, inst?: string): void {
   if (inst) _instRaf.set(inst, (_instRaf.get(inst) ?? 0) + 1);
   if (_last) {
     const dt = now - _last;
+    // ── WHOLE-WINDOW PUMP SHAPE (2026-08-29) ─────────────────────────────────
+    // dtP50/dtP95 below describe only the FIRST ~11,700 callbacks (DTS_MAX + the
+    // 900 warm-up, thinned) — during a 52,000/s runaway that is the first 0.2 s of
+    // a 60 s window, and every conclusion drawn from them covers 0.3% of the data.
+    // These two counters are unthinned and cover the whole window:
+    //   gaps   = intervals >= 2 ms = the number of PUMP PASSES. If the loop is still
+    //            display-paced this lands near 60 x seconds (or 120 x), and then
+    //            raf/gaps IS the concurrent-chain count. If it lands far below, the
+    //            callbacks are not coming from a display link at all.
+    //   gapMax = the largest interval anywhere in the window.
+    // Two compares and two increments — safe at 50k/s, which is the rate this exists
+    // to describe.
+    if (dt >= 2) _gaps++;
+    if (dt > _gapMax) _gapMax = dt;
     // Thin to every 4th once warm, and STOP at DTS_MAX (see above).
     if (_dts.length < 900 || ((_raf & 3) === 0 && _dts.length < DTS_MAX)) _dts.push(dt);
   }
@@ -175,7 +224,14 @@ async function flush(): Promise<void> {
   const raf = _raf, cam = _cam, tick = _tick;
   const dts = _dts.slice().sort((a, b) => a - b);
   const inst = instField();
+  // Snapshot the window shape with everything else, BEFORE the battery await yields.
+  const winMs = _winAt ? Date.now() - _winAt : -1;
+  const gaps = _gaps, gapMax = _gapMax, appSeen = _appSeen || '?';
   _raf = 0; _cam = 0; _tick = 0; _dts = []; _last = 0;
+  _winAt = Date.now(); _gaps = 0; _gapMax = 0;
+  // Carry the state we ENDED in into the next window, so a window that never sees a
+  // transition still reports where it actually was rather than '?'.
+  _appSeen = appSeen.slice(-1);
   _instRaf.clear(); _instCam.clear();
   // ⚠ _retired / _retiredBase are deliberately NEVER pruned mid-session — an
   // INTERMITTENT leak loses its `!` forever the moment it is forgotten. Baselines DO
@@ -200,7 +256,10 @@ async function flush(): Promise<void> {
   try {
     logEvent(
       `heat-probe ${ctx} raf=${raf} cam=${cam} tick=${tick} ` +
-      `dtP50=${pct(dts, 50).toFixed(1)} dtP95=${pct(dts, 95).toFixed(1)} batt=${batt}${inst}`,
+      `dtP50=${pct(dts, 50).toFixed(1)} dtP95=${pct(dts, 95).toFixed(1)} ` +
+      // win= makes every past cb/s figure honest — windows of 3 s, 26 s and 768 s all
+      // exist in the table, and every rate published so far assumed exactly 60 s.
+      `win=${winMs} app=${appSeen} gaps=${gaps} gapMax=${gapMax} batt=${batt}${inst}`,
     );
   } catch {}
 }
@@ -216,6 +275,8 @@ export function startHeatProbe(ctx: string): void {
   if (_on) return;
   _on = true;
   _raf = 0; _cam = 0; _tick = 0; _dts = []; _last = 0;
+  _winAt = Date.now(); _gaps = 0; _gapMax = 0;
+  armAppWatch();
   _instRaf.clear(); _instCam.clear();
   // _retired / _retiredBase are NOT cleared. This function re-runs on every nav start
   // and every CarPlay connect/disconnect (map.tsx effect), and a leaked rAF loop

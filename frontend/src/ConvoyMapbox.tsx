@@ -1177,6 +1177,14 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   }, []);
 
   const raf = useRef<number | null>(null);
+  // Pump guard bookkeeping — see armNextFrame below.
+  const lastArmAt = useRef(0);
+  const fastPumpRun = useRef(0);
+  // Which scheduler armed raf.current. RN routes cancelAnimationFrame and clearTimeout
+  // to ONE deleteTimer over ONE handle space (TimerManager.cpp: `timerIndex_++`,
+  // deleteTimer), so either cancel would in fact work — but pairing them explicitly
+  // keeps this correct if that ever stops being true, and makes the intent readable.
+  const rafIsTimer = useRef(false);
   const seeded = useRef(false);
   // The last RAW incoming fix (pre-dead-band), for the stationary scatter gate below:
   // cold-start GPS throws fixes 20–50m apart that a fixed 9m band can't absorb, so a
@@ -1403,6 +1411,70 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── PUMP GUARD (2026-08-29) ──────────────────────────────────────────────────
+  // Schedules the next frame, falling back to a TIMER when the callbacks are arriving
+  // faster than any display could produce them.
+  //
+  // WHY. Measured over 14 days: the rAF runaway is 100% iOS — 205 windows above 12,500
+  // callbacks (peak 3,226,867 in one minute = 52,839/s) and ZERO on Android in 796
+  // windows, whose maximum is 12,459. The JS is byte-identical on both platforms, so no
+  // loop leak in this file can explain that split.
+  //
+  // What can (verified in the RN 0.81.5 sources, not inferred): under the New
+  // Architecture `requestAnimationFrame` is `createTimer(delay 0)` — RN's own comment
+  // calls it "the same as setTimeout(0)". It only BEHAVES like 60 Hz because RCTTiming
+  // is pumped by a CADisplayLink. Once iOS posts WillResignActive / DidEnterBackground,
+  // RCTTiming sets _inBackground, startTimers can no longer un-pause, and every new
+  // 0-delay timer is routed to a PAST-DATED NSTimer on the JS runloop — so a
+  // self-re-arming chain runs at runloop speed, not vsync. Android's rAF is
+  // Choreographer-only and structurally cannot do this, which is exactly the 0/796.
+  //
+  // A `setTimeout(d)` with d > 0 does NOT degrade: its target time is d in the future,
+  // so RCTTiming's own shouldFire gate holds it. That asymmetry is the entire fix.
+  // cancelAnimationFrame and clearTimeout are ONE call over ONE handle space in RN, so
+  // raf.current stays cancellable whichever scheduler armed it — the unmount cleanup and
+  // every `raf.current == null` guard keep working untouched.
+  //
+  // ⚠ HYPOTHESIS, and it is why this is a GUARD and not a fix: the mechanism is
+  // source-verified but the ATTRIBUTION is not — the app has never logged AppState, so
+  // nobody can yet say a runaway window was backgrounded. heatProbe now ships `app=`,
+  // `gaps=` and `win=` to settle it on the next real drive. If `app=` comes back `a` for
+  // a whole runaway window, this diagnosis is wrong and this guard is merely a cap.
+  //
+  // SAFETY: 4 ms = 250 Hz. No shipping panel reaches it (120 Hz = 8.3 ms), so on a
+  // healthy display this branch is unreachable and the ease math, the draw gate, the
+  // pushCam call and their ordering are byte-identical. It only changes WHAT SCHEDULES
+  // the next callback, and only once the pump is already impossible.
+  const FAST_PUMP_MS = 4;
+  const FAST_PUMP_RUN = 8;   // consecutive impossible gaps before falling back
+  const armNextFrame = () => {
+    const now = Date.now();
+    const gap = now - lastArmAt.current;
+    lastArmAt.current = now;
+    if (gap < FAST_PUMP_MS) {
+      // Require a RUN of them: a single sub-4 ms gap is a scheduling hiccup, not a pump
+      // failure, and must not push a healthy loop onto a timer.
+      if (++fastPumpRun.current >= FAST_PUMP_RUN) {
+        rafIsTimer.current = true;
+        raf.current = setTimeout(step, 16) as unknown as number;
+        return;
+      }
+    } else {
+      fastPumpRun.current = 0;
+    }
+    rafIsTimer.current = false;
+    raf.current = requestAnimationFrame(step);
+  };
+
+  /** Cancel whatever armed the pending frame, and clear the handle. */
+  const cancelNextFrame = () => {
+    if (raf.current == null) return;
+    if (rafIsTimer.current) clearTimeout(raf.current as unknown as ReturnType<typeof setTimeout>);
+    else cancelAnimationFrame(raf.current);
+    raf.current = null;
+    rafIsTimer.current = false;
+  };
+
   const step = () => {
     rafDead.current = false; // the loop ticked → the display is awake; smooth easing is live
     lastStepAtRef.current = Date.now(); // heartbeat for the always-on car watchdog below
@@ -1444,7 +1516,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         const dE = (_nLng - _pr.lng) * 111320 * Math.cos((_nLat * Math.PI) / 180);
         const dH = Math.abs(((((_nHdg - _pr.heading) % 360) + 540) % 360) - 180);
         if (Math.hypot(dN, dE) < 0.06 && dH < 0.08) {
-          raf.current = requestAnimationFrame(step);
+          armNextFrame();   // pump guard: this is the branch that spins doing no work
           return;
         }
       }
@@ -1455,7 +1527,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     pushCam(render.current.lat, render.current.lng, render.current.heading); // LOCKSTEP: camera rides the eased pose
     noteTick(); setTick((n) => (n + 1) & 0xffff);
     if (t < 1) {
-      raf.current = requestAnimationFrame(step);
+      armNextFrame();
     } else {
       anim.current = null;
       raf.current = null;
@@ -1509,7 +1581,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       lastRawFix.current = { lat, lng };
       scatterRejects.current = 0;
       anim.current = null;
-      if (raf.current != null) { cancelAnimationFrame(raf.current); raf.current = null; }
+      cancelNextFrame();
       // NOTE: do NOT stop the bg watchdog here — for the lockstep (CarPlay)
       // instance it's the always-on freeze net, and killing it on a snap/recenter
       // would disarm it for the rest of the drive. anim=null + the heartbeat
@@ -1616,7 +1688,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
 
   // Stop the loop if the car unmounts mid-animation.
   useEffect(() => () => {
-    if (raf.current != null) cancelAnimationFrame(raf.current);
+    cancelNextFrame();
     if (bgTimer.current != null) { clearInterval(bgTimer.current); bgTimer.current = null; }
   }, []);
 

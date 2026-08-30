@@ -121,10 +121,14 @@ roadIncidentsRed?: boolean;
 roadIncidentsGrey?: boolean;
 showPlacePins: boolean;
 showNearby: boolean;
-// Power profile (Settings → Driving → Battery Saver). "auto" (default) = premium
-// when plugged in, eco when unplugged / iOS Low Power Mode. "eco" = eco ALWAYS —
-// the phone-runs-hot escape hatch (plugged-in = premium by design, which is
-// exactly when testers reported the most heat). Optional: undefined → "auto".
+// ⚠ RETIRED 2026-08-29 — Battery Saver was removed (src/powerMode.ts deleted, the
+// Settings toggle deleted, the last live eco branch in map.tsx's watchPositionAsync
+// collapsed to premium). NOTHING READS THIS ANY MORE.
+// It is deliberately NOT deleted from the type: existing installs still carry
+// `powerProfile: "eco"` on disk, and per the settings rule a stored value outlives
+// its writer. Leaving the key declared and unread means that stale value is inert.
+// ⛔ Never re-use this key name for a new setting — it would inherit "eco" from
+// every install that ever toggled the old switch.
 powerProfile?: "auto" | "eco";
 // Gas Jockey — declutter the map's Gas pins by favorite brand + octane.
 gasBrands?: Record<string, boolean>;          // brandKey -> shown; undefined = all shown

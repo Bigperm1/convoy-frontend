@@ -59,7 +59,6 @@ import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
 import { useSpeedCameras } from "../../src/speedCameras";
 import { useDriveBcEvents } from "../../src/driveBcEvents";
-import { usePowerMode } from "../../src/powerMode";
 import { useSpeedLimit, getSpeedLimitDebug } from "../../src/speedLimit";
 import { playSpeedDing } from "../../src/speedDing";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -2984,7 +2983,6 @@ export default function MapScreen() {
   // Premium (plugged) vs eco (unplugged) power profile. Drives the battery/heat gates
   // below (3D buildings, GPS accuracy). Always "premium" on a build without expo-battery
   // (build 62), so this is a no-op until build 63 — the premium path never changes.
-  const powerMode = usePowerMode();
   const wasActiveRef = useRef(true);
   useEffect(() => {
     const s = AppState.addEventListener("change", (st) => {
@@ -3077,19 +3075,33 @@ export default function MapScreen() {
         // is fed independently by carPlayBootstrap's acquireBgLocation +
         // startForegroundCarFeed → carStore, so the car map tracks without this watcher.)
         if (!appActive && !navActiveRef.current) return;
-        // PREMIUM (plugged): BestForNavigation @ 500ms / 0 m — the smoothest feed.
-        // ECO (unplugged, build 63+): High @ 1 s + an 8 m distance gate — still solid
-        // nav-grade GPS (the ConvoyMapbox ease loop interpolates between fixes so the car
-        // stays smooth) but far less GPS/radio cycling and no callback thrash when stopped.
-        // Re-subscribes on plug/unplug via the powerMode dep on this effect.
+        // ── BATTERY SAVER REMOVED (2026-08-29). ONE FEED, ALWAYS NAV-GRADE. ────────
+        // This was the last LIVE eco branch: unplugged phones silently dropped to
+        // High @ 1 s / 8 m. The render half had already been collapsed to premium on
+        // 08-14, so eco bought nothing but a degraded location feed.
+        //
+        // Measured before deleting it, and both numbers argue for removal:
+        //  • Eco gave ZERO protection against the open iOS rAF heat defect — the
+        //    runaway fires at 7.94% of unplugged windows vs 6.72% plugged (n=2,829).
+        //    Unplugged is exactly when eco was active.
+        //  • ConvoyMapbox's justification for always-premium rendering — "the phone is
+        //    nearly always on a charger in the car" — is FALSE. Per tester, unplugged
+        //    driving: SMSGRC 100%, (null) 65%, SPL_GRC 58%, Enablewhore 41%, Rodrigo
+        //    30%, Jeff 20%. Half the crew was quietly driving on the degraded feed —
+        //    including on WIRELESS CarPlay, which feeds the head unit from this very
+        //    watcher (setCarSelfPosition below).
+        //
+        // Cost, stated honestly: unplugged GPS duty cycle roughly doubles. Nobody
+        // measured eco's saving when it shipped and nobody has measured its removal;
+        // HYPOTHESIS is single-digit percent of drive-time drain, dominated by screen
+        // and GL. If a tester reports faster drain, this comment is where to start.
+        //
+        // distanceInterval 2 (was 0): let the OS drop sub-2m stationary jitter before
+        // it reaches the marker (BestForNavigation is tuned for motion and roams when
+        // parked) — the OTA half of the idle-drift fix; the marker's speed-scaled
+        // dead-band is the other half. 2 m is well below nav needs.
         sub = await Location.watchPositionAsync(
-          powerMode === "eco"
-            ? { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 8 }
-            // distanceInterval 2 (was 0): let the OS drop sub-2m stationary jitter
-            // before it reaches the marker (BestForNavigation is tuned for motion and
-            // roams when parked) — the OTA half of the idle-drift fix; the marker's
-            // speed-scaled dead-band is the other half. 2m is well below nav needs.
-            : { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 2 },
+          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 2 },
           (pos) => {
             const h = pos.coords.heading;
             const heading = typeof h === "number" && h > 0 ? h : undefined;
@@ -3247,7 +3259,7 @@ export default function MapScreen() {
     return () => { try { sub?.remove?.(); } catch {} };
     // Re-subscribe only on foreground/background change (not on every nav
     // start/stop — that's read via navActiveRef to avoid GPS blips mid-drive).
-  }, [appActive, powerMode]);
+  }, [appActive]);
 
   // ----- Hazard/Police reporting (Waze-style "5s ago" anchor) -----
   // Drivers usually notice a hazard a beat after they pass it. Snapping the

@@ -40,7 +40,6 @@ import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLat
 import { routeTrimLeadM, routeTrimFadeM } from "./routeTrim";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
-import { getPowerMode, usePowerMode } from "./powerMode";
 import { getVehiclePngOrDefault, getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
 import { ClassSprite } from "./classLayers";
 import { getPaintedArrowUri } from "./arrowModel";
@@ -627,10 +626,10 @@ export function easedFrac(f: { prev: number; cur: number; at: number; gap: numbe
 // sees. Heat is being paid down by REMOVING WORK (the carStore equality gate, the
 // screen-off pump scoping, the churn gates) rather than by degrading the render.
 //
-// powerMode itself is NOT deleted — it still exists and other callers may use it. Only the
-// RENDER-QUALITY branches are collapsed to premium.
+// UPDATE 2026-08-29: powerMode is now DELETED outright. The render branches were
+// collapsed here on 08-14; the last live consumer (the unplugged GPS downgrade in
+// map.tsx) went with Battery Saver. Everything runs premium, always.
 export const TRIM_TICK_MS_PREMIUM = 83;
-export const TRIM_TICK_MS_ECO = 125;
 
 // Heading-up camera bearing — we drive it ourselves instead of Mapbox's native
 // FollowWithCourse, which tracks raw GPS course and updates every frame, so its
@@ -2216,7 +2215,6 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // throttled interval with the latest raw pose without it re-subscribing each render.
   const mapRef = useRef<any>(null);
   // Reactive power mode for the render-rate cap on <MapView> below (premium 60 / eco 30).
-  const phonePowerMode = usePowerMode();
   // The LOCKED road polyline. The render projects the LIVE raw fix onto it each frame, so the
   // marker slides smoothly along the road; the interval only swaps WHICH road is locked. A ref
   // mirror lets the interval read the current lock without re-subscribing.
@@ -3335,7 +3333,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         // did, so Mapbox rendered at the display's native refresh: up to 120fps on a
         // ProMotion iPhone, uncapped, for the whole drive. Same values as CarMapView
         // (premium 60 / eco 30) so plugged-in keeps the premium feel and battery keeps
-        // the eco cap. usePowerMode() is reactive — plugging in mid-drive re-renders.
+        // the eco cap. (Eco is gone as of 2026-08-29 — this is now simply the cap.)
         preferredFramesPerSecond={60}
         scaleBarEnabled={false}
         compassEnabled={false}

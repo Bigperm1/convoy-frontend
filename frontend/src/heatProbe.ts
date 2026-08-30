@@ -243,7 +243,8 @@ async function flush(): Promise<void> {
 
   let batt = 'na';
   try {
-    // expo-battery is already a dependency and already used by src/powerMode.ts.
+    // expo-battery is a dependency. ⚠ Since powerMode.ts was deleted (2026-08-29) THIS
+    // is its only consumer — do not drop the package as cleanup, it would blind batt=.
     // Required lazily so a missing module can never touch the drive.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const B = require('expo-battery');

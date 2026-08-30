@@ -34,7 +34,6 @@ import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGes
 import { canonicalClass } from '../settings';
 import { useMapView2D } from '../mapViewMode';
 import { buildCongestionGradient } from '../mapboxDirections';
-import { usePowerMode } from '../powerMode';
 import { getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, getVehiclePngOrDefault, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
@@ -51,7 +50,6 @@ import {
   carModelScale,
   easedFrac,
   TRIM_TICK_MS_PREMIUM,
-  TRIM_TICK_MS_ECO,
   applyCarGapGradient,
   GREEN_ARROW_MODEL,
   ARROW_MODEL_ID,
@@ -397,7 +395,6 @@ type Props = {
 
 export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfaceH = 0 }: Props) {
   const s = useCarStore();
-  const powerMode = usePowerMode(); // premium (plugged) → 60fps; eco (unplugged) → 30fps
 
   const [mapH, setMapH] = useState(0);
   const [mapW, setMapW] = useState(0);
@@ -1048,7 +1045,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       setTrimTick((n) => (n + 1) & 0xffff);
     }, period);
     return () => clearInterval(id);
-  }, [s.navigating, powerMode]);
+  }, [s.navigating]);
   // FROZEN-CLOSURE FIX (2026-07-20) — the CarPlay half of the phone's chase-cam bug
   // (see ConvoyMapbox.tsx:1844). SelfCarModel's rAF step() loop captures ONE closure
   // at mount, so it kept calling render-#1's getCam forever. userZoomRef/camHdgRef

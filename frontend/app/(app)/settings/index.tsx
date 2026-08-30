@@ -125,14 +125,12 @@ export default function SettingsMenu() {
           value={settings.muteDuringCalls !== false}
           onChange={(v) => updateSettings({ muteDuringCalls: v })}
         />
-        <Divider />
-        <ToggleRow
-          icon="battery-half" iconColor="#FFD60A"
-          title="Battery Saver"
-          subtitle="Run cooler: lighter GPS & frame rate. Off = auto (eco only when unplugged)"
-          value={settings.powerProfile === "eco"}
-          onChange={(v) => updateSettings({ powerProfile: v ? "eco" : "auto" })}
-        />
+        {/* Battery Saver REMOVED 2026-08-29 (Jeff). Its subtitle promised "lighter GPS
+            & frame rate"; the frame-rate half had been dead since 08-14, so the toggle
+            was advertising something it no longer did. Measured, eco also gave zero
+            protection against the open heat defect (7.94% runaway unplugged vs 6.72%
+            plugged) while silently degrading the location feed for the half of the crew
+            that drives unplugged. See the note in map.tsx's watchPositionAsync. */}
       </SettingsCard>
 
       {/* MAP & FUEL */}

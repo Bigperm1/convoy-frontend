@@ -72,7 +72,13 @@ eas submit --profile production --platform ios|android
 File-based routing under `app/`. `typedRoutes` is on. Three groups:
 - `app/index.tsx` — the gate. Redirects to `/(app)/map` (session active), `/onboarding` (first launch), or `/(auth)/login`. It waits for both `useAuth().user` and an AsyncStorage read before redirecting so the wrong screen never flashes.
 - `app/(auth)/*` — login / signup / onboarding (unauthenticated).
-- `app/(app)/*` — the authenticated app, a `Tabs` layout. **`app/(app)/map.tsx` is the center of gravity (~3000 lines)** — it owns location, the WebSocket, presence, navigation state, hazards, and feeds the CarPlay surface. Most map/nav feature work happens here or in the `src/` modules it composes.
+- `app/(app)/*` — the authenticated app, a `Tabs` layout. **`app/(app)/map.tsx` is the center of gravity (~5,900 lines as of 2026-08-30)** — it owns location, the WebSocket, presence, navigation state, hazards, and feeds the CarPlay surface. Most map/nav feature work happens here or in the `src/` modules it composes.
+  > ⚠ **LINE NUMBERS IN THESE DOCS DRIFT — GREP, DON'T TRUST.** This file said "~3000 lines"
+  > for long enough that the real figure had nearly doubled. `CARPLAY.md` rule 1 cited `:2980`
+  > for a render early-return that had moved ~1,200 lines, and a comment inside `map.tsx`
+  > itself pointed at `:3023` for that same line. All three corrected 2026-08-30 — and the
+  > correction itself shifted the target three more lines, which is the whole argument.
+  > **Locate anything in this file by searching for its comment text, never by line number.**
 
 `src/auth.tsx` exposes `AuthProvider` / `useAuth`. `user` is `undefined` while loading, `null` when signed out — preserve this three-state contract. Token lives in AsyncStorage (`src/api.ts`) and is auto-attached as a Bearer header by the axios interceptor.
 

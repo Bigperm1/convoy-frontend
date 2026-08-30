@@ -1861,9 +1861,12 @@ export default function MapScreen() {
   // corridor scan), the fit-bounds memo (decodes EVERY route), and the route render
   // memo. That storm ran precisely when the driver was off-route and a reroute offer
   // was up — the same moment Jeff reports the car drifting and the line misbehaving.
-  // ⚠ MUST stay above the `if (!coords) return` early return (:3023) — a hook below it
-  // changes the hook count when the first fix lands and React throws. See CARPLAY.md
-  // rule 1; that trap cost two crashes on 2026-07-24.
+  // ⚠ MUST stay above the `if (!coords)` render early-return (the one returning
+  // "Locating…") — a hook below it changes the hook count when the first fix lands and
+  // React throws. See CARPLAY.md rule 1; that trap cost two crashes on 2026-07-24.
+  // Cited by CONTENT, not line: this comment used to say ":3023" and the return had
+  // drifted to :4158. A stale pointer here is worse than none — it sends the next
+  // reader to unrelated code and they add the hook anyway.
   // Pure identity fix: the array CONTENTS are byte-for-byte what they were.
   const displayRoutes = useMemo(
     () => (rerouteOffer ? [...routes, { ...(rerouteOffer.route as any), kind: "offer" }] : routes),

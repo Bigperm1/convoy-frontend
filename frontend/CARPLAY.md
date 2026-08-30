@@ -156,10 +156,17 @@ Cold falls through to the module-scope handlers.
 
 ## 5. Hard-won rules (each cost at least one bad build)
 
-1. **NEVER add a hook below `if (!coords) return` in `map.tsx` (:2980).** Two crashes on
-   2026-07-24. With no GPS fix the hooks don't run; when coords arrive the count changes →
+1. **NEVER add a hook below the `if (!coords)` render early-return in `map.tsx`.** Two crashes
+   on 2026-07-24. With no GPS fix the hooks don't run; when coords arrive the count changes →
    *"Rendered more hooks than during the previous render"* → surfaces as an opaque native
-   abort with no JS frames. The crew feed lives at :1666 for this reason.
+   abort with no JS frames. The CarPlay crew feed sits above it for this reason.
+   > **Find it by content, not by line:** `grep -n 'if (!coords) {' "app/(app)/map.tsx"` — the
+   > one returning `<Text>Locating…</Text>`. Crew feed: `grep -n 'CarPlay crew feed'`.
+   > This rule previously read `:2980` and `:1666`. Both had drifted by ~1,200 lines and
+   > pointed at unrelated code — which is exactly how someone re-introduces the crash the
+   > rule exists to prevent. **No line numbers here on purpose:** when this was corrected on
+   > 2026-08-30, adding the fix comment to `map.tsx` shifted the target three lines and
+   > invalidated the freshly-written number on the spot.
 2. **The iOS 26 spacer trick is DEAD.** Transparent images and `hidden:true` both still
    draw the glass circle. Two head-unit confirmations. Do not revisit.
 3. **`Camera.fitBounds` silently no-ops on the CarPlay window** (works in the 18.6 sim).

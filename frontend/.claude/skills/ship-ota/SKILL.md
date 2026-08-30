@@ -13,6 +13,34 @@ yarn typecheck
 ```
 Must pass clean. Do not publish on a failing or skipped typecheck.
 
+## 1b. Gate: doc-check (sub-second, added 2026-08-30)
+```bash
+python3 scripts/doc-check.py --live
+```
+Must exit 0. It verifies that every repo path a **live** doc references still exists, that
+every `file.ts:NNN` citation is inside that file, and that every "~N lines" claim is within
+25% of reality. History-only docs (`HANDOFF*.md`, `CARPLAY_MAC_HANDOFF.md`) are reported but
+never fail — they are dated snapshots and their references are *supposed* to rot.
+
+**Why it is a release gate and not a chore:** doc rot is created by CHANGES, not by time, so
+the moment code ships is exactly the moment to check. Deleting `src/powerMode.ts` orphaned a
+reference in `WHY-IT-HEATS.md` the same night. On the day this gate was added, four stale
+references were live at once — including **`CARPLAY.md` rule 1, the hook rule that cost two
+crashes on 2026-07-24**, pointing at an early-return that had drifted ~1,200 lines onto an
+unrelated comment. A stale pointer is worse than none: it sends the next reader to unrelated
+code, they conclude the rule does not apply, and they add the hook anyway.
+
+**If it fails:** fix by citing CONTENT (a `grep` for the comment text), not a line number —
+see `CARPLAY.md` rule 1 for the pattern. A line number written today is wrong by next week;
+correcting one of these shifted its own target three lines on the spot. To name a
+deliberately-deleted file in prose, add `<!-- doc-check:ignore: why -->` on that line.
+
+⚠ **What this gate does NOT prove.** It shows references POINT somewhere real. It cannot tell
+you a doc is LYING. `CLAUDE.md` described routing as "Google Routes API v2" for months after
+the 2026-06-14 move to Mapbox — every path in that sentence was valid, the prose was false,
+and it was repeated back to Jeff as fact. **If this OTA changed a subsystem, re-read that
+subsystem's doc by hand.** That is the only thing that catches semantic rot.
+
 ## 2. Confirm the change is OTA-able
 JS/TS-only changes ship OTA. If anything native changed (new native module, config plugin, `app.json` plugin/infoPlist change, patch-package on a native dep, SDK bump) — STOP: this needs a native build (`/cut-build`), not an OTA. Pushing JS an old binary can't run strands testers.
 

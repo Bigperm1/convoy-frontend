@@ -66,6 +66,15 @@ export type GreetingContext = {
   destination?: { lat: number; lng: number } | null;
   // Fallback name when the destination isn't a saved place (search label / city).
   destinationName?: string | null;
+  // The first PENDING stop's spoken name, on a multi-stop run.
+  //
+  // Composed HERE rather than by the caller, and that placement is the whole point.
+  // map.tsx originally packed "Canadian Tire, then home" into destinationName — but
+  // the saved-place match below runs FIRST and wins, so on the single most common
+  // errand shape (a stop on the way home) the composed string was silently thrown
+  // away and Nova announced only the destination. Which is the bug Jeff reported:
+  // "it announced Superstore while it was routing me to Canadian Tire first."
+  viaName?: string | null;
   // City/area for the weather clause.
   destinationCity?: string | null;
   // The selected route (for the traffic read).
@@ -102,6 +111,11 @@ export function prepareRouteGreeting(ctx: GreetingContext, key: string): void {
           : undefined;
       if (match) destLabel = match.kind === "home" ? "home" : match.kind === "work" ? "work" : match.label;
       else if (ctx.destinationName) destLabel = ctx.destinationName;
+      // Prefix the stop AFTER the saved-place match, so "home" survives as the tail.
+      // The ternary is load-bearing: with no saved match AND no destinationName,
+      // destLabel is undefined, and a plain `if (viaName && destLabel)` would drop
+      // the stop too — leaving a multi-stop drive with no label at all.
+      if (ctx.viaName) destLabel = destLabel ? `${ctx.viaName}, then ${destLabel}` : ctx.viaName;
 
       const { data } = await api.post("/nova/greeting", {
         call_sign: s.callSign || undefined,

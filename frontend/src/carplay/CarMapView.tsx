@@ -27,6 +27,7 @@ import Mapbox, {
   ShapeSource,
   LineLayer,
   SymbolLayer,
+  CircleLayer,
   VectorSource,
   Models,
 } from '@rnmapbox/maps';
@@ -802,9 +803,40 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   }, [s.peers]);
 
   const allMapImages = React.useMemo(
-    () => ({ [carFlatImg]: getVehiclePngOrDefault(s.selfCarColor), ...peerImages }),
+    () => ({
+      [carFlatImg]: getVehiclePngOrDefault(s.selfCarColor),
+      // The waypoint pin. Same asset the phone's destination and stop markers use, so a
+      // stop looks like the SAME object on both screens rather than a car-only invention.
+      brand_pin: require('../../assets/images/brand-pin.png'),
+      ...peerImages,
+    }),
     [carFlatImg, s.selfCarColor, peerImages],
   );
+
+  // ── WAYPOINT PINS — THE STOPS AND THE DESTINATION (2026-08-31) ───────────────
+  // Jeff, mid-errand: "it doesn't actually make a dot or anything on my stop."
+  // This surface drew the route, the congestion, the peers and the self car, and then
+  // nothing: the line ended in empty space. The phone has drawn numbered stop pins since
+  // 2026-07-29 — the head unit was simply never sent the data (carStore.waypoints, new).
+  //
+  // A SymbolLayer, NOT a MarkerView: the peer-car note above establishes that an RN view
+  // does not sync reliably on the CarPlay window, which is why the phone's marker
+  // components cannot be reused here. Same reason, same solution.
+  const waypointFC = React.useMemo(() => ({
+    type: 'FeatureCollection' as const,
+    features: (s.waypoints ?? [])
+      .filter((w) => Number.isFinite(w.lat) && Number.isFinite(w.lng))
+      .map((w, i) => ({
+        type: 'Feature' as const,
+        id: `wp-${i}`,
+        properties: {
+          // The destination carries no numeral; a stop carries its trip position, which
+          // matches the phone's badge and the drawer so "stop 2" means one thing.
+          label: w.kind === 'stop' && w.n ? String(w.n) : '',
+        },
+        geometry: { type: 'Point' as const, coordinates: [w.lng, w.lat] },
+      })),
+  }), [s.waypoints]);
 
   // canvasScale is uiScale: the Android Auto canvas correction. Passed in rather than closed
   // over because uiScale is declared below this point, and a TDZ bug here would be invisible
@@ -1992,6 +2024,94 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             id="car-cong-preview"
             slot="top"
             style={{ lineGradient: carCongGapped, lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
+          />
+        </ShapeSource>
+      )}
+
+      {/* Waypoint pins: every stop, numbered, plus the destination — the same list the
+          phone draws, per the "CarPlay matches the phone" rule.
+
+          key=: REMOUNT IN LOCKSTEP WITH THE ROUTE BRANCH — the same remedy as car-peers
+          below, and for the same reason. The ordering here is NOT given by JSX position:
+          this source shares slot 'top' with car-route-sel-casing/-core, where stacking is
+          pure INSERTION ORDER, and the route ternary's branch flip re-creates those
+          layers at the top of the slot — burying pins that were mounted before it. All
+          THREE arms, per the 2026-08-26 peers review: a null->nav cold connect is its own
+          case, and a two-arm key was already caught as insufficient once.
+          Mounting the source unconditionally is NOT the fix and would be worse: it would
+          be created once at CarMapView mount, before any route exists, so every later
+          route mount would leapfrog it permanently (car-cong-core's note at the
+          congestion source records exactly that failure). */}
+      {waypointFC.features.length > 0 && (
+        <ShapeSource
+          key={'car-waypoints-' + (previewMulti ? 'preview' : hasRoute ? 'nav' : 'none')}
+          id="car-waypoints"
+          shape={waypointFC as any}
+        >
+          {/* THE NUMERAL NEEDS A DISC UNDER IT — brand-pin.png's head is a RING, not a
+              filled circle. MEASURED off the asset (73x95): alpha is 0 straight through
+              the head, rows 21-51, so a numeral drawn there sits on the moving map with
+              nothing behind it. Both phone paths fill it first (ConvoyMapbox's
+              brandPinBadge view, and the gl-places-bg CircleLayer), and this file already
+              carries the scar: "dark-on-dark made the CarPlay PlaceMarker numbers
+              invisible."
+              Declared BEFORE the symbol layer because icon and text share ONE layer — a
+              circle mounted after would bury the numeral it exists to back.
+              Geometry is measured, not eyeballed: the hole centre is 59 asset px above
+              the image's bottom edge (the 'bottom' anchor point), so 59 x iconSize 0.5 =
+              29.5 pt; the hole's radius is 15.5 px -> 7.75 pt at the same scale. */}
+          <CircleLayer
+            id="car-waypoint-badge"
+            slot="top"
+            // Only features that actually carry a numeral. The destination pin has an
+            // empty label and must stay a clean ring.
+            filter={['!=', ['get', 'label'], ''] as any}
+            style={{
+              circleColor: '#0A1A10',
+              circleRadius: 7.75 * uiScale,
+              circleTranslate: [0, -29.5 * uiScale] as any,
+              circleTranslateAnchor: 'viewport',
+              circlePitchAlignment: 'viewport',
+              circleEmissiveStrength: 1,
+            }}
+          />
+          <SymbolLayer
+            id="car-waypoint-pins"
+            slot="top"
+            style={{
+              iconImage: 'brand_pin',
+              iconSize: 0.5 * uiScale,
+              // Bottom-anchored: a pin points AT a place, so its tip sits on the
+              // coordinate rather than its middle — the anchor the phone uses too.
+              iconAnchor: 'bottom',
+              // Screen-aligned, unlike the peer cars above: a pin is a label, not a
+              // vehicle, and must stay upright as the chase camera rotates.
+              iconRotationAlignment: 'viewport',
+              iconPitchAlignment: 'viewport',
+              // Never dropped for crowding. Two stops in one plaza is ordinary, and
+              // silently hiding one is the "there's no dot" complaint all over again.
+              iconAllowOverlap: true,
+              iconIgnorePlacement: true,
+              // REQUIRED on this surface: Standard's night/dusk preset renders unlit
+              // layers near-black — the original "hazards are black" bug.
+              iconEmissiveStrength: 1,
+              textField: ['get', 'label'] as any,
+              textSize: 11 * uiScale,
+              // Brand green on the disc above, matching the phone exactly. It was
+              // near-black, which is invisible both on the dark badge and in the
+              // transparent hole the badge fills.
+              textColor: '#2DEC86',
+              // Default (centre) anchor + an em offset — the phone's trick at
+              // gl-places-num. text-offset is in ems, so -(29.5/11) em x textSize
+              // 11*uiScale lands the glyph centre exactly on the disc centre AND scales
+              // with uiScale for free: no second multiplier, no separate Android Auto
+              // case. The previous 'bottom' anchor at -1.5 em put the numeral ~7 pt low,
+              // straddling the hole's notch and the pin's solid neck.
+              textOffset: [0, -29.5 / 11],
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+              textEmissiveStrength: 1,
+            }}
           />
         </ShapeSource>
       )}

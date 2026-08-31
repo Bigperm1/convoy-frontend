@@ -60,6 +60,22 @@ export type CarState = {
   eta: string; // e.g. "24 min"
   distanceRemaining: string; // e.g. "33 km"
   destinationLabel: string;
+  // ── WAYPOINTS: THE STOPS AND THE DESTINATION (2026-08-31) ───────────────────
+  // Jeff, mid-errand: "it doesn't actually make a dot or anything on my stop."
+  // He was on CarPlay, and this bridge carried NO waypoint data at all — not the
+  // stops, and not even the destination. CarMapView drew the route line, the
+  // congestion, the peers and the self car, and then simply stopped: the line ended
+  // in empty space with nothing saying what it ended AT.
+  //
+  // `n` is the 1-based trip position for a stop, matching the numbered pins the
+  // phone draws and the numbering in the drawer, so "stop 2" means the same thing
+  // on every surface. Absent for the destination.
+  //
+  // EVERY stop, including ones already collected — the same list the phone draws, and
+  // numbered the same way. A "pending only" variant was written first and cut in review:
+  // it could not work (stops are marked visited on a REF, which no effect can observe)
+  // and, once made to work, it would have made the car disagree with the phone.
+  waypoints?: { lat: number; lng: number; kind: 'stop' | 'dest'; n?: number }[];
   peers: CarPeer[];
   // Self user id, mirrored from the warm phone hook. Lets the CarPlay surface drop our
   // OWN voice out of the "X is talking…" indicator. undefined on a cold connect (no auth
@@ -207,6 +223,7 @@ const initial: CarState = {
   eta: '',
   distanceRemaining: '',
   destinationLabel: '',
+  waypoints: [],
   peers: [],
   distanceToTurnM: 0,
   distanceRemainingM: 0,

@@ -53,7 +53,7 @@ import { usePitstop } from "../../src/pitstop";
 import { recordTrip, consumeTakeAgain, cachePeerPbs } from "../../src/trips";
 import PitstopCard from "../../src/components/PitstopCard";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
-import { setCarState, setCarPeers, subscribeCarGesture, setCarSelfPosition } from '../../src/carplay/carStore';
+import { setCarState, setCarPeers, subscribeCarGesture, setCarSelfPosition, getCarState, type CarState } from '../../src/carplay/carStore';
 import { useVoice } from "../../src/useVoice";
 import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
@@ -1138,6 +1138,45 @@ export default function MapScreen() {
     setStopPill(null);
   };
 
+  // ── ROUND TRIP — "kinda like how the airplanes do it" (Jeff, 2026-08-31) ─────
+  // "can we have the add stop route sequence kinda like how the airplanes do it… a
+  // round trip? where it takes you back home?"
+  //
+  // The routing half already existed. routeOptimizer calls Mapbox Optimization with
+  // `source=first&destination=last&roundtrip=false`, which is exactly the multi-city
+  // shape: pin both ends, permute the middle. So a round trip needs NO routing change
+  // at all — it is a state shuffle. Where you are now stays the origin, what you typed
+  // becomes the last stop, and Home becomes the destination:
+  //
+  //     you are here -> Canadian Tire -> Superstore -> HOME
+  //
+  // Deliberately NOT Mapbox's own `roundtrip=true`: that returns to the FIRST
+  // coordinate, i.e. wherever the car happens to be, which is only what you want if you
+  // set off from home. Making Home an explicit final destination works just as well when
+  // you are already out mid-errand — the common case for this button.
+  //
+  // Home occupies a pinned END, not a stop slot, so this does NOT consume one of the ten
+  // the Optimization API allows.
+  //
+  // One-shot, not a toggle: it lands the trip in exactly the state the stops machinery
+  // already understands, so every downstream part — via routing, the optimizer's
+  // reordering, visited-marking, the car-surface pins, the property arrival — works with
+  // no special case for "this is a round trip". Undo is ordinary stop/destination editing.
+  const homePlace = useMemo(() => savedPlaces.find((p) => p.kind === "home"), [savedPlaces]);
+  const destIsHome = !!(destination && homePlace
+    && Math.abs(destination.lat - homePlace.lat) < 1e-4
+    && Math.abs(destination.lng - homePlace.lng) < 1e-4);
+  const canRoundTrip = !!homePlace && !!destination && !destIsHome
+    && stops.length + 1 <= ROUTABLE_MAX_STOPS;
+  const makeRoundTrip = () => {
+    if (!homePlace || !destination || destIsHome) return;
+    const wasDest = { lat: destination.lat, lng: destination.lng, label: destination.label };
+    setStops((prev) => [...prev, wasDest]);
+    setDestination({ lat: homePlace.lat, lng: homePlace.lng, label: homePlace.label || "Home" });
+    try { logEvent(`round-trip stops=${stops.length + 1} dest="${wasDest.label}" -> home`); } catch {}
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  };
+
   // Dedupe key so Nova announces the route options at most once per destination.
   const announcedRoutesForRef = useRef<string>("");
   // Unified multi-route directions (web + native). Fetches up to 3 alternates with `alternatives=true`.
@@ -1418,18 +1457,71 @@ export default function MapScreen() {
   useEffect(() => {
     if (!destination || !activeRoute) return;
     if (navMuted) return;
-    const key = `${destination.lat.toFixed(4)},${destination.lng.toFixed(4)}`;
+    // PREVIEW ONLY. The greeting is consumed exactly once, by startNav ->
+    // playPreparedGreeting, so anything prepared mid-drive can never be heard. Naming
+    // the first stop put the stop's coords in the key below, which means every
+    // "Arrived" tap re-keys the effect and would burn a Claude /nova/greeting call plus
+    // a full /tts synth per stop — and leave that audio armed, so a later Start speaks
+    // a greeting mid-errand. Gate before greetedDestRef is stamped: a suppressed run
+    // must not mark the key as greeted.
+    if (navMode === "turn-by-turn") return;
+    // ── NAME WHERE YOU ARE ACTUALLY GOING FIRST (2026-08-31) ──────────────────
+    // Jeff, mid-errand: "it gave me directions to Canadian Superstore, but looped me
+    // into Canadian Tire first. It should say first stop Canadian Tire, then to Real
+    // Canadian Superstore."
+    //
+    // The routing was RIGHT — the trace shows it drove him to the Tire, marked it
+    // reached, then continued. Only the words were wrong: this greeting has only ever
+    // been handed the FINAL destination, so on a multi-stop run it announces the last
+    // leg while you set off on the first. Correct behaviour that sounds like a fault.
+    //
+    // Composed client-side rather than adding a field to /nova/greeting: the backend
+    // already has undeployed commits, and the endpoint takes a free-text label, so
+    // "X, then Y" needs no deploy to work.
+    //
+    // A long-press stop is auto-labelled "Stop 1", which is worse than useless spoken
+    // aloud — "your first stop" carries the same meaning without the false precision.
+    const nextStop = pendingStops(stops)[0];
+    // Trim FIRST and test the trimmed value: an empty or whitespace-only label is not
+    // matched by /^Stop \d+$/, so the raw string used to slip through as the name —
+    // making the "your first stop" branch unreachable for the blank case and letting
+    // Nova speak a bare " , then home".
+    const rawStop = (nextStop?.label ?? "").trim();
+    const stopName = nextStop
+      ? (rawStop && !/^Stop \d+$/i.test(rawStop) ? rawStop : "your first stop")
+      : null;
+    // The stop is part of the key: adding one AFTER the route is plotted must re-prepare
+    // the line, or the driver hears the old single-destination greeting at Start.
+    // Coords AND the spoken name. Coords alone meant renaming "Stop 1" to "Tim's in
+    // Hope" after plotting never re-prepared, and Nova still said "your first stop".
+    const key = `${destination.lat.toFixed(4)},${destination.lng.toFixed(4)}`
+      + (nextStop ? `+${nextStop.lat.toFixed(4)},${nextStop.lng.toFixed(4)}` : "")
+      + `|${stopName ?? ""}`;
     if (greetedDestRef.current === key) return;
     greetedDestRef.current = key;
     prepareRouteGreeting({
       destination: { lat: destination.lat, lng: destination.lng },
       destinationName: destination.label,
+      // The stop goes in as its OWN field, not pre-composed into destinationName.
+      // novaGreeting resolves saved places (Home/Work) FIRST and that match wins, so a
+      // composed "Canadian Tire, then Home" was silently discarded on exactly the trip
+      // shape this exists for — an errand on the way home. It composes on the far side
+      // of that match instead.
+      viaName: stopName,
+      // City stays the FINAL destination: it feeds the weather clause, and the driver
+      // wants the forecast where they end up, not at the hardware store on the way.
       destinationCity: destination.label,
       route: activeRoute,
       weatherKind: destWeather?.kind ?? null,
       temperature: destWeather?.temp ?? null,
     }, key);
-  }, [destination, activeRoute, destWeather, navMuted]);
+    // `stops` / `stopsVersion` are deps because the greeting now NAMES the first stop:
+    // Jeff set the destination and added the stop afterwards, so without these the
+    // effect never re-runs and Start still speaks the old single-destination line. The
+    // key above makes the re-run idempotent, so a stop that changes nothing is free.
+    // `navMode` is a dep so the preview-only gate is honoured on the flip BACK: end a
+    // drive, plot a new route, and this must re-run.
+  }, [destination, activeRoute, destWeather, navMuted, stops, stopsVersion, navMode]);
 
   // LIVE TRAFFIC while driving. The route's per-segment durations are a snapshot from
   // when it was fetched; on a multi-hour trip that snapshot is stale long before you
@@ -1617,6 +1709,63 @@ export default function MapScreen() {
       });
     } catch {}
   }, [pitstop.active, pitstop.label, pitstop.kind, pitstop.elapsedS]);
+
+  // ── MIRROR THE WAYPOINTS TO THE CAR SURFACE (2026-08-31) ────────────────────
+  // Jeff, mid-errand: "it doesn't actually make a dot or anything on my stop." He was
+  // on CarPlay, and carStore carried no waypoints at all — so the head unit drew the
+  // route line ending in empty space, with nothing marking the stop OR the destination.
+  // The phone has drawn numbered stop pins since 2026-07-29; this is the surface that
+  // never got told. Same "phone owns it, the car draws it" rule as the pitstop mirror.
+  //
+  // MIRRORS THE FULL STOPS LIST, exactly what the phone draws — not a "pending only"
+  // subset. Two reasons, both learned the hard way in review:
+  //   1. It could not work. Stops are marked visited on two paths, and the one that
+  //      actually fired on Jeff's drive (why=reached, automatic) mutates visitedStopsRef
+  //      — a REF, deliberately, so nothing re-renders. No dep of this effect changes, so
+  //      the filter never re-ran and the collected pin stayed on screen anyway. Only the
+  //      manual "Arrived" tap bumps a version counter.
+  //   2. Fixing that would have made it WORSE: the car would then drop a pin the phone
+  //      still draws (ConvoyMapbox passes the full list, numbered i+1, with no filter) —
+  //      a four-surfaces divergence invented to solve a problem nobody reported.
+  // The phone is the reference. Draw what it draws.
+  //
+  // Written through a serialized key because carStore equality-gates on value and a
+  // fresh array literal every render would defeat it — that is precisely how carDbg
+  // re-rendered both car trees at 2 Hz for a whole drive (see the HEAT note in
+  // navNotification). Rounded to ~1 m: a waypoint pin does not move, so GPS-grade
+  // precision here would only manufacture writes.
+  // The write gate reads the STORE, not a ref of what we last wrote. A ref cannot see a
+  // clear it did not perform, and there is one: stopNavBanner wipes the car's route
+  // fields on teardown. With a ref, a traffic refresh then re-mints the route object,
+  // startNavBanner restores the ribbon — and the pins never come back, because the ref
+  // still says "already written". Same failure on a remount, where the ref is fresh but
+  // the module-level store is not. Deriving the key from getCarState() makes the guard
+  // true by construction: it compares what is actually on the car surface.
+  const waypointKey = (ws: NonNullable<CarState['waypoints']>) =>
+    ws.map((w) => `${w.kind}${w.n ?? ''}:${w.lat.toFixed(5)},${w.lng.toFixed(5)}`).join("|");
+  useEffect(() => {
+    const wps: { lat: number; lng: number; kind: 'stop' | 'dest'; n?: number }[] = [];
+    // Gated on `destination`, NOT on turn-by-turn. The car draws its route ribbon during
+    // PREVIEW too, so a nav-mode gate left the exact screen the driver studies before
+    // pressing Start showing a line into empty space — the original complaint, unfixed
+    // on the surface it was reported from. Gating on the destination (rather than not at
+    // all) still guarantees stop pins are never drawn with nothing at the end of them.
+    if (destination) {
+      stops.forEach((st, i) => {
+        // indexOf, not a lat/lng findIndex: two stops at the same coordinates both
+        // matched the first entry and drew the same numeral. `i + 1` here is the same
+        // numbering ConvoyMapbox uses, which is what keeps the two surfaces identical.
+        wps.push({ lat: st.lat, lng: st.lng, kind: 'stop', n: i + 1 });
+      });
+      wps.push({ lat: destination.lat, lng: destination.lng, kind: 'dest' });
+    }
+    try {
+      if (waypointKey(wps) === waypointKey(getCarState().waypoints ?? [])) return;
+      setCarState({ waypoints: wps });
+    } catch {}
+    // No navMode / stopsVersion: neither changes what is drawn any more, and both only
+    // bought redundant runs that the key gate above threw away.
+  }, [stops, destination?.lat, destination?.lng]);
 
   // Turn-by-turn engine — speaks instructions, advances steps, computes ETA / distance remaining
   // What Scout SAYS on arrival. Saved name wins, so a destination you searched by address
@@ -4941,9 +5090,25 @@ export default function MapScreen() {
                 testID="add-stops"
                 onPress={() => { Haptics.selectionAsync().catch(() => {}); setStopPickerOpen(true); }}
               >
+                <PillFill />
                 <Ionicons name="add-circle-outline" size={18} color="#fff" />
                 <Text style={styles.bannerPillBlueText}>{stops.length ? "Add another" : "Add stop"}</Text>
               </TouchableOpacity>
+              {/* Round trip — turns the plotted route into "…and back home". Shown only
+                  when a Home is saved and you are not already heading to it, so the pill
+                  never offers something it cannot do. */}
+              {canRoundTrip && (
+                <TouchableOpacity
+                  style={[styles.bannerPill, styles.bannerPillBlue]}
+                  activeOpacity={0.9}
+                  testID="round-trip"
+                  onPress={makeRoundTrip}
+                >
+                  <PillFill />
+                  <Ionicons name="repeat" size={18} color="#fff" />
+                  <Text style={styles.bannerPillBlueText}>Round trip</Text>
+                </TouchableOpacity>
+              )}
               {/* SHARE THE PLOTTED ROUTE TO THE CLUB (2026-07-30).
                   The whole feature existed EXCEPT this button: the ShareSheet was
                   mounted below with a correct kind:"route" payload, the sheet already
@@ -4960,12 +5125,14 @@ export default function MapScreen() {
                 disabled={!destination}
                 onPress={() => { Haptics.selectionAsync().catch(() => {}); setRouteShareOpen(true); }}
               >
+                <PillFill />
                 <Ionicons name="share-outline" size={18} color="#fff" />
                 <Text style={styles.bannerPillBlueText}>Share</Text>
               </TouchableOpacity>
               {SHOW_EXTRA_ROUTE_PILLS && (
                 <>
                   <TouchableOpacity style={[styles.bannerPill, styles.bannerPillBlue]} activeOpacity={0.9} testID="saved-routes">
+                    <PillFill />
                     <Ionicons name="bookmark" size={18} color="#fff" />
                     <Text style={styles.bannerPillBlueText}>Saved</Text>
                   </TouchableOpacity>
@@ -5685,6 +5852,36 @@ const isHazardVisible = (h: Hazard) => {
   return (h.disputes || 0) < 2;
 };
 
+/**
+ * The candy fill every SECONDARY route pill wears — Add stop, Round trip, Share, Saved.
+ *
+ * Jeff, 2026-08-31: "change the blue add stop and share buttons to a different colour
+ * that matches the design of the app, they are not even gradient." They were #0A84FF,
+ * Apple's system blue — the one colour in that row borrowed from someone else's design
+ * language, and the only flat fill next to gradient neighbours.
+ *
+ * Same three-stop construction as End (#FF3B5C/#E4002B/#B00020) and the turn-by-turn
+ * tile (#3DFF9A/#1FC96E/#0E8F4C): light top, mid, deep bottom. GRAPHITE rather than a
+ * colour, deliberately — Start sits immediately to the left wearing the app-skin accent,
+ * and a second saturated pill beside it would fight the primary action for the eye.
+ * Same object, quieter paint, which is how the tier metals already work.
+ *
+ * pointerEvents on the PROP, never the style: an absoluteFill child with it in the style
+ * object still swallows the tap on Android.
+ */
+function PillFill() {
+  return (
+    <LinearGradient
+      colors={["#5A6270", "#343A44", "#1E222A"]}
+      locations={[0, 0.5, 1]}
+      // 23 = bannerPill's borderRadius. Kept in step by hand because the pill's height
+      // (46) sets it; if that height ever changes, this follows.
+      style={[StyleSheet.absoluteFill, { borderRadius: 23 }]}
+      pointerEvents="none"
+    />
+  );
+}
+
 const styles = StyleSheet.create({
   c: { flex: 1, backgroundColor: "#0A1410" },
   loader: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
@@ -5752,7 +5949,19 @@ const styles = StyleSheet.create({
   bannerPill: { flex: 1, height: 46, borderRadius: 23, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
   bannerPillStart: { backgroundColor: "#2DEC86" },
   bannerPillStartText: { color: "#1C1C1E", fontSize: 16, fontWeight: "700" },
-  bannerPillBlue: { backgroundColor: "#0A84FF" },
+  // ── SECONDARY PILLS: CANDY, NOT iOS SYSTEM BLUE (Jeff, 2026-08-31) ────────
+  // "change the blue add stop and share buttons to a different colour that matches
+  //  the design of the app, they are not even gradient."
+  // #0A84FF was Apple's system blue — the one colour in this row that belonged to
+  // someone else's design language. These now use the SAME three-stop candy
+  // construction as End (#FF3B5C/#E4002B/#B00020) and the turn-by-turn tile
+  // (#3DFF9A/#1FC96E/#0E8F4C): bright top, mid, deep bottom, plus a pale rim.
+  // GRAPHITE rather than green, deliberately: Start already wears the app-skin
+  // accent, and a second saturated pill beside it would fight the primary action for
+  // the eye. Same object, quieter paint — which is exactly how the tier metals work.
+  // Transparent shell + overflow so the gradient child paints the fill and stays
+  // clipped to the pill's radius.
+  bannerPillBlue: { backgroundColor: "transparent", overflow: "hidden" },
   bannerPillBlueText: { color: "#F4F4F4", fontSize: 14, fontWeight: "600" },
 
   selectedCard: { position: "absolute", left: 12, right: 12, bottom: 200 },

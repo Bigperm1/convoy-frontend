@@ -1291,7 +1291,12 @@ async function stopNavBannerInner(): Promise<void> {
   //    gradient stayed painted on the head unit. It also backstops the newly gated
   //    ribbon mirror in ConvoyCarPlay, which deliberately stops clearing while
   //    `navigating` is still true.
-  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0, routeProgress: 0, maneuverIcon: undefined, routeCoordinates: undefined, routeCongestion: undefined });
+  //  • waypoints — the stop/destination pins, same argument as routeCoordinates. Cleared
+  //    HERE rather than in endCarNav because this is the universal teardown: endCarNav
+  //    calls it, and so does the cold-arrival path where map.tsx is unmounted and its
+  //    mirror effect cannot run at all. Without it, ending a drive from the head unit's
+  //    own End button left pins floating with no route line under them.
+  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0, routeProgress: 0, maneuverIcon: undefined, routeCoordinates: undefined, routeCongestion: undefined, waypoints: [] });
   // Release our hold; the shared task keeps running if CarPlay still needs it.
   await releaseBgLocation("nav");
   try { await Notifications.dismissNotificationAsync(NAV_NOTIF_ID); } catch {}

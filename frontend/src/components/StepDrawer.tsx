@@ -193,45 +193,57 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
             {!!distanceRemaining && <Text style={styles.barMeta}>{compact(distanceRemaining)}</Text>}
             {!!arrival && <Text style={styles.barMeta}>{compact(arrival).toLowerCase()}</Text>}
           </View>
-          {onShowList && (
-            /* Turn-by-turn button (Jeff, 8/21): a round glass twin of End, green,
-               carrying the classic turn-arrow "directions" glyph — the universal
-               turn-by-turn symbol — so it reads at a glance while driving. */
-            <TouchableOpacity
-              onPress={onShowList}
-              style={styles.barTurns}
-              activeOpacity={0.85}
-              testID="turn-by-turn"
-              hitSlop={6}
-              accessibilityLabel="Turn-by-turn directions"
-            >
-              <LinearGradient
-                colors={["#3DFF9A", "#1FC96E", "#0E8F4C"]}
-                locations={[0, 0.5, 1]}
-                style={[StyleSheet.absoluteFill, { borderRadius: 30 }]}
-              />
-              <GlassFill tintColor="#1FC96E" style={{ borderRadius: 30, overflow: "hidden" }} />
-              <MaterialCommunityIcons name="directions" size={32} color="#04150B" />
-            </TouchableOpacity>
+          {(onShowList || onEnd) && (
+            /* THE PAIR, SIDE BY SIDE (Jeff, 2026-08-31): "place the show map green
+               button to the same square and place it right beside the end button."
+               Both are now mapLogoBacking's exact footprint — 50x50, r14 — so the
+               logo tile, this green tile and this red tile read as one family. The row
+               owns marginLeft:auto so the two travel together against the right edge;
+               previously each button carried its own and they fought over the space. */
+            <View style={styles.barBtns}>
+              {onShowList && (
+                /* Green twin of End, carrying the classic turn-arrow "directions"
+                   glyph — the universal turn-by-turn symbol — so it reads at a glance
+                   while driving. Candy green, same three-stop construction as End. */
+                <TouchableOpacity
+                  onPress={onShowList}
+                  style={styles.barTurns}
+                  activeOpacity={0.85}
+                  testID="turn-by-turn"
+                  hitSlop={6}
+                  accessibilityLabel="Turn-by-turn directions"
+                >
+                  <LinearGradient
+                    colors={["#3DFF9A", "#1FC96E", "#0E8F4C"]}
+                    locations={[0, 0.5, 1]}
+                    style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
+                  />
+                  <GlassFill tintColor="#1FC96E" style={{ borderRadius: 14, overflow: "hidden" }} />
+                  {/* 26 in a 50pt tile keeps the glyph's optical weight from the 32-in-60
+                      circle it replaced (0.52 vs 0.53 of the box). */}
+                  <MaterialCommunityIcons name="directions" size={26} color="#04150B" />
+                </TouchableOpacity>
+              )}
+              {onEnd && (
+                <TouchableOpacity onPress={onEnd} style={styles.barExit} activeOpacity={0.85} testID="end-nav">
+                  {/* Candy-apple: a glossy red gradient base (bright top -> deep bottom)
+                      gives real candy dimension, and a red-tinted GlassFill on top
+                      refracts THAT gradient (not the dark map) for a liquid-glass sheen.
+                      Both clipped to the tile's r14. */}
+                  <LinearGradient
+                    colors={["#FF3B5C", "#E4002B", "#B00020"]}
+                    locations={[0, 0.5, 1]}
+                    style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
+                  />
+                  <GlassFill tintColor="#E4002B" style={{ borderRadius: 14, overflow: "hidden" }} />
+                  {/* "End", not "Exit" (Jeff, 2026-08-16) — one verb across phone,
+                      CarPlay and AA for the same action. */}
+                  <Text style={styles.barExitText}>End</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
-          {onEnd && (
-            <TouchableOpacity onPress={onEnd} style={styles.barExit} activeOpacity={0.85} testID="end-nav">
-              {/* Candy-apple button: a glossy red gradient base (bright top → deep
-                  bottom) gives real candy dimension, and a red-tinted GlassFill on
-                  top refracts THAT gradient (not the dark map) for a liquid-glass
-                  sheen. Both clipped to the circle. */}
-              <LinearGradient
-                colors={["#FF3B5C", "#E4002B", "#B00020"]}
-                locations={[0, 0.5, 1]}
-                style={[StyleSheet.absoluteFill, { borderRadius: 30 }]}
-              />
-              <GlassFill tintColor="#E4002B" style={{ borderRadius: 30, overflow: "hidden" }} />
-              {/* "End", not "Exit" (Jeff, 2026-08-16) — one verb across phone,
-                  CarPlay and AA for the same action. */}
-              <Text style={styles.barExitText}>End</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+          </View>
         {progressFrac != null && (
           <View style={styles.progressTrack}>
             <View style={[styles.progressFill, { width: `${progressFrac * 100}%`, backgroundColor: accent }]} />
@@ -281,8 +293,7 @@ const styles = StyleSheet.create({
   barTime: { color: "#30D158", fontSize: 24, fontWeight: "800", letterSpacing: -0.4 },
   barMeta: { color: "#F4F4F4", fontSize: 16, fontWeight: "600" },
   barExit: {
-    marginLeft: "auto",
-    width: 60, height: 60, borderRadius: 30,
+    width: 50, height: 50, borderRadius: 14,
     // Color comes from the candy-red LinearGradient child; keep the container
     // transparent + clip so the gradient + glass render as a clean red circle.
     backgroundColor: "transparent",
@@ -296,13 +307,22 @@ const styles = StyleSheet.create({
   // Turn-by-turn circle left of End — same candy construction in green. It takes
   // the marginLeft:auto so the pair sits flush right; End keeps its own as a
   // no-op when both are present.
+  // ── SQUARE, NOT ROUND (Jeff, 2026-08-31) ──────────────────────────────────
+  // "make it the same square look as the top logo shape… and place it right beside
+  // the end button." 50x50 r14 is not a fresh choice — it is mapLogoBacking's exact
+  // footprint (map.tsx), which CarDriveList's End square already copied on 8/16. So
+  // all three tiles on the phone are now literally the same object in different
+  // paint, which is the whole point of a shape language.
+  // marginLeft:auto moved to the ROW that holds both, so the pair travels together
+  // instead of the green one shoving the red one around.
   barTurns: {
-    marginLeft: "auto", marginRight: 10,
-    width: 60, height: 60, borderRadius: 30,
+    width: 50, height: 50, borderRadius: 14,
     backgroundColor: "transparent", overflow: "hidden",
     borderWidth: 1, borderColor: "rgba(120,255,180,0.9)",
     alignItems: "center", justifyContent: "center",
   },
+  // Holds the pair, hard right, with the gap between them.
+  barBtns: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 10 },
 
   // Live distance-travelled bar under the summary row: faint full-width track,
   // green fill to the current progress, green arrow tip at the leading edge.

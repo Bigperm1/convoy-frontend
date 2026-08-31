@@ -2503,6 +2503,35 @@ export default function MapScreen() {
   useEffect(() => {
     if (!carConnected || navMode !== "turn-by-turn") setCarListMapOverride(false);
   }, [carConnected, navMode]);
+  // ── "SHOW MAP" MUST NOT SURVIVE THE PHONE GOING IN YOUR POCKET (2026-08-31) ────
+  // Jeff, mid-errand: "I tapped the Show map on the phone and it screwed something up."
+  //
+  // While projecting, the phone renders NO map at all — `{!carListMode && <MapEngine>}`
+  // below. Tapping "Show map" flips this flag and MOUNTS a second Mapbox GL map beside
+  // the one already running on the head unit. The reset above only fires on head-unit
+  // detach or nav end, so that second map then survives the phone being pocketed for
+  // the rest of the drive — invisible, and still drawing.
+  //
+  // MEASURED on that drive (heat-probe `inst=`, which breaks rAF down per mount):
+  //   car#2 alone, app=a ............ dtP50 8.0   healthy
+  //   car#2 + phone#3, app=a ........ dtP50 8.0   healthy — two maps alone is NOT the bug
+  //   car#2 + phone#4, app=b ........ dtP50 0.0   12,922 rAF in 60 s (215/s), 10 minutes
+  //                                   split car#2:8709 + phone#4:4213, cam only 2,345
+  // It takes BOTH a second mount AND the app backgrounded. The frame loop has no
+  // background gate — cancelNextFrame() runs only on a snap reset and on UNMOUNT — so
+  // unmounting the invisible map is what actually stops it, and it reuses the teardown
+  // that already exists rather than adding a second way to stop the loop.
+  //
+  // Deliberately NOT a blanket "stop the loop when backgrounded" in ConvoyMapbox: the
+  // CarPlay instance MUST keep drawing with the phone backgrounded — that is the normal
+  // state of every projected drive — and gating it there would freeze the car screen.
+  useEffect(() => {
+    if (!carListMapOverride) return;
+    const sub = AppState.addEventListener("change", (st) => {
+      if (st === "background") setCarListMapOverride(false);
+    });
+    return () => sub.remove();
+  }, [carListMapOverride]);
 
   // HEAT PROBE — one row per 60 s of guidance. Jeff's 2-hour drive on build 73 ended
   // with the phone too hot to charge, and the analysis that followed is arithmetic, not

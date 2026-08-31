@@ -27,6 +27,7 @@ import { isOnCall, callSilence } from "./callState";
 // Head-unit liveness for the arrival silence backstop below. locationPrivacy imports
 // only AsyncStorage / Platform / settings, so this cannot close a cycle back to nav.
 import { headUnitAttachedRaw } from "./locationPrivacy";
+import { resolveArrivalZone, type ArrivalZone } from "./arrivalZone";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -863,6 +864,18 @@ export function useTurnByTurn(
   // path stays bit-identical: this can only fire where nothing fired before.
   const tickSeqRef = useRef(0);
   const silentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ── THE PROPERTY, NOT THE PIN (2026-08-31) ─────────────────────────────────
+  // Jeff's fix for the same bug, and a better one than anything above: stop asking
+  // "am I within 20 m of the front door" and ask "am I ON the property". A car park
+  // is where people actually stop, and the Superstore parcel he parked in is 256 x
+  // 159 m — five times wider than ARRIVE_M. Measured once per destination by
+  // arrivalZone.ts, then tested with plain haversine on every fix: no network on the
+  // hot path, no speed, no timers, and — the whole point — no dependence on a fix
+  // field that freezes the moment the car stops. Null whenever the destination has no
+  // parcel or the probe failed, in which case every tier below behaves exactly as it
+  // does today.
+  const zoneRef = useRef<ArrivalZone | null>(null);
+  const zoneForRef = useRef<string>("");
   useEffect(() => () => {
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     settleTimerRef.current = null;
@@ -882,6 +895,31 @@ export function useTurnByTurn(
     // must not inherit a pending arrival armed against the previous destination.
     if (silentTimerRef.current) { clearTimeout(silentTimerRef.current); silentTimerRef.current = null; }
   }, [active]);
+
+  // Measure the destination's property once per destination, off the hot path.
+  // Deliberately fire-and-forget: the route plots and guidance starts immediately, and
+  // the zone is not needed until the car is minutes away. If it never lands — no signal,
+  // dead cell, no such parcel — zoneRef stays null and arrival keeps today's behaviour.
+  // Keyed on the destination POINT, not the route, so the five reroutes on a single
+  // errand run re-use one measurement instead of re-probing the same shop five times.
+  useEffect(() => {
+    const dest = active ? route?.steps?.[route.steps.length - 1]?.end : null;
+    if (!dest) { zoneRef.current = null; zoneForRef.current = ""; return; }
+    const k = `${dest.lat.toFixed(4)},${dest.lng.toFixed(4)}`;
+    if (k === zoneForRef.current) return;      // same destination, already measured
+    zoneForRef.current = k;
+    zoneRef.current = null;                    // never carry the old shop's parcel over
+    let dropped = false;
+    void resolveArrivalZone(dest).then((z) => {
+      if (dropped || zoneForRef.current !== k) return;   // destination changed under us
+      zoneRef.current = z;
+    });
+    return () => { dropped = true; };
+    // Keyed on the polyline STRING, not route.steps — an array identity changes on every
+    // render and would re-enter this effect constantly. (The zoneForRef guard would still
+    // stop the re-probe, but the effect should not be churning in the first place; the
+    // route-swap effect above keys on route?.polyline for the same reason.)
+  }, [active, route?.polyline]);
 
   useEffect(() => {
     if (!active) {
@@ -1374,13 +1412,45 @@ export function useTurnByTurn(
     // One timestamp, one timer, but the dwell depends on which branch armed it.
     const dwellMs = settleOk ? ARRIVE_SETTLE_MS : ARRIVE_NEAR_MS;
 
+    // ON THE PROPERTY. Crow-fly inside the measured parcel, bounded by the route's own
+    // remaining distance so a line that merely clips a retail park early cannot fire.
+    // Position is the evidence — a frozen fix still carries the right coordinates, which
+    // is the whole reason this tier exists where the speed-based ones failed.
+    //
+    // The speed term is a VETO, not the test, and its threshold matters. `stopped`
+    // (1.4 m/s) would be wrong here: the measured frozen fix reads 2.5 m/s, so `stopped`
+    // is FALSE in the very drive this was built for — gating on it re-imports the exact
+    // dependence this tier was written to escape. ARRIVE_SILENT_MAX_SPD_MS (4.0 m/s,
+    // 14 km/h) sits above that frozen value and far below a car on a ring road, so it
+    // rejects the 60 km/h pass-by while the parked case still qualifies.
+    const zone = zoneRef.current;
+    const onProperty = !!zone && crowM < zone.radiusM && dDest < ARRIVE_NEAR_ROUTE_M
+      && Math.max(0, user.speed ?? 0) < ARRIVE_SILENT_MAX_SPD_MS;
+
     if (dDest < ARRIVE_M) {
       fireArriveRef.current(false);          // unchanged on the last step
-    } else if ((settleOk || nearOk) && !announcedRef.current.has(arriveKey)) {
+    } else if ((settleOk || nearOk || onProperty) && !announcedRef.current.has(arriveKey)) {
       // Stopped within reach of the destination. Stamp it, and arm ONE timer as the
       // backup for the case this whole mechanism exists to cover: no further fix.
+      //
+      // The property tier ARMS here rather than firing on the spot. Review caught that
+      // an instant fire made it the only path past ARRIVE_M with neither a speed test
+      // nor a dwell — one fix, up to the parcel radius out, and it SPEAKS. Routing it
+      // through the same machinery gives it tier 3's 90 s dwell for free (dwellMs below
+      // already resolves that way for a property-only arm), and the final `else`
+      // disarms cleanly if the car drives back off the land. Crucially the dwell does
+      // NOT need another fix to complete: the timer owns that, which is exactly why
+      // this still works when the car has parked and the fixes have stopped.
       const now = Date.now();
       if (settleSinceRef.current == null) {
+        if (onProperty && !settleOk && !nearOk) {
+          try {
+            logEvent(
+              `arrive-property armed r=${zone!.radiusM}m kind=${zone!.kind} agree=${zone!.agree}/8 ` +
+              `crow=${Math.round(crowM)}m route=${Math.round(dDest)}m spd=${Math.max(0, user.speed ?? 0).toFixed(1)}`,
+            );
+          } catch {}
+        }
         settleSinceRef.current = now;
         if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
         settleTimerRef.current = setTimeout(() => {

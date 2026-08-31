@@ -24,6 +24,9 @@ import { getSettings, getNovaVoice, getAudioVol } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
 import { isOnCall, callSilence } from "./callState";
+// Head-unit liveness for the arrival silence backstop below. locationPrivacy imports
+// only AsyncStorage / Platform / settings, so this cannot close a cycle back to nav.
+import { headUnitAttachedRaw } from "./locationPrivacy";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -438,6 +441,16 @@ export const ARRIVE_M = 20;
 export const ARRIVE_SETTLE_M = 50;
 export const ARRIVE_SETTLE_SPEED_MS = 1.4;
 export const ARRIVE_SETTLE_MS = 25000;
+// Ceiling for the SILENCE backstop's arm (2026-08-31). The backstop cannot read a
+// trustworthy speed — that is the whole point — so it must not arm off one that is
+// obviously still driving. 4.0 m/s (14 km/h) sits above the measured 2.5 m/s of a
+// car rolling into a bay and far below anything moving through traffic: a fix at
+// 21 km/h 45 m out must NOT arm a 25 s teardown. Chosen as a bound, not measured.
+export const ARRIVE_SILENT_MAX_SPD_MS = 4.0;
+// How late the silence timer may land and still be believed. iOS suspends JS timers
+// with the screen off, so a 25 s timer can surface minutes later — by which time the
+// car may be moving again with no fix having reached this screen to prove it.
+export const ARRIVE_SILENT_MAX_SKEW_MS = 10000;
 // The settle path is driven by fixes AND by one backup timer, because the whole
 // point is that fixes may have stopped. iOS suspends JS timers while the phone is
 // locked, so that timer can land arbitrarily late (the trap that once stranded the
@@ -827,9 +840,34 @@ export function useTurnByTurn(
   const settleSinceRef = useRef<number | null>(null);
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fireArriveRef = useRef<(late: boolean) => void>(() => {});
+  // ── PARKED, BUT THE LAST FIX SAYS OTHERWISE (2026-08-31) ────────────────────
+  // Tier 2 above tests `user.speed`. That field belongs to the LAST FIX THAT
+  // ARRIVED, and the moment the car parks the OS stops producing fixes — so a
+  // driver who rolls into a bay at 9 km/h leaves a permanent 9 km/h behind them.
+  // `stopped` can then never become true, tier 2 disarms on that very fix, and
+  // this effect (deps: active, user.lat, user.lng) never runs again to re-arm it.
+  //
+  // MEASURED, Jeff's Superstore run: step 8/8, rem=23m (ARRIVE_M is 20 — three
+  // metres short), then gps=49.053873,-122.317384 spd=9 repeated IDENTICALLY at
+  // 12:04:31, 12:04:44 and 12:07:31. Same point, same speed, three minutes apart.
+  // The route never ended, so onArrive never ran, so recordTrip never ran: the
+  // drive is missing from trips, no PB, and the AI route learned nothing.
+  //
+  // The honest signal for "parked" is not the speed field, it is SILENCE. Both
+  // watchers set a distanceInterval (2 m navigating, 8 m eco), so a car that is
+  // genuinely moving CANNOT go quiet — it trips the interval within a second or
+  // two. A full dwell with no tick therefore proves the car is standing still,
+  // whatever the stale speed claims.
+  //
+  // Kept as its OWN timer rather than widening tier 2, so every existing arrival
+  // path stays bit-identical: this can only fire where nothing fired before.
+  const tickSeqRef = useRef(0);
+  const silentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     settleTimerRef.current = null;
+    if (silentTimerRef.current) clearTimeout(silentTimerRef.current);
+    silentTimerRef.current = null;
   }, []);
 
   // Disarm the settle window whenever guidance starts OR stops. Without this, a timer
@@ -840,6 +878,9 @@ export function useTurnByTurn(
   useEffect(() => {
     settleSinceRef.current = null;
     if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
+    // Same reasoning for the silence timer: a route that just started or just ended
+    // must not inherit a pending arrival armed against the previous destination.
+    if (silentTimerRef.current) { clearTimeout(silentTimerRef.current); silentTimerRef.current = null; }
   }, [active]);
 
   useEffect(() => {
@@ -896,6 +937,10 @@ export function useTurnByTurn(
       // A settle armed against the OLD route's destination must not survive a swap.
       settleSinceRef.current = null;
       if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
+      // ...and neither may the silence backstop. Today's errand run swapped route FIVE
+      // times; a timer armed against the old line's last 40 m would otherwise mature
+      // against a brand-new route with kilometres left and tear it down.
+      if (silentTimerRef.current) { clearTimeout(silentTimerRef.current); silentTimerRef.current = null; }
       swapSuppressUntilRef.current = Date.now() + 8000;
       // ANCHOR BY POSITION ALONG THE NEW LINE, NOT 0 (2026-08-21). A swapped-in route
       // is not always computed from where the car is now — rkoji7's was computed from
@@ -925,6 +970,18 @@ export function useTurnByTurn(
     if (!r) return;
     const steps = r.steps;
     if (!steps?.length) return;
+    // One tick per POSITION CHANGE reaching this line — NOT per delivered fix, and the
+    // difference is the whole point. The effect's deps are user.lat/user.lng, so a
+    // repeated fix at identical coordinates does not tick at all; that is exactly how a
+    // parked car with a frozen speed reaches the silence probe below.
+    // Two honest caveats, both measured by review rather than assumed:
+    //   • It sits BELOW the three guard returns above and ABOVE the step-heal return, so
+    //     a heal bumps the sequence without re-arming — read as "moved" downstream.
+    //   • A frozen tick proves nothing about whether fixes were still being DELIVERED.
+    //     The OS stops delivering when the app backgrounds without "Always" permission,
+    //     which looks identical to parking from here. That ambiguity is the reason the
+    //     probe below only measures and does not act.
+    tickSeqRef.current += 1;
 
     // Cache the decoded route polyline per route (for perpendicular off-route).
     if (polyCacheRef.current.key !== r.polyline) {
@@ -1290,6 +1347,7 @@ export function useTurnByTurn(
       if (announcedRef.current.has(arriveKey)) return;
       announcedRef.current.add(arriveKey);   // fire once, not on every parked GPS tick
       if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
+      if (silentTimerRef.current) { clearTimeout(silentTimerRef.current); silentTimerRef.current = null; }
       // RECEIPT (2026-08-26, "it announced when I got to my destination despite being
       // off"): the arrival spoke through *some* mute for a tester and the gates here
       // could not be told apart after the fact. One reliable row per arrival records
@@ -1343,6 +1401,68 @@ export function useTurnByTurn(
       // later red light starts its own clean window.
       settleSinceRef.current = null;
       if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
+      // ── THE SILENCE BACKSTOP ────────────────────────────────────────────────
+      // Landing here while STILL inside the settle radius means tier 2 declined for
+      // exactly one reason: `stopped` was false. That is either real motion — in
+      // which case the next fix lands within a second or two and re-arms this — or a
+      // frozen speed on a car that has already parked, which is the case tier 2
+      // structurally cannot see (see the note beside settleSinceRef).
+      //
+      // Silence ALONE is not proof of parking, and this codebase says so in writing.
+      // map.tsx's off-route note: iOS "stops delivering once the phone locks — so
+      // `coords` froze". navNotification: the background task "only starts with 'Always'
+      // location permission", which most testers never grant. So a MOVING car can go
+      // silent too, and acting on silence unguarded tears down a live route and banks a
+      // phantom trip.
+      //
+      // The probe below records what each candidate signal SAW at that moment:
+      //   spd   the (possibly frozen) speed the arm was taken on
+      //   moved whether any position change reached this screen during the dwell
+      //   lateBy how far the timer slipped — iOS suspends JS timers with the screen off
+      //   fg/hu foreground app, head unit attached
+      // `would` is what a firing version WOULD have decided. Nothing acts on it yet.
+      // See the shadow-mode note in the callback for why that is deliberate.
+      const inSettle = dDest < ARRIVE_SETTLE_M;
+      const inNear = crowM < ARRIVE_NEAR_CROW_M && dDest < ARRIVE_NEAR_ROUTE_M;
+      const armedSpd = Math.max(0, user.speed ?? 0);
+      if ((inSettle || inNear) && armedSpd < ARRIVE_SILENT_MAX_SPD_MS
+          && !announcedRef.current.has(arriveKey)) {
+        const armedSeq = tickSeqRef.current;
+        const armedAt = Date.now();
+        const dwell = inSettle ? ARRIVE_SETTLE_MS : ARRIVE_NEAR_MS;
+        const armedDest = Math.round(dDest);
+        if (silentTimerRef.current) clearTimeout(silentTimerRef.current);
+        silentTimerRef.current = setTimeout(() => {
+          silentTimerRef.current = null;
+          const lateBy = Date.now() - armedAt - dwell;
+          const moved = tickSeqRef.current !== armedSeq;
+          const fg = AppState.currentState === "active";
+          const hu = headUnitAttachedRaw();
+          const would = !moved && lateBy <= ARRIVE_SILENT_MAX_SKEW_MS && (fg || hu);
+          // ⚠ SHADOW MODE — MEASURES, DOES NOT ACT (2026-08-31). This deliberately does
+          // NOT call fireArriveRef. Two adversarial review rounds killed two different
+          // firing designs, and the second one killed this exact gate set: in the plain
+          // park-unplug-pocket sequence `fg` and `hu` are BOTH false, so the guard that
+          // makes firing safe also declines the one case the backstop exists for. The
+          // guards are not wrong; the PREDICATE is. "Is a human present" is the wrong
+          // question — the right one is "would we have HEARD the car if it had moved",
+          // i.e. was a background location feed actually held. That is not currently
+          // knowable from here, and inventing it blind is how the 07-31 collapse
+          // happened. So: emit what every gate saw, on real drives, and build the fix
+          // off measurements. Until then arrival behaviour is BIT-IDENTICAL to today —
+          // this row is the only thing that changed.
+          try {
+            logEvent(
+              `arrive-silent would=${would ? 1 : 0} moved=${moved ? 1 : 0} lateBy=${Math.round(lateBy)}ms ` +
+              `fg=${fg ? 1 : 0} hu=${hu ? 1 : 0} app=${AppState.currentState} ` +
+              `route=${armedDest}m dwell=${Math.round(dwell / 1000)}s spd=${armedSpd.toFixed(1)}`,
+            );
+          } catch {}
+        }, dwell);
+      } else if (silentTimerRef.current) {
+        clearTimeout(silentTimerRef.current);
+        silentTimerRef.current = null;
+      }
     }
 
     const next: TbtState = { active: true, stepIndex: stepIdx, distanceToManeuverM: dManeuver, distanceRemainingM: remaining, etaSeconds: eta };

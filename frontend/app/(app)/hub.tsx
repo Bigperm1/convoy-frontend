@@ -13,7 +13,7 @@ import { EventDetailModal, CreateEventModal, whenText } from "../../src/hubEvent
 import { getEvent, myEvents, discoverEvents, type HubEvent } from "../../src/eventsApi";
 import { updateWidgetFeed } from "../../src/widgetFeed";
 import { api, formatErr } from "../../src/api";
-import { COLORS } from "../../src/theme";
+import { COLORS, ACTION } from "../../src/theme";
 import Glass, { GlassFill } from "../../src/Glass";
 import GlassBackdrop from "../../src/components/GlassBackdrop";
 import LogoMenu from "../../src/components/LogoMenu";
@@ -1537,7 +1537,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                 <View style={styles.inviteBox}>
                   <Text testID="invite-code" style={styles.inviteCode}>{c.invite_code}</Text>
                   <TouchableOpacity testID="share-invite" onPress={shareInvite} style={styles.smallBtn}>
-                    <Ionicons name="share-outline" size={16} color="#fff" />
+                    <Ionicons name="share-outline" size={16} color={ACTION.share} />
                     <Text style={[styles.smallBtnText, { marginLeft: 6 }]}>Share</Text>
                   </TouchableOpacity>
                 </View>

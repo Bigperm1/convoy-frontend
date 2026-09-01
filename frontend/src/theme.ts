@@ -20,6 +20,26 @@ export const COLORS = {
   textMute: "#808080",
 };
 
+// ── ACTION COLOURS — one meaning per colour, everywhere in the app ──────────────
+// Jeff, 2026-08-31: "make the bookmark candy red and the share system green so they
+// stick out more... make this system wide."
+//
+// These two actions sit side by side in the drive sheet header and used to be the same
+// off-white as the close button — three identical glyphs, none of them readable at a
+// glance from the driver's seat. Colour is the fastest thing the eye resolves, so save
+// and share each get one and keep it on every surface they appear on.
+//
+// NOT tier colours: gold and silver mean an entitlement (see src/tierTheme.ts and
+// DESIGN.md) and must never be spent on an ordinary button. These are the same candy red
+// and brand green already used by End and the turn-by-turn tile, so the app keeps ONE
+// red and ONE green rather than accumulating a second set.
+export const ACTION = {
+  // Candy red — the bright top of the End button's ramp.
+  save: "#FF3B5C",
+  // Brand green, straight from COLORS.brand.
+  share: "#2DEC86",
+};
+
 export const FONT = {
   // System font on iOS = San Francisco; on Android = Roboto.
   // Using undefined lets RN pick the default system font.

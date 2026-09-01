@@ -23,7 +23,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { GlassFill } from "./Glass";
 import { ManeuverArrow, ManeuverBox, maneuverDir } from "./components/ManeuverArrow";
-import { COLORS } from "./theme";
+import { COLORS, ACTION } from "./theme";
 import { useAccent, useAccentAlpha } from "./appSkin";
 import { NavStep, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec } from "./nav";
 import { skipNext, skipPrev } from "./applePlayer";
@@ -231,7 +231,7 @@ export default function CarDriveList(props: {
               })}
               hitSlop={8}
             >
-              <Ionicons name="share-outline" size={20} color="#F4F4F4" />
+              <Ionicons name="share-outline" size={20} color={ACTION.share} />
             </Pressable>
             <Pressable onPress={prev} hitSlop={8} style={{ marginLeft: 16 }}>
               <Ionicons name="play-skip-back" size={20} color="#F4F4F4" />

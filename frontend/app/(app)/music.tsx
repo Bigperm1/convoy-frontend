@@ -23,7 +23,7 @@ import { Image } from "expo-image";
 import { BlurView } from "expo-blur";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { GlassFill } from "../../src/Glass";
-import { COLORS } from "../../src/theme";
+import { COLORS, ACTION } from "../../src/theme";
 
 // iOS 26+ ships the real Liquid Glass material (UIGlassEffect); older iOS / Android
 // fall back to the expo-blur frosted panel. Resolved once at module load.
@@ -833,7 +833,7 @@ export default function MusicScreen() {
                 testID="am-share"
                 style={{ marginRight: 2 }}
               >
-                <Ionicons name="share-outline" size={20} color="#fff" />
+                <Ionicons name="share-outline" size={20} color={ACTION.share} />
               </TouchableOpacity>
               <TouchableOpacity onPress={toggleAppleShuffle} hitSlop={8} testID="am-shuffle" style={{ marginRight: 12 }}>
                 <Ionicons name="shuffle" size={20} color={appleShuffle ? AM_PINK[1] : "rgba(235,235,245,0.6)"} />
@@ -887,7 +887,7 @@ export default function MusicScreen() {
                 hitSlop={8}
                 testID="am-share-playlist"
               >
-                <Ionicons name="share-outline" size={19} color={COLORS.text} />
+                <Ionicons name="share-outline" size={19} color={ACTION.share} />
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setDetailPlaylist(null)} style={styles.plClose} hitSlop={8}>
                 <Ionicons name="close" size={20} color={COLORS.text} />

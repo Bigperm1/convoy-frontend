@@ -8,7 +8,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import Constants from "expo-constants";
 import { api, formatErr, wsUrl } from "../../src/api";
 import { useAuth } from "../../src/auth";
-import { COLORS } from "../../src/theme";
+import { COLORS, ACTION } from "../../src/theme";
 import { useRouter, useFocusEffect } from "expo-router";
 import Glass, { GlassFill, hudTint, drawerTint, glassLift } from "../../src/Glass";
 import ConvoyMapbox, { type Hazard, type Peer, contrastingRouteColor } from "../../src/ConvoyMapbox";
@@ -4957,10 +4957,12 @@ export default function MapScreen() {
               <Text style={[styles.bannerDrive, { color: accent }]}>Drive</Text>
               <View style={styles.bannerHeaderRight}>
                 <TouchableOpacity testID="save-destination" onPress={() => { if (savedMatch) { void removeSavedPlace(savedMatch.id); try { Haptics.selectionAsync(); } catch {} } else { saveCurrentDestination(); } }} hitSlop={10}>
-                  <Ionicons name={savedMatch ? "bookmark" : "bookmark-outline"} size={21} color={savedMatch ? accent : "#EBEBF5"} />
+                  {/* Candy red whether saved or not — filled vs outline already carries
+                      the state, so colour is free to carry the MEANING instead. */}
+                  <Ionicons name={savedMatch ? "bookmark" : "bookmark-outline"} size={21} color={ACTION.save} />
                 </TouchableOpacity>
                 <TouchableOpacity testID="share-route" onPress={() => { Haptics.selectionAsync().catch(() => {}); setRouteShareOpen(true); }} hitSlop={10}>
-                  <Ionicons name="share-outline" size={22} color="#EBEBF5" />
+                  <Ionicons name="share-outline" size={22} color={ACTION.share} />
                 </TouchableOpacity>
                 <TouchableOpacity testID="route-clear" onPress={clearRoute} hitSlop={10}>
                   <Ionicons name="close" size={24} color="#EBEBF5" />
@@ -5082,7 +5084,7 @@ export default function MapScreen() {
             <View style={styles.bannerPills}>
               <TouchableOpacity testID="start-nav" onPress={startNav} style={[styles.bannerPill, styles.bannerPillStart, { backgroundColor: accent }]} activeOpacity={0.9}>
                 <Ionicons name="navigate" size={18} color="#1C1C1E" />
-                <Text style={styles.bannerPillStartText}>Start</Text>
+                <Text style={styles.bannerPillStartText} numberOfLines={1}>Start</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.bannerPill, styles.bannerPillBlue]}
@@ -5092,7 +5094,11 @@ export default function MapScreen() {
               >
                 <PillFill />
                 <Ionicons name="add-circle-outline" size={18} color="#fff" />
-                <Text style={styles.bannerPillBlueText}>{stops.length ? "Add another" : "Add stop"}</Text>
+                {/* numberOfLines: belt-and-braces against the wrap that started this. Three pills
+                    leave 108-120pt each (measured across SE / 16 Pro / Pixel 7a) against ~96pt
+                    of content, so nothing truncates in practice — but "Add another" is the
+                    longest label in the row and the narrowest phone has the least slack. */}
+                <Text style={styles.bannerPillBlueText} numberOfLines={1}>{stops.length ? "Add another" : "Add stop"}</Text>
               </TouchableOpacity>
               {/* Round trip — turns the plotted route into "…and back home". Shown only
                   when a Home is saved and you are not already heading to it, so the pill
@@ -5106,35 +5112,26 @@ export default function MapScreen() {
                 >
                   <PillFill />
                   <Ionicons name="repeat" size={18} color="#fff" />
-                  <Text style={styles.bannerPillBlueText}>Round trip</Text>
+                  <Text style={styles.bannerPillBlueText} numberOfLines={1}>Round trip</Text>
                 </TouchableOpacity>
               )}
-              {/* SHARE THE PLOTTED ROUTE TO THE CLUB (2026-07-30).
-                  The whole feature existed EXCEPT this button: the ShareSheet was
-                  mounted below with a correct kind:"route" payload, the sheet already
-                  pulls the club roster (GET /communities/{id}) with multi-select, the
-                  push goes through /notifications/share, and the receiving half —
-                  ShareToast -> shareInbox.setRoute -> applyPendingRoute — plots it and
-                  credits the sharer. But setRouteShareOpen was never called from
-                  anywhere, so there was no way in. One pill closes it.
-                  Disabled until a destination exists, since the payload needs one. */}
-              <TouchableOpacity
-                style={[styles.bannerPill, styles.bannerPillBlue, !destination && { opacity: 0.5 }]}
-                activeOpacity={0.9}
-                testID="share-route"
-                disabled={!destination}
-                onPress={() => { Haptics.selectionAsync().catch(() => {}); setRouteShareOpen(true); }}
-              >
-                <PillFill />
-                <Ionicons name="share-outline" size={18} color="#fff" />
-                <Text style={styles.bannerPillBlueText}>Share</Text>
-              </TouchableOpacity>
+              {/* NO SHARE PILL HERE. It lived in this row until 2026-08-31 and was
+                  removed for the reason Jeff gave: "round trip does not fit in the button
+                  with padding... maybe remove the share button since it's beside the
+                  bookmark." It was the fourth pill in a flex:1 row, so every pill got 25%
+                  of the width and "Round trip" had nowhere to go. The same action already
+                  sits in this sheet's own header, next to the bookmark — now in brand
+                  green so it reads as the share affordance without a label.
+                  The feature is untouched: setRouteShareOpen, the ShareSheet with the club
+                  roster, /notifications/share, and the receiving ShareToast -> shareInbox
+                  -> applyPendingRoute half all still run. Only this duplicate entry point
+                  is gone. */}
               {SHOW_EXTRA_ROUTE_PILLS && (
                 <>
                   <TouchableOpacity style={[styles.bannerPill, styles.bannerPillBlue]} activeOpacity={0.9} testID="saved-routes">
                     <PillFill />
-                    <Ionicons name="bookmark" size={18} color="#fff" />
-                    <Text style={styles.bannerPillBlueText}>Saved</Text>
+                    <Ionicons name="bookmark" size={18} color={ACTION.save} />
+                    <Text style={styles.bannerPillBlueText} numberOfLines={1}>Saved</Text>
                   </TouchableOpacity>
                 </>
               )}

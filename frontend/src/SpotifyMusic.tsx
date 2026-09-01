@@ -9,7 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useFocusEffect } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { COLORS } from "./theme";
+import { COLORS, ACTION } from "./theme";
 import { spotify, spotifyMissingScopes, startLogin } from "./spotify";
 import ShareSheet from "./ShareSheet";
 import { shareInbox } from "./shareInbox";
@@ -340,7 +340,7 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
             hitSlop={8}
             style={{ marginRight: 2 }}
           >
-            <Ionicons name="share-outline" size={20} color={COLORS.text} />
+            <Ionicons name="share-outline" size={20} color={ACTION.share} />
           </TouchableOpacity>
           <TouchableOpacity onPress={toggleShuffle} hitSlop={8} disabled={busy} style={{ marginRight: 12 }}>
             <Ionicons name="shuffle" size={20} color={shuffle ? SP_GREEN : COLORS.textDim} />

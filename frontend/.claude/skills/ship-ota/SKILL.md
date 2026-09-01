@@ -59,11 +59,42 @@ eas build:list --platform android --limit 3 --non-interactive
 - The latest FINISHED build on EACH platform must be at `app.json`'s current `runtimeVersion` exactly. If either platform is lower, that platform needs a BUILD, not an OTA (2026-07-06: iOS-only build 62 orphaned Android from six OTAs).
 - Read the installed build's `Channel` field — currently **`mapbox-migration`**, NOT `preview` (publishing to preview silently ate three updates on 2026-07-05). Never assume the channel; read it.
 
-## 5. Publish
+## 5. Publish — ALWAYS through `env:exec`, never bare `eas update`
 ```bash
-eas update --branch mapbox-migration --message "<one-line summary>" --non-interactive
+npx eas-cli env:exec preview "npx eas-cli update --branch mapbox-migration --clear-cache -m '<one-line summary>' --non-interactive"
 ```
-Report the Update group ID, commit hash, and EAS dashboard link back to Jeff.
+**A bare `eas update` bakes an EMPTY `EXPO_PUBLIC_OPENWEATHER_KEY` into the bundle and
+silently kills every weather surface.** `eas update` inlines `process.env.EXPO_PUBLIC_*`
+at export time from the LOCAL `.env` only — it does NOT read the EAS server-side
+environments. `EXPO_PUBLIC_OPENWEATHER_KEY` lives ONLY in the EAS `preview`/`production`
+environments (deliberately: it is the one key not hardcoded in `src/api.ts`, because
+`Bigperm1/convoy-frontend` is a PUBLIC repo). `PROD_OPENWEATHER_KEY` in `src/api.ts:35`
+is `""`, so there is no fallback to catch it — `fetchWeatherConditions` returns `null`
+before any network call and the failure is completely silent.
+
+MEASURED COST (2026-08-31): weather died on phone + CarPlay + the destination card + the
+daily forecast + Nova's arrival weather word for **13 OTAs over 20 hours**, from the
+2026-08-30 19:12 PDT publish until Jeff noticed the next morning. Nobody could have
+reported it sooner — nothing errors, the chip simply never appears.
+
+## 5b. PROVE the key is in the bundle before announcing anything
+Do not tell anyone to tap the red pill until you have seen `KEY_PRESENT=1`:
+```bash
+python3 <scratchpad>/verify_key.py <new-update-group-id> 1.26.0
+```
+That script pulls the REAL published Hermes bundle from `u.expo.dev` (manifest multipart
+-> `launchAsset.url` + its EAS-HMAC `authorization` header) and greps it for the key,
+printing COUNTS ONLY so the value never reaches a transcript. Get the key into `ow.key`
+with `npx eas-cli env:exec preview 'printf "%s" "$EXPO_PUBLIC_OPENWEATHER_KEY" > ow.key'`.
+Expect `KEY_PRESENT=1  openweathermap=2  neg_control=0` on BOTH platforms; run it against
+the previous group too, as a control.
+
+⚠ Fetch the manifest with **curl**, not Python `urllib` — u.expo.dev 403s urllib's
+default User-Agent, which reads exactly like an auth failure and sends you chasing a
+stale session secret.
+
+Report the Update group ID, commit hash, the `KEY_PRESENT` line, and the EAS dashboard
+link back to Jeff.
 
 ## 6. Pickup instructions — the RED PILL, and nothing else
 Tell Jeff and the testers exactly one thing:

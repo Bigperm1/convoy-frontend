@@ -49,35 +49,156 @@
 
 import { File } from "expo-file-system";
 import { supabase, SUPABASE_ENABLED, SUPABASE_ANON_KEY } from "./supabase";
+import { api } from "./api";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
 
 export const SCAN_BUCKET = "car-scans";
 
-// ── SERVER-SIDE ATTEMPT CAP + THE RETURN LEG (2026-08-27) ─────────────────────
+// ── SERVER-ISSUED SCAN SLOTS + THE RETURN LEG (2026-09-02, supersedes 08-27) ──
 // Jeff: "cap them at two instances max so they can't … burn up my credits" and
 // "tell me how long it would take for the photos to reach their phone."
 //
 // The cap: MAX_SCAN_ATTEMPTS below is device-local AsyncStorage — a reinstall
-// resets it. The truth that survives reinstalls is the BUCKET, so the app asks
-// the register-scan edge function (service-role folder count per handle) BEFORE
-// uploading, and the function FAILS CLOSED: no verdict = no upload, because the
-// cap protects paid Tripo credits. Registration also drops a carscan-registered
-// breadcrumb, so a new scan shows up in the telemetry Jeff already queries.
+// resets it. The truth that survives reinstalls now lives on the BACKEND (Render,
+// keyed by the signed-in account, not the handle): the app asks POST /api/scan/slot
+// for a slot BEFORE it has a scan id at all, and the SERVER MINTS THE ID. Until
+// 2026-09-02 the phone made its own id (handle + timestamp) and asked the
+// register-scan edge function to bless it with the anon key — which meant the
+// only identity on a scan was a self-declared handle. The slot carries the
+// account's userId, the tier verdict and the used/max count, and the gate still
+// FAILS CLOSED: no verdict = no upload, because the cap protects paid Tripo credits.
+// Every slot request drops a carscan-slot breadcrumb (status, body, timing) so a
+// tester saying "it wouldn't let me scan" is answerable from telemetry.
 //
 // The return leg: the pipeline publishes finished cars to the PUBLIC models
 // bucket under a NAME CONVENTION —
 //     scan_<scanId>.glb        the Garage hero (full quality)
 //     scan_<scanId>_map.glb    the decimated map twin
-// scanId is per-attempt unique (handle+timestamp), so a second render is a NEW
+// scanId is per-attempt unique (server-issued), so a second render is a NEW
 // name and Mapbox's cache-by-URL can never pin the old car. The app polls with
 // a HEAD request (free, public bucket) while carScanStatus === 'submitted' and
 // flips itself to 'ready' — no backend column, no push infrastructure needed.
 const FN_BASE = "https://pgtbjiszjglznjagolse.supabase.co/functions/v1";
 const MODELS_PUBLIC = "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/public/models";
 
-export type ScanGate = { ok: boolean; used: number; max: number; reason?: string };
+/**
+ * The gate verdict. `reason` when !ok:
+ *   "cap"          — both renders used (server used/max are authoritative)
+ *   "tier"         — the account's tier does not include Garage Scan (→ Ultra pitch)
+ *   "signin"       — 401: the session token is finished; sign in again
+ *   "bad-response" — reachable, but the body was not a verdict (status in `detail`)
+ *   "threw"        — the request itself failed (network / DNS / timeout; code in `detail`)
+ * `detail` is the human-readable why for the UI, never a guess: it is the HTTP
+ * status or the axios error code/message that was actually observed.
+ */
+export type ScanGate = { ok: boolean; used: number; max: number; reason?: string; detail?: string };
 
-/** Ask the server whether this handle may start (or retry) a scan. FAILS CLOSED. */
+/** What POST /api/scan/slot hands back on top of the gate: the id the server MINTED. */
+export type ScanSlotGrant = ScanGate & { scanId?: string; userId?: string; tier?: string };
+
+/** Ask the backend for a scan slot. FAILS CLOSED — no verdict means no upload.
+ *
+ *  No argument      → issue a NEW slot (the server mints the scanId).
+ *  existingScanId   → re-validate the slot this lap already holds, for an upload
+ *                     retry. A retry must never mint a second id: the photos that
+ *                     already landed live under the first one.
+ *
+ *  CONTRACT (backend, 2026-09-02):
+ *    200 { ok: true,  scanId, userId, used, max, tier }
+ *    403 { ok: false, reason: "cap" | "tier", used, max, tier }
+ *    401 → the token is finished (api.ts attaches the Bearer; it has NO 401
+ *          interceptor — verified 2026-09-02 — so this maps it to "signin" itself).
+ */
+export async function requestScanSlot(existingScanId?: string): Promise<ScanSlotGrant> {
+  // PROBE: same discipline as registerScan below — the gate decides whether a
+  // tester burns one of two paid Tripo renders, so every exit records status,
+  // body and timing. `id=new` is a fresh issue; `id=<scanId>` is a retry re-check.
+  const t0 = Date.now();
+  const idTag = existingScanId ?? "new";
+  const closed = (reason: string, detail: string): ScanSlotGrant =>
+    ({ ok: false, used: 0, max: MAX_SCAN_ATTEMPTS, reason, detail });
+  try {
+    // validateStatus: a 403 IS the verdict (cap/tier live in its body), not an
+    // exception — let every status through and read it here.
+    const res = await api.post("/scan/slot", existingScanId ? { scanId: existingScanId } : {}, {
+      validateStatus: () => true,
+    });
+    const ms = Date.now() - t0;
+    const j: any = res.data;
+    if (res.status === 401) {
+      try { logEventReliable(`carscan-slot id=${idTag} ok=0 reason=signin http=401 ms=${ms}`); } catch {}
+      return closed("signin", "HTTP 401");
+    }
+    if (j && typeof j === "object" && typeof j.ok === "boolean") {
+      const g: ScanSlotGrant = {
+        ok: j.ok,
+        used: typeof j.used === "number" ? j.used : 0,
+        max: typeof j.max === "number" ? j.max : MAX_SCAN_ATTEMPTS,
+        reason: typeof j.reason === "string" ? j.reason : undefined,
+        scanId: typeof j.scanId === "string" && j.scanId ? j.scanId : undefined,
+        userId: typeof j.userId === "string" && j.userId ? j.userId : undefined,
+        tier: typeof j.tier === "string" ? j.tier : undefined,
+      };
+      // ok with no id is unusable — there is nothing to name the bucket folder.
+      // Treat it as a bad response rather than inventing an id on the phone again.
+      if (g.ok && !g.scanId) {
+        try { logEventReliable(`carscan-slot id=${idTag} ok=0 reason=no-scanid http=${res.status} ms=${ms}`); } catch {}
+        return { ...g, ok: false, reason: "bad-response", detail: `HTTP ${res.status}, ok without scanId` };
+      }
+      try {
+        logEventReliable(`carscan-slot id=${g.scanId ?? idTag} ok=${g.ok ? 1 : 0} used=${g.used}/${g.max}`
+          + ` reason=${g.reason ?? "-"} tier=${g.tier ?? "-"} http=${res.status} ms=${ms}`);
+      } catch {}
+      return g.ok ? g : { ...g, detail: `HTTP ${res.status}` };
+    }
+    const body = (() => { try { return JSON.stringify(j).slice(0, 120); } catch { return String(j).slice(0, 120); } })();
+    try { logEventReliable(`carscan-slot id=${idTag} ok=0 reason=bad-response http=${res.status} ms=${ms} body=${body}`); } catch {}
+    return closed("bad-response", `HTTP ${res.status}`);
+  } catch (e: any) {
+    // validateStatus swallows every HTTP status, so reaching here means the request
+    // itself failed. Record what actually threw — a DNS failure, a TLS error, a
+    // 60 s timeout (Render cold start) and a real outage are different bugs.
+    const code = String(e?.code ?? "");
+    const msg = String(e?.message ?? e).slice(0, 120);
+    try { logEventReliable(`carscan-slot id=${idTag} ok=0 reason=threw ms=${Date.now() - t0} code=${code || "-"} err=${msg}`); } catch {}
+    return closed("threw", code ? `${code}: ${msg}` : msg);
+  }
+}
+
+export type ScanSlots = { used: number; max: number; tier?: string };
+
+/** GET /api/entitlement → the server's render count for the signed-in account
+ *  ({ tier, source: "server", scanSlots: { used, max } }). Null when the server did
+ *  not answer with a count — callers fall back to the device-local counter and
+ *  say so. Read-only, so the breadcrumb is the plain (droppable) kind. */
+export async function fetchScanSlots(): Promise<ScanSlots | null> {
+  const t0 = Date.now();
+  try {
+    const res = await api.get("/entitlement", { validateStatus: () => true });
+    const ms = Date.now() - t0;
+    const d: any = res.data;
+    const s = d && typeof d === "object" ? d.scanSlots : undefined;
+    if (res.status === 200 && s && typeof s.used === "number" && typeof s.max === "number") {
+      const tier = typeof d.tier === "string" ? d.tier : undefined;
+      try { logEvent(`carscan-slots used=${s.used}/${s.max} tier=${tier ?? "-"} http=200 ms=${ms}`); } catch {}
+      return { used: s.used, max: s.max, tier };
+    }
+    try { logEvent(`carscan-slots ok=0 reason=bad-response http=${res.status} ms=${ms}`); } catch {}
+    return null;
+  } catch (e: any) {
+    try { logEvent(`carscan-slots ok=0 reason=threw ms=${Date.now() - t0} code=${String(e?.code ?? "-")} err=${String(e?.message ?? e).slice(0, 100)}`); } catch {}
+    return null;
+  }
+}
+
+/**
+ * @deprecated 2026-09-02 — the gate is `requestScanSlot()` (backend, JWT, server-minted
+ * id). The register-scan edge function is being turned into a slot LOOKUP for the
+ * pipeline; the app no longer calls it. Kept exported, unused, until the edge
+ * function change lands and this can be deleted.
+ *
+ * Ask the server whether this handle may start (or retry) a scan. FAILS CLOSED.
+ */
 export async function registerScan(handle: string | null | undefined, scanId: string): Promise<ScanGate> {
   // PROBE (2026-08-29): the gate decides whether a tester burns one of two paid
   // Tripo renders, and every failure path here used to collapse to the word
@@ -169,8 +290,10 @@ export const SHOTS_TOTAL = SCAN_SHOTS.length;
  *
  * The second is DESTRUCTIVE — it replaces the first, which cannot be recovered.
  * That is stated on the consent screen before the first photo rather than at the
- * moment it bites. ⚠️ Enforced in local settings today, which means a reinstall
- * resets it; a real entitlement needs a server-side counter.
+ * moment it bites. The SERVER's used/max (GET /api/entitlement, POST /api/scan/slot)
+ * is the count of record since 2026-09-02; this constant is the FALLBACK the UI
+ * shows only when the server has not answered, and the device-local counter it
+ * pairs with still resets on reinstall.
  */
 export const MAX_SCAN_ATTEMPTS = 2;
 
@@ -192,7 +315,13 @@ export type ScanUploadResult = {
   error?: string;
 };
 
-/** Filesystem/bucket-safe id: handle + local timestamp, unique per attempt. */
+/**
+ * @deprecated 2026-09-02 — the scan id is MINTED BY THE SERVER (`requestScanSlot()`
+ * returns it). Nothing in the app calls this any more; it stays exported only so the
+ * old id shape stays documented next to the slot flow that replaced it.
+ *
+ * Filesystem/bucket-safe id: handle + local timestamp, unique per attempt.
+ */
 export function newScanId(handle?: string | null): string {
   const who =
     (handle || "anon").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "anon";

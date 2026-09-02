@@ -8,7 +8,7 @@
 // All four are straight-on and all four feed the model — Tripo's Multi-view mode
 // takes exactly these (see src/carScan.ts for why four, and why orthogonal).
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -35,7 +35,7 @@ import { skin } from "../../src/tierTheme";
 import { useAuth } from "../../src/auth";
 import { getSettings, updateSettings } from "../../src/settings";
 import { ensureCameraPermission } from "../../src/permissionGate";
-import { SCAN_SHOTS, SHOTS_TOTAL, newScanId, uploadScan, registerScan, type CapturedShot } from "../../src/carScan";
+import { SCAN_SHOTS, SHOTS_TOTAL, uploadScan, requestScanSlot, type CapturedShot } from "../../src/carScan";
 import { logEvent } from "../../src/crashBreadcrumb";
 import { findColorsForTyped, type CarColor } from "../../src/carDatabase";
 import { MAIN_COLORS, CLUB_PALETTES } from "../../src/paintPalettes";
@@ -80,11 +80,19 @@ const isLightHex = (hex: string) => {
 };
 
 export default function GarageCaptureScreen() {
-  const { user } = useAuth();
+  const { user, refresh } = useAuth();
   const [shots, setShots] = useState<Record<string, string>>({});
   const [active, setActive] = useState(0);
   const [phase, setPhase] = useState<Phase>("capture");
   const [sent, setSent] = useState(0);
+  // True while the slot request is in flight — the "uploading" screen says
+  // "Reserving your render" instead of "0 of 4 uploaded" (a 60 s Render cold
+  // start would otherwise look like a stuck upload).
+  const [reserving, setReserving] = useState(false);
+  // The slot this lap holds, once the server has issued one. A "Try again" after
+  // a failed upload RE-VALIDATES this id instead of minting a second one — the
+  // photos that already landed live under it (and count against the cap).
+  const slotRef = useRef<{ scanId: string; userId?: string } | null>(null);
   const [result, setResult] = useState<{ ok: boolean; uploaded: number; error?: string } | null>(null);
   // Paint declaration (the "paint" phase). Factory list is matched from the
   // free-typed make/model; generic basics always offered; hex = paint code.
@@ -205,22 +213,54 @@ export default function GarageCaptureScreen() {
     setPhase("uploading");
     setSent(0);
     const s = await getSettings();
-    const scanId = newScanId(user?.handle);
-    // SERVER-SIDE CAP (Jeff, 2026-08-27): the device counter resets on reinstall, so
-    // the bucket is the ledger and register-scan is the gate. FAILS CLOSED — the cap
-    // protects paid Tripo credits, so no verdict means no upload, with a retry path.
-    const gate = await registerScan(user?.handle, scanId);
-    if (!gate.ok) {
+    // SERVER-ISSUED SLOT (2026-09-02; the cap itself is Jeff's 2026-08-27 call): the
+    // device counter resets on reinstall, so the backend is the ledger and it MINTS
+    // the scan id — no id exists on this phone until the server hands one over.
+    // FAILS CLOSED — the cap protects paid Tripo credits, so no verdict means no
+    // upload, with a retry path. A retry re-validates the id this lap already holds.
+    setReserving(true);
+    const gate = await requestScanSlot(slotRef.current?.scanId);
+    setReserving(false);
+    if (!gate.ok || !gate.scanId) {
       setPhase("capture");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert(
-        gate.reason === "cap" ? "No renders left" : "Can't reach the scan service",
-        gate.reason === "cap"
-          ? `You've used both of your renders (${gate.used}/${gate.max}). Ask Jeff if you need another.`
-          : "Check your connection and try again — your photos are still here.",
-      );
+      if (gate.reason === "tier") {
+        // Same destination as a locked 3D tile in the Garage (garage.tsx
+        // handleAppearance): the Ultra pitch, not the plain paywall sheet.
+        Alert.alert(
+          "Included with Ultra",
+          "Garage Scan — your real car on the map — comes with Ultra Premium. Upgrade, then come back and scan.",
+          [
+            { text: "Not now", style: "cancel" },
+            { text: "See Ultra", onPress: () => router.push("/(app)/garage-scan" as any) },
+          ],
+        );
+      } else if (gate.reason === "cap") {
+        Alert.alert(
+          "No renders left",
+          `You've used both of your renders (${gate.used}/${gate.max}). Ask Jeff if you need another.`,
+        );
+      } else if (gate.reason === "signin") {
+        // 401: the token is finished. refresh() asks /auth/me; a server rejection
+        // there ends the session and the (app) layout redirects to login.
+        Alert.alert(
+          "Sign in again",
+          "Your session has expired. Sign in again, then come back and re-shoot — the lap only takes a few minutes.",
+          [
+            { text: "Not now", style: "cancel" },
+            { text: "Sign in", onPress: () => { void refresh(); } },
+          ],
+        );
+      } else {
+        Alert.alert(
+          "Can't reach the scan service",
+          `Check your connection and try again — your photos are still here.${gate.detail ? ` (${gate.detail})` : ""}`,
+        );
+      }
       return;
     }
+    slotRef.current = { scanId: gate.scanId, userId: gate.userId };
+    const scanId = gate.scanId;
     const payload: CapturedShot[] = SCAN_SHOTS.filter((x) => shots[x.id]).map((x) => ({
       shotId: x.id,
       uri: shots[x.id],
@@ -230,6 +270,12 @@ export default function GarageCaptureScreen() {
       payload,
       {
         handle: user?.handle ?? null,
+        // Account identity, from the slot the server issued (falls back to the
+        // signed-in profile). `slot: true` marks a manifest written under the
+        // server-issued flow so the pipeline can tell it from the old
+        // handle-only, phone-minted-id scans.
+        userId: gate.userId ?? user?.id ?? null,
+        slot: true,
         platform: Platform.OS,
         car: {
           year: s.carYear ?? null,
@@ -256,7 +302,10 @@ export default function GarageCaptureScreen() {
         carScanId: scanId,
         carScanStatus: "submitted",
         carScanSubmittedAt: new Date().toISOString(),
-        carScanAttemptsUsed: (s.carScanAttemptsUsed ?? 0) + 1,
+        // The server's count is the one of record; the local counter is only the
+        // offline fallback. Never let the local number fall BELOW what the server
+        // reported (a reinstall starts local at 0 while the server remembers).
+        carScanAttemptsUsed: Math.max((s.carScanAttemptsUsed ?? 0) + 1, gate.used),
       });
     }
     setResult({ ok: r.ok, uploaded: r.uploaded, error: r.error });
@@ -264,7 +313,7 @@ export default function GarageCaptureScreen() {
     Haptics.notificationAsync(
       r.ok ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error,
     );
-  }, [shots, user]);
+  }, [shots, user, refresh]);
 
   // ── paint declaration (between capture and upload) ─────────────────────────
   if (phase === "paint") {
@@ -421,7 +470,7 @@ export default function GarageCaptureScreen() {
               <ActivityIndicator size="large" color={ULTRA.accent} />
               <Text style={styles.bigTitle}>Building your car</Text>
               <Text style={styles.centreBody}>
-                {sent} of {SHOTS_TOTAL} photos uploaded
+                {reserving ? "Reserving your render…" : `${sent} of ${SHOTS_TOTAL} photos uploaded`}
               </Text>
               <Text style={styles.finePrint}>Keep the app open until this finishes.</Text>
             </>

@@ -29,25 +29,40 @@ import { CandyCta } from "../../src/components/CandyCta";
 import { TierTitle } from "../../src/PremiumBadge";
 import { skin } from "../../src/tierTheme";
 import { getSettings, updateSettings } from "../../src/settings";
-import { SCAN_SHOTS, SCAN_RULES, MAX_SCAN_ATTEMPTS } from "../../src/carScan";
+import { SCAN_SHOTS, SCAN_RULES, MAX_SCAN_ATTEMPTS, fetchScanSlots, type ScanSlots } from "../../src/carScan";
 
 // This is an ULTRA PREMIUM page — gold, not brand green (Jeff 8/23).
 const ULTRA = skin("ultra");
 
 export default function GarageConsentScreen() {
   const [agreed, setAgreed] = useState(false);
-  const [used, setUsed] = useState(0);
+  const [localUsed, setLocalUsed] = useState(0);
   const [hasCar, setHasCar] = useState(false);
+  // The server's count (GET /api/entitlement → scanSlots). Null until it answers,
+  // or if it never does — then the device-local counter below is what we have.
+  const [server, setServer] = useState<ScanSlots | null>(null);
 
   useEffect(() => {
+    let alive = true;
     (async () => {
       const s = await getSettings();
-      setUsed(s.carScanAttemptsUsed ?? 0);
+      if (!alive) return;
+      setLocalUsed(s.carScanAttemptsUsed ?? 0);
       setHasCar(!!s.carScanModelUrl);
     })();
+    (async () => {
+      const slots = await fetchScanSlots();
+      if (alive && slots) setServer(slots);
+    })();
+    return () => { alive = false; };
   }, []);
 
-  const remaining = Math.max(0, MAX_SCAN_ATTEMPTS - used);
+  // SERVER COUNT WINS (2026-09-02): the local counter resets on reinstall, so when
+  // the backend has answered, its used/max drive every number on this screen. The
+  // slot request in garage-capture is the actual gate; this is the honest preview.
+  const used = server ? server.used : localUsed;
+  const max = server ? server.max : MAX_SCAN_ATTEMPTS;
+  const remaining = Math.max(0, max - used);
   const isSecond = used >= 1;
   const exhausted = remaining === 0;
 
@@ -81,14 +96,14 @@ export default function GarageConsentScreen() {
             <Text style={[styles.attemptTitle, isSecond && styles.attemptTitleWarn]}>
               {exhausted
                 ? "No renders left"
-                : `${remaining} of ${MAX_SCAN_ATTEMPTS} render${remaining === 1 ? "" : "s"} left`}
+                : `${remaining} of ${max} render${remaining === 1 ? "" : "s"} left`}
             </Text>
             <Text style={styles.attemptBody}>
               {exhausted
                 ? "Both renders have been used. Your current car stays as it is."
                 : isSecond && hasCar
                   ? "This is your final render. The car you have now will be REPLACED and cannot be brought back — even if you like it more."
-                  : "You get two renders. The second one replaces the first, so the first is gone for good once you use it."}
+                  : `You get ${max === 2 ? "two" : max} renders. The second one replaces the first, so the first is gone for good once you use it.`}
             </Text>
           </View>
         </View>
@@ -183,7 +198,7 @@ export default function GarageConsentScreen() {
             </View>
             <Text style={styles.checkText}>
               I understand my car will not be an exact replica, and that
-              {isSecond ? " this render replaces the one I have now." : ` I get ${MAX_SCAN_ATTEMPTS} renders and the second replaces the first.`}
+              {isSecond ? " this render replaces the one I have now." : ` I get ${max} renders and the second replaces the first.`}
             </Text>
           </TouchableOpacity>
         )}

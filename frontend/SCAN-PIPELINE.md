@@ -5,10 +5,17 @@ marker through **Tripo and nothing else** — no Blender, no manual mesh work, n
 step. Every number in here was measured on real scans (`jeff-20260829-141551` on
 2026-08-29, `enablewhore-20260901-185736` on 2026-09-01), not read off documentation.
 
-Status: **worker BUILT, not yet deployed** (2026-09-01). The automation is
-`supabase/functions/scan-worker/` + two migrations; the deploy runbook is
-`supabase/SCAN-WORKER-DEPLOY.md`. Until the maintainer runs that runbook and flips
-`pipeline_flags.enabled`, renders are still done by hand — see "By hand" below.
+Status: **LIVE — `pipeline_flags.enabled = true` since 2026-09-02 00:21 PT.** The first
+unattended tester render (`enablewhore-20260901-210315`, Olaf) went photos → twin → hero
+with no hands on it: flip 00:21:48 → `fetching` 00:22:18 → `generating` 00:22:48 →
+`converting_map` 00:26:20 → twin published 00:27:21 → hero published 00:29:21 → `done`.
+**7 min 47 s, 50 credits, 0 retries, 0 errors** (receipts: `car_scan_jobs`,
+`crash_reports platform='worker'`, `net._http_response`; the public bytes were
+re-downloaded and re-inspected with `tools/glb-pipeline/glbinfo.py` — twin 15,096 v / u16 /
+1.9097 m, hero 88,192 v / 1.9101 m, sha256 == the worker's ledger). The automation is
+`supabase/functions/scan-worker/` + three migrations; runbook `supabase/SCAN-WORKER-DEPLOY.md`
+(now ONE human paste — `TRIPO_API_KEY`; the worker reads `scan_worker_key` from Vault itself).
+"By hand" below is the fallback and the reference the worker was measured against.
 
 Jeff, 2026-09-01: *"this pipeline is not suppose to have any manual input, it is suppose
 to be all automatic from the photos sent to the delivery of the 3d image and 2d twin back

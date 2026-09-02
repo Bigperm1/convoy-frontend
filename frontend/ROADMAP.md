@@ -45,6 +45,20 @@ at the time of writing, not recalled. Re-verify before acting — this file ages
 
 ## 1 · Shipped state — VERIFIED 2026-08-27
 
+### 2026-09-02 — the scan pipeline is AUTOMATIC (Supabase `scan-worker`, commits `b4ff998` + `3272eaa`, local — not pushed)
+
+Jeff 9/01: *"not suppose to have any manual input… all automatic from the photos sent to the
+delivery of the 3d image and 2d twin back to the device."* **VERIFIED live:** Olaf's second
+scan (`enablewhore-20260901-210315`) rendered unattended — switch flipped 00:21:48, twin in
+the bucket 00:27:21, hero 00:29:21, `done` — **7 min 47 s, 50 credits, 0 errors**. pg_cron
+ticks every 30 s → edge fn advances ONE state per tick; spend guards (300 credits/day, 2
+renders per handle, balance floor) and a 60-credit ceiling per job. Twin re-inspected with
+`glbinfo.py`: 15,096 v / u16 / 1.9097 m — passes every Mapbox gate. The phone flips to
+`ready` on its Garage-screen poll (every 20 s), so the tester's `carscan-ready` breadcrumb
+lands when they next open the Garage. **Switch left ON.** Off switch:
+`update public.pipeline_flags set enabled=false, paused_reason='manual', updated_at=now() where id=1;`
+Docs: `SCAN-PIPELINE.md` (status + chain), `supabase/SCAN-WORKER-DEPLOY.md` (one-paste runbook).
+
 ### 2026-09-01 — watchdog kills fixed: per-tick state moved off layer properties (OTA `586e1273`, commit `26b21f4`)
 - **What broke:** Jeff's 9 am drive relaunched five times in four minutes at 90–113 km/h. Two `.ips`
   logs: `0x8BADF00D` scene-update watchdog (main thread ≥10 s inside `StyleManager.updateLayer →

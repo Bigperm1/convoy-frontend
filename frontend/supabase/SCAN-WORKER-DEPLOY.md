@@ -1,5 +1,11 @@
 # scan-worker — deploy runbook
 
+> **STATUS 2026-09-02: every step below has been executed and the pipeline is LIVE**
+> (`pipeline_flags.enabled = true`, first unattended tester render delivered 00:29 PT,
+> phone receipt 03:47 PT — receipts in `SCAN-PIPELINE.md`). The "What is already true"
+> section and the HYPOTHESIS list are the 2026-09-01 pre-deploy snapshot, kept for the
+> next environment; nothing in them is still open.
+
 Project `pgtbjiszjglznjagolse`. Everything below is run by the maintainer after Jeff's
 go; nothing in this repo deploys itself. Order matters: the kill switch stays OFF until
 the last step, so every earlier step is reversible and spends nothing.
@@ -22,8 +28,9 @@ A pause never expires a paid job: timeouts are counted in polls, not minutes (wo
   NOT a migration (`supabase/ops/scan_worker_cron.sql`) — see step 6 for why.
 - `car-scans` holds: `jeff-20260829-141551` (delivered), `enablewhore-20260901-185736`
   (delivered by hand), **`enablewhore-20260901-210315` (COMPLETE, 4 photos + manifest,
-  NOT rendered — see step 8)**, plus junk `probe-<epoch>`, `claudetest-*`.
-(An id starting with `_` is rejected by the table's own check `^[A-Za-z0-9]…` — the original `_selftest` could never enqueue; 2026-09-01 the probe used `probe-1788328618`, VERIFIED enqueued, then marked skipped.)
+  NOT rendered — see step 8)**, plus junk `_selftest/…` (a probe upload whose id the
+  table's check `^[A-Za-z0-9]…` rejects, so it never enqueued), `probe-1788328618` (the
+  probe that DID enqueue, marked skipped), `claudetest-*`.
 - `models` holds both files for jeff + enablewhore-185736, and a twin-only
   `scan_claudetest-20260821-000001_map.glb` (the worker skips it: `manual-in-progress`).
 - Edge functions `register-scan`, `fetch-scan`, `publish-model` exist with `verify_jwt=true`.

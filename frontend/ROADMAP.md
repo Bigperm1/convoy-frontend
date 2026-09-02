@@ -304,6 +304,16 @@ video, and UGC triggers Guideline 1.2, which wants report + block + EULA in code
 
 ## 6 · Open issues, ranked
 
+### scan-worker v3 hardening — HELD for Jeff's go (review 2026-09-02, none critical, pipeline works as-is)
+Ranked by what it protects. Server-side only (Supabase), no app change, no build.
+1. **Fence row writes to the lease** — `updateJob` adds `.eq('locked_by', tick).gt('lease_until', now)` and throws `LeaseLost` on 0 rows; today double-buy protection rests on the 170 s lease outliving a 130 s tick (`deps.ts updateJob`).
+2. **Abort check before every paid POST** — `if (signal.aborted) throw` at the top of `paidSubmit`; a POST after the budget is recorded as a lost reply and the generate FAILS the job.
+3. **Tripo 5xx = ambiguous, not "no task"** — `isDefiniteRejection` must also require `httpStatus < 500`, else a 5xx that did create a task rolls the ledger back.
+4. **Guards reserve the ceiling (60), not the nominal 50**; re-read `pipeline_flags.enabled` inside `paidSubmit` (a tick started before the switch went off can still buy converts).
+5. **Log which secret failed (never values)** in `resolveSecrets`; drop the isolate-lifetime cache (one RPC per tick is nothing) so a Vault rotation takes effect without a redeploy; `.trim()` Vault values.
+6. **Policy, Jeff's call:** the shipped anon key can upload a folder and spend, keyed on a client-supplied handle — bounded only by `daily_credit_cap` 300 ($3/day) + balance floor. Options: lower the cap while testers are few, or have `register-scan` issue the scan id and refuse unregistered folders (closes it properly).
+Not exposures (verified by probe): pg_net's PUBLIC table grants are unreachable — the API exposes only `public, graphql_public`.
+
 **1 · widebody4 invisible on the car map — CAUSE NEVER ESTABLISHED.**
 Shipped 2026-08-21 morning, Jeff's mid-drive photo showed no car marker, reverted same day
 (`c5fa646`). widebody4 is uint16 and structurally identical to widebody3, and it renders fine in

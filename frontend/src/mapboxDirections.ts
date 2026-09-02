@@ -63,7 +63,7 @@ export function levelFromNumeric(n: any): CongestionLevel {
 // `baseColor` (the user's chosen route color) overrides the clear-traffic color
 // (unknown / low) so a recolored route stays that color where traffic is moving;
 // the warm slow-down stops (yellow / orange / red) keep their traffic meaning.
-function colorFor(level: CongestionLevel | string | undefined, baseColor?: string): string {
+export function colorFor(level: CongestionLevel | string | undefined, baseColor?: string): string {
   if (level === "moderate" || level === "heavy" || level === "severe") {
     return (CONGESTION_COLOR as any)[level];
   }

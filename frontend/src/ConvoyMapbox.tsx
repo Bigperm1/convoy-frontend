@@ -38,6 +38,7 @@ import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, A
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
 import { routeTrimLeadM, routeTrimFadeM } from "./routeTrim";
+import { buildRibbonPartition, buildRibbonFeatures, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getVehiclePngOrDefault, getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
@@ -677,47 +678,9 @@ export function routeRgba(hex: string, a: number): string {
   return `rgba(${r},${g},${b},${a})`;
 }
 
-// Fully-transparent version of a colour string (hex / rgb / rgba) — used as the
-// "clear" end of a fade so the line vanishes to nothing rather than to a grey or
-// black tint.
-function transparentColor(c: string): string {
-  if (typeof c !== "string") return "rgba(0,0,0,0)";
-  const s = c.trim();
-  if (s[0] === "#") { const { r, g, b } = hexToRgb(s); return `rgba(${r},${g},${b},0)`; }
-  const m = s.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i);
-  if (m) return `rgba(${m[1]},${m[2]},${m[3]},0)`;
-  return "rgba(0,0,0,0)";
-}
 
-// Bake a speed-aware "car gap" into a line-progress COLOUR gradient: fully
-// transparent from the line start to s0, a soft transparent→colour ramp to s1,
-// then the gradient's ORIGINAL colours from s1 onward. This vanishes the line
-// behind/at the car and fades it in just ahead of the nose — WITHOUT
-// lineTrimOffset, because a multi-colour gradient flattens to solid when trimmed
-// in @rnmapbox 10.3.1 (the congestion core can't be trimmed, so we gap it here
-// in the gradient instead). s0/s1 are line-progress fractions (0..1). Pass-through
-// for a non-gradient (constant colour) input. See [[rnmapbox-gradient-trim-conflict]].
-export function applyCarGapGradient(grad: any, s0: number, s1: number): any {
-  if (!Array.isArray(grad) || grad.length < 5) return grad;
-  const head = grad.slice(0, 3); // ['interpolate', ['linear'], ['line-progress']]
-  const body = grad.slice(3);    // [pos0, color0, pos1, color1, ...]
-  const pairs: Array<[number, string]> = [];
-  for (let i = 0; i + 1 < body.length; i += 2) pairs.push([Number(body[i]), body[i + 1]]);
-  if (pairs.length === 0) return grad;
-  const a0 = Math.max(0.0001, Math.min(0.997, s0));
-  const a1 = Math.max(a0 + 1e-3, Math.min(0.999, s1));
-  // Colour the source gradient shows at the fade-in edge (last stop at/below a1).
-  let colorAtS1 = pairs[0][1];
-  for (const [p, c] of pairs) { if (p <= a1) colorAtS1 = c; else break; }
-  const clear = transparentColor(colorAtS1);
-  const out: any[] = [...head, 0, clear, a0, clear, a1, colorAtS1];
-  let last = a1;
-  for (const [p, c] of pairs) {
-    if (p > a1) { const v = p > last ? p : last + 1e-6; out.push(v, c); last = v; }
-  }
-  if (last < 1) out.push(1, pairs[pairs.length - 1][1]);
-  return out;
-}
+// applyCarGapGradient (gap baked into a line-progress gradient) was deleted 2026-09-01:
+// no layer takes a per-tick gradient any more — see src/routeRibbon.ts.
 
 // ===== 3-route palette (Best / Scenic / AI) =====
 // AI route core is black; its EDGES (casing) are the user color.
@@ -1723,9 +1686,26 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         interpolates at 60fps, so the camera stutters and the car drifts off
         centre. Now both ride the same smooth point: camera glides, car stays put. */}
     <CustomLocationProvider coordinate={[r.lng, r.lat]} heading={r.heading ?? 0} />
+    {/* ── ROTATION RIDES THE FEATURE, NOT THE LAYER (2026-09-01) ─────────────────
+        The eased heading used to be written into the layer `style` every frame
+        (`iconRotate: r.heading`, `modelRotation: [pitch, 0, heading + offset]`). In
+        @rnmapbox that is a full main-thread read-modify-write of the layer per change
+        (RNMBXLayer.reactStyle didSet → StyleManager.updateLayer, plus two SYNCHRONOUS
+        ones from the sourceID/filter setters inside RCTMountingManager.updateProps) —
+        the same mechanism as the route-ribbon trim that produced the 0x8BADF00D
+        watchdog kills on Jeff's 9 am drive, and the crash stack cannot tell the two
+        layers apart. The position already moves through the SOURCE every frame; the
+        heading now goes with it as feature properties, and both layer styles below are
+        constant while driving. `model-rotation` and `icon-rotate` accept feature
+        expressions on this SDK on BOTH platforms (RNMBXStyleValue.mglStyleValueArrayNumber
+        → .expression; RNMBXStyleFactory.setModelRotation → layer.modelRotation(expr)). */}
     <ShapeSource
       id="convoy-self-car"
-      shape={{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [r.lng, r.lat] } }}
+      shape={{
+        type: "Feature",
+        properties: { hdg: r.heading ?? 0, rot: [pitchTilt, 0, (r.heading ?? 0) + headingOffset] },
+        geometry: { type: "Point", coordinates: [r.lng, r.lat] },
+      }}
     >
       {sprite ? (
         // "Class" appearance: flat top-down sprite lying ON the map (rotation +
@@ -1738,7 +1718,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           style={{
             iconImage: sprite,
             iconSize: spriteSize,
-            iconRotate: r.heading ?? 0,
+            iconRotate: ["get", "hdg"] as any,
             iconRotationAlignment: "map",
             iconPitchAlignment: "map",
             iconAllowOverlap: true,
@@ -1777,7 +1757,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           modelTranslation: [0, 0, modelId === ARROW_MODEL_ID ? 16 : 10],
           modelEmissiveStrength: emissive,
           modelScale: scale ?? CAR_MODEL_SCALE_SIZED,
-          modelRotation: [pitchTilt, 0, (r.heading ?? 0) + headingOffset],
+          modelRotation: ["get", "rot"] as any,
           // ⚠ modelCastShadows MUST STAY FALSE (2026-08-19, found by sim bisect):
           // enabling it black-screened the ENTIRE map on Android the moment the
           // ModelLayer mounted (i.e. whenever 3D guidance started — idle draws the
@@ -3053,71 +3033,50 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const _fracDrawn = (routeProj && fixEaseRef.current)
     ? easedFrac(fixEaseRef.current, Date.now())
     : (routeProj ? routeProj.frac : 0);
-  const routeTrimEndFrac = routeProj
-    ? Math.max(0, Math.min(0.999, _fracDrawn + _trimLeadM / routeProj.totalM))
-    : null;
-  // Soft fade-in just past that buffer: the line ramps transparent → solid over
-  // ~20 m instead of hard-starting in front of the nose. Uses the route source's
-  // lineMetrics (already enabled). Only while navigating (a trim point exists);
-  // preview keeps the solid color. Built as a line-progress gradient anchored at
-  // the trim edge.
-  const _fadeSpanFrac = routeProj
-    ? Math.max(0.0008, Math.min(0.06, routeTrimFadeM(_trimZoom, selfCar?.lat ?? 0) / routeProj.totalM))
-    : 0;
-  const buildLineFade = (solid: string, clear: string): any => {
-    if (routeTrimEndFrac == null) return null;
-    const s0 = Math.min(0.997, Math.max(0.0001, routeTrimEndFrac));
-    const s1 = Math.min(0.999, Math.max(s0 + 0.0006, s0 + _fadeSpanFrac));
-    return ["interpolate", ["linear"], ["line-progress"], 0, clear, s0, clear, s1, solid, 1, solid];
-  };
-  // Selected route renders in ITS kind color (Best = user color, Scenic = contrasting,
-  // AI = black core). selColor === routeColor for Best, so the common case is unchanged.
-  const selCoreGradient = buildLineFade(routeRgba(selColor, 1), routeRgba(selColor, 0));
-  const selGlowGradient = buildLineFade(routeRgba(selEdge, 1), routeRgba(selEdge, 0));
-
-  // ===== Live congestion on the ACTIVE route (DURING navigation) =====
-  // The route we're driving already carries per-segment congestion (nav.ts gets
-  // it from fetchMapboxRoutes). Build a green→red line-progress gradient from it
-  // so the selected route's core shows live traffic WHILE navigating — not just
-  // in preview. buildCongestionGradient returns a plain colour string when the
-  // whole route is a single level; wrap that as a constant gradient so it's
-  // always usable as lineGradient alongside the behind-car trim. null when
-  // navigating without congestion data → falls back to the green fade core.
-  const navCongestionGradient = useMemo(() => {
-    if (!navigationActive) return null;
-    const sel: any = routes?.[selectedRouteIndex];
-    const coords = sel?.coordinates as [number, number][] | undefined;
-    const cong = sel?.congestion as CongestionLevel[] | undefined;
-    if (!coords || coords.length < 2 || !cong || cong.length === 0) return null;
-    const g = buildCongestionGradient(coords, cong, selColor);
-    return Array.isArray(g) ? g : (["interpolate", ["linear"], ["line-progress"], 0, g, 1, g] as any);
+  // ── THE CUT (2026-09-01) — geometry, not paint; see src/routeRibbon.ts ─────
+  // Until today the behind-car vanish + nose fade were LAYER PROPERTIES (lineTrimOffset,
+  // and a congestion gradient re-baked with the gap in its alpha) handed to @rnmapbox
+  // twelve times a second — each one a full main-thread read-modify-write of the layer
+  // (RNMBXLayer.reactStyle didSet → StyleManager.updateLayer). That is the stack in the
+  // 2026-09-01 watchdog crash logs, and the "Show map froze phone AND CarPlay" report:
+  // the surfaces share one main thread. Now the ribbon is FEATURES cut at the car and
+  // the layers below never change while driving.
+  //
+  // Partition: the selected route measured + coloured ONCE per route/traffic refresh.
+  // Congestion applies only while navigating — preview traffic is the separate
+  // convoy-congestion source below, unchanged. Geometry is the congestion-bearing
+  // coordinates when present (one level per segment), else the decoded polyline.
+  const ribbonPartition = useMemo(() => {
+    const sel: any = (routes as any)?.[selectedRouteIndex];
+    if (!sel) return null;
+    const rc = sel.coordinates as LngLat[] | undefined;
+    const coords: LngLat[] = (Array.isArray(rc) && rc.length >= 2)
+      ? rc
+      : decodePolyline(sel.polyline).map((p: any) => [p.longitude, p.latitude] as LngLat);
+    const cong = navigationActive ? (sel.congestion as CongestionLevel[] | undefined) : undefined;
+    return buildRibbonPartition(coords, cong, selColor);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigationActive, routes, selectedRouteIndex, selColor]);
-  // The selected core paints congestion during nav (preferred), else the soft
-  // green fade-in. Both ride the same behind-car trim.
-  const selCoreGrad = navCongestionGradient || selCoreGradient;
-  // True while we're navigating AND have a real congestion gradient to draw. When set,
-  // the congestion is painted on a DEDICATED, NON-TRIMMED core layer (route-sel-cong,
-  // a clone of the proven preview cong-core) instead of the trimmed route-sel-core.
-  // WHY: combining a multi-colour lineGradient with lineTrimOffset on the SAME layer
-  // does not render the colour transitions in @rnmapbox (the trimmed single-colour
-  // green fade hid this — alpha-only gradients survive the trim, multi-colour ones get
-  // flattened to solid). Decoupling colour from trim makes the transitions show on the
-  // route during nav exactly as they do in preview; the glow casing keeps the trim so
-  // the behind-car vanish is preserved.
-  const navCongActive = navigationActive && !!navCongestionGradient;
-  // Gap the congestion core off the car the same way. It's NON-trimmed (a trimmed
-  // multi-colour gradient flattens), so it previously ran straight THROUGH the car.
-  // Bake the behind-car vanish + soft front fade into the gradient's alpha using the
-  // same s0/s1 the plain core uses, so colour transitions still render but the line
-  // clears the nose. null routeProj (off-route) → unchanged full gradient.
-  const navCongGapped = (navCongestionGradient && routeTrimEndFrac != null)
-    ? applyCarGapGradient(
-        navCongestionGradient,
-        Math.min(0.997, Math.max(0.0001, routeTrimEndFrac)),
-        Math.min(0.999, Math.max(routeTrimEndFrac + 0.0006, routeTrimEndFrac + _fadeSpanFrac)),
-      )
-    : navCongestionGradient;
+  }, [routes, selectedRouteIndex, navigationActive, selColor]);
+  // Metres along the partition where the line starts: eased car position + the
+  // speed-aware lead. Quantised to one screen pixel at this camera so the source is
+  // rebuilt only when the start would visibly move; fade rounded to 2 m so a settling
+  // zoom cannot churn the memo.
+  const ribbonCutM = (routeProj && ribbonPartition)
+    ? _fracDrawn * ribbonPartition.totalM + _trimLeadM
+    : null;
+  const ribbonCutQ = quantiseM(ribbonCutM, ribbonStepM(_trimZoom, selfCar?.lat ?? 0));
+  const ribbonFadeQ = Math.round(routeTrimFadeM(_trimZoom, selfCar?.lat ?? 0) / 2) * 2;
+  // What convoy-routes actually draws: the base routes (alternates / the reroute offer,
+  // which the alt layers select by index/kind) plus the ribbon pieces for the selected
+  // route. Every ribbon feature carries the selected index, so the preview alt filter
+  // (index != selected) excludes it and a tap on it selects the route it already is.
+  const routeDrawFC: any = useMemo(() => ({
+    type: "FeatureCollection",
+    features: [
+      ...routeFC.features,
+      ...buildRibbonFeatures(ribbonPartition, { cutM: ribbonCutQ, fadeM: ribbonFadeQ, index: selectedRouteIndex }),
+    ],
+  }), [routeFC, ribbonPartition, ribbonCutQ, ribbonFadeQ, selectedRouteIndex]);
 
   // Snapped draw POSITION + heading: glue the car to the line within ~60 m of it —
   // further off (wrong turn / pre-reroute) we show the real GPS so you can see you're
@@ -3288,7 +3247,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // driver had not chosen, while the head unit correctly coloured the one they had.
   //
   // Both surfaces now derive from the one selected route — which is exactly what
-  // this surface already did DURING navigation (see navCongestionGradient), so this
+  // this surface already did DURING navigation (see ribbonPartition), so this
   // also makes preview and nav consistent with each other on the phone.
   //
   // The fetched route stays as a FALLBACK for the case where the selected route came
@@ -3569,7 +3528,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             index rather than unmounting, since ShapeSource children must always
             be elements (never a boolean). */}
         {showRoutes && (
-          <ShapeSource id="convoy-routes" shape={routeFC} onPress={handleRoutePress} lineMetrics>
+          <ShapeSource id="convoy-routes" shape={routeDrawFC} onPress={handleRoutePress}>
             {/* Non-selected preview routes (Best / Scenic / AI), dimmed. Each route carries
                 its own `edge` + `color` so ONE data-driven casing+core pair renders all
                 three kinds — including AI's inverted look (user-color edges, black core).
@@ -3600,31 +3559,29 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
                 car only wins when the route shares its "top" slot. Only the ACTIVE route
                 (sel casing/core + nav congestion) moves up — the dimmed alternates stay
                 at "middle", exactly as CarPlay does. */}
+            {/* ── STATIC RIBBON LAYERS (2026-09-01) — see src/routeRibbon.ts ───────
+                Both `style` objects are constant while driving: trim, fade and
+                congestion colour live in the FEATURES of routeDrawFC, so a tick updates
+                the GeoJSON source and never touches a layer property. route-sel-cong is
+                gone — its job (colour that survives the trim) is done by per-piece
+                `color`. Hidden in preview-congestion exactly as before, so the
+                convoy-congestion ribbon below never double-draws. Draw order is by
+                insertion within slot "top": casing first, core last, same commit. */}
             <LineLayer
               id="route-sel-casing"
               slot="top"
-              filter={(showCongestion ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selGlowGradient ? { lineGradient: selGlowGradient, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: selEdge }) }}
+              filter={(showCongestion ? ["==", ["get", "kind"], "__none__"] : ["==", ["get", "kind"], RIBBON_CASING]) as any}
+              style={{ lineColor: selEdge, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
             <LineLayer
               id="route-sel-core"
               slot="top"
-              // Hidden in preview-congestion AND while the dedicated congestion core
-              // (below) is active, so we never double-draw or let the trimmed green core
-              // paint over the congestion colours.
-              filter={((showCongestion || navCongActive) ? ["==", ["get", "index"], -1] : ["==", ["get", "index"], selectedRouteIndex]) as any}
-              style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(selCoreGrad ? { lineGradient: selCoreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: selColor }) }}
-            />
-            {/* CONGESTION core (DURING NAV) — a dedicated, NON-TRIMMED clone of the proven
-                preview cong-core: the live traffic gradient over the full active route, so
-                the green→yellow→orange→red transitions render while navigating (the trimmed
-                route-sel-core flattened them). The wide glow casing above keeps the trim, so
-                the behind-car vanish still reads. Hidden unless navigating with real data. */}
-            <LineLayer
-              id="route-sel-cong"
-              slot="top"
-              filter={(navCongActive ? ["==", ["get", "index"], selectedRouteIndex] : ["==", ["get", "index"], -1]) as any}
-              style={{ lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1, ...(navCongGapped ? { lineGradient: navCongGapped } : { lineColor: selColor }) }}
+              filter={(showCongestion ? ["==", ["get", "kind"], "__none__"] : ["==", ["get", "kind"], RIBBON_CORE]) as any}
+              // lineCap "butt": the core is a CHAIN of pieces sharing exact end points, so a
+              // flat cap meets flush; round caps would overlap at every seam and, on the
+              // translucent fade pieces, composite as beads. The round-capped casing still
+              // gives the ribbon its rounded ends.
+              style={{ lineColor: ["get", "color"] as any, lineOpacity: ["get", "alpha"] as any, lineWidth: 12, lineCap: "butt", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
           </ShapeSource>
         )}

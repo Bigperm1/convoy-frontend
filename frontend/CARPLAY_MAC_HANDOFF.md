@@ -149,6 +149,16 @@ layer inspector to see why the trim / transparent-gradient isn't producing trans
 Files: `src/ConvoyMapbox.tsx` (route-sel-cong / navCongGapped / routeTrimEndFrac) and
 `src/carplay/CarMapView.tsx` (car-cong-core / carCongGapped).
 
+> **2026-09-01 — THIS MECHANISM WAS THE CRASH. Superseded by `src/routeRibbon.ts`.**
+> "Logically correct" was true and beside the point: every per-tick change to a layer
+> `style` is a full main-thread read-modify-write inside @rnmapbox (`reactStyle didSet →
+> StyleManager.updateLayer → getStyleLayerProperties`), and three such layers × 12 Hz × two
+> maps is the exact main-thread stack in the `0x8BADF00D` watchdog kills on Jeff's 9 am
+> drive (five relaunches in four minutes). `route-sel-cong`, `car-cong-core`,
+> `applyCarGapGradient`-per-tick and `lineTrimOffset` on the ribbon are gone; the trim, fade
+> and congestion colour are now FEATURES of a source cut at the car, and the ribbon layers
+> never change while driving. See CLAUDE.md → Map rendering.
+
 ## Key files:
 - CarPlay: `src/carplay/{ConvoyCarPlay.tsx, CarMapView.tsx, carStore.ts}`, `plugins/withConvoyCarPlay.js`
 - Map engine: `src/ConvoyMapbox.tsx` (SelfCarModel lockstep + route layers)

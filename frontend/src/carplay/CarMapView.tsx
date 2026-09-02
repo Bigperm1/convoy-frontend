@@ -39,7 +39,6 @@ import { getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, getVehicl
 import {
   CAR_EMISSIVE_BY_MODE,
   ROUTE_GREEN_CORE,
-  routeRgba,
   chaseZoom,
   CHASE_ZOOM_CLAMP_MIN,
   CHASE_ZOOM_CLAMP_MAX,
@@ -51,7 +50,6 @@ import {
   carModelScale,
   easedFrac,
   TRIM_TICK_MS_PREMIUM,
-  applyCarGapGradient,
   GREEN_ARROW_MODEL,
   ARROW_MODEL_ID,
   ARROW_MODEL_PITCH,
@@ -70,6 +68,7 @@ import {
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
 import { routeTrimLeadM, routeTrimFadeM } from '../routeTrim';
+import { buildRibbonPartition, buildRibbonFeatures, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from '../routeRibbon';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
@@ -1476,6 +1475,23 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const routeLL = useMemo(() => decodePolyline(s.routePolyline), [s.routePolyline]);
   const routeCoords = useMemo(() => routeLL.map((p) => [p.longitude, p.latitude]), [routeLL]);
   const hasRoute = routeCoords.length >= 2;
+  // User-chosen route color (mirrored from the phone via carStore) — resolved
+  // through the SAME per-kind transform the phone paints with (scenic =
+  // contrast color, AI = black core), so the head unit's line matches the
+  // phone exactly (tester: "CarPlay route colour differs, phone is correct").
+  // s.routeKind mirrors the SELECTED route's kind; absent (old bundle) → base.
+  const carBaseColor = s.routeColor || ROUTE_GREEN_CORE;
+  const carRouteColor = routeColorsFor((s.routeKind as any) || 'best', carBaseColor).color;
+  // ── RIBBON PARTITION (2026-09-01) — see src/routeRibbon.ts ───────────────
+  // The route measured and coloured ONCE per route/traffic refresh; the per-tick cut
+  // below only slices it. Geometry is the congestion-bearing coordinates the phone
+  // mirrored (one level per segment — the same line the congestion probe indexes),
+  // else the decoded polyline, in which case the ribbon is a single colour.
+  const ribbonPartition = useMemo(() => {
+    const rc: any = s.routeCoordinates;
+    const coords = (Array.isArray(rc) && rc.length >= 2) ? (rc as LngLat[]) : (routeCoords as LngLat[]);
+    return buildRibbonPartition(coords, s.routeCongestion as any, carRouteColor);
+  }, [s.routeCoordinates, s.routeCongestion, routeCoords, carRouteColor]);
 
   // BUFFER the green line off the car (mirror the phone): project the car onto the
   // route and TRIM the line so it starts a speed-aware lead AHEAD of the nose, with a
@@ -1540,12 +1556,16 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const fracDrawn = (routeProj && fixEaseRef.current)
     ? easedFrac(fixEaseRef.current, Date.now())
     : (routeProj ? routeProj.frac : 0);
-  const routeTrimEndFrac = routeProj
-    ? Math.max(0, Math.min(0.999, fracDrawn + trimLeadM / routeProj.totalM))
+  // ── THE CUT (2026-09-01) — geometry, not paint; see src/routeRibbon.ts ─────
+  // Metres along the partition where the line starts: the eased car position plus
+  // the speed-aware lead. Quantised to one screen pixel at this camera so the source
+  // is rebuilt only when the start would visibly move; the fade is rounded to 2 m so
+  // a settling camera zoom cannot churn the memo either.
+  const ribbonCutM = (routeProj && ribbonPartition)
+    ? fracDrawn * ribbonPartition.totalM + trimLeadM
     : null;
-  const fadeSpanFrac = routeProj
-    ? Math.max(0.0008, Math.min(0.06, (routeTrimFadeM(trimZoom, lat) * mapScale) / routeProj.totalM))
-    : 0;
+  const ribbonCutQ = quantiseM(ribbonCutM, ribbonStepM(trimZoom, lat, mapScale));
+  const ribbonFadeQ = Math.round((routeTrimFadeM(trimZoom, lat) * mapScale) / 2) * 2;
   // Snap the car to the line + lock its heading to the route bearing when on-route (≤60 m),
   // matching the phone — stops the low-speed position drift + heading spin. Steer the
   // camera by the SAME bearing (getCam reads camHdgRef live) so the map doesn't rotate
@@ -1594,21 +1614,6 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // Live copy for the compass's IMMEDIATE camera push (the gesture closure is frozen).
   drawHdgRef.current = drawHdg;
   if (carSnapped) camHdgRef.current = routeProj!.bearing;
-  const buildLineFade = (solid: string, clear: string): any => {
-    if (routeTrimEndFrac == null) return null;
-    const s0 = Math.min(0.997, Math.max(0.0001, routeTrimEndFrac));
-    const s1 = Math.min(0.999, Math.max(s0 + 0.0006, s0 + fadeSpanFrac));
-    return ['interpolate', ['linear'], ['line-progress'], 0, clear, s0, clear, s1, solid, 1, solid];
-  };
-  // User-chosen route color (mirrored from the phone via carStore) — resolved
-  // through the SAME per-kind transform the phone paints with (scenic =
-  // contrast color, AI = black core), so the head unit's line matches the
-  // phone exactly (tester: "CarPlay route colour differs, phone is correct").
-  // s.routeKind mirrors the SELECTED route's kind; absent (old bundle) → base.
-  const carBaseColor = s.routeColor || ROUTE_GREEN_CORE;
-  const carRouteColor = routeColorsFor((s.routeKind as any) || 'best', carBaseColor).color;
-  const coreGrad = buildLineFade(routeRgba(carRouteColor, 1), routeRgba(carRouteColor, 0));
-  const glowGrad = buildLineFade(routeRgba(carRouteColor, 1), routeRgba(carRouteColor, 0));
   // MEMOISED (2026-08-16). This was a bare object literal, so every render minted a new
   // FeatureCollection; ShapeSource is a PureComponent, so it missed its shallow-compare
   // every time and re-ran toJSONString — a full JSON.stringify of the route. The 12 Hz
@@ -1616,12 +1621,16 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // being re-serialised 12x/sec on the car surface alone. Measured from telemetry:
   // 200-700 coordinates typical, 4,132 max — 10-116 KB per stringify.
   // routeCoords is the identity that actually matters; hasRoute is derived from it.
+  // 2026-09-01: the features ARE the ribbon — one casing + colour/alpha core pieces,
+  // cut at the car (src/routeRibbon.ts). Rebuilt only when the quantised cut, the
+  // fade or the partition changes; every other tick hits this memo and native sees
+  // the same object, so ShapeSource's PureComponent compare short-circuits it.
   const routeFC: any = useMemo(() => ({
     type: 'FeatureCollection',
     features: hasRoute
-      ? [{ type: 'Feature', properties: { index: SELECTED_INDEX }, geometry: { type: 'LineString', coordinates: routeCoords } }]
+      ? buildRibbonFeatures(ribbonPartition, { cutM: ribbonCutQ, fadeM: ribbonFadeQ, index: SELECTED_INDEX })
       : [],
-  }), [hasRoute, routeCoords]);
+  }), [hasRoute, ribbonPartition, ribbonCutQ, ribbonFadeQ]);
 
   // ===== Live congestion gradient (mirror of the phone) =====
   // The selected route's per-segment congestion + geometry are mirrored from the phone
@@ -1678,20 +1687,6 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       ? [{ type: 'Feature', properties: { index: SELECTED_INDEX }, geometry: { type: 'LineString', coordinates: s.routeCoordinates } }]
       : [],
   }), [carCongGradient, s.routeCoordinates]);
-  // While navigating, gap the (non-trimmed) congestion core off the car too — bake
-  // the behind-car vanish + soft front fade into the gradient alpha (same s0/s1 as
-  // the plain core) so the coloured line clears the nose instead of running through it.
-  // Memoised — a fresh gradient ARRAY every render re-uploads the layer's paint at 12 Hz.
-  const carCongGapped = useMemo(
-    () => ((carCongGradient && s.navigating && routeTrimEndFrac != null)
-      ? applyCarGapGradient(
-          carCongGradient,
-          Math.min(0.997, Math.max(0.0001, routeTrimEndFrac)),
-          Math.min(0.999, Math.max(routeTrimEndFrac + 0.0006, routeTrimEndFrac + fadeSpanFrac)),
-        )
-      : carCongGradient),
-    [carCongGradient, s.navigating, routeTrimEndFrac, fadeSpanFrac],
-  );
 
   // Multi-route PREVIEW geometry → one feature per display route, carrying its precomputed
   // per-kind core `color` + casing `edge` (AI = black core, user-color edge) so a single
@@ -1937,7 +1932,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         // "middle") into car-route-sel-casing (slot "top") — RNMBXLayer's id setter
         // does removeFromMap on willSet + addToMap on didSet, and with no
         // aboveLayerID/belowLayerID/layerIndex that re-add lands at LayerPosition
-        // .default = the TOP of its slot. Children 2 and 3 (sel-core, cong-core) are
+        // .default = the TOP of its slot. Children 2 and 3 (at the time: sel-core, cong-core;
+        // since 2026-09-01 the branch is casing + core only) are
         // brand-new mounts in the same commit. So at 'Go' the casing is re-added to
         // slot "top" by an id mutation while the congestion core arrives by a fresh
         // mount, and their relative order is decided by native prop-application order,
@@ -1948,67 +1944,45 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         // report word for word, three times.
         //
         // A distinct key makes the ternary a real unmount -> mount: every layer in this
-        // branch is CREATED, in declaration order, with car-cong-core last. That is the
+        // branch is CREATED, in declaration order — since 2026-09-01 that is the static
+        // casing then the static core (src/routeRibbon.ts), core last. That is the
         // phone's guarantee (convoy-routes is mounted once for BOTH preview and nav —
         // showRoutes never flips at 'Go' — so its five layers are only ever added
         // together, in order). The phone needs no key because it has no branch; the car
         // needs one because it does.
-        <ShapeSource key="car-route" id="car-route" shape={routeFC} lineMetrics>
+        <ShapeSource key="car-route" id="car-route" shape={routeFC}>
           <LineLayer
             id="car-route-alts"
             slot="middle"
             filter={['!=', ['get', 'index'], SELECTED_INDEX] as any}
             style={{ lineColor: '#9AA0A6', lineWidth: 5, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.85, lineEmissiveStrength: 1 }}
           />
+          {/* ── STATIC RIBBON LAYERS (2026-09-01) — see src/routeRibbon.ts ─────────
+              Nothing in these two `style` objects changes while driving. The trim, the
+              fade and the congestion colours all live in the FEATURES of routeFC, so a
+              tick updates the GeoJSON source and never touches a layer property. Each
+              layer-property change was a full main-thread read-modify-write of the
+              layer inside @rnmapbox — three layers × 12 Hz × two maps — and that is the
+              exact stack in the watchdog kills on Jeff's 9 am drive.
+              car-cong-core is gone: its job (colour that survives the trim) is done by
+              per-piece `color`. Draw order is by insertion within slot "top": casing
+              declared first, core last, both created in the same commit — the guarantee
+              the long note above was written to protect. */}
           <LineLayer
             id="car-route-sel-casing"
             slot="top"
-            filter={['==', ['get', 'index'], SELECTED_INDEX] as any}
-            style={{ lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(glowGrad ? { lineGradient: glowGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: carRouteColor }) }}
+            filter={['==', ['get', 'kind'], RIBBON_CASING] as any}
+            style={{ lineColor: carRouteColor, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
           />
           <LineLayer
             id="car-route-sel-core"
             slot="top"
-            // Hidden when the congestion core (below) is active, so it can't paint over
-            // the colours; the casing above keeps the trim/vanish.
-            filter={(carCongGradient ? ['==', ['get', 'index'], -1] : ['==', ['get', 'index'], SELECTED_INDEX]) as any}
-            style={{ lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(coreGrad ? { lineGradient: coreGrad, lineTrimOffset: [0, routeTrimEndFrac ?? 1] } : { lineColor: carRouteColor }) }}
-          />
-          {/* ── CONGESTION CORE — MUST BE THE LAST LAYER IN *THIS* SOURCE ────────
-              Jeff, three times: "the colour gradient on CarPlay does not match the
-              phone — there is no red whatsoever."
-
-              The gradient was never the problem. Running the real
-              buildCongestionGradient + applyCarGapGradient over the actual logged
-              drive (congestion-probe: n=256 severe=31 heavy=49) produces
-              #FF3B30 in the output at EVERY trim value either surface uses — red
-              was always in the expression. The bug was DRAW ORDER.
-
-              This layer used to live in its own separate <ShapeSource> mounted after
-              the route source. Mapbox orders layers within a slot by INSERTION, and
-              the route source sits inside a `previewMulti ? … : hasRoute ? … : null`
-              ternary — so every time that branch flips (preview→nav, a reroute, a
-              route clear) the route source UNMOUNTS AND REMOUNTS, and its layers get
-              re-inserted ABOVE the congestion layer, which never remounted. From that
-              moment the 24pt lineBlur:8 green casing sits on top of the 12pt coloured
-              core and washes it out permanently — no red, and the soft blended look in
-              the head-unit photo rather than the phone's crisp bands. It also explains
-              "it was fine earlier today and wrong on the drive home": order is correct
-              until the first branch flip.
-
-              The phone never had this because route-sel-cong lives INSIDE the same
-              ShapeSource as the glow and is mounted last, so the two can only ever be
-              re-added together, in order. Matching that structure here removes the
-              whole class of bug rather than patching the symptom. */}
-          <LineLayer
-            id="car-cong-core"
-            slot="top"
-            // FILTERED off rather than unmounted when there is no congestion — a
-            // conditional child would unmount the layer and re-insert it on the next
-            // route with congestion, reintroducing exactly the ordering bug above.
-            // Same technique the core layer uses.
-            filter={(carCongGradient ? ['==', ['get', 'index'], SELECTED_INDEX] : ['==', ['get', 'index'], -1]) as any}
-            style={{ lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1, ...(carCongGapped ? { lineGradient: carCongGapped } : { lineColor: carRouteColor }) }}
+            filter={['==', ['get', 'kind'], RIBBON_CORE] as any}
+            // lineCap 'butt': the core is a CHAIN of pieces sharing exact end points, so a
+            // flat cap meets flush; round caps would overlap at every seam and, on the
+            // translucent fade pieces, composite as beads. The 24 dp round-capped casing
+            // still gives the ribbon its rounded ends.
+            style={{ lineColor: ['get', 'color'] as any, lineOpacity: ['get', 'alpha'] as any, lineWidth: 12, lineCap: 'butt', lineJoin: 'round', lineEmissiveStrength: 1 }}
           />
         </ShapeSource>
       ) : null}
@@ -2023,7 +1997,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           <LineLayer
             id="car-cong-preview"
             slot="top"
-            style={{ lineGradient: carCongGapped, lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
+            style={{ lineGradient: carCongGradient, lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
           />
         </ShapeSource>
       )}
@@ -2040,7 +2014,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           case, and a two-arm key was already caught as insufficient once.
           Mounting the source unconditionally is NOT the fix and would be worse: it would
           be created once at CarMapView mount, before any route exists, so every later
-          route mount would leapfrog it permanently (car-cong-core's note at the
+          route mount would leapfrog it permanently (the STATIC RIBBON LAYERS note at the
           congestion source records exactly that failure). */}
       {waypointFC.features.length > 0 && (
         <ShapeSource

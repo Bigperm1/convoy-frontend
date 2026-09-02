@@ -44,7 +44,7 @@
 //   the charger — which is exactly the symptom Jeff reported, captured automatically.
 
 import { AppState, Platform } from 'react-native';
-import { logEvent } from './crashBreadcrumb';
+import { logEvent, logEventReliable } from './crashBreadcrumb';
 
 const WINDOW_MS = 60_000;
 
@@ -127,6 +127,21 @@ const DTS_MAX = 3600;
 let _winAt = 0;      // wall-clock window start: every cb/s figure to date ASSUMED 60 s
 let _gaps = 0;       // rAF intervals >= 2 ms == pump passes this window
 let _gapMax = 0;     // largest interval, unthinned, whole window
+// ── A STALL THAT RECOVERS REPORTS ITSELF (2026-09-01) ────────────────────────
+// gapMax only reaches a row when the 60 s window closes. Jeff's 9 am drive showed why
+// that is blind at exactly the wrong moment: the last probe landed at 09:13:13 with
+// gapMax=380, the watchdog killed the app at 09:13:21, and the >10 s main-thread stall
+// lived entirely in the eight seconds no window ever reported. And a freeze that DOES
+// clear (the "Show map froze the phone and CarPlay" report) was just as invisible: it
+// was averaged into a window that closed a minute later. So the first interval past
+// GAP_ALERT_MS is written the instant it ends, through the reliable path, with the
+// surface and app state it happened in. Rate-limited so one bad minute is one row.
+// (A stall the watchdog kills before it ends still cannot be seen from JS — no timer
+// or frame reaches this thread while the main thread is held. That case is the
+// crash log's job; this covers everything short of it.)
+const GAP_ALERT_MS = 2000;
+const GAP_ALERT_EVERY_MS = 10000;
+let _gapAlertAt = 0;
 let _appSeen = '';   // states this window touched, in order: 'a' active 'b' background 'i' inactive
 let _appSub: any = null;
 
@@ -161,6 +176,10 @@ export function noteFrame(now: number, inst?: string): void {
     // to describe.
     if (dt >= 2) _gaps++;
     if (dt > _gapMax) _gapMax = dt;
+    if (dt >= GAP_ALERT_MS && now - _gapAlertAt >= GAP_ALERT_EVERY_MS) {
+      _gapAlertAt = now;
+      try { logEventReliable(`main-gap dt=${Math.round(dt)} ${_ctx} app=${_appSeen.slice(-1) || '?'}`); } catch {}
+    }
     // Thin to every 4th once warm, and STOP at DTS_MAX (see above).
     if (_dts.length < 900 || ((_raf & 3) === 0 && _dts.length < DTS_MAX)) _dts.push(dt);
   }

@@ -135,6 +135,23 @@ Cross-screen coordination uses lightweight module-level `Set<Listener>` buses in
 
 `src/ConvoyMapbox.tsx` (`@rnmapbox/maps`) is the map engine on every platform — the 3D drive view, peers, hazards, and the route line all render through it. The legacy `react-native-maps` / `@vis.gl/react-google-maps` engine (`ConvoyMap.tsx` / `ConvoyMap.web.tsx`) was fully retired and those deps removed (RerouteCard's preview now uses a Mapbox static image; the `react-native-maps`/`expo-symbols`/`expo-background-fetch` dep + native Google-Maps-plugin removal is staged for the next native build).
 
+**⛔ Per-tick state never goes in a layer `style`/`filter` (2026-09-01).** `@rnmapbox` has no
+style diff: any CONTENT change to a layer's `style` prop is a full main-thread
+read-modify-write of that layer (`RNMBXLayer.reactStyle didSet → StyleManager.updateLayer →
+getStyleLayerProperties`, serialised through CoreFoundation strings, synchronous against the
+render thread). The route ribbon used to push `lineTrimOffset` + a re-baked congestion
+`lineGradient` that way at 12 Hz on three layers per surface — that is the exact main-thread
+stack in the `0x8BADF00D` watchdog kills on Jeff's 9 am drive (five relaunches in four minutes)
+and the mechanism behind "Show map froze the phone and CarPlay" (one main thread, two
+surfaces). Anything that moves per tick lives in the **source** instead: `src/routeRibbon.ts`
+cuts the ribbon geometry at the car and carries colour/alpha per feature, so the ribbon layers
+are static on both surfaces — and the self-car marker's heading rides its source feature
+(`hdg`/`rot` → `iconRotate`/`modelRotation: ['get', …]`) for the same reason. Review of the
+fix found the marker was a second per-frame path with TWO synchronous RMWs per change
+(the `sourceID`/`filter` setters fire `optionsChanged` inside `RCTMountingManager.updateProps`). `heatProbe`'s `main-gap` breadcrumb now fires the moment a
+main-thread stall that RECOVERS ends; a stall the watchdog kills leaves no JS row at all —
+ask for the `.ips` from Settings → Privacy & Security → Analytics Data.
+
 ### CarPlay / Android Auto
 
 `src/carplay/ConvoyCarPlay.tsx` is a **presentation surface only** — no nav engine or voice of its own. It mirrors the live route/peers from `map.tsx` into `carStore.ts`. iOS gets Map/Comms/Music tabs; Android Auto is navigation-only by platform rule. `.web.tsx` stubs keep `react-native-carplay` (which runs native side effects at import) out of the web bundle; it's also loaded lazily and only when the native module exists. Discoverability requires the config plugins below.

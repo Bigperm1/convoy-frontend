@@ -39,8 +39,10 @@ begin
   select decrypted_secret into v_anon from vault.decrypted_secrets where name = 'anon_key';
   select decrypted_secret into v_key  from vault.decrypted_secrets where name = 'scan_worker_key';
   if v_url is null or v_anon is null or v_key is null then
-    raise warning 'scan_worker_tick: vault secrets missing (project_url/anon_key/scan_worker_key)';
-    return null;
+    -- raise, don't warn: a warning + null return is recorded by pg_cron as status='succeeded'
+    -- with no HTTP response at all — invisible. An exception shows up as status='failed'
+    -- with this text in cron.job_run_details.return_message (2026-09-02 review).
+    raise exception 'scan_worker_tick: vault secrets missing (project_url/anon_key/scan_worker_key)';
   end if;
   return net.http_post(
     url                  := v_url || '/functions/v1/scan-worker',

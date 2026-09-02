@@ -10,6 +10,9 @@
 -- APPLIED LIVE 2026-09-01 (execute_sql), verified:
 --   has_function_privilege anon=false, authenticated=false, service_role=true.
 -- Idempotent: `create or replace` + explicit grants.
+--
+-- 2026-09-02 review: the function is a generic Vault reader for any service-role caller,
+-- so it now ALLOW-LISTS the two names the worker may read. Re-applied live 2026-09-02.
 
 create or replace function public.vault_secret(p_name text)
 returns text
@@ -17,7 +20,8 @@ language sql
 security definer
 set search_path = vault, public
 as $$
-  select decrypted_secret from vault.decrypted_secrets where name = p_name limit 1
+  select decrypted_secret from vault.decrypted_secrets
+   where name = p_name and p_name in ('scan_worker_key', 'tripo_api_key') limit 1
 $$;
 revoke all on function public.vault_secret(text) from public, anon, authenticated;
 grant execute on function public.vault_secret(text) to service_role;

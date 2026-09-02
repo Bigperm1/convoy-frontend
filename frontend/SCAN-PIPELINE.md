@@ -8,7 +8,9 @@ step. Every number in here was measured on real scans (`jeff-20260829-141551` on
 Status: **LIVE — `pipeline_flags.enabled = true` since 2026-09-02 00:21 PT.** The first
 unattended tester render (`enablewhore-20260901-210315`, Olaf) went photos → twin → hero
 with no hands on it: flip 00:21:48 → `fetching` 00:22:18 → `generating` 00:22:48 →
-`converting_map` 00:26:20 → twin published 00:27:21 → hero published 00:29:21 → `done`.
+`converting_map` 00:26:20 → twin published 00:27:21 → hero published 00:29:21 → `done`
+→ **Olaf's iPhone logged `carscan-ready hero=1 map=1` at 03:47:51** (the Garage-screen poll,
+the moment he next opened it — the return leg to the sending device is proven, not assumed).
 **7 min 47 s, 50 credits, 0 retries, 0 errors** (receipts: `car_scan_jobs`,
 `crash_reports platform='worker'`, `net._http_response`; the public bytes were
 re-downloaded and re-inspected with `tools/glb-pipeline/glbinfo.py` — twin 15,096 v / u16 /

@@ -52,9 +52,12 @@ If the CLI is not wanted, every step has a dashboard/MCP equivalent noted inline
 ```sql
 select vault.create_secret('https://pgtbjiszjglznjagolse.supabase.co', 'project_url');
 select vault.create_secret('<the anon JWT — the eyJ… string in src/supabase.ts>', 'anon_key');
-select vault.create_secret('<openssl rand -hex 32>', 'scan_worker_key');
+select vault.create_secret(encode(gen_random_bytes(32), 'hex'), 'scan_worker_key');  -- generated IN the DB: never pasted, never in shell history
 select name, created_at from vault.secrets order by name;   -- expect the three rows
 ```
+
+(2026-09-01 this is exactly how the live key was made. Nobody needs to see it — the worker
+reads it through `vault_secret()`, see step 2.)
 
 You do NOT need to copy `scan_worker_key` anywhere: the worker reads that same Vault row
 itself through `public.vault_secret()` (migration `20260902000200_vault_secret.sql`,

@@ -22,7 +22,8 @@ A pause never expires a paid job: timeouts are counted in polls, not minutes (wo
   NOT a migration (`supabase/ops/scan_worker_cron.sql`) — see step 6 for why.
 - `car-scans` holds: `jeff-20260829-141551` (delivered), `enablewhore-20260901-185736`
   (delivered by hand), **`enablewhore-20260901-210315` (COMPLETE, 4 photos + manifest,
-  NOT rendered — see step 8)**, plus junk `_selftest`, `claudetest-*`.
+  NOT rendered — see step 8)**, plus junk `probe-<epoch>`, `claudetest-*`.
+(An id starting with `_` is rejected by the table's own check `^[A-Za-z0-9]…` — the original `_selftest` could never enqueue; 2026-09-01 the probe used `probe-1788328618`, VERIFIED enqueued, then marked skipped.)
 - `models` holds both files for jeff + enablewhore-185736, and a twin-only
   `scan_claudetest-20260821-000001_map.glb` (the worker skips it: `manual-in-progress`).
 - Edge functions `register-scan`, `fetch-scan`, `publish-model` exist with `verify_jwt=true`.
@@ -138,11 +139,11 @@ been observed here yet):
 
 ```bash
 # upload a probe manifest with the shipped anon key (INSERT is allowed; content is junk on purpose)
-curl -s -X POST "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/car-scans/_selftest/$(date +%s)/manifest.json" \
+curl -s -X POST "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object/car-scans/probe-<epoch>/$(date +%s)/manifest.json" \
   -H "Authorization: Bearer <anon>" -H "apikey: <anon>" -H "Content-Type: application/json" --data '{"probe":true}'
 ```
 ```sql
-select scan_id, status from public.car_scan_jobs where scan_id='_selftest';   -- expect: _selftest | queued
+select scan_id, status from public.car_scan_jobs where scan_id='probe-<epoch>';   -- expect: probe-<epoch> | queued
 ```
 If no row appears, the trigger did not fire: fall back to the manual enqueue in step 8
 for every scan (and open a follow-up to poll the bucket from the tick instead).

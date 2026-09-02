@@ -306,7 +306,7 @@ video, and UGC triggers Guideline 1.2, which wants report + block + EULA in code
 
 ### scan-worker v3 hardening — HELD for Jeff's go (review 2026-09-02, none critical, pipeline works as-is)
 Ranked by what it protects. Server-side only (Supabase), no app change, no build.
-1. **Fence row writes to the lease** — `updateJob` adds `.eq('locked_by', tick).gt('lease_until', now)` and throws `LeaseLost` on 0 rows; today double-buy protection rests on the 170 s lease outliving a 130 s tick (`deps.ts updateJob`).
+1. *(optional — two independent verifiers REFUTED the risk: the 170 s lease + transaction advisory lock already prevent a double buy)* **Fence row writes to the lease** — `updateJob` adds `.eq('locked_by', tick).gt('lease_until', now)` and throws `LeaseLost` on 0 rows; today double-buy protection rests on the 170 s lease outliving a 130 s tick (`deps.ts updateJob`).
 2. **Abort check before every paid POST** — `if (signal.aborted) throw` at the top of `paidSubmit`; a POST after the budget is recorded as a lost reply and the generate FAILS the job.
 3. **Tripo 5xx = ambiguous, not "no task"** — `isDefiniteRejection` must also require `httpStatus < 500`, else a 5xx that did create a task rolls the ledger back.
 4. **Guards reserve the ceiling (60), not the nominal 50**; re-read `pipeline_flags.enabled` inside `paidSubmit` (a tick started before the switch went off can still buy converts).

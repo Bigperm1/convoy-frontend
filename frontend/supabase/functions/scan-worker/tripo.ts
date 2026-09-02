@@ -23,6 +23,15 @@ import type { TripoView } from "./manifest.ts";
 export const TRIPO_BASE_URL_DEFAULT = "https://openapi.tripo3d.ai";
 export const TRIPO_MODEL = "v3.1-20260211";
 export const TRIPO_CODE_INSUFFICIENT_CREDITS = 2010;
+/** Rate limiting (launch sizing v3 part 2, 2026-09-02 — platform.tripo3d.ai/docs/limit,
+ *  docs.tripo3d.ai/get-started/rate-limits.html): our endpoint (multiview-to-model v3.x,
+ *  non-P1) shares a pool of 10 CONCURRENT TASKS per account. Above it, task creation
+ *  returns code 2000 ("exceeded the limit of generation") with a Retry-After header;
+ *  code 1007 is the other documented retryable. Nothing is created or charged on either —
+ *  same contract as any other definite rejection, just with a server-told backoff. */
+export const TRIPO_CODE_RATE_LIMIT_EXCEEDED = 2000;
+export const TRIPO_CODE_RATE_LIMIT_RETRY = 1007;
+export const RATE_LIMIT_RETRY_AFTER_DEFAULT_S = 30;
 
 /** SCAN-PIPELINE.md "The commands" — the map twin recipe. 20,000 faces lands ~14–16k
  *  verts with u16 indices, which is the ONLY thing Mapbox will draw (trap 3). */
@@ -60,11 +69,17 @@ export type TripoTask = {
 export class TripoError extends Error {
   code?: number;
   httpStatus: number;
-  constructor(message: string, httpStatus: number, code?: number) {
+  /** Seconds to wait before retrying, from the response's Retry-After header (numeric
+   *  seconds or an HTTP-date, either form). Set on EVERY TripoError constructed by
+   *  TripoClient.send — not just rate-limit ones — because reading the header costs
+   *  nothing extra; only isRateLimited() callers act on it. */
+  retryAfterS?: number;
+  constructor(message: string, httpStatus: number, code?: number, retryAfterS?: number) {
     super(message);
     this.name = "TripoError";
     this.httpStatus = httpStatus;
     this.code = code;
+    this.retryAfterS = retryAfterS;
   }
 }
 
@@ -73,6 +88,32 @@ export class InsufficientCredits extends TripoError {
     super(message, httpStatus, TRIPO_CODE_INSUFFICIENT_CREDITS);
     this.name = "InsufficientCredits";
   }
+}
+
+/** Was task creation refused because the account's 10-concurrent-task pool (or the
+ *  other documented retryable, 1007) is exhausted? No task, no charge — same as any
+ *  definite rejection, but the caller should wait `retryAfterSeconds(e)` instead of
+ *  running the generic 5-strike retry policy. */
+export function isRateLimited(e: unknown): boolean {
+  return e instanceof TripoError && (e.code === TRIPO_CODE_RATE_LIMIT_EXCEEDED || e.code === TRIPO_CODE_RATE_LIMIT_RETRY);
+}
+
+/** The Retry-After the server actually sent, or RATE_LIMIT_RETRY_AFTER_DEFAULT_S (30)
+ *  when it didn't send one (or sent something unparseable). */
+export function retryAfterSeconds(e: unknown): number {
+  if (e instanceof TripoError && typeof e.retryAfterS === "number" && e.retryAfterS >= 0) return e.retryAfterS;
+  return RATE_LIMIT_RETRY_AFTER_DEFAULT_S;
+}
+
+/** RFC 7231 Retry-After: either delta-seconds ("120") or an HTTP-date. Returns undefined
+ *  when the header is absent or neither form parses. */
+function parseRetryAfterHeader(v: string | null): number | undefined {
+  if (!v) return undefined;
+  const n = Number(v);
+  if (Number.isFinite(n) && n >= 0) return Math.round(n);
+  const t = Date.parse(v);
+  if (!Number.isNaN(t)) return Math.max(0, Math.round((t - Date.now()) / 1000));
+  return undefined;
 }
 
 /** Did Tripo's application layer itself refuse this request? A TripoError carrying an
@@ -149,7 +190,8 @@ export class TripoClient implements TripoApi {
       const code = envelope?.code;
       const msg = envelope?.message ?? `HTTP ${res.status}`;
       if (code === TRIPO_CODE_INSUFFICIENT_CREDITS) throw new InsufficientCredits(msg, res.status);
-      throw new TripoError(`${path}: ${msg}`, res.status, code);
+      const retryAfterS = parseRetryAfterHeader(res.headers.get("retry-after"));
+      throw new TripoError(`${path}: ${msg}`, res.status, code, retryAfterS ?? (code === TRIPO_CODE_RATE_LIMIT_EXCEEDED || code === TRIPO_CODE_RATE_LIMIT_RETRY ? RATE_LIMIT_RETRY_AFTER_DEFAULT_S : undefined));
     }
     return envelope.data as T;
   }

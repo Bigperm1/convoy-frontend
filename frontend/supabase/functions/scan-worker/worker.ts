@@ -38,11 +38,11 @@
 //   - timeouts are counted in POLLS, not wall-clock seconds, so time spent with the
 //     kill switch off (or the cron unscheduled) never expires a paid job.
 
-import { checkFolder, heroName, isJunkScanId, mapShotsToViews, parseManifest, SHOT_FILE, SHOT_IDS, twinName } from "./manifest.ts";
+import { checkFolder, heroName, isJunkScanId, mapShotsToViews, normaliseHandle, parseManifest, SHOT_FILE, SHOT_IDS, twinName } from "./manifest.ts";
 import type { FolderEntry, ShotId, TripoView } from "./manifest.ts";
 import { finishMaterial, MAX_BYTES, qcHero, qcTwin, sha256Hex } from "./glb.ts";
 import type { QcReport } from "./glb.ts";
-import { HERO_CONVERT, InsufficientCredits, isDefiniteRejection, modelUrlOf, TWIN_CONVERT } from "./tripo.ts";
+import { HERO_CONVERT, InsufficientCredits, isDefiniteRejection, isRateLimited, modelUrlOf, retryAfterSeconds, TWIN_CONVERT } from "./tripo.ts";
 import type { TripoApi } from "./tripo.ts";
 
 export type JobStatus = "queued" | "fetching" | "generating" | "converting_map" | "converting_hero" | "done" | "failed" | "skipped";
@@ -55,6 +55,11 @@ export type PaidCall = "gen" | "map" | "hero";
 export type Job = {
   scan_id: string;
   handle: string | null;
+  /** Backend account id, from the server-issued scan slot (part 2). null on a legacy
+   *  slot-less job (require_slot was off) or a hand-seeded row. Doubles as "did this job
+   *  ever consume a slot" for the release-on-failure rule (item G) — a slot is only ever
+   *  consumed in the same commit that sets this. */
+  user_id: string | null;
   status: JobStatus;
   /** shots[] from manifest.json, persisted at queued->fetching so the view mapping never depends on a literal. */
   shots: string[] | null;
@@ -95,9 +100,25 @@ export type Flags = {
   per_user_cap: number;
   min_balance: number;
   paused_reason: string | null;
+  /** Transition switch (part 2, migration 20260902002000_scan_slots.sql): while testers
+   *  are still on JS that never requests a slot, a slot-less folder still renders (the
+   *  legacy manifest-handle path). Flip AFTER the OTA carrying the slot request ships —
+   *  from then on a slot-less scan_id is refused by register-scan AND here. */
+  require_slot: boolean;
 };
 
 export type JobPatch = Partial<Omit<Job, "scan_id" | "created_at">>;
+
+/** A row from `public.scan_slots` — the backend-issued grant that binds a scan_id to an
+ *  account. See supabase/migrations/20260902002000_scan_slots.sql. */
+export type ScanSlot = {
+  scan_id: string;
+  user_id: string;
+  handle: string | null;
+  tier: string | null;
+  consumed_at: string | null;
+  released_at: string | null;
+};
 
 export interface Deps {
   now(): Date;
@@ -109,7 +130,10 @@ export interface Deps {
    *  the cap reads in stepFetching cannot interleave with another job's spend. */
   claim(tickId: string, scan?: string): Promise<Job | null>;
   updateJob(scanId: string, patch: JobPatch): Promise<void>;
-  countUserRenders(handle: string, excludeScan: string): Promise<number>;
+  /** Courtesy/real per-user render cap. Keyed on `userId` (server-issued slot identity)
+   *  when the job has one; falls back to `handle` (client-supplied, a courtesy cap only)
+   *  for legacy slot-less jobs — see item F. */
+  countUserRenders(handle: string, excludeScan: string, userId?: string | null): Promise<number>;
   creditsLast24h(): Promise<number>;
   breadcrumb(handle: string | null, message: string): Promise<void>;
   listScan(scanId: string): Promise<FolderEntry[]>;
@@ -119,6 +143,21 @@ export interface Deps {
   fetchModelPublic(name: string): Promise<Uint8Array | null>;
   /** Download a Tripo model URL. 403/404 == the 5-minute URL expired. */
   download(url: string, signal?: AbortSignal): Promise<Uint8Array | "expired">;
+  /** The server-issued slot for this scan_id, or null if none was ever issued (legacy
+   *  path, subject to `flags.require_slot`). */
+  getSlot(scanId: string): Promise<ScanSlot | null>;
+  /** Marks the slot consumed (consumed_at = now() where still null) — called once, in
+   *  the same transition that moves queued -> fetching under a slot. */
+  consumeSlot(scanId: string): Promise<void>;
+  /** Gives the slot back (released_at = now()) so it no longer counts against the
+   *  account's two included scans. Called ONLY on a terminal `failed` — never `skipped`
+   *  (item G: a FAILED render must not burn one of the two included scans). */
+  releaseSlot(scanId: string): Promise<void>;
+  /** Jobs currently occupying a Tripo task slot (generating + both converts). Tripo's
+   *  account-wide pool is 10 concurrent tasks; converts occupy it too, so the worker caps
+   *  its own view below that (MAX_ACTIVE_TRIPO) rather than relying on Tripo's 2000/1007
+   *  rejection alone. */
+  countActiveTripo(): Promise<number>;
   tripo: TripoApi;
   log(msg: string): void;
 }
@@ -189,6 +228,17 @@ export const MAX_JOBS_PER_TICK = 25;
  *  than to risk the tick's wall clock killing the request mid-flight, which is exactly
  *  the ambiguous "lost reply" case every paid call is otherwise built to avoid. */
 export const PAID_CALL_RESERVE_MS = 25_000;
+// ── launch sizing v3 part 2: Tripo rate limits + server-issued scan slots (2026-09-02) ──
+/** Tripo's account-wide pool is 10 CONCURRENT TASKS (platform.tripo3d.ai/docs/limit).
+ *  A generate occupies one slot for its ~30 min lifetime; EACH CONVERT ALSO OCCUPIES ONE
+ *  (a job in `converting_map` or `converting_hero` still has a live Tripo task) — so with
+ *  several jobs per tick (launch sizing v3 part 1) the worker's own view of "how many
+ *  tasks are in flight right now" (generating + converting_map + converting_hero) must
+ *  stay under 10, not just count generates. 8, not 10, leaves headroom for a task Tripo
+ *  considers still-running that a lagging poll hasn't reflected here yet — the worker's
+ *  own guard is a courtesy that avoids spending into the 2000/1007 rejection in the
+ *  common case; isRateLimited/paidSubmit is what actually survives Tripo saying no. */
+export const MAX_ACTIVE_TRIPO = 8;
 
 const iso = (d: Date) => d.toISOString();
 const plus = (d: Date, s: number) => new Date(d.getTime() + s * 1000);
@@ -261,7 +311,14 @@ class Tick {
     return this.wait(POLL_S, { state_polls: polls }, `${detail} poll=${polls}/${maxPolls}`);
   }
 
-  fail(reason: string, extra: JobPatch = {}): Promise<TickResult> {
+  async fail(reason: string, extra: JobPatch = {}): Promise<TickResult> {
+    // Item G: a FAILED render must not burn one of the account's two included scans.
+    // `user_id` is only ever set in the same commit that consumes the slot (stepQueued),
+    // so its presence IS "this job holds a consumed slot" — never released on `skip()`.
+    if (this.job.user_id) {
+      await this.deps.releaseSlot(this.job.scan_id);
+      await this.crumb(`slot released reason=${reason}`);
+    }
     return this.commit({ to: "failed", patch: { reason, ...extra }, detail: `FAILED ${reason}` });
   }
 
@@ -365,6 +422,18 @@ class Tick {
         await this.crumb(`PAUSED tripo-credits on ${kind}: ${msg}`);
         return this.wait(CREDITS_PAUSE_S, { reason: "wait:tripo-credits", last_error: msg }, "paused tripo-credits");
       }
+      if (isRateLimited(e)) {
+        // Tripo's pool of 10 concurrent tasks (or the other documented retryable, 1007)
+        // is full: no task was created, no charge — roll back exactly like a definite
+        // rejection, but wait the SERVER-TOLD backoff instead of the generic 5-strike
+        // retry policy (no attempts++, no throw: this is expected traffic shaping, not
+        // an error). MAX_ACTIVE_TRIPO is a courtesy guard that should keep this rare.
+        await this.deps.updateJob(j.scan_id, { ...rollback, updated_at: iso(this.now) });
+        Object.assign(j, rollback);
+        const retryAfterS = retryAfterSeconds(e);
+        await this.crumb(`WAIT tripo-rate on ${kind}: ${msg} retryAfterS=${retryAfterS}`);
+        return this.wait(retryAfterS, { reason: "wait:tripo-rate" }, `tripo rate-limited ${kind}`);
+      }
       if (isDefiniteRejection(e)) {
         // Tripo answered with an error envelope: no task, no charge. Roll the ledger
         // back and let the generic 5-strike policy retry (re-POSTing costs nothing).
@@ -395,10 +464,28 @@ class Tick {
     if (!parsed.ok) return this.skip(parsed.reason);
     // Throws if not all four views map — a manifest that passed parseManifest always does.
     mapShotsToViews(parsed.manifest.shots);
+    const photos = entries.filter((e) => e.name.endsWith(".jpg")).map((e) => e.size).join("/");
+    // Item E: identity comes from a server-issued slot when one exists — the account the
+    // client cannot forge — never from the manifest alone. See
+    // supabase/migrations/20260902002000_scan_slots.sql / 20260902003000_car_scan_jobs_user_id.sql.
+    const slot = await this.deps.getSlot(j.scan_id);
+    if (slot && slot.released_at) return this.skip("slot-released");
+    if (slot) {
+      const handle = slot.handle ?? normaliseHandle(parsed.manifest.handle);
+      await this.deps.consumeSlot(j.scan_id);
+      return this.commit({
+        to: "fetching",
+        patch: { handle, shots: parsed.manifest.shots, user_id: slot.user_id },
+        detail: `slot=1 user=${slot.user_id} handle=${handle} shots=${parsed.manifest.shots.join(",")} photos=${photos}`,
+      });
+    }
+    // No slot. Allowed only while the transition flag is off — same rule register-scan
+    // enforces on the upload side (flip AFTER the OTA carrying the slot request ships).
+    if (this.flags.require_slot) return this.skip("slot-required");
     return this.commit({
       to: "fetching",
       patch: { handle: parsed.handle, shots: parsed.manifest.shots },
-      detail: `handle=${parsed.handle} shots=${parsed.manifest.shots.join(",")} photos=${entries.filter((e) => e.name.endsWith(".jpg")).map((e) => e.size).join("/")}`,
+      detail: `slot=0 legacy=1 handle=${parsed.handle} shots=${parsed.manifest.shots.join(",")} photos=${photos}`,
     });
   }
 
@@ -437,16 +524,25 @@ class Tick {
     //     the optimistic CREDITS_PER_CAR (50) — item 5.
     const fresh = await this.deps.flags();
     if (!fresh || !fresh.enabled) return this.wait(GUARD_WAIT_S, { reason: "wait:disabled" }, "guard disabled");
-    const others = await this.deps.countUserRenders(handle, j.scan_id);
+    // Item F: keyed on the SLOT's user_id when this job has one (the identity that
+    // cannot be forged), else on the manifest's handle as before (hand-seeded rows and
+    // legacy slot-less jobs — a courtesy cap only).
+    const others = await this.deps.countUserRenders(handle, j.scan_id, j.user_id ?? null);
     if (others >= fresh.per_user_cap) {
-      if (j.reason === "wait:user-cap") return this.fail("user-cap", { last_error: `handle=${handle} renders=${others} cap=${fresh.per_user_cap}` });
-      await this.crumb(`WAIT user-cap handle=${handle} renders=${others} cap=${fresh.per_user_cap}`);
+      if (j.reason === "wait:user-cap") return this.fail("user-cap", { last_error: `handle=${handle} user=${j.user_id ?? "-"} renders=${others} cap=${fresh.per_user_cap}` });
+      await this.crumb(`WAIT user-cap handle=${handle} user=${j.user_id ?? "-"} renders=${others} cap=${fresh.per_user_cap}`);
       return this.wait(GUARD_WAIT_S, { reason: "wait:user-cap" }, "guard user-cap");
     }
     const spent24h = await this.deps.creditsLast24h();
     if (spent24h + MAX_CREDITS_PER_JOB > fresh.daily_credit_cap) {
       await this.crumb(`WAIT daily-cap spent24h=${spent24h} cap=${fresh.daily_credit_cap}`);
       return this.wait(GUARD_WAIT_S, { reason: "wait:daily-cap" }, "guard daily-cap");
+    }
+    // Item C: the worker's own view of Tripo's 10-concurrent-task pool (converts occupy
+    // it too — see MAX_ACTIVE_TRIPO). DB-only, so it runs before the Tripo balance() call.
+    const active = await this.deps.countActiveTripo();
+    if (active >= MAX_ACTIVE_TRIPO) {
+      return this.wait(POLL_S, { reason: "wait:tripo-pool" }, `guard pool active=${active} cap=${MAX_ACTIVE_TRIPO}`);
     }
     const balance = await this.deps.tripo.balance();
     if (balance < fresh.min_balance + MAX_CREDITS_PER_JOB) {
@@ -651,6 +747,13 @@ async function runOneJob(deps: Deps, job: Job, flags: Flags, signal: AbortSignal
     const now = deps.now();
     deps.log(`[${job.scan_id}] ${job.status} ERROR attempt=${attempts} ${msg}`);
     if (attempts >= MAX_ATTEMPTS) {
+      // Item G: the 5-strikes path is also a terminal `failed` and does not go through
+      // Tick.fail() (the Tick may not even exist yet — e.g. preflight threw) — release
+      // the slot here too, same rule (a consumed slot is marked by job.user_id).
+      if (job.user_id) {
+        await deps.releaseSlot(job.scan_id);
+        await deps.breadcrumb(job.handle, `carscan-worker id=${job.scan_id} slot released reason=errors:${job.status}`);
+      }
       await deps.updateJob(job.scan_id, { status: "failed", reason: `errors:${job.status}`, last_error: msg, attempts, lease_until: null, locked_by: null, updated_at: now.toISOString() });
       await deps.breadcrumb(job.handle, `carscan-worker id=${job.scan_id} ${job.status}->failed FAILED errors:${job.status} ${msg.slice(0, 120)}`);
       return { ok: false, scan: job.scan_id, from: job.status, to: "failed", error: msg };

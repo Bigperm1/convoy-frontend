@@ -136,6 +136,49 @@ retry after a convert POST whose reply was lost — so 60 is the ceiling per sca
 - **Verify without spending**: `tools/glb-pipeline/scan_worker_dryrun.sh` (deno tests +
   a local Tripo stub + read-only probes of the real buckets).
 
+**Launch sizing v3 part 2 (2026-09-02, Tripo rate limits + server-issued scan slots):**
+
+- **Tripo rate limiting is handled, not just documented.** The multiview-to-model
+  endpoint shares a pool of **10 concurrent tasks per account**; over it, task creation
+  returns code 2000 ("exceeded the limit of generation") or 1007, with a Retry-After
+  header, and creates/charges nothing. `paidSubmit` treats this exactly like a definite
+  rejection (rolls the intent + credits back) but **waits the server-told Retry-After**
+  (default 30 s if the header is absent) instead of the generic 5-strike retry policy —
+  no `attempts++`, no throw, one breadcrumb per occurrence (`wait:tripo-rate`).
+- **A worker-side pool guard (`MAX_ACTIVE_TRIPO`, 8) runs before every generate buy**,
+  ahead of the Tripo `balance()` call — a DB-only count of jobs in `generating` /
+  `converting_map` / `converting_hero` (converts occupy a Tripo task slot too, which is
+  why the cap is 8, not the documented 10 — headroom for a task Tripo still considers
+  live that a lagging poll hasn't reflected here yet). Pool-full waits one poll interval
+  (`wait:tripo-pool`), not the 5 min guard wait. This is a courtesy that keeps the
+  2000/1007 rejection rare; `paidSubmit`'s handling above is what actually survives it.
+- **Server-issued scan slots replace the manifest handle as identity.** The backend
+  mints the scan id and writes `public.scan_slots` (user_id, handle/tier snapshots,
+  service-role only) after checking the account's slot count — the account is the thing
+  the client cannot forge, unlike a manifest-supplied handle. `stepQueued` looks the
+  slot up by scan_id: a live (unreleased) slot supplies `handle`/`user_id` for the job
+  and is marked consumed in the same commit that moves `queued -> fetching`
+  (breadcrumb `slot=1 user=<id>`); a **released** slot is refused outright
+  (`skipped slot-released`) — no reclaiming a render an operator already refunded. The
+  per-user cap (`countUserRenders`) keys on `user_id` when the job has one, falling back
+  to `handle` only for legacy slot-less jobs — a courtesy cap, same as before.
+- **`pipeline_flags.require_slot` is the transition switch** (migration
+  `20260902002000_scan_slots.sql`, default **false**). While off, a slot-less folder
+  still renders on the manifest-handle path (breadcrumb `slot=0 legacy=1`) — testers on
+  JS that predates the slot request keep working. Once on, a slot-less scan_id is
+  refused (`skipped slot-required`, never spends) by both `register-scan` and here.
+  **Flip it AFTER the OTA carrying the slot request (`POST /api/scan/slot`) is out**,
+  not before — flipping early strands anyone still on the old JS with a folder the
+  worker will only ever skip.
+- **A FAILED render gives its slot back; a SKIPPED one never does.** Any terminal
+  `failed` — through `Tick.fail()` or the 5-strike generic-error path, both check the
+  same `job.user_id` (set only when a slot was consumed) — calls `releaseSlot` and drops
+  a `slot released reason=<why>` breadcrumb, so a bad render never burns one of the
+  account's two included scans (Jeff's product rule). `skip()` (junk id, a manifest the
+  app itself reported incomplete, `manual-in-progress`, `slot-required`,
+  `slot-released`) never releases a slot — none of those are the worker's own render
+  failing, and in practice they can only fire before a slot is ever consumed anyway.
+
 ## By hand — when the worker is down
 
 The worker executes exactly these commands' REST equivalents. Run them yourself only

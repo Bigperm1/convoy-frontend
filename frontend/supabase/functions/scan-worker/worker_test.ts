@@ -7,14 +7,16 @@ import {
   CREDITS_PER_CAR,
   GEN_MAX_POLLS,
   GUARD_WAIT_S,
+  MAX_ACTIVE_TRIPO,
   MAX_CREDITS_PER_JOB,
   MAX_JOBS_PER_TICK,
   PAID_CALL_RESERVE_MS,
+  POLL_S,
   runTick,
   TICK_WORK_BUDGET_MS,
 } from "./worker.ts";
 import type { Deps, Job, JobResult } from "./worker.ts";
-import { FAKE_EPOCH, FakeTripo, FakeWorld, makeTestGlb, newJob, seedFolder } from "./fakes.ts";
+import { DEFAULT_FLAGS, FAKE_EPOCH, FakeTripo, FakeWorld, makeTestGlb, newJob, newSlot, seedFolder } from "./fakes.ts";
 import { InsufficientCredits } from "./tripo.ts";
 import { sha256Hex } from "./glb.ts";
 
@@ -118,7 +120,7 @@ Deno.test("polls that are still running are silent waits, not transitions", asyn
 });
 
 Deno.test("kill switch: flags disabled or unreadable -> idle, nothing claimed", async () => {
-  const w = world({ flags: { enabled: false, daily_credit_cap: 300, per_user_cap: 2, min_balance: 100, paused_reason: "test" } });
+  const w = world({ flags: { enabled: false, daily_credit_cap: 300, per_user_cap: 2, min_balance: 100, paused_reason: "test", require_slot: false } });
   assertEquals(await runTick(w.deps(), { tickId: "t" }), { ok: true, idle: "disabled", jobs: [] });
   const w2 = world({ flags: null });
   assertEquals(await runTick(w2.deps(), { tickId: "t" }), { ok: true, idle: "disabled", jobs: [] });
@@ -826,4 +828,189 @@ Deno.test("item 6: paidSubmit's kill-switch re-read protects a job later in the 
   assertEquals(w.job(idB).reason, "wait:disabled");
   assertEquals(w.job(idB).credits_spent, 40, "no spend — caught before the intent write, not the stale per-tick flags snapshot");
   assertEquals((w.tripo as FakeTripo).calls.filter((c) => c.method.includes("convert")).length, 0);
+});
+
+// ── part 2 (2026-09-02): Tripo rate limits + server-issued scan slots ────────
+
+// ── A/B: isRateLimited + paidSubmit's rate-limit handling ────────────────────
+
+Deno.test("item B: a rate-limited generate (code 2000) rolls back the ledger and waits the server's Retry-After — no attempts++, job stays fetching", async () => {
+  const w = world({}, { status: "fetching", handle: "tester", tripo_file_tokens: { front: "f", left: "l", back: "b", right: "r" } });
+  const t = w.tripo as FakeTripo;
+  t.rateLimitNextGenerate = true;
+  t.rateLimitRetryAfterS = 45;
+  const before = w.clock.getTime();
+  const r = await tick1(w.deps(), { tickId: "t" });
+  assertEquals(r.to, "fetching", `${r.from}->${r.to} ${r.detail ?? r.error}`);
+  assertEquals(r.detail, "tripo rate-limited gen");
+  assertEquals(w.job(SCAN).credits_spent, 0, "rolled back exactly like a definite rejection");
+  assertEquals(w.job(SCAN).paid_call, null);
+  assertEquals(w.job(SCAN).generate_submitted_at, null);
+  assertEquals(w.job(SCAN).attempts, 0, "NOT the generic retry policy: no attempts++, no throw");
+  assertEquals(w.job(SCAN).reason, "wait:tripo-rate");
+  assertEquals(w.job(SCAN).tripo_file_tokens, { front: "f", left: "l", back: "b", right: "r" }, "already-uploaded tokens are kept");
+  const nextRun = new Date(w.job(SCAN).next_run_at).getTime();
+  assertEquals(nextRun - before, 45_000, "next_run_at is exactly now + the server's Retry-After");
+  assert(w.breadcrumbs.filter((b) => b.message.includes("WAIT tripo-rate on gen")).length === 1, "one breadcrumb per occurrence");
+  assertEquals(t.calls.filter((c) => c.method.includes("multiview")).length, 1, "the generate WAS posted (and refused) — never blind-resubmitted within this tick");
+});
+
+Deno.test("item B: no Retry-After header defaults to 30s; a rate-limited CONVERT rolls back (not the lost-reply retry) and recovers with no double charge", async () => {
+  const w = world();
+  const t = w.tripo as FakeTripo;
+  t.rateLimitNextConverts = 1;
+  t.rateLimitRetryAfterS = undefined; // the fake response carries no header
+  t.rateLimitCode = 1007; // the other documented retryable code
+  await drain(w, 2); // queued -> fetching -> generating
+  assertEquals(w.job(SCAN).status, "generating");
+  assertEquals(w.job(SCAN).credits_spent, 30);
+  w.advance(61);
+  const before = w.clock.getTime();
+  const r = await tick1(w.deps(), { tickId: "rl" });
+  assertEquals(r.to, "generating", `${r.from}->${r.to} ${r.detail ?? r.error}`);
+  assertEquals(w.job(SCAN).credits_spent, 30, "the map convert's +10 intent was rolled back — never kept the way a lost reply is");
+  assertEquals(w.job(SCAN).reason, "wait:tripo-rate");
+  assertEquals(w.job(SCAN).map_submitted_at, null, "pre-fields reverted too, not just credits_spent");
+  const nextRun = new Date(w.job(SCAN).next_run_at).getTime();
+  assertEquals(nextRun - before, 30_000, "no Retry-After header -> RATE_LIMIT_RETRY_AFTER_DEFAULT_S");
+  // recovers normally once Tripo stops refusing — the retried convert is a FRESH buy
+  w.advance(31);
+  await drain(w, 10);
+  assertEquals(w.job(SCAN).status, "done");
+  assertEquals(w.job(SCAN).credits_spent, 50, "30 + 10 (retried map) + 10 (hero) — the rejected attempt was never charged");
+  assertEquals(w.job(SCAN).convert_retries, 0, "a rate-limited rejection is not the lost-reply retry — convert_retries is untouched");
+});
+
+// ── C: the worker's own view of Tripo's concurrent-task pool ─────────────────
+
+Deno.test("item C: MAX_ACTIVE_TRIPO active jobs -> the pool guard waits, before even calling Tripo's balance endpoint", async () => {
+  const statuses: Job["status"][] = ["generating", "converting_map", "converting_hero"];
+  const fillers = Array.from({ length: MAX_ACTIVE_TRIPO }, (_, i) => newJob(`filler-${i}`, { status: statuses[i % 3], next_run_at: "2026-09-03T00:00:00Z" }));
+  const w = world({ jobs: [...fillers, newJob(SCAN)] });
+  const t = w.tripo as FakeTripo;
+  await tick1(w.deps(), { tickId: "t0" }); // queued -> fetching
+  w.advance(61);
+  const r = await tick1(w.deps(), { tickId: "t1" });
+  assertEquals(r.to, "fetching", `${r.from}->${r.to} ${r.detail ?? r.error}`);
+  assertEquals(w.job(SCAN).reason, "wait:tripo-pool");
+  assertEquals(t.calls.filter((c) => c.method.includes("balance")).length, 0, "pool guard is DB-only and runs before the Tripo balance() call");
+  assertEquals(t.calls.filter((c) => c.method.includes("multiview")).length, 0);
+  assertEquals(w.job(SCAN).credits_spent, 0);
+  const waited = new Date(w.job(SCAN).next_run_at).getTime() - w.clock.getTime();
+  assertEquals(waited, POLL_S * 1000, "pool-full waits one poll interval, not the 5 min guard wait");
+});
+
+Deno.test("item C: MAX_ACTIVE_TRIPO - 1 active jobs clears the guard and proceeds to generate", async () => {
+  const fillers = Array.from({ length: MAX_ACTIVE_TRIPO - 1 }, (_, i) => newJob(`filler-${i}`, { status: "generating", next_run_at: "2026-09-03T00:00:00Z" }));
+  const w = world({ jobs: [...fillers, newJob(SCAN)] });
+  await tick1(w.deps(), { tickId: "t0" });
+  w.advance(61);
+  const r = await tick1(w.deps(), { tickId: "t1" });
+  assertEquals(r.to, "generating", `${r.from}->${r.to} ${r.detail ?? r.error}`);
+});
+
+// ── D/E: server-issued scan slots — identity, consumption, the transition flag ─
+
+Deno.test("item E: a server-issued slot supplies identity — handle + user_id come from the slot, not the manifest — and is consumed exactly once", async () => {
+  const w = world({ slots: { [SCAN]: newSlot(SCAN, { user_id: "acct-1", handle: "SlotHandle" }) } });
+  assertEquals(w.slots.get(SCAN)!.consumed_at, null);
+  const r = await tick1(w.deps(), { tickId: "t" });
+  assertEquals(r.to, "fetching", `${r.from}->${r.to} ${r.detail ?? r.error}`);
+  assertEquals(r.detail, "slot=1 user=acct-1 handle=SlotHandle shots=front,right,rear,left photos=468700/790526/835831/640865");
+  assertEquals(w.job(SCAN).handle, "SlotHandle", "identity is the SLOT's handle, not the manifest's ('tester')");
+  assertEquals(w.job(SCAN).user_id, "acct-1");
+  assert(w.slots.get(SCAN)!.consumed_at, "consumeSlot was called");
+});
+
+Deno.test("item E: a slot with no handle snapshot falls back to the normalised manifest handle", async () => {
+  const w = world({ slots: { [SCAN]: newSlot(SCAN, { user_id: "acct-2", handle: null }) } });
+  const r = await tick1(w.deps(), { tickId: "t" });
+  assertEquals(r.to, "fetching");
+  assertEquals(w.job(SCAN).handle, "tester", "normaliseHandle(manifest.handle) — the manifest's handle is 'tester' for this scan id");
+  assertEquals(w.job(SCAN).user_id, "acct-2");
+});
+
+Deno.test("item E: no slot + require_slot=false -> legacy path, unchanged behaviour, user_id stays null", async () => {
+  const w = world();
+  const r = await tick1(w.deps(), { tickId: "t" });
+  assertEquals(r.to, "fetching");
+  assertEquals(r.detail, "slot=0 legacy=1 handle=tester shots=front,right,rear,left photos=468700/790526/835831/640865");
+  assertEquals(w.job(SCAN).handle, "tester");
+  assertEquals(w.job(SCAN).user_id, null);
+});
+
+Deno.test("item E: no slot + require_slot=true -> skipped slot-required, never spends", async () => {
+  const w = world({ flags: { ...DEFAULT_FLAGS, require_slot: true } });
+  const r = await tick1(w.deps(), { tickId: "t" });
+  assertEquals(r.to, "skipped");
+  assertEquals(w.job(SCAN).reason, "slot-required");
+  assertEquals(w.job(SCAN).credits_spent, 0);
+  assertEquals((w.tripo as FakeTripo).calls.length, 0);
+});
+
+Deno.test("item E: a RELEASED slot is refused even with a complete folder — skipped slot-released, never resumed", async () => {
+  const w = world({ slots: { [SCAN]: newSlot(SCAN, { user_id: "acct-3", released_at: FAKE_EPOCH }) } });
+  const r = await tick1(w.deps(), { tickId: "t" });
+  assertEquals(r.to, "skipped");
+  assertEquals(w.job(SCAN).reason, "slot-released");
+  assertEquals(w.job(SCAN).user_id, null, "never consumed — the released slot is refused before consumeSlot is called");
+});
+
+// ── F: the per-user cap keys on user_id when the job has a slot ──────────────
+
+Deno.test("item F: per-user cap counts by user_id when the job has a slot — NOT by handle, and a different account sharing the handle does not count", async () => {
+  const w = world({
+    slots: { [SCAN]: newSlot(SCAN, { user_id: "acct-1", handle: "slotHandle" }) },
+    jobs: [
+      newJob("other-1", { handle: "different-handle", user_id: "acct-1", status: "done", credits_spent: 50 }),
+      newJob("other-2", { handle: "slotHandle", user_id: "acct-1", status: "done", credits_spent: 50 }),
+      newJob("other-3", { handle: "slotHandle", user_id: "acct-9", status: "done", credits_spent: 50 }), // same handle, DIFFERENT account
+      newJob(SCAN),
+    ],
+  });
+  await tick1(w.deps(), { tickId: "t0" }); // queued -> fetching: consumes the slot, sets user_id
+  assertEquals(w.job(SCAN).user_id, "acct-1");
+  w.advance(61);
+  const r = await tick1(w.deps(), { tickId: "t1" });
+  assertEquals(r.to, "fetching");
+  assertEquals(w.job(SCAN).reason, "wait:user-cap", "acct-1 already has 2 spent renders (other-1, other-2) — other-3 shares the handle but not the account, so it must NOT count");
+});
+
+// ── G: a FAILED render releases its slot; a SKIPPED one never does ───────────
+
+Deno.test("item G: a job that fails AFTER consuming a slot gets it released, with a breadcrumb; the ledger stays as spent", async () => {
+  const w = world({ slots: { [SCAN]: newSlot(SCAN, { user_id: "acct-1" }) } });
+  const t = w.tripo as FakeTripo;
+  t.failGenerateStatus = "failed";
+  await drain(w, 10);
+  assertEquals(w.job(SCAN).status, "failed");
+  assertEquals(w.job(SCAN).reason, "gen-failed");
+  assertEquals(w.job(SCAN).user_id, "acct-1", "the slot WAS consumed before the failure");
+  assert(w.slots.get(SCAN)!.released_at, "releaseSlot was called");
+  assert(w.breadcrumbs.some((b) => b.message.includes("slot released reason=gen-failed")));
+});
+
+Deno.test("item G: the 5-strikes generic-error path also releases a consumed slot (doesn't only go through fail())", async () => {
+  const w = world({ slots: { [SCAN]: newSlot(SCAN, { user_id: "acct-1", consumed_at: FAKE_EPOCH }) } }, { user_id: "acct-1" });
+  const dead = { ...w.deps(), listScan: () => Promise.reject(new Error("storage 503")) };
+  for (let i = 1; i <= 5; i++) {
+    await tick1(dead, { tickId: `e${i}` });
+    w.advance(600);
+  }
+  assertEquals(w.job(SCAN).status, "failed");
+  assertEquals(w.job(SCAN).reason, "errors:queued");
+  assert(w.slots.get(SCAN)!.released_at, "released even though this path never calls Tick.fail()");
+  assert(w.breadcrumbs.some((b) => b.message.includes("slot released reason=errors:queued")));
+});
+
+Deno.test("item G: skip() NEVER releases a slot, even when the job already holds a consumed one", async () => {
+  const w = world(
+    { slots: { [SCAN]: newSlot(SCAN, { user_id: "acct-1", consumed_at: FAKE_EPOCH }) }, models: { [`scan_${SCAN}_map.glb`]: new Uint8Array(3) } },
+    { status: "generating", user_id: "acct-1", tripo_gen_task: "gen-x", generate_submitted_at: FAKE_EPOCH },
+  );
+  const r = await tick1(w.deps(), { tickId: "t" });
+  assertEquals(r.to, "skipped");
+  assertEquals(w.job(SCAN).reason, "manual-in-progress");
+  assertEquals(w.slots.get(SCAN)!.released_at, null, "skip must never release the slot");
+  assert(!w.breadcrumbs.some((b) => b.message.includes("slot released")));
 });

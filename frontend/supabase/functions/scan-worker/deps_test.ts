@@ -37,6 +37,53 @@ function fakeSupa(o: { uploadError?: UploadError; listRows?: unknown[]; listErro
 const URL_BASE = "https://example.supabase.co";
 const deps = (supa: SupabaseClient, fetchImpl?: typeof fetch) => makeDeps(supa, URL_BASE, new FakeTripo(), () => {}, { fetchImpl });
 
+// ── part 2 (2026-09-02): a minimal `.from(table)` query-builder stand-in ─────────────
+// getSlot/consumeSlot/releaseSlot/countActiveTripo/flags(require_slot) only ever call
+// `.select/.update/.eq/.is/.in/.maybeSingle` — never `.storage` — so this mock carries
+// just that chain. Every method both records the call AND returns a thenable so the
+// production code can `await` at any point in the chain, exactly like the real
+// supabase-js PostgrestFilterBuilder.
+type QueryCall = { method: string; args: unknown[] };
+
+function fakeSupaFrom(byTable: Record<string, { data?: unknown; error?: { message: string } | null; count?: number | null }>): { supa: SupabaseClient; calls: Record<string, QueryCall[]> } {
+  const calls: Record<string, QueryCall[]> = {};
+  const supa = {
+    from: (table: string) => {
+      calls[table] ??= [];
+      const result = byTable[table] ?? { data: null, error: null };
+      // deno-lint-ignore no-explicit-any
+      const builder: any = {
+        select: (...a: unknown[]) => {
+          calls[table].push({ method: "select", args: a });
+          return builder;
+        },
+        update: (...a: unknown[]) => {
+          calls[table].push({ method: "update", args: a });
+          return builder;
+        },
+        eq: (...a: unknown[]) => {
+          calls[table].push({ method: "eq", args: a });
+          return builder;
+        },
+        is: (...a: unknown[]) => {
+          calls[table].push({ method: "is", args: a });
+          return builder;
+        },
+        in: (...a: unknown[]) => {
+          calls[table].push({ method: "in", args: a });
+          return builder;
+        },
+        maybeSingle: () => Promise.resolve({ data: result.data ?? null, error: result.error ?? null }),
+        // The terminal awaited call in a head-count select (countActiveTripo) resolves here.
+        then: (resolve: (v: unknown) => void, reject?: (e: unknown) => void) =>
+          Promise.resolve({ data: result.data ?? null, error: result.error ?? null, count: result.count ?? null }).then(resolve, reject),
+      };
+      return builder;
+    },
+  };
+  return { supa: supa as unknown as SupabaseClient, calls };
+}
+
 Deno.test("isDuplicateUploadError: every shape storage-js can hand back for an existing key", () => {
   // StorageApiError as built by lib/common/fetch.ts handleError (2.112.4) for HTTP 409:
   //   status = 409 (number), statusCode = body.statusCode || body.code || "409", code = body.code
@@ -109,4 +156,74 @@ Deno.test("downloadScanFile returns the bytes; modelExists/fetchModelPublic/down
   assertEquals(await d.download("https://tripo.example/model.glb"), new Uint8Array([9, 8, 7]));
   await assertRejects(() => d.download("https://tripo.example/huge.glb"), Error, "exceeds");
   await assertRejects(() => d.download("https://tripo.example/boom.glb"), Error, "HTTP 502");
+});
+
+// ── part 2 (2026-09-02): scan_slots + require_slot + countActiveTripo ───────────────
+
+Deno.test("getSlot: returns the row, null when absent, and throws on a query error", async () => {
+  const row = { scan_id: "s1", user_id: "acct-1", handle: "tester", tier: "ultra", consumed_at: null, released_at: null };
+  const { supa } = fakeSupaFrom({ scan_slots: { data: row, error: null } });
+  assertEquals(await deps(supa).getSlot("s1"), row);
+
+  const { supa: empty } = fakeSupaFrom({ scan_slots: { data: null, error: null } });
+  assertEquals(await deps(empty).getSlot("nope"), null);
+
+  const { supa: boom } = fakeSupaFrom({ scan_slots: { data: null, error: { message: "connection reset" } } });
+  await assertRejects(() => deps(boom).getSlot("s1"), Error, "getSlot: connection reset");
+});
+
+Deno.test("consumeSlot: updates consumed_at, scoped to this scan_id AND still-null (idempotent — never re-consumes)", async () => {
+  const { supa, calls } = fakeSupaFrom({ scan_slots: { data: null, error: null } });
+  await deps(supa).consumeSlot("s1");
+  const c = calls.scan_slots;
+  assertEquals(c[0].method, "update");
+  assert("consumed_at" in (c[0].args[0] as Record<string, unknown>));
+  assertEquals(c[1], { method: "eq", args: ["scan_id", "s1"] });
+  assertEquals(c[2], { method: "is", args: ["consumed_at", null] });
+
+  const { supa: boom } = fakeSupaFrom({ scan_slots: { data: null, error: { message: "boom" } } });
+  await assertRejects(() => deps(boom).consumeSlot("s1"), Error, "consumeSlot: boom");
+});
+
+Deno.test("releaseSlot: updates released_at, scoped to this scan_id — item G's other half", async () => {
+  const { supa, calls } = fakeSupaFrom({ scan_slots: { data: null, error: null } });
+  await deps(supa).releaseSlot("s1");
+  const c = calls.scan_slots;
+  assertEquals(c[0].method, "update");
+  assert("released_at" in (c[0].args[0] as Record<string, unknown>));
+  assertEquals(c[1], { method: "eq", args: ["scan_id", "s1"] });
+
+  const { supa: boom } = fakeSupaFrom({ scan_slots: { data: null, error: { message: "boom" } } });
+  await assertRejects(() => deps(boom).releaseSlot("s1"), Error, "releaseSlot: boom");
+});
+
+Deno.test("countActiveTripo: a head-count select filtered to generating/converting_map/converting_hero", async () => {
+  const { supa, calls } = fakeSupaFrom({ car_scan_jobs: { data: null, error: null, count: 5 } });
+  assertEquals(await deps(supa).countActiveTripo(), 5);
+  const inCall = calls.car_scan_jobs.find((c) => c.method === "in");
+  assertEquals(inCall?.args[0], "status");
+  assertEquals(inCall?.args[1], ["generating", "converting_map", "converting_hero"]);
+
+  const { supa: nullCount } = fakeSupaFrom({ car_scan_jobs: { data: null, error: null, count: null } });
+  assertEquals(await deps(nullCount).countActiveTripo(), 0);
+
+  const { supa: boom } = fakeSupaFrom({ car_scan_jobs: { data: null, error: { message: "boom" } } });
+  await assertRejects(() => deps(boom).countActiveTripo(), Error, "countActiveTripo: boom");
+});
+
+Deno.test("flags(): require_slot true/false pass through, and defaults to false when the column is null/missing rather than failing the whole read", async () => {
+  const base = { enabled: true, daily_credit_cap: 6000, per_user_cap: 2, min_balance: 300, paused_reason: null };
+  const { supa: on } = fakeSupaFrom({ pipeline_flags: { data: { ...base, require_slot: true }, error: null } });
+  assertEquals((await deps(on).flags())?.require_slot, true);
+
+  const { supa: off } = fakeSupaFrom({ pipeline_flags: { data: { ...base, require_slot: false }, error: null } });
+  assertEquals((await deps(off).flags())?.require_slot, false);
+
+  // column absent from the row (pre-migration schema cache, or a null value) -> false,
+  // not a thrown/unreadable flags() — the transition period's exact prior behaviour.
+  const { supa: missing } = fakeSupaFrom({ pipeline_flags: { data: { ...base }, error: null } });
+  assertEquals((await deps(missing).flags())?.require_slot, false);
+
+  const { supa: nullCol } = fakeSupaFrom({ pipeline_flags: { data: { ...base, require_slot: null }, error: null } });
+  assertEquals((await deps(nullCol).flags())?.require_slot, false);
 });

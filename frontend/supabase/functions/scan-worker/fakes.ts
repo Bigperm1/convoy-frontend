@@ -3,7 +3,7 @@
 
 import { PNG } from "npm:pngjs@7.0.0";
 import { Buffer } from "node:buffer";
-import type { Deps, Flags, Job, JobPatch, JobStatus } from "./worker.ts";
+import type { Deps, Flags, Job, JobPatch, JobStatus, ScanSlot } from "./worker.ts";
 import type { FolderEntry, TripoView } from "./manifest.ts";
 import type { ConvertParams, TripoApi, TripoTask } from "./tripo.ts";
 import { TripoError } from "./tripo.ts";
@@ -16,6 +16,7 @@ export function newJob(scanId: string, over: Partial<Job> = {}): Job {
   return {
     scan_id: scanId,
     handle: null,
+    user_id: null,
     status: "queued",
     shots: null,
     tripo_file_tokens: null,
@@ -48,7 +49,11 @@ export function newJob(scanId: string, over: Partial<Job> = {}): Job {
   };
 }
 
-export const DEFAULT_FLAGS: Flags = { enabled: true, daily_credit_cap: 300, per_user_cap: 2, min_balance: 100, paused_reason: null };
+export function newSlot(scanId: string, over: Partial<ScanSlot> = {}): ScanSlot {
+  return { scan_id: scanId, user_id: `user-${scanId}`, handle: null, tier: null, consumed_at: null, released_at: null, ...over };
+}
+
+export const DEFAULT_FLAGS: Flags = { enabled: true, daily_credit_cap: 300, per_user_cap: 2, min_balance: 100, paused_reason: null, require_slot: false };
 
 /** Scripted Tripo: each task succeeds after `pollsToSuccess` polls; outputs point at fake:// urls. */
 export class FakeTripo implements TripoApi {
@@ -67,6 +72,13 @@ export class FakeTripo implements TripoApi {
    *  treated like a lost reply (retry-once / never-re-POST-a-generate), never rolled back. */
   reject5xxNextConverts = 0;
   reject5xxNextGenerate = false;
+  /** RATE LIMITED (part 2, item A/B): Tripo's pool of 10 concurrent tasks is full — code
+   *  2000 (or 1007), no task created, no charge. `rateLimitRetryAfterS` is what the fake
+   *  response's Retry-After header carries (undefined -> the client's own 30 s default). */
+  rateLimitNextGenerate = false;
+  rateLimitNextConverts = 0;
+  rateLimitRetryAfterS: number | undefined = 45;
+  rateLimitCode: 2000 | 1007 = 2000;
   /** Every task ever created, in order — the receipt for "how many times were we charged". */
   created: string[] = [];
   modelUrls: Record<string, string> = { twin: "fake://twin.glb", hero: "fake://hero.glb" };
@@ -88,6 +100,10 @@ export class FakeTripo implements TripoApi {
       this.reject5xxNextGenerate = false;
       return Promise.reject(new TripoError("/v3/generation/multiview-to-model: upstream error", 502, 2003));
     }
+    if (this.rateLimitNextGenerate) {
+      this.rateLimitNextGenerate = false;
+      return Promise.reject(new TripoError("/v3/generation/multiview-to-model: exceeded the limit of generation", 429, this.rateLimitCode, this.rateLimitRetryAfterS));
+    }
     const id = `gen-${++this.n}`;
     this.tasks.set(id, { type: "multiview_to_model", polls: 0, fail: this.failGenerateStatus ?? undefined });
     this.created.push(id);
@@ -106,6 +122,10 @@ export class FakeTripo implements TripoApi {
     if (this.reject5xxNextConverts > 0) {
       this.reject5xxNextConverts--;
       return Promise.reject(new TripoError("/v3/models/convert: upstream error", 502, 2003));
+    }
+    if (this.rateLimitNextConverts > 0) {
+      this.rateLimitNextConverts--;
+      return Promise.reject(new TripoError("/v3/models/convert: exceeded the limit of generation", 429, this.rateLimitCode, this.rateLimitRetryAfterS));
     }
     const id = `${params.face_limit === 20000 ? "map" : "hero"}-${++this.n}`;
     this.tasks.set(id, { type: "convert_model", polls: 0, params });
@@ -138,6 +158,8 @@ export type FakeWorldOptions = {
   carScans?: Record<string, Uint8Array>; // "<scan>/<file>" -> bytes
   models?: Record<string, Uint8Array>; // published name -> bytes
   fakeUrls?: Record<string, Uint8Array>; // fake://… -> bytes (Tripo model downloads)
+  /** Server-issued scan slots (part 2), keyed by scan_id — see public.scan_slots. */
+  slots?: Record<string, ScanSlot>;
   tripo?: TripoApi;
   now?: Date;
   /** Real public-bucket HEAD for names not in `models` (dry run only). */
@@ -158,6 +180,7 @@ export class FakeWorld {
   carScans: Map<string, Uint8Array>;
   models: Map<string, Uint8Array>;
   fakeUrls: Map<string, Uint8Array>;
+  slots: Map<string, ScanSlot>;
   breadcrumbs: { handle: string | null; message: string }[] = [];
   logs: string[] = [];
   publishOrder: string[] = [];
@@ -175,6 +198,7 @@ export class FakeWorld {
     this.carScans = new Map(Object.entries(o.carScans ?? {}));
     this.models = new Map(Object.entries(o.models ?? {}));
     this.fakeUrls = new Map(Object.entries(o.fakeUrls ?? {}));
+    this.slots = new Map(Object.entries(o.slots ?? {}));
     this.tripo = o.tripo ?? new FakeTripo();
     this.clock = o.now ?? new Date(FAKE_EPOCH);
     this.publicModelBase = o.publicModelBase;
@@ -228,8 +252,10 @@ export class FakeWorld {
         Object.assign(j, patch);
         return Promise.resolve();
       },
-      countUserRenders(handle, excludeScan) {
-        return Promise.resolve([...w.jobs.values()].filter((j) => j.handle === handle && j.credits_spent > 0 && j.scan_id !== excludeScan).length);
+      countUserRenders(handle, excludeScan, userId) {
+        return Promise.resolve(
+          [...w.jobs.values()].filter((j) => (userId ? j.user_id === userId : j.handle === handle) && j.credits_spent > 0 && j.scan_id !== excludeScan).length,
+        );
       },
       creditsLast24h() {
         const since = w.clock.getTime() - 24 * 3600 * 1000;
@@ -288,6 +314,23 @@ export class FakeWorld {
         if (res.status === 403 || res.status === 404) return "expired";
         if (!res.ok) throw new Error(`download HTTP ${res.status}`);
         return new Uint8Array(await res.arrayBuffer());
+      },
+      getSlot(scanId) {
+        return Promise.resolve(w.slots.get(scanId) ?? null);
+      },
+      consumeSlot(scanId) {
+        const s = w.slots.get(scanId);
+        if (s && !s.consumed_at) s.consumed_at = w.clock.toISOString();
+        return Promise.resolve();
+      },
+      releaseSlot(scanId) {
+        const s = w.slots.get(scanId);
+        if (s) s.released_at = w.clock.toISOString();
+        return Promise.resolve();
+      },
+      countActiveTripo() {
+        const active: JobStatus[] = ["generating", "converting_map", "converting_hero"];
+        return Promise.resolve([...w.jobs.values()].filter((j) => active.includes(j.status)).length);
       },
       tripo: w.tripo,
       log(m) {

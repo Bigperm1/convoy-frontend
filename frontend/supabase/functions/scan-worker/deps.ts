@@ -6,10 +6,13 @@
 // below with the service role at zero credits.
 
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import type { Deps, Flags, Job, JobPatch } from "./worker.ts";
+import type { Deps, Flags, Job, JobPatch, ScanSlot } from "./worker.ts";
 import type { TripoApi } from "./tripo.ts";
 import { MAX_BYTES } from "./glb.ts";
 import type { FolderEntry } from "./manifest.ts";
+
+/** Jobs actively holding a Tripo task (part 2, item C) — mirrors MAX_ACTIVE_TRIPO's set. */
+const ACTIVE_TRIPO_STATUSES = ["generating", "converting_map", "converting_hero"] as const;
 
 /** Storage returns HTTP 409 for an existing key. storage-js surfaces it as
  *  StorageApiError { status: 409, statusCode: <body.statusCode || body.code || "409">,
@@ -34,12 +37,17 @@ export function makeDeps(supa: SupabaseClient, supabaseUrl: string, tripo: Tripo
   return {
     now: () => new Date(),
     async flags(): Promise<Flags | null> {
-      const { data, error } = await supa.from("pipeline_flags").select("enabled,daily_credit_cap,per_user_cap,min_balance,paused_reason").eq("id", 1).maybeSingle();
+      const { data, error } = await supa.from("pipeline_flags").select("enabled,daily_credit_cap,per_user_cap,min_balance,paused_reason,require_slot").eq("id", 1).maybeSingle();
       if (error || !data) {
         log(`flags unreadable: ${error?.message ?? "no row"} -> disabled`);
         return null;
       }
-      return data as Flags;
+      // require_slot defaults to false (never spend was already the door of the older,
+      // pre-slot code path) rather than trusting the column to be non-null: it's added
+      // by migration 20260902002000_scan_slots.sql (NOT NULL DEFAULT false) so a live
+      // project always has it, but a null/missing value here still means "the transition
+      // hasn't been flipped yet" — the exact state before this column existed at all.
+      return { ...(data as Flags), require_slot: Boolean((data as { require_slot?: boolean | null }).require_slot) };
     },
     async setFlags(patch) {
       const { error } = await supa.from("pipeline_flags").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", 1);
@@ -55,9 +63,13 @@ export function makeDeps(supa: SupabaseClient, supabaseUrl: string, tripo: Tripo
       const { error } = await supa.from("car_scan_jobs").update(patch).eq("scan_id", scanId);
       if (error) throw new Error(`updateJob: ${error.message}`);
     },
-    async countUserRenders(handle, excludeScan) {
-      // `handle` is the manifest's (client-supplied): a courtesy cap, not an abuse bound.
-      const { count, error } = await supa.from("car_scan_jobs").select("scan_id", { count: "exact", head: true }).eq("handle", handle).gt("credits_spent", 0).neq("scan_id", excludeScan);
+    async countUserRenders(handle, excludeScan, userId) {
+      // Item F: `userId` (from the job's server-issued slot) is the real key when the
+      // job has one — it cannot be forged. `handle` (the manifest's, client-supplied)
+      // stays the fallback for legacy slot-less jobs and hand-seeded rows, unchanged.
+      let q = supa.from("car_scan_jobs").select("scan_id", { count: "exact", head: true }).gt("credits_spent", 0).neq("scan_id", excludeScan);
+      q = userId ? q.eq("user_id", userId) : q.eq("handle", handle);
+      const { count, error } = await q;
       if (error) throw new Error(`countUserRenders: ${error.message}`);
       return count ?? 0;
     },
@@ -108,6 +120,26 @@ export function makeDeps(supa: SupabaseClient, supabaseUrl: string, tripo: Tripo
       const len = Number(res.headers.get("content-length") ?? 0);
       if (len > MAX_BYTES) throw new Error(`model download ${len} B exceeds ${MAX_BYTES}`);
       return new Uint8Array(await res.arrayBuffer());
+    },
+    async getSlot(scanId): Promise<ScanSlot | null> {
+      const { data, error } = await supa.from("scan_slots").select("scan_id,user_id,handle,tier,consumed_at,released_at").eq("scan_id", scanId).maybeSingle();
+      if (error) throw new Error(`getSlot: ${error.message}`);
+      return (data as ScanSlot | null) ?? null;
+    },
+    async consumeSlot(scanId) {
+      const { error } = await supa.from("scan_slots").update({ consumed_at: new Date().toISOString() }).eq("scan_id", scanId).is("consumed_at", null);
+      if (error) throw new Error(`consumeSlot: ${error.message}`);
+    },
+    async releaseSlot(scanId) {
+      // No `.is('released_at', null)` guard: idempotent either way (a second release just
+      // re-writes the same kind of timestamp), and item G's callers only ever release once.
+      const { error } = await supa.from("scan_slots").update({ released_at: new Date().toISOString() }).eq("scan_id", scanId);
+      if (error) throw new Error(`releaseSlot: ${error.message}`);
+    },
+    async countActiveTripo() {
+      const { count, error } = await supa.from("car_scan_jobs").select("scan_id", { count: "exact", head: true }).in("status", ACTIVE_TRIPO_STATUSES);
+      if (error) throw new Error(`countActiveTripo: ${error.message}`);
+      return count ?? 0;
     },
     tripo,
     log,

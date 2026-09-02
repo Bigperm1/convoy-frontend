@@ -356,6 +356,44 @@ it a day or two"*. After the first automated scan lands, change it to match
   through to the same lost-response handling (bounded convert retry / never-re-POST a
   generate) a network timeout gets, since a proxy 5xx can carry a well-formed envelope
   that describes the PROXY's failure, not Tripo's own considered rejection.
+- **Tripo rate limiting (launch sizing v3 part 2, 2026-09-02) rolls back and waits the
+  server's Retry-After.** Codes 2000 ("exceeded the limit of generation") and 1007 mean
+  the account's 10-concurrent-task pool is full — no task created, no charge. `paidSubmit`
+  rolls the intent + credits back (same as a definite rejection) but waits
+  `Retry-After` seconds (default 30 if absent) instead of running the generic 5-strike
+  policy — no `attempts++`. A worker-side guard (`MAX_ACTIVE_TRIPO=8`, DB-only, checked
+  before every generate buy and before the `balance()` call) keeps this rare in practice;
+  converts occupy a pool slot too, which is why the guard is 8 and not the documented 10.
+- **`per_user_cap` keys on the job's `user_id` (server-issued slot) when it has one —
+  the real ceiling, not a courtesy.** A legacy slot-less job (or a hand-seeded row) still
+  falls back to the manifest's `handle`, unchanged. See the slot rows below.
+
+## Money model — scan slots (launch sizing v3 part 2, 2026-09-02)
+
+- **Identity is the backend account, not the manifest.** `POST /api/scan/slot` mints the
+  scan id and writes `public.scan_slots` (user_id/handle/tier snapshots, service-role
+  only — `supabase/migrations/20260902002000_scan_slots.sql`) after checking the
+  account's slot count. `stepQueued` looks the slot up by scan_id: present and
+  unreleased → the job's `handle`/`user_id` come from the SLOT (`consumeSlot` marks it
+  used in the same commit as `queued -> fetching`, breadcrumb `slot=1 user=<id>`);
+  **released** → refused outright (`skipped slot-released`), never reclaimed.
+- **`pipeline_flags.require_slot`** (default **false**) is the transition switch —
+  `20260902002000_scan_slots.sql`. Off: a slot-less folder still renders on the old
+  manifest-handle path (`slot=0 legacy=1`). On: a slot-less scan_id is refused
+  (`skipped slot-required`, 0 credits) by `register-scan` AND the worker both. **Flip it
+  only after the OTA carrying `POST /api/scan/slot` is live** — flipping early strands
+  testers still on old JS with folders the worker will only ever skip.
+  `update public.pipeline_flags set require_slot=true where id=1;`
+- **A FAILED render releases its slot; a SKIPPED one never does** (Jeff: a failure must
+  not burn one of the account's two included scans). Both the `Tick.fail()` path and the
+  5-strikes generic-error path check the same signal — `job.user_id` set (only ever set
+  together with `consumeSlot`) — and call `releaseSlot`, breadcrumbing
+  `slot released reason=<why>`. `car_scan_jobs.user_id` (migration
+  `20260902003000_car_scan_jobs_user_id.sql`) is what lets both paths know this cheaply,
+  every tick, without a second query to `scan_slots`.
+- **A released slot can be re-issued by the backend** (a fresh `POST /api/scan/slot`
+  mints a new scan_id) — the OLD row simply stays `released_at`-stamped forever; nothing
+  here re-uses it.
 
 ## Operations
 
@@ -371,6 +409,12 @@ it a day or two"*. After the first automated scan lands, change it to match
 | `failed map-submit-unknown` / `hero-submit-unknown` | the bounded retry was already used; same two branches as above with the convert task, `status='converting_map'`/`'converting_hero'`, and `credits_spent-10` if no task exists |
 | rotate the worker key | new hex → Vault `vault.update_secret` + `supabase secrets set SCAN_WORKER_KEY=…` |
 | raise/lower caps | `update public.pipeline_flags set daily_credit_cap=…, per_user_cap=…, min_balance=…;` |
+| require server-issued slots (flip AFTER the slot-request OTA ships) | `update public.pipeline_flags set require_slot=true where id=1;` — a slot-less folder is then refused (`register-scan` 403 + worker `skipped slot-required`), never spends |
+| revert to the legacy manifest-handle path | `update public.pipeline_flags set require_slot=false where id=1;` |
+| raise/lower the Tripo-pool guard | `MAX_ACTIVE_TRIPO` in `worker.ts` (redeploy) — 8 leaves headroom under Tripo's documented 10; do not raise it to 10 |
+| a job is stuck `wait:tripo-pool` for a long time | `select status, count(*) from car_scan_jobs where status in ('generating','converting_map','converting_hero') group by status;` — if the true in-flight count is lower than this, a job is probably stuck mid-state (see the poll-timeout rows above), not actually occupying a Tripo slot |
+| manually give a scan_id back its slot (mistaken release, etc.) | `update public.scan_slots set released_at=null where scan_id='<id>';` — the job itself is untouched; it will only be reconsidered if re-queued |
+| see whether a job ever held a slot | `select scan_id, user_id from car_scan_jobs where scan_id='<id>';` — `user_id` null means legacy/slot-less |
 
 ## Open questions (not decided by this deploy)
 

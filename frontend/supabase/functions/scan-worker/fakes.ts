@@ -63,6 +63,10 @@ export class FakeTripo implements TripoApi {
   loseNextConverts = 0;
   /** DEFINITE rejection: throws a TripoError carrying an API code; no task is created. */
   rejectNextConverts = 0;
+  /** AMBIGUOUS rejection (item 4): a 5xx that STILL carries a parsed JSON code — must be
+   *  treated like a lost reply (retry-once / never-re-POST-a-generate), never rolled back. */
+  reject5xxNextConverts = 0;
+  reject5xxNextGenerate = false;
   /** Every task ever created, in order — the receipt for "how many times were we charged". */
   created: string[] = [];
   modelUrls: Record<string, string> = { twin: "fake://twin.glb", hero: "fake://hero.glb" };
@@ -80,6 +84,10 @@ export class FakeTripo implements TripoApi {
       this.failNextGenerate = null;
       return Promise.reject(e);
     }
+    if (this.reject5xxNextGenerate) {
+      this.reject5xxNextGenerate = false;
+      return Promise.reject(new TripoError("/v3/generation/multiview-to-model: upstream error", 502, 2003));
+    }
     const id = `gen-${++this.n}`;
     this.tasks.set(id, { type: "multiview_to_model", polls: 0, fail: this.failGenerateStatus ?? undefined });
     this.created.push(id);
@@ -94,6 +102,10 @@ export class FakeTripo implements TripoApi {
     if (this.rejectNextConverts > 0) {
       this.rejectNextConverts--;
       return Promise.reject(new TripoError("/v3/models/convert: invalid input", 400, 2002));
+    }
+    if (this.reject5xxNextConverts > 0) {
+      this.reject5xxNextConverts--;
+      return Promise.reject(new TripoError("/v3/models/convert: upstream error", 502, 2003));
     }
     const id = `${params.face_limit === 20000 ? "map" : "hero"}-${++this.n}`;
     this.tasks.set(id, { type: "convert_model", polls: 0, params });

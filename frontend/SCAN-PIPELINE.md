@@ -32,7 +32,7 @@ app capture (4 shots)                       app/(app)/garage-capture.tsx · src/
   └─ car-scans/<scanId>/01-front.jpg 02-right.jpg 03-rear.jpg 04-left.jpg + manifest.json
      (bucket: WRITE-ONLY to the app; register-scan caps uploads at 2 per handle)
        └─ DB trigger car_scan_enqueue  (INSERT of …/manifest.json)  → car_scan_jobs row
-            └─ pg_cron every 30 s → scan_worker_tick() → edge fn scan-worker  (ONE step per tick)
+            └─ pg_cron every 15 s → scan_worker_tick() → edge fn scan-worker  (up to 25 jobs/tick)
                  ├─ queued        folder complete? manifest sane? handle = manifest.handle
                  ├─ fetching      4 photos → Tripo file tokens · SPEND GUARDS · generate   30 credits
                  ├─ generating    poll → convert twin (20000 faces / 1024 / -x / 1.9101)   10 credits
@@ -53,25 +53,66 @@ retry after a convert POST whose reply was lost — so 60 is the ceiling per sca
 
 ## Automation — how the worker behaves
 
+**Launch sizing v3 (2026-09-02, throughput + spend safety — 170 Ultra members × 2 scans):**
+
+- **Several jobs per tick.** `runTick` loops claim → pre-flight/advance → claim again,
+  until claim() has nothing left, a soft work budget (`TICK_WORK_BUDGET_MS`, 100 s of the
+  130 s tick budget) is spent, or a hard cap (`MAX_JOBS_PER_TICK`, 25) is hit. Each job
+  keeps its own try/catch — one job's error never stops the rest of the tick. The old
+  "one job per tick" meant a burst of N scans made the Nth wait ~N × 30 s; a burst now
+  drains at up to 25 jobs/tick instead. The single-lease rule in `claim_scan_job` is
+  unchanged (it serialises the BUY step, not the tick) — polls of other states already
+  ran in parallel and still do.
+- **Faster polls.** Cron tightened from every 30 s to every **15 s**
+  (`supabase/ops/scan_worker_cron_15s.sql`) and `POLL_S` from 30 to **20**. The old
+  POLL_S(30) == cron-interval(30) pairing raced on pg_cron's fixed wall-clock grid — a row
+  due a few hundred ms after a grid mark missed it and waited a full extra cycle (observed
+  live: one generate polled at 00:24:19 and 00:25:19, a dead 60 s apart, with an
+  `idle:empty` tick between, despite POLL_S=30). Timeouts stay fixed in wall-clock seconds
+  (30 min generate, 15 min convert); the poll-COUNT that bounds them is re-derived from
+  `POLL_S` (now 90 / 45, was 60 / 30) so the real waiting time they allow is unchanged.
 - **Kill switch**: `public.pipeline_flags.enabled` (default false). `update … set
-  enabled=false` stops all spend within 30 s. Read at the top of every tick and again
-  right before the generate POST; unreadable == disabled.
-- **Guards before the only paid POST**: per-handle cap (`per_user_cap`, 2 — same number
-  as register-scan; keyed on the manifest's handle, i.e. client-supplied, so a courtesy
-  cap), rolling-24 h cap (`daily_credit_cap`, 300 = 6 cars) and Tripo balance ≥
-  `min_balance` + 50 — those two are the real ceiling. A guard failing waits 5 min; Tripo
-  "insufficient credits" (code 2010) pauses the whole pipeline (`paused_reason='tripo-credits'`).
-  Claims are serialised so only one job is ever in `fetching` with a live lease: the cap
-  reads cannot race another job's generate.
+  enabled=false` stops all spend within 30 s. Read at the top of every tick AND re-read by
+  every paid call (`paidSubmit`) right before its intent write — not just the generate —
+  because a multi-job tick shares one `flags` snapshot across every job it advances; the
+  re-read is what stops a LATER job in the same tick spending on stale information after
+  an earlier job (or an operator) changes it mid-tick. Unreadable == disabled.
+- **Guards before a paid POST reserve `MAX_CREDITS_PER_JOB` (60 — one generate + two
+  converts + one retry), not the optimistic `CREDITS_PER_CAR` (50, kept only for
+  docs/breadcrumbs)**: per-handle cap (`per_user_cap`, 2 — same number as register-scan;
+  keyed on the manifest's handle, i.e. client-supplied, so a courtesy cap), rolling-24 h
+  cap (`daily_credit_cap`, 6000 = 100 cars/day at launch sizing) and Tripo balance ≥
+  `min_balance` + 60 — those two are the real ceiling. `paidSubmit` also asserts the
+  ceiling directly (`credits_spent + credits > MAX_CREDITS_PER_JOB` → `failed ceiling`,
+  no spend) as a structural invariant, independent of the guards that are meant to prevent
+  it ever tripping. A guard failing waits 5 min. Claims are serialised so only one job is
+  ever in `fetching` with a live lease: the cap reads cannot race another job's generate.
+- **Abort/budget defers a paid call, never spends it.** Before a paid POST's intent write
+  (and between each of the four photo uploads), if the tick's own AbortSignal is set or
+  under `PAID_CALL_RESERVE_MS` (25 s) of tick budget remains, the job **waits** instead —
+  zero ledger change, already-uploaded file tokens stay on the row, and the next tick
+  resumes exactly where this one deferred. This is what stops the wall-clock kill from
+  ever landing mid-POST, which is otherwise indistinguishable from a lost reply.
+- **Tripo 5xx is ambiguous, even with a parsed error code.** A sub-500 status with a JSON
+  error code is a DEFINITE rejection (Tripo's app layer ran and refused it — no task, no
+  charge, ledger rolled back). A 5xx can carry a well-formed envelope that describes a
+  proxy failure, not Tripo's own considered answer — the task may exist anyway — so it
+  falls through to the same lost-response handling as a network timeout (one bounded
+  retry for a convert, never a re-POST for a generate).
+- **Insufficient Tripo credits pauses the JOB, not the pipeline.** `enabled` is left
+  untouched (item 7, launch sizing v3 — was a full pipeline disable); only
+  `pipeline_flags.paused_reason='tripo-credits'` is set and the job waits 10 min
+  (`CREDITS_PAUSE_S`, was 60). The balance guard in `fetching` re-checks Tripo's live
+  balance every cycle and clears `paused_reason` the moment it passes — a human top-up
+  resumes rendering with no flip of any switch, and every OTHER job keeps spending
+  normally the whole time.
 - **Intent before spend**: each paid POST is preceded by one row update that records
   `paid_call` + `paid_call_started_at` and adds the credits to the ledger; the task id's
   update clears it. A tick that dies inside the POST (edge wall clock, abort, network)
   leaves the marker, and the next tick never re-POSTs: a generate fails
   `gen-submit-unknown` (recovered by hand from Tripo's dashboard — there is no task-list
   API), a convert gets one bounded retry. Only a definite Tripo rejection (its own error
-  envelope, no task created) rolls the ledger back and retries normally.
-- **Timeouts are poll counts** (60 polls of a generate, 30 of a convert), reset on every
-  transition — a paused pipeline never expires a paid job.
+  envelope, sub-500, no task created) rolls the ledger back and retries normally.
 - **QC before spend**: the hero convert is only bought after the twin passed every
   Mapbox gate below, its public round trip hashed equal, AND `twin_published_at` is on the
   row (so a crash between the two never strands a live twin as "manual"). A bad
@@ -85,6 +126,13 @@ retry after a convert POST whose reply was lost — so 60 is the ceiling per sca
 - **Observability**: `car_scan_jobs` is the state of record; every transition also drops
   a `carscan-worker id=<scan> <from>-><to> …` row into `crash_reports` under the tester's
   handle, so `where message like 'carscan-%'` shows register → worker → ready → delivered.
+  A tick that advances MORE THAN ONE job also drops one summary breadcrumb,
+  `carscan-worker tick jobs=N ms=…` (handle null) — a single-job tick stays exactly as
+  quiet as before (no breadcrumb for a poll `wait`, same as always).
+- **Secrets logging (index.ts)**: every tick logs which source each secret resolved from
+  (`vault` / `env` / `missing`), never the value; a `misconfigured` 500 names which of the
+  two was missing. No isolate-lifetime cache — a rotated Vault secret or edge secret takes
+  effect on the very next tick, not the next redeploy. Vault/env values are `.trim()`'d.
 - **Verify without spending**: `tools/glb-pipeline/scan_worker_dryrun.sh` (deno tests +
   a local Tripo stub + read-only probes of the real buckets).
 

@@ -82,9 +82,17 @@ export class InsufficientCredits extends TripoError {
  *  Everything else — timeout / abort, network failure, a non-JSON body from a proxy —
  *  is AMBIGUOUS: the task may well have been created, and the caller must never
  *  re-POST on it. There is NO task-listing endpoint to reconcile with: tripo-cli 0.3.1
- *  only has `POST /v3/tasks/list {task_ids}` (lookup by ids you already know). */
+ *  only has `POST /v3/tasks/list {task_ids}` (lookup by ids you already know).
+ *
+ *  A 5xx is ALSO ambiguous even with a parsed JSON code (item 4, 2026-09-02): an origin
+ *  or proxy 5xx can carry a well-formed error envelope that describes the PROXY's
+ *  failure, not a considered rejection by Tripo's application layer — the underlying
+ *  task may have been created anyway. Only a sub-500 status (Tripo's app layer actually
+ *  ran and answered) counts as definite; a 5xx-with-code falls through to the same
+ *  lost-response path as a network timeout (paidSubmit: retry-once for a convert, never
+ *  re-POST for a generate). */
 export function isDefiniteRejection(e: unknown): boolean {
-  return e instanceof TripoError && typeof e.code === "number";
+  return e instanceof TripoError && typeof e.code === "number" && e.httpStatus < 500;
 }
 
 export type TripoClientOptions = {

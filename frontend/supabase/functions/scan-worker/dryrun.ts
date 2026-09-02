@@ -130,7 +130,7 @@ if (!TRIPO_BASE_URL) {
   for (let i = 0; i < 40; i++) {
     const r = await runTick(w.deps(), { tickId: `dry${i}` });
     if (r.idle === "disabled") break;
-    if (!r.idle && r.from !== r.to) transitions.push(`${r.from}->${r.to}`);
+    for (const jr of r.jobs) if (jr.from !== jr.to) transitions.push(`${jr.from}->${jr.to}`);
     if (["done", "failed", "skipped"].includes(w.job(scanId).status)) break;
     w.advance(61); // past the 60 s post-generate wait and every 30 s poll
   }

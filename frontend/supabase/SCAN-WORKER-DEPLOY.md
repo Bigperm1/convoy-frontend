@@ -238,6 +238,11 @@ curl -s -X POST "https://pgtbjiszjglznjagolse.supabase.co/functions/v1/scan-work
 
 ## 6. The heartbeat — pg_cron + pg_net + the schedule (NOT a migration)
 
+> **Launch sizing v3 (2026-09-02): use `scan_worker_cron_15s.sql`, not this file, for any
+> re-apply from here on** — same job name (`scan-worker-tick`), schedule tightened
+> 30 s → 15 s. This section is left as originally executed (30 s); see "Money model" above
+> and `worker.ts`'s `POLL_S` comment for why.
+
 ```bash
 supabase db query --linked -f supabase/ops/scan_worker_cron.sql
 ```
@@ -317,21 +322,47 @@ it a day or two"*. After the first automated scan lands, change it to match
   code — no task created) rolls the ledger back and takes the ordinary 5-strike retry.
 - **`per_user_cap` keys on the handle from `manifest.json` — client-supplied.** It stops
   a tester's own third render; it does not stop someone writing a fresh handle into the
-  manifest. `daily_credit_cap` (300 = $3/day, rolling 24 h) and `min_balance` + 50 are the
-  real ceiling, and both count the conservative ledger (lost replies included).
+  manifest. `daily_credit_cap` (launch sizing v3, 2026-09-02: **6000** = 100 cars/day —
+  see `supabase/migrations/20260902001000_launch_caps.sql`) and `min_balance` + **60**
+  (`MAX_CREDITS_PER_JOB`, the real per-job ceiling with one retry — not the optimistic
+  50) are the real ceiling, and both count the conservative ledger (lost replies included).
+  `paidSubmit` also asserts the 60-credit ceiling directly before every paid POST,
+  independent of the guards meant to keep it from ever tripping.
 - **Claims are serialised**: `claim_scan_job` hands out at most one `fetching` row with a
   live lease (advisory lock), so the cap reads and the generate of one job never
-  interleave with another's. Polls of the other states run in parallel as before.
-- **Timeouts are poll counts** (`state_polls`: 60 for a generate ≈ 30 min, 30 for a
-  convert ≈ 15 min), reset on every transition. The kill switch, an unscheduled cron or an
-  unreachable Tripo never burn a job's budget.
+  interleave with another's. Polls of the other states run in parallel, and (launch sizing
+  v3) so do several DIFFERENT jobs' single steps within one tick — see below.
+- **Timeouts are poll counts** (`state_polls`: launch sizing v3 raised POLL_S 30→20 s, so
+  90 polls ≈ 30 min for a generate, 45 ≈ 15 min for a convert — same wall-clock timeouts,
+  recomputed for the faster poll), reset on every transition. The kill switch, an
+  unscheduled cron or an unreachable Tripo never burn a job's budget.
+- **Several jobs per tick (launch sizing v3, 2026-09-02).** One job per tick meant a
+  burst of N scans made the Nth wait ~N × 30 s — real at the 170-member/340-scan launch
+  size. `runTick` now loops claim→advance→claim again per tick, up to `MAX_JOBS_PER_TICK`
+  (25) or until a 100 s soft work budget is spent (of the 130 s tick budget); each job's
+  own try/catch means one job's error never stops the rest. A paid POST (or a photo
+  upload) defers to the next tick — zero ledger change — if under 25 s of tick budget is
+  left or the tick's own AbortSignal already fired, rather than risk the wall-clock kill
+  landing mid-POST (indistinguishable from a lost reply otherwise). Cron tightened
+  30 s → **15 s** (`supabase/ops/scan_worker_cron_15s.sql`, replaces
+  `scan_worker_cron.sql` — same job name, re-running either upserts the one schedule).
+- **Insufficient Tripo credits pauses the JOB, not the pipeline (launch sizing v3).**
+  `pipeline_flags.enabled` is left untouched; only `paused_reason='tripo-credits'` is set
+  and the job waits 10 min (was a full-pipeline `enabled=false` for 60 min). The balance
+  guard clears `paused_reason` the moment a top-up is visible — no human resume step, and
+  every other job keeps spending normally the whole time.
+- **A Tripo 5xx with a parsed JSON error code is still ambiguous**, not a definite
+  rejection — only a sub-500 status means Tripo's app layer actually answered. A 5xx falls
+  through to the same lost-response handling (bounded convert retry / never-re-POST a
+  generate) a network timeout gets, since a proxy 5xx can carry a well-formed envelope
+  that describes the PROXY's failure, not Tripo's own considered rejection.
 
 ## Operations
 
 | need | do |
 |---|---|
 | stop all spend now | `update public.pipeline_flags set enabled=false, paused_reason='<why>' where id=1;` (safe for any length of time — no job expires while paused) |
-| stop the heartbeat | `select cron.unschedule('scan-worker-tick');` (re-run `supabase/ops/scan_worker_cron.sql` to restore) |
+| stop the heartbeat | `select cron.unschedule('scan-worker-tick');` (re-run `supabase/ops/scan_worker_cron_15s.sql` to restore — launch sizing v3, 2026-09-02: 15 s, was 30 s) |
 | re-trigger a scan | `insert into public.car_scan_jobs(scan_id,status) values('<id>','queued') on conflict do nothing;` |
 | retry a failed job at its state | `update public.car_scan_jobs set status='<state>', attempts=0, state_polls=0, lease_until=null, next_run_at=now() where scan_id='<id>';` (only when `paid_call` is null — see the next two rows) |
 | hero-only failure (twin live) | `update … set status='converting_map', attempts=0, state_polls=0, paid_call=null, paid_call_started_at=null, lease_until=null, next_run_at=now()` — `twin_published_at` is set, so the worker buys ONLY the hero (+10, explicit human action) |
@@ -354,9 +385,11 @@ it a day or two"*. After the first automated scan lands, change it to match
 5. **npm:pngjs / jpeg-js under the Supabase edge runtime** — VERIFIED under Deno 2.6.4 on
    the Mac (twin 29–37 ms, hero 86–97 ms); HYPOTHESIS on the hosted runtime until step 9's
    first `converting_map->converting_hero` breadcrumb shows a `finishMs=`.
-6. **6-minute promise** — automated critical path ≈ manual 5.5 min + ~5 tick latencies.
-   Re-measure from `car_scan_jobs` timestamps after the first three scans; tighten the
-   cron to `'15 seconds'` if needed (`select cron.alter_job(job_id := …, schedule := '15 seconds');`).
+6. **6-minute promise** — ~~automated critical path ≈ manual 5.5 min + ~5 tick
+   latencies~~ **DONE 2026-09-02 (launch sizing v3)**: cron tightened to `'15 seconds'`
+   (`supabase/ops/scan_worker_cron_15s.sql`) and `POLL_S` 30→20, fixing the observed
+   every-other-tick poll race (worker.ts's `POLL_S` comment has the timestamps). Also
+   landed: several jobs per tick (was one), so a burst no longer serialises N × 30 s.
 7. **The SQL has not been executed anywhere** (no Docker → no local stack; the live
    project is off-limits to this workflow). `supabase db push --dry-run` + step 4 settle
    it; the file fails loudly on a re-run (`create type` / `create table`) instead of doing harm.

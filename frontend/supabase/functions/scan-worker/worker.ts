@@ -134,23 +134,61 @@ export type TickResult = {
 };
 
 // ── tunables (all in one place) ──────────────────────────────────────────────
-export const LEASE_S = 170;
-export const POLL_S = 30;
+// The claim lease is 170 s — see claim_scan_job() in the SQL migration (not duplicated
+// here as a constant: nothing in worker.ts computes with it, and a stale copy would drift).
+export const POLL_S = 20;
+// FASTER POLLS (2026-09-02, launch sizing v3): the cron interval moves to 15 s
+// (supabase/ops/scan_worker_cron_15s.sql) and POLL_S drops from 30 to 20. The old
+// POLL_S(30) == cron-interval(30) pairing raced: pg_cron's '30 seconds' schedule fires on
+// a fixed wall-clock grid (…:00, :30, :00…), not "30 s after the row became due". A row
+// whose `next_run_at` landed a few hundred ms AFTER a grid mark (typical, since the tick
+// that set it also spent time doing the actual work) missed that mark by an epsilon and
+// had to wait a full extra cron cycle — observed live: a generate polled at 00:24:19 and
+// 00:25:19, a dead 60 s apart, with an `idle:empty` tick in between, despite POLL_S=30.
+// A 15 s grid with POLL_S=20 (not a multiple of the grid) bounds the worst case to one
+// skipped mark (~15 s) instead of one skipped cycle (~30 s) — halving typical poll latency.
+// GEN_TIMEOUT_S / CONVERT_TIMEOUT_S stay fixed in WALL-CLOCK seconds; MAX_POLLS is
+// re-derived from POLL_S below so the real waiting time they bound does not change.
 export const INCOMPLETE_WAIT_S = 60;
 export const INCOMPLETE_MAX_WAITS = 20; // ≈ 20 min of photos-still-arriving
 export const GUARD_WAIT_S = 5 * 60;
-export const CREDITS_PAUSE_S = 60 * 60;
+// NO SELF-DISABLE on InsufficientCredits (item 7): was 60 min disable-the-whole-pipeline;
+// now a 10 min per-job wait while `pipeline_flags.enabled` stays untouched — the balance
+// guard in stepFetching re-checks Tripo's balance on every cycle, so a human top-up
+// resumes rendering with no flip of any switch.
+export const CREDITS_PAUSE_S = 10 * 60;
 export const MAX_ATTEMPTS = 5;
 export const GEN_TIMEOUT_S = 30 * 60;
 export const CONVERT_TIMEOUT_S = 15 * 60;
 /** Timeouts are enforced as a poll COUNT (one poll per POLL_S at the fastest), so a
  *  pause of the pipeline — kill switch, cron unscheduled, Tripo unreachable — costs no
- *  budget. 60 polls of a still-running generate ≈ 30 min of actual waiting. */
+ *  budget. GEN_MAX_POLLS polls of a still-running generate ≈ GEN_TIMEOUT_S of actual
+ *  waiting, whatever POLL_S is currently tuned to. */
 export const GEN_MAX_POLLS = GEN_TIMEOUT_S / POLL_S;
 export const CONVERT_MAX_POLLS = CONVERT_TIMEOUT_S / POLL_S;
 export const CREDITS_GENERATE = 30;
 export const CREDITS_CONVERT = 10;
+/** Documentation/breadcrumb figure only ("50 credits = $0.50 per car") — the guards below
+ *  reserve against MAX_CREDITS_PER_JOB, the real worst case including one retry. */
 export const CREDITS_PER_CAR = CREDITS_GENERATE + 2 * CREDITS_CONVERT;
+/** The real per-job ceiling: one generate + two converts + ONE extra convert retry
+ *  (lost-reply or a bounded reconvert; `convert_retries` caps at 1). Guards reserve this
+ *  much headroom, not the optimistic 50, and `paidSubmit` refuses to spend past it —
+ *  a structural invariant check, not an operational guard (see item 5). */
+export const MAX_CREDITS_PER_JOB = 60;
+// ── launch sizing v3: throughput + spend safety (2026-09-02) ─────────────────
+/** Wall-clock budget for the whole tick's WORK loop, under index.ts's TICK_BUDGET_MS
+ *  (130 s, itself under Supabase's 150 s free-plan function wall clock). Leaves ~30 s of
+ *  headroom for a job already mid-flight when the soft budget is hit. */
+export const TICK_BUDGET_MS = 130_000;
+export const TICK_WORK_BUDGET_MS = 100_000;
+/** Hard cap on distinct jobs advanced in one tick, independent of the time budget. */
+export const MAX_JOBS_PER_TICK = 25;
+/** A paid POST is never started with less than this much tick budget left — better to
+ *  defer to the next tick (zero ledger change; already-uploaded file tokens are kept)
+ *  than to risk the tick's wall clock killing the request mid-flight, which is exactly
+ *  the ambiguous "lost reply" case every paid call is otherwise built to avoid. */
+export const PAID_CALL_RESERVE_MS = 25_000;
 
 const iso = (d: Date) => d.toISOString();
 const plus = (d: Date, s: number) => new Date(d.getTime() + s * 1000);
@@ -160,10 +198,20 @@ type Transition = { to: JobStatus; patch: JobPatch; detail: string; resetAttempt
 const CLEAR_PAID: JobPatch = { paid_call: null, paid_call_started_at: null };
 
 class Tick {
-  constructor(readonly deps: Deps, readonly job: Job, readonly flags: Flags, readonly signal?: AbortSignal) {}
+  /** `deadlineMs` is an absolute epoch-ms timestamp (tick start + TICK_WORK_BUDGET_MS),
+   *  shared across every job this tick advances — see `remainingMs()`. Defaults to
+   *  Infinity so nothing outside `runTick` (e.g. a future direct Tick construction) is
+   *  ever budget-limited by accident. */
+  constructor(readonly deps: Deps, readonly job: Job, readonly flags: Flags, readonly signal?: AbortSignal, readonly deadlineMs: number = Infinity) {}
 
   get now(): Date {
     return this.deps.now();
+  }
+
+  /** Budget left in this TICK (not this job) before a paid POST should defer instead of
+   *  risking the wall-clock kill mid-flight. See PAID_CALL_RESERVE_MS. */
+  remainingMs(): number {
+    return this.deadlineMs - this.now.getTime();
   }
 
   private crumb(msg: string, handle: string | null = this.job.handle) {
@@ -266,9 +314,36 @@ class Tick {
   }
 
   /** INTENT BEFORE SPEND. Records the paid call + credits in the row, then POSTs.
-   *  Returns the task id, or a TickResult when the job must stop here. */
+   *  Returns the task id, or a TickResult when the job must stop here.
+   *
+   *  Three guards run BEFORE the intent write, in this order:
+   *   1. CEILING (item 5) — a structural invariant, not an operational guard: this job
+   *      would exceed MAX_CREDITS_PER_JOB. Should never trip in normal operation (the
+   *      generic retry policy and convert_retries already bound spend to 60); tripping it
+   *      means something upstream is wrong, so it fails outright rather than waiting.
+   *   2. BUDGET/ABORT (item 3) — the tick's soft work budget is nearly spent, or the
+   *      whole tick was already aborted (index.ts's wall-clock guard). Deferring here
+   *      costs nothing: no intent has been written yet, and any file tokens already
+   *      uploaded (stepFetching) stay persisted for the next tick to resume from.
+   *   3. KILL SWITCH RE-READ (item 6) — `flags` on this Tick is a SNAPSHOT taken once at
+   *      the top of the tick (runTick) and shared across every job the tick advances. In
+   *      a multi-job tick, an earlier job's InsufficientCredits pause (or an operator
+   *      disabling mid-tick) would otherwise be invisible to a LATER job in the same
+   *      tick, which would still see the stale enabled:true and spend anyway. Re-reading
+   *      here catches that race for every paid call, not just the generate (stepFetching
+   *      already re-read before this method existed; this generalises it to map/hero). */
   private async paidSubmit(kind: PaidCall, credits: number, pre: JobPatch, call: () => Promise<string>): Promise<string | TickResult> {
     const j = this.job;
+    if (j.credits_spent + credits > MAX_CREDITS_PER_JOB) {
+      return this.fail("ceiling", { last_error: `credits_spent=${j.credits_spent}+${credits} > MAX_CREDITS_PER_JOB=${MAX_CREDITS_PER_JOB}` });
+    }
+    if (this.signal?.aborted || this.remainingMs() < PAID_CALL_RESERVE_MS) {
+      return this.wait(POLL_S, {}, `defer ${kind}: budget`);
+    }
+    const freshFlags = await this.deps.flags();
+    if (!freshFlags || !freshFlags.enabled) {
+      return this.wait(GUARD_WAIT_S, { reason: "wait:disabled" }, "guard disabled");
+    }
     const rollback: JobPatch = { ...CLEAR_PAID, credits_spent: j.credits_spent };
     for (const k of Object.keys(pre) as (keyof JobPatch)[]) (rollback as Record<string, unknown>)[k] = j[k];
     const stamp = iso(this.now);
@@ -279,9 +354,14 @@ class Tick {
     } catch (e) {
       const msg = String((e as Error)?.message ?? e).slice(0, 200);
       if (e instanceof InsufficientCredits) {
+        // NO SELF-DISABLE (item 7): `enabled` is untouched — only `paused_reason` is set,
+        // so other jobs' generates/converts keep running normally. This job itself waits
+        // CREDITS_PAUSE_S, then re-enters stepFetching's guards; the balance guard there
+        // re-checks Tripo's live balance every cycle and clears paused_reason the moment
+        // it passes, so a human top-up resumes rendering with no flip of any switch.
         await this.deps.updateJob(j.scan_id, { ...rollback, updated_at: iso(this.now) });
         Object.assign(j, rollback);
-        await this.deps.setFlags({ enabled: false, paused_reason: "tripo-credits" });
+        await this.deps.setFlags({ paused_reason: "tripo-credits" });
         await this.crumb(`PAUSED tripo-credits on ${kind}: ${msg}`);
         return this.wait(CREDITS_PAUSE_S, { reason: "wait:tripo-credits", last_error: msg }, "paused tripo-credits");
       }
@@ -338,6 +418,12 @@ class Tick {
     const tokens: Partial<Record<TripoView, string>> = { ...(j.tripo_file_tokens ?? {}) };
     for (const view of ["front", "left", "back", "right"] as TripoView[]) {
       if (tokens[view]) continue;
+      // Same budget check as paidSubmit (item 3): a slow upload defers to the next tick
+      // rather than risking the wall-clock kill mid-upload. Tokens already persisted
+      // above stay on the row, so the next tick resumes from exactly where this left off.
+      if (this.signal?.aborted || this.remainingMs() < PAID_CALL_RESERVE_MS) {
+        return this.wait(POLL_S, {}, "defer upload: budget");
+      }
       const shot: ShotId = views[view];
       const bytes = await this.deps.downloadScanFile(`${j.scan_id}/${SHOT_FILE[shot]}`);
       tokens[view] = await this.deps.tripo.uploadFile(bytes, SHOT_FILE[shot]);
@@ -347,6 +433,8 @@ class Tick {
     //     serialises `fetching` (one live lease at a time), so these reads cannot race
     //     another job's generate. NOTE: `handle` is the manifest's, i.e. client-supplied —
     //     per_user_cap is a courtesy cap; daily_credit_cap + min_balance are the ceiling.
+    //     Both reserve MAX_CREDITS_PER_JOB (60, the real worst case with one retry), not
+    //     the optimistic CREDITS_PER_CAR (50) — item 5.
     const fresh = await this.deps.flags();
     if (!fresh || !fresh.enabled) return this.wait(GUARD_WAIT_S, { reason: "wait:disabled" }, "guard disabled");
     const others = await this.deps.countUserRenders(handle, j.scan_id);
@@ -356,14 +444,21 @@ class Tick {
       return this.wait(GUARD_WAIT_S, { reason: "wait:user-cap" }, "guard user-cap");
     }
     const spent24h = await this.deps.creditsLast24h();
-    if (spent24h + CREDITS_PER_CAR > fresh.daily_credit_cap) {
+    if (spent24h + MAX_CREDITS_PER_JOB > fresh.daily_credit_cap) {
       await this.crumb(`WAIT daily-cap spent24h=${spent24h} cap=${fresh.daily_credit_cap}`);
       return this.wait(GUARD_WAIT_S, { reason: "wait:daily-cap" }, "guard daily-cap");
     }
     const balance = await this.deps.tripo.balance();
-    if (balance < fresh.min_balance + CREDITS_PER_CAR) {
-      await this.crumb(`WAIT balance=${balance} floor=${fresh.min_balance + CREDITS_PER_CAR}`);
+    if (balance < fresh.min_balance + MAX_CREDITS_PER_JOB) {
+      await this.crumb(`WAIT balance=${balance} floor=${fresh.min_balance + MAX_CREDITS_PER_JOB}`);
       return this.wait(GUARD_WAIT_S, { reason: "wait:balance" }, "guard balance");
+    }
+    // Item 7: the balance guard just passed. If InsufficientCredits paused the pipeline
+    // earlier (paused_reason set, `enabled` never touched), this is the moment a human
+    // top-up becomes visible — clear it here, once, with no separate resume step.
+    if (fresh.paused_reason === "tripo-credits") {
+      await this.deps.setFlags({ paused_reason: null });
+      await this.crumb(`RESUMED balance=${balance}`);
     }
     // (c) the one and only generate submit — intent recorded first (see paidSubmit).
     const genTask = await this.paidSubmit(
@@ -533,17 +628,21 @@ function warn(qc: QcReport): string {
 
 export type TickOptions = { tickId: string; scan?: string; signal?: AbortSignal };
 
-/** One cron tick: flags -> claim -> pre-flight -> one step, with the generic error policy. */
-export async function runTick(deps: Deps, opts: TickOptions): Promise<TickResult> {
-  const flags = await deps.flags();
-  if (!flags || !flags.enabled) return { ok: true, idle: "disabled" };
-  const job = await deps.claim(opts.tickId, opts.scan);
-  if (!job) return { ok: true, idle: "empty" };
-  const tick = new Tick(deps, job, flags, opts.signal);
+/** One job's outcome within a tick — the same shape `TickResult` always carried for a
+ *  real (non-idle) result, now nested under `jobs[]` since a tick can advance several. */
+export type JobResult = { ok: boolean; scan: string; from: JobStatus; to: JobStatus; detail?: string; error?: string };
+
+export type TickSummary = { ok: boolean; idle?: "disabled" | "empty"; jobs: JobResult[] };
+
+/** Claim -> pre-flight -> one step for ONE job, with the generic error policy. Never
+ *  throws: every path (success, guard wait, or an exception outside a paid POST) returns
+ *  a JobResult, so one job's error can never stop the tick's loop (item 1). */
+async function runOneJob(deps: Deps, job: Job, flags: Flags, signal: AbortSignal | undefined, deadlineMs: number): Promise<JobResult> {
+  const tick = new Tick(deps, job, flags, signal, deadlineMs);
   try {
     const pre = await tick.preflight();
-    if (pre) return pre;
-    return await tick.advance();
+    const r = pre ?? (await tick.advance());
+    return { ok: r.ok, scan: job.scan_id, from: r.from ?? job.status, to: r.to ?? job.status, detail: r.detail, error: r.error };
   } catch (e) {
     // Only reached by errors OUTSIDE a paid POST (or a definite rejection, whose ledger
     // entry was already rolled back): retrying here never buys anything twice.
@@ -561,4 +660,53 @@ export async function runTick(deps: Deps, opts: TickOptions): Promise<TickResult
     await deps.breadcrumb(job.handle, `carscan-worker id=${job.scan_id} ${job.status} ERROR attempt=${attempts} retry=${backoff}s ${msg.slice(0, 120)}`);
     return { ok: false, scan: job.scan_id, from: job.status, to: job.status, error: msg };
   }
+}
+
+/** One cron tick: flags -> claim (-> pre-flight -> one step) REPEATED, until claim() has
+ *  nothing left, the soft work budget is spent, or MAX_JOBS_PER_TICK is hit (item 1 —
+ *  "launch sizing": one job per tick meant a burst of N scans made the Nth wait ~N * 30s).
+ *
+ *  `flags` is read ONCE and shared across every job this tick advances — see paidSubmit's
+ *  kill-switch re-read (item 6) for why a stale snapshot here is still safe.
+ *
+ *  `seen` guards against re-claiming the SAME job twice in one tick: most transitions set
+ *  `next_run_at` into the future (a real wait), but `queued->fetching` does not (it never
+ *  needed to when only one job moved per tick) — without `seen`, an otherwise-idle tick
+ *  with just one due job would claim it, advance it, and immediately re-claim the same
+ *  row again since it's still nominally "due", cascading it through several states in one
+ *  tick instead of giving OTHER due jobs their turn first. Hitting an already-seen job
+ *  means claim() has nothing distinct left to offer this tick; its lease is released
+ *  (untouched otherwise) and the loop stops, exactly matching pre-v3 single-job-per-tick
+ *  behaviour for the "only one job in the whole queue" case. */
+export async function runTick(deps: Deps, opts: TickOptions): Promise<TickSummary> {
+  const flags = await deps.flags();
+  if (!flags || !flags.enabled) return { ok: true, idle: "disabled", jobs: [] };
+  const start = deps.now().getTime();
+  const deadlineMs = start + TICK_WORK_BUDGET_MS;
+  const jobs: JobResult[] = [];
+  const seen = new Set<string>();
+  let allOk = true;
+  for (let i = 0; i < MAX_JOBS_PER_TICK; i++) {
+    if (deps.now().getTime() - start > TICK_WORK_BUDGET_MS) break; // soft budget: jobs may remain for next tick
+    const job = await deps.claim(opts.tickId, opts.scan);
+    if (!job) break;
+    if (seen.has(job.scan_id)) {
+      await deps.updateJob(job.scan_id, { lease_until: null, locked_by: null });
+      break;
+    }
+    seen.add(job.scan_id);
+    const r = await runOneJob(deps, job, flags, opts.signal, deadlineMs);
+    jobs.push(r);
+    if (!r.ok) allOk = false;
+    if (opts.scan) break; // a pinned tick (runbook smoke test) advances only that one job, one step
+  }
+  if (jobs.length === 0) return { ok: true, idle: "empty", jobs: [] };
+  // Item 9: a tick summary breadcrumb, but only when the tick actually did the NEW thing
+  // (advanced more than one distinct job) — a single-job tick stays exactly as observable
+  // as before, preserving the "silent idle polls" invariant (a poll is a `wait`, not a
+  // breadcrumbed transition; see Tick.poll / the "breadcrumbs: one per transition" tests).
+  if (jobs.length > 1) {
+    await deps.breadcrumb(null, `carscan-worker tick jobs=${jobs.length} ms=${deps.now().getTime() - start}`);
+  }
+  return { ok: allOk, jobs };
 }

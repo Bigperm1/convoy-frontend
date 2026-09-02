@@ -28,11 +28,9 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { runTick } from "./worker.ts";
+import { runTick, TICK_BUDGET_MS } from "./worker.ts";
 import { TripoClient } from "./tripo.ts";
 import { makeDeps } from "./deps.ts";
-
-const TICK_BUDGET_MS = 130_000; // under the 150 s free-plan wall clock (docs: functions/limits)
 
 function constantTimeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -41,26 +39,21 @@ function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** Secrets: Deno.env first, then Vault via the service-role RPC `vault_secret`.
- *  SCAN_WORKER_KEY is Vault-FIRST (the cron caller reads the same Vault row, so the two
- *  can never drift); TRIPO_API_KEY is env-first with Vault as the fallback. Cached for
- *  the life of the isolate. */
-let secretCache: { workerKey: string; tripoKey: string } | null = null;
-async function resolveSecrets(supa: SupabaseClient): Promise<{ workerKey: string; tripoKey: string }> {
-  if (secretCache) return secretCache;
-  const vault = async (name: string): Promise<string> => {
-    try {
-      const { data, error } = await supa.rpc("vault_secret", { p_name: name } as never);
-      if (error || typeof data !== "string") return "";
-      return data;
-    } catch {
-      return "";
-    }
-  };
-  const workerKey = (await vault("scan_worker_key")) || (Deno.env.get("SCAN_WORKER_KEY") ?? "");
-  const tripoKey = (Deno.env.get("TRIPO_API_KEY") ?? "") || (await vault("tripo_api_key"));
-  if (workerKey && tripoKey) secretCache = { workerKey, tripoKey };
-  return { workerKey, tripoKey };
+type SecretSource = "vault" | "env" | "missing";
+
+/** One Vault RPC read, `.trim()`'d (item 8: a pasted secret with trailing whitespace must
+ *  not silently mismatch `constantTimeEqual`). No isolate-lifetime cache — a rotated
+ *  secret (Vault `vault.update_secret` or a `supabase secrets set`) must take effect on
+ *  the very next tick, not require a redeploy to bust a stale cache. One extra RPC per
+ *  15 s tick is nothing. */
+async function readVaultSecret(supa: SupabaseClient, name: string): Promise<string> {
+  try {
+    const { data, error } = await supa.rpc("vault_secret", { p_name: name });
+    if (error || typeof data !== "string") return "";
+    return data.trim();
+  } catch {
+    return "";
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -71,14 +64,39 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ ok: false, error: "misconfigured" }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
   const supa: SupabaseClient = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
-  const { workerKey, tripoKey } = await resolveSecrets(supa);
-  if (!workerKey || !tripoKey) {
-    // Refuse to claim anything when misconfigured — fail closed before touching a job.
+  const tickId = `${new Date().toISOString()}#${crypto.randomUUID().slice(0, 8)}`;
+  const log = (m: string) => console.log(`scan-worker ${tickId} ${m}`);
+
+  // SCAN_WORKER_KEY is Vault-FIRST (the cron caller reads the same Vault row, so the two
+  // can never drift); Deno.env is the fallback. Resolved and compared BEFORE touching the
+  // Tripo key at all — the auth check needs only this one secret, so an unauthenticated
+  // caller never causes a Tripo-key lookup.
+  const vaultWorkerKey = await readVaultSecret(supa, "scan_worker_key");
+  const envWorkerKey = (Deno.env.get("SCAN_WORKER_KEY") ?? "").trim();
+  const workerKey = vaultWorkerKey || envWorkerKey;
+  const workerKeySrc: SecretSource = vaultWorkerKey ? "vault" : envWorkerKey ? "env" : "missing";
+  log(`secret worker_key resolved=${workerKeySrc}`); // never the value
+  if (!workerKey) {
+    log("misconfigured: worker_key missing (checked vault:scan_worker_key, env:SCAN_WORKER_KEY)");
     return new Response(JSON.stringify({ ok: false, error: "misconfigured" }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
   if (!constantTimeEqual(req.headers.get("x-worker-key") ?? "", workerKey)) {
     return new Response("unauthorized", { status: 401 });
   }
+
+  // TRIPO_API_KEY is env-FIRST (set with `supabase secrets set --env-file`), Vault as
+  // fallback. Resolved only now that the caller is authenticated.
+  const envTripoKey = (Deno.env.get("TRIPO_API_KEY") ?? "").trim();
+  const vaultTripoKey = envTripoKey ? "" : await readVaultSecret(supa, "tripo_api_key");
+  const tripoKey = envTripoKey || vaultTripoKey;
+  const tripoKeySrc: SecretSource = envTripoKey ? "env" : vaultTripoKey ? "vault" : "missing";
+  log(`secret tripo_key resolved=${tripoKeySrc}`); // never the value
+  if (!tripoKey) {
+    // Refuse to claim anything when misconfigured — fail closed before touching a job.
+    log("misconfigured: tripo_key missing (checked env:TRIPO_API_KEY, vault:tripo_api_key)");
+    return new Response(JSON.stringify({ ok: false, error: "misconfigured" }), { status: 500, headers: { "Content-Type": "application/json" } });
+  }
+
   let body: { scan?: string; source?: string } = {};
   try {
     body = await req.json();
@@ -89,8 +107,6 @@ Deno.serve(async (req: Request) => {
 
   const controller = new AbortController();
   const budget = setTimeout(() => controller.abort(new Error("tick budget exceeded")), TICK_BUDGET_MS);
-  const tickId = `${new Date().toISOString()}#${crypto.randomUUID().slice(0, 8)}`;
-  const log = (m: string) => console.log(`scan-worker ${tickId} ${m}`);
   try {
     const tripo = new TripoClient({ apiKey: tripoKey, baseUrl: Deno.env.get("TRIPO_BASE_URL") ?? undefined, signal: controller.signal });
     const result = await runTick(makeDeps(supa, supabaseUrl, tripo, log), { tickId, scan, signal: controller.signal });

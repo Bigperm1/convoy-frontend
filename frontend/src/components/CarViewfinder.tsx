@@ -68,6 +68,21 @@ export default function CarViewfinder({ shot, index, total, onCapture, onCancel 
   const camRef = useRef<any>(null);
   const [ready, setReady] = useState(false);          // preview mounted
   const [busy, setBusy] = useState(false);            // shutter in flight
+  // ── FULL-SENSOR CAPTURE (2026-09-01) ─────────────────────────────────────────
+  // Without an explicit pictureSize, expo-camera shoots at the PREVIEW size — the first
+  // tester scan (enablewhore-20260901-185736) came back 886×1920, the car ~300 px wide,
+  // against 4032-wide frames from the system-camera path Jeff's own scan used. The
+  // reconstruction reads detail; a fifth of the pixels is a fifth of the car. Ask the
+  // device for its sizes once the camera is up and take the largest.
+  const [pictureSize, setPictureSize] = useState<string | undefined>(undefined);
+  const pickLargestSize = useCallback(async () => {
+    try {
+      const sizes: string[] = (await camRef.current?.getAvailablePictureSizesAsync?.()) ?? [];
+      const area = (v: string) => { const [w, h] = v.toLowerCase().split("x").map(Number); return Number.isFinite(w * h) ? w * h : 0; };
+      const best = sizes.filter((v) => area(v) > 0).sort((a, b) => area(b) - area(a))[0];
+      if (best) setPictureSize(best);
+    } catch {}
+  }, []);
   const [level, setLevel] = useState<LevelReading | null>(null);
 
   /** Last SMOOTHED unit vector — both the EMA state and the motion reference. */
@@ -145,7 +160,8 @@ export default function CarViewfinder({ shot, index, total, onCapture, onCancel 
         style={StyleSheet.absoluteFill}
         facing="back"
         animateShutter={false}
-        onCameraReady={() => setReady(true)}
+        onCameraReady={() => { setReady(true); void pickLargestSize(); }}
+        pictureSize={pictureSize}
       />
 
       {/* ── the guide overlay ── */}

@@ -45,6 +45,26 @@ at the time of writing, not recalled. Re-verify before acting — this file ages
 
 ## 1 · Shipped state — VERIFIED 2026-08-27
 
+### 2026-09-01 — watchdog kills fixed: per-tick state moved off layer properties (OTA `586e1273`, commit `26b21f4`)
+- **What broke:** Jeff's 9 am drive relaunched five times in four minutes at 90–113 km/h. Two `.ips`
+  logs: `0x8BADF00D` scene-update watchdog (main thread ≥10 s inside `StyleManager.updateLayer →
+  getStyleLayerProperties`) and a 5 s terminate-hang in `MapboxCommon CleanupManager`. Same stall
+  under 10 s = "Show map froze phone + CarPlay".
+- **Why:** `@rnmapbox` re-applies EVERY layer property and does a full main-thread read-modify-write
+  on any `style` content change (no diff). The ribbon pushed `lineTrimOffset` + a gap-baked
+  congestion gradient at 12 Hz on three layers per surface; the self-car marker pushed
+  `modelRotation`/`iconRotate` every eased frame (2 synchronous RMWs each).
+- **Fix:** `src/routeRibbon.ts` — the ribbon is cut GEOMETRY with per-feature colour/alpha, all
+  ribbon layers static; marker heading rides its feature (`['get','rot']`). Rule in CLAUDE.md →
+  Map rendering. `heatProbe` `main-gap` now reports a ≥2 s stall the moment it ends.
+- **Verified:** 12-agent adversarial review (all findings applied); standalone math; simulator
+  Release build navigating a real Hwy 1 track at 100 km/h through bends — 8 s / 1 ms stack sample:
+  `getStyleLayerProperties` 0, `resolveUpdatedLayerProperties` 0, `addStylesAndUpdate` 0 with the
+  map fully active; dtP95 17–23 ms; fade renders as one continuous ramp. Key probe
+  `KEY_PRESENT=1` both platforms.
+- **Field validation owed (07-31 rule):** one real drive on CarPlay — the head unit cannot be
+  driven on the bench (no entitlement in local builds); it runs the same `CarMapView` path.
+
 | | value |
 |---|---|
 | **Build** | **74** (iOS build number 74 · Android versionCode 74) |

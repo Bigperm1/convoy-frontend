@@ -5,6 +5,11 @@
 > phone receipt 03:47 PT — receipts in `SCAN-PIPELINE.md`). The "What is already true"
 > section and the HYPOTHESIS list are the 2026-09-01 pre-deploy snapshot, kept for the
 > next environment; nothing in them is still open.
+>
+> **v3 (launch sizing) LIVE 2026-09-02 08:15 PT:** scan-worker version 4 + register-scan v3 +
+> cron 15 s (`ops/scan_worker_cron_15s.sql`) + migrations …001000/…002000/…003000 applied
+> (switch OFF → supervised slot-path run `qa-20260902-081500` done in 5 m 46 s → ON) + app
+> OTA `0a6ea103…`. Backend `9b5bda2` on Render. `require_slot` = FALSE until the OTA is picked up.
 
 Project `pgtbjiszjglznjagolse`. Everything below is run by the maintainer after Jeff's
 go; nothing in this repo deploys itself. Order matters: the kill switch stays OFF until

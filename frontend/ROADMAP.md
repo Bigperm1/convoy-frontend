@@ -59,6 +59,13 @@ lands when they next open the Garage. **Switch left ON.** Off switch:
 `update public.pipeline_flags set enabled=false, paused_reason='manual', updated_at=now() where id=1;`
 Docs: `SCAN-PIPELINE.md` (status + chain), `supabase/SCAN-WORKER-DEPLOY.md` (one-paste runbook).
 
+**v3 — launch sizing, LIVE 08:15 PT the same day** (commits `afcb2e6` `2a77d16` `8e1cd8e`; backend
+`9b5bda2`): 25 cars per tick, 15 s heartbeat, Tripo pool/rate-limit aware, no self-disable on
+empty credits, **server-issued scan slots** bound to the signed-in account (RevenueCat is NOT
+in the app yet — `SCAN_REQUIRE_TIER` on Render is the enforcement switch, 0 in beta), caps
+6000/day. Supervised slot-path run: 5 m 46 s, 50 credits, 0 errors. App OTA `0a6ea103…`.
+Open: flip `require_slot` after pickup; Jeff pre-buys ~$170 Tripo credits + raises the alert.
+
 ### 2026-09-01 — watchdog kills fixed: per-tick state moved off layer properties (OTA `586e1273`, commit `26b21f4`)
 - **What broke:** Jeff's 9 am drive relaunched five times in four minutes at 90–113 km/h. Two `.ips`
   logs: `0x8BADF00D` scene-update watchdog (main thread ≥10 s inside `StyleManager.updateLayer →

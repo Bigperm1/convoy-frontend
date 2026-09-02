@@ -19,6 +19,13 @@ re-downloaded and re-inspected with `tools/glb-pipeline/glbinfo.py` — twin 15,
 (now ONE human paste — `TRIPO_API_KEY`; the worker reads `scan_worker_key` from Vault itself).
 "By hand" below is the fallback and the reference the worker was measured against.
 
+**v3 — launch sizing, LIVE 2026-09-02 08:15 PT** (`scan-worker` version 4, cron 15 s, caps 6000/day):
+supervised run `qa-20260902-081500` through the NEW server-issued-slot path — slot consumed
+08:15:20, generate bought 08:15:35, twin 08:19:24, hero 08:20:53, `done` 50 credits, 0 errors,
+**5 min 46 s** (polls every 30 s instead of 60). Public bytes re-hashed == ledger. App OTA
+group `0a6ea103…` makes the phone ask the backend for its slot (`POST /api/scan/slot`);
+`pipeline_flags.require_slot` stays FALSE until testers are on that JS, then flips.
+
 Jeff, 2026-09-01: *"this pipeline is not suppose to have any manual input, it is suppose
 to be all automatic from the photos sent to the delivery of the 3d image and 2d twin back
 to the device it was sent from."*

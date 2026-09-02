@@ -10,9 +10,12 @@
 // by ONE state (worker.ts) and returns a JSON summary that lands in
 // cron.job_run_details / net._http_response for free.
 //
-// SECRETS (Deno.env only — nothing in this repo):
-//   SCAN_WORKER_KEY   shared with Vault 'scan_worker_key' for the cron caller
-//   TRIPO_API_KEY     tsk_… (pay-as-you-go; 50 credits = $0.50 per car)
+// SECRETS (nothing in this repo). Resolved by resolveSecrets() below:
+//   SCAN_WORKER_KEY   Vault 'scan_worker_key' FIRST (the cron caller reads the same row),
+//                     Deno.env as fallback — so the two can never drift (Jeff 2026-09-01:
+//                     copying the key between two dashboard pages was the confusing step)
+//   TRIPO_API_KEY     Deno.env first (set with `supabase secrets set --env-file`), then
+//                     Vault 'tripo_api_key'. tsk_… pay-as-you-go; 50 credits = $0.50 per car
 //   TRIPO_BASE_URL    optional; the dry-run points it at the local stub
 //   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are injected by the platform. The service
 //   role reads the private `car-scans` bucket and writes the public `models` bucket
@@ -24,6 +27,7 @@
 // The real I/O layer lives in deps.ts (unit-tested); this file only wires it up.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { runTick } from "./worker.ts";
 import { TripoClient } from "./tripo.ts";
 import { makeDeps } from "./deps.ts";
@@ -37,13 +41,38 @@ function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/** Secrets: Deno.env first, then Vault via the service-role RPC `vault_secret`.
+ *  SCAN_WORKER_KEY is Vault-FIRST (the cron caller reads the same Vault row, so the two
+ *  can never drift); TRIPO_API_KEY is env-first with Vault as the fallback. Cached for
+ *  the life of the isolate. */
+let secretCache: { workerKey: string; tripoKey: string } | null = null;
+async function resolveSecrets(supa: SupabaseClient): Promise<{ workerKey: string; tripoKey: string }> {
+  if (secretCache) return secretCache;
+  const vault = async (name: string): Promise<string> => {
+    try {
+      const { data, error } = await supa.rpc("vault_secret", { p_name: name } as never);
+      if (error || typeof data !== "string") return "";
+      return data;
+    } catch {
+      return "";
+    }
+  };
+  const workerKey = (await vault("scan_worker_key")) || (Deno.env.get("SCAN_WORKER_KEY") ?? "");
+  const tripoKey = (Deno.env.get("TRIPO_API_KEY") ?? "") || (await vault("tripo_api_key"));
+  if (workerKey && tripoKey) secretCache = { workerKey, tripoKey };
+  return { workerKey, tripoKey };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return new Response("POST only", { status: 405 });
-  const workerKey = Deno.env.get("SCAN_WORKER_KEY") ?? "";
-  const tripoKey = Deno.env.get("TRIPO_API_KEY") ?? "";
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  if (!workerKey || !tripoKey || !supabaseUrl || !serviceKey) {
+  if (!supabaseUrl || !serviceKey) {
+    return new Response(JSON.stringify({ ok: false, error: "misconfigured" }), { status: 500, headers: { "Content-Type": "application/json" } });
+  }
+  const supa: SupabaseClient = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+  const { workerKey, tripoKey } = await resolveSecrets(supa);
+  if (!workerKey || !tripoKey) {
     // Refuse to claim anything when misconfigured — fail closed before touching a job.
     return new Response(JSON.stringify({ ok: false, error: "misconfigured" }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
@@ -63,7 +92,6 @@ Deno.serve(async (req: Request) => {
   const tickId = `${new Date().toISOString()}#${crypto.randomUUID().slice(0, 8)}`;
   const log = (m: string) => console.log(`scan-worker ${tickId} ${m}`);
   try {
-    const supa = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
     const tripo = new TripoClient({ apiKey: tripoKey, baseUrl: Deno.env.get("TRIPO_BASE_URL") ?? undefined, signal: controller.signal });
     const result = await runTick(makeDeps(supa, supabaseUrl, tripo, log), { tickId, scan, signal: controller.signal });
     return new Response(JSON.stringify({ tick: tickId, source: body?.source ?? "http", ...result }), { headers: { "Content-Type": "application/json" } });

@@ -56,18 +56,30 @@ select vault.create_secret('<openssl rand -hex 32>', 'scan_worker_key');
 select name, created_at from vault.secrets order by name;   -- expect the three rows
 ```
 
-Keep the `scan_worker_key` value for step 2 (it must match `SCAN_WORKER_KEY` exactly).
+You do NOT need to copy `scan_worker_key` anywhere: the worker reads that same Vault row
+itself through `public.vault_secret()` (migration `20260902000200_vault_secret.sql`,
+service-role only), so the cron caller and the worker can never drift. (2026-09-01: the
+original "copy it from the SQL editor into Edge Function Secrets" step was the one Jeff
+called confusing — removed.)
 
-## 2. Edge-function secrets
+## 2. Edge-function secret — ONE paste: `TRIPO_API_KEY`
 
+Dashboard: **Edge Functions → Secrets → Add new secret**, name `TRIPO_API_KEY`, value
+`tsk_…` (Tripo account → API keys). That is the only secret a human enters. Names must
+not start with `SUPABASE_`. (`SCAN_WORKER_KEY` as an edge secret is optional — it is only
+the fallback if the Vault read fails; the worker also accepts Vault `tripo_api_key`.)
+
+CLI alternative (needs `supabase login`, which opens the DEFAULT browser — Jeff wants
+Chrome, so prefer the dashboard):
 ```bash
 cp supabase/.env.local.example supabase/.env.local     # gitignored (checked in step 0)
-# fill TRIPO_API_KEY=tsk_… and SCAN_WORKER_KEY=<same hex as the Vault value>; leave TRIPO_BASE_URL empty
+# fill TRIPO_API_KEY=tsk_… only; leave SCAN_WORKER_KEY empty and TRIPO_BASE_URL empty
 supabase secrets set --env-file supabase/.env.local --project-ref pgtbjiszjglznjagolse
-supabase secrets list --project-ref pgtbjiszjglznjagolse   # names only: TRIPO_API_KEY, SCAN_WORKER_KEY
+supabase secrets list --project-ref pgtbjiszjglznjagolse   # names only
 ```
 
-Dashboard alternative: Edge Functions → Secrets. Names must not start with `SUPABASE_`.
+Proof the secrets resolve (no key in the request): the smoke POST in step 5 answers
+`401 unauthorized` — NOT `{"error":"misconfigured"}` — once both are readable.
 
 ## 3. Deploy the function (verify_jwt stays true)
 

@@ -1,0 +1,10 @@
+# Supabase CLI project config (minimal). The project itself is pgtbjiszjglznjagolse;
+# link with `supabase link --project-ref pgtbjiszjglznjagolse` before deploying.
+
+project_id = "pgtbjiszjglznjagolse"
+
+# scan-worker is called by pg_cron with the anon JWT + x-worker-key. verify_jwt stays
+# true so the gateway rejects anything without a valid project JWT before our code runs.
+[functions.scan-worker]
+verify_jwt = true
+entrypoint = "./functions/scan-worker/index.ts"

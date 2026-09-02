@@ -1,0 +1,19 @@
+{
+  "imports": {
+    "pngjs": "npm:pngjs@7.0.0",
+    "jpeg-js": "npm:jpeg-js@0.4.4",
+    "@supabase/supabase-js": "jsr:@supabase/supabase-js@2"
+  },
+  "nodeModulesDir": "none",
+  "lint": {
+    "rules": { "tags": ["recommended"] }
+  },
+  "fmt": {
+    "lineWidth": 160
+  },
+  "tasks": {
+    "check": "deno check index.ts dryrun.ts",
+    "lint": "deno lint",
+    "test": "deno test --allow-read --allow-env --allow-run=python3"
+  }
+}

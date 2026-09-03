@@ -50,6 +50,7 @@
 import { File } from "expo-file-system";
 import { supabase, SUPABASE_ENABLED, SUPABASE_ANON_KEY } from "./supabase";
 import { api } from "./api";
+import { getSettings, updateSettings } from "./settings";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
 
 export const SCAN_BUCKET = "car-scans";
@@ -537,4 +538,27 @@ export async function uploadScan(
       + (firstError ? ` err=${firstError.slice(0, 120)}` : ""));
   } catch {}
   return { ok: failed.length === 0, scanId, uploaded, failed, error: firstError || undefined };
+}
+
+// ── Report the finished scan to the backend (2026-09-03) ────────────────────────────
+// Presence carries `scanId` only while the member is LIVE. The Crew / "Drive to a friend"
+// tiles are built from the backend roster, so an offline member's hero shot needs the
+// scan id on their PROFILE: PUT /auth/profile { car_scan_id } once per scan, remembered
+// in `carScanBackendId`. The write is only marked done when the backend ECHOES the id —
+// an older backend (pydantic ignores unknown fields, 200 OK) would otherwise look synced
+// forever. Callers: garage.tsx (the moment the scan lands) and map.tsx (every launch,
+// for scans that predate the field — Olaf's).
+export async function syncScanIdToBackend(scanId: string): Promise<boolean> {
+  if (!scanId) return false;
+  try {
+    if (getSettings().carScanBackendId === scanId) return true;
+    const { data } = await api.put("/auth/profile", { car_scan_id: scanId });
+    const echoed = data && typeof data === "object" && (data as any).car_scan_id === scanId;
+    if (echoed) await updateSettings({ carScanBackendId: scanId });
+    logEvent(`carscan-sync id=${scanId} ok=${echoed ? 1 : 0}`);
+    return !!echoed;
+  } catch (e: any) {
+    logEvent(`carscan-sync-fail id=${scanId} err=${String(e?.message ?? e).slice(0, 80)}`);
+    return false;
+  }
 }

@@ -175,6 +175,7 @@ carScanCelebrated?: boolean;
 // The scan whose hero SHOT (a JPEG of the Garage hero) has been captured + uploaded to
 // car-scans/<scanId>/hero.jpg — the Crew / friend tiles show it (2026-09-03).
 carScanHeroShotId?: string;
+carScanBackendId?: string;                       // the scan id last PUT to /auth/profile (car_scan_id) — see syncScanIdToBackend
 carScanId?: string;                              // the scan folder in the car-scans bucket
 carScanSubmittedAt?: string;                     // ISO, when Generate was tapped
 carScanConsentAt?: string;                       // ISO, when the disclaimer was accepted

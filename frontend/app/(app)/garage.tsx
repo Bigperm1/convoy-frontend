@@ -25,7 +25,7 @@ import { CandyCta } from '../../src/components/CandyCta';
 import { CANDY_RIM, CANDY_INK } from '../../src/components/ManeuverArrow';
 import { skin, type VisualTier } from '../../src/tierTheme';
 import { setSkinChoice } from '../../src/appSkin';
-import { checkScanReady, uploadScanHero } from '../../src/carScan';
+import { checkScanReady, syncScanIdToBackend, uploadScanHero } from '../../src/carScan';
 import { logEventReliable } from '../../src/crashBreadcrumb';
 import { LinearGradient } from 'expo-linear-gradient';
 import { resolveGRCKey, getVehicleModelUrl } from '../../src/vehicleAssets';
@@ -586,6 +586,9 @@ export default function GarageScreen() {
           // map.tsx and carStore subscribe to settings, so the car lands on every
           // surface in the same instant this Garage page updates.
           try { logEventReliable(`carscan-delivered id=${s.carScanId} map=1`); } catch {}
+          // Tell the backend, so the roster shows this car's twin / hero shot to members
+          // who are not live on presence (2026-09-03). Retries from map.tsx if it fails.
+          void syncScanIdToBackend(s.carScanId);
         }
       }
       // HEAL a pre-fix latch: an install that flipped ready while the map twin was

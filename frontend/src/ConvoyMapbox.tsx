@@ -2893,6 +2893,26 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // keep their EXISTING camera paths (the imperative fits + native follow) untouched.
   const lockReadyRef = useRef(false);
   lockReadyRef.current = readyRef.current && coldLockDone && followUser && !placesShown && headingUp;
+
+  // `cam-mode` receipt (2026-09-03). Rodrigo: "my phone compass was changing directions
+  // randomly, CarPlay was fine" on a 15-minute drive with CarPlay connected. heat-probe's
+  // `inst=` showed the PHONE SelfCarModel running ~2,400 rAF frames a minute and pushing the
+  // camera 0 times, every minute — the lockstep never drove the phone — and NOTHING on record
+  // said which gate above held it (view, follow, cold lock, places, ready). One row a minute,
+  // plus one on any change, so the next report can be read instead of guessed at.
+  const camModeLastRef = useRef("");
+  useEffect(() => {
+    const emit = (force: boolean) => {
+      const key = `view=${mapView} hu=${headingUp ? 1 : 0} foll=${followUser ? 1 : 0} lock=${coldLockDone ? 1 : 0} places=${placesShown ? 1 : 0} ready=${readyRef.current ? 1 : 0} lockstep=${lockReadyRef.current ? 1 : 0} nav=${navigationActive ? 1 : 0}`;
+      if (!force && key === camModeLastRef.current) return;
+      camModeLastRef.current = key;
+      try { logEvent(`cam-mode surf=phone ${key}`); } catch {}
+    };
+    emit(false);
+    const id = setInterval(() => emit(true), 60_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapView, headingUp, followUser, coldLockDone, placesShown, navigationActive]);
   // LIVE camera target, read through a STABLE ref. The rAF lockstep's step() closure
   // is frozen for the life of an ease and, during continuous driving, never restarts
   // (a new fix only updates anim.current, not the loop) — so a getCam that closed over

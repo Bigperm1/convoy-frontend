@@ -77,6 +77,7 @@ import { startNavBanner, stopNavBanner, updateNavBanner, swapNavRoute, isNavSess
 import { onCarNavStarted } from "../../src/carplay/carActions";
 import { PoliceBadgeIcon } from "../../src/components/MapControlIcons";
 import CompassNeedle from '../../src/components/CompassNeedle';
+import { syncScanIdToBackend } from '../../src/carScan';
 import { startHeatProbe, stopHeatProbe } from '../../src/heatProbe';
 import { useAccent, useAccentAlpha, useAppSkin } from "../../src/appSkin";
 
@@ -636,7 +637,7 @@ export default function MapScreen() {
   // tap. navRoster holds the active community's members so the "drive to a
   // friend" carousel can show offline members greyed out.
   const [navSearchOpen, setNavSearchOpen] = useState(false);
-  const [navRoster, setNavRoster] = useState<{ id: string; handle: string; car_color?: string; is_admin?: boolean }[]>([]);
+  const [navRoster, setNavRoster] = useState<{ id: string; handle: string; car_color?: string; is_admin?: boolean; car_scan_id?: string }[]>([]);
   // Layers control state — driven by the new bottom-right Layers FAB.
   // mapType:    "hybrid" = satellite + labels (default), "roadmap" = flat road view.
   // showTraffic / showTransit / showHazards toggle their respective overlays.
@@ -799,7 +800,12 @@ export default function MapScreen() {
         const myId = meRes?.data?.id;
         const roster = (cRes?.data?.members_users || [])
           .filter((mem: any) => mem && mem.id && mem.id !== myId)
-          .map((mem: any) => ({ id: mem.id, handle: mem.handle, car_color: mem.car_color, is_admin: mem.is_admin }));
+          .map((mem: any) => ({
+            id: mem.id, handle: mem.handle, car_color: mem.car_color, is_admin: mem.is_admin,
+            // Finished 3D scan id from the backend profile (2026-09-03) — the Crew / "Drive to a
+            // friend" tiles show the hero shot for OFFLINE members too, not only live peers.
+            car_scan_id: typeof mem.car_scan_id === "string" && mem.car_scan_id ? mem.car_scan_id : undefined,
+          }));
         if (!cancelled) setNavRoster(roster);
       } catch {
         if (!cancelled) setNavRoster([]);
@@ -836,6 +842,16 @@ export default function MapScreen() {
   }, [destination]);
 
   const [settings] = useSettings();
+
+  // A finished scan is reported to the backend ONCE (`car_scan_id` on the profile) so the
+  // Crew / "Drive to a friend" tiles can show the hero shot for OFFLINE members too. Runs
+  // here as well as in the Garage because Olaf's scan (2026-09-01) predates the field —
+  // his phone reports it on the next launch without him opening the Garage.
+  useEffect(() => {
+    if (settings.carScanStatus !== "ready" || !settings.carScanId) return;
+    if (settings.carScanBackendId === settings.carScanId) return;
+    void syncScanIdToBackend(settings.carScanId);
+  }, [settings.carScanStatus, settings.carScanId, settings.carScanBackendId]);
   // Saved places (Home/Work/custom). The time-of-day prediction now surfaces as
   // the PREDICTIVE row in the search screen (NavSearchScreen), not an on-map banner.
   const [savedPlaces] = useSavedPlaces();
@@ -4430,7 +4446,7 @@ export default function MapScreen() {
       isLive,
       lat: p?.lat,
       lng: p?.lng,
-      scanId: p?.scanId,
+      scanId: p?.scanId ?? m.car_scan_id,
     };
   });
 
@@ -4716,7 +4732,9 @@ export default function MapScreen() {
           offer={rerouteOffer ? { title: rerouteOffer.title, subtitle: rerouteOffer.subtitle } : null}
           onOfferAccept={acceptReroute}
           onOfferDismiss={declineReroute}
-          onShowMap={() => setCarListMapOverride(true)}
+          // Receipt (2026-09-03): Rodrigo's phone-compass report happened on this face and
+          // nothing on record said when (or whether) he had tapped Show map.
+          onShowMap={() => { setCarListMapOverride(true); try { logEvent("phone-tap:show-map"); } catch {} }}
           onEnd={endNav}
         />
       )}

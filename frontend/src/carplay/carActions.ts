@@ -33,7 +33,7 @@ import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
 import { toggleMapView2D, setMapView2D } from '../mapViewMode';
 import { getDepartureBearing, orderRoutesForward, routeInitialBearing } from '../departureBearing';
-import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_VIEW_2D, carIcon } from './carButtonIcons';
+import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_BLANK, CAR_ICON_VIEW_2D, carIcon } from './carButtonIcons';
 import { appSkinNow } from '../appSkin';
 import { toggleCarComms } from './carComms';
 import { logEvent } from '../crashBreadcrumb';
@@ -368,6 +368,10 @@ let _searchPresented = false;
 // only pop while the template is visible, and a driver who is moving is exactly when it
 // is not. Fixing it this way is correct under either mechanism.
 let _searchPushed = false;
+// "Where to?" saved-places list (iOS) — see getWhereToTemplate. Shares _searchPushed.
+let _whereTo: any | null = null;
+let _whereToShown: SavedPlace[] = [];
+let _whereToToSearch = false;
 
 // ── ANDROID AUTO SEARCH (2026-08-15) ────────────────────────────────────────────
 // FILMED: the driver taps Search on the AA action strip, the green "Search ✓" receipt
@@ -848,6 +852,89 @@ function getSearchTemplate(): any | null {
   return _searchTemplate;
 }
 
+// ── "WHERE TO?" — saved places WITHOUT the keyboard (iOS, 2026-09-03) ─────────────
+// Rodrigo: "the saved locations on CarPlay get blocked by the keyboard." CPSearchTemplate
+// always raises its keyboard, and on his head unit it covers the saved rows the empty
+// query lists. So the Search button now opens a plain CPListTemplate first — Home, Work,
+// custom places — with one last row that pushes the keyboard template for typing. A
+// driver with no saved places goes straight to the keyboard, as before. The list shares
+// the search flow's OWNERSHIP flag (_searchPushed): the motion watcher pops it to root
+// when the car moves, the Search-button recovery branch clears it, and a genuine
+// back-out releases it in onDidDisappear — the same rules that keep the keyboard
+// template from ever being double-pushed. Android Auto is untouched (its native search
+// template lists the saved rows as `items` already).
+const WHERE_TO_MAX = 8;
+function pushSearchTemplateIOS(): void {
+  const t = getSearchTemplate();
+  if (!t) { _whereToToSearch = false; return; }
+  armSearchAutoDismiss();                    // idempotent
+  _searchPushed = true;
+  try { getLib()?.CarPlay?.pushTemplate?.(t, true); } catch { _searchPushed = false; _whereToToSearch = false; }
+}
+function whereToSections() {
+  const rank = (k: SavedPlace['kind']) => (k === 'home' ? 0 : k === 'work' ? 1 : 2);
+  _whereToShown = getSavedPlaces()
+    .slice()
+    .filter((p) => !!p.label)
+    .sort((a, b) => rank(a.kind) - rank(b.kind) || b.createdAt - a.createdAt)
+    .slice(0, WHERE_TO_MAX);
+  const items: { text: string; detailText?: string; image: unknown }[] = _whereToShown.map((p) => ({
+    text: p.label,
+    detailText: p.address || undefined,
+    image: p.kind === 'home' ? CAR_ICON_HOME : p.kind === 'work' ? CAR_ICON_WORK : CAR_ICON_SAVED,
+  }));
+  // ONE section on purpose: onItemSelect hands back a single index, and one section keeps
+  // that index unambiguous. The keyboard row is always LAST.
+  items.push({ text: 'Search by name…', detailText: 'Type a place (while parked)', image: CAR_ICON_BLANK });
+  return [{ items }];
+}
+function getWhereToTemplate(): any | null {
+  const lib = getLib();
+  if (!lib?.ListTemplate) return null;
+  const sections = whereToSections();
+  if (_whereTo) {
+    // ONE instance for the session (like _searchTemplate): a second `new ListTemplate` with
+    // the same id would leave the first instance's listeners alive and fire both.
+    try { _whereTo.updateSections(sections); } catch {}
+    return _whereTo;
+  }
+  try {
+    _whereTo = new lib.ListTemplate({
+      id: 'convoy-car-whereto',
+      title: 'Where to?',
+      sections,
+      onItemSelect: async ({ index }: { index: number }) => {
+        if (index < _whereToShown.length) {
+          const p = _whereToShown[index];
+          if (!p) return;
+          const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
+          if (ok) popCarSearchDeferred();   // release + pop to root only when the pop really happens
+          return;
+        }
+        _whereToToSearch = true;            // about to be COVERED by the keyboard template — not a back-out
+        pushSearchTemplateIOS();
+      },
+      onDidAppear: () => { _searchPushed = true; _movingTicks = 0; },
+      onDidDisappear: () => {
+        if (_whereToToSearch) { _whereToToSearch = false; return; }
+        // Genuine back-out, or the motion / recovery pop: release ownership unless the
+        // keyboard template is the thing on screen.
+        if (!_searchPresented) _searchPushed = false;
+      },
+    });
+  } catch {
+    _whereTo = null;
+  }
+  return _whereTo;
+}
+function openWhereToIOS(): void {
+  const t = getWhereToTemplate();
+  if (!t || _whereToShown.length === 0) { pushSearchTemplateIOS(); return; }
+  armSearchAutoDismiss();                    // idempotent
+  _searchPushed = true;
+  try { getLib()?.CarPlay?.pushTemplate?.(t, true); } catch { _searchPushed = false; }
+}
+
 // ── nav-bar buttons shared by BOTH map roots (cold idle + warm) ─────────────
 // automaticallyHidesNavigationBar:false keeps them visible; text buttons need
 // no image assets on the head unit.
@@ -1195,11 +1282,8 @@ export function handleCarBarButton(id: string, src = "?"): void {
     // Prime the cache BEFORE the template appears — the first updatedSearchText can
     // arrive before an await would have resolved.
     void ensureSavedPlacesLoaded().catch(() => {});
-    const t = getSearchTemplate();
-    if (!t) return;
-    armSearchAutoDismiss();                    // idempotent
-    _searchPushed = true;
-    try { getLib()?.CarPlay?.pushTemplate?.(t, true); } catch { _searchPushed = false; }
+    // Saved places FIRST, keyboard second (2026-09-03, Rodrigo) — see getWhereToTemplate.
+    openWhereToIOS();
   }
 }
 

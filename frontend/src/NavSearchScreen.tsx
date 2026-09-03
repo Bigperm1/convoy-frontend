@@ -9,7 +9,7 @@
 //   └──────────────────────────────────────┘
 // Presentation-only: the caller (map.tsx) owns the destination + routing, so
 // this just reports a chosen place or a chosen live friend back up.
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -123,6 +123,10 @@ export default function NavSearchScreen({
   );
 
   const typing = text.trim().length > 0;
+  const savedChips = useMemo(() => {
+    const rank = (k: string) => (k === "home" ? 0 : k === "work" ? 1 : 2);
+    return saved.slice().filter((p) => !!p.label).sort((a, b) => rank(a.kind) - rank(b.kind) || b.createdAt - a.createdAt).slice(0, 8);
+  }, [saved]);
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -151,6 +155,37 @@ export default function NavSearchScreen({
             )}
           </View>
         </View>
+
+        {/* SAVED quick row — Rodrigo (2026-09-03): "saved locations in an accessible area on the
+            main screen … awkward to scroll down". Home, Work, then custom places, as chips under
+            the search field, so a saved place is ONE tap from the moment the sheet opens. The
+            full SAVED list further down stays (that is where swipe-to-delete lives). */}
+        {!typing && savedChips.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            style={styles.chipRow}
+            contentContainerStyle={styles.chipRowContent}
+          >
+            {savedChips.map((p) => (
+              <TouchableOpacity
+                key={"chip-" + p.id}
+                style={styles.chip}
+                onPress={() => pickSaved(p)}
+                activeOpacity={0.7}
+                accessibilityLabel={"Drive to " + p.label}
+              >
+                <Ionicons
+                  name={p.kind === "home" ? "home" : p.kind === "work" ? "briefcase" : "bookmark"}
+                  size={15}
+                  color={COLORS.brand}
+                />
+                <Text style={styles.chipText} numberOfLines={1}>{p.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
 
         <ScrollView keyboardShouldPersistTaps="handled" style={{ flex: 1 }} keyboardDismissMode="on-drag">
           {typing ? (
@@ -280,6 +315,15 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, fontSize: 16, color: "#F4F4F4", paddingVertical: 0 },
   section: { paddingTop: 14, paddingBottom: 6 },
+  chipRow: { flexGrow: 0, marginTop: 10 },
+  chipRowContent: { paddingHorizontal: 16, gap: 8 },
+  chip: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.08)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.14)",
+    maxWidth: 180,
+  },
+  chipText: { color: COLORS.text, fontSize: 14, fontWeight: "600" },
   sectionLabel: {
     color: COLORS.textDim,
     fontSize: 11,

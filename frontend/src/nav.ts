@@ -1793,10 +1793,20 @@ function speak(text: string) {
   _lastTextAt = now;
   _lastSpoke = now;
   ttsQueue.push(toSpeech(text));
+  // TTS RECEIPTS (2026-09-03, Jeff: "scout drops sentences, especially upon arrival").
+  // There was not one breadcrumb on the speech path; the arrive-speak row proves the
+  // line was REQUESTED, nothing proves it was HEARD. tts-say / tts-play / tts-done /
+  // tts-cut / tts-skip make each utterance's fate a one-query answer.
+  try { logEvent(`tts-say len=${text.length} q=${ttsQueue.length} playing=${ttsPlaying ? 1 : 0}`); } catch {}
   if (!ttsPlaying) drainTtsQueue();
 }
 
 function resetSpeakGate() {
+  // A non-empty queue or an in-flight clip at reset time IS the "dropped sentence":
+  // reliable row, because absence of this row is what will be interpreted.
+  if (ttsQueue.length > 0 || ttsPlaying) {
+    try { logEventReliable(`tts-cut queued=${ttsQueue.length} playing=${ttsPlaying ? 1 : 0}`); } catch {}
+  }
   _speakLock = false;
   _lastSpoke = 0;
   _lastText = "";
@@ -1861,7 +1871,10 @@ async function drainTtsQueue(): Promise<void> {
     const ms = parseInt(item.slice(PAUSE_TOKEN.length), 10) || 0;
     if (ms > 0) await new Promise((r) => setTimeout(r, ms));
   } else {
+    const t0 = Date.now();
+    try { logEvent(`tts-play len=${item.length} q=${ttsQueue.length}`); } catch {}
     try { await speakOne(item); } catch {}
+    try { logEvent(`tts-done ms=${Date.now() - t0} len=${item.length}`); } catch {}
   }
   drainTtsQueue();
 }
@@ -1937,12 +1950,12 @@ async function playBase64Audio(b64: string, mime: string): Promise<void> {
 async function _playClip(b64: string, mime: string): Promise<void> {
   // Mute-during-calls: skip Nova entirely while on a call (nav callouts, greeting & quips
   // all route through here) so she isn't loud over the call. Settings → Mute During Calls.
-  if (callSilence()) return;
+  if (callSilence()) { try { logEvent("tts-skip why=call"); } catch {} return; }
   // Voice slider at/near zero → the clip would be INAUDIBLE, but playing it
   // would still pause Apple Music + grab the .duckOthers session — the tester's
   // "random dips in my music but nothing plays in the app". Silence costs
   // nothing; never duck anyone's music for it.
-  if (getAudioVol(getSettings(), "volVoice") <= 0.02) return;
+  if (getAudioVol(getSettings(), "volVoice") <= 0.02) { try { logEvent("tts-skip why=vol0"); } catch {} return; }
   if (Platform.OS === "web") {
     return new Promise((resolve) => {
       try {

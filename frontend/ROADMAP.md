@@ -396,6 +396,27 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   behaviour change there yet), the red pill, and what to watch for (zoom-out after corners smooth not
   slow · map still at steady speed · car still flashing?). Told them the nose-into-corners fix is next.
   Context in the chat: Say Phin 07:38 "Uneventful drive, nothing to report" (first AA drive on 76).
+- 🎯 **"SCOUT DROPS SENTENCES AT ARRIVAL" — ROOT-CAUSED from the first tts receipts (Say Phin, 07:36:04, Android 76,
+  OTA `1fac6dc3`).** Three mechanisms in one arrival, all from rows:
+  1. `07:36:03.071 tts-say len=45` → `07:36:04.084 arrive-speak` → **no `tts-say` for the arrival line** — it was
+     **dropped by `speak()`'s 1.5 s rate gate** (`if (now - _lastSpoke < 1500) return;` — 1.013 s after the previous say).
+  2. `07:36:04.109 tts-cut queued=1 playing=1` — 25 ms later `onArrive → endNav → resetSpeakGate()` **emptied the queue**
+     (the queued 45-char line never played) while a clip was still in flight.
+  3. That in-flight clip: `07:35:54.100 tts-play len=20` → `07:36:09.080 tts-done ms=15018` — **a 20-character line took
+     15 s** (cold `/tts` network hop; the drive's first callout took 19.6 s: `tts-done ms=19644 len=43` at 07:19:10).
+  Fix (OTA-E, to stage): exempt the arrival line from the rate gate · let the arrival clip finish before the
+  teardown resets the queue/audio session (bounded wait) · prefetch the arrival phrase at the prepare callout the
+  way turn cues already are (`prefetchTts`). Verify with the same rows.
+- 🐛 **"v75" on Android — ROOT-CAUSED + FIXED `db8cc25` (rides the next OTA):** `Constants.nativeBuildVersion` was
+  REMOVED from expo-constants (SDK 54 CHANGELOG, PR #26329) → undefined on both platforms → the pill, the
+  update gate and the push roster all fell through to the **iOS** `buildNumber`. Android showed 75 on a 76
+  binary; the roster's `build_number` has been empty since the SDK bump. `src/buildNumber.ts` prefers
+  expo-application's `nativeBuildVersion`, then the running platform's own app.json number. Replied to Say Phin
+  08:18 (he is on 76 and already on `7abe6a20` — his pill's `03·0806` proves it).
+- ✅ **Android Auto on 76 (targetSdk 36) — FIELD-PASSED:** Say Phin 07:19:05 `aa-crumb root-mount/root-render/
+  template-set/surface-render`, canvas 213x107dp, drove to `arrive-speak` 07:36:04, no fatals. His words: "Uneventful
+  drive, nothing to report." `main-gap app=ba sinceApp=40823` at 07:19:48 shows the new discriminator working.
+- **`7abe6a20` pickups by 08:18:** Enablewhore (iOS), SPL_GRC (Android). Drive-1 verdict comes from their next drives.
 - **OTA-C (was: STAGED at HEAD, live code — the NEXT nav change to ship, one drive):** slew-limited camera
   goal in `pushCam` (`CAM_ZOOM_SLEW_PER_S 0.5`, `CAM_ZOOM_DEADBAND 0.25`, `CAM_PITCH_SLEW_PER_S 5`).
   Fixes the corner-zoom RELEASE cliff (Olaf's size flash) and the speed-jitter creep (Jeff's "notchy").

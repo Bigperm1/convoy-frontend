@@ -383,7 +383,14 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
      is on `1fac6dc3`. Say Phin has not driven on 76 yet (no AA rows at 1.27.0).
 - **OTA-A (LIVE at HEAD, ships first):** `9a01f45` TTS receipts — `tts-say/tts-play/tts-done/tts-cut/
   tts-skip`. Instrumentation only. Answers "scout drops sentences on arrival" with one query.
-- **OTA-C (STAGED at HEAD, live code — the NEXT nav change to ship, one drive):** slew-limited camera
+- ✅ **OTA-C SHIPPED 08:07 PDT on Jeff's "ship it" — group `7abe6a20-6529-4392-8c46-abbc9055ffbb`, runtime
+  1.27.0, both platforms, commit `6ed21a1`.** Proof: `ios KEY_PRESENT=1 openweathermap=2 neg_control=0` ·
+  `android KEY_PRESENT=1 openweathermap=2 neg_control=0`. Bundle = camera slew (live) + heading receipt on
+  draw-cmp (live) + abort-timer crumbs (live) + OTA-D nose lead-in (`NOSE_LEAD_IN_ENABLED=false`) + OTA-B
+  bearing reroute (`REROUTE_ORIGIN_BEARING=false`). **This is drive 1 (camera). Verdict = cam-probe on the
+  next drive: no second with |Δz| ≥ 0.5, `zg` never > 0.5 ahead of `z`. Then drive 2 = flip the nose flag,
+  drive 3 = flip the bearing flag — one per drive.**
+- **OTA-C (was: STAGED at HEAD, live code — the NEXT nav change to ship, one drive):** slew-limited camera
   goal in `pushCam` (`CAM_ZOOM_SLEW_PER_S 0.5`, `CAM_ZOOM_DEADBAND 0.25`, `CAM_PITCH_SLEW_PER_S 5`).
   Fixes the corner-zoom RELEASE cliff (Olaf's size flash) and the speed-jitter creep (Jeff's "notchy").
   Replay of Olaf's real trace: 1.93 → 0.49 max level/s, 0 seconds ≥0.5/s, rest 33% → 24%. Verify on

@@ -280,7 +280,12 @@ export async function startCarNav(dest: { lat: number; lng: number; label?: stri
       const _b0 = routeInitialBearing(ordered[0] as any);
       const _off = (typeof facing === 'number' && _b0 != null)
         ? Math.round(Math.abs(((_b0 - facing + 540) % 360) - 180)) : -1;
-      logEvent(`depart-rank src=car n=${routes.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off}`);
+      const _cands = routes.map((r: any) => {
+        const b = routeInitialBearing(r);
+        const d = r?.duration_in_traffic_s ?? r?.duration_s;
+        return `${b != null ? Math.round(b) : '?'}/${typeof d === 'number' ? Math.round(d) : '?'}s`;
+      }).join(',');
+      logEvent(`depart-rank src=car n=${routes.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} cands=${_cands}`);
     } catch {}
     const best: NavRoute = ordered[0];
     // Persist the hand-off BEFORE starting the banner so a crash between the two

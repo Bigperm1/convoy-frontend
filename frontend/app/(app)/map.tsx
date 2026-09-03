@@ -1293,7 +1293,15 @@ export default function MapScreen() {
         const _b0 = routeInitialBearing(sorted[0] as any);
         const _off = (typeof facing === 'number' && _b0 != null)
           ? Math.round(Math.abs(((_b0 - facing + 540) % 360) - 180)) : -1;
-        logEvent(`depart-rank n=${raw.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off}`);
+        // cands= every candidate's initial bearing/duration (2026-09-03: Jeff's 15:37 start chose
+        // off=155 with n=2 and Rodrigo's 12:45 off=147 — neither row could say whether a
+        // forward-departing option EXISTED and lost, or Mapbox returned none. Now it can.)
+        const _cands = raw.map((r: any) => {
+          const b = routeInitialBearing(r);
+          const d = r?.duration_in_traffic_s ?? r?.duration_s;
+          return `${b != null ? Math.round(b) : '?'}/${typeof d === 'number' ? Math.round(d) : '?'}s`;
+        }).join(',');
+        logEvent(`depart-rank n=${raw.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} cands=${_cands}`);
       } catch {}
       // Color-rank: green (fastest) → orange (mid) → red (slowest). Cast to
       // any so we can attach an extra `color` field without modifying the

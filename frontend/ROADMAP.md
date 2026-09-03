@@ -209,7 +209,36 @@ premium CarPlay glyphs
 
 ---
 
-## 4 · Build 75 — NOT CUT. What it must carry.
+## 4 · Build 75 — CUT 2026-09-02 (record below). Build 76 = widgets/watch + RevenueCat.
+
+### ✅ BUILD 75 — CUT 2026-09-02 22:44 PDT, BOTH PLATFORMS FINISHED (runtime 1.26.0 → **1.27.0**)
+- iOS `a65064e0` (profile `mapbox-ios`) finished 22:52 · Android `967a8402` (profile
+  `mapbox-android-store`, versionCode 75) finished 22:58 · both **v3.10.0 / build 75 /
+  runtime 1.27.0 / channel `mapbox-migration` / distribution store** (verified on the build
+  records). Commit `c86a336`. Parity: GOOD.
+- **Submits: `eas submit` is blocked for Claude by the auto-mode classifier (as on 74) —
+  Jeff runs both:** `eas submit --platform ios --id a65064e0-da9a-4dc7-b75d-a08f68ddcfb3 --profile production`
+  and `eas submit --platform android --id 967a8402-9724-48e5-a66d-cf2dfa919ab9 --profile production`
+  (Play `internal` track). Until they land, testers stay on 74.
+- **What 75 carries (over 74):** the CarPlay-first OTA-stranding fix (`CARPLAY-OTA-STRANDING.md`
+  B1/B2/B4 — the cold-CarPlay host wait never mints the RN host; placeholder + App Group
+  diagnosis + unbounded slow poll; ceiling 20 s → 90 s) · `HairpinSystem.getSharedDefaults/
+  removeSharedDefaults` + the `carplay-host-ceiling` next-launch report · `hairpin://` scheme
+  ADDED beside `convoy://` · Google Maps SDK dropped at prebuild · `eas.json` mapbox-ios image
+  `auto`. JS embedded (all OTA-able): `main-gap` full AppState sequence + `sinceApp=` ·
+  `cam-probe` (applied zoom/pitch vs target + speed, on change, ≤1/s) · `route-fetch-fail
+  why=` on the `fetchRoutes` catch · updates-log harvest oldest-first with entry timestamps.
+- **NOT in 75:** RevenueCat, widgets/watch native, `Screen.setMarker` patch, AA `isConnected`,
+  the OTA-able self-heal A1. **Widgets + watchOS = build 76** (no watch target exists; the
+  `WIDGETS.md` haptic spike must precede any watch code).
+- ⚠ **The runtime bump is a one-way door:** every OTA from now on targets 1.27.0 — a tester
+  still on 74 gets nothing further. Sequence: crew installs 75 → then OTAs. Do NOT flip
+  `require_slot` until the stranded/74 testers are on 75.
+- Pre-flight that earned the green first try: `yarn typecheck` · `expo export` both platforms ·
+  a **clean** local `expo prebuild --clean` + Release compile (the first local compile reused a
+  stale `ios/` from Aug 14 and proved nothing — check `CarSceneDelegate.swift` carries the new
+  constants before trusting BUILD SUCCEEDED).
+
 
 > ⛔ **SUPERSEDED 2026-09-02 — this section was written for build 74, which CUT and SHIPPED on
 > 2026-08-27** (v3.10.0, runtime 1.26.0, both platforms, Play internal complete + TestFlight).

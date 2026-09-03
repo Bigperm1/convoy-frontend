@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { nativeBuildNumber } from "../../src/buildNumber";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder, TextInput, AppState, Pressable } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -4791,9 +4792,7 @@ export default function MapScreen() {
                   : (ts ? `${p2(ts.getDate())}·${p2(ts.getHours())}${p2(ts.getMinutes())}` : '');
               } catch {}
               if (!rtv) rtv = (Constants.expoConfig as any)?.runtimeVersion || '';
-              const buildNo = Constants.nativeBuildVersion
-                || Constants.expoConfig?.ios?.buildNumber
-                || String((Constants.expoConfig as any)?.android?.versionCode ?? "");
+              const buildNo = nativeBuildNumber() ?? "";
               return (
                 // Tappable (tester request): opens the who's-on roster sheet —
                 // every live member with YOHB + Drive-to actions.

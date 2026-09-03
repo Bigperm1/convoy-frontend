@@ -15,6 +15,7 @@
 // Previously the app shell prompted for notifications the instant the user logged
 // in, which is exactly the "bombarded with the allows right when you login" report.
 import { Platform } from "react-native";
+import { nativeBuildNumber } from "./buildNumber";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
@@ -35,7 +36,7 @@ function deviceInfo() {
   let updateId: string | undefined;
   try {
     appVersion = (Constants as any)?.expoConfig?.version || undefined;
-    buildNumber = (Constants as any)?.nativeBuildVersion || undefined;
+    buildNumber = nativeBuildNumber();   // was Constants.nativeBuildVersion — removed in SDK 54, so the roster's build_number has been empty
   } catch {}
   try {
     // The RUNNING bundle, not the installed one — expo-updates is the only

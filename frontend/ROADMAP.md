@@ -220,6 +220,15 @@ premium CarPlay glyphs
   Jeff runs both:** `eas submit --platform ios --id a65064e0-da9a-4dc7-b75d-a08f68ddcfb3 --profile production`
   and `eas submit --platform android --id 967a8402-9724-48e5-a66d-cf2dfa919ab9 --profile production`
   (Play `internal` track). Until they land, testers stay on 74.
+- 🛑 **PLAY REJECTED THE ANDROID 75 AAB — "Target SDK of artifact is too low"** (submission
+  `4e8b305b`, 23:10 PDT). Google requires **API 36 (Android 16) for app updates since
+  2026-08-31**; build 74 was accepted on 08-27, four days before the deadline. Cause:
+  `app.json`'s `expo-build-properties` block **pinned `compileSdkVersion`/`targetSdkVersion` 35**
+  (EAS Gradle log for 75: compileSdk 35 / targetSdk 35). Fixed in `f01fa5b` → 36/36, build-tools
+  pin dropped, **Android re-cut as versionCode 76** at the SAME runtime 1.27.0 (iOS stays 75 —
+  runtime parity is the rule, not build numbers). iOS 75 → TestFlight succeeded (submission
+  `f34a5958`, processing at Apple). The EAS log lives behind a brotli-encoded `logsUrl` on the
+  GraphQL API — `submission:list` only says "Fastlane supply failed".
 - **What 75 carries (over 74):** the CarPlay-first OTA-stranding fix (`CARPLAY-OTA-STRANDING.md`
   B1/B2/B4 — the cold-CarPlay host wait never mints the RN host; placeholder + App Group
   diagnosis + unbounded slow poll; ceiling 20 s → 90 s) · `HairpinSystem.getSharedDefaults/

@@ -135,7 +135,7 @@ Cross-screen coordination uses lightweight module-level `Set<Listener>` buses in
 
 ### Map rendering
 
-`src/ConvoyMapbox.tsx` (`@rnmapbox/maps`) is the map engine on every platform — the 3D drive view, peers, hazards, and the route line all render through it. The legacy `react-native-maps` / `@vis.gl/react-google-maps` engine (`ConvoyMap.tsx` / `ConvoyMap.web.tsx`) was fully retired and those deps removed (RerouteCard's preview now uses a Mapbox static image; the `react-native-maps`/`expo-symbols`/`expo-background-fetch` dep + native Google-Maps-plugin removal is staged for the next native build).
+`src/ConvoyMapbox.tsx` (`@rnmapbox/maps`) is the map engine on every platform — the 3D drive view, peers, hazards, and the route line all render through it. The legacy `react-native-maps` / `@vis.gl/react-google-maps` engine (`ConvoyMap.tsx` / `ConvoyMap.web.tsx`) was fully retired and those deps removed (RerouteCard's preview now uses a Mapbox static image. The `react-native-maps` / `expo-symbols` / `expo-background-fetch` deps and the native Google-Maps plugin are **GONE** — removed in `9e9f63d` 2026-06-30 and already inside the build-74 binary; verified 2026-09-02: zero hits in `package.json`, `yarn.lock`, `node_modules` and `app.json`. The only remaining source hits are comments.)
 
 **⛔ Per-tick state never goes in a layer `style`/`filter` (2026-09-01).** `@rnmapbox` has no
 style diff: any CONTENT change to a layer's `style` prop is a full main-thread

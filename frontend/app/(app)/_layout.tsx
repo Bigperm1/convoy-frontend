@@ -3,7 +3,7 @@ import { useAppSkin, useAccent } from "../../src/appSkin";
 import { Tabs, useRouter, Redirect } from "expo-router";
 import * as Linking from "expo-linking";
 import { parseDeepLink, setIntent } from "../../src/deepLinks";
-import { logEvent } from "../../src/crashBreadcrumb";
+import { logEvent, logEventReliable } from "../../src/crashBreadcrumb";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
@@ -257,7 +257,10 @@ export default function AppLayout() {
       const intent = parseDeepLink(url);
       if (!intent) return;   // ordinary expo-router URLs fall through untouched
       setIntent(intent);
-      try { logEvent(`deeplink ${intent.kind}${intent.kind === "drive" ? ` to=${intent.to}` : ""}`); } catch {}
+      // logEventReliable, not logEvent (2026-09-03): Jeff ran convoy://go?to=home from Safari, the route
+      // preview came up, and this row never landed — so nothing counts widget/Shortcut use. A row whose
+      // ABSENCE gets interpreted must go through the reliable path (see logevent-drops-preclient-rows).
+      try { logEventReliable(`deeplink ${intent.kind}${intent.kind === "drive" ? ` to=${intent.to}` : ""}`); } catch {}
       // comms/transmit -> Comms; crew and drive both live on the map.
       router.push((intent.kind === "transmit" ? "/(app)/talk" : "/(app)/map") as any);
     };

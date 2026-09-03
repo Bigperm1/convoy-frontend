@@ -601,6 +601,12 @@ export default function MapScreen() {
     }
   };
   const [stopPickerOpen, setStopPickerOpen] = useState(false);
+  // PIN-FIRST ADD STOP (Jeff, 2026-09-03: "I would like the drop a pin first with the option to
+  // search"). Tapping Add stop no longer opens the search; it arms this mode — the Drive card
+  // drops away, a banner says "tap the map", and the next single tap on the map becomes the
+  // stop through the SAME setStops line the long-press and double-tap use. Search stays one tap
+  // away on the banner.
+  const [stopPinMode, setStopPinMode] = useState(false);
   // Keyed by the stop's COORDINATES, not its array index: Scout can reorder `stops`
   // while this modal is open (2026-07-29), and an index would then rename whichever
   // stop happened to land in that slot.
@@ -2753,6 +2759,7 @@ export default function MapScreen() {
               ? (p as any).marker as 'class' | 'arrow' : undefined,
             cls: typeof (p as any).cls === 'string' ? (p as any).cls : undefined,
             color: (p as any).activeColor || (p as any).carColor || undefined,
+            scanId: typeof (p as any).scanId === 'string' ? (p as any).scanId : undefined,
           })),
         'phone',
       );
@@ -4200,6 +4207,8 @@ export default function MapScreen() {
       clsSec: getClassPaint(settings).secondary,
       arrPri: settings.arrowPaint?.primary,
       arrSec: settings.arrowPaint?.secondary,
+      // Finished scan → peers draw the twin; Crew/friend tiles show the hero shot (2026-09-03).
+      scanId: settings.carScanStatus === 'ready' && settings.carScanId ? settings.carScanId : undefined,
       // Personal best — live max-of(sessionMaxSpeed, persisted) so peers see
       // an up-to-date number even before the throttled sync fires.
       topSpeed: Math.max(user.top_speed_record || 0, sessionMaxSpeed),
@@ -4392,6 +4401,7 @@ export default function MapScreen() {
         clsSec: (p as any).clsSec,
         arrPri: (p as any).arrPri,
         arrSec: (p as any).arrSec,
+        scanId: (p as any).scanId,
       } as Peer;
     });
     return Object.values(byId);
@@ -4420,6 +4430,7 @@ export default function MapScreen() {
       isLive,
       lat: p?.lat,
       lng: p?.lng,
+      scanId: p?.scanId,
     };
   });
 
@@ -4427,6 +4438,8 @@ export default function MapScreen() {
   // tab bar; the FABs + speedo + weather lift to clear whichever banner is up.
   //   • preview "Drive" banner → lift by its measured height
   //   • turn-by-turn step bar  → lift by the collapsed step-bar height
+  // Pin mode keeps the chrome LIFTED (its banner measures itself into previewBannerH below), so the
+  // speed chip and compass never land on the banner's buttons (sim, 2026-09-03).
   const bannerUp = !!destination && !!route && navMode === "preview" && !previewCollapsed;
   const navBarUp = navMode === "turn-by-turn" && tbt.active;
   // Coordinate of the upcoming corner (current step's end) for the locked turn
@@ -4625,6 +4638,14 @@ export default function MapScreen() {
         // fetch + Drive drawer with Start). Ignored mid-guidance.
         onMapPress={(c?: { lat: number; lng: number; sx?: number; sy?: number }) => {
           if (!c) return;
+          // Pin-first Add stop: one tap places the stop and leaves the mode.
+          if (stopPinMode) {
+            setStopPinMode(false);
+            lastMapTapRef.current = null;
+            try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+            setStops((prev) => [...prev, { lat: c.lat, lng: c.lng, label: `Stop ${prev.length + 1}` }]);
+            return;
+          }
           const now = Date.now();
           const last = lastMapTapRef.current;
           lastMapTapRef.current = { t: now, lat: c.lat, lng: c.lng, sx: c.sx, sy: c.sy };
@@ -4910,8 +4931,41 @@ export default function MapScreen() {
           turn-by-turn UI belongs and blocked it from showing. Driving off now
           auto-starts turn-by-turn (see navAutoStartedRef effect above). */}
 
+      {/* ===== Pin-first Add stop — tap the map, or search instead ===== */}
+      {stopPinMode && (
+        <View style={[styles.pinBanner, { bottom: TAB_BAR_H + navInset }]} pointerEvents="box-none" onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>
+          <View style={styles.pinBannerCard}>
+            <Ionicons name="location" size={20} color={accent} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.pinBannerTitle}>Tap the map to drop your stop</Text>
+              <Text style={styles.pinBannerSub} numberOfLines={1}>It goes on the way to {destination?.label || "your destination"}.</Text>
+            </View>
+          </View>
+          <View style={styles.pinBannerRow}>
+            <TouchableOpacity
+              style={[styles.pinBannerBtn, { borderColor: accent }]}
+              activeOpacity={0.85}
+              testID="pin-stop-search"
+              onPress={() => { Haptics.selectionAsync().catch(() => {}); setStopPinMode(false); setStopPickerOpen(true); }}
+            >
+              <Ionicons name="search" size={16} color={accent} />
+              <Text style={[styles.pinBannerBtnText, { color: accent }]}>Search instead</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.pinBannerBtn}
+              activeOpacity={0.85}
+              testID="pin-stop-cancel"
+              onPress={() => { Haptics.selectionAsync().catch(() => {}); setStopPinMode(false); }}
+            >
+              <Ionicons name="close" size={16} color="#F4F4F4" />
+              <Text style={styles.pinBannerBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* ===== Route preview banner — "Drive" header, trip summary, Start ===== */}
-      {destination && route && navMode === "preview" && !previewCollapsed && (() => {
+      {destination && route && navMode === "preview" && !previewCollapsed && !stopPinMode && (() => {
         const ar = activeRoute;
         // Is this destination already a saved place (within ~160 m)? Drives the
         // bookmark icon's filled/outline state in the header.
@@ -5059,7 +5113,7 @@ export default function MapScreen() {
                         handleSelectRoute(c.idx);
                       }
                     }}
-                    style={[styles.routeOptChip, active && styles.routeOptChipActive, active && { borderColor: accent, backgroundColor: accentTint12 }, c.disabled && styles.routeOptChipDisabled]}
+                    style={[styles.routeOptChip, active && styles.routeOptChipActive, active && { borderColor: accent }, c.disabled && styles.routeOptChipDisabled]}
                   >
                     <View style={[
                       styles.routeOptChipSwatch,
@@ -5102,7 +5156,7 @@ export default function MapScreen() {
                 style={[styles.bannerPill, styles.bannerPillBlue]}
                 activeOpacity={0.9}
                 testID="add-stops"
-                onPress={() => { Haptics.selectionAsync().catch(() => {}); setStopPickerOpen(true); }}
+                onPress={() => { Haptics.selectionAsync().catch(() => {}); setStopPinMode(true); }}
               >
                 <PillFill />
                 <Ionicons name="add-circle-outline" size={18} color="#fff" />
@@ -5881,7 +5935,8 @@ const isHazardVisible = (h: Hazard) => {
 function PillFill() {
   return (
     <LinearGradient
-      colors={["#5A6270", "#343A44", "#1E222A"]}
+      // Darker + translucent (Jeff, 2026-09-03: "(add stops/roundtrip) more darker transparency").
+      colors={["rgba(56,62,72,0.80)", "rgba(30,34,42,0.86)", "rgba(12,14,18,0.92)"]}
       locations={[0, 0.5, 1]}
       // 23 = bannerPill's borderRadius. Kept in step by hand because the pill's height
       // (46) sets it; if that height ever changes, this follows.
@@ -5938,8 +5993,11 @@ const styles = StyleSheet.create({
   sharedByRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: -2, marginBottom: 10 },
   sharedByText: { color: "#2DEC86", fontSize: 12.5, fontWeight: "700", flex: 1 },
   routeOptChips: { flexDirection: "row", gap: 8, marginBottom: 14 },
-  routeOptChip: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
-  routeOptChipActive: { borderColor: "#2DEC86", backgroundColor: "rgba(45,236,134,0.12)" },
+  // Darker, more translucent chips (Jeff, 2026-09-03: "make the buttons (best/scenic/ai) more darker
+  // transparency") — a smoked-glass fill instead of the faint white lift, so they read as
+  // controls over the map rather than as part of the card.
+  routeOptChip: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, backgroundColor: "rgba(6,8,12,0.58)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+  routeOptChipActive: { borderColor: "#2DEC86", backgroundColor: "rgba(6,8,12,0.70)" },
   routeOptChipDisabled: { opacity: 0.5 },
   routeOptChipSwatch: { width: 14, height: 14, borderRadius: 7 },
   routeOptChipLabel: { color: "#F4F4F4", fontSize: 13, fontWeight: "700" },
@@ -5954,6 +6012,14 @@ const styles = StyleSheet.create({
   bannerArriveTime: { color: "#F4F4F4", fontSize: 16, fontWeight: "600" },
   bannerDist: { color: "#F4F4F4", fontSize: 16, fontWeight: "600", marginTop: 14 },
   bannerBest: { color: "#30D158", fontSize: 14, fontWeight: "600", marginLeft: "auto" },
+  // Pin-first Add stop banner — sits where the Drive card was, leaves the map open above it.
+  pinBanner: { position: "absolute", left: 12, right: 12, gap: 10 },
+  pinBannerCard: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 16, backgroundColor: "rgba(6,8,12,0.82)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  pinBannerTitle: { color: "#F4F4F4", fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
+  pinBannerSub: { color: "#C7C7CC", fontSize: 12.5, marginTop: 2, fontWeight: "500" },
+  pinBannerRow: { flexDirection: "row", gap: 10 },
+  pinBannerBtn: { flex: 1, height: 44, borderRadius: 22, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: "rgba(6,8,12,0.82)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  pinBannerBtnText: { color: "#F4F4F4", fontSize: 14, fontWeight: "700" },
   bannerPills: { flexDirection: "row", gap: 10 },
   bannerPill: { flex: 1, height: 46, borderRadius: 23, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
   bannerPillStart: { backgroundColor: "#2DEC86" },

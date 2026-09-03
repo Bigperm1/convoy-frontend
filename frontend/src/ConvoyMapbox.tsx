@@ -44,6 +44,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getVehiclePngOrDefault, getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
 import { ClassSprite } from "./classLayers";
+import { scanMapUrl } from "./carScan";
 import { getPaintedArrowUri } from "./arrowModel";
 import type { WeatherKind } from "./weatherLayer";
 import { fetchMapboxCongestion, buildCongestionGradient, type CongestionLevel } from "./mapboxDirections";
@@ -81,6 +82,8 @@ export interface Peer {
   online_at?: string;
   // "parked" peers (full-mode, head unit disconnected) render dimmed.
   status?: "live" | "parked";
+  // Finished 3D scan id — this peer draws as their map twin (PeerScanModels), not a sprite.
+  scanId?: string;
 }
 
 export interface Hazard {
@@ -1121,7 +1124,7 @@ export function routeInitialBearing(line: { latitude: number; longitude: number 
   return ((Math.atan2(east, north) * 180) / Math.PI + 360) % 360;
 }
 
-type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer; status?: "live" | "parked"; cls?: string; clsPri?: string; clsSec?: string; arrow?: boolean; arrPri?: string; arrSec?: string };
+type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer; status?: "live" | "parked"; cls?: string; clsPri?: string; clsSec?: string; arrow?: boolean; arrPri?: string; arrSec?: string; scanId?: string };
 type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
 
 // ===== SelfCarModel =====
@@ -2005,6 +2008,72 @@ export function TopDownClassSnap({ color }: { color: string }) {
 // (carHeading − mapHeading), exactly like ConvoyMap. One code path on both
 // platforms (MarkerView is screen-space on each), which also sidesteps
 // react-native-maps' Android bitmap-capture sliver bug entirely.
+/**
+ * Scanned peers as 3D models — ONE source, ONE layer, all peers. Per-peer model id, rotation
+ * and scale ride the FEATURE (data-driven `model-id`, `['get','rot']`, `['get','scl']`), so the
+ * layer style is constant (the 0x8BADF00D rule) and the size is exact at any zoom
+ * (modelScaleForPoints — a zoom curve would pop at whole zooms). <Models> registers at mount
+ * only, so it is keyed on the set of scan ids: a new scanned peer remounts the registration.
+ * Shared by the phone map and the car surface (CarMapView passes its own zoom + point size).
+ */
+export function PeerScanModels({ peers, zoom, sizePt, onPress }: {
+  peers: { id: string; lat: number; lng: number; heading?: number; scanId: string; parked?: boolean }[];
+  zoom: number;
+  sizePt: number;
+  onPress?: (id: string) => void;
+}) {
+  const ids = Array.from(new Set(peers.map((p) => p.scanId))).sort();
+  const modelsKey = ids.join("|");
+  const models = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const id of ids) m["scan_" + id] = scanMapUrl(id);
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelsKey]);
+  const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 17;
+  const fc = useMemo(() => ({
+    type: "FeatureCollection" as const,
+    features: peers.map((p) => {
+      const scl = Math.round(modelScaleForPoints(sizePt, CAR_LEN_UNITS, z, p.lat) * 1000) / 1000;
+      const hdg = typeof p.heading === "number" && Number.isFinite(p.heading) ? p.heading : 0;
+      return {
+        type: "Feature" as const,
+        id: p.id,
+        properties: { uid: p.id, mid: "scan_" + p.scanId, rot: [0, 0, hdg + CAR_MODEL_HEADING_OFFSET], scl: [scl, scl, scl], op: p.parked ? 0.55 : 1 },
+        geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
+      };
+    }),
+  }), [peers, z, sizePt]);
+  if (peers.length === 0) return null;
+  return (
+    <>
+      <Models key={"peer-scans-" + modelsKey} models={models} />
+      <ShapeSource
+        id="convoy-peer-scans"
+        shape={fc as any}
+        onPress={(e: any) => { const uid = e?.features?.[0]?.properties?.uid; if (typeof uid === "string") onPress?.(uid); }}
+      >
+        <ModelLayer
+          id="convoy-peer-scans-model"
+          style={{
+            modelId: ["get", "mid"] as any,
+            modelType: "common-3d",
+            modelOpacity: ["get", "op"] as any,
+            modelTranslation: [0, 0, 10],
+            modelEmissiveStrength: 0.6,
+            modelScale: PEER_SCALE_EXPR,
+            modelRotation: PEER_ROT_EXPR,
+            modelCastShadows: false,
+            modelReceiveShadows: false,
+          } as any}
+        />
+      </ShapeSource>
+    </>
+  );
+}
+const PEER_SCALE_EXPR: any = ["get", "scl"];
+const PEER_ROT_EXPR: any = ["get", "rot"];
+
 function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading?: number; onPress?: () => void }) {
   const src = getVehiclePngOrDefault(car.color);
   const heading = typeof car.heading === "number" && Number.isFinite(car.heading) ? car.heading : 0;
@@ -3030,6 +3099,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         arrow: (p as any).marker === "arrow",
         arrPri: (p as any).arrPri,
         arrSec: (p as any).arrSec,
+        scanId: typeof (p as any).scanId === "string" && (p as any).scanId ? (p as any).scanId : undefined,
       });
     }
   });
@@ -3989,9 +4059,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         {/* Car markers — PEERS only (self is the 3D model above). MarkerViews
             always render above the route LineLayers, and we declare the cars LAST
             so they sit on top of the other pins too. */}
-        {cars.filter((c) => c.id !== SELF_ID).map((c) => (
+        {cars.filter((c) => c.id !== SELF_ID && !c.scanId).map((c) => (
           <CarMarker key={c.id} car={c} mapHeading={mapHeadingDeg} onPress={() => { if (c.peer) onPeerPress?.(c.peer); }} />
         ))}
+        {/* Peers with a finished 3D scan draw as their own map twin — the same GLB the driver
+            sees for themselves — instead of the class sprite (2026-09-03, Jeff: Olaf's peer
+            "was his old 2D sprite (classes) car, it should be his 3D car"). */}
+        <PeerScanModels
+          peers={cars.filter((c) => c.id !== SELF_ID && !!c.scanId).map((c) => ({ id: c.id, lat: c.lat, lng: c.lng, heading: c.heading, scanId: c.scanId!, parked: c.status === "parked" }))}
+          zoom={lastZoomRef.current > 0 ? lastZoomRef.current : (camZoomRef.current ?? chaseZoomRaw)}
+          sizePt={SELF_MARKER_PT}
+          onPress={(id) => { const c = cars.find((x) => x.id === id); if (c?.peer) onPeerPress?.(c.peer); }}
+        />
       </MapView>
 
       {/* Heading-up diagnostic readout — gated by the Debug toggle in Settings. */}

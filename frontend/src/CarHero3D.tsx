@@ -54,6 +54,22 @@ export function carViewerHtml(glbUrl: string, opts?: { inline?: boolean; interac
   shadow-softness="0.7"
   touch-action="${!interactive ? "pan-y" : inline ? "pan-y" : "none"}">
 </model-viewer>
+<script>
+  // HERO SHOT (2026-09-03): once the model has loaded, wait a beat for the first frames,
+  // then hand a JPEG of the canvas to the app. The app decides whether it wants it.
+  (function () {
+    var mv = document.querySelector('model-viewer');
+    if (!mv) return;
+    mv.addEventListener('load', function () {
+      setTimeout(function () {
+        try {
+          var d = mv.toDataURL('image/jpeg', 0.86);
+          if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({ t: 'hero', d: d }));
+        } catch (e) {}
+      }, 900);
+    });
+  })();
+</script>
 </body></html>`;
 }
 
@@ -65,6 +81,7 @@ export default function CarHero3D({
   emptyHint = "Scan yours to put it on the map",
   onEmptyPress,
   interactive = true,
+  onSnapshot,
 }: {
   glbUrl: string | null;
   style?: StyleProp<ViewStyle>;
@@ -81,6 +98,8 @@ export default function CarHero3D({
    * itself, and tapping expands to the full-screen viewer where you can grab it.
    */
   interactive?: boolean;
+  /** Receives a data:image/jpeg URI of the loaded hero (see the HERO SHOT script). */
+  onSnapshot?: (jpegDataUri: string) => void;
 }) {
   const [ready, setReady] = useState(false);
 
@@ -126,6 +145,12 @@ export default function CarHero3D({
         // default false is what lets ScrollView.onInterceptTouchEvent take the
         // drag past touch-slop and ACTION_CANCEL the WebView.
         onLoadEnd={() => setReady(true)}
+        onMessage={(e) => {
+          try {
+            const m = JSON.parse(e.nativeEvent.data);
+            if (m && m.t === 'hero' && typeof m.d === 'string' && m.d.startsWith('data:image/jpeg')) onSnapshot?.(m.d);
+          } catch {}
+        }}
       />
 
       {!ready && (

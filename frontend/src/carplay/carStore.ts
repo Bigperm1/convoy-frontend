@@ -25,6 +25,8 @@ export type CarPeer = {
   lng?: number;
   heading?: number;
   status?: 'live' | 'parked';
+  // Finished 3D scan id — the car surface draws this peer as their map twin (PeerScanModels).
+  scanId?: string;
   // ── PEER APPEARANCE ON THE CAR SURFACE (Jeff, 2026-08-12) ─────────────────
   // "on CarPlay when I hit the crew, it doesn't show the high resolution car. It
   //  shows green dots instead for my peers."

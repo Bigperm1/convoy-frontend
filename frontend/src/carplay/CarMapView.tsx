@@ -63,7 +63,7 @@ import {
   ROAD_SNAP_RELEASE_M,
   ROAD_SNAP_QUERY_MS,
   ROAD_SNAP_MOVING_MS,
-  ROAD_SNAP_CROSS_DEG, noseBearing, CAR_LEN_UNITS, ARROW_LEN_UNITS
+  ROAD_SNAP_CROSS_DEG, noseBearing, CAR_LEN_UNITS, ARROW_LEN_UNITS, PeerScanModels
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
 import { routeTrimLeadM, routeTrimFadeM } from '../routeTrim';
@@ -2132,6 +2132,14 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           registered static images — see peerImages / peerImageFor above for why this is
           a symbol and not the MarkerView the phone uses. Kept in the 'top' slot so a
           car never hides under the route ribbon. */}
+      {/* Scanned peers as their 3D map twins — same component as the phone (2026-09-03). */}
+      <PeerScanModels
+        peers={(s.peers || [])
+          .filter((p) => typeof p.lat === 'number' && typeof p.lng === 'number' && !!p.scanId)
+          .map((p) => ({ id: 'peer_' + p.id, lat: p.lat as number, lng: p.lng as number, heading: p.heading, scanId: p.scanId!, parked: p.status === 'parked' }))}
+        zoom={trimZoom}
+        sizePt={CARPLAY_CAR_PT * uiScale}
+      />
       {(s.peers || []).some((p) => typeof p.lat === 'number' && typeof p.lng === 'number') && (
         <ShapeSource
           // key=: REMOUNT IN LOCKSTEP WITH THE ROUTE BRANCH (2026-08-26, "the route
@@ -2152,7 +2160,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           shape={{
             type: 'FeatureCollection',
             features: (s.peers || [])
-              .filter((p) => typeof p.lat === 'number' && typeof p.lng === 'number')
+              .filter((p) => typeof p.lat === 'number' && typeof p.lng === 'number' && !p.scanId)
               .map((p, i) => ({
                 type: 'Feature' as const,
                 // NUMERIC id (2026-07-24). This was `id: p.id` — a peer UUID STRING.

@@ -231,6 +231,47 @@ export async function registerScan(handle: string | null | undefined, scanId: st
 export function scanHeroUrl(scanId: string): string { return `${MODELS_PUBLIC}/scan_${scanId}.glb`; }
 export function scanMapUrl(scanId: string): string { return `${MODELS_PUBLIC}/scan_${scanId}_map.glb`; }
 
+// ── HERO SHOT (2026-09-03, Jeff: the Crew/friend avatar "should be the 3D hero shot") ─────
+// The pipeline makes GLBs only, so the PHONE takes the picture: the Garage's inline
+// model-viewer snapshots itself once the hero has loaded (CarHero3D onSnapshot) and the JPEG
+// goes to car-scans/<scanId>/hero.jpg — insert-only like the photos, a rescan is a new folder.
+// car-scans is a PRIVATE bucket; a storage policy grants anon SELECT on exactly `*/hero.jpg`
+// (the photos stay private), so readers fetch through the authenticated object endpoint with
+// the anon key in the headers — expo-image passes them. Nothing new in `models`.
+const SCAN_OBJECT_AUTH = "https://pgtbjiszjglznjagolse.supabase.co/storage/v1/object";
+export function scanHeroImageSource(scanId: string): { uri: string; headers: Record<string, string> } | null {
+  const key = (SUPABASE_ANON_KEY || "").trim();
+  if (!scanId || !key) return null;
+  return {
+    uri: `${SCAN_OBJECT_AUTH}/${SCAN_BUCKET}/${encodeURIComponent(scanId)}/hero.jpg`,
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+  };
+}
+/** Upload the Garage hero snapshot (a data: URI, image/jpeg). Duplicate = fine. */
+export async function uploadScanHero(scanId: string, dataUri: string): Promise<boolean> {
+  if (!supabase || !scanId) return false;
+  const m = /^data:image\/jpeg;base64,(.+)$/.exec(dataUri || "");
+  if (!m) return false;
+  const bin = base64ToBytes(m[1]);
+  const { error } = await supabase.storage
+    .from(SCAN_BUCKET)
+    .upload(`${scanId}/hero.jpg`, bin.buffer as ArrayBuffer, { contentType: "image/jpeg", upsert: false });
+  const dup = !!(error && isDuplicate(error.message));
+  try { logEvent(`carscan-hero id=${scanId} kb=${Math.round(bin.byteLength / 1024)}${error && !dup ? ` err=${String(error.message).slice(0, 90)}` : ""}`); } catch {}
+  return !error || dup;
+}
+function base64ToBytes(b64: string): Uint8Array {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const clean = b64.replace(/[^A-Za-z0-9+/]/g, "");
+  const out = new Uint8Array(Math.floor((clean.length * 3) / 4));
+  let o = 0, buf = 0, bits = 0;
+  for (let i = 0; i < clean.length; i++) {
+    buf = (buf << 6) | chars.indexOf(clean[i]); bits += 6;
+    if (bits >= 8) { bits -= 8; out[o++] = (buf >> bits) & 0xff; }
+  }
+  return out.subarray(0, o);
+}
+
 /** Poll the convention URLs for a submitted scan. Ready means BOTH files exist.
  *
  *  ⚠ BOTH, not hero-only — the 2026-08-29 review caught the race this closes: the

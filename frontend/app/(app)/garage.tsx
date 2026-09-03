@@ -25,7 +25,7 @@ import { CandyCta } from '../../src/components/CandyCta';
 import { CANDY_RIM, CANDY_INK } from '../../src/components/ManeuverArrow';
 import { skin, type VisualTier } from '../../src/tierTheme';
 import { setSkinChoice } from '../../src/appSkin';
-import { checkScanReady } from '../../src/carScan';
+import { checkScanReady, uploadScanHero } from '../../src/carScan';
 import { logEventReliable } from '../../src/crashBreadcrumb';
 import { LinearGradient } from 'expo-linear-gradient';
 import { resolveGRCKey, getVehicleModelUrl } from '../../src/vehicleAssets';
@@ -534,6 +534,19 @@ export default function GarageScreen() {
   // widebody was retired there is no personal car baked into the app any more —
   // it comes from a scan or not at all.
   const [scanModelUrl, setScanModelUrl] = useState<string | null>(null);
+  // HERO SHOT (2026-09-03): the first time the finished scan's hero renders, keep a JPEG of it
+  // in car-scans/<scanId>/hero.jpg so the Crew / friend tiles can show the car, not a sprite.
+  // Once per scan (carScanHeroShotId); a rescan is a new id and gets a new shot.
+  const heroShotBusyRef = useRef(false);
+  const onHeroShot = useCallback(async (dataUri: string) => {
+    const st = getSettings();
+    const id = st.carScanStatus === 'ready' ? st.carScanId : undefined;
+    if (!id || st.carScanHeroShotId === id || heroShotBusyRef.current) return;
+    heroShotBusyRef.current = true;
+    try {
+      if (await uploadScanHero(id, dataUri)) await updateSettings({ carScanHeroShotId: id });
+    } catch {} finally { heroShotBusyRef.current = false; }
+  }, []);
   const [scanPending, setScanPending] = useState(false);
   const [scanSubmittedAt, setScanSubmittedAt] = useState<string | null>(null);
   const [scanJustReady, setScanJustReady] = useState(false);
@@ -717,6 +730,7 @@ export default function GarageScreen() {
                   ) : heroModelUrl ? (
                     <CarHero3D
                       glbUrl={heroModelUrl}
+                      onSnapshot={scanModelUrl ? onHeroShot : undefined}
                       // Non-interactive INSIDE the carousel — a pager and a
                       // finger-spinnable model both want horizontal drags and the
                       // model wins, which would trap you on this page. It still

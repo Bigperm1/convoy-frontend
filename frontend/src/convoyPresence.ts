@@ -48,6 +48,10 @@ export type ConvoyPresencePeer = {
   // Arrow appearance paint (marker === 'arrow'): peers render a 2-tone arrow.
   arrPri?: string;
   arrSec?: string;
+  // Finished 3D scan (car-scans folder id). Peers draw this driver's map twin instead of a
+  // sprite, and the Crew/friend tiles show the hero shot (2026-09-03, Jeff: Olaf's peer was
+  // "his old 2D sprite"). Only broadcast while carScanStatus === 'ready'.
+  scanId?: string;
 };
 
 export type ConvoyMe = {
@@ -70,6 +74,10 @@ export type ConvoyMe = {
   // Arrow appearance paint (marker === 'arrow'): peers render a 2-tone arrow.
   arrPri?: string;
   arrSec?: string;
+  // Finished 3D scan (car-scans folder id). Peers draw this driver's map twin instead of a
+  // sprite, and the Crew/friend tiles show the hero shot (2026-09-03, Jeff: Olaf's peer was
+  // "his old 2D sprite"). Only broadcast while carScanStatus === 'ready'.
+  scanId?: string;
 };
 
 type Status = "idle" | "joining" | "subscribed" | "error" | "disabled";
@@ -119,6 +127,7 @@ export function useConvoyPresence(
       clsSec: m.clsSec,
       arrPri: m.arrPri,
       arrSec: m.arrSec,
+      scanId: m.scanId,
       lat: c.lat,
       lng: c.lng,
       heading: c.heading,
@@ -165,6 +174,7 @@ export function useConvoyPresence(
             clsSec: typeof p.clsSec === "string" ? p.clsSec : undefined,
             arrPri: typeof p.arrPri === "string" ? p.arrPri : undefined,
             arrSec: typeof p.arrSec === "string" ? p.arrSec : undefined,
+            scanId: typeof p.scanId === "string" && p.scanId ? p.scanId : undefined,
           });
         }
         setPeers(list);

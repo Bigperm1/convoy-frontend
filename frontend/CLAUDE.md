@@ -21,12 +21,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**➜ Read `RULES.md` first** (how to work — Rule #1 and every standing rule), **then `ROADMAP.md`**
-(current shipped state, the OTA position, what ships next, open issues ranked).
+**➜ Read `RULES.md` first** (how to work — Rule #1 and every standing rule), **then the newest
+`HANDOFF-<date>.md`** (current state — today `HANDOFF-2026-09-02.md`), **then `ROADMAP.md`**
+(the OTA position, what ships next, open issues ranked).
 
 Then, as needed:
-- `SCAN-PIPELINE.md` — **THE photo → car pipeline** (Tripo CLI only; measured recipe,
-  traps, QC gates). `HANDOFF-3D.md` is that work's historical log — lessons only.
+- `SCAN-PIPELINE.md` — **THE photo → car pipeline**, now FULLY AUTOMATIC (Supabase `scan-worker`
+  edge function on a 15 s pg_cron; the by-hand Tripo CLI recipe is the documented fallback).
+  Measured recipe, traps, QC gates. Deploy runbook: `supabase/SCAN-WORKER-DEPLOY.md`. `HANDOFF-3D.md` is that work's historical log — lessons only.
 - `HANDOFF-48H-2026-08-16.md` — the 08-14 → 08-16 window (heat, the location regression).
 - `HANDOFF.md` — the long chronological log. **⛔ Its header state is STALE (build 70).**
   Read it for the root-cause write-ups and traps, never for current state.
@@ -203,8 +205,15 @@ Native deps are patched at install time via `patch-package` (postinstall hook): 
 
 ## Release Discipline
 
-- **Publish each OTA to the branch that matches the INSTALLED build's channel — verify, don't assume.** Run `eas build:list --platform ios` and read the `Channel` of the build testers are on, then `eas update --branch <that-channel>`. The `mapbox-migration` builds (current: build 61, runtime 1.13.2) listen to the **`mapbox-migration`** channel, so their OTAs go to `eas update --branch mapbox-migration` — publishing to `preview` does NOT reach them (this silently ate three updates on 2026-07-05). The historical `preview`/`production` channels both track the `preview` branch; only use `--branch preview` when the target build was actually built on one of those channels.
+- **Publish each OTA to the branch that matches the INSTALLED build's channel — verify, don't assume.** Run `eas build:list --platform ios` and read the `Channel` of the build testers are on, then `eas update --branch <that-channel>`. The `mapbox-migration` builds (current: **build 74, runtime 1.26.0**, both platforms — but read the `Channel` field off `eas build:list` rather than trusting this number) listen to the **`mapbox-migration`** channel, so their OTAs go to `eas update --branch mapbox-migration` — publishing to `preview` does NOT reach them (this silently ate three updates on 2026-07-05). The historical `preview`/`production` channels both track the `preview` branch; only use `--branch preview` when the target build was actually built on one of those channels.
+- 🛑 **NEVER a bare `eas update`.** A bare publish inlines an EMPTY `EXPO_PUBLIC_OPENWEATHER_KEY`
+  (`PROD_OPENWEATHER_KEY` is `""` in `src/api.ts`; the real key lives only in the EAS environment),
+  which killed weather on every surface for ~20 h / 13 OTAs on 2026-08-30. Publish through
+  `npx eas-cli env:exec preview "npx eas-cli update --branch mapbox-migration --clear-cache -m '…' --non-interactive"`
+  and then PROVE it: `python3 tools/ota/verify-bundle-key.py <group> 1.26.0` → `KEY_PRESENT=1` on BOTH platforms.
 - **`yarn typecheck` must pass clean before every publish.** This is a required gate — do not publish on a failing or skipped typecheck.
+  ⚠ `supabase/` is Deno and is EXCLUDED in `tsconfig.json` — check it with `deno task check` inside
+  `supabase/functions/scan-worker/`, never with `tsc` (its sources put 111 errors into the gate on 2026-09-02).
 - **Never run `eas submit`** (TestFlight or production) without the maintainer's explicit go-ahead.
 - **EAS native builds cost money.** Batch scope before recommending one, and verify `yarn typecheck` passes, the lockfile (`yarn.lock`) is consistent, and references resolve first.
 - **The RED PILL is the one and only OTA pickup instruction.** Tell testers: open the app, wait a few seconds on the map, tap the red **"Update ready — tap to install"** pill under the search bar. That's `src/UpdateReadyPill.tsx` — it watches `isUpdatePending` and the tap calls `reloadAsync()`, so the new JS runs immediately. Do **NOT** say "Settings → Software Update" (that row was REMOVED, and it lied anyway: `checkForUpdateAsync` compares the server to what's DOWNLOADED, not what's RUNNING) and do **NOT** say "cold-start twice" — that's the old dance the pill replaced. Jeff's call, 2026-07-25: two competing instructions confused testers, so there is exactly one. Only if the pill never appears is the device stranded on the embedded bundle (`/ota-rescue`).

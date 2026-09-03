@@ -45,7 +45,7 @@ at the time of writing, not recalled. Re-verify before acting — this file ages
 
 ## 1 · Shipped state — VERIFIED 2026-08-27
 
-### 2026-09-02 — the scan pipeline is AUTOMATIC (Supabase `scan-worker`, commits `b4ff998` + `3272eaa`, local — not pushed)
+### 2026-09-02 — the scan pipeline is AUTOMATIC (Supabase `scan-worker`, commits `b4ff998` + `3272eaa`, PUSHED)
 
 Jeff 9/01: *"not suppose to have any manual input… all automatic from the photos sent to the
 delivery of the 3d image and 2d twin back to the device."* **VERIFIED live:** Olaf's second
@@ -209,9 +209,14 @@ premium CarPlay glyphs
 
 ---
 
-## 4 · Build 74 — NOT CUT. What it must carry.
+## 4 · Build 75 — NOT CUT. What it must carry.
 
-**Verified: build 74 does not exist on either platform.** The newest row on both listings is 73.
+> ⛔ **SUPERSEDED 2026-09-02 — this section was written for build 74, which CUT and SHIPPED on
+> 2026-08-27** (v3.10.0, runtime 1.26.0, both platforms, Play internal complete + TestFlight).
+> **The current build-75 backlog is §4 of `HANDOFF-2026-09-02.md`** — read that, not this.
+> Everything below is retained as the reasoning that produced 74.
+
+**Historical (2026-08-22): build 74 did not yet exist on either platform.**
 
 74 is the next **native** build, so everything native queues into it. Bumping `runtimeVersion` for
 it means **both platforms must be cut in the same batch** or the unbuilt one is stranded from every

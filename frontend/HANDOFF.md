@@ -21,8 +21,10 @@
 
 > # ⛔ THIS FILE IS STALE — HISTORY ONLY
 >
-> **Everything below describes build 70 · runtime 1.22.0. Shipped state is now
-> build 73 · v3.9.0 · runtime 1.25.0** (verified against EAS 2026-08-22).
+> **Everything below describes build 70 · runtime 1.22.0.**
+> **➜ CURRENT STATE LIVES IN THE NEWEST `HANDOFF-<date>.md` — today `HANDOFF-2026-09-02.md`.**
+> (Shipped state as of 2026-09-02: build 74 · v3.10.0 · runtime 1.26.0, both platforms.)
+> Do not read version numbers out of this file; read the root-cause write-ups and traps only.
 > This document's last section is *"Build 71 — QUEUED, NOT CUT"*; builds 72 and 73 both
 > shipped after it was written, and it has never been updated.
 >

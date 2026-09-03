@@ -37,10 +37,12 @@ to the device it was sent from."*
 ```
 app capture (4 shots)                       app/(app)/garage-capture.tsx · src/carScan.ts
   └─ car-scans/<scanId>/01-front.jpg 02-right.jpg 03-rear.jpg 04-left.jpg + manifest.json
-     (bucket: WRITE-ONLY to the app; register-scan caps uploads at 2 per handle)
+     (bucket: WRITE-ONLY to the app. The scanId is MINTED BY THE BACKEND:
+      POST /api/scan/slot -> public.scan_slots, bound to the signed-in ACCOUNT)
        └─ DB trigger car_scan_enqueue  (INSERT of …/manifest.json)  → car_scan_jobs row
             └─ pg_cron every 15 s → scan_worker_tick() → edge fn scan-worker  (up to 25 jobs/tick)
-                 ├─ queued        folder complete? manifest sane? handle = manifest.handle
+                 ├─ queued        folder complete? manifest sane? SLOT looked up ->
+                 │                identity = slot.user_id (legacy: manifest.handle)
                  ├─ fetching      4 photos → Tripo file tokens · SPEND GUARDS · generate   30 credits
                  ├─ generating    poll → convert twin (20000 faces / 1024 / -x / 1.9101)   10 credits
                  ├─ converting_map    poll → download → QC GATES → material pass →
@@ -57,6 +59,58 @@ app capture (4 shots)                       app/(app)/garage-capture.tsx · src/
 Failed Tripo tasks auto-refund. The worker never resubmits a generate; the only path
 above 50 is ONE extra convert (+10) — a re-convert after an expired download URL, or one
 retry after a convert POST whose reply was lost — so 60 is the ceiling per scan.
+
+## Live configuration — and how to check it
+
+**Verified 2026-09-02 18:28 PT.** The row is the source of truth; this table is a snapshot.
+
+| flag (`public.pipeline_flags`, id = 1) | value | meaning |
+|---|---|---|
+| `enabled` | **true** | the kill switch. false = nothing spends, within one tick |
+| `require_slot` | **false** | transition switch — see below. Flip only after the OTA is picked up |
+| `daily_credit_cap` | **6000** | 100 cars per rolling 24 h ($60/day ceiling) |
+| `per_user_cap` | **2** | the two scans included with Ultra |
+| `min_balance` | **300** | never buy below this + 60 |
+| `paused_reason` | null | set to `tripo-credits` by an out-of-credits generate; clears itself on top-up |
+
+Also live: pg_cron `scan-worker-tick` **every 15 s** (jobid 2) - edge fn `scan-worker`
+**version 4** - `register-scan` **version 3** - worker-side `MAX_ACTIVE_TRIPO` = 8.
+
+```sql
+-- health, one query
+select enabled, require_slot, daily_credit_cap, per_user_cap, min_balance, paused_reason
+  from public.pipeline_flags where id = 1;
+
+-- a scan's life
+select scan_id, status, reason, credits_spent, user_id, twin_published_at, hero_published_at
+  from public.car_scan_jobs order by updated_at desc limit 10;
+
+-- what the worker did (breadcrumbs land under the TESTER's handle)
+select created_at, handle, message from public.crash_reports
+ where platform = 'worker' order by created_at desc limit 40;
+
+-- every tick's JSON verdict (idle:disabled | idle:empty | jobs:[...])
+select created, status_code, left(content::text, 160) from net._http_response
+ order by created desc limit 20;
+```
+
+**The off switch - one line, takes effect within one tick:**
+```sql
+update public.pipeline_flags set enabled=false, paused_reason='manual', updated_at=now() where id=1;
+```
+Heartbeat off entirely: `select cron.unschedule('scan-worker-tick');`
+
+**The one flip still owed.** `require_slot=false` lets a slot-less folder render on the
+legacy manifest-handle path, so testers on JS older than OTA `0a6ea103...` keep working.
+Flip it to `true` **only once every active tester is on that OTA or newer** - check first,
+because a stranded tester (CarPlay-first launch, `launch_kind='unknown'`) is still on the
+embedded bundle and their scans would be skipped, never rendered:
+```sql
+select handle, count(distinct instance_id) sessions, max(created_at) last_seen
+  from public.crash_reports
+ where launch_kind = 'unknown' and created_at > now() - interval '3 days'
+ group by 1 order by sessions desc;   -- must be EMPTY before flipping
+```
 
 ## Automation — how the worker behaves
 
@@ -263,13 +317,17 @@ hero can never fail after the twin from the same generate is already live. Code:
 `tools/glb-pipeline/glbinfo.py`. Then **look at it** — render front + top; a metric once
 passed a visually destroyed model. The front render is also the mirror check (trap 1).
 
-Measured on the delivered scans:
+Measured on the delivered scans (the last four are the AUTOMATED recipe, worker-published):
 
 | file | faces | verts | idx | bytes (raw → finished) |
 |---|---|---|---|---|
 | enablewhore twin (the recipe) | 20,000 | 14,201 | u16 | 1,146,948 → 1,061,704 (worker) / 1,419,852 (scan_finish.py) |
 | enablewhore hero | 150,000 | 85,856 | u32 | 6,244,500 → 5,926,480 |
 | jeff twin (**40k evaluation build**, not the recipe) | 40,000 | 28,367 | u16 | 2,113,332 — **fails the <25,000-vert gate** |
+| **olaf twin — first AUTOMATED render** | 20,000 | 15,096 | u16 | 1,135,212 (length 1.9097, minY 0, centred) |
+| **olaf hero — first AUTOMATED render** | 150,000 | 88,192 | u32 | 6,143,712 (length 1.9101) |
+| **qa twin — v3 slot path** | 20,000 | 15,546 | u16 | 1,203,652 (length 1.9103) |
+| **qa hero — v3 slot path** | 150,000 | 89,493 | u32 | 6,409,644 (length 1.9101) |
 
 The published jeff twin is the 40k-face evaluation build from "Open quality work"; the
 automated recipe is 20k. If 40k wins, the gate becomes <35,000 verts (still u16) and this
@@ -324,8 +382,11 @@ the fleet car. Publishes never overwrite (409 forever per name) — a re-render 
 
 - **Panel bumpiness** — decimation artefacts at 20k faces; the 40k-face twin (28,367
   verts, still u16) is under evaluation (see the table above).
-- **6-minute promise** — automated critical path ≈ manual 5.5 min + ~5 tick latencies;
-  re-measure from `car_scan_jobs` timestamps after the first automated scans.
+- ~~**6-minute promise** — re-measure after the first automated scans.~~ **MEASURED, twice:**
+  **7 m 47 s** (`enablewhore-20260901-210315`, v2 — 30 s cron, one job per tick) and
+  **5 m 46 s** (`qa-20260902-081500`, v3 — 15 s cron, POLL_S 20). Both 50 credits, 0 retries,
+  0 errors. The promise holds with headroom; what remains is Tripo's own generate (~3.5 min)
+  plus two converts, which no amount of tick tuning can compress.
 
 ## History
 

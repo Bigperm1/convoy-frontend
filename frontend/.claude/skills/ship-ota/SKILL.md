@@ -80,7 +80,7 @@ reported it sooner — nothing errors, the chip simply never appears.
 ## 5b. PROVE the key is in the bundle before announcing anything
 Do not tell anyone to tap the red pill until you have seen `KEY_PRESENT=1`:
 ```bash
-python3 <scratchpad>/verify_key.py <new-update-group-id> 1.26.0
+python3 tools/ota/verify-bundle-key.py <new-update-group-id> 1.26.0
 ```
 That script pulls the REAL published Hermes bundle from `u.expo.dev` (manifest multipart
 -> `launchAsset.url` + its EAS-HMAC `authorization` header) and greps it for the key,

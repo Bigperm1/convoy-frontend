@@ -491,7 +491,7 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`_releaseIdleSoon`, cancelled when the next clip starts; also used by `resetSpeakGate`). HYPOTHESIS until Jeff's
   next arrival — the receipts already say "played to completion", so the verdict is his ear: the destination name
   should now finish cleanly.
-- 🚧 **OTA-I STAGED — UX batch (Jeff, 2026-09-03 afternoon): darker route chips + stop pills · pin-first Add stop · scanned
+- ✅ **OTA-I SHIPPED 13:19 PDT — group `7857b5d5-c5c1-4a85-8171-8b5b188c417e`, commit `8c2c955`, KEY_PRESENT=1 both — UX batch (Jeff, 2026-09-03 afternoon): darker route chips + stop pills · pin-first Add stop · scanned
   peers drawn as their 3D twin · hero-shot avatars.**
   (1) `routeOptChip` / `PillFill` now smoked glass (`rgba(6,8,12,0.58–0.92)`) instead of the faint white lift / graphite.
   (2) "Add stop" arms `stopPinMode`: the Drive card drops, a banner says *Tap the map to drop your stop* with

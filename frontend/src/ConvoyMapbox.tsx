@@ -602,6 +602,25 @@ const ZOOM_MAX = CHASE_ZOOM_CLAMP_MAX;
 // This constant lives in SelfCarModel, which BOTH the phone map and CarMapView render,
 // so this one value fixes the phone, CarPlay and Android Auto together.
 const CAM_SMOOTH_TAU_MS = 1400;
+// ── CORNER-ZOOM RELEASE + SPEED-JITTER REST (2026-09-03, Jeff: "super smooth… still a
+// little notchy on 74"; Olaf: "the avatar is resizing itself from small to big") ──────
+// MEASURED on Olaf's 50-min car-surface cam-probe trace (803 rows): the camera TARGET
+// fell ≥2 zoom levels in one tick 10 times — every one the corner zoom (18.5) releasing
+// the instant a maneuver passed — and the tau-1.4 s low-pass alone glided the APPLIED
+// zoom through those cliffs at up to 1.93 levels/s (2.84 levels inside 2 s). modelScale
+// is 2× per level, so the self car halved/doubled over ~2 s at every corner exit, on
+// both surfaces. Replaying the same trace through this slew: max 0.49 level/s, and
+// NOT ONE second above 0.5 — while the ordinary speed zoom (≤0.3 level/s) is untouched.
+// Mechanism: the low-pass now chases a GOAL that may move toward the raw target no
+// faster than CAM_ZOOM_SLEW_PER_S, so a target cliff becomes a bounded ramp and the
+// exponential rounds its ends. The goal also ignores target twitches smaller than
+// CAM_ZOOM_DEADBAND (raw GPS speed jitter → zoom creep): the camera rested 24% of the
+// drive instead of 33% in the replay, with no change to the rates. Snap paths (first
+// fix / recenter / driver pinch) bypass all of this, exactly as before.
+// Replay tool: tools/cam-probe/replay.py. Infinity/0 restore the old behaviour.
+const CAM_ZOOM_SLEW_PER_S = 0.5;   // zoom levels per second the goal may move
+const CAM_ZOOM_DEADBAND = 0.25;    // target twitches below this do not move the goal
+const CAM_PITCH_SLEW_PER_S = 5;    // degrees per second (48↔60 band = 2.4 s), same shape
 
 // Route-trim ease: linear from prev→cur over the measured fix gap, clamped at both
 // ends. Deliberately the SAME shape and clock as SelfCarModel's position ease, so the
@@ -1172,6 +1191,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // snapping (see CAM_SMOOTH_TAU_MS). null until the first frame seeds them.
   const camZoom = useRef<number | null>(null);
   const camPitch = useRef<number | null>(null);
+  // Slew-limited goals the low-pass chases (see CAM_ZOOM_SLEW_PER_S).
+  const camZoomGoal = useRef<number | null>(null);
+  const camPitchGoal = useRef<number | null>(null);
   const lastCamAt = useRef(0);
   // cam-probe bookkeeping (see pushCam). Seeded far away so the first push logs once.
   const camProbeAt = useRef(0);
@@ -1211,10 +1233,22 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     if (snap || userZoomed || camZoom.current == null || camPitch.current == null) {
       camZoom.current = c.zoomLevel;
       camPitch.current = c.pitch;
+      camZoomGoal.current = c.zoomLevel;
+      camPitchGoal.current = c.pitch;
     } else {
+      // 1) The GOAL walks toward the raw target at a bounded rate, ignoring twitches
+      //    smaller than the dead-band. 2) The applied value low-passes toward the goal.
+      const zg = camZoomGoal.current ?? camZoom.current;
+      const zGap = c.zoomLevel - zg;
+      const zStep = (CAM_ZOOM_SLEW_PER_S * dt) / 1000;
+      camZoomGoal.current = Math.abs(zGap) < CAM_ZOOM_DEADBAND ? zg : zg + Math.max(-zStep, Math.min(zStep, zGap));
+      const pg = camPitchGoal.current ?? camPitch.current;
+      const pGap = c.pitch - pg;
+      const pStep = (CAM_PITCH_SLEW_PER_S * dt) / 1000;
+      camPitchGoal.current = pg + Math.max(-pStep, Math.min(pStep, pGap));
       const a = 1 - Math.exp(-dt / CAM_SMOOTH_TAU_MS);
-      camZoom.current += (c.zoomLevel - camZoom.current) * a;
-      camPitch.current += (c.pitch - camPitch.current) * a;
+      camZoom.current += (camZoomGoal.current - camZoom.current) * a;
+      camPitch.current += (camPitchGoal.current - camPitch.current) * a;
     }
     // Publish the zoom the camera is ACTUALLY at. The route trim converts a fixed
     // screen distance to metres and must use this, not the speed-derived TARGET —
@@ -1230,7 +1264,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         (Math.abs(camZoom.current - camProbeZoom.current) >= 0.15 || Math.abs(camPitch.current - camProbePitch.current) >= 3)) {
       camProbeAt.current = now; camProbeZoom.current = camZoom.current; camProbePitch.current = camPitch.current;
       try {
-        logEvent(`cam-probe surf=${probeRole} z=${camZoom.current.toFixed(2)} zt=${Number(c.zoomLevel).toFixed(2)} p=${camPitch.current.toFixed(1)} pt=${Number(c.pitch).toFixed(1)} spd=${Math.round((speedMs ?? 0) * 3.6)} snap=${snap || userZoomed ? 1 : 0}`);
+        logEvent(`cam-probe surf=${probeRole} z=${camZoom.current.toFixed(2)} zg=${Number(camZoomGoal.current ?? camZoom.current).toFixed(2)} zt=${Number(c.zoomLevel).toFixed(2)} p=${camPitch.current.toFixed(1)} pt=${Number(c.pitch).toFixed(1)} spd=${Math.round((speedMs ?? 0) * 3.6)} snap=${snap || userZoomed ? 1 : 0}`);
       } catch {}
     }
     try {

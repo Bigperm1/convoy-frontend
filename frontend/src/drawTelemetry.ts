@@ -33,6 +33,69 @@ const MIN_SPEED_MS = 1.5;
 
 const lastAt: Record<string, number> = {};
 
+// ── CORNER TRACE (2026-09-03, Jeff: "the first corner was off the route line by a lot") ──
+// The 10 s cadence above straddled that corner: the two rows either side of it showed the
+// marker 4.5 m and 1.7 m from GPS and nothing in between, so a 2–3 s excursion inside the
+// turn was invisible by construction. This adds a BOUNDED burst: when the GPS course swings
+// ≥ CORNER_DEG within a few seconds during guidance, up to TRACE_ROWS rows at ≥ 1 s spacing
+// carry the same numbers as draw-cmp, and every snap-MODE change in guidance logs once
+// (route→raw at a corner = "the snap dropped"). Re-arms after TRACE_REARM_MS, so a twisty
+// road costs ≤ ~5 rows per corner per surface.
+const CORNER_DEG = 30;
+const CORNER_ANCHOR_MS = 3000;     // heading is compared against a 0–3 s old anchor
+const TRACE_ROWS = 5;
+const TRACE_MIN_GAP_MS = 1000;
+const TRACE_REARM_MS = 15000;
+const MODE_ROW_MIN_GAP_MS = 2000;
+const hdgAnchor: Record<string, { deg: number; at: number }> = {};
+const traceState: Record<string, { left: number; lastAt: number; armedAt: number }> = {};
+const lastMode: Record<string, { mode: string; at: number }> = {};
+const angDelta = (a: number, b: number) => ((((b - a) % 360) + 540) % 360) - 180;
+
+function cornerTrace(
+  surface: string,
+  raw: { lat: number; lng: number },
+  drawn: { lat: number; lng: number },
+  mode: string,
+  spd: number,
+  navActive: boolean,
+  gps: { lat: number; lng: number; accM?: number | null } | null | undefined,
+  hdg: { locked: number | null; raw: number | null; route: number | null } | null | undefined,
+): void {
+  if (!navActive) return;
+  const now = Date.now();
+  // Snap-mode transitions in guidance (bounded).
+  const lm = lastMode[surface];
+  if (!lm) lastMode[surface] = { mode, at: 0 };
+  else if (lm.mode !== mode) {
+    if (now - lm.at >= MODE_ROW_MIN_GAP_MS) {
+      const d = haversineM(raw.lat, raw.lng, drawn.lat, drawn.lng);
+      logEvent(`snap-mode surf=${surface} from=${lm.mode} to=${mode} d=${d.toFixed(1)}m spd=${(spd * 3.6).toFixed(0)}` +
+        (hdg ? ` hdg=${fmtDeg(hdg.locked)} gpsHdg=${fmtDeg(hdg.raw)} rb=${hdg.route == null ? "-" : fmtDeg(hdg.route)}` : ""));
+      lastMode[surface] = { mode, at: now };
+    } else lastMode[surface] = { mode, at: lm.at };
+  }
+  const h = typeof hdg?.raw === "number" && isFinite(hdg.raw) ? hdg.raw : (typeof hdg?.locked === "number" && isFinite(hdg.locked) ? hdg.locked : null);
+  if (h == null || spd < MIN_SPEED_MS) return;
+  const a = hdgAnchor[surface];
+  if (!a) { hdgAnchor[surface] = { deg: h, at: now }; return; }
+  const t = traceState[surface] ?? (traceState[surface] = { left: 0, lastAt: 0, armedAt: 0 });
+  if (Math.abs(angDelta(a.deg, h)) >= CORNER_DEG && t.left === 0 && now - t.armedAt >= TRACE_REARM_MS) {
+    t.left = TRACE_ROWS; t.armedAt = now; t.lastAt = 0;
+  }
+  if (now - a.at >= CORNER_ANCHOR_MS) hdgAnchor[surface] = { deg: h, at: now };
+  if (t.left > 0 && now - t.lastAt >= TRACE_MIN_GAP_MS) {
+    t.left -= 1; t.lastAt = now;
+    const d = haversineM(raw.lat, raw.lng, drawn.lat, drawn.lng);
+    const sep = gps ? haversineM(gps.lat, gps.lng, drawn.lat, drawn.lng) : null;
+    logEvent(
+      `corner-trace surf=${surface} i=${TRACE_ROWS - t.left} mode=${mode} d=${d.toFixed(1)}m sep=${sep == null ? "?" : sep.toFixed(0) + "m"} spd=${(spd * 3.6).toFixed(0)} ` +
+        `raw=${raw.lat.toFixed(6)},${raw.lng.toFixed(6)} drawn=${drawn.lat.toFixed(6)},${drawn.lng.toFixed(6)}` +
+        (hdg ? ` hdg=${fmtDeg(hdg.locked)} gpsHdg=${fmtDeg(hdg.raw)} rb=${hdg.route == null ? "-" : fmtDeg(hdg.route)}` : ""),
+    );
+  }
+}
+
 function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const R = 6371000;
   const dLat = ((bLat - aLat) * Math.PI) / 180;
@@ -61,6 +124,8 @@ export function reportDraw(
   try {
     if (!raw || !drawn) return;
     const spd = typeof speedMs === "number" && isFinite(speedMs) ? speedMs : 0;
+    // Corner trace + snap-mode rows run BEFORE the 10 s throttle (they have their own bounds).
+    try { cornerTrace(surface, raw, drawn, mode, spd, navActive, gps, hdg); } catch {}
     // ── THE SPEED FLOOR USED TO CENSOR THE EVIDENCE ──────────────────────────────
     // Dropping every sub-creep sample meant the only rows that ever survived were ones
     // carrying phantom speed, so the 2026-08-29 evidence set was a biased subset by

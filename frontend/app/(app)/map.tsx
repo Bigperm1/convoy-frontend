@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import { nativeBuildNumber } from "../../src/buildNumber";
+import { releaseBuildNumber } from "../../src/buildNumber";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder, TextInput, AppState, Pressable } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -4792,7 +4792,9 @@ export default function MapScreen() {
                   : (ts ? `${p2(ts.getDate())}·${p2(ts.getHours())}${p2(ts.getMinutes())}` : '');
               } catch {}
               if (!rtv) rtv = (Constants.expoConfig as any)?.runtimeVersion || '';
-              const buildNo = nativeBuildNumber() ?? "";
+              // ONE number for both platforms — Jeff 2026-09-03: a pill that reads 76 on
+              // Android and 75 on iPhone is more confusing than the mismatch it reports.
+              const buildNo = releaseBuildNumber() ?? "";
               return (
                 // Tappable (tester request): opens the who's-on roster sheet —
                 // every live member with YOHB + Drive-to actions.

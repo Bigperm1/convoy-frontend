@@ -26,7 +26,7 @@
 // Nothing here touches the network, storage, or a permission: it reads one constant and
 // renders. A gate that can fail to render is worse than no gate.
 import React from 'react';
-import { nativeBuildNumber } from "./buildNumber";
+import { releaseBuildNumber } from "./buildNumber";
 import { View, Text, StyleSheet, Linking, Pressable, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { COLORS } from './theme';
@@ -37,7 +37,7 @@ export const MIN_BUILD = 72;
 /** Native build number as an integer, or null when it cannot be read. */
 export function currentBuild(): number | null {
   try {
-    const raw = nativeBuildNumber();
+    const raw = releaseBuildNumber();   // the crew-facing release number, same on both platforms
     const n = Number(String(raw ?? '').trim());
     return Number.isFinite(n) && n > 0 ? n : null;
   } catch { return null; }

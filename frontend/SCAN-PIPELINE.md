@@ -15,7 +15,7 @@ the moment he next opened it — the return leg to the sending device is proven,
 `crash_reports platform='worker'`, `net._http_response`; the public bytes were
 re-downloaded and re-inspected with `tools/glb-pipeline/glbinfo.py` — twin 15,096 v / u16 /
 1.9097 m, hero 88,192 v / 1.9101 m, sha256 == the worker's ledger). The automation is
-`supabase/functions/scan-worker/` + three migrations; runbook `supabase/SCAN-WORKER-DEPLOY.md`
+`supabase/functions/scan-worker/` + `register-scan/` + six 2026-09-02 migrations; runbook `supabase/SCAN-WORKER-DEPLOY.md`
 (now ONE human paste — `TRIPO_API_KEY`; the worker reads `scan_worker_key` from Vault itself).
 "By hand" below is the fallback and the reference the worker was measured against.
 
@@ -231,6 +231,14 @@ select handle, count(distinct instance_id) sessions, max(created_at) last_seen
   **Flip it AFTER the OTA carrying the slot request (`POST /api/scan/slot`) is out**,
   not before — flipping early strands anyone still on the old JS with a folder the
   worker will only ever skip.
+- 🔴 **KNOWN DEFECT (2026-09-02) — the release does not reach the gate the phone asks.**
+  `releaseSlot` writes `released_at` into **Supabase** `public.scan_slots`
+  (`deps.ts:133`), but the backend's cap counts **Mongo** `db.scan_slots`
+  (`server.py:3390`, `count_documents({user_id, released_at: None})`). The backend never
+  reads Supabase back and the worker never writes Mongo, so **a failed render still burns
+  one of the account's two scans** — exactly the rule the release was built to honour.
+  Not yet hit (0 failed renders to date). Fix: the worker calls a backend endpoint on
+  release, or the backend counts Supabase. Tracked in `HANDOFF-2026-09-02.md` §5 item 0.
 - **A FAILED render gives its slot back; a SKIPPED one never does.** Any terminal
   `failed` — through `Tick.fail()` or the 5-strike generic-error path, both check the
   same `job.user_id` (set only when a slot was consumed) — calls `releaseSlot` and drops
@@ -280,8 +288,8 @@ Auth: `tripo login --region ov` (device flow, headless-safe) or `TRIPO_API_KEY=t
 
 1. **Views are NAMED, never positional.** Tripo's endpoint takes `front / left / back /
    right`. The app writes `01-front, 02-right, 03-rear, 04-left` and lists
-   `shots: ["front","right","rear","left"]` in `manifest.json` (there is **no `slot`
-   field** — an earlier version of this doc said there was). Feeding the files in
+   `shots: ["front","right","rear","left"]` in `manifest.json` (since OTA `0a6ea103…` the manifest ALSO carries
+   `userId` and `slot: true`; the four view files and `shots` are unchanged). Feeding the files in
    filename order builds the car **mirrored, with no error**. The worker maps by shot id
    (`rear → back`) — `supabase/functions/scan-worker/manifest.ts`. The CLI's positional
    order is front, left, back, right and it only recognises the filename hints
@@ -309,7 +317,9 @@ Read off the shipped fleet twin, and enforced by the convert flags above:
 ## QC gates — enforced by the worker before every publish
 
 Map twin: **u16 indices · < 25,000 verts · < 65,536 verts/mesh · ≤ 30 MB · length
-1.9101 ± 0.05 · minY ± 0.005 · centre X/Z < 0.01 · a metallicRoughness texture present**.
+1.9101 ± 0.05 · minY ± 0.005 · centre X/Z < 0.01**. A missing metallicRoughness texture is a
+**warning, not a gate** (`glb.ts` pushes `no-metallicRoughness-texture` to `warnings`, on
+both the twin and the hero) — it shows up as `warn=` in the breadcrumb and blocks nothing.
 Hero: ≤ 30 MB + parseable, nothing more (the WebView tolerates u32 and any vertex count);
 the worker only WARNS in the breadcrumb (`warn=`) if its length / minY / centre drift, so a
 hero can never fail after the twin from the same generate is already live. Code:

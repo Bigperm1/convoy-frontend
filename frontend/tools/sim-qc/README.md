@@ -48,7 +48,9 @@ hierarchy dump or by eye in the screenshot) gives the exact `lead`, `cut+`, `lag
 ## Traps met on the way (so you do not meet them again)
 
 * `xcrun simctl openurl … convoy://go?to=qc` shows the OS sheet "Open in Hairpin?" — it needs a tap, and
-  even after Open the app logged no `deeplink` crumb on 2026-09-03. Use the search sheet.
+  even after Open the app logged no `deeplink` crumb on 2026-09-03. **Simulator-only:** Jeff ran
+  `convoy://go?to=home` from Safari on his phone the same day and the route preview came up. Use the
+  search sheet (or the "Heading to … Let's go" chip) on the sim.
 * The route the sim drives MUST be the app's own route from the SAME origin, or the car is >60 m off the
   line, unsnaps, and the app reroutes — the "line through the car" that looked like a trim bug was that.
   `route_wps.py` fetches with the app's token + profile (`driving-traffic`); park at the origin, select

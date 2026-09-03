@@ -64,7 +64,7 @@ import {
   ROAD_SNAP_RELEASE_M,
   ROAD_SNAP_QUERY_MS,
   ROAD_SNAP_MOVING_MS,
-  ROAD_SNAP_CROSS_DEG,
+  ROAD_SNAP_CROSS_DEG, noseBearing
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
 import { routeTrimLeadM, routeTrimFadeM } from '../routeTrim';
@@ -1609,9 +1609,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // duplicates raw — but it keeps the row shape identical across both surfaces, which
     // is what lets one query compare them. Accuracy isn't carried in carStore yet.
     hasFix ? { lat, lng, accM: null } : null,
-    { locked: carSnapped ? routeProj!.bearing : hdg, raw: typeof s.heading === 'number' ? s.heading : null, route: carSnapped ? routeProj!.bearing : null },
+    { locked: carSnapped ? noseBearing(routeProj) : hdg, raw: typeof s.heading === 'number' ? s.heading : null, route: carSnapped ? routeProj!.bearing : null },
   );
-  const drawHdg = carSnapped ? routeProj!.bearing : hdg;
+  const drawHdg = carSnapped ? noseBearing(routeProj) : hdg;
   // Live copy for the compass's IMMEDIATE camera push (the gesture closure is frozen).
   drawHdgRef.current = drawHdg;
   if (carSnapped) camHdgRef.current = routeProj!.bearing;

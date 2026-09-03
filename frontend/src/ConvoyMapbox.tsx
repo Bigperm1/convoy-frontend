@@ -938,7 +938,7 @@ export function projectOntoRoute(
   nearAtM?: number | null,
   movedM?: number | null,
   travelHdg?: number | null,
-): { frac: number; lat: number; lng: number; distM: number; totalM: number; bearing: number } | null {
+): { frac: number; lat: number; lng: number; distM: number; totalM: number; bearing: number; bearingSmooth: number } | null {
   if (!coords || coords.length < 2) return null;
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -955,6 +955,7 @@ export function projectOntoRoute(
   let bestArc = 0;        // arc length from origin to that nearest point
   let bestX = 0, bestY = 0; // nearest point on the route, in local metres
   let bestDx = 0, bestDy = 0; // direction of the segment the projection landed on (east, north)
+  let bestI = 1, bestT = 0;   // that segment's end-vertex index + the fraction along it (for bearingSmooth)
   let total = 0;
   let bestClamped = false;
   const windowed = typeof nearAtM === 'number' && Number.isFinite(nearAtM);
@@ -964,6 +965,7 @@ export function projectOntoRoute(
   for (let pass = 0; pass < 2; pass++) {
     const limit = pass === 0 && windowed;
     acc = 0; bestD2 = Infinity; bestArc = 0; bestX = 0; bestY = 0; bestDx = 0; bestDy = 0;
+    bestI = 1; bestT = 0;
     bestClamped = false;
     let prevX = X(coords[0].longitude), prevY = Y(coords[0].latitude);
     for (let i = 1; i < coords.length; i++) {
@@ -990,7 +992,7 @@ export function projectOntoRoute(
           const d2 = projX * projX + projY * projY;
           if (d2 < bestD2) {
             bestD2 = d2; bestArc = acc + t * len; bestX = projX; bestY = projY;
-            bestDx = dx; bestDy = dy; bestClamped = clamped;
+            bestDx = dx; bestDy = dy; bestClamped = clamped; bestI = i; bestT = t;
           }
         }
         acc += len;
@@ -1029,7 +1031,48 @@ export function projectOntoRoute(
   // bearing of the route AT the projected point (compass degrees, 0..360). Lets the car
   // point ALONG the line instead of spinning with jittery low-speed GPS heading.
   const bearing = (Math.atan2(bestDx, bestDy) * 180 / Math.PI + 360) % 360;
-  return { frac: bestArc / acc, lat: invLat(bestY), lng: invLng(bestX), distM: Math.sqrt(bestD2), totalM: acc, bearing };
+  // ── bearingSmooth (2026-09-03, Jeff: "the nose of the car does not follow the corner") ──
+  // `bearing` is the direction of ONE polyline segment, so the nose turns in a step at every
+  // vertex. This is the tangent of the CURVE instead: each vertex gets the bisector of its two
+  // segments, and the bearing is interpolated (shortest-arc) between the segment's start- and
+  // end-vertex tangents by the fraction along it — continuous across vertices, so the nose
+  // sweeps through a bend. Route-end vertices keep their single segment. The off-route and
+  // U-turn gates keep using `bearing`; only the drawn nose reads this (noseBearing()).
+  const segBrg = (i: number): number | null => {
+    if (i < 1 || i >= coords.length) return null;
+    const ax = X(coords[i - 1].longitude), ay = Y(coords[i - 1].latitude);
+    const bx = X(coords[i].longitude), by = Y(coords[i].latitude);
+    const ddx = bx - ax, ddy = by - ay;
+    if (Math.hypot(ddx, ddy) <= 0) return null;
+    return (Math.atan2(ddx, ddy) * 180 / Math.PI + 360) % 360;
+  };
+  const wrap = (d: number) => ((((d) % 360) + 540) % 360) - 180;                 // shortest signed delta
+  const mixAng = (a: number, b: number, t: number) => (a + wrap(b - a) * t + 360) % 360;
+  const bisect = (a: number | null, b: number | null): number | null =>
+    a == null ? b : b == null ? a : mixAng(a, b, 0.5);
+  const tanStart = bisect(segBrg(bestI - 1), bearing) ?? bearing;
+  const tanEnd = bisect(bearing, segBrg(bestI + 1)) ?? bearing;
+  const bearingSmooth = mixAng(tanStart, tanEnd, Math.max(0, Math.min(1, bestT)));
+  return { frac: bestArc / acc, lat: invLat(bestY), lng: invLng(bestX), distM: Math.sqrt(bestD2), totalM: acc, bearing, bearingSmooth };
+}
+
+// ── NOSE LEAD-IN (2026-09-03, Jeff: "both A and B, mostly A") — STAGED OFF ─────────────
+// A: the camera heading trails the car's by CAM_HEADING_LAG_MS so the nose visibly turns
+//    INTO a corner before the map follows (today camera == car heading every frame, so
+//    the car is rigid on screen and the road rotates under it). Bounded: the car never
+//    sits more than CAM_HEADING_MAX_LEAD_DEG off screen-up, whatever the turn rate.
+// B: while snapped, the nose follows bearingSmooth (the curve's tangent) instead of the
+//    per-segment bearing, so the turn-in is a sweep, not vertex steps.
+// One flag, both surfaces (pushCam + the two nose call sites). Its own drive, after OTA-C.
+// The numbers are DESIGN CHOICES, not measurements — cam-probe `ch=` (camera heading) and
+// `hdg=` (nose) on the next drive measure the actual lead angle; tune from those rows.
+export const NOSE_LEAD_IN_ENABLED = false;
+export const CAM_HEADING_LAG_MS = 700;
+export const CAM_HEADING_MAX_LEAD_DEG = 25;
+/** The heading the drawn nose should use for a snapped car. */
+export function noseBearing(p: { bearing: number; bearingSmooth?: number } | null | undefined): number {
+  if (!p) return 0;
+  return NOSE_LEAD_IN_ENABLED && typeof p.bearingSmooth === "number" ? p.bearingSmooth : p.bearing;
 }
 
 // Initial compass bearing (0..360) of a decoded route polyline — from its start toward the
@@ -1194,6 +1237,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // Slew-limited goals the low-pass chases (see CAM_ZOOM_SLEW_PER_S).
   const camZoomGoal = useRef<number | null>(null);
   const camPitchGoal = useRef<number | null>(null);
+  // Lagged camera heading (see NOSE_LEAD_IN_ENABLED). null until seeded.
+  const camHdgLag = useRef<number | null>(null);
   const lastCamAt = useRef(0);
   // cam-probe bookkeeping (see pushCam). Seeded far away so the first push logs once.
   const camProbeAt = useRef(0);
@@ -1254,6 +1299,22 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // screen distance to metres and must use this, not the speed-derived TARGET —
     // see the routeTrim call site for why that difference is visible as jitter.
     if (camZoomOutRef) camZoomOutRef.current = camZoom.current;
+    // NOSE LEAD-IN (A): the camera heading trails the eased car heading by a first-order lag,
+    // clamped so the nose never exceeds CAM_HEADING_MAX_LEAD_DEG off screen-up. Off → the
+    // camera heading is the car heading, exactly as before. Snaps seed it directly.
+    const carHdg = typeof hdg === 'number' ? hdg : c.heading;
+    let camHeading = carHdg;
+    if (NOSE_LEAD_IN_ENABLED && typeof carHdg === 'number') {
+      if (snap || userZoomed || camHdgLag.current == null) camHdgLag.current = carHdg;
+      else {
+        const k = 1 - Math.exp(-dt / CAM_HEADING_LAG_MS);
+        let h = camHdgLag.current + angDelta(camHdgLag.current, carHdg) * k;
+        const lead = angDelta(h, carHdg);   // how far the nose is ahead of the camera
+        if (Math.abs(lead) > CAM_HEADING_MAX_LEAD_DEG) h = carHdg - Math.sign(lead) * CAM_HEADING_MAX_LEAD_DEG;
+        camHdgLag.current = ((h % 360) + 360) % 360;
+      }
+      camHeading = camHdgLag.current;
+    }
     // CAM-PROBE (2026-09-02, Olaf: "the avatar is resizing itself from small to big and
     // flashing between those"). The self car's on-screen size is a pure function of the
     // camera (modelScale is a static zoom expression on both surfaces), so a size flash
@@ -1264,7 +1325,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         (Math.abs(camZoom.current - camProbeZoom.current) >= 0.15 || Math.abs(camPitch.current - camProbePitch.current) >= 3)) {
       camProbeAt.current = now; camProbeZoom.current = camZoom.current; camProbePitch.current = camPitch.current;
       try {
-        logEvent(`cam-probe surf=${probeRole} z=${camZoom.current.toFixed(2)} zg=${Number(camZoomGoal.current ?? camZoom.current).toFixed(2)} zt=${Number(c.zoomLevel).toFixed(2)} p=${camPitch.current.toFixed(1)} pt=${Number(c.pitch).toFixed(1)} spd=${Math.round((speedMs ?? 0) * 3.6)} snap=${snap || userZoomed ? 1 : 0}`);
+        logEvent(`cam-probe surf=${probeRole} z=${camZoom.current.toFixed(2)} zg=${Number(camZoomGoal.current ?? camZoom.current).toFixed(2)} zt=${Number(c.zoomLevel).toFixed(2)} p=${camPitch.current.toFixed(1)} pt=${Number(c.pitch).toFixed(1)} spd=${Math.round((speedMs ?? 0) * 3.6)} hdg=${typeof carHdg === 'number' ? Math.round(carHdg) : '?'} ch=${typeof camHeading === 'number' ? Math.round(camHeading) : '?'} snap=${snap || userZoomed ? 1 : 0}`);
       } catch {}
     }
     try {
@@ -1272,7 +1333,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         centerCoordinate: [ln, la],
         // Ride the EASED heading (render.current.heading) so the map rotates as smoothly
         // as the car turns; getCam's heading is only a fallback when none is passed.
-        heading: (camHeadingOverrideRef && typeof camHeadingOverrideRef.current === 'number') ? camHeadingOverrideRef.current : (typeof hdg === 'number' ? hdg : c.heading),
+        heading: (camHeadingOverrideRef && typeof camHeadingOverrideRef.current === 'number') ? camHeadingOverrideRef.current : camHeading,
         zoomLevel: camZoom.current,
         pitch: camPitch.current,
         padding: c.padding,
@@ -3234,7 +3295,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // bearing at that spot (stable + line-aligned); else fall back to the smoothed camera
   // heading; else raw. So the car sits ON the line pointing down it, never wandering.
   const selfHeadingLocked = selfSnapped
-    ? routeProj!.bearing
+    ? noseBearing(routeProj)
     : (camHeadingRef.current != null ? camHeadingRef.current : (selfCar?.heading ?? 0));
   // Drawn-vs-raw breadcrumb (8/20): one bounded row / 10 s while moving. Taps only.
   // `gps` is passed SEPARATELY from `raw` on purpose: when pinned, selfCar IS the parked

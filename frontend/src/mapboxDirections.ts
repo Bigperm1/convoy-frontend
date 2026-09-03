@@ -340,7 +340,7 @@ export async function fetchMapboxRoutes(
   origin: LatLng,
   dest: LatLng,
   avoid?: MapboxAvoid,
-  opts?: { signal?: AbortSignal; curbApproach?: boolean },
+  opts?: { signal?: AbortSignal; curbApproach?: boolean; bearing?: number },
 ): Promise<MapboxRoute[]> {
   try {
     if (
@@ -366,7 +366,14 @@ export async function fetchMapboxRoutes(
       // "on the left" to "on the right" and is a genuine re-route, not a relabel.
       (opts?.curbApproach ? `&approaches=unrestricted%3Bcurb` : ``) +
       (exclude.length ? `&exclude=${exclude.join(",")}` : ``) +
-      `&access_token=${MAPBOX_PUBLIC_TOKEN}`;
+      `&access_token=${MAPBOX_PUBLIC_TOKEN}` +
+      // ORIGIN BEARING (2026-09-03, Olaf: "it really wanted me to turn around" — 8 reroutes
+      // in 113 s, each the same route back through a closed street). Without a bearing the
+      // API is free to route you back the way you came; with `bearings=hdg,45;` it must
+      // continue within 45° of the direction of travel. Empty entry = destination free.
+      (typeof opts?.bearing === "number" && Number.isFinite(opts.bearing)
+        ? `&bearings=${Math.round(((opts.bearing % 360) + 360) % 360)},45;`
+        : "");
 
     const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}${qs}`;
     const res = await fetch(url, { signal: opts?.signal });

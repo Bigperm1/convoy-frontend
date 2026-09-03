@@ -348,6 +348,13 @@ const PAN_RECENTER_MS = 20000;
 // ~16 s at 110 km/h — a result from further back describes a road already driven.
 const REROUTE_MAX_AGE_MS = 30000;
 const REROUTE_MAX_MOVE_M = 500;
+// ── OTA-B, STAGED OFF (2026-09-03) ────────────────────────────────────────────
+// Off-route refetches pass the car's heading as a Mapbox `bearings` constraint, so the
+// API cannot answer "turn around and go back" (Olaf 2026-09-02: 8 reroutes in 113 s,
+// every one the same route back through a closed street). A nav behaviour change →
+// ONE real drive to itself (the 07-31 rule). Flip to true + publish when Jeff calls it;
+// the reroute-result crumb records what was sent either way.
+const REROUTE_ORIGIN_BEARING = false;
 // How quiet the foreground watch must go before background fixes take over. The nav
 // watch delivers at ~1-2 Hz, so 3s means "the fg watch has genuinely stopped" (a
 // locked screen) rather than "we're between fixes".
@@ -1873,16 +1880,20 @@ export default function MapScreen() {
       const reqId = ++offRouteReqSeqRef.current;
       const issuedAt = Date.now();
       const from = { lat: coords.lat, lng: coords.lng };
+      // Heading only counts while moving — a stopped car's heading is GPS noise, and a
+      // wrong bearing constraint is worse than none.
+      const bearing = REROUTE_ORIGIN_BEARING && typeof coords.heading === "number" && Number.isFinite(coords.heading) && (coords.speed ?? 0) > 1.4
+        ? coords.heading : undefined;
       (pinned.length
         ? fetchRouteViaStops(coords, pinned, destination, avoid).then((r) => { if (r) noteViaSnapped(pinned, r.viaSnapped, r.viaSnapDistM); return r ? [r] : []; })
-        : fetchRoutes(coords, destination, avoid)
+        : fetchRoutes(coords, destination, avoid, bearing != null ? { bearing } : undefined)
       ).then((res) => {
         const ageMs = Date.now() - issuedAt;
         const nowC = coordsRef.current;
         const movedM = nowC ? haversineMeters(from, nowC) : 0;
         const superseded = reqId !== offRouteReqSeqRef.current;
         const stale = ageMs > REROUTE_MAX_AGE_MS || movedM > REROUTE_MAX_MOVE_M;
-        try { logEvent(`reroute-result id=${reqId} age=${Math.round(ageMs / 1000)}s moved=${Math.round(movedM)}m n=${res.length} stops=${pinned.length}/${stopsRef.current.length} ${superseded ? 'superseded' : stale ? 'stale' : 'applied'}`); } catch {}
+        try { logEvent(`reroute-result id=${reqId} age=${Math.round(ageMs / 1000)}s moved=${Math.round(movedM)}m n=${res.length} stops=${pinned.length}/${stopsRef.current.length} bearing=${bearing != null ? Math.round(bearing) : '-'} ${superseded ? 'superseded' : stale ? 'stale' : 'applied'}`); } catch {}
         if (superseded || stale) return;   // the next off-route tick (>=8 s) asks again from here
         if (res.length > 0) {
           // Prefer the fastest reroute that continues in the direction the car is

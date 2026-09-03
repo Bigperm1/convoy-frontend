@@ -175,7 +175,8 @@ export type AvoidPrefs = {
 export async function fetchRoutes(
   origin: LatLng,
   destination: LatLng,
-  avoid?: AvoidPrefs
+  avoid?: AvoidPrefs,
+  opts?: { bearing?: number }
 ): Promise<NavRoute[]> {
   // Routing now comes from Mapbox Directions (driving-traffic), replacing Google
   // Routes API. Same signature + NavRoute/NavStep shape, so every caller (map.tsx,
@@ -195,7 +196,7 @@ export async function fetchRoutes(
       origin,
       destination,
       { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
-      { signal: ctl.signal },
+      { signal: ctl.signal, bearing: opts?.bearing },
     );
     if (!mbRoutes.length) return [];
     mbRoutes = await preferCurbArrival(origin, destination, avoid, mbRoutes, ctl.signal);

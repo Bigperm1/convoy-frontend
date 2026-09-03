@@ -335,6 +335,12 @@ tester reminder (WhatsApp desktop); **every 30 min from 06:33** a gate that quer
 runtime 1.27.0 and, once every handle active in the last 24 h (Jeff excluded) is on it: ships
 HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group> 1.27.0`), flips
 `pipeline_flags.require_slot=true` once Rodrigo/Ni GR/GRSIENNA are on 1.27.0, reports, deletes itself.
+- ✅ **06:03 reminder fired late (first Supabase call hung) — SENT 07:00 PDT** to Hairpin App Testing,
+  naming Ron / SMSGRC / Victor 3d Dude as still on 1.26.0. **State at 06:59:** on 1.27.0 = Enablewhore,
+  GRSIENNA, Ni GR, Rodrigo (iOS), **SPL_GRC (Android 76 — confirmed on his head unit, screenshot
+  `1 Crew · v75 · 1.27.0 · emb` at 06:04)**, Jeff. Still 1.26.0 = Ron (Android, active 06:51), Victor
+  3d Dude (Android, 03:31), SMSGRC (Android, last row 09-02 09:45). **All three formerly-stranded testers
+  are on 1.27.0 → `require_slot` is unblocked.** John Mungai posted "1.27 emb / V75" at 00:11 (iOS).
 - **OTA-A (LIVE at HEAD, ships first):** `9a01f45` TTS receipts — `tts-say/tts-play/tts-done/tts-cut/
   tts-skip`. Instrumentation only. Answers "scout drops sentences on arrival" with one query.
 - **OTA-B (STAGED, `REROUTE_ORIGIN_BEARING = false` in map.tsx):** origin `bearings=<hdg>,45;` on

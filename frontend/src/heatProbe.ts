@@ -144,13 +144,14 @@ const GAP_ALERT_EVERY_MS = 10000;
 let _gapAlertAt = 0;
 let _appSeen = '';   // states this window touched, in order: 'a' active 'b' background 'i' inactive
 let _appSub: any = null;
+let _appChangedAt = 0;   // wall-clock of the last AppState transition (0 = none this session)
 
 function armAppWatch(): void {
   if (_appSub || Platform.OS === 'web') return;
   _appSeen = String(AppState.currentState ?? '?').slice(0, 1);
   _appSub = AppState.addEventListener('change', (s) => {
     const c = String(s ?? '?').slice(0, 1);
-    if (_appSeen.slice(-1) !== c) _appSeen += c;   // 'aba' = active -> background -> active
+    if (_appSeen.slice(-1) !== c) { _appSeen += c; _appChangedAt = Date.now(); }   // 'aba' = active -> background -> active
   });
 }
 
@@ -178,7 +179,12 @@ export function noteFrame(now: number, inst?: string): void {
     if (dt > _gapMax) _gapMax = dt;
     if (dt >= GAP_ALERT_MS && now - _gapAlertAt >= GAP_ALERT_EVERY_MS) {
       _gapAlertAt = now;
-      try { logEventReliable(`main-gap dt=${Math.round(dt)} ${_ctx} app=${_appSeen.slice(-1) || '?'}`); } catch {}
+      // The WHOLE sequence, not its last char (2026-09-02): 'aba' proves a suspension,
+      // 'a' with sinceApp far larger than dt proves the app never left the foreground.
+      // A gap can still be the step loop idling under the dead-band (noteFrame's only
+      // caller is the SelfCarModel ease) — read it with the speed on the draw-cmp rows.
+      const sinceApp = _appChangedAt ? now - _appChangedAt : -1;
+      try { logEventReliable(`main-gap dt=${Math.round(dt)} ${_ctx} app=${_appSeen || '?'} sinceApp=${Math.round(sinceApp)}`); } catch {}
     }
     // Thin to every 4th once warm, and STOP at DTS_MAX (see above).
     if (_dts.length < 900 || ((_raf & 3) === 0 && _dts.length < DTS_MAX)) _dts.push(dt);

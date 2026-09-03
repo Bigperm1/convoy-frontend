@@ -133,11 +133,24 @@ protocol ConvoyHostedVC: AnyObject {
 
 enum ConvoyRNHost {
   static var started = false
-  // Cold-CarPlay host wait (see mount's CarPlay branch). 0.05 s x 400 = 20 s ceiling,
-  // comfortably past app.json's fallbackToCacheTimeout of 15 s so a slow-network cold
-  // launch still gets the OTA-selected bundle instead of falling back to embedded.
+  // Cold-CarPlay host wait (see mount's CarPlay branch). 0.05 s x 1800 = 90 s ceiling.
+  // BUILD 75 (CARPLAY-OTA-STRANDING.md B1/B2/B4): the old ceiling was 20 s, justified by
+  // a fallbackToCacheTimeout of "15 s" that has been 0 since d1cae98 — while the step it
+  // waits on (expo-updates ensureAllAssetsExist) carries a 60 s PER-ASSET timeout
+  // (FileDownloader.swift:58). The ceiling was shorter than the thing it waited for.
+  // Past the ceiling we now show a placeholder and KEEP WAITING — we never mint the
+  // host ourselves (that was the poisoning act: superView() resolves the EMBEDDED
+  // bundle while launchAssetUrl is nil and pins the whole process to stale JS).
   static let HOST_WAIT_INTERVAL: TimeInterval = 0.05
-  static let HOST_WAIT_MAX_TICKS = 400
+  static let HOST_WAIT_MAX_TICKS = 1800
+  // After the ceiling: slower poll, unbounded. A late car screen is recoverable; a
+  // process pinned to stale JS is not (the red pill can never appear on it).
+  static let HOST_WAIT_SLOW_INTERVAL: TimeInterval = 0.5
+  // UserDefaults (App Group) marker written on ceiling-hit; JS reports it on the NEXT
+  // launch (crashBreadcrumb.reportCarPlayHostCeiling) — the "diagnose from the following
+  // launch" trick d1cae98 established. Keys shared with src/crashBreadcrumb.ts.
+  static let DIAG_SUITE = "group.com.sw0rdfisch.convoy"
+  static let DIAG_KEY = "convoy.carplay.hostCeiling.v1"
 
   static weak var carWindowRef: UIWindow?
   static var carRepaintBudget = 0
@@ -390,21 +403,60 @@ enum ConvoyRNHost {
       // property would be sharper but also brittle across Expo versions; this is a
       // cheap read on a path that runs once per cold CarPlay connect.
       //
-      // HOST_WAIT_MAX_TICKS x HOST_WAIT_INTERVAL = the ceiling. Past it we mount
-      // anyway, which reproduces exactly today's behaviour (possibly stale JS) rather
-      // than a blank head unit. Deliberately generous: fallbackToCacheTimeout is
-      // 15 s in app.json, so a cold launch on bad signal can legitimately take that
-      // long to resolve a launcher, and cutting it short would just recreate the bug.
+      // HOST_WAIT_MAX_TICKS x HOST_WAIT_INTERVAL = the ceiling (90 s). Past it we do
+      // NOT mount — mounting is what created the host on the embedded bundle and
+      // stranded Olaf for two days and three testers on 2026-09-02. Instead: put a
+      // static placeholder on the head unit (never-blank rule), write the diagnosis
+      // to the App Group defaults for the next launch to report, and keep polling at
+      // a slower cadence until expo-updates' host exists. Only THEN mint the surface.
+      var ceilingLogged = false
+      func showCarPlaceholder() {
+        let vc = UIViewController()
+        vc.view.backgroundColor = UIColor(red: 0.06, green: 0.07, blue: 0.08, alpha: 1)
+        let label = UILabel()
+        label.text = "Starting Hairpin…"
+        label.textColor = UIColor(white: 0.85, alpha: 1)
+        label.font = UIFont.systemFont(ofSize: 22, weight: .semibold)
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        vc.view.addSubview(label)
+        NSLayoutConstraint.activate([
+          label.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor),
+          label.centerYAnchor.constraint(equalTo: vc.view.centerYAnchor),
+        ])
+        window.rootViewController = vc
+      }
+      func recordCeilingHit(hostReady: Bool) {
+        let diag: [String: Any] = [
+          "ticks": hostWaitTicks,
+          "hostReady": hostReady,
+          "sceneState": ConvoyRNHost.carSceneState,
+          "ts": Date().timeIntervalSince1970 * 1000,
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: diag),
+           let json = String(data: data, encoding: .utf8) {
+          UserDefaults(suiteName: ConvoyRNHost.DIAG_SUITE)?.set(json, forKey: ConvoyRNHost.DIAG_KEY)
+        }
+        NSLog("[Convoy] car host ceiling hit after %d ticks — NOT mounting on an embedded host; placeholder shown, still waiting", hostWaitTicks)
+      }
       func mountCarWhenHostReady() {
         let hostReady = (factory.rootViewFactory.value(forKey: "reactHost") as AnyObject?) != nil
-        if hostReady || hostWaitTicks >= ConvoyRNHost.HOST_WAIT_MAX_TICKS {
-          if !hostReady {
-            NSLog("[Convoy] car surface mounted WITHOUT an updates-created host after %d ticks - JS may be stale", hostWaitTicks)
-          }
+        if hostReady {
           mountCarSurface()
           return
         }
         hostWaitTicks += 1
+        if hostWaitTicks >= ConvoyRNHost.HOST_WAIT_MAX_TICKS {
+          if !ceilingLogged {
+            ceilingLogged = true
+            recordCeilingHit(hostReady: false)
+            showCarPlaceholder()
+          }
+          DispatchQueue.main.asyncAfter(deadline: .now() + ConvoyRNHost.HOST_WAIT_SLOW_INTERVAL) {
+            mountCarWhenHostReady()
+          }
+          return
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + ConvoyRNHost.HOST_WAIT_INTERVAL) {
           mountCarWhenHostReady()
         }

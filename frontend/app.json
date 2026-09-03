@@ -5,14 +5,17 @@
     "version": "3.10.0",
     "orientation": "portrait",
     "icon": "./assets/HAIRPIN.png",
-    "scheme": "convoy",
+    "scheme": [
+      "convoy",
+      "hairpin"
+    ],
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "runtimeVersion": "1.26.0",
+    "runtimeVersion": "1.27.0",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
-      "buildNumber": "74",
+      "buildNumber": "75",
       "entitlements": {
         "com.apple.security.application-groups": [
           "group.com.sw0rdfisch.convoy"
@@ -37,7 +40,7 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 74,
+      "versionCode": 75,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/hairpin-adaptive.png",

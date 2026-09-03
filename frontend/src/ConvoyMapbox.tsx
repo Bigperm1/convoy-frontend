@@ -34,6 +34,7 @@
 import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import { reportDraw } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance } from "./heatProbe";
+import { logEvent } from "./crashBreadcrumb";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
@@ -1172,6 +1173,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const camZoom = useRef<number | null>(null);
   const camPitch = useRef<number | null>(null);
   const lastCamAt = useRef(0);
+  // cam-probe bookkeeping (see pushCam). Seeded far away so the first push logs once.
+  const camProbeAt = useRef(0);
+  const camProbeZoom = useRef(-99);
+  const camProbePitch = useRef(-99);
   const [, setTick] = useState(0);
   // Last pose actually DRAWN (see the sub-pixel skip in the rAF step).
   const lastDrawnRef = useRef<{ lat: number; lng: number; heading: number } | null>(null);
@@ -1215,6 +1220,19 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // screen distance to metres and must use this, not the speed-derived TARGET —
     // see the routeTrim call site for why that difference is visible as jitter.
     if (camZoomOutRef) camZoomOutRef.current = camZoom.current;
+    // CAM-PROBE (2026-09-02, Olaf: "the avatar is resizing itself from small to big and
+    // flashing between those"). The self car's on-screen size is a pure function of the
+    // camera (modelScale is a static zoom expression on both surfaces), so a size flash
+    // IS a camera jump — and the camera was never instrumented (car-viewport logs once
+    // per surface). Row only when the APPLIED zoom moves ≥0.15 or pitch ≥3° since the
+    // last row, never more than 1/s: silent at a steady cruise, one row per step.
+    if (now - camProbeAt.current >= 1000 &&
+        (Math.abs(camZoom.current - camProbeZoom.current) >= 0.15 || Math.abs(camPitch.current - camProbePitch.current) >= 3)) {
+      camProbeAt.current = now; camProbeZoom.current = camZoom.current; camProbePitch.current = camPitch.current;
+      try {
+        logEvent(`cam-probe surf=${probeRole} z=${camZoom.current.toFixed(2)} zt=${Number(c.zoomLevel).toFixed(2)} p=${camPitch.current.toFixed(1)} pt=${Number(c.pitch).toFixed(1)} spd=${Math.round((speedMs ?? 0) * 3.6)} snap=${snap || userZoomed ? 1 : 0}`);
+      } catch {}
+    }
     try {
       cameraRef.current.setCamera({
         centerCoordinate: [ln, la],

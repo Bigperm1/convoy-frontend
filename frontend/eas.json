@@ -82,7 +82,7 @@
       "environment": "preview",
       "ios": {
         "resourceClass": "m-medium",
-        "image": "latest"
+        "image": "auto"
       },
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://convoy-backend-j9q1.onrender.com",

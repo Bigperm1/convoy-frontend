@@ -188,6 +188,7 @@ export async function fetchRoutes(
   // No fetch here had any timeout. 15 s is well past a normal Directions round
   // trip; a hung request now fails instead of surfacing minutes later.
   const ctl = new AbortController();
+  const t0 = Date.now();
   const timer = setTimeout(() => ctl.abort(), ROUTE_FETCH_TIMEOUT_MS);
   try {
     mbRoutes = await fetchMapboxRoutes(
@@ -198,7 +199,13 @@ export async function fetchRoutes(
     );
     if (!mbRoutes.length) return [];
     mbRoutes = await preferCurbArrival(origin, destination, avoid, mbRoutes, ctl.signal);
-  } catch {
+  } catch (e: any) {
+    // 2026-09-02: Rodrigo's five off-route refetches came back with REAL routes at
+    // 34-317 s — past this 15 s abort. An aborted fetch cannot return routes, so the
+    // abort did not take effect, and this catch (which used to be silent) could not
+    // tell us whether it ever fires. Now it says which it was.
+    const why = e?.name === "AbortError" || ctl.signal.aborted ? "timeout" : String(e?.name ?? e?.message ?? e).slice(0, 60);
+    try { logEvent(`route-fetch-fail why=${why} ms=${Date.now() - t0}`); } catch {}
     return [];
   } finally {
     clearTimeout(timer);

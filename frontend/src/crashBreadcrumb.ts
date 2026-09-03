@@ -409,7 +409,28 @@ export function installCrashBreadcrumb() {
   // Delivery + harvest happen well after boot so this never competes with
   // startup work (and never runs at module scope — a crash reporter must not
   // itself be able to crash the boot).
-  setTimeout(() => { void deliverAndHarvest(); }, DELIVER_DELAY_MS);
+  setTimeout(() => { void deliverAndHarvest(); reportCarPlayHostCeiling(); }, DELIVER_DELAY_MS);
+}
+
+// BUILD 75 — the CarPlay host plugin (plugins/withConvoyCarPlay.js) writes a marker to
+// the App Group defaults when a cold CarPlay connect waits past its host ceiling. That
+// launch may be running stale JS or none at all, so it cannot report itself; THIS launch
+// reports it, then clears it. Absent on binaries before 75 (getSharedDefaults missing).
+const CARPLAY_DIAG_SUITE = "group.com.sw0rdfisch.convoy";
+const CARPLAY_DIAG_KEY = "convoy.carplay.hostCeiling.v1";
+function reportCarPlayHostCeiling(): void {
+  if (Platform.OS !== "ios") return;
+  try {
+    const { HairpinSystem } = require("../modules/hairpin-system");
+    if (!HairpinSystem || typeof HairpinSystem.getSharedDefaults !== "function") return;
+    const raw = HairpinSystem.getSharedDefaults(CARPLAY_DIAG_SUITE, CARPLAY_DIAG_KEY);
+    if (!raw) return;
+    let d: any = null;
+    try { d = JSON.parse(String(raw)); } catch {}
+    const age = d?.ts ? Math.round((Date.now() - Number(d.ts)) / 1000) : -1;
+    logEventReliable(`carplay-host-ceiling ticks=${d?.ticks ?? "?"} hostReady=${d?.hostReady ? 1 : 0} scene=${d?.sceneState ?? "?"} ageS=${age}`);
+    try { HairpinSystem.removeSharedDefaults?.(CARPLAY_DIAG_SUITE, CARPLAY_DIAG_KEY); } catch {}
+  } catch {}
 }
 
 // 2) Harvest expo-updates' persisted JSRuntimeError entries (last 24h),
@@ -435,14 +456,20 @@ async function harvestUpdatesLog() {
     // whole knot. Every entry is kept now: the interesting codes here are things like
     // NoUpdatesAvailable, UpdateFailedToLoad, AssetsFailedToLoad and the emergency-launch
     // reason, none of which match the old filter.
+    // OLDEST FIRST, capped — and the watermark advances only past what was actually
+    // sent, so a backlog drains over successive launches instead of being skipped
+    // forever (`.slice(-N)` + max-watermark used to drop everything older than the
+    // newest N, permanently). The entry's own timestamp rides in the message so a row
+    // can be attributed to the launch it describes, not the one that harvested it.
     const fresh = entries
       .filter((e) => e && Number(e.timestamp) > watermark)
-      .slice(-MAX_HARVEST);
+      .sort((a, b) => Number(a.timestamp) - Number(b.timestamp))
+      .slice(0, MAX_HARVEST);
     if (!fresh.length) return;
     await queue(fresh.map((e): Report => {
       const code = String(e.code ?? "");
       return {
-        message: `[updates-log ${code}] ${String(e.message ?? "").slice(0, 2000)}`,
+        message: `[updates-log ${code} @${Number(e.timestamp) || 0}] ${String(e.message ?? "").slice(0, 2000)}`,
         stack: e.stacktrace ? String((Array.isArray(e.stacktrace) ? e.stacktrace.join("\n") : e.stacktrace)).slice(0, 12000) : undefined,
         // Only a real JS fatal is a crash; the rest are launch diagnostics and must not
         // masquerade as crashes in the table.

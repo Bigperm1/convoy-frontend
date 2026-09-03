@@ -167,6 +167,15 @@ public class HairpinSystemModule: Module {
         WidgetCenter.shared.reloadAllTimelines()
       }
     }
+
+    // Read-back + clear for one-shot native diagnostics (build 75): the CarPlay host
+    // plugin writes a ceiling-hit marker here; JS reports it on the NEXT launch.
+    Function("getSharedDefaults") { (suite: String, key: String) -> String? in
+      return UserDefaults(suiteName: suite)?.string(forKey: key)
+    }
+    Function("removeSharedDefaults") { (suite: String, key: String) in
+      UserDefaults(suiteName: suite)?.removeObject(forKey: key)
+    }
   }
 }
 

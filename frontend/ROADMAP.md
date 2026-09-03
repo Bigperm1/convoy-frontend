@@ -509,6 +509,31 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   `car_scans_hero_anon_select` grants anon SELECT on exactly `*/hero.jpg` (photos stay private). MemberCarousel
   (Crew / "Drive to a friend") shows it via the authenticated object endpoint with the anon key in headers, sprite
   fallback on error. Testers see each other's hero shots once each has opened their Garage on this build.
+- ✅ **OTA-J SHIPPED 13:58 PDT — group `5bf509e6-6fb5-4790-82e2-3e6ec892727b`, commit `ce6912b`, KEY_PRESENT=1 both — scan id
+  through the BACKEND + Rodrigo's two items (Jeff, 2026-09-03 afternoon).**
+  (1) `car_scan_id` on the profile: backend `0b928d5` (`CarUpdate`, `public_user`/`peer_user`, `members_users`,
+  user search, event attendees — verified live via `/openapi.json`). The phone PUTs it once per scan
+  (`syncScanIdToBackend`, `src/carScan.ts`; remembered in `carScanBackendId`, marked done only when the backend
+  ECHOES the id) from the Garage on delivery and from map.tsx on launch (Olaf's scan predates the field);
+  `navMembers.scanId = p?.scanId ?? m.car_scan_id`, so the Crew / "Drive to a friend" hero shot shows for
+  OFFLINE members too.
+  (2) Rodrigo's request — saved places reachable without scrolling: a SAVED chip row (Home, Work, custom) under the
+  phone search field (`NavSearchScreen`); on CarPlay the Search button now opens a **"Where to?"** CPListTemplate
+  of saved places FIRST, with "Search by name…" as the last row pushing the keyboard template (his head unit's
+  keyboard covered the saved rows). The list shares the search flow's ownership flag (`_searchPushed`) so the
+  motion pop / recovery / back-out rules are unchanged; AA untouched (its native search lists saved rows as `items`).
+  (3) Rodrigo's issue — "phone compass changing directions randomly, CarPlay fine" (12:46–12:52, CarPlay connected,
+  phone on the Show-map face). VERIFIED: `heat-probe inst=car#2:2417/2368,phone#3:2418/0` every minute — the
+  phone's SelfCarModel ran ~2,400 rAF/min and pushed the camera **0 times** for 15 min (the lockstep never drove
+  the phone; the car surface pushed nearly every frame). Drawn heading in `draw-cmp surf=phone` tracked GPS/route
+  cleanly at 10 s samples; the phone's zoom DID move with speed (`ribbon-trim surf=phone z=17.00→18.28→…`), so
+  something other than the lockstep drove that camera. **Which gate held `lockReadyRef` false is NOT on record** —
+  shipped `cam-mode surf=phone view= hu= foll= lock= places= ready= lockstep= nav=` (once a minute + on change)
+  and `phone-tap:show-map`. Next Rodrigo drive: `where handle='Rodrigo' and message like 'cam-mode%'` — the 0 is
+  the answer. Do not guess it. Memory: `rodrigo-phone-compass-lockstep-off.md`.
+  ⚠ Verified: typecheck, trap-check (0 hits), KEY_PRESENT both platforms. NOT sim-verified at ship time: the chips
+  row (sim Release build running) and the CarPlay list (CarPlay sim blocked by the iOS-26 share crash) — field
+  verdict from Rodrigo / Jeff.
 - ✅ **OTA-E SHIPPED 08:37 PDT on Jeff's "ship it" — group `c59b50b9-82c4-4fba-a1f4-47f1fdcfc0c9`, runtime 1.27.0,
   both platforms, commit `323d12d`.** Proof: `ios KEY_PRESENT=1 openweathermap=2 neg_control=0` · `android
   KEY_PRESENT=1 openweathermap=2 neg_control=0`. Contents: arrival-speech fix (`43b901c`) + one shared build number on

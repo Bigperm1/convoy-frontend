@@ -349,6 +349,11 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   now has something to show on 75/76.** `require_slot` LEFT FALSE (Jeff said "ship it", not "flip
   it"; the flip is safe for every device — all three laggards are on the slot-path OTA `01a062b7`).
   OTA-B still `REROUTE_ORIGIN_BEARING = false`. The 06:33 gate cron was deleted after this publish.
+- ✅ **`require_slot = true` — FLIPPED 2026-09-03 07:08:42 PDT on Jeff's "flip it".** Slot-less uploads are
+  now skipped, never rendered. Safe for every device: the formerly-stranded three are on 1.27.0 and the
+  three 1.26.0 laggards are on the slot-path OTA `01a062b7`. Worker tick 07:08:43 (1 s later) = `200
+  ok:true idle:empty`, no worker errors. `enabled=true · daily_credit_cap=6000 · per_user_cap=2 ·
+  min_balance=300` unchanged. Off switch unchanged: `update public.pipeline_flags set enabled=false …`.
 - **OTA-A (LIVE at HEAD, ships first):** `9a01f45` TTS receipts — `tts-say/tts-play/tts-done/tts-cut/
   tts-skip`. Instrumentation only. Answers "scout drops sentences on arrival" with one query.
 - **OTA-B (STAGED, `REROUTE_ORIGIN_BEARING = false` in map.tsx):** origin `bearings=<hdg>,45;` on

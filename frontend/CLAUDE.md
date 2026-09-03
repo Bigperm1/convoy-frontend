@@ -218,6 +218,10 @@ Native deps are patched at install time via `patch-package` (postinstall hook): 
   which killed weather on every surface for ~20 h / 13 OTAs on 2026-08-30. Publish through
   `npx eas-cli env:exec preview "npx eas-cli update --branch mapbox-migration --clear-cache -m '…' --non-interactive"`
   and then PROVE it: `python3 tools/ota/verify-bundle-key.py <group> 1.26.0` → `KEY_PRESENT=1` on BOTH platforms.
+- **`python3 scripts/trap-check.py` must pass before every publish (2026-09-03).** It greps for the
+  signatures of bugs already root-caused (zoom-curve `modelScale`, per-tick layer-style writes,
+  `Constants.nativeBuildVersion`, a ribbon cut from a foreign polyline fraction, bare `eas update`).
+  Add a rule the day a root cause closes. Field behaviour is gated by `tools/sim-qc/` (see its README).
 - **`yarn typecheck` must pass clean before every publish.** This is a required gate — do not publish on a failing or skipped typecheck.
   ⚠ `supabase/` is Deno and is EXCLUDED in `tsconfig.json` — check it with `deno task check` inside
   `supabase/functions/scan-worker/`, never with `tsc` (its sources put 111 errors into the gate on 2026-09-02).

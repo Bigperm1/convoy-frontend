@@ -76,7 +76,13 @@ export function metersPerDp(zoom: number, lat: number): number {
 // the line now starts ~17dp ahead of the nose — visibly clear of the car at any
 // speed, no longer a third of a screen away. OTA-tunable; if a drive photo shows a
 // kiss, raise toward 56 before rethinking.
-export const TRIM_LEAD_DP = 48;
+// ── 48 → 60 (2026-09-03, Jeff: "the route line was overlapping the car marker" — CarPlay video) ──
+// The cut is now anchored to the DRAWN car on the ribbon's own metres (routeRibbon.alongMOnPartition),
+// which removed a ~1%-of-distance drift and the separate ease clock. What remains at 48 is optics: the
+// fade starts 26 dp ahead of the nose and the casing GLOW is blurred ~20 dp behind its own start, so the
+// halo visibly touched the nose on the sim at 54 km/h (measured: faint green 3 pt ahead of the nose,
+// solid 13 pt). 60 puts the cut 38 dp ahead of the nose and the halo clear of it at every zoom.
+export const TRIM_LEAD_DP = 60;
 
 // Sanity rails on the METRE result. These exist only to stop a pathological camera
 // (a mid-pinch zoom spike, a bogus latitude) producing an absurd trim; in normal

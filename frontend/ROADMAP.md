@@ -450,6 +450,22 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   while pushes were issued (heat-probe `cam == tick`, no `main-gap` ≥ 2 s) then caught up — a native non-apply,
   cause unknown; `cam-apply` is the check. Verdict rows next drive: no `cam-apply` rows through a roundabout =
   camera applied; car size constant across `cam-probe z=` changes (photo/video).
+- 🚧 **OTA-F STAGED 11:15 PDT — ROUTE LINE OFF THE CAR (Jeff: "the route line was overlapping the car marker… make sure this does not happen") + the gates (Jeff: "how can we gate all these changes so they do not come back?").**
+  Sim-reproduced on the phone (iOS 27 sim, Xcode-MCP taps, `tools/sim-qc/`): at 54 km/h the cut sat 31 m
+  ahead of the RAW projection but the faint casing glow reached the nose; on CarPlay (Jeff's 09:22 video) the
+  solid line ended on the roof. Two structural causes removed: (1) the cut was `frac × partition.totalM` with
+  `frac` from a projection onto the precision-5 nav polyline but applied to the dense `coordinates` partition —
+  the lengths differ ~1%, i.e. tens of metres a few km in; (2) the eased fraction ran its own clock against the
+  marker's ease. Now `routeRibbon.alongMOnPartition()` projects the DRAWN car (SelfCarModel's `drawPosOutRef`)
+  onto the ribbon's own metres, windowed ±250 m, and the cut = that + lead (both surfaces). Readout on the sim:
+  `lead:33m cut+33m lag:0m` (was cut+31). `TRIM_LEAD_DP` 48 → 60 so the glow halo clears the nose (measured
+  faint green 3 pt ahead of the nose at 48). Receipt `ribbon-trim surf=phone|car snap= z= lead= cutAhead= lag=
+  anchorOff= proj= fade=` every 15 s in nav — the CarPlay-specific cause (if any remains) shows up there.
+  **Gates added:** `scripts/trap-check.py` (release gate, wired into the ship-ota skill + CLAUDE.md: textual
+  signatures of the zoom-curve modelScale, per-tick layer-style writes, `Constants.nativeBuildVersion`, the
+  foreign-polyline cut, a bare `eas update`) and `tools/sim-qc/` (park → search → drive the app's own route on
+  the sim → `measure.py` PASS/FAIL on car size across zooms + nose→line gap). Debug toggle now shows a `TRIM`
+  line (snap, zoom, lead, cut+, lag, proj, fade).
 - ✅ **OTA-E SHIPPED 08:37 PDT on Jeff's "ship it" — group `c59b50b9-82c4-4fba-a1f4-47f1fdcfc0c9`, runtime 1.27.0,
   both platforms, commit `323d12d`.** Proof: `ios KEY_PRESENT=1 openweathermap=2 neg_control=0` · `android
   KEY_PRESENT=1 openweathermap=2 neg_control=0`. Contents: arrival-speech fix (`43b901c`) + one shared build number on

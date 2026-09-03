@@ -175,6 +175,46 @@ export function buildRibbonPartition(
   return { coords: coords as LngLat[], cum, totalM, runs };
 }
 
+/**
+ * Metres along THIS partition's own line for a point, plus its lateral distance. This is
+ * what the route-line cut must be computed in (2026-09-03): `frac × totalM` from a
+ * projection onto a DIFFERENT polyline (the precision-5 nav polyline vs the dense
+ * `coordinates` the ribbon is built from) drifts by the two lengths' difference — a
+ * percent of the distance driven, i.e. tens of metres mid-route — and the eased fraction
+ * lagged the eased marker on its own clock. Anchoring the cut to the DRAWN car on the
+ * ribbon's own metres removes both by construction. `nearM ± spanM` keeps the search local
+ * so a parallel leg 60 m away (divided highway, out-and-back) cannot capture the anchor.
+ */
+export function alongMOnPartition(
+  p: RibbonPartition, lat: number, lng: number, nearM?: number | null, spanM = 250,
+): { m: number; distM: number } | null {
+  const n = p.coords.length;
+  if (n < 2) return null;
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const cosLat = Math.cos(toRad(lat));
+  const X = (ln: number) => toRad(ln - lng) * cosLat * R;
+  const Y = (la: number) => toRad(la - lat) * R;
+  const lo = typeof nearM === "number" && Number.isFinite(nearM) ? nearM - spanM : -Infinity;
+  const hi = typeof nearM === "number" && Number.isFinite(nearM) ? nearM + spanM : Infinity;
+  let bestD2 = Infinity, bestM = 0;
+  let px = X(p.coords[0][0]), py = Y(p.coords[0][1]);
+  for (let i = 1; i < n; i++) {
+    const cx = X(p.coords[i][0]), cy = Y(p.coords[i][1]);
+    const s0 = p.cum[i - 1], s1 = p.cum[i];
+    if (s1 >= lo && s0 <= hi) {
+      const dx = cx - px, dy = cy - py, len2 = dx * dx + dy * dy;
+      let t = len2 > 0 ? -(px * dx + py * dy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const qx = px + t * dx, qy = py + t * dy, d2 = qx * qx + qy * qy;
+      if (d2 < bestD2) { bestD2 = d2; bestM = s0 + t * (s1 - s0); }
+    }
+    px = cx; py = cy;
+  }
+  if (bestD2 === Infinity) return null;
+  return { m: Math.max(0, Math.min(p.totalM, bestM)), distM: Math.sqrt(bestD2) };
+}
+
 /** Index of the segment containing metre `m`: cum[i] <= m < cum[i+1]. */
 function segIndex(p: RibbonPartition, m: number): number {
   let lo = 0, hi = p.cum.length - 2;

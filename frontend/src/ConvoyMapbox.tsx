@@ -39,7 +39,7 @@ import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, A
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
 import { routeTrimLeadM, routeTrimFadeM } from "./routeTrim";
-import { buildRibbonPartition, buildRibbonFeatures, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
+import { buildRibbonPartition, buildRibbonFeatures, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
 import { getVehiclePngOrDefault, getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
@@ -1152,7 +1152,7 @@ const SELF_MARKER_SLOT = undefined;
 /** Monotonic mount counter — see probeKeyRef inside SelfCarModel. */
 let _selfCarMountSeq = 0;
 
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, drawPosOutRef, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -1211,6 +1211,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // stale and the target zoom is only a guess. Sim, 2026-09-03: at idle the map sat ~0.4
   // below the 17.0 target and the car drew at 33 pt instead of 44.
   liveZoomRef?: React.RefObject<number | null>;
+  // OUT-param: where the car is DRAWN this frame (the eased pose pushCam is about to centre
+  // on). The route-line cut anchors to this (routeRibbon.alongMOnPartition) so the gap in
+  // front of the nose is constant by construction, on both surfaces.
+  drawPosOutRef?: React.MutableRefObject<{ lat: number; lng: number } | null>;
   // "Class" appearance: the name of a REGISTERED map image (the tinted top-down
   // class sprite). When set, the marker renders as a flat map-aligned SymbolLayer
   // riding the SAME eased pose instead of the 3D ModelLayer.
@@ -1302,6 +1306,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // translates around it. Gated on readyRef so 60fps calls never queue into a not-yet-
   // ready surface (the CarPlay blank-with-bounds hazard). No-op unless wired.
   const pushCam = (la: number, ln: number, hdg?: number, snap = false) => {
+    // Drawn pose out-param FIRST — the cut needs it even when the camera is not ours to push.
+    if (drawPosOutRef) drawPosOutRef.current = { lat: la, lng: ln };
     if (!cameraRef?.current || !getCam || !(readyRef?.current)) return;
     // Counted AFTER the bail, so this measures camera pushes that actually cross the
     // bridge — each one is a JSON encode here and a JSON decode in native.
@@ -2838,6 +2844,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // and gets the zoom the driver is really looking through rather than the noisy
   // speed-derived target. null until the first camera frame seeds it.
   const camZoomRef = useRef<number | null>(null);
+  const drawPosRef = useRef<{ lat: number; lng: number } | null>(null);
+  const trimLogAt = useRef(0);
   // Along-route ease state for the route trim: where the line start is coming FROM,
   // where it is going TO, when that leg started and how long it should take. Keyed by
   // polyline so a reroute starts clean instead of interpolating across two routes.
@@ -3257,9 +3265,22 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // speed-aware lead. Quantised to one screen pixel at this camera so the source is
   // rebuilt only when the start would visibly move; fade rounded to 2 m so a settling
   // zoom cannot churn the memo.
-  const ribbonCutM = (routeProj && ribbonPartition)
-    ? _fracDrawn * ribbonPartition.totalM + _trimLeadM
+  // ── CUT ANCHORED TO THE DRAWN CAR, ON THE RIBBON'S OWN METRES (2026-09-03) ──────
+  // Jeff's CarPlay video: the line ended on the car's roof. Two structural reasons, both
+  // gone here: (1) `frac` came from a projection onto the precision-5 nav polyline but was
+  // applied to the dense `coordinates` partition — the lengths differ by ~1%, i.e. tens of
+  // metres a few km in; (2) the eased fraction ran its own clock against the marker's ease.
+  // Now the marker's DRAWN pose (SelfCarModel's out-param) is projected onto the partition
+  // itself, windowed around the eased fraction; the old path stays as the fallback for the
+  // first frames and when the anchor is >80 m off the ribbon (not on this line at all).
+  const _anchorPos = drawPosRef.current ?? (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null);
+  const _alongAnchor = (routeProj && ribbonPartition && _anchorPos)
+    ? alongMOnPartition(ribbonPartition, _anchorPos.lat, _anchorPos.lng, _fracDrawn * ribbonPartition.totalM, 250)
     : null;
+  const _cutBaseM = (routeProj && ribbonPartition)
+    ? ((_alongAnchor && _alongAnchor.distM <= 80) ? _alongAnchor.m : _fracDrawn * ribbonPartition.totalM)
+    : null;
+  const ribbonCutM = _cutBaseM != null ? _cutBaseM + _trimLeadM : null;
   const ribbonCutQ = quantiseM(ribbonCutM, ribbonStepM(_trimZoom, selfCar?.lat ?? 0));
   const ribbonFadeQ = Math.round(routeTrimFadeM(_trimZoom, selfCar?.lat ?? 0) / 2) * 2;
   // What convoy-routes actually draws: the base routes (alternates / the reroute offer,
@@ -3362,6 +3383,18 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   }
   // DISPLAY-ONLY draw position: route line (snapped) → nearest road (idle/off-route) → raw GPS.
   // Reroute + /location + presence stay on RAW GPS (see nav.ts); NEVER lift this into `coords`.
+  // RIBBON-TRIM RECEIPT (2026-09-03): the numbers behind "the route line is over the car",
+  // every 15 s while navigating. cutAhead = metres from the anchored car to the cut (should
+  // equal lead); lag = how far the old eased-fraction path sat behind the drawn car.
+  if (navigationActive && routeProj && ribbonPartition && ribbonCutM != null && _cutBaseM != null) {
+    const _tn = Date.now();
+    if (_tn - trimLogAt.current >= 15000) {
+      trimLogAt.current = _tn;
+      try {
+        logEvent(`ribbon-trim surf=phone snap=${selfSnapped ? 1 : 0} z=${Number(_trimZoom).toFixed(2)} lead=${Math.round(_trimLeadM)} cutAhead=${Math.round(ribbonCutM - _cutBaseM)} lag=${_alongAnchor ? Math.round(_fracDrawn * ribbonPartition.totalM - _alongAnchor.m) : '-'} anchorOff=${_alongAnchor ? Math.round(_alongAnchor.distM) : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ}`);
+      } catch {}
+    }
+  }
   const selfDraw = selfPinned
     // The parked spot was RECORDED while driving, so it is already on the road. Snapping
     // it again would drag the pin to whatever fragment is nearest the phone's own idea of
@@ -3948,6 +3981,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             cameraRef={cameraRef}
             getCam={getCam}
             camZoomOutRef={camZoomRef}
+            drawPosOutRef={drawPosRef}
             readyRef={lockReadyRef}
           />
         )}
@@ -3964,7 +3998,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       {getSettings().debugOverlays && (
       <View pointerEvents="none" style={{ position: 'absolute', top: 120, left: 8, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 3, paddingHorizontal: 6, borderRadius: 6 }}>
         <Text style={{ color: '#00FF88', fontSize: 11, fontWeight: '600' }}>
-          {`HDG mode:${mapView} feed:${followHeadingDeg != null ? Math.round(followHeadingDeg) : '-'} cam:${Math.round(dbgCamHdg)} gps:${Math.round(selfHeadingDeg)} foll:${followUser ? 'Y' : 'N'} lock:${coldLockDone ? 'Y' : 'N'} zoom:${dbgZoom.toFixed(1)}`}
+          {`HDG mode:${mapView} feed:${followHeadingDeg != null ? Math.round(followHeadingDeg) : '-'} cam:${Math.round(dbgCamHdg)} gps:${Math.round(selfHeadingDeg)} foll:${followUser ? 'Y' : 'N'} lock:${coldLockDone ? 'Y' : 'N'} zoom:${dbgZoom.toFixed(1)}`}</Text>
+        {/* TRIM readout (2026-09-03): the numbers behind "the route line is over the car" — snap state,
+            the zoom the lead was converted at vs the LIVE map zoom, the lead in metres, and where the
+            cut sits relative to the car's projected point. Debug toggle only. */}
+        <Text style={{ color: '#00FF88', fontSize: 11, fontWeight: '600' }}>{`TRIM snap:${selfSnapped ? 'Y' : 'N'} trimZ:${Number(_trimZoom).toFixed(2)} camZ:${camZoomRef.current == null ? '-' : camZoomRef.current.toFixed(2)} lead:${Math.round(_trimLeadM)}m cut+${ribbonCutM == null || _cutBaseM == null ? '-' : Math.round(ribbonCutM - _cutBaseM)}m lag:${_alongAnchor && ribbonPartition ? Math.round(_fracDrawn * ribbonPartition.totalM - _alongAnchor.m) : '-'}m proj:${routeProj ? routeProj.distM.toFixed(0) : '-'}m fade:${ribbonFadeQ}m`}
         </Text>
         <Text style={{ color: '#00FF88', fontSize: 11, fontWeight: '600' }}>{`CAR store fix:${typeof getCarState().selfLat === 'number' ? 'Y' : 'N'} @${typeof getCarState().selfLat === 'number' ? getCarState().selfLat!.toFixed(3) : '-'},${typeof getCarState().selfLng === 'number' ? getCarState().selfLng!.toFixed(3) : '-'} spd:${(getCarState().speedMs || 0).toFixed(0)}`}</Text>
       </View>

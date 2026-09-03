@@ -67,7 +67,7 @@ import {
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
 import { routeTrimLeadM, routeTrimFadeM } from '../routeTrim';
-import { buildRibbonPartition, buildRibbonFeatures, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from '../routeRibbon';
+import { buildRibbonPartition, buildRibbonFeatures, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from '../routeRibbon';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
@@ -1061,6 +1061,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // The camera's ACTUAL low-passed zoom, written every frame by SelfCarModel's
   // pushCam. A ref → no renders. The route trim reads it; see trimZoom.
   const camZoomRef = useRef<number | null>(null);
+  const carDrawPosRef = useRef<{ lat: number; lng: number } | null>(null);
+  const carTrimLogAt = useRef(0);
   // Along-route ease state for the route trim (see routeTrimEndFrac below).
   const fixEaseRef = useRef<{ key: string | null; prev: number; cur: number; at: number; gap: number } | null>(null);
   const [, setTrimTick] = useState(0);
@@ -1567,9 +1569,16 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // the speed-aware lead. Quantised to one screen pixel at this camera so the source
   // is rebuilt only when the start would visibly move; the fade is rounded to 2 m so
   // a settling camera zoom cannot churn the memo either.
-  const ribbonCutM = (routeProj && ribbonPartition)
-    ? fracDrawn * ribbonPartition.totalM + trimLeadM
+  // CUT ANCHORED TO THE DRAWN CAR on the ribbon's own metres (2026-09-03) — see the
+  // matching block in ConvoyMapbox.tsx. Jeff's 09:22 CarPlay video is the report.
+  const _carAnchor = carDrawPosRef.current ?? { lat, lng };
+  const _carAlongAnchor = (routeProj && ribbonPartition)
+    ? alongMOnPartition(ribbonPartition, _carAnchor.lat, _carAnchor.lng, fracDrawn * ribbonPartition.totalM, 250)
     : null;
+  const _carCutBaseM = (routeProj && ribbonPartition)
+    ? ((_carAlongAnchor && _carAlongAnchor.distM <= 80) ? _carAlongAnchor.m : fracDrawn * ribbonPartition.totalM)
+    : null;
+  const ribbonCutM = _carCutBaseM != null ? _carCutBaseM + trimLeadM : null;
   const ribbonCutQ = quantiseM(ribbonCutM, ribbonStepM(trimZoom, lat, mapScale));
   const ribbonFadeQ = Math.round((routeTrimFadeM(trimZoom, lat) * mapScale) / 2) * 2;
   // Snap the car to the line + lock its heading to the route bearing when on-route (≤60 m),
@@ -1588,6 +1597,16 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   }
   carSnapHdgOkRef.current = _carDistSnap ? _carHdgOk : true;
   const carSnapped = _carDistSnap && _carHdgOk;
+  // RIBBON-TRIM RECEIPT (car surface) — same fields as the phone's, every 15 s in nav.
+  if (s.navigating && routeProj && ribbonPartition && ribbonCutM != null && _carCutBaseM != null) {
+    const _tn = Date.now();
+    if (_tn - carTrimLogAt.current >= 15000) {
+      carTrimLogAt.current = _tn;
+      try {
+        logEvent(`ribbon-trim surf=car snap=${carSnapped ? 1 : 0} z=${trimZoom.toFixed(2)} lead=${Math.round(trimLeadM)} cutAhead=${Math.round(ribbonCutM - _carCutBaseM)} lag=${_carAlongAnchor ? Math.round(fracDrawn * ribbonPartition.totalM - _carAlongAnchor.m) : '-'} anchorOff=${_carAlongAnchor ? Math.round(_carAlongAnchor.distM) : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} scale=${mapScale.toFixed(2)}`);
+      } catch {}
+    }
+  }
   // Feed the road-snap query (only when NOT route-snapped) + use a FRESH snap for the draw.
   // NAV-ONLY, mirroring the phone exactly — in free drive the car marker draws RAW GPS.
   // See the long note at ConvoyMapbox's _roadActive: off-route snapping froze and jumped
@@ -1875,6 +1894,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           readyRef={lockReadyRef}
           camHeadingOverrideRef={camHdgOverrideRef}
           camZoomOutRef={camZoomRef}
+          drawPosOutRef={carDrawPosRef}
           // PHONE PARITY (2026-07-30). Without this the dead-band expression in
           // SelfCarModel reads `(speedMs ?? 99) < SELF_CREEP_MS` = false FOREVER, so the
           // car surface was permanently on the tight 2.5 m moving band and never got the

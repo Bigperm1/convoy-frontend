@@ -229,6 +229,11 @@ premium CarPlay glyphs
   runtime parity is the rule, not build numbers). iOS 75 → TestFlight succeeded (submission
   `f34a5958`, processing at Apple). The EAS log lives behind a brotli-encoded `logsUrl` on the
   GraphQL API — `submission:list` only says "Fastlane supply failed".
+- ✅ **Android re-cut FINISHED 23:35 PDT — `421a3691` (`mapbox-android-store`), v3.10.0, versionCode 76,
+  runtime 1.27.0, channel `mapbox-migration`, compile/targetSdk 36.** Pair for the crew = **iOS 75
+  `a65064e0` + Android 76 `421a3691`, both runtime 1.27.0** (parity GOOD). Play submit for 76 is
+  Jeff's to run (classifier): `eas submit --platform android --id 421a3691-3cb8-4cf0-aabc-45aaa7ffb551 --profile production`.
+  The rejected 75 AAB (`967a8402`) is dead — never submit it.
 - **What 75 carries (over 74):** the CarPlay-first OTA-stranding fix (`CARPLAY-OTA-STRANDING.md`
   B1/B2/B4 — the cold-CarPlay host wait never mints the RN host; placeholder + App Group
   diagnosis + unbounded slow poll; ceiling 20 s → 90 s) · `HairpinSystem.getSharedDefaults/

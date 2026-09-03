@@ -1780,9 +1780,9 @@ export default function MapScreen() {
   // the module-level store is not. Deriving the key from getCarState() makes the guard
   // true by construction: it compares what is actually on the car surface.
   const waypointKey = (ws: NonNullable<CarState['waypoints']>) =>
-    ws.map((w) => `${w.kind}${w.n ?? ''}:${w.lat.toFixed(5)},${w.lng.toFixed(5)}`).join("|");
+    ws.map((w) => `${w.kind}${w.n ?? ''}:${w.lat.toFixed(5)},${w.lng.toFixed(5)}:${w.wx ?? ''}:${w.temp ?? ''}`).join("|");
   useEffect(() => {
-    const wps: { lat: number; lng: number; kind: 'stop' | 'dest'; n?: number }[] = [];
+    const wps: NonNullable<CarState['waypoints']> = [];
     // Gated on `destination`, NOT on turn-by-turn. The car draws its route ribbon during
     // PREVIEW too, so a nav-mode gate left the exact screen the driver studies before
     // pressing Start showing a line into empty space — the original complaint, unfixed
@@ -1795,7 +1795,9 @@ export default function MapScreen() {
         // numbering ConvoyMapbox uses, which is what keeps the two surfaces identical.
         wps.push({ lat: st.lat, lng: st.lng, kind: 'stop', n: i + 1 });
       });
-      wps.push({ lat: destination.lat, lng: destination.lng, kind: 'dest' });
+      // The end pin IS the arrival weather now (Jeff, 2026-09-03) — same ETA-matched
+      // forecast the phone pin shows; absent while the weather layer is off or unfetched.
+      wps.push({ lat: destination.lat, lng: destination.lng, kind: 'dest', wx: destWeather?.kind, temp: destWeather?.temp });
     }
     try {
       if (waypointKey(wps) === waypointKey(getCarState().waypoints ?? [])) return;
@@ -1803,7 +1805,7 @@ export default function MapScreen() {
     } catch {}
     // No navMode / stopsVersion: neither changes what is drawn any more, and both only
     // bought redundant runs that the key gate above threw away.
-  }, [stops, destination?.lat, destination?.lng]);
+  }, [stops, destination?.lat, destination?.lng, destWeather]);
 
   // Turn-by-turn engine — speaks instructions, advances steps, computes ETA / distance remaining
   // What Scout SAYS on arrival. Saved name wins, so a destination you searched by address

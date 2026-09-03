@@ -77,7 +77,10 @@ export type CarState = {
   // numbered the same way. A "pending only" variant was written first and cut in review:
   // it could not work (stops are marked visited on a REF, which no effect can observe)
   // and, once made to work, it would have made the car disagree with the phone.
-  waypoints?: { lat: number; lng: number; kind: 'stop' | 'dest'; n?: number }[];
+  // `wx`/`temp` ride the DESTINATION entry only: the ETA-matched arrival weather kind
+  // (WeatherKind) and the pre-formatted reading ('18°'), so the head unit's end pin can
+  // be the weather pin the phone draws (Jeff, 2026-09-03).
+  waypoints?: { lat: number; lng: number; kind: 'stop' | 'dest'; n?: number; wx?: string; temp?: string }[];
   peers: CarPeer[];
   // Self user id, mirrored from the warm phone hook. Lets the CarPlay surface drop our
   // OWN voice out of the "X is talking…" indicator. undefined on a cold connect (no auth

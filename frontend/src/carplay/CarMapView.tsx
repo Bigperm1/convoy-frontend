@@ -34,6 +34,11 @@ import Mapbox, {
 import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
 import { canonicalClass } from '../settings';
 import { useMapView2D } from '../mapViewMode';
+import { useAppSkin } from '../appSkin';
+import { wxPinUri, wxPillUri, WX_PIN_KINDS } from '../wxPinImages';
+// End-pin weather images on the car surface — iOS CarPlay only until Android Auto is verified
+// (see allMapImages below). JS-only, so an OTA can flip it.
+const WX_PIN_ON_CAR = Platform.OS === 'ios';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, getVehiclePngOrDefault, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
 import {
@@ -806,15 +811,29 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.peers]);
 
+  // ── THE END PIN IS THE ARRIVAL WEATHER (Jeff, 2026-09-03) ────────────────────
+  // Same baked images the phone's DestinationWeatherPin draws (src/wxPinImages.ts: the brand
+  // pin's silhouette, outline in the tier metal, two-tone glyph in the head), registered as
+  // Mapbox symbol images per skin, plus the temperature pill. Data URIs decode through RN's
+  // image loader on iOS. ANDROID AUTO KEEPS brand_pin for now: data-URI symbol images on the
+  // AA canvas are unverified and a failed decode would draw NO end pin at all — the exact
+  // "there's no dot" complaint. Flip WX_PIN_ON_CAR after one verified AA connect.
+  const tier = useAppSkin();
   const allMapImages = React.useMemo(
     () => ({
       [carFlatImg]: getVehiclePngOrDefault(s.selfCarColor),
       // The waypoint pin. Same asset the phone's destination and stop markers use, so a
       // stop looks like the SAME object on both screens rather than a car-only invention.
       brand_pin: require('../../assets/images/brand-pin.png'),
+      ...(WX_PIN_ON_CAR
+        ? {
+            ...Object.fromEntries(WX_PIN_KINDS.map((k) => ['wxpin_' + k, { uri: wxPinUri(tier, k) }])),
+            wxpill: { uri: wxPillUri(tier) },
+          }
+        : {}),
       ...peerImages,
     }),
-    [carFlatImg, s.selfCarColor, peerImages],
+    [carFlatImg, s.selfCarColor, peerImages, tier],
   );
 
   // ── WAYPOINT PINS — THE STOPS AND THE DESTINATION (2026-08-31) ───────────────
@@ -837,6 +856,13 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           // The destination carries no numeral; a stop carries its trip position, which
           // matches the phone's badge and the drawer so "stop 2" means one thing.
           label: w.kind === 'stop' && w.n ? String(w.n) : '',
+          // The end pin's image: the weather pin for its ETA-matched forecast kind ('none'
+          // = the clean skin-ringed pin while the layer is off / unfetched); stops keep the
+          // brand pin. `isz` corrects for the 2x bake vs the 1x brand asset so both draw at
+          // the same 36.5x47.5 pt; `temp` feeds the pill layer (empty = no pill).
+          icon: WX_PIN_ON_CAR && w.kind === 'dest' ? 'wxpin_' + (w.wx && (WX_PIN_KINDS as readonly string[]).includes(w.wx) ? w.wx : 'none') : 'brand_pin',
+          isz: WX_PIN_ON_CAR && w.kind === 'dest' ? 0.5 : 1,
+          temp: WX_PIN_ON_CAR && w.kind === 'dest' && w.temp ? w.temp : '',
         },
         geometry: { type: 'Point' as const, coordinates: [w.lng, w.lat] },
       })),
@@ -2082,8 +2108,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             id="car-waypoint-pins"
             slot="top"
             style={{
-              iconImage: 'brand_pin',
-              iconSize: 0.5 * uiScale,
+              iconImage: ['get', 'icon'] as any,
+              iconSize: ['*', ['get', 'isz'], 0.5 * uiScale] as any,
               // Bottom-anchored: a pin points AT a place, so its tip sits on the
               // coordinate rather than its middle — the anchor the phone uses too.
               iconAnchor: 'bottom',
@@ -2116,7 +2142,40 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
               textEmissiveStrength: 1,
             }}
           />
-        </ShapeSource>
+                  {/* Temperature pill beside the end pin's head — the same baked pill + white
+              reading the phone draws (DestinationWeatherPin). Translate is in viewport
+              points from the bottom anchor: head centre 29.5 pt up, pill centre 37.25 pt
+              right (pin half-width 18.25 + 4 gap + pill half-width 15), x uiScale on AA. */}
+          <SymbolLayer
+            id="car-waypoint-temp"
+            slot="top"
+            filter={['!=', ['get', 'temp'], ''] as any}
+            style={{
+              iconImage: 'wxpill',
+              iconSize: 0.5 * uiScale,
+              iconAnchor: 'center',
+              iconTranslate: [37.25 * uiScale, -29.5 * uiScale] as any,
+              iconTranslateAnchor: 'viewport',
+              iconRotationAlignment: 'viewport',
+              iconPitchAlignment: 'viewport',
+              iconAllowOverlap: true,
+              iconIgnorePlacement: true,
+              iconEmissiveStrength: 1,
+              textField: ['get', 'temp'] as any,
+              textSize: 11 * uiScale,
+              textColor: '#FFFFFF',
+              textFont: ['DIN Pro Bold', 'Arial Unicode MS Bold'],
+              textAnchor: 'center',
+              textTranslate: [37.25 * uiScale, -29.5 * uiScale] as any,
+              textTranslateAnchor: 'viewport',
+              textRotationAlignment: 'viewport',
+              textPitchAlignment: 'viewport',
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+              textEmissiveStrength: 1,
+            }}
+          />
+</ShapeSource>
       )}
 
       {/* Mirrored map markers — the SAME hazards / DriveBC incidents / speed cameras /

@@ -52,6 +52,7 @@ import { getCarState } from "./carplay/carStore";
 import { getLastLocation, setLastLocation, getSettings, canonicalClass } from "./settings";
 import { haversineMeters } from "./nav";
 import { useAppSkin } from "./appSkin";
+import { wxPinUri, wxPillUri, WX_PIN_W, WX_PIN_H, WX_PILL_W, WX_PILL_H } from "./wxPinImages";
 import type { VisualTier } from "./tierTheme";
 
 // 1×1 fully transparent PNG — a REAL bundled asset, not a data-URI (@rnmapbox's
@@ -551,22 +552,7 @@ const HAZARD_ICONS: Record<string, any> = {
 const HAZARD_ICON_DEFAULT = require("../assets/images/hazard.png");
 const CAMERA_ICON = require("../assets/images/speed_camera.png");
 
-// Destination arrival-weather chip icon: map a WeatherKind to an icon + tint.
-// `mci` selects MaterialCommunityIcons (fog) vs Ionicons (everything else).
-function destWxIcon(kind: WeatherKind): { name: string; color: string; mci: boolean } {
-  switch (kind) {
-    case "clear-day": return { name: "sunny", color: "#FFD60A", mci: false };
-    case "clear-night": return { name: "moon", color: "#DCE3F0", mci: false };
-    case "partly-day": return { name: "partly-sunny", color: "#FFD60A", mci: false };
-    case "partly-night": return { name: "cloudy-night", color: "#DCE3F0", mci: false };
-    case "cloudy": return { name: "cloud", color: "#AEB4BD", mci: false };
-    case "fog": return { name: "weather-fog", color: "#AEB4BD", mci: true };
-    case "rain": return { name: "rainy", color: "#5AC8FA", mci: false };
-    case "snow": return { name: "snow", color: "#EAF6FF", mci: false };
-    case "thunder": return { name: "thunderstorm", color: "#FFD60A", mci: false };
-    default: return { name: "partly-sunny", color: "#FFD60A", mci: false };
-  }
-}
+// (The destination's arrival weather is drawn by DestinationWeatherPin — see wxPinImages.ts.)
 
 // ===== Chase-cam tuning — mirrors ConvoyMap.tsx =====
 // Chase-cam tilt is speed-aware: a touch flatter in the city, tilting further
@@ -2222,17 +2208,34 @@ export function PlaceMarker({ place, index, onPress, scale = 1 }: { place: Place
   );
 }
 
-// ===== DestWeatherMarker =====
-// Arrival-weather chip floating just above the destination pin.
-function DestWeatherMarker({ lat, lng, weather }: { lat: number; lng: number; weather: { kind: WeatherKind; temp: string } }) {
-  const ic = destWxIcon(weather.kind);
+// ===== DestinationWeatherPin =====
+// Jeff, 2026-09-03: "the end destination has the green pin. Change it to the weather for
+// that destination. I like the size of the green pin and how on the 3D map it looks like
+// it's floating. Make the border the skin colour, green/silver/gold."
+// Same silhouette and size as the brand pin (34x44 pt, bottom-anchored MarkerView — the
+// screen-space float he likes), re-baked with the tier metal as its outline and the two-tone
+// weather glyph in the head (tools/wx-pin/bake.py → src/wxPinImages.ts, data URIs so CarPlay
+// draws the identical pixels through a SymbolLayer). The ETA-matched temperature hangs in a
+// skin-bordered pill beside the head; no weather (layer off / not fetched yet) = the clean
+// skin-ringed pin. This REPLACES the chip that used to float above the pin.
+const DEST_PIN_W = 34;
+const DEST_PIN_H = Math.round(DEST_PIN_W * (WX_PIN_H / WX_PIN_W)); // 44
+const DEST_PILL_GAP = 4;
+function DestinationWeatherPin({ lat, lng, weather }: { lat: number; lng: number; weather: { kind: WeatherKind; temp: string } | null }) {
+  const tier = useAppSkin();
+  const kind = weather?.kind ?? "none";
+  const boxW = DEST_PIN_W + DEST_PILL_GAP + WX_PILL_W;
+  const headCy = DEST_PIN_H * (36 / 95); // the head hole centre, in the baked geometry
   return (
-    <MarkerView coordinate={[lng, lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
-      <View style={styles.destWxChip}>
-        {ic.mci
-          ? <MaterialCommunityIcons name={ic.name as any} size={18} color={ic.color} />
-          : <Ionicons name={ic.name as any} size={18} color={ic.color} />}
-        <Text style={styles.destWxText}>{weather.temp}</Text>
+    <MarkerView coordinate={[lng, lat]} anchor={{ x: (DEST_PIN_W / 2) / boxW, y: 1 }} allowOverlap>
+      <View style={{ width: boxW, height: DEST_PIN_H }}>
+        <Image source={{ uri: wxPinUri(tier, kind) }} style={{ position: "absolute", left: 0, top: 0, width: DEST_PIN_W, height: DEST_PIN_H }} resizeMode="contain" />
+        {weather ? (
+          <View style={{ position: "absolute", left: DEST_PIN_W + DEST_PILL_GAP, top: headCy - WX_PILL_H / 2, width: WX_PILL_W, height: WX_PILL_H, alignItems: "center", justifyContent: "center" }}>
+            <Image source={{ uri: wxPillUri(tier) }} style={{ position: "absolute", left: 0, top: 0, width: WX_PILL_W, height: WX_PILL_H }} resizeMode="contain" />
+            <Text style={styles.destWxText} numberOfLines={1}>{weather.temp}</Text>
+          </View>
+        ) : null}
       </View>
     </MarkerView>
   );
@@ -3930,9 +3933,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             wordmark, so map pins and the logo are literally the same art).
             Bottom-anchored: the teardrop tip sits ON the destination. */}
         {destination && (
-          <MarkerView coordinate={[destination.lng, destination.lat]} anchor={{ x: 0.5, y: 1 }}>
-            <Image source={require("../assets/images/brand-pin.png")} style={styles.brandPin} resizeMode="contain" />
-          </MarkerView>
+          <DestinationWeatherPin lat={destination.lat} lng={destination.lng} weather={destWeather ?? null} />
         )}
 
         {/* STOP pins (2026-07-29) — Jeff: "we should maybe put a pin on where the
@@ -4032,10 +4033,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           onPlacePress={onPlacePress}
         />
 
-        {/* Arrival-weather chip floating above the destination. */}
-        {destination && destWeather && (
-          <DestWeatherMarker lat={destination.lat} lng={destination.lng} weather={destWeather} />
-        )}
+        {/* The arrival weather now lives IN the destination pin (DestinationWeatherPin). */}
 
         {/* Self car as a 3D GLB model (ModelLayer). Lives in the map's geo space
             (rotates/tilts with the world), unlike the screen-space PNG MarkerView.
@@ -4179,14 +4177,5 @@ const styles = StyleSheet.create({
   // circle — dark-on-dark made the CarPlay PlaceMarker numbers invisible.
   placeNumText: { color: "#2DEC86", fontSize: 14, fontWeight: "800" },
   // Arrival-weather chip.
-  destWxChip: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    backgroundColor: "rgba(22,22,24,0.92)",
-    borderRadius: 13, paddingHorizontal: 9, paddingVertical: 5,
-    marginBottom: 8,
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
-    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
-    elevation: 5,
-  },
-  destWxText: { color: "#fff", fontSize: 14, fontWeight: "700", letterSpacing: -0.2 },
+  destWxText: { color: "#fff", fontSize: 11, fontWeight: "800", letterSpacing: -0.2 },
 });

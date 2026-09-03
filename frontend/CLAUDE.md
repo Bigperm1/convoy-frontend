@@ -154,6 +154,13 @@ fix found the marker was a second per-frame path with TWO synchronous RMWs per c
 main-thread stall that RECOVERS ends; a stall the watchdog kills leaves no JS row at all —
 ask for the `.ips` from Settings → Privacy & Security → Analytics Data.
 
+**⛔ A `['zoom']` curve in `modelScale` is evaluated at the TILE's integer zoom (2026-09-03).** Mapbox
+re-evaluates model-scale/rotation/translation per feature only when the integer zoom changes
+(`mapbox-gl-js/3d-style/data/bucket/model_bucket.ts`), so between whole zooms a 3D model's screen size
+drifts ∝ 2^(z−⌊z⌋) and pops 2× at each crossing — Jeff's 09-03 CarPlay video, measured frame by frame.
+The self car's size therefore rides the source feature per tick (`scl` ← `modelScaleForPoints()`), like
+its heading. Never size a model with a zoom expression again.
+
 ### CarPlay / Android Auto
 
 `src/carplay/ConvoyCarPlay.tsx` is a **presentation surface only** — no nav engine or voice of its own. It mirrors the live route/peers from `map.tsx` into `carStore.ts`. iOS gets Map/Comms/Music tabs; Android Auto is navigation-only by platform rule. `.web.tsx` stubs keep `react-native-carplay` (which runs native side effects at import) out of the web bundle; it's also loaded lazily and only when the native module exists. Discoverability requires the config plugins below.

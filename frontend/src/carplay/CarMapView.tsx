@@ -47,7 +47,6 @@ import {
   decodePolyline,
   SelfCarModel,
   projectOntoRoute,
-  carModelScale,
   easedFrac,
   TRIM_TICK_MS_PREMIUM,
   GREEN_ARROW_MODEL,
@@ -64,7 +63,7 @@ import {
   ROAD_SNAP_RELEASE_M,
   ROAD_SNAP_QUERY_MS,
   ROAD_SNAP_MOVING_MS,
-  ROAD_SNAP_CROSS_DEG, noseBearing
+  ROAD_SNAP_CROSS_DEG, noseBearing, CAR_LEN_UNITS, ARROW_LEN_UNITS
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
 import { routeTrimLeadM, routeTrimFadeM } from '../routeTrim';
@@ -371,6 +370,12 @@ const CREW_FIT_MAX_KM = 100;
 const CAR_SNAP_HDG_LOCK = 45;
 const CAR_SNAP_HDG_UNLOCK = 60;
 const CAR_SNAP_MOVING_MS = 1.5;
+// Self-marker sizes in POINTS (2026-09-03) — what the retired zoom-curve multipliers
+// (0.7 car / 0.78 arrow / 0.60 arrow-2D) produced at z=17, now held at EVERY zoom via the
+// per-tick source scale (see modelScaleForPoints in ConvoyMapbox). × uiScale on Android Auto.
+const CARPLAY_CAR_PT = 45;
+const CARPLAY_ARROW_PT = 33.5;
+const CARPLAY_ARROW_2D_PT = 26;
 
 type Props = {
   // Called when the GL map fails or never paints on the CarPlay window, so the
@@ -897,10 +902,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // the old 1.25 multiplier. The car surface keeps its own multipliers below.
   // That constant has its own tuning history at Jeff's hand (1.9 -> 1.6 -> 1.25) and
   // he photographed CarPlay, not the phone. One surface per report.
-  const selfScale = useMemo(
-    () => carModelScale((isArrow ? (view2D ? 0.60 : 0.78) : 0.7) * uiScale),
-    [isArrow, uiScale, view2D],
-  );
+  // PER-TICK SIZE (2026-09-03). The multipliers above were applied to a zoom CURVE that
+  // Mapbox only honours at whole zooms (see modelScaleForPoints in ConvoyMapbox) — Jeff's
+  // 09:22 video: the car swelled up to 2× between integers and popped at each crossing.
+  // Same sizes the curve gave at z=17, now held at every zoom. OTA-tunable.
+  const selfSizePt = (isArrow ? (view2D ? CARPLAY_ARROW_2D_PT : CARPLAY_ARROW_PT) : CARPLAY_CAR_PT) * uiScale;
 
   // MANDATORY heading-up — mirror the phone: plain Follow + a HELD heading, NOT
   // FollowWithCourse (which wobbles on raw GPS course and spins when stopped). Holding
@@ -1878,7 +1884,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           // the coarser 5 m feeds take over. A one-word omission, not a design choice;
           // `s.speedMs` was already in scope and used for the zoom curve above.
           speedMs={s.speedMs}
-          scale={selfScale}
+          sizePt={selfSizePt}
+          lenUnits={isArrow ? ARROW_LEN_UNITS : CAR_LEN_UNITS}
+          mapRef={carMapRef}
           headingOffset={isArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
           pitchTilt={isArrow ? ARROW_MODEL_PITCH : 0}
           // Flat top-down PNG while not routing, the 3D GLB while routing — the

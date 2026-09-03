@@ -273,8 +273,8 @@ const SELF_ID = "self";
 // tuned on the head unit 2026-08-25). Re-basing them here would silently resize the
 // car surface, which nobody asked for. Only the PHONE's two self markers move.
 const CAL_LAT = 49.25;
-const CAR_LEN_UNITS = 1.910;     // GRC2 / GRC2_map1 long axis, measured 2026-08-26
-const ARROW_LEN_UNITS = 1.289;   // green-arrow-v10.glb long axis, measured 2026-08-27
+export const CAR_LEN_UNITS = 1.910;     // GRC2 / GRC2_map1 long axis, measured 2026-08-26
+export const ARROW_LEN_UNITS = 1.289;   // green-arrow-v10.glb long axis, measured 2026-08-27
 /** EVERY self marker's on-screen length, in POINTS. ONE number, OTA-tunable.
  *
  *  44 (Jeff, 2026-08-27: "everything uniform"). It was 59 — the self class sprite's
@@ -320,6 +320,29 @@ function scaleCurveForPoints(targetPt: number, modelLenUnits: number): any {
   }
   return out;
 }
+
+// ── THE ZOOM CURVE ABOVE IS ONLY TRUE AT WHOLE ZOOMS (2026-09-03, Jeff's CarPlay video) ──
+// Mapbox evaluates a zoom expression in `model-scale` per feature at the TILE's integer
+// zoom (mapbox-gl-js 3d-style/data/bucket/model_bucket.ts: evaluate(…, this.canonical),
+// re-run only when the integer result changes; iOS shows the identical signature). So
+// between whole zooms the car's WORLD size is frozen and its on-screen size grows
+// ∝ 2^(z − ⌊z⌋) — up to 2× — then pops back at the next integer. Measured off Jeff's 09:22
+// video joined to cam-probe: pop at the z=17 crossing (180→110 px), pop at z=18
+// (165→95 px), then a straight 2× shrink zooming 18.2→17.2. The chase cam lives at
+// fractional zooms (14.0 highway, 16.3 at 45 km/h, 18.5 corner), so the car was almost
+// never the size the curve says, and the corner-zoom release — four integer crossings in a
+// row — was the "flash". Camera smoothing (OTA-C) cannot fix it. The self car therefore
+// carries its scale on the SOURCE feature every tick (`scl`, computed from the APPLIED
+// camera zoom with this function) — the same per-tick path the nose heading rides (`rot`).
+// Data-driven values re-evaluate on every source update, so the size is exact at any zoom
+// and no layer `style` is ever rewritten (the 0x8BADF00D rule). Real latitude, not CAL_LAT.
+export function modelScaleForPoints(targetPt: number, modelLenUnits: number, zoom: number, latDeg: number): number {
+  const mpp = (78271.517 * Math.cos((latDeg * Math.PI) / 180)) / Math.pow(2, zoom);
+  return (targetPt * mpp) / modelLenUnits;
+}
+// Stable reference: a fresh array literal per render would be a "content change" to the
+// layer style in RN's prop diff — the exact main-thread RMW the per-tick rule forbids.
+const SELF_SCALE_EXPR: any = ["get", "scl"];
 
 const CAR_MODEL_SCALE_BY_ZOOM: any = [
   "interpolate", ["linear"], ["zoom"],
@@ -1129,7 +1152,7 @@ const SELF_MARKER_SLOT = undefined;
 /** Monotonic mount counter — see probeKeyRef inside SelfCarModel. */
 let _selfCarMountSeq = 0;
 
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -1172,6 +1195,22 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   camZoomOutRef?: React.RefObject<number | null>;
   readyRef?: React.RefObject<boolean>;
   scale?: any;
+  // PER-TICK SIZE (2026-09-03): the marker's on-screen length in POINTS + the model's long
+  // axis in model units. When both are set the scale rides the source feature (`scl`) every
+  // tick, computed from the APPLIED camera zoom — see modelScaleForPoints for why the zoom
+  // curve in `scale` cannot do this. Both surfaces pass these now; `scale` is the fallback.
+  sizePt?: number;
+  lenUnits?: number;
+  // Optional MapView ref for the cam-apply receipt (getCenter/getZoom): logs when the map's
+  // ACTUAL camera sits away from what pushCam just requested — Jeff's 09:22 roundabout, where
+  // the map froze ~12 s while pushes were issued (heat-probe cam == tick, no gap row).
+  mapRef?: React.RefObject<any>;
+  // The map's LIVE zoom as reported by onCameraChanged (the phone keeps it in lastZoomRef).
+  // Used for the per-tick size whenever the lockstep camera is not the one moving the map —
+  // free drive under native follow, a pinch, the crew overview — because then camZoom is
+  // stale and the target zoom is only a guess. Sim, 2026-09-03: at idle the map sat ~0.4
+  // below the 17.0 target and the car drew at 33 pt instead of 44.
+  liveZoomRef?: React.RefObject<number | null>;
   // "Class" appearance: the name of a REGISTERED map image (the tinted top-down
   // class sprite). When set, the marker renders as a flat map-aligned SymbolLayer
   // riding the SAME eased pose instead of the 3D ModelLayer.
@@ -1239,6 +1278,11 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const camPitchGoal = useRef<number | null>(null);
   // Lagged camera heading (see NOSE_LEAD_IN_ENABLED). null until seeded.
   const camHdgLag = useRef<number | null>(null);
+  // Fresh per render, read by pushCam's probe: the closure that calls pushCam is frozen for
+  // the life of an ease, which is why cam-probe printed spd=83 for 96 s while GPS ran 92→35.
+  const speedRef = useRef(speedMs); speedRef.current = speedMs;
+  const camApplyAt = useRef(0);
+  const camApplyBusy = useRef(false);
   const lastCamAt = useRef(0);
   // cam-probe bookkeeping (see pushCam). Seeded far away so the first push logs once.
   const camProbeAt = useRef(0);
@@ -1316,16 +1360,16 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       camHeading = camHdgLag.current;
     }
     // CAM-PROBE (2026-09-02, Olaf: "the avatar is resizing itself from small to big and
-    // flashing between those"). The self car's on-screen size is a pure function of the
-    // camera (modelScale is a static zoom expression on both surfaces), so a size flash
-    // IS a camera jump — and the camera was never instrumented (car-viewport logs once
-    // per surface). Row only when the APPLIED zoom moves ≥0.15 or pitch ≥3° since the
-    // last row, never more than 1/s: silent at a steady cruise, one row per step.
+    // flashing between those"). Written believing the car's on-screen size was a pure
+    // function of the camera; 2026-09-03 showed it was not — a zoom-curve modelScale is
+    // evaluated at the tile's integer zoom (see modelScaleForPoints) — but the probe stays:
+    // it is the only camera instrument. Row only when the APPLIED zoom moves ≥0.15 or
+    // pitch ≥3° since the last row, never more than 1/s: silent at a steady cruise.
     if (now - camProbeAt.current >= 1000 &&
         (Math.abs(camZoom.current - camProbeZoom.current) >= 0.15 || Math.abs(camPitch.current - camProbePitch.current) >= 3)) {
       camProbeAt.current = now; camProbeZoom.current = camZoom.current; camProbePitch.current = camPitch.current;
       try {
-        logEvent(`cam-probe surf=${probeRole} z=${camZoom.current.toFixed(2)} zg=${Number(camZoomGoal.current ?? camZoom.current).toFixed(2)} zt=${Number(c.zoomLevel).toFixed(2)} p=${camPitch.current.toFixed(1)} pt=${Number(c.pitch).toFixed(1)} spd=${Math.round((speedMs ?? 0) * 3.6)} hdg=${typeof carHdg === 'number' ? Math.round(carHdg) : '?'} ch=${typeof camHeading === 'number' ? Math.round(camHeading) : '?'} snap=${snap || userZoomed ? 1 : 0}`);
+        logEvent(`cam-probe surf=${probeRole} z=${camZoom.current.toFixed(2)} zg=${Number(camZoomGoal.current ?? camZoom.current).toFixed(2)} zt=${Number(c.zoomLevel).toFixed(2)} p=${camPitch.current.toFixed(1)} pt=${Number(c.pitch).toFixed(1)} spd=${Math.round((speedRef.current ?? 0) * 3.6)} hdg=${typeof carHdg === 'number' ? Math.round(carHdg) : '?'} ch=${typeof camHeading === 'number' ? Math.round(camHeading) : '?'} snap=${snap || userZoomed ? 1 : 0}`);
       } catch {}
     }
     try {
@@ -1341,6 +1385,26 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         animationMode: 'none',
       });
     } catch {}
+    // CAM-APPLY RECEIPT (2026-09-03): ask the map where it ACTUALLY is, ≤1 poll / 2 s, async.
+    // Jeff's 09:22 roundabout: pushes were issued the whole time (heat-probe cam == tick) yet
+    // the map sat still ~12 s while the car walked across it. This row tells a native
+    // non-apply from a JS silence. Logs only on divergence (>15 m or >0.4 zoom).
+    if (mapRef?.current && !camApplyBusy.current && now - camApplyAt.current >= 2000) {
+      camApplyAt.current = now; camApplyBusy.current = true;
+      const reqLa = la, reqLn = ln, reqZ = Number(camZoom.current), at = now;
+      try {
+        Promise.all([mapRef.current.getCenter?.(), mapRef.current.getZoom?.()]).then((res: any[]) => {
+          camApplyBusy.current = false;
+          const ctr = res?.[0], z = res?.[1];
+          if (!Array.isArray(ctr) || typeof z !== 'number') return;
+          const dM = Math.hypot((ctr[1] - reqLa) * 111320, (ctr[0] - reqLn) * 111320 * Math.cos((reqLa * Math.PI) / 180));
+          const dz = z - reqZ;
+          if (dM > 15 || Math.abs(dz) > 0.4) {
+            try { logEvent(`cam-apply surf=${probeRole} dM=${Math.round(dM)} dz=${dz.toFixed(2)} req=${reqLa.toFixed(5)},${reqLn.toFixed(5)} z=${reqZ.toFixed(2)} act=${Number(ctr[1]).toFixed(5)},${Number(ctr[0]).toFixed(5)} z=${z.toFixed(2)} lag=${Date.now() - at}`); } catch {}
+          }
+        }).catch(() => { camApplyBusy.current = false; });
+      } catch { camApplyBusy.current = false; }
+    }
   };
 
   // Advance the current ease by ONE frame from a background TIMER (setInterval),
@@ -1791,6 +1855,20 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   }, []);
 
   const r = render.current;
+  // PER-TICK SIZE — see modelScaleForPoints. Applied camera zoom when the lockstep camera
+  // runs (camZoom), else the caller's target zoom, else the nav default. Rounded to 1e-3 so a
+  // settling low-pass cannot churn the source with invisible changes.
+  const perTick = typeof sizePt === 'number' && sizePt > 0 && typeof lenUnits === 'number' && lenUnits > 0;
+  // Zoom source, most-trustworthy first: the value the lockstep camera pushed within the last
+  // 500 ms (exact — it is what setCamera was just given); else the map's own reported zoom;
+  // else the caller's target; else the nav default.
+  const lockstepFresh = typeof camZoom.current === 'number' && Date.now() - lastCamAt.current < 500;
+  const liveZ = liveZoomRef?.current;
+  const perTickZoom = lockstepFresh ? (camZoom.current as number)
+    : (typeof liveZ === 'number' && liveZ > 0) ? liveZ
+    : (typeof camZoom.current === 'number') ? camZoom.current
+    : (getCam ? getCam().zoomLevel : 17);
+  const perTickScale = perTick ? Math.round(modelScaleForPoints(sizePt!, lenUnits!, perTickZoom, r.lat) * 1000) / 1000 : 0;
   return (
     <>
     {/* Feed the SMOOTH interpolated position to Mapbox's native user-location so
@@ -1816,7 +1894,12 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       id="convoy-self-car"
       shape={{
         type: "Feature",
-        properties: { hdg: r.heading ?? 0, rot: [pitchTilt, 0, (r.heading ?? 0) + headingOffset] },
+        properties: {
+          hdg: r.heading ?? 0,
+          rot: [pitchTilt, 0, (r.heading ?? 0) + headingOffset],
+          // PER-TICK SIZE (2026-09-03) — see modelScaleForPoints.
+          ...(perTick ? { scl: [perTickScale, perTickScale, perTickScale] } : {}),
+        },
         geometry: { type: "Point", coordinates: [r.lng, r.lat] },
       }}
     >
@@ -1869,7 +1952,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           // route line. OTA-tunable (raise if the ribbon still covers it, lower if it floats).
           modelTranslation: [0, 0, modelId === ARROW_MODEL_ID ? 16 : 10],
           modelEmissiveStrength: emissive,
-          modelScale: scale ?? CAR_MODEL_SCALE_SIZED,
+          modelScale: perTick ? SELF_SCALE_EXPR : (scale ?? CAR_MODEL_SCALE_SIZED),
           modelRotation: ["get", "rot"] as any,
           // ⚠ modelCastShadows MUST STAY FALSE (2026-08-19, found by sim bisect):
           // enabling it black-screened the ENTIRE map on Android the moment the
@@ -3474,9 +3557,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           const active = !!state?.gestures?.isGestureActive;
           if (active && !gesturingRef.current) { gesturingRef.current = true; onUserPan?.(); }
           else if (!active && gesturingRef.current) { gesturingRef.current = false; }
-          // (3D car scale is driven natively by the modelScale zoom expression —
-          // CAR_MODEL_SCALE_BY_ZOOM — so it tracks the live zoom every frame with
-          // no JS lag; nothing to recompute here.)
+          // (The 3D car's size is NOT a native zoom expression any more — Mapbox only
+          // honours those at whole zooms (see modelScaleForPoints). lastZoomRef below is
+          // what SelfCarModel sizes the car from whenever its lockstep camera is idle.)
           // Report the live bearing for the on-map compass, throttled to ~0.5°.
           const h = state?.properties?.heading;
           if (typeof h === "number" && Math.abs(h - lastHeadingRef.current) > 0.5) {
@@ -3842,7 +3925,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             heading={selfHeadingLocked}
             emissive={selfEmissive}
             modelId={selfModelId}
-            scale={selfIsArrow ? ARROW_MODEL_SCALE : undefined}
+            // PER-TICK size (2026-09-03): ARROW_MODEL_SCALE / CAR_MODEL_SCALE_SIZED are zoom
+            // curves and Mapbox only honours those at whole zooms — see modelScaleForPoints.
+            sizePt={SELF_MARKER_PT}
+            lenUnits={selfIsArrow ? ARROW_LEN_UNITS : CAR_LEN_UNITS}
+            mapRef={mapRef}
+            liveZoomRef={lastZoomRef}
             headingOffset={selfIsArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
             pitchTilt={selfIsArrow ? ARROW_MODEL_PITCH : 0}
             // CLASS is the only tier with a flat sprite now — the 3D/Ultra car always

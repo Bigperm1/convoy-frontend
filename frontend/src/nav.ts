@@ -652,6 +652,31 @@ export function arrivalLine(destLabel?: string | null): string {
   return ARRIVAL_LINES[Math.floor(Math.random() * ARRIVAL_LINES.length)];
 }
 
+// ── ARRIVAL SPEECH (2026-09-03, "Scout drops sentences, especially upon arrival") ────────
+// Say Phin's 07:36 arrival, from the tts receipts: (1) the arrival line was DROPPED by
+// speak()'s 1.5 s rate gate — it came 1.013 s after the "you will arrive" prepare line;
+// (2) the queued prepare line was CUT 25 ms later when onArrive → navMode preview →
+// resetSpeakGate() emptied the queue (`tts-cut queued=1 playing=1`); (3) the clip in
+// flight had taken 15 s to fetch (`tts-done ms=15018 len=20`), so everything stacked up
+// at the worst moment. Three fixes, each aimed at one receipt:
+//   • the arrival line is CHOSEN at the prepare callout and prefetched like a turn cue,
+//     so it plays from cache with no network hop;
+//   • speakArrival() bypasses the rate gate (never the master voice switch / greeting hold);
+//   • resetSpeakGate() defers while an arrival is draining (see _arrivalHoldUntil).
+let _arrivalLineChosen: string | null = null;
+let _arrivalHoldUntil = 0;
+const ARRIVAL_DRAIN_MAX_MS = 8000;
+export function prefetchArrivalLine(destLabel?: string | null): void {
+  if (!_arrivalLineChosen) _arrivalLineChosen = arrivalLine(destLabel);
+  prefetchTts(_arrivalLineChosen);
+}
+function speakArrival(destLabel?: string | null): void {
+  const line = _arrivalLineChosen ?? arrivalLine(destLabel);
+  _arrivalLineChosen = null;
+  _arrivalHoldUntil = Date.now() + ARRIVAL_DRAIN_MAX_MS;
+  speak(line, { priority: true });
+}
+
 // "Less intrusive Nova" filter. Maneuvers that just mean "keep going" aren't
 // worth a spoken callout — speaking them ("continue straight for 2 km") is the
 // nagging the driver complained about. We skip ONLY these, so real turns,
@@ -1099,6 +1124,7 @@ export function useTurnByTurn(
         if (!announcedRef.current.has(prepKey)) {
           if (isFinal) {
             speak(`In ${fmtDistanceM(dManeuver)}, you will arrive at your destination.`);
+            prefetchArrivalLine(options?.destLabel);
           } else {
             const ns = steps[stepIdx + 1];
             const ra = roundaboutExitCue(ns.maneuver, ns.html);
@@ -1120,6 +1146,7 @@ export function useTurnByTurn(
         // onArrive fire from the dManeuver < 20 block below.
         if (dManeuver <= prepareM && !announcedRef.current.has(prepKey)) {
           speak(`In ${fmtDistanceM(dManeuver)}, you will arrive at your destination.`);
+          prefetchArrivalLine(options?.destLabel);
           announcedRef.current.add(prepKey);
         }
       } else {
@@ -1409,7 +1436,7 @@ export function useTurnByTurn(
           `novaMuted=${st.novaMuted ? 1 : 0} novaVoice=${st.novaVoice === false ? 0 : 1} vol=${getAudioVol(st, "volVoice").toFixed(2)}`,
         );
       } catch {}
-      if (!options?.mute && !late) speak(arrivalLine(options?.destLabel));
+      if (!options?.mute && !late) speakArrival(options?.destLabel);
       options?.onArrive?.();
     };
 
@@ -1777,7 +1804,7 @@ function scrubDoubledInstruction(text: string): string {
   return head || text;
 }
 
-function speak(text: string) {
+function speak(text: string, opts?: { priority?: boolean }) {
   if (!text || !text.trim()) return;
   text = scrubDoubledInstruction(text);
   // Master Nova voice switch (settings). Off → nothing speaks at all.
@@ -1786,7 +1813,10 @@ function speak(text: string) {
   // so the greeting always leads (it's replayed once the greeting + pause end).
   if (_greetingInFlight) { _heldSpeech = text; return; }
   const now = Date.now();
-  if (now - _lastSpoke < 1500) return;
+  // The 1.5 s rate gate protects against callout spam; the ARRIVAL line is the one
+  // sentence that must never lose to it (2026-09-03: it did, 1.013 s after the prepare
+  // line). `priority` skips only this gate.
+  if (!opts?.priority && now - _lastSpoke < 1500) { try { logEvent(`tts-skip why=rate len=${text.length}`); } catch {} return; }
   // Same-phrase dedupe: kills the "Turn left, turn left" double that happens when
   // the Routes API splits one maneuver into two adjacent same-direction steps and
   // each fires the identical bare verb a couple seconds apart. Only EXACT repeats
@@ -1806,7 +1836,22 @@ function speak(text: string) {
   if (!ttsPlaying) drainTtsQueue();
 }
 
+let _arrivalDrainTimer: ReturnType<typeof setTimeout> | null = null;
 function resetSpeakGate() {
+  // ARRIVAL HOLD (2026-09-03): the route ends the instant the arrival line is queued, and
+  // this reset used to empty the queue 25 ms later (`tts-cut queued=1 playing=1`). While an
+  // arrival is draining, wait for the queue to empty (bounded by ARRIVAL_DRAIN_MAX_MS), then
+  // reset. stopSpeech() (Clear button / a new route) still resets immediately — it clears
+  // the hold first.
+  if (_arrivalHoldUntil && Date.now() < _arrivalHoldUntil && (ttsQueue.length > 0 || ttsPlaying)) {
+    if (!_arrivalDrainTimer) {
+      _arrivalDrainTimer = setTimeout(() => { _arrivalDrainTimer = null; resetSpeakGate(); }, 250);
+      try { logEvent(`tts-arrival-hold queued=${ttsQueue.length} playing=${ttsPlaying ? 1 : 0}`); } catch {}
+    }
+    return;
+  }
+  _arrivalHoldUntil = 0;
+  if (_arrivalDrainTimer) { clearTimeout(_arrivalDrainTimer); _arrivalDrainTimer = null; }
   // A non-empty queue or an in-flight clip at reset time IS the "dropped sentence":
   // reliable row, because absence of this row is what will be interpreted.
   if (ttsQueue.length > 0 || ttsPlaying) {
@@ -1846,6 +1891,8 @@ export function announce(text: string) {
 // Stop nav speech immediately — clears the queue AND the in-flight playback so
 // a half-spoken instruction doesn't linger after End / Clear.
 export function stopSpeech() {
+  _arrivalHoldUntil = 0;   // a hard stop (Clear / new route) never waits for an arrival to drain
+  _arrivalLineChosen = null;
   resetSpeakGate();
   try { _currentSound?.stopAsync?.(); } catch {}
   try { _currentSound?.unloadAsync?.(); } catch {}

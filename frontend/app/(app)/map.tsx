@@ -1885,7 +1885,7 @@ export default function MapScreen() {
       const bearing = REROUTE_ORIGIN_BEARING && typeof coords.heading === "number" && Number.isFinite(coords.heading) && (coords.speed ?? 0) > 1.4
         ? coords.heading : undefined;
       (pinned.length
-        ? fetchRouteViaStops(coords, pinned, destination, avoid).then((r) => { if (r) noteViaSnapped(pinned, r.viaSnapped, r.viaSnapDistM); return r ? [r] : []; })
+        ? fetchRouteViaStops(coords, pinned, destination, avoid, bearing != null ? { bearing } : undefined).then((r) => { if (r) noteViaSnapped(pinned, r.viaSnapped, r.viaSnapDistM); return r ? [r] : []; })
         : fetchRoutes(coords, destination, avoid, bearing != null ? { bearing } : undefined)
       ).then((res) => {
         const ageMs = Date.now() - issuedAt;

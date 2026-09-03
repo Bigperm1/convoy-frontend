@@ -190,7 +190,10 @@ export async function fetchRoutes(
   // trip; a hung request now fails instead of surfacing minutes later.
   const ctl = new AbortController();
   const t0 = Date.now();
-  const timer = setTimeout(() => ctl.abort(), ROUTE_FETCH_TIMEOUT_MS);
+  // 2026-09-03: Olaf's ids 8-17 resolved 7-159 s late in ONE second with real routes and this
+  // catch never ran — so either the timer never fired or fetch ignored the abort. Two rows tell
+  // them apart: the timer firing, and how long the request actually took to settle.
+  const timer = setTimeout(() => { try { logEvent(`route-fetch-abort-fired ms=${Date.now() - t0}`); } catch {} ctl.abort(); }, ROUTE_FETCH_TIMEOUT_MS);
   try {
     mbRoutes = await fetchMapboxRoutes(
       origin,
@@ -198,6 +201,7 @@ export async function fetchRoutes(
       { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
       { signal: ctl.signal, bearing: opts?.bearing },
     );
+    try { const ms = Date.now() - t0; if (ms > ROUTE_FETCH_TIMEOUT_MS) logEvent(`route-fetch-settled-late ms=${ms} n=${mbRoutes.length} aborted=${ctl.signal.aborted ? 1 : 0}`); } catch {}
     if (!mbRoutes.length) return [];
     mbRoutes = await preferCurbArrival(origin, destination, avoid, mbRoutes, ctl.signal);
   } catch (e: any) {
@@ -2203,6 +2207,7 @@ export async function fetchRouteViaStops(
   stops: LatLng[],
   destination: LatLng,
   avoid?: AvoidPrefs,
+  opts?: { bearing?: number },
 ): Promise<NavRoute | null> {
   try {
     const via: [number, number][] = (stops || [])
@@ -2211,8 +2216,7 @@ export async function fetchRouteViaStops(
     if (!via.length) return null;
     const mb = await fetchMapboxRouteVia(
       origin, via, destination,
-      { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
-    );
+      { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries }, { bearing: opts?.bearing });
     if (!mb || !mb.polyline) return null;
     return mapboxToNavRoute(mb);
   } catch {

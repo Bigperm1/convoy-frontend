@@ -461,7 +461,7 @@ export async function fetchMapboxRouteVia(
   via: [number, number][],     // interior [lng,lat] waypoints
   dest: LatLng,
   avoid?: MapboxAvoid,
-  opts?: { signal?: AbortSignal },
+  opts?: { signal?: AbortSignal; bearing?: number },
 ): Promise<MapboxRoute | null> {
   try {
     if (
@@ -497,7 +497,12 @@ export async function fetchMapboxRouteVia(
       `&annotations=congestion_numeric,duration,distance&banner_instructions=false` +
       `&enable_refresh=true` +
       (exclude.length ? `&exclude=${exclude.join(",")}` : ``) +
-      `&access_token=${MAPBOX_PUBLIC_TOKEN}`;
+      `&access_token=${MAPBOX_PUBLIC_TOKEN}` +
+      // ORIGIN BEARING — same constraint as fetchMapboxRoutes. `bearings` needs one entry per
+      // coordinate: origin `hdg,45`, then an EMPTY entry for every via and for the destination.
+      (typeof opts?.bearing === "number" && Number.isFinite(opts.bearing)
+        ? `&bearings=${Math.round(((opts.bearing % 360) + 360) % 360)},45${";".repeat(via.length + 1)}`
+        : "");
 
     const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${pts.join(";")}${qs}`;
     const res = await fetch(url, { signal: opts?.signal });

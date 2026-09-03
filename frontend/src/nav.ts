@@ -1875,7 +1875,7 @@ function resetSpeakGate() {
   // BUT only when Nova voice is actually on: with the readout toggled off we never
   // play anything here, so grabbing the audio session just needlessly re-routes the
   // user's own music. Leaving it untouched keeps their stereo (A2DP) intact.
-  if (getSettings().novaVoice !== false) void setIdleAudioMode();
+  if (getSettings().novaVoice !== false) _releaseIdleSoon();
 }
 
 // (Reroute is intentionally SILENT — Convoy used to speak "Recalculating route."
@@ -1899,6 +1899,21 @@ export function stopSpeech() {
   _currentSound = null;
 }
 
+// Idle audio-mode release, held back a moment after the last clip (2026-09-03, the
+// arrival tail). Cancelled the instant another clip starts.
+const IDLE_RELEASE_GRACE_MS = 350;
+let _idleReleaseTimer: ReturnType<typeof setTimeout> | null = null;
+function _cancelIdleRelease(): void {
+  if (_idleReleaseTimer) { clearTimeout(_idleReleaseTimer); _idleReleaseTimer = null; }
+}
+function _releaseIdleSoon(): void {
+  _cancelIdleRelease();
+  _idleReleaseTimer = setTimeout(() => {
+    _idleReleaseTimer = null;
+    if (ttsPlaying || ttsQueue.length > 0) return;   // something started meanwhile
+    void setIdleAudioMode();
+  }, IDLE_RELEASE_GRACE_MS);
+}
 async function drainTtsQueue(): Promise<void> {
   if (ttsQueue.length === 0) {
     ttsPlaying = false;
@@ -1907,9 +1922,12 @@ async function drainTtsQueue(): Promise<void> {
     // Queue fully drained — release the ducking audio session so EXTERNAL music
     // (Spotify, podcasts) returns to full volume. Without this the session stays
     // in .duckOthers and the user's music is stuck quiet until they force-quit.
-    void setIdleAudioMode();
+    // Deferred by IDLE_RELEASE_GRACE_MS: didJustFinish fires when the DECODER is done,
+    // and a CarPlay/Bluetooth route still has the last few hundred ms in its buffer.
+    _releaseIdleSoon();
     return;
   }
+  _cancelIdleRelease();
   ttsPlaying = true;
   const item = ttsQueue.shift()!;
   if (typeof item !== "string") {
@@ -2060,7 +2078,16 @@ async function _playClip(b64: string, mime: string): Promise<void> {
       // will be super quiet"). 55%/100ms still rounds off the attack over the
       // music without eating any speech.
       const startV = target * 0.55;
-      const FADE_IN_MS = 100, FADE_OUT_MS = 240, STEPS = 4;
+      // FADE OUT (2026-09-03, Jeff: "the scout voice was cut off when I arrived at work"):
+      // the receipts for that arrival show every clip played to completion (the last
+      // instruction 5994 ms, "Here we are — work." 1652 ms, no tts-cut) — so what was cut
+      // was not the CLIP but its TAIL: this ramp took the last 240 ms of EVERY clip to
+      // silence, and on a 1.6 s arrival line that is the final syllable of the destination.
+      // The fade-in had the mirror bug ("the first word will be super quiet") and was
+      // shortened the same way. Now 80 ms to 60 % — a soft edge over the music, no speech
+      // lost. The release of the audio session after the LAST clip is also deferred (see
+      // _releaseIdleSoon) instead of firing on the same tick as didJustFinish.
+      const FADE_IN_MS = 100, FADE_OUT_MS = 80, FADE_OUT_FLOOR = 0.6, STEPS = 4;
       Audio.Sound.createAsync({ uri: path }, { shouldPlay: true, rate: NAV_TTS_RATE, shouldCorrectPitch: true, volume: startV })
         .then(({ sound, status: initStatus }) => {
           _currentSound = sound;
@@ -2079,7 +2106,7 @@ async function _playClip(b64: string, mime: string): Promise<void> {
           if (effDur > FADE_IN_MS + FADE_OUT_MS + 200) {
             const outAt = effDur - FADE_OUT_MS;
             for (let i = 1; i <= STEPS; i++) {
-              const v = target * (1 - i / STEPS);
+              const v = target * (1 - (1 - FADE_OUT_FLOOR) * (i / STEPS));
               setTimeout(() => { sound.setVolumeAsync(Math.max(0, v)).catch(() => {}); }, Math.round(outAt + (FADE_OUT_MS / STEPS) * i));
             }
           }

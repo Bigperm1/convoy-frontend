@@ -394,7 +394,13 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   single projected route SEGMENT (steps per vertex), eased ~1.1 s/fix behind an 8° dead-band; camera rides
   the same value in lockstep (the car is rigid on screen, the road rotates). Two readings, two fixes:
   (A) no lead-in → let the camera heading lag the car's; (B) nose off the road mid-corner → interpolate
-  the bearing along the curve + drop the dead-band while snapped. **Waiting on Jeff: A or B.**
+  the bearing along the curve. **Jeff: "both, mostly A" → STAGED (flag OFF) as OTA-D:**
+  `NOSE_LEAD_IN_ENABLED` in ConvoyMapbox.tsx — camera heading lags the car (700 ms, ≤25° lead) +
+  `bearingSmooth` curve tangent for the drawn nose (`noseBearing()`, both surfaces); gates keep the
+  raw segment `bearing`. ⚠ Correction: the 8° heading dead-band only holds the nose when the car
+  is also nearly stationary (the condition is an AND) — while driving the ease re-arms every fix,
+  so the notchiness was the per-vertex step + the 1.1 s ease, not the dead-band. Own drive after
+  OTA-C; measure the lead with cam-probe `hdg=`/`ch=`.
 - **OTA-B (STAGED, `REROUTE_ORIGIN_BEARING = false` in map.tsx):** origin `bearings=<hdg>,45;` on
   off-route refetches (Olaf's 8-reroute loop). **Needs Jeff's word**: flip the flag, `OTA:` commit,
   publish — and it gets one real drive to itself. `reroute-result … bearing=` shows what was sent.

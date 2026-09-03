@@ -328,6 +328,26 @@ the whole Android Auto port once.
 
 ---
 
+
+### 🌅 MORNING RUNBOOK 2026-09-03 — teed up 00:40 PDT, executes when the crew is on 1.27.0
+Two session-local timers exist in Claude's session (die if the session closes): **06:03** one-shot
+tester reminder (WhatsApp desktop); **every 30 min from 06:33** a gate that queries who is on
+runtime 1.27.0 and, once every handle active in the last 24 h (Jeff excluded) is on it: ships
+HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group> 1.27.0`), flips
+`pipeline_flags.require_slot=true` once Rodrigo/Ni GR/GRSIENNA are on 1.27.0, reports, deletes itself.
+- **OTA-A (LIVE at HEAD, ships first):** `9a01f45` TTS receipts — `tts-say/tts-play/tts-done/tts-cut/
+  tts-skip`. Instrumentation only. Answers "scout drops sentences on arrival" with one query.
+- **OTA-B (STAGED, `REROUTE_ORIGIN_BEARING = false` in map.tsx):** origin `bearings=<hdg>,45;` on
+  off-route refetches (Olaf's 8-reroute loop). **Needs Jeff's word**: flip the flag, `OTA:` commit,
+  publish — and it gets one real drive to itself. `reroute-result … bearing=` shows what was sent.
+- **Read after the first 1.27.0 drives:** `carplay-host-ceiling` / any `launch_kind=unknown` on 1.27.0
+  (stranding fix) · `aa-crumb` on Say Phin's first AA connect (targetSdk 36) · `cam-probe` (Olaf's size
+  flash) · `route-fetch-fail why=` (Rodrigo's 15 s abort that never fired) · `main-gap … app=<seq>
+  sinceApp=` · `tts-cut` at arrivals.
+- **Not teed up (needs design or a drive first):** congestion+reason on the map at the faster-route
+  offer (#1) · replay (#3, nothing exists to revamp) · peer twin in presence (#4, heat budget) ·
+  failed-scan surfacing (needs a readable job status) · RevenueCat/widgets/watch = build 76.
+
 ## 5 · The road to build 80 — GRC club launch
 
 Jeff's goal (2026-08-20): **build 80 launches Hairpin to the full ~170-member GRC club** with full

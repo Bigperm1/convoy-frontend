@@ -29,7 +29,7 @@ RULES = [
     (
         "per-tick-line-trim-in-style",
         ["src/**/*.tsx"],
-        r"lineTrimOffset\s*:\s*\[?\s*(?:trim|cut|frac|ribbon|_frac)",
+        r"lineTrimOffset\s*:\s*\[?\s*(?:Math\.\w+\(\s*[^)]*(?:progress|frac|trim|cut)|trim|cut|frac|ribbon|_frac|progress)",
         "2026-09-01: any per-tick CONTENT change to a layer `style` is a main-thread read-modify-write of the "
         "whole layer (0x8BADF00D watchdog kills). The ribbon is CUT in the source (src/routeRibbon.ts), never trimmed in paint.",
     ),

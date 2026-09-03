@@ -5548,7 +5548,19 @@ export default function MapScreen() {
         <TouchableOpacity
           testID="compass-fab"
           style={styles.fab}
-          onPress={() => { setNorthUpHold(true); setNorthSignal((n) => n + 1); recenterNow(); }}
+          onPress={() => {
+            // TOGGLE, like the CarPlay compass (CarMapView 'compass': "holding north-up until
+            // tapped again"). This was ONE-WAY: every tap armed the hold, and only a manual pan
+            // or a NEW route released it — so a recenter tap mid-drive left the map north-up for
+            // the rest of the drive, needle pinned north while the car turned (Rodrigo,
+            // 2026-09-03: "compass shows north but it's going right/left"; CarPlay, which
+            // toggles, "was fine"). Receipt: phone-tap:compass hold=0|1.
+            const hold = !northUpHold;
+            setNorthUpHold(hold);
+            if (hold) setNorthSignal((n) => n + 1);
+            recenterNow();
+            try { logEvent(`phone-tap:compass hold=${hold ? 1 : 0}`); } catch {}
+          }}
           activeOpacity={0.85}
         >
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />

@@ -863,7 +863,9 @@ function getSearchTemplate(): any | null {
 // back-out releases it in onDidDisappear — the same rules that keep the keyboard
 // template from ever being double-pushed. Android Auto is untouched (its native search
 // template lists the saved rows as `items` already).
-const WHERE_TO_MAX = 8;
+// Rodrigo has LOTS of saved places (Jeff, 2026-09-03) — the list scrolls, so the cap only
+// guards a runaway store. CPListTemplate.maximumItemCount is 500 on iOS 14+ head units.
+const WHERE_TO_MAX = 30;
 function pushSearchTemplateIOS(): void {
   const t = getSearchTemplate();
   if (!t) { _whereToToSearch = false; return; }
@@ -884,8 +886,10 @@ function whereToSections() {
     image: p.kind === 'home' ? CAR_ICON_HOME : p.kind === 'work' ? CAR_ICON_WORK : CAR_ICON_SAVED,
   }));
   // ONE section on purpose: onItemSelect hands back a single index, and one section keeps
-  // that index unambiguous. The keyboard row is always LAST.
-  items.push({ text: 'Search by name…', detailText: 'Type a place (while parked)', image: CAR_ICON_BLANK });
+  // that index unambiguous. The keyboard row is FIRST (Jeff, 2026-09-03: "the keyboard is
+  // hidden when tapping Search and you invoke it to type") — one tap away however long the
+  // saved list is, and the saved places read on from row two.
+  items.unshift({ text: 'Type a place…', detailText: 'Opens the keyboard (while parked)', image: CAR_ICON_BLANK });
   return [{ items }];
 }
 function getWhereToTemplate(): any | null {
@@ -904,15 +908,15 @@ function getWhereToTemplate(): any | null {
       title: 'Where to?',
       sections,
       onItemSelect: async ({ index }: { index: number }) => {
-        if (index < _whereToShown.length) {
-          const p = _whereToShown[index];
-          if (!p) return;
-          const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
-          if (ok) popCarSearchDeferred();   // release + pop to root only when the pop really happens
+        if (index === 0) {
+          _whereToToSearch = true;          // about to be COVERED by the keyboard template — not a back-out
+          pushSearchTemplateIOS();
           return;
         }
-        _whereToToSearch = true;            // about to be COVERED by the keyboard template — not a back-out
-        pushSearchTemplateIOS();
+        const p = _whereToShown[index - 1]; // row 0 is the keyboard row
+        if (!p) return;
+        const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
+        if (ok) popCarSearchDeferred();     // release + pop to root only when the pop really happens
       },
       onDidAppear: () => { _searchPushed = true; _movingTicks = 0; },
       onDidDisappear: () => {

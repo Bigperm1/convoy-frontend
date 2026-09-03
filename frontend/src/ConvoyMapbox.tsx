@@ -1066,7 +1066,7 @@ export function projectOntoRoute(
 // One flag, both surfaces (pushCam + the two nose call sites). Its own drive, after OTA-C.
 // The numbers are DESIGN CHOICES, not measurements — cam-probe `ch=` (camera heading) and
 // `hdg=` (nose) on the next drive measure the actual lead angle; tune from those rows.
-export const NOSE_LEAD_IN_ENABLED = false;
+export const NOSE_LEAD_IN_ENABLED = true;   // ON 2026-09-03 (drive 2) — Jeff: "flip the nose flag"
 export const CAM_HEADING_LAG_MS = 700;
 export const CAM_HEADING_MAX_LEAD_DEG = 25;
 /** The heading the drawn nose should use for a snapped car. */

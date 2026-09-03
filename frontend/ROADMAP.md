@@ -407,6 +407,16 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   Fix (OTA-E, to stage): exempt the arrival line from the rate gate · let the arrival clip finish before the
   teardown resets the queue/audio session (bounded wait) · prefetch the arrival phrase at the prepare callout the
   way turn cues already are (`prefetchTts`). Verify with the same rows.
+- 🧩 **REINSTALL LOSES THE SCAN (Olaf, iMessage 06:24 09-03) — OPEN, ranked with #2 (failed renders invisible).**
+  He uninstalled/reinstalled to get 75 (2 am), the phone's `carScanId`/`carScanMapUrl` went with AsyncStorage,
+  and he re-uploaded. VERIFIED: the re-upload `enablewhore-20260903-095615` went `queued → WAIT user-cap →
+  FAILED` at 03:02, **0 credits, no slot** — the per-user cap of 2 held. His twin
+  `scan_enablewhore-20260901-210315_map.glb` is intact in the bucket. Two gaps, both real: (a) **no recovery
+  path** — `carScanId` is only ever set at capture (`garage-capture.tsx`), the backend has only `POST /scan/slot`,
+  nothing lists an account's scans; (b) **the phone is never told the worker refused** — `carScanStatus:'failed'`
+  is still never written, so his Garage shows "submitted" indefinitely. Fix shape: `GET /api/scan/mine` (done scans
+  for the account, server-side, Render auto-deploys) + restore-on-launch in the app + surface the worker verdict.
+  This is the same listing the Ultra multi-car garage (#2) needs — build it once. **Do NOT re-render for him.**
 - 🔧 **OTA-E STAGED at HEAD (`43b901c`, live code, UNPUBLISHED) — the arrival-speech fix:** arrival line chosen +
   prefetched at the "you will arrive" callout (`prefetchArrivalLine`), spoken past the 1.5 s rate gate
   (`speak(line, {priority:true})`), and `resetSpeakGate()` defers up to 8 s while an arrival drains

@@ -52,6 +52,11 @@ export function reportDraw(
   navActive: boolean,
   /** The LIVE fix, always — even when `raw` is the pin. Plus its own uncertainty. */
   gps?: { lat: number; lng: number; accM?: number | null } | null,
+  /** HEADING RECEIPT (2026-09-03, Jeff: "the nose of the car does not follow the corner").
+   *  Heading had no breadcrumb anywhere. `locked` = what the model is pointed at (route
+   *  segment bearing while snapped, else the smoothed/raw course), `raw` = the GPS course,
+   *  `route` = the projected segment's bearing (null when not snapped). Degrees, true. */
+  hdg?: { locked: number | null; raw: number | null; route: number | null } | null,
 ): void {
   try {
     if (!raw || !drawn) return;
@@ -96,9 +101,14 @@ export function reportDraw(
         `acc=${acc == null ? "?" : acc.toFixed(0) + "m"} sep=${sep == null ? "?" : sep.toFixed(0) + "m"} ` +
         `gps=${gps && !hideGps ? gps.lat.toFixed(6) + "," + gps.lng.toFixed(6) : hideGps ? "withheld" : "?"} ` +
         `raw=${raw.lat.toFixed(6)},${raw.lng.toFixed(6)} drawn=${drawn.lat.toFixed(6)},${drawn.lng.toFixed(6)} ` +
-        `latch=${p.latch ? 1 : 0} parked=${p.parked ? 1 : 0} hu=${p.hu ? 1 : 0} spotAge=${p.spotAgeS == null ? "?" : p.spotAgeS + "s"}`,
+        `latch=${p.latch ? 1 : 0} parked=${p.parked ? 1 : 0} hu=${p.hu ? 1 : 0} spotAge=${p.spotAgeS == null ? "?" : p.spotAgeS + "s"}` +
+        (hdg ? ` hdg=${fmtDeg(hdg.locked)} gpsHdg=${fmtDeg(hdg.raw)} rb=${hdg.route == null ? "-" : fmtDeg(hdg.route)}` : ""),
     );
   } catch {
     // never let the instrument disturb the draw path
   }
+}
+
+function fmtDeg(v: number | null | undefined): string {
+  return typeof v === "number" && isFinite(v) ? String(Math.round(((v % 360) + 360) % 360)) : "?";
 }

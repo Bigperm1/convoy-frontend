@@ -3250,6 +3250,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     user && typeof user.lat === 'number' && typeof user.lng === 'number'
       ? { lat: user.lat, lng: user.lng, accM: user.acc ?? null }
       : null,
+    { locked: selfHeadingLocked, raw: selfCar?.heading ?? null, route: selfSnapped ? routeProj!.bearing : null },
   );
 
   // Memoized so the downstream GL FeatureCollection memo can actually cache (a bare

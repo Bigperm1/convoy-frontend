@@ -706,6 +706,9 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   URL); manual deploy → `/api/health` `supabase:true` at ~23:40. Real-key probe = `GET /api/health/supabase` (backend
   `1078872`, one service-key read of `scan_slots`) → **23:41: `{enabled:true, probe_status:200, rows:1, ok:true}`** — the key
   is real. Mirrors + slot mirror live again from this deploy on; `require_slot=true` is now safe.
+  **Tripo API key ROTATED 00:10 PDT (9/04)** after Claude printed `~/.tripo/config.json` into the transcript (nested
+  `api_key` slipped a top-level mask). One key remains (client id `…a8a0dc`); CLI balance OK (1740 credits); Supabase
+  `TRIPO_API_KEY` digest == sha256(CLI key), updated 07:09:53 UTC; leaked `cli-default` deleted. Lesson filed in memory.
   Trap met: `re` was only imported inside one function → the first deploy 500'd (`carscan-reconcile-fail` crumbs at
   23:04/23:05 prove the app-side failure path too). Codex second opinion on the pipeline → `SCAN-PIPELINE.md`
   "Second opinion" (7 verified findings, 7 hypotheses, none adopted tonight).

@@ -34,6 +34,7 @@ import Mapbox, {
 import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
 import { canonicalClass } from '../settings';
 import { useMapView2D } from '../mapViewMode';
+import { cornerBlend, newCornerBlendState } from '../cornerBlend';
 import { useAppSkin } from '../appSkin';
 import { wxCalloutUri, WX_CALLOUT_KINDS, WX_CALLOUT_TEXT_X, WX_CALLOUT_TEXT_CY, WX_CALLOUT_W, WX_CALLOUT_H } from '../wxCalloutImages';
 // End-pin weather images on the car surface — iOS CarPlay only until Android Auto is verified
@@ -662,7 +663,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // byte-identical there. On Android Auto it converts the canvas's inflated dp back
   // to CarPlay's ground scale, so both car surfaces frame the same road ahead.
   const aaZoomOut = aaZoomOutFor(mapW);
-  const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined) - CAR_ZOOM_OUT - aaZoomOut - (previewMulti ? PREVIEW_ZOOM_OUT : 0);
+  const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined, s.navigating ? s.stepLengthM : undefined) - CAR_ZOOM_OUT - aaZoomOut - (previewMulti ? PREVIEW_ZOOM_OUT : 0);
   // ── FLAT WHEN NOT ROUTING (2026-07-29, Jeff's call) ─────────────────────────
   // "I want to make the CarPlay flat when not routing, because it uses the high-res
   // PNG images instead of the 3D — the 3D should be for routing."
@@ -938,6 +939,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const followHeadingDeg = camHdgRef.current;
   // Hysteresis latch for the route-snap heading gate (see carSnapped below).
   const carSnapHdgOkRef = useRef(true);
+  const carCornerStRef = useRef(newCornerBlendState());
 
   // Seed the FIRST rendered frame at the driver's location so the GL map never
   // paints the world/default view before the lockstep snap lands — that's the
@@ -1642,8 +1644,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   }
   // DISPLAY-ONLY: route line → nearest road (idle/off-route) → raw GPS. (Raw stays authoritative
   // for everything else — this only moves the drawn car.)
-  const drawLat = carSnapped ? routeProj!.lat : (carRoadDraw ? carRoadDraw.lat : lat);
-  const drawLng = carSnapped ? routeProj!.lng : (carRoadDraw ? carRoadDraw.lng : lng);
+  // CORNER RELEASE — mirror of the phone (src/cornerBlend.ts): while turning with the line's
+  // corner geometry >6 m off, draw toward the raw fix so the lot entrance is not "wide".
+  const carCornerK = cornerBlend(carCornerStRef.current, _carTravelHdg, routeProj?.distM ?? null, s.speedMs || 0, carSnapped);
+  const drawLat = carSnapped ? (carCornerK > 0 ? routeProj!.lat + (lat - routeProj!.lat) * carCornerK : routeProj!.lat) : (carRoadDraw ? carRoadDraw.lat : lat);
+  const drawLng = carSnapped ? (carCornerK > 0 ? routeProj!.lng + (lng - routeProj!.lng) * carCornerK : routeProj!.lng) : (carRoadDraw ? carRoadDraw.lng : lng);
   // Drawn-vs-raw breadcrumb (8/20) — CarPlay/AA surface. Taps only.
   reportDraw(
     'car',
@@ -1656,9 +1661,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // duplicates raw — but it keeps the row shape identical across both surfaces, which
     // is what lets one query compare them. Accuracy isn't carried in carStore yet.
     hasFix ? { lat, lng, accM: null } : null,
-    { locked: carSnapped ? noseBearing(routeProj) : hdg, raw: typeof s.heading === 'number' ? s.heading : null, route: carSnapped ? routeProj!.bearing : null },
+    { locked: carSnapped && carCornerK < 0.5 ? noseBearing(routeProj) : hdg, raw: typeof s.heading === 'number' ? s.heading : null, route: carSnapped ? routeProj!.bearing : null },
   );
-  const drawHdg = carSnapped ? noseBearing(routeProj) : hdg;
+  const drawHdg = carSnapped && carCornerK < 0.5 ? noseBearing(routeProj) : hdg;
   // Live copy for the compass's IMMEDIATE camera push (the gesture closure is frozen).
   drawHdgRef.current = drawHdg;
   if (carSnapped) camHdgRef.current = routeProj!.bearing;

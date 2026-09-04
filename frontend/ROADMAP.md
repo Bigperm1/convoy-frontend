@@ -616,6 +616,23 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   220 ms; hard safety lift at 1 s. ⚠ Not reproducible on the sim (needs CarPlay connected) — normal launch verified
   unaffected (no cover at a non-nav mount). Field verdict = Jeff's next Show-map tap: the map should appear already in the
   chase pose, ~0.3 s after the tap.
+- 📊 **JEFF'S DRIVE HOME 17:28–18:05 (OTA-O `01a069ba`, CarPlay connected) — read 18:20.** Jeff: "the exit off the
+  highway was glitching and the route line was overlapping for a bit, and the turn into the parking lot was wide."
+  · **Exit = corner-zoom yo-yo (VERIFIED, cam-probe 1 Hz):** zoom climbed 16.2→18.1 for the exit-gore maneuver
+  (`zt=18.50`, `turn=138m` at 18:02:27); the step advanced at ~18:02:34 with the NEXT maneuver 483 m away (car-strip
+  `step=3/7 turn=483m` at 18:02:36) → target dropped to the 76 km/h speed zoom (`zt=14.92`) → the camera glided OUT
+  18.1→15.4 over 7 s → at 280 m from the ramp's end-turn (18:02:49) the corner zoom re-armed and it climbed back to 18.5
+  by 18:03:02 while the actual ramp curve ran 18:02:59–18:03:15. In, out, in, through one exit. "Line overlapping for a
+  bit" is a HYPOTHESIS tied to that zoom-out window (ribbon-trim at 18:02:37/52 shows lag 1–2 m, cut 25–40 m ahead —
+  the 15 s sampling cannot see inside it).
+  · **Parking-lot turn = route-snap geometry (VERIFIED, corner-trace):** `i=1 mode=route d=15.9m sep=16m spd=24 hdg=124
+  gpsHdg=136 rb=159` — the marker followed the polyline's wide arc while the car cut inside, 16 m apart for ~1 s, then
+  4.5 m on the lot road.
+  · **Backwards start, with the new `cands=` receipt:** `depart-rank n=2 facing=null chosenBr=351 off=-1
+  cands=351/2361s,351/2599s` → the compass sample was null AND both Mapbox candidates departed 351°; off-route 73 m in
+  33 s → reroute. Not the ranker: Mapbox offered no forward option at that origin.
+  · Show-map wrong pose reproduced once more pre-OTA-P (`phone-tap:show-map` 17:51:29 → `cam-apply surf=phone dz=1.65`,
+  then `dM=9480` at 17:51:51 — the phone camera 9.5 km off the request for a moment).
 - ✅ **OTA-E SHIPPED 08:37 PDT on Jeff's "ship it" — group `c59b50b9-82c4-4fba-a1f4-47f1fdcfc0c9`, runtime 1.27.0,
   both platforms, commit `323d12d`.** Proof: `ios KEY_PRESENT=1 openweathermap=2 neg_control=0` · `android
   KEY_PRESENT=1 openweathermap=2 neg_control=0`. Contents: arrival-speech fix (`43b901c`) + one shared build number on

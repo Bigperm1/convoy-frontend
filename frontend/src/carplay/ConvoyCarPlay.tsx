@@ -1221,6 +1221,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       // same owner as the strings above, so the two can never come from different engines.
       ...(ownStrip ? {
         distanceToTurnM: tbt.distanceToManeuverM,
+        stepLengthM: route?.steps?.[tbt.stepIndex]?.distance_m,
         distanceRemainingM: tbt.distanceRemainingM,
         etaSeconds: tbt.etaSeconds,
         routeProgress: route && route.distance_m > 0

@@ -111,6 +111,7 @@ export type CarState = {
   // NavigationTemplate needs real meters/seconds (it formats them itself), not
   // the pre-formatted phone-banner strings. Populated alongside the strings.
   distanceToTurnM: number; // meters to the next maneuver
+  stepLengthM?: number;    // length of the step the car is on — chained-maneuver hold in chaseZoom (2026-09-03)
   distanceRemainingM: number; // meters to the destination
   etaSeconds: number; // seconds remaining to the destination
   // 0..1 fraction of the route completed — drives the green progress divider in the

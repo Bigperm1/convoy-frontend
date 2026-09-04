@@ -52,6 +52,7 @@ import { getCarState } from "./carplay/carStore";
 import { getLastLocation, setLastLocation, getSettings, canonicalClass } from "./settings";
 import { haversineMeters } from "./nav";
 import { useAppSkin } from "./appSkin";
+import { cornerBlend, newCornerBlendState } from "./cornerBlend";
 import { wxCalloutUri, WX_CALLOUT_W, WX_CALLOUT_H, WX_CALLOUT_TEXT_X, WX_CALLOUT_TEXT_CY } from "./wxCalloutImages";
 import type { VisualTier } from "./tierTheme";
 
@@ -197,6 +198,8 @@ interface ConvoyMapboxProps {
   // halves are one decision, which is why this single flag drives both.
   flatView?: boolean;
   distanceToManeuverM?: number;
+  /** Length of the step the car is currently on (metres) — feeds the chained-maneuver hold in chaseZoom. */
+  currentStepLenM?: number;
   maneuverCoord?: { lat: number; lng: number } | null;
   // Delivers the tapped coordinate AND the on-screen tap point (sx/sy, px) so the
   // caller can implement gestures like double-tap-to-drop-a-pin in SCREEN space
@@ -579,6 +582,14 @@ export const FOLLOW_ZOOM = 17;
 const CORNER_ZOOM = 18.5;
 const CORNER_FAR_M = 280;
 const CORNER_NEAR_M = 70;
+// ── CHAINED MANEUVERS (Jeff, 2026-09-03: "the exit off the highway was glitching") ──
+// cam-probe on his drive home: zoom climbed to 18.1 for the exit-gore maneuver, the step
+// advanced at 18:02:34 with the NEXT maneuver 483 m away (car-strip `turn=483m`), so the
+// target dropped to the 76 km/h speed zoom (14.9) and the camera glided out for 15 s — then
+// at 280 m from the ramp's end-turn it climbed back to 18.5. In, out, in, through one exit.
+// A step shorter than this holds the corner zoom for its whole length: the next maneuver is
+// already close, and a highway exit is exactly a gore maneuver + a short ramp step.
+const CORNER_CHAIN_M = 550;
 // The user zoom-button offset is added to the computed follow zoom; clamp the
 // result so the minus button can widen the view well out (~10.5) without going
 // uselessly far, and the plus button can't over-zoom past ~20.
@@ -822,9 +833,11 @@ function chaseZoomForSpeed(kmh: number) {
   }
   return st[st.length - 1][1];
 }
-export function chaseZoom(kmh: number, distToManeuverM?: number) {
+export function chaseZoom(kmh: number, distToManeuverM?: number, curStepLenM?: number) {
   const base = chaseZoomForSpeed(kmh);
   if (typeof distToManeuverM !== "number" || !Number.isFinite(distToManeuverM) || distToManeuverM <= 0) return base;
+  // Chained maneuvers (exit gore → short ramp): hold the corner zoom for the whole short step.
+  if (typeof curStepLenM === "number" && Number.isFinite(curStepLenM) && curStepLenM > 0 && curStepLenM <= CORNER_CHAIN_M) return CORNER_ZOOM;
   const t = (CORNER_FAR_M - distToManeuverM) / (CORNER_FAR_M - CORNER_NEAR_M);
   return Math.max(base, lerp(base, CORNER_ZOOM, t));
 }
@@ -2429,7 +2442,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     mapMode = "satellite", leaderUserId, show3dBuildings = true,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs, flatView = false,
     routeColor = DEFAULT_ROUTE_COLOR,
-    distanceToManeuverM, onMapPress, onPoiPress, onMapLongPress, onPeerPress, onMapReady,
+    distanceToManeuverM, currentStepLenM, onMapPress, onPoiPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination, stops,
     offerPill, onOfferAccept, onOfferDismiss,
     stopPill, onStopArrived, onStopDismiss,
@@ -2457,6 +2470,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // last gate decision so the snap locks in at 45° but only releases past 60°, preventing
   // flicker when the travel heading hovers near the boundary.
   const snapHdgOkRef = useRef(true);
+  const cornerStRef = useRef(newCornerBlendState());
   // Accumulated MOVING milliseconds of heading disagreement, plus the tick clock it
   // advances on. Not a "since" timestamp: below the speed gate the clock PAUSES
   // rather than resetting, so stop-and-go traffic after a wrong turn cannot hand
@@ -2879,7 +2893,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // city framing are bit-identical to before; only above 45 km/h does this differ,
   // which is precisely the band being reported. Turn-tightening stays nav-only.
   const chaseZoomRaw = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX,
-    chaseZoom(kmhFromMs(userSpeedMs), navigationActive ? distanceToManeuverM : undefined) + (zoomOffset || 0),
+    chaseZoom(kmhFromMs(userSpeedMs), navigationActive ? distanceToManeuverM : undefined, navigationActive ? currentStepLenM : undefined) + (zoomOffset || 0),
   ));
   // Quantized to 0.1 for the NATIVE followZoomLevel (north-up) so the native follow
   // engine isn't re-nudged on every micro speed change.
@@ -3514,13 +3528,19 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       } catch {}
     }
   }
+  // CORNER RELEASE (2026-09-03, "the turn into the parking lot was wide"): while the course is
+  // actually swinging and the line's corner geometry sits >6 m from the car, draw toward the
+  // raw fix (fully raw at 16 m) — see src/cornerBlend.ts. Straights stay glued to the line.
+  const cornerK = cornerBlend(cornerStRef.current, _travelHdg, routeProj?.distM ?? null, userSpeedMs ?? 0, selfSnapped);
   const selfDraw = selfPinned
     // The parked spot was RECORDED while driving, so it is already on the road. Snapping
     // it again would drag the pin to whatever fragment is nearest the phone's own idea of
     // "here" — the marker-drift bug, reintroduced.
     ? (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null)
     : selfSnapped
-    ? { lat: routeProj!.lat, lng: routeProj!.lng }
+    ? (selfCar && cornerK > 0
+        ? { lat: lerp(routeProj!.lat, selfCar.lat, cornerK), lng: lerp(routeProj!.lng, selfCar.lng, cornerK) }
+        : { lat: routeProj!.lat, lng: routeProj!.lng })
     : roadDraw
     ? roadDraw
     : (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null);
@@ -3530,7 +3550,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // bearing at that spot (stable + line-aligned); else fall back to the smoothed camera
   // heading; else raw. So the car sits ON the line pointing down it, never wandering.
   const selfHeadingLocked = selfSnapped
-    ? noseBearing(routeProj)
+    ? (cornerK >= 0.5 && typeof selfCar?.heading === "number" ? selfCar.heading : noseBearing(routeProj))
     : (camHeadingRef.current != null ? camHeadingRef.current : (selfCar?.heading ?? 0));
   // Drawn-vs-raw breadcrumb (8/20): one bounded row / 10 s while moving. Taps only.
   // `gps` is passed SEPARATELY from `raw` on purpose: when pinned, selfCar IS the parked

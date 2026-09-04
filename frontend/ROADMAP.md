@@ -698,6 +698,27 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   ≤5 m on most bends (route polyline vs lane), 8.6 m once (05:54:31), the 21 m spike (06:04:27 phone) was the
   off-route moment. Below the 6 m release by design. (e) **"glitching"**: `main-gap` 28483 ms (06:39:40), 7322,
   6222, 4939 on the car surface — visible freeze vs locked phone unknown; asked Olaf.
+- 🟡 **OTA-W BUILT + SIM-VERIFIED 2026-09-04 09:05 PDT — commit `a008317` — NOT PUBLISHED (Jeff: "go build and sim check
+  it… corners/ribbon/flickering/centering"; the ship call is his).** Four fixes from Olaf's + Say Phin's morning reports:
+  (1) **Ribbon lead pitch-compensated** (`src/routeTrim.ts`, live pitch threaded on both surfaces, receipts `pitch= leadDp=`).
+  Reproduced FIRST on the sim: same 108 km/h replay (tools/sim-qc, dense waypoints) on OTA-V code = faint 9 pt / solid
+  17 pt ahead of the nose (FAIL <18); patched = 37 / 48–51 pt, 0 green over the car, lead 201→402 m at z13.9 (cos 60°).
+  (2) **Lot reroute storm** → `src/offRouteGate.ts` (pure decision extracted from nav.ts): the divergence TREND was a
+  fast path cleared on every swap; now inadmissible until the car has been within 25 m of the route + 40 m travel, creep
+  hold <8 km/h/10 s, reset only on a real swap and on activation, unknown speed ≠ motion. Replay gate reproduces Olaf's
+  storm 5→1; the sim replay's own storm (straight-line waypoints cut the ramp → backwards reroute) went 9 reroutes
+  (baseline 08:15) → 3 (08:33). Receipt `off-route held why= d= since= trav=`. (3) **"Wide corners" = the NOSE**, not
+  position: `bearingSmooth` starts a post-corner segment half a turn behind (reproduced to the degree: prevSeg 178 →
+  tanStart 134, t=0.45 → 114 = Olaf's 05:52:56 rows). `cornerNose()` clamps the drawn heading to ≤20° off the GPS course
+  after two distinct fixes; position untouched; `corner-trace … fix= nfx=`. Root cause (tangent span in
+  `projectOntoRoute`) NOT fixed — its own nav change. (4) **Say Phin's AA screen-off**: no AppState handling existed on the
+  car surface; `aa-appstate state= aa=1 foll=` receipt + follow re-assert on return to active (live refs, recentre armed
+  for the next fix); zoom never dropped follow and AA has no pan gesture — the mechanism stays HYPOTHESIS until her
+  receipts land. **Codex adversarial review ×2** found 4 real defects, all fixed + gated before commit. Gates: typecheck,
+  trap-check, doc-check, corner 11/11, ribbon, off-route A–D/I/J/K. Sim build 5: boots, 140 s routed replay, 0 crashes,
+  0 JS exceptions, receipts `pitch=60 leadDp=120`, `fix= nfx=2`, `off-route held` all present. ⚠ Codex also flagged the
+  plaintext `mapbox tokens.txt` in the repo root (untracked, Aug 12): ignore rule added; moving it out + rotating both keys
+  is Jeff's. Flicker/"phone off → CarPlay freezes" = iOS JS suspension, no OTA fix (build 77 native).
 - 💬 **07:50–07:59 replies (sent as Claude, Jeff: "Look at chat and answer").** Olaf: "when the phone turns off the CarPlay
   does freeze" → answered with the measured fact (iOS parks JS while locked, bursts ~50 s apart; Prevent Auto-Lock only
   holds while Hairpin is foreground; native CarPlay-standalone is the real fix — build 77). His 28 s `main-gap` at 06:39

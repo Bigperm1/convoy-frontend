@@ -698,6 +698,13 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   ≤5 m on most bends (route polyline vs lane), 8.6 m once (05:54:31), the 21 m spike (06:04:27 phone) was the
   off-route moment. Below the 6 m release by design. (e) **"glitching"**: `main-gap` 28483 ms (06:39:40), 7322,
   6222, 4939 on the car surface — visible freeze vs locked phone unknown; asked Olaf.
+- 💬 **07:50–07:59 replies (sent as Claude, Jeff: "Look at chat and answer").** Olaf: "when the phone turns off the CarPlay
+  does freeze" → answered with the measured fact (iOS parks JS while locked, bursts ~50 s apart; Prevent Auto-Lock only
+  holds while Hairpin is foreground; native CarPlay-standalone is the real fix — build 77). His 28 s `main-gap` at 06:39
+  fits. **Say Phin (`SPL_GRC`, the only handle with `aa-crumb`/`car-viewport surf=213x107` this morning): "turn the phone
+  screen off → the avatar moves off the AA screen, zooming out doesn't bring it back".** Data 07:12–07:30: `cam-mode …
+  foll=0` twice (07:12:10, 07:29:52) then back to `foll=1`, `heat-probe` gapMax 3.9 s ×3. No receipt yet ties the camera
+  stopping to screen-off; asked for the screen-off time + whether the re-center button recovers it. OPEN (surfaces).
 - ✅ **OTA-V SHIPPED 2026-09-04 00:24 PDT — group `e9c59c06-33bc-4e8c-a8d6-a944069ccedc`, commit `13d06ef` (code `0f67a89`),
   KEY_PRESENT=1 both — a reinstall no longer loses the scan; a dead upload stops the countdown.** Jeff: "go ship the otav".
   Pickup = the red pill. Olaf's twin returns on his next launch by itself (crumb `carscan-restored` will show it). Olaf's 09-03 reinstall wiped `carScanId` (AsyncStorage only) and his Garage

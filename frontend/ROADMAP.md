@@ -669,6 +669,19 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   "Post a meet" beside "Plan a cruise" on the Hub's empty next-up card (Jeff: "maybe put in the club card beside plan a
   cruise put plan a event button too"). Same pill style, same labels as the + sheet; both open the create sheet with the
   right kind. Only shows while nothing is upcoming (with an event the card shows You're in / Details). Mock sent first.
+- ✅ **OTA-T SHIPPED 22:06 PDT — group `cb6d6fa4-472b-48cb-ac8f-70c1622cca3a`, commit `fedb7ec`, KEY_PRESENT=1 both —
+  CORNER RELEASE reworked after CODEX's first second-opinion pass.** Codex (codex-cli 0.153.2, `codex@openai-codex`
+  plugin, Jeff's ChatGPT sign-in 21:53 — second opinion ONLY, never `--write`) read `src/cornerBlend.ts` and found two
+  real flaws in the OTA-Q version, both verified by re-reading the code: (1) the rate was recomputed on every call ≥150 ms
+  apart while the course only changes per GPS fix (~1 Hz) — unchanged frames decayed it and the next fix was measured
+  over ~150 ms instead of ~1 s, so a 4° jitter read as 27°/s: enough to release a car 35 m off a divided-highway line
+  (the exact regression the design tried to avoid); (2) the 0.5 EMA halved the first swing, so a short lot-entrance turn
+  could sit under threshold. Fix: a sample counts only when the course changes ≥3°, rate = Δ over the real gap between
+  distinct samples (floor 0.25 s, cap 3 s), held 1.5 s instead of decaying, no EMA; easing constants named as
+  exponential time constants (Codex's third, cosmetic, point). **New numeric gate** `tools/sim-qc/corner_blend_test.mts`
+  (`node --experimental-strip-types …`): highway jitter 0 · 4° step 0 · lot swing 16 m → 1.0 · lot swing 4 m → 0. The sim
+  cannot cut corners, so this is the only automated check of that logic. Field verdict unchanged: Jeff's next lot entrance.
+  Codex usage: `/codex:review`, `/codex:adversarial-review <focus>`, `/codex:rescue` (no `--write`); stop-time gate OFF.
 - ✅ **OTA-E SHIPPED 08:37 PDT on Jeff's "ship it" — group `c59b50b9-82c4-4fba-a1f4-47f1fdcfc0c9`, runtime 1.27.0,
   both platforms, commit `323d12d`.** Proof: `ios KEY_PRESENT=1 openweathermap=2 neg_control=0` · `android
   KEY_PRESENT=1 openweathermap=2 neg_control=0`. Contents: arrival-speech fix (`43b901c`) + one shared build number on

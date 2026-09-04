@@ -562,3 +562,54 @@ export async function syncScanIdToBackend(scanId: string): Promise<boolean> {
     return false;
   }
 }
+
+// ── RECONCILE WITH THE SERVER (2026-09-03, Olaf's reinstall) ───────────────────────
+// The scan pointer lived ONLY in AsyncStorage. Olaf reinstalled to get build 75, the pointer
+// went with it, his re-upload was refused by the per-user cap and FAILED, and the Garage sat on
+// "submitted" polling a scan that would never render — while his finished twin sat in the bucket.
+// On launch (map.tsx) and on Garage focus: ask the backend for the account's scans
+// (GET /scan/mine) and (1) restore the newest DONE scan when the phone has no ready one,
+// (2) mark the scan being polled as 'failed' when the worker says so. Never touches a phone
+// that already has a ready scan. Receipts: carscan-restored / carscan-verdict.
+type MyScan = { scanId: string; status: string; reason?: string | null; createdAt?: string | null };
+let _reconcileBusy = false;
+export async function reconcileScanState(): Promise<"restored" | "failed" | "noop"> {
+  if (_reconcileBusy) return "noop";
+  _reconcileBusy = true;
+  try {
+    const cur = getSettings();
+    if (cur.carScanStatus === "ready" && cur.carScanId) return "noop";
+    const { data } = await api.get("/scan/mine");
+    const scans: MyScan[] = Array.isArray(data?.scans) ? data.scans : [];
+    if (!scans.length) return "noop";
+    // 1) A finished scan the phone does not know about → restore it.
+    for (const sc of scans) {
+      if (sc.status !== "done" || !sc.scanId) continue;
+      const ready = await checkScanReady(sc.scanId);
+      if (!ready) continue;
+      await updateSettings({
+        carScanId: sc.scanId, carScanModelUrl: ready.heroUrl, carScanMapUrl: ready.mapUrl,
+        carScanStatus: "ready", carScanBackendId: undefined,
+      });
+      logEventReliable(`carscan-restored id=${sc.scanId} from=${cur.carScanStatus ?? "none"}`);
+      void syncScanIdToBackend(sc.scanId);
+      return "restored";
+    }
+    // 2) The one being polled is dead — say so instead of polling forever.
+    if (cur.carScanStatus === "submitted" && cur.carScanId) {
+      const mine = scans.find((x) => x.scanId === cur.carScanId);
+      if (mine && mine.status === "failed") {
+        await updateSettings({ carScanStatus: "failed" });
+        logEventReliable(`carscan-verdict id=${cur.carScanId} status=failed reason=${String(mine.reason ?? "").slice(0, 60)}`);
+        return "failed";
+      }
+    }
+    return "noop";
+  } catch (e: any) {
+    logEvent(`carscan-reconcile-fail err=${String(e?.message ?? e).slice(0, 80)}`);
+    return "noop";
+  } finally {
+    _reconcileBusy = false;
+  }
+}
+

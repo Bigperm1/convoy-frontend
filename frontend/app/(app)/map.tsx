@@ -77,7 +77,7 @@ import { startNavBanner, stopNavBanner, updateNavBanner, swapNavRoute, isNavSess
 import { onCarNavStarted } from "../../src/carplay/carActions";
 import { PoliceBadgeIcon } from "../../src/components/MapControlIcons";
 import CompassNeedle from '../../src/components/CompassNeedle';
-import { syncScanIdToBackend } from '../../src/carScan';
+import { syncScanIdToBackend, reconcileScanState } from '../../src/carScan';
 import { startHeatProbe, stopHeatProbe } from '../../src/heatProbe';
 import { useAccent, useAccentAlpha, useAppSkin } from "../../src/appSkin";
 
@@ -852,6 +852,9 @@ export default function MapScreen() {
     if (settings.carScanBackendId === settings.carScanId) return;
     void syncScanIdToBackend(settings.carScanId);
   }, [settings.carScanStatus, settings.carScanId, settings.carScanBackendId]);
+  // Once per launch: pull the account's scans from the backend and restore a finished twin the
+  // phone has lost (Olaf's reinstall, 2026-09-03) or mark a dead 'submitted' scan as failed.
+  useEffect(() => { void reconcileScanState(); }, []);
   // Saved places (Home/Work/custom). The time-of-day prediction now surfaces as
   // the PREDICTIVE row in the search screen (NavSearchScreen), not an on-map banner.
   const [savedPlaces] = useSavedPlaces();

@@ -25,7 +25,7 @@ import { CandyCta } from '../../src/components/CandyCta';
 import { CANDY_RIM, CANDY_INK } from '../../src/components/ManeuverArrow';
 import { skin, type VisualTier } from '../../src/tierTheme';
 import { setSkinChoice } from '../../src/appSkin';
-import { checkScanReady, syncScanIdToBackend, uploadScanHero } from '../../src/carScan';
+import { checkScanReady, syncScanIdToBackend, uploadScanHero, reconcileScanState } from '../../src/carScan';
 import { logEventReliable } from '../../src/crashBreadcrumb';
 import { LinearGradient } from 'expo-linear-gradient';
 import { resolveGRCKey, getVehicleModelUrl } from '../../src/vehicleAssets';
@@ -568,8 +568,10 @@ export default function GarageScreen() {
     if (scanBusyRef.current) return;
     scanBusyRef.current = true;
     try {
-      const s = getSettings();
+      let s = getSettings();
       setScanModelUrl(s.carScanModelUrl ?? null);
+      // Server truth first (restore a lost finished scan / surface a failed one), then the local view.
+      try { if (await reconcileScanState() !== 'noop') s = getSettings(); } catch {}
       setScanPending(s.carScanStatus === 'submitted');
       setScanSubmittedAt(s.carScanSubmittedAt ?? null);
       if (s.carScanStatus === 'submitted' && s.carScanId) {

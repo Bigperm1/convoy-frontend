@@ -59,3 +59,13 @@ hierarchy dump or by eye in the screenshot) gives the exact `lead`, `cut+`, `lag
   `set` while parked is deadbanded (9 m) and ignored.
 * The Claude Code iOS-Simulator MCP crashed on every call that day; the Xcode MCP
   (`DeviceInteractionStartSession` on an iOS 27 sim) tapped fine.
+
+## Corner-release gate (numeric, seconds)
+
+```bash
+node --experimental-strip-types tools/sim-qc/corner_blend_test.mts
+```
+
+Exercises `src/cornerBlend.ts` (the marker's corner release) on four synthetic traces: divided-highway GPS jitter
+and a single 4° step must stay snapped (blend 0); a parking-lot swing 16 m off the line must release (≈1); the same
+swing only 4 m off must stay snapped. The sim cannot cut corners, so this is the only automated check of that logic.

@@ -834,6 +834,16 @@ Mapbox caches by URL so any rebake needs a new filename. Details in `HANDOFF-3D.
 club-create, top speed, convoy size. Backend entitlement endpoints live in `~/convoy-backend`
 (build 77).
 
+- **BUILD 77 (next native cut, BOTH platforms at the same number) — CarPlay layout guide (Jeff, 2026-09-03: "Add the
+  CarPlay Layout Guide to Build seventy seven").** Read `CPWindow.mapButtonSafeAreaLayoutGuide` (CPWindow.h:18) in the
+  CarPlay scene / react-native-carplay patch and push the chrome-free rect (top nav bar + trailing map-button column) into
+  `carStore` as `chromeInsets {top,right,bottom,left}`; `ConvoyCarPlay` then anchors the nav stack, speed cluster and
+  crew pill to REAL insets and retires the measured constants (`CAR_RIGHT_INSET` 48, the 775-wide stopgap
+  `carRightInsetFor`, `CAR_BAR_*`). Why: Alfred's Sienna (775×291) put the banner under the crew/compass buttons; every
+  unit we have not seen is the same risk. Verify on the CarPlay sim at 400×240 and a wide preset, then Alfred's photo.
+  Also on the 77 list from 75/76: RevenueCat, widgets + watchOS, `Screen.setMarker` patch, AA `isConnected` getter,
+  self-heal A1. `buildNumber` and `versionCode` move together to 77.
+
 **5 · Class colour batch** — GT3 RS +7, GRC +4, LFA +5. Baked, needs QC + wiring.
 
 **6 · Mic arbiter — FIXED, held for build 74.** ~~There is no arbiter anywhere.~~ There is now:

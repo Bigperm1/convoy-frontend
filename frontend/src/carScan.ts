@@ -598,9 +598,11 @@ export async function reconcileScanState(): Promise<"restored" | "failed" | "noo
     // 2) The one being polled is dead — say so instead of polling forever.
     if (cur.carScanStatus === "submitted" && cur.carScanId) {
       const mine = scans.find((x) => x.scanId === cur.carScanId);
-      if (mine && mine.status === "failed") {
+      // 'skipped' is terminal too (the worker never rendered it: slot-required, junk, probe) —
+      // to the phone that is the same verdict: stop the countdown.
+      if (mine && (mine.status === "failed" || mine.status === "skipped")) {
         await updateSettings({ carScanStatus: "failed" });
-        logEventReliable(`carscan-verdict id=${cur.carScanId} status=failed reason=${String(mine.reason ?? "").slice(0, 60)}`);
+        logEventReliable(`carscan-verdict id=${cur.carScanId} status=${mine.status} reason=${String(mine.reason ?? "").slice(0, 60)}`);
         return "failed";
       }
     }

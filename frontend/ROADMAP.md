@@ -633,6 +633,20 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   33 s → reroute. Not the ranker: Mapbox offered no forward option at that origin.
   · Show-map wrong pose reproduced once more pre-OTA-P (`phone-tap:show-map` 17:51:29 → `cam-apply surf=phone dz=1.65`,
   then `dM=9480` at 17:51:51 — the phone camera 9.5 km off the request for a moment).
+- ✅ **OTA-Q SHIPPED 18:36 PDT — group `17366001-2b5a-410f-8788-302ab0f5fc57`, commit `676cae5`, KEY_PRESENT=1 both —
+  CORNER-ZOOM HOLD THROUGH CHAINED MANEUVERS + CORNER RELEASE for the drawn car (both surfaces).** From the drive-home
+  read above. (1) `chaseZoom(kmh, distToManeuverM, curStepLenM)`: a current step ≤ `CORNER_CHAIN_M` (550 m) holds
+  `CORNER_ZOOM` for its whole length — an exit is a gore maneuver + a short ramp step, which is exactly the in/out/in.
+  Phone `currentStepLenM` (map.tsx, `activeRoute.steps[tbt.stepIndex].distance_m`); CarPlay `carStore.stepLengthM` (written
+  with `distanceToTurnM` in ConvoyCarPlay). Accepted trade-off: short city blocks between turns also hold 18.5.
+  (2) `src/cornerBlend.ts`: while the GPS course swings ≥ 12°/s AND the route projection is > 6 m off, the drawn position
+  blends toward the raw fix (fully raw at 16 m), eased 250 ms in / 700 ms out, nose on the raw course past 0.5 — straights
+  stay glued (a divided highway holds `proj=35` for minutes with a stable heading). Phone `cornerK` at `selfDraw`, car
+  `carCornerK` at `drawLat/Lng` + `drawHdg`. Receipts: `corner-trace` (d should fall toward raw inside corners), `cam-probe
+  zt` (held at 18.5 across short steps). **Sim smoke drive (iOS 27, key-in-build):** guidance, snap and chase camera healthy;
+  the sim's straight-line waypoints diverge from the road (d 12→55 m, a reroute) so the blend never engages there —
+  `measure.py` also FAILS on the dusk style (its car detector assumes the day palette; run it in daylight or fix the
+  detector). **Field verdict = Jeff's next exit + lot entrance.**
 - ✅ **OTA-E SHIPPED 08:37 PDT on Jeff's "ship it" — group `c59b50b9-82c4-4fba-a1f4-47f1fdcfc0c9`, runtime 1.27.0,
   both platforms, commit `323d12d`.** Proof: `ios KEY_PRESENT=1 openweathermap=2 neg_control=0` · `android
   KEY_PRESENT=1 openweathermap=2 neg_control=0`. Contents: arrival-speech fix (`43b901c`) + one shared build number on

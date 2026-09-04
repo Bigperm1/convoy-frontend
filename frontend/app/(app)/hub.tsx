@@ -254,6 +254,7 @@ export default function HubScreen() {
           skinColors={skinColors}
           onOpen={(e) => setOpenEvent(e)}
           onPlan={() => { setCreateKind("cruise"); setShowCreateSheet(true); }}
+          onPlanMeet={() => { setCreateKind("event"); setShowCreateSheet(true); }}
         />
 
         {/* ── YOUR CLUBS — a rail, so ONE club reads deliberate, not lonely ── */}
@@ -373,9 +374,9 @@ export default function HubScreen() {
 /** NEXT UP — the one large object on the screen. The empty state is the SAME
  *  shape and weight as the populated one, so the screen never visibly deflates
  *  for a member with nothing on. */
-function NextUp({ event: e, accent, skinColors, onOpen, onPlan }: {
+function NextUp({ event: e, accent, skinColors, onOpen, onPlan, onPlanMeet }: {
   event: HubEvent | null; accent: string; skinColors: any;
-  onOpen: (e: HubEvent) => void; onPlan: () => void;
+  onOpen: (e: HubEvent) => void; onPlan: () => void; onPlanMeet: () => void;
 }) {
   const wash = useAccentAlpha(0.28);
   const washMid = useAccentAlpha(0.09);
@@ -420,9 +421,16 @@ function NextUp({ event: e, accent, skinColors, onOpen, onPlan }: {
               </View>
             </>
           ) : (
-            <TouchableOpacity onPress={onPlan} activeOpacity={0.9} style={[styles.heroCta, { backgroundColor: accent }]}>
-              <Text style={[styles.heroCtaTxt, { color: skinColors.ink }]}>Plan a cruise</Text>
-            </TouchableOpacity>
+            <>
+              {/* Both kinds from the empty card (Jeff, 2026-09-03: "beside plan a cruise put plan a
+                  event button too") — same labels as the FAB sheet, so the two entry points agree. */}
+              <TouchableOpacity onPress={onPlan} activeOpacity={0.9} style={[styles.heroCta, { backgroundColor: accent }]}>
+                <Text style={[styles.heroCtaTxt, { color: skinColors.ink }]}>Plan a cruise</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={onPlanMeet} activeOpacity={0.9} style={[styles.heroCta, { backgroundColor: accent }]}>
+                <Text style={[styles.heroCtaTxt, { color: skinColors.ink }]}>Post a meet</Text>
+              </TouchableOpacity>
+            </>
           )}
         </View>
       </View>

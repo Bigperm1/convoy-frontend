@@ -682,6 +682,29 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`node --experimental-strip-types …`): highway jitter 0 · 4° step 0 · lot swing 16 m → 1.0 · lot swing 4 m → 0. The sim
   cannot cut corners, so this is the only automated check of that logic. Field verdict unchanged: Jeff's next lot entrance.
   Codex usage: `/codex:review`, `/codex:adversarial-review <focus>`, `/codex:rescue` (no `--write`); stop-time gate OFF.
+- 🟡 **OTA-V READY, NOT PUBLISHED (needs Jeff's go) — commit `0f67a89` — a reinstall no longer loses the scan;
+  a dead upload stops the countdown.** Olaf's 09-03 reinstall wiped `carScanId` (AsyncStorage only) and his Garage
+  sat on "submitted" for a re-upload the worker had failed on `user-cap`, while his finished twin
+  (`enablewhore-20260901-210315`, `done`, both GLBs in `models`) sat untouched. Now `reconcileScanState()`
+  (`src/carScan.ts`) runs once per launch (map.tsx, next to the profile sync) and on every Garage refresh: it asks
+  `GET /scan/mine` and restores the newest `done` scan whose GLBs HEAD OK (settings + `carscan-restored` crumb; the
+  profile sync then PUTs the id once), or flips a polled scan the worker marked `failed`/`skipped` to
+  `carScanStatus:'failed'` (`carscan-verdict` crumb) — the Garage then shows the invitation again (no "failed"
+  copy yet: that is a UX change and needs a mockup OK first). **Sim-verified 23:11 PDT on the iOS 27 sim with Jeff's
+  account:** pointer wiped → launch → settings read back `ready` + both URLs + `carScanBackendId`, crumb
+  `carscan-restored id=jeff-20260902-193844 from=none`. Failed case (phone pointed at a fake `failed` job, account
+  also owns a done scan = Olaf's exact situation): the done twin wins → `carscan-restored … from=submitted`, countdown
+  gone. The pure "failed and nothing done" branch is code-verified only (no such account to run it on).
+  **Backend:** `GET /api/scan/mine` (`~/convoy-backend` `03be1cb`, live) = Mongo `scan_slots` ids + Supabase
+  `car_scan_jobs` by handle through the anon-key RPC `scan_jobs_for_handle` (migration applied), because —
+  **⛔ VERIFIED: the Render deploy has NO Supabase service-role key** (`/api/health` → `"supabase":false`). Every
+  `supabase_admin` helper is a silent no-op in production: hazards + communities mirrors, community routes, and the
+  **scan-slot mirror** — with `pipeline_flags.require_slot=true` (since 09-03) the worker will `skip("slot-required")`
+  every NEW upload (Supabase `scan_slots` holds one `qa` row). Nobody has hit it yet. Fix = Jeff sets `SUPABASE_URL` +
+  `SUPABASE_SERVICE_ROLE_KEY` on Render (never through me) → `supabase:true`; or `require_slot=false` meanwhile.
+  Trap met: `re` was only imported inside one function → the first deploy 500'd (`carscan-reconcile-fail` crumbs at
+  23:04/23:05 prove the app-side failure path too). Codex second opinion on the pipeline → `SCAN-PIPELINE.md`
+  "Second opinion" (7 verified findings, 7 hypotheses, none adopted tonight).
 - ✅ **OTA-U SHIPPED 22:52 PDT — group `b97a211d-4ce3-447c-91ad-876333192c16`, commit `5f9bb6f`, KEY_PRESENT=1 both — map
   HUD pinned to factory text size + CarPlay banner inset scales with head-unit width.**
   (1) **Olaf's "bigger" HUD** (Jeff's two screenshots, measured: chip frames + status clock identical, HUD text ~1.3×) =

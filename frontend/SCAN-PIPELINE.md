@@ -404,3 +404,45 @@ The authored-fleet toolkit under `tools/glb-pipeline/` predates this pipeline an
 for fleet authoring only (paint variants, sprites). `HANDOFF-3D.md` is the historical
 log of that era — none of it is on the scan path. `scan_finish.py`, `glbinfo.py`,
 `tripo_stub.py` and `scan_worker_dryrun.sh` are the scan-path tools.
+
+## Second opinion — Codex (ChatGPT), 2026-09-03 late
+
+Jeff asked for an outside review of build quality "using different techniques", vendor fixed (Tripo).
+Codex read this file, `supabase/functions/scan-worker/`, `src/carScan.ts`, `garage-capture.tsx`,
+`HANDOFF-3D.md` and Tripo's current docs. Every line below was re-checked against the code by Claude
+before it was written here; the full report is in the session scratchpad (`codex-pipeline-review.md`).
+
+**VERIFIED facts it surfaced (receipts in the code):**
+- The hero conversion asks for `texture_size: 2048` (`tripo.ts` `HERO_CONVERT`); Tripo's conversion docs allow 4096
+  for recent models at the same credit cost. The 30 MB hero gate (`glb.ts` `MAX_BYTES`) has headroom (heroes are
+  4.8–6.5 MB). → Try 4096 on ONE scan and measure size + Garage decode time before making it the recipe.
+- The map twin is converted straight to `face_limit: 20000` / `texture_size: 1024` (`TWIN_CONVERT`); the twin gate
+  rejects `totalVerts >= 25_000` (`TWIN_MAX_VERTS`) while Mapbox's real limit is 65,536 per mesh (u16). The
+  `maxPrimVerts` check is per PRIMITIVE, not per mesh (`glb.ts` measure loop) — fix that before raising the gate.
+- The generate request sends only `inputs` + `model` (`tripo.ts` `generateMultiview`). `enable_image_autofix`,
+  `texture_quality`, `geometry_quality`, `texture_alignment`, `export_uv` all ride Tripo's defaults — nothing is
+  pinned, so a Tripo default change would silently change our output. Pin the defaults explicitly.
+- Photo preflight is "JPEG and ≥ 100 KB" (`manifest.ts` `MIN_PHOTO_BYTES`); no blur / exposure / framing check
+  on the phone (`garage-capture.tsx` captures at quality 0.9, no gate).
+- The declared paint colour is recorded in the manifest and shown in the capture UI, but NO worker step consumes it
+  (grep `paint` in worker/tripo/glb: nothing). Either use it (body-paint texels only) or stop promising it.
+- The finish pass applies ONE global roughness floor 0.35 / metallic scale 0.85 to the whole atlas
+  (`glb.ts` `ROUGH_FLOOR_DEFAULT` / `METAL_SCALE_DEFAULT`) — glass, tyres and chrome get the paint curve.
+- Robustness: `uploadScanFolder` swallows a manifest-upload failure and still reports `ok` (`src/carScan.ts`,
+  "a missing manifest is recoverable" — but without a manifest no job is ever enqueued); `modelExists()` treats
+  any non-2xx HEAD as "missing" (`deps.ts`), so a storage 5xx could start paid Tripo work; the capture lap lives
+  only in React state (a process death loses the photos and leaves a slot half-used).
+
+**HYPOTHESES it offered (untested — each needs a paired scan before it becomes recipe):**
+1. 4096 hero texture (free, biggest visible win on badges/trim/wheels).
+2. 30k → 40k-face map twin with the gate corrected to the per-mesh rule, watched on a real Android for heat.
+3. `enable_image_autofix: true` on a canary cohort (watch for mirrors / spoilers being "fixed" away).
+4. On-device photo preflight: min pixel size, blur, clipped exposure, car occupancy ~70–80 %, complete wheels/roof.
+5. ONE hero conversion (150k / 4096) and derive the map twin locally (gltf-transform simplify + weighted normals,
+   already proven in `HANDOFF-3D.md`) — saves 10 credits, which could fund `texture_quality: "detailed"`.
+6. QC that judges appearance: canonical renders + silhouette IoU against the four input masks; plate redaction on
+   the public hero texture.
+7. Two candidate frames per station in the lap, auto-pick the sharper one (still exactly four views to Tripo).
+
+Not adopted: quad/`force_symmetry` retopology (extra credits, erases asymmetric details), detailed geometry
+(+20 credits, over the $0.50 ceiling), any vendor change.

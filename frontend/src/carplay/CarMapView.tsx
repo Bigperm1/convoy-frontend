@@ -35,7 +35,7 @@ import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGes
 import { canonicalClass } from '../settings';
 import { useMapView2D } from '../mapViewMode';
 import { useAppSkin } from '../appSkin';
-import { wxPinUri, wxPillUri, WX_PIN_KINDS } from '../wxPinImages';
+import { wxCalloutUri, WX_CALLOUT_KINDS, WX_CALLOUT_TEXT_X, WX_CALLOUT_TEXT_CY, WX_CALLOUT_W, WX_CALLOUT_H } from '../wxCalloutImages';
 // End-pin weather images on the car surface — iOS CarPlay only until Android Auto is verified
 // (see allMapImages below). JS-only, so an OTA can flip it.
 const WX_PIN_ON_CAR = Platform.OS === 'ios';
@@ -811,11 +811,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.peers]);
 
-  // ── THE END PIN IS THE ARRIVAL WEATHER (Jeff, 2026-09-03) ────────────────────
-  // Same baked images the phone's DestinationWeatherPin draws (src/wxPinImages.ts: the brand
-  // pin's silhouette, outline in the tier metal, two-tone glyph in the head), registered as
-  // Mapbox symbol images per skin, plus the temperature pill. Data URIs decode through RN's
-  // image loader on iOS. ANDROID AUTO KEEPS brand_pin for now: data-URI symbol images on the
+  // ── THE END MARKER IS THE ARRIVAL-WEATHER CALLOUT (Jeff, 2026-09-03) ──────────
+  // Same baked images the phone's DestinationWeatherCallout draws (src/wxCalloutImages.ts:
+  // rounded dark-glass box, tier-metal border, two-tone glyph, tail to the spot; 'none' = the
+  // flag), registered as Mapbox symbol images per skin; the temperature is a text layer at
+  // the baked text slot. Data URIs decode through RN's image loader on iOS. ANDROID AUTO KEEPS brand_pin for now: data-URI symbol images on the
   // AA canvas are unverified and a failed decode would draw NO end pin at all — the exact
   // "there's no dot" complaint. Flip WX_PIN_ON_CAR after one verified AA connect.
   const tier = useAppSkin();
@@ -826,10 +826,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       // stop looks like the SAME object on both screens rather than a car-only invention.
       brand_pin: require('../../assets/images/brand-pin.png'),
       ...(WX_PIN_ON_CAR
-        ? {
-            ...Object.fromEntries(WX_PIN_KINDS.map((k) => ['wxpin_' + k, { uri: wxPinUri(tier, k) }])),
-            wxpill: { uri: wxPillUri(tier) },
-          }
+        ? Object.fromEntries(WX_CALLOUT_KINDS.map((k: string) => ['wxcallout_' + k, { uri: wxCalloutUri(tier, k) }]))
         : {}),
       ...peerImages,
     }),
@@ -856,12 +853,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           // The destination carries no numeral; a stop carries its trip position, which
           // matches the phone's badge and the drawer so "stop 2" means one thing.
           label: w.kind === 'stop' && w.n ? String(w.n) : '',
-          // The end pin's image: the weather pin for its ETA-matched forecast kind ('none'
-          // = the clean skin-ringed pin while the layer is off / unfetched); stops keep the
-          // brand pin. `isz` corrects for the 2x bake vs the 1x brand asset so both draw at
-          // the same 36.5x47.5 pt; `temp` feeds the pill layer (empty = no pill).
-          icon: WX_PIN_ON_CAR && w.kind === 'dest' ? 'wxpin_' + (w.wx && (WX_PIN_KINDS as readonly string[]).includes(w.wx) ? w.wx : 'none') : 'brand_pin',
-          isz: WX_PIN_ON_CAR && w.kind === 'dest' ? 0.5 : 1,
+          // The end marker's image: the weather callout for its ETA-matched forecast kind
+          // ('none' = the flag while the layer is off / unfetched); stops keep the brand pin.
+          // The 2x bake at iconSize 0.5 draws the callout at its 70x42 pt design size — the
+          // same iconSize that draws the 1x brand pin at 36.5x47.5. `temp` feeds the text layer.
+          icon: WX_PIN_ON_CAR && w.kind === 'dest' ? 'wxcallout_' + (w.wx && (WX_CALLOUT_KINDS as readonly string[]).includes(w.wx) ? w.wx : 'none') : 'brand_pin',
           temp: WX_PIN_ON_CAR && w.kind === 'dest' && w.temp ? w.temp : '',
         },
         geometry: { type: 'Point' as const, coordinates: [w.lng, w.lat] },
@@ -2109,7 +2105,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             slot="top"
             style={{
               iconImage: ['get', 'icon'] as any,
-              iconSize: ['*', ['get', 'isz'], 0.5 * uiScale] as any,
+              iconSize: 0.5 * uiScale,
               // Bottom-anchored: a pin points AT a place, so its tip sits on the
               // coordinate rather than its middle — the anchor the phone uses too.
               iconAnchor: 'bottom',
@@ -2142,31 +2138,22 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
               textEmissiveStrength: 1,
             }}
           />
-                  {/* Temperature pill beside the end pin's head — the same baked pill + white
-              reading the phone draws (DestinationWeatherPin). Translate is in viewport
-              points from the bottom anchor: head centre 29.5 pt up, pill centre 37.25 pt
-              right (pin half-width 18.25 + 4 gap + pill half-width 15), x uiScale on AA. */}
+                  {/* The temperature, live text at the callout's baked text slot (left edge at
+              WX_CALLOUT_TEXT_X, centre line WX_CALLOUT_TEXT_CY from the box top). Translate is in
+              viewport points from the bottom-centre anchor (the tail tip), x uiScale on AA. Same
+              white 14 pt bold the phone draws. Only the destination carries `temp`, and only
+              with a forecast — the flag callout has no text. */}
           <SymbolLayer
             id="car-waypoint-temp"
             slot="top"
             filter={['!=', ['get', 'temp'], ''] as any}
             style={{
-              iconImage: 'wxpill',
-              iconSize: 0.5 * uiScale,
-              iconAnchor: 'center',
-              iconTranslate: [37.25 * uiScale, -29.5 * uiScale] as any,
-              iconTranslateAnchor: 'viewport',
-              iconRotationAlignment: 'viewport',
-              iconPitchAlignment: 'viewport',
-              iconAllowOverlap: true,
-              iconIgnorePlacement: true,
-              iconEmissiveStrength: 1,
               textField: ['get', 'temp'] as any,
-              textSize: 11 * uiScale,
+              textSize: 14 * uiScale,
               textColor: '#FFFFFF',
               textFont: ['DIN Pro Bold', 'Arial Unicode MS Bold'],
-              textAnchor: 'center',
-              textTranslate: [37.25 * uiScale, -29.5 * uiScale] as any,
+              textAnchor: 'left',
+              textTranslate: [(WX_CALLOUT_TEXT_X - WX_CALLOUT_W / 2) * uiScale, -(WX_CALLOUT_H - WX_CALLOUT_TEXT_CY) * uiScale] as any,
               textTranslateAnchor: 'viewport',
               textRotationAlignment: 'viewport',
               textPitchAlignment: 'viewport',

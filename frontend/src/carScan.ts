@@ -592,7 +592,8 @@ export async function reconcileScanState(): Promise<"restored" | "failed" | "noo
         carScanStatus: "ready", carScanBackendId: undefined,
       });
       logEventReliable(`carscan-restored id=${sc.scanId} from=${cur.carScanStatus ?? "none"}`);
-      void syncScanIdToBackend(sc.scanId);
+      // No explicit sync here: clearing carScanBackendId above makes map.tsx's sync effect PUT the
+      // id once (sim run 2026-09-03 23:11 showed two identical carscan-sync rows with both).
       return "restored";
     }
     // 2) The one being polled is dead — say so instead of polling forever.

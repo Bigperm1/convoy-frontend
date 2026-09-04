@@ -38,7 +38,7 @@ import { logEvent } from "./crashBreadcrumb";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert, Animated } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
-import { routeTrimLeadM, routeTrimFadeM } from "./routeTrim";
+import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp } from "./routeTrim";
 import { buildRibbonPartition, buildRibbonFeatures, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
@@ -52,7 +52,7 @@ import { getCarState } from "./carplay/carStore";
 import { getLastLocation, setLastLocation, getSettings, canonicalClass } from "./settings";
 import { haversineMeters } from "./nav";
 import { useAppSkin } from "./appSkin";
-import { cornerBlend, newCornerBlendState } from "./cornerBlend";
+import { cornerBlend, cornerNose, newCornerBlendState, newFixClock, noteFix } from "./cornerBlend";
 import { wxCalloutUri, WX_CALLOUT_W, WX_CALLOUT_H, WX_CALLOUT_TEXT_X, WX_CALLOUT_TEXT_CY } from "./wxCalloutImages";
 import type { VisualTier } from "./tierTheme";
 
@@ -1156,7 +1156,7 @@ const SELF_MARKER_SLOT = undefined;
 /** Monotonic mount counter — see probeKeyRef inside SelfCarModel. */
 let _selfCarMountSeq = 0;
 
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, drawPosOutRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, drawPosOutRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -1197,6 +1197,11 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // OUT-param: the camera's ACTUAL low-passed zoom, written every frame. The route
   // trim needs it — see the routeTrim call site. Read-only for the caller.
   camZoomOutRef?: React.RefObject<number | null>;
+  // OUT-param: the camera's ACTUAL low-passed PITCH, written every frame alongside
+  // camZoomOutRef (2026-09-04). The route trim's pitch compensation needs the value
+  // the driver is really looking through, not the speed-derived target — same
+  // reasoning as camZoomOutRef, see the routeTrim call site.
+  camPitchOutRef?: React.RefObject<number | null>;
   readyRef?: React.RefObject<boolean>;
   scale?: any;
   // PER-TICK SIZE (2026-09-03): the marker's on-screen length in POINTS + the model's long
@@ -1358,6 +1363,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // screen distance to metres and must use this, not the speed-derived TARGET —
     // see the routeTrim call site for why that difference is visible as jitter.
     if (camZoomOutRef) camZoomOutRef.current = camZoom.current;
+    // Publish the ACTUAL pitch too (2026-09-04) — the trim's pitch compensation
+    // needs the same "what the driver is really looking through" value as zoom.
+    if (camPitchOutRef) camPitchOutRef.current = camPitch.current;
     // NOSE LEAD-IN (A): the camera heading trails the eased car heading by a first-order lag,
     // clamped so the nose never exceeds CAM_HEADING_MAX_LEAD_DEG off screen-up. Off → the
     // camera heading is the car heading, exactly as before. Snaps seed it directly.
@@ -2471,6 +2479,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // flicker when the travel heading hovers near the boundary.
   const snapHdgOkRef = useRef(true);
   const cornerStRef = useRef(newCornerBlendState());
+  // Derived arrival time of the raw pose — cornerNose's hold counts FIXES, and neither
+  // UserLocation nor CarPoint carries a fix timestamp (see cornerBlend.ts DERIVED FIX CLOCK).
+  const fixClockRef = useRef(newFixClock());
   // Accumulated MOVING milliseconds of heading disagreement, plus the tick clock it
   // advances on. Not a "since" timestamp: below the speed gate the clock PAUSES
   // rather than resetting, so stop-and-go traffic after a wrong turn cannot hand
@@ -2976,6 +2987,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // and gets the zoom the driver is really looking through rather than the noisy
   // speed-derived target. null until the first camera frame seeds it.
   const camZoomRef = useRef<number | null>(null);
+  // ACTUAL low-passed pitch, written every frame by the same pushCam (2026-09-04) —
+  // the route trim's pitch compensation reads it, see the routeTrim call site below.
+  const camPitchRef = useRef<number | null>(null);
   const drawPosRef = useRef<{ lat: number; lng: number } | null>(null);
   const trimLogAt = useRef(0);
   // Along-route ease state for the route trim: where the line start is coming FROM,
@@ -3330,7 +3344,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // driver is actually looking through. Falls back to the target before the first
   // frame seeds it (and on surfaces with no lockstep camera).
   const _trimZoom = camZoomRef.current ?? chaseZoomRaw;
-  const _trimLeadM = routeTrimLeadM(_trimZoom, selfCar?.lat ?? 0);
+  // Same fallback pattern as _trimZoom: ride the camera's ACTUAL pitch, falling back
+  // to the speed-derived TARGET before the first frame seeds camPitchRef (2026-09-04,
+  // see the routeTrim.ts REVISED note — CarPlay's ribbon touched the self car at a
+  // highway chase pitch).
+  const _trimPitch = camPitchRef.current ?? followPitchDeg;
+  const _trimLeadM = routeTrimLeadM(_trimZoom, selfCar?.lat ?? 0, _trimPitch);
   // ── AND WHICH POSITION (2026-07-30) ────────────────────────────────────────
   // Second, independent source of the same complaint, and the bigger one. The trim
   // was anchored to routeProj.frac — the NEWEST fix — while the MARKER eases toward
@@ -3415,7 +3434,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     : null;
   const ribbonCutM = _cutBaseM != null ? _cutBaseM + _trimLeadM : null;
   const ribbonCutQ = quantiseM(ribbonCutM, ribbonStepM(_trimZoom, selfCar?.lat ?? 0));
-  const ribbonFadeQ = Math.round(routeTrimFadeM(_trimZoom, selfCar?.lat ?? 0) / 2) * 2;
+  const ribbonFadeQ = Math.round(routeTrimFadeM(_trimZoom, selfCar?.lat ?? 0, _trimPitch) / 2) * 2;
   // What convoy-routes actually draws: the base routes (alternates / the reroute offer,
   // which the alt layers select by index/kind) plus the ribbon pieces for the selected
   // route. Every ribbon feature carries the selected index, so the preview alt filter
@@ -3524,7 +3543,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     if (_tn - trimLogAt.current >= 15000) {
       trimLogAt.current = _tn;
       try {
-        logEvent(`ribbon-trim surf=phone snap=${selfSnapped ? 1 : 0} z=${Number(_trimZoom).toFixed(2)} lead=${Math.round(_trimLeadM)} cutAhead=${Math.round(ribbonCutM - _cutBaseM)} lag=${_alongAnchor ? Math.round(_fracDrawn * ribbonPartition.totalM - _alongAnchor.m) : '-'} anchorOff=${_alongAnchor ? Math.round(_alongAnchor.distM) : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ}`);
+        logEvent(`ribbon-trim surf=phone snap=${selfSnapped ? 1 : 0} z=${Number(_trimZoom).toFixed(2)} lead=${Math.round(_trimLeadM)} cutAhead=${Math.round(ribbonCutM - _cutBaseM)} lag=${_alongAnchor ? Math.round(_fracDrawn * ribbonPartition.totalM - _alongAnchor.m) : '-'} anchorOff=${_alongAnchor ? Math.round(_alongAnchor.distM) : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} pitch=${Math.round(_trimPitch)} leadDp=${Math.round(routeTrimLeadDp(_trimPitch))}`);
       } catch {}
     }
   }
@@ -3549,8 +3568,25 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // heading, which spins at low speed. When snapped, point the car along the route's
   // bearing at that spot (stable + line-aligned); else fall back to the smoothed camera
   // heading; else raw. So the car sits ON the line pointing down it, never wandering.
+  // NOSE COURSE CLAMP (2026-09-04, Olaf: "still drifting around the corners… some but not all
+  // wide"). bearingSmooth starts a corner-exit segment half a turn behind and only reaches the
+  // segment bearing at the far end of it — measured at 05:52:56 surf=car: hdg 134→114 while
+  // gpsHdg AND rb were both 90, position only 2.4 m off. cornerNose caps the nose at 20° from
+  // the course; it is an exact identity whenever the nose is already within that (which was 8
+  // of the 9 corner bursts on that drive). Position is untouched. See src/cornerBlend.ts.
+  // ⚠ The course fed in is selfCar.heading, NOT _travelHdg: _travelHdg falls back to the camera
+  // heading, and the camera heading is driven BY the nose while snapped — clamping the nose
+  // against it would be circular. No course ⇒ no clamp, which is the correct failure.
+  // ⚠ `noteFix` runs on EVERY render, outside the clamp's own branch: it dates the course sample
+  // by the render at which the raw pose last CHANGED, and cornerNose's hold counts those dates,
+  // not frames. Feeding it a per-render clock would let one bad fix rotate the nose (the exact
+  // [high] finding of the 2026-09-04 Codex pass). UserLocation carries no fix time — see the
+  // DERIVED FIX CLOCK note in src/cornerBlend.ts.
+  const _selfFixAt = noteFix(fixClockRef.current, selfCar?.lat, selfCar?.lng, selfCar?.heading);
   const selfHeadingLocked = selfSnapped
-    ? (cornerK >= 0.5 && typeof selfCar?.heading === "number" ? selfCar.heading : noseBearing(routeProj))
+    ? (cornerK >= 0.5 && typeof selfCar?.heading === "number"
+        ? selfCar.heading
+        : cornerNose(cornerStRef.current, noseBearing(routeProj), selfCar?.heading ?? null, _selfFixAt, userSpeedMs ?? 0, true))
     : (camHeadingRef.current != null ? camHeadingRef.current : (selfCar?.heading ?? 0));
   // Drawn-vs-raw breadcrumb (8/20): one bounded row / 10 s while moving. Taps only.
   // `gps` is passed SEPARATELY from `raw` on purpose: when pinned, selfCar IS the parked
@@ -3566,7 +3602,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     user && typeof user.lat === 'number' && typeof user.lng === 'number'
       ? { lat: user.lat, lng: user.lng, accM: user.acc ?? null }
       : null,
-    { locked: selfHeadingLocked, raw: selfCar?.heading ?? null, route: selfSnapped ? routeProj!.bearing : null },
+    { locked: selfHeadingLocked, raw: selfCar?.heading ?? null, route: selfSnapped ? routeProj!.bearing : null, fix: cornerStRef.current.hdgFix, fixN: cornerStRef.current.offN },
   );
 
   // Memoized so the downstream GL FeatureCollection memo can actually cache (a bare
@@ -4116,6 +4152,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             getCam={getCam}
             onFirstCam={endWarm}
             camZoomOutRef={camZoomRef}
+            camPitchOutRef={camPitchRef}
             drawPosOutRef={drawPosRef}
             readyRef={lockReadyRef}
           />

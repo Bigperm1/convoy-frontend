@@ -60,7 +60,7 @@ function cornerTrace(
   spd: number,
   navActive: boolean,
   gps: { lat: number; lng: number; accM?: number | null } | null | undefined,
-  hdg: { locked: number | null; raw: number | null; route: number | null } | null | undefined,
+  hdg: { locked: number | null; raw: number | null; route: number | null; fix?: number | null; fixN?: number | null } | null | undefined,
 ): void {
   if (!navActive) return;
   const now = Date.now();
@@ -91,7 +91,7 @@ function cornerTrace(
     logEvent(
       `corner-trace surf=${surface} i=${TRACE_ROWS - t.left} mode=${mode} d=${d.toFixed(1)}m sep=${sep == null ? "?" : sep.toFixed(0) + "m"} spd=${(spd * 3.6).toFixed(0)} ` +
         `raw=${raw.lat.toFixed(6)},${raw.lng.toFixed(6)} drawn=${drawn.lat.toFixed(6)},${drawn.lng.toFixed(6)}` +
-        (hdg ? ` hdg=${fmtDeg(hdg.locked)} gpsHdg=${fmtDeg(hdg.raw)} rb=${hdg.route == null ? "-" : fmtDeg(hdg.route)}` : ""),
+        (hdg ? ` hdg=${fmtDeg(hdg.locked)} gpsHdg=${fmtDeg(hdg.raw)} rb=${hdg.route == null ? "-" : fmtDeg(hdg.route)} fix=${fmtFix(hdg.fix)} nfx=${typeof hdg.fixN === "number" ? hdg.fixN : "?"}` : ""),
     );
   }
 }
@@ -118,8 +118,18 @@ export function reportDraw(
   /** HEADING RECEIPT (2026-09-03, Jeff: "the nose of the car does not follow the corner").
    *  Heading had no breadcrumb anywhere. `locked` = what the model is pointed at (route
    *  segment bearing while snapped, else the smoothed/raw course), `raw` = the GPS course,
-   *  `route` = the projected segment's bearing (null when not snapped). Degrees, true. */
-  hdg?: { locked: number | null; raw: number | null; route: number | null } | null,
+   *  `route` = the projected segment's bearing (null when not snapped). Degrees, true.
+   *  `fix` = the NOSE COURSE CLAMP correction currently applied to `locked`, signed degrees
+   *  (2026-09-04, src/cornerBlend.ts cornerNose). `fix=0` means the clamp is idle — the nose is
+   *  within 20° of the course; a non-zero value is how far it was pulled back toward the course.
+   *  The field is printed whenever `hdg` is supplied, so a MISSING `fix=` means an old bundle,
+   *  not an idle clamp.
+   *  `fixN` → `nfx=` = how many DISTINCT over-cone GPS course fixes are currently backing that
+   *  correction (2026-09-04). It exists because the first version's hold counted RENDERS, so one
+   *  bad fix held across 1.5 s could move the nose with no second observation behind it; the gate
+   *  now needs ≥2 fixes spanning ≥1 s. `nfx=` is what makes that auditable from a drive instead of
+   *  from a code read: `fix=` non-zero with `nfx=` 0 or 1 would mean the gate is broken. */
+  hdg?: { locked: number | null; raw: number | null; route: number | null; fix?: number | null; fixN?: number | null } | null,
 ): void {
   try {
     if (!raw || !drawn) return;
@@ -167,7 +177,7 @@ export function reportDraw(
         `gps=${gps && !hideGps ? gps.lat.toFixed(6) + "," + gps.lng.toFixed(6) : hideGps ? "withheld" : "?"} ` +
         `raw=${raw.lat.toFixed(6)},${raw.lng.toFixed(6)} drawn=${drawn.lat.toFixed(6)},${drawn.lng.toFixed(6)} ` +
         `latch=${p.latch ? 1 : 0} parked=${p.parked ? 1 : 0} hu=${p.hu ? 1 : 0} spotAge=${p.spotAgeS == null ? "?" : p.spotAgeS + "s"}` +
-        (hdg ? ` hdg=${fmtDeg(hdg.locked)} gpsHdg=${fmtDeg(hdg.raw)} rb=${hdg.route == null ? "-" : fmtDeg(hdg.route)}` : ""),
+        (hdg ? ` hdg=${fmtDeg(hdg.locked)} gpsHdg=${fmtDeg(hdg.raw)} rb=${hdg.route == null ? "-" : fmtDeg(hdg.route)} fix=${fmtFix(hdg.fix)} nfx=${typeof hdg.fixN === "number" ? hdg.fixN : "?"}` : ""),
     );
   } catch {
     // never let the instrument disturb the draw path
@@ -176,4 +186,9 @@ export function reportDraw(
 
 function fmtDeg(v: number | null | undefined): string {
   return typeof v === "number" && isFinite(v) ? String(Math.round(((v % 360) + 360) % 360)) : "?";
+}
+
+/** Signed, NOT wrapped to 0..360 — the sign is the whole point (which way the nose was pulled). */
+function fmtFix(v: number | null | undefined): string {
+  return typeof v === "number" && isFinite(v) ? v.toFixed(1) : "?";
 }

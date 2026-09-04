@@ -475,7 +475,9 @@ export default function MapScreen() {
   const accentTint12 = useAccentAlpha(0.12);
   const navInset = Platform.OS === "android" ? insets.bottom : 0;
   // `acc` = CoreLocation horizontal accuracy in metres, plumbed 2026-08-29 for telemetry
-  // ONLY (draw-cmp `acc=`). Nothing gates on it yet and that is deliberate: we have never
+  // ONLY (draw-cmp `acc=`), plus ONE fallback: src/offRouteGate.ts uses it as a minimum-step
+  // floor when a fix carries NO speed — a branch no phone fix reaches (speed is always a
+  // number here), so nothing on this feed gates on it. That restraint is deliberate: we have never
   // measured what a tester's phone actually reports, so any threshold today would be
   // invented rather than derived. Set by the main foreground watcher; the one-shot seeds
   // leave it undefined.

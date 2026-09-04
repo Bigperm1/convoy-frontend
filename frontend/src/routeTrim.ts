@@ -42,6 +42,24 @@
 // so the RATIO the driver sees (gap vs car length) is unchanged. Adding a
 // 1/cos(pitch) factor would have doubled the gap at highway pitch for no visual
 // gain.
+// ── REVISED 2026-09-04 (Olaf, CarPlay, 90 km/h, AI route: "the route ribbon
+// visibly covered the self car"). Telemetry at the moment of the kiss: `ribbon-trim
+// surf=car z=15.76 lead=55 fade=46` alongside `cam-probe surf=car z=15.7 p=55-59
+// spd=80-91` — a highway CHASE PITCH near the 60° cap. The ground-plane RATIO
+// argument above still holds for a 3D object's FOOTPRINT, but metersPerDp is a
+// zoom-only conversion (Mapbox's orthographic tile→metre scale) with NO
+// perspective term — it does not know the camera is pitched, so it cannot itself
+// be the thing that keeps a SCREEN gap constant as pitch changes. HYPOTHESIS, not
+// yet field-verified: the on-screen projection of a fixed ground-metre gap along
+// the road shrinks with pitch, so the same 60 ground-dp lead reads as materially
+// fewer on-screen points at p=57° than at p=0° — thin enough to sit under the
+// ~45pt CarPlay car plus its ~20dp casing glow. The phone's own 20 m floor hid
+// this at its z18.5 cruise pitch (still ~136dp of screen clearance even
+// compressed), which is why only CarPlay hit it. `pitchDeg` below is OPTIONAL and
+// defaults to 0, so every caller that does not pass it gets the exact old number —
+// this is an ADDITIVE compensation on top of the 2026-07-29 reasoning, not a
+// reversal of it. Settling check: a drive video at a similar pitch after this
+// ships, read alongside the receipt's new `pitch=`/`leadDp=` fields.
 //
 // NO SPEED TERM either. The old one existed to cover the drawn car interpolating
 // ahead of the raw GPS fix the projection is computed from — worst case ~30 m at
@@ -91,11 +109,30 @@ export const TRIM_LEAD_DP = 60;
 const TRIM_MIN_M = 20;
 const TRIM_MAX_M = 500;
 
+// Pitch compensation shared by lead and fade (2026-09-04, see the REVISED note above):
+// lead_dp = BASE_DP / max(0.45, cos(pitchRad)). At pitch 0 this is exactly BASE_DP —
+// every existing caller that omits pitchDeg sees NO behaviour change. The 0.45 floor
+// is a sanity rail, same spirit as TRIM_MIN_M/MAX_M: cos(60°) = 0.5 and Mapbox Standard
+// hard-caps camera pitch at 60°, so in normal driving the floor never binds — it only
+// stops a pathological >63° reading from blowing the lead up unboundedly.
+function pitchCompensatedDp(baseDp: number, pitchDeg: number): number {
+  const p = Number.isFinite(pitchDeg) ? pitchDeg : 0;
+  const pRad = (p * Math.PI) / 180;
+  return baseDp / Math.max(0.45, Math.cos(pRad));
+}
+
+// The lead in SCREEN POINTS after pitch compensation — exported so a caller can log the
+// exact value routeTrimLeadM used (see the `leadDp=` field in the ribbon-trim receipt).
+export function routeTrimLeadDp(pitchDeg = 0): number {
+  return pitchCompensatedDp(TRIM_LEAD_DP, pitchDeg);
+}
+
 // Metres ahead of the car's projected point at which the route line should start.
 // Pass the camera zoom the surface is actually using (including any pinch bias) and
-// the car's latitude.
-export function routeTrimLeadM(zoom: number, lat: number): number {
-  const m = TRIM_LEAD_DP * metersPerDp(zoom, lat);
+// the car's latitude. `pitchDeg` (optional, default 0) is the camera's ACTUAL pitch —
+// see routeTrimLeadDp / the REVISED note above.
+export function routeTrimLeadM(zoom: number, lat: number, pitchDeg = 0): number {
+  const m = routeTrimLeadDp(pitchDeg) * metersPerDp(zoom, lat);
   if (!Number.isFinite(m)) return 30;
   return Math.max(TRIM_MIN_M, Math.min(TRIM_MAX_M, m));
 }
@@ -105,8 +142,12 @@ export function routeTrimLeadM(zoom: number, lat: number): number {
 // vanishes when zoomed out.
 const TRIM_FADE_DP = 51;
 
-export function routeTrimFadeM(zoom: number, lat: number): number {
-  const m = TRIM_FADE_DP * metersPerDp(zoom, lat);
+// Same pitch compensation as the lead, and for the identical reason: this is the same
+// metersPerDp zoom-only conversion applied to a different screen-dp constant, so it is
+// wrong on a pitched camera in exactly the same way. `pitchDeg` optional, default 0 —
+// unchanged for callers that don't pass it.
+export function routeTrimFadeM(zoom: number, lat: number, pitchDeg = 0): number {
+  const m = pitchCompensatedDp(TRIM_FADE_DP, pitchDeg) * metersPerDp(zoom, lat);
   if (!Number.isFinite(m)) return 20;
   return Math.max(10, Math.min(340, m));
 }

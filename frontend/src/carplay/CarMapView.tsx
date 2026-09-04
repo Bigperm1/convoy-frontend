@@ -20,7 +20,7 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { reportDraw } from "../drawTelemetry";
-import { Platform, StyleSheet, Image as RNImage } from 'react-native';
+import { Platform, StyleSheet, Image as RNImage, AppState } from 'react-native';
 import Mapbox, {
   MapView,
   Camera,
@@ -34,7 +34,7 @@ import Mapbox, {
 import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
 import { canonicalClass } from '../settings';
 import { useMapView2D } from '../mapViewMode';
-import { cornerBlend, newCornerBlendState } from '../cornerBlend';
+import { cornerBlend, cornerNose, newCornerBlendState, newFixClock, noteFix } from '../cornerBlend';
 import { useAppSkin } from '../appSkin';
 import { wxCalloutUri, WX_CALLOUT_KINDS, WX_CALLOUT_TEXT_X, WX_CALLOUT_TEXT_CY, WX_CALLOUT_W, WX_CALLOUT_H } from '../wxCalloutImages';
 // End-pin weather images on the car surface — iOS CarPlay only until Android Auto is verified
@@ -72,7 +72,7 @@ import {
   ROAD_SNAP_CROSS_DEG, noseBearing, CAR_LEN_UNITS, ARROW_LEN_UNITS, PeerScanModels
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
-import { routeTrimLeadM, routeTrimFadeM } from '../routeTrim';
+import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp } from '../routeTrim';
 import { buildRibbonPartition, buildRibbonFeatures, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from '../routeRibbon';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
@@ -940,6 +940,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // Hysteresis latch for the route-snap heading gate (see carSnapped below).
   const carSnapHdgOkRef = useRef(true);
   const carCornerStRef = useRef(newCornerBlendState());
+  // Derived arrival time of the raw pose — the nose clamp's hold counts FIXES, and carStore's
+  // real `fixTs` never reaches this surface (see cornerBlend.ts DERIVED FIX CLOCK).
+  const carFixClockRef = useRef(newFixClock());
 
   // Seed the FIRST rendered frame at the driver's location so the GL map never
   // paints the world/default view before the lockstep snap lands — that's the
@@ -1085,6 +1088,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // The camera's ACTUAL low-passed zoom, written every frame by SelfCarModel's
   // pushCam. A ref → no renders. The route trim reads it; see trimZoom.
   const camZoomRef = useRef<number | null>(null);
+  // Same, for pitch (2026-09-04) — the trim's pitch compensation needs the value
+  // the driver is really looking through, not the speed-derived followPitch target.
+  // See the routeTrim.ts REVISED note: this is what let the ribbon touch the self
+  // car at a highway chase pitch.
+  const camPitchRef = useRef<number | null>(null);
   const carDrawPosRef = useRef<{ lat: number; lng: number } | null>(null);
   const carTrimLogAt = useRef(0);
   // Along-route ease state for the route trim (see routeTrimEndFrac below).
@@ -1480,6 +1488,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             // "hard-starts on the car / overlaps weirdly" report. The camera's target
             // zoom IS known right here — publish it to the ref the trim reads.
             camZoomRef.current = zoom;
+            // Pitch goes top-down for the overview too (pitch: 0 below) — publish it
+            // the same way, else camPitchRef holds a stale pre-hold chase pitch for
+            // the whole 15 s hold and the trim's pitch compensation inflates the lead
+            // against a camera that is actually looking straight down (2026-09-04).
+            camPitchRef.current = 0;
             cameraRef.current?.setCamera({
               centerCoordinate: [cLng, cLat], zoomLevel: zoom,
               pitch: 0, heading: 0, animationDuration: 600, animationMode: 'easeTo',
@@ -1491,6 +1504,137 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       }
     });
   }, []);
+
+  // ── APPSTATE FOLLOW RE-ASSERT (2026-09-04, Say Phin/SPL_GRC, real head unit) ─
+  // "if I turn the phone screen off, the avatar will move off the AA screen.
+  // Zooming out doesn't bring it back into view." Two gaps closed here:
+  //   (1) NO RECEIPT existed for the phone's AppState while a car session was
+  //       live, and none said whether the lockstep camera (this file) was still
+  //       following. `aa-appstate` below is that receipt, on every change.
+  //   (2) NOTHING re-asserted follow when the phone came back. AppState here is
+  //       the PHONE's Activity lifecycle, not the head unit's own screen —
+  //       CarPlaySession/CarAppService renders this surface onto a SEPARATE
+  //       physical display, so backgrounding the phone does not end the car
+  //       session. But this camera is driven by SelfCarModel's rAF (+ the
+  //       carFramePump/bgTick fallback above), which rides the PHONE's display
+  //       link, and a manual zoom bias (userZoomRef) or a crew-overview hold
+  //       (camHoldUntilRef) computed before a screen-off gap is exactly the kind
+  //       of stale state that would make "zooming out" look dead afterward — a
+  //       held bias/hold is added on TOP of whatever the driver does next.
+  //   ⚠ HYPOTHESIS, not reproduced this session (no real head unit or AA DHU
+  //   camera test available): the EXACT mechanism that stops the camera
+  //   tracking while the phone screen is off. What IS verified by reading this
+  //   file and ConvoyMapbox.tsx's SelfCarModel: (a) zoom/zoomStep already clear
+  //   camHoldUntilRef and never disable the lockstep — a pinch/tap-zoom cannot
+  //   itself permanently drop follow; (b) AA has no pan gesture today (no 'pan'
+  //   case above, no button emits one), so there is nothing to time out there;
+  //   (c) SelfCarModel has its own AppState listener that hard-snaps the DRAWN
+  //   pose on the next fix after returning from background, but it cannot see
+  //   or clear THIS file's zoom bias / crew-hold refs. This effect covers that
+  //   gap defensively regardless of which mechanism turns out to be the cause.
+  const aaAppStateRef = useRef(AppState.currentState);
+  const aaAwayRef = useRef(false);
+  const aaRecenterLogAtRef = useRef(0);
+  // ── CODEX RECEIPT (2026-09-04) — stale closure, MEDIUM ──────────────────────
+  // "The listener is installed by an empty-dependency effect and closes over
+  // that render's reassertAaFollow, including hasFix/lng/lat/followZoom/
+  // followPitch. After a drive and a screen-lock interval, recovery can
+  // therefore skip recentering if mount-time hasFix was false, or snap the
+  // camera back to the MOUNT-TIME coordinates. applyZoomNow() only updates
+  // zoom, so it does not repair the centre." VERIFIED by reading this file:
+  // hasFix/lat/lng/followZoom/followPitch (:594, :617-618, :666, :699) are
+  // plain per-render consts, not refs — exactly the trap already root-caused
+  // for getCam's frozen closure above (:1119, camInputsRef :1131-1132: "Fix =
+  // keep the FUNCTION IDENTITY stable … and read every input through a ref
+  // that is refreshed on each render"). Same fix, applied here: the
+  // subscription's identity stays stable (empty deps is fine, and correct —
+  // AppState should only be subscribed once), but the handler now reads the
+  // CURRENT render's values through aaLiveRef instead of its own mount-time
+  // closure. A no-fix reassert no longer does nothing either: it arms
+  // aaPendingRecenterRef, consumed by the `[painted, hasFix]` effect below —
+  // the same one-shot-on-next-fix idiom as COLD-START SNAP (:1248).
+  // FIELD VERIFICATION (not yet run — no real head unit / AA DHU camera test
+  // this session): `aa-recenter why=appstate` (immediate) or
+  // `why=appstate-pending-fix` (armed, fired on the next fix) in the log,
+  // followed by a `car-viewport`/camera receipt showing the CURRENT fix's
+  // coordinates — not the coordinates from when the car session mounted.
+  const aaPendingRecenterRef = useRef(false);
+  const aaLiveRef = useRef({ hasFix, lat, lng, followZoom, followPitch });
+  aaLiveRef.current = { hasFix, lat, lng, followZoom, followPitch };
+  // Never a bare setTimeout (iOS suspends JS timers while the phone is locked —
+  // CLAUDE.md/CARPLAY.md — and this must be safe on Android too): this runs
+  // synchronously off the AppState event itself, and the actual camera hold
+  // releases it already relies on (zoomHoldUntilRef, camHoldUntilRef) are
+  // per-frame TIMESTAMP comparisons in getCam(), never timers.
+  const reassertAaFollow = (why: string) => {
+    userZoomRef.current = 0;
+    zoomBaseRef.current = 0;
+    zoomHoldUntilRef.current = 0;
+    camHoldUntilRef.current = 0; // release any crew-overview hold too
+    const live = aaLiveRef.current; // never the render-#1 closure — see the Codex receipt above
+    if (paintedRef.current && live.hasFix && cameraRef.current) {
+      try {
+        cameraRef.current.setCamera({
+          centerCoordinate: [live.lng, live.lat],
+          heading: camHdgRef.current,
+          zoomLevel: live.followZoom,
+          pitch: live.followPitch,
+          padding: getCam().padding,
+          animationDuration: 0,
+          animationMode: 'none',
+        });
+      } catch {}
+    } else if (!live.hasFix) {
+      // No fix yet (cold GPS after a long screen-off gap) — don't snap the centre
+      // to the (0,0) hasFix-false fallback. Arm the one-shot recentre and let the
+      // `[painted, hasFix]` effect below fire it the instant a real fix lands.
+      aaPendingRecenterRef.current = true;
+    }
+    applyZoomNow(); // push the released zoom immediately — a parked car arms no ease
+    const now = Date.now();
+    if (now - aaRecenterLogAtRef.current >= 5000) {
+      aaRecenterLogAtRef.current = now;
+      try { logEvent(`aa-recenter why=${why} fix=${live.hasFix ? 1 : 0}`); } catch {}
+    }
+  };
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      aaAppStateRef.current = st;
+      // aa=1 unconditionally: this effect lives on CarMapView, which mounts only
+      // while a car surface (CarPlay or Android Auto) is actually live.
+      try { logEvent(`aa-appstate state=${st} aa=1 foll=${lockReadyRef.current ? 1 : 0}`); } catch {}
+      if (st !== 'active') { aaAwayRef.current = true; return; }
+      if (!aaAwayRef.current) return; // active -> active: nothing to recover from
+      aaAwayRef.current = false;
+      reassertAaFollow('appstate');
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // One-shot recentre for the "armed while no fix existed" branch above. Same
+  // shape as COLD-START SNAP (:1248, `[painted, hasFix]`) on purpose: a fresh
+  // effect closure per hasFix/painted change reads THAT render's live lng/lat/
+  // followZoom/followPitch directly, so it can never carry a stale coordinate —
+  // no ref plumbing needed here because, unlike the AppState listener, this
+  // effect is allowed to resubscribe.
+  useEffect(() => {
+    if (!aaPendingRecenterRef.current || !painted || !hasFix || !cameraRef.current) return;
+    aaPendingRecenterRef.current = false;
+    try {
+      cameraRef.current.setCamera({
+        centerCoordinate: [lng, lat],
+        heading: camHdgRef.current,
+        zoomLevel: followZoom,
+        pitch: followPitch,
+        padding: getCam().padding,
+        animationDuration: 0,
+        animationMode: 'none',
+      });
+    } catch {}
+    applyZoomNow();
+    try { logEvent('aa-recenter why=appstate-pending-fix'); } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [painted, hasFix]);
 
   // Active route → GeoJSON. Only drawn when the polyline decodes to a real line.
   //
@@ -1556,6 +1700,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const trimZoom = camZoomRef.current != null
     ? Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, camZoomRef.current))
     : Math.max(CAR_ZOOM_MIN, Math.min(CAR_ZOOM_MAX, followZoom + userZoomRef.current));
+  // Same fallback pattern as trimZoom: ride the camera's ACTUAL pitch, falling back to
+  // the speed-derived followPitch target before the first frame seeds camPitchRef
+  // (2026-09-04 — see the routeTrim.ts REVISED note; this is the field report's surface).
+  const trimPitch = camPitchRef.current ?? followPitch;
   // × mapScale (2026-08-18, Say Phin's head-unit photo): routeTrimLeadM computes the
   // lead in LOGICAL screen points, but on AA the whole map is laid out at
   // surfaceW/mapScale and transformed down — so the ~76-logical-dp gap that reads
@@ -1563,7 +1711,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // scaled) car's length on the head unit: the ribbon visibly ended a car-length
   // behind the marker. Scaling the lead by the same factor keeps the on-screen gap
   // the same fraction of the car everywhere. mapScale is 1 on CarPlay — no change.
-  const trimLeadM = routeTrimLeadM(trimZoom, lat) * mapScale;
+  const trimLeadM = routeTrimLeadM(trimZoom, lat, trimPitch) * mapScale;
   // TRIM RIDES THE MARKER'S EASE — see the matching block in ConvoyMapbox.tsx for the
   // full reasoning. The trim was anchored to the NEWEST fix while the marker eases
   // toward it, so the gap sawtoothed by one whole step per fix (~15dp of 76.6 at
@@ -1604,7 +1752,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     : null;
   const ribbonCutM = _carCutBaseM != null ? _carCutBaseM + trimLeadM : null;
   const ribbonCutQ = quantiseM(ribbonCutM, ribbonStepM(trimZoom, lat, mapScale));
-  const ribbonFadeQ = Math.round((routeTrimFadeM(trimZoom, lat) * mapScale) / 2) * 2;
+  const ribbonFadeQ = Math.round((routeTrimFadeM(trimZoom, lat, trimPitch) * mapScale) / 2) * 2;
   // Snap the car to the line + lock its heading to the route bearing when on-route (≤60 m),
   // matching the phone — stops the low-speed position drift + heading spin. Steer the
   // camera by the SAME bearing (getCam reads camHdgRef live) so the map doesn't rotate
@@ -1627,7 +1775,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     if (_tn - carTrimLogAt.current >= 15000) {
       carTrimLogAt.current = _tn;
       try {
-        logEvent(`ribbon-trim surf=car snap=${carSnapped ? 1 : 0} z=${trimZoom.toFixed(2)} lead=${Math.round(trimLeadM)} cutAhead=${Math.round(ribbonCutM - _carCutBaseM)} lag=${_carAlongAnchor ? Math.round(fracDrawn * ribbonPartition.totalM - _carAlongAnchor.m) : '-'} anchorOff=${_carAlongAnchor ? Math.round(_carAlongAnchor.distM) : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} scale=${mapScale.toFixed(2)}`);
+        logEvent(`ribbon-trim surf=car snap=${carSnapped ? 1 : 0} z=${trimZoom.toFixed(2)} lead=${Math.round(trimLeadM)} cutAhead=${Math.round(ribbonCutM - _carCutBaseM)} lag=${_carAlongAnchor ? Math.round(fracDrawn * ribbonPartition.totalM - _carAlongAnchor.m) : '-'} anchorOff=${_carAlongAnchor ? Math.round(_carAlongAnchor.distM) : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} scale=${mapScale.toFixed(2)} pitch=${Math.round(trimPitch)} leadDp=${Math.round(routeTrimLeadDp(trimPitch))}`);
       } catch {}
     }
   }
@@ -1649,6 +1797,19 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const carCornerK = cornerBlend(carCornerStRef.current, _carTravelHdg, routeProj?.distM ?? null, s.speedMs || 0, carSnapped);
   const drawLat = carSnapped ? (carCornerK > 0 ? routeProj!.lat + (lat - routeProj!.lat) * carCornerK : routeProj!.lat) : (carRoadDraw ? carRoadDraw.lat : lat);
   const drawLng = carSnapped ? (carCornerK > 0 ? routeProj!.lng + (lng - routeProj!.lng) * carCornerK : routeProj!.lng) : (carRoadDraw ? carRoadDraw.lng : lng);
+  // NOSE COURSE CLAMP — identical to the phone (src/cornerBlend.ts cornerNose). The 2026-09-04
+  // defect rows were surf=car: 05:52:56 hdg 134→114 with gpsHdg AND rb both 90, d only 2.4 m.
+  // Hoisted ABOVE reportDraw so the clamp ticks exactly once per render and the receipt reports
+  // the heading actually drawn. Was: `carSnapped && carCornerK < 0.5 ? noseBearing(routeProj) : hdg`.
+  // ⚠ noteFix runs on EVERY render, outside the clamp's branch — it dates the course sample by
+  // the render at which the raw pose last CHANGED, and the clamp's hold counts those dates, not
+  // frames (2026-09-04 Codex [high]: one bad fix held across 1.5 s of the 12 Hz trim ticker used
+  // to satisfy a render-time hold). carStore takes a real `fixTs` but never publishes it into the
+  // state read here (carStore.ts:324/:346), so it is derived. See cornerBlend.ts DERIVED FIX CLOCK.
+  const _carFixAt = noteFix(carFixClockRef.current, hasFix ? lat : null, hasFix ? lng : null, _carTravelHdg);
+  const drawHdg = carSnapped && carCornerK < 0.5
+    ? cornerNose(carCornerStRef.current, noseBearing(routeProj), _carTravelHdg, _carFixAt, s.speedMs || 0, true)
+    : hdg;
   // Drawn-vs-raw breadcrumb (8/20) — CarPlay/AA surface. Taps only.
   reportDraw(
     'car',
@@ -1661,9 +1822,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // duplicates raw — but it keeps the row shape identical across both surfaces, which
     // is what lets one query compare them. Accuracy isn't carried in carStore yet.
     hasFix ? { lat, lng, accM: null } : null,
-    { locked: carSnapped && carCornerK < 0.5 ? noseBearing(routeProj) : hdg, raw: typeof s.heading === 'number' ? s.heading : null, route: carSnapped ? routeProj!.bearing : null },
+    { locked: drawHdg, raw: typeof s.heading === 'number' ? s.heading : null, route: carSnapped ? routeProj!.bearing : null, fix: carCornerStRef.current.hdgFix, fixN: carCornerStRef.current.offN },
   );
-  const drawHdg = carSnapped && carCornerK < 0.5 ? noseBearing(routeProj) : hdg;
   // Live copy for the compass's IMMEDIATE camera push (the gesture closure is frozen).
   drawHdgRef.current = drawHdg;
   if (carSnapped) camHdgRef.current = routeProj!.bearing;
@@ -1921,6 +2081,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           readyRef={lockReadyRef}
           camHeadingOverrideRef={camHdgOverrideRef}
           camZoomOutRef={camZoomRef}
+          camPitchOutRef={camPitchRef}
           drawPosOutRef={carDrawPosRef}
           // PHONE PARITY (2026-07-30). Without this the dead-band expression in
           // SelfCarModel reads `(speedMs ?? 99) < SELF_CREEP_MS` = false FOREVER, so the

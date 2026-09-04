@@ -80,3 +80,6 @@ memory/test_credentials.md
 
 # Mobile development
 android-sdk/
+# never commit local token notes (2026-09-04, Codex flagged the plaintext file)
+mapbox tokens.txt
+*tokens*.txt

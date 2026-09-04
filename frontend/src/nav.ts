@@ -20,6 +20,7 @@ import { api } from "./api";
 import { fetchMapboxRoutes, fetchMapboxRouteVia, refreshMapboxRoute, arrivesOnFarSide, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
 import { anchorStepIndex } from "./navAnchor";
+import { newOffRouteGateState, resetOffRouteGate, offRouteTick, type OffRouteGateState } from "./offRouteGate";
 import { getSettings, getNovaVoice, getAudioVol } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
@@ -490,58 +491,21 @@ export const ARRIVE_SPEAK_MAX_LATE_MS = 90000;
 const ARRIVE_NEAR_CROW_M = 80;
 const ARRIVE_NEAR_ROUTE_M = 400;
 const ARRIVE_NEAR_MS = 90000;
-const REROUTE_DISTANCE_M = 80; // PERPENDICULAR distance off the route line before off-route
-// ── DIVERGENCE TREND (2026-07-31) ──────────────────────────────────────────
-// Jeff: "I took a different route and it took a while for the route to change, at
-// least 1 min."
-//
-// The streak logic below is already fast ONCE you are 80 m off the line. The 80 m
-// itself is the delay: turn onto a street that parallels the route and the gap opens
-// slowly, so on a city grid you can drive a long way before any threshold trips. The
-// missed-maneuver fast path does not help either — it needs you to have approached
-// within 80 m of a maneuver first, and an early deliberate departure never does.
-//
-// A trend is a much better discriminator than a distance. On-route error OSCILLATES:
-// GPS noise, lane changes and the simplified overview polyline all wander up and down
-// around zero. A real departure MONOTONICALLY grows. So: already clearly off the line,
-// growing on essentially every tick, and enough total growth that it cannot be noise.
-// That fires while the gap is still ~45 m instead of waiting for 80 m.
-//
-// Tuned to require BOTH sustained growth and a floor well above polyline-simplification
-// error (which is a fixed offset on a curve — it does not keep growing).
-// TUNED BY SIMULATION over ten synthetic traces (scratchpad/offroute_sim2.js), three
-// that must reroute and seven that must not. A 5-tick window was tried FIRST and was
-// wrong in both directions: it fired on a 4-tick urban-canyon spike (a spurious reroute
-// mid-drive — worse than the bug) and still missed the slow parallel-street case it was
-// written for. The fix is a LONGER window, because that is what actually separates the
-// two: a multipath spike rises fast and falls back within a few ticks, so it can never
-// stay monotonic for ten; a real departure can. Result at these values, 10/10:
-//   parallel street  23 s -> 10 s      urban-canyon spike   no reroute
-//   gentle fork      38 s -> 19 s      two spikes in a row  no reroute
-//   hard wrong turn   8 s (unchanged)  sweeping bend        no reroute
-//   GPS noise / lane change / overtaking / service road beside the highway: none
-const DIVERGE_MIN_M = 45;        // must already be clearly off the line
-const DIVERGE_GROWTH_M = 20;     // total growth across the window
-const DIVERGE_SLACK_M = 3;       // per-sample dip allowed, so one noisy fix doesn't reset
-// ⚠ WINDOW IS WALL-CLOCK, NOT A TICK COUNT (corrected 2026-07-31, same day).
-// It was DIVERGE_TICKS = 10 and the comment claimed "~10 s". That was wrong, and the
-// error is large in the exact case this detector exists for. Fixes are gated by
-// distanceInterval, not time — 2 m plugged, 8 m unplugged, 5 m background — so ten
-// samples take:
-//        5 km/h   10 km/h   20 km/h
-//   eco    58 s     29 s      14 s
-// Pulling out of a car park unplugged is the 5-10 km/h column, so the "reroute in ~10 s"
-// I measured was really up to a minute. A wall-clock window is honest at any cadence.
-// The sample floor keeps the anti-spike property: a multipath excursion rises and falls
-// within a few seconds, so it cannot stay monotonic across a full window.
-const DIVERGE_WINDOW_MS = 8000;
-const DIVERGE_MIN_SAMPLES = 4;
+// ⚠ REROUTE_DISTANCE_M (80 m), the DIVERGENCE-TREND constants and the whole off-route
+// TRIP decision moved to `src/offRouteGate.ts` on 2026-09-04, unchanged, so the parking-lot
+// reroute storm can be replayed as a numeric gate (tools/sim-qc/offroute_storm_test.mts).
+// Their measurement history moved with them. What stays HERE is the geometry that feeds
+// the decision: nearestRouteInfo, the heading gate below, and the missed-maneuver detector.
 // Heading gate for off-route: a big perpendicular distance only counts as a real
 // departure if the car's heading ALSO diverges from the route's local direction
 // by more than this. Driving straight along a highway while GPS multipath off an
 // overpass/bridge throws the fix sideways keeps the heading aligned — so those
 // spikes no longer trigger a phantom reroute.
 const OFFROUTE_HEADING_TOL_DEG = 55;
+// A held off-route trip can repeat on every GPS tick, so its receipt is rate-limited.
+// 10 s is one row per lot cycle in the 2026-09-04 storm (trips were 8-12 s apart) —
+// enough to see the pattern, never enough to flood crash_reports.
+const OFFROUTE_HELD_LOG_MS = 10000;
 
 // Decode a Google encoded polyline → [{lat,lng}]. Used to measure how far off the
 // ROUTE LINE the driver actually is (perpendicular) — the correct off-route signal.
@@ -822,7 +786,12 @@ export function useTurnByTurn(
   // voice lead distance with speed. Optional so other callers stay compatible.
   // `heading` (deg, course over ground) rides along too — used to gate off-route
   // detection so GPS multipath off an overpass can't fake a departure.
-  user: (LatLng & { speed?: number; heading?: number }) | null,
+  // `acc` (horizontal accuracy, m) rides along as well — map.tsx already carries it on
+  // the same object (app/(app)/map.tsx:482, set at :3353; the background takeover at
+  // :1977 publishes none, so it is legitimately undefined there). offRouteGate uses it as
+  // the minimum-step floor when a fix has NO speed, so stationary scatter cannot be
+  // mistaken for travel; nothing else reads it here.
+  user: (LatLng & { speed?: number; heading?: number; acc?: number }) | null,
   active: boolean,
   options?: { mute?: boolean; destLabel?: string | null; onArrive?: () => void; onOffRoute?: () => void }
 ) {
@@ -837,10 +806,11 @@ export function useTurnByTurn(
   // react, because the mainline runs parallel to the ramp and the perpendicular
   // off-route distance grows too slowly to trip the streak).
   const missRef = useRef<{ step: number; min: number } | null>(null);
-  const lastOffRouteAtRef = useRef<number>(0);
-  const offRouteStreakRef = useRef<number>(0);
-  // Recent perpendicular distances, for the divergence trend (see DIVERGE_*).
-  const divergeRef = useRef<{ t: number; d: number }[]>([]);
+  // Streak, divergence trend, the 8 s rate limit AND the 2026-09-04 post-swap /
+  // creeping gates — all of it in one pure state object (src/offRouteGate.ts).
+  const offRouteGateRef = useRef<OffRouteGateState>(newOffRouteGateState(Date.now()));
+  // Rate limit for the `off-route held` receipt (the gates can hold on every tick).
+  const lastHeldLogAtRef = useRef<number>(0);
   const polyCacheRef = useRef<{ key: string; pts: LatLng[] }>({ key: "", pts: [] });
   const lastUserRef = useRef(user);
   lastUserRef.current = user;
@@ -970,6 +940,20 @@ export function useTurnByTurn(
       return;
     }
     _tbtEngineActive = true; // phone engine owns spoken guidance while active
+    // ── EVERY SESSION STARTS ON A CLEAN OFF-ROUTE GATE (2026-09-04, review #2) ──
+    // THE RULE: reset on every inactive→active transition, unconditionally.
+    // The route-swap effect below cannot cover this. While inactive it records the new
+    // polyline key and returns (`if (!active || !key) { routeKeyRef.current = key; ... }`),
+    // so a route that changed BETWEEN sessions arrives with the key already matching and
+    // the swap branch — the only other caller of resetOffRouteGate — never runs. And the
+    // teardown above clears speech state only: streak, trend history, travelSinceSwapM,
+    // onThisRoute and lastFix all survive the end of a drive. Trip 2 would then open with
+    // trip 1's evidence — onThisRoute true and a travel budget already past both the 40 m
+    // and 150 m post-swap guards — i.e. every fast path armed against a route it has
+    // never driven. That is the parking-lot storm with the lot swapped for a past drive.
+    // Resetting here can only DELAY a reroute (the 40 m budget re-arms), never cause one.
+    // Gated by `offroute_storm_test.mts` scenario J. Cheap: it mutates one plain object.
+    resetOffRouteGate(offRouteGateRef.current, Date.now());
     // NOTE: no resetSpeakGate() here. startNav() calls stopSpeech() right before
     // reserving the Nova greeting, so resetting again on activate would wipe the
     // greeting we just queued (and clear the in-flight hold) — which let the first
@@ -1008,7 +992,10 @@ export function useTurnByTurn(
     if (key !== routeKeyRef.current) {
       routeKeyRef.current = key;
       announcedRef.current.clear();
-      divergeRef.current = [];   // the trend is meaningless against a different line
+      // The trend is meaningless against a different line — and the new line's travel
+      // budget starts at zero, so the next reroute cannot be asked for until the car has
+      // actually driven SWAP_ARM_TRAVEL_M on it (2026-09-04 lot storm, see offRouteGate).
+      resetOffRouteGate(offRouteGateRef.current, Date.now());
       // A settle armed against the OLD route's destination must not survive a swap.
       settleSinceRef.current = null;
       if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
@@ -1204,33 +1191,6 @@ export function useTurnByTurn(
         if (dHdg > 180) dHdg = 360 - dHdg;
         headingOff = dHdg > OFFROUTE_HEADING_TOL_DEG;
       }
-      // Count ANY tick that's off the line by more than the threshold. The heading
-      // gate no longer SUPPRESSES the count — that was the bug behind the "~1 minute
-      // to recalculate": on a road PARALLEL to the route the heading stays aligned,
-      // so the streak reset every tick and a reroute never fired until the roads
-      // finally diverged. Heading now feeds the TRIP threshold instead, so real
-      // departures act in ~2-3 s while a transient multipath spike (a brief sideways
-      // fix with aligned heading) still gets ridden out.
-      const conclusivelyOff = dRoute > REROUTE_DISTANCE_M * 2;   // >160 m: GPS multipath can't explain this
-      if (dRoute > REROUTE_DISTANCE_M) offRouteStreakRef.current += 1;
-      else offRouteStreakRef.current = 0;
-      // Divergence trend — catches the slow parallel-street departure long before the
-      // 80 m threshold does. See the DIVERGE_* block for why a trend beats a distance.
-      const hist = divergeRef.current;
-      const nowT = Date.now();
-      hist.push({ t: nowT, d: dRoute });
-      while (hist.length && nowT - hist[0].t > DIVERGE_WINDOW_MS) hist.shift();
-      const diverging =
-        hist.length >= DIVERGE_MIN_SAMPLES &&
-        nowT - hist[0].t >= DIVERGE_WINDOW_MS * 0.75 &&   // a real window, not 4 fast fixes
-        dRoute > DIVERGE_MIN_M &&
-        dRoute - hist[0].d > DIVERGE_GROWTH_M &&
-        hist.every((v, i) => i === 0 || v.d >= hist[i - 1].d - DIVERGE_SLACK_M);
-      // Trip fast when the evidence is strong, slower when it's marginal:
-      //   • conclusively off (>160 m)      → 2 ticks (~2 s), heading irrelevant
-      //   • off + heading diverging (>55°) → 3 ticks (~3 s): a real wrong turn
-      //   • off but heading still aligned  → 6 ticks (~6 s): a SUSTAINED offset,
-      //     not a momentary multipath spike (the parallel-road departure)
       // MISSED-MANEUVER fast path (tester: kept straight past an exit; the
       // mainline parallels the ramp so dRoute grows too slowly — ~30 s to
       // react). Got within 80 m of the maneuver, then receded 150 m+ WITHOUT
@@ -1243,22 +1203,24 @@ export function useTurnByTurn(
         missRef.current.min < 80 &&
         dManeuver > missRef.current.min + 150 &&
         dRoute > 25;
-      const tripped =
-        missedManeuver ? true :
-        diverging ? true :
-        conclusivelyOff ? offRouteStreakRef.current >= 2 :
-        headingOff      ? offRouteStreakRef.current >= 3 :
-                          offRouteStreakRef.current >= 6;
-      if (tripped) {
-        const now = Date.now();
-        if (now - lastOffRouteAtRef.current > 8000) {
-          lastOffRouteAtRef.current = now;
-          try { logEvent(`off-route tripped d=${Math.round(dRoute)}m streak=${offRouteStreakRef.current} why=${missedManeuver ? 'missed' : diverging ? 'diverging' : conclusivelyOff ? 'far' : headingOff ? 'heading' : 'sustained'} step=${stepIdx}`); } catch {}
-          offRouteStreakRef.current = 0;
-          divergeRef.current = [];  // fresh trend against the NEW line
-          missRef.current = null; // one miss = one reroute; re-arm on the new route
-          options?.onOffRoute?.();
-        }
+      // The DECISION (streak, divergence trend, the 8 s rate limit and the 2026-09-04
+      // post-swap / creeping gates) is pure and lives in src/offRouteGate.ts, so the
+      // parking-lot storm replays as a numeric gate. Geometry stays here.
+      const nowT = Date.now();
+      const decision = offRouteTick(offRouteGateRef.current, {
+        now: nowT, dRoute, headingOff, missedManeuver,
+        lat: user.lat, lng: user.lng, speedMs: user.speed, accM: user.acc,
+      });
+      if (decision.trip) {
+        try { logEvent(`off-route tripped d=${Math.round(dRoute)}m streak=${decision.streak} why=${decision.why} step=${stepIdx}`); } catch {}
+        missRef.current = null; // one miss = one reroute; re-arm on the new route
+        options?.onOffRoute?.();
+      } else if (decision.held && nowT - lastHeldLogAtRef.current > OFFROUTE_HELD_LOG_MS) {
+        // Bounded receipt: the gates can hold on every tick, so at most one row per
+        // 10 s. `trav=` is the number that settles WHICH gate would have fired on the
+        // next lot drive — it is the one measurement the 09-04 log did not carry.
+        lastHeldLogAtRef.current = nowT;
+        try { logEvent(`off-route held why=${decision.held} d=${Math.round(dRoute)}m since=${Math.round(decision.sinceSwapS)}s trav=${Math.round(decision.travelSinceSwapM)}m`); } catch {}
       }
     }
 

@@ -35,7 +35,7 @@ import React, { useEffect, useMemo, useCallback, useRef, useState } from "react"
 import { reportDraw } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance } from "./heatProbe";
 import { logEvent } from "./crashBreadcrumb";
-import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert } from "react-native";
+import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert, Animated } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
 import { routeTrimLeadM, routeTrimFadeM } from "./routeTrim";
@@ -290,7 +290,9 @@ export const ARROW_LEN_UNITS = 1.289;   // green-arrow-v10.glb long axis, measur
  *  size): class 44 (CarMarker ClassSprite), arrow ~40 (40pt box / 38pt icon), car
  *  photo 46 (styles.car, normalised by vehiclePngScale). They sit within 10% of each
  *  other and are deliberately tuned; 44 lands in the middle of that range. */
-const SELF_MARKER_PT = 44;
+// 44 → 50 (Jeff, 2026-09-03, off the CarPlay-connected drive: "on the phone when I switch over to
+// the map, the car needs to be a little bit bigger"). CarPlay keeps its own 45 (CarMapView).
+const SELF_MARKER_PT = 50;
 /** The two SELF class snapshot sources, in points — the divisors that turn
  *  SELF_MARKER_PT into an iconSize. Keep in step with the JSX below (the
  *  <ClassSprite size={66}> snapshot and TopDownClassSnap's 34x62 box). */
@@ -1141,7 +1143,7 @@ const SELF_MARKER_SLOT = undefined;
 /** Monotonic mount counter — see probeKeyRef inside SelfCarModel. */
 let _selfCarMountSeq = 0;
 
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, drawPosOutRef, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, drawPosOutRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -1204,6 +1206,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // on). The route-line cut anchors to this (routeRibbon.alongMOnPartition) so the gap in
   // front of the nose is constant by construction, on both surfaces.
   drawPosOutRef?: React.MutableRefObject<{ lat: number; lng: number } | null>;
+  /** Fires ONCE, on the first camera push that crosses the bridge — the parent lifts the
+   *  warm-mount cover then (see WARM MOUNT COVER). */
+  onFirstCam?: () => void;
   // "Class" appearance: the name of a REGISTERED map image (the tinted top-down
   // class sprite). When set, the marker renders as a flat map-aligned SymbolLayer
   // riding the SAME eased pose instead of the 3D ModelLayer.
@@ -1276,6 +1281,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const speedRef = useRef(speedMs); speedRef.current = speedMs;
   const camApplyAt = useRef(0);
   const camApplyBusy = useRef(false);
+  const firstCamDoneRef = useRef(false);
   const lastCamAt = useRef(0);
   // cam-probe bookkeeping (see pushCam). Seeded far away so the first push logs once.
   const camProbeAt = useRef(0);
@@ -1301,6 +1307,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // Counted AFTER the bail, so this measures camera pushes that actually cross the
     // bridge — each one is a JSON encode here and a JSON decode in native.
     noteCam(probeKeyRef.current);
+    if (!firstCamDoneRef.current) { firstCamDoneRef.current = true; try { onFirstCam?.(); } catch {} }
     const c = getCam();
     // Glide zoom + pitch toward the LIVE speed target (getCam reads a fresh ref, so
     // this tracks acceleration even though this loop's closure is frozen). Position
@@ -2605,6 +2612,31 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // back to undefined) so the in-drive chase transitions stay smooth.
   const coldLockArmedRef = useRef(false);
   const [coldLockDone, setColdLockDone] = useState(false);
+  // ── WARM MOUNT COVER (Jeff, 2026-09-03: "when I go from the turn-by-turn directions on the
+  // phone and hit Show map, it's orientated completely wrong, and then it snaps to the correct
+  // chase cam — get rid of that weird in-between"). The phone map is UNMOUNTED on the written-
+  // directions face (the 8/16 heat decision), so Show map mounts it cold mid-drive: frame 0 is
+  // defaultSettings (north-up, zoom 17), the 1.2 s cold-lock timer holds the lockstep off, then
+  // the first push lands the chase pose in one jump. His own 15:38:26 rows show it: cam-mode
+  // lock=0 ready=0 → 1 s later lockstep=1, cam-apply dz=0.96. Fix: when mounted during guidance,
+  // (1) cold lock waits 250 ms instead of 1200 (a fix already exists; the timer exists for the
+  // native follow fly-in, which heading-up does not use), and (2) an opaque cover sits over the
+  // map until the FIRST lockstep push has landed, then fades out — so the wrong pose is never
+  // seen. Safety: the cover lifts on its own after 1 s no matter what.
+  const warmMountRef = useRef(!!navigationActive && mapView === "heading_up");
+  const warmingRef = useRef(warmMountRef.current);
+  const [warming, setWarming] = useState(warmMountRef.current);
+  const warmFade = useRef(new Animated.Value(1)).current;
+  const endWarm = useCallback(() => {
+    if (!warmingRef.current) return;
+    warmingRef.current = false;
+    Animated.timing(warmFade, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => setWarming(false));
+  }, [warmFade]);
+  useEffect(() => {
+    if (!warmMountRef.current) return;
+    const t = setTimeout(endWarm, 1000);
+    return () => clearTimeout(t);
+  }, [endWarm]);
   const [dbgCamHdg, setDbgCamHdg] = useState(0);
   // Live camera zoom, surfaced in the debug strip so the car-size curve can be
   // tuned against actual zoom values (read "too small at zoom X" instead of guessing).
@@ -2623,7 +2655,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     // starts + no chase). Keying on the stable hasFirstFix boolean lets the timer
     // run to completion; the cleanup now only fires on unmount.
     coldLockArmedRef.current = true;
-    const t = setTimeout(() => setColdLockDone(true), 1200);
+    const t = setTimeout(() => setColdLockDone(true), warmMountRef.current ? 250 : 1200);
     return () => clearTimeout(t);
   }, [hasFirstFix]);
   // Throttle clock for persisting the live location (see the effect below).
@@ -4062,6 +4094,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             speedMs={userSpeedMs}
             cameraRef={cameraRef}
             getCam={getCam}
+            onFirstCam={endWarm}
             camZoomOutRef={camZoomRef}
             drawPosOutRef={drawPosRef}
             readyRef={lockReadyRef}
@@ -4084,6 +4117,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           onPress={(id) => { const c = cars.find((x) => x.id === id); if (c?.peer) onPeerPress?.(c.peer); }}
         />
       </MapView>
+
+      {/* WARM MOUNT COVER — see the note at warmMountRef. Lifts on the first lockstep push. */}
+      {warming && (
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: "#0B0D10", opacity: warmFade, zIndex: 9998 }]} />
+      )}
 
       {/* Heading-up diagnostic readout — gated by the Debug toggle in Settings. */}
       {getSettings().debugOverlays && (

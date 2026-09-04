@@ -601,7 +601,7 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   @2×, ~96 KB; the OTA-N `wxPinImages.ts` is gone). Phone `DestinationWeatherCallout` (MarkerView, bottom-anchored float);
   CarPlay `wxcallout_<kind>` per skin at iconSize 0.5 + `car-waypoint-temp` text layer; **AA keeps `brand_pin`**
   (`WX_PIN_ON_CAR`). Sim-verified with a real forecast: gold border on the Ultra skin, partly-night glyph, 19°, tail on
-  the spot — screenshot sent to Jeff before publishing. CarPlay = field verdict.
+  the spot — screenshot sent to Jeff before publishing. **CarPlay field verdict (Jeff, ~17:40, CarPlay-connected drive): "the CarPlay icon, perfect size, everything is perfect."** Resolved on both surfaces (AA still gated).
 - ✅ **OTA-E SHIPPED 08:37 PDT on Jeff's "ship it" — group `c59b50b9-82c4-4fba-a1f4-47f1fdcfc0c9`, runtime 1.27.0,
   both platforms, commit `323d12d`.** Proof: `ios KEY_PRESENT=1 openweathermap=2 neg_control=0` · `android
   KEY_PRESENT=1 openweathermap=2 neg_control=0`. Contents: arrival-speech fix (`43b901c`) + one shared build number on

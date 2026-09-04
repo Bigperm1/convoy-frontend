@@ -647,8 +647,9 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   the sim's straight-line waypoints diverge from the road (d 12→55 m, a reroute) so the blend never engages there —
   `measure.py` also FAILS on the dusk style (its car detector assumes the day palette; run it in daylight or fix the
   detector). **Field verdict = Jeff's next exit + lot entrance.**
-- 🧩 **EVENT INVITES — BUILT 21:00 PDT, backend LIVE (`8030769`), app STAGED for OTA-R pending Jeff's OK on the sim
-  renders (rule: preview UX first).** Jeff: "I created a meet event but I want to push the meet to the crew." VERIFIED:
+- ✅ **EVENT INVITES — OTA-R SHIPPED 21:41 PDT (Jeff: "go ship it") — group `692446cf-8a08-465d-81a4-9570a034ed96`, commit
+  `12401fd`, KEY_PRESENT=1 both; backend `8030769` + `05435a7` live; `OPENWEATHER_API_KEY` SET on Render by Jeff 21:30
+  (`GET /api/health` → `weather_key: true`).** Jeff: "I created a meet event but I want to push the meet to the crew." VERIFIED:
   the only push was at creation, only with Public OFF (the club picker was gated on it) + Notify ON; no re-send existed;
   editing never notified. His spec: owner + club admins manage; a club can be tagged EVEN IF PUBLIC and the whole crew gets
   "you have been invited to the 'Boba Tea Meet'" → tap opens the event page → Going / Not going → 24h and ~2h follow-ups

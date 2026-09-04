@@ -704,7 +704,8 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   `SUPABASE_SERVICE_ROLE_KEY` on Render (never through me) → `supabase:true`; or `require_slot=false` meanwhile.
   **→ DONE 23:37 PDT:** Jeff pasted both into the Render env (Claude drove Chrome to the form, typed the names + public
   URL); manual deploy → `/api/health` `supabase:true` at ~23:40. Real-key probe = `GET /api/health/supabase` (backend
-  `1078872`, one service-key read of `scan_slots`). Mirrors + slot mirror live again from this deploy on.
+  `1078872`, one service-key read of `scan_slots`) → **23:41: `{enabled:true, probe_status:200, rows:1, ok:true}`** — the key
+  is real. Mirrors + slot mirror live again from this deploy on; `require_slot=true` is now safe.
   Trap met: `re` was only imported inside one function → the first deploy 500'd (`carscan-reconcile-fail` crumbs at
   23:04/23:05 prove the app-side failure path too). Codex second opinion on the pipeline → `SCAN-PIPELINE.md`
   "Second opinion" (7 verified findings, 7 hypotheses, none adopted tonight).

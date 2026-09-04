@@ -24,7 +24,11 @@ export type HubEvent = {
   attendee_count: number;
   confirmed_count: number;
   is_creator: boolean;
+  /** Creator, or an admin/co-admin of the tagged club — may edit and send the invite. */
+  can_manage?: boolean;
   is_attending: boolean;
+  is_declined?: boolean;
+  declined_count?: number;
   is_confirmed: boolean;
   banner_b64?: string | null;
   tags: string[];
@@ -96,6 +100,18 @@ export async function confirmEvent(id: string): Promise<HubEvent> {
 
 export async function unattendEvent(id: string): Promise<HubEvent> {
   const { data } = await api.post(`/events/${id}/unattend`);
+  return data;
+}
+
+/** "Not going" — remembered, so the invite/announce pushes skip you (2026-09-03). */
+export async function declineEvent(id: string): Promise<HubEvent> {
+  const { data } = await api.post(`/events/${id}/decline`);
+  return data;
+}
+
+/** Push the invite to the tagged club now (creator or club admin; throttled server-side). */
+export async function announceEvent(id: string): Promise<{ sent: number }> {
+  const { data } = await api.post(`/events/${id}/announce`);
   return data;
 }
 

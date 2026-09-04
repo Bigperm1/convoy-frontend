@@ -32,7 +32,7 @@ import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from './routeOptim
 import { scoutScenicStops } from './scoutScenic';
 import {
   type HubEvent, type EventPoint, createEvent, myEvents, discoverEvents,
-  getEvent, attendEvent, confirmEvent, unattendEvent, deleteEvent, updateEvent,
+  getEvent, attendEvent, confirmEvent, unattendEvent, declineEvent, announceEvent, deleteEvent, updateEvent,
 } from './eventsApi';
 import { updateWidgetFeed } from './widgetFeed';
 
@@ -608,30 +608,38 @@ export function CreateEventModal({ kind, visible, editing, onClose, onCreated }:
             <View style={styles.toggleRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.toggleTitle}>Public</Text>
-                <Text style={styles.toggleSub}>{isPublic ? `Anyone can discover this ${copy.one}` : 'Only members of the club below can see it'}</Text>
+                <Text style={styles.toggleSub}>{isPublic ? `Anyone can discover this ${copy.one}` : 'Only members of your club can see it'}</Text>
               </View>
               <Switch value={isPublic} onValueChange={setIsPublic} trackColor={{ false: '#3A3A3C', true: accent + '88' }} thumbColor={isPublic ? accent : '#f4f3f4'} />
             </View>
-            {!isPublic && (
-              clubs.length === 0 ? (
-                <Text style={styles.helpText}>{`You're not in any clubs yet — join or create one in the Clubs tab.`}</Text>
-              ) : (
+            {/* INVITE YOUR CLUB — always offered, public or not (Jeff, 2026-09-03: "even if it is
+                public, your crew gets a push"). Tagging a club is what sends the invite on save;
+                the Public switch above only decides who else can discover it. On a public event a
+                second tap untags; a club-only event always needs one. */}
+            <Text style={[styles.label, { marginTop: 14 }]}>Invite your club</Text>
+            {clubs.length === 0 ? (
+              <Text style={styles.helpText}>{`You're not in any clubs yet — join or create one in the Clubs tab.`}</Text>
+            ) : (
+              <>
                 <View style={styles.clubChips}>
                   {clubs.map((c) => (
-                    <TouchableOpacity key={c.id} onPress={() => setClubId(c.id)}
+                    <TouchableOpacity key={c.id} onPress={() => setClubId(clubId === c.id && isPublic ? null : c.id)}
                       style={[styles.clubChip, clubId === c.id && styles.clubChipOn,
                               clubId === c.id && { backgroundColor: accent, borderColor: accent }]}>
                       <Text style={[styles.clubChipText, clubId === c.id && { color: skinColors.ink }]} numberOfLines={1}>{c.name}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-              )
+                <Text style={styles.helpText}>{clubId
+                  ? `Every member gets \u201cYou're invited to ${title.trim() || `your ${copy.one}`}\u201d on their phone when you save.`
+                  : `Pick a club and the whole crew gets the invite when you save.`}</Text>
+              </>
             )}
 
             <View style={styles.toggleRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.toggleTitle}>Attendee notifications</Text>
-                <Text style={styles.toggleSub}>{`24h "are you coming?" check-in + a route to the meet 2h before`}</Text>
+                <Text style={styles.toggleSub}>{`24h "are you coming?" check-in + a route 2h before, both with the forecast at the meet`}</Text>
               </View>
               <Switch value={notify} onValueChange={setNotify} trackColor={{ false: '#3A3A3C', true: accent + '88' }} thumbColor={notify ? accent : '#f4f3f4'} />
             </View>
@@ -744,22 +752,28 @@ export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEd
               </View>
             </View>
 
-            {/* RSVP actions */}
-            {!e.is_attending ? (
-              <TouchableOpacity onPress={() => act(() => attendEvent(e.id))} activeOpacity={0.85}>
-                <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.createBtn}>
-                  <Text style={styles.createBtnText}>{busy ? '…' : "I'm interested — attend"}</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            ) : (
+            {/* RSVP — GOING / NOT GOING (Jeff, 2026-09-03). "Going" = attend + confirm in one tap
+                (the old interested→confirm two-step is gone); "Not going" is remembered so the
+                invite pushes skip you. Both stay tappable so a change of mind is one tap. */}
+            {!e.is_confirmed ? (
               <>
-                {!e.is_confirmed && (
-                  <TouchableOpacity onPress={() => act(() => confirmEvent(e.id))} activeOpacity={0.85}>
-                    <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.createBtn}>
-                      <Text style={styles.createBtnText}>{busy ? '…' : "✓ I'm showing up"}</Text>
-                    </LinearGradient>
+                <TouchableOpacity onPress={() => act(() => confirmEvent(e.id))} activeOpacity={0.85}>
+                  <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.createBtn}>
+                    <Text style={styles.createBtnText}>{busy ? '…' : "✓ Going"}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+                {e.is_declined ? (
+                  <Text style={[styles.helpText, { textAlign: 'center', marginTop: 8 }]}>{`You said not going — tap Going if plans change.`}</Text>
+                ) : (
+                  <TouchableOpacity onPress={() => act(() => declineEvent(e.id))} activeOpacity={0.85} style={[styles.secondaryBtn, { borderColor: ctaBorder }]}>
+                    <Ionicons name="close-circle-outline" size={16} color={accent} />
+                    <Text style={styles.secondaryBtnText}>Not going</Text>
                   </TouchableOpacity>
                 )}
+              </>
+            ) : (
+              <>
+                <Text style={[styles.helpText, { textAlign: 'center', marginTop: 4 }]}>{`✓ You're going`}</Text>
                 <TouchableOpacity onPress={routeThere} activeOpacity={0.85} style={[styles.secondaryBtn, { borderColor: ctaBorder }]}>
                   <Ionicons name="navigate" size={16} color={accent} />
                   <Text style={styles.secondaryBtnText}>Route to the meet</Text>
@@ -770,10 +784,31 @@ export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEd
                     <Text style={styles.secondaryBtnText}>Plot the cruise route</Text>
                   </TouchableOpacity>
                 )}
-                <TouchableOpacity onPress={() => act(() => unattendEvent(e.id))} style={styles.linkBtn}>
-                  <Text style={styles.linkBtnText}>{`Can't make it`}</Text>
+                <TouchableOpacity onPress={() => act(() => declineEvent(e.id))} style={styles.linkBtn}>
+                  <Text style={styles.linkBtnText}>{`Change to not going`}</Text>
                 </TouchableOpacity>
               </>
+            )}
+
+            {/* ANNOUNCE — creator or club admin pushes the invite to the tagged club on demand
+                (throttled server-side). The backend already sends it on save; this covers "I
+                forgot to tag the club" (tag it in Edit, then send) and "remind everyone". */}
+            {(e.can_manage || e.is_creator) && !!e.club_id && (
+              <TouchableOpacity
+                onPress={() => {
+                  if (busy) return;
+                  setBusy(true);
+                  announceEvent(e.id)
+                    .then((r) => Alert.alert('Invite sent', r.sent > 0 ? `Pushed to ${r.sent} club member${r.sent === 1 ? '' : 's'}.` : 'No club member has notifications on yet.'))
+                    .catch((err) => Alert.alert('Not sent', formatErr(err)))
+                    .finally(() => setBusy(false));
+                }}
+                activeOpacity={0.85}
+                style={[styles.secondaryBtn, { borderColor: ctaBorder }]}
+              >
+                <Ionicons name="megaphone" size={16} color={accent} />
+                <Text style={styles.secondaryBtnText}>Send the invite to the club</Text>
+              </TouchableOpacity>
             )}
 
             {/* Roster */}
@@ -791,7 +826,7 @@ export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEd
               </>
             )}
 
-            {e.is_creator && (
+            {(e.can_manage || e.is_creator) && (
               <>
                 <TouchableOpacity onPress={() => onEdit(e)} style={[styles.linkBtn, { marginTop: 16 }]}>
                   <Text style={styles.linkBtnText}>{`Edit ${copy.one}`}</Text>

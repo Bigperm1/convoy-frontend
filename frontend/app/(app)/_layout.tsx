@@ -383,6 +383,9 @@ export default function AppLayout() {
           // below leaves the icon+label centered with room to spare.
           tabBarItemStyle: { paddingVertical: 0 },
           tabBarLabelStyle: { fontSize: 15, fontWeight: "600", letterSpacing: 0, marginTop: Platform.OS === 'ios' ? 10 : 8, lineHeight: 18 },
+          // Map chrome stays at factory size regardless of iOS Text Size (Jeff, 2026-09-03 — Olaf's
+          // phone at max text size made the HUD look like a different app). Lists/settings still scale.
+          tabBarAllowFontScaling: false,
         }}
       >
         <Tabs.Screen name="map" options={{
@@ -393,7 +396,7 @@ export default function AppLayout() {
         }} />
         <Tabs.Screen name="talk" options={{
           tabBarLabel: ({ color }) => (
-            <Text style={{ color, fontSize: 15, fontWeight: "600", marginTop: Platform.OS === 'ios' ? 10 : 0, lineHeight: Platform.OS === 'ios' ? 18 : undefined }}>Comms</Text>
+            <Text maxFontSizeMultiplier={1} style={{ color, fontSize: 15, fontWeight: "600", marginTop: Platform.OS === 'ios' ? 10 : 0, lineHeight: Platform.OS === 'ios' ? 18 : undefined }}>Comms</Text>
           ),
           tabBarButtonTestID: "tab-talk",
           tabBarButton: (props) => <CommsTabButton {...props} selfId={user?.id} />,

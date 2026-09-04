@@ -526,7 +526,7 @@ export function CarSurface() {
   // Physical space free, then converted back to DESIGN units (the stack's width is
   // written in design units and shrunk by the transform).
   const navAvail = surfaceW > 0
-    ? (surfaceW - Math.max(effLeftInset, carClearLeft) - CAR_RIGHT_INSET) / hudScale
+    ? (surfaceW - Math.max(effLeftInset, carClearLeft) - carRightInsetFor(surfaceW)) / hudScale
     : 0;
   // ── TIGHT CANVAS REFLOW (2026-07-28, the Android Auto overlap) ──────────────
   // The comment above says "clamp downward only", but the code did the opposite:
@@ -703,7 +703,7 @@ export function CarSurface() {
         <View
           style={[
             styles.navStack,
-            { width: navStackW },
+            { width: navStackW, right: carRightInsetFor(surfaceW) },
             // Scaled about the bottom-right corner it is pinned to.
             hudFit('right bottom'),
             // Tight canvas: full width, lifted one row so it clears the speed cluster
@@ -806,7 +806,17 @@ export function CarSurface() {
         if (typeof w === 'number' && typeof h === 'number' && (w > 0 || h > 0) && !measured) {
           setMeasured(true);
         }
-        if (typeof w === 'number' && w > 0 && Math.abs(w - surfaceW) > 1) setSurfaceW(w);
+        if (typeof w === 'number' && w > 0 && Math.abs(w - surfaceW) > 1) {
+          setSurfaceW(w);
+          // Chrome-inset receipt (2026-09-03): what right inset this canvas got, so a head-unit
+          // photo can be checked against a number instead of a guess.
+          // Once per distinct w×h per process — a head unit that oscillates between two measured
+          // widths must not enqueue a durable row on every flip.
+          try {
+            const key = `${Math.round(w)}x${Math.round(e?.nativeEvent?.layout?.height ?? 0)}`;
+            if (!_chromeLogged.has(key)) { _chromeLogged.add(key); logEventReliable(`car-chrome surf=${key} rightInset=${carRightInsetFor(w)}`); }
+          } catch {}
+        }
         if (typeof h === 'number' && h > 0 && Math.abs(h - surfaceH) > 1) setSurfaceH(h);
         // Android Auto only, once per process — see logAaCanvas.
         if (typeof w === 'number' && typeof h === 'number') logAaCanvas(w, h);
@@ -1754,6 +1764,25 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
 // 28 keeps roughly the rail's own width in clearance. OTA-tunable: if a head-unit
 // photo ever shows the card touching the +/- buttons, put it back toward 40.
 const CAR_RIGHT_INSET = IS_AA ? 28 : 48;
+// ── WIDE HEAD UNITS (Alfred's Toyota Sienna, photo 2026-09-02 17:20, canvas 775×291) ──
+// The 48 above was measured on a 470-wide CarPlay canvas. On the Sienna's 775-wide screen
+// iOS draws a larger glass map-button column, and the maneuver banner's right end ran
+// UNDER the crew and compass buttons (Jeff: "the turn-by-turn banner is stuck under the
+// crew/compass"). The real answer is CPWindow.mapButtonSafeAreaLayoutGuide (native, build
+// 77); until then the inset grows with the canvas width relative to the 470 reference —
+// unchanged for every unit we have measured (400/427/470 → 48), 79 pt on the Sienna.
+// Receipt: `car-chrome surf= rightInset=` when the surface lands.
+export const CAR_REF_CARPLAY_W = 470;
+// Capped at 2× (96 pt): a width-only model is a stopgap from ONE photo (Codex's review point,
+// 2026-09-03), so an absurd canvas width must not eat the map; the receipt + the next head-unit
+// photo are what validate the number, and the native layout guide replaces it in build 77.
+const CAR_RIGHT_INSET_MAX = CAR_RIGHT_INSET * 2;
+export function carRightInsetFor(surfaceW: number): number {
+  if (IS_AA) return CAR_RIGHT_INSET;
+  const scaled = CAR_RIGHT_INSET * Math.max(1, (surfaceW > 0 ? surfaceW : CAR_REF_CARPLAY_W) / CAR_REF_CARPLAY_W);
+  return Math.round(Math.min(CAR_RIGHT_INSET_MAX, scaled));
+}
+const _chromeLogged = new Set<string>();
 const NAV_STACK_BOTTOM = IS_AA ? 4 : 8;
 
 // ── ONE SPACING RHYTHM (2026-07-20) ──────────────────────────────────────────

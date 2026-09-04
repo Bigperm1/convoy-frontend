@@ -151,8 +151,8 @@ export function SpeedPill({ speedMs, unit, bottom, limitKmh }: { speedMs?: numbe
         <Animated.View style={[styles.limitBox, { opacity: slide, transform: [{ translateX: slideX }] }]} pointerEvents="none">
           <Animated.View style={[styles.limitSmoke, { opacity: smokeAOpacity, transform: [{ scale: smokeAScale }] }]} pointerEvents="none" />
           <Animated.View style={[styles.limitSmoke, styles.limitSmokeB, { opacity: smokeBOpacity, transform: [{ scale: smokeBScale }] }]} pointerEvents="none" />
-          <Text style={styles.limitValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{limitValue}</Text>
-          <Text style={styles.limitUnit} numberOfLines={1}>{isMph ? "mph" : "km/h"}</Text>
+          <Text maxFontSizeMultiplier={1} style={styles.limitValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{limitValue}</Text>
+          <Text maxFontSizeMultiplier={1} style={styles.limitUnit} numberOfLines={1}>{isMph ? "mph" : "km/h"}</Text>
         </Animated.View>
       )}
       {speeding && (
@@ -175,8 +175,8 @@ export function SpeedPill({ speedMs, unit, bottom, limitKmh }: { speedMs?: numbe
         )}
         {/* Glass speedo; red-tinted glass when over the limit. */}
         <GlassFill tintColor={speeding ? OVER_RED : hudTint()} style={{ borderRadius: 16, overflow: "hidden" }} />
-        <Text style={styles.speedValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{value}</Text>
-        <Text style={[styles.speedUnit, speeding && styles.speedUnitOver]} numberOfLines={1}>{isMph ? "mph" : "km/h"}</Text>
+        <Text maxFontSizeMultiplier={1} style={styles.speedValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{value}</Text>
+        <Text maxFontSizeMultiplier={1} style={[styles.speedUnit, speeding && styles.speedUnitOver]} numberOfLines={1}>{isMph ? "mph" : "km/h"}</Text>
       </View>
     </View>
   );
@@ -217,8 +217,8 @@ export default function TurnByTurnNav({
             <ManeuverArrow dir={maneuverDir(instruction, maneuverKey)} size={34} color="#0B0B0C" />
           </ManeuverBox>
           <View style={{ flex: 1 }}>
-            <Text style={styles.distanceToTurn}>{distanceToTurn}</Text>
-            <Text style={styles.instruction} numberOfLines={2}>{instruction}</Text>
+            <Text maxFontSizeMultiplier={1} style={styles.distanceToTurn}>{distanceToTurn}</Text>
+            <Text maxFontSizeMultiplier={1} style={styles.instruction} numberOfLines={2}>{instruction}</Text>
           </View>
           <TouchableOpacity onPress={onToggleMute} hitSlop={10} style={styles.muteBtn} testID="nav-mute">
             <Ionicons name={muted ? "volume-mute" : "volume-high"} size={22} color="#fff" />

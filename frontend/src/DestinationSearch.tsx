@@ -249,8 +249,8 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           {aiSuggest ? (
             // Departure IQ pre-fill — premium "AI" badge + the suggestion text.
             <View style={styles.aiRow}>
-              <View style={[styles.aiBadge, { backgroundColor: accent }]}><Text style={styles.aiBadgeText}>AI</Text></View>
-              <Text style={styles.aiText} numberOfLines={1}>
+              <View style={[styles.aiBadge, { backgroundColor: accent }]}><Text maxFontSizeMultiplier={1} style={styles.aiBadgeText}>AI</Text></View>
+              <Text maxFontSizeMultiplier={1} style={styles.aiText} numberOfLines={1}>
                 {aiSuggest.label}{aiSuggest.eta ? `  ·  ${aiSuggest.eta}` : ""}
               </Text>
             </View>
@@ -261,10 +261,10 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
               activeOpacity={0.7}
               onPress={onPressField}
             >
-              <Text style={styles.fieldTapText} numberOfLines={1}>Search here</Text>
+              <Text maxFontSizeMultiplier={1} style={styles.fieldTapText} numberOfLines={1}>Search here</Text>
             </TouchableOpacity>
           ) : (
-            <TextInput
+            <TextInput allowFontScaling={false}
               testID="destination-input"
               value={text}
               onChangeText={onChangeText}
@@ -284,7 +284,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
               <TouchableOpacity testID="ai-lets-go" onPress={onAiGo} style={[styles.letsGoBtn, { backgroundColor: letsGoFloor }]} activeOpacity={0.85}>
                 <GlassFill tintColor={accent} style={{ borderRadius: 10, overflow: "hidden" }} />
                 <Ionicons name="navigate" size={14} color="#06281A" />
-                <Text style={styles.letsGoText}>Let's go</Text>
+                <Text maxFontSizeMultiplier={1} style={styles.letsGoText}>Let's go</Text>
               </TouchableOpacity>
               <TouchableOpacity testID="ai-dismiss" onPress={onAiDismiss} hitSlop={8} style={{ paddingLeft: 2 }}>
                 <Ionicons name="close" size={18} color="rgba(235,235,245,0.6)" />
@@ -321,7 +321,7 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
           {suggestions.map((s) => (
             <TouchableOpacity key={s.place_id} testID={`sug-${s.place_id}`} style={styles.row} onPress={() => { Keyboard.dismiss(); pick(s); }}>
               <Ionicons name="location" size={16} color={COLORS.brand} />
-              <Text style={styles.rowText} numberOfLines={1}>{s.description}</Text>
+              <Text maxFontSizeMultiplier={1} style={styles.rowText} numberOfLines={1}>{s.description}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>

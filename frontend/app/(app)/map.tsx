@@ -4967,8 +4967,8 @@ export default function MapScreen() {
           <View style={styles.pinBannerCard}>
             <Ionicons name="location" size={20} color={accent} />
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.pinBannerTitle}>Tap the map to drop your stop</Text>
-              <Text style={styles.pinBannerSub} numberOfLines={1}>It goes on the way to {destination?.label || "your destination"}.</Text>
+              <Text maxFontSizeMultiplier={1} style={styles.pinBannerTitle}>Tap the map to drop your stop</Text>
+              <Text maxFontSizeMultiplier={1} style={styles.pinBannerSub} numberOfLines={1}>It goes on the way to {destination?.label || "your destination"}.</Text>
             </View>
           </View>
           <View style={styles.pinBannerRow}>
@@ -4979,7 +4979,7 @@ export default function MapScreen() {
               onPress={() => { Haptics.selectionAsync().catch(() => {}); setStopPinMode(false); setStopPickerOpen(true); }}
             >
               <Ionicons name="search" size={16} color={accent} />
-              <Text style={[styles.pinBannerBtnText, { color: accent }]}>Search instead</Text>
+              <Text maxFontSizeMultiplier={1} style={[styles.pinBannerBtnText, { color: accent }]}>Search instead</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.pinBannerBtn}
@@ -4988,7 +4988,7 @@ export default function MapScreen() {
               onPress={() => { Haptics.selectionAsync().catch(() => {}); setStopPinMode(false); }}
             >
               <Ionicons name="close" size={16} color="#F4F4F4" />
-              <Text style={styles.pinBannerBtnText}>Cancel</Text>
+              <Text maxFontSizeMultiplier={1} style={styles.pinBannerBtnText}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -5050,7 +5050,7 @@ export default function MapScreen() {
 
             {/* Header — Drive (yellow) · share to community · close */}
             <View style={styles.bannerHeader}>
-              <Text style={[styles.bannerDrive, { color: accent }]}>Drive</Text>
+              <Text maxFontSizeMultiplier={1} style={[styles.bannerDrive, { color: accent }]}>Drive</Text>
               <View style={styles.bannerHeaderRight}>
                 <TouchableOpacity testID="save-destination" onPress={() => { if (savedMatch) { void removeSavedPlace(savedMatch.id); try { Haptics.selectionAsync(); } catch {} } else { saveCurrentDestination(); } }} hitSlop={10}>
                   {/* Candy red whether saved or not — filled vs outline already carries
@@ -5152,8 +5152,8 @@ export default function MapScreen() {
                         : { backgroundColor: c.color },
                     ]} />
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.routeOptChipLabel, active && styles.routeOptChipLabelActive]} numberOfLines={1}>{c.label}</Text>
-                      {c.sub ? <Text style={styles.routeOptChipSub} numberOfLines={1}>{c.sub}</Text> : null}
+                      <Text maxFontSizeMultiplier={1} style={[styles.routeOptChipLabel, active && styles.routeOptChipLabelActive]} numberOfLines={1}>{c.label}</Text>
+                      {c.sub ? <Text maxFontSizeMultiplier={1} style={styles.routeOptChipSub} numberOfLines={1}>{c.sub}</Text> : null}
                     </View>
                   </TouchableOpacity>
                 );
@@ -5163,24 +5163,24 @@ export default function MapScreen() {
             {/* Summary — duration · arrive time · distance · best-route label */}
             <View style={styles.bannerSummary}>
               <View style={styles.bannerDurCol}>
-                <Text style={styles.bannerDurNum}>{durBig}</Text>
-                {durHrs < 1 && <Text style={styles.bannerDurUnit}>min</Text>}
+                <Text maxFontSizeMultiplier={1} style={styles.bannerDurNum}>{durBig}</Text>
+                {durHrs < 1 && <Text maxFontSizeMultiplier={1} style={styles.bannerDurUnit}>min</Text>}
               </View>
               <View>
                 <View style={styles.bannerArriveRow}>
-                  <Text style={styles.bannerArriveLabel}>Arrive</Text>
-                  <Text style={styles.bannerArriveTime}>{arriveStr}</Text>
+                  <Text maxFontSizeMultiplier={1} style={styles.bannerArriveLabel}>Arrive</Text>
+                  <Text maxFontSizeMultiplier={1} style={styles.bannerArriveTime}>{arriveStr}</Text>
                 </View>
-                <Text style={styles.bannerDist}>{distStr}</Text>
+                <Text maxFontSizeMultiplier={1} style={styles.bannerDist}>{distStr}</Text>
               </View>
-              <Text style={styles.bannerBest}>{bestLabel}</Text>
+              <Text maxFontSizeMultiplier={1} style={styles.bannerBest}>{bestLabel}</Text>
             </View>
 
             {/* Pills — Start (yellow). Add stops + Saved designed but hidden. */}
             <View style={styles.bannerPills}>
               <TouchableOpacity testID="start-nav" onPress={startNav} style={[styles.bannerPill, styles.bannerPillStart, { backgroundColor: accent }]} activeOpacity={0.9}>
                 <Ionicons name="navigate" size={18} color="#1C1C1E" />
-                <Text style={styles.bannerPillStartText} numberOfLines={1}>Start</Text>
+                <Text maxFontSizeMultiplier={1} style={styles.bannerPillStartText} numberOfLines={1}>Start</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.bannerPill, styles.bannerPillBlue]}
@@ -5194,7 +5194,7 @@ export default function MapScreen() {
                     leave 108-120pt each (measured across SE / 16 Pro / Pixel 7a) against ~96pt
                     of content, so nothing truncates in practice — but "Add another" is the
                     longest label in the row and the narrowest phone has the least slack. */}
-                <Text style={styles.bannerPillBlueText} numberOfLines={1}>{stops.length ? "Add another" : "Add stop"}</Text>
+                <Text maxFontSizeMultiplier={1} style={styles.bannerPillBlueText} numberOfLines={1}>{stops.length ? "Add another" : "Add stop"}</Text>
               </TouchableOpacity>
               {/* Round trip — turns the plotted route into "…and back home". Shown only
                   when a Home is saved and you are not already heading to it, so the pill
@@ -5208,7 +5208,7 @@ export default function MapScreen() {
                 >
                   <PillFill />
                   <Ionicons name="repeat" size={18} color="#fff" />
-                  <Text style={styles.bannerPillBlueText} numberOfLines={1}>Round trip</Text>
+                  <Text maxFontSizeMultiplier={1} style={styles.bannerPillBlueText} numberOfLines={1}>Round trip</Text>
                 </TouchableOpacity>
               )}
               {/* NO SHARE PILL HERE. It lived in this row until 2026-08-31 and was
@@ -5227,7 +5227,7 @@ export default function MapScreen() {
                   <TouchableOpacity style={[styles.bannerPill, styles.bannerPillBlue]} activeOpacity={0.9} testID="saved-routes">
                     <PillFill />
                     <Ionicons name="bookmark" size={18} color={ACTION.save} />
-                    <Text style={styles.bannerPillBlueText} numberOfLines={1}>Saved</Text>
+                    <Text maxFontSizeMultiplier={1} style={styles.bannerPillBlueText} numberOfLines={1}>Saved</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -5552,7 +5552,7 @@ export default function MapScreen() {
               The CarPlay crew map button uses the SAME green — see CAR_ICON_CREW. */}
           {/* Candy crew glyph — the SAME art as the CarPlay crew button (8/20). */}
           <Image source={CREW_ART[skinTier]} style={{ width: 26, height: 26 }} resizeMode="contain" />
-          <Text style={styles.fabCrewLabel}>Crew</Text>
+          <Text maxFontSizeMultiplier={1} style={styles.fabCrewLabel}>Crew</Text>
         </TouchableOpacity>
         {/* Compass — bottom of stack. The needle rotates opposite the live map
             bearing so North always points north as the map turns; tapping it
@@ -5842,7 +5842,7 @@ export default function MapScreen() {
         <TouchableOpacity activeOpacity={1} style={styles.nameModalBackdrop} onPress={() => setRenameStop(null)}>
           <TouchableOpacity activeOpacity={1} style={styles.nameModalCard} onPress={() => {}}>
             <Text style={styles.nameModalTitle}>Rename stop</Text>
-            <TextInput
+            <TextInput allowFontScaling={false}
               value={renameStop?.name ?? ""}
               onChangeText={(t) => setRenameStop((r) => (r ? { ...r, name: t } : r))}
               placeholder="e.g. Tim's in Hope, Lunch, Fuel up"
@@ -5884,7 +5884,7 @@ export default function MapScreen() {
         <TouchableOpacity activeOpacity={1} style={styles.nameModalBackdrop} onPress={() => setSavePlaceModal(null)}>
           <TouchableOpacity activeOpacity={1} style={styles.nameModalCard} onPress={() => {}}>
             <Text style={styles.nameModalTitle}>Name this place</Text>
-            <TextInput
+            <TextInput allowFontScaling={false}
               value={savePlaceName}
               onChangeText={setSavePlaceName}
               placeholder="e.g. Gym, Mom's, Cars and Coffee"

@@ -270,7 +270,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         ) : (
           <MaterialCommunityIcons name={cat.icon} size={15} color={active ? "#1C1C1E" : accent} />
         )}
-        <Text style={[styles.pillText, active && styles.pillTextActive]}>{cat.label}</Text>
+        <Text maxFontSizeMultiplier={1} style={[styles.pillText, active && styles.pillTextActive]}>{cat.label}</Text>
       </TouchableOpacity>
     );
   };
@@ -288,7 +288,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         <TouchableOpacity testID="cat-pill-more" activeOpacity={0.8} onPress={() => setMoreOpen(true)} style={styles.pill}>
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 13, overflow: "hidden" }} />
           <MaterialCommunityIcons name="dots-horizontal" size={16} color={accent} />
-          <Text style={styles.pillText}>More</Text>
+          <Text maxFontSizeMultiplier={1} style={styles.pillText}>More</Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -303,7 +303,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         >
           <GlassFill tintColor={drawerTint()} style={StyleSheet.absoluteFill} />
           <View style={styles.dropHeader}>
-            <Text style={styles.dropTitle}>Results</Text>
+            <Text maxFontSizeMultiplier={1} style={styles.dropTitle}>Results</Text>
             <TouchableOpacity onPress={closeDropdown} hitSlop={10} testID="results-close">
               <MaterialCommunityIcons name="close" size={20} color="#9A9A9E" />
             </TouchableOpacity>
@@ -311,10 +311,10 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
           {loadingKey ? (
             <View style={styles.dropLoading}>
               <ActivityIndicator size="small" color={accent} />
-              <Text style={styles.dropLoadingText}>Searching…</Text>
+              <Text maxFontSizeMultiplier={1} style={styles.dropLoadingText}>Searching…</Text>
             </View>
           ) : results.length === 0 ? (
-            <Text style={styles.dropEmpty}>No results nearby</Text>
+            <Text maxFontSizeMultiplier={1} style={styles.dropEmpty}>No results nearby</Text>
           ) : (
             <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {results.map((r, i) => (
@@ -326,21 +326,21 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
                   style={styles.resultRow}
                 >
                   <View style={styles.resultLeft}>
-                    <Text style={styles.resultName} numberOfLines={1}>{i + 1}. {r.label}</Text>
-                    {!!r.address && <Text style={styles.resultAddr} numberOfLines={1}>{r.address}</Text>}
+                    <Text maxFontSizeMultiplier={1} style={styles.resultName} numberOfLines={1}>{i + 1}. {r.label}</Text>
+                    {!!r.address && <Text maxFontSizeMultiplier={1} style={styles.resultAddr} numberOfLines={1}>{r.address}</Text>}
                   </View>
                   <View style={styles.resultRight}>
                     {r.isGas ? (
-                      <Text style={[styles.gasPrice, { color: accent }]} numberOfLines={1}>{r.price ? `Premium ${r.price}` : "Premium —"}</Text>
+                      <Text maxFontSizeMultiplier={1} style={[styles.gasPrice, { color: accent }]} numberOfLines={1}>{r.price ? `Premium ${r.price}` : "Premium —"}</Text>
                     ) : (
                       <View style={styles.ratingRow}>
                         {[0, 1, 2, 3, 4].map((d) => (
                           <View key={d} style={[styles.dot, d < Math.round(r.rating ?? 0) ? [styles.dotOn, { backgroundColor: accent }] : styles.dotOff]} />
                         ))}
-                        {typeof r.ratingCount === "number" && <Text style={styles.ratingCount}>{r.ratingCount}</Text>}
+                        {typeof r.ratingCount === "number" && <Text maxFontSizeMultiplier={1} style={styles.ratingCount}>{r.ratingCount}</Text>}
                       </View>
                     )}
-                    <Text style={styles.timeDist} numberOfLines={1}>{fmtEta(r.distanceM)} · {fmtDist(r.distanceM, unit)}</Text>
+                    <Text maxFontSizeMultiplier={1} style={styles.timeDist} numberOfLines={1}>{fmtEta(r.distanceM)} · {fmtDist(r.distanceM, unit)}</Text>
                   </View>
                   {onSelect && <MaterialCommunityIcons name="chevron-right" size={20} color="#5A5A5E" style={{ alignSelf: "center" }} />}
                 </TouchableOpacity>
@@ -354,7 +354,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         <Pressable style={styles.backdrop} onPress={() => setMoreOpen(false)}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <View style={styles.grip} />
-            <Text style={styles.sheetTitle}>More places</Text>
+            <Text maxFontSizeMultiplier={1} style={styles.sheetTitle}>More places</Text>
             <View style={styles.grid}>
               {MORE.map((cat) => (
                 <TouchableOpacity
@@ -367,12 +367,12 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
                   <View style={[styles.gridIcon, { backgroundColor: accentWell, borderColor: accentHairline }]}>
                     <MaterialCommunityIcons name={cat.icon} size={22} color={accent} />
                   </View>
-                  <Text style={styles.gridLabel} numberOfLines={1}>{cat.label}</Text>
+                  <Text maxFontSizeMultiplier={1} style={styles.gridLabel} numberOfLines={1}>{cat.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
             <TouchableOpacity onPress={() => setMoreOpen(false)} style={styles.doneBtn}>
-              <Text style={styles.doneText}>Done</Text>
+              <Text maxFontSizeMultiplier={1} style={styles.doneText}>Done</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>

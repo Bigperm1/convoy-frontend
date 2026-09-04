@@ -156,23 +156,23 @@ export default function WeatherHUD({ weather, unit, compact, forecast, onOpenCha
         {cardMounted && (
           <Animated.View style={[styles.forecastCard, cardStyle]}>
             <GlassFill tintColor={hudTint()} style={StyleSheet.absoluteFill} />
-            <Text style={styles.forecastTitle}>5-Day Forecast</Text>
+            <Text maxFontSizeMultiplier={1} style={styles.forecastTitle}>5-Day Forecast</Text>
             {forecast && forecast.length > 0 ? (
               forecast.slice(0, 5).map((d) => (
                 <View key={d.startMs} style={styles.forecastRow}>
-                  <Text style={styles.forecastDay} numberOfLines={1}>{d.label}</Text>
+                  <Text maxFontSizeMultiplier={1} style={styles.forecastDay} numberOfLines={1}>{d.label}</Text>
                   <View style={styles.forecastGlyph}>
                     <WeatherGlyph kind={d.kind} size={22} />
                   </View>
-                  <Text style={styles.forecastPrecip}>
+                  <Text maxFontSizeMultiplier={1} style={styles.forecastPrecip}>
                     {d.precipProbability > 0 ? `${d.precipProbability}%` : ''}
                   </Text>
-                  <Text style={styles.forecastHi}>{tempVal(d.hiC, d.hiF)}{DEG}</Text>
-                  <Text style={styles.forecastLo}>{tempVal(d.loC, d.loF)}{DEG}</Text>
+                  <Text maxFontSizeMultiplier={1} style={styles.forecastHi}>{tempVal(d.hiC, d.hiF)}{DEG}</Text>
+                  <Text maxFontSizeMultiplier={1} style={styles.forecastLo}>{tempVal(d.loC, d.loF)}{DEG}</Text>
                 </View>
               ))
             ) : (
-              <Text style={styles.forecastLoading}>Loading forecast…</Text>
+              <Text maxFontSizeMultiplier={1} style={styles.forecastLoading}>Loading forecast…</Text>
             )}
           </Animated.View>
         )}
@@ -184,7 +184,7 @@ export default function WeatherHUD({ weather, unit, compact, forecast, onOpenCha
         >
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 16, overflow: "hidden" }} />
           <WeatherGlyph kind={weatherKind(weather)} size={26} />
-          <Text style={styles.compactTemp} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{temp}</Text>
+          <Text maxFontSizeMultiplier={1} style={styles.compactTemp} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{temp}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -193,15 +193,15 @@ export default function WeatherHUD({ weather, unit, compact, forecast, onOpenCha
   return (
     <View style={styles.chip}>
       <WeatherGlyph kind={weatherKind(weather)} size={20} />
-      <Text style={styles.temp}>{temp}</Text>
+      <Text maxFontSizeMultiplier={1} style={styles.temp}>{temp}</Text>
       <View style={styles.divider} />
       <Ionicons name="arrow-up-circle-outline" size={13} color="rgba(255,255,255,0.55)" style={{ transform: [{ rotate: `${weather.windDirectionDeg}deg` }] }} />
-      <Text style={styles.wind}>{wind}</Text>
+      <Text maxFontSizeMultiplier={1} style={styles.wind}>{wind}</Text>
       {weather.precipProbability > 0 && (
         <>
           <View style={styles.divider} />
           <Ionicons name="water-outline" size={13} color="#5AC8FA" />
-          <Text style={styles.precip}>{weather.precipProbability}%</Text>
+          <Text maxFontSizeMultiplier={1} style={styles.precip}>{weather.precipProbability}%</Text>
         </>
       )}
     </View>

@@ -27,7 +27,7 @@ export default function UpdateReadyPill({ hidden }: { hidden?: boolean }) {
       activeOpacity={0.8}
       testID="update-ready-pill"
     >
-      <Text style={styles.text}>Update ready — tap to install</Text>
+      <Text maxFontSizeMultiplier={1} style={styles.text}>Update ready — tap to install</Text>
     </TouchableOpacity>
   );
 }

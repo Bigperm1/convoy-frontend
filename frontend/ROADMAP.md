@@ -682,8 +682,9 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`node --experimental-strip-types …`): highway jitter 0 · 4° step 0 · lot swing 16 m → 1.0 · lot swing 4 m → 0. The sim
   cannot cut corners, so this is the only automated check of that logic. Field verdict unchanged: Jeff's next lot entrance.
   Codex usage: `/codex:review`, `/codex:adversarial-review <focus>`, `/codex:rescue` (no `--write`); stop-time gate OFF.
-- 🟡 **OTA-V READY, NOT PUBLISHED (needs Jeff's go) — commit `0f67a89` — a reinstall no longer loses the scan;
-  a dead upload stops the countdown.** Olaf's 09-03 reinstall wiped `carScanId` (AsyncStorage only) and his Garage
+- ✅ **OTA-V SHIPPED 2026-09-04 00:24 PDT — group `e9c59c06-33bc-4e8c-a8d6-a944069ccedc`, commit `13d06ef` (code `0f67a89`),
+  KEY_PRESENT=1 both — a reinstall no longer loses the scan; a dead upload stops the countdown.** Jeff: "go ship the otav".
+  Pickup = the red pill. Olaf's twin returns on his next launch by itself (crumb `carscan-restored` will show it). Olaf's 09-03 reinstall wiped `carScanId` (AsyncStorage only) and his Garage
   sat on "submitted" for a re-upload the worker had failed on `user-cap`, while his finished twin
   (`enablewhore-20260901-210315`, `done`, both GLBs in `models`) sat untouched. Now `reconcileScanState()`
   (`src/carScan.ts`) runs once per launch (map.tsx, next to the profile sync) and on every Garage refresh: it asks

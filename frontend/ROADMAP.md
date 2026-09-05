@@ -698,8 +698,19 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   ≤5 m on most bends (route polyline vs lane), 8.6 m once (05:54:31), the 21 m spike (06:04:27 phone) was the
   off-route moment. Below the 6 m release by design. (e) **"glitching"**: `main-gap` 28483 ms (06:39:40), 7322,
   6222, 4939 on the car surface — visible freeze vs locked phone unknown; asked Olaf.
-- 🟡 **OTA-W BUILT + SIM-VERIFIED 2026-09-04 09:05 PDT — commit `a008317` — NOT PUBLISHED (Jeff: "go build and sim check
-  it… corners/ribbon/flickering/centering"; the ship call is his).** Four fixes from Olaf's + Say Phin's morning reports:
+- 🔎 **2026-09-05 07:30 PDT — drives read (Jeff: "lets see the drives from yesterday and today first").** Jeff 09-04: 08:30–09:46
+  one real reroute + arrival spoken; 17:40–18:26 zero trips, arrival spoken. Crew on OTA-V: **Rodrigo 37 trips** — his
+  15 s route-fetch abort timers fired 176–307 s late, all at 19:19:25 when the app foregrounded, while `off-route tripped`
+  rows posted LIVE every 8–9 s ⇒ **JS TIMERS FROZEN ~5 min with the phone locked on CarPlay while native location events
+  still ran JS** (VERIFIED, late=false rows + `heat-probe win=577549`); Olaf 16:15–16:39 CarPlay `main-gap` 5–40 s ×19 and
+  162 s ×1 (rAF in bursts) = the "phone off → CarPlay freezes" report; SMSGRC 12 reroutes = the driver leaving each new
+  route within 8 s (headings 310→305→294→238→214→274→299 in a minute) — routes vs roads, not the gate; SPL_GRC post-swap
+  re-trips 11 s apart at drive start (OTA-W's swap guard); **Ni GR `update_id null` since 09-04 22:30 = stranded on the
+  embedded bundle (CarPlay-first launch), gets no OTA**. → **OTA-X (building):** timer-liveness clock + `timer-starve`
+  receipt, fix-driven marker+camera when timers are starved (both surfaces), off-route HOLD while starved, stale-fetch
+  guard; sim reproduction via the LOCK button. Native follow on the car map = build 77 ([[carplay-aa-standalone-is-the-requirement]]).
+- ✅ **OTA-W SHIPPED 2026-09-05 07:35 PDT — group `cf954078-69c5-49e7-b334-9210e2b8b3c4`, commit `726510a` (code `a008317`),
+  KEY_PRESENT=1 both (Jeff: "ship W build X"). Built + sim-verified 09-04 09:05.** Four fixes from Olaf's + Say Phin's morning reports:
   (1) **Ribbon lead pitch-compensated** (`src/routeTrim.ts`, live pitch threaded on both surfaces, receipts `pitch= leadDp=`).
   Reproduced FIRST on the sim: same 108 km/h replay (tools/sim-qc, dense waypoints) on OTA-V code = faint 9 pt / solid
   17 pt ahead of the nose (FAIL <18); patched = 37 / 48–51 pt, 0 green over the car, lead 201→402 m at z13.9 (cos 60°).

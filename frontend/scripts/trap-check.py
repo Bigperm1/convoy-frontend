@@ -62,6 +62,22 @@ RULES = [
         "by the two lengths' difference (tens of metres mid-route) and ran its own ease clock — the line reached the "
         "car's roof on CarPlay. The cut anchors to the DRAWN car via routeRibbon.alongMOnPartition().",
     ),
+    (
+        "off-route-tick-without-slot-sweep",
+        ["src/nav.ts"],
+        r"(?s)const nowT = Date\.now\(\);(?:(?!sweepRerouteInFlight\().)*?offRouteTick\(offRouteGateRef\.current",
+        "2026-09-05: the ONE reroute slot (src/rerouteSlot.ts) is aged from LOCATION FIXES — sweepRerouteInFlight(nowT) "
+        "must run BEFORE the off-route decision on the same tick, or a stuck request holds the gate `inflight` past the "
+        "timeout and, with JS timers frozen, nothing else ever frees it (Rodrigo's stacked-request storm).",
+    ),
+    (
+        "off-route-tick-without-inflight-age",
+        ["src/nav.ts"],
+        r"(?s)offRouteTick\(offRouteGateRef\.current,\s*\{(?:(?!rerouteInFlightMs).)*?\}\)",
+        "2026-09-05: the gate can only hold `inflight` if the tick input carries rerouteInFlightMs — drop it and the "
+        "one-in-flight bound silently disappears while every Node gate still passes (the gate tests the pure slot, "
+        "not this wiring).",
+    ),
 ]
 
 

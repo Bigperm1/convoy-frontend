@@ -59,6 +59,17 @@ hierarchy dump or by eye in the screenshot) gives the exact `lead`, `cut+`, `lag
   `set` while parked is deadbanded (9 m) and ignored.
 * The Claude Code iOS-Simulator MCP crashed on every call that day; the Xcode MCP
   (`DeviceInteractionStartSession` on an iOS 27 sim) tapped fine.
+* **Xcode MCP tap grammar (2026-09-05, cost 15 min of guessing):** `interactionCommand` is a chain of
+  single-letter commands — `t x y` tap, `d x y` double-tap, `drag x1 y1 x2 y2 [seconds]` swipe/scroll
+  (`drag 200 720 200 200 0.4` scrolls a list DOWN one screen), `w seconds` wait, `r <button>` hardware
+  button, `orientation <value>`, and a type-text command that must be LAST. Chain them in ONE call:
+  `t 167 77 w 1.5 t 47 129 w 3 t 106 749` is Search → "Drive to qc" → Start. `swipe`/`s`/`scroll` are
+  NOT commands. Sessions expire after ~3 min idle AND on every reinstall ("Session not found") — start
+  a new one with a new identifier; the identifier you pass IS the session key. Deep links to a route
+  registered with `href: null` (settings, hub, garage…) do nothing — Expo Router drops them from the
+  linking config — so reach Settings through the logo menu (`logo-menu-btn` → Settings row) and scroll.
+  The grammar lives in `/Applications/Xcode-beta.app/Contents/PlugIns/IDEDeviceInteraction.framework`
+  (`strings … | grep components`), not in any skill file on disk.
 
 ## Corner-release gate (numeric, seconds)
 
@@ -104,3 +115,45 @@ C that a car parked with the GPS scattering outward never reroutes (`held why=cr
 missed-maneuver fast path still fires. A swap moves the LINE, not the car: the first version of this replay
 modelled a swap as the car jumping back to 27 m, which counted the re-snap as 37 m of driving and armed the
 travel gate for free — that bug is why A now checks the un-gated count too.
+
+## Timer-starvation gate (numeric, liveness clock + off-route hold)
+
+```bash
+node --experimental-strip-types tools/sim-qc/timer_starve_test.mts
+```
+
+Gates `src/timerLiveness.ts` (2026-09-04/05 — "the car surface must keep working with the
+phone locked and the app not open"). Two field measurements forced a three-axis model
+instead of one "frozen" bit: Rodrigo's CarPlay drive had JS timers dead for ~5 min while
+native location events kept reaching JS (off-route trips posted live every 8-9 s while the
+15 s route-fetch abort timers fired 29-at-once, 176-307 s late); the architect's iOS 27 sim
+lock (2026-09-05, 54 km/h) measured the OPPOSITE split — timers alive, rAF and location
+dead. Part A drives `timerLiveness.ts` directly (it has no RN-only imports at the top
+level, same reason `offRouteGate.ts` stays Node-runnable): a fresh heartbeat reads ~0, a
+stale one reads starved past the 3 s receipt threshold, a new tick clears it with no latch,
+the sim-only debug-force switch (Settings → Developer → Debug overlays → Force timer
+starvation) reports starved regardless of the real heartbeat, and the rAF side-channel
+(tumbling 5 s windows, bounded memory even under the measured 52,839 callback/s iOS
+runaway) is asserted to move INDEPENDENTLY of the timer clock in both directions — timers
+healthy while rAF is silent, and rAF alive while the timer clock independently reads
+starved — because conflating the two axes is exactly what would have read the sim run
+backwards. Part B is the off-route side of the same finding, against the REAL exported
+`holdReason()` / `offRouteTick()` in `src/offRouteGate.ts`. The first design was a blanket
+`timers-starved` HOLD; Codex adversarial review (2026-09-05, pass 2) rejected it — timer
+silence does not establish that a request cannot settle, and it would have disabled
+off-route recovery for the whole locked interval — so it was replaced by request-lifecycle
+bounding in `src/nav.ts` (GATE 4: ONE reroute in flight, aged and aborted off LOCATION
+FIXES, `held why=inflight`). Part B asserts that contract: a young in-flight request holds,
+an EXPIRED one never does (a stuck request must not wedge the gate), `null`/unmeasured never
+holds, an existing `moved` hold is untouched, `inflight` is reported first, and — the Codex
+objection made executable — a missed turn with timers reported starved by Rodrigo's worst
+figure and nothing in flight TRIPS. `offroute_storm_test.mts` L/M/N are the same contract on
+full traces (Rodrigo's 29-request storm → 19 bounded asks / 1 in flight; a wrong turn with
+timers frozen trips on B's exact tick; a hung ask retries every 16 s, never sooner), and they
+drive the REAL slot — `src/rerouteSlot.ts`, the pure state machine `src/nav.ts` wraps — not a
+mirror of it (review 2026-09-05: the first draft kept its own `outstanding[]` and would have
+passed with the registry deleted). Scenario O is the slot's contract clause by clause (claim
+ticket one-shot and dropped on an early return, identity-checked release, sweep frees + cancels
+the request's own timer + aborts exactly once, nav end frees without aborting). What no Node gate
+can see is the nav.ts WIRING — the sweep running before the decision and `rerouteInFlightMs`
+being passed — so `scripts/trap-check.py` carries two rules for exactly that.

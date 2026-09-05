@@ -35,6 +35,11 @@ import React, { useEffect, useMemo, useCallback, useRef, useState } from "react"
 import { reportDraw } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance } from "./heatProbe";
 import { logEvent } from "./crashBreadcrumb";
+// Timer-liveness clock (2026-09-04/05) — see src/timerLiveness.ts. Used by SelfCarModel
+// below to bypass the eased marker/camera path with a direct fix-driven update when JS
+// timers (not rAF) are dead, on BOTH surfaces (this component renders the phone map
+// directly and CarMapView's self car via the same SelfCarModel).
+import { noteRafFrame, timersStarvedMs, maybeLogTimerStarve } from "./timerLiveness";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert, Animated } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
@@ -1644,6 +1649,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // frame even when the ease has ended and we bail below. No-ops unless a drive is
     // being sampled. See src/heatProbe.ts for what question this answers.
     noteFrame(Date.now(), probeKeyRef.current);
+    // Diagnostic-only rAF side channel for src/timerLiveness.ts's `timer-starve` receipt
+    // (2026-09-05) — never feeds a decision, see that file for why rAF and the 1s-timer
+    // clock are measured independently.
+    noteRafFrame();
     const a = anim.current;
     if (!a) { raf.current = null; return; }
     a.stepped = true; // this ease has rendered ≥1 frame → the loop is alive for it
@@ -1724,6 +1733,19 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       rafDead.current = true;
     }
     const rafStale = rafDead.current;
+    // ── GLOBAL TIMER STARVATION (2026-09-04/05) ─────────────────────────────────
+    // `rafStale` above answers "is THIS component's own rAF/bgTick pump alive" — it
+    // says nothing about whether JS timers generally are being serviced, and the two
+    // are independent axes (see src/timerLiveness.ts header: Rodrigo's field freeze
+    // had timers dead + location alive; the architect's sim lock had the OPPOSITE
+    // split — timers alive, rAF + location dead). `starvedMs` is the general signal:
+    // ms since the app-wide 1s heartbeat last ticked, forced high by the sim-only
+    // debug switch (Settings -> Developer -> Debug overlays -> Force timer
+    // starvation) so this path is exercisable without a real multi-minute freeze.
+    // Logged unconditionally here (bounded + rate-limited inside the helper) so the
+    // receipt exists whether or not this fix ends up taking the bypass below.
+    const starvedMs = timersStarvedMs(now);
+    maybeLogTimerStarve(probeRole === 'car' ? 'car' : 'phone', now);
     // Post-foreground snap window: after returning from another app, iOS often
     // delivers a STALE cached fix first, then the fresh one. Easing between them is
     // the visible "camera plays catch-up to find the car." So for a short window
@@ -1812,7 +1834,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       start: now, dur: Math.max(220, fixGap.current * 1.1),
       armedAt: now, stepped: false,
     };
-    if (rafStale) {
+    if (rafStale || starvedMs > 2000) {
       // Phone display asleep (requestAnimationFrame paused) but CarPlay active + the app
       // alive via background location/audio → drive the ease from a background timer so
       // the head-unit car keeps moving smoothly instead of snapping to each ~1 Hz fix.
@@ -1828,6 +1850,23 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       // every background GPS fix — that's what trims the line) so the marker tracks.
       // When the timer IS alive (CarPlay scene keeps the app active) its heartbeat is
       // fresh and this snap is skipped, preserving the smooth head-unit ease.
+      //
+      // 2026-09-04/05: OR'd with `starvedMs > 2000` (the app-wide timer clock, NOT this
+      // instance's own bgTick pump — see src/timerLiveness.ts). `lastBgTickAt` can stay
+      // fresh purely because iOS's native CarPlay frame pump (onCarFrame, ~line 1560
+      // below) calls bgTick() directly from a native event, independent of whether
+      // setInterval/setTimeout are being serviced — Rodrigo's field freeze (JS timers
+      // dead, native events alive) is exactly the case where that pump may be the only
+      // thing still ticking. `starvedMs` catches the case that pump-liveness check
+      // cannot: JS timers dead AND (Android Auto has no such native pump, or the pump
+      // itself has stopped). Either signal alone is sufficient to prove no smooth
+      // animator is currently running.
+      // Codex adversarial review 2026-09-05: the hard-snap must key on the ANIMATION DRIVER's
+      // liveness only. On CarPlay the native frame pump (onCarFrame → bgTick) keeps
+      // lastBgTickAt fresh even while generic JS timers are frozen; snapping on `starvedMs`
+      // alone would turn that healthy pump into ~1 Hz jumps exactly during locked-phone use.
+      // `starvedMs` still opens this block (above) so the bg timer is armed and the receipt
+      // fires, but the snap waits for the pump itself to go silent.
       if (now - lastBgTickAt.current > 1500) {
         // Genuinely no driver (phone-only, screen locked, JS timers suspended): move the
         // marker from here, because nothing else will. With the stamp above now honest

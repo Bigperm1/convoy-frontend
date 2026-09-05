@@ -13,6 +13,12 @@ import type { MapMode, Settings } from '../settings';
 // AsyncStorage and react (settings.ts:2-3).
 import { getSettings, getMapMode, getRouteColor, getSelfMarkerType, subscribeSettings } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
+// Timer-liveness receipt (2026-09-04/05) — see src/timerLiveness.ts. setCarSelfPosition
+// is the single choke point every car-surface GPS fix passes through (mirror/fgwatch/
+// bgtask), so it is the right place to log the bounded `timer-starve` receipt. The
+// actual marker/camera bypass when timers are dead lives in SelfCarModel
+// (src/ConvoyMapbox.tsx), which reads timersStarvedMs() itself off the same fix.
+import { maybeLogTimerStarve } from '../timerLiveness';
 
 // Peer entry for the car surface. `id`+`handle` feed the Comms list (the original
 // shape); the optional position/status fields (added for CarPlay-standalone Wave 1)
@@ -325,6 +331,12 @@ export function setCarSelfPosition(
   fixTs?: number,
 ) {
   const now = Date.now();
+  // Bounded receipt (2026-09-04/05): every raw fix from any of the three feeds passes
+  // through here, regardless of whether the priority gate below accepts it — logged
+  // BEFORE the gate on purpose, so this answers "are timers starved" independent of
+  // which feed currently owns the marker. See src/timerLiveness.ts for why this is
+  // keyed on a plain 1s setInterval, not on rAF.
+  maybeLogTimerStarve('car', now);
   const rank = SELF_SOURCE_RANK[source];
   const cur = lastSelfPos;
   // dt < 0 = the wall clock stepped backward (NTP / manual set); treat as stale so a clock

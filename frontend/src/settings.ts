@@ -239,6 +239,15 @@ debugOverlays: boolean;
 // the head unit). Separate from debugOverlays so the car screen can stay clean
 // while phone diagnostics are on. Off by default.
 carplayDebug: boolean;
+// Developer, SIM-ONLY (2026-09-05): force src/timerLiveness.ts's timersStarvedMs() to
+// report starved so the fix-driven car-surface bypass and the off-route hold can be
+// exercised against a normal simulator location replay — the real field freeze
+// (JS timers dead, native location alive) could not be reproduced with a sim lock
+// (measured: a sim lock starves rAF + location instead, the opposite axis). Nested
+// behind debugOverlays in the developer settings screen so it cannot be hit by
+// accident. Off by default; undefined/legacy (every install before this field existed)
+// also reads as off.
+debugForceTimerStarve?: boolean;
 // Keep the phone screen awake while the map is open, so it can't auto-lock and
 // freeze the CarPlay marker mid-drive (Waze-style "keep screen on"). Gates the
 // map.tsx keep-awake. undefined/legacy → on (matches the prior always-on behavior).
@@ -316,6 +325,7 @@ volTransmission: undefined,
 musicSource: null,
 debugOverlays: false,
 carplayDebug: false,
+debugForceTimerStarve: false,
 preventAutoLock: true,
 muteDuringCalls: true,
 };
@@ -506,6 +516,17 @@ try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
 if (parsed.widebodyRetiredMigrated === undefined) {
 if (cached.carColor === "Widebody") cached.carColor = undefined;
 cached.widebodyRetiredMigrated = true;
+try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
+}
+// SESSION-SCOPED, every load (not a one-time migration flag — deliberately unlike
+// the blocks above): Codex adversarial review 2026-09-05 found that turning Debug
+// overlays off while Force timer starvation was on left `debugForceTimerStarve: true`
+// persisted with no visible control to clear it, so timersStarvedMs() kept reporting
+// a forced freeze across restarts. developer.tsx now also clears this when overlays
+// are turned off, but this is the backstop of last resort: a sim-only switch must
+// never survive an app restart, full stop, regardless of how it got left on.
+if (cached.debugForceTimerStarve === true) {
+cached.debugForceTimerStarve = false;
 try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
 }
 }

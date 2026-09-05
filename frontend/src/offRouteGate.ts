@@ -1,7 +1,8 @@
 // offRouteGate — the off-route DECISION, extracted pure so it can be replayed.
 //
 // Everything here used to live inline in `useTurnByTurn` (src/nav.ts). It is the same
-// streak + divergence-trend logic, moved verbatim, plus the two 2026-09-04 gates below.
+// streak + divergence-trend logic, moved verbatim, plus the four gates below (three from
+// 2026-09-04's parking-lot storm, the fourth from 2026-09-05's stacked-request storm).
 // It is pure and side-effect-free (state in, decision out — no React, no logEvent, no
 // Date.now()) for exactly one reason: `tools/sim-qc/offroute_storm_test.mts` replays a
 // real field trace against it as a numeric release gate. nav.ts keeps the GEOMETRY
@@ -195,8 +196,52 @@ const DIVERGE_MIN_SAMPLES = 4;
 // does not stop one.
 const OFFROUTE_MIN_GAP_MS = 8000;
 
+// ── GATE 4: ONE REROUTE REQUEST IN FLIGHT (`held why=inflight`, 2026-09-05) ────
+// Rodrigo, iOS + CarPlay, phone LOCKED, 2026-09-04 19:14-19:19 PT (crash_reports):
+// off-route trips kept posting every 8-9 s (native location events still ran the
+// decision) while JS TIMERS were frozen — the 15 s route-fetch abort `setTimeout`s
+// (src/nav.ts) all fired at once at 19:19:25, `route-fetch-abort-fired ms=176000-306929`,
+// 29 of them, and 29 `reroute-result … superseded` landed in the same burst. Each of the
+// 29 trips had issued its own request; NOTHING bounded how many could be outstanding.
+//
+// The first fix tried was a blanket `timers-starved` hold. Codex adversarial review
+// (2026-09-05) rejected it, correctly: timer silence does not establish that a network
+// request cannot settle — `fetchRoutes` uses its timer for CANCELLATION, not completion —
+// so that hold would have disabled off-route recovery outright for the whole locked
+// interval, and a genuine missed turn with fresh GPS and no request in flight would never
+// reroute. The bound belongs at the REQUEST OWNER, not on a proxy for it.
+//
+// So: at most ONE reroute request outstanding (src/rerouteSlot.ts — pure, so the storm
+// gate drives the real thing; nav.ts wraps it). While one is younger than
+// ROUTE_FETCH_TIMEOUT_MS the gate holds `inflight`; past that age nav.ts's FIX-DRIVEN
+// sweep (which runs off location events and therefore survives frozen timers) aborts it
+// and frees the slot, and the very next tick may trip. 29 stacked requests becomes at
+// most one per ~16 s at a 1 Hz fix cadence. `timersStarvedMs` stays in the tick input as
+// a RECEIPT ONLY — it is a diagnostic, never a blocker.
+//   • `offroute_storm_test.mts` scenario L is the gate (Rodrigo's storm, modelled as
+//     hanging requests + frozen timers); M asserts a fresh-GPS wrong turn with timers
+//     frozen and no request in flight trips on exactly the tick it does today;
+//     N asserts the second request is allowed once the fix-driven abort fires.
 export type OffRouteWhy = "missed" | "diverging" | "far" | "heading" | "sustained";
-export type OffRouteHold = "moved" | "trend" | "creeping";
+export type OffRouteHold = "moved" | "trend" | "creeping" | "inflight";
+
+// How long a reroute request may be outstanding before it is abandoned. ONE number for
+// three consumers, which is why it lives in this dependency-free file rather than in
+// nav.ts where it started: (1) `fetchRoutes`/`fetchRouteViaStops`'s own `setTimeout`
+// abort — now the SECOND line of defence, since a frozen timer service cannot fire it;
+// (2) nav.ts's fix-driven sweep, the FIRST line, which ages the request off GPS events;
+// (3) the `inflight` hold below. 15 s is unchanged from the 2026-08-21 value and its
+// original measurement stands: well past a normal Directions round trip (rkoji7's 20
+// hung refetches resolved 3-7 MINUTES late while Supabase inserts from the same phone
+// flowed within 0.2 s).
+export const ROUTE_FETCH_TIMEOUT_MS = 15000;
+
+/** True once an outstanding reroute request is old enough to abandon. Exported so the
+ *  fix-driven sweep in nav.ts, the `inflight` hold and the sim-qc gate all decide with
+ *  ONE predicate instead of three copies of `>`. Non-numeric age = no request. */
+export function rerouteInflightExpired(ageMs?: number | null): boolean {
+  return typeof ageMs === "number" && Number.isFinite(ageMs) && ageMs > ROUTE_FETCH_TIMEOUT_MS;
+}
 
 export type OffRouteGateState = {
   streak: number;                                   // consecutive ticks beyond REROUTE_DISTANCE_M
@@ -227,6 +272,19 @@ export type OffRouteTickInput = {
   // accuracy (app/(app)/map.tsx:1977-1984), so it arrives undefined there. Used only as
   // the minimum-step floor on the unknown-speed branch.
   accM?: number | null;
+  // ms since src/timerLiveness.ts's 1 s heartbeat last ticked. ⚠ DIAGNOSTIC ONLY — it is
+  // carried so the `off-route held`/`tripped` receipts can say whether JS timers were
+  // frozen at the moment of the decision, and it NEVER blocks a trip. It used to (a
+  // `timers-starved` hold, 2026-09-05, never shipped): see GATE 4 above for why that was
+  // wrong — timer silence does not establish that a request cannot settle, and holding on
+  // it would disable recovery for a genuine wrong turn with fresh GPS. undefined =
+  // unmeasured.
+  timersStarvedMs?: number;
+  // Age in ms of the ONE outstanding reroute request, or null/undefined when none is in
+  // flight. nav.ts owns the registry (it owns the AbortController) and sweeps expired
+  // entries off GPS fixes BEFORE calling this, so an age past ROUTE_FETCH_TIMEOUT_MS
+  // normally cannot reach here — and if it ever does it must NOT hold. See GATE 4.
+  rerouteInFlightMs?: number | null;
 };
 
 export type OffRouteDecision = {
@@ -282,8 +340,31 @@ const haversineM = (aLat: number, aLng: number, bLat: number, bLng: number): num
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
 };
 
-/** Which gate (if any) blocks a trip right now. `diverging` = the trend fired. */
-function holdReason(st: OffRouteGateState, diverging: boolean, now: number): OffRouteHold | null {
+// ⚠ NOT A GATE — a RECEIPT threshold (2026-09-05; it was briefly TIMERS_STARVED_HOLD_MS and
+// renamed the same day so the name cannot lie). Past this many ms of timer silence the
+// off-route crumbs carry `starved=<ms>`, so a storm read back off crash_reports
+// can be attributed to a freeze without guessing. It blocked trips for one unshipped
+// revision; GATE 4 above records why that was wrong and what replaced it. Kept at 3× the
+// 1 s heartbeat — one missed tick is noise, three is a freeze — and still referenced by
+// src/timerLiveness.ts's FORCED_STARVE_DT_MS comment as the far end of the real thresholds.
+export const TIMERS_STARVED_RECEIPT_MS = 3000;
+
+/** Which gate (if any) blocks a trip right now. `diverging` = the trend fired.
+ *  `rerouteInFlightMs` is the age of the outstanding reroute request (null = none). */
+export function holdReason(
+  st: OffRouteGateState,
+  diverging: boolean,
+  now: number,
+  rerouteInFlightMs?: number | null,
+): OffRouteHold | null {
+  // FIRST, deliberately: while a request is outstanding a second one can only stack. When
+  // a storm is read back off crash_reports this must name the bound that actually held it,
+  // not whichever older gate happened to be closed as well.
+  // Note the polarity — an EXPIRED age does not hold. The sweep should already have freed
+  // the slot; if it somehow has not, the stuck request must never be able to wedge the
+  // gate shut, which is the exact failure mode the `timers-starved` hold would have had.
+  if (typeof rerouteInFlightMs === "number" && Number.isFinite(rerouteInFlightMs) &&
+      !rerouteInflightExpired(rerouteInFlightMs)) return "inflight";
   if (st.travelSinceSwapM < SWAP_ARM_TRAVEL_M) return "moved";
   if (!diverging && st.travelSinceSwapM < SWAP_FASTPATH_ARM_M) return "trend";
   if (diverging && !st.onThisRoute) return "trend";
@@ -352,7 +433,7 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   };
   if (!why) return { trip: false, why: null, held: null, ...base };
   if (t.now - st.lastTripAt <= OFFROUTE_MIN_GAP_MS) return { trip: false, why, held: null, ...base };
-  const held = holdReason(st, diverging, t.now);
+  const held = holdReason(st, diverging, t.now, t.rerouteInFlightMs);
   if (held) return { trip: false, why, held, ...base };
 
   // ── COOLDOWN ONLY — NOTHING ROUTE-RELATIVE (corrected 2026-09-04, same day) ──

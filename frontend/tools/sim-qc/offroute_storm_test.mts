@@ -23,6 +23,16 @@
 //    scattering 3–8 m. Zero reroutes, `held why=creeping`, and essentially no banked
 //    travel — pre-fix the speedless ticks kept the creep window forever fresh and the raw
 //    scatter path armed both post-swap guards on its own.
+// L: Rodrigo's 2026-09-05 STACKED-REQUEST storm — five minutes genuinely off-route with
+//    the phone locked, every reroute request HANGING and JS timers frozen so nothing can
+//    cancel one. Pre-fix that stacks a request per trip (the field burst: 29 at once);
+//    bounded, at most ONE may be outstanding and the FIX-DRIVEN sweep abandons it at 15 s.
+// M: the Codex objection made executable — a fresh-GPS wrong turn at 40 km/h with JS
+//    timers frozen and NO request in flight must reroute on exactly the tick B does.
+//    (The rejected `timers-starved` hold would have failed this outright.)
+// N: a hung request AND a genuine missed turn: held while the request is young, allowed
+//    the moment the fix-driven abort frees the slot — and again every 16 s while the
+//    retries keep hanging, never sooner.
 //
 // The traces are laid out on a straight synthetic road running due east: the car sits
 // `d` metres south of the CURRENT line, and `pos` is how far south it has actually driven.
@@ -30,9 +40,15 @@
 // swap as the car teleporting back to 27 m, which counted the re-snap as 37 m of driving
 // and armed the travel gate for free. A swap moves the LINE, not the car.
 import {
-  newOffRouteGateState, resetOffRouteGate, offRouteTick,
+  newOffRouteGateState, resetOffRouteGate, offRouteTick, ROUTE_FETCH_TIMEOUT_MS,
   SWAP_ARM_TRAVEL_M, SWAP_FASTPATH_ARM_M, ONROUTE_M, REROUTE_DISTANCE_M, type OffRouteGateState,
 } from "../../src/offRouteGate.ts";
+// The REAL one-in-flight slot nav.ts wraps (review 2026-09-05: the first version of this
+// gate kept its own `outstanding[]` and would have passed with the registry deleted).
+import {
+  newRerouteSlotState, armRerouteClaim, dropRerouteClaim, claimRerouteSlot, releaseRerouteSlot,
+  rerouteInFlightAgeMs, sweepRerouteInFlight, abandonRerouteInFlight,
+} from "../../src/rerouteSlot.ts";
 
 const fails: string[] = [];
 const check = (ok: boolean, msg: string) => { if (!ok) fails.push(msg); };
@@ -72,25 +88,71 @@ function run(
      *  the creeping hold could never engage. Set at the top of the tick, exactly where the
      *  old line sat. The "must still reproduce the failure" direction for scenario K. */
     legacyUnknownSpeedFast?: boolean;
+    // ── REQUEST LIFECYCLE (2026-09-05, scenarios L/M/N) ──────────────────────────────
+    /** Every trip issues a reroute request that HANGS and never settles. The request goes
+     *  through the REAL slot (src/rerouteSlot.ts) exactly as src/nav.ts drives it: the tick
+     *  arms the claim ticket, the "fetch" claims the slot, the ticket is dropped; and
+     *  `sweepRerouteInFlight` runs at the top of every tick, BEFORE `offRouteTick`, off a
+     *  location event. Implies the reroute never lands, so `resetOffRouteGate` is not
+     *  called (same as `rerouteFails`). */
+    hangingRequests?: boolean;
+    /** THE PRE-FIX DIRECTION for L. Replays the shipped code exactly: there is no
+     *  registry, so there is no fix-driven sweep and the gate is never told a request is
+     *  outstanding — and with JS timers frozen the per-request `setTimeout` cannot cancel
+     *  anything either. Nothing bounds the requests, and they all stay live. */
+    preFixUnbounded?: boolean;
+    /** JS-timer starvation reported on EVERY tick. A pure diagnostic in the tick input —
+     *  the assertion is that it can never block a trip by itself (M). */
+    starvedMs?: number;
   },
-): { trips: number[]; holds: string[]; st: OffRouteGateState; endT: number } {
+): {
+  trips: number[]; holds: string[]; st: OffRouteGateState; endT: number; aborts: number[];
+  maxInFlight: number; overwrites: number; ctlAborts: number;
+} {
   const st: OffRouteGateState = opts?.state ?? newOffRouteGateState(opts?.t0 ?? T0);
   let t = opts?.t0 ?? T0, offset = 0;   // metres added to every subsequent d by the swaps so far
   if (opts?.sessionReset) resetOffRouteGate(st, t);
   const trips: number[] = [], holds: string[] = [];
+  const slot = newRerouteSlotState();   // the real slot, bounded direction
+  let outstanding: number[] = [];       // pre-fix world: no registry, every request stays live
+  const aborts: number[] = [];
+  let maxInFlight = 0, overwrites = 0, ctlAborts = 0;
   for (const k of ticks) {
     t += 1000;
     if (opts?.gatesOff) { st.travelSinceSwapM = 1e6; st.onThisRoute = true; }
     if (opts?.legacyUnknownSpeedFast &&
         (typeof k.speedMs !== "number" || !Number.isFinite(k.speedMs))) st.lastFastAt = t;
+    // The fix-driven sweep, in the order src/nav.ts runs it: BEFORE the decision, so the
+    // same tick that abandons an expired request may legitimately ask for the next one.
+    if (opts?.hangingRequests && !opts?.preFixUnbounded) {
+      if (sweepRerouteInFlight(slot, t) != null) aborts.push(t - T0);
+    }
+    const inFlightMs = opts?.preFixUnbounded ? null : rerouteInFlightAgeMs(slot, t);
     const d = k.d + offset;
     const dec = offRouteTick(st, {
       now: t, dRoute: d, headingOff: k.headingOff ?? true, missedManeuver: k.missed ?? false,
       lat: LAT0 - k.pos / M_PER_DEG_LAT, lng: LNG0, speedMs: k.speedMs, accM: k.accM,
+      timersStarvedMs: opts?.starvedMs,
+      rerouteInFlightMs: inFlightMs,
     });
     if (dec.trip) {
       trips.push(t - T0);
-      if (opts?.rerouteFails) {
+      if (opts?.hangingRequests) {
+        if (opts.preFixUnbounded) {
+          outstanding.push(t);
+          if (outstanding.length > maxInFlight) maxInFlight = outstanding.length;
+        } else {
+          // nav.ts: arm the ticket → the handler's fetch claims before its first await →
+          // the ticket is dropped. A trip while the slot is STILL occupied means the hold
+          // failed — counted, and asserted to be zero.
+          if (slot.inflight) overwrites++;
+          armRerouteClaim(slot);
+          claimRerouteSlot(slot, t, { abort() { ctlAborts++; } });
+          dropRerouteClaim(slot);
+          maxInFlight = Math.max(maxInFlight, slot.inflight ? 1 : 0);
+        }
+      }
+      if (opts?.rerouteFails || opts?.hangingRequests) {
         // Nothing is installed and resetOffRouteGate is NOT called — the line, and every
         // route-relative counter measured against it, must survive untouched.
         if (opts.legacyTripReset) { st.swapAt = t; st.travelSinceSwapM = 0; st.onThisRoute = false; }
@@ -101,7 +163,7 @@ function run(
     }
     if (dec.held) holds.push(dec.held);
   }
-  return { trips, holds, st, endT: t };
+  return { trips, holds, st, endT: t, aborts, maxInFlight, overwrites, ctlAborts };
 }
 
 // ── A: THE LOT STORM ─────────────────────────────────────────────────────────────
@@ -283,6 +345,123 @@ check(kRawPathM > SWAP_FASTPATH_ARM_M,
 check(kTravelBanked < 1,
   `K banked ${kTravelBanked.toFixed(1)}m of "travel" from a parked car over a ${kRawPathM.toFixed(0)}m raw scatter path (want <1)`);
 
+// ── L: RODRIGO'S STACKED-REQUEST STORM ───────────────────────────────────────────
+// Receipts (crash_reports, 2026-09-04 PT, iOS + CarPlay, phone LOCKED):
+//   19:14-19:19  off-route trips posting LIVE every 8-9 s (fix-driven, timers dead)
+//   19:19:25     29 × `route-fetch-abort-fired ms=176000-306929` in ONE burst
+//   19:19:25     29 × `reroute-result … superseded` in the same burst
+// Every trip issued its own request; nothing bounded how many could be outstanding, and
+// the only cancellation was a `setTimeout` that could not fire for five minutes.
+//
+// The car really IS off-route here — this is NOT the lot storm. It is on a road 205 m
+// from the line at 40 km/h, so `conclusivelyOff` (>160 m) holds, every 09-04 gate is open
+// (travel banked, `onThisRoute` earned, speed well above the creep threshold) and the
+// ONLY thing that can bound the requests is the in-flight registry. That is deliberate:
+// a scenario the older gates could stop would prove nothing about this one.
+// 20 ticks of departure at 10 m/s outward, then five minutes holding station off the line.
+const STORM_S = 300;
+const rodrigo: Tick[] = [];
+for (let i = 1; i <= 30; i++) rodrigo.push({ pos: 11.1 * i, d: 5, speedMs: 11.1 });          // on route, 40 km/h
+for (let i = 1; i <= 20; i++) rodrigo.push({ pos: 333 + 11.1 * i, d: 5 + 10 * i, speedMs: 11.1 });
+for (let i = 1; i <= STORM_S - 20; i++) rodrigo.push({ pos: 555 + 11.1 * i, d: 205, speedMs: 11.1 });
+const Lpre = run(rodrigo, { hangingRequests: true, preFixUnbounded: true, starvedMs: 306_929 });
+const L = run(rodrigo, { hangingRequests: true, starvedMs: 306_929 });
+const Lgaps = L.trips.slice(1).map((x, i) => x - L.trips[i]);
+check(Lpre.trips.length >= 29 && Lpre.maxInFlight >= 29,
+  `L model is wrong: the pre-fix run gave ${Lpre.trips.length} requests / ${Lpre.maxInFlight} stacked, and the field burst was 29 at once — it is not reproducing the failure`);
+check(L.maxInFlight === 1 && L.overwrites === 0,
+  `L allowed a trip while a request was still in flight (${L.overwrites} overwrites; slot used=${L.maxInFlight}) — want 0 overwrites, slot used`);
+check(L.ctlAborts === L.aborts.length,
+  `L the sweep freed ${L.aborts.length} requests but aborted ${L.ctlAborts} controllers (want equal — free AND abort, every time)`);
+check(L.trips.length <= 20,
+  `L issued ${L.trips.length} reroute requests over ${STORM_S}s (want ≤20 — one per ROUTE_FETCH_TIMEOUT_MS + a fix)`);
+// The exact bound this implementation gives, not a range: a request is abandoned on the
+// first fix STRICTLY past ROUTE_FETCH_TIMEOUT_MS (15 s), which at a 1 Hz fix cadence is
+// 16 s, and the 8 s rate limit has long since expired by then. 19 = 1 + floor(287/16).
+check(Lgaps.every((g) => g === ROUTE_FETCH_TIMEOUT_MS + 1000),
+  `L trips are ${[...new Set(Lgaps)].join("/")}ms apart (want every gap = ${ROUTE_FETCH_TIMEOUT_MS + 1000} — the timeout plus the fix that observes it)`);
+check(L.trips.length === 19,
+  `L issued ${L.trips.length} requests over ${STORM_S}s (want exactly 19)`);
+check(L.holds.includes("inflight"),
+  `L never reported held why=inflight (holds: ${[...new Set(L.holds)].join("/") || "none"}) — the bound is not the thing doing the work`);
+check(L.aborts.length >= L.trips.length - 1,
+  `L aborted only ${L.aborts.length} of ${L.trips.length} hung requests from the fix path (want ≥${L.trips.length - 1}; the last one may still be young when the trace ends)`);
+
+// ── M: THE CODEX OBJECTION, EXECUTABLE ───────────────────────────────────────────
+// "Timer starvation unconditionally disables off-route recovery — a genuine missed turn
+// with fresh GPS and no request in flight never reroutes for the entire locked interval."
+// Correct, and it is why the `timers-starved` hold was thrown away. Scenario B's exact
+// trace, re-run with the worst starvation figure in Rodrigo's log (306929 ms) reported on
+// every tick and NO request outstanding: it must trip on the same tick as B.
+const M = run(wrongTurn, { starvedMs: 306_929 });
+check(M.trips.length === B.trips.length && M.trips[0] === B.trips[0],
+  `M wrong turn with timers frozen tripped at ${M.trips[0] ?? "never"} ms (${M.trips.length} trips) vs B's ${B.trips[0] ?? "never"} ms (${B.trips.length}) — timer starvation must never block a trip by itself`);
+check(!M.holds.includes("inflight"),
+  `M held why=inflight with nothing in flight (holds: ${[...new Set(M.holds)].join("/") || "none"})`);
+
+// ── N: A HUNG REQUEST, THEN A GENUINE MISSED TURN ────────────────────────────────
+// The reroute for the first departure hangs. The driver then misses a maneuver — the
+// fast path that trips on ONE tick with no streak at all. It must be held while the
+// outstanding request is young, and allowed the moment the fix-driven abort frees the
+// slot: 16 s, not 5 minutes, and not "never". Every retry hangs too (the phone is still
+// locked), so the pattern REPEATS for as long as the trace lasts: one ask, then exactly
+// one more every ROUTE_FETCH_TIMEOUT_MS + one fix — 21 s, 37 s, 53 s on a 54 s trace.
+// (The first draft of this scenario wanted "exactly 2" on the same trace; the third ask
+// at 53 s is the bound doing its job, not a defect, so the expectation is DERIVED from
+// the trace length rather than hard-coded.)
+const nTicks: Tick[] = [];
+for (let i = 1; i <= 20; i++) nTicks.push({ pos: 11.1 * i, d: 5, speedMs: 11.1 });            // on route
+for (let i = 1; i <= 4; i++) nTicks.push({ pos: 222 + 11.1 * i, d: 205, speedMs: 11.1 });     // conclusively off → trip 1
+for (let i = 1; i <= 30; i++) nTicks.push({ pos: 266 + 11.1 * i, d: 205, speedMs: 11.1, missed: true });
+const N = run(nTicks, { hangingRequests: true, starvedMs: 306_929 });
+const N_RETRY_MS = ROUTE_FETCH_TIMEOUT_MS + 1000;
+const nGaps = N.trips.slice(1).map((x, i) => x - N.trips[i]);
+// Retries expected after the first ask, given how long the trace runs past it.
+const nWantTrips = N.trips.length ? 1 + Math.floor((N.endT - T0 - N.trips[0]) / N_RETRY_MS) : 0;
+check(N.trips.length >= 2,
+  `N hung request + missed turn gave ${N.trips.length} reroute(s) — the slot never freed; the missed turn must be allowed once the fix-driven abort fires`);
+check(nGaps.length > 0 && nGaps.every((g) => g === N_RETRY_MS),
+  `N retries came ${[...new Set(nGaps)].join("/") || "never"} ms apart (want every gap = ${N_RETRY_MS}: the timeout plus the fix that observes it — no earlier, no later)`);
+check(N.trips.length === nWantTrips,
+  `N issued ${N.trips.length} asks over the trace (want ${nWantTrips} = the first ask + one retry per ${N_RETRY_MS} ms while it kept hanging)`);
+check(N.holds.includes("inflight"),
+  `N never reported held why=inflight (holds: ${[...new Set(N.holds)].join("/") || "none"}) — the missed-maneuver fast path must be the thing being held`);
+check(N.trips.slice(1).every((t, i) => N.aborts[i] === t),
+  `N aborts [${N.aborts.join(",")}] did not each land on the same fix as the retry they freed [${N.trips.slice(1).join(",")}]`);
+check(N.aborts.length === N.trips.length - 1,
+  `N aborted ${N.aborts.length} requests for ${N.trips.length} asks (want ${N.trips.length - 1}: every ask but the last, still-young one)`);
+check(N.overwrites === 0 && N.ctlAborts === N.aborts.length,
+  `N overwrites=${N.overwrites} ctlAborts=${N.ctlAborts} sweeps=${N.aborts.length} (want 0, equal)`);
+
+// ── O: THE CLAIM TICKET + IDENTITY RELEASE (src/rerouteSlot.ts, unit) ────────────
+// The registry's contract, one clause per check, against the real functions nav.ts wraps.
+const o = newRerouteSlotState();
+const c1 = { abort() {} }, c2 = { abort() {} };
+check(claimRerouteSlot(o, T0, c1) === false && o.inflight === null,
+  "O1 a fetch nobody armed (initial plot / scenic / preview / CarPlay search) must not take the slot");
+armRerouteClaim(o); dropRerouteClaim(o);
+check(claimRerouteSlot(o, T0, c1) === false && o.inflight === null,
+  "O2 a ticket dropped before any fetch ran (handler returned early) must leave nothing claimable");
+armRerouteClaim(o);
+check(claimRerouteSlot(o, T0, c1) === true && o.claim === false && rerouteInFlightAgeMs(o, T0 + 500) === 500,
+  "O3 the armed fetch takes the slot, consumes the ticket, and the gate reads its age");
+check(claimRerouteSlot(o, T0, c2) === false && o.inflight?.ctl === c1,
+  "O4 the ticket is one-shot — a second fetch in the same window must not take the slot");
+check(releaseRerouteSlot(o, c2) === false && o.inflight !== null,
+  "O5 a foreign controller (a zombie settling late) must not clear the slot");
+check(sweepRerouteInFlight(o, T0 + ROUTE_FETCH_TIMEOUT_MS) === null && o.inflight !== null,
+  `O6 at exactly ${ROUTE_FETCH_TIMEOUT_MS} ms the request is still the slot's`);
+let oTimer = 0, oAbort = 0;
+o.inflight!.cancelTimer = () => { oTimer++; }; o.inflight!.ctl = { abort() { oAbort++; } };
+check(sweepRerouteInFlight(o, T0 + ROUTE_FETCH_TIMEOUT_MS + 1) === ROUTE_FETCH_TIMEOUT_MS + 1 && o.inflight === null && oTimer === 1 && oAbort === 1,
+  `O7 one ms past the timeout the sweep frees, cancels the request's own timer and aborts — each exactly once (timer=${oTimer} abort=${oAbort})`);
+armRerouteClaim(o); claimRerouteSlot(o, T0, c1);
+check(releaseRerouteSlot(o, c1) === true && o.inflight === null,
+  "O8 the settling fetch clears its own slot");
+armRerouteClaim(o); claimRerouteSlot(o, T0, c1);
+check(abandonRerouteInFlight(o, T0 + 4000) === 4000 && o.inflight === null && abandonRerouteInFlight(o, T0 + 5000) === null,
+  "O9 nav end / unmount frees without aborting, and is a no-op on an empty slot");
+
 const fmt = (r: { trips: number[] }) => r.trips.map((x) => (x / 1000).toFixed(0) + "s").join(",") || "none";
 console.log(
   `A lot storm: today=${Atoday.trips.length} [${fmt(Atoday)}] → gated=${A.trips.length} [${fmt(A)}] ` +
@@ -296,7 +475,12 @@ console.log(
   `holds=${[...new Set(J.holds)].join("/") || "-"} (want 0) | ` +
   `K parked 3min, no speed field: pre-fix=${Kpre.trips.length} → fixed=${K.trips.length} ` +
   `holds=${[...new Set(K.holds)].join("/") || "-"} banked=${kTravelBanked.toFixed(1)}m of ${kRawPathM.toFixed(0)}m raw (want 0, <1m) | ` +
-  `arm=${SWAP_ARM_TRAVEL_M}m onRoute=${ONROUTE_M}m`,
+  `L stacked-request storm ${STORM_S}s: pre-fix=${Lpre.trips.length} reqs / ${Lpre.maxInFlight} in flight (field: 29) → ` +
+  `bounded=${L.trips.length} reqs / ${L.maxInFlight} in flight (overwrites=${L.overwrites}), gaps=${[...new Set(Lgaps)].join("/")}ms aborts=${L.aborts.length}/${L.ctlAborts} ` +
+  `holds=${[...new Set(L.holds)].join("/") || "-"} (want ≤20, 1) | ` +
+  `M wrong turn + timers frozen ${fmt(M)} vs B ${fmt(B)} (want equal) | ` +
+  `N hung request + missed turn=${N.trips.length} [${fmt(N)}] gaps=${[...new Set(nGaps)].join("/") || "-"}ms aborts=${N.aborts.length} (want ${nWantTrips}, +${N_RETRY_MS}ms) | ` +
+  `O slot contract 9/9 | arm=${SWAP_ARM_TRAVEL_M}m onRoute=${ONROUTE_M}m fetchTimeout=${ROUTE_FETCH_TIMEOUT_MS}ms`,
 );
 if (fails.length) { console.error("FAIL:\n  " + fails.join("\n  ")); process.exit(1); }
 console.log("PASS");

@@ -1,6 +1,12 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
+    // 2026-09-05: src/rerouteSlot.ts imports "./offRouteGate.ts" WITH the extension so the
+    // pure modules also run under plain Node (`node --experimental-strip-types`, the sim-qc
+    // gates) — Node ESM does not probe extensions. tsc only allows that with these two flags;
+    // Metro resolves the explicit path directly. `yarn typecheck` is `tsc --noEmit` anyway.
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "strict": true,
     "paths": {
       "@/*": ["./*"],

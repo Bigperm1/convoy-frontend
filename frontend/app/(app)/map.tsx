@@ -1873,6 +1873,10 @@ export default function MapScreen() {
       tripBaselineRef.current = null;
       pendingRerouteRef.current = null;
       clearOffer();
+      // Supersede any reroute still in flight: its result is for a drive that is over, and the
+      // `.then` guard only compares this counter + a 30 s / 500 m staleness window — an
+      // old-destination route could otherwise land on the NEXT trip (review 2026-09-05, F3).
+      offRouteReqSeqRef.current++;
       // Stops + visited keys go with the trip (review, 2026-08-27). This teardown's
       // own comment promises "the SAME full teardown the Clear button does", but it
       // never cleared stops — and a lingering visited KEY is worse than a lingering
@@ -2626,6 +2630,10 @@ export default function MapScreen() {
     tripBaselineRef.current = null;
     pendingRerouteRef.current = null;
     clearOffer();
+    // Supersede any reroute still in flight: its result is for a drive that is over, and the
+    // `.then` guard only compares this counter + a 30 s / 500 m staleness window — an
+    // old-destination route could otherwise land on the NEXT trip (review 2026-09-05, F3).
+    offRouteReqSeqRef.current++;
     navAutoStartedRef.current = true;  // stay stopped until a new destination is set
     setNavMode("preview");
   };
@@ -2968,6 +2976,10 @@ export default function MapScreen() {
     tripBaselineRef.current = null;
     pendingRerouteRef.current = null;
     clearOffer();
+    // Supersede any reroute still in flight: its result is for a drive that is over, and the
+    // `.then` guard only compares this counter + a 30 s / 500 m staleness window — an
+    // old-destination route could otherwise land on the NEXT trip (review 2026-09-05, F3).
+    offRouteReqSeqRef.current++;
     setDestination(null);
     setRoutes([]);
     setRoute(null);

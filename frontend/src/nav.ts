@@ -20,7 +20,16 @@ import { api } from "./api";
 import { fetchMapboxRoutes, fetchMapboxRouteVia, refreshMapboxRoute, arrivesOnFarSide, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
 import { anchorStepIndex } from "./navAnchor";
-import { newOffRouteGateState, resetOffRouteGate, offRouteTick, type OffRouteGateState } from "./offRouteGate";
+import {
+  newOffRouteGateState, resetOffRouteGate, offRouteTick, rerouteInflightExpired,
+  ROUTE_FETCH_TIMEOUT_MS, TIMERS_STARVED_RECEIPT_MS, type OffRouteGateState,
+} from "./offRouteGate";
+import { timersStarvedMs } from "./timerLiveness";
+import {
+  newRerouteSlotState, armRerouteClaim as slotArm, dropRerouteClaim as slotDrop,
+  claimRerouteSlot as slotClaim, releaseRerouteSlot as slotRelease, rerouteInFlightAgeMs as slotAgeMs,
+  sweepRerouteInFlight as slotSweep, abandonRerouteInFlight as slotAbandon,
+} from "./rerouteSlot";
 import { getSettings, getNovaVoice, getAudioVol } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { duckForSpeech, unduckForSpeech } from "./applePlayer";
@@ -169,6 +178,79 @@ export type AvoidPrefs = {
   ferries?: boolean;
 };
 
+// ══ REROUTE REQUEST REGISTRY — ONE IN FLIGHT, AGED BY GPS FIXES (2026-09-05) ══════
+// Rodrigo, iOS + CarPlay, phone LOCKED, 2026-09-04 19:14-19:19 PT (crash_reports):
+// off-route trips each issued their own reroute request, and NOTHING here bounded how
+// many could be outstanding. `offRouteReqSeqRef` in app/(app)/map.tsx supersedes
+// RESULTS, not REQUESTS — they were all live at once, and every
+// `route-fetch-abort-fired ms=176000-306929` landed in one burst when the app came
+// forward, because the ONLY thing that could cancel one was a `setTimeout` and JS timers
+// were frozen for the whole five minutes.
+//
+// Two changes, and neither of them is "hold when timers look frozen" (Codex adversarial
+// review, 2026-09-05, correctly rejected that: timer silence does not establish that a
+// request cannot SETTLE — the timer is used for cancellation only — and a blanket hold
+// would leave a genuine wrong turn with fresh GPS unable to reroute for the whole locked
+// interval):
+//   1. ONE slot. A reroute is registered while it is outstanding, and the off-route gate
+//      holds `why=inflight` until it clears (src/offRouteGate.ts, GATE 4).
+//   2. The slot is aged and abandoned from LOCATION FIXES (`sweepRerouteInFlight`, called
+//      on every off-route tick), which kept running all through Rodrigo's freeze — the
+//      per-request `setTimeout` stays as the second line of defence for the case where
+//      fixes stop instead.
+// The state machine itself is src/rerouteSlot.ts (pure, so tools/sim-qc's storm gate
+// drives the SAME code); these wrappers add the module-level instance, the wall clock and
+// the receipts. A late zombie result is caught downstream exactly as before — map.tsx's
+// `REROUTE_MAX_AGE_MS` staleness check reads a wall clock, so it is unaffected by frozen
+// timers and still rejects everything the sweep abandoned at 15 s that resurfaces past
+// 30 s; and nav end bumps `offRouteReqSeqRef` so a result for a finished drive is
+// superseded outright.
+const _rerouteSlot = newRerouteSlotState();
+
+/** Arm/drop the one-shot claim ticket around the off-route handler. nav.ts internal. */
+function armRerouteClaim(): void { slotArm(_rerouteSlot); }
+function dropRerouteClaim(): void { slotDrop(_rerouteSlot); }
+
+/** Called from inside fetchRoutes/fetchRouteViaStops, before their first await. */
+function claimRerouteSlot(startedAt: number, ctl: AbortController, cancelTimer: () => void): void {
+  slotClaim(_rerouteSlot, startedAt, ctl, cancelTimer);
+}
+function releaseRerouteSlot(ctl: AbortController): void { slotRelease(_rerouteSlot, ctl); }
+
+/** Age of the outstanding reroute request, or null when the slot is empty. */
+export function rerouteInFlightAgeMs(now: number): number | null {
+  return slotAgeMs(_rerouteSlot, now);
+}
+
+/**
+ * FIX-DRIVEN TIMEOUT. Abort and free an outstanding reroute older than
+ * ROUTE_FETCH_TIMEOUT_MS. Called on every off-route tick — i.e. from a LOCATION EVENT,
+ * the one clock that survived Rodrigo's freeze. Returns the aborted age, or null.
+ * `src=fix` distinguishes this from the `setTimeout` path's crumb of the same name — on
+ * Rodrigo's trace every row was the timer path, minutes late. The request's own timer is
+ * cancelled by the sweep, so an abandoned request is reported ONCE (review, same day).
+ */
+export function sweepRerouteInFlight(now: number): number | null {
+  const age = slotSweep(_rerouteSlot, now);
+  if (age != null) { try { logEvent(`route-fetch-abort-fired ms=${age} src=fix`); } catch {} }
+  return age;
+}
+
+/**
+ * Free the slot outright when the drive ENDS or the engine unmounts mid-nav. A reroute
+ * still outstanding then belongs to a route nobody is on any more; without this, the
+ * module-level slot would hold the NEXT session's first off-route tick `inflight` for up
+ * to ROUTE_FETCH_TIMEOUT_MS. Free only — no abort: the request's own timer / settle path
+ * still runs, map.tsx's `endNav` bumps `offRouteReqSeqRef` so the result is superseded,
+ * and the identity-checked release means a late settle cannot clear a newer session's
+ * slot. At most one row per nav end / unmount; a no-op when the slot is empty.
+ */
+export function abandonRerouteInFlight(src: "nav-end" | "unmount"): number | null {
+  const age = slotAbandon(_rerouteSlot, Date.now());
+  if (age != null) { try { logEvent(`reroute-slot-freed ms=${age} src=${src}`); } catch {} }
+  return age;
+}
+
 // ---- Route fetch (MAPBOX Directions — see the file header) ----
 // Returns NavRoute[], the shape every caller (map.tsx, the car surfaces, the turn
 // engine) consumes. The "Routes API v2 / computeRoutes" this comment used to name
@@ -194,7 +276,16 @@ export async function fetchRoutes(
   // 2026-09-03: Olaf's ids 8-17 resolved 7-159 s late in ONE second with real routes and this
   // catch never ran — so either the timer never fired or fetch ignored the abort. Two rows tell
   // them apart: the timer firing, and how long the request actually took to settle.
+  // ⚠ SECOND line of defence since 2026-09-05, not the first. A frozen JS timer service
+  // cannot fire this at all (Rodrigo: 29 of these landed 176-307 s late, all at once); the
+  // FIX-DRIVEN sweep above is what actually bounds a reroute now. Kept because the two
+  // fail in opposite conditions — this one still covers a request outstanding while
+  // location events have stopped, and it is the only cancellation the non-reroute callers
+  // (initial plot, scenic, search preview) have.
   const timer = setTimeout(() => { try { logEvent(`route-fetch-abort-fired ms=${Date.now() - t0}`); } catch {} ctl.abort(); }, ROUTE_FETCH_TIMEOUT_MS);
+  // Occupies the single reroute slot ONLY when the off-route tick armed the ticket — an
+  // initial plot / scenic / preview fetch must never make the gate report `inflight`.
+  claimRerouteSlot(t0, ctl, () => clearTimeout(timer));
   try {
     mbRoutes = await fetchMapboxRoutes(
       origin,
@@ -215,10 +306,10 @@ export async function fetchRoutes(
     return [];
   } finally {
     clearTimeout(timer);
+    releaseRerouteSlot(ctl);
   }
   return mbRoutes.map(mapboxToNavRoute).filter((r: NavRoute) => r.polyline);
 }
-const ROUTE_FETCH_TIMEOUT_MS = 15000;
 
 // ── ARRIVE ON THE DRIVER'S SIDE, WHEN IT IS CHEAP (2026-07-31) ──────────────
 // Jeff: "the GPS needs to be a little mindful on which side of the road the
@@ -937,6 +1028,8 @@ export function useTurnByTurn(
       const cleared: TbtState = { active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0 };
       stateRef.current = cleared;
       setState(cleared);
+      // The single reroute slot (2026-09-05) must not outlive the drive it was asked for.
+      abandonRerouteInFlight("nav-end");
       return;
     }
     _tbtEngineActive = true; // phone engine owns spoken guidance while active
@@ -976,7 +1069,7 @@ export function useTurnByTurn(
 
   // Release spoken-guidance ownership if the phone screen unmounts mid-nav (tab
   // switch / app teardown) so the cold CarPlay path can pick the voice up.
-  useEffect(() => () => { _tbtEngineActive = false; }, []);
+  useEffect(() => () => { _tbtEngineActive = false; abandonRerouteInFlight("unmount"); }, []);
 
   // Re-anchor on a mid-drive route SWAP. When the active route's polyline changes
   // while navigating — a Nova reroute the driver accepted, or an off-route
@@ -1204,23 +1297,45 @@ export function useTurnByTurn(
         dManeuver > missRef.current.min + 150 &&
         dRoute > 25;
       // The DECISION (streak, divergence trend, the 8 s rate limit and the 2026-09-04
-      // post-swap / creeping gates) is pure and lives in src/offRouteGate.ts, so the
-      // parking-lot storm replays as a numeric gate. Geometry stays here.
+      // post-swap / creeping gates plus 09-05's in-flight bound) is pure and lives in
+      // src/offRouteGate.ts, so both storms replay as a numeric gate. Geometry stays here.
       const nowT = Date.now();
+      // ⚠ THE FIX-DRIVEN TIMEOUT, AND IT MUST RUN BEFORE THE DECISION. This block is
+      // reached from a LOCATION EVENT — the clock that kept running through Rodrigo's
+      // 2026-09-04 freeze while every `setTimeout` sat dead for five minutes. Sweeping
+      // first means an expired reroute is abandoned and its slot freed on the same tick
+      // that may then legitimately ask for a new one, so the bound costs a stuck request
+      // ROUTE_FETCH_TIMEOUT_MS and not a fix more.
+      sweepRerouteInFlight(nowT);
+      const starvedMs = timersStarvedMs(nowT);
+      const inFlightMs = rerouteInFlightAgeMs(nowT);
       const decision = offRouteTick(offRouteGateRef.current, {
         now: nowT, dRoute, headingOff, missedManeuver,
         lat: user.lat, lng: user.lng, speedMs: user.speed, accM: user.acc,
+        // Receipt only — never a blocker. See offRouteGate.ts's GATE 4.
+        timersStarvedMs: starvedMs,
+        rerouteInFlightMs: inFlightMs,
       });
+      // `starved=` on BOTH crumbs: it is the one field that tells a storm read back off
+      // crash_reports apart from an ordinary one, and it is now the only thing timer
+      // liveness is used for in this file.
+      const starvedTag = starvedMs > TIMERS_STARVED_RECEIPT_MS ? ` starved=${Math.round(starvedMs)}` : "";
       if (decision.trip) {
-        try { logEvent(`off-route tripped d=${Math.round(dRoute)}m streak=${decision.streak} why=${decision.why} step=${stepIdx}`); } catch {}
+        try { logEvent(`off-route tripped d=${Math.round(dRoute)}m streak=${decision.streak} why=${decision.why} step=${stepIdx}${starvedTag}`); } catch {}
         missRef.current = null; // one miss = one reroute; re-arm on the new route
-        options?.onOffRoute?.();
+        // Arm the one-shot claim so whichever fetch the handler issues occupies the single
+        // reroute slot, and drop it again immediately — an `onOffRoute` that returns early
+        // without fetching (`if (!coords || !destination) return;`) must leave nothing armed for a later, unrelated
+        // `fetchRoutes` to claim.
+        armRerouteClaim();
+        try { options?.onOffRoute?.(); } finally { dropRerouteClaim(); }
       } else if (decision.held && nowT - lastHeldLogAtRef.current > OFFROUTE_HELD_LOG_MS) {
         // Bounded receipt: the gates can hold on every tick, so at most one row per
         // 10 s. `trav=` is the number that settles WHICH gate would have fired on the
         // next lot drive — it is the one measurement the 09-04 log did not carry.
         lastHeldLogAtRef.current = nowT;
-        try { logEvent(`off-route held why=${decision.held} d=${Math.round(dRoute)}m since=${Math.round(decision.sinceSwapS)}s trav=${Math.round(decision.travelSinceSwapM)}m`); } catch {}
+        const flightTag = inFlightMs != null ? ` inflight=${Math.round(inFlightMs)}` : "";
+        try { logEvent(`off-route held why=${decision.held} d=${Math.round(dRoute)}m since=${Math.round(decision.sinceSwapS)}s trav=${Math.round(decision.travelSinceSwapM)}m${flightTag}${starvedTag}`); } catch {}
       }
     }
 
@@ -2245,6 +2360,16 @@ export async function fetchRouteViaStops(
   avoid?: AvoidPrefs,
   opts?: { bearing?: number },
 ): Promise<NavRoute | null> {
+  // ⚠ THIS PATH HAD NO TIMEOUT AND NO ABORT AT ALL until 2026-09-05 — `fetchRoutes` got
+  // one on 2026-08-21 and this wrapper was never given the matching treatment, so a
+  // reroute on a trip WITH STOPS (the common case for Olaf's and Rodrigo's drives, and
+  // the branch the off-route handler in app/(app)/map.tsx takes whenever `pendingStops` is non-empty) could hang
+  // indefinitely with nothing able to cancel it. `fetchMapboxRouteVia` has always
+  // accepted a signal (src/mapboxDirections.ts:464); it simply was not passed one.
+  const ctl = new AbortController();
+  const t0 = Date.now();
+  const timer = setTimeout(() => { try { logEvent(`route-fetch-abort-fired ms=${Date.now() - t0} via=1`); } catch {} ctl.abort(); }, ROUTE_FETCH_TIMEOUT_MS);
+  claimRerouteSlot(t0, ctl, () => clearTimeout(timer));   // no-op unless the off-route tick armed the ticket
   try {
     const via: [number, number][] = (stops || [])
       .filter((s) => typeof s?.lat === "number" && typeof s?.lng === "number")
@@ -2252,10 +2377,27 @@ export async function fetchRouteViaStops(
     if (!via.length) return null;
     const mb = await fetchMapboxRouteVia(
       origin, via, destination,
-      { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries }, { bearing: opts?.bearing });
-    if (!mb || !mb.polyline) return null;
+      { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
+      { signal: ctl.signal, bearing: opts?.bearing });
+    // `fetchMapboxRouteVia` swallows EVERY error, AbortError included, and returns null
+    // (src/mapboxDirections.ts, `return null; // includes AbortError`) — so the catch
+    // below can never see a timeout, and `route-fetch-fail` had zero rows in
+    // crash_reports before 2026-09-05 (adversarial review, F1). Say it here instead, the
+    // way fetchRoutes does after its await: whether the abort was honoured is the ONE
+    // open question about the fix-driven sweep, and only a settle receipt can answer it.
+    const ms = Date.now() - t0;
+    if (!mb || !mb.polyline) {
+      try { logEvent(`route-fetch-fail why=${ctl.signal.aborted ? "timeout" : "empty"} ms=${ms} via=1`); } catch {}
+      return null;
+    }
+    try { if (ms > ROUTE_FETCH_TIMEOUT_MS) logEvent(`route-fetch-settled-late ms=${ms} n=1 aborted=${ctl.signal.aborted ? 1 : 0} via=1`); } catch {}
     return mapboxToNavRoute(mb);
-  } catch {
+  } catch (e: any) {
+    const why = e?.name === "AbortError" || ctl.signal.aborted ? "timeout" : String(e?.name ?? e?.message ?? e).slice(0, 60);
+    try { logEvent(`route-fetch-fail why=${why} ms=${Date.now() - t0} via=1`); } catch {}
     return null;
+  } finally {
+    clearTimeout(timer);
+    releaseRerouteSlot(ctl);
   }
 }

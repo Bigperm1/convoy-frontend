@@ -698,7 +698,8 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   ≤5 m on most bends (route polyline vs lane), 8.6 m once (05:54:31), the 21 m spike (06:04:27 phone) was the
   off-route moment. Below the 6 m release by design. (e) **"glitching"**: `main-gap` 28483 ms (06:39:40), 7322,
   6222, 4939 on the car surface — visible freeze vs locked phone unknown; asked Olaf.
-- 🟡 **OTA-Y BUILT + SIM-VERIFIED 2026-09-05 16:47 PDT — Codex pass 3 follow-up to OTA-X. AWAITING JEFF'S GO.** Codex (16:31, on the
+- ✅ **OTA-Y SHIPPED 2026-09-05 16:52 PDT — group `9f3dc52a-8260-4827-a4af-b49608bc9640`, code `30c9afd`, KEY_PRESENT=1 both
+  (Jeff: "send it"). Codex pass 3 follow-up to OTA-X; built + sim-verified 16:47.** Codex (16:31, on the
   committed range, verdict needs-attention): (1) [high] the sweep abandons a request but, if iOS ignores `abort()`, its late response
   could still be INSTALLED (car back on the original route → no newer request supersedes it → inside the 30 s / 500 m window) — the
   timer path always had this hole, OTA-X made abandonment explicit without closing it; (2) [medium] the new 15 s via timeout also

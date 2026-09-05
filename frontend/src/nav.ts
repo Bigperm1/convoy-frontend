@@ -28,7 +28,7 @@ import { timersStarvedMs } from "./timerLiveness";
 import {
   newRerouteSlotState, armRerouteClaim as slotArm, dropRerouteClaim as slotDrop,
   claimRerouteSlot as slotClaim, releaseRerouteSlot as slotRelease, rerouteInFlightAgeMs as slotAgeMs,
-  sweepRerouteInFlight as slotSweep, abandonRerouteInFlight as slotAbandon,
+  sweepRerouteInFlight as slotSweep, abandonRerouteInFlight as slotAbandon, isRerouteClaimArmed as slotArmed,
 } from "./rerouteSlot";
 import { getSettings, getNovaVoice, getAudioVol } from "./settings";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
@@ -216,6 +216,17 @@ function claimRerouteSlot(startedAt: number, ctl: AbortController, cancelTimer: 
   slotClaim(_rerouteSlot, startedAt, ctl, cancelTimer);
 }
 function releaseRerouteSlot(ctl: AbortController): void { slotRelease(_rerouteSlot, ctl); }
+/** Is the fetch about to be issued a REROUTE (the off-route handler's window)? Picks the
+ *  timeout policy in fetchRouteViaStops. */
+function rerouteClaimArmed(): boolean { return slotArmed(_rerouteSlot); }
+
+// An initial plot / stop re-order through the via path is NOT a reroute: it has no fresh
+// GPS behind it and no retry loop in front of it, and map.tsx's fallback on a null via
+// result is a DIRECT route that silently omits the stops the driver asked for (Codex pass
+// 3, 2026-09-05). So the reroute's 15 s applies only inside the off-route handler's
+// window; a plot keeps a bound (a hung request must still not wedge the UI forever, and
+// this path had no timeout at all before 2026-09-05) but a generous one.
+export const PLOT_VIA_FETCH_TIMEOUT_MS = 45000;
 
 /** Age of the outstanding reroute request, or null when the slot is empty. */
 export function rerouteInFlightAgeMs(now: number): number | null {
@@ -293,7 +304,16 @@ export async function fetchRoutes(
       { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
       { signal: ctl.signal, bearing: opts?.bearing },
     );
-    try { const ms = Date.now() - t0; if (ms > ROUTE_FETCH_TIMEOUT_MS) logEvent(`route-fetch-settled-late ms=${ms} n=${mbRoutes.length} aborted=${ctl.signal.aborted ? 1 : 0}`); } catch {}
+    try { const ms = Date.now() - t0; if (ms > ROUTE_FETCH_TIMEOUT_MS || ctl.signal.aborted) logEvent(`route-fetch-settled-late ms=${ms} n=${mbRoutes.length} aborted=${ctl.signal.aborted ? 1 : 0} dropped=${ctl.signal.aborted && mbRoutes.length ? 1 : 0}`); } catch {}
+    // AN ABORTED REQUEST NEVER RETURNS ROUTES (Codex pass 3, 2026-09-05). If the platform
+    // ignores `abort()` the response still arrives — computed from a position the car left
+    // 15+ s ago — and map.tsx's `.then` would install it whenever no newer request has been
+    // issued (the driver got back on route) and the 30 s / 500 m staleness window has not
+    // closed. The timer path always had that hole; the fix-driven sweep made abandonment
+    // explicit, so the result is dropped HERE, on the controller both paths share. `n=` on
+    // the receipt above still says what the network returned — that row is how the field
+    // answers whether iOS honoured the abort at all.
+    if (ctl.signal.aborted) return [];
     if (!mbRoutes.length) return [];
     mbRoutes = await preferCurbArrival(origin, destination, avoid, mbRoutes, ctl.signal);
   } catch (e: any) {
@@ -2360,7 +2380,8 @@ export async function fetchRouteViaStops(
   avoid?: AvoidPrefs,
   opts?: { bearing?: number },
 ): Promise<NavRoute | null> {
-  // ⚠ THIS PATH HAD NO TIMEOUT AND NO ABORT AT ALL until 2026-09-05 — `fetchRoutes` got
+  // ⚠ THIS PATH HAD NO TIMEOUT AND NO ABORT AT ALL until 2026-09-05 (reroute 15 s / plot
+  // 45 s since, see PLOT_VIA_FETCH_TIMEOUT_MS) — `fetchRoutes` got
   // one on 2026-08-21 and this wrapper was never given the matching treatment, so a
   // reroute on a trip WITH STOPS (the common case for Olaf's and Rodrigo's drives, and
   // the branch the off-route handler in app/(app)/map.tsx takes whenever `pendingStops` is non-empty) could hang
@@ -2368,7 +2389,10 @@ export async function fetchRouteViaStops(
   // accepted a signal (src/mapboxDirections.ts:464); it simply was not passed one.
   const ctl = new AbortController();
   const t0 = Date.now();
-  const timer = setTimeout(() => { try { logEvent(`route-fetch-abort-fired ms=${Date.now() - t0} via=1`); } catch {} ctl.abort(); }, ROUTE_FETCH_TIMEOUT_MS);
+  // Reroute (armed) → the 15 s the fix-driven sweep also uses; plot / re-order → 45 s.
+  const isReroute = rerouteClaimArmed();
+  const timeoutMs = isReroute ? ROUTE_FETCH_TIMEOUT_MS : PLOT_VIA_FETCH_TIMEOUT_MS;
+  const timer = setTimeout(() => { try { logEvent(`route-fetch-abort-fired ms=${Date.now() - t0} via=1 reroute=${isReroute ? 1 : 0}`); } catch {} ctl.abort(); }, timeoutMs);
   claimRerouteSlot(t0, ctl, () => clearTimeout(timer));   // no-op unless the off-route tick armed the ticket
   try {
     const via: [number, number][] = (stops || [])
@@ -2387,10 +2411,12 @@ export async function fetchRouteViaStops(
     // open question about the fix-driven sweep, and only a settle receipt can answer it.
     const ms = Date.now() - t0;
     if (!mb || !mb.polyline) {
-      try { logEvent(`route-fetch-fail why=${ctl.signal.aborted ? "timeout" : "empty"} ms=${ms} via=1`); } catch {}
+      try { logEvent(`route-fetch-fail why=${ctl.signal.aborted ? "timeout" : "empty"} ms=${ms} via=1 reroute=${isReroute ? 1 : 0}`); } catch {}
       return null;
     }
-    try { if (ms > ROUTE_FETCH_TIMEOUT_MS) logEvent(`route-fetch-settled-late ms=${ms} n=1 aborted=${ctl.signal.aborted ? 1 : 0} via=1`); } catch {}
+    try { if (ms > timeoutMs || ctl.signal.aborted) logEvent(`route-fetch-settled-late ms=${ms} n=1 aborted=${ctl.signal.aborted ? 1 : 0} dropped=${ctl.signal.aborted ? 1 : 0} via=1 reroute=${isReroute ? 1 : 0}`); } catch {}
+    // Same rule as fetchRoutes: an aborted request never returns a route (Codex pass 3).
+    if (ctl.signal.aborted) return null;
     return mapboxToNavRoute(mb);
   } catch (e: any) {
     const why = e?.name === "AbortError" || ctl.signal.aborted ? "timeout" : String(e?.name ?? e?.message ?? e).slice(0, 60);

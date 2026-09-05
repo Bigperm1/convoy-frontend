@@ -698,6 +698,42 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   ≤5 m on most bends (route polyline vs lane), 8.6 m once (05:54:31), the 21 m spike (06:04:27 phone) was the
   off-route moment. Below the 6 m release by design. (e) **"glitching"**: `main-gap` 28483 ms (06:39:40), 7322,
   6222, 4939 on the car surface — visible freeze vs locked phone unknown; asked Olaf.
+- 🟡 **OTA-Y BUILT + SIM-VERIFIED 2026-09-05 16:47 PDT — Codex pass 3 follow-up to OTA-X. AWAITING JEFF'S GO.** Codex (16:31, on the
+  committed range, verdict needs-attention): (1) [high] the sweep abandons a request but, if iOS ignores `abort()`, its late response
+  could still be INSTALLED (car back on the original route → no newer request supersedes it → inside the 30 s / 500 m window) — the
+  timer path always had this hole, OTA-X made abandonment explicit without closing it; (2) [medium] the new 15 s via timeout also
+  bounded INITIAL multi-stop plots, whose null fallback is a direct route that silently drops the stops; (3) [medium] the gates and the
+  two trap rules would not notice the production claim wiring being deleted. **Fixes:** both fetches now DROP a response whose
+  controller was aborted (`route-fetch-settled-late … aborted=1 dropped=1`; `n=` still says what the network returned, so the field can
+  still tell whether the abort was honoured); `fetchRouteViaStops` uses 15 s only inside the off-route handler's window and
+  `PLOT_VIA_FETCH_TIMEOUT_MS = 45 s` otherwise (receipts carry `reroute=0|1`); `src/rerouteSlot.ts` exports `isRerouteClaimArmed`;
+  five more trap-check rules (13 total; `off-route-handler-without-claim-ticket`, `off-route-trip-without-armed-ticket`,
+  `route-fetch-awaits-before-slot-claim`, `reroute-claim-wrapper-detached`, `aborted-route-result-returned`), each proven to fire on
+  the matching mutation; the storm gate's summary now says what the bound IS — rate + ownership, "19 live on the wire if abort is
+  ignored" — instead of "one in flight". Gates: typecheck, trap-check 13/0, doc-check, corner 11/11, ribbon, storm A–D/I–O, timer
+  A1–A9 + B1–B8. **Sim (build 10, iOS 27):** first replay was voided by the SIMULATOR's location stream stalling at 16:39:07 (every
+  fix identical for 3 min — `simctl location start` does this; the app was fine); second replay 16:43–16:46: 5 reroutes, every
+  `reroute-result … applied` in ≤1 s, zero `dropped`, zero `inflight`, zero timeouts, heat-probe raf 2.6–3.3 k/min, 0 crashes. Seen
+  and NOT changed: after the 16:44:20 reroute the replay's straight-line path never came within 25 m of the new route, so OTA-W's
+  `trend` gate held `far` trips for 48 s while d grew to 1.5 km — a real road always starts the reroute under the car, so this is the
+  replay's artifact until a field row says otherwise.
+- 🔎 **2026-09-05 16:45 PDT — FIRST FIELD READ OF OTA-X (crash_reports, `update_id 01a072fa…`, 5 testers within 4 h).** The instrument
+  works and the backstop works: **Jeff 13:21–13:42, iOS + CarPlay (`carplay-onconnect conn=1`, `aa-appstate state=active`)** —
+  `timer-starve` rows every 10 s, `dt` climbing monotonically 7 s → 474 s over EIGHT MINUTES with `raf=0` throughout (heartbeat never
+  ticked once, no rAF frames), then `aa-appstate inactive/background` at 13:29:44 and NO starve rows until `active` again at 13:35:31,
+  when dt restarted from 4.3 s and climbed to 410 s by 13:42:21. VERIFIED observations: JS timers and rAF are dead the whole time
+  Hairpin is the foreground CarPlay app, fixes keep reaching JS, and the heartbeat ran again while the CarPlay scene was in the
+  background. HYPOTHESIS (fits every row, not yet proven natively): RN's timer module is paced by the phone's display link, which is
+  paused while the screen is locked and the app is "active" through CarPlay; in the background it falls back to an NSTimer and runs.
+  That is build 77's native target ([[carplay-aa-standalone-is-the-requirement]]). **Backstop VERIFIED:** during the freeze every
+  `draw-cmp surf=car` sample (67 rows, 10 s cadence, 6–80 km/h) has `d=0.0m` / `drawn=` equal to `gps=` — the car marker was placed on
+  every fix; Olaf's 30 freeze-window rows read the same (his timers-ok rows average 1.2 m, the normal ease lag). Olaf (Enablewhore)
+  13:29–13:58: 25 car-surface starve rows, dt p50 43 s / max 134 s, rAF intermittently alive; Say Phin (SPL_GRC, AA) 16:14–16:17: 18
+  rows, dt to 208 s. **Zero `off-route held why=inflight`, zero `route-fetch-abort-fired src=fix` on anyone** — no reroute request ran
+  past 15 s today, so whether iOS honours the abort is STILL open. **Ni GR** relaunched clean at 12:40 (`launch_kind=ota`, no longer
+  `unknown`) but on `01a06b4a` = OTA-V — the rescue worked; W/X arrive via the pill. **Rodrigo re-stranded at 14:50** (`update_id
+  NULL`, `launch_kind=unknown`, 545 rows to 15:58 — a CarPlay-first relaunch onto the embedded bundle); he needs the same routine
+  ([[carplay-ota-stranding]]). Codex pass 3 (16:31, on the committed range) → three findings, all real → OTA-Y in build (next entry).
 - ✅ **OTA-X SHIPPED 2026-09-05 12:11 PDT — group `c8f031d4-8577-49f2-91d6-b71225eede0a`, commit `9b7a7c3`, KEY_PRESENT=1 both
   (Jeff: "go"). Standalone mitigation for the locked-phone timer freeze; built + sim-verified 11:40** (Jeff: "ship W build X"). What ships: (1) `src/timerLiveness.ts` — 1 s heartbeat → `timersStarvedMs()`, rAF frame
   counter as an INDEPENDENT axis, bounded `timer-starve dt= surf= raf= forced=` receipt from the FIX path (≤1 per 10 s); debug switch

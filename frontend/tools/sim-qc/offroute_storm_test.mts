@@ -373,6 +373,13 @@ check(L.maxInFlight === 1 && L.overwrites === 0,
   `L allowed a trip while a request was still in flight (${L.overwrites} overwrites; slot used=${L.maxInFlight}) — want 0 overwrites, slot used`);
 check(L.ctlAborts === L.aborts.length,
   `L the sweep freed ${L.aborts.length} requests but aborted ${L.ctlAborts} controllers (want equal — free AND abort, every time)`);
+// WHAT L PROVES AND WHAT IT CANNOT (Codex pass 3, 2026-09-05): this gate drives the slot,
+// not the network. If the platform IGNORES abort(), every one of L's 19 asks stays live on
+// the wire — the bound is RATE (one new request per timeout + one fix) and ownership, not a
+// physical count of one. `liveIfAbortIgnored` is printed for exactly that reason, and the
+// thing that makes an ignored abort harmless — an aborted request never returning a route —
+// is enforced in nav.ts and guarded by trap-check's `aborted-route-result-returned`.
+const liveIfAbortIgnored = L.trips.length;
 check(L.trips.length <= 20,
   `L issued ${L.trips.length} reroute requests over ${STORM_S}s (want ≤20 — one per ROUTE_FETCH_TIMEOUT_MS + a fix)`);
 // The exact bound this implementation gives, not a range: a request is abandoned on the
@@ -476,7 +483,7 @@ console.log(
   `K parked 3min, no speed field: pre-fix=${Kpre.trips.length} → fixed=${K.trips.length} ` +
   `holds=${[...new Set(K.holds)].join("/") || "-"} banked=${kTravelBanked.toFixed(1)}m of ${kRawPathM.toFixed(0)}m raw (want 0, <1m) | ` +
   `L stacked-request storm ${STORM_S}s: pre-fix=${Lpre.trips.length} reqs / ${Lpre.maxInFlight} in flight (field: 29) → ` +
-  `bounded=${L.trips.length} reqs / ${L.maxInFlight} in flight (overwrites=${L.overwrites}), gaps=${[...new Set(Lgaps)].join("/")}ms aborts=${L.aborts.length}/${L.ctlAborts} ` +
+  `bounded=${L.trips.length} reqs / ${L.maxInFlight} tracked (overwrites=${L.overwrites}; ${liveIfAbortIgnored} live on the wire if abort is ignored), gaps=${[...new Set(Lgaps)].join("/")}ms aborts=${L.aborts.length}/${L.ctlAborts} ` +
   `holds=${[...new Set(L.holds)].join("/") || "-"} (want ≤20, 1) | ` +
   `M wrong turn + timers frozen ${fmt(M)} vs B ${fmt(B)} (want equal) | ` +
   `N hung request + missed turn=${N.trips.length} [${fmt(N)}] gaps=${[...new Set(nGaps)].join("/") || "-"}ms aborts=${N.aborts.length} (want ${nWantTrips}, +${N_RETRY_MS}ms) | ` +

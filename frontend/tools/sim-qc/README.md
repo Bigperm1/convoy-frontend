@@ -148,12 +148,17 @@ an EXPIRED one never does (a stuck request must not wedge the gate), `null`/unme
 holds, an existing `moved` hold is untouched, `inflight` is reported first, and — the Codex
 objection made executable — a missed turn with timers reported starved by Rodrigo's worst
 figure and nothing in flight TRIPS. `offroute_storm_test.mts` L/M/N are the same contract on
-full traces (Rodrigo's 29-request storm → 19 bounded asks / 1 in flight; a wrong turn with
-timers frozen trips on B's exact tick; a hung ask retries every 16 s, never sooner), and they
+full traces (Rodrigo's 29-request storm → 19 asks at 16 s gaps with one TRACKED at a time — a
+rate-and-ownership bound, not a physical count: if iOS ignores `abort()` all 19 stay live on the
+wire, which is why an aborted request never returns a route; a wrong turn with timers frozen
+trips on B's exact tick; a hung ask retries every 16 s, never sooner), and they
 drive the REAL slot — `src/rerouteSlot.ts`, the pure state machine `src/nav.ts` wraps — not a
 mirror of it (review 2026-09-05: the first draft kept its own `outstanding[]` and would have
 passed with the registry deleted). Scenario O is the slot's contract clause by clause (claim
 ticket one-shot and dropped on an early return, identity-checked release, sweep frees + cancels
 the request's own timer + aborts exactly once, nav end frees without aborting). What no Node gate
 can see is the nav.ts WIRING — the sweep running before the decision and `rerouteInFlightMs`
-being passed — so `scripts/trap-check.py` carries two rules for exactly that.
+being passed, the ticket armed around `onOffRoute`, both fetches claiming before their first
+`await`, the wrapper forwarding to the pure module, and aborted results being dropped — so
+`scripts/trap-check.py` carries seven rules for exactly that, each proven to fire on the
+matching mutation the day it was added.

@@ -30,9 +30,14 @@
 //
 // The slot is freed at ABORT time, not at settle time: an abandoned fetch may never
 // settle at all, and a slot that waited for a zombie would wedge the gate shut forever.
-// A late zombie result is rejected downstream by map.tsx's supersession + staleness
-// checks, and nav end bumps the supersession counter so a result for a finished drive
-// can never be applied (review finding F3, same day).
+// WHAT THIS BOUNDS, HONESTLY (Codex pass 3, 2026-09-05): ownership and RATE — at most one
+// tracked request, and at most one NEW request per ROUTE_FETCH_TIMEOUT_MS + one fix. It
+// cannot bound live network sockets if the platform ignores `abort()` (no on-time abort has
+// ever been observed in the field, so that is still open). What it does guarantee is that
+// an abandoned request's RESULT is never installed: both fetch wrappers in nav.ts drop a
+// response whose controller was aborted (`route-fetch-settled-late … dropped=1`), map.tsx's
+// supersession + staleness checks reject the rest, and nav end bumps the supersession
+// counter so a result for a finished drive can never be applied (review finding F3).
 import { rerouteInflightExpired } from "./offRouteGate.ts";
 
 export type RerouteAbortable = { abort(): void };
@@ -60,6 +65,9 @@ export function newRerouteSlotState(): RerouteSlotState {
  *  off-route handler; pair with `dropRerouteClaim` in a `finally`. */
 export function armRerouteClaim(s: RerouteSlotState): void { s.claim = true; }
 export function dropRerouteClaim(s: RerouteSlotState): void { s.claim = false; }
+/** True only inside the off-route handler's synchronous window — the fetch issued there is
+ *  a REROUTE and gets the reroute timeout policy; anything else is a plot/preview. */
+export function isRerouteClaimArmed(s: RerouteSlotState): boolean { return s.claim; }
 
 /**
  * Called by a route fetch before its first await. Takes the slot ONLY while the ticket is

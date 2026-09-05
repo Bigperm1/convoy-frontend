@@ -78,6 +78,43 @@ RULES = [
         "one-in-flight bound silently disappears while every Node gate still passes (the gate tests the pure slot, "
         "not this wiring).",
     ),
+    (
+        "off-route-handler-without-claim-ticket",
+        ["src/nav.ts"],
+        r"(?<!try \{ )options\?\.onOffRoute\?\.\(\)",
+        "2026-09-05 (Codex pass 3): the reroute slot is claimed through a one-shot ticket armed IMMEDIATELY before "
+        "the off-route handler runs — `armRerouteClaim(); try { options?.onOffRoute?.(); } finally { dropRerouteClaim(); }`. "
+        "A bare call means no reroute is ever registered and the gate can never hold `inflight`, while every Node gate still passes.",
+    ),
+    (
+        "off-route-trip-without-armed-ticket",
+        ["src/nav.ts"],
+        r"(?s)if \(decision\.trip\) \{(?:(?!armRerouteClaim\(\)).)*?onOffRoute",
+        "2026-09-05 (Codex pass 3): the trip block must arm the claim ticket before invoking the handler — see "
+        "off-route-handler-without-claim-ticket.",
+    ),
+    (
+        "route-fetch-awaits-before-slot-claim",
+        ["src/nav.ts"],
+        r"(?s)export async function (?:fetchRoutes|fetchRouteViaStops)\((?:(?!claimRerouteSlot\().)*?\bawait\b",
+        "2026-09-05 (Codex pass 3): both route fetches must call claimRerouteSlot(t0, ctl, …) BEFORE their first await, or the "
+        "one-shot ticket is dropped by the tick's `finally` before the fetch can take the slot (the claim is synchronous by design).",
+    ),
+    (
+        "reroute-claim-wrapper-detached",
+        ["src/nav.ts"],
+        r"(?s)function claimRerouteSlot\([^)]*\)[^{]*\{(?:(?!slotClaim\().)*?\}",
+        "2026-09-05 (Codex pass 3): nav.ts's claimRerouteSlot wrapper must forward to src/rerouteSlot.ts's slotClaim — deleting "
+        "that one call disables the whole bound and neither the storm gate (which drives the pure module) nor the older rules see it.",
+    ),
+    (
+        "aborted-route-result-returned",
+        ["src/nav.ts"],
+        r"(?s)route-fetch-settled-late ms=\$\{ms\} n=\$\{mbRoutes\.length\}(?:(?!ctl\.signal\.aborted\) return \[\]).)*?preferCurbArrival\(|route-fetch-settled-late ms=\$\{ms\} n=1 (?:(?!ctl\.signal\.aborted\) return null).)*?mapboxToNavRoute\(mb\)",
+        "2026-09-05 (Codex pass 3): a route fetch whose controller was aborted must return nothing — if the platform ignores "
+        "abort(), the late response is computed from a position the car left 15+ s ago and map.tsx would install it inside the "
+        "30 s / 500 m staleness window whenever no newer request superseded it.",
+    ),
 ]
 
 

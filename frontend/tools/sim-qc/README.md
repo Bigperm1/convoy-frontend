@@ -116,6 +116,25 @@ missed-maneuver fast path still fires. A swap moves the LINE, not the car: the f
 modelled a swap as the car jumping back to 27 m, which counted the re-snap as 37 m of driving and armed the
 travel gate for free — that bug is why A now checks the un-gated count too.
 
+## Ribbon anchor gate (numeric, the cut's anchor on long drives)
+
+```bash
+node --experimental-strip-types tools/sim-qc/ribbon_anchor_test.mts
+```
+
+Jeff, 2026-09-05 after a four-hour CarPlay drive: "the route line is way too far away from the car". His
+807 `ribbon-trim surf=car` receipts read `anchorOff` avg 417 m / max 1268 m and `lag` −249 m. The cut's
+anchor search (`alongMOnPartition`, ±250 m window) was hinted by `fracDrawn × totalM` — a fraction measured
+on the projection line applied to the ribbon's own partition; the two length bases differ by ~1 %, so the
+hint drifts a percent of the distance driven, leaves its own window past ~25 km, the search returns the
+window's far end (that IS the 400-odd-metre `anchorOff`), the >80 m guard rejects it and the cut falls back
+to the wrong metre plus the lead. `src/ribbonAnchor.ts` (`anchorCutM`, pure, re-exported by routeRibbon)
+never hints with a foreign fraction: last anchor on this partition, one global search to seed, fallback only
+when the car is really >80 m off the line; receipts carry `hint=prev|global|fallback`. The gate rebuilds a
+40 km road with a 2.2 % shorter projection line and asserts the old hint misses by ~670 m with the field's
+400 m `anchorOff` signature, the new anchor is within 1 m cold and hinted, re-seeds after a swap, falls back
+off-line, and never jumps to the return leg of an out-and-back 30 m away.
+
 ## Timer-starvation gate (numeric, liveness clock + off-route hold)
 
 ```bash
@@ -164,3 +183,49 @@ being passed, the ticket armed around `onOffRoute`, both fetches claiming before
 `await`, the wrapper forwarding to the pure module, and aborted results being dropped — so
 `scripts/trap-check.py` carries seven rules for exactly that, each proven to fire on the
 matching mutation the day it was added.
+
+## Speed-episode gate (numeric, sounds per speeding stretch)
+
+```bash
+node --experimental-strip-types tools/sim-qc/speed_episode_test.mts
+```
+
+Gates `src/speedEpisode.ts` (2026-09-05 — Jeff: *"there is a single speed ding and a double ding
+happening, and when I go 20 over and speed up it dings, then I speed up more it dings — really
+annoying"*). The old `map.tsx` logic (per-threshold `armed` flags re-armed the instant the speed dropped
+under the line, cooldown OR'd with the flag) is transcribed verbatim inside the gate and must reproduce the
+complaint first — 3 sounds on Jeff's profile, 20 on a two-minute 20↔23-over wobble, a re-fire every
+5 minutes while sitting at 25 over — before the real `speedEpisodeTick` is held to ONE alert per speeding
+episode: A Jeff's exact profile (25 over 30 s → 45 → 25 → 45) → one single + one double; B the wobble → one
+sound; C a 10 s dip under the limit → same episode, nothing; D 25 s under limit+5 ends the episode and a
+fresh crossing after the 5-minute ceiling is episode 2 with its own single; E the ceiling never ADDS a
+sound (three episodes in four minutes → one; 20 minutes at 25 over → one; a double also stamps the tier-1
+clock); F unknown speed / limit → nothing, state untouched, and unknown ticks mid-episode neither end it
+nor sound; G a launch straight to 45 over → the double only; H the exit dwell is CONSECUTIVE (one tick at
+limit+5 resets it); I the adaptive tier-1 threshold gates entry while the exit line stays at limit+5.
+Proven to fail on three mutations the day it was added (tier-2 once-per-episode guard removed, dwell 0,
+cooldown re-fire inside an episode). What it cannot see is the `map.tsx` wiring (the `< 5 km/h` no-op
+tick, the adaptive threshold, the `speed-alert tier= … episode=` receipt) and `src/speedDing.ts`'s
+one-chime-at-a-time merge — those are read-verified, not measured.
+
+## Arrival line gate (text, order)
+
+```bash
+node --experimental-strip-types tools/sim-qc/arrival_line_test.mts
+```
+
+Gates `src/arrivalEndings.ts`, the ONE arrival utterance (2026-09-05, Jeff: *"Nova also says the destination
+name AFTER telling the weather on arrival. It should say 'You have arrived at <saved place name>. The weather
+is 19 degrees right now.' Then add a series of endings"*). The receipts from his 20:36 PDT arrival showed the
+line heard before the 18-char arrival line was the final-leg prepare callout (`tts-say len=45 → tts-play
+len=50` = "In 50 m, you will arrive at your destination." after `m→meters`), not weather — nothing spoke
+weather at arrival; it now rides the arrival line itself. The gate pins: place → weather → closer order on
+every context and random pick; the no-label form ("You have arrived."); the no-forecast form (no weather
+sentence, never "undefined"/"NaN"); every context (home / work / custom / sunny / rain / snow / cold / hot /
+night / long / generic) yields a non-empty closer carrying its tag; 20 consecutive picks in one context never
+repeat back-to-back (a one-entry pool falls back to the generic set); no closer has a dash, an emoji or more
+than 8 words; "Drive safe on the way back." never plays at home; Jeff's example composes exactly as
+"You have arrived at Lake. It's 19 degrees and sunny right now. <closer>"; and the `wx=` / `ending=` receipt
+fields on the `arrive-speak` row describe the text they ride with. Running under plain Node is the proof
+the module has no react-native import (`nav.ts` composes through it; the cold/AA path gets the same form
+without the weather sentence).

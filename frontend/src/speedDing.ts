@@ -1,5 +1,9 @@
 // Speed-alert ding — a short, self-contained notification chime for the "Ding"
-// speed-alert mode (single ding ~21 km/h over the limit, double ding ~41 over).
+// speed-alert mode: a single ding on entering a speeding episode (~21 km/h over the
+// limit), a double ding at most once per episode on first pushing past ~41 over. WHEN
+// it sounds is decided upstream in src/speedEpisode.ts (one alert per episode, gated by
+// tools/sim-qc/speed_episode_test.mts); this module only owns HOW — and it plays ONE
+// chime at a time (see playSpeedDing).
 //
 // There is no bundled sound asset in the repo and no way to add a binary one
 // through the text tooling, so the chime is embedded as a base64 WAV (a tiny
@@ -67,28 +71,48 @@ function playOnceWeb(): Promise<void> {
   });
 }
 
-// Play the speed-alert chime. `double` plays it twice (the +41-over warning);
-// otherwise once (the +21-over nudge). Always resolves; never throws.
+// ONE chime at a time (2026-09-05). The WHEN is decided upstream (src/speedEpisode.ts:
+// one single per speeding episode, one double on the first tier-2 crossing), but two
+// requests can still arrive back-to-back — a hard launch that crosses both tiers a second
+// apart — and the yield-to-Nova wait below would otherwise let both play on top of each
+// other. A request that lands while one is still pending is MERGED into it (a double
+// upgrades a pending single; never a second chime), and a request inside MIN_SPACING_MS
+// of the last chime is dropped — the driver has just been told.
+const MIN_SPACING_MS = 1200;                 // ≈ one full double (480 + 190 + 480 ms)
+let _pending: { double: boolean } | null = null;
+let _lastPlayMs = 0;
+
+// Play the speed-alert chime. `double` plays it twice (the tier-2 / +41-over warning);
+// otherwise once (the tier-1 nudge). Always resolves; never throws.
 export async function playSpeedDing(double: boolean): Promise<void> {
   if (callSilence()) return; // no dings over a phone call (Settings → Mute During Calls)
-  // Yield to Nova: never sound a ding ON TOP of a greeting / turn callout (the
-  // confirmed "two sounds at once" overlap — the ding bypasses the speech queue).
-  // Briefly wait for the voice to clear, then ding; give up after ~3s so a long
-  // callout can't swallow a real speed alert entirely.
-  for (let i = 0; i < 8 && isAudioBusy(); i++) {
-    await new Promise((r) => setTimeout(r, 400));
+  if (_pending) { if (double) _pending.double = true; return; }   // merge, never stack
+  if (Date.now() - _lastPlayMs < MIN_SPACING_MS) return;           // just chimed
+  const req = { double };
+  _pending = req;
+  try {
+    // Yield to Nova: never sound a ding ON TOP of a greeting / turn callout (the
+    // confirmed "two sounds at once" overlap — the ding bypasses the speech queue).
+    // Briefly wait for the voice to clear, then ding; give up after ~3s so a long
+    // callout can't swallow a real speed alert entirely.
+    for (let i = 0; i < 8 && isAudioBusy(); i++) {
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    _lastPlayMs = Date.now();
+    if (Platform.OS === "web") {
+      try { await playOnceWeb(); } catch {}
+      if (req.double) setTimeout(() => { void playOnceWeb(); }, GAP_MS);
+      return;
+    }
+    // Make sure the iOS session plays on the loudspeaker, in silent mode, and
+    // MIXES with the driver's music rather than pausing/ducking it. The app's idle
+    // audio mode is exactly that (allowsRecordingIOS:false + playsInSilentModeIOS
+    // + MixWithOthers), so the chime is audible even with the ring switch on and
+    // never interrupts music. Non-disruptive by construction.
+    try { await setIdleAudioMode(); } catch {}
+    try { await playOnceNative(); } catch {}
+    if (req.double) setTimeout(() => { void playOnceNative(); }, GAP_MS);
+  } finally {
+    _pending = null;
   }
-  if (Platform.OS === "web") {
-    try { await playOnceWeb(); } catch {}
-    if (double) setTimeout(() => { void playOnceWeb(); }, GAP_MS);
-    return;
-  }
-  // Make sure the iOS session plays on the loudspeaker, in silent mode, and
-  // MIXES with the driver's music rather than pausing/ducking it. The app's idle
-  // audio mode is exactly that (allowsRecordingIOS:false + playsInSilentModeIOS
-  // + MixWithOthers), so the chime is audible even with the ring switch on and
-  // never interrupts music. Non-disruptive by construction.
-  try { await setIdleAudioMode(); } catch {}
-  try { await playOnceNative(); } catch {}
-  if (double) setTimeout(() => { void playOnceNative(); }, GAP_MS);
 }

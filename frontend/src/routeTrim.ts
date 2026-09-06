@@ -100,13 +100,21 @@ export function metersPerDp(zoom: number, lat: number): number {
 // fade starts 26 dp ahead of the nose and the casing GLOW is blurred ~20 dp behind its own start, so the
 // halo visibly touched the nose on the sim at 54 km/h (measured: faint green 3 pt ahead of the nose,
 // solid 13 pt). 60 puts the cut 38 dp ahead of the nose and the halo clear of it at every zoom.
-export const TRIM_LEAD_DP = 60;
+// ── 60 → 40 (2026-09-05, Jeff: "the route line/ribbon is way too far away from the car") ──
+// The 09-04 pitch compensation doubles the ground lead at the car surface's pitch 60, so the 60 dp
+// base became 120 dp on the ground — on the sim that was 48-51 pt of solid line ahead of the nose at
+// 108 km/h, more than a car length, and Jeff drove behind it for four hours. (The bulk of what he saw
+// was the anchor drift fixed in routeRibbon.anchorCutM the same night; this is the optics on top.)
+// 40 → ~30 pt solid at 108 km/h and ~20 pt at 54 km/h on the sim, still clear of the halo (≥18).
+export const TRIM_LEAD_DP = 40;
 
 // Sanity rails on the METRE result. These exist only to stop a pathological camera
 // (a mid-pinch zoom spike, a bogus latitude) producing an absurd trim; in normal
 // driving the screen calculation sits well inside them and they never bind.
 //   z17 city → 30 m · z15 → 120 m · z14 highway → 252 m · z12.8 at 180 km/h → 500 m (capped)
-const TRIM_MIN_M = 20;
+// 20 → 12 (2026-09-05): at z18.5 the 20 m floor was ~74 dp of ground — a line starting a car length
+// and a half ahead of a creeping car (Jeff's phone rows at z18.50: lead=20 on every sample).
+const TRIM_MIN_M = 12;
 const TRIM_MAX_M = 500;
 
 // Pitch compensation shared by lead and fade (2026-09-04, see the REVISED note above):
@@ -140,7 +148,7 @@ export function routeTrimLeadM(zoom: number, lat: number, pitchDeg = 0): number 
 // The soft transparent→solid fade just past the trim, also in screen points so it
 // stays a consistent slice of the visible line rather than a fixed metre count that
 // vanishes when zoomed out.
-const TRIM_FADE_DP = 51;
+const TRIM_FADE_DP = 34;   // scaled with the lead (60→40) on 2026-09-05
 
 // Same pitch compensation as the lead, and for the identical reason: this is the same
 // metersPerDp zoom-only conversion applied to a different screen-dp constant, so it is

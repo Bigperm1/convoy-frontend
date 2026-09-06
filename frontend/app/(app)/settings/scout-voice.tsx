@@ -71,9 +71,9 @@ export default function ScoutVoicePage() {
 
       <SectionLabel>SPEED ALERT</SectionLabel>
       <SettingsCard>
-        <RadioRow icon="speedometer" iconColor="#FF453A" title="Scout" subtitle="Scout speaks up when you're well over the limit (~21 over), firmer at ~41 over" selected={getSpeedAlertMode(settings) === "nova"} onSelect={() => setSettings({ speedAlertMode: "nova", novaSpeeding: true })} />
+        <RadioRow icon="speedometer" iconColor="#FF453A" title="Scout" subtitle="Scout speaks up once when you're well over the limit (~21 over), once more if you push past ~41 — then stays quiet until you've been back near the limit for a bit" selected={getSpeedAlertMode(settings) === "nova"} onSelect={() => setSettings({ speedAlertMode: "nova", novaSpeeding: true })} />
         <Divider />
-        <RadioRow icon="notifications" iconColor="#FF9F0A" title="Ding" subtitle="A chime instead of a voice: one ding ~21 over, a double ding ~41 over" selected={getSpeedAlertMode(settings) === "ding"} onSelect={() => setSettings({ speedAlertMode: "ding", novaSpeeding: false })} />
+        <RadioRow icon="notifications" iconColor="#FF9F0A" title="Ding" subtitle="A chime instead of a voice: one ding when you go ~21 over, a double if you push past ~41 — once per speeding stretch, not on every wobble" selected={getSpeedAlertMode(settings) === "ding"} onSelect={() => setSettings({ speedAlertMode: "ding", novaSpeeding: false })} />
         {/* Preview the ding without having to go speed — single tap, plus the double
             (the +41-over warning) so both patterns can be heard here. */}
         <View style={styles.sampleRow}>

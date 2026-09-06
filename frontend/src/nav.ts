@@ -38,6 +38,7 @@ import { isOnCall, callSilence } from "./callState";
 // only AsyncStorage / Platform / settings, so this cannot close a cycle back to nav.
 import { headUnitAttachedRaw } from "./locationPrivacy";
 import { resolveArrivalZone, type ArrivalZone } from "./arrivalZone";
+import { composeArrivalLine, type ArrivalUtterance, type ArrivalWeather, type ArrivalPlaceKind } from "./arrivalEndings";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -674,57 +675,28 @@ function nearestRouteInfo(lat: number, lng: number, pts: LatLng[]): { distM: num
   return { distM: Math.sqrt(best) * 111320, bearingDeg: bearingBetween(pts[bi], pts[bi + 1]) };
 }
 
-// Arrival lines — varied so Nova doesn't say the exact same thing every trip.
-// Spoken by the engine (not the screen) so the line survives nav teardown; the
-// map screen's onArrive ends navigation WITHOUT stopSpeech so it isn't cut off.
-// ── NAME THE DESTINATION (2026-08-05) ──────────────────────────────────────
-// Jeff, arriving at his saved place "Lake": Scout said "you have arrived at ... your",
-// which is the generic line read aloud and heard as a fragment. What he wants is the
-// actual place — "Denny's" if he searched it, the address if he searched an address,
-// and the SAVED name (Lake / Home / Work) when the destination is one of his.
-//
-// Two line sets, because a name has to sit in a sentence that was built for it. The
-// unnamed set is unchanged, and is still what plays when we have no label — an
-// arrival with no name is better than "You've arrived at ." with a hole in it.
-const ARRIVAL_LINES = [
-  "You've arrived at your destination.",
-  "Here we are — you've made it.",
-  "Arrived. Nice driving.",
-  "This is it, you've reached your destination.",
-  "You made it — welcome.",
-  "Destination reached. Enjoy.",
-];
-const ARRIVAL_LINES_NAMED = [
-  "You've arrived at {d}.",
-  "Here we are — {d}.",
-  "Arrived at {d}. Nice driving.",
-  "This is it — {d}.",
-  "You made it. Welcome to {d}.",
-  "{d}. Destination reached.",
-];
-// A label only earns its way into speech if it reads as a place. Anything absurdly long
-// is almost always a full formatted address with a country and postcode glued on, which
-// is a mouthful mid-drive; fall back to the unnamed line rather than recite it.
-const ARRIVAL_LABEL_MAX = 60;
-export function cleanArrivalLabel(label?: string | null): string | null {
-  let t = (label || "").trim();
-  if (!t) return null;
-  // Drop a trailing country/postcode tail from formatted addresses so "123 Main St,
-  // Langley, BC V3A 1B2, Canada" speaks as "123 Main Street, Langley".
-  const parts = t.split(",").map((x) => x.trim()).filter(Boolean);
-  if (parts.length > 2) t = parts.slice(0, 2).join(", ");
-  if (!t || t.length > ARRIVAL_LABEL_MAX) return null;
-  // A bare coordinate pair is a label in name only.
-  if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(t)) return null;
-  return t;
-}
+// Arrival line — ONE utterance, composed by src/arrivalEndings.ts (pure; gated under Node by
+// tools/sim-qc/arrival_line_test.mts): "You have arrived at {place}." then the weather at the
+// destination RIGHT NOW (skipped entirely without a forecast), then one context-chosen closer.
+// Spoken by the engine (not the screen) so the line survives nav teardown; the map screen's
+// onArrive ends navigation WITHOUT stopSpeech so it isn't cut off.
+// ── PLACE, THEN WEATHER, THEN A CLOSER (2026-09-05) ────────────────────────────────────
+// Jeff: "Nova also says the destination name AFTER telling the weather on arrival. It should
+// say 'You have arrived at <saved place name>. The weather is 19 degrees right now.' Then add
+// a series of endings." His 20:36 PDT arrival, from the tts receipts: the line heard BEFORE the
+// 18-char arrival line ("This is it — Lake.") was `tts-say len=45 → tts-play len=50` — the
+// final-leg prepare callout "In 50 m, you will arrive at your destination." after toSpeech's
+// m→meters expansion (45+5), not a weather line; no code path spoke weather at arrival (the
+// only spoken weather was the route-START greeting, src/novaGreeting.ts). The weather now
+// rides the arrival line itself, after the place, so the order cannot regress.
+// (History, 2026-08-05: the destination was first NAMED here because "you have arrived at ...
+// your" was heard as a fragment; the two varied line sets that did that are replaced by the
+// fixed opener + the closer pool, which is where the variety lives now.)
+export { cleanArrivalLabel } from "./arrivalEndings";
+// Cold / Android Auto arrival (src/navNotification.ts): the slim route carries no forecast, so
+// this form is place + closer only — the weather sentence is skipped by construction.
 export function arrivalLine(destLabel?: string | null): string {
-  const name = cleanArrivalLabel(destLabel);
-  if (name) {
-    const set = ARRIVAL_LINES_NAMED;
-    return set[Math.floor(Math.random() * set.length)].replace("{d}", name);
-  }
-  return ARRIVAL_LINES[Math.floor(Math.random() * ARRIVAL_LINES.length)];
+  return composeArrivalLine({ destLabel, hour: new Date().getHours() }).text;
 }
 
 // ── ARRIVAL SPEECH (2026-09-03, "Scout drops sentences, especially upon arrival") ────────
@@ -738,18 +710,54 @@ export function arrivalLine(destLabel?: string | null): string {
 //     so it plays from cache with no network hop;
 //   • speakArrival() bypasses the rate gate (never the master voice switch / greeting hold);
 //   • resetSpeakGate() defers while an arrival is draining (see _arrivalHoldUntil).
-let _arrivalLineChosen: string | null = null;
+let _arrivalLineChosen: ArrivalUtterance | null = null;
 let _arrivalHoldUntil = 0;
-const ARRIVAL_DRAIN_MAX_MS = 8000;
-export function prefetchArrivalLine(destLabel?: string | null): void {
-  if (!_arrivalLineChosen) _arrivalLineChosen = arrivalLine(destLabel);
-  prefetchTts(_arrivalLineChosen);
+// 15 s, was 8 s (2026-09-05): the utterance is now three sentences (~100 chars; ≈7 s cached,
+// EXTRAPOLATED from tonight's cached clips at ≈0.07 s/char — a HYPOTHESIS until a tts-done row
+// shows it), and Jeff's 20:36 arrival queued the line 5.4 s behind an UNCACHED prepare clip
+// (`tts-done ms=6454 len=50`). Past the bound resetSpeakGate flips ttsPlaying off, unducks the
+// music and releases the audio session while the clip can still be in flight; 8 s covered an
+// 18-char line, not this one.
+const ARRIVAL_DRAIN_MAX_MS = 15000;
+// What map.tsx knows at arrival that the engine does not: the saved-place kind, the forecast
+// at the destination for right now, and when the drive started. Supplied as a GETTER on the
+// options so it is read at prefetch / speak time, never captured stale.
+export type ArrivalContext = {
+  placeKind?: ArrivalPlaceKind | null;
+  weather?: ArrivalWeather | null;
+  startedAt?: number | null;
+};
+function readArrivalContext(options?: { arrivalContext?: () => ArrivalContext | null }): ArrivalContext | null {
+  try { return options?.arrivalContext?.() ?? null; } catch { return null; }
 }
-function speakArrival(destLabel?: string | null): void {
-  const line = _arrivalLineChosen ?? arrivalLine(destLabel);
+function composeArrival(destLabel: string | null | undefined, ctx: ArrivalContext | null | undefined): ArrivalUtterance {
+  const startedAt = ctx?.startedAt ?? 0;
+  return composeArrivalLine({
+    destLabel,
+    placeKind: ctx?.placeKind ?? null,
+    weather: ctx?.weather ?? null,
+    hour: new Date().getHours(),
+    driveMin: startedAt > 0 ? (Date.now() - startedAt) / 60000 : null,
+  });
+}
+// The WHOLE line (place + weather + closer) is chosen and synthesized at the prepare callout —
+// the forecast hour and the clock hour a minute before arrival are the ones at arrival — so a
+// single cached clip plays with no /tts hop. The first prefetch wins until the line is taken.
+export function prefetchArrivalLine(destLabel?: string | null, ctx?: ArrivalContext | null): void {
+  if (!_arrivalLineChosen) _arrivalLineChosen = composeArrival(destLabel, ctx);
+  prefetchTts(_arrivalLineChosen.text);
+}
+// Hand over the prefetched line (or compose one now if no prepare callout fired) and forget
+// it — taken whether or not it will be spoken, so a muted or late arrival can never leave the
+// previous destination's line armed for the next trip.
+function takeArrivalUtterance(destLabel: string | null | undefined, ctx: ArrivalContext | null | undefined): ArrivalUtterance {
+  const u = _arrivalLineChosen ?? composeArrival(destLabel, ctx);
   _arrivalLineChosen = null;
+  return u;
+}
+function speakArrival(u: ArrivalUtterance): void {
   _arrivalHoldUntil = Date.now() + ARRIVAL_DRAIN_MAX_MS;
-  speak(line, { priority: true });
+  speak(u.text, { priority: true });
 }
 
 // "Less intrusive Nova" filter. Maneuvers that just mean "keep going" aren't
@@ -904,7 +912,7 @@ export function useTurnByTurn(
   // mistaken for travel; nothing else reads it here.
   user: (LatLng & { speed?: number; heading?: number; acc?: number }) | null,
   active: boolean,
-  options?: { mute?: boolean; destLabel?: string | null; onArrive?: () => void; onOffRoute?: () => void }
+  options?: { mute?: boolean; destLabel?: string | null; arrivalContext?: () => ArrivalContext | null; onArrive?: () => void; onOffRoute?: () => void }
 ) {
   const [state, setState] = useState<TbtState>({
     active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0,
@@ -1224,7 +1232,7 @@ export function useTurnByTurn(
         if (!announcedRef.current.has(prepKey)) {
           if (isFinal) {
             speak(`In ${fmtDistanceM(dManeuver)}, you will arrive at your destination.`);
-            prefetchArrivalLine(options?.destLabel);
+            prefetchArrivalLine(options?.destLabel, readArrivalContext(options));
           } else {
             const ns = steps[stepIdx + 1];
             const ra = roundaboutExitCue(ns.maneuver, ns.html);
@@ -1246,7 +1254,7 @@ export function useTurnByTurn(
         // onArrive fire from the dManeuver < 20 block below.
         if (dManeuver <= prepareM && !announcedRef.current.has(prepKey)) {
           speak(`In ${fmtDistanceM(dManeuver)}, you will arrive at your destination.`);
-          prefetchArrivalLine(options?.destLabel);
+          prefetchArrivalLine(options?.destLabel, readArrivalContext(options));
           announcedRef.current.add(prepKey);
         }
       } else {
@@ -1526,14 +1534,20 @@ export function useTurnByTurn(
       // off"): the arrival spoke through *some* mute for a tester and the gates here
       // could not be told apart after the fact. One reliable row per arrival records
       // every gate's state at fire time, so the next report is a one-query answer.
+      // The line is taken BEFORE the receipt so the one row says which form played:
+      // wx=1 when the weather sentence is in it, ending=<index into ARRIVAL_ENDINGS>
+      // (src/arrivalEndings.ts); ending=-1 when nothing is spoken (muted / late).
+      const willSpeak = !options?.mute && !late;
+      const utt = takeArrivalUtterance(options?.destLabel, readArrivalContext(options));
       try {
         const st = getSettings();
         logEventReliable(
           `arrive-speak engine=warm late=${late ? 1 : 0} optMute=${options?.mute ? 1 : 0} ` +
-          `novaMuted=${st.novaMuted ? 1 : 0} novaVoice=${st.novaVoice === false ? 0 : 1} vol=${getAudioVol(st, "volVoice").toFixed(2)}`,
+          `novaMuted=${st.novaMuted ? 1 : 0} novaVoice=${st.novaVoice === false ? 0 : 1} vol=${getAudioVol(st, "volVoice").toFixed(2)} ` +
+          `wx=${willSpeak && utt.wx ? 1 : 0} ending=${willSpeak ? utt.endingIndex : -1}`,
         );
       } catch {}
-      if (!options?.mute && !late) speakArrival(options?.destLabel);
+      if (willSpeak) speakArrival(utt);
       options?.onArrive?.();
     };
 

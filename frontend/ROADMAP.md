@@ -698,6 +698,44 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   ≤5 m on most bends (route polyline vs lane), 8.6 m once (05:54:31), the 21 m spike (06:04:27 phone) was the
   off-route moment. Below the 6 m release by design. (e) **"glitching"**: `main-gap` 28483 ms (06:39:40), 7322,
   6222, 4939 on the car surface — visible freeze vs locked phone unknown; asked Olaf.
+- 🟡 **OTA-Z — the rest of the batch (Jeff 23:20: "put this all in ota-z and send it"), built 2026-09-05 23:45, build 12.**
+  (a) **Speed dings** (Jeff: "a single ding and a double ding… when I go 20 over and speed up it dings, then I speed up more it
+  dings — really annoying"): the old effect re-armed each tier the instant the speed dipped under it and re-fired every 5 min while
+  above the line. Now ONE alert per speeding EPISODE — `src/speedEpisode.ts` (pure): an episode opens on the first tick ≥ tier 1
+  (single ding / Scout nudge; straight to ≥41 over = the double only), the double fires at most once on the first tier-2 tick, and
+  the episode ends only after 20 s continuously below limit+5 (a dip under the limit or a red light does not end it); the 5-min
+  per-tier cooldown is a ceiling, never a re-fire. `speedDing.ts` merges overlapping chimes. Receipt `speed-alert tier= mode= over=
+  limit= episode=` (≤2 rows/episode). Gate `speed_episode_test.mts` (transcribes the old logic and reproduces the complaint: 3 dings →
+  1+1; wobble 20 → 1; dip 2 → 1; mutation-tested). (b) **Arrival line** (Jeff: name after the weather; wants "You have arrived at
+  <place>. The weather is 19 degrees right now." + endings): `src/arrivalEndings.ts` (pure, 20 closers chosen by context — home /
+  work / custom name / sun / rain / snow / cold / hot / night / long drive / generic, never the same twice in a row) +
+  `composeArrivalLine`: "You have arrived at Lake. It's 19 degrees and sunny right now. Perfect day for it." (no label → "You have
+  arrived."; no forecast → weather sentence skipped). Composed + prefetched at the prepare callout so one cached clip plays; receipt
+  `arrive-speak … wx= ending=`. VERIFIED from the 20:36 receipts that no separate weather line was spoken at arrival (the 45-char
+  line was "In 50 m, you will arrive…"); the only spoken weather is the route-start greeting — what Jeff heard is a HYPOTHESIS
+  (ask). Gate `arrival_line_test.mts`. (c) **Weather pill temperature off-centre**: the phone drew the number in a fixed
+  `lineHeight: 20` box that sat 1.5 pt high of the glyph centre (measured with the real SF font at 3×); now centred in a
+  `WX_CALLOUT_BOX_H` box. CarPlay's SymbolLayer measured +0.4 pt and was left alone. Preview `tools/wx-pin/preview_align.png`
+  (sent to Jeff). Seen, not fixed: a 3-digit "104°" overflows the 70 pt box (Fahrenheit only). (d) The route-line anchor + lead
+  (entry below) and the two 22:46 root causes (per-path post-swap holds, head-unit car size refresh). Gates: typecheck, trap-check
+  13/0, doc-check, corner, ribbon lead, ribbon anchor, storm A–D/I–Q, timer, speed episode, arrival line.
+- 🔎 **2026-09-05 23:25 PDT — Jeff: "look at my drive… why can't you get the route line/ribbon correct? it is way too far away from
+  the car" → ROOT-CAUSED from his receipts, fixed in OTA-Z.** His 4-hour CarPlay drive (807 `ribbon-trim surf=car` rows, 17:00–21:00):
+  `anchorOff` avg **417 m**, max 1268 m, >30 m on 400 rows; `lag` avg −249 m; the phone's 21 rows read anchorOff 1 m. Decoded:
+  `anchorOff` is the lateral distance from the drawn car to the nearest ribbon point found within ±250 m of the HINT, and the hint was
+  `fracDrawn × totalM` — a fraction measured on the projection line applied to the ribbon's own partition (the car surface projects
+  onto the decoded polyline, `routeLL`, and builds its partition from the mirrored dense `routeCoordinates`). The lengths differ by
+  about a percent, so the hint drifts a percent of the distance driven; past ~25 km it is outside its own window, the windowed
+  search returns the window's far end (that IS the 400-odd-metre `anchorOff`, and `lag=-249` is the window edge), the >80 m guard
+  rejects it, and the cut fell back to the same wrong metre + the 435 m lead: the line started hundreds of metres from the car. The
+  phone's short drives never got far enough to show it. **Fix:** `src/ribbonAnchor.ts` (pure) `anchorCutM` — the hint is the LAST
+  anchor on this partition (keyed by the partition object, so a swap re-seeds), one global search when there is none, the old metre
+  only when the car is genuinely >80 m off the line; both surfaces use it; receipts gain `hint=prev|global|fallback`. **Gate**
+  `tools/sim-qc/ribbon_anchor_test.mts`: the old hint at 30 km misses by 674 m with anchorOff 400 (Jeff's signature), the new anchor
+  is within 1 m from a cold start, stays local afterwards, re-seeds after a swap, falls back off-line, and never jumps to the
+  return leg of an out-and-back 30 m away. **Optics on top:** `TRIM_LEAD_DP` 60 → 40 (the 09-04 pitch compensation doubled the
+  ground lead at pitch 60 — the sim's 48–51 pt of solid line ahead of the nose at 108 km/h was more than a car length), fade 51 → 34,
+  floor 20 → 12 m (his phone rows at z18.50 sat on the 20 m floor = a car length and a half ahead of a creeping car).
 - 🔎 **2026-09-05 22:46 PDT — WhatsApp read (Jeff: "Look at the WhatsApp chat today") → TWO root causes, OTA-Z built.**
   Rodrigo 17:02 (photo, head unit): *"car was huge when starting a route, went back to normal once I started driving"* (yesterday +
   today) and *"the app will route you to the quickest path regardless of where you are headed … take a long time to re-route"*;

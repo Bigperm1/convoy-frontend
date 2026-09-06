@@ -40,6 +40,7 @@ import { logEvent } from "./crashBreadcrumb";
 // timers (not rAF) are dead, on BOTH surfaces (this component renders the phone map
 // directly and CarMapView's self car via the same SelfCarModel).
 import { noteRafFrame, timersStarvedMs, maybeLogTimerStarve } from "./timerLiveness";
+import { anchorCutM, type CutAnchorHint } from "./routeRibbon";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert, Animated } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
@@ -58,7 +59,7 @@ import { getLastLocation, setLastLocation, getSettings, canonicalClass } from ".
 import { haversineMeters } from "./nav";
 import { useAppSkin } from "./appSkin";
 import { cornerBlend, cornerNose, newCornerBlendState, newFixClock, noteFix } from "./cornerBlend";
-import { wxCalloutUri, WX_CALLOUT_W, WX_CALLOUT_H, WX_CALLOUT_TEXT_X, WX_CALLOUT_TEXT_CY } from "./wxCalloutImages";
+import { wxCalloutUri, WX_CALLOUT_W, WX_CALLOUT_H, WX_CALLOUT_BOX_H, WX_CALLOUT_TEXT_X } from "./wxCalloutImages";
 import type { VisualTier } from "./tierTheme";
 
 // 1×1 fully transparent PNG — a REAL bundled asset, not a data-URI (@rnmapbox's
@@ -2307,9 +2308,18 @@ function DestinationWeatherCallout({ lat, lng, weather }: { lat: number; lng: nu
       <View style={{ width: WX_CALLOUT_W, height: WX_CALLOUT_H }}>
         <Image source={{ uri: wxCalloutUri(tier, kind) }} style={{ position: "absolute", left: 0, top: 0, width: WX_CALLOUT_W, height: WX_CALLOUT_H }} resizeMode="contain" />
         {weather ? (
-          <Text style={[styles.destWxText, { position: "absolute", left: WX_CALLOUT_TEXT_X, top: WX_CALLOUT_TEXT_CY - 10, height: 20, lineHeight: 20 }]} numberOfLines={1}>
-            {weather.temp}
-          </Text>
+          // Flex-centred on WX_CALLOUT_BOX_H (the box the glyph was baked centred in —
+          // bake.py's BOX_H/2, same value as WX_CALLOUT_TEXT_CY) instead of a fixed
+          // lineHeight box — a forced lineHeight taller than the font's natural line height
+          // lets TextKit/includeFontPadding split the extra leading unevenly, which is what
+          // pushed the rendered digits off the glyph's vertical centre (Jeff, 2026-09-05).
+          // Centring the Text's own measured box via justifyContent avoids depending on
+          // that leading math.
+          <View style={{ position: "absolute", left: WX_CALLOUT_TEXT_X, top: 0, height: WX_CALLOUT_BOX_H, justifyContent: "center", alignItems: "flex-start" }}>
+            <Text style={styles.destWxText} numberOfLines={1}>
+              {weather.temp}
+            </Text>
+          </View>
         ) : null}
       </View>
     </MarkerView>
@@ -2720,6 +2730,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // tuned against actual zoom values (read "too small at zoom X" instead of guessing).
   const [dbgZoom, setDbgZoom] = useState(0);
   const lastZoomRef = useRef<number>(0);
+  // The last cut anchor on the current ribbon partition (anchorCutM) — the only hint the
+  // anchor search is allowed to use; keyed by the partition object so a swap re-seeds.
+  const cutAnchorHintRef = useRef<CutAnchorHint>(null);
   // SelfCarModel re-render hook + throttle for the camera-change bump (see refreshRef).
   const selfRefreshRef = useRef<(() => void) | null>(null);
   const selfRefreshAt = useRef(0);
@@ -3481,13 +3494,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Now the marker's DRAWN pose (SelfCarModel's out-param) is projected onto the partition
   // itself, windowed around the eased fraction; the old path stays as the fallback for the
   // first frames and when the anchor is >80 m off the ribbon (not on this line at all).
+  // 2026-09-05: the hint is the LAST anchor on this partition, never the foreign fraction —
+  // see anchorCutM in src/routeRibbon.ts for Jeff's 417 m receipts and why.
   const _anchorPos = drawPosRef.current ?? (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null);
   const _alongAnchor = (routeProj && ribbonPartition && _anchorPos)
-    ? alongMOnPartition(ribbonPartition, _anchorPos.lat, _anchorPos.lng, _fracDrawn * ribbonPartition.totalM, 250)
+    ? anchorCutM(ribbonPartition, _anchorPos.lat, _anchorPos.lng, cutAnchorHintRef.current, ribbonPartition, _fracDrawn * ribbonPartition.totalM)
     : null;
-  const _cutBaseM = (routeProj && ribbonPartition)
-    ? ((_alongAnchor && _alongAnchor.distM <= 80) ? _alongAnchor.m : _fracDrawn * ribbonPartition.totalM)
-    : null;
+  if (_alongAnchor) cutAnchorHintRef.current = _alongAnchor.hint;
+  const _cutBaseM = (routeProj && ribbonPartition) ? (_alongAnchor ? _alongAnchor.m : _fracDrawn * ribbonPartition.totalM) : null;
   const ribbonCutM = _cutBaseM != null ? _cutBaseM + _trimLeadM : null;
   const ribbonCutQ = quantiseM(ribbonCutM, ribbonStepM(_trimZoom, selfCar?.lat ?? 0));
   const ribbonFadeQ = Math.round(routeTrimFadeM(_trimZoom, selfCar?.lat ?? 0, _trimPitch) / 2) * 2;
@@ -3599,7 +3613,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     if (_tn - trimLogAt.current >= 15000) {
       trimLogAt.current = _tn;
       try {
-        logEvent(`ribbon-trim surf=phone snap=${selfSnapped ? 1 : 0} z=${Number(_trimZoom).toFixed(2)} lead=${Math.round(_trimLeadM)} cutAhead=${Math.round(ribbonCutM - _cutBaseM)} lag=${_alongAnchor ? Math.round(_fracDrawn * ribbonPartition.totalM - _alongAnchor.m) : '-'} anchorOff=${_alongAnchor ? Math.round(_alongAnchor.distM) : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} pitch=${Math.round(_trimPitch)} leadDp=${Math.round(routeTrimLeadDp(_trimPitch))}`);
+        logEvent(`ribbon-trim surf=phone snap=${selfSnapped ? 1 : 0} z=${Number(_trimZoom).toFixed(2)} lead=${Math.round(_trimLeadM)} cutAhead=${Math.round(ribbonCutM - _cutBaseM)} lag=${_alongAnchor ? Math.round(_fracDrawn * ribbonPartition.totalM - _alongAnchor.m) : '-'} anchorOff=${_alongAnchor && Number.isFinite(_alongAnchor.distM) ? Math.round(_alongAnchor.distM) : '-'} hint=${_alongAnchor ? _alongAnchor.src : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} pitch=${Math.round(_trimPitch)} leadDp=${Math.round(routeTrimLeadDp(_trimPitch))}`);
       } catch {}
     }
   }

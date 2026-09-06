@@ -62,6 +62,8 @@ import { useSpeedCameras } from "../../src/speedCameras";
 import { useDriveBcEvents } from "../../src/driveBcEvents";
 import { useSpeedLimit, getSpeedLimitDebug } from "../../src/speedLimit";
 import { playSpeedDing } from "../../src/speedDing";
+import { speedEpisodeTick, newSpeedEpisodeState, SPEED_TIER1_OVER_KMH, SPEED_TIER2_OVER_KMH } from "../../src/speedEpisode";
+import type { SpeedEpisodeState } from "../../src/speedEpisode";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
 import { prepareRouteGreeting, playPreparedGreeting, clearPreparedGreeting } from "../../src/novaGreeting";
@@ -916,6 +918,10 @@ export default function MapScreen() {
     const t = Math.round(settings.speedUnit === "mph" ? cond.tempF : cond.tempC);
     return { kind: weatherKind(cond), temp: `${t}\u00b0` };
   }, [destination, destForecast, activeRoute?.duration_in_traffic_s, activeRoute?.duration_s, settings.speedUnit]);
+  // The arrival line's weather (src/arrivalEndings.ts) is the same hourly feed, read for RIGHT
+  // NOW at speak time through a ref so the engine's getter never sees a stale render.
+  const destForecastRef = useRef(destForecast);
+  destForecastRef.current = destForecast;
 
   // Fixed speed cameras (OpenStreetMap), fetched around the driver and cached.
   // Drives both the map pins and the Nova proximity voice alert below.
@@ -967,21 +973,21 @@ export default function MapScreen() {
   const speedLimitKmh = useSpeedLimit(coords?.lat ?? null, coords?.lng ?? null, true);
 
   // ===== Speed alerts (Nova / Ding / Off) =====
-  // Mode from settings: 'nova' speaks a humorous nudge, 'ding' plays a chime
-  // (single ~21 km/h over, double ~41 over), 'off' is silent. Posted limit comes
-  // from useSpeedLimit (OpenStreetMap). Each threshold has its OWN independent
-  // 5-minute cooldown and re-arms the instant you drop back under it: it fires
-  // once on crossing, won't nag while you sit above the line, but alerts again on
-  // a fresh transgression — and the +41 warning can fire even if the +21 nudge
-  // just did (they're tracked separately). Thresholds are km/h; the spoken amount
-  // is converted to the driver's unit. navMuted silences the SPOKEN mode only —
-  // the ding is a non-voice alert the driver explicitly opted into, so it keeps
-  // playing even when Nova's voice is muted.
-  const SPEED_TIER1_OVER_KMH = 21;
-  const SPEED_TIER2_OVER_KMH = 41;
-  const SPEED_ALERT_COOLDOWN_MS = 300000; // 5 min, per threshold
-  const speedTier1Ref = useRef({ last: 0, armed: true });
-  const speedTier2Ref = useRef({ last: 0, armed: true });
+  // Mode from settings: 'nova' speaks a nudge, 'ding' plays a chime, 'off' is silent.
+  // Posted limit comes from useSpeedLimit (OpenStreetMap). WHEN an alert sounds is
+  // decided by src/speedEpisode.ts (pure; gated by tools/sim-qc/speed_episode_test.mts):
+  // ONE alert per speeding EPISODE — the single ding / nudge on crossing tier 1 (21 over,
+  // adaptive up to 35), the double / firmer line at most once on the FIRST crossing of
+  // tier 2 (41 over), and the episode only ends after 20 consecutive seconds below
+  // limit + 5. Wobbling around a threshold or dipping under the limit for a moment is
+  // silent; the 5-minute per-tier cooldown is a ceiling across episodes, never a re-fire.
+  // (Jeff, 2026-09-05: the old per-threshold re-arm dinged on every crossing — "20 over
+  // dings, speed up more it dings — really annoying".) Thresholds are km/h; the spoken
+  // amount is converted to the driver's unit. navMuted silences the SPOKEN mode only —
+  // the ding is a non-voice alert the driver explicitly opted into, so it keeps playing
+  // even when Nova's voice is muted. A stopped car (< 5 km/h) is a no-op tick: an
+  // episode ends by DRIVING under limit + 5 for 20 s, not by sitting at a light.
+  const speedEpisodeRef = useRef<SpeedEpisodeState>(newSpeedEpisodeState());
   useEffect(() => {
     const mode = getSpeedAlertMode(settings);
     if (mode === "off") return;
@@ -989,7 +995,6 @@ export default function MapScreen() {
     const kmh = (coords?.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
     if (kmh < 5) return;
     const overKmh = kmh - speedLimitKmh;
-    const now = Date.now();
     // Learn the habitual over-margin, then (if adaptive is on) raise ONLY the tier-1
     // nudge toward it — buffered + hard-capped at 35 over so a habitual speeder still
     // gets nudged, and tier-2 (the firmer alert) is untouched.
@@ -999,22 +1004,19 @@ export default function MapScreen() {
       const hab = habitualOverKmh();
       if (hab != null) tier1Over = Math.max(SPEED_TIER1_OVER_KMH, Math.min(35, Math.round(hab) + 5));
     }
-    // Re-arm each threshold the moment you drop back under it.
-    if (overKmh < tier1Over) speedTier1Ref.current.armed = true;
-    if (overKmh < SPEED_TIER2_OVER_KMH) speedTier2Ref.current.armed = true;
-    // Fire the HIGHEST crossed threshold whose own cooldown currently allows it.
-    let tier: 0 | 1 | 2 = 0;
-    if (overKmh >= SPEED_TIER2_OVER_KMH) {
-      const t = speedTier2Ref.current;
-      if (t.armed || now - t.last >= SPEED_ALERT_COOLDOWN_MS) { t.last = now; t.armed = false; tier = 2; }
-    } else if (overKmh >= tier1Over) {
-      const t = speedTier1Ref.current;
-      if (t.armed || now - t.last >= SPEED_ALERT_COOLDOWN_MS) { t.last = now; t.armed = false; tier = 1; }
-    }
+    const r = speedEpisodeTick(speedEpisodeRef.current, {
+      nowMs: Date.now(), kmh, limitKmh: speedLimitKmh, tier1Over, tier2Over: SPEED_TIER2_OVER_KMH,
+    });
+    speedEpisodeRef.current = r.state;
+    const tier = r.fire;
     if (tier === 0) return;
+    // Bounded receipt — logEvent is a Supabase INSERT. ≤2 rows per episode by construction
+    // (entry + first tier-2 crossing) and never more than one per tier per 5 minutes.
+    const muted = mode === "nova" && navMuted;
+    try { logEvent(`speed-alert tier=${tier} mode=${mode} over=${Math.round(overKmh)} limit=${Math.round(speedLimitKmh)} episode=${r.state.episode}${muted ? " muted=1" : ""}`); } catch {}
     if (mode === "ding") { void playSpeedDing(tier === 2); return; }
     // mode === "nova": spoken nudge (announce() also honors the Nova master switch).
-    if (navMuted) return;
+    if (muted) return;
     const mph = settings.speedUnit === "mph";
     const overDisp = Math.max(1, Math.round(mph ? overKmh / 1.60934 : overKmh));
     const cs = (getSettings().callSign || "").trim();
@@ -1827,6 +1829,19 @@ export default function MapScreen() {
   const tbt = useTurnByTurn(activeRoute, coords, navMode === "turn-by-turn", {
     mute: navMuted,
     destLabel: arrivalDestLabel,
+    // What the arrival line needs beyond the label (nav.ts ArrivalContext): the saved-place
+    // kind for the closer, the destination forecast for right now in the driver's unit, and
+    // the drive start for the "long one" closer. Evaluated at prefetch / speak time.
+    arrivalContext: () => {
+      if (!destination) return null;
+      const saved = matchSavedPlace(destination.lat, destination.lng);
+      const cond = pickForecastAt(destForecastRef.current, Date.now());
+      return {
+        placeKind: saved?.kind ?? null,
+        weather: cond ? { temp: settings.speedUnit === "mph" ? cond.tempF : cond.tempC, tempC: cond.tempC, kind: weatherKind(cond) } : null,
+        startedAt: tripBaselineRef.current?.startedAt || getNavStartedAt() || null,
+      };
+    },
     onArrive: () => {
       // Auto-finish the trip on arrival. The engine already spoke the (varied)
       // arrival line, so do NOT call stopSpeech() here — that would cut it off

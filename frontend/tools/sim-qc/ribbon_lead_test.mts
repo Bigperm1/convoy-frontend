@@ -15,7 +15,9 @@ const Z = 15.76, LAT = 49.24; // Olaf's field report
 // BEFORE the pitch parameter existed (the unpitched formula: TRIM_LEAD_DP * metersPerDp),
 // then hard-coded here per instruction — it is the one number in this file NOT derived
 // from the code under test. Also matches the field telemetry's own `lead=55` (rounded).
-const PRE_CHANGE_LEAD_0 = 55.253983267062594;
+// 2026-09-05: TRIM_LEAD_DP 60 → 40 (Jeff: "way too far away from the car"), so the baseline is
+// 55.253983267062594 × 40/60. Still the one hard-coded number here — the pitch-0 lead at Olaf's zoom.
+const PRE_CHANGE_LEAD_0 = 55.253983267062594 * (40 / 60);
 const lead0 = routeTrimLeadM(Z, LAT, 0);
 assert.ok(
   Math.abs(lead0 - PRE_CHANGE_LEAD_0) < 1e-9,
@@ -34,20 +36,21 @@ assert.ok(
 );
 
 // leadDp is the SCREEN-space value before the metres conversion — what the `leadDp=`
-// receipt field prints. At pitch 0 it must be exactly TRIM_LEAD_DP (60).
-assert.equal(routeTrimLeadDp(0), 60, "routeTrimLeadDp(0) must equal TRIM_LEAD_DP (60)");
-assert.ok(routeTrimLeadDp(57) >= 60 * 1.8, "routeTrimLeadDp(57) did not compensate enough");
+// receipt field prints. At pitch 0 it must be exactly TRIM_LEAD_DP (40 since 2026-09-05 — Jeff:
+// "way too far away from the car"; 60 before).
+assert.equal(routeTrimLeadDp(0), 40, "routeTrimLeadDp(0) must equal TRIM_LEAD_DP (40)");
+assert.ok(routeTrimLeadDp(57) >= 40 * 1.8, "routeTrimLeadDp(57) did not compensate enough");
 
 // 3. THE RAILS STILL BIND with a pitch term in the mix.
 // Floor: at a high zoom (metersPerDp collapses toward 0), even a pitch-inflated dp value
-// must still floor at TRIM_MIN_M (20 m) — not report some vanishing gap.
-assert.equal(routeTrimLeadM(20, 0, 0), 20, "TRIM_MIN_M floor did not bind at pitch=0");
-assert.equal(routeTrimLeadM(20, 0, 57), 20, "TRIM_MIN_M floor did not bind at pitch=57");
+// must still floor at TRIM_MIN_M (12 m since 2026-09-05; 20 before) — not report some vanishing gap.
+assert.equal(routeTrimLeadM(20, 0, 0), 12, "TRIM_MIN_M floor did not bind at pitch=0");
+assert.equal(routeTrimLeadM(20, 0, 57), 12, "TRIM_MIN_M floor did not bind at pitch=57");
 // Cap: pick a zoom where pitch=0 sits just under the 500 m cap, then confirm pitch=57
 // pushes it OVER and the rail clamps it back to exactly 500 (no runaway).
-const nearCapAtPitch0 = routeTrimLeadM(13.5, 0, 0);
+const nearCapAtPitch0 = routeTrimLeadM(13.0, 0, 0);   // 40 dp × 9.55 m/dp = 382 m at pitch 0; ÷cos57 = 701 → cap
 assert.ok(nearCapAtPitch0 < 500, `test zoom picked wrong — already at the cap: ${nearCapAtPitch0}`);
-assert.equal(routeTrimLeadM(13.5, 0, 57), 500, "TRIM_MAX_M cap did not bind with pitch present");
+assert.equal(routeTrimLeadM(13.0, 0, 57), 500, "TRIM_MAX_M cap did not bind with pitch present");
 
 // FADE rides the same compensation for the same reason (identical metersPerDp mechanism,
 // see routeTrim.ts) — same ratio, and unchanged at pitch 0.
@@ -62,5 +65,5 @@ assert.equal(routeTrimFadeM(Z, LAT), fade0, "omitting pitchDeg on fade must equa
 console.log(
   `PASS — lead0=${lead0.toFixed(2)}m lead57=${lead57.toFixed(2)}m (${(lead57 / lead0).toFixed(3)}x) ` +
   `leadDp0=${routeTrimLeadDp(0)} leadDp57=${routeTrimLeadDp(57).toFixed(1)} ` +
-  `fade0=${fade0.toFixed(2)}m fade57=${fade57.toFixed(2)}m floor=20 cap=500 all bound correctly`,
+  `fade0=${fade0.toFixed(2)}m fade57=${fade57.toFixed(2)}m floor=12 cap=500 all bound correctly`,
 );

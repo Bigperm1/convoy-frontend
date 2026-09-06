@@ -73,7 +73,7 @@ import {
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
 import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp } from '../routeTrim';
-import { buildRibbonPartition, buildRibbonFeatures, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from '../routeRibbon';
+import { buildRibbonPartition, buildRibbonFeatures, anchorCutM, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat, type CutAnchorHint } from '../routeRibbon';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
@@ -1088,6 +1088,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // The camera's ACTUAL low-passed zoom, written every frame by SelfCarModel's
   // pushCam. A ref → no renders. The route trim reads it; see trimZoom.
   const camZoomRef = useRef<number | null>(null);
+  const cutAnchorHintRef = useRef<CutAnchorHint>(null);   // last cut anchor on this partition (anchorCutM)
   // THE HUGE CAR AT ROUTE START (Rodrigo 2026-09-05, GR Advisor "same"): this surface moves the
   // camera with its own setCamera calls (nav start 17 → 18.5, the crew overview, a pinch), and
   // SelfCarModel — which sizes the car at RENDER time — never re-renders while the car is parked.
@@ -1754,13 +1755,15 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // a settling camera zoom cannot churn the memo either.
   // CUT ANCHORED TO THE DRAWN CAR on the ribbon's own metres (2026-09-03) — see the
   // matching block in ConvoyMapbox.tsx. Jeff's 09:22 CarPlay video is the report.
+  // 2026-09-05: the hint is the LAST anchor on this partition, never the foreign fraction —
+  // Jeff's 4-hour CarPlay drive read anchorOff avg 417 m / max 1268 m on 807 receipts, i.e.
+  // the line started hundreds of metres from the car. See anchorCutM in src/routeRibbon.ts.
   const _carAnchor = carDrawPosRef.current ?? { lat, lng };
   const _carAlongAnchor = (routeProj && ribbonPartition)
-    ? alongMOnPartition(ribbonPartition, _carAnchor.lat, _carAnchor.lng, fracDrawn * ribbonPartition.totalM, 250)
+    ? anchorCutM(ribbonPartition, _carAnchor.lat, _carAnchor.lng, cutAnchorHintRef.current, ribbonPartition, fracDrawn * ribbonPartition.totalM)
     : null;
-  const _carCutBaseM = (routeProj && ribbonPartition)
-    ? ((_carAlongAnchor && _carAlongAnchor.distM <= 80) ? _carAlongAnchor.m : fracDrawn * ribbonPartition.totalM)
-    : null;
+  if (_carAlongAnchor) cutAnchorHintRef.current = _carAlongAnchor.hint;
+  const _carCutBaseM = (routeProj && ribbonPartition) ? (_carAlongAnchor ? _carAlongAnchor.m : fracDrawn * ribbonPartition.totalM) : null;
   const ribbonCutM = _carCutBaseM != null ? _carCutBaseM + trimLeadM : null;
   const ribbonCutQ = quantiseM(ribbonCutM, ribbonStepM(trimZoom, lat, mapScale));
   const ribbonFadeQ = Math.round((routeTrimFadeM(trimZoom, lat, trimPitch) * mapScale) / 2) * 2;
@@ -1786,7 +1789,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     if (_tn - carTrimLogAt.current >= 15000) {
       carTrimLogAt.current = _tn;
       try {
-        logEvent(`ribbon-trim surf=car snap=${carSnapped ? 1 : 0} z=${trimZoom.toFixed(2)} lead=${Math.round(trimLeadM)} cutAhead=${Math.round(ribbonCutM - _carCutBaseM)} lag=${_carAlongAnchor ? Math.round(fracDrawn * ribbonPartition.totalM - _carAlongAnchor.m) : '-'} anchorOff=${_carAlongAnchor ? Math.round(_carAlongAnchor.distM) : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} scale=${mapScale.toFixed(2)} pitch=${Math.round(trimPitch)} leadDp=${Math.round(routeTrimLeadDp(trimPitch))}`);
+        logEvent(`ribbon-trim surf=car snap=${carSnapped ? 1 : 0} z=${trimZoom.toFixed(2)} lead=${Math.round(trimLeadM)} cutAhead=${Math.round(ribbonCutM - _carCutBaseM)} lag=${_carAlongAnchor ? Math.round(fracDrawn * ribbonPartition.totalM - _carAlongAnchor.m) : '-'} anchorOff=${_carAlongAnchor && Number.isFinite(_carAlongAnchor.distM) ? Math.round(_carAlongAnchor.distM) : '-'} hint=${_carAlongAnchor ? _carAlongAnchor.src : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} scale=${mapScale.toFixed(2)} pitch=${Math.round(trimPitch)} leadDp=${Math.round(routeTrimLeadDp(trimPitch))}`);
       } catch {}
     }
   }

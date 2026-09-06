@@ -698,7 +698,13 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   ≤5 m on most bends (route polyline vs lane), 8.6 m once (05:54:31), the 21 m spike (06:04:27 phone) was the
   off-route moment. Below the 6 m release by design. (e) **"glitching"**: `main-gap` 28483 ms (06:39:40), 7322,
   6222, 4939 on the car surface — visible freeze vs locked phone unknown; asked Olaf.
-- 🟡 **2026-09-06 09:40 PDT — OTA-AB built ("before we get to my list I want everything fixed"): every OTA-reachable open item closed.**
+- ✅ **OTA-AB SHIPPED 2026-09-06 09:29 PDT — group `b472fd1d-b24c-4954-b756-4c5ed97a155d`, code `7c9a22e` + `src/navNotification.ts`
+  (see below), KEY_PRESENT=1 both ("before we get to my list I want everything fixed"): every OTA-reachable open item closed.** Sim
+  build 14: 6 reroutes ≤1 s with bearings, `hint=prev` snapped / `fallback` off-line, no `js-error`, app alive. ⚠ The bundle also
+  carries an UNCOMMITTED edit found in the checkout at publish time (mtime 09:07, not from this session's edits or its agents'
+  reports): `startNavBanner` no longer requests notification permission at nav start ("requested on Comms through
+  permissionGate") — consistent with CLAUDE.md's permission rule, so kept and committed with this note; provenance unconfirmed
+  ([[shared-checkout-commit-collision]]).
   (1) creep hold bounded to ≤160 m off the line (a car crawling in a jam on another road was held for the length of the jam —
   Codex rescue); storm gate R: re-trip 21 s, C (lot scatter) still 0. (2) `alongMOnPartition` starts at the window (binary search on
   `cum`) instead of walking a 40 km partition per frame. (3) crash-queue writes serialised (two overlapping writes lost a row —

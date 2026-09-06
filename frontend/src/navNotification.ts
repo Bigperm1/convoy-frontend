@@ -1193,8 +1193,9 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
     // teardown resets to the 2D idle default. Here (not map.tsx) because this is the
     // ONE start every path funnels through — phone, adoption, car-started.
     setMapView2D(false);
-    const perm = await Notifications.getPermissionsAsync();
-    if (!perm.granted) { try { await Notifications.requestPermissionsAsync(); } catch {} }
+    // Notification permission is requested on Comms through permissionGate.
+    // Navigation startup, including CarPlay and Android Auto starts, never opens
+    // an OS permission dialog.
 
     if (Platform.OS === "android") {
       try {

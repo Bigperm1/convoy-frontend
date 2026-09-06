@@ -1024,7 +1024,10 @@ export default function MapScreen() {
     const overDisp = Math.max(1, Math.round(mph ? overKmh / 1.60934 : overKmh));
     const cs = (getSettings().callSign || "").trim();
     try { announce(speedingLine(tier, overDisp, cs ? `${cs}, ` : "")); } catch {}
-  }, [coords?.speed, speedLimitKmh, navMuted, settings.speedUnit, settings.speedAlertMode, settings.novaSpeeding]);
+  // `coords` (every fix), not `coords?.speed`: at a constant speed the effect never re-ran, so
+  // the 20 s below-limit dwell could never complete and the next speeding never alerted
+  // (Codex rescue 2026-09-06).
+  }, [coords, speedLimitKmh, navMuted, settings.speedUnit, settings.speedAlertMode, settings.novaSpeeding]);
 
   // Optional Convoy alert sound — chime when a NEW community hazard appears
   const prevHazardIdsRef = useRef<Set<string>>(new Set());

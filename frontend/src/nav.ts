@@ -317,6 +317,10 @@ export async function fetchRoutes(
     if (ctl.signal.aborted) return [];
     if (!mbRoutes.length) return [];
     mbRoutes = await preferCurbArrival(origin, destination, avoid, mbRoutes, ctl.signal);
+    // The curb pass is a second await; an abort landing during it must not let the original
+    // routes through either (Codex rescue 2026-09-06 — preferCurbArrival swallows its failure
+    // and returns the input routes).
+    if (ctl.signal.aborted) return [];
   } catch (e: any) {
     // 2026-09-02: Rodrigo's five off-route refetches came back with REAL routes at
     // 34-317 s — past this 15 s abort. An aborted fetch cannot return routes, so the
@@ -817,7 +821,7 @@ function roundaboutExitCue(maneuverKey?: string, html?: string): string | null {
 // Breadcrumb cadence for the nav-eta receipt below. A plain timestamp compare, never
 // a JS timer — iOS suspends timers while the phone is locked, which is exactly when a
 // drive is most in need of a receipt.
-const ETA_LOG_EVERY_MS = 30_000;
+const ETA_LOG_EVERY_MS = 60_000;   // 30 s → 60 s (2026-09-06, receipt volume cut)
 let lastEtaLogAt = 0;
 let _tbtEngineActive = false;
 export function isPhoneTbtSpeaking(): boolean { return _tbtEngineActive; }
@@ -1948,6 +1952,8 @@ function speak(text: string, opts?: { priority?: boolean }) {
 }
 
 let _arrivalDrainTimer: ReturnType<typeof setTimeout> | null = null;
+let _arrivalHoldPolls = 0;
+let _arrivalHoldStartedAt = 0;
 function resetSpeakGate() {
   // ARRIVAL HOLD (2026-09-03): the route ends the instant the arrival line is queued, and
   // this reset used to empty the queue 25 ms later (`tts-cut queued=1 playing=1`). While an
@@ -1957,9 +1963,19 @@ function resetSpeakGate() {
   if (_arrivalHoldUntil && Date.now() < _arrivalHoldUntil && (ttsQueue.length > 0 || ttsPlaying)) {
     if (!_arrivalDrainTimer) {
       _arrivalDrainTimer = setTimeout(() => { _arrivalDrainTimer = null; resetSpeakGate(); }, 250);
-      try { logEvent(`tts-arrival-hold queued=${ttsQueue.length} playing=${ttsPlaying ? 1 : 0}`); } catch {}
+      // ONE row at the start of a hold and one at its end (2026-09-06) — this used to log every
+      // 250 ms poll: 626 rows in three days for a fact that fits in two.
+      if (_arrivalHoldPolls === 0) {
+        _arrivalHoldStartedAt = Date.now();
+        try { logEvent(`tts-arrival-hold start queued=${ttsQueue.length} playing=${ttsPlaying ? 1 : 0}`); } catch {}
+      }
+      _arrivalHoldPolls += 1;
     }
     return;
+  }
+  if (_arrivalHoldPolls > 0) {
+    try { logEvent(`tts-arrival-hold end polls=${_arrivalHoldPolls} ms=${Date.now() - _arrivalHoldStartedAt}`); } catch {}
+    _arrivalHoldPolls = 0;
   }
   _arrivalHoldUntil = 0;
   if (_arrivalDrainTimer) { clearTimeout(_arrivalDrainTimer); _arrivalDrainTimer = null; }

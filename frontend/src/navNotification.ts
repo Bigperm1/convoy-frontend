@@ -139,7 +139,7 @@ async function persistProgress(idx: number, notified: number): Promise<void> {
 }
 // Cadence for the car-strip receipt. Timestamp compare, not a JS timer (suspended
 // while the phone is locked — see nav.ts).
-const COLD_STRIP_LOG_EVERY_MS = 30_000;
+const COLD_STRIP_LOG_EVERY_MS = 60_000;   // 30 s → 60 s (2026-09-06, receipt volume cut)
 let _coldStripLogAt = 0;
 
 // COLD lane guidance was REMOVED 2026-08-13 with the lane row it fed — Jeff: "lets

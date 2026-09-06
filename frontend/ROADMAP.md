@@ -698,6 +698,19 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   ≤5 m on most bends (route polyline vs lane), 8.6 m once (05:54:31), the 21 m spike (06:04:27 phone) was the
   off-route moment. Below the 6 m release by design. (e) **"glitching"**: `main-gap` 28483 ms (06:39:40), 7322,
   6222, 4939 on the car surface — visible freeze vs locked phone unknown; asked Olaf.
+- 🟡 **2026-09-06 09:15 PDT — OTA-AA built (Jeff: "all I want is this to be fixed … I have a huge list"; bundling is his call, every fix
+  gated).** From the Codex rescue pass (session `01a0774e`, verdicts kept as written): **(1) fatal crash reports were never sent** —
+  a PostgREST builder only runs when `.then()` is attached and the "immediate" fatal insert was `void builder` (since 07-23);
+  fixed. **(2) Production error visibility**: non-fatal errors bypassed reporting and unhandled promise rejections are only
+  tracked in `__DEV__` by React Native → `js-error kind=nonfatal|rejection` rows, deduplicated per message, ≤12 per session,
+  persisted through the queue. "Zero crash rows" never meant zero errors. **(3)** an abort landing during `preferCurbArrival`
+  could still return routes → second `signal.aborted` guard. **(4) Telemetry volume cut** (Jeff: "all these receipts and probes"):
+  draw-cmp 10→30 s, cam-probe 1→15 s, cam-apply 2→10 s, ribbon-trim 15→30 s, snap-mode 2→15 s, corner-trace 5→3 rows / 15→60 s,
+  arrival-hold one start + one end row instead of one per 250 ms poll, nav-eta/car-strip 30→60 s — the six kinds that were 78 %
+  of all rows; verdict receipts unchanged. **(5)** head-unit size refresh compared each zoom event to the previous one (native
+  animations step ~0.02 per event, so ≥0.05 never fired until idle) → compares to the zoom at the last refresh. **(6)** the speed
+  episode ticked only when the speed VALUE changed, so at cruise the 20 s dwell never completed → ticks every fix. Plus bearing on
+  (entry below). Gates: typecheck, trap-check, doc-check, all Node gates.
 - 🟡 **2026-09-06 08:30 PDT — "bearing on" (Jeff) — BUILT, not published (waits for the Codex debug pass + one OTA).** Before flipping the
   flag I re-measured the thing `src/departureBearing.ts` had recorded as impossible: with the app's own request shape
   (driving-traffic, alternatives, `bearings=<hdg>,45;`) on Rodrigo's street, a westward constraint turned BOTH returned routes from

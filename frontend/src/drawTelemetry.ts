@@ -25,7 +25,7 @@
 import { logEvent } from "./crashBreadcrumb";
 import { privacyDebug } from "./locationPrivacy";
 
-const INTERVAL_MS = 10_000;
+const INTERVAL_MS = 30_000;      // 10 s → 30 s (2026-09-06: draw-cmp was 27 % of all rows)
 // Stationary rows are throttled harder — a parked phone would otherwise emit all night.
 // 60 s bounds it at ~60 rows/hour while still catching a wrong pin within a minute.
 const SLOW_INTERVAL_MS = 60_000;
@@ -43,10 +43,10 @@ const lastAt: Record<string, number> = {};
 // road costs ≤ ~5 rows per corner per surface.
 const CORNER_DEG = 30;
 const CORNER_ANCHOR_MS = 3000;     // heading is compared against a 0–3 s old anchor
-const TRACE_ROWS = 5;
+const TRACE_ROWS = 3;            // 5 → 3 (2026-09-06)
 const TRACE_MIN_GAP_MS = 1000;
-const TRACE_REARM_MS = 15000;
-const MODE_ROW_MIN_GAP_MS = 2000;
+const TRACE_REARM_MS = 60000;    // 15 s → 60 s (2026-09-06)
+const MODE_ROW_MIN_GAP_MS = 15000; // 2 s → 15 s (2026-09-06)
 const hdgAnchor: Record<string, { deg: number; at: number }> = {};
 const traceState: Record<string, { left: number; lastAt: number; armedAt: number }> = {};
 const lastMode: Record<string, { mode: string; at: number }> = {};

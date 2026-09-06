@@ -1099,6 +1099,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const carLiveZoomRef = useRef<number | null>(null);
   const selfRefreshRef = useRef<(() => void) | null>(null);
   const selfRefreshAt = useRef(0);
+  const lastRefreshZoomRef = useRef<number | null>(null);
   const scaleRefreshLogAt = useRef(0);
   // Same, for pitch (2026-09-04) — the trim's pitch compensation needs the value
   // the driver is really looking through, not the speed-derived followPitch target.
@@ -1786,7 +1787,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // RIBBON-TRIM RECEIPT (car surface) — same fields as the phone's, every 15 s in nav.
   if (s.navigating && routeProj && ribbonPartition && ribbonCutM != null && _carCutBaseM != null) {
     const _tn = Date.now();
-    if (_tn - carTrimLogAt.current >= 15000) {
+    if (_tn - carTrimLogAt.current >= 30000) {   // 15 s → 30 s (2026-09-06)
       carTrimLogAt.current = _tn;
       try {
         logEvent(`ribbon-trim surf=car snap=${carSnapped ? 1 : 0} z=${trimZoom.toFixed(2)} lead=${Math.round(trimLeadM)} cutAhead=${Math.round(ribbonCutM - _carCutBaseM)} lag=${_carAlongAnchor ? Math.round(fracDrawn * ribbonPartition.totalM - _carAlongAnchor.m) : '-'} anchorOff=${_carAlongAnchor && Number.isFinite(_carAlongAnchor.distM) ? Math.round(_carAlongAnchor.distM) : '-'} hint=${_carAlongAnchor ? _carAlongAnchor.src : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} scale=${mapScale.toFixed(2)} pitch=${Math.round(trimPitch)} leadDp=${Math.round(routeTrimLeadDp(trimPitch))}`);
@@ -1955,12 +1956,15 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       onCameraChanged={(state: any) => {
         const z = state?.properties?.zoom;
         if (typeof z !== 'number' || !Number.isFinite(z)) return;
-        const prev = carLiveZoomRef.current;
         carLiveZoomRef.current = z;
+        // Compare against the zoom at the LAST REFRESH, not the previous event: a native
+        // animation reports ~60 tiny steps, none ≥0.05 on its own (Codex rescue 2026-09-06).
+        const prev = lastRefreshZoomRef.current;
         if (prev != null && Math.abs(z - prev) < 0.05) return;
         const nowC = Date.now();
         if (nowC - selfRefreshAt.current < 100) return;
         selfRefreshAt.current = nowC;
+        lastRefreshZoomRef.current = z;
         selfRefreshRef.current?.();
         // Bounded receipt (≤1 per 30 s, only on a ≥0.5 zoom move): proves the refresh fired
         // at a route start in the field — Rodrigo's next drive is the verdict.

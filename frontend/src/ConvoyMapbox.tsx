@@ -1408,7 +1408,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // evaluated at the tile's integer zoom (see modelScaleForPoints) — but the probe stays:
     // it is the only camera instrument. Row only when the APPLIED zoom moves ≥0.15 or
     // pitch ≥3° since the last row, never more than 1/s: silent at a steady cruise.
-    if (now - camProbeAt.current >= 1000 &&
+    // 1 s → 15 s minimum gap (2026-09-06, Jeff: the probes were 16 % of all rows). The change
+    // thresholds stay, so a moving camera still gets a row, four times a minute at most.
+    if (now - camProbeAt.current >= 15000 &&
         (Math.abs(camZoom.current - camProbeZoom.current) >= 0.15 || Math.abs(camPitch.current - camProbePitch.current) >= 3)) {
       camProbeAt.current = now; camProbeZoom.current = camZoom.current; camProbePitch.current = camPitch.current;
       try {
@@ -1432,7 +1434,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // Jeff's 09:22 roundabout: pushes were issued the whole time (heat-probe cam == tick) yet
     // the map sat still ~12 s while the car walked across it. This row tells a native
     // non-apply from a JS silence. Logs only on divergence (>15 m or >0.4 zoom).
-    if (mapRef?.current && !camApplyBusy.current && now - camApplyAt.current >= 2000) {
+    // 2 s → 10 s (2026-09-06): each poll is two native getter calls on the bridge, rows only on divergence.
+    if (mapRef?.current && !camApplyBusy.current && now - camApplyAt.current >= 10000) {
       camApplyAt.current = now; camApplyBusy.current = true;
       const reqLa = la, reqLn = ln, reqZ = Number(camZoom.current), at = now;
       try {
@@ -3610,7 +3613,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // equal lead); lag = how far the old eased-fraction path sat behind the drawn car.
   if (navigationActive && routeProj && ribbonPartition && ribbonCutM != null && _cutBaseM != null) {
     const _tn = Date.now();
-    if (_tn - trimLogAt.current >= 15000) {
+    if (_tn - trimLogAt.current >= 30000) {   // 15 s → 30 s (2026-09-06)
       trimLogAt.current = _tn;
       try {
         logEvent(`ribbon-trim surf=phone snap=${selfSnapped ? 1 : 0} z=${Number(_trimZoom).toFixed(2)} lead=${Math.round(_trimLeadM)} cutAhead=${Math.round(ribbonCutM - _cutBaseM)} lag=${_alongAnchor ? Math.round(_fracDrawn * ribbonPartition.totalM - _alongAnchor.m) : '-'} anchorOff=${_alongAnchor && Number.isFinite(_alongAnchor.distM) ? Math.round(_alongAnchor.distM) : '-'} hint=${_alongAnchor ? _alongAnchor.src : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} pitch=${Math.round(_trimPitch)} leadDp=${Math.round(routeTrimLeadDp(_trimPitch))}`);

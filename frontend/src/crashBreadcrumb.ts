@@ -321,9 +321,51 @@ export function logEventReliable(message: string): void {
   } catch {}
 }
 
+// ── PRODUCTION ERROR VISIBILITY (2026-09-06, Codex rescue) ─────────────────────────────
+// Two classes of real error never reached crash_reports: NON-FATAL errors handed to the
+// global handler (they went straight to the previous handler), and UNHANDLED PROMISE
+// REJECTIONS — React Native only enables Hermes' rejection tracker in __DEV__
+// (Libraries/Core/polyfillPromise.js), so in a release bundle a rejected promise nobody
+// caught was invisible. "Zero crash rows" therefore never meant "zero errors". Both now
+// land as `js-error kind=<nonfatal|rejection> …` rows: deduplicated by message (one row
+// per distinct message per session), capped at ERROR_ROWS_MAX per session, persisted
+// through the queue so a following crash cannot lose them. The message and stack are
+// truncated; nothing here can throw into the caller.
+const ERROR_ROWS_MAX = 12;
+let _errorRows = 0;
+const _errorSeen = new Set<string>();
+function reportNonFatal(kind: "nonfatal" | "rejection", error: any): void {
+  try {
+    if (_errorRows >= ERROR_ROWS_MAX) return;
+    const msg = String(error?.message ?? error ?? "").slice(0, 300);
+    const key = kind + ":" + msg.slice(0, 120);
+    if (_errorSeen.has(key)) return;
+    _errorSeen.add(key);
+    _errorRows += 1;
+    const report: Report = {
+      message: `js-error kind=${kind} ${msg}`,
+      stack: String(error?.stack ?? "").slice(0, 4000),
+      is_fatal: false, late: false, ...baseMeta(),
+    };
+    void queue([report]);
+    try {
+      const { supabase } = require("./supabase");
+      if (supabase) void supabase.from("crash_reports").insert([{ ...report }]).then(() => {}, () => {});
+    } catch {}
+  } catch {}
+}
+
 export function installCrashBreadcrumb() {
   if (installed) return;
   installed = true;
+  try {
+    // Hermes exposes the same tracker RN uses in __DEV__; enable it in every build.
+    (global as any).HermesInternal?.enablePromiseRejectionTracker?.({
+      allRejections: true,
+      onUnhandled: (_id: number, error: any) => { reportNonFatal("rejection", error); },
+      onHandled: () => {},
+    });
+  } catch {}
   try {
     const EU = (global as any).ErrorUtils;
     if (!EU?.setGlobalHandler) return;
@@ -399,10 +441,15 @@ export function installCrashBreadcrumb() {
           // because delivery only ran 8s after a SUCCESSFUL launch).
           try {
             const { supabase } = require("./supabase");
-            if (supabase) void supabase.from("crash_reports").insert([{ ...report }]);
+            // ⚠ A PostgREST builder is a THENABLE that only starts its request when `.then()` is
+            // called (PostgrestBuilder.then → execute). `void builder` alone never sent anything —
+            // every "immediate" fatal delivery since 2026-07-23 silently depended on the queued
+            // copy + a later launch (Codex rescue, 2026-09-06). Attach handlers so it actually runs.
+            if (supabase) void supabase.from("crash_reports").insert([{ ...report }]).then(() => {}, () => {});
           } catch {}
         }
       } catch {}
+      if (!isFatal) reportNonFatal("nonfatal", error);
       prev?.(error, isFatal);
     });
   } catch {}

@@ -1088,6 +1088,17 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // The camera's ACTUAL low-passed zoom, written every frame by SelfCarModel's
   // pushCam. A ref → no renders. The route trim reads it; see trimZoom.
   const camZoomRef = useRef<number | null>(null);
+  // THE HUGE CAR AT ROUTE START (Rodrigo 2026-09-05, GR Advisor "same"): this surface moves the
+  // camera with its own setCamera calls (nav start 17 → 18.5, the crew overview, a pinch), and
+  // SelfCarModel — which sizes the car at RENDER time — never re-renders while the car is parked.
+  // So the model kept the scale of the zoom it was last drawn at while the map moved 1.5 zooms
+  // under it: 2^1.5 ≈ 2.8× too big until the first fix. onCameraChanged below writes the live
+  // zoom into carLiveZoomRef (SelfCarModel reads it whenever its lockstep is idle) and bumps a
+  // re-render, ≤10/s and only on a ≥0.05 zoom change; onMapIdle lands the final size.
+  const carLiveZoomRef = useRef<number | null>(null);
+  const selfRefreshRef = useRef<(() => void) | null>(null);
+  const selfRefreshAt = useRef(0);
+  const scaleRefreshLogAt = useRef(0);
   // Same, for pitch (2026-09-04) — the trim's pitch compensation needs the value
   // the driver is really looking through, not the speed-derived followPitch target.
   // See the routeTrim.ts REVISED note: this is what let the ribbon touch the self
@@ -1938,6 +1949,24 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       pitchEnabled={false}
       logoEnabled={false}
       attributionEnabled={false}
+      onCameraChanged={(state: any) => {
+        const z = state?.properties?.zoom;
+        if (typeof z !== 'number' || !Number.isFinite(z)) return;
+        const prev = carLiveZoomRef.current;
+        carLiveZoomRef.current = z;
+        if (prev != null && Math.abs(z - prev) < 0.05) return;
+        const nowC = Date.now();
+        if (nowC - selfRefreshAt.current < 100) return;
+        selfRefreshAt.current = nowC;
+        selfRefreshRef.current?.();
+        // Bounded receipt (≤1 per 30 s, only on a ≥0.5 zoom move): proves the refresh fired
+        // at a route start in the field — Rodrigo's next drive is the verdict.
+        if (prev != null && Math.abs(z - prev) >= 0.5 && nowC - scaleRefreshLogAt.current > 30000) {
+          scaleRefreshLogAt.current = nowC;
+          try { logEvent(`self-scale-refresh surf=car z=${z.toFixed(2)} from=${prev.toFixed(2)}`); } catch {}
+        }
+      }}
+      onMapIdle={() => { selfRefreshRef.current?.(); }}
       onLayout={(e: any) => {
         const h = e?.nativeEvent?.layout?.height;
         if (typeof h === 'number' && h > 0 && Math.abs(h - mapH) > 1) setMapH(h);
@@ -2082,6 +2111,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           camHeadingOverrideRef={camHdgOverrideRef}
           camZoomOutRef={camZoomRef}
           camPitchOutRef={camPitchRef}
+          liveZoomRef={carLiveZoomRef}
+          refreshRef={selfRefreshRef}
           drawPosOutRef={carDrawPosRef}
           // PHONE PARITY (2026-07-30). Without this the dead-band expression in
           // SelfCarModel reads `(speedMs ?? 99) < SELF_CREEP_MS` = false FOREVER, so the

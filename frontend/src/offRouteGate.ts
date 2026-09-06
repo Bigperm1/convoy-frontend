@@ -350,12 +350,15 @@ const haversineM = (aLat: number, aLng: number, bLat: number, bLng: number): num
 export const TIMERS_STARVED_RECEIPT_MS = 3000;
 
 /** Which gate (if any) blocks a trip right now. `diverging` = the trend fired.
+ *  `trendOnly` = the trip would rest on the trend ALONE (no streak / distance / missed
+ *  evidence of its own) — defaults to `diverging` for legacy callers.
  *  `rerouteInFlightMs` is the age of the outstanding reroute request (null = none). */
 export function holdReason(
   st: OffRouteGateState,
   diverging: boolean,
   now: number,
   rerouteInFlightMs?: number | null,
+  trendOnly: boolean = diverging,
 ): OffRouteHold | null {
   // FIRST, deliberately: while a request is outstanding a second one can only stack. When
   // a storm is read back off crash_reports this must name the bound that actually held it,
@@ -366,8 +369,26 @@ export function holdReason(
   if (typeof rerouteInFlightMs === "number" && Number.isFinite(rerouteInFlightMs) &&
       !rerouteInflightExpired(rerouteInFlightMs)) return "inflight";
   if (st.travelSinceSwapM < SWAP_ARM_TRAVEL_M) return "moved";
-  if (!diverging && st.travelSinceSwapM < SWAP_FASTPATH_ARM_M) return "trend";
-  if (diverging && !st.onThisRoute) return "trend";
+  // ── THE TWO POST-SWAP HOLDS ARE PER PATH, NOT PER TREND FLAG (2026-09-05, Rodrigo) ──
+  // Until tonight these two lines read `if (!diverging && travel < 150) trend` and
+  // `if (diverging && !onThisRoute) trend` — keyed on the TREND FLAG, not on the path that
+  // wants to trip — and the `why` ladder ranks the trend ABOVE `far`/`heading`/`sustained`
+  // because it is the fast path. So whenever the distance happened to be growing
+  // monotonically (which it always is for a driver leaving a reroute they never joined),
+  // EVERY trip — even one that also had 160 m+ and a streak of 30 behind it — was held
+  // until the car came within 25 m of the new line, with no travel bound at all. Rodrigo 14:27:22 (crash_reports):
+  // reroute applied, then `held why=trend d=82m since=15s trav=71m`, `d=120m since=25s
+  // trav=114m` — 25 s of driving away with no reroute, until he gave up and re-plotted by
+  // hand ("takes a long time to re-route"; GR Advisor: "I have the same"). The sim replay the
+  // same afternoon held a `far` trip for 48 s while d grew to 1.5 km.
+  // The lot storm (the reason these holds exist) is `why=diverging` at 45-70 m with streak
+  // 0 — the trend FAST PATH. That path still needs the car to have joined the line; every
+  // other path carries its own evidence (a streak, >160 m, a missed maneuver) and needs only
+  // the 150 m post-swap travel arm. `trendOnly` is computed by the tick from the SAME
+  // ladder with the trend switched off. `offroute_storm_test.mts` Q is the gate; A (the
+  // lot storm) is asserted unchanged.
+  if (trendOnly && !st.onThisRoute) return "trend";
+  if (!trendOnly && st.travelSinceSwapM < SWAP_FASTPATH_ARM_M) return "trend";
   if (now - st.lastFastAt >= CREEP_WINDOW_MS) return "creeping";
   return null;
 }
@@ -419,12 +440,19 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   //   • off + heading diverging (>55°) → 3 ticks (~3 s): a real wrong turn
   //   • off but heading still aligned  → 6 ticks (~6 s): a SUSTAINED offset,
   //     not a momentary multipath spike (the parallel-road departure)
-  const why: OffRouteWhy | null =
+  // The evidence that stands WITHOUT the trend (missed / far / heading / sustained) — what
+  // holdReason uses to tell a trend-only trip (needs the car to have joined the line) from
+  // one that has a streak or a distance of its own (needs only the 150 m post-swap arm).
+  const strongWhy: OffRouteWhy | null =
     t.missedManeuver ? "missed" :
-    diverging ? "diverging" :
     conclusivelyOff ? (st.streak >= 2 ? "far" : null) :
     t.headingOff ? (st.streak >= 3 ? "heading" : null) :
                    (st.streak >= 6 ? "sustained" : null);
+  const why: OffRouteWhy | null =
+    t.missedManeuver ? "missed" :
+    diverging ? "diverging" :
+    strongWhy;
+  const trendOnly = why === "diverging" && strongWhy == null;
 
   const base = {
     streak: st.streak,
@@ -433,7 +461,7 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   };
   if (!why) return { trip: false, why: null, held: null, ...base };
   if (t.now - st.lastTripAt <= OFFROUTE_MIN_GAP_MS) return { trip: false, why, held: null, ...base };
-  const held = holdReason(st, diverging, t.now, t.rerouteInFlightMs);
+  const held = holdReason(st, diverging, t.now, t.rerouteInFlightMs, trendOnly);
   if (held) return { trip: false, why, held, ...base };
 
   // ── COOLDOWN ONLY — NOTHING ROUTE-RELATIVE (corrected 2026-09-04, same day) ──

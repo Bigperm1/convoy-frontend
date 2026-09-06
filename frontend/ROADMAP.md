@@ -698,6 +698,34 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   ≤5 m on most bends (route polyline vs lane), 8.6 m once (05:54:31), the 21 m spike (06:04:27 phone) was the
   off-route moment. Below the 6 m release by design. (e) **"glitching"**: `main-gap` 28483 ms (06:39:40), 7322,
   6222, 4939 on the car surface — visible freeze vs locked phone unknown; asked Olaf.
+- 🔎 **2026-09-05 22:46 PDT — WhatsApp read (Jeff: "Look at the WhatsApp chat today") → TWO root causes, OTA-Z built.**
+  Rodrigo 17:02 (photo, head unit): *"car was huge when starting a route, went back to normal once I started driving"* (yesterday +
+  today) and *"the app will route you to the quickest path regardless of where you are headed … take a long time to re-route"*;
+  GR Advisor (Alfred) 17:32: *"I have the same"*; Say Phin 12:14 confirmed OTA-X with a screenshot.
+  **(1) Huge car at route start — VERIFIED mechanism from code + his rows.** `cam-probe surf=car z=18.50 … spd=0` at nav start
+  (14:26:36) with `cam-apply … req z=18.50 act z=17.00`: the head-unit camera goes 17 → 18.5 through CarMapView's OWN
+  `setCamera` calls, while the car's size is computed at RENDER time (`scl` from the zoom, `modelScaleForPoints`) and SelfCarModel
+  only re-renders from its ease loop / bg tick / a fix / a heading blend — all silent while parked. The model kept the z17 scale
+  under a z18.5 map: 2^1.5 ≈ 2.8× (the photo: ~3×), until the first fix. Fix: `refreshRef` on SelfCarModel; CarMapView's MapView
+  gets `onCameraChanged` (writes `carLiveZoomRef`, bumps a re-render ≤10/s on a ≥0.05 zoom move, receipt `self-scale-refresh
+  surf=car z= from=` ≤1/30 s) + `onMapIdle`; the phone gets the same bump on its existing handler (a pinch while parked had the
+  same hole). Not sim-verifiable on CarPlay (iOS-26 share crash); the phone path is exercised by every camera move.
+  **(2) "Takes a long time to re-route" — VERIFIED from his rows: OTA-W's post-swap hold blocked EVERY path.** 14:27:22 reroute
+  applied → `held why=trend d=82m since=15s trav=71m`, `d=120m since=25s trav=114m` → he ended nav and re-plotted by hand at
+  14:27:57. `holdReason` keyed the two post-swap holds on the TREND FLAG (`diverging && !onThisRoute → hold, no travel bound`),
+  and the `why` ladder ranks the trend above `far`/`heading`/`sustained`, so a driver leaving a reroute he never joined (its line
+  starts on a road he already left) was held until he came within 25 m of it — i.e. never. The same afternoon's sim replay held a
+  `far` trip 48 s while d reached 1.5 km. Fix (`src/offRouteGate.ts`): the tick computes `strongWhy` (the ladder with the trend
+  off); `trendOnly` trips still need the join (the lot-storm reason the hold exists), every other path needs only the 150 m
+  post-swap travel arm. Gate: `offroute_storm_test.mts` Q — re-trip +37 s at 15 km/h (Rodrigo's speed; was never), +6 s at 108 km/h
+  (was 48 s); A (Olaf's lot storm) unchanged at 1. **(3) "Routes the quickest way regardless of where I'm pointing" — a product
+  choice, not a bug:** `depart-rank … facing=360 chosenBr=237 off=123 cands=237/1098s,237/1410s` — both Mapbox candidates left
+  at 237°, so the ranker had nothing forward to prefer; `REROUTE_ORIGIN_BEARING = false` (staged off since OTA-A) and the initial
+  plot passes no bearing. Turning a bearing constraint on (moving only) makes Mapbox route forward like Waze at the cost of
+  sometimes-longer routes — Jeff's call. Gates: typecheck, trap-check 13/0, doc-check, corner, ribbon, storm A–D/I–O+Q, timer. **Sim (build 11, iOS 27, 23:06–23:09, night style): 108 km/h replay — 6 reroutes,
+  every `reroute-result … applied` in ≤1 s, `held why=trend since=8s` still engages for trend-only trips and a `sustained` trip now
+  clears it 7 s later, car + ribbon normal, 0 crashes (the first replay was voided by the simulator's location stream stalling
+  again at 49.1139,-122.5243 — restart with `simctl location clear` + `go`). 🟡 OTA-Z BUILT, AWAITING JEFF'S GO.**
 - ✅ **OTA-Y SHIPPED 2026-09-05 16:52 PDT — group `9f3dc52a-8260-4827-a4af-b49608bc9640`, code `30c9afd`, KEY_PRESENT=1 both
   (Jeff: "send it"). Codex pass 3 follow-up to OTA-X; built + sim-verified 16:47.** Codex (16:31, on the
   committed range, verdict needs-attention): (1) [high] the sweep abandons a request but, if iOS ignores `abort()`, its late response

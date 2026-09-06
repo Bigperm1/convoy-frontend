@@ -1161,7 +1161,7 @@ const SELF_MARKER_SLOT = undefined;
 /** Monotonic mount counter — see probeKeyRef inside SelfCarModel. */
 let _selfCarMountSeq = 0;
 
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, drawPosOutRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, refreshRef, drawPosOutRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -1225,6 +1225,15 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // stale and the target zoom is only a guess. Sim, 2026-09-03: at idle the map sat ~0.4
   // below the 17.0 target and the car drew at 33 pt instead of 44.
   liveZoomRef?: React.RefObject<number | null>;
+  // RE-RENDER HOOK (2026-09-05, Rodrigo's "car was huge when starting a route, normal once I
+  // started driving" + GR Advisor "same"). The per-tick size is computed at RENDER time and
+  // this component only re-renders from its own ease loop, the bg tick, a fix, or a heading
+  // blend — all silent while the car is parked. CarMapView moves the head-unit camera with
+  // its OWN setCamera calls (nav start: 17 → 18.5; the crew overview; a pinch), so a parked
+  // car kept the scale of the zoom it was last rendered at while the map moved 1.5 zooms
+  // under it: 2^1.5 ≈ 2.8× too big until the first fix. The surface writes the live zoom to
+  // liveZoomRef (read above) and calls this after a camera change so the size follows.
+  refreshRef?: React.MutableRefObject<(() => void) | null>;
   // OUT-param: where the car is DRAWN this frame (the eased pose pushCam is about to centre
   // on). The route-line cut anchors to this (routeRibbon.alongMOnPartition) so the gap in
   // front of the nose is constant by construction, on both surfaces.
@@ -1311,6 +1320,11 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const camProbeZoom = useRef(-99);
   const camProbePitch = useRef(-99);
   const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!refreshRef) return;
+    refreshRef.current = () => { noteTick(); setTick((n) => (n + 1) & 0xffff); };
+    return () => { refreshRef.current = null; };
+  }, [refreshRef]);
   // Last pose actually DRAWN (see the sub-pixel skip in the rAF step).
   const lastDrawnRef = useRef<{ lat: number; lng: number; heading: number } | null>(null);
   const lastFrameRef = useRef(0); // wall-clock of the last RENDERED ease frame (eco fps cap)
@@ -2706,6 +2720,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // tuned against actual zoom values (read "too small at zoom X" instead of guessing).
   const [dbgZoom, setDbgZoom] = useState(0);
   const lastZoomRef = useRef<number>(0);
+  // SelfCarModel re-render hook + throttle for the camera-change bump (see refreshRef).
+  const selfRefreshRef = useRef<(() => void) | null>(null);
+  const selfRefreshAt = useRef(0);
   // True the moment we have ANY GPS fix. Kept as a STABLE boolean so the arm
   // effect below runs EXACTLY ONCE (on the first fix) and is not re-run on every
   // subsequent GPS tick.
@@ -3819,8 +3836,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           if (typeof z === "number" && Math.abs(z - lastZoomRef.current) > 0.05) {
             lastZoomRef.current = z;
             setDbgZoom(z);
+            // The car's per-tick size is computed at render time from this zoom; a parked
+            // car never re-renders on its own, so a pinch / fly-to while stopped left it at
+            // the old zoom's scale (2026-09-05, see SelfCarModel.refreshRef). ≤10/s.
+            const nowB = Date.now();
+            if (nowB - selfRefreshAt.current >= 100) { selfRefreshAt.current = nowB; selfRefreshRef.current?.(); }
           }
         }}
+        onMapIdle={() => { selfRefreshRef.current?.(); }}
       >
         {/* Mapbox Standard "night" config — turns on the dark 3D-building
             basemap. Only mounted when the Standard style is active (roadmap +
@@ -4173,6 +4196,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             lenUnits={selfIsArrow ? ARROW_LEN_UNITS : CAR_LEN_UNITS}
             mapRef={mapRef}
             liveZoomRef={lastZoomRef}
+            refreshRef={selfRefreshRef}
             headingOffset={selfIsArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
             pitchTilt={selfIsArrow ? ARROW_MODEL_PITCH : 0}
             // CLASS is the only tier with a flat sprite now — the 3D/Ultra car always

@@ -148,7 +148,9 @@ an EXPIRED one never does (a stuck request must not wedge the gate), `null`/unme
 holds, an existing `moved` hold is untouched, `inflight` is reported first, and — the Codex
 objection made executable — a missed turn with timers reported starved by Rodrigo's worst
 figure and nothing in flight TRIPS. `offroute_storm_test.mts` L/M/N are the same contract on
-full traces (Rodrigo's 29-request storm → 19 asks at 16 s gaps with one TRACKED at a time — a
+full traces (Q, 2026-09-05 22:50: a reroute the driver never joins — its line starts on a road he already
+left — must re-trip on the 150 m post-swap arm, +37 s at 15 km/h and +6 s at 108 km/h; before, the trend flag held EVERY path
+until the car came within 25 m of the line, i.e. never: Rodrigo's `held why=trend … since=25s`; Rodrigo's 29-request storm → 19 asks at 16 s gaps with one TRACKED at a time — a
 rate-and-ownership bound, not a physical count: if iOS ignores `abort()` all 19 stay live on the
 wire, which is why an aborted request never returns a route; a wrong turn with timers frozen
 trips on B's exact tick; a hung ask retries every 16 s, never sooner), and they

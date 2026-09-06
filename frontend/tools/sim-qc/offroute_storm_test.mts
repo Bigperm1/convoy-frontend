@@ -469,6 +469,51 @@ armRerouteClaim(o); claimRerouteSlot(o, T0, c1);
 check(abandonRerouteInFlight(o, T0 + 4000) === 4000 && o.inflight === null && abandonRerouteInFlight(o, T0 + 5000) === null,
   "O9 nav end / unmount frees without aborting, and is a no-op on an empty slot");
 
+// ── Q: THE REROUTE THE DRIVER NEVER JOINS (Rodrigo, 2026-09-05 14:27) ────────────
+// A reroute lands (`route-swap`), but its line starts on a road the car has already left,
+// so the car is never within 25 m of it and drives AWAY at ~15 km/h: d 57 → 82 → 120 m over
+// 25 s, travel 71 → 114 m (his exact `held why=trend` rows). Before tonight every path was
+// held by the trend flag until the car joined the line, i.e. forever. Now: the trend fast
+// path still needs the join; `sustained` (streak ≥ 6 over 80 m) must trip once the 150 m
+// post-swap travel arm is banked — here at ~33 s, not never. The 1.5 km sim case (108 km/h)
+// is the same trace at 30 m/s: `far` must trip within ~6 s of the swap.
+function neverJoined(speedMs: number): Tick[] {
+  const t: Tick[] = [];
+  for (let i = 1; i <= 20; i++) t.push({ pos: speedMs * i, d: 5, speedMs });      // on the OLD line
+  t.push({ pos: speedMs * 21, d: 57, speedMs });                                  // the swap tick: 57 m off
+  // Driving AWAY: the distance to the line grows at ~0.85 × speed (Rodrigo's rows: 82 → 120 m
+  // over 10 s at ~15 km/h; the 108 km/h sim replay: 241 → 1393 m over 40 s).
+  for (let i = 1; i <= 60; i++) t.push({ pos: speedMs * (21 + i), d: 57 + 0.85 * speedMs * i, speedMs });
+  return t;
+}
+// Model the swap: a fresh gate state whose line moved under the car — the car is 57 m off
+// the NEW line from the first tick and never gets closer.
+function runNeverJoined(speedMs: number, legacy: boolean) {
+  const st = newOffRouteGateState(T0); st.onThisRoute = true; st.travelSinceSwapM = 1000;  // long on the old line
+  const ticks = neverJoined(speedMs);
+  // the swap happens at tick 21: replay ticks 1-20 on the old line, reset (the swap), then the rest
+  let t = T0; const trips: number[] = []; const holds: string[] = [];
+  ticks.forEach((k, i) => {
+    t += 1000;
+    if (i === 20) resetOffRouteGate(st, t);   // route-swap: the line moved, the car did not
+    const dec = offRouteTick(st, { now: t, dRoute: k.d, headingOff: true, missedManeuver: false,
+      lat: LAT0 - k.pos / M_PER_DEG_LAT, lng: LNG0, speedMs: k.speedMs });
+    if (dec.trip) trips.push(t - T0); else if (dec.held) holds.push(dec.held);
+    void legacy;
+  });
+  return { trips, holds, swapAt: 21000 };
+}
+const Qslow = runNeverJoined(15 / 3.6, false);   // Rodrigo: ~15 km/h
+const Qfast = runNeverJoined(30, false);          // the 09-05 sim replay: 108 km/h
+const qSlowDelay = Qslow.trips.length ? Qslow.trips[0] - Qslow.swapAt : Infinity;
+const qFastDelay = Qfast.trips.length ? Qfast.trips[0] - Qfast.swapAt : Infinity;
+check(Qslow.trips.length >= 1 && qSlowDelay <= 40000,
+  `Q slow: a driver leaving a reroute he never joined at 15 km/h re-tripped ${Number.isFinite(qSlowDelay) ? (qSlowDelay / 1000).toFixed(0) + "s" : "NEVER"} after the swap (want ≤40 s: the 150 m arm at that speed)`);
+check(Qslow.holds.includes("trend") || Qslow.holds.includes("moved"),
+  `Q slow: the post-swap holds must still engage before the arm (holds: ${[...new Set(Qslow.holds)].join("/") || "none"})`);
+check(Qfast.trips.length >= 1 && qFastDelay <= 8000,
+  `Q fast: at 108 km/h the same driver re-tripped ${Number.isFinite(qFastDelay) ? (qFastDelay / 1000).toFixed(0) + "s" : "NEVER"} after the swap (want ≤8 s; the sim held this 48 s while d reached 1.5 km)`);
+
 const fmt = (r: { trips: number[] }) => r.trips.map((x) => (x / 1000).toFixed(0) + "s").join(",") || "none";
 console.log(
   `A lot storm: today=${Atoday.trips.length} [${fmt(Atoday)}] → gated=${A.trips.length} [${fmt(A)}] ` +
@@ -487,7 +532,7 @@ console.log(
   `holds=${[...new Set(L.holds)].join("/") || "-"} (want ≤20, 1) | ` +
   `M wrong turn + timers frozen ${fmt(M)} vs B ${fmt(B)} (want equal) | ` +
   `N hung request + missed turn=${N.trips.length} [${fmt(N)}] gaps=${[...new Set(nGaps)].join("/") || "-"}ms aborts=${N.aborts.length} (want ${nWantTrips}, +${N_RETRY_MS}ms) | ` +
-  `O slot contract 9/9 | arm=${SWAP_ARM_TRAVEL_M}m onRoute=${ONROUTE_M}m fetchTimeout=${ROUTE_FETCH_TIMEOUT_MS}ms`,
+  `O slot contract 9/9 | Q never-joined reroute: re-trip +${Number.isFinite(qSlowDelay) ? qSlowDelay / 1000 : "never"}s @15km/h, +${Number.isFinite(qFastDelay) ? qFastDelay / 1000 : "never"}s @108km/h (want ≤40, ≤8) | arm=${SWAP_ARM_TRAVEL_M}m onRoute=${ONROUTE_M}m fetchTimeout=${ROUTE_FETCH_TIMEOUT_MS}ms`,
 );
 if (fails.length) { console.error("FAIL:\n  " + fails.join("\n  ")); process.exit(1); }
 console.log("PASS");

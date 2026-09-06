@@ -137,7 +137,19 @@ function baseMeta() {
   };
 }
 
-async function queue(reports: Report[]) {
+// SERIALISED (Codex review 2026-09-06): the write is read → parse → append → write with an
+// await in the middle, so two overlapping calls — a fatal on top of a nonfatal, or two
+// logEventReliable failures — each read the SAME old value and the second write erased the
+// first's row. Every call now runs strictly after the previous one settled. The chain can
+// never reject (doQueue swallows everything, and the catch below is belt-and-braces), so
+// `void queue(...)` and `await queue(...)` callers keep their never-throw guarantee.
+let _queueChain: Promise<void> = Promise.resolve();
+function queue(reports: Report[]): Promise<void> {
+  const run = _queueChain.then(() => doQueue(reports)).catch(() => {});
+  _queueChain = run;
+  return run;
+}
+async function doQueue(reports: Report[]): Promise<void> {
   try {
     const AsyncStorage = require("@react-native-async-storage/async-storage").default;
     const raw = await AsyncStorage.getItem(QUEUE_KEY);

@@ -2319,7 +2319,13 @@ function DestinationWeatherCallout({ lat, lng, weather }: { lat: number; lng: nu
           // Centring the Text's own measured box via justifyContent avoids depending on
           // that leading math.
           <View style={{ position: "absolute", left: WX_CALLOUT_TEXT_X, top: 0, height: WX_CALLOUT_BOX_H, justifyContent: "center", alignItems: "flex-start" }}>
-            <Text style={styles.destWxText} numberOfLines={1}>
+            {/* 3-digit values ("104°") ink 38.8pt at 14pt weight-800 — 6.8pt past the
+                70pt box's right edge (measured w/ PIL against SFNS.ttf, tools/wx-pin/
+                preview_align.py). Dropping to 10.5pt keeps every value in -40°..120°
+                (the widest, "-40°", inks 29.7pt) clear of the box edge with room to
+                spare before the 1.5pt border (bake.py BORDER). ≤2 digits keeps the
+                original 14pt. justifyContent:'center' above re-centres on whichever size. */}
+            <Text style={[styles.destWxText, weather.temp.length > 3 ? styles.destWxTextSm : null]} numberOfLines={1}>
               {weather.temp}
             </Text>
           </View>
@@ -3027,10 +3033,17 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // said which gate above held it (view, follow, cold lock, places, ready). One row a minute,
   // plus one on any change, so the next report can be read instead of guessed at.
   const camModeLastRef = useRef("");
+  // Rate floor (Codex review 2026-09-06): a flapping gate re-runs this effect per change and
+  // emitted a row per change. Rows inside 2 s of the last one are DROPPED, never queued —
+  // the 60 s forced row reports whatever state it settled in.
+  const camModeAtRef = useRef(0);
   useEffect(() => {
     const emit = (force: boolean) => {
       const key = `view=${mapView} hu=${headingUp ? 1 : 0} foll=${followUser ? 1 : 0} lock=${coldLockDone ? 1 : 0} places=${placesShown ? 1 : 0} ready=${readyRef.current ? 1 : 0} lockstep=${lockReadyRef.current ? 1 : 0} nav=${navigationActive ? 1 : 0}`;
       if (!force && key === camModeLastRef.current) return;
+      const now = Date.now();
+      if (now - camModeAtRef.current < 2000) return;
+      camModeAtRef.current = now;
       camModeLastRef.current = key;
       try { logEvent(`cam-mode surf=phone ${key}`); } catch {}
     };
@@ -4347,4 +4360,7 @@ const styles = StyleSheet.create({
   placeNumText: { color: "#2DEC86", fontSize: 14, fontWeight: "800" },
   // Arrival-weather chip.
   destWxText: { color: "#fff", fontSize: 14, fontWeight: "800", letterSpacing: -0.2 },
+  // 3-digit-before-° values ("104°", "-40°") only — see the call site. Measured to clear
+  // the 70pt callout box (tools/wx-pin/preview_align.py).
+  destWxTextSm: { fontSize: 10.5 },
 });

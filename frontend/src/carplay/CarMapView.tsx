@@ -1548,6 +1548,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const aaAppStateRef = useRef(AppState.currentState);
   const aaAwayRef = useRef(false);
   const aaRecenterLogAtRef = useRef(0);
+  // Rate floors (Codex review 2026-09-06): ≥2 s between rows at each site below; the
+  // extra rows are DROPPED, never queued, so a flapping AppState cannot emit per tick.
+  const aaAppStateLogAtRef = useRef(0);
+  const aaPendingRecenterLogAtRef = useRef(0);
   // ── CODEX RECEIPT (2026-09-04) — stale closure, MEDIUM ──────────────────────
   // "The listener is installed by an empty-dependency effect and closes over
   // that render's reassertAaFollow, including hasFix/lng/lat/followZoom/
@@ -1615,7 +1619,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       aaAppStateRef.current = st;
       // aa=1 unconditionally: this effect lives on CarMapView, which mounts only
       // while a car surface (CarPlay or Android Auto) is actually live.
-      try { logEvent(`aa-appstate state=${st} aa=1 foll=${lockReadyRef.current ? 1 : 0}`); } catch {}
+      const now = Date.now();
+      if (now - aaAppStateLogAtRef.current >= 2000) {
+        aaAppStateLogAtRef.current = now;
+        try { logEvent(`aa-appstate state=${st} aa=1 foll=${lockReadyRef.current ? 1 : 0}`); } catch {}
+      }
       if (st !== 'active') { aaAwayRef.current = true; return; }
       if (!aaAwayRef.current) return; // active -> active: nothing to recover from
       aaAwayRef.current = false;
@@ -1645,7 +1653,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       });
     } catch {}
     applyZoomNow();
-    try { logEvent('aa-recenter why=appstate-pending-fix'); } catch {}
+    const now = Date.now();
+    if (now - aaPendingRecenterLogAtRef.current >= 2000) {
+      aaPendingRecenterLogAtRef.current = now;
+      try { logEvent('aa-recenter why=appstate-pending-fix'); } catch {}
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [painted, hasFix]);
 
@@ -2353,7 +2365,13 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             filter={['!=', ['get', 'temp'], ''] as any}
             style={{
               textField: ['get', 'temp'] as any,
-              textSize: 14 * uiScale,
+              // 3-digit-before-° values ("104°", "-40°") ink past the 70pt callout box at
+              // 14pt (measured w/ PIL against SFNS.ttf, tools/wx-pin/preview_align.py — the
+              // widest, "-40°", inks 39.6pt vs 32pt of box remaining at TEXT_X=38). Data-driven
+              // on the feature's own `temp` string length so it never needs a JS-side re-render;
+              // same 10.5pt floor as the phone's destWxTextSm for ≥3 chars, 14pt (x uiScale)
+              // otherwise. Covers every value the app can show (-40°..120°).
+              textSize: ['*', uiScale, ['case', ['>', ['length', ['get', 'temp']], 3], 10.5, 14]] as any,
               textColor: '#FFFFFF',
               textFont: ['DIN Pro Bold', 'Arial Unicode MS Bold'],
               textAnchor: 'left',

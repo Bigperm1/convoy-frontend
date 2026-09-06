@@ -698,6 +698,22 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   ≤5 m on most bends (route polyline vs lane), 8.6 m once (05:54:31), the 21 m spike (06:04:27 phone) was the
   off-route moment. Below the 6 m release by design. (e) **"glitching"**: `main-gap` 28483 ms (06:39:40), 7322,
   6222, 4939 on the car surface — visible freeze vs locked phone unknown; asked Olaf.
+- 🟡 **2026-09-06 09:40 PDT — OTA-AB built ("before we get to my list I want everything fixed"): every OTA-reachable open item closed.**
+  (1) creep hold bounded to ≤160 m off the line (a car crawling in a jam on another road was held for the length of the jam —
+  Codex rescue); storm gate R: re-trip 21 s, C (lot scatter) still 0. (2) `alongMOnPartition` starts at the window (binary search on
+  `cum`) instead of walking a 40 km partition per frame. (3) crash-queue writes serialised (two overlapping writes lost a row —
+  reproduced in a Node harness: 2 of 3 rows survived before, 3 of 3 after). (4) heat-probe retired-instance history pruned (5 quiet
+  windows, cap 64). (5) `cam-mode` / `aa-appstate` / `aa-recenter` rows ≥2 s apart. (6) weather pill: 3-digit / "-40°" values now fit
+  the box on both surfaces (10.5 pt when longer than 3 characters; measured 29 pt of ink vs 32 available; preview regenerated).
+  **First field verdicts on the earlier fixes, Rodrigo 00:24–00:51 (OTA-Z):** `self-scale-refresh surf=car z=18.50 from=17.00` at
+  the very second of `cam-apply … req 18.50 act 17.00` at nav start — the huge-car refresh fired where it was designed to; then a
+  6.7-minute timer freeze (`starved=399568`) with ONE reroute request `held why=inflight`, aborted by the fix-driven sweep and its
+  late result dropped (`reroute-result id=3 age=160s n=0 superseded`) — the whole X/Y chain observed end to end. SMSGRC's
+  reroutes: 12 yesterday → 2 this morning. Say Phin's AA follow re-assert (OTA-W) fired for real (`aa-recenter why=appstate fix=1`).
+  **Not OTA-reachable (build 77):** the CarPlay-first stranding, Victor's AA cold connect, the timer freeze itself. **Needs Jeff:**
+  the 2026-08-21 CarPlay End button (did a pill appear?), Alfred's telemetry handle, whether free drives should record PBs, wiring
+  the approved Tripo car. **Rodrigo's "compass shows north but the car turns"** = his phone is in North-up (`cam-mode view=north_up`
+  at every route start) — a Map View setting, not a bug; tell him.
 - ✅ **OTA-AA SHIPPED 2026-09-06 08:54 PDT — group `f920b579-8bf2-406d-99d9-feb19557e757`, code `95acc6f`, KEY_PRESENT=1 both
   (Jeff: "all I want is this to be fixed … I have a huge list"; bundling is his call, every fix gated). Sim build 13: 6 reroutes applied
   ≤1 s each, every one now carrying `bearing=`; no `js-error`; rows 24/min vs 32/min on the same replay; the two sims signed out at the

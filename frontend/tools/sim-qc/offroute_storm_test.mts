@@ -514,6 +514,19 @@ check(Qslow.holds.includes("trend") || Qslow.holds.includes("moved"),
 check(Qfast.trips.length >= 1 && qFastDelay <= 8000,
   `Q fast: at 108 km/h the same driver re-tripped ${Number.isFinite(qFastDelay) ? (qFastDelay / 1000).toFixed(0) + "s" : "NEVER"} after the swap (want ≤8 s; the sim held this 48 s while d reached 1.5 km)`);
 
+// ── R: CRAWLING IN A JAM 200 M OFF THE LINE (Codex rescue 2026-09-06) ────────────────
+// The creep hold is for a car scattering in a LOT next to the route (C). A car creeping at
+// 5 km/h on another road 200 m away — conclusively off — must still be rerouted: before, the
+// creep window held it for as long as the jam lasted.
+const jam: Tick[] = [];
+for (let i = 1; i <= 20; i++) jam.push({ pos: 11.1 * i, d: 5, speedMs: 11.1 });          // on route, 40 km/h
+for (let i = 1; i <= 60; i++) jam.push({ pos: 222 + 1.4 * i, d: 200, speedMs: 1.4 });     // 5 km/h, 200 m off
+const R = run(jam, {});
+check(R.trips.length >= 1 && R.trips[0] <= 60000,
+  `R crawling 200 m off the line: re-tripped ${R.trips.length ? (R.trips[0] / 1000).toFixed(0) + "s" : "NEVER"} (want within 60 s — the creep hold must not apply this far off)`);
+check(C.trips.length === 0,
+  `R changed C: the parked lot scatter now trips ${C.trips.length} times (want 0)`);
+
 const fmt = (r: { trips: number[] }) => r.trips.map((x) => (x / 1000).toFixed(0) + "s").join(",") || "none";
 console.log(
   `A lot storm: today=${Atoday.trips.length} [${fmt(Atoday)}] → gated=${A.trips.length} [${fmt(A)}] ` +
@@ -532,7 +545,7 @@ console.log(
   `holds=${[...new Set(L.holds)].join("/") || "-"} (want ≤20, 1) | ` +
   `M wrong turn + timers frozen ${fmt(M)} vs B ${fmt(B)} (want equal) | ` +
   `N hung request + missed turn=${N.trips.length} [${fmt(N)}] gaps=${[...new Set(nGaps)].join("/") || "-"}ms aborts=${N.aborts.length} (want ${nWantTrips}, +${N_RETRY_MS}ms) | ` +
-  `O slot contract 9/9 | Q never-joined reroute: re-trip +${Number.isFinite(qSlowDelay) ? qSlowDelay / 1000 : "never"}s @15km/h, +${Number.isFinite(qFastDelay) ? qFastDelay / 1000 : "never"}s @108km/h (want ≤40, ≤8) | arm=${SWAP_ARM_TRAVEL_M}m onRoute=${ONROUTE_M}m fetchTimeout=${ROUTE_FETCH_TIMEOUT_MS}ms`,
+  `R jam 200m off: re-trip ${R.trips.length ? R.trips[0] / 1000 + "s" : "never"} | O slot contract 9/9 | Q never-joined reroute: re-trip +${Number.isFinite(qSlowDelay) ? qSlowDelay / 1000 : "never"}s @15km/h, +${Number.isFinite(qFastDelay) ? qFastDelay / 1000 : "never"}s @108km/h (want ≤40, ≤8) | arm=${SWAP_ARM_TRAVEL_M}m onRoute=${ONROUTE_M}m fetchTimeout=${ROUTE_FETCH_TIMEOUT_MS}ms`,
 );
 if (fails.length) { console.error("FAIL:\n  " + fails.join("\n  ")); process.exit(1); }
 console.log("PASS");

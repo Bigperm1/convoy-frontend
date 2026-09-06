@@ -28,10 +28,20 @@ export function alongMOnPartition(
   const lo = typeof nearM === "number" && Number.isFinite(nearM) ? nearM - spanM : -Infinity;
   const hi = typeof nearM === "number" && Number.isFinite(nearM) ? nearM + spanM : Infinity;
   let bestD2 = Infinity, bestM = 0;
-  let px = X(p.coords[0][0]), py = Y(p.coords[0][1]);
-  for (let i = 1; i < n; i++) {
+  // Start at the first segment that can reach the window (binary search on cum) instead of
+  // walking every vertex of a 40 km partition per frame (Codex rescue 2026-09-06); the loop
+  // still stops at the window's far end.
+  let start = 1;
+  if (lo > -Infinity) {
+    let a = 1, b = n - 1;
+    while (a < b) { const mid = (a + b) >> 1; if (p.cum[mid] < lo) a = mid + 1; else b = mid; }
+    start = Math.max(1, a);
+  }
+  let px = X(p.coords[start - 1][0]), py = Y(p.coords[start - 1][1]);
+  for (let i = start; i < n; i++) {
     const cx = X(p.coords[i][0]), cy = Y(p.coords[i][1]);
     const s0 = p.cum[i - 1], s1 = p.cum[i];
+    if (s0 > hi) break;
     if (s1 >= lo && s0 <= hi) {
       const dx = cx - px, dy = cy - py, len2 = dx * dx + dy * dy;
       let t = len2 > 0 ? -(px * dx + py * dy) / len2 : 0;

@@ -82,7 +82,8 @@ let _ctx = '';
 //     nav start AND every CarPlay connect/disconnect (map.tsx effect deps), and a
 //     leaked loop outlives all of those. Keys are globally unique per JS context
 //     (monotonic seq, never reset), so retention cannot collide with a live mount.
-//     Bounded: tens of short strings per app session.
+//     Bounded (2026-09-06): quiet retired keys age out after RETIRED_FORGET_WINDOWS
+//     flushes, and RETIRED_MAX caps the set — see flush() / retireInstance().
 //   • Activity = raf + cam, because three of the four camera-push paths are NOT
 //     rAF-driven (bgTick, fix-effect snap, stale-bg fallback) — 18 real rows in
 //     crash_reports show raf=0 with cam>0. A raf-only view missed those mounts
@@ -96,6 +97,16 @@ const _retired = new Set<string>();
 /** Activity (raf+cam) each retired mount had at the moment it retired, reset to 0
  *  every flush. Growth past this = post-unmount ticking = leak. */
 const _retiredBase = new Map<string, number>();
+/** Consecutive flushed windows in which a retired key recorded NO activity. */
+const _retiredQuiet = new Map<string, number>();
+/** Bounded retention (Codex review 2026-09-06): a retired key is forgotten after this
+ *  many consecutive quiet windows. A key that keeps ticking is never forgotten. */
+const RETIRED_FORGET_WINDOWS = 5;
+/** Hard ceiling on retained retired keys — the oldest retirement is evicted first. */
+const RETIRED_MAX = 64;
+function forgetRetired(k: string): void {
+  _retired.delete(k); _retiredBase.delete(k); _retiredQuiet.delete(k);
+}
 
 /** Hard ceiling on interval samples per window. 3600 already describes the
  *  distribution fully; without a ceiling the 53k-cb/s runaway pushed ~800k entries
@@ -206,6 +217,10 @@ const _act = (k: string) => (_instRaf.get(k) ?? 0) + (_instCam.get(k) ?? 0);
 export function retireInstance(inst: string): void {
   _retired.add(inst);
   _retiredBase.set(inst, _act(inst));
+  if (_retired.size > RETIRED_MAX) {
+    const oldest = (_retired.values() as any).next().value as string | undefined;
+    if (oldest !== undefined) forgetRetired(oldest);
+  }
 }
 
 /** `inst=` field, two separate budgets so neither class can crowd out the other
@@ -257,12 +272,22 @@ async function flush(): Promise<void> {
   // Carry the state we ENDED in into the next window, so a window that never sees a
   // transition still reports where it actually was rather than '?'.
   _appSeen = appSeen.slice(-1);
+  // BOUNDED retention (Codex review 2026-09-06): every nav start / surface remount
+  // retires a key that used to be kept forever. A retired mount with NO activity
+  // (raf+cam) for RETIRED_FORGET_WINDOWS consecutive windows is forgotten; one that
+  // keeps ticking is kept, so a continuous leak keeps its `!` for as long as it leaks.
+  // Trade-off vs the old never-prune rule: a leak that pauses longer than that comes
+  // back unflagged. Live (unretired) keys are never touched. Runs BEFORE the
+  // per-window maps clear below — _act() reads them.
+  for (const k of [...(_retired.values() as any)] as string[]) {
+    const quiet = _act(k) === 0 ? (_retiredQuiet.get(k) ?? 0) + 1 : 0;
+    if (quiet >= RETIRED_FORGET_WINDOWS) forgetRetired(k);
+    else _retiredQuiet.set(k, quiet);
+  }
   _instRaf.clear(); _instCam.clear();
-  // ⚠ _retired / _retiredBase are deliberately NEVER pruned mid-session — an
-  // INTERMITTENT leak loses its `!` forever the moment it is forgotten. Baselines DO
-  // reset to 0 here: the per-window counters just reset, so from the next window on,
-  // ANY activity from a retired mount is post-unmount growth. (Both rules bought by
-  // harness failures; see the block above noteFrame.)
+  // Baselines reset to 0 here: the per-window counters just reset, so from the next
+  // window on, ANY activity from a retired mount is post-unmount growth. (Bought by a
+  // harness failure; see the block above noteFrame.)
   for (const k of [...(_retiredBase.keys() as any)] as string[]) _retiredBase.set(k, 0);
   if (raf === 0 && cam === 0) return;   // nothing happened; do not spend an INSERT
 

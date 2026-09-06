@@ -359,6 +359,7 @@ export function holdReason(
   now: number,
   rerouteInFlightMs?: number | null,
   trendOnly: boolean = diverging,
+  dRoute: number = 0,   // legacy callers (no distance) keep the creep hold unconditional
 ): OffRouteHold | null {
   // FIRST, deliberately: while a request is outstanding a second one can only stack. When
   // a storm is read back off crash_reports this must name the bound that actually held it,
@@ -389,7 +390,11 @@ export function holdReason(
   // lot storm) is asserted unchanged.
   if (trendOnly && !st.onThisRoute) return "trend";
   if (!trendOnly && st.travelSinceSwapM < SWAP_FASTPATH_ARM_M) return "trend";
-  if (now - st.lastFastAt >= CREEP_WINDOW_MS) return "creeping";
+  // CREEP HOLD ONLY NEAR THE LINE (2026-09-06, Codex rescue: "creeping can hold indefinitely").
+  // The hold exists for a car crawling in a lot 45-70 m off the route (Olaf's storm); a car
+  // crawling in a traffic jam 160 m+ off it — conclusively on another road — needs the reroute,
+  // and the creep window would otherwise hold it for as long as the jam lasts.
+  if (now - st.lastFastAt >= CREEP_WINDOW_MS && dRoute <= REROUTE_DISTANCE_M * 2) return "creeping";
   return null;
 }
 
@@ -461,7 +466,7 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   };
   if (!why) return { trip: false, why: null, held: null, ...base };
   if (t.now - st.lastTripAt <= OFFROUTE_MIN_GAP_MS) return { trip: false, why, held: null, ...base };
-  const held = holdReason(st, diverging, t.now, t.rerouteInFlightMs, trendOnly);
+  const held = holdReason(st, diverging, t.now, t.rerouteInFlightMs, trendOnly, t.dRoute);
   if (held) return { trip: false, why, held, ...base };
 
   // ── COOLDOWN ONLY — NOTHING ROUTE-RELATIVE (corrected 2026-09-04, same day) ──

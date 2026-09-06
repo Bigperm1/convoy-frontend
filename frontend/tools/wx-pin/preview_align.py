@@ -32,6 +32,27 @@ Under the BEFORE model (ascender line at box top, y=7pt): ink centre lands at
 Under the AFTER model (natural box centred at 17pt): ink centre lands at
   17 + ((3.5+13.875)/2 - 16.625/2) = 17.34pt -> within 0.4pt of the glyph centre.
 
+--- 2026-09-06 pass: the 3-digit OVERFLOW, not vertical alignment ---
+Yesterday's vertical-alignment fix left a second, separate defect: at 14pt weight-800,
+a THREE-character value before the ° ("104°", "-40°" — any value outside -9..99) inks
+wider than the 32pt of box remaining right of TEXT_X=38 (box right edge at 70pt), and the
+glyph itself. Measured here with PIL against SFNS.ttf (textbbox, anchor "la", same method
+this script already used for the vertical pass):
+  "19°"  @14pt: ink width 26.4pt -> right edge 38+26.4=64.4pt (clears the 70pt box)
+  "-4°"  @14pt: ink width 26.6pt -> right edge 64.6pt (clears)
+  "104°" @14pt: ink width 38.8pt -> right edge 76.8pt (OVERFLOWS by 6.8pt, matches the
+                                     ~7pt clip Jeff saw)
+  "-40°" @14pt: ink width 39.6pt -> right edge 77.6pt (OVERFLOWS by 7.6pt — the WORST case
+                                     in the app's -40°..120° range)
+Fix (mirrors src/ConvoyMapbox.tsx destWxTextSm / src/carplay/CarMapView.tsx's textSize
+expression): values with >3 characters before the box (i.e. `temp.length > 3`, the ° counted
+in) drop to 10.5pt. At 10.5pt the worst case, "-40°", inks 29.7pt -> right edge 67.7pt,
+2.3pt clear of the box edge and clear of the 1.5pt border (bake.py BORDER). "104°" inks
+29.1pt -> right edge 67.1pt. ≤2-character values ("19°", "-4°") are untouched at 14pt.
+This pass's BEFORE/AFTER columns show this size fix (both columns keep the box-centred
+vertical fix from the 09-05 pass above); a red guide line marks the box's right inner edge
+so the "104°"/"-40°" BEFORE cells visibly cross it.
+
 Run: python3 tools/wx-pin/preview_align.py   (PIL only, no app/JS involved)
 """
 import os, sys
@@ -48,7 +69,14 @@ TEXT_ROWS = [
     ("brand", "clear-day", "19°"),
     ("premium", "cloudy", "104°"),
     ("ultra", "rain", "-4°"),
+    ("brand", "snow", "-40°"),
 ]
+
+# Mirrors src/ConvoyMapbox.tsx destWxText/destWxTextSm and src/carplay/CarMapView.tsx's
+# textSize expression: >3 characters before/including the ° drops to SIZE_SMALL.
+SIZE_NORMAL = 14
+SIZE_SMALL = 10.5
+SIZE_THRESHOLD = 3  # temp.length > 3 -> SIZE_SMALL
 
 PAD = 14
 LABEL_H = 22
@@ -74,28 +102,32 @@ def callout_at_scale(skin, kind):
 
 
 def draw_variant(skin, kind, temp, mode):
-    """mode: 'before' (buggy lineHeight box) or 'after' (flex-centred natural box)."""
+    """mode: 'before' (14pt always — the overflow bug) or 'after' (length-sized, matching
+    the shipped destWxTextSm / CarMapView textSize expression). Both centre vertically on
+    the box midpoint (the 09-05 fix), since this pass is about width, not vertical position.
+    """
     base = callout_at_scale(skin, kind).convert("RGBA")
     canvas = Image.new("RGBA", base.size, (0, 0, 0, 0))
     canvas.alpha_composite(base)
     draw = ImageDraw.Draw(canvas)
-    font = make_font(14)
+
+    size_pt = SIZE_NORMAL if mode == "before" else (SIZE_SMALL if len(temp) > SIZE_THRESHOLD else SIZE_NORMAL)
+    font = make_font(size_pt)
 
     text_x = bake.TEXT_X * SCALE
     box_center_y = (bake.BOX_H / 2) * SCALE  # == bake.TEXT_CY * SCALE, the glyph's own centre
+    box_right_edge = bake.BOX_W * SCALE
 
     # Faint horizontal guide through the glyph's baked vertical centre.
     draw.line([(0, box_center_y), (bake.BOX_W * SCALE, box_center_y)], fill=(255, 255, 255, 90), width=1)
+    # Red guide at the box's right inner edge (minus the border stroke) — the overflow
+    # boundary. "104°"/"-40°" ink crosses this in the 'before' column.
+    edge_x = box_right_edge - bake.BORDER * SCALE
+    draw.line([(edge_x, 0), (edge_x, (bake.BOX_H) * SCALE)], fill=(255, 70, 70, 180), width=1)
 
-    if mode == "before":
-        # Old code: top = TEXT_CY - 10, height 20, lineHeight 20 — ascender line at the
-        # TOP of that 20pt box (RN/TextKit's "extra leading appended below" behaviour).
-        box_top = (bake.TEXT_CY - 10) * SCALE
-        draw.text((text_x, box_top), temp, font=font, fill=(255, 255, 255, 255), anchor="la")
-    else:
-        # New code: height=WX_CALLOUT_BOX_H, justifyContent:'center' — centres the text's
-        # own natural (ascent+descent) box on the container's midpoint == glyph centre.
-        draw.text((text_x, box_center_y), temp, font=font, fill=(255, 255, 255, 255), anchor="lm")
+    # New code (both modes): height=WX_CALLOUT_BOX_H, justifyContent:'center' — centres the
+    # text's own natural (ascent+descent) box on the container's midpoint == glyph centre.
+    draw.text((text_x, box_center_y), temp, font=font, fill=(255, 255, 255, 255), anchor="lm")
 
     return canvas
 
@@ -113,7 +145,7 @@ def main():
     d = ImageDraw.Draw(sheet)
 
     title_f = ImageFont.truetype(FONT_PATH, 16)
-    d.text((PAD, 6), "BEFORE (shipped)                                              AFTER (fixed)", font=title_f, fill=(255, 255, 255, 255))
+    d.text((PAD, 6), "BEFORE (14pt always — overflow)                         AFTER (sized by length)", font=title_f, fill=(255, 255, 255, 255))
 
     for ri, (skin, kind, temp) in enumerate(TEXT_ROWS):
         row_y = LABEL_H + ri * CELL_H

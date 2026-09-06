@@ -9,7 +9,16 @@
 // happens to be a few metres closer — which from a parking spot is a reversal. The
 // router was never told which way we face.
 //
-// ⚠ MEASURED — DO NOT RE-TRY THE OBVIOUS FIX. The Directions API's own `bearings`
+// ⚠ THE NOTE BELOW WAS WRONG (re-measured 2026-09-06). With the app's exact request shape —
+// driving-traffic, alternatives=true, `bearings=<hdg>,45;` — the parameter DOES steer the
+// departure: on Rodrigo's street a westward constraint turned both returned routes from
+// "Drive east" (90°) to "Drive west" (270°) at +76 m / +20 s, and an eastward one left the
+// eastbound routes untouched. map.tsx now uses it: reroutes pass the GPS heading
+// (REROUTE_ORIGIN_BEARING) and an initial plot whose fastest route departs >75° off the
+// facing is re-asked once with the facing as the constraint. The client-side ranking below
+// stays as the tie-breaker among whatever comes back. The original July finding is kept
+// for the record, not as guidance:
+// (July) The Directions API's own `bearings`
 // parameter looks like the answer and IS NOT. It validates (a wrong entry count 422s
 // with "Number of bearing elements must match number of coordinates") but has NO
 // effect on the route: tested across three locations, both the `driving` and

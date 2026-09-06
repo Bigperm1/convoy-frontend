@@ -352,13 +352,16 @@ const PAN_RECENTER_MS = 20000;
 // ~16 s at 110 km/h — a result from further back describes a road already driven.
 const REROUTE_MAX_AGE_MS = 30000;
 const REROUTE_MAX_MOVE_M = 500;
-// ── OTA-B, STAGED OFF (2026-09-03) ────────────────────────────────────────────
+// ── OTA-B, STAGED OFF 2026-09-03 → ON 2026-09-06 (Jeff: "bearing on") ───────────────
 // Off-route refetches pass the car's heading as a Mapbox `bearings` constraint, so the
 // API cannot answer "turn around and go back" (Olaf 2026-09-02: 8 reroutes in 113 s,
-// every one the same route back through a closed street). A nav behaviour change →
-// ONE real drive to itself (the 07-31 rule). Flip to true + publish when Jeff calls it;
-// the reroute-result crumb records what was sent either way.
-const REROUTE_ORIGIN_BEARING = false;
+// every one the same route back through a closed street). MEASURED 2026-09-06 with the
+// app's own request shape (driving-traffic, alternatives, Rodrigo's street): `bearings=272,45;`
+// turned both returned routes from "Drive east" (90°) to "Drive west" (270°) at +76 m /
+// +20 s — the parameter DOES steer the departure. (src/departureBearing.ts's July note
+// that it has no effect was wrong for today's API; corrected there.) The reroute-result
+// crumb records what was sent either way.
+const REROUTE_ORIGIN_BEARING = true;
 // How quiet the foreground watch must go before background fixes take over. The nav
 // watch delivers at ~1-2 Hz, so 3s means "the fg watch has genuinely stopped" (a
 // locked screen) rather than "we're between fixes".
@@ -1276,11 +1279,32 @@ export default function MapScreen() {
       // never got the same treatment. Compass sample runs CONCURRENTLY with the
       // route fetch so it costs no added latency, and a null facing falls straight
       // through to plain fastest-first — i.e. today's behaviour.
-      const [raw, facing] = await Promise.all([
+      const [raw0, facing] = await Promise.all([
         fetchRoutes(origin, destination, avoid),
         getDepartureBearing(),
       ]);
       if (cancelled) return;
+      // ── DEPART THE WAY THE CAR IS POINTING, FOR REAL (2026-09-06, Jeff: "bearing on") ──
+      // The ranker below can only prefer a forward-departing option that EXISTS. Rodrigo
+      // 2026-09-05 14:27:57: `depart-rank facing=360 chosenBr=237 cands=237/1098s,237/1410s`
+      // — both candidates left backwards, so ranking had nothing to choose ("routes me the
+      // quickest way regardless of where I'm pointing"). Mapbox's `bearings` constraint DOES
+      // steer the departure (measured 2026-09-06, see REROUTE_ORIGIN_BEARING), so when the
+      // fastest unconstrained route turns us around (>75° off the facing) we ask ONCE more
+      // with the facing as the constraint and take that answer if there is one. One extra
+      // request only in the turn-around case; an empty constrained answer (a dead end, a
+      // one-way) keeps the unconstrained routes, exactly as today.
+      let raw = raw0;
+      let constrained = 0;
+      if (typeof facing === 'number' && raw0.length) {
+        const _b00 = routeInitialBearing(raw0[0] as any);
+        const _off0 = _b00 != null ? Math.abs(((_b00 - facing + 540) % 360) - 180) : null;
+        if (_off0 != null && _off0 > 75) {
+          const withBearing = await fetchRoutes(origin, destination, avoid, { bearing: facing });
+          if (cancelled) return;
+          if (withBearing.length) { raw = withBearing; constrained = 1; }
+        }
+      }
       // Forward-departing options first (each group fastest-first), so index 0 —
       // the selected, green route — is the quickest one that does NOT turn you
       // around. When nothing departs forward the order is unchanged: sometimes a
@@ -1308,7 +1332,7 @@ export default function MapScreen() {
           const d = r?.duration_in_traffic_s ?? r?.duration_s;
           return `${b != null ? Math.round(b) : '?'}/${typeof d === 'number' ? Math.round(d) : '?'}s`;
         }).join(',');
-        logEvent(`depart-rank n=${raw.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} cands=${_cands}`);
+        logEvent(`depart-rank constrained=${constrained} n=${raw.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} cands=${_cands}`);
       } catch {}
       // Color-rank: green (fastest) → orange (mid) → red (slowest). Cast to
       // any so we can attach an extra `color` field without modifying the

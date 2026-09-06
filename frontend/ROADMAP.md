@@ -1091,12 +1091,16 @@ Mapbox GL JS on desktop. **This is unexplained and will recur on the next model 
 > ⚠ `draw-cmp` telemetry reports the position handed to the marker — **not whether the model
 > rendered.** It read healthy while the car was invisible. Do not use it to clear a marker bug.
 
-**2 · CarPlay End button did not work** (Jeff, 2026-08-21). Unresolved: it is not known whether the
+**2 · ~~CarPlay End button did not work~~ CLOSED 2026-09-06 (Jeff: "I don't remember" whether a pill appeared; unresolvable, receipt chain stays).** Was: it is not known whether the
 press reached JS. The receipt chain is shipped (`83600a09`) — a full crumb chain with the pressed
 button and **no tap row** means the press died native-side, which makes it a build fix. Needs Jeff
 to say whether a pill appeared.
 
-**3 · ✅ 3D car — TRIPO PICKED, look approved 2026-08-23.**
+**3 · ✅ 3D car — DONE: the approved car IS the shipped GRC2 (hero `GRC2.glb` 9.69 MB) + its map twin `GRC2_map2.glb`
+(3.68 MB, `vehicleAssets.ts` heavy_metal on the map surface) — VERIFIED 2026-09-06 in the bucket and the asset table. Jeff's
+2026-08-28 call ("use the one in the hero shot app right now with the scaled-down version for the mapbox") superseded the PICK-1
+paragraph below, which is STALE (the `~/Documents/hairpin-3d/PICKS/` folder no longer exists). Jeff 2026-09-06 "4 yes" = confirmed.**
+~~3 · 3D car — TRIPO PICKED, look approved 2026-08-23.~~
 Jeff: *"this current widebody is by far the best… this is the #1 pick so far."* The asset and
 its irreplaceable source generation are saved at `~/Documents/hairpin-3d/PICKS/` with a full
 recipe in `PICKS/MANIFEST.md`. 190,000 tris · uint16 · 6.47 MB · 2K maps — inside the fleet
@@ -1128,7 +1132,7 @@ wants a real drive behind it rather than another same-day push. See §4.
 **Still open underneath it:** hold-to-talk on CarPlay remains impossible — `react-native-carplay`
 exposes a single-press handler, not press/release. That is a separate native problem, untouched.
 
-**7 · Leaderboard misses free drives.** `recordTrip` fires **only** from `onArrive`, so `trips` is
+**7 · ~~Leaderboard misses free drives~~ CLOSED 2026-09-06 — Jeff: free drives do NOT record PBs. Was:** `recordTrip` fires **only** from `onArrive`, so `trips` is
 an exact usage counter — but personal bests never record on a free drive. Crew has been told the
 interim rule.
 

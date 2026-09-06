@@ -723,11 +723,11 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
 - 🔐 **BACKEND SECURITY RELEASE 2026-09-06 (Codex found, Claude reviewed + released)** — `~/convoy-backend` commit `466f2a3`: verified-email-only
   social linking (409 on subject replacement), invite code only to admins + private rosters only to members + admin rights need membership,
   `floor_acquire` membership check + deleted users refused on the socket, Supabase→Mongo slot sync before every credit decision (503 when
-  unreadable), `/scan/mine` by account ownership (never the handle RPC), `/health` `rev`. 47-test offline suite in `tests/`. **Push to master
-  = Render deploy was BLOCKED by the auto-mode classifier → Jeff pushes.** Then: apply `supabase/migrations/20260906000100_account_scan_recovery.sql`
-  (revokes client EXECUTE on `scan_jobs_for_handle`) + ownership backfill from the authenticated `users.car_scan_id` pointer (Jeff `jeff-20260902-193844`,
-  Olaf `enablewhore-20260901-210315`). No OTA needed (navNotification already in OTA-AB — that edit was Codex's). ⚠ Jeff's phone runs Codex's
-  DEBUG build (updates-disabled) since 10:38 — reinstall TestFlight 75 before the next drive. Full record: `HANDOFF-2026-09-02.md` § 11.
+  unreadable), `/scan/mine` by account ownership (never the handle RPC), `/health` `rev`. 47-test offline suite in `tests/`. **LIVE 12:03 PDT**
+  (`rev=466f2a3`); migration `20260906000100_account_scan_recovery` APPLIED (anon key → `42501 permission denied` on the old RPC, grants =
+  postgres + service_role); ownership set from the authenticated `users.car_scan_id` pointer (Jeff `jeff-20260902-193844`, Olaf
+  `enablewhore-20260901-210315`); six superseded/probe jobs stay ownerless on purpose. No OTA needed (navNotification already in OTA-AB —
+  that edit was Codex's). Jeff's phone: back on TestFlight 75 + OTA-AB at 11:57. Full record: `HANDOFF-2026-09-02.md` § 11.
 - ✅ **OTA-AA SHIPPED 2026-09-06 08:54 PDT — group `f920b579-8bf2-406d-99d9-feb19557e757`, code `95acc6f`, KEY_PRESENT=1 both
   (Jeff: "all I want is this to be fixed … I have a huge list"; bundling is his call, every fix gated). Sim build 13: 6 reroutes applied
   ≤1 s each, every one now carrying `bearing=`; no `js-error`; rows 24/min vs 32/min on the same replay; the two sims signed out at the

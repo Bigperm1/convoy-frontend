@@ -1,8 +1,8 @@
 // carSpotTrust — is a PERSISTED car spot worth believing on the next launch? (pure, 2026-09-06)
 //
 // Say Phin, 2026-09-06 19:21 (WhatsApp): "Compass button puts me here but I'm not there, I'm
-// home." Her rows: `draw-cmp mode=pin parked=1 hu=0 sep=1141m spotAge=25791s` — the phone
-// drew (and shared) a car spot 1.1 km from where she and the car actually were. The spot had
+// home." His rows: `draw-cmp mode=pin parked=1 hu=0 sep=1141m spotAge=25791s` — the phone
+// drew (and shared) a car spot 1.1 km from where he and the car actually were. The spot had
 // been written at 12:11:09, while she was still ROLLING at 7 km/h with Android Auto attached,
 // and that was the last row of the drive: the process died mid-crawl, so no stop and no
 // head-unit disconnect was ever seen. Seven hours later hydrate adopted the record because
@@ -41,7 +41,7 @@ export type SpotVerdict =
  * May a persisted spot be adopted at hydrate? `lastDrivingAt` is the persisted driving stamp
  * (LAST_DRIVING_KEY): a car that was seen DRIVING more than a minute after the spot was written
  * provably left it — Say Phin 22:31, OTA-AD: a witnessed park at the meet (hu=1, mv=0) survived
- * a 9.3 km drive home because nothing rewrote it, and she was "showing near SunTea still".
+ * a 9.3 km drive home because nothing rewrote it, and he was "showing near SunTea still".
  */
 export function spotAdoptVerdict(p: unknown, now: number, lastDrivingAt: number = 0): SpotVerdict {
   const r = p as Partial<PersistedSpot> | null;

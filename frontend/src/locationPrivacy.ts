@@ -180,7 +180,7 @@ export async function hydrateLocationPrivacy(): Promise<void> {
         // tools/sim-qc/car_spot_trust_test.mts): the same age rule, plus a spot written
         // while a head unit was attached (`att`) and never followed by a witnessed
         // disconnect (`hu`) is UNVERIFIED — the process died with the car still moving and
-        // cannot know where it ended up (Say Phin's pin sat 1.1 km from her car for seven
+        // cannot know where it ended up (Say Phin's pin sat 1.1 km from his car for seven
         // hours). A refused spot leaves no pin; draw-cmp prints `spotDrop=<why>`.
         const drivingT = drivingRaw ? Number(drivingRaw) : 0;
         const v = spotAdoptVerdict(p, Date.now(), Number.isFinite(drivingT) ? drivingT : 0);
@@ -391,7 +391,7 @@ export function noteFix(lat: number, lng: number, speedMs?: number): void {
   //    to disk. A real driver clears provisional within seconds of pulling away.
   if (!carAttached() && !(driving && latchedBefore && !_latchProvisional)) return;
   // The spot FOLLOWS the car on every fix while attached/driving (OTA-AC gated this on
-  // speed for two hours and Say Phin's spot stayed at the meet while she drove home — see
+  // speed for two hours and Say Phin's spot stayed at the meet while he drove home — see
   // src/carSpotTrust.ts). What guards against a fix the app never saw end is the persisted
   // `mv` (speed at the last write) and `att`, judged at hydrate.
   _carSpot = { lat, lng };

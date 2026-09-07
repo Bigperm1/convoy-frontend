@@ -176,7 +176,7 @@ export function reportDraw(
         `acc=${acc == null ? "?" : acc.toFixed(0) + "m"} sep=${sep == null ? "?" : sep.toFixed(0) + "m"} ` +
         `gps=${gps && !hideGps ? gps.lat.toFixed(6) + "," + gps.lng.toFixed(6) : hideGps ? "withheld" : "?"} ` +
         `raw=${raw.lat.toFixed(6)},${raw.lng.toFixed(6)} drawn=${drawn.lat.toFixed(6)},${drawn.lng.toFixed(6)} ` +
-        `latch=${p.latch ? 1 : 0} parked=${p.parked ? 1 : 0} hu=${p.hu ? 1 : 0} spotAge=${p.spotAgeS == null ? "?" : p.spotAgeS + "s"}` +
+        `latch=${p.latch ? 1 : 0} parked=${p.parked ? 1 : 0} hu=${p.hu ? 1 : 0} spotAge=${p.spotAgeS == null ? "?" : p.spotAgeS + "s"}${p.spotDrop ? ` spotDrop=${p.spotDrop}` : ""}` +
         (hdg ? ` hdg=${fmtDeg(hdg.locked)} gpsHdg=${fmtDeg(hdg.raw)} rb=${hdg.route == null ? "-" : fmtDeg(hdg.route)} fix=${fmtFix(hdg.fix)} nfx=${typeof hdg.fixN === "number" ? hdg.fixN : "?"}` : ""),
     );
   } catch {

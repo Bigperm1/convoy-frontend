@@ -27,6 +27,7 @@
 // the parked branch fell back to live coordinates and drew a peer on their own home.
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { spotAdoptVerdict, fixMayBecomeSpot } from "./carSpotTrust";
 import { Platform } from "react-native";
 import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
 
@@ -55,7 +56,7 @@ const CAR_SPOT_KEY = "convoy.lastCarSpot.v1";
 // "where did I park" feature has to answer for, and short enough that a spot can never
 // outlive the trip it belongs to. A rejected spot costs "no pin"; an adopted stale one
 // costs a confident lie about where the driver is.
-const SPOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// SPOT_MAX_AGE_MS (24 h) now lives in src/carSpotTrust.ts with the rest of the adopt rule.
 // Persisted so a COLD context (visitMonitor firing while the app was suspended, a
 // background task) can tell "parked" from "driving" instead of guessing.
 const LAST_DRIVING_KEY = "convoy.lastDrivingAt.v1";
@@ -137,6 +138,7 @@ let _carSpot: { lat: number; lng: number } | null = null;
 // spot so hydrate can age it out — see SPOT_MAX_AGE_MS.
 let _carSpotAt = 0;
 let _parkWitnessed = false;   // see noteCarConnected / parkEndedByHeadUnit
+let _spotDrop: string | null = null;   // why hydrate refused the persisted spot (carSpotTrust) — printed by draw-cmp
 let _spotSavedAt = 0;
 let _drivingSavedAt = 0;
 let _hydrated = false;
@@ -173,15 +175,23 @@ export async function hydrateLocationPrivacy(): Promise<void> {
         // above 15 km/h, which rewrites it. One launch, self-healing, and it purges every
         // poisoned spot in the fleet at once. Peers see nothing rather than something
         // wrong, which is this module's stated rule: absent beats exposed.
-        const at = typeof p?.t === "number" && isFinite(p.t) ? p.t : 0;
-        const fresh = at > 0 && Date.now() - at <= SPOT_MAX_AGE_MS;
-        if (fresh) {
+        //
+        // Since 2026-09-06 the verdict lives in src/carSpotTrust.ts (pure; gate
+        // tools/sim-qc/car_spot_trust_test.mts): the same age rule, plus a spot written
+        // while a head unit was attached (`att`) and never followed by a witnessed
+        // disconnect (`hu`) is UNVERIFIED — the process died with the car still moving and
+        // cannot know where it ended up (Say Phin's pin sat 1.1 km from her car for seven
+        // hours). A refused spot leaves no pin; draw-cmp prints `spotDrop=<why>`.
+        const v = spotAdoptVerdict(p, Date.now());
+        if (v.adopt) {
           _carSpot = { lat: p.lat, lng: p.lng };
-          _carSpotAt = at;
+          _carSpotAt = p.t;
           // Same freshness rule as the spot itself: only adopt the persisted witnessed-park
           // flag when the persisted spot was adopted. `hu` on disk can only have survived
           // if nothing drove since the disconnect (drivers rewrite the key without it).
           if (p?.hu) _parkWitnessed = true;
+        } else {
+          _spotDrop = v.why;
         }
       }
     }
@@ -379,13 +389,19 @@ export function noteFix(lat: number, lng: number, speedMs?: number): void {
   //    runner who drove 80 s ago and force-quit still recorded their FIRST jogging fix
   //    to disk. A real driver clears provisional within seconds of pulling away.
   if (!carAttached() && !(driving && latchedBefore && !_latchProvisional)) return;
+  // A spot is a STOP (2026-09-06, Say Phin): a fix that merely happens to be slow — 7 km/h
+  // in traffic with the head unit attached — must never become the car's parking place,
+  // because the process can die on that very fix and the next launch would believe it.
+  if (!fixMayBecomeSpot(spd)) return;
   _carSpot = { lat, lng };
   _carSpotAt = now;
   if (now - _spotSavedAt > SPOT_SAVE_THROTTLE_MS) {
     _spotSavedAt = now;
     // `t` is what lets hydrate age this out — see SPOT_MAX_AGE_MS. Writing a plain
     // {lat,lng} here (as the deleted map.tsx writer did) puts an immortal spot on disk.
-    void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, t: now })).catch(() => {});
+    // `att` records that a head unit was attached when this was written: without a later
+    // witnessed disconnect (`hu`, written by noteCarConnected) hydrate refuses the spot.
+    void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, t: now, att: carAttached() ? 1 : 0, mv: Math.round(spd * 10) / 10 })).catch(() => {});
   }
 }
 
@@ -403,12 +419,13 @@ export function carSpot(): { lat: number; lng: number } | null {
  * These four fields make the next occurrence a one-query answer instead of a nine-agent
  * investigation. Consumed by src/drawTelemetry.ts.
  */
-export function privacyDebug(): { latch: boolean; parked: boolean; hu: boolean; spotAgeS: number | null } {
+export function privacyDebug(): { latch: boolean; parked: boolean; hu: boolean; spotAgeS: number | null; spotDrop: string | null } {
   return {
     latch: _drivingLatched,
     parked: isParked(),
     hu: _parkWitnessed,
     spotAgeS: _carSpotAt > 0 ? Math.round((Date.now() - _carSpotAt) / 1000) : null,
+    spotDrop: _spotDrop,
   };
 }
 

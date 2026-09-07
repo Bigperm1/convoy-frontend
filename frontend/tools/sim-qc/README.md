@@ -229,3 +229,15 @@ than 8 words; "Drive safe on the way back." never plays at home; Jeff's example 
 fields on the `arrive-speak` row describe the text they ride with. Running under plain Node is the proof
 the module has no react-native import (`nav.ts` composes through it; the cold/AA path gets the same form
 without the weather sentence).
+
+## Car-spot trust gate (numeric, adopt / refuse)
+
+`node --experimental-strip-types tools/sim-qc/car_spot_trust_test.mts` — `src/carSpotTrust.ts`, the rule hydrate
+applies before believing a persisted parking spot (2026-09-06, Say Phin: "Compass button puts me here but I'm not
+there, I'm home" — `draw-cmp mode=pin hu=0 sep=1141m spotAge=25791s`; the spot was written from a 7 km/h fix the
+instant the process died with Android Auto attached, and adopted seven hours later because it was fresh). Scenario
+A replays her record and must be REFUSED (`unwitnessed-attached`); B–C2 keep witnessed parks, phone-only parks and
+pre-change records adopted; D–E the age and shape rules; F which fixes may become a spot at all
+(`SPOT_WRITE_MAX_SPEED_MS` = 1.5 m/s: 7 km/h no, 3 km/h yes). What it cannot see: the AsyncStorage round trip and
+`noteCarConnected` itself — those are read-verified; the field receipt is `draw-cmp … spotDrop=<why>` on the
+first launch after a drive the app did not see end.

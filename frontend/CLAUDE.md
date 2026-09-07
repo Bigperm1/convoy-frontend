@@ -22,7 +22,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 **➜ Read `RULES.md` first** (how to work — Rule #1 and every standing rule), **then the newest
-`HANDOFF-<date>.md`** (current state — today `HANDOFF-2026-09-02.md`), **then `ROADMAP.md`**
+`HANDOFF-<date>.md`** (current state — today `HANDOFF-2026-09-06.md`; `HANDOFF-2026-09-02.md` is the 09-02 → 09-06 fix log), **then `ROADMAP.md`**
 (the OTA position, what ships next, open issues ranked).
 
 Then, as needed:

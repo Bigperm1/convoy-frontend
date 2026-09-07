@@ -20,7 +20,7 @@
 # Standing rules
 
 The single consolidated list. `CLAUDE.md` holds the architecture; **the newest `HANDOFF-<date>.md`
-holds current state** (today: `HANDOFF-2026-09-02.md`), with `ROADMAP.md` for ranked open issues;
+holds current state** (today: `HANDOFF-2026-09-06.md`; `HANDOFF-2026-09-02.md` = the 09-02 → 09-06 fix log), with `ROADMAP.md` for ranked open issues;
 ⛔ **plain `HANDOFF.md` is HISTORY ONLY — its header is stale at build 70.** This file holds **how to work**. Every rule here was written after it was broken and cost something.
 
 ---

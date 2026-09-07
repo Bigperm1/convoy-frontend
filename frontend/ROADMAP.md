@@ -27,6 +27,7 @@ at the time of writing, not recalled. Re-verify before acting — this file ages
 | file | what it is | freshness |
 |---|---|---|
 | **`RULES.md`** | how to work — the standing rules | current |
+| **`HANDOFF-2026-09-06.md`** | CURRENT STATE — builds, latest OTA, backend rev, field verdicts, Codex process, ranked fixes | **2026-09-06** |
 | **`ROADMAP.md`** ← you are here | current state + what ships next | **2026-08-22** |
 | `HANDOFF-3D.md` | photo → GLB pipeline, the 3D car work | **2026-08-22** |
 | `HANDOFF-48H-2026-08-16.md` | the 08-14 → 08-16 window, heat + location regression | 08-16 |
@@ -209,7 +210,7 @@ premium CarPlay glyphs
 
 ---
 
-## 4 · Build 75 — CUT 2026-09-02 (record below). Build 76 = widgets/watch + RevenueCat.
+## 4 · Build 75 — CUT 2026-09-02 (record below). ~~Build 76 = widgets/watch + RevenueCat~~ → Android 76 was consumed by the Play re-cut; widgets/watch + RevenueCat are on the BUILD 77 list (§6).
 
 ### ✅ BUILD 75 — CUT 2026-09-02 22:44 PDT, BOTH PLATFORMS FINISHED (runtime 1.26.0 → **1.27.0**)
 - iOS `a65064e0` (profile `mapbox-ios`) finished 22:52 · Android `967a8402` (profile
@@ -256,7 +257,7 @@ premium CarPlay glyphs
   `cam-probe` (applied zoom/pitch vs target + speed, on change, ≤1/s) · `route-fetch-fail
   why=` on the `fetchRoutes` catch · updates-log harvest oldest-first with entry timestamps.
 - **NOT in 75:** RevenueCat, widgets/watch native, `Screen.setMarker` patch, AA `isConnected`,
-  the OTA-able self-heal A1. **Widgets + watchOS = build 76** (no watch target exists; the
+  the OTA-able self-heal A1. **Widgets + watchOS = ~~build 76~~ build 77** (76 was consumed by the Android re-cut, 2026-09-02) (no watch target exists; the
   `WIDGETS.md` haptic spike must precede any watch code).
 - ⚠ **The runtime bump is a one-way door:** every OTA from now on targets 1.27.0 — a tester
   still on 74 gets nothing further. Sequence: crew installs 75 → then OTAs. Do NOT flip
@@ -1036,7 +1037,7 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   sinceApp=` · `tts-cut` at arrivals.
 - **Not teed up (needs design or a drive first):** congestion+reason on the map at the faster-route
   offer (#1) · replay (#3, nothing exists to revamp) · peer twin in presence (#4, heat budget) ·
-  failed-scan surfacing (needs a readable job status) · RevenueCat/widgets/watch = build 76.
+  failed-scan surfacing (needs a readable job status) · RevenueCat/widgets/watch = ~~build 76~~ build 77 (76 consumed by the Android re-cut).
 
 ## 5 · The road to build 80 — GRC club launch
 
@@ -1162,7 +1163,7 @@ done: it reverses an earlier call about the robotic device voice.
    (*"this current widebody is by far the best"*) and closed the vendor question the same day
    (*"we are working with Tripo now"*). **Do not benchmark other modelers or re-open a comparison.**
    Tripo Multi-view takes **4 orthogonal views** — front / left / right / back. The approved asset
-   lives in `~/Documents/hairpin-3d/PICKS/`; it is NOT yet uploaded to the `models` bucket or wired
+   ~~lives in `~/Documents/hairpin-3d/PICKS/`; it is NOT yet uploaded to the `models` bucket or wired~~ **STALE — §6 #3 (2026-09-06): the approved car IS the shipped GRC2 + `GRC2_map2`, already uploaded and wired**; the old text:
    into `vehicleAssets.ts`. Ask his credit budget before spending on generations.
 4. **Commit the three new docs** if not already done (`RULES.md`, `ROADMAP.md`, `HANDOFF-3D.md`).
 5. Then the ranked list in §6.

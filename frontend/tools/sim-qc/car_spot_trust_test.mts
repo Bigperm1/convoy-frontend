@@ -58,7 +58,7 @@ assert.equal(g4.adopt, true);
 out.push(`G stopped+hu → adopt; 60km/h+hu → written-moving; phone-only 15km/h → written-moving; phone-only stopped → adopt`);
 
 // H — Say Phin 22:31 on OTA-AD: a witnessed, stopped park at the meet (t = 21:45) but the car was
-// seen DRIVING at 22:03 (persisted driving stamp) → she left it → refused. A stamp older than the
+// seen DRIVING at 22:03 (persisted driving stamp) → he left it → refused. A stamp older than the
 // spot (the pull-in itself) or within the grace keeps the park.
 const meet = { lat: 49.171954, lng: -123.131714, t: NOW - 2804 * 1000, att: 1 as const, hu: 1 as const, mv: 0 };
 const h1 = spotAdoptVerdict(meet, NOW, NOW - 1700 * 1000);   // drove 18 min after parking

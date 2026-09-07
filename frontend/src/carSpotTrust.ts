@@ -3,7 +3,7 @@
 // Say Phin, 2026-09-06 19:21 (WhatsApp): "Compass button puts me here but I'm not there, I'm
 // home." His rows: `draw-cmp mode=pin parked=1 hu=0 sep=1141m spotAge=25791s` — the phone
 // drew (and shared) a car spot 1.1 km from where he and the car actually were. The spot had
-// been written at 12:11:09, while she was still ROLLING at 7 km/h with Android Auto attached,
+// been written at 12:11:09, while he was still ROLLING at 7 km/h with Android Auto attached,
 // and that was the last row of the drive: the process died mid-crawl, so no stop and no
 // head-unit disconnect was ever seen. Seven hours later hydrate adopted the record because
 // it was fresh (< 24 h) — nothing recorded that the drive's END had never been witnessed.
@@ -12,7 +12,7 @@
 // launch), never on the write path: while the car is attached or driving the spot must keep
 // FOLLOWING the car on every fix, exactly as before — OTA-AC (2026-09-06 20:1x) briefly
 // gated the write path on speed instead, and Say Phin's spot then stayed at the meet while
-// she drove 9.3 km home with Android Auto attached (`sep=9285m hu=1 spotAge=2804s`), and a
+// he drove 9.3 km home with Android Auto attached (`sep=9285m hu=1 spotAge=2804s`), and a
 // phone-only driver could never record a spot at all (that path only writes while moving).
 // Reverted the same night; the persisted record now carries the speed of its LAST write.
 //  1. A spot is a STOP: a record whose last write happened at or above

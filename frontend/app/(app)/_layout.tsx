@@ -4,6 +4,7 @@ import { Tabs, useRouter, Redirect } from "expo-router";
 import * as Linking from "expo-linking";
 import { parseDeepLink, setIntent } from "../../src/deepLinks";
 import { logEvent, logEventReliable } from "../../src/crashBreadcrumb";
+import { confirmEvent, declineEvent } from "../../src/eventsApi";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
@@ -269,6 +270,17 @@ export default function AppLayout() {
     return () => { try { sub.remove(); } catch {} };
   }, [router]);
 
+  // EVENT ACTION BUTTONS (2026-09-06). The backend sends the invite and the 24 h
+  // "still attending?" pushes with categoryId "event-confirm"; registering the category
+  // here puts "I'm in" / "Can't make it" on the banner on both platforms. Idempotent.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    Notifications.setNotificationCategoryAsync("event-confirm", [
+      { identifier: "going", buttonTitle: "I'm in", options: { opensAppToForeground: true } },
+      { identifier: "not-going", buttonTitle: "Can't make it", options: { opensAppToForeground: true } },
+    ]).catch(() => {});
+  }, []);
+
   // Tap-to-open listener — fires when the user taps the OS notification
   // banner while the app is backgrounded or killed. For Hails we route to
   // the Map tab so they can see the hailer's car blink on the map.
@@ -276,6 +288,24 @@ export default function AppLayout() {
     if (Platform.OS === "web") return;
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = (response.notification.request.content.data ?? {}) as any;
+      // An action-button tap answers the server FIRST, then opens the event so the new
+      // state is on screen (Rodrigo, 2026-09-06: "when I press it, it sends me to the
+      // event and nothing else"). A plain banner tap has no actionIdentifier and falls
+      // through to the routing below.
+      const action = String((response as any).actionIdentifier || "");
+      if (data?.type === "event" && data.event_id && (action === "going" || action === "not-going")) {
+        const id = String(data.event_id);
+        (async () => {
+          try {
+            if (action === "going") await confirmEvent(id); else await declineEvent(id);
+            logEventReliable(`event-push-action id=${id} action=${action} ok=1`);
+          } catch (e: any) {
+            logEvent(`event-push-action id=${id} action=${action} ok=0 err=${String(e?.message ?? e).slice(0, 60)}`);
+          }
+          router.push({ pathname: "/(app)/hub", params: { event: id } } as any);
+        })();
+        return;
+      }
       if (data?.type === "hail") {
         router.push("/(app)/map");
       }

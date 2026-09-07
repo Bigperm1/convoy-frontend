@@ -55,6 +55,20 @@ export function whenText(iso: string): string {
   try { return fmtWhen(new Date(iso)); } catch { return iso; }
 }
 
+/** "Started 2 h ago" once the start time has passed, else null (2026-09-06: an event set for
+ *  8:00 AM vanished from the Hub at 11:00 and the crew read it as "wiped" — a past event now
+ *  stays listed, greyed, until local midnight; see hub.tsx feedShown). */
+export function startedText(iso: string): string | null {
+  try {
+    const ago = Date.now() - new Date(iso).getTime();
+    if (!(ago > 0)) return null;
+    const min = Math.round(ago / 60_000);
+    if (min < 60) return `Started ${Math.max(1, min)} min ago`;
+    const h = Math.round(min / 60);
+    return `Started ${h} h ago`;
+  } catch { return null; }
+}
+
 // ── Section (mine/discover lists + create + detail) ─────────────────────────
 export function EventsSection({ kind, openEventId }: { kind: Kind; openEventId?: string | null }) {
   const accent = useAccent();

@@ -9,7 +9,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth";
-import { EventDetailModal, CreateEventModal, whenText } from "../../src/hubEvents";
+import { EventDetailModal, CreateEventModal, whenText, startedText } from "../../src/hubEvents";
 import { getEvent, myEvents, discoverEvents, type HubEvent } from "../../src/eventsApi";
 import { updateWidgetFeed } from "../../src/widgetFeed";
 import { api, formatErr } from "../../src/api";
@@ -180,7 +180,15 @@ export default function HubScreen() {
   const standingsClubId = settings.activeCommunityId || mine[0]?.id || null;
 
   const feedShown = React.useMemo(() => {
-    const live = (e: HubEvent) => new Date(e.start_at).getTime() + 3 * 3600_000 > Date.now();
+    // An event that STARTED TODAY stays in the list until local midnight, greyed (Jeff,
+    // 2026-09-06: Say Phin's 8:00 AM event dropped out at 11:00 and the crew read it as
+    // "wiped"). The 3 h grace still covers a late-evening start rolling past midnight.
+    const live = (e: HubEvent) => {
+      const t = new Date(e.start_at).getTime();
+      if (t + 3 * 3600_000 > Date.now()) return true;
+      const d = new Date(t), n = new Date();
+      return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+    };
     const byTime = (a: HubEvent, b: HubEvent) => +new Date(a.start_at) - +new Date(b.start_at);
     let list = feedAll.filter(live);
     if (chip === "going") list = list.filter((e) => e.is_attending);
@@ -453,10 +461,10 @@ function FeedList({ events, loading, accent, onOpen, emptyLabel }: {
   return (
     <View style={styles.sheetList}>
       {events.length === 0 && <Text style={styles.feedEmpty}>{emptyLabel}</Text>}
-      {events.map((e, i) => (
+      {events.map((e, i) => { const started = startedText(e.start_at); return (
         <TouchableOpacity
           key={e.id} testID={`club-feed-${e.id}`} activeOpacity={0.85} onPress={() => onOpen(e)}
-          style={[styles.feedRow, i > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.08)" } : null]}
+          style={[styles.feedRow, started ? { opacity: 0.55 } : null, i > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.08)" } : null]}
         >
           <View style={styles.feedGlyph}>
             <Ionicons name={e.kind === "cruise" ? "git-branch" : "location"} size={20} color={accent} />
@@ -464,7 +472,7 @@ function FeedList({ events, loading, accent, onOpen, emptyLabel }: {
           <View style={{ flex: 1 }}>
             <Text style={styles.feedTitle} numberOfLines={1}>{e.title}</Text>
             <Text style={styles.feedSub} numberOfLines={1}>
-              <Text style={{ color: accent, fontWeight: "700" }}>{whenText(e.start_at)}</Text>
+              <Text style={{ color: accent, fontWeight: "700" }}>{started ?? whenText(e.start_at)}</Text>
               {e.venue?.label ? <Text>{"  ·  " + e.venue.label}</Text> : null}
             </Text>
           </View>
@@ -474,7 +482,7 @@ function FeedList({ events, loading, accent, onOpen, emptyLabel }: {
               </View>
             : <View style={styles.countWell}><Text style={styles.countTxt}>{e.attendee_count}</Text></View>}
         </TouchableOpacity>
-      ))}
+      ); })}
     </View>
   );
 }

@@ -159,4 +159,47 @@ console.log(
   samples.map((s) => `  e.g. ${s}`).join("\n"),
 );
 if (fails.length) { console.error("FAIL:\n  " + fails.join("\n  ")); process.exit(1); }
+
+// ── 9. A RESOLVED BUSINESS names the arrival and picks the closer by type (2026-09-06) ──────────
+{
+  const { resetPlaceCloserMemory, PLACE_CLOSERS, CLOSED_CLOSER } = await import("../../src/arrivalPlaceClosers.ts");
+  resetPlaceCloserMemory(); resetArrivalEndingMemory();
+  const moto = { name: "International Motorsports", primaryType: "motorcycle_dealer", types: ["motorcycle_dealer", "store"], openNow: true };
+  const u1 = composeArrivalLine({ destLabel: "9420 200A St Unit 100, Langley Twp, BC V1M 4C2, Canada", place: moto, weather: SUNNY }, () => 0);
+  check(u1.text === "You have arrived at International Motorsports. It's 19 degrees and sunny right now. Looking to buy a bike today?", `9a poi line: ${u1.text}`);
+  check(u1.poi === true && u1.endingIndex === 100, "9a receipt poi=1 ending=100");
+  const chinese = { name: "Golden Dragon", primaryType: "chinese_restaurant", types: ["chinese_restaurant", "restaurant"], openNow: true };
+  const u2 = composeArrivalLine({ destLabel: "123 Main St", place: chinese, weather: null }, () => 0);
+  check(u2.text === "You have arrived at Golden Dragon. Get the ginger fried beef, I hear it's good.", `9b chinese: ${u2.text}`);
+  // closed → the closed line, whatever the type
+  const u3 = composeArrivalLine({ destLabel: "x", place: { ...moto, openNow: false }, weather: null }, () => 0);
+  check(u3.text.endsWith(CLOSED_CLOSER) && u3.endingIndex === 101, `9c closed: ${u3.text}`);
+  // a generated quip wins over the canned line
+  const u4 = composeArrivalLine({ destLabel: "x", place: { ...moto, quip: "Two wheels, zero regrets." }, weather: null }, () => 0);
+  check(u4.text === "You have arrived at International Motorsports. Two wheels, zero regrets." && u4.endingIndex === 102, `9d quip: ${u4.text}`);
+  // a SAVED place keeps its own name and closers even when a business resolved there
+  const u5 = composeArrivalLine({ destLabel: "Home", placeKind: "home", place: moto, weather: null }, () => 0);
+  check(u5.text.startsWith("You have arrived at Home.") && u5.poi === false && u5.endingIndex < 100, `9e saved place wins: ${u5.text}`);
+  // an unknown type falls back to the ordinary closers but still names the place
+  const u6 = composeArrivalLine({ destLabel: "x", place: { name: "Acme Widgets", primaryType: "widget_factory", types: [] }, weather: SUNNY }, () => 0);
+  check(u6.text.startsWith("You have arrived at Acme Widgets. It's 19 degrees") && u6.poi === true && u6.endingIndex < 100, `9f unknown type: ${u6.text}`);
+  // no back-to-back repeat within a type pool
+  resetPlaceCloserMemory();
+  let prev = ""; let repeats = 0;
+  for (let i = 0; i < 20; i++) {
+    const t = composeArrivalLine({ destLabel: "x", place: chinese, weather: null }, Math.random).text;
+    if (t === prev) repeats++;
+    prev = t;
+  }
+  check(repeats === 0, `9g no repeats in 20 picks (repeats=${repeats})`);
+  // every canned line: ≤ 12 words, no dash, no emoji, no quotes
+  let bad = 0, n = 0;
+  for (const r of PLACE_CLOSERS) for (const l of r.lines) {
+    n++;
+    if (l.split(" ").length > 12 || /[—–\-]|[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}"]/u.test(l)) { bad++; fails.push(`9h bad line: ${l}`); }
+  }
+  check(bad === 0, `9h ${n} place closers clean`);
+  console.log(`place closers: rules=${PLACE_CLOSERS.length} lines=${n}`);
+}
+
 console.log("PASS");

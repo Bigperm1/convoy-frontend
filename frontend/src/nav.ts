@@ -38,7 +38,7 @@ import { isOnCall, callSilence } from "./callState";
 // only AsyncStorage / Platform / settings, so this cannot close a cycle back to nav.
 import { headUnitAttachedRaw } from "./locationPrivacy";
 import { resolveArrivalZone, type ArrivalZone } from "./arrivalZone";
-import { composeArrivalLine, type ArrivalUtterance, type ArrivalWeather, type ArrivalPlaceKind } from "./arrivalEndings";
+import { composeArrivalLine, type ArrivalUtterance, type ArrivalWeather, type ArrivalPlaceKind, type ArrivalPlaceInfo } from "./arrivalEndings";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -730,6 +730,8 @@ export type ArrivalContext = {
   placeKind?: ArrivalPlaceKind | null;
   weather?: ArrivalWeather | null;
   startedAt?: number | null;
+  /** The business at the destination, resolved at plot (src/placeIdentity.ts). */
+  place?: ArrivalPlaceInfo | null;
 };
 function readArrivalContext(options?: { arrivalContext?: () => ArrivalContext | null }): ArrivalContext | null {
   try { return options?.arrivalContext?.() ?? null; } catch { return null; }
@@ -739,6 +741,7 @@ function composeArrival(destLabel: string | null | undefined, ctx: ArrivalContex
   return composeArrivalLine({
     destLabel,
     placeKind: ctx?.placeKind ?? null,
+    place: ctx?.place ?? null,
     weather: ctx?.weather ?? null,
     hour: new Date().getHours(),
     driveMin: startedAt > 0 ? (Date.now() - startedAt) / 60000 : null,
@@ -1548,7 +1551,7 @@ export function useTurnByTurn(
         logEventReliable(
           `arrive-speak engine=warm late=${late ? 1 : 0} optMute=${options?.mute ? 1 : 0} ` +
           `novaMuted=${st.novaMuted ? 1 : 0} novaVoice=${st.novaVoice === false ? 0 : 1} vol=${getAudioVol(st, "volVoice").toFixed(2)} ` +
-          `wx=${willSpeak && utt.wx ? 1 : 0} ending=${willSpeak ? utt.endingIndex : -1}`,
+          `wx=${willSpeak && utt.wx ? 1 : 0} ending=${willSpeak ? utt.endingIndex : -1} poi=${utt.poi ? 1 : 0}`,
         );
       } catch {}
       if (willSpeak) speakArrival(utt);

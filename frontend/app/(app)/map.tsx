@@ -63,6 +63,7 @@ import { useDriveBcEvents } from "../../src/driveBcEvents";
 import { useSpeedLimit, getSpeedLimitDebug } from "../../src/speedLimit";
 import { playSpeedDing } from "../../src/speedDing";
 import { speedEpisodeTick, newSpeedEpisodeState, SPEED_TIER1_OVER_KMH, SPEED_TIER2_OVER_KMH } from "../../src/speedEpisode";
+import { resolveDestinationPlace, type ArrivalPlace } from "../../src/placeIdentity";
 import type { SpeedEpisodeState } from "../../src/speedEpisode";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
@@ -925,6 +926,25 @@ export default function MapScreen() {
   // NOW at speak time through a ref so the engine's getter never sees a stale render.
   const destForecastRef = useRef(destForecast);
   destForecastRef.current = destForecast;
+  // WHAT is at the destination (src/placeIdentity.ts): resolved once per plotted destination so
+  // the arrival line can say the business by name and pick its closer by type. Saved places skip
+  // it (their own name and closers win). Receipt: dest-place … once per resolve.
+  const destPlaceRef = useRef<ArrivalPlace | null>(null);
+  useEffect(() => {
+    destPlaceRef.current = null;
+    if (!destination) return;
+    if (matchSavedPlace(destination.lat, destination.lng)) return;
+    let alive = true;
+    const t0 = Date.now();
+    resolveDestinationPlace(destination).then((p) => {
+      if (!alive) return;
+      destPlaceRef.current = p;
+      try {
+        logEvent(`dest-place ${p ? `name=${p.name.slice(0, 40)} type=${p.primaryType ?? "-"} open=${p.openNow == null ? "?" : p.openNow ? 1 : 0} dist=${p.distM} quip=${p.quip ? 1 : 0}` : "none"} ms=${Date.now() - t0}`);
+      } catch {}
+    });
+    return () => { alive = false; };
+  }, [destination?.lat, destination?.lng]);
 
   // Fixed speed cameras (OpenStreetMap), fetched around the driver and cached.
   // Drives both the map pins and the Nova proximity voice alert below.
@@ -1865,6 +1885,7 @@ export default function MapScreen() {
       const cond = pickForecastAt(destForecastRef.current, Date.now());
       return {
         placeKind: saved?.kind ?? null,
+        place: saved ? null : destPlaceRef.current,
         weather: cond ? { temp: settings.speedUnit === "mph" ? cond.tempF : cond.tempC, tempC: cond.tempC, kind: weatherKind(cond) } : null,
         startedAt: tripBaselineRef.current?.startedAt || getNavStartedAt() || null,
       };

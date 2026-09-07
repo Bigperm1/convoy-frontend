@@ -18,6 +18,10 @@
 // a finite number — "undefined degrees" cannot be composed.
 
 import type { WeatherKind } from "./weatherLayer";
+import { chooseArrivalPlaceCloser } from "./arrivalPlaceClosers.ts";
+
+/** The business at the destination (src/placeIdentity.ts), when one was resolved. */
+export type ArrivalPlaceInfo = { name: string; primaryType: string | null; types: readonly string[]; openNow?: boolean | null; quip?: string | null };
 
 export type ArrivalPlaceKind = "home" | "work" | "custom";
 
@@ -178,6 +182,9 @@ export function arrivalWeatherSentence(w: ArrivalWeather | null | undefined): st
 export type ArrivalLineInput = {
   destLabel?: string | null;
   placeKind?: ArrivalPlaceKind | null;
+  /** The resolved business at the destination — names the arrival when the destination is not a
+   *  saved place, and picks the closer by what the place IS (src/arrivalPlaceClosers.ts). */
+  place?: ArrivalPlaceInfo | null;
   weather?: ArrivalWeather | null;
   hour?: number | null;
   driveMin?: number | null;
@@ -187,17 +194,29 @@ export type ArrivalUtterance = {
   text: string;
   /** Whether the weather sentence is in it (the `wx=` receipt field). */
   wx: boolean;
-  /** Index into ARRIVAL_ENDINGS (the `ending=` receipt field). */
+  /** Index into ARRIVAL_ENDINGS (the `ending=` receipt field); 100 = a place-type closer,
+   *  101 = the closed line, 102 = a generated quip. */
   endingIndex: number;
   /** The cleaned place actually spoken, null for the unnamed form. */
   place: string | null;
+  /** `poi=` receipt: the arrival was named after a resolved business. */
+  poi: boolean;
 };
 
 /** The whole arrival line: "You have arrived at {place}." + weather sentence + closer. */
 export function composeArrivalLine(input: ArrivalLineInput, rand: () => number = Math.random): ArrivalUtterance {
-  const place = cleanArrivalLabel(input.destLabel);
+  // A saved place keeps its own name and closers ("Welcome home."); otherwise a resolved business
+  // names the arrival and its type picks the closer (Jeff, 2026-09-06: "you have arrived at
+  // International Motorsports, looking to buy a bike today?").
+  const poi = !input.placeKind && !!input.place?.name ? input.place : null;
+  const place = poi ? poi.name : cleanArrivalLabel(input.destLabel);
   const opener = place ? `You have arrived at ${place}.` : "You have arrived.";
   const wx = arrivalWeatherSentence(input.weather);
+  const poiCloser = poi ? chooseArrivalPlaceCloser(poi, rand) : null;
+  if (poiCloser) {
+    const idx = poiCloser.src === "quip" ? 102 : poiCloser.src === "closed" ? 101 : 100;
+    return { text: [opener, wx, poiCloser.text].filter(Boolean).join(" "), wx: !!wx, endingIndex: idx, place, poi: true };
+  }
   const ending = chooseArrivalEnding({
     placeKind: input.placeKind ?? null,
     placeName: place,
@@ -205,5 +224,5 @@ export function composeArrivalLine(input: ArrivalLineInput, rand: () => number =
     hour: input.hour ?? null,
     driveMin: input.driveMin ?? null,
   }, rand);
-  return { text: [opener, wx, ending.text].filter(Boolean).join(" "), wx: !!wx, endingIndex: ending.index, place };
+  return { text: [opener, wx, ending.text].filter(Boolean).join(" "), wx: !!wx, endingIndex: ending.index, place, poi: !!poi };
 }

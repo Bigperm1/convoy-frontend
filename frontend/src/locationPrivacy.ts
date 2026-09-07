@@ -27,7 +27,7 @@
 // the parked branch fell back to live coordinates and drew a peer on their own home.
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { spotAdoptVerdict, fixMayBecomeSpot } from "./carSpotTrust";
+import { spotAdoptVerdict } from "./carSpotTrust";
 import { Platform } from "react-native";
 import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
 
@@ -182,7 +182,8 @@ export async function hydrateLocationPrivacy(): Promise<void> {
         // disconnect (`hu`) is UNVERIFIED — the process died with the car still moving and
         // cannot know where it ended up (Say Phin's pin sat 1.1 km from her car for seven
         // hours). A refused spot leaves no pin; draw-cmp prints `spotDrop=<why>`.
-        const v = spotAdoptVerdict(p, Date.now());
+        const drivingT = drivingRaw ? Number(drivingRaw) : 0;
+        const v = spotAdoptVerdict(p, Date.now(), Number.isFinite(drivingT) ? drivingT : 0);
         if (v.adopt) {
           _carSpot = { lat: p.lat, lng: p.lng };
           _carSpotAt = p.t;
@@ -389,10 +390,10 @@ export function noteFix(lat: number, lng: number, speedMs?: number): void {
   //    runner who drove 80 s ago and force-quit still recorded their FIRST jogging fix
   //    to disk. A real driver clears provisional within seconds of pulling away.
   if (!carAttached() && !(driving && latchedBefore && !_latchProvisional)) return;
-  // A spot is a STOP (2026-09-06, Say Phin): a fix that merely happens to be slow — 7 km/h
-  // in traffic with the head unit attached — must never become the car's parking place,
-  // because the process can die on that very fix and the next launch would believe it.
-  if (!fixMayBecomeSpot(spd)) return;
+  // The spot FOLLOWS the car on every fix while attached/driving (OTA-AC gated this on
+  // speed for two hours and Say Phin's spot stayed at the meet while she drove home — see
+  // src/carSpotTrust.ts). What guards against a fix the app never saw end is the persisted
+  // `mv` (speed at the last write) and `att`, judged at hydrate.
   _carSpot = { lat, lng };
   _carSpotAt = now;
   if (now - _spotSavedAt > SPOT_SAVE_THROTTLE_MS) {

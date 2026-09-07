@@ -721,6 +721,7 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   the 2026-08-21 CarPlay End button (did a pill appear?), Alfred's telemetry handle, whether free drives should record PBs, wiring
   the approved Tripo car. **Rodrigo's "compass shows north but the car turns"** = his phone is in North-up (`cam-mode view=north_up`
   at every route start) — a Map View setting, not a bug; tell him.
+- ✅ **OTA-AC SHIPPED 2026-09-06 evening — group `7301112b-26a8-40ab-bf04-a7fce0b5aa28`, code `9dee6bf`, KEY_PRESENT=1 both** — Say Phin's frozen car pin: a spot is a STOP and an unwitnessed spot written with a head unit attached is refused on relaunch (`src/carSpotTrust.ts` + gate). Same evening, backend `eea3db1` (event pushes: no duplicates for last-minute events; create-time invite = announce; 5 tests) committed for Jeff's push. Full read: `HANDOFF-2026-09-06.md` §3.10.
 - 🔐 **BACKEND SECURITY RELEASE 2026-09-06 (Codex found, Claude reviewed + released)** — `~/convoy-backend` commit `466f2a3`: verified-email-only
   social linking (409 on subject replacement), invite code only to admins + private rosters only to members + admin rights need membership,
   `floor_acquire` membership check + deleted users refused on the socket, Supabase→Mongo slot sync before every credit decision (503 when

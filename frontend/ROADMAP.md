@@ -27,7 +27,8 @@ at the time of writing, not recalled. Re-verify before acting — this file ages
 | file | what it is | freshness |
 |---|---|---|
 | **`RULES.md`** | how to work — the standing rules | current |
-| **`HANDOFF-2026-09-06.md`** | CURRENT STATE — builds, latest OTA, backend rev, field verdicts, Codex process, ranked fixes | **2026-09-06** |
+| **`HANDOFF-2026-09-07.md`** | CURRENT STATE — builds, latest OTA, backend rev, field verdicts, ranked fixes, the 09-06 evening | **2026-09-07** |
+| `HANDOFF-2026-09-06.md` | 09-05 → 09-06 fix log (root causes, receipts, the refutation pass) | history |
 | **`ROADMAP.md`** ← you are here | current state + what ships next | **2026-08-22** |
 | `HANDOFF-3D.md` | photo → GLB pipeline, the 3D car work | **2026-08-22** |
 | `HANDOFF-48H-2026-08-16.md` | the 08-14 → 08-16 window, heat + location regression | 08-16 |

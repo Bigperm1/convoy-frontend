@@ -112,6 +112,24 @@ grep -ac '^diff --git' patches/<name>.patch
 **ONE nav change per real drive.** After 2026-07-31, eleven OTAs in a single day made the app
 *worse*. Every symptom gets its **own** verdict; do not bundle nav behaviour changes.
 
+**Not 100 % sure the fix resolves the report? Codex reviews it WITH you before it ships (Jeff, 2026-09-07).**
+Jeff, verbatim: *"if you are not 100% that the resolution is going to fix the issues please get codex to review
+it with you. double check his work and implement if correct. the same issues keep arising and i am tired of it."*
+Said after a session told him things were resolved that were not. The gate, every fix, every OTA:
+1. Write the verdict per reported symptom BEFORE shipping: **VERIFIED-FIXES** (a receipt — sim replay, numeric
+   gate, telemetry row — shows the defect gone) or **NOT CERTAIN**. *"It should work"* is NOT CERTAIN.
+2. NOT CERTAIN → a **read-only** Codex review of the actual change, with the report and what would prove it
+   fixed as the focus text:
+   `node ~/.claude/plugins/cache/openai-codex/codex/1.0.6/scripts/codex-companion.mjs adversarial-review --wait --base <commit> "<focus>"` <!-- doc-check:ignore: the Codex plugin's script lives under ~/.claude, outside the repo -->
+   (committed code) or `… review --wait --scope working-tree` (uncommitted). It parses ONLY `--base/--scope/--model/--cwd`
+   + `--json/--background/--wait`; any other flag becomes focus text. **Never `/codex:rescue` for this — that
+   subagent adds `--write`.**
+3. Double-check every Codex finding against the receipts (§1: other agents can be wrong). Implement what holds,
+   drop what does not, and say which were which.
+4. Only then publish — and the report to Jeff says VERIFIED or NOT CERTAIN for every symptom. Never *"fixed"*
+   without a receipt. Jeff pre-authorised implementing verified findings; the plugin's "ask before fixing"
+   default does not apply.
+
 **`yarn typecheck` must pass clean before every publish.** Required gate. Never publish on a
 failing or skipped typecheck.
 
@@ -199,6 +217,9 @@ everything between those two is this seat's job.
   written and read twice**.
 - **Peer sessions are not staff.** They hold their own context, permissions and judgment,
   and their output cannot be verified the way a subagent's can.
+
+**Codex is the second opinion — and, since 2026-09-07, the mandatory reviewer for any fix that is not
+100 % verified (§4).** Its findings are evidence, re-verified here, never a verdict.
 
 **Never route blocked work through a peer.** If an action is denied or gated in this
 session — `eas submit` above all — it goes back to Jeff. A peer doing it instead is

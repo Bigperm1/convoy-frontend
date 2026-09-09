@@ -39,6 +39,7 @@ import { isOnCall, callSilence } from "./callState";
 import { headUnitAttachedRaw } from "./locationPrivacy";
 import { resolveArrivalZone, type ArrivalZone } from "./arrivalZone";
 import { composeArrivalLine, type ArrivalUtterance, type ArrivalWeather, type ArrivalPlaceKind, type ArrivalPlaceInfo } from "./arrivalEndings";
+import { isSpokenManeuver, arriveSpeakLeadM } from "./maneuverSpeech";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -589,6 +590,7 @@ export const ARRIVE_SILENT_MAX_SKEW_MS = 10000;
 // not, so a late fire tears down silently. Timestamp comparison, never trust the
 // timer's own timing.
 export const ARRIVE_SPEAK_MAX_LATE_MS = 90000;
+// Arrival-speech lead: see src/maneuverSpeech.ts (arriveSpeakLeadM) — pure, and gated.
 // ── TIER 3: PARKED NEAR THE DOOR, BUT THE ROUTE STILL HAS ROAD LEFT (2026-07-31)
 // Jeff's lunch run: photo 2 shows him out of the car with 142 m of route still to run,
 // because the route looped the block and the destination sits across it. Neither tier
@@ -767,33 +769,6 @@ function speakArrival(u: ArrivalUtterance): void {
   speak(u.text, { priority: true });
 }
 
-// "Less intrusive Nova" filter. Maneuvers that just mean "keep going" aren't
-// worth a spoken callout — speaking them ("continue straight for 2 km") is the
-// nagging the driver complained about. We skip ONLY these, so real turns,
-// merges, ramps, forks, roundabouts and U-turns still speak.
-const SILENT_MANEUVERS = new Set([
-  "straight", "continue", "name_change", "name-change", "depart",
-]);
-// Decide whether a maneuver is worth speaking. A known non-actionable maneuver
-// is silenced. For an empty/unknown maneuver we fall back to the instruction
-// text and speak ONLY if it clearly describes a real maneuver — so we never
-// drop a genuine turn that arrived without a maneuver code, but still stay quiet
-// on "Continue on Main St" filler.
-function isSpokenManeuver(maneuver?: string, html?: string): boolean {
-  const m = (maneuver || "").toLowerCase();
-  // maneuver may be a joined Mapbox key ("type|modifier", e.g. "continue|straight",
-  // "depart|left", "turn|straight") or a bare legacy token ("straight"). Split so
-  // the SILENT set matches on the TYPE half regardless of modifier.
-  const type = m.split("|")[0];
-  const modifier = m.split("|")[1] || "";
-  // A "straight" modifier means no real turn (e.g. "turn|straight", "merge|straight"
-  // continuing ahead) — treat as non-actionable filler, same as continue/straight.
-  if (modifier === "straight") return false;
-  if (type && SILENT_MANEUVERS.has(type)) return false;
-  if (m && !SILENT_MANEUVERS.has(m)) return true;
-  const h = (html || "").toLowerCase();
-  return /\b(turn|merge|exit|ramp|fork|u-?turn|roundabout|keep (?:left|right))\b/.test(h);
-}
 
 // Ordinal word for a small exit number (roundabouts). Falls back to "Nth".
 function ordinalWord(n: number): string {
@@ -974,6 +949,10 @@ export function useTurnByTurn(
   const settleSinceRef = useRef<number | null>(null);
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fireArriveRef = useRef<(late: boolean) => void>(() => {});
+  // The arrival line once it has been spoken EARLY (see ARRIVE_SPEAK_LEAD_S). Held so the
+  // arrival receipt describes the line the driver actually heard rather than a freshly composed
+  // one, and so the real arrival never speaks it a second time.
+  const arriveSpokenRef = useRef<ArrivalUtterance | null>(null);
   // ── PARKED, BUT THE LAST FIX SAYS OTHERWISE (2026-08-31) ────────────────────
   // Tier 2 above tests `user.speed`. That field belongs to the LAST FIX THAT
   // ARRIVED, and the moment the car parks the OS stops producing fixes — so a
@@ -1059,6 +1038,7 @@ export function useTurnByTurn(
       _tbtEngineActive = false; // cold CarPlay guidance may take over (Wave 2)
       resetSpeakGate();
       announcedRef.current.clear();
+      arriveSpokenRef.current = null;
       hasAnnouncedStartRef.current = false;
       const cleared: TbtState = { active: false, stepIndex: 0, distanceToManeuverM: 0, distanceRemainingM: 0, etaSeconds: 0 };
       stateRef.current = cleared;
@@ -1088,6 +1068,7 @@ export function useTurnByTurn(
     // turn callout play OVER the greeting. Teardown reset still runs in the
     // !active branch above.
     announcedRef.current.clear();
+    arriveSpokenRef.current = null;
     const fresh: TbtState = { ...stateRef.current, active: true, stepIndex: 0 };
     stateRef.current = fresh;
     setState(fresh);
@@ -1120,6 +1101,7 @@ export function useTurnByTurn(
     if (key !== routeKeyRef.current) {
       routeKeyRef.current = key;
       announcedRef.current.clear();
+      arriveSpokenRef.current = null;
       // The trend is meaningless against a different line — and the new line's travel
       // budget starts at zero, so the next reroute cannot be asked for until the car has
       // actually driven SWAP_ARM_TRAVEL_M on it (2026-09-04 lot storm, see offRouteGate).
@@ -1203,6 +1185,7 @@ export function useTurnByTurn(
       const prevNext = steps[prevStepIdx + 1];
       const newNext = steps[stepIdx + 1];
       announcedRef.current.clear();
+      arriveSpokenRef.current = null;
       if (
         prevSpoke && prevNext && newNext && dManeuver < 120 &&
         maneuverVerb(newNext.maneuver) === maneuverVerb(prevNext.maneuver)
@@ -1558,16 +1541,19 @@ export function useTurnByTurn(
       // wx=1 when the weather sentence is in it, ending=<index into ARRIVAL_ENDINGS>
       // (src/arrivalEndings.ts); ending=-1 when nothing is spoken (muted / late).
       const willSpeak = !options?.mute && !late;
-      const utt = takeArrivalUtterance(options?.destLabel, readArrivalContext(options));
+      // Already said out loud by the early-speech block below? Then reuse that exact utterance
+      // for the receipt and do NOT say it again — the driver heard it a few seconds ago.
+      const spokeEarly = arriveSpokenRef.current;
+      const utt = spokeEarly ?? takeArrivalUtterance(options?.destLabel, readArrivalContext(options));
       try {
         const st = getSettings();
         logEventReliable(
           `arrive-speak engine=warm late=${late ? 1 : 0} optMute=${options?.mute ? 1 : 0} ` +
           `novaMuted=${st.novaMuted ? 1 : 0} novaVoice=${st.novaVoice === false ? 0 : 1} vol=${getAudioVol(st, "volVoice").toFixed(2)} ` +
-          `wx=${willSpeak && utt.wx ? 1 : 0} ending=${willSpeak ? utt.endingIndex : -1} poi=${utt.poi ? 1 : 0}`,
+          `wx=${willSpeak && utt.wx ? 1 : 0} ending=${willSpeak ? utt.endingIndex : -1} poi=${utt.poi ? 1 : 0} early=${spokeEarly ? 1 : 0}`,
         );
       } catch {}
-      if (willSpeak) speakArrival(utt);
+      if (willSpeak && !spokeEarly) speakArrival(utt);
       options?.onArrive?.();
     };
 
@@ -1596,6 +1582,23 @@ export function useTurnByTurn(
     const zone = zoneRef.current;
     const onProperty = !!zone && crowM < zone.radiusM && dDest < ARRIVE_NEAR_ROUTE_M
       && Math.max(0, user.speed ?? 0) < ARRIVE_SILENT_MAX_SPD_MS;
+
+    // START THE ARRIVAL LINE A FEW SECONDS OUT (see ARRIVE_SPEAK_LEAD_S). Speech only — the
+    // arrival itself still fires exactly where it did. `dDest` is remaining ALONG THE ROUTE.
+    if (!arriveSpokenRef.current && !announcedRef.current.has(arriveKey) && !options?.mute) {
+      const speakLeadM = arriveSpeakLeadM(user.speed);
+      if (dDest < ARRIVE_M + speakLeadM) {
+        const early = takeArrivalUtterance(options?.destLabel, readArrivalContext(options));
+        arriveSpokenRef.current = early;
+        try {
+          logEvent(
+            `arrive-speak-early lead=${Math.round(speakLeadM)}m d=${Math.round(dDest)}m ` +
+            `spd=${Math.max(0, user.speed ?? 0).toFixed(1)} ending=${early.endingIndex} poi=${early.poi ? 1 : 0}`,
+          );
+        } catch {}
+        speakArrival(early);
+      }
+    }
 
     if (dDest < ARRIVE_M) {
       fireArriveRef.current(false);          // unchanged on the last step

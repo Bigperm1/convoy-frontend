@@ -37,6 +37,7 @@ import { useMapView2D } from '../mapViewMode';
 import { cornerBlend, cornerNose, newCornerBlendState, newFixClock, noteFix } from '../cornerBlend';
 import { useAppSkin } from '../appSkin';
 import { wxCalloutUri, WX_CALLOUT_KINDS, WX_CALLOUT_TEXT_X, WX_CALLOUT_TEXT_CY, WX_CALLOUT_W, WX_CALLOUT_H } from '../wxCalloutImages';
+import { calloutTextOffsetExpr, CALLOUT_TEXT_PT, CALLOUT_TEXT_SM_PT, CALLOUT_TEXT_LEN_MAX } from '../calloutTextOffset';
 // End-pin weather images on the car surface — iOS CarPlay only until Android Auto is verified
 // (see allMapImages below). JS-only, so an OTA can flip it.
 const WX_PIN_ON_CAR = Platform.OS === 'ios';
@@ -2371,12 +2372,17 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
               // on the feature's own `temp` string length so it never needs a JS-side re-render;
               // same 10.5pt floor as the phone's destWxTextSm for ≥3 chars, 14pt (x uiScale)
               // otherwise. Covers every value the app can show (-40°..120°).
-              textSize: ['*', uiScale, ['case', ['>', ['length', ['get', 'temp']], 3], 10.5, 14]] as any,
+              textSize: ['*', uiScale, ['case', ['>', ['length', ['get', 'temp']], CALLOUT_TEXT_LEN_MAX], CALLOUT_TEXT_SM_PT, CALLOUT_TEXT_PT]] as any,
               textColor: '#FFFFFF',
               textFont: ['DIN Pro Bold', 'Arial Unicode MS Bold'],
               textAnchor: 'left',
-              textTranslate: [(WX_CALLOUT_TEXT_X - WX_CALLOUT_W / 2) * uiScale, -(WX_CALLOUT_H - WX_CALLOUT_TEXT_CY) * uiScale] as any,
-              textTranslateAnchor: 'viewport',
+              // ⛔ EMS, NEVER textTranslate — see src/calloutTextOffset.ts for the measurement.
+              // Mapbox shrinks a symbol with distance (perspective ratio); a paint-space
+              // translate in POINTS does not shrink with it, so the temperature climbed out of
+              // the top of the box on Jeff's head unit (2026-09-07). Measured on the pitched
+              // simulator: translate drifted 16.5 -> 10.0 pt below the box top across +350 m,
+              // ems held 16.5 -> 13.7 pt and tracked the box. uiScale cancels (text-size has it).
+              textOffset: calloutTextOffsetExpr(WX_CALLOUT_TEXT_X - WX_CALLOUT_W / 2, -(WX_CALLOUT_H - WX_CALLOUT_TEXT_CY)) as any,
               textRotationAlignment: 'viewport',
               textPitchAlignment: 'viewport',
               textAllowOverlap: true,

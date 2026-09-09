@@ -41,6 +41,17 @@ RULES = [
         "the layer style per frame is the same watchdog-kill mechanism as the ribbon trim.",
     ),
     (
+        "callout-text-translate-in-points",
+        ["src/**/*.tsx"],
+        r"text(?:Translate|TranslateAnchor)\s*:",
+        "2026-09-08: Mapbox multiplies a symbol's text-size and icon-size by a PERSPECTIVE RATIO on a pitched "
+        "camera, so a billboarded callout SHRINKS with distance. `text-translate` is a paint property in constant "
+        "screen POINTS and is not scaled by it, so the destination-weather temperature climbed out of the top of "
+        "its box on Jeff's head unit (2026-09-07). MEASURED: across +350 m the text drifted 16.5 -> 10.0 pt below "
+        "the box top with translate, and held 16.5 -> 13.7 pt with an ems textOffset. Offset symbol text in EMS "
+        "(src/calloutTextOffset.ts); gate tools/sim-qc/callout_offset_test.mts.",
+    ),
+    (
         "native-build-version-constant",
         ["src/**/*.ts", "src/**/*.tsx", "app/**/*.tsx"],
         r"Constants\.nativeBuildVersion",

@@ -2033,7 +2033,16 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           // ⚠ THE SINGLE SOURCE OF TRUTH FOR THESE TWO NUMBERS IS src/routeTrim.ts — the route
           // trim has to add the SAME lift back to the cut, or the drawn car sits past the line
           // start at deep zoom (Jeff, 2026-09-07 exit ramp). Never edit one without the other.
-          modelTranslation: [0, 0, modelId === ARROW_MODEL_ID ? SELF_ARROW_LIFT_M : SELF_MODEL_LIFT_M],
+          // ⚠ startsWith, NOT === : a PAINTED arrow's id is ARROW_MODEL_ID + "_" + <paint> (see
+          // selfModelId below), so an equality test drew every painted arrow at the CAR's 10 m
+          // instead of the arrow's 16 m. Two consequences, one old and one new. Old: the 16 m
+          // exists precisely so the flat arrow clears the ground-level route ribbon ("the low
+          // arrow doesn't win the depth buffer"), so a painted arrow has been drawn UNDER the
+          // line. New (2026-09-09): the route trim now feeds this same lift back in to place the
+          // cut, and it asks `selfIsArrow`, which IS true for a painted arrow — so the trim
+          // compensated for 16 m against a marker drawn at 10 and the line started far too far
+          // ahead. Found by the pre-ship review fleet. One predicate now answers both.
+          modelTranslation: [0, 0, modelId.startsWith(ARROW_MODEL_ID) ? SELF_ARROW_LIFT_M : SELF_MODEL_LIFT_M],
           modelEmissiveStrength: emissive,
           modelScale: perTick ? SELF_SCALE_EXPR : (scale ?? CAR_MODEL_SCALE_SIZED),
           modelRotation: ["get", "rot"] as any,

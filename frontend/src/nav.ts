@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Platform, AppState } from "react-native";
-import { api, TTS_FETCH_TIMEOUT_MS } from "./api";
+import { api, TTS_FETCH_TIMEOUT_MS, TTS_FETCH_TIMEOUT_LONG_MS } from "./api";
 import { fetchMapboxRoutes, fetchMapboxRouteVia, refreshMapboxRoute, arrivesOnFarSide, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
 import { anchorStepIndex } from "./navAnchor";
@@ -2125,13 +2125,22 @@ const _ttsPending = new Set<string>();
 const TTS_CACHE_MAX = 12;
 function _ttsKey(text: string): string { return `${getNovaVoice()}|${text}`; }
 export function prefetchTts(text: string): void {
-  const t = (text || "").trim();
+  // ⚠ NORMALISE THROUGH toSpeech FIRST, or the cache is written under a key nothing reads.
+  // speak() queues toSpeech(text) and speakOne() looks the clip up by _ttsKey of THAT, so a
+  // prefetch keyed on the raw string misses for every line toSpeech rewrites — "123 Main St"
+  // becomes "123 Main Street", so an ADDRESS destination's arrival line was never once served
+  // from cache and always took a live /tts hop. That is the line Jeff asked to start early "so
+  // if some one is in a rush they hear the whole line", and since 2026-09-09 a slow hop is
+  // capped at 8 s and then silent rather than merely late. Both paths now derive their key from
+  // raw text through the SAME normaliser, so they cannot drift apart again.
+  // (Found by the pre-ship review fleet, 2026-09-09; the mismatch itself predates that change.)
+  const t = toSpeech(text || "").trim();
   if (!t) return;
   if (getSettings().novaVoice === false) return;
   const key = _ttsKey(t);
   if (_ttsCache.has(key) || _ttsPending.has(key)) return;
   _ttsPending.add(key);
-  api.post("/tts", { text: t, voice: getNovaVoice() })
+  api.post("/tts", { text: t, voice: getNovaVoice() }, { timeout: TTS_FETCH_TIMEOUT_LONG_MS })
     .then(({ data }) => {
       if (!data?.audio_b64) return;
       if (_ttsCache.size >= TTS_CACHE_MAX) {

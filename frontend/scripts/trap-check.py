@@ -41,9 +41,19 @@ RULES = [
         "the layer style per frame is the same watchdog-kill mechanism as the ribbon trim.",
     ),
     (
+        "arrow-model-id-equality",
+        ["src/**/*.tsx", "src/**/*.ts"],
+        r"modelId\s*===\s*ARROW_MODEL_ID",
+        "2026-09-09: a PAINTED arrow's model id is ARROW_MODEL_ID + '_' + <paint>, so `===` is FALSE for it. That "
+        "drew every painted arrow at the CAR's 10 m lift instead of the arrow's 16 m — under the route ribbon, "
+        "which is the exact thing the 16 m exists to prevent — and once the route trim started feeding the lift "
+        "back in to place the cut (it asks selfIsArrow, true for a painted arrow) the line began starting far too "
+        "far ahead for those drivers. Use modelId.startsWith(ARROW_MODEL_ID) so one predicate answers both.",
+    ),
+    (
         "tts-fetch-without-timeout",
         ["src/**/*.ts", "src/**/*.tsx"],
-        r"api\.post\(\s*[\"']/tts[\"'](?:(?!timeout)[^;])*?\)\s*;",
+        r"api\.post\(\s*[\"']/tts[\"'](?:(?!timeout)[^;])*?\)\s*[;.]",
         "2026-09-09 (Jeff: \"the annoucments were a little late\"): the /tts fetch sits on the critical path of a "
         "turn callout and the api client's own timeout is 60 s — a page-load budget, not a callout budget. MEASURED "
         "on his 2026-09-08 drive to work: one clip took 32.5 s (tts-done ms=32489 len=36) and the announcement "

@@ -210,6 +210,30 @@ function groundMetresAtScreenPt(Ypt: number, zoom: number, lat: number, pitchDeg
  * With no lift, no viewport height or a flat camera this returns `leadM` UNCHANGED, so every
  * pre-existing caller and the whole pitch-0 path keep their exact numbers.
  */
+// ── THE CORRECTION IS BOUNDED, AND THAT BOUND IS NOT A ROUND NUMBER ─────────────────────────
+// (Codex adversarial review, 2026-09-09, and it was right.) The inverse projection blows up as
+// the target approaches the horizon, which sits d/tan(pitch) above the camera target — only
+// 229 screen pt on a 265 pt head unit at pitch 60. MEASURED across the supported envelope
+// (pitch 60, CHASE_ZOOM_CLAMP_MAX = 20, viewports 201 / 265 / 874 dp, lifts 10 and 16 m), the
+// correction the marker actually needs is:
+//     phone   874 dp : 19-36 m (car), 31-85 m (arrow)   — tame at every reachable zoom
+//     head unit 265 dp: 24-42 m (car), 39-117 m (arrow) up to z18.5, then 490 m at z19 and
+//                       UNREACHABLE (past the horizon) at z19.5
+//     short 201 dp    : unreachable from z19 (car) and z18.5+ (arrow)
+// Past that point the marker is being DRAWN at the vanishing point and no cut can clear it —
+// the lift itself is the broken thing there, not the trim. Letting the inverse run to the
+// TRIM_MAX_M rail would hand buildRibbonFeatures a 500 m cut, and it drops every feature once
+// `totalM - cut < 1`: the whole route line would VANISH rather than merely overlap the car.
+// So the correction is capped at 120 m. WHAT THAT COVERS, stated exactly (and asserted in the
+// gate, not just claimed here): the CAR at every viewport up to maneuver zoom 18.5, and the
+// ARROW at every viewport up to z18. It does NOT cover the arrow skin on the short Android Auto
+// canvas above z18 (480 m needed at z18.5) — there the marker is drawn 124 pt up a 201 pt layout,
+// 71% of the way to the horizon, and the LIFT is the broken thing at that camera, not the trim.
+// That case degrades to a PARTIAL correction, and `clampCutToRoute` below guarantees the line
+// still reaches the screen. Fixing it properly means a zoom-aware lift, which cannot be done in
+// a layer style without the per-tick main-thread write the 0x8BADF00D rule forbids. Open item.
+export const LIFT_LEAD_MAX_M = 120;
+
 export function leadShiftedByLift(
   leadM: number, liftM: number, zoom: number, lat: number, pitchDeg: number, viewportHDp: number,
 ): number {
@@ -217,7 +241,8 @@ export function leadShiftedByLift(
   if (!(shift > 0)) return leadM;
   const target = groundScreenPt(leadM, zoom, lat, pitchDeg, viewportHDp) + shift;
   const m = groundMetresAtScreenPt(target, zoom, lat, pitchDeg, viewportHDp);
-  return Number.isFinite(m) ? Math.max(leadM, Math.min(TRIM_MAX_M, m)) : leadM;
+  if (!Number.isFinite(m) || m <= leadM) return leadM;
+  return Math.min(leadM + LIFT_LEAD_MAX_M, Math.min(TRIM_MAX_M, m));
 }
 
 // Metres ahead of the car's projected point at which the route line should start.
@@ -249,4 +274,19 @@ export function routeTrimFadeM(zoom: number, lat: number, pitchDeg = 0): number 
   const m = pitchCompensatedDp(TRIM_FADE_DP, pitchDeg) * metersPerDp(zoom, lat);
   if (!Number.isFinite(m)) return 20;
   return Math.max(10, Math.min(340, m));
+}
+
+// ── THE TRIM MUST NEVER TRIM THE WHOLE LINE AWAY ────────────────────────────────────────────
+// (Codex adversarial review, 2026-09-09.) `buildRibbonFeatures` drops EVERY feature once
+// `totalM - cut < 1` — correct at the destination, catastrophic if a large cut ever outruns the
+// route while the driver still has turns ahead. The lift correction is capped, but a capped cut
+// is still ~130 m, so on a short remaining route it could have swallowed the line. Clamp the cut
+// to leave a tail, FLOORED at the car's own anchor so arrival still clears the ribbon exactly as
+// before (there the base already sits at the end and this returns it untouched).
+export const RIBBON_MIN_TAIL_M = 40;
+
+export function clampCutToRoute(cutM: number, cutBaseM: number, totalM: number): number {
+  if (!Number.isFinite(cutM) || !Number.isFinite(totalM) || !(totalM > 0)) return cutM;
+  const base = Number.isFinite(cutBaseM) ? cutBaseM : 0;
+  return Math.min(cutM, Math.max(base, totalM - RIBBON_MIN_TAIL_M));
 }

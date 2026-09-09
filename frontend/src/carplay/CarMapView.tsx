@@ -73,7 +73,7 @@ import {
   ROAD_SNAP_CROSS_DEG, noseBearing, CAR_LEN_UNITS, ARROW_LEN_UNITS, PeerScanModels
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
-import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M } from '../routeTrim';
+import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, leadShiftedByLift, selfLiftScreenPt, clampCutToRoute, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M } from '../routeTrim';
 import { buildRibbonPartition, buildRibbonFeatures, anchorCutM, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat, type CutAnchorHint } from '../routeRibbon';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
@@ -1743,7 +1743,14 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // measured from the DRAWN car. See the long note in src/routeTrim.ts; gate
   // tools/sim-qc/self_lift_lead_test.mts. mapH is this map's layout height.
   const selfLiftM = isArrow ? SELF_ARROW_LIFT_M : SELF_MODEL_LIFT_M;
-  const trimLeadM = routeTrimLeadM(trimZoom, lat, trimPitch, selfLiftM, mapH) * mapScale;
+  // ⚠ ORDER MATTERS ON ANDROID AUTO (Codex adversarial review, 2026-09-09). `* mapScale` is the
+  // AA correction for a map laid out at surfaceW/mapScale and transformed down — it belongs to
+  // the DESIGN lead only. The lift correction cancels a shift the marker makes in this map's OWN
+  // layout points, so scaling it too would under-apply it by the same factor (at mapScale 0.53
+  // barely half the shift would be cancelled and the overlap would survive on AA). Scale first,
+  // then correct at full strength. mapScale is 1 on CarPlay, so nothing changes there.
+  const designLeadM = routeTrimLeadM(trimZoom, lat, trimPitch) * mapScale;
+  const trimLeadM = leadShiftedByLift(designLeadM, selfLiftM, trimZoom, lat, trimPitch, mapH);
   // TRIM RIDES THE MARKER'S EASE — see the matching block in ConvoyMapbox.tsx for the
   // full reasoning. The trim was anchored to the NEWEST fix while the marker eases
   // toward it, so the gap sawtoothed by one whole step per fix (~15dp of 76.6 at
@@ -1784,7 +1791,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     : null;
   if (_carAlongAnchor) cutAnchorHintRef.current = _carAlongAnchor.hint;
   const _carCutBaseM = (routeProj && ribbonPartition) ? (_carAlongAnchor ? _carAlongAnchor.m : fracDrawn * ribbonPartition.totalM) : null;
-  const ribbonCutM = _carCutBaseM != null ? _carCutBaseM + trimLeadM : null;
+  // Clamped so a long cut can never trim the entire ribbon away while turns remain (see
+  // clampCutToRoute); at the destination the base is already at the end and this is a no-op.
+  const ribbonCutM = _carCutBaseM != null && ribbonPartition
+    ? clampCutToRoute(_carCutBaseM + trimLeadM, _carCutBaseM, ribbonPartition.totalM)
+    : (_carCutBaseM != null ? _carCutBaseM + trimLeadM : null);
   const ribbonCutQ = quantiseM(ribbonCutM, ribbonStepM(trimZoom, lat, mapScale));
   const ribbonFadeQ = Math.round((routeTrimFadeM(trimZoom, lat, trimPitch) * mapScale) / 2) * 2;
   // Snap the car to the line + lock its heading to the route bearing when on-route (≤60 m),

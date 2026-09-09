@@ -44,7 +44,7 @@ import { anchorCutM, type CutAnchorHint } from "./routeRibbon";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert, Animated } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
-import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M, PEER_MODEL_LIFT_M } from "./routeTrim";
+import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, clampCutToRoute, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M, PEER_MODEL_LIFT_M } from "./routeTrim";
 import { buildRibbonPartition, buildRibbonFeatures, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
@@ -3525,7 +3525,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     : null;
   if (_alongAnchor) cutAnchorHintRef.current = _alongAnchor.hint;
   const _cutBaseM = (routeProj && ribbonPartition) ? (_alongAnchor ? _alongAnchor.m : _fracDrawn * ribbonPartition.totalM) : null;
-  const ribbonCutM = _cutBaseM != null ? _cutBaseM + _trimLeadM : null;
+  // Clamped so a long cut can never trim the entire ribbon away while turns remain (see
+  // clampCutToRoute); at the destination the base is already at the end and this is a no-op.
+  const ribbonCutM = _cutBaseM != null && ribbonPartition
+    ? clampCutToRoute(_cutBaseM + _trimLeadM, _cutBaseM, ribbonPartition.totalM)
+    : (_cutBaseM != null ? _cutBaseM + _trimLeadM : null);
   const ribbonCutQ = quantiseM(ribbonCutM, ribbonStepM(_trimZoom, selfCar?.lat ?? 0));
   const ribbonFadeQ = Math.round(routeTrimFadeM(_trimZoom, selfCar?.lat ?? 0, _trimPitch) / 2) * 2;
   // What convoy-routes actually draws: the base routes (alternates / the reroute offer,

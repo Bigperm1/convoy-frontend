@@ -13,7 +13,10 @@
 // camera — zoom 16.5, pitch 57, 402x874 pt — one with the 10 m lift and one with it zeroed, with
 // ground-anchored control markers that did not change by a single pixel. The drawn car moved
 // 17.2 pt up-screen; the model below predicts 15.3.
-import { routeTrimLeadM, leadShiftedByLift, selfLiftScreenPt, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M } from "../../src/routeTrim.ts";
+import {
+  routeTrimLeadM, leadShiftedByLift, selfLiftScreenPt, clampCutToRoute,
+  LIFT_LEAD_MAX_M, RIBBON_MIN_TAIL_M, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M,
+} from "../../src/routeTrim.ts";
 
 const D_OF = (H: number) => 1.5 * H;                       // Mapbox cameraToCenterDistance, fov 36.87
 const mpd = (z: number, lat: number) => (78271.516964 * Math.cos((lat * Math.PI) / 180)) / 2 ** z;
@@ -111,6 +114,80 @@ const brokenAfter = noseGap(FRAMES[1], FRAMES[1].loggedLead + 0);
 ok("G1 with the compensation removed, the ramp check FAILS", !(brokenAfter >= 8), `${brokenAfter.toFixed(1)} pt`);
 ok("G2 the ADDITIVE version (ground-equivalent, not screen-space) fails for the arrow",
   !(arrowNoseGap(18.26, 56, 12 + 42.4) >= 15), "the version the gate rejected");
+
+
+// ── H. ANDROID AUTO COMPOSITION — the order of mapScale and the lift correction ─────────────
+// Codex's adversarial review, 2026-09-09: `routeTrimLeadM(..., lift, mapH) * mapScale` scales the
+// ALTITUDE correction too, while modelTranslation stays at a full 10/16 m — so on AA barely half
+// the shift is cancelled and the overlap survives. The shipped order scales the DESIGN lead only.
+// AA canvas measured at 213x107 dp: mapScale = min(1, max(0.4, 213/400)) = 0.5325, layout height
+// 107/0.5325 = 201 dp (CarMapView lays the map out at surfaceW/mapScale and transforms it down).
+const AA_SCALE = 0.5325, AA_H = 201, AA_Z = 17.5, AA_P = 57;
+const aaDesign = routeTrimLeadM(AA_Z, LAT, AA_P) * AA_SCALE;
+const aaRight = leadShiftedByLift(aaDesign, SELF_MODEL_LIFT_M, AA_Z, LAT, AA_P, AA_H);          // shipped
+const aaWrong = routeTrimLeadM(AA_Z, LAT, AA_P, SELF_MODEL_LIFT_M, AA_H) * AA_SCALE;            // the bug
+const aaShift = selfLiftScreenPt(SELF_MODEL_LIFT_M, AA_Z, LAT, AA_P, AA_H);
+const aaRise = (m: number) => groundPt(m, AA_Z, LAT, AA_P, AA_H) - groundPt(aaDesign, AA_Z, LAT, AA_P, AA_H);
+console.log(`  -- AA: car drawn ${aaShift.toFixed(1)} pt up; shipped order raises the cut ${aaRise(aaRight).toFixed(1)} pt, scaled order ${aaRise(aaWrong).toFixed(1)} pt`);
+ok("H1 shipped order cancels the AA shift in full", near(aaRise(aaRight), aaShift, 0.05), `${aaRise(aaRight).toFixed(2)} vs ${aaShift.toFixed(2)} pt`);
+ok("H2 the scaled-correction order UNDER-compensates (the defect Codex found)", aaRise(aaWrong) < aaShift * 0.75, `${aaRise(aaWrong).toFixed(1)} pt of ${aaShift.toFixed(1)}`);
+ok("H3 CarPlay (mapScale 1) is identical either way",
+  near(leadShiftedByLift(routeTrimLeadM(18.26, LAT, 56) * 1, SELF_MODEL_LIFT_M, 18.26, LAT, 56, 265),
+       routeTrimLeadM(18.26, LAT, 56, SELF_MODEL_LIFT_M, 265), 1e-9));
+
+// ── I. THE CORRECTION IS BOUNDED — it may never reach the rail and erase the line ───────────
+// Raw (uncapped) inverse, reproduced here so the cap has something to be measured against.
+const rawInverse = (leadM: number, liftM: number, z: number, p: number, H: number) => {
+  const d = D_OF(H), pr = (p * Math.PI) / 180;
+  const Y = groundPt(leadM, z, LAT, p, H) + liftPt(liftM, z, LAT, p, H);
+  const den = d * Math.cos(pr) - Y * Math.sin(pr);
+  return den > 0 ? ((Y * d) / den) * mpd(z, LAT) : Infinity;
+};
+let capViolations = 0, envelopeChecked = 0;
+for (const H of [201, 265, 400, 874]) for (const lift of [SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M])
+  for (const p of [0, 30, 45, 57, 60]) for (const z of [10.5, 14, 16, 18, 18.5, 19, 19.5, 20]) {
+    const base = routeTrimLeadM(z, LAT, p);
+    const got = leadShiftedByLift(base, lift, z, LAT, p, H);
+    envelopeChecked++;
+    if (!(Number.isFinite(got) && got >= base && got <= base + LIFT_LEAD_MAX_M + 1e-6)) capViolations++;
+  }
+ok(`I1 bounded across the whole supported envelope (${envelopeChecked} cameras)`, capViolations === 0, `${capViolations} violations`);
+const hardBase = routeTrimLeadM(19, LAT, 60);
+ok("I2 the uncapped inverse really does blow up at z19/pitch60/265dp/arrow",
+  rawInverse(hardBase, SELF_ARROW_LIFT_M, 19, 60, 265) > 400, `${rawInverse(hardBase, SELF_ARROW_LIFT_M, 19, 60, 265).toFixed(0)} m raw`);
+ok("I3 ... and the shipped cap holds it down",
+  leadShiftedByLift(hardBase, SELF_ARROW_LIFT_M, 19, LAT, 60, 265) <= hardBase + LIFT_LEAD_MAX_M,
+  `${leadShiftedByLift(hardBase, SELF_ARROW_LIFT_M, 19, LAT, 60, 265).toFixed(0)} m`);
+ok("I4 past the horizon degrades, never NaN or 500",
+  Number.isFinite(leadShiftedByLift(hardBase, SELF_ARROW_LIFT_M, 19.5, LAT, 60, 201)) &&
+  leadShiftedByLift(hardBase, SELF_ARROW_LIFT_M, 19.5, LAT, 60, 201) < 500);
+// What the cap DOES and does NOT cover — stated as assertions rather than as a claim in prose.
+const needed = (z: number, lift: number, H: number) => {
+  const b = routeTrimLeadM(z, LAT, 60);
+  return rawInverse(b, lift, z, 60, H) - b;
+};
+ok("I5 the cap covers the CAR at every viewport up to maneuver zoom 18.5",
+  [201, 265, 874].every((H) => needed(18.5, SELF_MODEL_LIFT_M, H) < LIFT_LEAD_MAX_M),
+  `${[201, 265, 874].map((H) => needed(18.5, SELF_MODEL_LIFT_M, H).toFixed(0)).join(" / ")} m needed`);
+ok("I6 the cap covers the ARROW up to z18 at every viewport",
+  [201, 265, 874].every((H) => needed(18, SELF_ARROW_LIFT_M, H) < LIFT_LEAD_MAX_M),
+  `${[201, 265, 874].map((H) => needed(18, SELF_ARROW_LIFT_M, H).toFixed(0)).join(" / ")} m needed`);
+// KNOWN, BOUNDED LIMITATION, asserted so it cannot silently change: the arrow skin on the short
+// Android Auto canvas above z18 needs more than the cap allows, so its compensation is PARTIAL.
+// The marker there is drawn ~124 pt up a 201 pt layout, 71% of the way to the horizon — the lift
+// itself is the broken thing at that camera and no cut can clear it. Bounded, never catastrophic.
+ok("I7 arrow on the AA canvas above z18 is a KNOWN partial case",
+  needed(18.5, SELF_ARROW_LIFT_M, 201) > LIFT_LEAD_MAX_M,
+  `${needed(18.5, SELF_ARROW_LIFT_M, 201).toFixed(0)} m needed vs a ${LIFT_LEAD_MAX_M} m cap — partial, and clampCutToRoute keeps the line on screen`);
+
+// ── J. THE CUT MAY NEVER SWALLOW THE WHOLE RIBBON ───────────────────────────────────────────
+// buildRibbonFeatures drops every feature once totalM - cut < 1. That is right at the
+// destination and catastrophic anywhere else.
+ok("J1 a long cut leaves a visible tail", clampCutToRoute(100 + 600, 100, 200) === 200 - RIBBON_MIN_TAIL_M, `${clampCutToRoute(700, 100, 200)} m`);
+ok("J2 the ribbon survives it", 200 - clampCutToRoute(700, 100, 200) >= RIBBON_MIN_TAIL_M);
+ok("J3 arrival still clears the line (base already at the end)", clampCutToRoute(199 + 600, 199, 200) === 199);
+ok("J4 an ordinary cut is untouched", clampCutToRoute(140, 100, 5000) === 140);
+ok("J5 NEGATIVE CONTROL: unclamped, that cut would have erased the ribbon", 200 - (100 + 600) < 1);
 
 console.log(fails === 0 ? "\nPASS self_lift_lead" : `\nFAIL self_lift_lead (${fails})`);
 if (fails) process.exit(1);

@@ -1238,7 +1238,17 @@ export function useTurnByTurn(
         pendingStartCueRef.current = false;
         if (!announcedRef.current.has(prepKey)) {
           if (isFinal) {
-            speak(`In ${fmtDistanceM(dManeuver)}, you will arrive at your destination.`);
+            // ⛔ DO NOT SPEAK A "you will arrive at your destination" HEADS-UP (Jeff, 2026-09-09:
+            // "you have an 'arrived at destination' before the weather/destination/end greeting
+            // when arriving at the destination. please remove that."). The arrival line itself
+            // opens with "You have arrived at <place>.", so this was the same news twice, ~20 s
+            // apart. VERIFIED from his 09-08 09:28 drive to work: `tts-say len=45 -> tts-play
+            // len=50` (this exact sentence after toSpeech's m->meters expansion) finished, and
+            // the composed arrival line `len=82` played immediately behind it. It is also the
+            // ONLY spoken line containing the word "your", which is what he heard truncated
+            // ("cut off the words after your") — the fragment this file already recorded once in
+            // its 2026-08-05 history note. The PREFETCH stays: it is what makes the arrival line
+            // play from cache instead of waiting on a /tts hop (the 2026-09-03 fix).
             prefetchArrivalLine(options?.destLabel, readArrivalContext(options));
           } else {
             const ns = steps[stepIdx + 1];
@@ -1257,10 +1267,13 @@ export function useTurnByTurn(
         }
       }
       if (isFinal) {
-        // Final leg → arrival heads-up only; the actual "You have arrived" +
-        // onArrive fire from the dManeuver < 20 block below.
+        // Final leg → PREFETCH ONLY, no speech. The spoken heads-up was removed 2026-09-09 (see
+        // the matching note in the start-cue branch above): the arrival line already opens with
+        // "You have arrived at <place>.", so the driver heard the same thing twice. Reaching
+        // prepareM is still what CHOOSES and synthesizes the arrival line, so it plays instantly
+        // from cache — that part must stay or the 2026-09-03 "Scout drops sentences on arrival"
+        // defect comes straight back.
         if (dManeuver <= prepareM && !announcedRef.current.has(prepKey)) {
-          speak(`In ${fmtDistanceM(dManeuver)}, you will arrive at your destination.`);
           prefetchArrivalLine(options?.destLabel, readArrivalContext(options));
           announcedRef.current.add(prepKey);
         }

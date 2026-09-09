@@ -41,6 +41,19 @@ RULES = [
         "the layer style per frame is the same watchdog-kill mechanism as the ribbon trim.",
     ),
     (
+        "duplicate-arrival-headsup",
+        ["src/**/*.ts", "src/**/*.tsx"],
+        r"speak\([^)]*you will arrive at your destination",
+        "2026-09-09 (Jeff): \"you have an 'arrived at destination' before the weather/destination/end greeting when "
+        "arriving at the destination. please remove that.\" The composed arrival line already opens with \"You have "
+        "arrived at <place>.\", so a spoken final-leg heads-up is the same news twice ~20 s apart — VERIFIED on his "
+        "2026-09-08 09:28 drive: tts-say len=45 -> tts-play len=50 (this sentence) finished and the arrival line "
+        "len=82 played straight behind it. It is also the only spoken line containing \"your\", which is the "
+        "fragment he heard truncated. Reaching prepareM must still call prefetchArrivalLine() — that is what keeps "
+        "the arrival line playing from cache (the 2026-09-03 'Scout drops sentences on arrival' fix) — but it must "
+        "not speak.",
+    ),
+    (
         "self-model-lift-hardcoded",
         ["src/**/*.tsx", "src/**/*.ts"],
         r"modelTranslation:\s*\[[^\]]*?,\s*\d+(?:\.\d+)?\s*\]",

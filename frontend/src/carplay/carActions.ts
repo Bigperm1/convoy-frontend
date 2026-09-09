@@ -548,8 +548,19 @@ function aaPushRows(rows: AaRow[]): void {
 // screen and drop the driver on the session placeholder, which is the very
 // failure being fixed here.
 let _aaSearchOnStack = false;
+// ── THE ONE THING THE TELEMETRY COULD NOT SEE (2026-09-09) ──────────────────────────────
+// Say Phin's head unit shows CarPlaySession's "RNCarPlay loading..." root placeholder for a
+// whole drive, and every receipt we HAVE says the Android Auto surface is fine: through his
+// 09-09 07:01-07:17 drive the car surface logged 40 cam-probe, 32 ribbon-trim, 30 draw-cmp,
+// 15 corner-trace and 16 unbroken 60 s heat-probe windows. The React tree renders happily —
+// into a screen nobody can see. What is broken is WHICH SCREEN IS ON TOP of androidx's
+// ScreenManager, and nothing in this app ever recorded a push or a pop. So an investigation
+// can only guess between "we popped our own map off" (the marker trap documented above) and
+// "the system took it". These two rows end that guess: they are rare (a search opens or
+// closes), bounded by construction, and they say what WE did.
 function aaPop(): void {
   if (!_aaSearchOnStack) return;
+  try { logEvent('aa-stack op=pop had=1'); } catch {}
   _aaSearchOnStack = false;
   try { getCarLib()?.CarPlay?.popTemplate?.(true); } catch {}
 }
@@ -647,6 +658,7 @@ function armAaSearchBridge(lib: any): void {
       // The whole screen stack dies with the session, so our screen is provably
       // gone — clearing this stops the next session's first dismiss from popping
       // the fresh nav screen.
+      try { logEvent('aa-stack op=reset why=disconnect'); } catch {}
       _aaSearchOnStack = false;
       _aaSearchSeq += 1;
       _aaLastRowsKey = '';
@@ -688,6 +700,7 @@ function openAaSearch(): void {
         if (!_searchPushed) return;       // dismissed between create and push
         try {
           bridge.pushTemplate(AA_SEARCH_ID, true);
+          try { logEvent('aa-stack op=push id=search'); } catch {}
           _aaSearchOnStack = true;          // exactly one screen; aaPop() pops exactly it
           try { logEvent('aa-search-open'); } catch {}
         } catch {

@@ -41,6 +41,16 @@ RULES = [
         "the layer style per frame is the same watchdog-kill mechanism as the ribbon trim.",
     ),
     (
+        "tts-fetch-without-timeout",
+        ["src/**/*.ts", "src/**/*.tsx"],
+        r"api\.post\(\s*[\"']/tts[\"'](?:(?!timeout)[^;])*?\)\s*;",
+        "2026-09-09 (Jeff: \"the annoucments were a little late\"): the /tts fetch sits on the critical path of a "
+        "turn callout and the api client's own timeout is 60 s — a page-load budget, not a callout budget. MEASURED "
+        "on his 2026-09-08 drive to work: one clip took 32.5 s (tts-done ms=32489 len=36) and the announcement "
+        "queued behind it played EIGHTEEN SECONDS late. Always pass an explicit { timeout: TTS_FETCH_TIMEOUT_MS }; "
+        "on timeout stay silent (the banner still shows the turn) rather than let one slow clip hold the queue.",
+    ),
+    (
         "duplicate-arrival-headsup",
         ["src/**/*.ts", "src/**/*.tsx"],
         r"speak\([^)]*you will arrive at your destination",

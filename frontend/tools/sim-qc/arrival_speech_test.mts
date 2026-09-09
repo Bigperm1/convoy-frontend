@@ -44,15 +44,17 @@ for (const [key, html] of [
 ok("B8 unknown key with turn text still speaks", isSpokenManeuver("", "Turn right onto Braid St"));
 ok("B9 filler stays silent", !isSpokenManeuver("continue|straight", "Continue on Main St"));
 
-// ── B10. A PRE-EXISTING GAP THIS GATE FOUND, recorded so it is not mistaken for the 09-09
-// arrival change and cannot change silently. isSpokenManeuver returns false for ANY maneuver
-// whose modifier is "straight", which is correct for turn|straight and merge|straight filler
-// but ALSO silences a roundabout you drive straight through — Mapbox emits roundabout|straight
-// for that, and roundaboutExitCue ("Take the second exit") never gets the chance to speak.
-// NOT changed here: it is a nav-behaviour change nobody reported and bundling is Jeff's call.
-ok("B10 KNOWN GAP: roundabout|straight is silent (pre-existing, not the 09-09 change)",
-  !isSpokenManeuver("roundabout|straight", "Take the 2nd exit onto Maplewood Dr"),
-  "flagged for Jeff, deliberately not fixed here");
+// ── B10. ROUNDABOUTS SPEAK WHATEVER THE MODIFIER (fixed 2026-09-09) ────────────────────────
+// This gate FOUND the gap: isSpokenManeuver silenced any maneuver whose modifier is "straight",
+// which is right for turn|straight and merge|straight filler but also silenced a roundabout you
+// drive straight THROUGH — Mapbox emits roundabout|straight for exactly that — so
+// roundaboutExitCue ("Take the second exit") never got to speak. Pre-existing since 5ce2fb7.
+ok("B10 roundabout|straight speaks", isSpokenManeuver("roundabout|straight", "Take the 2nd exit onto Maplewood Dr"));
+ok("B11 rotary|straight speaks", isSpokenManeuver("rotary|straight", "Take the 2nd exit"));
+// NEGATIVE CONTROLS — the exemption must be roundabouts ONLY, not a hole in the filler rule.
+ok("B12 turn|straight stays silent", !isSpokenManeuver("turn|straight", "Continue onto Main St"));
+ok("B13 merge|straight stays silent", !isSpokenManeuver("merge|straight", "Continue onto Hwy 1"));
+ok("B14 continue|straight stays silent", !isSpokenManeuver("continue|straight", "Continue on Main St"));
 
 // ── C. THE EARLY LEAD ──────────────────────────────────────────────────────────────────────
 ok("C1 stopped -> no lead", arriveSpeakLeadM(0) === 0);

@@ -13,7 +13,7 @@
 // of the nav speech queue.
 
 import { Audio } from "expo-av";
-import { api } from "./api";
+import { api, TTS_FETCH_TIMEOUT_LONG_MS } from "./api";
 import { setPlaybackAudioMode, setIdleAudioMode } from "./audioMode";
 import { getSettings, getAudioVol } from "./settings";
 
@@ -59,7 +59,7 @@ export async function previewNovaVoice(voiceId: string): Promise<void> {
   try {
     let clip = _cache[voiceId];
     if (!clip) {
-      const { data } = await api.post("/tts", { text: sampleTextFor(voiceId), voice: voiceId });
+      const { data } = await api.post("/tts", { text: sampleTextFor(voiceId), voice: voiceId }, { timeout: TTS_FETCH_TIMEOUT_LONG_MS });
       const b64 = data?.audio_b64;
       if (!b64) { void setIdleAudioMode(); return; } // backend unavailable / no quota
       clip = { b64, mime: data?.mime || "audio/mp3" };

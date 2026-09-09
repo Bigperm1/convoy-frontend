@@ -142,9 +142,26 @@ const NOSE_COURSE_STALE_MS = 3000;   // 3× the ~1 Hz fix cadence. A course olde
                                      // evidence about where the car points NOW ⇒ no correction, and
                                      // any live one decays out. Covers a paused feed, a screen-off
                                      // handoff, and a frozen `heading` field.
-const NOSE_FIX_MIN_SPEED_MS = 4.2;   // 15 km/h. Below this the raw course spins — that spin is the
-                                     // whole reason the nose is locked to the line at all. The
-                                     // defect ran at 23–44 km/h, so nothing here needs low speed.
+const NOSE_FIX_MIN_SPEED_MS = 4.2;   // 15 km/h. Below this the raw course gets noisy — that noise is
+                                     // part of why the nose is locked to the line at all. The
+                                     // 2026-09-04 defect ran at 23–44 km/h, so it needed no low speed.
+// ── ROUNDABOUTS LIVE BELOW THAT FLOOR (Jeff, 2026-09-09: "the car was really drifting around
+// especially in the 2 round abouts", drive to work 09-08 09:03) ────────────────────────────
+// MEASURED from that drive: through the roundabout he ran 9–20 km/h, i.e. 2.5–5.6 m/s, so the
+// 4.2 m/s floor switched this clamp OFF for most of it. At 09:05:27 the marker was snapped to
+// the route line and drawn pointing 182° while the car was actually travelling 124° — 58° out,
+// with the receipt reading `fix=0.0 nfx=0`: no correction even attempted, because of the floor.
+// That is the drift. The route line cuts across a roundabout, so a snapped nose points along the
+// chord while the driver is going round the circle.
+// The floor still has a real job near a standstill, where course is meaningless — so instead of
+// moving it, a SLOWER band is admitted with MORE evidence required. Everything else (the 20°
+// cone, distinct fixes, the 1 s span, the eased correction) is untouched.
+const NOSE_FIX_MIN_SPEED_SLOW_MS = 2.2;  // 8 km/h. Below the slowest roundabout sample on that
+                                         // drive (9 km/h = 2.5 m/s) with margin, and well above
+                                         // walking pace where GPS course is noise.
+const NOSE_FIX_MIN_SAMPLES_SLOW = 3;     // 2 -> 3 distinct over-cone fixes in the slow band, so a
+                                         // wandering low-speed course needs a full extra second of
+                                         // agreement before it may move the nose at all.
 const NOSE_RISE_TAU_MS = 400;        // 63% of a 25° correction in 400 ms ≈ 40°/s — inside the
                                      // 20–40°/s a real corner already turns at, so it reads as steering.
 const NOSE_FALL_TAU_MS = 500;
@@ -178,7 +195,7 @@ export function cornerNose(
   const fixAge = typeof courseAt === "number" && Number.isFinite(courseAt) ? now - courseAt : Infinity;
   if (snapped && fixAge >= 0 && fixAge <= NOSE_COURSE_STALE_MS
       && typeof courseDeg === "number" && Number.isFinite(courseDeg) && courseDeg >= 0
-      && speedMs >= NOSE_FIX_MIN_SPEED_MS) {
+      && speedMs >= NOSE_FIX_MIN_SPEED_SLOW_MS) {
     const err = angDelta(courseDeg, nose);              // signed nose-minus-course, −180..180
     const over = Math.abs(err) - NOSE_MAX_OFF_COURSE_DEG;
     if (over > 0) {
@@ -188,7 +205,9 @@ export function cornerNose(
         st.offFixAt = at;
         st.offN += 1;
       }
-      if (st.offN >= NOSE_FIX_MIN_SAMPLES && st.offFixAt - st.offAt >= NOSE_FIX_SPAN_MS) {
+      // Slow band (roundabouts, tight turns) demands an extra distinct fix before it may act.
+      const minSamples = speedMs >= NOSE_FIX_MIN_SPEED_MS ? NOSE_FIX_MIN_SAMPLES : NOSE_FIX_MIN_SAMPLES_SLOW;
+      if (st.offN >= minSamples && st.offFixAt - st.offAt >= NOSE_FIX_SPAN_MS) {
         correction = -Math.sign(err) * over;
       }
     } else { st.offAt = 0; st.offFixAt = 0; st.offN = 0; }

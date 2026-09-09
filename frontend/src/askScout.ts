@@ -15,7 +15,7 @@
 
 import { Platform, AppState } from "react-native";
 import { Audio } from "expo-av";
-import { api } from "./api";
+import { api, TTS_FETCH_TIMEOUT_LONG_MS } from "./api";
 import { getNovaVoice, getSettings, getAudioVol } from "./settings";
 import { isAudioBusy } from "./nav";
 import { callSilence } from "./callState";
@@ -133,7 +133,7 @@ async function speakAndWait(text: string): Promise<void> {
   if (callSilence()) return; // muted during a phone call (Settings → Mute During Calls)
   try {
     await setPlaybackAudioMode();
-    const { data } = await api.post("/tts", { text, voice: getNovaVoice() });
+    const { data } = await api.post("/tts", { text, voice: getNovaVoice() }, { timeout: TTS_FETCH_TIMEOUT_LONG_MS });
     const b64 = data?.audio_b64;
     if (!b64) return;
     // volume — expo-av defaults to ~0.5, which made Scout sound faint next to the

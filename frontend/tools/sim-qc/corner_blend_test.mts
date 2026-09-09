@@ -88,10 +88,33 @@ for (const [nose, crs] of clean) {
   if (out.some(r => r.drawn !== nose)) cleanBad++;
 }
 check(cleanBad === 0, `G ${cleanBad}/${clean.length} clean corner samples were altered by the clamp (want 0 — it must be an identity there)`);
-// H: 45° off course but only 10 km/h — the raw course spins at low speed, which is the whole
-//    reason the nose is locked to the line. Must be left alone.
-const { out: outH } = replayNose([135, 135, 135, 135, 135], () => 90, 2.8);
-check(outH.every(r => r.drawn === 135), `H clamp fired below 15 km/h — the low-speed course spin is exactly what it must not chase`);
+// ── H: THE ROUNDABOUT SPEED BAND (rewritten 2026-09-09) ─────────────────────────────────────
+// H USED to assert that 45° off at 10 km/h was left alone, because the clamp floor was 15 km/h.
+// Jeff's 2026-09-08 09:03 drive to work moved that contract: through the two roundabouts he ran
+// 9-20 km/h and at 09:05:27 the marker was drawn 58° off his actual course with `fix=0.0 nfx=0`
+// — the clamp never even tried, because of that floor. A route line cuts the chord across a
+// roundabout, so a snapped nose points the wrong way exactly where the driver notices.
+// The floor still protects the near-standstill case; the slow band is admitted with MORE
+// evidence required (NOSE_FIX_MIN_SAMPLES_SLOW = 3 distinct over-cone fixes, not 2).
+// H1 — the roundabout case itself: 45° off at 10 km/h, five real fixes, MUST now be pulled back.
+const { out: outH1 } = replayNose([135, 135, 135, 135, 135], () => 90, 2.8);
+const endH1 = outH1[outH1.length - 1];
+check(Math.abs(wrap(endH1.drawn - 90)) <= 20.5,
+  `H1 roundabout speed (10 km/h) left the nose ${Math.abs(wrap(endH1.drawn - 90)).toFixed(1)}° off course (want ≤20) — this is the 09-08 drift`);
+// H2 — NEGATIVE CONTROL, near standstill: 5 km/h is below NOSE_FIX_MIN_SPEED_SLOW_MS, where a
+//      GPS course is noise. Must still be an exact identity.
+const { out: outH2 } = replayNose([135, 135, 135, 135, 135], () => 90, 1.4);
+check(outH2.every((r) => r.drawn === 135), `H2 clamp fired at 5 km/h — below the slow floor the course is noise and must never move the nose`);
+// H3 — NEGATIVE CONTROL, not enough evidence: TWO distinct over-cone fixes at 10 km/h. Enough in
+//      the fast band, deliberately NOT enough in the slow band.
+const { out: outH3, st: stH3 } = replayNose([135, 135], () => 90, 2.8);
+check(outH3.every((r) => r.drawn === 135), `H3 two fixes moved the nose in the slow band (offN=${stH3.offN}) — the slow band requires three`);
+// H4 — NEGATIVE CONTROL, one repeated fix at low speed: the frames-not-fixes guard must hold
+//      here too, or a single wandering sample re-rendered for a second could steer the marker.
+const stH4 = newCornerBlendState();
+let tH4 = 0; const fixAtH4 = 16.7; let alteredH4 = 0;
+for (let f = 0; f < 180; f++) { tH4 += 16.7; if (cornerNose(stH4, 135, 90, fixAtH4, 2.8, true, tH4) !== 135) alteredH4++; }
+check(alteredH4 === 0 && stH4.offN === 1, `H4 one repeated fix at 10 km/h moved the nose on ${alteredH4}/180 frames (offN=${stH4.offN}, want 1)`);
 
 // ── I: THE HOLD MUST COUNT FIXES, NOT FRAMES (2026-09-04 Codex adversarial pass, [high]) ────
 // I2: ONE bad course fix, 45° off, re-rendered for 3 s at 60 fps with the SAME fix timestamp —
@@ -125,7 +148,7 @@ let tI4 = outI3[outI3.length - 1].t, frozenAt = outI3[outI3.length - 1].fixAt, l
 for (let f = 0; f < 360; f++) { tI4 += 16.7; lastDrawnI4 = cornerNose(stI4, 114, 90, frozenAt, 6.4, true, tI4); }  // 6 s, no new fix
 check(lastDrawnI4 === 114 && stI4.hdgFix === 0, `I4 a frozen course kept the nose corrected (drawn ${lastDrawnI4.toFixed(1)} vs nose 114, hdgFix ${stI4.hdgFix.toFixed(2)}) — stale course must decay`);
 
-console.log(`E 05:52:56 nose end=${endE.drawn.toFixed(1)}° vs course ${endE.crs} (off ${Math.abs(wrap(endE.drawn - endE.crs)).toFixed(1)}°, want ≤20) peakFix=${peakFixE.toFixed(1)}° | F 06:39:43 position blend max=${maxF.toFixed(3)} (want 0) | G clean samples altered=${cleanBad}/${clean.length} (want 0) | H low-speed altered=${outH.some(r => r.drawn !== 135) ? 'YES' : 'no'} (want no)`);
+console.log(`E 05:52:56 nose end=${endE.drawn.toFixed(1)}° vs course ${endE.crs} (off ${Math.abs(wrap(endE.drawn - endE.crs)).toFixed(1)}°, want ≤20) peakFix=${peakFixE.toFixed(1)}° | F 06:39:43 position blend max=${maxF.toFixed(3)} (want 0) | G clean samples altered=${cleanBad}/${clean.length} (want 0) | H1 roundabout 10km/h off=${Math.abs(wrap(endH1.drawn - 90)).toFixed(1)}° (want ≤20) H2 5km/h altered=${outH2.some(r => r.drawn !== 135) ? 'YES' : 'no'} (want no) H3 two-fix altered=${outH3.some(r => r.drawn !== 135) ? 'YES' : 'no'} (want no)`);
 console.log(`I2 one repeated fix: frames altered=${alteredI2}/180 (want 0) offN=${stI2.offN} (want 1) | I3 1 Hz replay end off course=${Math.abs(wrap(endI3.drawn - endI3.crs)).toFixed(1)}° peakFix=${peakFixI3.toFixed(1)}° offN=${stI3.offN} (want ≥2) | I4 frozen course drawn=${lastDrawnI4.toFixed(1)} hdgFix=${stI4.hdgFix.toFixed(2)} (want 114 / 0)`);
 if (fails.length) { console.error(`\nFAIL (${fails.length}):\n  ` + fails.join("\n  ")); process.exit(1); }
-console.log("PASS — all 11 scenarios");
+console.log("PASS — all 14 scenarios");

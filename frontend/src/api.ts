@@ -50,6 +50,21 @@ export async function clearToken() {
 
 export const api = axios.create({ baseURL: API_BASE, timeout: 60000 });
 
+// ── SPEECH FETCHES NEED THEIR OWN BUDGET (Jeff, 2026-09-09: "the annoucments were a little
+// late") ─────────────────────────────────────────────────────────────────────────────────
+// The 60 s above is a page-load budget. A /tts hop sits on the critical path of a spoken turn
+// callout, and the whole speech queue is serialised behind it. MEASURED on his 2026-09-08 09:03
+// drive to work: healthy clips ran 5.5-10.4 s end to end for 35-54 characters (roughly 2-7 s of
+// that is the fetch), and ONE took 32.5 s — `tts-done ms=32489 len=36` at 09:06:27 — with the
+// next announcement queued behind it from 09:06:09 and not heard until 09:06:27. Eighteen
+// seconds late. A callout that lands after the corner is worse than no callout: the banner
+// still shows the turn.
+export const TTS_FETCH_TIMEOUT_MS = 8000;        // turn callouts: above every healthy fetch measured
+// Not on a corner's critical path (route-start greeting, a Scout answer, a settings preview) and
+// the utterances are longer, so these get room — but never the full 60 s, because the greeting
+// RESERVES the speech slot and parks the first turn callout behind itself while it is in flight.
+export const TTS_FETCH_TIMEOUT_LONG_MS = 15000;
+
 api.interceptors.request.use(async (config) => {
   const t = await getToken();
   if (t) config.headers.Authorization = `Bearer ${t}`;

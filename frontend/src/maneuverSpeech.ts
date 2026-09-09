@@ -32,7 +32,12 @@ export function isSpokenManeuver(maneuver?: string, html?: string): boolean {
   const modifier = m.split("|")[1] || "";
   // A "straight" modifier means no real turn (e.g. "turn|straight", "merge|straight"
   // continuing ahead) — treat as non-actionable filler, same as continue/straight.
-  if (modifier === "straight") return false;
+  // ⚠ A ROUNDABOUT IS ALWAYS ACTIONABLE, WHATEVER THE MODIFIER (2026-09-09). Mapbox emits
+  // roundabout|straight for one you drive straight THROUGH, and the blanket straight-modifier
+  // rule below silenced it — so roundaboutExitCue ("Take the second exit") never got to speak
+  // on exactly the roundabouts that need it most. Found by tools/sim-qc/arrival_speech_test.mts
+  // while gating the arrival change; pre-existing since 5ce2fb7, not part of that change.
+  if (modifier === "straight" && type !== "roundabout" && type !== "rotary") return false;
   if (type && SILENT_MANEUVERS.has(type)) return false;
   if (m && !SILENT_MANEUVERS.has(m)) return true;
   const h = (html || "").toLowerCase();

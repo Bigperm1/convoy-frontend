@@ -12,7 +12,7 @@
 // Best-effort: any failure (offline, backend down) just means no greeting — it
 // never throws into the caller.
 
-import { api } from "./api";
+import { api, TTS_FETCH_TIMEOUT_LONG_MS } from "./api";
 import { reserveGreeting, deliverGreetingAudio, cancelGreeting } from "./nav";
 import type { NavRoute } from "./nav";
 import { getSettings, getNovaVoice } from "./settings";
@@ -130,7 +130,7 @@ export function prepareRouteGreeting(ctx: GreetingContext, key: string): void {
       if (!text) return;
 
       // Pre-synthesize so Start -> instant playback (no /tts round-trip then).
-      const tts = await api.post("/tts", { text, voice: getNovaVoice(s) });
+      const tts = await api.post("/tts", { text, voice: getNovaVoice(s) }, { timeout: TTS_FETCH_TIMEOUT_LONG_MS });
       const b64 = tts?.data?.audio_b64;
       if (b64) _preparedAudio = { b64, mime: tts?.data?.mime || "audio/mp3" };
     } catch {

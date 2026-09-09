@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Platform, AppState } from "react-native";
-import { api } from "./api";
+import { api, TTS_FETCH_TIMEOUT_MS } from "./api";
 import { fetchMapboxRoutes, fetchMapboxRouteVia, refreshMapboxRoute, arrivesOnFarSide, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
 import { anchorStepIndex } from "./navAnchor";
@@ -2137,13 +2137,29 @@ async function speakOne(text: string): Promise<void> {
       await playBase64Audio(cached.b64, cached.mime);
       return;
     }
-    const { data } = await api.post("/tts", { text, voice: getNovaVoice() });
+    // ── A SLOW CLIP MUST NOT HOLD THE QUEUE (Jeff, 2026-09-09: "the annoucments were a
+    // little late"). MEASURED on his 2026-09-08 09:03 drive to work: `tts-done` ran 5.5-10.4 s
+    // for 35-54 character lines (roughly 2-7 s of that is this fetch, the rest is playback),
+    // and ONE clip took 32.5 s — `tts-done ms=32489 len=36` at 09:06:27. The next announcement
+    // was queued behind it at 09:06:09 and did not play until 09:06:27: eighteen seconds late.
+    // The api client's own timeout is 60 s (src/api.ts), which is a page-load budget, not a
+    // turn-callout budget. 8 s sits above every healthy fetch on that drive and caps the damage
+    // a cold Render dyno can do to the NEXT turn. On timeout we stay silent, which is this
+    // function's existing contract — the on-screen banner still shows the turn, and a callout
+    // that arrives after the corner is worse than none.
+    const { data } = await api.post("/tts", { text, voice: getNovaVoice() }, { timeout: TTS_FETCH_TIMEOUT_MS });
     if (data?.audio_b64) {
       await playBase64Audio(data.audio_b64, data.mime ?? "audio/mp3");
     }
-  } catch {
+  } catch (e: any) {
     // TTS unavailable: stay silent. The on-screen nav banner still shows the
     // turn, and we no longer fall back to the robotic device voice.
+    // The receipt tells a TIMED-OUT fetch apart from a failed one, so "announcements were
+    // late" is a one-query answer next time instead of an inference from tts-done deltas.
+    try {
+      const timedOut = e?.code === "ECONNABORTED" || /timeout/i.test(String(e?.message ?? ""));
+      logEvent(`tts-fail why=${timedOut ? "timeout" : "error"} len=${text.length}`);
+    } catch {}
   }
 }
 

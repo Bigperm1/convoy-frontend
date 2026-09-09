@@ -41,6 +41,19 @@ RULES = [
         "the layer style per frame is the same watchdog-kill mechanism as the ribbon trim.",
     ),
     (
+        "self-model-lift-hardcoded",
+        ["src/**/*.tsx", "src/**/*.ts"],
+        r"modelTranslation:\s*\[[^\]]*?,\s*\d+(?:\.\d+)?\s*\]",
+        "2026-09-09: the self marker is drawn N METRES IN THE AIR to beat the 3D buildings' depth test, and on a "
+        "pitched camera that moves it FORWARD up the road by a screen distance that DOUBLES with every zoom level "
+        "(3 pt at highway zoom, 62 pt on an exit ramp — MEASURED: two simulator frames at an identical pinned "
+        "camera, lift on vs off, the car moved 17.2 pt). The route trim must add the SAME lift back to the cut or "
+        "the drawn car sits past the line start and the ribbon runs under it (Jeff, 2026-09-07 exit 90; it had "
+        "already been 'fixed' twice by changing the lead, which was never wrong). So the altitude may NOT be a "
+        "literal here: use SELF_MODEL_LIFT_M / SELF_ARROW_LIFT_M from src/routeTrim.ts, which is the single source "
+        "the trim reads. Gate tools/sim-qc/self_lift_lead_test.mts.",
+    ),
+    (
         "callout-text-translate-in-points",
         ["src/**/*.tsx"],
         r"text(?:Translate|TranslateAnchor)\s*:",

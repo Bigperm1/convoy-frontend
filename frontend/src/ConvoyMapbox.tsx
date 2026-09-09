@@ -44,7 +44,7 @@ import { anchorCutM, type CutAnchorHint } from "./routeRibbon";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert, Animated } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
-import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp } from "./routeTrim";
+import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M, PEER_MODEL_LIFT_M } from "./routeTrim";
 import { buildRibbonPartition, buildRibbonFeatures, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
@@ -2030,7 +2030,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           // route ribbon (the tall car wins at +10m; the low arrow doesn't), so the ribbon
           // drew OVER it. Lift the arrow higher than the car so it clears the ground-level
           // route line. OTA-tunable (raise if the ribbon still covers it, lower if it floats).
-          modelTranslation: [0, 0, modelId === ARROW_MODEL_ID ? 16 : 10],
+          // ⚠ THE SINGLE SOURCE OF TRUTH FOR THESE TWO NUMBERS IS src/routeTrim.ts — the route
+          // trim has to add the SAME lift back to the cut, or the drawn car sits past the line
+          // start at deep zoom (Jeff, 2026-09-07 exit ramp). Never edit one without the other.
+          modelTranslation: [0, 0, modelId === ARROW_MODEL_ID ? SELF_ARROW_LIFT_M : SELF_MODEL_LIFT_M],
           modelEmissiveStrength: emissive,
           modelScale: perTick ? SELF_SCALE_EXPR : (scale ?? CAR_MODEL_SCALE_SIZED),
           modelRotation: ["get", "rot"] as any,
@@ -2130,7 +2133,7 @@ export function PeerScanModels({ peers, zoom, sizePt, onPress }: {
             modelId: ["get", "mid"] as any,
             modelType: "common-3d",
             modelOpacity: ["get", "op"] as any,
-            modelTranslation: [0, 0, 10],
+            modelTranslation: [0, 0, PEER_MODEL_LIFT_M],
             modelEmissiveStrength: 0.6,
             modelScale: PEER_SCALE_EXPR,
             modelRotation: PEER_ROT_EXPR,
@@ -3434,7 +3437,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // see the routeTrim.ts REVISED note — CarPlay's ribbon touched the self car at a
   // highway chase pitch).
   const _trimPitch = camPitchRef.current ?? followPitchDeg;
-  const _trimLeadM = routeTrimLeadM(_trimZoom, selfCar?.lat ?? 0, _trimPitch);
+  // The lift the self MODEL is drawn at, fed back in so the cut is measured from where the car
+  // is DRAWN rather than where it is (src/routeTrim.ts leadShiftedByLift). mapH is the map's own
+  // layout height, which is what Mapbox derives cameraToCenterDistance from.
+  const _selfLiftM = selfIsArrow ? SELF_ARROW_LIFT_M : SELF_MODEL_LIFT_M;
+  const _trimLeadM = routeTrimLeadM(_trimZoom, selfCar?.lat ?? 0, _trimPitch, _selfLiftM, mapH);
   // ── AND WHICH POSITION (2026-07-30) ────────────────────────────────────────
   // Second, independent source of the same complaint, and the bigger one. The trim
   // was anchored to routeProj.frac — the NEWEST fix — while the MARKER eases toward
@@ -3629,7 +3636,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     if (_tn - trimLogAt.current >= 30000) {   // 15 s → 30 s (2026-09-06)
       trimLogAt.current = _tn;
       try {
-        logEvent(`ribbon-trim surf=phone snap=${selfSnapped ? 1 : 0} z=${Number(_trimZoom).toFixed(2)} lead=${Math.round(_trimLeadM)} cutAhead=${Math.round(ribbonCutM - _cutBaseM)} lag=${_alongAnchor ? Math.round(_fracDrawn * ribbonPartition.totalM - _alongAnchor.m) : '-'} anchorOff=${_alongAnchor && Number.isFinite(_alongAnchor.distM) ? Math.round(_alongAnchor.distM) : '-'} hint=${_alongAnchor ? _alongAnchor.src : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} pitch=${Math.round(_trimPitch)} leadDp=${Math.round(routeTrimLeadDp(_trimPitch))}`);
+        logEvent(`ribbon-trim surf=phone snap=${selfSnapped ? 1 : 0} z=${Number(_trimZoom).toFixed(2)} lead=${Math.round(_trimLeadM)} cutAhead=${Math.round(ribbonCutM - _cutBaseM)} lag=${_alongAnchor ? Math.round(_fracDrawn * ribbonPartition.totalM - _alongAnchor.m) : '-'} anchorOff=${_alongAnchor && Number.isFinite(_alongAnchor.distM) ? Math.round(_alongAnchor.distM) : '-'} hint=${_alongAnchor ? _alongAnchor.src : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} pitch=${Math.round(_trimPitch)} leadDp=${Math.round(routeTrimLeadDp(_trimPitch))} lift=${Math.round(selfLiftScreenPt(_selfLiftM, _trimZoom, selfCar?.lat ?? 0, _trimPitch, mapH))}`);
       } catch {}
     }
   }

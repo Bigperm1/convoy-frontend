@@ -73,7 +73,7 @@ import {
   ROAD_SNAP_CROSS_DEG, noseBearing, CAR_LEN_UNITS, ARROW_LEN_UNITS, PeerScanModels
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
-import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp } from '../routeTrim';
+import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M } from '../routeTrim';
 import { buildRibbonPartition, buildRibbonFeatures, anchorCutM, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat, type CutAnchorHint } from '../routeRibbon';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
@@ -1737,7 +1737,13 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // scaled) car's length on the head unit: the ribbon visibly ended a car-length
   // behind the marker. Scaling the lead by the same factor keeps the on-screen gap
   // the same fraction of the car everywhere. mapScale is 1 on CarPlay — no change.
-  const trimLeadM = routeTrimLeadM(trimZoom, lat, trimPitch) * mapScale;
+  // The self model is drawn SELF_MODEL_LIFT_M metres in the air (16 for the arrow), which on a
+  // pitched camera moves it FORWARD up the road by a screen distance that doubles with every
+  // zoom level — 3 pt at highway zoom, 62 pt on an exit ramp. Feed it back so the cut is
+  // measured from the DRAWN car. See the long note in src/routeTrim.ts; gate
+  // tools/sim-qc/self_lift_lead_test.mts. mapH is this map's layout height.
+  const selfLiftM = isArrow ? SELF_ARROW_LIFT_M : SELF_MODEL_LIFT_M;
+  const trimLeadM = routeTrimLeadM(trimZoom, lat, trimPitch, selfLiftM, mapH) * mapScale;
   // TRIM RIDES THE MARKER'S EASE — see the matching block in ConvoyMapbox.tsx for the
   // full reasoning. The trim was anchored to the NEWEST fix while the marker eases
   // toward it, so the gap sawtoothed by one whole step per fix (~15dp of 76.6 at
@@ -1803,7 +1809,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     if (_tn - carTrimLogAt.current >= 30000) {   // 15 s → 30 s (2026-09-06)
       carTrimLogAt.current = _tn;
       try {
-        logEvent(`ribbon-trim surf=car snap=${carSnapped ? 1 : 0} z=${trimZoom.toFixed(2)} lead=${Math.round(trimLeadM)} cutAhead=${Math.round(ribbonCutM - _carCutBaseM)} lag=${_carAlongAnchor ? Math.round(fracDrawn * ribbonPartition.totalM - _carAlongAnchor.m) : '-'} anchorOff=${_carAlongAnchor && Number.isFinite(_carAlongAnchor.distM) ? Math.round(_carAlongAnchor.distM) : '-'} hint=${_carAlongAnchor ? _carAlongAnchor.src : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} scale=${mapScale.toFixed(2)} pitch=${Math.round(trimPitch)} leadDp=${Math.round(routeTrimLeadDp(trimPitch))}`);
+        logEvent(`ribbon-trim surf=car snap=${carSnapped ? 1 : 0} z=${trimZoom.toFixed(2)} lead=${Math.round(trimLeadM)} cutAhead=${Math.round(ribbonCutM - _carCutBaseM)} lag=${_carAlongAnchor ? Math.round(fracDrawn * ribbonPartition.totalM - _carAlongAnchor.m) : '-'} anchorOff=${_carAlongAnchor && Number.isFinite(_carAlongAnchor.distM) ? Math.round(_carAlongAnchor.distM) : '-'} hint=${_carAlongAnchor ? _carAlongAnchor.src : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} scale=${mapScale.toFixed(2)} pitch=${Math.round(trimPitch)} leadDp=${Math.round(routeTrimLeadDp(trimPitch))} lift=${Math.round(selfLiftScreenPt(selfLiftM, trimZoom, lat, trimPitch, mapH))}`);
       } catch {}
     }
   }

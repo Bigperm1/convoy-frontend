@@ -135,14 +135,105 @@ export function routeTrimLeadDp(pitchDeg = 0): number {
   return pitchCompensatedDp(TRIM_LEAD_DP, pitchDeg);
 }
 
+// ── THE SELF MARKER IS DRAWN 10 m IN THE AIR, AND THAT MOVES IT UP THE ROAD ─────────────
+// (2026-09-09. Jeff's 2026-09-07 exit-90 photograph: the ribbon ran UNDER the car — again,
+// after OTA-W's pitch compensation and OTA-Z's cut anchor had each "fixed" it.)
+//
+// src/ConvoyMapbox.tsx gives the self model `modelTranslation: [0, 0, 10]` (16 for the flat
+// arrow) so the 3D buildings' shared depth buffer cannot eat it; the vendored SDK documents
+// that field as "[longitudal, latitudal, altitude] offsets" IN METRES. On a pitched camera a
+// raised object projects toward the horizon — i.e. FORWARD along the road — and the lift is a
+// fixed number of GROUND metres, so its screen cost DOUBLES with every zoom level. The ribbon
+// is a LineLayer with no lift and stays on the ground. The trim placed the cut a fixed screen
+// distance ahead of the car's GROUND point, which is not where the car is DRAWN.
+//
+// MEASURED, not derived: two simulator frames at an IDENTICAL pinned camera (zoom 16.5,
+// pitch 57, 402x874 pt), lift 10 m vs lift 0, with ground-anchored control markers unchanged
+// to the pixel — the drawn car moved 17.2 pt up-screen (this model predicts 15.3). Carried to
+// Jeff's 470x265 head unit that is 3.4 pt on the highway and 62.5 pt on the exit ramp, against
+// a cut sitting ~35 pt ahead on screen at BOTH zooms by design. Highway: 20 pt of clear road.
+// Ramp: the car's body lands 51-75 pt up-screen, past a cut at 36 — the line comes out from
+// under it. That is exactly the two photographs, and it is why raising or lowering
+// TRIM_LEAD_DP never fixed it: the lead was already correct.
+//
+// THE FIX: measure the lead from where the car is DRAWN. `leadShiftedByLift` moves the cut
+// UP-SCREEN by exactly the lift's shift and converts back — solved exactly, not approximated:
+// with h and s in map px and d = 1.5 * viewportHeight,
+//     ground_screen(s) = d*s*cos p / (d + s*sin p)   and   lift_screen(h) = d*h*sin p / (d - h*cos p)
+// are equal when   s = h*d*sin p / (d*cos p - h).
+// Gate: tools/sim-qc/self_lift_lead_test.mts.
+export const SELF_MODEL_LIFT_M = 10;   // the 3D car / scan twin (ConvoyMapbox modelTranslation)
+export const SELF_ARROW_LIFT_M = 16;   // the flat arrow is lifted higher to clear the ribbon
+// The crew's 3D twins share the car's lift. No route cut is measured from a PEER, so the trim
+// defect above does not apply to them — but the same parallax does: at an exit-ramp zoom a peer
+// is drawn ~55 pt further up the road than they actually are. Cosmetic today, and it moves with
+// the self car by definition rather than drifting apart. Not yet raised with Jeff.
+export const PEER_MODEL_LIFT_M = SELF_MODEL_LIFT_M;
+
+// Mapbox's camera: fov 36.87 deg => cameraToCenterDistance = 0.5*H/tan(fov/2) = 1.5*H.
+const camDist = (viewportHDp: number) => 1.5 * viewportHDp;
+
+/** Screen points ABOVE the camera target for a GROUND point `sM` metres ahead of it. */
+export function groundScreenPt(sM: number, zoom: number, lat: number, pitchDeg: number, viewportHDp: number): number {
+  const d = camDist(viewportHDp), x = sM / metersPerDp(zoom, lat), p = (pitchDeg * Math.PI) / 180;
+  return (d * x * Math.cos(p)) / (d + x * Math.sin(p));
+}
+/** Screen points ABOVE the camera target for a point at ALTITUDE `hM` metres over it — i.e. how
+ *  far up the road the lifted self marker is actually DRAWN. This is the whole defect. */
+export function selfLiftScreenPt(hM: number, zoom: number, lat: number, pitchDeg: number, viewportHDp: number): number {
+  if (!(hM > 0) || !(viewportHDp > 0)) return 0;
+  const p = (pitchDeg * Math.PI) / 180;
+  if (!(p > 0)) return 0;                       // a flat camera hides the lift entirely
+  const mpd = metersPerDp(zoom, lat);
+  if (!(mpd > 0)) return 0;
+  const d = camDist(viewportHDp), y = hM / mpd;
+  const den = d - y * Math.cos(p);
+  if (!(den > 0)) return 0;
+  const v = (d * y * Math.sin(p)) / den;
+  return Number.isFinite(v) ? v : 0;
+}
+/** Inverse of groundScreenPt: the ground metres whose projection lands at `Ypt`. */
+function groundMetresAtScreenPt(Ypt: number, zoom: number, lat: number, pitchDeg: number, viewportHDp: number): number {
+  const d = camDist(viewportHDp), p = (pitchDeg * Math.PI) / 180;
+  const den = d * Math.cos(p) - Ypt * Math.sin(p);
+  if (!(den > 0)) return TRIM_MAX_M;            // at or past the horizon — rail it, never NaN
+  return ((Ypt * d) / den) * metersPerDp(zoom, lat);
+}
+
+/**
+ * THE FIX (2026-09-09): move the cut UP-SCREEN by exactly the number of points the lift moved
+ * the CAR, then convert back to ground metres. Adding the lift's ground-equivalent instead is
+ * NOT enough — high on a pitched screen the perspective is so compressed that the remaining
+ * design lead buys almost no visible road, and the gate caught that on the ARROW skin (lifted
+ * 16 m, so drawn 94 pt up-screen at z18.26: the additive version left 3.7 pt of clearance).
+ * Working in screen space restores the SAME gap for every lift, zoom and pitch by construction.
+ * With no lift, no viewport height or a flat camera this returns `leadM` UNCHANGED, so every
+ * pre-existing caller and the whole pitch-0 path keep their exact numbers.
+ */
+export function leadShiftedByLift(
+  leadM: number, liftM: number, zoom: number, lat: number, pitchDeg: number, viewportHDp: number,
+): number {
+  const shift = selfLiftScreenPt(liftM, zoom, lat, pitchDeg, viewportHDp);
+  if (!(shift > 0)) return leadM;
+  const target = groundScreenPt(leadM, zoom, lat, pitchDeg, viewportHDp) + shift;
+  const m = groundMetresAtScreenPt(target, zoom, lat, pitchDeg, viewportHDp);
+  return Number.isFinite(m) ? Math.max(leadM, Math.min(TRIM_MAX_M, m)) : leadM;
+}
+
 // Metres ahead of the car's projected point at which the route line should start.
 // Pass the camera zoom the surface is actually using (including any pinch bias) and
 // the car's latitude. `pitchDeg` (optional, default 0) is the camera's ACTUAL pitch —
 // see routeTrimLeadDp / the REVISED note above.
-export function routeTrimLeadM(zoom: number, lat: number, pitchDeg = 0): number {
+export function routeTrimLeadM(
+  zoom: number, lat: number, pitchDeg = 0, selfLiftM = 0, viewportHDp = 0,
+): number {
   const m = routeTrimLeadDp(pitchDeg) * metersPerDp(zoom, lat);
   if (!Number.isFinite(m)) return 30;
-  return Math.max(TRIM_MIN_M, Math.min(TRIM_MAX_M, m));
+  const railed = Math.max(TRIM_MIN_M, Math.min(TRIM_MAX_M, m));
+  // The rails stay on the DESIGN lead; the lift correction is a rendering fact, not a tuning
+  // choice, so it is applied after the floor rather than being squeezed by it. With no lift or
+  // no viewport height this is exactly `railed` — the pre-2026-09-09 number, byte for byte.
+  return Math.min(TRIM_MAX_M, leadShiftedByLift(railed, selfLiftM, zoom, lat, pitchDeg, viewportHDp));
 }
 
 // The soft transparent→solid fade just past the trim, also in screen points so it

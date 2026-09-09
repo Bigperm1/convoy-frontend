@@ -15,7 +15,10 @@
 // VERIFIED on his 2026-09-08 09:28 drive to work: tts-say len=45 -> tts-play len=50 was (1), and
 // the composed arrival line len=82 played straight behind it; tts-skip why=rate len=16 was (3)
 // being dropped by the rate gate rather than by design.
-import { isSpokenManeuver, arriveSpeakLeadM, ARRIVE_SPEAK_LEAD_S, ARRIVE_SPEAK_LEAD_MAX_M } from "../../src/maneuverSpeech.ts";
+import {
+  isSpokenManeuver, arriveSpeakLeadM, arrivalAlreadySpokenFor,
+  ARRIVE_SPEAK_LEAD_S, ARRIVE_SPEAK_LEAD_MAX_M,
+} from "../../src/maneuverSpeech.ts";
 
 const ARRIVE_M = 20;   // src/nav.ts
 let fails = 0;
@@ -81,6 +84,23 @@ console.log(`  -- the line is ~${(LINE_CHARS * CHAR_S).toFixed(1)} s of speech; 
 const noLead = (speedMs: number) => Math.min(ARRIVE_SPEAK_LEAD_MAX_M, Math.max(0, speedMs) * 0);
 ok("D1 a zeroed lead FAILS the head-start check", !(noLead(30 / 3.6) >= 24));
 ok("D2 an unbounded lead FAILS the bound", !(Math.max(0, 1000) * ARRIVE_SPEAK_LEAD_S <= ARRIVE_SPEAK_LEAD_MAX_M));
+
+// ── E. THE ARRIVAL LINE IS SPOKEN ONCE PER DESTINATION ─────────────────────────────────────
+// Codex adversarial review, 2026-09-09 [high]: the first version of the early-speech dedupe was a
+// bare flag cleared alongside announcedRef — which nav.ts clears on EVERY step advance and every
+// route key change. Crossing the 25 m advancement threshold on the final approach re-armed it and
+// the driver heard the whole arrival line TWICE on an ordinary approach, no reroute needed, and
+// possibly with a different closer because the utterance had already been consumed.
+const D1 = "49.03151,-122.29202", D2 = "49.13823,-122.59453";
+ok("E1 same destination is suppressed (step advance / same-dest reroute)", arrivalAlreadySpokenFor({ dest: D1 }, D1));
+ok("E2 a NEW destination speaks", !arrivalAlreadySpokenFor({ dest: D1 }, D2));
+ok("E3 nothing spoken yet -> speaks", !arrivalAlreadySpokenFor(null, D1) && !arrivalAlreadySpokenFor(undefined, D1));
+// An unknown destination id must never suppress: two unlabelled trips would silence the second.
+ok("E4 an empty id never suppresses", !arrivalAlreadySpokenFor({ dest: "" }, "") && !arrivalAlreadySpokenFor({ dest: D1 }, ""));
+// NEGATIVE CONTROL: the OLD boolean behaviour — "anything already spoken suppresses everything" —
+// must fail E2, or this gate cannot see the regression it was written for.
+const oldBooleanDedupe = (prev: unknown) => !!prev;
+ok("E5 the old boolean dedupe FAILS the new-destination case", oldBooleanDedupe({ dest: D1 }) === true && !arrivalAlreadySpokenFor({ dest: D1 }, D2));
 
 console.log(fails === 0 ? "\nPASS arrival_speech" : `\nFAIL arrival_speech (${fails})`);
 if (fails) process.exit(1);

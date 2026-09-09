@@ -58,3 +58,15 @@ export function arriveSpeakLeadM(speedMs: number | null | undefined): number {
   const v = typeof speedMs === "number" && Number.isFinite(speedMs) ? Math.max(0, speedMs) : 0;
   return Math.min(ARRIVE_SPEAK_LEAD_MAX_M, v * ARRIVE_SPEAK_LEAD_S);
 }
+
+/** The arrival line is spoken at most once per DESTINATION — not per step, not per route.
+ *  (Codex adversarial review, 2026-09-09, [high].) The first version cleared its flag alongside
+ *  `announcedRef`, which is cleared on every STEP ADVANCE and on every route key change. Crossing
+ *  the 25 m advancement threshold on the final approach therefore re-armed the early speech and the
+ *  driver heard the whole arrival line twice — on an ordinary approach, with no reroute — and
+ *  because the utterance had already been consumed the second one could even pick a different
+ *  closer, so exact-text dedupe would not have caught it either. Keying on the destination keeps a
+ *  same-destination reroute quiet while a genuinely new destination still speaks. */
+export function arrivalAlreadySpokenFor(prev: { dest: string } | null | undefined, destId: string): boolean {
+  return !!prev && !!destId && prev.dest === destId;
+}

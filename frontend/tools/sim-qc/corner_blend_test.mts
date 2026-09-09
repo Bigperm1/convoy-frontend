@@ -116,6 +116,32 @@ let tH4 = 0; const fixAtH4 = 16.7; let alteredH4 = 0;
 for (let f = 0; f < 180; f++) { tH4 += 16.7; if (cornerNose(stH4, 135, 90, fixAtH4, 2.8, true, tH4) !== 135) alteredH4++; }
 check(alteredH4 === 0 && stH4.offN === 1, `H4 one repeated fix at 10 km/h moved the nose on ${alteredH4}/180 frames (offN=${stH4.offN}, want 1)`);
 
+// H5 — NEGATIVE CONTROL, A WANDERING LOW-SPEED COURSE (Codex adversarial review, 2026-09-09).
+//      Opening the slow band made `offN` — which counts over-cone fixes without looking at WHICH
+//      SIDE they fall — accept three CONTRADICTORY fixes as agreement. REPRODUCED on the real
+//      function before the fix: nose 90 at 2.5 m/s with the course alternating 45/135 drew
+//      66.9, 111.3, 68.6, 111.4 — a 42.8 degree wobble, worse than the drift the band was opened
+//      to fix. The slow band now restarts its run on an opposing fix.
+{
+  const st = newCornerBlendState(); let t2 = 0; const drawn: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    const crs = i % 2 === 0 ? 45 : 135;          // flip-flopping either side of the nose
+    const fixAt = t2 + 16.7;
+    for (let f = 0; f < 60; f++) { t2 += 16.7; drawn.push(cornerNose(st, 90, crs, fixAt, 2.5, true, t2)); }
+  }
+  const swing = Math.max(...drawn.slice(180)) - Math.min(...drawn.slice(180));
+  check(swing === 0, `H5 an alternating low-speed course swung the nose ${swing.toFixed(1)}° (want 0) — the slow band accepted contradictory fixes as agreement`);
+}
+// H6 — and the band must STILL work on consistent evidence, or H5 was "fixed" by disabling it.
+{
+  const st = newCornerBlendState(); let t3 = 0; let last = 0;
+  for (let i = 0; i < 5; i++) {
+    const fixAt = t3 + 16.7;
+    for (let f = 0; f < 60; f++) { t3 += 16.7; last = cornerNose(st, 135, 90, fixAt, 2.8, true, t3); }
+  }
+  check(Math.abs(wrap(last - 90)) <= 20.5, `H6 consistent slow-speed evidence no longer corrects (${Math.abs(wrap(last - 90)).toFixed(1)}° off, want ≤20) — H5's fix went too far`);
+}
+
 // ── I: THE HOLD MUST COUNT FIXES, NOT FRAMES (2026-09-04 Codex adversarial pass, [high]) ────
 // I2: ONE bad course fix, 45° off, re-rendered for 3 s at 60 fps with the SAME fix timestamp —
 //     which is what a 12 Hz trim ticker does to a 1 Hz course between fixes. The old hold
@@ -151,4 +177,4 @@ check(lastDrawnI4 === 114 && stI4.hdgFix === 0, `I4 a frozen course kept the nos
 console.log(`E 05:52:56 nose end=${endE.drawn.toFixed(1)}° vs course ${endE.crs} (off ${Math.abs(wrap(endE.drawn - endE.crs)).toFixed(1)}°, want ≤20) peakFix=${peakFixE.toFixed(1)}° | F 06:39:43 position blend max=${maxF.toFixed(3)} (want 0) | G clean samples altered=${cleanBad}/${clean.length} (want 0) | H1 roundabout 10km/h off=${Math.abs(wrap(endH1.drawn - 90)).toFixed(1)}° (want ≤20) H2 5km/h altered=${outH2.some(r => r.drawn !== 135) ? 'YES' : 'no'} (want no) H3 two-fix altered=${outH3.some(r => r.drawn !== 135) ? 'YES' : 'no'} (want no)`);
 console.log(`I2 one repeated fix: frames altered=${alteredI2}/180 (want 0) offN=${stI2.offN} (want 1) | I3 1 Hz replay end off course=${Math.abs(wrap(endI3.drawn - endI3.crs)).toFixed(1)}° peakFix=${peakFixI3.toFixed(1)}° offN=${stI3.offN} (want ≥2) | I4 frozen course drawn=${lastDrawnI4.toFixed(1)} hdgFix=${stI4.hdgFix.toFixed(2)} (want 114 / 0)`);
 if (fails.length) { console.error(`\nFAIL (${fails.length}):\n  ` + fails.join("\n  ")); process.exit(1); }
-console.log("PASS — all 14 scenarios");
+console.log("PASS — all 16 scenarios");

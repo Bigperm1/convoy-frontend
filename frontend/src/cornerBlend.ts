@@ -24,10 +24,12 @@ export type CornerBlendState = {
   offAt: number;            // FIX TIME of the first over-cone course sample of this run (0 = none)
   offFixAt: number;         // FIX TIME of the last one COUNTED — dedupes the ~12-60 renders of one fix
   offN: number;             // how many DISTINCT fixes in this run were over the cone
+  offSign: number;          // which SIDE of the cone this run is on (+1/-1, 0 = none). In the slow
+                            // band an opposing fix resets the run — see the note at cornerNose.
   hdgFix: number;           // the eased correction currently applied to the nose, degrees signed
   noseAt: number;           // last cornerNose() tick (stale after NOSE_STALE_MS)
 };
-export const newCornerBlendState = (): CornerBlendState => ({ lastHdg: null, lastAt: 0, rate: 0, rateAt: 0, blend: 0, tickAt: 0, offAt: 0, offFixAt: 0, offN: 0, hdgFix: 0, noseAt: 0 });
+export const newCornerBlendState = (): CornerBlendState => ({ lastHdg: null, lastAt: 0, rate: 0, rateAt: 0, blend: 0, tickAt: 0, offAt: 0, offFixAt: 0, offN: 0, offSign: 0, hdgFix: 0, noseAt: 0 });
 
 const CORNER_RATE_DPS = 12;   // course swinging faster than this = a corner (a 90° turn at city speed is 20–40°/s)
 const CORNER_D0 = 6;          // metres off the line before any blend
@@ -187,7 +189,7 @@ export function cornerNose(
 ): number {
   if (!Number.isFinite(noseDeg)) return noseDeg;
   const nose = ((noseDeg % 360) + 360) % 360;
-  if (st.noseAt && now - st.noseAt > NOSE_STALE_MS) { st.hdgFix = 0; st.offAt = 0; st.offFixAt = 0; st.offN = 0; st.noseAt = 0; }
+  if (st.noseAt && now - st.noseAt > NOSE_STALE_MS) { st.hdgFix = 0; st.offAt = 0; st.offFixAt = 0; st.offN = 0; st.offSign = 0; st.noseAt = 0; }
   let correction = 0;
   // A course with no arrival time, from the future (clock step), or older than
   // NOSE_COURSE_STALE_MS is not evidence: fall through to the reset below, which zeroes the
@@ -200,13 +202,26 @@ export function cornerNose(
     const over = Math.abs(err) - NOSE_MAX_OFF_COURSE_DEG;
     if (over > 0) {
       const at = courseAt as number;
+      const slow = speedMs < NOSE_FIX_MIN_SPEED_MS;
+      const sign = err >= 0 ? 1 : -1;
       if (at !== st.offFixAt) {                         // a NEW fix — not this one re-rendered
-        if (!st.offAt || at < st.offAt) { st.offAt = at; st.offN = 0; }  // first, or the clock stepped back
+        // ⚠ THE SLOW BAND MUST AGREE WITH ITSELF (Codex adversarial review, 2026-09-09, and it
+        // REPRODUCED IT). `offN` counts over-cone fixes without looking at WHICH SIDE they are on,
+        // so three fixes alternating either side of the nose satisfied the three-sample guard just
+        // as well as three consistent ones. Measured on the real function at 2.5 m/s with a nose of
+        // 90 and a course flip-flopping 45/135: drawn headings 66.9, 111.3, 68.6, 111.4 — a 42.8°
+        // wobble, which is a worse artefact than the drift this band was opened to fix. The old
+        // 15 km/h floor hid it. So in the slow band an OPPOSING fix restarts the run; a wandering
+        // course can no longer accumulate. The fast band is untouched: it is field-proven and a
+        // 45° reversal at 40 km/h is a real manoeuvre, not noise.
+        const flipped = slow && st.offSign !== 0 && sign !== st.offSign;
+        if (!st.offAt || at < st.offAt || flipped) { st.offAt = at; st.offN = 0; }
+        st.offSign = sign;
         st.offFixAt = at;
         st.offN += 1;
       }
       // Slow band (roundabouts, tight turns) demands an extra distinct fix before it may act.
-      const minSamples = speedMs >= NOSE_FIX_MIN_SPEED_MS ? NOSE_FIX_MIN_SAMPLES : NOSE_FIX_MIN_SAMPLES_SLOW;
+      const minSamples = slow ? NOSE_FIX_MIN_SAMPLES_SLOW : NOSE_FIX_MIN_SAMPLES;
       if (st.offN >= minSamples && st.offFixAt - st.offAt >= NOSE_FIX_SPAN_MS) {
         correction = -Math.sign(err) * over;
       }

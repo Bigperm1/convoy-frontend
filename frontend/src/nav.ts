@@ -39,7 +39,7 @@ import { isOnCall, callSilence } from "./callState";
 import { headUnitAttachedRaw } from "./locationPrivacy";
 import { resolveArrivalZone, type ArrivalZone } from "./arrivalZone";
 import { composeArrivalLine, type ArrivalUtterance, type ArrivalWeather, type ArrivalPlaceKind, type ArrivalPlaceInfo } from "./arrivalEndings";
-import { isSpokenManeuver, arriveSpeakLeadM } from "./maneuverSpeech";
+import { isSpokenManeuver, arriveSpeakLeadM, arrivalAlreadySpokenFor } from "./maneuverSpeech";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -952,7 +952,7 @@ export function useTurnByTurn(
   // The arrival line once it has been spoken EARLY (see ARRIVE_SPEAK_LEAD_S). Held so the
   // arrival receipt describes the line the driver actually heard rather than a freshly composed
   // one, and so the real arrival never speaks it a second time.
-  const arriveSpokenRef = useRef<ArrivalUtterance | null>(null);
+  const arriveSpokenRef = useRef<{ dest: string; utt: ArrivalUtterance } | null>(null);
   // ── PARKED, BUT THE LAST FIX SAYS OTHERWISE (2026-08-31) ────────────────────
   // Tier 2 above tests `user.speed`. That field belongs to the LAST FIX THAT
   // ARRIVED, and the moment the car parks the OS stops producing fixes — so a
@@ -1101,7 +1101,9 @@ export function useTurnByTurn(
     if (key !== routeKeyRef.current) {
       routeKeyRef.current = key;
       announcedRef.current.clear();
-      arriveSpokenRef.current = null;
+      // NOT arriveSpokenRef: it is keyed on the DESTINATION (see arrivalAlreadySpokenFor), so a
+      // same-destination reroute keeps its claim and cannot re-speak the arrival line, while a new
+      // destination invalidates it by identity. Codex adversarial review, 2026-09-09.
       // The trend is meaningless against a different line — and the new line's travel
       // budget starts at zero, so the next reroute cannot be asked for until the car has
       // actually driven SWAP_ARM_TRAVEL_M on it (2026-09-04 lot storm, see offRouteGate).
@@ -1185,7 +1187,8 @@ export function useTurnByTurn(
       const prevNext = steps[prevStepIdx + 1];
       const newNext = steps[stepIdx + 1];
       announcedRef.current.clear();
-      arriveSpokenRef.current = null;
+      // NOT arriveSpokenRef: crossing the 25 m advancement threshold on the final approach used to
+      // re-arm the early arrival line and say the whole thing a second time. Codex, 2026-09-09 [high].
       if (
         prevSpoke && prevNext && newNext && dManeuver < 120 &&
         maneuverVerb(newNext.maneuver) === maneuverVerb(prevNext.maneuver)
@@ -1528,6 +1531,10 @@ export function useTurnByTurn(
     const dDest = remaining;
     // One funnel for both arrival paths, so they cannot disagree and cannot double-fire.
     // Kept in a ref because the backup timer's closure outlives this effect run.
+    // What "the same arrival" means: the final step's own end point, which survives a reroute to
+    // the same place and changes when the driver picks somewhere new.
+    const _destEnd = steps[steps.length - 1]?.end;
+    const destId = _destEnd ? `${_destEnd.lat.toFixed(5)},${_destEnd.lng.toFixed(5)}` : (options?.destLabel ?? "");
     fireArriveRef.current = (late: boolean) => {
       if (announcedRef.current.has(arriveKey)) return;
       announcedRef.current.add(arriveKey);   // fire once, not on every parked GPS tick
@@ -1543,7 +1550,8 @@ export function useTurnByTurn(
       const willSpeak = !options?.mute && !late;
       // Already said out loud by the early-speech block below? Then reuse that exact utterance
       // for the receipt and do NOT say it again — the driver heard it a few seconds ago.
-      const spokeEarly = arriveSpokenRef.current;
+      const spokeEarly = arrivalAlreadySpokenFor(arriveSpokenRef.current, destId)
+        ? arriveSpokenRef.current!.utt : null;
       const utt = spokeEarly ?? takeArrivalUtterance(options?.destLabel, readArrivalContext(options));
       try {
         const st = getSettings();
@@ -1585,11 +1593,19 @@ export function useTurnByTurn(
 
     // START THE ARRIVAL LINE A FEW SECONDS OUT (see ARRIVE_SPEAK_LEAD_S). Speech only — the
     // arrival itself still fires exactly where it did. `dDest` is remaining ALONG THE ROUTE.
-    if (!arriveSpokenRef.current && !announcedRef.current.has(arriveKey) && !options?.mute) {
+    // AUDIBLE-ONLY CLAIM (Codex adversarial review, 2026-09-09, [medium]). The flag used to be set
+    // before speaking, so a line the audio layer then DROPPED — muted during a phone call, or the
+    // voice slider at zero — still suppressed the real arrival. If the call ended before the driver
+    // parked, the arrival that would previously have spoken went silent instead. So the early path
+    // only runs, and only claims the dedupe, when the same gates _playClip checks are already clear;
+    // otherwise nothing is claimed and the arrival funnel behaves exactly as it did before.
+    const _audibleNow = !callSilence() && getAudioVol(getSettings(), "volVoice") > 0.02;
+    if (!arrivalAlreadySpokenFor(arriveSpokenRef.current, destId)
+        && !announcedRef.current.has(arriveKey) && !options?.mute && _audibleNow) {
       const speakLeadM = arriveSpeakLeadM(user.speed);
       if (dDest < ARRIVE_M + speakLeadM) {
         const early = takeArrivalUtterance(options?.destLabel, readArrivalContext(options));
-        arriveSpokenRef.current = early;
+        arriveSpokenRef.current = { dest: destId, utt: early };
         try {
           logEvent(
             `arrive-speak-early lead=${Math.round(speakLeadM)}m d=${Math.round(dDest)}m ` +

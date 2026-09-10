@@ -10,12 +10,18 @@ final class PttRecorder: ObservableObject {
   @Published var lastError: String? = nil
   private var rec: AVAudioRecorder?
   private var startedAt: Date?
+  private var starting = false
 
   func start() {
+    guard rec == nil, !starting else { return }
+    starting = true
     let session = AVAudioSession.sharedInstance()
     session.requestRecordPermission { [weak self] granted in
       guard let self = self else { return }
-      guard granted else { DispatchQueue.main.async { self.lastError = "Mic not allowed" }; return }
+      guard granted else {
+        DispatchQueue.main.async { self.lastError = "Mic not allowed"; self.starting = false }
+        return
+      }
       do {
         try session.setCategory(.record, mode: .default)
         try session.setActive(true)
@@ -25,12 +31,19 @@ final class PttRecorder: ObservableObject {
           AVEncoderBitRateKey: 64000, AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
         ]
         let r = try AVAudioRecorder(url: url, settings: settings)
-        r.record()
-        self.rec = r; self.startedAt = Date()
-        DispatchQueue.main.async { self.recording = true; self.lastError = nil }
+        guard r.record() else {
+          DispatchQueue.main.async { self.lastError = "Record failed"; self.starting = false }
+          try? session.setActive(false)
+          return
+        }
+        DispatchQueue.main.async {
+          self.rec = r; self.startedAt = Date()
+          self.recording = true; self.lastError = nil
+          self.starting = false
+        }
         if WCSession.default.isReachable { WCSession.default.sendMessage(["json": "{\"ptt\":\"down\"}"], replyHandler: nil, errorHandler: nil) }
       } catch {
-        DispatchQueue.main.async { self.lastError = "Record failed" }
+        DispatchQueue.main.async { self.lastError = "Record failed"; self.starting = false }
       }
     }
   }

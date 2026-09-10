@@ -18,6 +18,7 @@ export function startWatchPtt(getChannel: () => string | null | undefined): () =
       const o = JSON.parse(m.json);
       const ch = getChannel();
       if (o?.ptt === "down" && ch) acquireFloor(ch);
+      if (o?.ptt === "up" && ch) releaseFloor(ch);
     } catch {}
   });
   const fileSub = HairpinWatch.addListener("onWatchFile", async (f) => {
@@ -29,7 +30,6 @@ export function startWatchPtt(getChannel: () => string | null | undefined): () =
         if (audio_b64) { await api.post("/ptt", { channel: ch, audio_b64, duration_ms: Math.round(f.ms) }); ok = true; }
       }
     } catch {}
-    if (ch) releaseFloor(ch);
     if (_rows < ROWS_MAX) { _rows += 1; try { logEventReliable(`watch-ptt ms=${Math.round(f.ms)} ok=${ok ? 1 : 0} ch=${ch ? 1 : 0}`); } catch {} }
   });
   _stop = () => { msgSub.remove(); fileSub.remove(); _stop = null; };

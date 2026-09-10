@@ -48,6 +48,12 @@ final class WatchSession: NSObject, WCSessionDelegate {
     }
   }
 
+  // A wrist PTT clip is a temp file handed to transferFile in PttRecorder.stop(); once WatchConnectivity
+  // has finished sending it (success or failure) the temp copy is ours to clean up.
+  func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
+    try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+  }
+
   private func play(tap: String, side: String) {
     let type: WKHapticType
     switch side {

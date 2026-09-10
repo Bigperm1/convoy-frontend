@@ -315,6 +315,15 @@ export async function startCarNav(dest: { lat: number; lng: number; label?: stri
 
 export async function endCarNav(): Promise<void> {
   if (!getCarState().navigating) { toast('No active route'); return; }
+  // BANK THE DRIVE FIRST (Codex review 2026-09-09). On a STANDALONE head-unit drive the phone
+  // map is not mounted, so the map's own End recorder never runs and this teardown simply
+  // deleted the session — the drive vanished. stopNavBanner() below clears CAR_NAV_KEY and the
+  // slim route, so this has to happen before it, not after. Lazy require: carActions is loaded
+  // on the CarPlay bootstrap path and must not pull navNotification in at import time.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    await require('../navNotification').recordColdDriveOnEnd();
+  } catch {}
   try { await stopNavBanner(); } catch {} // also clears CAR_NAV_KEY (owner: navNotification)
   // Ending a route must also clean the template stack: Jeff's 8/19 drive ended with
   // the stranded search keyboard STILL covering the map because nothing here popped

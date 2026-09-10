@@ -184,8 +184,19 @@ RULES = [
         "receipt written to answer Say Phin's black screen. Use logEventReliable, which queues on a missing client "
         "and delivers `late` on a later launch. Contract: src/crashBreadcrumb.ts.",
     ),
+    (
+        "trip-recorded-from-route-distance",
+        ["src/**/*.ts", "app/**/*.tsx"],
+        r"recordTrip\(\{(?:(?!travelledM)[\s\S]){0,600}?\}\)",
+        "2026-09-09: recordTrip credited the ROUTE'S PLANNED distance, not the distance driven, and "
+        "nothing in the app could tell the difference. Four rows in Jeff's own history banked a full "
+        "17.2 km route ~139 s after it was plotted with top_speed 0 — 445 km/h average, 68.9 km of his "
+        "1,989.5 km lifetime total that he never drove, all of it on the club leaderboard. Every call "
+        "site must pass `travelledM` from src/tripOdometer.ts (the headless cold-arrival path in "
+        "navNotification.ts is the ONE documented exception and passes travelledM: undefined "
+        "explicitly). Gate: tools/sim-qc/trip_odometer_test.mts.",
+    ),
 ]
-
 def blank_comments(text: str) -> str:
     """Replace the contents of // line comments and /* */ blocks with spaces, keeping every
     newline so line numbers survive. History is allowed to QUOTE a trap; code is not."""

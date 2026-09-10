@@ -1,8 +1,23 @@
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
-index ef6aa04..757ad2e 100644
+index ef6aa04..340ab79 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
-@@ -120,13 +120,33 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -108,7 +108,13 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+       try {
+         createScreen(templateId);
+         callback?.invoke()
+-      } catch (err: IllegalArgumentException) {
++      } catch (err: Throwable) {
++        // CONVOY FIX (2026-09-09): was `catch (err: IllegalArgumentException)`. Anything else
++        // thrown here escaped handler.post{} and killed the process on the main thread — the
++        // template parser uses non-null assertions liberally (see updateTemplate's note), and
++        // createScreen can throw UninitializedPropertyAccessException on a cold connect.
++        // A template that fails to build is a stuck placeholder, never a dead app.
++        AACrashLog.record(reactContext, "CarPlayModule.createTemplate($templateId)", err)
+         val args = Arguments.createMap()
+         args.putString("error", "Failed to parse template '$templateId': ${err.message}")
+         callback?.invoke(args)
+@@ -120,13 +126,33 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    fun updateTemplate(templateId: String, config: ReadableMap) {
      handler.post {
        carTemplates[templateId] = config;
@@ -40,6 +55,88 @@ index ef6aa04..757ad2e 100644
          }
        }
      }
+@@ -136,11 +162,23 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+   fun setRootTemplate(templateId: String, animated: Boolean?) {
+     Log.d(TAG, "set Root Template for $templateId")
+     handler.post {
+-      val screen = getScreen(templateId)
+-      if (screen != null) {
+-        currentCarScreen = screen
+-        screenManager?.popToRoot()
+-        screenManager?.push(screen)
++      // CONVOY FIX (2026-09-09): this block had NO try/catch. Everything it calls —
++      // getScreen -> createScreen -> parseTemplate -> ScreenManager.push — can throw, and a
++      // throw inside handler.post{} is an UNCAUGHT main-thread exception: the process dies,
++      // the head unit keeps showing the loading placeholder, and because there is no JS left
++      // to run, nothing reaches crash_reports. That is Say Phin's black screen.
++      try {
++        val screen = getScreen(templateId)
++        if (screen != null) {
++          currentCarScreen = screen
++          screenManager?.popToRoot()
++          screenManager?.push(screen)
++        } else {
++          Log.w(TAG, "setRootTemplate($templateId): no screen available yet")
++        }
++      } catch (t: Throwable) {
++        AACrashLog.record(reactContext, "CarPlayModule.setRootTemplate($templateId)", t)
++        Log.e(TAG, "setRootTemplate failed for $templateId", t)
+       }
+     }
+   }
+@@ -148,10 +186,16 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+   @ReactMethod
+   fun pushTemplate(templateId: String, animated: Boolean?) {
+     handler.post {
+-      val screen = getScreen(templateId)
+-      if (screen != null) {
+-        currentCarScreen = screen;
+-        screenManager?.push(screen)
++      // CONVOY FIX (2026-09-09): same unguarded handler.post{} as setRootTemplate above.
++      try {
++        val screen = getScreen(templateId)
++        if (screen != null) {
++          currentCarScreen = screen
++          screenManager?.push(screen)
++        }
++      } catch (t: Throwable) {
++        AACrashLog.record(reactContext, "CarPlayModule.pushTemplate($templateId)", t)
++        Log.e(TAG, "pushTemplate failed for $templateId", t)
+       }
+     }
+   }
+@@ -271,6 +315,31 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+   }
+ 
+   private fun createScreen(templateId: String): CarScreen? {
++    // CONVOY FIX (2026-09-09): `carContext` is a LATEINIT assigned only in setCarContext().
++    // Touching it before the car session has handed it over throws
++    // UninitializedPropertyAccessException — which is NOT an IllegalArgumentException, so
++    // createTemplate's catch below never caught it, and setRootTemplate had no catch at all.
++    // Both run their body inside handler.post{}, so the throw lands UNCAUGHT on Android's
++    // main thread and kills the process: no JS fatal, no AACrashLog entry, nothing but a
++    // relaunch and the "RNCarPlay loading..." placeholder on the head unit.
++    //
++    // MEASURED, Say Phin's head unit 2026-09-09 23:40:43 UTC (his report the same evening:
++    // "This afternoon's drive was black screen on start up. Then I restarted head unit and
++    // app again."): JS instance lasvyk-243729 logged aa-crumb root-render, root-mount and
++    // template-set inside 1.9 ms and never logged again; a fresh instance took over 10 s
++    // later and ran fine for 9 minutes. He has ZERO JS fatals across 128 instances.
++    //
++    // Returning null is already a handled outcome everywhere getScreen() is used, so the
++    // race degrades to "no screen yet" instead of a process kill.
++    if (!::carContext.isInitialized) {
++      Log.w(TAG, "createScreen($templateId) before setCarContext — no car context yet")
++      AACrashLog.record(
++        reactContext,
++        "CarPlayModule.createScreen($templateId) before setCarContext",
++        IllegalStateException("carContext not initialized"),
++      )
++      return null
++    }
+     val config = carTemplates[templateId];
+     if (config != null) {
+       val screen = CarScreen(carContext)
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt
 index 73aad53..4f187ab 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt
@@ -1003,7 +1100,7 @@ index b52d6c8..530f8d3 100644
            });
          }
 diff --git a/node_modules/react-native-carplay/src/templates/Template.ts b/node_modules/react-native-carplay/src/templates/Template.ts
-index d39678f..2d29edc 100644
+index d39678f..6e2f012 100644
 --- a/node_modules/react-native-carplay/src/templates/Template.ts
 +++ b/node_modules/react-native-carplay/src/templates/Template.ts
 @@ -3,7 +3,18 @@ import { CarPlay } from '../CarPlay';
@@ -1026,7 +1123,45 @@ index d39678f..2d29edc 100644
  
  export interface BaseEvent {
    /**
-@@ -129,6 +140,14 @@ export class Template<P> {
+@@ -89,6 +100,31 @@ export class Template<P> {
+     return {};
+   }
+ 
++  /**
++   * CONVOY FIX (2026-09-09): does a SUBCLASS build this template's native screen itself?
++   *
++   * AndroidNavigationBaseTemplate's constructor calls CarPlay.bridge.createTemplate a SECOND
++   * time, with `render: true` added, right after super() has already called it once without.
++   * On Android each createTemplate runs createScreen(), which builds a BRAND NEW CarScreen and
++   * VirtualRenderer and replaces carScreens[id] — so every Android navigation template was
++   * built twice per construction, the first one thrown away unrendered.
++   *
++   * That matters because the native path is unguarded: CarPlayModule.createTemplate catches
++   * only IllegalArgumentException and setRootTemplate does its work inside handler.post{} with
++   * NO try/catch at all, so anything else thrown there is an uncaught exception on Android's
++   * main thread — process death, no JS fatal, nothing in AACrashLog (which is not wired into
++   * CarPlayModule). MEASURED on Say Phin's head unit, 2026-09-09 23:40:43 UTC: JS instance
++   * lasvyk-243729 logged aa-crumb root-render, root-mount and template-set within 1.9 ms and
++   * then never logged again; a fresh instance appeared 10 s later. He has ZERO JS fatals
++   * across 128 instances, which is what a native death looks like from here.
++   *
++   * A getter, not a field: subclass field initialisers run AFTER super()'s body, so a field
++   * would still read the base default at the moment it is consulted.
++   */
++  protected get defersNativeCreate(): boolean {
++    return false;
++  }
++
+   constructor(public config: TemplateConfig & P) {
+     if (config.id) {
+       this.id = config.id;
+@@ -124,11 +160,19 @@ export class Template<P> {
+       });
+     });
+ 
+-    if (this.type !== 'map') {
++    if (this.type !== 'map' && !this.defersNativeCreate) {
+       const callbackFn = Platform.select({
          android: ({ error }: { error?: string } = {}) => {
            error && console.error(error);
          },
@@ -1041,7 +1176,7 @@ index d39678f..2d29edc 100644
        });
        CarPlay.bridge.createTemplate(
          this.id,
-@@ -153,7 +172,15 @@ export class Template<P> {
+@@ -153,7 +197,15 @@ export class Template<P> {
          }
          if (String(i).match(/[Ii]mage$/)) {
            // eslint-disable-next-line @typescript-eslint/no-unsafe-call
@@ -1059,10 +1194,10 @@ index d39678f..2d29edc 100644
        }
      }
 diff --git a/node_modules/react-native-carplay/src/templates/android/AndroidNavigationBaseTemplate.ts b/node_modules/react-native-carplay/src/templates/android/AndroidNavigationBaseTemplate.ts
-index 5f6c067..7bef181 100644
+index 5f6c067..d6aee51 100644
 --- a/node_modules/react-native-carplay/src/templates/android/AndroidNavigationBaseTemplate.ts
 +++ b/node_modules/react-native-carplay/src/templates/android/AndroidNavigationBaseTemplate.ts
-@@ -19,6 +19,13 @@ export class AndroidNavigationBaseTemplate<
+@@ -19,11 +19,25 @@ export class AndroidNavigationBaseTemplate<
  > extends Template<T> {
    get eventMap() {
      return {
@@ -1076,3 +1211,15 @@ index 5f6c067..7bef181 100644
        didShowPanningInterface: 'onDidShowPanningInterface',
        didDismissPanningInterface: 'onDidDismissPanningInterface',
      };
+   }
+ 
++  // CONVOY FIX (2026-09-09): this class builds the native screen ITSELF, below, with
++  // `render: true`. Telling the base class to skip its own createTemplate stops every
++  // Android navigation template being built twice — see the note on Template.defersNativeCreate.
++  protected get defersNativeCreate(): boolean {
++    return true;
++  }
++
+   constructor(public config: T) {
+     super(config);
+ 

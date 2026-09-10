@@ -26,6 +26,7 @@
 // If per-trip routes ever need to follow a member across their own devices, that belongs
 // on the AUTHENTICATED custom backend, not on the anon-key database.
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { isPlausibleDrive, creditedDistanceM, ODO_MIN_TRIP_M } from "./tripOdometer";
 
 const KEY = "hairpin.trips.v1";
 // Keep the on-device history bounded — a polyline is a few kB and a heavy user could
@@ -51,6 +52,14 @@ export type Trip = {
   /** Fastest km/h seen on THIS drive — the PB the club board ranks on. */
   topSpeedKmh?: number;
 };
+
+/** One row per attempted drive record. Bounded by construction: a drive ends once. */
+function logTrip(msg: string): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require("./crashBreadcrumb").logEventReliable(msg);
+  } catch {}
+}
 
 function newId(startedAt: number, endedAt: number): string {
   // Date.now-based ids collide only if two trips end in the same millisecond, which one
@@ -90,7 +99,13 @@ async function saveTrips(list: Trip[]): Promise<void> {
  */
 export async function recordTrip(input: {
   startedAt: number;
+  /** The ROUTE's planned distance. Used only when no odometer reading is available. */
   distanceM: number;
+  /**
+   * Metres the car actually COVERED, from src/tripOdometer.ts. When present this wins:
+   * the route's planned length is what you were told to drive, not what you drove.
+   */
+  travelledM?: number;
   durationS: number;
   destLabel: string;
   polyline: string;
@@ -105,19 +120,44 @@ export async function recordTrip(input: {
   try {
     const endedAt = Date.now();
     const startedAt = Number.isFinite(input.startedAt) && input.startedAt > 0 ? input.startedAt : endedAt;
-    const distanceM = Number.isFinite(input.distanceM) && input.distanceM > 0 ? input.distanceM : 0;
+    const routeM = Number.isFinite(input.distanceM) && input.distanceM > 0 ? input.distanceM : 0;
+    // >= 0, NOT > 0 (Codex review 2026-09-09). Treating a measured ZERO as "no reading"
+    // fell straight back to the planned route distance — so a driver who plots a 5 km route,
+    // never moves, and presses End was still credited 5 km, at an average of 150 km/h that
+    // sails through the plausibility guard. That is the ORIGINAL phantom bug, surviving
+    // inside its own fix. A zero the odometer actually measured is the strongest evidence
+    // there is that no distance was covered.
+
+    // ── WHAT DISTANCE IS THIS DRIVE WORTH (2026-09-09) ──────────────────────────────────
+    // The odometer wins whenever it ran. The route's planned length is what you were TOLD
+    // to drive; it is not evidence you drove it. Four rows in Jeff's own history were the
+    // full 17.2 km of a plotted route banked ~139 s after it was plotted, top speed 0 —
+    // 445 km/h, 68.9 km he never covered, all of it on the club leaderboard. The headless
+    // route figure is used ONLY when no reading exists at all (a drive that began in another
+    // JS context), and the plausibility guard below still covers that case.
+    const { m: distanceM, src } = creditedDistanceM(routeM, input.travelledM);
+    const durationS = Number.isFinite(input.durationS) && input.durationS > 0
+      ? input.durationS
+      : Math.max(0, (endedAt - startedAt) / 1000);
     // Ignore trivial drives — a route started and cancelled in the driveway is noise in
     // both the history list and the leaderboard.
-    if (distanceM < 500) return null;
+    if (distanceM < ODO_MIN_TRIP_M) { logTrip(`trip-skip why=short m=${Math.round(distanceM)} src=${src}`); return null; }
+    // A drive nobody could physically have taken is not a drive. Deliberately generous:
+    // 200 km/h AVERAGE over the whole trip, where Jeff's real drives run 106-126 km/h.
+    if (!isPlausibleDrive(distanceM, durationS)) {
+      logTrip(`trip-skip why=implausible km=${(distanceM / 1000).toFixed(2)} dur=${Math.round(durationS)}s `
+        + `kmh=${Math.round((distanceM / 1000) / (durationS / 3600))} src=${src} routeKm=${(routeM / 1000).toFixed(2)}`);
+      return null;
+    }
+    logTrip(`trip-record km=${(distanceM / 1000).toFixed(2)} src=${src} routeKm=${(routeM / 1000).toFixed(2)} `
+      + `dur=${Math.round(durationS)}s club=${input.communityId ? 1 : 0}`);
 
     const trip: Trip = {
       id: newId(startedAt, endedAt),
       startedAt,
       endedAt,
       distanceM,
-      durationS: Number.isFinite(input.durationS) && input.durationS > 0
-        ? input.durationS
-        : Math.max(0, (endedAt - startedAt) / 1000),
+      durationS,
       destLabel: input.destLabel || "Drive",
       polyline: input.polyline || "",
       stops: input.stops?.length ? input.stops : undefined,

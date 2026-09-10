@@ -28,6 +28,7 @@ import { resetMapView2D, setMapView2D } from "./mapViewMode";
 import { getSettings, getMapMode } from "./settings";
 import { updateSpeedLimit } from "./speedLimit";
 import { recordTrip } from "./trips";
+import { feedOdo, odoNowM } from "./driveOdometer";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
 import { accentNow } from "./appSkin";
 
@@ -234,7 +235,25 @@ let _navEnding = false;
 // Best-effort PB for a cold drive: the fastest fix THIS context saw. A drive that
 // started in another context reports 0, which recordTrip already treats as "unknown".
 let _coldMaxSpeedMs = 0;
+// The SHARED odometer's reading when this cold drive began; the drive is credited the
+// delta. Shared with the phone map's foreground watcher on purpose — see src/driveOdometer.ts.
+let _coldOdoBase: number | null = null;
+/** One cold drive banks at most one trip, whether it ends by arriving or by End. */
+let _coldTripRecorded = false;
 
+/** DRIVE-scoped reset: only for a genuinely new drive, never for a geometry swap. */
+function resetColdDrive(): void {
+  _coldOdoBase = odoNowM();
+  _coldTripRecorded = false;
+}
+
+/**
+ * ARRIVAL state only. This is called on every GEOMETRY SWAP mid-drive (swapNavRoute, "a new
+ * geometry must be able to arrive again"), so anything drive-scoped that lives here is wiped
+ * every time the route changes. The odometer baseline used to be here and a rerouting drive
+ * was therefore credited only the metres since its last swap — Ni GR swapped 20+ times in one
+ * session on 2026-09-09. Drive-scoped state now lives in resetColdDrive(). (Codex review.)
+ */
 function resetColdArrival(): void {
   _coldArrived = false;
   _navEnding = false;
@@ -263,10 +282,16 @@ async function recordColdTrip(r: SlimRoute | null, polyline: string): Promise<vo
     if (u && typeof u.id === "string") { userId = u.id; handle = u.handle || undefined; }
   } catch {}
   if (!userId) return;   // signed out / unknown — recordTrip could not attribute it anyway
+  if (_coldTripRecorded) return;
+  _coldTripRecorded = true;
   let communityId: string | undefined;
   try { communityId = getSettings().activeCommunityId || undefined; } catch {}
   await recordTrip({
     startedAt: r.startedAt,
+    // What this context actually watched the car cover. 0 when the drive began in another
+    // context (a warm start that later went cold) — recordTrip falls back to the route
+    // figure there, and its plausibility guard still refuses an impossible one.
+    travelledM: _coldOdoBase == null ? undefined : Math.max(0, odoNowM() - _coldOdoBase),
     distanceM: r.totalM,
     // Elapsed wall-clock, exactly as the phone computes it — not the route's planned
     // duration, which would ignore traffic and every stop along the way.
@@ -278,6 +303,20 @@ async function recordColdTrip(r: SlimRoute | null, polyline: string): Promise<vo
     topSpeedKmh: _coldMaxSpeedMs > 0 ? _coldMaxSpeedMs * 3.6 : 0,
     userId, handle, communityId,
   });
+}
+
+/**
+ * Bank a CarPlay/Android-Auto drive that the driver ENDED rather than completed.
+ *
+ * The phone map's own End already routes through recordDriveNow, but on a STANDALONE head-unit
+ * drive the map is not mounted at all: carActions.endCarNav tore the session down and the drive
+ * vanished. Same one-record guard as arrival. (Codex review 2026-09-09.)
+ */
+export async function recordColdDriveOnEnd(): Promise<void> {
+  try {
+    if (_coldTripRecorded || !_route) return;
+    await recordColdTrip(_route, _routePolyline || "");
+  } catch {}
 }
 
 async function fireColdArrival(late: boolean): Promise<void> {
@@ -631,6 +670,14 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   const loc = locs && locs.length ? locs[locs.length - 1] : null;
   if (!loc?.coords) return;
   _lastFixAt = Date.now(); // feed the GPS stall watchdog
+  // Trip odometer for a COLD (car-started) drive. Gates live in src/tripOdometer.ts.
+  feedOdo({
+    lat: loc.coords.latitude,
+    lng: loc.coords.longitude,
+    at: typeof loc.timestamp === "number" ? loc.timestamp : Date.now(),
+    accM: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : undefined,
+    speedMs: typeof loc.coords.speed === "number" && loc.coords.speed >= 0 ? loc.coords.speed : undefined,
+  });
   // Feed the CarPlay surface too: this is the SAME background-location task the
   // car map now relies on (acquireBgLocation). Cheap no-op when CarPlay isn't up.
   const _h = loc.coords.heading;
@@ -1184,6 +1231,7 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
     _stepIdx = 0;
     _notifiedStep = -1; // -1 so the FIRST turn still announces when it's incoming
     resetColdArrival();  // a new route must be able to arrive again (also clears _navEnding)
+    resetColdDrive();    // ...and this is a NEW DRIVE, so its odometer baseline starts here
     _routeLookAt = 0;
     _progressReadAt = 0;
     _progressWritten = "";

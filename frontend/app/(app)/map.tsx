@@ -52,6 +52,7 @@ import { takeIntent, subscribeIntent } from "../../src/deepLinks";
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from "../../src/routeOptimizer";
 import { usePitstop } from "../../src/pitstop";
 import { recordTrip, consumeTakeAgain, cachePeerPbs } from "../../src/trips";
+import { feedOdo, odoNowM } from "../../src/driveOdometer";
 import PitstopCard from "../../src/components/PitstopCard";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import { setCarState, setCarPeers, subscribeCarGesture, setCarSelfPosition, getCarState, type CarState } from '../../src/carplay/carStore';
@@ -496,6 +497,24 @@ export default function MapScreen() {
   // at most once every 60s to keep battery + network use low while driving.
   const [sessionMaxSpeed, setSessionMaxSpeed] = useState(0);
   const lastTopSyncAtRef = useRef(0);
+  // ---- Trip odometer (2026-09-09) ----
+  // How far the car has ACTUALLY covered, integrated from the same location stream that
+  // feeds the PB above. Free-running since mount; a drive reads the DELTA from the metre
+  // count captured at its start, so a reroute (which re-baselines tripBaselineRef, start
+  // time and all) cannot reset it mid-drive. See src/tripOdometer.ts for why this exists:
+  // four rows in Jeff's history banked a full 17.2 km route ~139 s after it was plotted.
+  const driveOdoStartRef = useRef<number | null>(null);
+  // The TRUE start of this drive. tripBaselineRef.startedAt is deliberately reset on every
+  // reroute, so it measures the leg, not the trip — using it for duration turned a rerouted
+  // drive into a short one, which is half of how a 445 km/h average gets stored.
+  const driveStartedAtRef = useRef<number | null>(null);
+  // One drive records at most one trip, whether it ends by arriving or by pressing End.
+  const tripRecordedRef = useRef(false);
+  // The club a drive is credited to when nothing is marked active. Measured 2026-09-09:
+  // 170.6 km of Olaf's 470 km, and every one of SMSGRC's drives, carry community_id NULL
+  // and are therefore credited to nobody. talk.tsx already auto-activates clubs[0] on the
+  // Comms screen; this is the same repair applied where the drive is actually banked.
+  const myClubIdRef = useRef<string | null>(null);
   // Heading tracker — resolves a stable marker heading from GPS heading when
   // moving, or inferred travel bearing when GPS heading is missing/zero, so a
   // parked car keeps pointing its last direction of travel instead of snapping
@@ -787,6 +806,21 @@ export default function MapScreen() {
       startNav();
     }
   }, [activeRoute, navMode]);
+  // The driver's own club, fetched once, so a drive that finishes with no ACTIVE club is
+  // still credited to somebody. clubs[0] matches what talk.tsx already auto-activates on
+  // the Comms screen, so the two cannot disagree about which club "yours" means.
+  useEffect(() => {
+    if (!user?.id) return;
+    let dead = false;
+    (async () => {
+      try {
+        const { data } = await api.get("/communities/mine");
+        if (!dead && Array.isArray(data) && data[0]?.id) myClubIdRef.current = String(data[0].id);
+      } catch {}
+    })();
+    return () => { dead = true; };
+  }, [user?.id]);
+
   // Fetch the active community roster when the search opens (same pattern as
   // ShareSheet) so offline members appear greyed in the friend carousel.
   useEffect(() => {
@@ -1906,33 +1940,8 @@ export default function MapScreen() {
       // route figure is the one the driver was shown all trip. The polyline is kept ON
       // DEVICE for playback; only distance/duration/when go to the server. See
       // src/trips.ts for why that split exists.
-      try {
-        const done = activeRoute;
-        // Date.now() as the LAST resort only. It used to be the only fallback, and it
-        // makes startedAt === endedAt — a real 32 km drive recorded as 0.0 minutes
-        // (2026-07-30). getNavStartedAt() is the slim route's stamp, written by
-        // startNavBanner on every nav start on every surface, so it survives any path
-        // that missed the React baseline.
-        const startedAt = tripBaselineRef.current?.startedAt || getNavStartedAt() || Date.now();
-        if (done) {
-          void recordTrip({
-            startedAt,
-            distanceM: done.distance_m || 0,
-            durationS: Math.max(0, (Date.now() - startedAt) / 1000),
-            destLabel: destination?.label || done.summary || "Drive",
-            polyline: done.polyline || "",
-            stops: stops.length ? stops.map((st) => ({ label: st.label, lat: st.lat, lng: st.lng })) : undefined,
-            destLat: destination?.lat,
-            destLng: destination?.lng,
-            // PB for this drive. sessionMaxSpeed is the fastest km/h since the map
-            // mounted, which for a normal drive IS this trip's max.
-            topSpeedKmh: sessionMaxSpeed,
-            userId: user?.id ? String(user.id) : undefined,
-            handle: (user as any)?.handle || undefined,
-            communityId: getSettings().activeCommunityId || undefined,
-          });
-        }
-      } catch {}
+      // Banked through the ONE recorder, shared with End — see recordDriveNow below.
+      recordDriveNow("arrive");
       tripBaselineRef.current = null;
       pendingRerouteRef.current = null;
       clearOffer();
@@ -2650,6 +2659,10 @@ export default function MapScreen() {
     // Capture the trip baseline (start time + planned traffic-aware duration) so the
     // proactive-reroute check can tell if the route later runs LONGER than promised.
     tripBaselineRef.current = { startedAt: Date.now(), plannedSec: activeRoute.duration_in_traffic_s ?? activeRoute.duration_s };
+    // A NEW drive starts here (the reroute re-baselines below deliberately do not touch these).
+    driveOdoStartRef.current = odoNowM();
+    driveStartedAtRef.current = Date.now();
+    tripRecordedRef.current = false;
     // Begin guidance centred on the car (a destination pick had dropped follow to
     // frame the route options).
     clearRecenterTimer();
@@ -2684,7 +2697,53 @@ export default function MapScreen() {
     void recordDrive({ placeId: place.id, trace });
   };
 
+  // ── THE ONE PLACE A DRIVE IS BANKED (2026-09-09) ──────────────────────────────────────
+  // It used to be banked ONLY from onArrive. If a drive ended any other way — End on the
+  // phone, End on the head unit, an arrival that never fired — nothing was recorded at all.
+  // MEASURED: Ni GR (John Mungai) drove 2026-09-09 22:29 → 23:46 UTC, 77 minutes, route
+  // swaps all the way through on a 859-point route, and public.trips has NO row for it. His
+  // words in the crew chat that evening: "I was gonna be number 2 on drives … But didn't
+  // save progress". Both endings now come through here, and tripRecordedRef makes sure a
+  // drive is banked at most once however it ends.
+  const recordDriveNow = (why: "arrive" | "end") => {
+    try {
+      if (tripRecordedRef.current) return;
+      const done = activeRoute;
+      if (!done) return;
+      // driveStartedAtRef FIRST: tripBaselineRef.startedAt is reset on every reroute, so it
+      // measures the current leg, not the drive. getNavStartedAt() is the cross-surface stamp.
+      const startedAt = driveStartedAtRef.current || getNavStartedAt()
+        || tripBaselineRef.current?.startedAt || Date.now();
+      const base = driveOdoStartRef.current;
+      const travelledM = base == null ? undefined : Math.max(0, odoNowM() - base);
+      tripRecordedRef.current = true;
+      void recordTrip({
+        startedAt,
+        distanceM: done.distance_m || 0,
+        travelledM,
+        durationS: Math.max(0, (Date.now() - startedAt) / 1000),
+        destLabel: destination?.label || done.summary || (why === "end" ? "Drive" : "Drive"),
+        polyline: done.polyline || "",
+        stops: stops.length ? stops.map((st) => ({ label: st.label, lat: st.lat, lng: st.lng })) : undefined,
+        destLat: destination?.lat,
+        destLng: destination?.lng,
+        // PB for this drive. sessionMaxSpeed is the fastest km/h since the map
+        // mounted, which for a normal drive IS this trip's max.
+        topSpeedKmh: sessionMaxSpeed,
+        userId: user?.id ? String(user.id) : undefined,
+        handle: (user as any)?.handle || undefined,
+        // Fall back to the driver's club when none is marked active, so the drive is credited
+        // to somebody instead of to nobody. Read-only: it never writes activeCommunityId,
+        // because turning a club off is a choice the driver made.
+        communityId: getSettings().activeCommunityId || myClubIdRef.current || undefined,
+      });
+    } catch {}
+  };
+
   const endNav = () => {
+    // Bank the drive BEFORE the teardown drops activeRoute — an End is a finished drive,
+    // not a discarded one.
+    recordDriveNow("end");
     // A 2D choice lasts exactly as long as the drive did — Jeff: "it sticks till route
     // ends or manually pushed button again."
     resetMapView2D();
@@ -2715,8 +2774,15 @@ export default function MapScreen() {
   // pressing End cleared the car store and the next mirror tick put it straight back.
   // The car has no "preview" concept, so End from the car clears the destination and
   // the selected route as well — the same trio the phone's own Clear button uses.
+  // endNavFromCar is deliberately memoized with an EMPTY dep array (it is handed to
+  // useConvoyCarPlay), which froze `endNav` — and therefore recordDriveNow — as they were on
+  // the FIRST render, when activeRoute is null. So End on the head unit reached a recorder
+  // that could only ever see a null route and returned without saving. It has to call the
+  // CURRENT one through a ref. (Codex review 2026-09-09.)
+  const endNavRef = useRef(endNav);
+  endNavRef.current = endNav;
   const endNavFromCar = useCallback(() => {
-    endNav();
+    endNavRef.current();
     // Visited keys are DRIVE-scoped: ending the drive un-visits everything so a
     // re-Go through the same chips routes the full plan again (review, 2026-08-27).
     visitedStopsRef.current = new Set();
@@ -2922,6 +2988,9 @@ export default function MapScreen() {
       // the `> 0` guard on the running-late check, because a 0 plan would read as
       // infinitely late and fire reroute offers all drive.
       tripBaselineRef.current = { startedAt: startedAt || Date.now(), plannedSec: 0 };
+      driveOdoStartRef.current = odoNowM();
+      driveStartedAtRef.current = startedAt || Date.now();
+      tripRecordedRef.current = false;
       setNavMode("turn-by-turn");
     };
     const un = onCarNavStarted(({ dest }) => adopt(dest));
@@ -3523,6 +3592,15 @@ export default function MapScreen() {
               }
             }
             const kmh = speed * 3.6;
+            // Trip odometer — the gates that decide what counts live in src/tripOdometer.ts,
+            // deliberately NOT here, so tools/sim-qc/trip_odometer_test.mts can drive them.
+            feedOdo({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              at: Date.now(),
+              accM: typeof pos.coords.accuracy === "number" ? pos.coords.accuracy : undefined,
+              speedMs: speed,
+            });
             // Personal-best tracking (in-memory): ignore stationary jitter (<1 km/h).
             // The throttled PUT to /auth/profile is handled by the existing
             // `useEffect([sessionMaxSpeed, ...])` block below — no duplicate post here.

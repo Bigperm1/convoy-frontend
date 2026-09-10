@@ -548,6 +548,14 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
       // Maneuver glyph for the car banner's arrow box — same derivation as the
       // phone mirror (maneuverDir over the instruction + Mapbox maneuver key).
       maneuverIcon: maneuverDir(carInstruction, arriving ? steps[steps.length - 1]?.maneuver : upNext.maneuver),
+      // NavStep.maneuver is ALREADY the joined Mapbox key ("turn|left") — built once by
+      // mapboxManeuverKey() when the route is parsed (nav.ts, `verbKey`) and stored as a
+      // plain string ever since (nav.ts NavStep.maneuver: `string | undefined`), which is
+      // exactly what the line above passes into maneuverDir(). Re-wrapping it in
+      // mapboxManeuverKey(m.type, m.modifier) here does not typecheck (`m` is a string,
+      // not `{type,modifier}`) and would be wrong even if it did — the value is already
+      // the key. Use it directly, same source as maneuverIcon, same owner.
+      maneuverKey: (arriving ? steps[steps.length - 1]?.maneuver : upNext.maneuver) ?? "",
       ...(paced
         ? {
             eta: fmtEtaSec(etaS),
@@ -1357,7 +1365,7 @@ async function stopNavBannerInner(): Promise<void> {
   //    calls it, and so does the cold-arrival path where map.tsx is unmounted and its
   //    mirror effect cannot run at all. Without it, ending a drive from the head unit's
   //    own End button left pins floating with no route line under them.
-  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0, routeProgress: 0, maneuverIcon: undefined, routeCoordinates: undefined, routeCongestion: undefined, waypoints: [] });
+  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0, routeProgress: 0, maneuverIcon: undefined, maneuverKey: "", routeCoordinates: undefined, routeCongestion: undefined, waypoints: [] });
   // Release our hold; the shared task keeps running if CarPlay still needs it.
   await releaseBgLocation("nav");
   try { await Notifications.dismissNotificationAsync(NAV_NOTIF_ID); } catch {}

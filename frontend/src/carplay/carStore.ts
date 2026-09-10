@@ -223,6 +223,10 @@ export type CarState = {
   // Glyph (unicode arrow) for the upcoming maneuver, shown in the car banner's green
   // arrow box (mirrors the phone's maneuver icon). undefined when not navigating.
   maneuverIcon?: string;
+  // Mapbox maneuver key ("turn|left") of the same upcoming maneuver — the wrist-tap side
+  // (src/watchTaps.ts tapSideFor). Written by the SAME owner as maneuverIcon, inside the
+  // nav-strip gate, so the watch can never tap for a different turn than the car shows.
+  maneuverKey?: string;
   // (The `lanes` field was removed 2026-08-13 with the lane row on every surface.)
   // On-screen diagnostic breadcrumb for the CarPlay surface (which feed last wrote a
   // position, or which call failed). Shown in the logo fallback so the head-unit screen

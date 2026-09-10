@@ -12,18 +12,25 @@ let WATCH_STALE_MS: Double = 30_000         // mirrors src/watchFeed.ts WATCH_ST
 final class WatchStore: ObservableObject {
   @Published var payload: WatchPayload? = WatchStore.load()
   @Published var linkOk = false
+  @Published var lastError: String? = nil   // set on a decode failure in apply(json:); cleared on the next success. load()'s cold-launch miss is NOT an error.
 
   static func load() -> WatchPayload? {
     guard let raw = UserDefaults.standard.string(forKey: WATCH_STATE_KEY), let d = raw.data(using: .utf8) else { return nil }
     return try? JSONDecoder().decode(WatchPayload.self, from: d)
   }
 
-  func apply(json: String) {
-    guard let d = json.data(using: .utf8), let p = try? JSONDecoder().decode(WatchPayload.self, from: d) else { return }
+  @discardableResult
+  func apply(json: String) -> Bool {
+    guard let d = json.data(using: .utf8), let p = try? JSONDecoder().decode(WatchPayload.self, from: d) else {
+      lastError = "decode"   // leave payload untouched — do not clobber the last-known-good state on a bad message
+      return false
+    }
+    lastError = nil
     let crewChanged = p.crew.live != (payload?.crew.live ?? -1)
     payload = p
     UserDefaults.standard.set(json, forKey: WATCH_STATE_KEY)
     if crewChanged { WidgetCenter.shared.reloadAllTimelines() }
+    return true
   }
 
   var isStale: Bool {

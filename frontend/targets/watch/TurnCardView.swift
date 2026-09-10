@@ -17,6 +17,9 @@ struct TurnCardView: View {
         Text("No drive").font(.headline)
         Text("\(store.payload?.crew.live ?? 0) crew live").font(.caption2).foregroundStyle(.secondary)
       }
+      if store.lastError != nil {
+        Text("Phone data unreadable").font(.caption2).foregroundStyle(.red)
+      }
     }
     .padding(.horizontal, 6)
   }

@@ -18,12 +18,12 @@ final class WatchSession: NSObject, WCSessionDelegate {
   func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
     DispatchQueue.main.async { self.store.linkOk = activationState == .activated }
     if let json = session.receivedApplicationContext["json"] as? String {
-      DispatchQueue.main.async { self.store.apply(json: json) }
+      applyAndReportFailure(json: json)
     }
   }
 
   func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
-    if let json = applicationContext["json"] as? String { DispatchQueue.main.async { self.store.apply(json: json) } }
+    if let json = applicationContext["json"] as? String { applyAndReportFailure(json: json) }
   }
 
   func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
@@ -33,7 +33,18 @@ final class WatchSession: NSObject, WCSessionDelegate {
       let side = (obj["side"] as? String) ?? "generic"
       play(tap: tap, side: side)
     } else {
-      DispatchQueue.main.async { self.store.apply(json: json) }
+      applyAndReportFailure(json: json)
+    }
+  }
+
+  // Applies on main (WatchStore's @Published writes expect it) and, on a decode failure,
+  // tells the phone so it isn't silently stuck showing stale/no data.
+  private func applyAndReportFailure(json: String) {
+    DispatchQueue.main.async {
+      let ok = self.store.apply(json: json)
+      if !ok, WCSession.default.isReachable {
+        WCSession.default.sendMessage(["json": "{\"err\":\"decode\"}"], replyHandler: nil, errorHandler: nil)
+      }
     }
   }
 
@@ -44,7 +55,7 @@ final class WatchSession: NSObject, WCSessionDelegate {
     case "right": type = .navigationRightTurn
     default: type = .navigationGenericManeuver
     }
-    WKInterfaceDevice.current().play(type)
+    DispatchQueue.main.async { WKInterfaceDevice.current().play(type) }
     if tap == "now" {   // the at-the-turn tap is doubled so it reads differently from the heads-up
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { WKInterfaceDevice.current().play(type) }
     }

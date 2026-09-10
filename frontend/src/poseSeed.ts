@@ -8,7 +8,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { logEventReliable } from "./crashBreadcrumb";
 
-const KEY = "convoy.poseYawSign.v1";
+// v2 (2026-09-10): the cumulative yaw's sign convention changed when the feed moved from rate·ĝ
+// (ĝ down ⇒ counter-clockwise negative) to the fused attitude (counter-clockwise positive). A v1
+// sign applied to the new feed would turn the predicted heading the WRONG way until four opposing
+// corners re-learned it (Codex 4th pass) — so v1 is simply never read again.
+const KEY = "convoy.poseYawSign.v2";
 let _cached: 1 | -1 | null = null;
 let _loaded = false;
 let _loading: Promise<void> | null = null;

@@ -21,7 +21,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "../drawTelemetry";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState } from "../poseEstimator";
-import { startYawRate, stopYawRate, getYawRateDps, getYawIntegralDeg } from "../yawRate";
+import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "../yawRate";
 import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "../poseSeed";
 import { noteFixAccepted } from "../heatProbe";
 import { Platform, StyleSheet, Image as RNImage, AppState } from 'react-native';
@@ -1868,7 +1868,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // by its accuracy and age, the route as a lateral WEIGHT that fades as the car turns. Only during
   // guidance — free drive keeps drawing the raw fix, exactly as before.
   const _nowMs = Date.now();
-  const _yawNow = s.navigating ? getYawRateDps() : null;
+  // The sensor's CUMULATIVE yaw (fused attitude); the estimator differences it per tick — never a rate sample (2026-09-10 wag).
+  const _yawNow = s.navigating ? getYawIntegral() : null;
   const _fixTs = typeof s.selfFixTs === 'number' && Number.isFinite(s.selfFixTs) ? s.selfFixTs : 0;
   let _poseFixLanded = false;
   if (s.navigating) {
@@ -1885,7 +1886,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       if (ps.yawSign !== 0) noteLearnedYawSign(ps.yawSign);
       _poseFixLanded = true;
     }
-    ps = poseRoute(ps, routeProj ? { lat: routeProj.lat, lng: routeProj.lng, bearing: routeProj.bearing, distM: routeProj.distM } : null, _yawNow != null ? Math.abs(_yawNow) : null, _dtS);
+    ps = poseRoute(ps, routeProj ? { lat: routeProj.lat, lng: routeProj.lng, bearing: routeProj.bearing, distM: routeProj.distM } : null, ps.src === "gyro" ? Math.abs(ps.yawDpsLast) : null, _dtS);
     poseRef.current = ps;
   } else if (poseRef.current.hasFix) {
     poseRef.current = poseStart();   // a drive ended: the next one starts clean
@@ -1911,11 +1912,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const drawHdg = est && poseRef.current.hdgKnown ? est.hdg : oldDrawHdg;
   const _dOld = est ? poseHaversineM(oldDrawLat, oldDrawLng, est.lat, est.lng) : null;
   if (_poseFixLanded && est) {
-    const _turning = (_yawNow != null && Math.abs(_yawNow) > 8) || Math.abs(poseRef.current.gpsTurnDps) > 8;
+    const _turning = Math.abs(poseRef.current.yawDpsLast) > 8 || Math.abs(poseRef.current.gpsTurnDps) > 8;
     if (_turning) {
       reportPoseFix('car', !!s.navigating, {
         fixAge: _nowMs - _fixTs, acc: s.selfAccM ?? null, course: typeof s.selfCourse === 'number' ? s.selfCourse : null, spd: s.speedMs || 0,
-        estHdg: est.hdg, yaw: _yawNow, src: est.src, drawnVsFixM: poseHaversineM(est.lat, est.lng, lat, lng),
+        estHdg: est.hdg, yaw: poseRef.current.yawDpsLast, src: est.src, ys: yawRateStats().src, mdiff: getYawSourceDiffDeg(), pitch: yawRateStats().pitchDeg, lock: yawRateStats().locked, drawnVsFixM: poseHaversineM(est.lat, est.lng, lat, lng),
         distM: routeProj ? routeProj.distM : null, routeW: est.routeW, dOld: _dOld,
       });
     }
@@ -1939,7 +1940,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       hd: _hd, latch: _latchIn, gate: _gateWhy,
       rate: carCornerStRef.current.rate, age: carCornerStRef.current.lastAt ? _nowMs - carCornerStRef.current.lastAt : null,
       fixAge: _fixTs ? _nowMs - _fixTs : null,
-      est: est ? { lat: est.lat, lng: est.lng, hdg: est.hdg, src: est.src, routeW: est.routeW, yaw: _yawNow, dOld: _dOld } : null,
+      est: est ? { lat: est.lat, lng: est.lng, hdg: est.hdg, src: est.src, routeW: est.routeW, yaw: poseRef.current.yawDpsLast, dOld: _dOld } : null,
     },
   );
   // Live copy for the compass's IMMEDIATE camera push (the gesture closure is frozen).

@@ -64,6 +64,9 @@ export type PoseState = {
   pendLat: number; pendLng: number;   // fix correction still to be applied, eased out by posePredict (degrees)
   rawLat: number; rawLng: number; rawAt: number;   // the previous RAW fix, accepted or not
   yawCumAtCourse: number | null;   // the sensor's cumulative yaw when the last course was ADOPTED
+  yawCumPrev: number | null;       // the sensor's cumulative yaw last consumed (delta source)
+  yawCumPrevAt: number;            // …and the SENSOR time it was measured at (the clamp's clock)
+  yawDpsLast: number;              // sensor-frame rate of the last consumed delta (receipts, route weight)
   src: "gyro" | "gps" | "hold" | "none";
   fixes: number; rejected: number; maxStepM: number;
 };
@@ -71,6 +74,10 @@ export type PoseState = {
 // ── constants (each one is a physical statement, not a tuned edge) ──────────────────────────
 /** Below this the car is not moving: heading holds, position holds, GPS course is noise. */
 export const POSE_MOVING_MS = 1.0;
+/** A yaw delta faster than this over its SENSOR interval is not a car turning (a wrapped sample, a sensor restart): dropped. */
+export const POSE_YAW_MAX_DPS = 90;
+/** Sensor-timestamped cumulative yaw, as src/yawRate.ts getYawIntegral() hands it in. */
+export type PoseYaw = { cumDeg: number; atMs: number };
 /** GPS course is trustworthy enough to correct heading above this (≈11 km/h). */
 export const POSE_COURSE_MIN_MS = 3.0;
 /** Dead reckoning without a fix stops here; beyond it the estimate waits for GPS. */
@@ -155,7 +162,7 @@ export function poseStart(): PoseState {
   return {
     lat: NaN, lng: NaN, hdg: 0, spd: 0, tAt: 0, fixAt: 0, hasFix: false, hdgKnown: false, drM: 0,
     yawBias: 0, yawSign: 0, yawAgree: 0, lastCourse: null, lastCourseAt: 0, gpsTurnDps: 0,
-    routeW: 0, errPrev: null, errPrevAt: 0, pendLat: 0, pendLng: 0, rawLat: NaN, rawLng: NaN, rawAt: 0, yawCumAtCourse: null, src: "none", fixes: 0, rejected: 0, maxStepM: 0,
+    routeW: 0, errPrev: null, errPrevAt: 0, pendLat: 0, pendLng: 0, rawLat: NaN, rawLng: NaN, rawAt: 0, yawCumAtCourse: null, yawCumPrev: null, yawCumPrevAt: 0, yawDpsLast: 0, src: "none", fixes: 0, rejected: 0, maxStepM: 0,
   };
 }
 
@@ -163,14 +170,49 @@ export function poseStart(): PoseState {
  * Advance the estimate to `nowMs`. `yawDps` is the sensor yaw rate about gravity (any sign
  * convention — the sign is learned from the course), null when there is no sensor sample.
  */
-export function posePredict(st: PoseState, nowMs: number, yawDps: number | null | undefined): PoseState {
-  if (!st.hasFix) return { ...st, tAt: nowMs };
+/**
+ * `yawCumDeg` is the sensor's CUMULATIVE yaw about the vertical (src/yawRate.ts getYawIntegralDeg),
+ * or null. The estimator differences it against its own `yawCumPrev` — it never integrates a
+ * rate sample: a sample once per render frame aliased the mount vibration into a random walk
+ * (2026-09-10 drive, ±33°/s on a straight highway, heading 31° off in the city corners).
+ */
+export function posePredict(st: PoseState, nowMs: number, yaw: PoseYaw | null | undefined): PoseState {
+  // A fresh, timestamped cumulative yaw — or nothing. A stale/absent sensor is "no gyro" (null),
+  // never a healthy gyro reporting zero turn (Codex 2026-09-10).
+  const cumOk = !!yaw && Number.isFinite(yaw.cumDeg) && Number.isFinite(yaw.atMs);
+  const yawCumPrev = cumOk ? yaw!.cumDeg : null;
+  const yawCumPrevAt = cumOk ? yaw!.atMs : 0;
+  if (!st.hasFix) return { ...st, tAt: nowMs, yawCumPrev, yawCumPrevAt, yawDpsLast: 0 };
   const rawDt = st.tAt > 0 ? (nowMs - st.tAt) / 1000 : 0;
-  if (!(rawDt > 0)) return { ...st, tAt: nowMs };
+  if (!(rawDt > 0)) return { ...st, tAt: nowMs, yawCumPrev, yawCumPrevAt, yawDpsLast: st.yawDpsLast };
   const dt = Math.min(rawDt, POSE_MAX_DT_S);
+  // The yaw the sensor accumulated since the value last consumed, judged over the SENSOR interval:
+  // renders are irregular (two can land 2 ms apart around one 50 ms sample), so the render dt is
+  // the wrong clock for plausibility. A delta with no new sample is zero and keeps the last rate.
+  let yawDelta: number | null = null;
+  let yawDpsLast = st.yawDpsLast;
+  let sensorDt = 0;
+  if (cumOk && st.yawCumPrev != null) {
+    sensorDt = (yaw!.atMs - st.yawCumPrevAt) / 1000;
+    const d = yaw!.cumDeg - st.yawCumPrev;
+    if (sensorDt <= 0) {
+      yawDelta = 0;                                        // no new sample yet this render
+    } else if (Math.abs(d) <= POSE_YAW_MAX_DPS * sensorDt) {
+      yawDelta = d; yawDpsLast = d / sensorDt;
+    } else {
+      yawDelta = 0; yawDpsLast = 0;                        // a wrap or a restart, not a turn: dropped
+    }
+  } else if (!cumOk) {
+    yawDpsLast = 0;
+  }
   if (rawDt > POSE_MAX_DT_S) {
-    // A gap: nothing was observed, so nothing is integrated. The next fix re-anchors.
-    return { ...st, tAt: nowMs, src: "hold" };
+    // A render gap (a JS stall): NO dead reckoning — but the sensor kept integrating through it,
+    // and its delta is fresh and sensor-timestamped, so the HEADING still turns (refuter 2026-09-10:
+    // dropping it lost 12° across a 2 s stall inside a corner). The next fix re-anchors position.
+    const hdg = yawDelta != null && st.yawSign !== 0 && st.hdgKnown
+      ? norm360(st.hdg + yawDelta * st.yawSign - st.yawBias * Math.min(sensorDt, POSE_MAX_DT_S))
+      : st.hdg;
+    return { ...st, hdg, tAt: nowMs, src: "hold", yawCumPrev, yawCumPrevAt, yawDpsLast: 0 };
   }
   // Speed is the estimator's ACCEPTED speed. It used to accept a caller-supplied speed, and both
   // surfaces handed in the store's latest raw speed — which poseFix would then refuse as stale a
@@ -178,7 +220,7 @@ export function posePredict(st: PoseState, nowMs: number, yawDps: number | null 
   const spd = st.spd;
   let hdg = st.hdg;
   let src: PoseState["src"] = "hold";
-  const gyroOk = typeof yawDps === "number" && Number.isFinite(yawDps) && st.yawSign !== 0;
+  const gyroOk = yawDelta != null && st.yawSign !== 0;
   if (!st.hdgKnown) {
     // No heading yet: nothing to integrate and no direction to dead-reckon along — but the queued
     // GPS corrections MUST still land (Codex 2nd pass: an early return here froze the marker at the
@@ -189,11 +231,11 @@ export function posePredict(st: PoseState, nowMs: number, yawDps: number | null 
       lat += pendLat * k; lng += pendLng * k; pendLat *= 1 - k; pendLng *= 1 - k;
       if (Math.abs(pendLat) < 1e-9 && Math.abs(pendLng) < 1e-9) { pendLat = 0; pendLng = 0; }
     }
-    return { ...st, lat, lng, pendLat, pendLng, tAt: nowMs, src: "hold" };
+    return { ...st, lat, lng, pendLat, pendLng, tAt: nowMs, src: "hold", yawCumPrev, yawCumPrevAt, yawDpsLast };
   }
   if (spd >= POSE_MOVING_MS) {
     if (gyroOk) {
-      hdg = norm360(hdg + (yawDps! * st.yawSign - st.yawBias) * dt);
+      hdg = norm360(hdg + yawDelta! * st.yawSign - st.yawBias * dt);
       src = "gyro";
     } else if (st.lastCourse != null && nowMs - st.lastCourseAt <= POSE_GPS_TURN_HOLD_MS && st.gpsTurnDps !== 0) {
       hdg = norm360(hdg + st.gpsTurnDps * POSE_GPS_TURN_GAIN * dt);
@@ -217,7 +259,7 @@ export function posePredict(st: PoseState, nowMs: number, yawDps: number | null 
     pendLat *= 1 - k; pendLng *= 1 - k;
     if (Math.abs(pendLat) < 1e-9 && Math.abs(pendLng) < 1e-9) { pendLat = 0; pendLng = 0; }
   }
-  return { ...st, lat, lng, hdg, tAt: nowMs, drM, pendLat, pendLng, src };
+  return { ...st, lat, lng, hdg, yawCumPrev, yawCumPrevAt, yawDpsLast, tAt: nowMs, drM, pendLat, pendLng, src };
 }
 
 /** Fold a GPS fix in. Rejects out-of-order fixes; down-weights vague, stale and impossible ones. */
@@ -378,7 +420,7 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
   return { ...st, lat, lng, routeW };
 }
 
-export function poseOut(st: PoseState): { lat: number; lng: number; hdg: number; src: PoseState["src"]; routeW: number } | null {
+export function poseOut(st: PoseState): { lat: number; lng: number; hdg: number; src: PoseState["src"]; routeW: number; yawDps: number } | null {
   if (!st.hasFix || !Number.isFinite(st.lat) || !Number.isFinite(st.lng)) return null;
-  return { lat: st.lat, lng: st.lng, hdg: norm360(st.hdg), src: st.src, routeW: st.routeW };
+  return { lat: st.lat, lng: st.lng, hdg: norm360(st.hdg), src: st.src, routeW: st.routeW, yawDps: st.yawDpsLast };
 }

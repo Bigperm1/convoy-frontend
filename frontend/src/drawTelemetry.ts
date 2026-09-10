@@ -143,23 +143,37 @@ function hdgExtra(hdg: HdgReceipt | null | undefined): string {
 // ── POSE-FIX ROW (2026-09-09): one row per accepted fix INSIDE A TURN (or the last 500 m), bounded ──
 // This is the receipt the corner diagnosis never had: the fix's age and accuracy, the course, the
 // estimator's heading and yaw source, drawn-vs-fix, the projection distance and the route weight.
-const POSE_ROWS_MAX = 40;
+// 2026-09-10: 40 rows per DRIVE was spent by the departure corners (all 80 gone by 09:02 on a
+// 25-minute drive), leaving the exit roundabout and the arrival with no rows at all. A sliding
+// window keeps the receipts where the corners are: ≤ 12 rows per minute, ≤ 400 per drive.
+const POSE_ROWS_PER_MIN = 12;
+const POSE_ROWS_MAX = 400;
 let _poseRows = 0;
+let _poseRowTimes: number[] = [];
 /** Called by both surfaces when guidance STARTS, so every drive gets a fresh budget. (Codex review
  *  2026-09-09: the budget used to reset only on a navActive false->true seen by reportPoseFix itself,
  *  which the callers never delivered — after 40 rows no later drive in the session logged anything.) */
-export function resetPoseFixBudget(): void { _poseRows = 0; }
+export function resetPoseFixBudget(): void { _poseRows = 0; _poseRowTimes = []; }
 export function reportPoseFix(surface: "phone" | "car", navActive: boolean, f: {
   fixAge: number; acc: number | null; course: number | null; spd: number;
   estHdg: number; yaw: number | null; src: string; drawnVsFixM: number; distM: number | null; routeW: number; dOld?: number | null;
+  // 2026-09-10 receipts for the two open HYPOTHESES: ys = which sensor feed carried the yaw
+  // (att = fused attitude, rate = gyro fallback), mdiff = fused-minus-gyro cumulative degrees (its
+  // change between rows is the magnetic slew), pitch = mount angle (±90 = upright, the Euler-yaw singularity).
+  ys?: string | null; mdiff?: number | null; pitch?: number | null; lock?: boolean;
 }): void {
   try {
     if (!navActive || _poseRows >= POSE_ROWS_MAX) return;
+    const now = Date.now();
+    while (_poseRowTimes.length && now - _poseRowTimes[0] > 60_000) _poseRowTimes.shift();
+    if (_poseRowTimes.length >= POSE_ROWS_PER_MIN) return;
+    _poseRowTimes.push(now);
     _poseRows += 1;
     logEvent(
       `pose-fix surf=${surface} fixAge=${Math.round(f.fixAge)} acc=${f.acc == null ? "?" : f.acc.toFixed(0)} course=${fmtDeg(f.course)} spd=${(f.spd * 3.6).toFixed(0)} ` +
       `estHdg=${fmtDeg(f.estHdg)} yaw=${f.yaw == null ? "?" : f.yaw.toFixed(1)} src=${f.src} dFix=${f.drawnVsFixM.toFixed(1)} ` +
-      `distM=${f.distM == null ? "?" : f.distM.toFixed(1)} rw=${f.routeW.toFixed(2)}${typeof f.dOld === "number" && isFinite(f.dOld) ? ` dOld=${f.dOld.toFixed(1)}` : ""}`,
+      `distM=${f.distM == null ? "?" : f.distM.toFixed(1)} rw=${f.routeW.toFixed(2)}${typeof f.dOld === "number" && isFinite(f.dOld) ? ` dOld=${f.dOld.toFixed(1)}` : ""}` +
+      ` ys=${f.ys ?? "?"}${typeof f.mdiff === "number" && isFinite(f.mdiff) ? ` mdiff=${f.mdiff.toFixed(1)}` : ""}${typeof f.pitch === "number" && isFinite(f.pitch) ? ` pitch=${f.pitch.toFixed(0)}` : ""}${f.lock ? " lock=1" : ""}`,
     );
   } catch {}
 }

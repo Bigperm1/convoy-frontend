@@ -5,7 +5,7 @@
 // 2026-09-09 00:56:48–53 UTC — the corner that produced d = 15.9 / 10.8 / 14.8 m on three drives.
 // Field shapes only: one or two fixes per corner, exactly what the road produces.
 import {
-  poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM, bearingDeg, stepLatLng, wrap180,
+  poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, POSE_YAW_MAX_DPS, haversineM, bearingDeg, stepLatLng, wrap180, norm360,
   POSE_DR_MAX_M, POSE_ROUTE_MAX_M,
 } from "../../src/poseEstimator.ts";
 
@@ -76,7 +76,8 @@ function run(truth: Truth[], opts: { gyro: boolean; noiseM: number; route: boole
       yaw = (rate + rnd() + (opts.biasDps ?? 0)) * (opts.yawSign ?? 1);
       yawSince += yaw * dt;
     }
-    st = posePredict(st, now, yaw);
+    // The estimator takes the sensor's CUMULATIVE yaw (fused attitude), never a rate sample.
+    st = posePredict(st, now, opts.gyro && i > 0 ? { cumDeg: yawSince, atMs: now } : null);
     if (tr.t - lastFixT >= 1 / fixHz - 1e-9) {
       const noisyLat = tr.lat + (rnd() * 2 * opts.noiseM) / 111320;
       const noisyLng = tr.lng + (rnd() * 2 * opts.noiseM) / (111320 * Math.cos(tr.lat * Math.PI / 180));
@@ -169,7 +170,7 @@ const secondExit = (() => { const a = (Math.PI / 2) * 10; return Math.floor((2 *
   st = poseFix(st, { lat: 49.03, lng: -122.29, at: T0, accM: 8, speedMs: 0, courseDeg: null });
   let maxD = 0;
   for (let i = 1; i <= 120; i++) {
-    st = posePredict(st, T0 + i * 250, 0.3 * rnd());
+    st = posePredict(st, T0 + i * 250, { cumDeg: 0.3 * rnd(), atMs: T0 + i * 250 });
     if (i % 4 === 0) st = poseFix(st, { lat: 49.03 + rnd() * 6 / 111320, lng: -122.29 + rnd() * 6 / 73000, at: T0 + i * 250, accM: 10, speedMs: 0, courseDeg: null });
     const o = poseOut(st)!; maxD = Math.max(maxD, haversineM(o.lat, o.lng, 49.03, -122.29));
   }
@@ -277,11 +278,11 @@ const KING = [
 {
   let st = poseStart(); const T0 = 1_700_000_000_000; st = poseSeedYawSign(st, 1);
   st = poseFix(st, { lat: 49.03, lng: -122.29, at: T0, accM: 8, speedMs: 20, courseDeg: 90 });
-  for (let i = 1; i <= 10; i++) st = posePredict(st, T0 + i * 100, 0);   // the second between fixes, as on the road
+  for (let i = 1; i <= 10; i++) st = posePredict(st, T0 + i * 100, { cumDeg: 0, atMs: T0 + i * 100 });   // the second between fixes, as on the road
   st = poseFix(st, { lat: 49.03, lng: -122.29 + 20 / 73000, at: T0 + 1000, accM: 8, speedMs: 20, courseDeg: 90 });
   const proj = { lat: 49.03, lng: -122.29 + 20 / 73000, bearing: 90, distM: 0 };   // held: the last fix's projection
   let minLng = Infinity, maxLng = -Infinity;
-  for (let i = 1; i <= 100; i++) { st = posePredict(st, T0 + 1000 + i * 100, 0); st = poseRoute(st, proj, 0, 0.1); const o = poseOut(st)!; minLng = Math.min(minLng, o.lng); maxLng = Math.max(maxLng, o.lng); }
+  for (let i = 1; i <= 100; i++) { st = posePredict(st, T0 + 1000 + i * 100, { cumDeg: 0, atMs: T0 + 1000 + i * 100 }); st = poseRoute(st, proj, 0, 0.1); const o = poseOut(st)!; minLng = Math.min(minLng, o.lng); maxLng = Math.max(maxLng, o.lng); }
   const o = poseOut(st)!;
   ok("L1 after 10 s without a fix the car sits at the DR cap ahead, not dragged back", haversineM(o.lat, o.lng, proj.lat, proj.lng) > POSE_DR_MAX_M - 2, `${haversineM(o.lat, o.lng, proj.lat, proj.lng).toFixed(1)} m ahead`);
   ok("L2 it never moved backward", maxLng === o.lng, "");
@@ -390,11 +391,108 @@ const KING = [
     const now = T0 + i * 1000;
     if (i > 0) { hdg = (hdg - 20 + 360) % 360; cum += 20; const p = stepLatLng(lat, lng, hdg, 5); lat = p.lat; lng = p.lng; }
     const f = { lat, lng, at: now, accM: 8, speedMs: 5, courseDeg: hdg };
-    a = posePredict(a, now, 20); b = posePredict(b, now, 20);
+    a = posePredict(a, now, { cumDeg: cum, atMs: now }); b = posePredict(b, now, { cumDeg: cum, atMs: now });
     a = poseFix(a, f, cum); b = poseFix(b, f, cum);    // the SAME cumulative integral, both readers
   }
   ok("T1 the first estimator learned the sign", a.yawSign !== 0, `a=${a.yawSign}`);
   ok("T2 the second estimator learned the same sign (not starved by the first)", b.yawSign === a.yawSign && b.yawSign !== 0, `b=${b.yawSign}`);
+}
+
+// ── U. MOUNT VIBRATION (Jeff's 2026-09-10 drive: "pointing left and right the whole time") ──────
+// A straight highway at 100 km/h, 1 Hz fixes ±3 m, render ticks at 12 Hz. The phone in its mount
+// oscillates about the vertical at 37 Hz, ±0.15° — a bounded wobble (peak rate ±35°/s, the field's
+// ±33°/s samples) whose true integral is ~0.
+// (a) the FUSED attitude sees the bounded wobble: the cumulative yaw handed in is the true integral
+//     plus that oscillation → the heading must stay within 4° of the course.
+// (b) NEGATIVE CONTROL — what shipped in OTA-AK: one instantaneous rate sample per render frame,
+//     integrated as rate×dt. Sampling a 37 Hz oscillation at 12 Hz aliases it into a random walk;
+//     the field rows showed ±33°/s samples and a heading 12–31° off. Built as a cumulative value
+//     the OLD way and fed through the SAME posePredict — the error must be large, or the gate is
+//     not testing the defect.
+{
+  const spd = 28, T0 = 1_700_000_000_000, TICK = 1000 / 12, DUR_S = 40;
+  const AMP = 0.15;
+  const wobbleDeg = (tS: number) => AMP * Math.sin(2 * Math.PI * 37 * tS);
+  const wobbleRate = (tS: number) => AMP * 2 * Math.PI * 37 * Math.cos(2 * Math.PI * 37 * tS);   // °/s, peak ±35 — what the field rows showed
+  // Render ticks JITTER ±15 ms (a refuter showed the exact 37/12 beat flatters neither side: with
+  // jitter the old feed is worse at every frequency and the fused feed stays ≤ 0.4°).
+  const runStraight = (feed: (tS: number, dtS: number, prevCum: number) => number) => {
+    let st = poseSeedYawSign(poseStart(), 1);
+    const hdg = 90;
+    let cum = 0, maxErr = 0, nextFix = 0, prevT = 0;
+    for (let k = 0; k * TICK <= DUR_S * 1000; k++) {
+      const tS = (k * TICK + (k > 0 ? rnd() * 15 : 0)) / 1000;
+      const dtS = tS - prevT; prevT = tS;
+      if (k > 0) cum = feed(tS, dtS, cum);
+      st = posePredict(st, T0 + k * TICK, k > 0 ? { cumDeg: cum, atMs: T0 + k * TICK } : null);
+      if (tS >= nextFix) {
+        const p = stepLatLng(49.03, -122.29, hdg, spd * tS);
+        const lat = p.lat + (rnd() * 6) / 111320, lng = p.lng + (rnd() * 6) / (111320 * Math.cos(49.03 * Math.PI / 180));
+        st = poseFix(st, { lat, lng, at: T0 + Math.round(tS * 1000), accM: 5, speedMs: spd, courseDeg: hdg }, cum);
+        nextFix += 1;
+      }
+      if (tS > 5 && st.hdgKnown) maxErr = Math.max(maxErr, Math.abs(wrap180(st.hdg - hdg)));
+    }
+    return { maxErr, st };
+  };
+  // (a) fused attitude: cumulative = true integral (0) + the bounded wobble at the tick instant
+  const a = runStraight((tS) => wobbleDeg(tS));
+  ok("U1 fused attitude under 37 Hz mount wobble: heading within 1° on a straight", a.maxErr < 1, `${a.maxErr.toFixed(2)}°`);
+  ok("U2 …and the last tick's rate is inside the plausibility clamp", Math.abs(a.st.yawDpsLast) <= POSE_YAW_MAX_DPS, `${a.st.yawDpsLast.toFixed(1)} dps`);
+  // (b) the old feed: one rate SAMPLE per render frame, integrated as rate×dt — aliased
+  const b = runStraight((tS, dtS, prev) => prev + wobbleRate(tS) * dtS);
+  ok("U3 NEGATIVE CONTROL — a rate sample per jittered frame wags the heading > 4° (and > 4× the fused path)", b.maxErr > 4 && b.maxErr > 4 * a.maxErr, `${b.maxErr.toFixed(1)}° vs ${a.maxErr.toFixed(2)}° (the OTA-AK defect)`);
+}
+
+// ── V. Codex 2026-09-10: the clamp's clock is the SENSOR's, and a frozen sensor is no sensor ──────
+// V1: a legal 40°/s turn, sensor every 50 ms, renders in PAIRS 2 ms apart around each sample (49 ms,
+//     51 ms). Judged by the render interval, the 2° sample-delta over "2 ms" is 1000°/s and gets
+//     dropped — the heading stops turning. Judged by the sensor interval it is 40°/s and follows.
+{
+  let st = poseSeedYawSign(poseStart(), 1);
+  const T0 = 1_700_000_000_000; let hdg = 0; const lat0 = 49.03, lng0 = -122.29;
+  st = poseFix(st, { lat: lat0, lng: lng0, at: T0, accM: 5, speedMs: 8, courseDeg: 0 }, 0);
+  st = posePredict(st, T0, { cumDeg: 0, atMs: T0 });
+  let cum = 0, sensorAt = T0;
+  for (let n = 1; n <= 60; n++) {                       // 3 s at 20 Hz
+    sensorAt = T0 + n * 50; cum += 40 * 0.05; hdg += 2;
+    st = posePredict(st, sensorAt - 1, { cumDeg: cum, atMs: sensorAt });   // render 49 ms after the previous sample
+    st = posePredict(st, sensorAt + 1, { cumDeg: cum, atMs: sensorAt });   // render 2 ms later, same sample
+  }
+  ok("V1 40°/s turn with paired renders 2 ms apart: heading follows (within 3°)", Math.abs(wrap180(st.hdg - hdg)) < 3, `est=${st.hdg.toFixed(1)} true=${hdg} src=${st.src}`);
+  ok("V1b …and the last rate reads 40°/s, not 0 or 1000", Math.abs(st.yawDpsLast - 40) < 1, `${st.yawDpsLast.toFixed(1)}`);
+}
+// V2: the sensor freezes (callbacks stop) while GPS keeps reporting a 20°/s turn: with a stale
+//     integral the surfaces hand in null; the estimator must fall back to the GPS turn rate and
+//     report src=gps, not hold a frozen heading as "gyro".
+{
+  let st = poseSeedYawSign(poseStart(), 1);
+  const T0 = 1_700_000_000_000; let hdg = 90; let lat = 49.03, lng = -122.29;
+  st = poseFix(st, { lat, lng, at: T0, accM: 5, speedMs: 8, courseDeg: hdg }, 0);
+  st = posePredict(st, T0, { cumDeg: 0, atMs: T0 });
+  let srcMid = "";
+  for (let i = 1; i <= 6; i++) {
+    const now = T0 + i * 1000; hdg = norm360(hdg + 20);
+    const p = stepLatLng(lat, lng, hdg, 8); lat = p.lat; lng = p.lng;
+    for (let k = 1; k <= 12; k++) { st = posePredict(st, now - 1000 + k * 83, null); if (i === 4 && k === 6) srcMid = st.src; }
+    st = poseFix(st, { lat, lng, at: now, accM: 5, speedMs: 8, courseDeg: hdg }, null);
+  }
+  ok("V2 frozen sensor (null): the estimator predicts from the GPS turn rate (src=gps), heading within 12°", srcMid === "gps" && Math.abs(wrap180(st.hdg - hdg)) < 12, `src=${srcMid} err=${wrap180(st.hdg - hdg).toFixed(1)}°`);
+}
+
+// ── W. a JS stall (> POSE_MAX_DT_S) inside a corner: no dead reckoning, but the sensor's fresh delta
+//      still turns the heading (refuter 2026-09-10: dropping it lost 12° across a 2 s stall).
+{
+  let st = poseSeedYawSign(poseStart(), 1);
+  const T0 = 1_700_000_000_000;
+  st = poseFix(st, { lat: 49.03, lng: -122.29, at: T0, accM: 5, speedMs: 8, courseDeg: 0 }, 0);
+  st = posePredict(st, T0, { cumDeg: 0, atMs: T0 });
+  st = posePredict(st, T0 + 100, { cumDeg: 0, atMs: T0 + 100 });
+  const before = st.hdg, latBefore = st.lat, lngBefore = st.lng;
+  // the sensor integrated a 40° turn during a 2 s JS stall (samples kept coming at 20 Hz)
+  st = posePredict(st, T0 + 2100, { cumDeg: 40, atMs: T0 + 2100 });
+  ok("W1 heading turned by the stall's sensor delta (≈40°), src=hold", Math.abs(wrap180(st.hdg - before - 40)) < 0.5 && st.src === "hold", `Δ=${wrap180(st.hdg - before).toFixed(1)} src=${st.src}`);
+  ok("W2 …with no dead reckoning during the gap", st.lat === latBefore && st.lng === lngBefore);
 }
 
 console.log(fails === 0 ? "\nPASS pose_estimator" : `\nFAIL pose_estimator (${fails})`);

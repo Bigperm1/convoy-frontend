@@ -209,6 +209,17 @@ RULES = [
         "heading from the switch stack again.",
     ),
     (
+        "estimator-fed-a-rate-sample",
+        ["src/**/*.tsx", "src/**/*.ts"],
+        r"posePredict\([^)]*getYawRateDps",
+        "2026-09-10 (Jeff: 'the car was pointing left and right consistently the whole time … overshot "
+        "the corners'): the estimator was handed ONE instantaneous rotationRate sample per render frame "
+        "and integrated it as rate×dt. Mount vibration made those samples ±33°/s on a straight highway "
+        "(sd 21°/s, real turn ~1°/s), so the heading random-walked between fixes and ran 31° off in the "
+        "city corners. posePredict takes the sensor's CUMULATIVE yaw (getYawIntegralDeg — fused attitude) "
+        "and differences it itself. Never feed it getYawRateDps().",
+    ),
+    (
         "watch-haptic-math-in-swift",
         ["targets/watch/**/*.swift", "targets/watch-widget/**/*.swift", "modules/hairpin-watch/ios/**/*.swift"],
         r"(distM|speedMs|WATCH_NOW_M|WATCH_PREPARE)[^\n]*(<=|>=|<|>)",

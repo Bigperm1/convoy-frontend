@@ -35,7 +35,7 @@ import React, { useEffect, useMemo, useCallback, useRef, useState } from "react"
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted } from "./heatProbe";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState } from "./poseEstimator";
-import { startYawRate, stopYawRate, getYawRateDps, getYawIntegralDeg } from "./yawRate";
+import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "./yawRate";
 import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "./poseSeed";
 import { logEvent } from "./crashBreadcrumb";
 // Timer-liveness clock (2026-09-04/05) — see src/timerLiveness.ts. Used by SelfCarModel
@@ -3684,7 +3684,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const cornerK = cornerBlend(cornerStRef.current, _travelHdg, routeProj?.distM ?? null, userSpeedMs ?? 0, selfSnapped);
   // ── POSE ESTIMATOR STEP (phone) — see CarMapView for the same block on the car surface ────
   const _nowMs = Date.now();
-  const _yawNow = navigationActive ? getYawRateDps() : null;
+  // The sensor's CUMULATIVE yaw (fused attitude); the estimator differences it per tick — never a rate sample (2026-09-10 wag).
+  const _yawNow = navigationActive ? getYawIntegral() : null;
   const _fixTs = typeof user?.ts === "number" && Number.isFinite(user.ts) ? user.ts : 0;
   // ONLY the fix's own course. `user.heading` / `selfCar.heading` are STICKY display headings —
   // held when the platform reports none — and feeding a held heading in as fresh evidence pulled
@@ -3703,7 +3704,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       if (ps.yawSign !== 0) noteLearnedYawSign(ps.yawSign);
       _poseFixLanded = true;
     }
-    ps = poseRoute(ps, routeProj ? { lat: routeProj.lat, lng: routeProj.lng, bearing: routeProj.bearing, distM: routeProj.distM } : null, _yawNow != null ? Math.abs(_yawNow) : null, _dtS);
+    ps = poseRoute(ps, routeProj ? { lat: routeProj.lat, lng: routeProj.lng, bearing: routeProj.bearing, distM: routeProj.distM } : null, ps.src === "gyro" ? Math.abs(ps.yawDpsLast) : null, _dtS);
     poseRef.current = ps;
   } else if (poseRef.current.hasFix) {
     poseRef.current = poseStart();
@@ -3751,11 +3752,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const selfHeadingLocked = est && poseRef.current.hdgKnown ? est.hdg : oldSelfHeading;
   const _dOld = est && oldSelfDraw ? poseHaversineM(oldSelfDraw.lat, oldSelfDraw.lng, est.lat, est.lng) : null;
   if (_poseFixLanded && est && user) {
-    const _turning = (_yawNow != null && Math.abs(_yawNow) > 8) || Math.abs(poseRef.current.gpsTurnDps) > 8;
+    const _turning = Math.abs(poseRef.current.yawDpsLast) > 8 || Math.abs(poseRef.current.gpsTurnDps) > 8;
     if (_turning) {
       reportPoseFix('phone', !!navigationActive, {
         fixAge: _nowMs - _fixTs, acc: user.acc ?? null, course: _rawCourse, spd: userSpeedMs ?? 0,
-        estHdg: est.hdg, yaw: _yawNow, src: est.src,
+        estHdg: est.hdg, yaw: poseRef.current.yawDpsLast, src: est.src, ys: yawRateStats().src, mdiff: getYawSourceDiffDeg(), pitch: yawRateStats().pitchDeg, lock: yawRateStats().locked,
         drawnVsFixM: typeof user.lat === "number" && typeof user.lng === "number" ? poseHaversineM(est.lat, est.lng, user.lat, user.lng) : 0,
         distM: routeProj ? routeProj.distM : null, routeW: est.routeW, dOld: _dOld,
       });
@@ -3782,7 +3783,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       hd: _hd, latch: _latchIn, gate: _gateWhy,
       rate: cornerStRef.current.rate, age: cornerStRef.current.lastAt ? _nowMs - cornerStRef.current.lastAt : null,
       fixAge: _fixTs ? _nowMs - _fixTs : null,
-      est: est ? { lat: est.lat, lng: est.lng, hdg: est.hdg, src: est.src, routeW: est.routeW, yaw: _yawNow, dOld: _dOld } : null,
+      est: est ? { lat: est.lat, lng: est.lng, hdg: est.hdg, src: est.src, routeW: est.routeW, yaw: poseRef.current.yawDpsLast, dOld: _dOld } : null,
     },
   );
 

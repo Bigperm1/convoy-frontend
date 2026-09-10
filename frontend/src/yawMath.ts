@@ -37,3 +37,18 @@ export function yawAboutGravity(r: RotationRate | null | undefined, g: Vec3 | nu
   if (![wx, wy, wz].every(Number.isFinite)) return null;
   return (wx * gx + wy * gy + wz * gz) / n;
 }
+
+/**
+ * Heading change between two attitude-yaw samples (RADIANS, wrapping at ±π), in degrees.
+ * CoreMotion's `attitude.yaw` (expo `rotation.alpha` on iOS) is the FUSED rotation about the
+ * vertical axis in a fixed reference frame; Android's `rotation.alpha` is -azimuth from the
+ * rotation-vector sensor. Both are bounded, fused values — differencing them is a clean integral
+ * of the car's yaw, immune to the aliasing that ruined rate×dt at 12 Hz (2026-09-10 drive:
+ * ±33°/s samples on a straight highway; heading 31° off in a city corner).
+ */
+export function attitudeDeltaDeg(prevRad: number, nextRad: number): number | null {
+  if (!Number.isFinite(prevRad) || !Number.isFinite(nextRad)) return null;
+  let d = (nextRad - prevRad) * 180 / Math.PI;
+  d = ((d + 540) % 360) - 180;
+  return d;
+}

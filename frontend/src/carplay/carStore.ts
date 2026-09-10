@@ -227,6 +227,11 @@ export type CarState = {
   // (src/watchTaps.ts tapSideFor). Written by the SAME owner as maneuverIcon, inside the
   // nav-strip gate, so the watch can never tap for a different turn than the car shows.
   maneuverKey?: string;
+  // The nav engine's OWN step index for that same upcoming maneuver — written by the same owner
+  // as maneuverIcon/maneuverKey, inside the same nav-strip gate. src/watchLink.ts keys the wrist
+  // tap off it instead of guessing a step change from the instruction text (an owner handoff
+  // rewrites the text without the turn changing). undefined when not navigating.
+  navStepIdx?: number;
   // (The `lanes` field was removed 2026-08-13 with the lane row on every surface.)
   // On-screen diagnostic breadcrumb for the CarPlay surface (which feed last wrote a
   // position, or which call failed). Shown in the logo fallback so the head-unit screen

@@ -75,6 +75,20 @@ Directional taps need the watch app reachable; a backgrounded watch app is not. 
 Spike 2 = a local dev-signed build on Jeff's phone + watch, three drives, read `watch-tap sent= reachable= via=msg|notif`
 rows. The winner ships; the others stay out of the code.
 
+**Spike 2, Step 1 result (2026-09-10, VERIFIED from Apple's "Using extended runtime sessions", fetched via
+developer.apple.com/tutorials/data/documentation/watchkit/using-extended-runtime-sessions.json):** the session
+types are Self care (frontmost, 10 min), Mindfulness (frontmost, 1 h), Physical therapy (background, 1 h) and Smart
+alarm (background, 30 min, schedulable); "Select a session type based on the app's intended use—not based on the
+features that the session provides"; "Each app can only support one type of extended runtime session". A driving
+companion is none of these — **candidate (a) is out; no `WKExtendedRuntimeSession` code is written.** The same page:
+"With background sessions, your app continues to run in the background, but the sessions can only monitor workouts,
+track the user's location, or play audio files" — so the legitimate ways to stay reachable are (b) a workout session
+(HealthKit entitlement, review risk for "driving") or (d) the watch's own **location** background mode, which is
+legitimate only if the watch app actually tracks the drive. Both need Jeff's go. Spike 2 on the wrist therefore
+measures the DEFAULT first (no code: how many `watch-tap` rows go `via=msg` with the phone in the mount and the
+watch app merely frontmost), and only then, with Jeff's decision, one of (b)/(d). Until measured, the shipped
+behaviour is (c): directional taps while the watch app is reachable, the mirrored local notification otherwise.
+
 ## 6 · Error handling
 
 - Not paired / no watch app installed → `watchFeed` never starts; zero cost.

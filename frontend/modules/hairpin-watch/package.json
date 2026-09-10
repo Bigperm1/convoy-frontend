@@ -1,0 +1,1 @@
+{ "name": "hairpin-watch", "version": "1.0.0", "description": "Hairpin Apple Watch link: the phone's WCSession owner.", "main": "index.ts" }

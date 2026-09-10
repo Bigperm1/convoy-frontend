@@ -1030,7 +1030,10 @@ export default function MapScreen() {
   // no maxspeed tag, in which case the pill simply stays neutral.
   // The fix's own course (per-platform raw; the sticky heading only as a fallback) and speed feed the
   // snap's direction rule — the road you are on runs the way you are going (src/speedLimitSnap.ts).
-  const speedLimitKmh = useSpeedLimit(coords?.lat ?? null, coords?.lng ?? null, true, coords?.course ?? coords?.heading ?? null, coords?.speed ?? null);
+  // ONLY the fix's own course: `coords.heading` is the STICKY display heading (held from earlier fixes) and
+  // would reject the real road after a turn whose fix carried no course (Codex 2026-09-10). No course = no
+  // direction evidence = the old nearest-way rule, on every feed alike.
+  const speedLimitKmh = useSpeedLimit(coords?.lat ?? null, coords?.lng ?? null, true, coords?.course ?? null, coords?.speed ?? null);
 
   // ===== Speed alerts (Nova / Ding / Off) =====
   // Mode from settings: 'nova' speaks a nudge, 'ding' plays a chime, 'off' is silent.
@@ -1056,10 +1059,15 @@ export default function MapScreen() {
   useEffect(() => {
     const mode = getSpeedAlertMode(settings);
     if (mode === "off") return;
-    if (!speedLimitKmh || speedLimitKmh <= 0) return;
+    // Every limit transition is tracked, null included, BEFORE the null return: 50 → null → 50 must restart
+    // the settle window (Codex 2026-09-10). The alert is ARMED only once the current limit has been
+    // continuously present for SPEED_LIMIT_SETTLE_MS; the reducer still ticks while settling (armed=false)
+    // so an above-limit observation keeps breaking a running dwell — it just cannot sound, start or spend.
     const nowMs = Date.now();
-    if (limitSeenRef.current.limit !== speedLimitKmh) limitSeenRef.current = { limit: speedLimitKmh, sinceMs: nowMs };
-    if (nowMs - limitSeenRef.current.sinceMs < SPEED_LIMIT_SETTLE_MS) return;   // let the sign settle before it can sound
+    const lim = speedLimitKmh && speedLimitKmh > 0 ? speedLimitKmh : null;
+    if (limitSeenRef.current.limit !== lim) limitSeenRef.current = { limit: lim, sinceMs: nowMs };
+    if (lim == null) return;
+    const armed = nowMs - limitSeenRef.current.sinceMs >= SPEED_LIMIT_SETTLE_MS;
     const kmh = (coords?.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
     if (kmh < 5) return;
     const overKmh = kmh - speedLimitKmh;
@@ -1073,7 +1081,7 @@ export default function MapScreen() {
       if (hab != null) tier1Over = Math.max(SPEED_TIER1_OVER_KMH, Math.min(35, Math.round(hab) + 5));
     }
     const r = speedEpisodeTick(speedEpisodeRef.current, {
-      nowMs: Date.now(), kmh, limitKmh: speedLimitKmh, tier1Over, tier2Over: SPEED_TIER2_OVER_KMH,
+      nowMs, kmh, limitKmh: lim, tier1Over, tier2Over: SPEED_TIER2_OVER_KMH, armed,
     });
     speedEpisodeRef.current = r.state;
     const tier = r.fire;

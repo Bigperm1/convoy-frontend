@@ -190,5 +190,27 @@ console.log(
   `G straight to 45: [${fmt(G)}] (want DD@0s only) | H consecutive dwell: ${H.sounds} (want 1) | I adaptive@35: ${I1.sounds}/${I2.sounds} (want 0/1) | ` +
   `exit<limit+${SPEED_EPISODE_EXIT_OVER_KMH} dwell=${SPEED_EPISODE_EXIT_DWELL_MS}ms ceiling=${SPEED_ALERT_COOLDOWN_MS}ms`,
 );
+// G  SETTLING (2026-09-10, the Clearbrook overpass — a transient wrong limit while the sign settles):
+//    armed=false ticks never sound, start, end or spend; a tick above limit + 5 still breaks a running dwell
+//    (Codex: 19 s dwelled, a 2 s transient, then the episode must NOT end on the stale clock).
+{
+  const T = 1_800_000_000_000, lim = 100, tiers = { tier1Over: 21, tier2Over: 41 };
+  let st = newSpeedEpisodeState();
+  let r = speedEpisodeTick(st, { nowMs: T, kmh: 125, limitKmh: lim, ...tiers, armed: true }); st = r.state;
+  check(r.fire === 1 && st.inEpisode, "G1 an armed tier-1 entry fires the single");
+  for (let i = 1; i <= 19; i++) { r = speedEpisodeTick(st, { nowMs: T + i * 1000, kmh: 90, limitKmh: lim, ...tiers, armed: true }); st = r.state; }
+  check(st.inEpisode && st.belowSinceMs === T + 1000, "G2 19 s of below-limit dwell accumulated");
+  r = speedEpisodeTick(st, { nowMs: T + 20000, kmh: 90, limitKmh: 50, ...tiers, armed: false }); st = r.state;
+  check(r.fire === 0 && st.inEpisode && st.belowSinceMs === null && !st.tier2Seen && st.lastTier2Ms == null, "G3 a settling tick above limit+5 breaks the dwell and neither fires nor spends");
+  r = speedEpisodeTick(st, { nowMs: T + 22000, kmh: 90, limitKmh: lim, ...tiers, armed: true }); st = r.state;
+  check(st.inEpisode && st.belowSinceMs === T + 22000, "G4 …and once settled the dwell RESTARTS — the episode does not end on the stale clock");
+  const r2 = speedEpisodeTick(newSpeedEpisodeState(), { nowMs: T, kmh: 95, limitKmh: 50, ...tiers, armed: false });
+  check(r2.fire === 0 && !r2.state.inEpisode && r2.state.episode === 0, "G5 a settling tick never starts an episode or sounds (the overpass 50 at 95 km/h)");
+  const r3 = speedEpisodeTick(r2.state, { nowMs: T + 2000, kmh: 95, limitKmh: 100, ...tiers, armed: true });
+  check(r3.fire === 0 && !r3.state.inEpisode, "G6 settled on the real limit two seconds later: nothing to alert");
+  const r4 = speedEpisodeTick(newSpeedEpisodeState(), { nowMs: T, kmh: 125, limitKmh: lim, ...tiers });
+  check(r4.fire === 1, "G7 armed defaults to true (every existing caller unchanged)");
+}
+
 if (fails.length) { console.error("FAIL:\n  " + fails.join("\n  ")); process.exit(1); }
 console.log("PASS");

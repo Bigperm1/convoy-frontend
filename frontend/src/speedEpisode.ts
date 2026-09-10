@@ -64,6 +64,9 @@ export type SpeedEpisodeInput = {
   tier1Over: number;
   /** Firmer threshold, km/h over the limit (41). */
   tier2Over: number;
+  /** false while the posted limit is still SETTLING (it changed less than 2 s ago — map.tsx): nothing may
+   *  sound, start, end or be spent; only a tick above limit + 5 still breaks a running below-limit dwell. */
+  armed?: boolean;
 };
 
 /** 0 = nothing, 1 = the single ding / nudge, 2 = the double ding / firmer line. */
@@ -87,6 +90,14 @@ export function speedEpisodeTick(
     return { fire: 0, state };
   }
   const over = kmh - limitKmh;
+  if (input.armed === false) {
+    // SETTLING (2026-09-10, the Clearbrook overpass): the limit just changed and is not yet evidence. Nothing
+    // may sound, start, end or be spent — but a tick above limit + 5 still breaks a running dwell, or the
+    // dwell would complete on a stale timestamp once the limit settles (Codex: 19 s dwelled, a 2 s transient
+    // limit, then "out" on the old clock and a re-armed alert inside the same episode).
+    if (state.inEpisode && over >= SPEED_EPISODE_EXIT_OVER_KMH && state.belowSinceMs != null) return { fire: 0, state: { ...state, belowSinceMs: null } };
+    return { fire: 0, state };
+  }
   const cool1 = state.lastTier1Ms == null || nowMs - state.lastTier1Ms >= SPEED_ALERT_COOLDOWN_MS;
   const cool2 = state.lastTier2Ms == null || nowMs - state.lastTier2Ms >= SPEED_ALERT_COOLDOWN_MS;
 

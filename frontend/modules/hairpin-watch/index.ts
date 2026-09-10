@@ -12,6 +12,8 @@ type HairpinWatchModule = {
   addListener(eventName: 'onWatchState', listener: (s: WatchLinkState) => void): { remove: () => void };
   addListener(eventName: 'onWatchFile', listener: (f: WatchFileEvent) => void): { remove: () => void };
   addListener(eventName: 'onWatchMessage', listener: (m: { json: string }) => void): { remove: () => void };
+  // sendMessage returned true but WatchConnectivity's errorHandler fired: the json never landed.
+  addListener(eventName: 'onWatchSendError', listener: (m: { json: string }) => void): { remove: () => void };
 };
 
 let mod: HairpinWatchModule | null = null;

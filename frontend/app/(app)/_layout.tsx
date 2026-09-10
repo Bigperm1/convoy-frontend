@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { useAppSkin, useAccent } from "../../src/appSkin";
 import { Tabs, useRouter, Redirect } from "expo-router";
 import * as Linking from "expo-linking";
@@ -110,7 +110,11 @@ if (Platform.OS !== "web") {
       // handler doesn't run and the OS banner shows normally (correct — the
       // toast can't render then).
       const isShare = data?.type === "share";
-      if (isNav || isShare) {
+      // The wrist tap (src/watchTurnNotify.ts) is a HAPTIC carrier, not a banner: it only fires
+      // when the phone is backgrounded, but a race (the user reopening the app between the
+      // AppState check and delivery) must never pop a duplicate turn card over the map.
+      const isTurnWrist = data?.type === "turn-wrist";
+      if (isNav || isShare || isTurnWrist) {
         return {
           shouldShowAlert: false,
           shouldPlaySound: false,
@@ -153,7 +157,12 @@ export default function AppLayout() {
 
   // Wrist PTT (build 77): a clip held-to-talk on the watch acquires the SAME floor as a
   // phone-side transmission, keyed off the same active-channel getter as the listener above.
-  useEffect(() => startWatchPtt(() => settings.activeThreadId || settings.activeCommunityId), [settings.activeThreadId, settings.activeCommunityId]);
+  // The getter reads a REF, so switching the active channel never tears the WCSession listeners
+  // down and back up mid-hold (which dropped the press-up and orphaned the floor). Deps are []
+  // on purpose — same argument as useLiveWalkieListener's getter above.
+  const chanRef = useRef<string | null | undefined>(settings.activeThreadId || settings.activeCommunityId);
+  chanRef.current = settings.activeThreadId || settings.activeCommunityId;
+  useEffect(() => startWatchPtt(() => chanRef.current), []);
 
   useEffect(() => {
     if (user === null) router.replace("/(auth)/login");

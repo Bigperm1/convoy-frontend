@@ -25,7 +25,7 @@ public class HairpinWatchModule: Module {
 
   public func definition() -> ModuleDefinition {
     Name("HairpinWatch")
-    Events("onWatchState", "onWatchFile", "onWatchMessage")
+    Events("onWatchState", "onWatchFile", "onWatchMessage", "onWatchSendError")
 
     OnCreate {
       guard WCSession.isSupported() else { return }
@@ -48,9 +48,15 @@ public class HairpinWatchModule: Module {
       do { try WCSession.default.updateApplicationContext(["json": json]); return true } catch { return false }
     }
 
+    // `isReachable` is a snapshot: it can be true here and the send still fail (the watch app
+    // just went to the background, the link dropped between the check and the call). Returning
+    // true would let JS believe the wrist got the tap, so a failure is reported back as
+    // onWatchSendError with the exact json — src/watchLink.ts falls back to the notification.
     Function("sendMessage") { (json: String) -> Bool in
       guard WCSession.isSupported(), WCSession.default.isReachable else { return false }
-      WCSession.default.sendMessage(["json": json], replyHandler: nil, errorHandler: nil)
+      WCSession.default.sendMessage(["json": json], replyHandler: nil, errorHandler: { [weak self] _ in
+        self?.sendEvent("onWatchSendError", ["json": json])
+      })
       return true
     }
   }
@@ -78,7 +84,9 @@ final class HairpinWatchDelegate: NSObject, WCSessionDelegate {
       try? FileManager.default.removeItem(at: dst)
       try FileManager.default.copyItem(at: file.fileURL, to: dst)
       let meta = file.metadata ?? [:]
-      onFile?(["path": dst.path, "kind": (meta["kind"] as? String) ?? "ptt", "ms": (meta["ms"] as? Double) ?? 0])
+      // absoluteString, NOT .path: JS reads the clip with uriToBase64 → fetch(uri), which needs a
+      // file:// URL. A bare POSIX path made fetch throw and every wrist clip was silently dropped.
+      onFile?(["path": dst.absoluteString, "kind": (meta["kind"] as? String) ?? "ptt", "ms": (meta["ms"] as? Double) ?? 0])
     } catch {
       onFile?(["path": "", "kind": "error", "ms": 0])
     }

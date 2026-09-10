@@ -9,4 +9,5 @@ module.exports = {
   deploymentTarget: '10.0',
   frameworks: ['WatchConnectivity', 'WatchKit', 'AVFAudio', 'WidgetKit'],
   colors: { $accent: '#2DEC86' },
+  entitlements: { 'com.apple.security.application-groups': ['group.com.sw0rdfisch.convoy.watch'] },
 };

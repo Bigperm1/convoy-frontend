@@ -6,4 +6,5 @@ module.exports = {
   bundleIdentifier: 'com.sw0rdfisch.convoy.watchkitapp.widget',
   deploymentTarget: '10.0',
   frameworks: ['WidgetKit', 'SwiftUI'],
+  entitlements: { 'com.apple.security.application-groups': ['group.com.sw0rdfisch.convoy.watch'] },
 };

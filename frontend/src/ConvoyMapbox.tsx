@@ -3792,7 +3792,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const selfHeadingLocked = est && poseRef.current.hdgKnown ? est.hdg : oldSelfHeading;
   const _dOld = est && oldSelfDraw ? poseHaversineM(oldSelfDraw.lat, oldSelfDraw.lng, est.lat, est.lng) : null;
   if (_poseFixLanded && est && user) {
-    const _turning = Math.abs(poseRef.current.yawDpsLast) > 8 || Math.abs(poseRef.current.gpsTurnDps) > 8;
+    // …or the LINE turns ahead while the road owns the nose: below 3 m/s no course is adopted and gpsTurnDps
+    // decays to 0, so a 10 km/h corner logged ZERO rows (refuter 09-10) — the slow regime was unobservable.
+    const _rd = poseRef.current.roadHdg, _ra = poseRef.current.roadHdgAhead;
+    const _roadTurn = _rd != null && _ra != null ? Math.abs(((((_ra - _rd) % 360) + 540) % 360) - 180) : 0;
+    const _turning = Math.abs(poseRef.current.yawDpsLast) > 8 || Math.abs(poseRef.current.gpsTurnDps) > 8 || (poseRef.current.roadK > 0 && _roadTurn > 8);
     if (_turning) {
       reportPoseFix('phone', !!navigationActive, {
         fixAge: _nowMs - _fixTs, acc: user.acc ?? null, course: _rawCourse, spd: userSpeedMs ?? 0,

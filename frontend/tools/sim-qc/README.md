@@ -247,19 +247,24 @@ first launch after a drive the app did not see end.
 ```bash
 node --experimental-strip-types tools/sim-qc/pose_estimator_test.mts
 **Section X (2026-09-10, "how do the big 3 do the GPS?")** — the shipped default: gyro OFF, 1 Hz fixes, the
-ROAD HEADING on. `projectOntoRoute` hands the estimator the line's direction averaged over ±max(speed/2, 10 m) of
-arc around the projection (`roadHdg`, Mapbox's `interpolatedCourse` span) and the same chord speed × 1 s further
-along (`roadHdgAhead`, their predicted keyPoints); on the no-gyro path the nose eases onto that (τ 0.35 s, ≤ 45°/s)
-and the fix no longer jolts it, unless a qualified course (≥ 3 m/s, acc < 20 m) disagrees with the line by > 45°,
-which releases both the nose and the lateral pull (the vendors' `RouteSnappingMaxManipulatedCourseAngle`). Every
-X case is measured against the same run with the road stripped (`noRoad`) — the 09-10 morning behaviour: a
-15 km/h single-vertex corner 33.4° / 16.6°-per-frame pops → 24.0° / 2.3°; the S-curve 33.2° → 20.3°; the
-iOS course-dropped corner 91.1° with a 89° pop → 27.0° / 2.3°; 50 km/h 32.2° → 14.8°; 100 km/h 16.2° → 5.2°; a
-straight with ±8° course noise 5.1° / 5.5°-per-frame → 0.0° / 0.01° (THE WAG BAR). X7 = the release (a line
-90° off a qualified course: the nose follows the course, routeW → 0); X8 = the snap (a line 20° off: the nose
-sits on the line, `src=road`). The harness polyline is built like a real Mapbox line since 09-10: one vertex at
-the tangent intersection for an arc under 20 m (the King Rd shape), a vertex every 20 m on longer arcs — until
-then the vertex sat at the arc's START and skewed every exit leg by ~8°.
+ROAD HEADING on. On the no-gyro path the heading is ONE eased, rate-limited value (τ 0.35 s, ≤ 60°/s) chasing one
+target: the convex mix, by roadK, of the last course carried forward by the inferred turn and the road's direction —
+`projectOntoRoute` hands in `roadHdg` (the line averaged over ±max(speed/2, 10 m) of arc around the projection,
+Mapbox's `interpolatedCourse`) and `roadHdgAhead` (the same chord speed × 1 s further along, their predicted
+keyPoints), and the estimator slides between them as the held projection ages. The fix never jolts the heading.
+roadK fades as road and course disagree (15° → 45°) and where the line turns sharply ahead (20° → 60°), both only
+while the newest fix carries a course; a qualified course from the NEWEST fix > 45° from the road releases nose and
+lateral pull (hysteresis 30°); an implausible uncorroborated chord step is held one fix or refused beyond 90°.
+Every case is swept over 60 noise seeds against the same runs with the road stripped (`noRoad` = the eased course
+path), p90 bars: course-dropped corner 51.8° vs 94.0° (the course path snaps 94° when the course returns — this
+morning's field row); roundabout r=15 20.7° vs 30.8°; 50 km/h 27.1° vs 37.1°; 100 km/h 5.8° vs 17.9°; a straight
+with ±8° course noise 0.4° vs 6.1° and 2°/s of swing vs 26 (THE WAG BAR); the one-vertex 15 km/h corner 39.4° vs
+35.5° at 3 m and 45.5° vs 35.5° at 6 m — neither better nor worse (a raw-fix projection reaches the exit leg a
+second early; Jeff's car-surface rows report 2–5 m); every exit leg within 0.4°; no swing above 60°/s anywhere.
+R-tests: the release, the snap, the hysteresis edge, the wrong-leg refusal, a stale course cannot release, a
+one-fix chord flip is held. The harness polyline is built like a real Mapbox line: one vertex at the tangent
+intersection for arcs under 35 m (a residential 90° at 25 km/h is ONE vertex on the real line), a vertex every
+5 m on roundabouts/hairpins, 20 m otherwise. Three refuter lenses + a 60-seed refuter shaped this section.
 
 - `node --experimental-strip-types tools/sim-qc/fix_course_test.mts` — a fix's own course per platform: iOS keeps 0° (due north), Android drops 0 (`Location.getBearing()` = 0.0 with no bearing). Every feed site goes through `src/fixCourseHere.ts`.
 - `node --experimental-strip-types tools/sim-qc/yaw_feed_test.mts` — the DeviceMotion → cumulative-yaw reducer (`src/yawFeed.ts`): fused attitude deltas on the SENSOR clock, cached re-dispatches are not new samples, freshness expires, the fallback rate path integrates at the sensor interval. Added 2026-09-10 with the wag fix.

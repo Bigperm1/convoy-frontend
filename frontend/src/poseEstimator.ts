@@ -94,6 +94,8 @@ export type PoseState = {
   roadAt: number;                  // predict-clock time the road was last handed in
   roadSetAt: number;               // predict-clock time the PROJECTION last moved (the road direction's age)
   projLat: number; projLng: number;   // the held projection, to notice when it moves
+  projMovedAt: number;             // predict-clock time the projection last MOVED (the adoption clock; refuter 09-10: clocking
+                                   // it from the last ADOPTION let a refused wrong-leg chord in after ~4 s of no course)
   accLast: number | null;          // horizontal accuracy of the last accepted fix (the release rule)
   roadReleased: boolean;           // the line let go of the nose (hysteresis: re-snaps only inside POSE_ROAD_RESNAP_DEG)
   roadHeld: number;                // consecutive fixes whose chord was HELD back (an implausible, uncorroborated step)
@@ -246,7 +248,7 @@ export function poseStart(): PoseState {
     lat: NaN, lng: NaN, hdg: 0, spd: 0, tAt: 0, fixAt: 0, hasFix: false, hdgKnown: false, drM: 0,
     yawBias: 0, yawSign: 0, yawAgree: 0, lastCourse: null, lastCourseAt: 0, gpsTurnDps: 0,
     routeW: 0, errPrev: null, errPrevAt: 0, pendLat: 0, pendLng: 0, rawLat: NaN, rawLng: NaN, rawAt: 0, yawCumAtCourse: null, yawCumPrev: null, yawCumPrevAt: 0, yawDpsLast: 0,
-    roadHdg: null, roadHdgAhead: null, roadK: 0, roadAt: 0, roadSetAt: 0, projLat: NaN, projLng: NaN, accLast: null, roadReleased: false, roadHeld: 0,
+    roadHdg: null, roadHdgAhead: null, roadK: 0, roadAt: 0, roadSetAt: 0, projLat: NaN, projLng: NaN, projMovedAt: 0, accLast: null, roadReleased: false, roadHeld: 0,
     src: "none", fixes: 0, rejected: 0, maxStepM: 0,
   };
 }
@@ -550,7 +552,7 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
       // legs at a vertex), and beyond POSE_ROAD_ADOPT_MAX_DEG refuse it (the wrong leg of a loop).
       const ref = prevFresh ? st.roadHdg! : (st.hdgKnown ? st.hdg : null);
       const stepDeg = ref == null ? 0 : Math.abs(wrap180(chord - ref));
-      const dtMoved = st.roadSetAt > 0 ? Math.max(0.25, (st.tAt - st.roadSetAt) / 1000) : 1;
+      const dtMoved = st.projMovedAt > 0 ? Math.max(0.25, (st.tAt - st.projMovedAt) / 1000) : 1;
       const corroborated = courseQualified && Math.abs(wrap180(courseNew! - chord)) <= POSE_ROAD_RELEASE_DEG;
       if (corroborated || stepDeg <= POSE_ROAD_ADOPT_DPS * dtMoved) {
         roadHdg = chord; roadHdgAhead = chordAhead; roadHeld = 0; roadSetAt = st.tAt;
@@ -579,6 +581,7 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
     roadAt: roadHdg != null ? st.tAt : st.roadAt,
     roadSetAt,
     projLat: proj ? proj.lat : NaN, projLng: proj ? proj.lng : NaN,
+    projMovedAt: moved ? st.tAt : st.projMovedAt,
   };
   if (!proj || routeW <= 0.001) return next;
   // LATERAL ONLY (Codex review 2026-09-09). The projection the surfaces hand in is of the RAW FIX,

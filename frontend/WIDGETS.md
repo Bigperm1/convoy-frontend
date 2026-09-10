@@ -103,6 +103,8 @@ Glance app widgets: crew snapshot (resizable) + mic launcher. Same data plumbing
 
 ## Apple Watch (added same day — Jeff: "turnbyturn wrist taps")
 
+**BUILDING for 77** — spec docs/superpowers/specs/2026-09-10-apple-watch-companion-design.md, plan docs/superpowers/plans/2026-09-10-apple-watch-companion.md; haptics = WKHapticType.navigationLeftTurn/RightTurn (verified in WatchKit 26.5), not .directionUp/.directionDown.
+
 **Tier 0 — free-ish, OTA:** iPhone local notifications MIRROR to a paired Watch when
 the phone is locked. Post a turn-approach local notification (glyph + street + dist)
 while navigating with the phone locked → wrist tap at every turn, zero native work.

@@ -247,6 +247,8 @@ first launch after a drive the app did not see end.
 ```bash
 node --experimental-strip-types tools/sim-qc/pose_estimator_test.mts
 - `node --experimental-strip-types tools/sim-qc/fix_course_test.mts` — a fix's own course per platform: iOS keeps 0° (due north), Android drops 0 (`Location.getBearing()` = 0.0 with no bearing). Every feed site goes through `src/fixCourseHere.ts`.
+- `node --experimental-strip-types tools/sim-qc/watch_taps_test.mts` — the wrist-tap rule (side from the maneuver key; prepare at a 12 s lead clamped 120–400 m; now at 40 m; one per kind per step; 1.5 s apart).
+- `node --experimental-strip-types tools/sim-qc/watch_feed_test.mts` — the wrist payload: shape, on-change ≤ 2 Hz (nav on/off and step change immediate), 30 s stale rule.
 ```
 
 Drives `src/poseEstimator.ts` — the continuous pose that replaced the snap / cornerBlend / cornerNose

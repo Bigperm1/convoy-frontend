@@ -208,6 +208,12 @@ RULES = [
         "is computed only as `oldDrawHdg` / `oldSelfHeading` for the receipts. Do not assign the DRAWN "
         "heading from the switch stack again.",
     ),
+    (
+        "watch-haptic-math-in-swift",
+        ["targets/watch/**/*.swift"],
+        r"(distM|speedMs|WATCH_NOW_M|WATCH_PREPARE)[^\n]*(<=|>=|<|>)",
+        "The wrist-tap decision lives ONLY in src/watchTaps.ts (node-gated). The watch plays what it is told.",
+    ),
 ]
 
 def blank_comments(text: str) -> str:

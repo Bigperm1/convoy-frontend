@@ -13,8 +13,16 @@
 // endpoint that was disabled on this project (every call 403'd).
 
 import { useEffect, useRef, useState } from "react";
-
-type LimitWay = { maxspeedKmh: number; geom: { lat: number; lng: number }[] };
+import { snapSpeedLimit, SNAP_TOLERANCE_M, type LimitWay, type SnapResult } from "./speedLimitSnap";
+import { logEvent } from "./crashBreadcrumb";
+// ── THE ROAD YOU ARE ON RUNS THE WAY YOU ARE GOING (2026-09-10) ──────────────────────────
+// Jeff's 09:01:55 double ding at 95 km/h: `speed-alert tier=2 over=45 limit=50` under the Clearbrook
+// Road overpass on the Trans-Canada. The nearest tagged way by flat distance at a crossing IS the
+// crossing road (0 m laterally, a bridge deck above), so the limit read 50 on a 100 highway for a
+// second or two. The snap now lives in src/speedLimitSnap.ts (pure, gated): a way whose direction
+// disagrees with the car's course by more than 35° cannot be the road under a moving car. Every feed
+// passes the fix's course and speed; a `speed-limit` receipt fires on each change with the way class
+// and the crossing it rejected, so the next wrong sign has a row.
 
 // ---- Tunables ----
 // Multiple Overpass mirrors. overpass-api.de intermittently rejects requests
@@ -28,7 +36,7 @@ const OVERPASS_URLS = [
 const FETCH_RADIUS_M = 1500;    // pull maxspeed ways within ~1.5 km of the driver
 const REFETCH_MOVE_M = 1000;    // re-query once they've driven > ~1 km from the last pull
 const MIN_REFETCH_MS = 30000;   // and never more than once per 30s
-const SNAP_TOLERANCE_M = 30;    // how close a road must be to count as "the road you're on"
+// SNAP_TOLERANCE_M (30 m: how close a road must be to count as "the road you're on") lives in speedLimitSnap.ts
 // Re-run the LOCAL nearest-road scan only after ~10 m of travel. See the RESOLVE
 // DISTANCE GATE in updateSpeedLimit for why. Deliberately a third of
 // SNAP_TOLERANCE_M so the gate can never change which road we snap to.
@@ -141,7 +149,8 @@ export async function fetchSpeedLimitWaysAround(
               .filter((p: any) => typeof p.lat === "number" && typeof p.lon === "number")
               .map((p: any) => ({ lat: p.lat, lng: p.lon }))
           : [];
-        if (geom.length) ways.push({ maxspeedKmh: sp, geom });
+        const ow = e?.tags?.oneway;
+        if (geom.length) ways.push({ maxspeedKmh: sp, geom, oneway: ow === "yes" || ow === "1" || ow === "true", highway: typeof e?.tags?.highway === "string" ? e.tags.highway : undefined });
       }
       _dbgHttp = lastStatus;                              // TEMP debug
       _dbgWays = ways.length;                             // TEMP debug
@@ -158,31 +167,18 @@ export async function fetchSpeedLimitWaysAround(
   return null;
 }
 
-// Nearest road's limit to a point, or null if the closest road is farther than
-// SNAP_TOLERANCE_M (i.e. we're not confidently on any tagged road).
-export function nearestLimit(lat: number, lng: number, ways: LimitWay[]): number | null {
-  let best = Infinity;
-  let bestSpeed: number | null = null;
-  for (const w of ways) {
-    const g = w.geom;
-    if (g.length === 1) {
-      const d = haversineM(lat, lng, g[0].lat, g[0].lng);
-      if (d < best) { best = d; bestSpeed = w.maxspeedKmh; }
-      continue;
-    }
-    for (let i = 0; i + 1 < g.length; i++) {
-      const d = segDistM(lat, lng, g[i].lat, g[i].lng, g[i + 1].lat, g[i + 1].lng);
-      if (d < best) { best = d; bestSpeed = w.maxspeedKmh; }
-    }
-  }
-  const snapped = best <= SNAP_TOLERANCE_M ? bestSpeed : null;
-  _lastNearestM = Number.isFinite(best) ? best : Infinity;   // for stale-cache self-heal
-  // TEMP debug — nearest-road distance + resolved limit, or no-snap (with the
-  // nearest distance when ways exist but none are within tolerance).
-  _dbgSnap = Number.isFinite(best)
-    ? (snapped != null ? `snap:${Math.round(best)}m=${snapped}` : `no-snap@${Math.round(best)}m`)
+// The limit of the road the driver is on (src/speedLimitSnap.ts): the nearest cached way within
+// SNAP_TOLERANCE_M whose direction agrees with the course while moving. null when nothing qualifies.
+let _lastSnap: SnapResult | null = null;
+export function nearestLimit(lat: number, lng: number, ways: LimitWay[], courseDeg: number | null = null, speedMs: number | null = null): number | null {
+  const r = snapSpeedLimit(lat, lng, ways, courseDeg, speedMs);
+  _lastSnap = r;
+  _lastNearestM = r.nearestM;                                  // for stale-cache self-heal
+  // TEMP debug — nearest-road distance + resolved limit, or no-snap (with the nearest distance when ways exist but none qualify).
+  _dbgSnap = Number.isFinite(r.nearestM)
+    ? (r.limitKmh != null ? `snap:${Math.round(r.nearestM)}m=${r.limitKmh}` : `no-snap@${Math.round(r.nearestM)}m`)
     : "no-snap";
-  return snapped;
+  return r.limitKmh;
 }
 
 /**
@@ -217,10 +213,24 @@ let _current: number | null = null;
 // last LOCAL nearest-road scan. null until the first scan and after resetSpeedLimit,
 // so the first call after either always resolves.
 let _resolvedAt: { lat: number; lng: number } | null = null;
+// The fix's course (deg, null = none) and speed (m/s) that fed the last update — the snap's direction evidence.
+let _course: number | null = null;
+let _speedMs: number | null = null;
+let _receipts = 0;
+const RECEIPTS_MAX = 80;               // a drive changes limit a few dozen times; logEvent is a Supabase INSERT
 
 function _emit(v: number | null): void {
   if (v === _current) return;          // only wake consumers on a real change
+  const prev = _current;
   _current = v;
+  // Bounded receipt on every CHANGE: what we resolved, how far, which class, and the nearest way the
+  // direction rule rejected (the overpass) — nothing had ever logged the limit before 2026-09-10.
+  if (_receipts < RECEIPTS_MAX) {
+    _receipts += 1;
+    const r = _lastSnap;
+    const x = r?.crossing ? `${r.crossing.limitKmh}@${Math.round(r.crossing.distM)}m/${Math.round(r.crossing.diffDeg)}°` : "-";
+    try { logEvent(`speed-limit lim=${prev ?? "?"}>${v ?? "?"} near=${r && Number.isFinite(r.nearestM) ? Math.round(r.nearestM) : "?"} cls=${r?.highway ?? "?"} x=${x} crs=${_course == null ? "?" : Math.round(_course)} spd=${_speedMs == null ? "?" : Math.round(_speedMs * 3.6)}`); } catch {}
+  }
   _subs.forEach((f) => { try { f(v); } catch {} });
 }
 
@@ -236,8 +246,12 @@ export function subscribeSpeedLimit(fn: (v: number | null) => void): () => void 
  * Overpass fetch is throttled and de-duplicated internally. Returns the current
  * limit so a caller with its own render loop can use it immediately.
  */
-export function updateSpeedLimit(lat: number, lng: number): number | null {
+export function updateSpeedLimit(lat: number, lng: number, courseDeg?: number | null, speedMs?: number | null): number | null {
   if (typeof lat !== "number" || typeof lng !== "number") return _current;
+  // The direction evidence for the snap. A caller that has none leaves the last values alone for
+  // this tick only if it passes undefined; null means "no course" and is honoured.
+  if (courseDeg !== undefined) _course = typeof courseDeg === "number" && Number.isFinite(courseDeg) && courseDeg >= 0 ? courseDeg : null;
+  if (speedMs !== undefined) _speedMs = typeof speedMs === "number" && Number.isFinite(speedMs) && speedMs >= 0 ? speedMs : null;
   const now = Date.now();
   const moved = _center ? haversineM(_center.lat, _center.lng, lat, lng) : Infinity;
   const needArea = !_center || moved > REFETCH_MOVE_M;
@@ -249,7 +263,7 @@ export function updateSpeedLimit(lat: number, lng: number): number | null {
     fetchSpeedLimitWaysAround(lat, lng)
       .then((ways) => {
         _inFlight = false;
-        if (ways) { _ways = ways; _emit(nearestLimit(lat, lng, ways)); }
+        if (ways) { _ways = ways; _emit(nearestLimit(lat, lng, ways, _course, _speedMs)); }
         else { _center = null; }       // fetch failed — retry after the throttle window
       })
       .catch(() => { _inFlight = false; _center = null; });
@@ -290,7 +304,7 @@ export function updateSpeedLimit(lat: number, lng: number): number | null {
   }
   _resolvedAt = { lat, lng };
   // Resolve against whatever is cached right now (instant; no network).
-  _emit(nearestLimit(lat, lng, _ways));
+  _emit(nearestLimit(lat, lng, _ways, _course, _speedMs));
   // Stale-cache self-heal: if the nearest cached road is implausibly far, the cache
   // is stale (a wedged/aborted fetch left the centre kilometres behind). Drop the
   // centre so the next call refetches. The throttle still applies, so this can never
@@ -320,13 +334,15 @@ export function speedLimitVisible(speedKmh: number | undefined | null, limitKmh:
 export function useSpeedLimit(
   lat: number | null | undefined,
   lng: number | null | undefined,
-  enabled: boolean
+  enabled: boolean,
+  courseDeg?: number | null,
+  speedMs?: number | null,
 ): number | null {
   const [limit, setLimit] = useState<number | null>(getSpeedLimitKmh());
   useEffect(() => subscribeSpeedLimit(setLimit), []);
   useEffect(() => {
     if (!enabled || typeof lat !== "number" || typeof lng !== "number") return;
-    updateSpeedLimit(lat, lng);
-  }, [lat, lng, enabled]);
+    updateSpeedLimit(lat, lng, courseDeg ?? null, speedMs ?? null);
+  }, [lat, lng, enabled, courseDeg, speedMs]);
   return limit;
 }

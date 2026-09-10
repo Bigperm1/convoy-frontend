@@ -16,6 +16,7 @@ import { api, TTS_FETCH_TIMEOUT_LONG_MS } from "./api";
 import { reserveGreeting, deliverGreetingAudio, cancelGreeting } from "./nav";
 import type { NavRoute } from "./nav";
 import { getSettings, getNovaVoice } from "./settings";
+import { logEvent } from "./crashBreadcrumb";
 import { matchSavedPlace } from "./savedPlaces";
 import type { WeatherKind } from "./weatherLayer";
 
@@ -127,14 +128,19 @@ export function prepareRouteGreeting(ctx: GreetingContext, key: string): void {
         temperature: ctx.temperature || undefined,
       });
       const text = (data?.text || "").toString().trim();
+      // Receipt (2026-09-10, Jeff: "can you tell me what it said to me this morning" — nothing had recorded
+      // it): the line, its source (claude | template — the template is several clipped sentences), once
+      // per prepared destination. Bounded by construction (one per route preview).
+      try { logEvent(`greet-prep src=${data?.source ?? "?"} len=${text.length} text="${text.slice(0, 200).replace(/"/g, "'")}"`); } catch {}
       if (!text) return;
 
       // Pre-synthesize so Start -> instant playback (no /tts round-trip then).
       const tts = await api.post("/tts", { text, voice: getNovaVoice(s) }, { timeout: TTS_FETCH_TIMEOUT_LONG_MS });
       const b64 = tts?.data?.audio_b64;
       if (b64) _preparedAudio = { b64, mime: tts?.data?.mime || "audio/mp3" };
-    } catch {
+    } catch (e) {
       _preparedAudio = null;
+      try { logEvent(`greet-prep-fail err=${String((e as any)?.message ?? e).slice(0, 80)}`); } catch {}
     } finally {
       _preparing = null;
     }
@@ -150,7 +156,7 @@ export async function playPreparedGreeting(): Promise<void> {
   try {
     if (_preparing) await _preparing;
     if (_preparedAudio) deliverGreetingAudio(_preparedAudio.b64, _preparedAudio.mime);
-    else cancelGreeting();
+    else { try { logEvent("greet-none why=no-audio"); } catch {} cancelGreeting(); }
   } catch {
     cancelGreeting();
   } finally {

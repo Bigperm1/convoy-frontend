@@ -271,6 +271,7 @@ intersection for arcs under 35 m (a residential 90° at 25 km/h is ONE vertex on
 - `node --experimental-strip-types tools/sim-qc/watch_taps_test.mts` — the wrist-tap rule (side from the maneuver key; prepare at a 12 s lead clamped 120–400 m; now at 40 m; one per kind per step; 1.5 s apart).
 - `node --experimental-strip-types tools/sim-qc/watch_feed_test.mts` — the wrist payload: shape, on-change ≤ 2 Hz (nav on/off and step change immediate), 30 s stale rule.
 - `node --experimental-strip-types tools/sim-qc/drive_feed_test.mts` — the drive-time location request (`src/driveFeed.ts`): BestForNavigation 500 ms / 2 m on every head-unit feed, High 1000 / 5 only under Lite GPS, and the rebuild rule that follows a Lite GPS toggle (or the settings hydration) onto the LIVE feeds — the Codex finding on OTA-AM, 2026-09-10.
+- `node --experimental-strip-types tools/sim-qc/speed_limit_snap_test.mts` — the posted-limit snap (`src/speedLimitSnap.ts`): the road you are on runs the way you are going — a way more than 35° off the course while moving ≥ 3 m/s cannot be the road under the car (the Clearbrook overpass's 50 over the Trans-Canada's 100, Jeff's 09-10 09:01:55 double ding); one-way vs two-way; the 30 m tolerance; stopped/no-course keeps the old nearest-way rule.
 ```
 
 Drives `src/poseEstimator.ts` — the continuous pose that replaced the snap / cornerBlend / cornerNose

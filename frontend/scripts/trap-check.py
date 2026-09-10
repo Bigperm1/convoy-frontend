@@ -229,6 +229,14 @@ RULES = [
         "mid-way down a straight that ends in a 90° turn — the staged-off lead-in).",
     ),
     (
+        "double-chime-scheduled-by-gap-alone",
+        ["src/speedDing.ts"],
+        r"setTimeout\(\(\)\s*=>\s*\{\s*void\s+playOnce(Native|Web)\(\);?\s*\},\s*GAP_MS\)",
+        "2026-09-10 (Jeff: 'the first speed ding tripled up'): the double chime's second ding was scheduled "
+        "GAP_MS (190 ms) after the first one LOADED, into a 480 ms clip — the two overlapped into three audible "
+        "beats. playOnceNative/playOnceWeb resolve when the clip has ENDED; the second ding is awaited after them.",
+    ),
+    (
         "estimator-fed-a-rate-sample",
         ["src/**/*.tsx", "src/**/*.ts"],
         r"posePredict\([^)]*getYawRateDps",

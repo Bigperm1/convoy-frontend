@@ -32,7 +32,8 @@ const DING_WAV_B64 =
 
 const DING_MIME = "audio/wav";
 let _nativeUri: string | null = null;       // cache-dir path, written once
-const GAP_MS = 190;                          // spacing between the two dings (double)
+const CLIP_MS = 480;                         // the WAV's length (16 kHz mono 16-bit, 15,360 data bytes)
+const GAP_MS = 190;                          // silence between the END of the first ding and the second (double)
 
 async function ensureNativeFile(): Promise<string | null> {
   try {
@@ -51,10 +52,20 @@ async function playOnceNative(): Promise<void> {
     const uri = await ensureNativeFile();
     if (!uri) return;
     const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true, volume: getAudioVol(getSettings(), "volDings") });
-    sound.setOnPlaybackStatusUpdate((st: any) => {
-      if (!st?.isLoaded || st?.didJustFinish) {
-        sound.unloadAsync().catch(() => {});
-      }
+    // Resolve when the clip has FINISHED (didJustFinish), with a timer as the floor: createAsync resolves on
+    // LOAD, and the double used to schedule its second chime GAP_MS after that — 190 ms into a 480 ms clip,
+    // so the two overlapped into three audible beats (Jeff, 2026-09-10: "the first speed ding tripled up").
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      const guard = setTimeout(finish, CLIP_MS + 250);
+      sound.setOnPlaybackStatusUpdate((st: any) => {
+        if (!st?.isLoaded || st?.didJustFinish) {
+          clearTimeout(guard);
+          sound.unloadAsync().catch(() => {});
+          finish();
+        }
+      });
     });
   } catch { /* no sound on failure */ }
 }
@@ -78,7 +89,7 @@ function playOnceWeb(): Promise<void> {
 // other. A request that lands while one is still pending is MERGED into it (a double
 // upgrades a pending single; never a second chime), and a request inside MIN_SPACING_MS
 // of the last chime is dropped — the driver has just been told.
-const MIN_SPACING_MS = 1200;                 // ≈ one full double (480 + 190 + 480 ms)
+const MIN_SPACING_MS = 1200;                 // ≈ one full double (480 + 190 + 480 ms), measured from the first chime's start
 let _pending: { double: boolean } | null = null;
 let _lastPlayMs = 0;
 
@@ -101,7 +112,7 @@ export async function playSpeedDing(double: boolean): Promise<void> {
     _lastPlayMs = Date.now();
     if (Platform.OS === "web") {
       try { await playOnceWeb(); } catch {}
-      if (req.double) setTimeout(() => { void playOnceWeb(); }, GAP_MS);
+      if (req.double) { await new Promise((r) => setTimeout(r, GAP_MS)); try { await playOnceWeb(); } catch {} }
       return;
     }
     // Make sure the iOS session plays on the loudspeaker, in silent mode, and
@@ -110,8 +121,8 @@ export async function playSpeedDing(double: boolean): Promise<void> {
     // + MixWithOthers), so the chime is audible even with the ring switch on and
     // never interrupts music. Non-disruptive by construction.
     try { await setIdleAudioMode(); } catch {}
-    try { await playOnceNative(); } catch {}
-    if (req.double) setTimeout(() => { void playOnceNative(); }, GAP_MS);
+    try { await playOnceNative(); } catch {}                       // resolves when the chime has ENDED
+    if (req.double) { await new Promise((r) => setTimeout(r, GAP_MS)); try { await playOnceNative(); } catch {} }   // doo-dun … doo-dun, never on top of each other
   } finally {
     _pending = null;
   }

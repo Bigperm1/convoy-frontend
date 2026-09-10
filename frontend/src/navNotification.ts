@@ -642,8 +642,8 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
 // positions, resolving independently. It also lacked the phone's stale-cache
 // self-heal. speedLimit.ts now owns ONE pipeline; this just feeds it a position and
 // mirrors the shared value into carStore.
-function maybeUpdateSpeedLimit(lat: number, lng: number): void {
-  setCarState({ speedLimitKmh: updateSpeedLimit(lat, lng) ?? undefined });
+function maybeUpdateSpeedLimit(lat: number, lng: number, courseDeg?: number | null, speedMs?: number | null): void {
+  setCarState({ speedLimitKmh: updateSpeedLimit(lat, lng, courseDeg, speedMs) ?? undefined });
 }
 
 // Background location task — fires on each location update (foreground AND
@@ -778,7 +778,7 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   try {
     setCarState({ selfCarColor: getSettings().carColor, mapMode: getMapMode(getSettings()) });
   } catch {}
-  maybeUpdateSpeedLimit(loc.coords.latitude, loc.coords.longitude);
+  maybeUpdateSpeedLimit(loc.coords.latitude, loc.coords.longitude, rawCourseHere(loc.coords.heading), loc.coords.speed);
   await updateNavBanner(
     loc.coords.latitude, loc.coords.longitude,
     typeof _sp === "number" && _sp >= 0 ? _sp : 0,
@@ -978,7 +978,7 @@ export async function startForegroundCarFeed(): Promise<void> {
         try {
           setCarState({ selfCarColor: getSettings().carColor, mapMode: getMapMode(getSettings()) });
         } catch {}
-        maybeUpdateSpeedLimit(loc.coords.latitude, loc.coords.longitude);
+        maybeUpdateSpeedLimit(loc.coords.latitude, loc.coords.longitude, rawCourseHere(h), sp);   // the fix's course + speed: the snap's direction rule
         // Drive the cold nav engine from THIS feed too, not just the bg task. The bg
         // task needs "Always" location; this watch only needs "While using", and while
         // Android Auto is projecting the app counts as in use. Without this, a cold AA

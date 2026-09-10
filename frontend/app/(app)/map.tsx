@@ -1028,7 +1028,9 @@ export default function MapScreen() {
   // Posted speed limit for the road you're on (OpenStreetMap maxspeed via
   // Overpass). Feeds the speedometer's over-limit pulse; null when the road has
   // no maxspeed tag, in which case the pill simply stays neutral.
-  const speedLimitKmh = useSpeedLimit(coords?.lat ?? null, coords?.lng ?? null, true);
+  // The fix's own course (per-platform raw; the sticky heading only as a fallback) and speed feed the
+  // snap's direction rule — the road you are on runs the way you are going (src/speedLimitSnap.ts).
+  const speedLimitKmh = useSpeedLimit(coords?.lat ?? null, coords?.lng ?? null, true, coords?.course ?? coords?.heading ?? null, coords?.speed ?? null);
 
   // ===== Speed alerts (Nova / Ding / Off) =====
   // Mode from settings: 'nova' speaks a nudge, 'ding' plays a chime, 'off' is silent.
@@ -1046,10 +1048,18 @@ export default function MapScreen() {
   // even when Nova's voice is muted. A stopped car (< 5 km/h) is a no-op tick: an
   // episode ends by DRIVING under limit + 5 for 20 s, not by sitting at a light.
   const speedEpisodeRef = useRef<SpeedEpisodeState>(newSpeedEpisodeState());
+  // A limit that changed less than this ago is not yet evidence for an ALERT (the sign may show it):
+  // 2026-09-10 09:01:55, the double ding fired the instant the limit flipped to an overpass road's 50.
+  // The direction rule in the snap is the fix; this is the belt for a parallel road it cannot rule out.
+  const SPEED_LIMIT_SETTLE_MS = 2000;
+  const limitSeenRef = useRef<{ limit: number | null; sinceMs: number }>({ limit: null, sinceMs: 0 });
   useEffect(() => {
     const mode = getSpeedAlertMode(settings);
     if (mode === "off") return;
     if (!speedLimitKmh || speedLimitKmh <= 0) return;
+    const nowMs = Date.now();
+    if (limitSeenRef.current.limit !== speedLimitKmh) limitSeenRef.current = { limit: speedLimitKmh, sinceMs: nowMs };
+    if (nowMs - limitSeenRef.current.sinceMs < SPEED_LIMIT_SETTLE_MS) return;   // let the sign settle before it can sound
     const kmh = (coords?.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
     if (kmh < 5) return;
     const overKmh = kmh - speedLimitKmh;

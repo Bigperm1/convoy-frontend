@@ -1919,6 +1919,7 @@ export function deliverGreetingAudio(b64: string, mime: string): void {
 
 export function cancelGreeting(): void {
   if (_greetingTimer) { clearTimeout(_greetingTimer); _greetingTimer = null; }
+  if (_greetingInFlight) { try { logEvent(`greet-cancel held=${_heldSpeech ? 1 : 0}`); } catch {} }
   _greetingInFlight = false;
   _flushHeldSpeech();
 }
@@ -2093,8 +2094,12 @@ async function drainTtsQueue(): Promise<void> {
   ttsPlaying = true;
   const item = ttsQueue.shift()!;
   if (typeof item !== "string") {
-    // Pre-synthesized greeting audio (prepared during preview, no /tts hop).
+    // Pre-synthesized greeting audio (prepared during preview, no /tts hop). Receipt: the greeting used
+    // to be the ONE clip with no row at all (2026-09-10) — greet-play/greet-done bracket it now.
+    const g0 = Date.now();
+    try { logEvent(`greet-play bytes=${item._greetAudio.length} q=${ttsQueue.length}`); } catch {}
     try { await playBase64Audio(item._greetAudio, item.mime); } catch {}
+    try { logEvent(`greet-done ms=${Date.now() - g0}`); } catch {}
   } else if (item === GREETING_DONE_TOKEN) {
     // Greeting + pause finished — release the hold and replay the parked turn.
     _greetingInFlight = false;

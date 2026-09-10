@@ -1070,7 +1070,7 @@ export default function MapScreen() {
     const armed = nowMs - limitSeenRef.current.sinceMs >= SPEED_LIMIT_SETTLE_MS;
     const kmh = (coords?.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
     if (kmh < 5) return;
-    const overKmh = kmh - speedLimitKmh;
+    const overKmh = kmh - lim;
     // Learn the habitual over-margin, then (if adaptive is on) raise ONLY the tier-1
     // nudge toward it — buffered + hard-capped at 35 over so a habitual speeder still
     // gets nudged, and tier-2 (the firmer alert) is untouched.
@@ -1089,7 +1089,7 @@ export default function MapScreen() {
     // Bounded receipt — logEvent is a Supabase INSERT. ≤2 rows per episode by construction
     // (entry + first tier-2 crossing) and never more than one per tier per 5 minutes.
     const muted = mode === "nova" && navMuted;
-    try { logEvent(`speed-alert tier=${tier} mode=${mode} over=${Math.round(overKmh)} limit=${Math.round(speedLimitKmh)} episode=${r.state.episode}${muted ? " muted=1" : ""}`); } catch {}
+    try { logEvent(`speed-alert tier=${tier} mode=${mode} over=${Math.round(overKmh)} limit=${Math.round(lim)} episode=${r.state.episode}${muted ? " muted=1" : ""}`); } catch {}
     if (mode === "ding") { void playSpeedDing(tier === 2); return; }
     // mode === "nova": spoken nudge (announce() also honors the Nova master switch).
     if (muted) return;

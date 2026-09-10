@@ -3,7 +3,14 @@ import SwiftUI
 
 struct TurnCardView: View {
   @ObservedObject var store: WatchStore
+  // isStale is a function of the CLOCK, not of the payload: with the phone gone quiet no new
+  // value ever arrives, so nothing would re-run body and the card would keep showing a turn that
+  // went stale minutes ago. TimelineView re-evaluates it every 5 s on its own.
   var body: some View {
+    TimelineView(.periodic(from: .now, by: 5)) { _ in card }
+  }
+
+  private var card: some View {
     VStack(spacing: 6) {
       if let p = store.payload, p.nav.on, !store.isStale {
         Text(p.nav.glyph.isEmpty ? "•" : p.nav.glyph).font(.system(size: 44, weight: .bold))

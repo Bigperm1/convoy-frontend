@@ -5,10 +5,13 @@ import WatchKit
 
 // Receives the phone's state and tap commands. NO distance or speed comparison lives here —
 // the phone decides (src/watchTaps.ts); this plays the haptic it is told to play.
-final class WatchSession: NSObject, WCSessionDelegate {
-  private let store: WatchStore
-  init(store: WatchStore) {
-    self.store = store
+// The session OWNS the store and activates in init(). Activating from a view's .onAppear meant
+// the first applicationContext could land before there was a delegate to receive it — the wrist
+// then sat on "Waiting for phone" until the phone happened to write again.
+final class WatchSession: NSObject, ObservableObject, WCSessionDelegate {
+  let store = WatchStore()
+
+  override init() {
     super.init()
     guard WCSession.isSupported() else { return }
     WCSession.default.delegate = self
@@ -52,6 +55,8 @@ final class WatchSession: NSObject, WCSessionDelegate {
   // has finished sending it (success or failure) the temp copy is ours to clean up.
   func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
     try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+    // A clip that never reached the phone is otherwise indistinguishable from one that did.
+    DispatchQueue.main.async { self.store.pttStatus = error == nil ? nil : "Not sent" }
   }
 
   private func play(tap: String, side: String) {

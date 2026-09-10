@@ -15,6 +15,9 @@ final class WatchStore: ObservableObject {
   @Published var payload: WatchPayload? = WatchStore.load()
   @Published var linkOk = false
   @Published var lastError: String? = nil   // set on a decode failure in apply(json:); cleared on the next success. load()'s cold-launch miss is NOT an error.
+  // Set by WatchSession when a PTT file transfer finishes with an error; nil when it succeeded.
+  // The wrist is the only place a failed clip can be surfaced — the phone never saw it.
+  @Published var pttStatus: String? = nil
 
   private static func suite() -> UserDefaults? { UserDefaults(suiteName: WATCH_SUITE) }
 
@@ -31,10 +34,13 @@ final class WatchStore: ObservableObject {
       return false
     }
     lastError = nil
+    // The complication draws BOTH the crew count and the drive state, so a drive starting or
+    // ending has to reload it too — crew alone left a stale "no drive" face for a whole drive.
     let crewChanged = p.crew.live != (payload?.crew.live ?? -1)
+    let navChanged = p.nav.on != (payload?.nav.on ?? false)
     payload = p
     ud.set(json, forKey: WATCH_STATE_KEY)
-    if crewChanged { WidgetCenter.shared.reloadAllTimelines() }
+    if crewChanged || navChanged { WidgetCenter.shared.reloadAllTimelines() }
     return true
   }
 

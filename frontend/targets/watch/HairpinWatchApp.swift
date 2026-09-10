@@ -3,16 +3,16 @@ import SwiftUI
 
 @main
 struct HairpinWatchApp: App {
-  @StateObject private var store = WatchStore()
-  @State private var session: WatchSession? = nil
+  // The session is the root object: it owns the store and activates WCSession at init, before
+  // any view exists. No .onAppear activation — see WatchSession.swift.
+  @StateObject private var session = WatchSession()
   var body: some Scene {
     WindowGroup {
       TabView {
-        TurnCardView(store: store)
-        PttButton()
+        TurnCardView(store: session.store)
+        PttButton(store: session.store)
       }
       .tabViewStyle(.page)
-      .onAppear { if session == nil { session = WatchSession(store: store) } }
     }
   }
 }

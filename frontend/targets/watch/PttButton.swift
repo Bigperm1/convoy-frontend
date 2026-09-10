@@ -2,6 +2,7 @@
 import SwiftUI
 
 struct PttButton: View {
+  @ObservedObject var store: WatchStore
   @StateObject private var rec = PttRecorder()
   var body: some View {
     VStack(spacing: 8) {
@@ -13,6 +14,9 @@ struct PttButton: View {
           .onChanged { _ in if !rec.recording { rec.start() } }
           .onEnded { _ in rec.stop() })
       Text(rec.recording ? "Talking…" : "Hold to talk").font(.caption)
+      // The transfer can fail long after the press ended (WatchSession.didFinish) — that is the
+      // only signal the driver ever gets that the crew did not hear the clip.
+      if let p = store.pttStatus { Text(p).font(.caption2).foregroundStyle(.red) }
       if let e = rec.lastError { Text(e).font(.caption2).foregroundStyle(.red) }
     }
   }

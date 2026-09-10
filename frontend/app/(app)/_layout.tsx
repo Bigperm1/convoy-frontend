@@ -78,6 +78,7 @@ import { cruisePlot } from "../../src/cruisePlot";
 import { getEvent } from "../../src/eventsApi";
 import { initVisitMonitor } from "../../src/visitMonitor";
 import { refreshWidgetFeed } from "../../src/widgetFeed";
+import { startWatchLink } from "../../src/watchLink";
 import * as Notifications from "expo-notifications";
 import { initCallDetection } from "../../src/callState";
 
@@ -217,6 +218,10 @@ export default function AppLayout() {
   // Home-screen widget feed (build 65+): refresh "Next up" on boot so the widget
   // stays current without opening the Hub. No-op without the native module.
   useEffect(() => { void refreshWidgetFeed(); }, []);
+
+  // Apple Watch companion (build 77): mirror carStore's nav/crew state to the wrist and
+  // decide directional taps. No-op on Android/web and on builds without the native module.
+  useEffect(() => startWatchLink(), []);
 
   // Foreground delivery listener — fires while the app is open. We DON'T
   // rely on the system banner here; instead we forward the hail to `hailBus`

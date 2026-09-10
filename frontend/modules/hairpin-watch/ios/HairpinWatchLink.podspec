@@ -1,5 +1,8 @@
+# The POD is HairpinWatchLink, not HairpinWatch: the watch APP target is named HairpinWatch,
+# and two products with the same name in one Pods project collide (the app's scheme gets
+# hijacked by the pod's). The Expo module keeps Name("HairpinWatch") — JS is unaffected.
 Pod::Spec.new do |s|
-  s.name           = 'HairpinWatch'
+  s.name           = 'HairpinWatchLink'
   s.version        = '1.0.0'
   s.summary        = 'Hairpin Apple Watch link (WatchConnectivity).'
   s.description    = 'Owns the phone side of WCSession: pushes drive/crew state to the watch, receives PTT clips.'

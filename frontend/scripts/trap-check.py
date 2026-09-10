@@ -210,9 +210,10 @@ RULES = [
     ),
     (
         "watch-haptic-math-in-swift",
-        ["targets/watch/**/*.swift"],
+        ["targets/watch/**/*.swift", "targets/watch-widget/**/*.swift", "modules/hairpin-watch/ios/**/*.swift"],
         r"(distM|speedMs|WATCH_NOW_M|WATCH_PREPARE)[^\n]*(<=|>=|<|>)",
-        "The wrist-tap decision lives ONLY in src/watchTaps.ts (node-gated). The watch plays what it is told.",
+        "The wrist-tap decision lives ONLY in src/watchTaps.ts (node-gated). The watch plays what it is told. "
+        "Note a local alias (`m >= 1000`) is not caught — reviewers read the wrist Swift for that.",
     ),
 ]
 
@@ -258,7 +259,7 @@ def main():
         pat = re.compile(rx)
         for f in files_for(globs):
             raw = f.read_text(encoding="utf-8", errors="replace")
-            text = blank_comments(raw) if f.suffix in (".ts", ".tsx", ".js") else raw
+            text = blank_comments(raw) if f.suffix in (".ts", ".tsx", ".js", ".swift") else raw
             for m in pat.finditer(text):
                 line_start = text.rfind("\n", 0, m.start()) + 1
                 line = raw[line_start:raw.find("\n", m.start())]

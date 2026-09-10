@@ -42,7 +42,7 @@ navigation without the phone.
 |---|---|---|---|
 | `targets/watch` (`HairpinWatch`) | watchOS app, SwiftUI | Turn card (glyph · street · distance countdown · ETA), crew count, hold-to-talk button; plays haptics on command; keeps a local store for the complication | WatchConnectivity, WatchKit haptics, AVFAudio |
 | `targets/watch-widget` | watch complication | circular / rectangular / inline crew-live count from the watch app's store | the watch app's UserDefaults |
-| `modules/hairpin-watch` | local Expo module (Swift, iOS) | owns the phone `WCSession`: `updateContext(json)`, `sendMessage(json)`, `isReachable()`, `isPaired()`; emits `watchFile` (PTT clip path) and `watchState` events to JS | WatchConnectivity |
+| `modules/hairpin-watch` | local Expo module (Swift, iOS) | owns the phone `WCSession`: `updateContext(json)`, `sendMessage(json)`, `getState()` (one call folding supported/paired/appInstalled/reachable/activation — there is no separate `isPaired()`/`isReachable()`); emits `onWatchFile` (PTT clip path), `onWatchState` and `onWatchSendError` events to JS | WatchConnectivity |
 | `src/watchFeed.ts` | TS, pure core + thin RN shell | subscribes to carStore/tbt/presence; builds the context payload; throttles (on change, ≤2 Hz); decides taps (`prepare`/`now`, left/right/generic) via `src/watchTaps.ts`; posts the Tier-0 notification fallback | carStore, nav, presence, `hairpin-watch`, expo-notifications |
 | `src/watchTaps.ts` | TS, pure | the ONE tap-threshold rule (speed-scaled lead + at-maneuver), given `{distM, speedMs, side}` and the last-tapped step → `null | 'prepare' | 'now'` | nothing |
 | `src/watchPtt.ts` | TS | receives a watch clip file event → base64 → the existing `/api/ptt` POST + floor messages | `pttChannel.ts` helpers |
@@ -52,19 +52,23 @@ watchOS deployment floor: 10.0 (HYPOTHESIS until Spike 1 compiles; apple-targets
 
 ## 4 · Data flow
 
-1. Drive starts on the phone (map.tsx or the cold/CarPlay path). `watchFeed` starts when `HairpinWatch.isPaired()`.
+1. Drive starts on the phone (map.tsx or the cold/CarPlay path). `watchFeed` starts when `HairpinWatch.getState().paired`.
 2. On every carStore/tbt change: payload `{nav: {on, glyph, street, distM, side, eta, stepIdx}, crew: {live}, at}` →
    `updateApplicationContext` (always; the watch gets the latest on its next run) and `sendMessage` when
-   `isReachable()` (live card).
+   `getState().reachable` (live card).
 3. `watchTaps` decides `prepare`/`now` per step; `watchFeed` sends `{tap}` via `sendMessage`. If not reachable, it
    schedules an immediate local notification (glyph + street + distance; category `turn`) — iOS mirrors it to the wrist
    with a standard tap. Suppressed when the phone screen is on (the in-app banner already shows). Respects the existing
    notification-permission gate; never prompts from this path.
 4. Watch: `WCSessionDelegate` writes the store, redraws the card, plays the haptic on `{tap}`, reloads complication
    timelines on `crew.live` change.
-5. PTT: hold → `AVAudioRecorder` (AAC, tier params) → release → `transferFile` → phone module → `watchFile` event →
-   `watchPtt` uploads via the existing POST; floor acquired on press-down (`sendMessage {ptt:'down'}`) and released on
-   upload. Watch mic permission = the watch's own prompt on first press (documented exception to `permissionGate`).
+5. PTT: hold → `AVAudioRecorder` (fixed AAC 22.05 kHz mono 64 kbps — the "mid" tier's shape; the wrist does not know
+   the proximity tier, so it never varies) → release → `transferFile` → phone module → `onWatchFile` event →
+   `watchPtt` uploads via the existing POST. The floor is acquired on press-down (`sendMessage {ptt:'down'}`) against
+   the channel active AT THAT MOMENT, and **released on press-up (mirrors the phone's `talk.tsx`), the upload
+   follows** — another driver may take the floor while the clip is still uploading; that is the phone's semantics
+   too. A press-up that never arrives (link dropped, watch app killed) is covered by a 30 s watchdog.
+   Watch mic permission = the watch's own prompt on first press (documented exception to `permissionGate`).
 
 ## 5 · Haptic keep-alive — the spike, not a decision
 
@@ -95,16 +99,18 @@ behaviour is (c): directional taps while the watch app is reachable, the mirrore
 - `sendMessage` errors → fall through to the notification path for taps; context updates never throw (queued by iOS).
 - Watch app cold → first `applicationContext` renders the card; a stale payload (`at` older than 30 s) shows "Waiting
   for phone".
-- PTT transfer failure → watch shows "not sent"; the phone side logs `watch-ptt fail=`.
+- PTT transfer failure → a failed transfer shows "Not sent" on the wrist via `pttStatus` (set from
+  `session(_:didFinish:error:)`, the only place the failure is ever visible — the phone never saw the clip); the
+  phone side logs `watch-ptt fail=` for the clips that did arrive but failed to upload.
 - Android / web / older binaries → every entry point is a no-op (`requireOptionalNativeModule`).
 
 ## 7 · Receipts & gates
 
-- Breadcrumbs (bounded, `logEventReliable`): `watch-ctx paired= reachable= app=` once per change; `watch-tap step= kind=
-  side= via=msg|notif`; `watch-ptt ms= bytes= ok=`.
+- Breadcrumbs (bounded, `logEventReliable`): `watch-ctx paired= reachable= app=` once per change (≤ 20 rows);
+  `watch-tap step= kind= side= via=msg|notif|suppressed|notif-after-fail ok=`; `watch-ptt ms= bytes= ok= fail=`.
 - Node gates: `tools/sim-qc/watch_taps_test.mts` (thresholds by speed, one tap per kind per step, left/right/generic
   mapping) and `tools/sim-qc/watch_feed_test.mts` (payload shape, on-change throttle, stale rule).
-- trap-check rule: `watch-haptic-math-in-swift` — no distance/speed comparison in `targets/watch/*.swift`.
+- trap-check rule: `watch-haptic-math-in-swift` — no distance/speed comparison in `targets/watch/**/*.swift`, `targets/watch-widget/**/*.swift` or `modules/hairpin-watch/ios/**/*.swift`.
 - Sim: paired iPhone 17 Pro + watchOS 26.5 sims with the existing `tools/sim-qc/drive.sh` route replay.
 
 ## 8 · Sequencing

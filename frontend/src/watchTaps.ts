@@ -18,7 +18,12 @@ export const WATCH_TAP_MIN_GAP_MS = 1500;
 
 /** Mapbox maneuver key ("turn|left", "roundabout|straight", …) → haptic side. */
 export function tapSideFor(maneuverKey: string | undefined): TapSide {
-  const mod = (maneuverKey || "").split("|")[1] || "";
+  const parts = (maneuverKey || "").split("|");
+  const type = parts[0] || "";
+  const mod = parts[1] || "";
+  // Arrive/depart carry a modifier ("arrive|left" = the destination is on your left) that is NOT
+  // a turn — tapping the left-turn haptic there tells the driver to turn where there is no turn.
+  if (type === "arrive" || type === "depart") return "generic";
   if (mod.includes("uturn")) return "generic";
   if (mod.includes("left")) return "left";
   if (mod.includes("right")) return "right";

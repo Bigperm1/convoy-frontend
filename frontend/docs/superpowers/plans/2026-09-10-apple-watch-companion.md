@@ -37,7 +37,7 @@
 | `targets/watch/TurnCardView.swift` | the card |
 | `targets/watch/PttButton.swift` + `PttRecorder.swift` | hold-to-talk + AVAudioRecorder |
 | `targets/watch-widget/expo-target.config.js`, `Info.plist`, `index.swift` | complication |
-| `modules/hairpin-watch/{package.json,expo-module.config.json,index.ts,ios/HairpinWatch.podspec,ios/HairpinWatchModule.swift}` | phone `WCSession` owner |
+| `modules/hairpin-watch/{package.json,expo-module.config.json,index.ts,ios/HairpinWatchLink.podspec,ios/HairpinWatchModule.swift}` | phone `WCSession` owner |
 | `src/watchTaps.ts` | pure tap rule |
 | `src/watchFeed.ts` | pure payload builder + throttle + stale rule |
 | `src/watchLink.ts` | RN shell: carStore → module; tap → message or notification |
@@ -565,7 +565,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 5: `modules/hairpin-watch` — the phone's WCSession owner
 
 **Files:**
-- Create: `modules/hairpin-watch/package.json`, `modules/hairpin-watch/expo-module.config.json`, `modules/hairpin-watch/index.ts`, `modules/hairpin-watch/ios/HairpinWatch.podspec`, `modules/hairpin-watch/ios/HairpinWatchModule.swift`
+- Create: `modules/hairpin-watch/package.json`, `modules/hairpin-watch/expo-module.config.json`, `modules/hairpin-watch/index.ts`, `modules/hairpin-watch/ios/HairpinWatchLink.podspec`, `modules/hairpin-watch/ios/HairpinWatchModule.swift`
 
 **Interfaces:**
 - Produces (JS, `modules/hairpin-watch/index.ts`):
@@ -586,9 +586,9 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 { "platforms": ["apple"], "apple": { "modules": ["HairpinWatchModule"] } }
 ```
 ```ruby
-# modules/hairpin-watch/ios/HairpinWatch.podspec
+# modules/hairpin-watch/ios/HairpinWatchLink.podspec
 Pod::Spec.new do |s|
-  s.name           = 'HairpinWatch'
+  s.name           = 'HairpinWatchLink'
   s.version        = '1.0.0'
   s.summary        = 'Hairpin Apple Watch link (WatchConnectivity).'
   s.description    = 'Owns the phone side of WCSession: pushes drive/crew state to the watch, receives PTT clips.'

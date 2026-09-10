@@ -13,6 +13,10 @@ ok("A2 turn|slight right → right", tapSideFor("turn|slight right") === "right"
 ok("A3 roundabout|straight → generic", tapSideFor("roundabout|straight") === "generic");
 ok("A4 turn|uturn → generic", tapSideFor("turn|uturn") === "generic");
 ok("A5 undefined → generic", tapSideFor(undefined) === "generic");
+// arrive|left means "the destination is on your left", not "turn left" — a left-turn haptic there
+// tells the driver to turn where there is no turn.
+ok("A6 arrive|left → generic", tapSideFor("arrive|left") === "generic");
+ok("A7 depart|right → generic", tapSideFor("depart|right") === "generic");
 
 // B. a 50 km/h approach: prepare once at the speed-scaled lead, now once at 40 m, nothing else
 {
@@ -58,6 +62,21 @@ ok("A5 undefined → generic", tapSideFor(undefined) === "generic");
   let st = tapStart();
   const r = tapDecide(st, { stepIdx: 0, distM: NaN, speedMs: 10, nowMs: 0 });
   ok("F1 NaN distance → null", r.tap === null);
+}
+// G. degenerate inputs that must still behave (a lost fix, an overshot turn)
+{
+  // NaN speed: the lead clamps to the minimum rather than vanishing, so the prepare still fires.
+  let st = tapStart(); const taps: string[] = [];
+  for (let d = 300, t = 0; d >= 0; d -= 10, t += 1000) { const r = tapDecide(st, { stepIdx: 0, distM: d, speedMs: NaN, nowMs: t }); st = r.st; if (r.tap) taps.push(`${r.tap}@${Math.round(d)}`); }
+  ok("G1 NaN speed still taps (lead clamps to min)", taps.length === 2 && taps[0].startsWith("prepare") && taps[1].startsWith("now"), taps.join(" "));
+}
+{
+  // Past the turn (the projection can go negative): the now tap must still land, exactly once.
+  let st = tapStart();
+  let r = tapDecide(st, { stepIdx: 9, distM: -12, speedMs: 15, nowMs: 0 }); st = r.st;
+  ok("G2 negative distM → now fires once", r.tap === "now");
+  r = tapDecide(st, { stepIdx: 9, distM: -40, speedMs: 15, nowMs: 5000 }); st = r.st;
+  ok("G2b and never again on that step", r.tap === null);
 }
 console.log(fails === 0 ? "\nPASS watch_taps" : `\nFAIL watch_taps (${fails})`);
 if (fails) process.exit(1);

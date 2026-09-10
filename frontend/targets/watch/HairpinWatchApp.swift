@@ -1,10 +1,18 @@
+// targets/watch/HairpinWatchApp.swift
 import SwiftUI
 
 @main
 struct HairpinWatchApp: App {
+  @StateObject private var store = WatchStore()
+  @State private var session: WatchSession? = nil
   var body: some Scene {
     WindowGroup {
-      Text("Hairpin").font(.headline)
+      TabView {
+        TurnCardView(store: store)
+        Text("PTT")           // Task 9
+      }
+      .tabViewStyle(.page)
+      .onAppear { if session == nil { session = WatchSession(store: store) } }
     }
   }
 }

@@ -213,9 +213,13 @@ let _current: number | null = null;
 // last LOCAL nearest-road scan. null until the first scan and after resetSpeedLimit,
 // so the first call after either always resolves.
 let _resolvedAt: { lat: number; lng: number } | null = null;
-// The fix's course (deg, null = none) and speed (m/s) that fed the last update — the snap's direction evidence.
+// The fix's course (deg, null = none) and speed (m/s) that fed the last update — the snap's direction evidence —
+// and the position they came with. A delayed Overpass fetch resolves against THIS complete latest snapshot,
+// never the fetch-start position with a later fix's direction (Codex 2026-09-10: a turn during the fetch
+// would judge the old road by the new heading and publish a wrong or null limit).
 let _course: number | null = null;
 let _speedMs: number | null = null;
+let _lastPos: { lat: number; lng: number } | null = null;
 let _receipts = 0;
 const RECEIPTS_MAX = 80;               // a drive changes limit a few dozen times; logEvent is a Supabase INSERT
 
@@ -252,6 +256,7 @@ export function updateSpeedLimit(lat: number, lng: number, courseDeg?: number | 
   // this tick only if it passes undefined; null means "no course" and is honoured.
   if (courseDeg !== undefined) _course = typeof courseDeg === "number" && Number.isFinite(courseDeg) && courseDeg >= 0 ? courseDeg : null;
   if (speedMs !== undefined) _speedMs = typeof speedMs === "number" && Number.isFinite(speedMs) && speedMs >= 0 ? speedMs : null;
+  _lastPos = { lat, lng };
   const now = Date.now();
   const moved = _center ? haversineM(_center.lat, _center.lng, lat, lng) : Infinity;
   const needArea = !_center || moved > REFETCH_MOVE_M;
@@ -263,7 +268,14 @@ export function updateSpeedLimit(lat: number, lng: number, courseDeg?: number | 
     fetchSpeedLimitWaysAround(lat, lng)
       .then((ways) => {
         _inFlight = false;
-        if (ways) { _ways = ways; _emit(nearestLimit(lat, lng, ways, _course, _speedMs)); }
+        if (ways) {
+          _ways = ways;
+          // Resolve where the car IS now, with the direction of that same fix — one snapshot — and anchor
+          // the resolve gate there so the next tick does not skip a correction against the new cache.
+          const at = _lastPos ?? { lat, lng };
+          _resolvedAt = at;
+          _emit(nearestLimit(at.lat, at.lng, ways, _course, _speedMs));
+        }
         else { _center = null; }       // fetch failed — retry after the throttle window
       })
       .catch(() => { _inFlight = false; _center = null; });

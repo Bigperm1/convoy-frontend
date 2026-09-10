@@ -31,7 +31,7 @@ import { acquireBgLocation, releaseBgLocation, registerBgConsumerProbe, hydrateC
 import { startCarDataService, stopCarDataService } from './carDataService';
 import { noteCarConnected } from '../locationPrivacy';
 import { AA_ACTION_STRIP, aaMapButtons, handleAaButton, carTap } from './carActions';
-import { logEventReliable } from '../crashBreadcrumb';
+import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
 // ── COLD-CONNECT TRACER (2026-08-18 night) ──────────────────────────────────
 // The first-connect crash dies BETWEEN js-mark and every other instrument — no
@@ -78,6 +78,10 @@ function aaCrumb(stage: string): void {
 //   mapButtons -> MapActionStrip  (up to 4; ICON ONLY — androidx rejects titles)
 // Both reuse CarPlay's button ids so the existing handlers take them unchanged.
 
+// How many times this JS process has set the car root. Rides the aa-stack rows so a
+// SECOND Android Auto session in the same process is distinguishable from the first.
+let _aaRootSets = 0;
+
 export default function AndroidAutoRoot() {
   // FIRST RENDER = the native session actually ran this root (AppRegistry
   // .runApplication from CarPlaySession). Death before this row = native session
@@ -112,15 +116,35 @@ export default function AndroidAutoRoot() {
       } as any);
       templateRef.current = template;
       CarPlay.setRootTemplate(template);
+      // ── WHY THIS ROW EXISTS AND aa-crumb DOES NOT COVER IT (2026-09-09) ─────────────
+      // Say Phin's head unit shows CarPlaySession's own "RNCarPlay loading..." root
+      // placeholder for a whole drive while this tree renders normally — on 09-09 the car
+      // surface drew 36 ribbon and 25 camera frames on the bundle that carries the first
+      // aa-stack rows, and logged nothing, because those rows only covered the SEARCH
+      // screen and he never opened search. That was my miss.
+      // aa-crumb cannot fill the gap: the crumbs are deduped at MODULE scope, so
+      // 'template-set' fires once per JS PROCESS. Android Auto can start a second session
+      // in the same process (the phone app and this root share one ReactHost), and on that
+      // second session the crumb is silent while this effect really does re-run. This row
+      // is per-mount and counted, so "did we set our root on THIS connect" is answerable —
+      // and, paired with the absence of any `op=pop`, it says whether OUR JS ever moved the
+      // stack at all. A session with op=root and no op=pop that still shows the placeholder
+      // puts the fault on the native side, which is a real answer rather than a guess.
+      _aaRootSets += 1;
+      try { logEvent(`aa-stack op=root id=convoy-aa-nav n=${_aaRootSets}`); } catch {}
       aaCrumb('template-set');
     } catch (e) {
       console.warn('[AndroidAuto] root template setup failed', e);
       // A swallowed template failure is a blank car screen with no telemetry —
       // the exact invisibility class the receipt chain fixed on iOS.
       try { logEventReliable(`aa-crumb template-threw ${String((e as any)?.message || e).slice(0, 100)}`); } catch {}
+      try { logEvent(`aa-stack op=root-threw n=${_aaRootSets}`); } catch {}
     }
     return () => {
       templateRef.current = null;
+      // Pairs with op=root: a root that is set and then torn down inside one drive is a
+      // remount, which nothing has ever been able to see from the outside.
+      try { logEvent('aa-stack op=root-unmount'); } catch {}
     };
   }, []);
 

@@ -209,6 +209,26 @@ RULES = [
         "heading from the switch stack again.",
     ),
     (
+        "drive-feed-not-navigation-grade",
+        ["src/navNotification.ts"],
+        r"(watchPositionAsync|startLocationUpdatesAsync)\([^)]*accuracy:\s*Location\.Accuracy\.(High|Highest|Balanced)\b",
+        "2026-09-10 (Jeff: 'how do the big 3 do the GPS?'): the head unit's two feeds asked expo for "
+        "Accuracy.High, which expo maps to kCLLocationAccuracyNearestTenMeters — ten-metre class, no "
+        "sensor fusion — and a JS gyro was bolted on top to compensate. Apple, Google and Mapbox fuse in "
+        "the OS/native layer: every drive-time request goes through driveLocationOptions() "
+        "(BestForNavigation, or High only when the user chose Lite GPS). Never a literal here.",
+    ),
+    (
+        "raw-segment-bearing-as-the-nose",
+        ["src/ConvoyMapbox.tsx", "src/carplay/CarMapView.tsx"],
+        r"(roadHdg(Ahead)?\s*[:=][^,;\n]*?\b\w+\??\.(bearing|bearingSmooth)\b|roadHdg(Ahead)?\s*[:=][^,;\n]*?noseBearing\()",
+        "2026-09-10 (the road heading): the estimator's nose follows the line's direction averaged over "
+        "the vendors' window (projectOntoRoute roadHdg / roadHdgAhead) — NEVER the raw segment `bearing` "
+        "(at a single-vertex corner that is the two legs' bisector: King Rd hdg=124, 35° off the road, "
+        "three drives) and never `bearingSmooth` (bisectors mixed across the WHOLE segment: 22° off "
+        "mid-way down a straight that ends in a 90° turn — the staged-off lead-in).",
+    ),
+    (
         "estimator-fed-a-rate-sample",
         ["src/**/*.tsx", "src/**/*.ts"],
         r"posePredict\([^)]*getYawRateDps",

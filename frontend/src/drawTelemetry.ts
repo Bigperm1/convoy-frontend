@@ -161,6 +161,8 @@ export function reportPoseFix(surface: "phone" | "car", navActive: boolean, f: {
   // (att = fused attitude, rate = gyro fallback), mdiff = fused-minus-gyro cumulative degrees (its
   // change between rows is the magnetic slew), pitch = mount angle (±90 = upright, the Euler-yaw singularity).
   ys?: string | null; mdiff?: number | null; pitch?: number | null; lock?: boolean;
+  // 2026-09-10 the road heading: road = the line's direction owning the nose (°), rk = how much (0..1), rel = released
+  road?: number | null; rk?: number | null; rel?: boolean;
 }): void {
   try {
     if (!navActive || _poseRows >= POSE_ROWS_MAX) return;
@@ -173,7 +175,8 @@ export function reportPoseFix(surface: "phone" | "car", navActive: boolean, f: {
       `pose-fix surf=${surface} fixAge=${Math.round(f.fixAge)} acc=${f.acc == null ? "?" : f.acc.toFixed(0)} course=${fmtDeg(f.course)} spd=${(f.spd * 3.6).toFixed(0)} ` +
       `estHdg=${fmtDeg(f.estHdg)} yaw=${f.yaw == null ? "?" : f.yaw.toFixed(1)} src=${f.src} dFix=${f.drawnVsFixM.toFixed(1)} ` +
       `distM=${f.distM == null ? "?" : f.distM.toFixed(1)} rw=${f.routeW.toFixed(2)}${typeof f.dOld === "number" && isFinite(f.dOld) ? ` dOld=${f.dOld.toFixed(1)}` : ""}` +
-      ` ys=${f.ys ?? "?"}${typeof f.mdiff === "number" && isFinite(f.mdiff) ? ` mdiff=${f.mdiff.toFixed(1)}` : ""}${typeof f.pitch === "number" && isFinite(f.pitch) ? ` pitch=${f.pitch.toFixed(0)}` : ""}${f.lock ? " lock=1" : ""}`,
+      ` ys=${f.ys ?? "?"}${typeof f.mdiff === "number" && isFinite(f.mdiff) ? ` mdiff=${f.mdiff.toFixed(1)}` : ""}${typeof f.pitch === "number" && isFinite(f.pitch) ? ` pitch=${f.pitch.toFixed(0)}` : ""}${f.lock ? " lock=1" : ""}` +
+      `${typeof f.road === "number" && isFinite(f.road) ? ` road=${f.road.toFixed(0)}` : ""}${typeof f.rk === "number" && isFinite(f.rk) ? ` rk=${f.rk.toFixed(2)}` : ""}${f.rel ? " rel=1" : ""}`,
     );
   } catch {}
 }

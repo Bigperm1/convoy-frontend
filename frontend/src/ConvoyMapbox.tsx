@@ -34,7 +34,7 @@
 import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted } from "./heatProbe";
-import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState } from "./poseEstimator";
+import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, poseRoadWindowM } from "./poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "./yawRate";
 import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "./poseSeed";
 import { logEvent } from "./crashBreadcrumb";
@@ -978,7 +978,8 @@ export function projectOntoRoute(
   nearAtM?: number | null,
   movedM?: number | null,
   travelHdg?: number | null,
-): { frac: number; lat: number; lng: number; distM: number; totalM: number; bearing: number; bearingSmooth: number } | null {
+  roadSpeedMs?: number | null,
+): { frac: number; lat: number; lng: number; distM: number; totalM: number; bearing: number; bearingSmooth: number; roadHdg: number; roadHdgAhead: number } | null {
   if (!coords || coords.length < 2) return null;
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -1093,7 +1094,45 @@ export function projectOntoRoute(
   const tanStart = bisect(segBrg(bestI - 1), bearing) ?? bearing;
   const tanEnd = bisect(bearing, segBrg(bestI + 1)) ?? bearing;
   const bearingSmooth = mixAng(tanStart, tanEnd, Math.max(0, Math.min(1, bestT)));
-  return { frac: bestArc / acc, lat: invLat(bestY), lng: invLng(bestX), distM: Math.sqrt(bestD2), totalM: acc, bearing, bearingSmooth };
+  // ── roadHdg / roadHdgAhead (2026-09-10, "how do the big 3 do it") ─────────────────────
+  // roadHdg: the line's direction averaged over ±W of ARC around the projection — the chord from W
+  // behind to W ahead, W = poseRoadWindowM(speed) = max(speed/2, 10 m). Mapbox Nav's
+  // interpolatedCourse (MapboxCoreNavigation CLLocation.swift snapped(to:)) does exactly this over
+  // max(speed × RouteControllerDeadReckoningTimeInterval(1.0) / 2, 15 / 2) m, and it is why their
+  // puck is never a vertex bisector: at a single-vertex corner the chord turns over the window, i.e.
+  // like a car on an arc of about the window's radius. roadHdgAhead: the same chord evaluated
+  // speed × 1 s further along the line — where the car will be when the next fix lands. This
+  // projection is of the RAW fix and is HELD between fixes; the estimator slides from roadHdg to
+  // roadHdgAhead as the projection ages, so a held 1 Hz projection does not pin the nose to where
+  // the car WAS in the corner (Mapbox's predicted keyPoints along the road are the same idea).
+  // `bearing` (the raw segment direction) stays for the ribbon and the lateral split;
+  // `bearingSmooth` (bisectors mixed across the WHOLE segment) feeds the nose lead-in (ON since 09-03; only the
+  // pre-hdgKnown fallback heading and the camera read it now).
+  const v = typeof roadSpeedMs === "number" && Number.isFinite(roadSpeedMs) && roadSpeedMs > 0 ? roadSpeedMs : 0;
+  const W = poseRoadWindowM(v);
+  const chordAt = (centreArc: number): number => {
+    const s0 = Math.max(0, centreArc - W), s1 = Math.min(total, centreArc + W);
+    if (s1 - s0 < 0.5) return bearing;
+    let a = 0, p0: [number, number] | null = null, p1: [number, number] | null = null;
+    let px = X(coords[0].longitude), py = Y(coords[0].latitude);
+    for (let i = 1; i < coords.length && (p0 == null || p1 == null); i++) {
+      const cx = X(coords[i].longitude), cy = Y(coords[i].latitude);
+      const len = Math.hypot(cx - px, cy - py);
+      if (len > 0) {
+        if (p0 == null && a + len >= s0) { const t = (s0 - a) / len; p0 = [px + t * (cx - px), py + t * (cy - py)]; }
+        if (p1 == null && a + len >= s1 - 1e-6) { const t = Math.min(1, (s1 - a) / len); p1 = [px + t * (cx - px), py + t * (cy - py)]; }
+        a += len;
+      }
+      px = cx; py = cy;
+    }
+    if (p1 == null) p1 = [px, py];
+    if (p0 == null) return bearing;
+    const ddx = p1[0] - p0[0], ddy = p1[1] - p0[1];
+    return Math.hypot(ddx, ddy) > 0.25 ? (Math.atan2(ddx, ddy) * 180 / Math.PI + 360) % 360 : bearing;
+  };
+  const roadHdg = chordAt(bestArc);
+  const roadHdgAhead = v > 0 ? chordAt(Math.min(total, bestArc + v * 1.0)) : roadHdg;
+  return { frac: bestArc / acc, lat: invLat(bestY), lng: invLng(bestX), distM: Math.sqrt(bestD2), totalM: acc, bearing, bearingSmooth, roadHdg, roadHdgAhead };
 }
 
 // ── NOSE LEAD-IN (2026-09-03, Jeff: "both A and B, mostly A") — STAGED OFF ─────────────
@@ -3436,10 +3475,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     const p = projectOntoRoute(
       selfCar.lat, selfCar.lng, decodePolyline(poly),
       projAtRef.current, movedM, selfCar.heading ?? null,
+      userSpeedMs ?? 0,               // roadHdg window = the vendors' max(speed/2, 10 m); roadHdgAhead = speed × 1 s along the line
     );
     projAtRef.current = p ? p.frac * p.totalM : null;
     return p;
-  }, [navigationActive, selfCar?.lat, selfCar?.lng, selfCar?.heading, routes, selectedRouteIndex]);
+  }, [navigationActive, selfCar?.lat, selfCar?.lng, selfCar?.heading, routes, selectedRouteIndex, userSpeedMs]);
 
   // Trim end: where the line starts, ahead of the car's nose.
   //
@@ -3704,7 +3744,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       if (ps.yawSign !== 0) noteLearnedYawSign(ps.yawSign);
       _poseFixLanded = true;
     }
-    ps = poseRoute(ps, routeProj ? { lat: routeProj.lat, lng: routeProj.lng, bearing: routeProj.bearing, distM: routeProj.distM } : null, ps.src === "gyro" ? Math.abs(ps.yawDpsLast) : null, _dtS);
+    ps = poseRoute(ps, routeProj ? { lat: routeProj.lat, lng: routeProj.lng, bearing: routeProj.bearing, distM: routeProj.distM, roadHdg: routeProj.roadHdg, roadHdgAhead: routeProj.roadHdgAhead } : null, ps.src === "gyro" ? Math.abs(ps.yawDpsLast) : null, _dtS);
     poseRef.current = ps;
   } else if (poseRef.current.hasFix) {
     poseRef.current = poseStart();
@@ -3756,7 +3796,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     if (_turning) {
       reportPoseFix('phone', !!navigationActive, {
         fixAge: _nowMs - _fixTs, acc: user.acc ?? null, course: _rawCourse, spd: userSpeedMs ?? 0,
-        estHdg: est.hdg, yaw: poseRef.current.yawDpsLast, src: est.src, ys: yawRateStats().src, mdiff: getYawSourceDiffDeg(), pitch: yawRateStats().pitchDeg, lock: yawRateStats().locked,
+        estHdg: est.hdg, yaw: poseRef.current.yawDpsLast, src: est.src, ys: yawRateStats().src, mdiff: getYawSourceDiffDeg(), pitch: yawRateStats().pitchDeg, lock: yawRateStats().locked, road: poseRef.current.roadHdg, rk: poseRef.current.roadK, rel: poseRef.current.roadReleased,
         drawnVsFixM: typeof user.lat === "number" && typeof user.lng === "number" ? poseHaversineM(est.lat, est.lng, user.lat, user.lng) : 0,
         distM: routeProj ? routeProj.distM : null, routeW: est.routeW, dOld: _dOld,
       });

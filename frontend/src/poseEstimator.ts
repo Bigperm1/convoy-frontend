@@ -28,7 +28,26 @@
 //   poseRoute    each frame: a LATERAL pull toward the route projection with a WEIGHT that falls as
 //                the yaw rate rises and as the lateral distance grows. Straights ride the line;
 //                corners are drawn where the car is. Nothing flips.
-// The nose is the integrated heading. Never the polyline tangent.
+// The nose is the integrated heading. Never the polyline's raw tangent (the bisector failure above).
+//
+// ── THE ROAD HEADING (2026-09-10, Jeff: "how do the big 3 do the GPS?") ───────────────────
+// With the gyro off by default (src/yawRate.ts), the only turn evidence is the GPS course, once a
+// second: measured on this gate, the nose ran ~30° behind through a 15 km/h corner and popped
+// 14–16° per frame at every fix; when iOS dropped the course inside the corner it did not turn at
+// all. Mapbox's engine (MapboxCoreNavigation CLLocation.swift snapped(to:)) does what every vendor
+// does: while the car is on the line, the puck's course IS the line's direction averaged over
+// ±max(speed/2, 7.5) m around the projection (never a vertex bisector — a 7.5 m window is a 10 m
+// corner), and the raw course only wins when it is qualified (≥ 3 m/s, accuracy < 20 m) AND
+// disagrees with the road by more than 45°. The surfaces hand that windowed direction in as
+// `roadHdg` (projectOntoRoute). ON THE NO-GYRO PATH THE HEADING IS ONE EASED, RATE-LIMITED VALUE
+// (τ 0.35 s, ≤ 45°/s) chasing a single target: the convex mix, by roadK, of the last course carried
+// forward by the inferred turn and the road's direction aged along the line — the fix never jolts
+// it (three refuter lenses, 2026-09-10: every per-frame pop traced to the fix blending against a
+// road direction one projection stale). The release (a qualified course from the NEWEST fix more
+// than 45° from the road, hysteresis 30°) frees the nose and the lateral pull; a new chord that
+// steps further than a car can turn, with no course to corroborate it, is held for one fix (a noisy
+// projection flipping legs at a vertex) or refused outright beyond 90° (a wrong leg). Gate: section X,
+// swept over noise seeds, against the same runs with the road stripped.
 
 export type PoseFix = {
   lat: number; lng: number;
@@ -40,8 +59,10 @@ export type PoseFix = {
   courseDeg?: number | null;
 };
 
-/** The route-line projection of the RAW fix, when navigating and within reach. */
-export type PoseRoute = { lat: number; lng: number; bearing: number; distM: number } | null;
+/** The route-line projection of the RAW fix, when navigating and within reach. `roadHdg` is the line's
+ *  direction averaged over the vendors' window around the projection (projectOntoRoute); absent, the
+ *  raw segment bearing stands in. */
+export type PoseRoute = { lat: number; lng: number; bearing: number; distM: number; roadHdg?: number | null; roadHdgAhead?: number | null } | null;
 
 export type PoseState = {
   lat: number; lng: number;
@@ -67,7 +88,16 @@ export type PoseState = {
   yawCumPrev: number | null;       // the sensor's cumulative yaw last consumed (delta source)
   yawCumPrevAt: number;            // …and the SENSOR time it was measured at (the clamp's clock)
   yawDpsLast: number;              // sensor-frame rate of the last consumed delta (receipts, route weight)
-  src: "gyro" | "gps" | "hold" | "none";
+  roadHdg: number | null;          // the road's windowed direction at the held projection (null = none / released)
+  roadHdgAhead: number | null;     // …and speed × 1 s further along the line (where the car will be at the next fix)
+  roadK: number;                   // 0..1 how much the road owns the nose this frame (distance weight; 0 when released)
+  roadAt: number;                  // predict-clock time the road was last handed in
+  roadSetAt: number;               // predict-clock time the PROJECTION last moved (the road direction's age)
+  projLat: number; projLng: number;   // the held projection, to notice when it moves
+  accLast: number | null;          // horizontal accuracy of the last accepted fix (the release rule)
+  roadReleased: boolean;           // the line let go of the nose (hysteresis: re-snaps only inside POSE_ROAD_RESNAP_DEG)
+  roadHeld: number;                // consecutive fixes whose chord was HELD back (an implausible, uncorroborated step)
+  src: "gyro" | "gps" | "road" | "hold" | "none";
   fixes: number; rejected: number; maxStepM: number;
 };
 
@@ -120,6 +150,59 @@ export const POSE_GPS_TURN_HOLD_MS = 1200;
 export const POSE_GPS_TURN_GAIN = 0.5;
 /** A course this far from the heading is not gyro drift, the heading is simply wrong: adopt the course. */
 export const POSE_HDG_SNAP_DEG = 60;
+/** ROAD HEADING (the vendors' rule, 2026-09-10). A qualified course that disagrees with the road by more
+ *  than this says the line is wrong here: the road lets go of the nose and the lateral pull
+ *  (Mapbox RouteSnappingMaxManipulatedCourseAngle = 45). */
+export const POSE_ROAD_RELEASE_DEG = 45;
+/** …and once released the line does not take the nose back until the course agrees within this — a
+ *  course hovering at the 45° edge (a diagonal lot exit) would otherwise release and re-snap once a
+ *  second, each re-snap a 45°/s swing (Codex pass 3 probe, 2026-09-10). */
+export const POSE_ROAD_RESNAP_DEG = 30;
+/** CONTINUOUS release for the NOSE: while the newest fix carries a course, the road's weight fades as the road
+ *  and course targets disagree — full inside this angle, none at POSE_ROAD_RELEASE_DEG. A noisy fix flipping
+ *  legs at a single vertex hands in a chord 40–60° from a perfectly good course; the course wins there,
+ *  without a flip (gate X1n: 51° → the course-path figure). With no course on the newest fix (iOS inside a
+ *  slow corner) the road is the only evidence and keeps full weight. */
+export const POSE_ROAD_AGREE_DEG = 15;
+/** SHARPNESS: where the line turns more than this within the next second of travel (|roadHdgAhead − roadHdg|),
+ *  a ONE-vertex line is cutting a corner the car drives as an arc, and the raw-fix projection flips legs at
+ *  the vertex — the chord is worse evidence than the course there. The road's weight fades from this angle
+ *  to none at POSE_ROAD_SHARP_FULL_DEG, only while the newest fix carries a course (Mapbox restricts
+ *  snapping at sharp maneuvers for the same reason). A roundabout on a dense line turns ~20°/s: unaffected. */
+export const POSE_ROAD_SHARP_DEG = 20;
+export const POSE_ROAD_SHARP_FULL_DEG = 60;
+/** A course qualifies to release the road only from a fix at least this sharp (Mapbox RouteSnappingMinimumHorizontalAccuracy = 20)
+ *  and while moving ≥ POSE_COURSE_MIN_MS (Mapbox RouteSnappingMinimumSpeed = 3). */
+export const POSE_ROAD_RELEASE_ACC_M = 20;
+/** The nose eases onto the road's direction over this: a new direction each fix is a slide, never a pop. */
+export const POSE_ROAD_TAU_S = 0.35;
+/** …and never faster than this. A car's yaw rate through the tightest corners is 25–45°/s (a hairpin of
+ *  radius 8 at 20 km/h is 40°/s), so the eased nose needs headroom above that to catch a real turn; 60°/s
+ *  is a rate a road car does not exceed. The swing is continuous (3°/frame at 20 Hz), never a pop. */
+export const POSE_ROAD_MAX_DPS = 60;
+/** The road direction is the line averaged over ±poseRoadWindowM(speed) = max(speed × 1.0 s / 2, 10 m).
+ *  Mapbox's interpolatedCourse span is max(speed × RouteControllerDeadReckoningTimeInterval(1.0) / 2,
+ *  15 / 2 = 7.5 m); ours floors at 10 m — the tangent length of a 10 m-radius 90° corner, the tightest
+ *  a car takes at 15 km/h (gate sweep: 7.5 → 10 m took the King Rd-shaped corner from 26.1° to 24.0°
+ *  and the course-dropped corner from 32.8° to 27.0°, for +1.3° on a 30 m-radius sweep). */
+export const POSE_ROAD_WINDOW_MIN_M = 10;
+export function poseRoadWindowM(speedMs: number | null | undefined): number {
+  const v = typeof speedMs === "number" && Number.isFinite(speedMs) && speedMs > 0 ? speedMs : 0;
+  return Math.max(v * 0.5, POSE_ROAD_WINDOW_MIN_M);
+}
+/** A road direction not refreshed within this is history (the surfaces feed it every frame while navigating). */
+export const POSE_ROAD_HOLD_MS = 2500;
+/** A new chord further than the car could have turned since the projection last moved (POSE_ROAD_MAX_DPS × dt),
+ *  with no qualified course within the release angle of it, is a projection that jumped — not a corner. It is
+ *  held back for this many fixes (a noisy fix flipping legs at a vertex) and adopted after; beyond
+ *  POSE_ROAD_ADOPT_MAX_DEG from the current road/heading it is refused (the wrong leg of a loop). */
+export const POSE_ROAD_HOLD_FIXES = 1;
+export const POSE_ROAD_ADOPT_MAX_DEG = 90;
+/** The turn a car can plausibly have made between two projections: 45°/s (the tightest city corner). Kept
+ *  separate from POSE_ROAD_MAX_DPS (the ease's headroom) so a wider swing allowance never loosens adoption. */
+export const POSE_ROAD_ADOPT_DPS = 45;
+/** The last course is a heading target for this long (carried forward by the inferred turn while that is live). */
+export const POSE_COURSE_TARGET_HOLD_MS = 2500;
 /** Bias is only learned while the course error is small; a converging heading is not a bias. */
 export const POSE_BIAS_MAX_ERR_DEG = 15;
 /** Sign learning: agree/disagree evidence needed before the gyro is trusted. */
@@ -162,7 +245,9 @@ export function poseStart(): PoseState {
   return {
     lat: NaN, lng: NaN, hdg: 0, spd: 0, tAt: 0, fixAt: 0, hasFix: false, hdgKnown: false, drM: 0,
     yawBias: 0, yawSign: 0, yawAgree: 0, lastCourse: null, lastCourseAt: 0, gpsTurnDps: 0,
-    routeW: 0, errPrev: null, errPrevAt: 0, pendLat: 0, pendLng: 0, rawLat: NaN, rawLng: NaN, rawAt: 0, yawCumAtCourse: null, yawCumPrev: null, yawCumPrevAt: 0, yawDpsLast: 0, src: "none", fixes: 0, rejected: 0, maxStepM: 0,
+    routeW: 0, errPrev: null, errPrevAt: 0, pendLat: 0, pendLng: 0, rawLat: NaN, rawLng: NaN, rawAt: 0, yawCumAtCourse: null, yawCumPrev: null, yawCumPrevAt: 0, yawDpsLast: 0,
+    roadHdg: null, roadHdgAhead: null, roadK: 0, roadAt: 0, roadSetAt: 0, projLat: NaN, projLng: NaN, accLast: null, roadReleased: false, roadHeld: 0,
+    src: "none", fixes: 0, rejected: 0, maxStepM: 0,
   };
 }
 
@@ -237,11 +322,46 @@ export function posePredict(st: PoseState, nowMs: number, yaw: PoseYaw | null | 
     if (gyroOk) {
       hdg = norm360(hdg + yawDelta! * st.yawSign - st.yawBias * dt);
       src = "gyro";
-    } else if (st.lastCourse != null && nowMs - st.lastCourseAt <= POSE_GPS_TURN_HOLD_MS && st.gpsTurnDps !== 0) {
-      hdg = norm360(hdg + st.gpsTurnDps * POSE_GPS_TURN_GAIN * dt);
-      src = "gps";
-    } else if (st.lastCourse != null) {
-      src = "gps";
+    } else {
+      // GPS path: ONE eased heading toward ONE target. The course target is the last course carried
+      // forward by the inferred turn (half gain, while live); the road target slides from roadHdg (at
+      // the held projection) to roadHdgAhead (speed × 1 s further along the line) as the projection
+      // ages, so a held 1 Hz projection does not pin the nose to where the car WAS (Mapbox's predicted
+      // keyPoints). The two are mixed by roadK — one equilibrium, never two (refuter 2026-09-10: a
+      // rate-only roadK gave the predict and the fix different equilibria, a once-a-second sawtooth).
+      const courseLive = st.lastCourse != null && nowMs - st.lastCourseAt <= POSE_GPS_TURN_HOLD_MS;
+      const turnDps = courseLive && st.gpsTurnDps !== 0 ? st.gpsTurnDps * POSE_GPS_TURN_GAIN : 0;
+      let courseTarget: number | null = null;
+      if (st.lastCourse != null && nowMs - st.lastCourseAt <= POSE_COURSE_TARGET_HOLD_MS) {
+        const ageC = Math.max(0, Math.min(POSE_GPS_TURN_HOLD_MS / 1000, (nowMs - st.lastCourseAt) / 1000));
+        courseTarget = norm360(st.lastCourse + turnDps * ageC);
+      }
+      const roadFresh = st.roadHdg != null && st.roadK > 0 && nowMs - st.roadAt <= POSE_ROAD_HOLD_MS;
+      let roadK = roadFresh ? st.roadK : 0;
+      let roadTarget: number | null = null;
+      if (roadFresh) {
+        const ageS = Math.max(0, Math.min(1, (nowMs - st.roadSetAt) / 1000));
+        const ahead = st.roadHdgAhead != null ? st.roadHdgAhead : st.roadHdg!;
+        roadTarget = norm360(st.roadHdg! + wrap180(ahead - st.roadHdg!) * ageS);
+        // Agreement and sharpness (see POSE_ROAD_AGREE_DEG / POSE_ROAD_SHARP_DEG): both judged only while the
+        // NEWEST fix carries a course — with none, the road is the only evidence and keeps full weight.
+        if (courseTarget != null && st.lastCourseAt === st.fixAt) {
+          const dis = Math.abs(wrap180(roadTarget - courseTarget));
+          roadK *= Math.max(0, Math.min(1, 1 - (dis - POSE_ROAD_AGREE_DEG) / (POSE_ROAD_RELEASE_DEG - POSE_ROAD_AGREE_DEG)));
+          const sharp = Math.abs(wrap180(ahead - st.roadHdg!));
+          roadK *= Math.max(0, Math.min(1, 1 - (sharp - POSE_ROAD_SHARP_DEG) / (POSE_ROAD_SHARP_FULL_DEG - POSE_ROAD_SHARP_DEG)));
+        }
+      }
+      const target = roadTarget != null && courseTarget != null
+        ? norm360(courseTarget + wrap180(roadTarget - courseTarget) * roadK)
+        : (roadTarget ?? courseTarget);
+      if (target != null) {
+        const pull = wrap180(target - hdg) * (1 - Math.exp(-dt / POSE_ROAD_TAU_S));
+        hdg = norm360(hdg + Math.max(-POSE_ROAD_MAX_DPS * dt, Math.min(POSE_ROAD_MAX_DPS * dt, pull)));
+        src = roadK >= 0.5 ? "road" : "gps";
+      } else if (st.lastCourse != null) {
+        src = "gps";                                          // nothing live to chase: the heading holds
+      }
     }
   }
   // Dead reckoning along the heading, capped since the last accepted fix.
@@ -282,6 +402,7 @@ export function poseFix(st: PoseState, f: PoseFix, yawCumDeg?: number | null): P
   const ageMs = st.tAt > 0 ? st.tAt - f.at : 0;
   const stale = ageMs > POSE_FIX_STALE_MS;
   const spd = stale ? st.spd : (spdF ?? st.spd);
+  const acc = typeof f.accM === "number" && Number.isFinite(f.accM) && f.accM >= 0 ? f.accM : null;
 
   if (!st.hasFix) {
     const useCourse = !stale && course != null && (spdF ?? 0) >= POSE_MOVING_MS;
@@ -292,12 +413,12 @@ export function poseFix(st: PoseState, f: PoseFix, yawCumDeg?: number | null): P
       lastCourse: useCourse ? course : null, lastCourseAt: useCourse ? f.at : 0,
       yawCumAtCourse: useCourse && typeof yawCumDeg === "number" && Number.isFinite(yawCumDeg) ? yawCumDeg : null,
       rawLat: stale ? NaN : f.lat, rawLng: stale ? NaN : f.lng, rawAt: stale ? 0 : f.at,
+      accLast: stale ? null : acc,
       src: useCourse ? "gps" : "hold", fixes: 1,
     };
   }
 
   // ── position weight ────────────────────────────────────────────────────────────────────
-  const acc = typeof f.accM === "number" && Number.isFinite(f.accM) && f.accM >= 0 ? f.accM : null;
   let w = acc == null ? POSE_W_OK : acc <= 10 ? POSE_W_SHARP : acc <= 30 ? POSE_W_OK : POSE_W_VAGUE;
   const dtFix = (f.at - st.fixAt) / 1000;
   const budgetMs = Math.max(spd, st.spd) * 1.5 + POSE_JUMP_SLACK_MS;
@@ -337,7 +458,7 @@ export function poseFix(st: PoseState, f: PoseFix, yawCumDeg?: number | null): P
   let yawCumAtCourse = st.yawCumAtCourse;
   if (course != null && !stale && (spd >= POSE_COURSE_MIN_MS || (!st.hdgKnown && spd >= POSE_MOVING_MS))) {
     adopted = true;
-    const err = wrap180(course - hdg);
+    const errCourse = wrap180(course - hdg);
     // Gyro yaw integrated since the LAST ADOPTED course — this estimator's own cursor.
     const yawIntegratedSinceLastFixDeg =
       typeof yawCumDeg === "number" && Number.isFinite(yawCumDeg) && st.yawCumAtCourse != null ? yawCumDeg - st.yawCumAtCourse : null;
@@ -353,19 +474,25 @@ export function poseFix(st: PoseState, f: PoseFix, yawCumDeg?: number | null): P
       }
     }
     const gyro = st.src === "gyro" && yawSign !== 0;
+    const err = errCourse;
     // Bias: how fast the course error is DRIFTING while the gyro says "straight". The error
     // itself is not a bias (a lagging estimate would teach the gyro to spin — positive feedback).
-    if (gyro && errPrev != null && Math.abs(err) < POSE_BIAS_MAX_ERR_DEG && Math.abs(errPrev) < POSE_BIAS_MAX_ERR_DEG
+    if (gyro && errPrev != null && Math.abs(errCourse) < POSE_BIAS_MAX_ERR_DEG && Math.abs(errPrev) < POSE_BIAS_MAX_ERR_DEG
         && f.at - errPrevAt > 500 && f.at - errPrevAt <= 3000
         && typeof yawIntegratedSinceLastFixDeg === "number" && Math.abs(yawIntegratedSinceLastFixDeg) / ((f.at - errPrevAt) / 1000) < POSE_BIAS_STRAIGHT_DPS) {
-      const driftDps = wrap180(err - errPrev) / ((f.at - errPrevAt) / 1000);   // +ve: heading falling behind the course
+      const driftDps = wrap180(errCourse - errPrev) / ((f.at - errPrevAt) / 1000);   // +ve: heading falling behind the course
       // The gyro-integrated heading gained (yaw*sign - bias)*dt; the course says it should have
       // gained `driftDps` more per second, so the bias is over-subtracting by that much.
       const biasObs = yawBias - driftDps;
       yawBias = Math.max(-POSE_BIAS_MAX_DPS, Math.min(POSE_BIAS_MAX_DPS, yawBias + (biasObs - yawBias) * POSE_BIAS_K));
     }
-    if (!st.hdgKnown || Math.abs(err) > POSE_HDG_SNAP_DEG) hdg = course;   // no prior, or a wrong one
-    else hdg = norm360(hdg + err * (gyro ? POSE_HDG_W_GYRO : POSE_HDG_W_GPS));
+    // THE NO-GYRO FIX NEVER JOLTS THE HEADING (refuters 2026-09-10): posePredict eases it toward this
+    // course / the road every frame. Only a first heading (adoption) or a heading that is simply WRONG
+    // (> POSE_HDG_SNAP_DEG off, with no road owning the nose — a stop, a U-turn off the line) snaps.
+    const roadOwned = !gyro && st.roadHdg != null && st.roadK > 0 && st.tAt - st.roadAt <= POSE_ROAD_HOLD_MS;
+    if (!st.hdgKnown) hdg = course;
+    else if (gyro) hdg = Math.abs(err) > POSE_HDG_SNAP_DEG ? course : norm360(hdg + err * POSE_HDG_W_GYRO);
+    else if (!roadOwned && Math.abs(err) > POSE_HDG_SNAP_DEG) hdg = course;
     errPrev = wrap180(course - hdg); errPrevAt = f.at;
     const dtCourse = lastCourse != null ? (f.at - lastCourseAt) / 1000 : 0;
     if (lastCourse != null && dtCourse > 0.25 && dtCourse <= 3) {
@@ -383,6 +510,7 @@ export function poseFix(st: PoseState, f: PoseFix, yawCumDeg?: number | null): P
     yawCumAtCourse,
     lastCourse, lastCourseAt, gpsTurnDps, errPrev, errPrevAt, pendLat, pendLng,
     rawLat: stale ? st.rawLat : f.lat, rawLng: stale ? st.rawLng : f.lng, rawAt: stale ? st.rawAt : f.at, fixes: st.fixes + 1,
+    accLast: stale ? st.accLast : acc,
     rejected: st.rejected, maxStepM: Math.max(st.maxStepM, stepM),
   };
 }
@@ -394,16 +522,65 @@ export function poseFix(st: PoseState, f: PoseFix, yawCumDeg?: number | null): P
 export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | null | undefined, dtS: number): PoseState {
   if (!st.hasFix) return st;
   let target = 0;
+  let roadHdg: number | null = null, roadHdgAhead: number | null = null, roadK = 0;
+  let released = false, roadHeld = 0, roadSetAt = st.roadSetAt;
+  const moved = !!proj && (proj.lat !== st.projLat || proj.lng !== st.projLng);
   if (proj && Number.isFinite(proj.distM) && proj.distM <= POSE_ROUTE_MAX_M) {
     const yaw = typeof yawDpsAbs === "number" && Number.isFinite(yawDpsAbs) ? Math.abs(yawDpsAbs) : Math.abs(st.gpsTurnDps);
     const yawK = Math.max(0, 1 - yaw / POSE_ROUTE_YAW_FREE_DPS);
     const distK = Math.max(0, 1 - proj.distM / POSE_ROUTE_MAX_M);
-    target = POSE_ROUTE_W_MAX * yawK * distK;
+    // No `roadHdg` handed in = no road heading at all (the raw segment bearing is NEVER the nose —
+    // the bisector failure in the header); the lateral pull alone, as before.
+    const chord = typeof proj.roadHdg === "number" && Number.isFinite(proj.roadHdg) ? norm360(proj.roadHdg) : null;
+    const chordAhead = typeof proj.roadHdgAhead === "number" && Number.isFinite(proj.roadHdgAhead) ? norm360(proj.roadHdgAhead) : chord;
+    // THE NEWEST FIX'S course, qualified per the vendors (moving ≥ 3 m/s, a KNOWN accuracy < 20 m). A course
+    // from an earlier fix is not evidence about this projection (refuter: a 2.5 s-old entry-leg course
+    // released the road mid-corner exactly when iOS had dropped the course — the case the road is for).
+    const courseNew = st.lastCourse != null && st.lastCourseAt === st.fixAt && st.tAt - st.lastCourseAt <= POSE_ROAD_HOLD_MS ? st.lastCourse : null;
+    const courseQualified = courseNew != null && st.spd >= POSE_COURSE_MIN_MS && st.accLast != null && st.accLast < POSE_ROAD_RELEASE_ACC_M;
+    const prevFresh = st.roadHdg != null && st.tAt - st.roadAt <= POSE_ROAD_HOLD_MS;
+    let suspect = false;
+    if (chord == null) {
+      roadHdg = null; roadHdgAhead = null;
+    } else if (!moved && prevFresh) {
+      roadHdg = st.roadHdg; roadHdgAhead = st.roadHdgAhead ?? st.roadHdg; roadHeld = st.roadHeld;   // held between fixes
+    } else {
+      // ADOPT the new projection's chord? Only a step a car could have turned since the projection last
+      // moved, or one a qualified course corroborates. Beyond that: hold one fix (a noisy fix flipped
+      // legs at a vertex), and beyond POSE_ROAD_ADOPT_MAX_DEG refuse it (the wrong leg of a loop).
+      const ref = prevFresh ? st.roadHdg! : (st.hdgKnown ? st.hdg : null);
+      const stepDeg = ref == null ? 0 : Math.abs(wrap180(chord - ref));
+      const dtMoved = st.roadSetAt > 0 ? Math.max(0.25, (st.tAt - st.roadSetAt) / 1000) : 1;
+      const corroborated = courseQualified && Math.abs(wrap180(courseNew! - chord)) <= POSE_ROAD_RELEASE_DEG;
+      if (corroborated || stepDeg <= POSE_ROAD_ADOPT_DPS * dtMoved) {
+        roadHdg = chord; roadHdgAhead = chordAhead; roadHeld = 0; roadSetAt = st.tAt;
+      } else if (stepDeg > POSE_ROAD_ADOPT_MAX_DEG) {
+        roadHdg = null; roadHdgAhead = null; roadHeld = 0; suspect = true;
+      } else if (prevFresh && st.roadHeld < POSE_ROAD_HOLD_FIXES) {
+        roadHdg = st.roadHdg; roadHdgAhead = st.roadHdgAhead ?? st.roadHdg; roadHeld = st.roadHeld + 1; suspect = true;
+      } else {
+        roadHdg = chord; roadHdgAhead = chordAhead; roadHeld = 0; roadSetAt = st.tAt;
+      }
+    }
+    // THE VENDORS' RELEASE, with hysteresis, judged on the adopted road with the newest fix's course.
+    released = st.roadReleased;
+    if (roadHdg != null && courseQualified) {
+      const diff = Math.abs(wrap180(courseNew! - roadHdg));
+      released = st.roadReleased ? diff > POSE_ROAD_RESNAP_DEG : diff > POSE_ROAD_RELEASE_DEG;
+    }
+    if (!released && !suspect) target = POSE_ROUTE_W_MAX * yawK * distK;   // a suspect projection pulls nothing
+    if (roadHdg != null && !released) roadK = distK;
   }
   const dt = Math.max(0, Math.min(POSE_MAX_DT_S, dtS));
   const ease = 1 - Math.exp(-dt / POSE_ROUTE_TAU_S);
   const routeW = st.routeW + (target - st.routeW) * ease;
-  if (!proj || routeW <= 0.001) return { ...st, routeW };
+  const next: PoseState = {
+    ...st, routeW, roadHdg, roadHdgAhead, roadK, roadReleased: !!proj && released, roadHeld,
+    roadAt: roadHdg != null ? st.tAt : st.roadAt,
+    roadSetAt,
+    projLat: proj ? proj.lat : NaN, projLng: proj ? proj.lng : NaN,
+  };
+  if (!proj || routeW <= 0.001) return next;
   // LATERAL ONLY (Codex review 2026-09-09). The projection the surfaces hand in is of the RAW FIX,
   // and it is held between fixes; the estimate dead-reckons FORWARD between fixes. Pulling toward the
   // point itself dragged the car BACK along the road every frame (reproduced: 5.6–11.9 m of error on
@@ -417,7 +594,7 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
   const px = ex - along * tx, py = ey - along * ty;                                    // perpendicular part
   const lat = st.lat + (py * k) / 111320;
   const lng = st.lng + (px * k) / (111320 * cos);
-  return { ...st, lat, lng, routeW };
+  return { ...next, lat, lng };
 }
 
 export function poseOut(st: PoseState): { lat: number; lng: number; hdg: number; src: PoseState["src"]; routeW: number; yawDps: number } | null {

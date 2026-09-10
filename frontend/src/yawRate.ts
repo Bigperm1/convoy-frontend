@@ -39,6 +39,17 @@ import { yawFeedStart, yawFeedStep, yawFeedIntegral, yawFeedMeanDps, yawFeedSour
 
 const PLATFORM: MotionPlatform = Platform.OS === "ios" ? "ios" : Platform.OS === "android" ? "android" : "other";
 
+// ── OFF BY DEFAULT (2026-09-10, Jeff: "how do the big 3 do the GPS?") ───────────────────────
+// Apple, Google and Mapbox do the sensor fusion in the OS / native layer (CoreLocation
+// BestForNavigation "uses additional sensor data"; the fused provider; Mapbox's native enhanced
+// location engine) and never integrate a gyro in app code — the OS knows when the phone is being
+// handled in the back seat; app JS cannot. The drive-time feeds now ask the OS for that fused
+// output (src/navNotification.ts driveLocationOptions), and the estimator runs its GPS path
+// (src/poseEstimator.ts: eased fused fixes, GPS-turn extrapolation, lateral route pull). This
+// module stays — 48 gated assertions, thirteen Codex passes — as an OPT-IN experiment for a
+// rigidly mounted phone; flipping it on is a deliberate act with a receipt, not a default.
+export const YAW_GYRO_ENABLED = false;
+
 const UPDATE_MS = 50;              // 20 Hz — a 90° corner at city speed is 20–40°/s; 20 Hz sees it
 
 let _refs = 0;
@@ -66,6 +77,7 @@ function fold(m: any): void {
 /** Begin listening (ref-counted). Safe to call from both surfaces; idempotent. */
 export function startYawRate(): void {
   _refs += 1;
+  if (!YAW_GYRO_ENABLED) return;                           // no subscription, no battery, no receipts
   if (_sub || _starting) return;
   const DeviceMotion = loadDeviceMotion();
   if (!DeviceMotion) { _available = false; return; }
@@ -99,6 +111,7 @@ export function stopYawRate(): void {
 /** The MEAN yaw rate over the last ~400 ms of SENSOR time in deg/s (sign convention unknown to the
  *  caller), or null if none/stale. Receipts only — the estimator integrates the cumulative value. */
 export function getYawRateDps(): number | null {
+  if (!YAW_GYRO_ENABLED) return null;
   return yawFeedMeanDps(_feed, Date.now());
 }
 
@@ -114,6 +127,7 @@ export function getYawRateDps(): number | null {
  * sensor on that same edge. Any new consumer must reset its PoseState when it stops the sensor.
  */
 export function getYawIntegralDeg(): number | null {
+  if (!YAW_GYRO_ENABLED) return null;
   return yawFeedIntegral(_feed, Date.now())?.cumDeg ?? null;
 }
 
@@ -124,11 +138,13 @@ export function getYawIntegralDeg(): number | null {
  * a frozen sensor reads as "no gyro", never as a healthy gyro reporting zero turn (Codex 2026-09-10).
  */
 export function getYawIntegral(): { cumDeg: number; atMs: number } | null {
+  if (!YAW_GYRO_ENABLED) return null;
   return yawFeedIntegral(_feed, Date.now());
 }
 
-export function yawRateStats(): { available: boolean | null; samples: number; ageMs: number | null; refs: number; src: "att" | "rate" | null; locked: boolean; pitchDeg: number | null } {
-  return { available: _available, samples: _feed.samples, ageMs: _feed.advancedAtMs ? Date.now() - _feed.advancedAtMs : null, refs: _refs, src: _feed.src, locked: _feed.locked, pitchDeg: _feed.pitchRad == null ? null : _feed.pitchRad * 180 / Math.PI };
+export function yawRateStats(): { available: boolean | null; samples: number; ageMs: number | null; refs: number; src: "att" | "rate" | "off" | null; locked: boolean; pitchDeg: number | null } {
+  // `ys=off` on the rows when the gyro is disabled — a `?` read as "unknown sensor" (refuter 2026-09-10).
+  return { available: _available, samples: _feed.samples, ageMs: _feed.advancedAtMs ? Date.now() - _feed.advancedAtMs : null, refs: _refs, src: YAW_GYRO_ENABLED ? _feed.src : "off", locked: _feed.locked, pitchDeg: _feed.pitchRad == null ? null : _feed.pitchRad * 180 / Math.PI };
 }
 
 /**
@@ -136,4 +152,4 @@ export function yawRateStats(): { available: boolean | null; samples: number; ag
  * attitude has absorbed so far. Printed as `mdiff=` on pose-fix rows; its change between rows is
  * the slew rate the estimator saw. THE ONE CHECK for the magnetic-slew HYPOTHESIS (2026-09-10).
  */
-export function getYawSourceDiffDeg(): number { return yawFeedSourceDiffDeg(_feed); }
+export function getYawSourceDiffDeg(): number { return YAW_GYRO_ENABLED ? yawFeedSourceDiffDeg(_feed) : NaN; }   // NaN: the row omits mdiff= (nothing was measured)

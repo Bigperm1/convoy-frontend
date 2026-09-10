@@ -1719,9 +1719,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // Also memoised: projectOntoRoute WALKS the whole decoded line, so at 12 Hz it was
   // the second half of the same stall. It only changes when the car moves or the
   // route does — never on a trim tick.
+  // Speed feeds roadHdg's window (the vendors' max(speed/2, 10 m)) and roadHdgAhead (speed × 1 s
+  // along the line) — see projectOntoRoute. It changes with the fix, so no extra recomputes.
   const routeProj = useMemo(
-    () => ((s.navigating && hasFix && hasRoute) ? projectOntoRoute(lat, lng, routeLL) : null),
-    [s.navigating, hasFix, hasRoute, lat, lng, routeLL],
+    () => ((s.navigating && hasFix && hasRoute) ? projectOntoRoute(lat, lng, routeLL, null, null, null, s.speedMs || 0) : null),
+    [s.navigating, hasFix, hasRoute, lat, lng, routeLL, s.speedMs],
   );
   // ONE trim for all three surfaces (2026-07-29, src/routeTrim.ts). This used to be
   // its OWN formula — clamp(10 + speed*1.1, 10, 55) — against the phone's
@@ -1886,7 +1888,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       if (ps.yawSign !== 0) noteLearnedYawSign(ps.yawSign);
       _poseFixLanded = true;
     }
-    ps = poseRoute(ps, routeProj ? { lat: routeProj.lat, lng: routeProj.lng, bearing: routeProj.bearing, distM: routeProj.distM } : null, ps.src === "gyro" ? Math.abs(ps.yawDpsLast) : null, _dtS);
+    ps = poseRoute(ps, routeProj ? { lat: routeProj.lat, lng: routeProj.lng, bearing: routeProj.bearing, distM: routeProj.distM, roadHdg: routeProj.roadHdg, roadHdgAhead: routeProj.roadHdgAhead } : null, ps.src === "gyro" ? Math.abs(ps.yawDpsLast) : null, _dtS);
     poseRef.current = ps;
   } else if (poseRef.current.hasFix) {
     poseRef.current = poseStart();   // a drive ended: the next one starts clean
@@ -1916,7 +1918,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     if (_turning) {
       reportPoseFix('car', !!s.navigating, {
         fixAge: _nowMs - _fixTs, acc: s.selfAccM ?? null, course: typeof s.selfCourse === 'number' ? s.selfCourse : null, spd: s.speedMs || 0,
-        estHdg: est.hdg, yaw: poseRef.current.yawDpsLast, src: est.src, ys: yawRateStats().src, mdiff: getYawSourceDiffDeg(), pitch: yawRateStats().pitchDeg, lock: yawRateStats().locked, drawnVsFixM: poseHaversineM(est.lat, est.lng, lat, lng),
+        estHdg: est.hdg, yaw: poseRef.current.yawDpsLast, src: est.src, ys: yawRateStats().src, mdiff: getYawSourceDiffDeg(), pitch: yawRateStats().pitchDeg, lock: yawRateStats().locked, road: poseRef.current.roadHdg, rk: poseRef.current.roadK, rel: poseRef.current.roadReleased, drawnVsFixM: poseHaversineM(est.lat, est.lng, lat, lng),
         distM: routeProj ? routeProj.distM : null, routeW: est.routeW, dOld: _dOld,
       });
     }

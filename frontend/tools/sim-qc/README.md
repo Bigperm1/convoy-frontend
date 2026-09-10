@@ -246,10 +246,26 @@ first launch after a drive the app did not see end.
 
 ```bash
 node --experimental-strip-types tools/sim-qc/pose_estimator_test.mts
+**Section X (2026-09-10, "how do the big 3 do the GPS?")** — the shipped default: gyro OFF, 1 Hz fixes, the
+ROAD HEADING on. `projectOntoRoute` hands the estimator the line's direction averaged over ±max(speed/2, 10 m) of
+arc around the projection (`roadHdg`, Mapbox's `interpolatedCourse` span) and the same chord speed × 1 s further
+along (`roadHdgAhead`, their predicted keyPoints); on the no-gyro path the nose eases onto that (τ 0.35 s, ≤ 45°/s)
+and the fix no longer jolts it, unless a qualified course (≥ 3 m/s, acc < 20 m) disagrees with the line by > 45°,
+which releases both the nose and the lateral pull (the vendors' `RouteSnappingMaxManipulatedCourseAngle`). Every
+X case is measured against the same run with the road stripped (`noRoad`) — the 09-10 morning behaviour: a
+15 km/h single-vertex corner 33.4° / 16.6°-per-frame pops → 24.0° / 2.3°; the S-curve 33.2° → 20.3°; the
+iOS course-dropped corner 91.1° with a 89° pop → 27.0° / 2.3°; 50 km/h 32.2° → 14.8°; 100 km/h 16.2° → 5.2°; a
+straight with ±8° course noise 5.1° / 5.5°-per-frame → 0.0° / 0.01° (THE WAG BAR). X7 = the release (a line
+90° off a qualified course: the nose follows the course, routeW → 0); X8 = the snap (a line 20° off: the nose
+sits on the line, `src=road`). The harness polyline is built like a real Mapbox line since 09-10: one vertex at
+the tangent intersection for an arc under 20 m (the King Rd shape), a vertex every 20 m on longer arcs — until
+then the vertex sat at the arc's START and skewed every exit leg by ~8°.
+
 - `node --experimental-strip-types tools/sim-qc/fix_course_test.mts` — a fix's own course per platform: iOS keeps 0° (due north), Android drops 0 (`Location.getBearing()` = 0.0 with no bearing). Every feed site goes through `src/fixCourseHere.ts`.
 - `node --experimental-strip-types tools/sim-qc/yaw_feed_test.mts` — the DeviceMotion → cumulative-yaw reducer (`src/yawFeed.ts`): fused attitude deltas on the SENSOR clock, cached re-dispatches are not new samples, freshness expires, the fallback rate path integrates at the sensor interval. Added 2026-09-10 with the wag fix.
 - `node --experimental-strip-types tools/sim-qc/watch_taps_test.mts` — the wrist-tap rule (side from the maneuver key; prepare at a 12 s lead clamped 120–400 m; now at 40 m; one per kind per step; 1.5 s apart).
 - `node --experimental-strip-types tools/sim-qc/watch_feed_test.mts` — the wrist payload: shape, on-change ≤ 2 Hz (nav on/off and step change immediate), 30 s stale rule.
+- `node --experimental-strip-types tools/sim-qc/drive_feed_test.mts` — the drive-time location request (`src/driveFeed.ts`): BestForNavigation 500 ms / 2 m on every head-unit feed, High 1000 / 5 only under Lite GPS, and the rebuild rule that follows a Lite GPS toggle (or the settings hydration) onto the LIVE feeds — the Codex finding on OTA-AM, 2026-09-10.
 ```
 
 Drives `src/poseEstimator.ts` — the continuous pose that replaced the snap / cornerBlend / cornerNose

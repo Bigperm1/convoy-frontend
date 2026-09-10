@@ -26,7 +26,8 @@ import { setCarState, setCarSelfPosition, claimCarNavStrip, releaseCarNavStrip }
 import { rawCourseHere } from "./fixCourseHere";
 import { CAR_DIAG_MODE } from "./carplay/carPlayShared";
 import { resetMapView2D, setMapView2D } from "./mapViewMode";
-import { getSettings, getMapMode } from "./settings";
+import { getSettings, getMapMode, subscribeSettings } from "./settings";
+import { driveFeedOptions, driveFeedNeedsRelite, reliteDriveFeeds } from "./driveFeed";
 import { updateSpeedLimit } from "./speedLimit";
 import { recordTrip } from "./trips";
 import { feedOdo, odoNowM } from "./driveOdometer";
@@ -680,6 +681,37 @@ function _emitBgFix(f: BgFix): void {
   _bgFixListeners.forEach((l) => { try { l(f); } catch {} });
 }
 
+// ── DRIVE-TIME LOCATION MODE (2026-09-10) ────────────────────────────────────────────────────
+// Apple, Google and Mapbox all do the sensor fusion in the OS / native layer and map-match on top;
+// the app never integrates a gyro itself. The head unit's two feeds here asked expo for
+// `Accuracy.High`, which expo maps to kCLLocationAccuracyNearestTenMeters (LocationAccuracy.swift)
+// — the coarsest mode this app uses, and on a locked phone the ONLY feed the car surface has.
+// Apple: kCLLocationAccuracyBestForNavigation is "the highest possible accuracy that uses
+// additional sensor data to facilitate navigation apps"; expo's iOS provider ignores timeInterval
+// (delivery ~1 Hz measured). Android: High and BestForNavigation are BOTH PRIORITY_HIGH_ACCURACY on
+// the fused provider — our explicit 500 ms / 2 m override expo's per-enum defaults
+// (LocationHelpers.kt:113-117), so there the change is the interval and the distance filter.
+// The user's Lite GPS setting (Settings → Map) still opts down to High on every path, with the
+// phone watcher's own numbers (src/driveFeed.ts). Receipt: `nav-loc` once per start.
+// Lifecycle (Codex review, 2026-09-10, two passes): these feeds are module-scope singletons that
+// read the setting only when they START, and getSettings() returns the DEFAULTS until hydration
+// lands. Each feed therefore records the value it was started with — `_fgLite` / `_bgLite`,
+// committed only after its native start succeeded, null = not up or not started by this JS session
+// — and _reconcileLite() (every settings notify, hydration included, and after every start)
+// rebuilds the LIVE feeds whose value no longer matches (src/driveFeed.ts). The start path itself
+// never waits on disk: on a locked phone with CarPlay live, JS timers can freeze.
+let _fgLite: boolean | null = null;
+let _bgLite: boolean | null = null;
+function driveLocationOptions(): { accuracy: Location.Accuracy; timeInterval: number; distanceInterval: number; lite: boolean } {
+  let lite = false;
+  try { lite = getSettings().liteGps === true; } catch {}   // cold/headless context: never skip the start over a settings read
+  const o = driveFeedOptions(lite);
+  return {
+    accuracy: o.accuracy === "high" ? Location.Accuracy.High : Location.Accuracy.BestForNavigation,
+    timeInterval: o.timeInterval, distanceInterval: o.distanceInterval, lite,
+  };
+}
+
 TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   if (error) return;
   const locs = data?.locations;
@@ -917,10 +949,12 @@ export async function startForegroundCarFeed(): Promise<void> {
   try {
     const fg = await Location.getForegroundPermissionsAsync();
     if (!fg.granted) return;
+    const _carLoc = driveLocationOptions();
+    try { logEventReliable(`nav-loc src=car mode=${_carLoc.lite ? "high" : "bfn"} t=${_carLoc.timeInterval} d=${_carLoc.distanceInterval}`); } catch {}
     _fgCarWatch = await Location.watchPositionAsync(
-      // 1s/5m (was 2s/15m): the head unit's only continuous feed in several
-      // states — 15m gating read as "GPS stopped" at parking-lot speeds.
-      { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 5 },
+      // 0.5s/2m navigation-grade fused fixes (was High = NearestTenMeters at 1s/5m — see
+      // driveLocationOptions): the head unit's only continuous feed in several states.
+      { accuracy: _carLoc.accuracy, timeInterval: _carLoc.timeInterval, distanceInterval: _carLoc.distanceInterval },
       (loc) => {
         _lastFixAt = Date.now(); // feed the GPS stall watchdog
         const h = loc.coords.heading;
@@ -959,12 +993,62 @@ export async function startForegroundCarFeed(): Promise<void> {
         }
       }
     );
+    _fgLite = _carLoc.lite;                 // committed only now — the native start succeeded
+    if (_locConsumers.size === 0) {         // the last consumer released while the watch was being built
+      stopForegroundCarFeed();              // (the same guard acquireBgLocation carries; closes the watchdog's window too)
+      try { logEventReliable("bgloc-fgstart-raced stopped=1"); } catch {}
+      return;
+    }
+    _reconcileLite(false); // the setting may have hydrated/flipped while the watch was being built
   } catch {}
 }
 
 function stopForegroundCarFeed(): void {
   try { _fgCarWatch?.remove(); } catch {}
   _fgCarWatch = null;
+  _fgLite = null;
+}
+
+// ── Lite GPS follows the driver onto the head unit (Codex review, 2026-09-10, two passes) ──
+// The phone watcher re-subscribes on `settings.liteGps` (map.tsx dep array); these two feeds did
+// not, so a mid-drive toggle changed nothing on CarPlay / Android Auto and a cold connect before
+// hydration ran the defaults for the whole drive. The decision and the async rebuild live in
+// src/driveFeed.ts (gated with deferred native promises: a toggle between the two starts, a release
+// mid-rebuild); this is the glue. One serialized rebuild per actual change, only for feeds that are
+// up and still wanted. Receipt: `nav-loc relite` (bounded: one per toggle).
+let _reliteChain: Promise<unknown> = Promise.resolve();
+let _liteSeen: boolean = (() => { try { return getSettings().liteGps === true; } catch { return false; } })();
+function _reconcileLite(fromSettings: boolean): void {
+  // ⚠ MUST NOT THROW — settings.ts notifies listeners with no per-listener guard.
+  try {
+    const liteNow = getSettings().liteGps === true;
+    const changed = fromSettings && liteNow !== _liteSeen;   // an ACTUAL toggle (or the hydration flip)
+    if (fromSettings) _liteSeen = liteNow;
+    if (!driveFeedNeedsRelite({ liteNow, changed, consumers: _locConsumers.size, fg: { up: !!_fgCarWatch, lite: _fgLite }, bgLite: _bgLite })) return;
+    _reliteChain = _reliteChain.then(() => reliteDriveFeeds({
+      liteNow, changed,
+      consumers: () => _locConsumers.size,
+      fg: () => ({ up: !!_fgCarWatch, lite: _fgLite }),
+      bgOn: () => Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false),
+      bgLite: () => _bgLite,
+      restartFg: async () => { stopForegroundCarFeed(); await startForegroundCarFeed(); },
+      restartBg: async () => { await tryStartBgUpdates(true); }, // force: stop + start with the new request
+      teardown: async () => {
+        // The last consumer left while a restart was in flight: undo everything, like acquireBgLocation.
+        _stopStallWatchdog();
+        stopForegroundCarFeed();
+        const on = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
+        if (on) {
+          await Location.stopLocationUpdatesAsync(NAV_TASK).catch(() => {});
+          try { logEventReliable("bgloc-relite-raced stopped=1"); } catch {}
+        }
+      },
+      log: (row) => { try { logEventReliable(row); } catch {} },
+    })).catch(() => {});
+  } catch {}
+}
+if (Platform.OS !== "web") {
+  try { subscribeSettings(() => _reconcileLite(true)); } catch {}
 }
 
 // Cold-connect route hydration (PART 4). On a cold CarPlay connect the phone map
@@ -1015,14 +1099,23 @@ async function tryStartBgUpdates(force = false): Promise<boolean> {
     const already = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
     // `force` (stall watchdog): a wedged session still REPORTS started but
     // delivers nothing — stop it so the start below rebuilds it for real.
-    if (already && !force) return true;
-    if (already && force) { try { await Location.stopLocationUpdatesAsync(NAV_TASK); } catch {} }
+    // INHERITED (2026-09-10): a task this JS session never started — a red-pill reload or a relaunch
+    // with the native task still registered — is running the PREVIOUS bundle's request (until this
+    // OTA, the ten-metre one). Rebuild it once, but only while the app is in use: with When-In-Use
+    // permission a task only delivers through lock if it STARTED in use (see below), so a
+    // backgrounded inherit is left alone and the AppState heal below rebuilds it on the next active.
+    const inherited = already && !force && _bgLite == null;
+    if (already && !force && !inherited) return true;
+    if (inherited && AppState.currentState !== "active") return true;
+    if (already) { try { await Location.stopLocationUpdatesAsync(NAV_TASK); } catch {} }
+    const _bgLoc = driveLocationOptions();
+    try { logEventReliable(`nav-loc src=bg mode=${_bgLoc.lite ? "high" : "bfn"} t=${_bgLoc.timeInterval} d=${_bgLoc.distanceInterval} inherit=${inherited ? 1 : 0}`); } catch {}
     await Location.startLocationUpdatesAsync(NAV_TASK, {
-      accuracy: Location.Accuracy.High,
-      // 1s/5m (was 3s/20m): with the phone locked this is the ONLY feed moving
-      // the car marker — 3s/20m looked frozen-then-teleporting on the head unit.
-      timeInterval: 1000,
-      distanceInterval: 5,
+      // Navigation-grade FUSED fixes (was High = NearestTenMeters at 1s/5m — see
+      // driveLocationOptions): with the phone locked this is the ONLY feed moving the car marker.
+      accuracy: _bgLoc.accuracy,
+      timeInterval: _bgLoc.timeInterval,
+      distanceInterval: _bgLoc.distanceInterval,
       // AutomotiveNavigation tells iOS these updates are for driving, so it keeps
       // the location session alive through a locked screen instead of throttling/
       // pausing it as it does for the generic (Other) type. NOTE the drive-tested
@@ -1041,6 +1134,8 @@ async function tryStartBgUpdates(force = false): Promise<boolean> {
         notificationColor: accentNow(),
       },
     });
+    _bgLite = _bgLoc.lite;                  // committed only now — the native start succeeded
+    _reconcileLite(false); // the setting may have hydrated/flipped while the task was being started
     return true;
   } catch (e) {
     // Background updates couldn't start (likely needs "Always"). Surface the reason
@@ -1073,7 +1168,7 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
   _startStallWatchdog(); // self-heal a feed that dies while the lock is held
   try {
     const already = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
-    if (already) { void startForegroundCarFeed(); return true; }
+    if (already) { void startForegroundCarFeed(); void tryStartBgUpdates(); return true; } // tryStart: the inherited-task rule
     // Try for "Always" (keeps the car map fed while the phone is FULLY
     // backgrounded behind the head unit). Note: when this runs from a cold CarPlay
     // connect the app is backgrounded, so iOS CANNOT show the upgrade prompt here —

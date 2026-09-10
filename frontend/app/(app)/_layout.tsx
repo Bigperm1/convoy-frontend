@@ -79,6 +79,7 @@ import { getEvent } from "../../src/eventsApi";
 import { initVisitMonitor } from "../../src/visitMonitor";
 import { refreshWidgetFeed } from "../../src/widgetFeed";
 import { startWatchLink } from "../../src/watchLink";
+import { startWatchPtt } from "../../src/watchPtt";
 import * as Notifications from "expo-notifications";
 import { initCallDetection } from "../../src/callState";
 
@@ -149,6 +150,10 @@ export default function AppLayout() {
   // incoming frame, so switching active community in Comms is reflected
   // immediately without reopening the socket.
   useLiveWalkieListener(() => settings.activeThreadId || settings.activeCommunityId, () => user?.id);
+
+  // Wrist PTT (build 77): a clip held-to-talk on the watch acquires the SAME floor as a
+  // phone-side transmission, keyed off the same active-channel getter as the listener above.
+  useEffect(() => startWatchPtt(() => settings.activeThreadId || settings.activeCommunityId), [settings.activeThreadId, settings.activeCommunityId]);
 
   useEffect(() => {
     if (user === null) router.replace("/(auth)/login");

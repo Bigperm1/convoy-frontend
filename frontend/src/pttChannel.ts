@@ -39,7 +39,7 @@ const VOX_SILENCE_MS = 1000;
 const VOX_DB_THRESHOLD = -40;
 const VOX_POLL_MS = 250;
 
-async function uriToBase64(uri: string): Promise<string> {
+export async function uriToBase64(uri: string): Promise<string> {
   // Web: fetch + FileReader. Native: expo-file-system reads base64 directly,
   // but fetch()+FileReader also works for file:// URIs on RN and keeps this
   // single-path. Mirrors the proven approach in useVoice.ts.

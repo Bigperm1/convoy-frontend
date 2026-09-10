@@ -9,7 +9,7 @@ struct HairpinWatchApp: App {
     WindowGroup {
       TabView {
         TurnCardView(store: store)
-        Text("PTT")           // Task 9
+        PttButton()
       }
       .tabViewStyle(.page)
       .onAppear { if session == nil { session = WatchSession(store: store) } }

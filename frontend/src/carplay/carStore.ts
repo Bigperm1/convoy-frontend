@@ -134,6 +134,16 @@ export type CarState = {
   selfLat: number | null;
   selfLng: number | null;
   heading: number | null; // degrees, 0 = north
+  // The accepted fix's OWN timestamp (epoch ms) and horizontal accuracy (m). Published
+  // 2026-09-09: the store received fixTs since 8/20 but buried it in `lastSelfPos`, so the
+  // draw path dated every fix by the render clock and could not tell a stale fix from a
+  // fresh one — tonight's 00:56:48 i=1 fix implied 65 km/h to the next and was drawn as
+  // current. The pose estimator weights fixes by exactly these two numbers.
+  selfFixTs: number | null;
+  selfAccM: number | null;
+  /** The accepted fix's OWN course, null when the platform reported none. `heading` above is
+   *  STICKY (held when unknown) for the display; the pose estimator must read this one. */
+  selfCourse: number | null;
   routePolyline: string;
   // Self car paint (mirror of the phone's settings.carColor). Lets the car root
   // pick the right 3D vehicle model (getVehicleModelUrl). undefined → car root
@@ -244,6 +254,9 @@ const initial: CarState = {
   selfLat: null,
   selfLng: null,
   heading: null,
+  selfFixTs: null,
+  selfAccM: null,
+  selfCourse: null,
   routePolyline: '',
 };
 
@@ -329,6 +342,11 @@ export function setCarSelfPosition(
   // writer priority and writer freshness but never fix time — an older queued
   // fix from one GPS stream legally replaced a newer one at every feed handoff.
   fixTs?: number,
+  /** Horizontal accuracy of THIS fix in metres, when the platform reports it. */
+  accM?: number | null,
+  // The fix's OWN course (src/fixCourseHere.ts rawCourseHere), or null when the platform reported
+  // none. `heading` above is the sticky DISPLAY heading; this is the pose estimator's evidence.
+  course?: number | null,
 ) {
   const now = Date.now();
   // Bounded receipt (2026-09-04/05): every raw fix from any of the three feeds passes
@@ -371,6 +389,9 @@ export function setCarSelfPosition(
     : (typeof prevHeading === 'number' ? prevHeading : null);
   setCarState({
     selfLat: lat, selfLng: lng, heading: nextHeading,
+    selfFixTs: ts,
+    selfAccM: typeof accM === 'number' && Number.isFinite(accM) && accM >= 0 ? accM : null,
+    selfCourse: typeof course === 'number' && Number.isFinite(course) ? course : null,
     ...(typeof speedMs === 'number' && Number.isFinite(speedMs) && speedMs >= 0 ? { speedMs } : {}),
   });
 }

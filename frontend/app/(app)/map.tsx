@@ -56,6 +56,7 @@ import { feedOdo, odoNowM } from "../../src/driveOdometer";
 import PitstopCard from "../../src/components/PitstopCard";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
 import { setCarState, setCarPeers, subscribeCarGesture, setCarSelfPosition, getCarState, type CarState } from '../../src/carplay/carStore';
+import { rawCourseHere } from "../../src/fixCourseHere";
 import { useVoice } from "../../src/useVoice";
 import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
@@ -488,7 +489,7 @@ export default function MapScreen() {
   // measured what a tester's phone actually reports, so any threshold today would be
   // invented rather than derived. Set by the main foreground watcher; the one-shot seeds
   // leave it undefined.
-  const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number; speed?: number; acc?: number } | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lng: number; heading?: number; speed?: number; acc?: number; ts?: number; course?: number | null } | null>(null);
 
   // ---- Personal Best speed tracking ----
   // sessionMaxSpeed: highest km/h seen since the screen mounted (in-memory only).
@@ -2056,6 +2057,9 @@ export default function MapScreen() {
         lat: f.lat,
         lng: f.lng,
         heading: typeof f.heading === "number" ? f.heading : cur?.heading,
+        ts: typeof f.ts === "number" ? f.ts : Date.now(),
+        acc: typeof f.acc === "number" ? f.acc : undefined,
+        course: typeof f.course === "number" ? f.course : null,
         // >= 0: CoreLocation reports an INVALID speed as -1 — the fg watcher clamps
         // it (:2732) but this feed passed it through, and downstream the scatter
         // gate treats any sub-creep speed as "stopped" (review find F1, 8/19).
@@ -3386,6 +3390,8 @@ export default function MapScreen() {
                 lat: pos.coords.latitude,
                 lng: pos.coords.longitude,
                 heading: typeof h === "number" && h > 0 ? h : cur?.heading,
+                ts: typeof pos.timestamp === "number" ? pos.timestamp : Date.now(),
+                course: rawCourseHere(h),   // the fix's OWN course; per-platform 0° rule
                 speed: typeof sp === "number" && sp >= 0 ? sp : (cur?.speed ?? 0),
                 acc: typeof a === "number" && isFinite(a) && a >= 0 ? a : undefined,
               }));
@@ -3491,6 +3497,9 @@ export default function MapScreen() {
           (pos) => {
             const h = pos.coords.heading;
             const heading = typeof h === "number" && h > 0 ? h : undefined;
+            // The fix's OWN course, nullable, 0° kept: the pose estimator reads THIS, never the
+            // sticky display heading above (a held heading is not evidence of direction).
+            const rawCourse = rawCourseHere(h);   // per-platform 0° rule: src/fixCourse.ts
             const sRaw = pos.coords.speed;
             const speed = typeof sRaw === "number" && sRaw >= 0 ? sRaw : 0;  // clamp negatives
             // Telemetry only — see the `coords` declaration. CoreLocation reports an
@@ -3532,6 +3541,8 @@ export default function MapScreen() {
               setCarSelfPosition(
                 pos.coords.latitude, pos.coords.longitude,
                 heading ?? null, 'mirror', speed, pos.timestamp,
+                typeof pos.coords.accuracy === "number" ? pos.coords.accuracy : null,
+                rawCourse,   // the fix's OWN course for the car surface's pose estimator
               );
             } catch {}
             setCoords((cur) => ({
@@ -3540,6 +3551,10 @@ export default function MapScreen() {
               heading: heading ?? cur?.heading,
               speed,
               acc,
+              // The fix's OWN time, for the pose estimator (src/poseEstimator.ts): a fix is
+              // weighted by its age, and the render clock cannot tell a stale fix from a fresh one.
+              ts: typeof pos.timestamp === "number" ? pos.timestamp : Date.now(),
+              course: rawCourse,
             }));
             // Live-avatar publish â push our position to the backend on a ~4s
             // throttle so every other driver's /users/nearby (polled by
@@ -3929,6 +3944,8 @@ export default function MapScreen() {
           heading: typeof heading === "number" && heading > 0 ? heading : (coords?.heading || 0),
           speed: typeof speed === "number" && speed >= 0 ? speed : 0,
           acc: typeof acc0 === "number" && isFinite(acc0) && acc0 >= 0 ? acc0 : undefined,
+          ts: typeof (pos as any).timestamp === "number" ? (pos as any).timestamp : Date.now(),
+          course: rawCourseHere(heading),   // the fix's OWN course; per-platform 0° rule
         });
         // 2. Push the new fix to the backend so /users/nearby returns us live — but only
         //    what the avatarMode contract allows. This was ungated too, so a manual

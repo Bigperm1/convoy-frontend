@@ -168,6 +168,15 @@ function armAppWatch(): void {
 
 /** Called from the rAF step. Must stay trivial — it runs up to 120x/sec (and, during
  *  the bug this exists to catch, ~50,000x/sec). */
+// ── FIX GAP (2026-09-09) ─────────────────────────────────────────────────────────────────
+// A `main-gap` row could not say whether frames stopped because the main thread stalled or
+// because no fix was ACCEPTED (SelfCarModel's step() idles with nothing to ease). Jeff's drive
+// home: `main-gap dt=3936 surface=car` at 00:56:07 in the exit sweep, 37–53 m of travel with no
+// eased frame, and no way to tell which. The draw paths now stamp every accepted fix here, and
+// the row prints `fixGap=` — ms since the last accepted fix — beside `dt=`.
+let _lastFixAt = 0;
+export function noteFixAccepted(now: number): void { if (now > _lastFixAt) _lastFixAt = now; }
+
 export function noteFrame(now: number, inst?: string): void {
   if (!_on) return;
   _raf++;
@@ -195,7 +204,8 @@ export function noteFrame(now: number, inst?: string): void {
       // A gap can still be the step loop idling under the dead-band (noteFrame's only
       // caller is the SelfCarModel ease) — read it with the speed on the draw-cmp rows.
       const sinceApp = _appChangedAt ? now - _appChangedAt : -1;
-      try { logEventReliable(`main-gap dt=${Math.round(dt)} ${_ctx} app=${_appSeen || '?'} sinceApp=${Math.round(sinceApp)}`); } catch {}
+      const fixGap = _lastFixAt ? now - _lastFixAt : -1;
+      try { logEventReliable(`main-gap dt=${Math.round(dt)} ${_ctx} app=${_appSeen || '?'} sinceApp=${Math.round(sinceApp)} fixGap=${Math.round(fixGap)}`); } catch {}
     }
     // Thin to every 4th once warm, and STOP at DTS_MAX (see above).
     if (_dts.length < 900 || ((_raf & 3) === 0 && _dts.length < DTS_MAX)) _dts.push(dt);

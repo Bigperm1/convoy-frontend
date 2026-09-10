@@ -23,6 +23,7 @@ import {
 } from "./nav";
 import { maneuverDir } from "./components/ManeuverArrow";
 import { setCarState, setCarSelfPosition, claimCarNavStrip, releaseCarNavStrip } from "./carplay/carStore";
+import { rawCourseHere } from "./fixCourseHere";
 import { CAR_DIAG_MODE } from "./carplay/carPlayShared";
 import { resetMapView2D, setMapView2D } from "./mapViewMode";
 import { getSettings, getMapMode } from "./settings";
@@ -654,7 +655,11 @@ let _navTaskTicks = 0;
 // different streak thresholds) and a second copy would drift from the first — the same
 // duplication that gave the route trim two different formulas for months. Instead the
 // background fix is PUBLISHED, and map.tsx feeds it to the one existing engine.
-type BgFix = { lat: number; lng: number; heading?: number; speed?: number };
+// 2026-09-09: `ts`, `acc` and the RAW `course` ride every background fix. The pose estimator
+// weights a fix by its age and accuracy and must only ever see the fix's OWN course — `heading`
+// here is the display heading (held when the platform reports none) and must not be mistaken for
+// evidence. Codex 4th pass: without `ts` the phone estimator went blind on background takeover.
+type BgFix = { lat: number; lng: number; heading?: number; speed?: number; ts?: number; acc?: number | null; course?: number | null };
 const _bgFixListeners = new Set<(f: BgFix) => void>();
 export function subscribeBgFix(fn: (f: BgFix) => void): () => void {
   _bgFixListeners.add(fn);
@@ -696,7 +701,9 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
     typeof _h === "number" && _h > 0 ? _h : null,
     'bgtask',
     typeof _sp === "number" && _sp >= 0 ? _sp : 0,
-    loc.timestamp, // fix time — the gate now refuses to draw time backwards (8/20)
+    loc.timestamp, // fix time — the gate now refuses to draw time backwards (8/20),
+    typeof loc.coords.accuracy === 'number' ? loc.coords.accuracy : null,
+    rawCourseHere(_h),   // the fix's OWN course for the pose estimator (0° kept on iOS)
   );
   setCarState({
     // HEAT (2026-08-14): this INCREMENTS, so it defeats carStore's equality gate and
@@ -714,6 +721,9 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
     lng: loc.coords.longitude,
     heading: typeof _h === "number" && _h > 0 ? _h : undefined,
     speed: typeof _sp === "number" && _sp >= 0 ? _sp : 0,
+    ts: typeof loc.timestamp === "number" ? loc.timestamp : Date.now(),
+    acc: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : null,
+    course: rawCourseHere(_h),   // the fix's OWN course; per-platform 0° rule in src/fixCourse.ts
   });
   // DEAD-MAN AUDIT (see _sweepBgConsumers): every delivery batch, the task checks
   // whether anyone still legitimately consumes it — in the leaked state THIS callback
@@ -912,7 +922,9 @@ export async function startForegroundCarFeed(): Promise<void> {
           typeof h === "number" && h > 0 ? h : null,
           'fgwatch',
           typeof sp === "number" && sp >= 0 ? sp : 0,
-          loc.timestamp, // fix time — see the gate (8/20)
+          loc.timestamp, // fix time — see the gate (8/20),
+          typeof loc.coords.accuracy === 'number' ? loc.coords.accuracy : null,
+          rawCourseHere(h),   // the fix's OWN course for the pose estimator (0° kept on iOS)
         );
         // Constant string, so carStore's equality gate already makes this a no-op after
         // the first write; flag-gated too so it costs nothing at all when diag is off.

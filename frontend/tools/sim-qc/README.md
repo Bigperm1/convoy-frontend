@@ -241,3 +241,22 @@ pre-change records adopted; D–E the age and shape rules; F which fixes may bec
 (`SPOT_WRITE_MAX_SPEED_MS` = 1.5 m/s: 7 km/h no, 3 km/h yes). What it cannot see: the AsyncStorage round trip and
 `noteCarConnected` itself — those are read-verified; the field receipt is `draw-cmp … spotDrop=<why>` on the
 first launch after a drive the app did not see end.
+
+## Pose-estimator gate (numeric, seconds)
+
+```bash
+node --experimental-strip-types tools/sim-qc/pose_estimator_test.mts
+- `node --experimental-strip-types tools/sim-qc/fix_course_test.mts` — a fix's own course per platform: iOS keeps 0° (due north), Android drops 0 (`Location.getBearing()` = 0.0 with no bearing). Every feed site goes through `src/fixCourseHere.ts`.
+```
+
+Drives `src/poseEstimator.ts` — the continuous pose that replaced the snap / cornerBlend / cornerNose
+switch stack for the DRAWN car during guidance (2026-09-09, Jeff: "why is it drifting and at low
+speeds ... why cant this be fixed"). Scenarios: a left-then-right S-curve at 15 km/h with 1 Hz ±3 m
+fixes and a 20 Hz gyro (position and heading measured on the SECOND corner, the first teaches the
+gyro its sign), the same corner GPS-only, an opposite-sign sensor, a parked phone with jitter, a
+lost signal (dead reckoning capped), a stale and a vague fix, a 1.5°/s gyro bias on a straight, and
+Jeff's REAL King Rd rows from 2026-09-09 00:56:48–53 UTC — the corner that read 15.9 / 10.8 / 14.8 m
+off the car on three drives. The gate holds the nose within 20° of the course at that corner where
+the old draw pointed at the 124° polyline bisector, and the position within 8 m where the old draw
+sat 14.8 m away on the line. Field receipts for the same numbers: `pose-fix` rows and the `est=`
+fields on `corner-trace` / `draw-cmp` / `snap-mode`.

@@ -32,8 +32,11 @@
 // handed to Mapbox below is [lng, lat].
 
 import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
-import { reportDraw } from "./drawTelemetry";
-import { noteFrame, noteCam, noteTick, retireInstance } from "./heatProbe";
+import { reportDraw, reportPoseFix, resetPoseFixBudget } from "./drawTelemetry";
+import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted } from "./heatProbe";
+import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState } from "./poseEstimator";
+import { startYawRate, stopYawRate, getYawRateDps, getYawIntegralDeg } from "./yawRate";
+import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "./poseSeed";
 import { logEvent } from "./crashBreadcrumb";
 // Timer-liveness clock (2026-09-04/05) — see src/timerLiveness.ts. Used by SelfCarModel
 // below to bypass the eased marker/camera path with a direct fix-driven update when JS
@@ -117,6 +120,10 @@ export interface UserLocation {
    *  yet, deliberately: we have never measured what testers' phones report, so any
    *  threshold today would be folklore. Logged first (draw-cmp `acc=`), gated later. */
   acc?: number;
+  /** The fix's own timestamp (epoch ms), when the caller has it. */
+  ts?: number;
+  /** The fix's OWN course (deg, 0 = north), null when the platform reported none. Not the sticky heading. */
+  course?: number | null;
 }
 
 // Mapbox is now the only engine. This is the single source of truth for the map
@@ -1727,7 +1734,11 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     const now = Date.now();
     if (lastFixAt.current) {
       const gap = now - lastFixAt.current;
-      if (gap > 80) fixGap.current = Math.max(300, Math.min(1600, gap));
+      // 2026-09-09: targets now arrive every ~83 ms from the pose estimator during guidance, not
+      // once a second from a fix. Restarting a 330 ms ease every 83 ms converges, but with a lag of
+      // roughly a third of the ease; a 150 ms floor for that cadence halves it. Fix-driven cadences
+      // (free drive, ~1 s) keep the 300 ms floor and the full-interval ease.
+      if (gap > 80) fixGap.current = gap < 150 ? 150 : Math.max(300, Math.min(1600, gap));
     }
     lastFixAt.current = now;
 
@@ -2563,6 +2574,17 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // flicker when the travel heading hovers near the boundary.
   const snapHdgOkRef = useRef(true);
   const cornerStRef = useRef(newCornerBlendState());
+  // ── POSE ESTIMATOR (2026-09-09) — src/poseEstimator.ts: the DRAWN pose during guidance ──
+  const poseRef = useRef<PoseState>(poseStart());
+  const poseFixTsRef = useRef(0);
+  const poseSeededRef = useRef(false);
+  useEffect(() => { void ensureYawSignLoaded(); }, []);
+  useEffect(() => {
+    if (!navigationActive) return;
+    resetPoseFixBudget();
+    startYawRate();
+    return () => stopYawRate();
+  }, [navigationActive]);
   // Derived arrival time of the raw pose — cornerNose's hold counts FIXES, and neither
   // UserLocation nor CarPoint carries a fix timestamp (see cornerBlend.ts DERIVED FIX CLOCK).
   const fixClockRef = useRef(newFixClock());
@@ -3584,9 +3606,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const _travelHdg = (selfCar?.heading ?? null) != null ? (selfCar!.heading as number)
     : (camHeadingRef.current != null ? camHeadingRef.current : null);
   let _hdgOk = true;
+  let _hd: number | null = null;
+  const _latchIn = snapHdgOkRef.current;
   if (_distSnap && _travelHdg != null && (userSpeedMs ?? 0) >= SELF_SNAP_MOVING_MS) {
     // Absolute shortest-arc angle between travel heading and the route segment bearing.
-    const _hd = Math.abs(((((_travelHdg - routeProj!.bearing) % 360) + 540) % 360) - 180);
+    _hd = Math.abs(((((_travelHdg - routeProj!.bearing) % 360) + 540) % 360) - 180);
     const _instantOk = snapHdgOkRef.current ? _hd <= SELF_SNAP_HDG_UNLOCK : _hd <= SELF_SNAP_HDG_LOCK;
     // SUSTAINED disagreement only. Rounding a real corner ON the route produces a
     // big instantaneous angle — at the apex of a 90° turn the course is ~45° off
@@ -3611,6 +3635,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   }
   snapHdgOkRef.current = _distSnap ? _hdgOk : true; // reset the latch when not distance-snapped
   const selfSnapped = _distSnap && _hdgOk;
+  const _gateWhy = !navigationActive ? "nonav" : !routeProj ? "noproj" : !_distSnap ? "dist" : _hd == null ? "slow" : _hdgOk ? "ok" : "hdg";
   // Feed the throttled road-snap query with the latest raw pose — only while NOT route-snapped
   // (idle / off-route), so it never runs during normal on-route nav.
   // ROAD SNAP IS NAV-ONLY (2026-07-24). It exists to keep the car on the road while
@@ -3657,7 +3682,35 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // actually swinging and the line's corner geometry sits >6 m from the car, draw toward the
   // raw fix (fully raw at 16 m) — see src/cornerBlend.ts. Straights stay glued to the line.
   const cornerK = cornerBlend(cornerStRef.current, _travelHdg, routeProj?.distM ?? null, userSpeedMs ?? 0, selfSnapped);
-  const selfDraw = selfPinned
+  // ── POSE ESTIMATOR STEP (phone) — see CarMapView for the same block on the car surface ────
+  const _nowMs = Date.now();
+  const _yawNow = navigationActive ? getYawRateDps() : null;
+  const _fixTs = typeof user?.ts === "number" && Number.isFinite(user.ts) ? user.ts : 0;
+  // ONLY the fix's own course. `user.heading` / `selfCar.heading` are STICKY display headings —
+  // held when the platform reports none — and feeding a held heading in as fresh evidence pulled
+  // against the gyro in exactly the slow corners where iOS drops the course (Codex 4th pass).
+  const _rawCourse = typeof user?.course === "number" && Number.isFinite(user.course) ? user.course : null;
+  let _poseFixLanded = false;
+  if (navigationActive) {
+    let ps = poseRef.current;
+    if (!poseSeededRef.current) { const sg = getSeededYawSign(); if (sg) { ps = poseSeedYawSign(ps, sg); poseSeededRef.current = true; } }
+    const _dtS = ps.tAt > 0 ? Math.min(1.5, Math.max(0, (_nowMs - ps.tAt) / 1000)) : 0.083;
+    ps = posePredict(ps, _nowMs, _yawNow);
+    if (user && typeof user.lat === "number" && typeof user.lng === "number" && _fixTs > 0 && _fixTs !== poseFixTsRef.current) {
+      poseFixTsRef.current = _fixTs;
+      ps = poseFix(ps, { lat: user.lat, lng: user.lng, at: _fixTs, accM: user.acc ?? null, speedMs: userSpeedMs ?? null, courseDeg: _rawCourse }, getYawIntegralDeg());
+      noteFixAccepted(_nowMs);
+      if (ps.yawSign !== 0) noteLearnedYawSign(ps.yawSign);
+      _poseFixLanded = true;
+    }
+    ps = poseRoute(ps, routeProj ? { lat: routeProj.lat, lng: routeProj.lng, bearing: routeProj.bearing, distM: routeProj.distM } : null, _yawNow != null ? Math.abs(_yawNow) : null, _dtS);
+    poseRef.current = ps;
+  } else if (poseRef.current.hasFix) {
+    poseRef.current = poseStart();
+    poseFixTsRef.current = 0;
+  }
+  const est = navigationActive && !selfPinned ? poseOut(poseRef.current) : null;
+  const oldSelfDraw = selfPinned
     // The parked spot was RECORDED while driving, so it is already on the road. Snapping
     // it again would drag the pin to whatever fragment is nearest the phone's own idea of
     // "here" — the marker-drift bug, reintroduced.
@@ -3669,6 +3722,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     : roadDraw
     ? roadDraw
     : (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null);
+  const selfDraw = est ? { lat: est.lat, lng: est.lng } : oldSelfDraw;
   // Heading LOCK — the "car drifting/spinning around" fix. The camera heading is already
   // smoothed + held when stopped (camHeadingRef); the car model was still riding RAW GPS
   // heading, which spins at low speed. When snapped, point the car along the route's
@@ -3689,11 +3743,24 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // [high] finding of the 2026-09-04 Codex pass). UserLocation carries no fix time — see the
   // DERIVED FIX CLOCK note in src/cornerBlend.ts.
   const _selfFixAt = noteFix(fixClockRef.current, selfCar?.lat, selfCar?.lng, selfCar?.heading);
-  const selfHeadingLocked = selfSnapped
+  const oldSelfHeading = selfSnapped
     ? (cornerK >= 0.5 && typeof selfCar?.heading === "number"
         ? selfCar.heading
         : cornerNose(cornerStRef.current, noseBearing(routeProj), selfCar?.heading ?? null, _selfFixAt, userSpeedMs ?? 0, true))
     : (camHeadingRef.current != null ? camHeadingRef.current : (selfCar?.heading ?? 0));
+  const selfHeadingLocked = est && poseRef.current.hdgKnown ? est.hdg : oldSelfHeading;
+  const _dOld = est && oldSelfDraw ? poseHaversineM(oldSelfDraw.lat, oldSelfDraw.lng, est.lat, est.lng) : null;
+  if (_poseFixLanded && est && user) {
+    const _turning = (_yawNow != null && Math.abs(_yawNow) > 8) || Math.abs(poseRef.current.gpsTurnDps) > 8;
+    if (_turning) {
+      reportPoseFix('phone', !!navigationActive, {
+        fixAge: _nowMs - _fixTs, acc: user.acc ?? null, course: _rawCourse, spd: userSpeedMs ?? 0,
+        estHdg: est.hdg, yaw: _yawNow, src: est.src,
+        drawnVsFixM: typeof user.lat === "number" && typeof user.lng === "number" ? poseHaversineM(est.lat, est.lng, user.lat, user.lng) : 0,
+        distM: routeProj ? routeProj.distM : null, routeW: est.routeW, dOld: _dOld,
+      });
+    }
+  }
   // Drawn-vs-raw breadcrumb (8/20): one bounded row / 10 s while moving. Taps only.
   // `gps` is passed SEPARATELY from `raw` on purpose: when pinned, selfCar IS the parked
   // spot, so raw= and drawn= are the same point and the driver's real fix would otherwise
@@ -3708,7 +3775,15 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     user && typeof user.lat === 'number' && typeof user.lng === 'number'
       ? { lat: user.lat, lng: user.lng, accM: user.acc ?? null }
       : null,
-    { locked: selfHeadingLocked, raw: selfCar?.heading ?? null, route: selfSnapped ? routeProj!.bearing : null, fix: cornerStRef.current.hdgFix, fixN: cornerStRef.current.offN },
+    {
+      locked: selfHeadingLocked, raw: selfCar?.heading ?? null, route: selfSnapped ? routeProj!.bearing : null,
+      fix: cornerStRef.current.hdgFix, fixN: cornerStRef.current.offN,
+      rbAll: routeProj ? routeProj.bearing : null, distM: routeProj ? routeProj.distM : null,
+      hd: _hd, latch: _latchIn, gate: _gateWhy,
+      rate: cornerStRef.current.rate, age: cornerStRef.current.lastAt ? _nowMs - cornerStRef.current.lastAt : null,
+      fixAge: _fixTs ? _nowMs - _fixTs : null,
+      est: est ? { lat: est.lat, lng: est.lng, hdg: est.hdg, src: est.src, routeW: est.routeW, yaw: _yawNow, dOld: _dOld } : null,
+    },
   );
 
   // Memoized so the downstream GL FeatureCollection memo can actually cache (a bare

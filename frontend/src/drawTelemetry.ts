@@ -45,8 +45,8 @@ const CORNER_DEG = 30;
 const CORNER_ANCHOR_MS = 3000;     // heading is compared against a 0–3 s old anchor
 const TRACE_ROWS = 3;            // 5 → 3 (2026-09-06)
 const TRACE_MIN_GAP_MS = 1000;
-const TRACE_REARM_MS = 60000;    // 15 s → 60 s (2026-09-06)
-const MODE_ROW_MIN_GAP_MS = 15000; // 2 s → 15 s (2026-09-06)
+const TRACE_REARM_MS = 10000;    // 15 s → 60 s (2026-09-06) → 10 s (2026-09-09: the 60 s rearm ate Jeff's roundabout AND his stop-light left — one burst per minute cannot record two corners 40 s apart)
+const MODE_ROW_MIN_GAP_MS = 2000; // 2 s → 15 s (2026-09-06) → 2 s (2026-09-09: a route→raw→route flip inside 15 s left no row at all, so whether the driveway turn was drawn raw for 7 s or 0.5 s was unknowable)
 const hdgAnchor: Record<string, { deg: number; at: number }> = {};
 const traceState: Record<string, { left: number; lastAt: number; armedAt: number }> = {};
 const lastMode: Record<string, { mode: string; at: number }> = {};
@@ -60,7 +60,7 @@ function cornerTrace(
   spd: number,
   navActive: boolean,
   gps: { lat: number; lng: number; accM?: number | null } | null | undefined,
-  hdg: { locked: number | null; raw: number | null; route: number | null; fix?: number | null; fixN?: number | null } | null | undefined,
+  hdg: HdgReceipt | null | undefined,
 ): void {
   if (!navActive) return;
   const now = Date.now();
@@ -70,8 +70,7 @@ function cornerTrace(
   else if (lm.mode !== mode) {
     if (now - lm.at >= MODE_ROW_MIN_GAP_MS) {
       const d = haversineM(raw.lat, raw.lng, drawn.lat, drawn.lng);
-      logEvent(`snap-mode surf=${surface} from=${lm.mode} to=${mode} d=${d.toFixed(1)}m spd=${(spd * 3.6).toFixed(0)}` +
-        (hdg ? ` hdg=${fmtDeg(hdg.locked)} gpsHdg=${fmtDeg(hdg.raw)} rb=${hdg.route == null ? "-" : fmtDeg(hdg.route)}` : ""));
+      logEvent(`snap-mode surf=${surface} from=${lm.mode} to=${mode} d=${d.toFixed(1)}m spd=${(spd * 3.6).toFixed(0)}` + hdgExtra(hdg));
       lastMode[surface] = { mode, at: now };
     } else lastMode[surface] = { mode, at: lm.at };
   }
@@ -91,7 +90,7 @@ function cornerTrace(
     logEvent(
       `corner-trace surf=${surface} i=${TRACE_ROWS - t.left} mode=${mode} d=${d.toFixed(1)}m sep=${sep == null ? "?" : sep.toFixed(0) + "m"} spd=${(spd * 3.6).toFixed(0)} ` +
         `raw=${raw.lat.toFixed(6)},${raw.lng.toFixed(6)} drawn=${drawn.lat.toFixed(6)},${drawn.lng.toFixed(6)}` +
-        (hdg ? ` hdg=${fmtDeg(hdg.locked)} gpsHdg=${fmtDeg(hdg.raw)} rb=${hdg.route == null ? "-" : fmtDeg(hdg.route)} fix=${fmtFix(hdg.fix)} nfx=${typeof hdg.fixN === "number" ? hdg.fixN : "?"}` : ""),
+        hdgExtra(hdg),
     );
   }
 }
@@ -104,6 +103,65 @@ function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): num
     Math.sin(dLat / 2) ** 2 +
     Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+/**
+ * The heading receipt. 2026-09-09 additions, because every field a corner diagnosis needed was
+ * MISSING from the rows on Jeff's drive home: `rbAll`/`distM` (the projection even when NOT
+ * snapped — `rb=` used to print `-` exactly when it mattered), `hd`/`latch`/`gate` (the snap gate's
+ * inputs, not just its output), `rate`/`age` (cornerBlend's dilution denominator), `fixAge` (how old
+ * the fix the row was drawn from actually is), and `est` — what the pose estimator drew, with its
+ * source (gyro / gps / hold) and route weight, so old-vs-new is one query.
+ */
+export type HdgReceipt = {
+  locked: number | null; raw: number | null; route: number | null; fix?: number | null; fixN?: number | null;
+  rbAll?: number | null; distM?: number | null;
+  hd?: number | null; latch?: boolean | null; gate?: string | null;
+  rate?: number | null; age?: number | null;
+  fixAge?: number | null;
+  est?: { lat: number; lng: number; hdg: number; src: string; routeW: number; yaw?: number | null; dOld?: number | null } | null;
+};
+function hdgExtra(hdg: HdgReceipt | null | undefined): string {
+  if (!hdg) return "";
+  let s = ` hdg=${fmtDeg(hdg.locked)} gpsHdg=${fmtDeg(hdg.raw)} rb=${hdg.route == null ? (hdg.rbAll == null ? "-" : fmtDeg(hdg.rbAll) + "u") : fmtDeg(hdg.route)} fix=${fmtFix(hdg.fix)} nfx=${typeof hdg.fixN === "number" ? hdg.fixN : "?"}`;
+  if (typeof hdg.distM === "number" && isFinite(hdg.distM)) s += ` distM=${hdg.distM.toFixed(1)}`;
+  if (typeof hdg.hd === "number" && isFinite(hdg.hd)) s += ` hd=${Math.round(hdg.hd)}`;
+  if (typeof hdg.latch === "boolean") s += ` latch=${hdg.latch ? 1 : 0}`;
+  if (hdg.gate) s += ` gate=${hdg.gate}`;
+  if (typeof hdg.rate === "number" && isFinite(hdg.rate)) s += ` rate=${hdg.rate.toFixed(1)}`;
+  if (typeof hdg.age === "number" && isFinite(hdg.age)) s += ` age=${Math.round(hdg.age)}`;
+  if (typeof hdg.fixAge === "number" && isFinite(hdg.fixAge)) s += ` fixAge=${Math.round(hdg.fixAge)}`;
+  if (hdg.est) {
+    const e = hdg.est;
+    s += ` est=${e.lat.toFixed(6)},${e.lng.toFixed(6)} estHdg=${fmtDeg(e.hdg)} src=${e.src} rw=${e.routeW.toFixed(2)}`;
+    if (typeof e.yaw === "number" && isFinite(e.yaw)) s += ` yaw=${e.yaw.toFixed(1)}`;
+    if (typeof e.dOld === "number" && isFinite(e.dOld)) s += ` dOld=${e.dOld.toFixed(1)}`;
+  }
+  return s;
+}
+
+// ── POSE-FIX ROW (2026-09-09): one row per accepted fix INSIDE A TURN (or the last 500 m), bounded ──
+// This is the receipt the corner diagnosis never had: the fix's age and accuracy, the course, the
+// estimator's heading and yaw source, drawn-vs-fix, the projection distance and the route weight.
+const POSE_ROWS_MAX = 40;
+let _poseRows = 0;
+/** Called by both surfaces when guidance STARTS, so every drive gets a fresh budget. (Codex review
+ *  2026-09-09: the budget used to reset only on a navActive false->true seen by reportPoseFix itself,
+ *  which the callers never delivered — after 40 rows no later drive in the session logged anything.) */
+export function resetPoseFixBudget(): void { _poseRows = 0; }
+export function reportPoseFix(surface: "phone" | "car", navActive: boolean, f: {
+  fixAge: number; acc: number | null; course: number | null; spd: number;
+  estHdg: number; yaw: number | null; src: string; drawnVsFixM: number; distM: number | null; routeW: number; dOld?: number | null;
+}): void {
+  try {
+    if (!navActive || _poseRows >= POSE_ROWS_MAX) return;
+    _poseRows += 1;
+    logEvent(
+      `pose-fix surf=${surface} fixAge=${Math.round(f.fixAge)} acc=${f.acc == null ? "?" : f.acc.toFixed(0)} course=${fmtDeg(f.course)} spd=${(f.spd * 3.6).toFixed(0)} ` +
+      `estHdg=${fmtDeg(f.estHdg)} yaw=${f.yaw == null ? "?" : f.yaw.toFixed(1)} src=${f.src} dFix=${f.drawnVsFixM.toFixed(1)} ` +
+      `distM=${f.distM == null ? "?" : f.distM.toFixed(1)} rw=${f.routeW.toFixed(2)}${typeof f.dOld === "number" && isFinite(f.dOld) ? ` dOld=${f.dOld.toFixed(1)}` : ""}`,
+    );
+  } catch {}
 }
 
 export function reportDraw(
@@ -129,7 +187,7 @@ export function reportDraw(
    *  bad fix held across 1.5 s could move the nose with no second observation behind it; the gate
    *  now needs ≥2 fixes spanning ≥1 s. `nfx=` is what makes that auditable from a drive instead of
    *  from a code read: `fix=` non-zero with `nfx=` 0 or 1 would mean the gate is broken. */
-  hdg?: { locked: number | null; raw: number | null; route: number | null; fix?: number | null; fixN?: number | null } | null,
+  hdg?: HdgReceipt | null,
 ): void {
   try {
     if (!raw || !drawn) return;
@@ -177,7 +235,7 @@ export function reportDraw(
         `gps=${gps && !hideGps ? gps.lat.toFixed(6) + "," + gps.lng.toFixed(6) : hideGps ? "withheld" : "?"} ` +
         `raw=${raw.lat.toFixed(6)},${raw.lng.toFixed(6)} drawn=${drawn.lat.toFixed(6)},${drawn.lng.toFixed(6)} ` +
         `latch=${p.latch ? 1 : 0} parked=${p.parked ? 1 : 0} hu=${p.hu ? 1 : 0} spotAge=${p.spotAgeS == null ? "?" : p.spotAgeS + "s"}${p.spotDrop ? ` spotDrop=${p.spotDrop}` : ""}` +
-        (hdg ? ` hdg=${fmtDeg(hdg.locked)} gpsHdg=${fmtDeg(hdg.raw)} rb=${hdg.route == null ? "-" : fmtDeg(hdg.route)} fix=${fmtFix(hdg.fix)} nfx=${typeof hdg.fixN === "number" ? hdg.fixN : "?"}` : ""),
+        hdgExtra(hdg),
     );
   } catch {
     // never let the instrument disturb the draw path

@@ -196,7 +196,20 @@ RULES = [
         "navNotification.ts is the ONE documented exception and passes travelledM: undefined "
         "explicitly). Gate: tools/sim-qc/trip_odometer_test.mts.",
     ),
+    (
+        "draw-heading-from-switch-stack",
+        ["src/**/*.tsx"],
+        r"const (?:drawHdg|selfHeadingLocked)\s*=\s*(?:carSnapped|selfSnapped)\b",
+        "2026-09-09 (Jeff: 'why is it drifting and at low speeds ... why cant this be fixed'): the drawn car "
+        "used to be a stack of threshold SWITCHES on a 1 Hz GPS course — snap/unsnap, cornerBlend, cornerNose, "
+        "the polyline tangent as the nose. The same King Rd corner produced the same bad row on three drives "
+        "across five revisions (15.9 / 10.8 / 14.8 m; nose = the 124° bisector). During guidance the drawn "
+        "pose is src/poseEstimator.ts (`est`), gated by tools/sim-qc/pose_estimator_test.mts; the old formula "
+        "is computed only as `oldDrawHdg` / `oldSelfHeading` for the receipts. Do not assign the DRAWN "
+        "heading from the switch stack again.",
+    ),
 ]
+
 def blank_comments(text: str) -> str:
     """Replace the contents of // line comments and /* */ blocks with spaces, keeping every
     newline so line numbers survive. History is allowed to QUOTE a trap; code is not."""

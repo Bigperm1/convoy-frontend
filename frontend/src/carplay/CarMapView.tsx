@@ -19,7 +19,11 @@
 // drop back to the static-image fallback (ConvoyCarPlay's showLive/glFailed).
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { reportDraw } from "../drawTelemetry";
+import { reportDraw, reportPoseFix, resetPoseFixBudget } from "../drawTelemetry";
+import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState } from "../poseEstimator";
+import { startYawRate, stopYawRate, getYawRateDps, getYawIntegralDeg } from "../yawRate";
+import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "../poseSeed";
+import { noteFixAccepted } from "../heatProbe";
 import { Platform, StyleSheet, Image as RNImage, AppState } from 'react-native';
 import Mapbox, {
   MapView,
@@ -941,6 +945,19 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // Hysteresis latch for the route-snap heading gate (see carSnapped below).
   const carSnapHdgOkRef = useRef(true);
   const carCornerStRef = useRef(newCornerBlendState());
+  // ── POSE ESTIMATOR (2026-09-09) — src/poseEstimator.ts: the DRAWN pose during guidance ──
+  // The switch stack below (distance/heading snap, cornerBlend, cornerNose) is still computed
+  // every render so the receipts carry old-vs-new for the first drives; the marker draws `est`.
+  const poseRef = useRef<PoseState>(poseStart());
+  const poseFixTsRef = useRef(0);
+  const poseSeededRef = useRef(false);
+  useEffect(() => { void ensureYawSignLoaded(); }, []);
+  useEffect(() => {
+    if (!s.navigating) return;
+    resetPoseFixBudget();
+    startYawRate();
+    return () => stopYawRate();
+  }, [s.navigating]);
   // Derived arrival time of the raw pose — the nose clamp's hold counts FIXES, and carStore's
   // real `fixTs` never reaches this surface (see cornerBlend.ts DERIVED FIX CLOCK).
   const carFixClockRef = useRef(newFixClock());
@@ -1808,12 +1825,15 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const _carDistSnap = routeProj != null && routeProj.distM <= 60;
   const _carTravelHdg = typeof s.heading === 'number' ? s.heading : null;
   let _carHdgOk = true;
+  let _hd: number | null = null;
+  const _latchIn = carSnapHdgOkRef.current;
   if (_carDistSnap && _carTravelHdg != null && (s.speedMs || 0) >= CAR_SNAP_MOVING_MS) {
-    const _hd = Math.abs(((((_carTravelHdg - routeProj!.bearing) % 360) + 540) % 360) - 180);
+    _hd = Math.abs(((((_carTravelHdg - routeProj!.bearing) % 360) + 540) % 360) - 180);
     _carHdgOk = carSnapHdgOkRef.current ? _hd <= CAR_SNAP_HDG_UNLOCK : _hd <= CAR_SNAP_HDG_LOCK;
   }
   carSnapHdgOkRef.current = _carDistSnap ? _carHdgOk : true;
   const carSnapped = _carDistSnap && _carHdgOk;
+  const _gateWhy = !routeProj ? "noproj" : !_carDistSnap ? "dist" : _hd == null ? "slow" : _carHdgOk ? "ok" : "hdg";
   // RIBBON-TRIM RECEIPT (car surface) — same fields as the phone's, every 15 s in nav.
   if (s.navigating && routeProj && ribbonPartition && ribbonCutM != null && _carCutBaseM != null) {
     const _tn = Date.now();
@@ -1840,8 +1860,40 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // CORNER RELEASE — mirror of the phone (src/cornerBlend.ts): while turning with the line's
   // corner geometry >6 m off, draw toward the raw fix so the lot entrance is not "wide".
   const carCornerK = cornerBlend(carCornerStRef.current, _carTravelHdg, routeProj?.distM ?? null, s.speedMs || 0, carSnapped);
-  const drawLat = carSnapped ? (carCornerK > 0 ? routeProj!.lat + (lat - routeProj!.lat) * carCornerK : routeProj!.lat) : (carRoadDraw ? carRoadDraw.lat : lat);
-  const drawLng = carSnapped ? (carCornerK > 0 ? routeProj!.lng + (lng - routeProj!.lng) * carCornerK : routeProj!.lng) : (carRoadDraw ? carRoadDraw.lng : lng);
+  const oldDrawLat = carSnapped ? (carCornerK > 0 ? routeProj!.lat + (lat - routeProj!.lat) * carCornerK : routeProj!.lat) : (carRoadDraw ? carRoadDraw.lat : lat);
+  const oldDrawLng = carSnapped ? (carCornerK > 0 ? routeProj!.lng + (lng - routeProj!.lng) * carCornerK : routeProj!.lng) : (carRoadDraw ? carRoadDraw.lng : lng);
+  // ── POSE ESTIMATOR STEP ─────────────────────────────────────────────────────────────────
+  // One continuous pose, integrated every render (the 12 Hz trim ticker keeps this component
+  // rendering during guidance): the gyro yaw rate about gravity between fixes, each fix folded in
+  // by its accuracy and age, the route as a lateral WEIGHT that fades as the car turns. Only during
+  // guidance — free drive keeps drawing the raw fix, exactly as before.
+  const _nowMs = Date.now();
+  const _yawNow = s.navigating ? getYawRateDps() : null;
+  const _fixTs = typeof s.selfFixTs === 'number' && Number.isFinite(s.selfFixTs) ? s.selfFixTs : 0;
+  let _poseFixLanded = false;
+  if (s.navigating) {
+    let ps = poseRef.current;
+    if (!poseSeededRef.current) { const sg = getSeededYawSign(); if (sg) { ps = poseSeedYawSign(ps, sg); poseSeededRef.current = true; } }
+    const _dtS = ps.tAt > 0 ? Math.min(1.5, Math.max(0, (_nowMs - ps.tAt) / 1000)) : 0.083;
+    ps = posePredict(ps, _nowMs, _yawNow);
+    if (hasFix && _fixTs > 0 && _fixTs !== poseFixTsRef.current) {
+      poseFixTsRef.current = _fixTs;
+      // ONLY the fix's own course (s.selfCourse). s.heading is STICKY for the display and must not
+      // be mistaken for fresh evidence of direction (Codex 4th pass).
+      ps = poseFix(ps, { lat, lng, at: _fixTs, accM: s.selfAccM ?? null, speedMs: typeof s.speedMs === 'number' ? s.speedMs : null, courseDeg: typeof s.selfCourse === 'number' ? s.selfCourse : null }, getYawIntegralDeg());
+      noteFixAccepted(_nowMs);
+      if (ps.yawSign !== 0) noteLearnedYawSign(ps.yawSign);
+      _poseFixLanded = true;
+    }
+    ps = poseRoute(ps, routeProj ? { lat: routeProj.lat, lng: routeProj.lng, bearing: routeProj.bearing, distM: routeProj.distM } : null, _yawNow != null ? Math.abs(_yawNow) : null, _dtS);
+    poseRef.current = ps;
+  } else if (poseRef.current.hasFix) {
+    poseRef.current = poseStart();   // a drive ended: the next one starts clean
+    poseFixTsRef.current = 0;
+  }
+  const est = s.navigating ? poseOut(poseRef.current) : null;
+  const drawLat = est ? est.lat : oldDrawLat;
+  const drawLng = est ? est.lng : oldDrawLng;
   // NOSE COURSE CLAMP — identical to the phone (src/cornerBlend.ts cornerNose). The 2026-09-04
   // defect rows were surf=car: 05:52:56 hdg 134→114 with gpsHdg AND rb both 90, d only 2.4 m.
   // Hoisted ABOVE reportDraw so the clamp ticks exactly once per render and the receipt reports
@@ -1852,9 +1904,22 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // to satisfy a render-time hold). carStore takes a real `fixTs` but never publishes it into the
   // state read here (carStore.ts:324/:346), so it is derived. See cornerBlend.ts DERIVED FIX CLOCK.
   const _carFixAt = noteFix(carFixClockRef.current, hasFix ? lat : null, hasFix ? lng : null, _carTravelHdg);
-  const drawHdg = carSnapped && carCornerK < 0.5
+  const oldDrawHdg = carSnapped && carCornerK < 0.5
     ? cornerNose(carCornerStRef.current, noseBearing(routeProj), _carTravelHdg, _carFixAt, s.speedMs || 0, true)
     : hdg;
+  // The nose is the INTEGRATED heading, never the polyline tangent (the 124° bisector on King Rd).
+  const drawHdg = est && poseRef.current.hdgKnown ? est.hdg : oldDrawHdg;
+  const _dOld = est ? poseHaversineM(oldDrawLat, oldDrawLng, est.lat, est.lng) : null;
+  if (_poseFixLanded && est) {
+    const _turning = (_yawNow != null && Math.abs(_yawNow) > 8) || Math.abs(poseRef.current.gpsTurnDps) > 8;
+    if (_turning) {
+      reportPoseFix('car', !!s.navigating, {
+        fixAge: _nowMs - _fixTs, acc: s.selfAccM ?? null, course: typeof s.selfCourse === 'number' ? s.selfCourse : null, spd: s.speedMs || 0,
+        estHdg: est.hdg, yaw: _yawNow, src: est.src, drawnVsFixM: poseHaversineM(est.lat, est.lng, lat, lng),
+        distM: routeProj ? routeProj.distM : null, routeW: est.routeW, dOld: _dOld,
+      });
+    }
+  }
   // Drawn-vs-raw breadcrumb (8/20) — CarPlay/AA surface. Taps only.
   reportDraw(
     'car',
@@ -1867,11 +1932,22 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // duplicates raw — but it keeps the row shape identical across both surfaces, which
     // is what lets one query compare them. Accuracy isn't carried in carStore yet.
     hasFix ? { lat, lng, accM: null } : null,
-    { locked: drawHdg, raw: typeof s.heading === 'number' ? s.heading : null, route: carSnapped ? routeProj!.bearing : null, fix: carCornerStRef.current.hdgFix, fixN: carCornerStRef.current.offN },
+    {
+      locked: drawHdg, raw: typeof s.heading === 'number' ? s.heading : null, route: carSnapped ? routeProj!.bearing : null,
+      fix: carCornerStRef.current.hdgFix, fixN: carCornerStRef.current.offN,
+      rbAll: routeProj ? routeProj.bearing : null, distM: routeProj ? routeProj.distM : null,
+      hd: _hd, latch: _latchIn, gate: _gateWhy,
+      rate: carCornerStRef.current.rate, age: carCornerStRef.current.lastAt ? _nowMs - carCornerStRef.current.lastAt : null,
+      fixAge: _fixTs ? _nowMs - _fixTs : null,
+      est: est ? { lat: est.lat, lng: est.lng, hdg: est.hdg, src: est.src, routeW: est.routeW, yaw: _yawNow, dOld: _dOld } : null,
+    },
   );
   // Live copy for the compass's IMMEDIATE camera push (the gesture closure is frozen).
   drawHdgRef.current = drawHdg;
-  if (carSnapped) camHdgRef.current = routeProj!.bearing;
+  // The camera follows the ESTIMATED heading during guidance — it is already continuous, so the
+  // map no longer rotates in steps at each polyline vertex; outside guidance the old rule holds.
+  if (est && poseRef.current.hdgKnown) camHdgRef.current = est.hdg;
+  else if (carSnapped) camHdgRef.current = routeProj!.bearing;
   // MEMOISED (2026-08-16). This was a bare object literal, so every render minted a new
   // FeatureCollection; ShapeSource is a PureComponent, so it missed its shallow-compare
   // every time and re-ran toJSONString — a full JSON.stringify of the route. The 12 Hz

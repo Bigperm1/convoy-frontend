@@ -1224,7 +1224,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
         // src/navNotification.ts. Without it a dead arrow survives the whole drive.
         maneuverIcon: maneuverDir(upcomingInstruction(route, tbt.stepIndex), upcomingManeuverKey(route, tbt.stepIndex)),
         maneuverKey: upcomingManeuverKey(route, tbt.stepIndex) ?? "",
-        navStepIdx: tbt.stepIndex,
+        navStepIdx: Math.min(tbt.stepIndex + 1, (route?.steps?.length ?? 1) - 1),
       } : {}),
       // NOTE: peers + hazards are NOT written here anymore — they go through the
       // gated setCarPeers/setCarHazards writes in the effect below, so the cold

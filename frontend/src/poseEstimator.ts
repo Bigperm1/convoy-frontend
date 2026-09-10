@@ -99,6 +99,10 @@ export type PoseState = {
   accLast: number | null;          // horizontal accuracy of the last accepted fix (the release rule)
   roadReleased: boolean;           // the line let go of the nose (hysteresis: re-snaps only inside POSE_ROAD_RESNAP_DEG)
   roadHeld: number;                // consecutive fixes whose chord was HELD back (an implausible, uncorroborated step)
+  roadSuspect: boolean;            // the CURRENT projection was held back or refused: no lateral pull toward it, and the verdict
+                                   // stands until the projection moves or a qualified course speaks (Codex pass 3: a per-call
+                                   // flag let the pull creep back on the next render, and an unchanged refused chord was
+                                   // re-judged every frame and admitted by elapsed time alone after 4 s)
   src: "gyro" | "gps" | "road" | "hold" | "none";
   fixes: number; rejected: number; maxStepM: number;
 };
@@ -248,7 +252,7 @@ export function poseStart(): PoseState {
     lat: NaN, lng: NaN, hdg: 0, spd: 0, tAt: 0, fixAt: 0, hasFix: false, hdgKnown: false, drM: 0,
     yawBias: 0, yawSign: 0, yawAgree: 0, lastCourse: null, lastCourseAt: 0, gpsTurnDps: 0,
     routeW: 0, errPrev: null, errPrevAt: 0, pendLat: 0, pendLng: 0, rawLat: NaN, rawLng: NaN, rawAt: 0, yawCumAtCourse: null, yawCumPrev: null, yawCumPrevAt: 0, yawDpsLast: 0,
-    roadHdg: null, roadHdgAhead: null, roadK: 0, roadAt: 0, roadSetAt: 0, projLat: NaN, projLng: NaN, projMovedAt: 0, accLast: null, roadReleased: false, roadHeld: 0,
+    roadHdg: null, roadHdgAhead: null, roadK: 0, roadAt: 0, roadSetAt: 0, projLat: NaN, projLng: NaN, projMovedAt: 0, accLast: null, roadReleased: false, roadHeld: 0, roadSuspect: false,
     src: "none", fixes: 0, rejected: 0, maxStepM: 0,
   };
 }
@@ -526,6 +530,7 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
   let target = 0;
   let roadHdg: number | null = null, roadHdgAhead: number | null = null, roadK = 0;
   let released = false, roadHeld = 0, roadSetAt = st.roadSetAt;
+  let suspect = false;
   const moved = !!proj && (proj.lat !== st.projLat || proj.lng !== st.projLng);
   if (proj && Number.isFinite(proj.distM) && proj.distM <= POSE_ROUTE_MAX_M) {
     const yaw = typeof yawDpsAbs === "number" && Number.isFinite(yawDpsAbs) ? Math.abs(yawDpsAbs) : Math.abs(st.gpsTurnDps);
@@ -541,11 +546,14 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
     const courseNew = st.lastCourse != null && st.lastCourseAt === st.fixAt && st.tAt - st.lastCourseAt <= POSE_ROAD_HOLD_MS ? st.lastCourse : null;
     const courseQualified = courseNew != null && st.spd >= POSE_COURSE_MIN_MS && st.accLast != null && st.accLast < POSE_ROAD_RELEASE_ACC_M;
     const prevFresh = st.roadHdg != null && st.tAt - st.roadAt <= POSE_ROAD_HOLD_MS;
-    let suspect = false;
+    suspect = st.roadSuspect;
     if (chord == null) {
-      roadHdg = null; roadHdgAhead = null;
-    } else if (!moved && prevFresh) {
-      roadHdg = st.roadHdg; roadHdgAhead = st.roadHdgAhead ?? st.roadHdg; roadHeld = st.roadHeld;   // held between fixes
+      roadHdg = null; roadHdgAhead = null; suspect = false;
+    } else if (!moved && (prevFresh || st.roadSuspect)) {
+      // The SAME projection as last render: what was decided about it stands — an adopted road is held, a
+      // held chord stays held, a refused one stays refused — until the projection moves or a qualified
+      // course arrives with a fix (a fix that lands moves the projection). Never re-judged by elapsed time.
+      roadHdg = st.roadHdg; roadHdgAhead = st.roadHdgAhead ?? st.roadHdg; roadHeld = st.roadHeld;
     } else {
       // ADOPT the new projection's chord? Only a step a car could have turned since the projection last
       // moved, or one a qualified course corroborates. Beyond that: hold one fix (a noisy fix flipped
@@ -554,14 +562,17 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
       const stepDeg = ref == null ? 0 : Math.abs(wrap180(chord - ref));
       const dtMoved = st.projMovedAt > 0 ? Math.max(0.25, (st.tAt - st.projMovedAt) / 1000) : 1;
       const corroborated = courseQualified && Math.abs(wrap180(courseNew! - chord)) <= POSE_ROAD_RELEASE_DEG;
-      if (corroborated || stepDeg <= POSE_ROAD_ADOPT_DPS * dtMoved) {
-        roadHdg = chord; roadHdgAhead = chordAhead; roadHeld = 0; roadSetAt = st.tAt;
+      if (corroborated) {
+        roadHdg = chord; roadHdgAhead = chordAhead; roadHeld = 0; roadSetAt = st.tAt; suspect = false;
       } else if (stepDeg > POSE_ROAD_ADOPT_MAX_DEG) {
+        // judged BEFORE the elapsed-turn allowance: time alone never admits the wrong leg of a loop
         roadHdg = null; roadHdgAhead = null; roadHeld = 0; suspect = true;
+      } else if (stepDeg <= POSE_ROAD_ADOPT_DPS * dtMoved) {
+        roadHdg = chord; roadHdgAhead = chordAhead; roadHeld = 0; roadSetAt = st.tAt; suspect = false;
       } else if (prevFresh && st.roadHeld < POSE_ROAD_HOLD_FIXES) {
         roadHdg = st.roadHdg; roadHdgAhead = st.roadHdgAhead ?? st.roadHdg; roadHeld = st.roadHeld + 1; suspect = true;
       } else {
-        roadHdg = chord; roadHdgAhead = chordAhead; roadHeld = 0; roadSetAt = st.tAt;
+        roadHdg = chord; roadHdgAhead = chordAhead; roadHeld = 0; roadSetAt = st.tAt; suspect = false;
       }
     }
     // THE VENDORS' RELEASE, with hysteresis, judged on the adopted road with the newest fix's course.
@@ -572,12 +583,14 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
     }
     if (!released && !suspect) target = POSE_ROUTE_W_MAX * yawK * distK;   // a suspect projection pulls nothing
     if (roadHdg != null && !released) roadK = distK;
+  } else {
+    suspect = false;
   }
   const dt = Math.max(0, Math.min(POSE_MAX_DT_S, dtS));
   const ease = 1 - Math.exp(-dt / POSE_ROUTE_TAU_S);
   const routeW = st.routeW + (target - st.routeW) * ease;
   const next: PoseState = {
-    ...st, routeW, roadHdg, roadHdgAhead, roadK, roadReleased: !!proj && released, roadHeld,
+    ...st, routeW, roadHdg, roadHdgAhead, roadK, roadReleased: !!proj && released, roadHeld, roadSuspect: !!proj && suspect,
     roadAt: roadHdg != null ? st.tAt : st.roadAt,
     roadSetAt,
     projLat: proj ? proj.lat : NaN, projLng: proj ? proj.lng : NaN,

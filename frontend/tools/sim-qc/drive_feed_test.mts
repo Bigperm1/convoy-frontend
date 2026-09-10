@@ -91,6 +91,7 @@ function makeModel(init: { lite: boolean; consumers: number }) {
     if (st.bgUp && !force) return;
     const lite = st.settingsLite;
     const d = defer(); st.pendingBg.push(d); await d.p;   // startLocationUpdatesAsync
+    if (st.consumers === 0) { st.bgUp = false; st.bgLite = null; st.teardowns++; return; }   // the post-start consumer guard (Codex pass 3)
     st.bgUp = true; st.bgLite = lite; st.bgStarts++;
     reconcile(false);
   };
@@ -185,6 +186,17 @@ await (async () => {
   check("D5a converged on the last value", m.st.fgLite === false && m.st.bgLite === false, `fg=${m.st.fgLite} bg=${m.st.bgLite}`);
   check("D5b bounded restarts (≤ 3 per feed incl. the first start)", m.st.fgStarts <= 3 && m.st.bgStarts <= 3, `fg=${m.st.fgStarts} bg=${m.st.bgStarts}`);
   check("D5c chain quiet", m.st.pendingFg.length === 0 && m.st.pendingBg.length === 0);
+})();
+
+await (async () => {
+  // D6 — Codex pass 3: an INHERITED task is rebuilt (stop → start) from acquire's already-branch without acquire's own
+  // post-start guard; the last consumer releases between the stop and the start. The task must not survive ownerless.
+  const m = makeModel({ lite: false, consumers: 1 });
+  m.st.bgUp = true; m.st.bgLite = null;                      // inherited from the previous JS session
+  void m.startBg(true);                                      // the inherited rebuild: stopped, start pending
+  m.release();                                               // CarPlay unplugged
+  m.resolveBg(); await settle();
+  check("D6 inherited-task rebuild raced by the last release: the started task is torn down, nothing runs ownerless", !m.st.bgUp && m.st.bgLite == null && m.st.teardowns >= 1, `bgUp=${m.st.bgUp} teardowns=${m.st.teardowns}`);
 })();
 
 console.log(`\n${pass} passed, ${fail} failed`);

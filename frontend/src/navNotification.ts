@@ -1134,7 +1134,15 @@ async function tryStartBgUpdates(force = false): Promise<boolean> {
         notificationColor: accentNow(),
       },
     });
-    _bgLite = _bgLoc.lite;                  // committed only now — the native start succeeded
+    if (_locConsumers.size === 0) {
+      // The last consumer released while the task was being (re)started: an inherited-task rebuild, a watchdog
+      // or a relite restart has no acquire-style guard of its own (Codex pass 3). Undo it here, for every caller.
+      await Location.stopLocationUpdatesAsync(NAV_TASK).catch(() => {});
+      try { logEventReliable("bgloc-start-raced stopped=1"); } catch {}
+      _bgLite = null;
+      return false;
+    }
+    _bgLite = _bgLoc.lite;                  // committed only now — the native start succeeded, with an owner
     _reconcileLite(false); // the setting may have hydrated/flipped while the task was being started
     return true;
   } catch (e) {

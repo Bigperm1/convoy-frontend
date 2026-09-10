@@ -690,9 +690,19 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
     const st = drive(300, (tr) => { const off = fixes > 3 ? 60 : 0; return { lat: tr.lat, lng: tr.lng, bearing: norm360(tr.hdg + off), distM: 3, roadHdg: norm360(tr.hdg + off), roadHdgAhead: norm360(tr.hdg + off) }; }, (tr) => (fixes++ < 3 ? tr.hdg : null), 8, 4.17, (_i, s) => { if (s.roadReleased) anyRelease = true; });
     ok("R5 a course from an EARLIER fix cannot release the road (course dropped, line 60° off): never released, src=road", !anyRelease && st.src === "road" && st.roadHdg != null, `anyRelease=${anyRelease} src=${st.src}`); }
   // R6 A NOISY FLIP AT A VERTEX: the chord jumps +60° for ONE fix and back — held, not adopted; no swing.
-  { let fixes = 0; let maxStep = 0; let prev: number | null = null;
-    const st = drive(400, (tr) => { const k = fixes; const off = (k === 8) ? 60 : 0; return { lat: tr.lat, lng: tr.lng + (k === 8 ? 0.00001 : 0), bearing: norm360(tr.hdg + off), distM: 3, roadHdg: norm360(tr.hdg + off), roadHdgAhead: norm360(tr.hdg + off) }; }, (tr) => (fixes++ === 0 ? tr.hdg : null), 8, 4.17, (i, s) => { if (i > 60) { if (prev != null) maxStep = Math.max(maxStep, Math.abs(wrap180(s.hdg - prev))); } prev = s.hdg; });
-    ok("R6 a one-fix +60° chord flip with no course to corroborate it is HELD (no swing > 0.5°/frame), nose on the line", maxStep <= 0.5 && Math.abs(wrap180(st.hdg - trueHdg)) <= 3, `maxStep=${maxStep.toFixed(2)}°/f off=${wrap180(st.hdg - trueHdg).toFixed(1)}°`); }
+  { let fixes = 0; let maxStep = 0; let prev: number | null = null; const rw: number[] = [];
+    const st = drive(400, (tr) => { const k = fixes; const off = (k === 8) ? 60 : 0; return { lat: tr.lat, lng: tr.lng + (k === 8 ? 0.00001 : 0), bearing: norm360(tr.hdg + off), distM: 3, roadHdg: norm360(tr.hdg + off), roadHdgAhead: norm360(tr.hdg + off) }; }, (tr) => (fixes++ === 0 ? tr.hdg : null), 8, 4.17, (i, s) => { if (i > 60) { if (prev != null) maxStep = Math.max(maxStep, Math.abs(wrap180(s.hdg - prev))); } prev = s.hdg; rw.push(s.routeW); });
+    ok("R6a a one-fix +60° chord flip with no course to corroborate it is HELD (no swing > 0.5°/frame), nose on the line", maxStep <= 0.5 && Math.abs(wrap180(st.hdg - trueHdg)) <= 3, `maxStep=${maxStep.toFixed(2)}°/f off=${wrap180(st.hdg - trueHdg).toFixed(1)}°`);
+    // the flipped chord is the projection of the 8th fix (the course callback counts first, so `fixes === 8` at
+    // t = 7 s, frame 140): the lateral pull must keep DECAYING through every render of that second — a per-call
+    // flag let it creep back on the next render (Codex pass 3) — and rise again only when the next fix re-adopts.
+    const held = rw.slice(141, 160); const rising = held.some((v, i) => i > 0 && v > held[i - 1] + 1e-9);
+    ok("R6b …and the lateral pull decays through the whole held second (never creeps back between fixes)", !rising && held[held.length - 1] < 0.05 && held[0] < rw[139] && rw[179] > rw[159], `before=${rw[139].toFixed(3)} held→${held[held.length - 1].toFixed(3)} rising=${rising} after=${rw[179].toFixed(3)}`); }
+  // R7 A REFUSED PROJECTION STAYS REFUSED while it does not move: the same 180° chord held for 8 s (a delivery gap or a
+  // parked fix) must never be admitted by elapsed time — only a moved projection or a qualified course re-judges it.
+  { let fixes = 0; let adoptedAt: number | null = null; const fixed = straight[100];
+    const st = drive(400, () => ({ lat: fixed.lat, lng: fixed.lng, bearing: norm360(fixed.hdg + 180), distM: 8, roadHdg: norm360(fixed.hdg + 180), roadHdgAhead: norm360(fixed.hdg + 180) }), (tr) => (fixes++ === 0 ? tr.hdg : null), 8, 2.0, (i, s) => { if (adoptedAt == null && i > 40 && s.roadHdg != null) adoptedAt = i; });
+    ok("R7 an unmoved refused chord (180° off, no course) is never admitted by elapsed time: no road for 20 s, routeW → 0, nose holds", adoptedAt == null && st.roadHdg == null && st.routeW < 0.02 && Math.abs(wrap180(st.hdg - trueHdg)) <= 3, `adoptedAt=${adoptedAt} roadHdg=${st.roadHdg} routeW=${st.routeW.toFixed(3)}`); }
 }
 
 console.log(fails === 0 ? "\nPASS pose_estimator" : `\nFAIL pose_estimator (${fails})`);

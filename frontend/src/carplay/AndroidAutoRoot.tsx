@@ -31,7 +31,7 @@ import { acquireBgLocation, releaseBgLocation, registerBgConsumerProbe, hydrateC
 import { startCarDataService, stopCarDataService } from './carDataService';
 import { noteCarConnected } from '../locationPrivacy';
 import { AA_ACTION_STRIP, aaMapButtons, handleAaButton, carTap } from './carActions';
-import { logEvent, logEventReliable } from '../crashBreadcrumb';
+import { logEventReliable } from '../crashBreadcrumb';
 
 // ── COLD-CONNECT TRACER (2026-08-18 night) ──────────────────────────────────
 // The first-connect crash dies BETWEEN js-mark and every other instrument — no
@@ -130,21 +130,33 @@ export default function AndroidAutoRoot() {
       // and, paired with the absence of any `op=pop`, it says whether OUR JS ever moved the
       // stack at all. A session with op=root and no op=pop that still shows the placeholder
       // puts the fault on the native side, which is a real answer rather than a guess.
+      //
+      // ⚠ READ PRESENCE, NOT ABSENCE (Codex adversarial review, 2026-09-09). A row that
+      // ARRIVES is proof this ran. A row that is MISSING is NOT proof it did not: when the
+      // direct insert cannot go out, the fallback is a bounded 25-row FIFO shared with crash
+      // reports and up to 12 harvested updates-log rows per launch, so an offline or
+      // crash-looping drive can evict this row before it is ever delivered. Classify a
+      // session with no op=root as UNKNOWN, never as "our JS never set the root".
       _aaRootSets += 1;
-      try { logEvent(`aa-stack op=root id=convoy-aa-nav n=${_aaRootSets}`); } catch {}
+      // logEventReliable, NOT logEvent: plain logEvent returns early and DROPS the row
+      // outright while the Supabase client is still being constructed — the normal state on
+      // an Android Auto cold connect, i.e. exactly when this fires. That is the difference
+      // between a row that is merely delayed and one that never existed, and it is why the
+      // caveat above is a caveat and not a dead loss. Contract: src/crashBreadcrumb.ts.
+      try { logEventReliable(`aa-stack op=root id=convoy-aa-nav n=${_aaRootSets}`); } catch {}
       aaCrumb('template-set');
     } catch (e) {
       console.warn('[AndroidAuto] root template setup failed', e);
       // A swallowed template failure is a blank car screen with no telemetry —
       // the exact invisibility class the receipt chain fixed on iOS.
       try { logEventReliable(`aa-crumb template-threw ${String((e as any)?.message || e).slice(0, 100)}`); } catch {}
-      try { logEvent(`aa-stack op=root-threw n=${_aaRootSets}`); } catch {}
+      try { logEventReliable(`aa-stack op=root-threw n=${_aaRootSets}`); } catch {}
     }
     return () => {
       templateRef.current = null;
       // Pairs with op=root: a root that is set and then torn down inside one drive is a
       // remount, which nothing has ever been able to see from the outside.
-      try { logEvent('aa-stack op=root-unmount'); } catch {}
+      try { logEventReliable('aa-stack op=root-unmount'); } catch {}
     };
   }, []);
 

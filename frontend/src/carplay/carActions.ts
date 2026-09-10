@@ -36,7 +36,7 @@ import { getDepartureBearing, orderRoutesForward, routeInitialBearing } from '..
 import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_BLANK, CAR_ICON_VIEW_2D, carIcon } from './carButtonIcons';
 import { appSkinNow } from '../appSkin';
 import { toggleCarComms } from './carComms';
-import { logEvent } from '../crashBreadcrumb';
+import { logEvent, logEventReliable } from '../crashBreadcrumb';
 import { ensureSavedPlacesLoaded, getSavedPlaces, type SavedPlace } from '../savedPlaces';
 
 // ── lazy react-native-carplay access ────────────────────────────────────────
@@ -560,7 +560,7 @@ let _aaSearchOnStack = false;
 // closes), bounded by construction, and they say what WE did.
 function aaPop(): void {
   if (!_aaSearchOnStack) return;
-  try { logEvent('aa-stack op=pop had=1'); } catch {}
+  try { logEventReliable('aa-stack op=pop had=1'); } catch {}
   _aaSearchOnStack = false;
   try { getCarLib()?.CarPlay?.popTemplate?.(true); } catch {}
 }
@@ -658,7 +658,7 @@ function armAaSearchBridge(lib: any): void {
       // The whole screen stack dies with the session, so our screen is provably
       // gone — clearing this stops the next session's first dismiss from popping
       // the fresh nav screen.
-      try { logEvent('aa-stack op=reset why=disconnect'); } catch {}
+      try { logEventReliable('aa-stack op=reset why=disconnect'); } catch {}
       _aaSearchOnStack = false;
       _aaSearchSeq += 1;
       _aaLastRowsKey = '';
@@ -700,7 +700,7 @@ function openAaSearch(): void {
         if (!_searchPushed) return;       // dismissed between create and push
         try {
           bridge.pushTemplate(AA_SEARCH_ID, true);
-          try { logEvent('aa-stack op=push id=search'); } catch {}
+          try { logEventReliable('aa-stack op=push id=search'); } catch {}
           _aaSearchOnStack = true;          // exactly one screen; aaPop() pops exactly it
           try { logEvent('aa-search-open'); } catch {}
         } catch {

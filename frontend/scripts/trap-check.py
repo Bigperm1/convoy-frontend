@@ -172,8 +172,19 @@ RULES = [
         "abort(), the late response is computed from a position the car left 15+ s ago and map.tsx would install it inside the "
         "30 s / 500 m staleness window whenever no newer request superseded it.",
     ),
+    (
+        "absence-receipt-uses-droppable-logevent",
+        ["src/**/*.ts", "src/**/*.tsx"],
+        r"logEvent\(\s*[`'\"](?:aa-stack|aa-crumb)",
+        "2026-09-09: plain logEvent DROPS the row outright when the Supabase client is not constructed yet "
+        "(`if (!supabase) return`) — the normal state during an Android Auto / CarPlay cold connect, which is "
+        "exactly when these rows fire. The aa-stack instrument is read for ABSENCE (\"no op=root, so our JS never "
+        "set the car root; blame the native side\"), so a silently dropped row is indistinguishable from code that "
+        "never ran, and would send the next investigation at the wrong layer. Caught before publish, on the very "
+        "receipt written to answer Say Phin's black screen. Use logEventReliable, which queues on a missing client "
+        "and delivers `late` on a later launch. Contract: src/crashBreadcrumb.ts.",
+    ),
 ]
-
 
 def blank_comments(text: str) -> str:
     """Replace the contents of // line comments and /* */ blocks with spaces, keeping every

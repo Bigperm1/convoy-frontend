@@ -13,13 +13,15 @@
 // (insert-only RLS) a few seconds after launch; until that table exists the
 // insert fails quietly and reports stay queued (capped) for a later attempt.
 import { Platform } from "react-native";
+// The queue's pure state transitions live in their own dependency-free module so
+// tools/sim-qc/crash_queue_test.mts can drive the SHIPPED logic under plain Node.
+import { MAX_QUEUE, appendToQueue, claimQueue, dropDelivered, stripQid, type QueuedRow } from "./crashQueue";
 
 const QUEUE_KEY = "convoy.pendingCrashReports.v1";
 const HARVEST_KEY = "convoy.crashLogHarvestedAt.v1";
 // 5 -> 25. The updates-log harvest below can legitimately produce a dozen rows from one bad
 // launch, and queue() keeps only the LAST MAX_QUEUE — so a cap of 5 silently threw away the
 // earliest (and usually most explanatory) entries of exactly the incident being chased.
-const MAX_QUEUE = 25;
 // Per-launch ceiling on harvested updates-log rows, so a pathological log cannot flood.
 const MAX_HARVEST = 12;
 // 8000 -> 3000 (2026-07-23): a crash-looping device (Android login loop) dies
@@ -149,13 +151,73 @@ function queue(reports: Report[]): Promise<void> {
   _queueChain = run;
   return run;
 }
+
+// ── THE DELETER MUST RIDE THE SAME CHAIN AS THE WRITER (Codex review 2026-09-09) ──────
+// The 09-06 fix serialised the WRITERS and left the DELETER outside the chain: delivery
+// read a snapshot, awaited a network INSERT, then did `removeItem(QUEUE_KEY)` — wiping the
+// whole key, including any row queued during that in-flight request. Those rows were never
+// sent and are simply gone. That is the same lost-write class the 09-06 fix closed, one
+// door along, and it defeats the entire point of logEventReliable: a receipt whose ABSENCE
+// is read as evidence must not be able to vanish for a boring reason.
+// Each queued row now carries a client-side `_qid`, delivery CLAIMS a snapshot (stamping
+// any legacy row that predates this change) and afterwards drops EXACTLY the ids it
+// delivered, through this same chain. A row queued mid-flight has an id nobody delivered,
+// so it survives to the next launch. `_qid` never reaches the database — it is stripped in
+// deliverAndHarvest, because crash_reports has no such column.
+type QueuedReport = Report & { _qid?: string };
+let _qidSeq = 0;
+function nextQid(): string {
+  _qidSeq += 1;
+  return `${Date.now().toString(36)}-${_qidSeq.toString(36)}`;
+}
+
 async function doQueue(reports: Report[]): Promise<void> {
   try {
     const AsyncStorage = require("@react-native-async-storage/async-storage").default;
     const raw = await AsyncStorage.getItem(QUEUE_KEY);
-    const cur: Report[] = raw ? JSON.parse(raw) : [];
-    const next = [...cur, ...reports].slice(-MAX_QUEUE);
-    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(next));
+    const cur: QueuedRow[] = raw ? JSON.parse(raw) : [];
+    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(appendToQueue(cur, reports, nextQid)));
+  } catch {}
+}
+
+/** Serialised: stamp any unstamped row and hand back the snapshot delivery will send. */
+function claimQueued(): Promise<QueuedReport[]> {
+  let out: QueuedReport[] = [];
+  const run = _queueChain
+    .then(async () => { out = await doClaimQueued(); })
+    .catch(() => { out = []; });
+  _queueChain = run;
+  return run.then(() => out);
+}
+async function doClaimQueued(): Promise<QueuedReport[]> {
+  try {
+    const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+    const raw = await AsyncStorage.getItem(QUEUE_KEY);
+    const cur: QueuedRow[] = raw ? JSON.parse(raw) : [];
+    if (!cur.length) return [];
+    const { rows, dirty } = claimQueue(cur, nextQid);
+    if (dirty) await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(rows));
+    return rows as QueuedReport[];
+  } catch { return []; }
+}
+
+/** Serialised: drop exactly the ids that were delivered, leaving anything queued since. */
+function dropQueued(ids: string[]): Promise<void> {
+  const run = _queueChain.then(() => doDropQueued(ids)).catch(() => {});
+  _queueChain = run;
+  return run;
+}
+async function doDropQueued(ids: string[]): Promise<void> {
+  try {
+    if (!ids.length) return;
+    const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+    const raw = await AsyncStorage.getItem(QUEUE_KEY);
+    const cur: QueuedRow[] = raw ? JSON.parse(raw) : [];
+    if (!cur.length) return;
+    const next = dropDelivered(cur, ids);
+    if (next.length === cur.length) return;
+    if (next.length) await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(next));
+    else await AsyncStorage.removeItem(QUEUE_KEY);
   } catch {}
 }
 
@@ -545,15 +607,17 @@ async function harvestUpdatesLog() {
 async function deliverAndHarvest() {
   await harvestUpdatesLog();
   try {
-    const AsyncStorage = require("@react-native-async-storage/async-storage").default;
-    const raw = await AsyncStorage.getItem(QUEUE_KEY);
-    const pending: Report[] = raw ? JSON.parse(raw) : [];
-    if (!pending.length) return;
     const { supabase } = require("./supabase");
     if (!supabase) return; // keep queued; try again next launch
+    const pending = await claimQueued();
+    if (!pending.length) return;
     const { error } = await supabase.from("crash_reports").insert(
-      pending.map((r) => ({ ...r, late: true })),
+      // Strip the client-side id: crash_reports has no `_qid` column, and an unknown
+      // key makes PostgREST reject the whole batch.
+      stripQid(pending).map((r) => ({ ...r, late: true })),
     );
-    if (!error) await AsyncStorage.removeItem(QUEUE_KEY);
+    // Drop ONLY what we just delivered. Anything queued while the insert was in flight
+    // carries an id that is not in this list and survives to the next launch.
+    if (!error) await dropQueued(pending.map((r) => r._qid).filter((v): v is string => !!v));
   } catch {}
 }

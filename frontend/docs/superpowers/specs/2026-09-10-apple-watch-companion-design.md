@@ -97,6 +97,34 @@ rows. The winner ships; the others stay out of the code.
 
 1. **Spike 1 (sim, throwaway):** `targets/watch` "Hello" + `targets/watch-widget` → `expo prebuild --clean` → compile →
    embed → launches on the paired sims. Output = "apple-targets watch works / needs X".
+
+   **2026-09-10 result: works as-is**, with two unrelated environment gotchas (neither is an `@bacons/apple-targets` bug):
+   - `npx expo prebuild --clean --platform ios` — the prebuild phase itself succeeded clean (`✔ Finished prebuild`);
+     the immediately-following `pod install` sub-step failed with `Encoding::CompatibilityError` from
+     `Ruby 4.0.5 unicode_normalize` because this shell's `LANG`/`LC_ALL` were empty (CocoaPods 1.16.2 requires
+     UTF-8). Fix: `cd ios && LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pod install --repo-update` — succeeded, "129
+     dependencies from the Podfile and 144 total pods installed."
+   - `grep -c "HairpinWatch" ios/Hairpin.xcodeproj/project.pbxproj` → `32` (>0); `WATCHOS_DEPLOYMENT_TARGET = 10.0`
+     and `INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.sw0rdfisch.convoy` both present — apple-targets wired
+     both new targets into the generated Xcode project correctly.
+   - `xcodebuild -scheme HairpinWatch -destination 'platform=watchOS Simulator,name=Apple Watch Series 11 (46mm)'` →
+     `** BUILD SUCCEEDED **`. Side note: this scheme's build graph pulls in and compiles the *entire* phone app
+     (Mapbox, RNSVG, etc. for `iphonesimulator`, not just watchOS) — a scoping quirk that makes this build far
+     slower than a watch-only build would be, not a failure.
+   - `xcodebuild -scheme Hairpin -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max'` →
+     `** BUILD SUCCEEDED **`; `ls Hairpin.app/Watch` → `HairpinWatch.app` (embedded), and
+     `HairpinWatch.app/PlugIns` → `HairpinWatchWidget.appex` (the complication extension is embedded inside the
+     watch app, as expected).
+   - Launch on the paired sims: the brief's exact sequence (`simctl install` on the **phone** sim only, then
+     `simctl launch` on the **watch** sim) failed first try —
+     `FBSOpenApplicationServiceErrorDomain code=4: Simulator device failed to launch`. Installing the phone app
+     alone did not auto-propagate the WatchKit companion onto the already-booted, already-paired watch simulator.
+     Fix: `xcrun simctl install D26BBDBE-3DD0-4252-8D76-DDA0AF1F632D ".../Hairpin.app/Watch/HairpinWatch.app"`
+     (install the watch bundle directly on the watch sim's UDID), then `simctl launch` succeeded (returned a PID)
+     and the screenshot shows "Hairpin" centered on the watch face with the sim clock (8:30) in the corner.
+   - **Net:** `@bacons/apple-targets` 4.0.7 needs no patch or workaround of its own — prebuild, compile, and the
+     `Embed Watch Content` phase all work out of the box. The two fixes above (`LANG` for pod install, direct
+     watch-UDID install for first launch) are one-time / per-session environment steps, not code changes.
 2. **Spike 2 (Jeff's wrist, throwaway strategies):** module + card + taps behind the three keep-alive options.
 3. Feature work per this spec; gates green; Codex review.
 4. Build 77 cut with the rest of the list (`build-77-backlog`): runtime bump, both platforms at 77, Jeff's paid go.

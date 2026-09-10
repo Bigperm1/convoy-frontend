@@ -11,15 +11,17 @@ final class PttRecorder: ObservableObject {
   private var rec: AVAudioRecorder?
   private var startedAt: Date?
   private var starting = false
+  private var cancelled = false
 
   func start() {
     guard rec == nil, !starting else { return }
     starting = true
+    cancelled = false
     let session = AVAudioSession.sharedInstance()
     session.requestRecordPermission { [weak self] granted in
       guard let self = self else { return }
       guard granted else {
-        DispatchQueue.main.async { self.lastError = "Mic not allowed"; self.starting = false }
+        DispatchQueue.main.async { self.lastError = "Mic not allowed"; self.starting = false; self.cancelled = false }
         return
       }
       do {
@@ -32,24 +34,32 @@ final class PttRecorder: ObservableObject {
         ]
         let r = try AVAudioRecorder(url: url, settings: settings)
         guard r.record() else {
-          DispatchQueue.main.async { self.lastError = "Record failed"; self.starting = false }
+          DispatchQueue.main.async { self.lastError = "Record failed"; self.starting = false; self.cancelled = false }
           try? session.setActive(false)
           return
         }
         DispatchQueue.main.async {
+          if self.cancelled {
+            self.cancelled = false; self.starting = false
+            r.stop(); try? FileManager.default.removeItem(at: r.url); try? session.setActive(false)
+            return
+          }
           self.rec = r; self.startedAt = Date()
           self.recording = true; self.lastError = nil
           self.starting = false
+          if WCSession.default.isReachable { WCSession.default.sendMessage(["json": "{\"ptt\":\"down\"}"], replyHandler: nil, errorHandler: nil) }
         }
-        if WCSession.default.isReachable { WCSession.default.sendMessage(["json": "{\"ptt\":\"down\"}"], replyHandler: nil, errorHandler: nil) }
       } catch {
-        DispatchQueue.main.async { self.lastError = "Record failed"; self.starting = false }
+        DispatchQueue.main.async { self.lastError = "Record failed"; self.starting = false; self.cancelled = false }
       }
     }
   }
 
   func stop() {
-    guard let r = rec else { return }
+    guard let r = rec else {
+      if starting { cancelled = true }
+      return
+    }
     r.stop(); rec = nil
     let ms = Int((Date().timeIntervalSince(startedAt ?? Date())) * 1000)
     DispatchQueue.main.async { self.recording = false }

@@ -164,11 +164,31 @@ export const REROUTE_DISTANCE_M = 80;
 //     would look clear one tick into the corner (Codex 2026-09-11, reproduced);
 //   • HDG_FAST_TICKS consecutive qualifying ticks (fix-driven — timer starvation cannot
 //     stretch them), and every existing hold still applies (post-swap arm, creep, in-flight,
-//     the 8 s gap). Replay: tools/sim-qc/offroute_storm_test.mts scenarios S/T/U.
+//     the 8 s gap);
+//   • the car must have BEEN on this line (`onThisRoute`). Labelling the trip `heading` makes
+//     `trendOnly` false, which skips the one hold this file names as the thing that actually stops
+//     the 09-04 lot storm — so the fast path carries the join requirement itself. A ramp departure
+//     always starts on the route (Jeff's dRoute was 2.2 m at the release); a lot the car was never
+//     on is exactly what this blocks (reviewer, 2026-09-11: 11 trips without it);
+//   • and dRoute must GROW by HDG_FAST_GROWTH_M across the window — a departure leaves, a car
+//     parked beside the line or circling a forecourt does not (reviewer: 14 trips in 180 s at a
+//     steady 25 m offset). The counter is cleared on every trip, so one departure is one reroute.
+//     Replay: tools/sim-qc/offroute_storm_test.mts scenarios S/T/U/V/W and the lot/steady bars.
 export const HDG_FAST_MIN_M = 12;
 export const HDG_FAST_TICKS = 3;
 export const HDG_FAST_MIN_SPEED_MS = 4;
 export const HDG_FAST_MANEUVER_CLEAR_M = 100;
+/** …and the car must be LEAVING, not merely beside: dRoute must grow by at least this much across the
+ *  LAST HDG_FAST_TICKS ticks — a rolling window, never "since the window opened". Measured the
+ *  difference (2026-09-11): a forecourt loop drifting out at 1.7 m/s satisfies a since-the-start test
+ *  after twelve ticks (13 → 47 m) and stormed 6× in four minutes, but never clears 8 m inside any
+ *  three-tick window. Jeff's ramp clears it in one window (16 → 30 m). Reviewers reproduced two storms without it (2026-09-11): a steady 25 m offset
+ *  with an aligned-but-off course re-tripped every 9 s for as long as it lasted (14 trips in 180 s at
+ *  20 m/s — above 67 km/h the 150 m post-swap arm is covered inside the 8 s cooldown, so no hold ever
+ *  engages), and a forecourt loop at 14–25 km/h produced 6–11 trips in four minutes. A departure
+ *  GROWS: Jeff's ramp went 2.2 → 43.3 m (16 → 30 m across its qualifying window). A car parked beside
+ *  the line, or circling a lot, does not. */
+export const HDG_FAST_GROWTH_M = 8;
 // ── DIVERGENCE TREND (2026-07-31) ──────────────────────────────────────────
 // Jeff: "I took a different route and it took a while for the route to change, at
 // least 1 min."
@@ -283,6 +303,7 @@ export type OffRouteGateState = {
   lastTripAt: number;
   onThisRoute: boolean;                             // has been within ONROUTE_M since the swap
   hdgOffTicks: number;                              // consecutive ticks qualifying for the heading fast path
+  hdgOffD: number[];                                // the last HDG_FAST_TICKS qualifying dRoute values (rolling growth test)
 };
 
 export type OffRouteTickInput = {
@@ -340,7 +361,7 @@ export type OffRouteDecision = {
 
 export const newOffRouteGateState = (now = 0): OffRouteGateState => ({
   streak: 0, hist: [], swapAt: now, travelSinceSwapM: 0, lastFix: null, lastFastAt: 0,
-  lastTripAt: 0, onThisRoute: false, hdgOffTicks: 0,
+  lastTripAt: 0, onThisRoute: false, hdgOffTicks: 0, hdgOffD: [],
 });
 
 /**
@@ -374,6 +395,7 @@ export function resetOffRouteGate(st: OffRouteGateState, now: number): void {
   st.lastFix = null;
   st.onThisRoute = false;   // re-earned against the NEW line, on the next fix
   st.hdgOffTicks = 0;
+  st.hdgOffD.length = 0;
 }
 
 const haversineM = (aLat: number, aLng: number, bLat: number, bLng: number): number => {
@@ -479,7 +501,20 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
     t.dRoute > HDG_FAST_MIN_M &&
     spd !== null && spd >= HDG_FAST_MIN_SPEED_MS &&
     maneuverClear;
-  st.hdgOffTicks = hdgFastTick ? st.hdgOffTicks + 1 : 0;
+  if (hdgFastTick) {
+    st.hdgOffTicks += 1;
+    st.hdgOffD.push(t.dRoute);
+    if (st.hdgOffD.length > HDG_FAST_TICKS) st.hdgOffD.shift();   // ROLLING, never since-the-start
+  } else {
+    st.hdgOffTicks = 0;
+    st.hdgOffD.length = 0;
+  }
+  // A departure LEAVES the line, and the car was ON it. Both measured across the rolling window.
+  const hdgFastArmed =
+    st.hdgOffTicks >= HDG_FAST_TICKS &&
+    st.onThisRoute &&
+    st.hdgOffD.length === HDG_FAST_TICKS &&
+    t.dRoute > st.hdgOffD[0] + HDG_FAST_GROWTH_M;
 
   // ── divergence trend — catches the slow parallel-street departure long before the
   // 80 m threshold does. See the DIVERGE_* block for why a trend beats a distance.
@@ -504,7 +539,7 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   const strongWhy: OffRouteWhy | null =
     t.missedManeuver ? "missed" :
     conclusivelyOff ? (st.streak >= 2 ? "far" : null) :
-    st.hdgOffTicks >= HDG_FAST_TICKS ? "heading" :                 // the 09-11 fast path
+    hdgFastArmed ? "heading" :                                     // the 09-11 fast path
     t.headingOff ? (st.streak >= 3 ? "heading" : null) :
                    (st.streak >= 6 ? "sustained" : null);
   const why: OffRouteWhy | null =
@@ -545,6 +580,8 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   // at most one retry per ~9 s — and the creep gate still holds a car crawling in a lot,
   // which is what the storm actually was.
   st.lastTripAt = t.now;
+  st.hdgOffTicks = 0;      // one departure is one reroute: the window must be rebuilt from scratch
+  st.hdgOffD.length = 0;
   st.streak = 0;
   st.hist.length = 0;          // the trend has been acted on; re-earn it from here
   return { trip: true, why, held: null, ...base };

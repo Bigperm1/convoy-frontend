@@ -42,7 +42,7 @@
 import {
   newOffRouteGateState, resetOffRouteGate, offRouteTick, ROUTE_FETCH_TIMEOUT_MS,
   SWAP_ARM_TRAVEL_M, SWAP_FASTPATH_ARM_M, ONROUTE_M, REROUTE_DISTANCE_M, type OffRouteGateState,
-  HDG_FAST_MIN_M, HDG_FAST_TICKS, HDG_FAST_MIN_SPEED_MS, HDG_FAST_MANEUVER_CLEAR_M,
+  HDG_FAST_MIN_M, HDG_FAST_TICKS, HDG_FAST_MIN_SPEED_MS, HDG_FAST_MANEUVER_CLEAR_M, HDG_FAST_GROWTH_M,
 } from "../../src/offRouteGate.ts";
 // The REAL one-in-flight slot nav.ts wraps (review 2026-09-05: the first version of this
 // gate kept its own `outstanding[]` and would have passed with the registry deleted).
@@ -621,8 +621,11 @@ check(Tc.trips.length === 0, `T coarse-line corner produced ${Tc.trips.length} r
 // …and the guard must be LOAD-BEARING (Codex pass 2): the same corner with the passed maneuver unknown
 // (behind = undefined = clear) has three qualifying ticks after the advance and MUST trip. If this stops
 // tripping, the scenario has gone soft and no longer proves the behind-guard.
-const TcNoBehind = run(coarseTicks.map((k) => ({ ...k, dManeuverBehindM: undefined })));
-check(TcNoBehind.trips.length === 1, `T coarse corner WITHOUT the behind-guard produced ${TcNoBehind.trips.length} reroutes (want 1: proves the guard is load-bearing)`);
+// The corner is now held by TWO independent guards (the passed maneuver, and rolling growth — a
+// corner does not leave the line). Strip BOTH to prove neither is decoration: same corner, d growing
+// 14 → 26 → 38 as if the car were genuinely leaving, and the passed maneuver unknown.
+const TcNoGuards = run(coarseTicks.map((k, i) => (k.headingOff ? { ...k, dManeuverBehindM: undefined, d: 14 + 12 * Math.max(0, i - 60) } : k)));
+check(TcNoGuards.trips.length === 1, `T coarse corner with BOTH guards stripped produced ${TcNoGuards.trips.length} reroutes (want 1: proves they are load-bearing, not decoration)`);
 
 // ── V: A STALE DISPLAY HEADING IS NOT A KNOWN COURSE (Codex 2026-09-11, reproduced) ──
 // map.tsx keeps `heading` sticky across course-less fixes. Three fixes with NO course while the
@@ -631,7 +634,8 @@ check(TcNoBehind.trips.length === 1, `T coarse corner WITHOUT the behind-guard p
 // sees headingKnown=false here; the same three ticks WITH a real course are a genuine departure.
 const staleTicks: Tick[] = [];
 for (let i = 0; i < 30; i++) staleTicks.push({ pos: 10 * i, d: 4, speedMs: 10, headingOff: false, headingKnown: true, dManeuverM: 500 });
-for (let i = 0; i < 3; i++) staleTicks.push({ pos: 300 + 10 * (i + 1), d: 14, speedMs: 10, headingOff: true, headingKnown: false, accM: 10, dManeuverM: 500 });
+// A genuine departure GROWS (the rolling-growth guard): 14 → 26 → 38 m.
+for (let i = 0; i < 3; i++) staleTicks.push({ pos: 300 + 10 * (i + 1), d: 14 + 12 * i, speedMs: 10, headingOff: true, headingKnown: false, accM: 10, dManeuverM: 500 });
 const V = run(staleTicks);
 check(V.trips.length === 0, `V stale display heading with no course produced ${V.trips.length} reroutes (want 0)`);
 const Vreal = run(staleTicks.map((k, i) => (i >= 30 ? { ...k, headingKnown: true } : k)));
@@ -646,6 +650,43 @@ for (let i = 0; i < 30; i++) stopTicks.push({ pos: 10 * i, d: i % 2 ? 8 : 4, spe
 [[90, 300], [86, 301], [90, 302], [4, 303]].forEach(([d, pos]) => stopTicks.push({ pos, d, speedMs: 0, headingOff: false, headingKnown: false, courseOff: false, accM: 10, dManeuverM: 500 }));
 const W = run(stopTicks);
 check(W.trips.length === 0, `W stop + transient 90 m offset with no course produced ${W.trips.length} reroutes (want 0)`);
+
+// ── X: THE LOT STORM AT ROAD SPEED (reviewer, 2026-09-11 — REPRODUCED, 11 trips) ──────
+// The 09-04 forecourt shape driven at 14–25 km/h instead of Olaf's 9 km/h crawl. Above
+// CREEP_SPEED_MS the creeping hold is dead; labelling the trip `heading` makes `trendOnly` false,
+// which skips the `onThisRoute` hold this file calls the one that actually stops the storm; and
+// 150 m of lot driving is 20 s. Without the join + growth requirements this produced 6–11 reroutes
+// in four minutes. The car NEVER joins the line it is handed (each reroute re-snaps ~27 m away).
+const lotAt = (speedMs: number): Tick[] => {
+  const t: Tick[] = [];
+  // Straight to the lot on the route, then loop inside it: d wanders 13→47→13 and never settles.
+  for (let i = 0; i < 20; i++) t.push({ pos: speedMs * i, d: 5, speedMs, headingOff: false, headingKnown: true, courseOff: false, dManeuverM: 900 });
+  for (let i = 0; i < 240; i++) {
+    const phase = i % 40;
+    const d = 13 + (phase < 20 ? phase * 1.7 : (40 - phase) * 1.7);   // 13 → 47 → 13, never monotonic
+    t.push({ pos: speedMs * (20 + i), d, speedMs, headingOff: true, headingKnown: true, courseOff: true, accM: 8, dManeuverM: 900 });
+  }
+  return t;
+};
+for (const kmh of [14, 18, 25]) {
+  const v = kmh / 3.6;
+  const X = run(lotAt(v), { swapD: () => 27 });
+  check(X.trips.length <= 1, `X lot transit at ${kmh} km/h produced ${X.trips.length} reroutes (want ≤1; reviewer measured 6–11 before the join+growth guards)`);
+}
+// …and the steady-offset case: 25 m off the line, course off, nothing changing. Nothing may re-trip.
+const steadyTicks: Tick[] = [];
+for (let i = 0; i < 20; i++) steadyTicks.push({ pos: 20 * i, d: 5, speedMs: 20, headingOff: false, headingKnown: true, courseOff: false, dManeuverM: 3000 });
+for (let i = 0; i < 180; i++) steadyTicks.push({ pos: 20 * (20 + i), d: 25, speedMs: 20, headingOff: true, headingKnown: true, courseOff: true, accM: 8, dManeuverM: 3000 });
+const Xs = run(steadyTicks);
+check(Xs.trips.length === 0, `X steady 25 m offset at 72 km/h produced ${Xs.trips.length} reroutes (want 0; reviewer measured 14 in 180 s)`);
+// The growth rule must still let a REAL departure through from the same steady state.
+const leaveTicks: Tick[] = [...steadyTicks.slice(0, 60)];
+for (let i = 0; i < 10; i++) leaveTicks.push({ pos: 20 * (80 + i), d: 25 + 9 * (i + 1), speedMs: 20, headingOff: true, headingKnown: true, courseOff: true, accM: 8, dManeuverM: 3000 });
+const Xl = run(leaveTicks);
+// One reroute for the departure; a second only if the car is STILL leaving after the 8 s cooldown,
+// which is the pre-existing retry behaviour (scenario I), not the fast path storming.
+check(Xl.trips.length >= 1 && Xl.trips.length <= 2, `X a real departure out of the steady state produced ${Xl.trips.length} reroutes (want 1–2: growth ${HDG_FAST_GROWTH_M} m, then the designed retry)`);
+check(Xl.trips[0] <= 63_000, `X the departure's FIRST reroute came at ${Xl.trips[0] / 1000}s (want ≤63 s: three ticks after it began at 60 s)`);
 
 // ── U: A DIVIDED HIGHWAY, 35 M OFF THE LINE, HEADING ALIGNED ─────────────────────
 // The parallel-carriageway case the heading gate was born for: far off the drawn line for
@@ -676,7 +717,7 @@ console.log(
   `holds=${[...new Set(L.holds)].join("/") || "-"} (want ≤20, 1) | ` +
   `M wrong turn + timers frozen ${fmt(M)} vs B ${fmt(B)} (want equal) | ` +
   `N hung request + missed turn=${N.trips.length} [${fmt(N)}] gaps=${[...new Set(nGaps)].join("/") || "-"}ms aborts=${N.aborts.length} (want ${nWantTrips}, +${N_RETRY_MS}ms) | ` +
-  `S Jeff's ramp (trend ${sBaseT / 1000}s): gain by maneuver distance ${sSweep.map((x) => `${x.m}m:+${x.gainS}s`).join(" ")} — the field's value is UNKNOWN | T legit corner=${T.trips.length}/${Tc.trips.length} (want 0/0; step advance modelled) | V stale heading=${V.trips.length} real=${Vreal.trips.length} (want 0/1) | W stop+offset=${W.trips.length} (want 0) | Tc no-guard control=${TcNoBehind.trips.length} (want 1) | U divided hwy=${U.trips.length} (want 0) | A+heading=${Ah.trips.length} | ` +
+  `S Jeff's ramp (trend ${sBaseT / 1000}s): gain by maneuver distance ${sSweep.map((x) => `${x.m}m:+${x.gainS}s`).join(" ")} — the field's value is UNKNOWN | T legit corner=${T.trips.length}/${Tc.trips.length} (want 0/0; step advance modelled) | V stale heading=${V.trips.length} real=${Vreal.trips.length} (want 0/1) | W stop+offset=${W.trips.length} (want 0) | X lot@14/18/25=${[14, 18, 25].map((k) => run(lotAt(k / 3.6), { swapD: () => 27 }).trips.length).join("/")} steady=${Xs.trips.length} depart=${Xl.trips.length} (want ≤1/0/1–2) | Tc both-guards-stripped=${TcNoGuards.trips.length} (want 1) | U divided hwy=${U.trips.length} (want 0) | A+heading=${Ah.trips.length} | ` +
   `R jam 200m off: re-trip ${R.trips.length ? R.trips[0] / 1000 + "s" : "never"} | O slot contract 9/9 | Q never-joined reroute: re-trip +${Number.isFinite(qSlowDelay) ? qSlowDelay / 1000 : "never"}s @15km/h, +${Number.isFinite(qFastDelay) ? qFastDelay / 1000 : "never"}s @108km/h (want ≤40, ≤8) | arm=${SWAP_ARM_TRAVEL_M}m onRoute=${ONROUTE_M}m fetchTimeout=${ROUTE_FETCH_TIMEOUT_MS}ms`,
 );
 if (fails.length) { console.error("FAIL:\n  " + fails.join("\n  ")); process.exit(1); }

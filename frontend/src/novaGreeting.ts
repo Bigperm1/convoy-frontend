@@ -76,7 +76,10 @@ export type GreetingContext = {
   // away and Nova announced only the destination. Which is the bug Jeff reported:
   // "it announced Superstore while it was routing me to Canadian Tire first."
   viaName?: string | null;
-  // City/area for the weather clause.
+  // City/area for the weather clause. The app STOPPED sending this on 2026-09-11: the only
+  // value it ever had was the destination label, which for a saved place is "Work", and the
+  // template dutifully said "It's cloudy in Work." The backend now ends the weather clause on
+  // "when you arrive" instead. Left in the type so a real locality can be wired later.
   destinationCity?: string | null;
   // The selected route (for the traffic read).
   route?: NavRoute | null;

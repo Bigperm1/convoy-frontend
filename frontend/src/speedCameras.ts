@@ -13,6 +13,7 @@
 // crowdsourced via /api/hazards. This module is fixed cameras only.
 
 import { useEffect, useRef, useState } from "react";
+import { logEvent } from "./crashBreadcrumb";
 
 export type SpeedCamera = { id: string; lat: number; lng: number };
 
@@ -50,6 +51,9 @@ function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): num
  * differently from `[]`: a failure should be retried, an empty success should
  * not — see useSpeedCameras.
  */
+let _fetchRows = 0;
+let _lastN = -1;
+
 export async function fetchSpeedCamerasAround(
   lat: number,
   lng: number,
@@ -59,16 +63,27 @@ export async function fetchSpeedCamerasAround(
     `[out:json][timeout:25];node(around:${Math.round(radiusM)},${lat},${lng})[highway=speed_camera];out body;`;
   // Try each mirror in turn; the first that answers OK wins. A non-OK status
   // (rate-limit / gateway timeout) or a network error falls through to the next.
-  for (const url of OVERPASS_MIRRORS) {
+  for (let mi = 0; mi < OVERPASS_MIRRORS.length; mi++) {
+    const url = OVERPASS_MIRRORS[mi];
     try {
+      const t0 = Date.now();
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: "data=" + encodeURIComponent(query),
       });
       if (!res.ok) continue;
+      const tNet = Date.now();
       const json: any = await res.json();
       const els: any[] = Array.isArray(json?.elements) ? json.elements : [];
+      // Receipt (2026-09-11): Jeff's exit-ramp "stutter" was a 25 s frame gap on the car surface
+      // 46 s after a reroute, and nothing that runs off a route change logged anything, so the
+      // stall had no author. Bounded: the first few fetches per session, then only when the
+      // count changes. `parse` is the JS-thread cost of res.json() on the reply.
+      if (_fetchRows < 6 || els.length !== _lastN) {
+        _fetchRows += 1; _lastN = els.length;
+        try { logEvent(`cam-fetch mirror=${mi} n=${els.length} net=${tNet - t0} parse=${Date.now() - tNet}`); } catch {}
+      }
       return els
         .filter((e) => e && typeof e.lat === "number" && typeof e.lon === "number")
         .map((e) => ({ id: String(e.id), lat: e.lat, lng: e.lon }));

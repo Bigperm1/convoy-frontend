@@ -1654,12 +1654,15 @@ export default function MapScreen() {
       // shape this exists for — an errand on the way home. It composes on the far side
       // of that match instead.
       viaName: stopName,
-      // City stays the FINAL destination: it feeds the weather clause, and the driver
-      // wants the forecast where they end up, not at the hardware store on the way.
-      destinationCity: destination.label,
+      // NO city. This used to pass `destination.label`, and for a saved place that label is
+      // "Work" — so 2026-09-11's line was "Heading to work. … It's cloudy in Work." (receipt:
+      // greet-prep src=template). The weather clause now closes on "when you arrive", which
+      // is what Jeff asked for, and needs no place name at all.
       route: activeRoute,
       weatherKind: destWeather?.kind ?? null,
-      temperature: destWeather?.temp ?? null,
+      // Spoken form: the chip shows "20°", Nova says "20 degrees" (the unit follows the
+      // speed-unit setting exactly as the chip does, so it needs no letter to be right).
+      temperature: destWeather?.temp ? destWeather.temp.replace("\u00b0", " degrees") : null,
     }, key);
     // `stops` / `stopsVersion` are deps because the greeting now NAMES the first stop:
     // Jeff set the destination and added the stop afterwards, so without these the

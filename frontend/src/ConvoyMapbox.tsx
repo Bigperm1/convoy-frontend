@@ -2580,6 +2580,13 @@ function GLPinLayers({
     const t2 = setTimeout(() => setImgGen(2), 1500);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [glyphsReady]);
+  // Receipt (2026-09-11): every bump here remounts the whole registry and re-snapshots every pin
+  // on the main thread. Expected only at mount (gens 0/1/2 inside 1.5 s); a row mid-drive would
+  // make this the author of a frame gap like the 25 s one after Jeff's exit-ramp reroute.
+  useEffect(() => {
+    if (!glyphsReady) return;
+    try { logEvent(`pin-imgs gen=${imgGen} n=${HAZARD_PIN_KINDS.length + INCIDENT_PIN_KINDS.length + 8}`); } catch {}
+  }, [glyphsReady, imgGen]);
   // A cluster tap: ask the source where the cluster splits and hand the camera there.
   const zoomToCluster = useCallback(async (srcRef: React.MutableRefObject<any>, feature: any) => {
     try {

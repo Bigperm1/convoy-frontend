@@ -19,6 +19,7 @@
 // Licence – British Columbia (attribution shown on the Legal screen).
 
 import { useEffect, useRef, useState } from "react";
+import { logEvent } from "./crashBreadcrumb";
 
 export type RoadEventKind = "incident" | "construction" | "road" | "weather" | "event";
 export type RoadEventSeverity = "MINOR" | "MODERATE" | "MAJOR" | "UNKNOWN";
@@ -84,6 +85,9 @@ function firstCoord(geometry: any): [number, number] | null {
  * `null` when the request failed (network / server error) so the caller can
  * retry rather than lock in an empty result. Outside BC returns [] immediately.
  */
+let _fetchRows = 0;
+let _lastN = -1;
+
 export async function fetchDriveBcEventsAround(
   lat: number,
   lng: number,
@@ -96,10 +100,19 @@ export async function fetchDriveBcEventsAround(
   const bbox = `${(lng - lngDelta).toFixed(5)},${(lat - latDelta).toFixed(5)},${(lng + lngDelta).toFixed(5)},${(lat + latDelta).toFixed(5)}`;
   const url = `${OPEN511_EVENTS}?status=ACTIVE&bbox=${bbox}&limit=500&format=json`;
   try {
+    const t0 = Date.now();
     const res = await fetch(url, { headers: { Accept: "application/json" } });
     if (!res.ok) return null;
+    const tNet = Date.now();
     const json: any = await res.json();
     const events: any[] = Array.isArray(json?.events) ? json.events : [];
+    // Receipt (2026-09-11): see cam-fetch in speedCameras.ts — the post-route jobs had no author
+    // when a 25 s frame gap followed Jeff's exit-ramp reroute. `parse` = res.json() on the JS
+    // thread for a 40 km bbox of full Open511 geometries. Bounded: first few, then on change.
+    if (_fetchRows < 6 || events.length !== _lastN) {
+      _fetchRows += 1; _lastN = events.length;
+      try { logEvent(`bc-events n=${events.length} net=${tNet - t0} parse=${Date.now() - tNet}`); } catch {}
+    }
     const out: RoadEvent[] = [];
     for (const e of events) {
       const coord = firstCoord(e?.geography);

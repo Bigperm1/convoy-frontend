@@ -49,10 +49,13 @@ function merged(now: number): LiftEvidence {
     if (!e || now - e.at > LIFT_EVIDENCE_FRESH_MS) continue;
     if (typeof e.speedMs === "number" && (speedMs == null || e.speedMs > speedMs)) speedMs = e.speedMs;
     if (e.roadHit === true) roadHit = true;
-    // An absence only counts from a surface whose map was idle when it answered.
-    else if (e.roadHit === false && e.complete && roadHit == null) { roadHit = false; complete = true; }
-    if (typeof e.buildingH === "number" && (buildingH == null || e.buildingH > buildingH)) buildingH = e.buildingH;
-    if (e.lot) lot = true;
+    // Off-road evidence of EITHER kind counts only from a surface whose map was idle for the whole query: an
+    // absence may be a tile still loading, and a driveway seen under the car may be missing the closer road of
+    // a tile still loading (Codex pass 5). A road HIT is presence and counts from any surface.
+    if (!e.complete) continue;
+    if (e.roadHit === false && roadHit == null) { roadHit = false; complete = true; }
+    if (typeof e.buildingH === "number" && (buildingH == null || e.buildingH > buildingH)) { buildingH = e.buildingH; complete = true; }
+    if (e.lot) { lot = true; complete = true; }
   }
   const navDistM = now - _navAt <= LIFT_EVIDENCE_FRESH_MS ? _navDistM : null;
   return { speedMs, navDistM, roadHit, buildingH, lot, complete };
@@ -114,13 +117,13 @@ export function clearSelfLiftSurface(surface: LiftSurface): void {
 }
 /** Bounded receipt of what our road source handed back — the first few queries and every flip of the
  *  road verdict — so the evidence behind a lift is in telemetry, not guessed. */
-export function logSelfLiftQuery(surface: LiftSurface, q: { roads: number; drivable: number; drivableM: number | null; propertyM: number | null; buildings: number; ms?: number; nearestCls?: string | null }, ev: RoadEvidence): void {
+export function logSelfLiftQuery(surface: LiftSurface, q: { roads: number; drivable: number; drivableM: number | null; propertyM: number | null; buildings: number; ms?: number; complete?: boolean; nearestCls?: string | null }, ev: RoadEvidence): void {
   const flipped = _qLastRoad[surface] !== ev.roadHit;
   _qLastRoad[surface] = ev.roadHit;
   if (_qRows >= Q_ROWS_MAX || (!flipped && _qRows >= 4)) return;
   _qRows += 1;
   try {
-    logEvent(`self-lift q surf=${surface} roads=${q.roads} drv=${q.drivable} drvM=${q.drivableM == null ? "-" : q.drivableM.toFixed(0)} propM=${q.propertyM == null ? "-" : q.propertyM.toFixed(0)} bldN=${q.buildings} ms=${q.ms ?? "?"} idle=${isMapIdle(surface) ? 1 : 0} road=${ev.roadHit == null ? "?" : ev.roadHit ? 1 : 0} bld=${ev.buildingH == null ? "-" : ev.buildingH}${ev.lot ? " lot=1" : ""} cls=${q.nearestCls ?? "-"}`);
+    logEvent(`self-lift q surf=${surface} roads=${q.roads} drv=${q.drivable} drvM=${q.drivableM == null ? "-" : q.drivableM.toFixed(0)} propM=${q.propertyM == null ? "-" : q.propertyM.toFixed(0)} bldN=${q.buildings} ms=${q.ms ?? "?"} idle=${q.complete ? 1 : 0} road=${ev.roadHit == null ? "?" : ev.roadHit ? 1 : 0} bld=${ev.buildingH == null ? "-" : ev.buildingH}${ev.lot ? " lot=1" : ""} cls=${q.nearestCls ?? "-"}`);
   } catch {}
 }
 /** Fast enough that the map need not be asked at all. */

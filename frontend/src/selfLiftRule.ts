@@ -169,8 +169,10 @@ export type LiftEvidence = {
   buildingH: number | null;
   /** POSITIVE off-road evidence: a driveway / parking aisle under the car (roadEvidence's `lot`). */
   lot?: boolean;
-  /** The reporting map was IDLE (Mapbox: every tile loaded and rendered, no camera transition) when it answered —
-   *  the only proof that "no road within reach" is not a tile still loading. An absence without it is unknown. */
+  /** The reporting map was IDLE (Mapbox: every tile loaded and rendered, no camera transition) for the whole
+   *  query — the only proof that "no road within reach" is not a tile still loading, AND that a driveway seen
+   *  under the car is not missing the closer road of a tile still loading (Codex pass 5). Without it, an absence
+   *  is unknown and a positive is not yet trusted. */
   complete?: boolean;
 };
 export type LiftState = {
@@ -195,8 +197,8 @@ export function liftDecide(st: LiftState, ev: LiftEvidence, now: number, offRoad
   // absence: it counts solely when the map was idle (every tile loaded) — a tile still loading looks the same
   // (Codex passes 3–4) — and it must hold longer. The two tiers keep their own clocks: a first positive sample after
   // seconds of absence does not inherit the absence clock.
-  const positive = !!ev.lot || (typeof ev.buildingH === "number" && ev.buildingH >= 0);
-  const absence = ev.roadHit === false && ev.complete === true;
+  const positive = ev.complete === true && (!!ev.lot || (typeof ev.buildingH === "number" && ev.buildingH >= 0));
+  const absence = ev.complete === true && ev.roadHit === false;
   if (positive || absence) {
     const since = st.offRoadSince ?? now;
     const pSince = positive ? (st.positiveSince ?? now) : null;

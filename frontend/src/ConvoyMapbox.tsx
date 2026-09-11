@@ -1396,7 +1396,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // The last answer and where it was taken: a car that has not moved LIFT_CACHE_M since is re-served the
   // same evidence for LIFT_CACHE_MS (Codex pass 2: a parked car was pulling two full-source queries a
   // second forever) — the confirm timer still runs on the re-reports, only the native work is skipped.
-  const liftCache = useRef<{ lat: number; lng: number; at: number; ev: RoadEvidence } | null>(null);
+  const liftCache = useRef<{ lat: number; lng: number; at: number; ev: RoadEvidence; complete: boolean } | null>(null);
   const liftAnimTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const liftGen = useRef(0);   // bumped on every (re)start and on cleanup: an in-flight query from an old life is dropped
   const offRoadLiftM = modelId.startsWith(ARROW_MODEL_ID) ? SELF_ARROW_LIFT_M : SELF_MODEL_LIFT_M;
@@ -1438,12 +1438,16 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       const r0 = render.current;
       const c = liftCache.current;
       if (c && Date.now() - c.at < LIFT_CACHE_MS && poseHaversineM(c.lat, c.lng, r0.lat, r0.lng) < LIFT_CACHE_M) {
-        reportSelfLiftEvidence(surface, { speedMs: spd, roadHit: c.ev.roadHit, buildingH: c.ev.buildingH, lot: c.ev.lot, complete: isMapIdle(surface) });
+        // Completeness is the CACHED query's, never the idle flag of the moment (Codex pass 5).
+        reportSelfLiftEvidence(surface, { speedMs: spd, roadHit: c.ev.roadHit, buildingH: c.ev.buildingH, lot: c.ev.lot, complete: c.complete });
         armEase();
         return;
       }
       liftQueryBusy.current = true;
       const qStart = Date.now();
+      // Completeness is bound to THIS query: idle when it started AND still idle when it finished (no camera
+      // change in between), so every tile the answer is built on was loaded before the question was asked.
+      const idleAtStart = isMapIdle(surface);
       try {
         const r = render.current;
         // OUR OWN road source (the road-snap's invisible mapbox-streets-v8 copy, both surfaces): Standard
@@ -1469,11 +1473,12 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           buildings = bfs.length;
           ev = { ...ev, buildingH: buildingUnder(r.lat, r.lng, bfs) };
         }
-        // Cache only what is POSITIVELY known — a road under the car, or a property / roof under it. An absence
-        // ("no road within reach") is re-asked every second: a tile that loads a moment later must be seen.
-        liftCache.current = (ev.roadHit === true || ev.lot || ev.buildingH != null) ? { lat: r.lat, lng: r.lng, at: Date.now(), ev } : null;
-        logSelfLiftQuery(surface, { roads: roads.length, drivable: drivable.length, drivableM: nd ? nd.distM : null, propertyM: np ? np.distM : null, buildings, ms: Date.now() - qStart }, ev);
-        reportSelfLiftEvidence(surface, { speedMs: spd, roadHit: ev.roadHit, buildingH: ev.buildingH, lot: ev.lot, complete: isMapIdle(surface) });
+        const complete = idleAtStart && isMapIdle(surface);
+        // Cache a road HIT (presence, any time) or a COMPLETE off-road verdict; an absence, or anything asked of a
+        // map that was still loading, is re-asked every second so a tile that loads a moment later is seen.
+        liftCache.current = (ev.roadHit === true || (complete && (ev.lot || ev.buildingH != null))) ? { lat: r.lat, lng: r.lng, at: Date.now(), ev, complete } : null;
+        logSelfLiftQuery(surface, { roads: roads.length, drivable: drivable.length, drivableM: nd ? nd.distM : null, propertyM: np ? np.distM : null, buildings, ms: Date.now() - qStart, complete }, ev);
+        reportSelfLiftEvidence(surface, { speedMs: spd, roadHit: ev.roadHit, buildingH: ev.buildingH, lot: ev.lot, complete });
       } catch (e) {
         if (gen !== liftGen.current) return;
         noteSelfLiftQueryFail(surface, e);

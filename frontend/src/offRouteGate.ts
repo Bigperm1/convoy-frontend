@@ -153,13 +153,15 @@ export const REROUTE_DISTANCE_M = 80;
 // a ramp runs beside its highway, so d grows late and the heading was inert at 43–56 m.
 //
 // This path trips on HEADING alone, guarded four ways so it can never be the lot storm:
-//   • the heading must be KNOWN (nav.ts passes headingOff=true when it has none — that
-//     default must never count here);
+//   • the heading must be KNOWN — from the FIX'S OWN COURSE (nav.ts). map.tsx keeps the display
+//     heading sticky across course-less fixes; that held value is not direction evidence and must
+//     never count here (nav.ts passes headingOff=true with no course: the distance-only fallback);
 //   • the car must be physically off the line (> HDG_FAST_MIN_M: a lane plus the fix noise)
 //     and MOVING (≥ HDG_FAST_MIN_SPEED_MS — the lot storm crept at 2.6 m/s);
-//   • no route maneuver within HDG_FAST_MANEUVER_CLEAR_M ahead: a legitimate turn AT a
+//   • no route maneuver within HDG_FAST_MANEUVER_CLEAR_M ahead OR BEHIND: a legitimate turn AT a
 //     maneuver has the course 45–90° off the segment bearing for a second or two before
-//     the projection crosses the vertex;
+//     the projection crosses the vertex — and the step ADVANCES at < 25 m, so "ahead" alone
+//     would look clear one tick into the corner (Codex 2026-09-11, reproduced);
 //   • HDG_FAST_TICKS consecutive qualifying ticks (fix-driven — timer starvation cannot
 //     stretch them), and every existing hold still applies (post-swap arm, creep, in-flight,
 //     the 8 s gap). Replay: tools/sim-qc/offroute_storm_test.mts scenarios S/T/U.
@@ -293,6 +295,10 @@ export type OffRouteTickInput = {
   /** Distance to the current step's maneuver (nav.ts `dManeuver`); a turn that is about to happen
    *  legitimately points the car off the segment. null/undefined = unknown = treated as clear. */
   dManeuverM?: number | null;
+  /** Distance to the maneuver just PASSED (the previous step's end). nav.ts advances the step at
+   *  < 25 m, so `dManeuverM` jumps to the NEXT turn while the car is still inside this one — the
+   *  guard must look both ways (Codex 2026-09-11). null/undefined = none / unknown. */
+  dManeuverBehindM?: number | null;
   missedManeuver: boolean; // the missed-maneuver fast path (nav.ts)
   lat: number;
   lng: number;
@@ -462,7 +468,8 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   else st.streak = 0;
   // Heading fast path: consecutive ticks with a KNOWN heading off the line, the car off the
   // line and moving, and no maneuver about to explain it. See HDG_FAST_* above.
-  const maneuverClear = !(typeof t.dManeuverM === "number" && Number.isFinite(t.dManeuverM)) || t.dManeuverM > HDG_FAST_MANEUVER_CLEAR_M;
+  const farEnough = (d: number | null | undefined) => !(typeof d === "number" && Number.isFinite(d)) || d > HDG_FAST_MANEUVER_CLEAR_M;
+  const maneuverClear = farEnough(t.dManeuverM) && farEnough(t.dManeuverBehindM);
   const hdgFastTick =
     t.headingKnown === true && t.headingOff &&
     t.dRoute > HDG_FAST_MIN_M &&

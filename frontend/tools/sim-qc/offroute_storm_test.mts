@@ -66,6 +66,7 @@ type Tick = {
    *  scenario above S is replayed with the fast path INERT — that is the regression assertion. */
   headingKnown?: boolean;
   dManeuverM?: number | null;
+  dManeuverBehindM?: number | null;
 };
 
 /** `swapD` maps the car's position at a swap to its offset from the NEW line. */
@@ -137,7 +138,7 @@ function run(
     const d = k.d + offset;
     const dec = offRouteTick(st, {
       now: t, dRoute: d, headingOff: k.headingOff ?? true, missedManeuver: k.missed ?? false,
-      headingKnown: k.headingKnown, dManeuverM: k.dManeuverM,
+      headingKnown: k.headingKnown, dManeuverM: k.dManeuverM, dManeuverBehindM: k.dManeuverBehindM,
       lat: LAT0 - k.pos / M_PER_DEG_LAT, lng: LNG0, speedMs: k.speedMs, accM: k.accM,
       timersStarvedMs: opts?.starvedMs,
       rerouteInFlightMs: inFlightMs,
@@ -569,8 +570,10 @@ check(sT >= (60 + 24 + HDG_FAST_TICKS - 1) * 1000, `S fast path tripped at ${sT 
 // 2–3 s before the projection crosses the vertex, while the car sits 3–8 m off a one-vertex line.
 const cornerTicks: Tick[] = [];
 for (let i = 0; i < 60; i++) cornerTicks.push({ pos: 8 * i, d: 4, speedMs: 8, headingOff: false, headingKnown: true, dManeuverM: 600 - 8 * i });
-[[5, 7, true, 30], [7, 6, true, 22], [8, 6, true, 15], [6, 6.5, true, 9], [4, 7, false, 400], [4, 8, false, 392]].forEach(([d, v, off, dm], i) =>
-  cornerTicks.push({ pos: 480 + 7 * (i + 1), d: d as number, speedMs: v as number, headingOff: off as boolean, headingKnown: true, dManeuverM: dm as number }));
+// nav.ts advances the step at < 25 m: from the third in-corner tick `dManeuverM` is the NEXT turn (400 m)
+// and the turn being driven is BEHIND the car (Codex 2026-09-11: without `dManeuverBehindM` this tripped).
+[[5, 7, true, 30, null], [7, 6, true, 22, null], [8, 6, true, 400, 15], [6, 6.5, true, 400, 9], [4, 7, false, 400, 14], [4, 8, false, 392, 22]].forEach(([d, v, off, dm, db], i) =>
+  cornerTicks.push({ pos: 480 + 7 * (i + 1), d: d as number, speedMs: v as number, headingOff: off as boolean, headingKnown: true, dManeuverM: dm as number, dManeuverBehindM: db as number | null }));
 for (let i = 0; i < 30; i++) cornerTicks.push({ pos: 530 + 8 * i, d: 4, speedMs: 8, headingOff: false, headingKnown: true, dManeuverM: 380 - 8 * i });
 const T = run(cornerTicks);
 check(T.trips.length === 0, `T legitimate corner produced ${T.trips.length} reroutes (want 0)`);
@@ -579,6 +582,19 @@ check(T.trips.length === 0, `T legitimate corner produced ${T.trips.length} rero
 const coarseTicks: Tick[] = cornerTicks.map((k) => (k.headingOff ? { ...k, d: 14 } : k));
 const Tc = run(coarseTicks);
 check(Tc.trips.length === 0, `T coarse-line corner produced ${Tc.trips.length} reroutes (want 0: maneuver ${HDG_FAST_MANEUVER_CLEAR_M} m guard)`);
+
+// ── V: A STALE DISPLAY HEADING IS NOT A KNOWN COURSE (Codex 2026-09-11, reproduced) ──
+// map.tsx keeps `heading` sticky across course-less fixes. Three fixes with NO course while the
+// held heading sits 90° off the route (a single bad course, then none) must not count as three
+// known off-route ticks. nav.ts now derives headingKnown from the fix's own course, so the gate
+// sees headingKnown=false here; the same three ticks WITH a real course are a genuine departure.
+const staleTicks: Tick[] = [];
+for (let i = 0; i < 30; i++) staleTicks.push({ pos: 10 * i, d: 4, speedMs: 10, headingOff: false, headingKnown: true, dManeuverM: 500 });
+for (let i = 0; i < 3; i++) staleTicks.push({ pos: 300 + 10 * (i + 1), d: 14, speedMs: 10, headingOff: true, headingKnown: false, accM: 10, dManeuverM: 500 });
+const V = run(staleTicks);
+check(V.trips.length === 0, `V stale display heading with no course produced ${V.trips.length} reroutes (want 0)`);
+const Vreal = run(staleTicks.map((k, i) => (i >= 30 ? { ...k, headingKnown: true } : k)));
+check(Vreal.trips.length === 1, `V the same three ticks with a REAL course 90° off produced ${Vreal.trips.length} reroutes (want 1: a genuine departure)`);
 
 // ── U: A DIVIDED HIGHWAY, 35 M OFF THE LINE, HEADING ALIGNED ─────────────────────
 // The parallel-carriageway case the heading gate was born for: far off the drawn line for
@@ -609,7 +625,7 @@ console.log(
   `holds=${[...new Set(L.holds)].join("/") || "-"} (want ≤20, 1) | ` +
   `M wrong turn + timers frozen ${fmt(M)} vs B ${fmt(B)} (want equal) | ` +
   `N hung request + missed turn=${N.trips.length} [${fmt(N)}] gaps=${[...new Set(nGaps)].join("/") || "-"}ms aborts=${N.aborts.length} (want ${nWantTrips}, +${N_RETRY_MS}ms) | ` +
-  `S Jeff's ramp: baseline ${sBaseT / 1000}s → fast path ${sT / 1000}s (${(sBaseT - sT) / 1000} s sooner; min ${HDG_FAST_MIN_M}m ${HDG_FAST_TICKS} ticks) | T legit corner=${T.trips.length}/${Tc.trips.length} (want 0/0) | U divided hwy=${U.trips.length} (want 0) | A+heading=${Ah.trips.length} | ` +
+  `S Jeff's ramp: baseline ${sBaseT / 1000}s → fast path ${sT / 1000}s (${(sBaseT - sT) / 1000} s sooner; min ${HDG_FAST_MIN_M}m ${HDG_FAST_TICKS} ticks) | T legit corner=${T.trips.length}/${Tc.trips.length} (want 0/0; step advance modelled) | V stale heading=${V.trips.length} real=${Vreal.trips.length} (want 0/1) | U divided hwy=${U.trips.length} (want 0) | A+heading=${Ah.trips.length} | ` +
   `R jam 200m off: re-trip ${R.trips.length ? R.trips[0] / 1000 + "s" : "never"} | O slot contract 9/9 | Q never-joined reroute: re-trip +${Number.isFinite(qSlowDelay) ? qSlowDelay / 1000 : "never"}s @15km/h, +${Number.isFinite(qFastDelay) ? qFastDelay / 1000 : "never"}s @108km/h (want ≤40, ≤8) | arm=${SWAP_ARM_TRAVEL_M}m onRoute=${ONROUTE_M}m fetchTimeout=${ROUTE_FETCH_TIMEOUT_MS}ms`,
 );
 if (fails.length) { console.error("FAIL:\n  " + fails.join("\n  ")); process.exit(1); }

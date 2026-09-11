@@ -892,7 +892,7 @@ export function useTurnByTurn(
   // :1977 publishes none, so it is legitimately undefined there). offRouteGate uses it as
   // the minimum-step floor when a fix has NO speed, so stationary scatter cannot be
   // mistaken for travel; nothing else reads it here.
-  user: (LatLng & { speed?: number; heading?: number; acc?: number }) | null,
+  user: (LatLng & { speed?: number; heading?: number; acc?: number; course?: number | null }) | null,
   active: boolean,
   options?: { mute?: boolean; destLabel?: string | null; arrivalContext?: () => ArrivalContext | null; onArrive?: () => void; onOffRoute?: () => void }
 ) {
@@ -1311,14 +1311,25 @@ export function useTurnByTurn(
       // overpass throws the fix sideways keeps the heading aligned — so it no
       // longer counts as off-route. With no heading we can't disprove a
       // departure, so we fall back to distance-only (headingOff = true).
-      const hdg = user.heading;
+      // THE FIX'S OWN COURSE, never the sticky display heading (Codex 2026-09-11, reproduced):
+      // map.tsx keeps `heading` at the last real course when a fix has none (so the drawn car does
+      // not spin at a light) and carries the fix's nullable course as `course`. A held heading is not
+      // evidence of direction — three course-less fixes with a stale heading 90° off the route
+      // would have counted as three KNOWN off-route ticks and rerouted a car following its road.
+      // With no course: headingKnown=false (the fast path is inert) and headingOff=true (the
+      // distance-only fallback, exactly as before).
+      const crs = user.course;
+      const headingKnown = typeof crs === "number" && Number.isFinite(crs) && crs >= 0 && !Number.isNaN(info.bearingDeg);
       let headingOff = true;
-      const headingKnown = typeof hdg === "number" && hdg >= 0 && !Number.isNaN(info.bearingDeg);
       if (headingKnown) {
-        let dHdg = Math.abs(hdg - info.bearingDeg) % 360;
+        let dHdg = Math.abs(crs! - info.bearingDeg) % 360;
         if (dHdg > 180) dHdg = 360 - dHdg;
         headingOff = dHdg > OFFROUTE_HEADING_TOL_DEG;
       }
+      // The maneuver just PASSED, for the fast path's guard: a step advances at < ADVANCE_THRESHOLD_M
+      // (nav.ts, above) and `dManeuver` then measures the NEXT turn — while the car is still in this
+      // one (Codex 2026-09-11, reproduced: a coarse-line corner tripped one tick after the advance).
+      const dManeuverBehind = stepIdx > 0 ? haversineMeters(user, steps[stepIdx - 1].end) : null;
       // MISSED-MANEUVER fast path (tester: kept straight past an exit; the
       // mainline parallels the ramp so dRoute grows too slowly — ~30 s to
       // react). Got within 80 m of the maneuver, then receded 150 m+ WITHOUT
@@ -1348,7 +1359,7 @@ export function useTurnByTurn(
         now: nowT, dRoute, headingOff, missedManeuver,
         // The 09-11 heading fast path (offRouteGate HDG_FAST_*): a KNOWN heading, and how far the
         // current maneuver is (a turn about to happen explains an off-segment course).
-        headingKnown, dManeuverM: dManeuver,
+        headingKnown, dManeuverM: dManeuver, dManeuverBehindM: dManeuverBehind,
         lat: user.lat, lng: user.lng, speedMs: user.speed, accM: user.acc,
         // Receipt only — never a blocker. See offRouteGate.ts's GATE 4.
         timersStarvedMs: starvedMs,

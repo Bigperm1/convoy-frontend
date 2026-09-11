@@ -1318,13 +1318,27 @@ export function useTurnByTurn(
       // would have counted as three KNOWN off-route ticks and rerouted a car following its road.
       // With no course: headingKnown=false (the fast path is inert) and headingOff=true (the
       // distance-only fallback, exactly as before).
-      const crs = user.course;
-      const headingKnown = typeof crs === "number" && Number.isFinite(crs) && crs >= 0 && !Number.isNaN(info.bearingDeg);
+      // LEGACY streak input, UNCHANGED: the sticky display heading, with "no heading = true" as the
+      // distance-only fallback. Codex pass 2 (2026-09-11) reproduced why it must stay on this input:
+      // a course-less fix at a standstill (a light, a lot) would otherwise flip headingOff to true and
+      // lower the streak threshold from six ticks to three — a transient 90 m GPS offset right after
+      // stopping rerouted where the sticky, aligned heading had held it.
+      const hdg = user.heading;
       let headingOff = true;
-      if (headingKnown) {
-        let dHdg = Math.abs(crs! - info.bearingDeg) % 360;
+      if (typeof hdg === "number" && hdg >= 0 && !Number.isNaN(info.bearingDeg)) {
+        let dHdg = Math.abs(hdg - info.bearingDeg) % 360;
         if (dHdg > 180) dHdg = 360 - dHdg;
         headingOff = dHdg > OFFROUTE_HEADING_TOL_DEG;
+      }
+      // THE FAST PATH'S evidence is separate: the fix's OWN course (map.tsx `coords.course`, nullable,
+      // platform-normalised — never the sticky heading). No course → headingKnown=false → inert.
+      const crs = user.course;
+      const headingKnown = typeof crs === "number" && Number.isFinite(crs) && crs >= 0 && !Number.isNaN(info.bearingDeg);
+      let courseOff = false;
+      if (headingKnown) {
+        let dCrs = Math.abs(crs! - info.bearingDeg) % 360;
+        if (dCrs > 180) dCrs = 360 - dCrs;
+        courseOff = dCrs > OFFROUTE_HEADING_TOL_DEG;
       }
       // The maneuver just PASSED, for the fast path's guard: a step advances at < ADVANCE_THRESHOLD_M
       // (nav.ts, above) and `dManeuver` then measures the NEXT turn — while the car is still in this
@@ -1359,7 +1373,7 @@ export function useTurnByTurn(
         now: nowT, dRoute, headingOff, missedManeuver,
         // The 09-11 heading fast path (offRouteGate HDG_FAST_*): a KNOWN heading, and how far the
         // current maneuver is (a turn about to happen explains an off-segment course).
-        headingKnown, dManeuverM: dManeuver, dManeuverBehindM: dManeuverBehind,
+        headingKnown, courseOff, dManeuverM: dManeuver, dManeuverBehindM: dManeuverBehind,
         lat: user.lat, lng: user.lng, speedMs: user.speed, accM: user.acc,
         // Receipt only — never a blocker. See offRouteGate.ts's GATE 4.
         timersStarvedMs: starvedMs,

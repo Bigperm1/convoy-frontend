@@ -289,9 +289,13 @@ export type OffRouteTickInput = {
   now: number;
   dRoute: number;          // perpendicular metres from the raw fix to the route line
   headingOff: boolean;     // course diverges from the route's local bearing (nav.ts)
-  /** The heading behind `headingOff` is REAL (nav.ts reports headingOff=true with no heading at all,
-   *  as a distance-only fallback — that default must never feed the heading fast path). */
+  /** The FAST PATH's own evidence (2026-09-11): `headingKnown` = the fix carries a real course (nav.ts
+   *  `user.course`, platform-normalised, never the sticky display heading), `courseOff` = that course is
+   *  > OFFROUTE_HEADING_TOL_DEG off the route's local bearing. `headingOff` above stays the LEGACY streak
+   *  input (sticky heading, "none = true" fallback) and is never read by the fast path — Codex pass 2
+   *  reproduced a standstill false reroute when the two were merged. */
   headingKnown?: boolean;
+  courseOff?: boolean;
   /** Distance to the current step's maneuver (nav.ts `dManeuver`); a turn that is about to happen
    *  legitimately points the car off the segment. null/undefined = unknown = treated as clear. */
   dManeuverM?: number | null;
@@ -471,7 +475,7 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   const farEnough = (d: number | null | undefined) => !(typeof d === "number" && Number.isFinite(d)) || d > HDG_FAST_MANEUVER_CLEAR_M;
   const maneuverClear = farEnough(t.dManeuverM) && farEnough(t.dManeuverBehindM);
   const hdgFastTick =
-    t.headingKnown === true && t.headingOff &&
+    t.headingKnown === true && t.courseOff === true &&
     t.dRoute > HDG_FAST_MIN_M &&
     spd !== null && spd >= HDG_FAST_MIN_SPEED_MS &&
     maneuverClear;

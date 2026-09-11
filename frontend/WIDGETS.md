@@ -77,6 +77,34 @@ Nothing below this line exists yet except the three deep links (routed in JS sin
   Today View on iOS and iPadOS, on the Desktop on macOS, and on visionOS. This extra-large widget appears in a portrait
   orientation, similar to the widget of a visionOS app." Introduced iOS 27.0 / iPadOS 27.0 / macOS 27.0 (visionOS 26.0).
   It is the page-height portrait size on the iPhone Home Screen — the "full screen widget".
+- **MEASURED SIZES (2026-09-11, on the iOS 27.0 simulator runtime — Apple has published NONE).** The family is a
+  **4-column x 6-row** footprint: same width as medium/large, exactly 2 grid rows taller than large. Aspect ratio
+  ~1 : 1.618. On a 402x874 iPhone 17 Pro it occupies y=90 to y=655.7, i.e. ~87% of screen width and ~65% of height —
+  "full page" is close but not literal; the status bar, the widget label, the Search pill and the dock stay visible.
+
+  | screen (pt) | iPhone | XL portrait | large | medium |
+  |---|---|---|---|---|
+  | 390x844 | 17e / 16e / 14 / 13 | **342 x 554** | 342 x 358 | 342 x 162 |
+  | 402x874 | 17, 17 Pro | **349 x 565** | 349 x 365 | 349 x 164 |
+  | 420x912 | Air | **366 x 591** | 366 x 382 | 366 x 172 |
+  | 440x956 | 17 Pro Max | **378 x 611** | 378 x 394 | 378 x 176 |
+
+  ⚠ Apple's HIG iPhone dimensions table is STALE (last dimension revision 2022-11-03): every iPhone widget grew
+  ~+3.7 pt per axis in iOS 26 (Liquid Glass), and the table has no rows for the 402/420/440 pt screens at all.
+  Corner radius measured ~35-39 pt on iOS 26/27 (was ~29 on iOS 18) — use `ContainerRelativeShape`, never a constant.
+  `#Preview(as: .systemExtraLargePortrait)` and `WidgetPreviewContext(family:)` both compile, but need the iOS 27 SDK
+  and an iOS 27 preview destination.
+- **MOCKUPS RENDERED 2026-09-11 — awaiting Jeff's pick.** Three concepts, real SwiftUI rendered at 349x565 pt @3x over a
+  real Mapbox dark static map of Abbotsford, plus an in-context iPhone 17 Pro home screen at measured geometry
+  (renderer + PNGs in the session scratchpad, `mock/Render.swift` + `mock/Compose.swift` — throwaway, not in the repo):
+  **A · CREW PAGE** map + crew ring row + next-cruise card + Comms — the spec below, most information per glance.
+  **B · DRIVE READY** a "LEAVE BY 8:42" Departure-IQ hero over a route map, crew strip, Start-drive button — action-first.
+  **C · DASHBOARD** three stat tiles (km this week / next cruise / crew out), map, crew list with distances.
+  ⚠ **DATA GAP — none of the three can be built from what the app writes today.** The App Group carries exactly one key,
+  `nextEvent` = `{title, startAt, kind, venueLabel}` (`src/widgetFeed.ts`). Crew avatars/status/distances, the snapshot
+  map image, the km total and the Departure-IQ "leave by" all need NEW payload written into the App Group, and the map
+  needs a rendered snapshot image (a widget cannot draw a live Mapbox view and must not network). The Comms/Start-drive
+  buttons need an AppIntent + `openAppWhenRun` — `targets/` has none yet. Scope that plumbing with the design choice.
 - Content (mockup first, Jeff's OK, then Swift — [[preview-ux-before-shipping]]): the crew snapshot map at full height
   (static image, same privacy rules as the medium), the crew avatar row with live / driving / parked, the next cruise
   or the Departure IQ "leave by" window, and the Comms launcher button (App Intent, `openAppWhenRun`) across the bottom.

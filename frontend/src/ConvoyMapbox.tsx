@@ -51,7 +51,7 @@ import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, clam
 // The self car is lifted ONLY off the road (Jeff, 2026-09-10) — the rule is src/selfLiftRule.ts, the
 // live state src/selfLift.ts; SelfCarModel asks the map once a second while slow and eases the lift
 // it draws, riding the source feature (`trn`) like the size and the heading.
-import { noteSelfLiftNav, reportSelfLiftEvidence, noteSelfLiftQueryFail, selfLiftTargetM, selfLiftDrawnM, setSelfLiftDrawnM, setSelfOffRoadLiftM, selfLiftSkipQuery, clearSelfLiftSurface, subscribeSelfLiftDrawn, logSelfLiftQuery } from "./selfLift";
+import { noteSelfLiftNav, reportSelfLiftEvidence, noteSelfLiftQueryFail, selfLiftTargetM, selfLiftDrawnM, setSelfLiftDrawnM, setSelfOffRoadLiftM, selfLiftSkipQuery, clearSelfLiftSurface, subscribeSelfLiftDrawn, logSelfLiftQuery, noteMapIdle, isMapIdle } from "./selfLift";
 import { easeLift, roadEvidence, isDrivableRoad, isPropertyRoad, buildingUnder, LIFT_ROAD_NEAR_M, LIFT_PROPERTY_NEAR_M, LIFT_COVERAGE_M, LIFT_QUERY_MS, type RoadEvidence } from "./selfLiftRule";
 import { buildRibbonPartition, buildRibbonFeatures, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -1438,7 +1438,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       const r0 = render.current;
       const c = liftCache.current;
       if (c && Date.now() - c.at < LIFT_CACHE_MS && poseHaversineM(c.lat, c.lng, r0.lat, r0.lng) < LIFT_CACHE_M) {
-        reportSelfLiftEvidence(surface, { speedMs: spd, roadHit: c.ev.roadHit, buildingH: c.ev.buildingH, lot: c.ev.lot });
+        reportSelfLiftEvidence(surface, { speedMs: spd, roadHit: c.ev.roadHit, buildingH: c.ev.buildingH, lot: c.ev.lot, complete: isMapIdle(surface) });
         armEase();
         return;
       }
@@ -1473,7 +1473,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         // ("no road within reach") is re-asked every second: a tile that loads a moment later must be seen.
         liftCache.current = (ev.roadHit === true || ev.lot || ev.buildingH != null) ? { lat: r.lat, lng: r.lng, at: Date.now(), ev } : null;
         logSelfLiftQuery(surface, { roads: roads.length, drivable: drivable.length, drivableM: nd ? nd.distM : null, propertyM: np ? np.distM : null, buildings, ms: Date.now() - qStart }, ev);
-        reportSelfLiftEvidence(surface, { speedMs: spd, roadHit: ev.roadHit, buildingH: ev.buildingH, lot: ev.lot });
+        reportSelfLiftEvidence(surface, { speedMs: spd, roadHit: ev.roadHit, buildingH: ev.buildingH, lot: ev.lot, complete: isMapIdle(surface) });
       } catch (e) {
         if (gen !== liftGen.current) return;
         noteSelfLiftQueryFail(surface, e);
@@ -4105,6 +4105,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           if (Array.isArray(c) && typeof c[0] === "number") onMapLongPress?.({ lat: c[1], lng: c[0] });
         }}
         onCameraChanged={(state: any) => {
+          noteMapIdle("phone", false);   // tiles may be loading again; an absence of roads is unknown until idle
           // gestures.isGestureActive cleanly separates a real finger-pan from our
           // own setCamera moves — no self-moving guard flag needed (unlike the
           // Google engine). Fire onUserPan once per gesture so follow drops and
@@ -4134,7 +4135,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             if (nowB - selfRefreshAt.current >= 100) { selfRefreshAt.current = nowB; selfRefreshRef.current?.(); }
           }
         }}
-        onMapIdle={() => { selfRefreshRef.current?.(); }}
+        onMapIdle={() => { selfRefreshRef.current?.(); noteMapIdle("phone", true); }}
       >
         {/* Mapbox Standard "night" config — turns on the dark 3D-building
             basemap. Only mounted when the Standard style is active (roadmap +

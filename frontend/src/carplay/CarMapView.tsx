@@ -81,7 +81,7 @@ import {
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
 import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, leadShiftedByLift, selfLiftScreenPt, clampCutToRoute } from '../routeTrim';
-import { selfLiftDrawnM, noteSelfLiftNav, subscribeSelfLiftDrawn } from '../selfLift';
+import { selfLiftDrawnM, noteSelfLiftNav, subscribeSelfLiftDrawn, noteMapIdle } from '../selfLift';
 import { buildRibbonPartition, buildRibbonFeatures, anchorCutM, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat, type CutAnchorHint } from '../routeRibbon';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
@@ -2080,6 +2080,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       logoEnabled={false}
       attributionEnabled={false}
       onCameraChanged={(state: any) => {
+        noteMapIdle('car', false);   // tiles may be loading again; an absence of roads is unknown until idle
         const z = state?.properties?.zoom;
         if (typeof z !== 'number' || !Number.isFinite(z)) return;
         carLiveZoomRef.current = z;
@@ -2099,7 +2100,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           try { logEvent(`self-scale-refresh surf=car z=${z.toFixed(2)} from=${prev.toFixed(2)}`); } catch {}
         }
       }}
-      onMapIdle={() => { selfRefreshRef.current?.(); }}
+      onMapIdle={() => { selfRefreshRef.current?.(); noteMapIdle('car', true); }}
       onLayout={(e: any) => {
         const h = e?.nativeEvent?.layout?.height;
         if (typeof h === 'number' && h > 0 && Math.abs(h - mapH) > 1) setMapH(h);

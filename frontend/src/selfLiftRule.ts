@@ -169,41 +169,51 @@ export type LiftEvidence = {
   buildingH: number | null;
   /** POSITIVE off-road evidence: a driveway / parking aisle under the car (roadEvidence's `lot`). */
   lot?: boolean;
+  /** The reporting map was IDLE (Mapbox: every tile loaded and rendered, no camera transition) when it answered —
+   *  the only proof that "no road within reach" is not a tile still loading. An absence without it is unknown. */
+  complete?: boolean;
 };
 export type LiftState = {
   targetM: number;
   why: string;
+  /** since when ANY counted off-road evidence has been continuous (absence needs LIFT_ABSENCE_CONFIRM_MS of it) */
   offRoadSince: number | null;
+  /** since when POSITIVE evidence (something under the car) has been continuous (LIFT_OFFROAD_CONFIRM_MS) */
+  positiveSince: number | null;
   unknownSince: number | null;
 };
-export const LIFT_STATE0: LiftState = { targetM: 0, why: "init", offRoadSince: null, unknownSince: null };
+export const LIFT_STATE0: LiftState = { targetM: 0, why: "init", offRoadSince: null, positiveSince: null, unknownSince: null };
 
 /** One decision. `offRoadLiftM` is the marker's own off-road lift (car 10, arrow 16). */
 export function liftDecide(st: LiftState, ev: LiftEvidence, now: number, offRoadLiftM: number): LiftState {
   const fastEnough = typeof ev.speedMs === "number" && Number.isFinite(ev.speedMs) && ev.speedMs >= LIFT_ONROAD_SPEED_MS;
   const onRoute = typeof ev.navDistM === "number" && Number.isFinite(ev.navDistM) && ev.navDistM <= LIFT_NAV_ONROAD_M;
   if (fastEnough || onRoute || ev.roadHit === true) {
-    return { targetM: 0, why: fastEnough ? "speed" : onRoute ? "nav" : "road", offRoadSince: null, unknownSince: null };
+    return { targetM: 0, why: fastEnough ? "speed" : onRoute ? "nav" : "road", offRoadSince: null, positiveSince: null, unknownSince: null };
   }
-  const offRoadEvidence = ev.roadHit === false || (typeof ev.buildingH === "number" && ev.buildingH >= 0);
-  if (offRoadEvidence) {
+  // Something UNDER the car (a driveway, an aisle, a roof) is positive evidence. "No road within reach" is only an
+  // absence: it counts solely when the map was idle (every tile loaded) — a tile still loading looks the same
+  // (Codex passes 3–4) — and it must hold longer. The two tiers keep their own clocks: a first positive sample after
+  // seconds of absence does not inherit the absence clock.
+  const positive = !!ev.lot || (typeof ev.buildingH === "number" && ev.buildingH >= 0);
+  const absence = ev.roadHit === false && ev.complete === true;
+  if (positive || absence) {
     const since = st.offRoadSince ?? now;
-    // Something UNDER the car (a driveway, an aisle, a roof) is positive evidence; "no road within reach" is only an
-    // absence — a tile still loading looks the same (Codex pass 3) — so it must hold longer before the car rises.
-    const positive = !!ev.lot || (typeof ev.buildingH === "number" && ev.buildingH >= 0);
-    if (now - since >= (positive ? LIFT_OFFROAD_CONFIRM_MS : LIFT_ABSENCE_CONFIRM_MS)) {
+    const pSince = positive ? (st.positiveSince ?? now) : null;
+    const ready = (pSince != null && now - pSince >= LIFT_OFFROAD_CONFIRM_MS) || (now - since >= LIFT_ABSENCE_CONFIRM_MS);
+    if (ready) {
       const bld = typeof ev.buildingH === "number" ? ev.buildingH + LIFT_BUILDING_MARGIN_M : 0;
       const target = Math.min(LIFT_MAX_M, Math.max(offRoadLiftM, bld));
-      return { targetM: target, why: bld > 0 ? `bld:${Math.round(ev.buildingH as number)}` : "offroad", offRoadSince: since, unknownSince: null };
+      return { targetM: target, why: bld > 0 ? `bld:${Math.round(ev.buildingH as number)}` : "offroad", offRoadSince: since, positiveSince: pSince, unknownSince: null };
     }
-    return { ...st, why: st.targetM > 0 ? st.why : "offroad-wait", offRoadSince: since, unknownSince: null };
+    return { ...st, why: st.targetM > 0 ? st.why : "offroad-wait", offRoadSince: since, positiveSince: pSince, unknownSince: null };
   }
-  // No evidence either way.
+  // No counted evidence either way (nothing, or an absence the map could not vouch for).
   const uSince = st.unknownSince ?? now;
   if (st.targetM > 0 && now - uSince >= LIFT_UNKNOWN_HOLD_MS) {
-    return { targetM: 0, why: "unknown", offRoadSince: null, unknownSince: uSince };
+    return { targetM: 0, why: "unknown", offRoadSince: null, positiveSince: null, unknownSince: uSince };
   }
-  return { ...st, offRoadSince: null, unknownSince: uSince };
+  return { ...st, offRoadSince: null, positiveSince: null, unknownSince: uSince };
 }
 
 /** The drawn lift slides toward the target: a slide, never a pop. */

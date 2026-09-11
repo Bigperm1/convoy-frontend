@@ -330,6 +330,7 @@ export async function endCarNav(): Promise<void> {
   // it. iOS-only — Android's dismiss path pops to the AA nav template by id, and on
   // AA endCarNav can run while other templates are legitimately stacked.
   if (Platform.OS !== 'android' && (_searchPushed || _searchPresented)) {
+    iosStack('op=root why=end');
     _searchPushed = false;
     try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
   }
@@ -574,9 +575,24 @@ function aaPop(): void {
   try { getCarLib()?.CarPlay?.popTemplate?.(true); } catch {}
 }
 
+// iOS twin of aa-stack (2026-09-10, Rodrigo: "press back while the trip is loading → none of the
+// buttons work, only fix was to close the app"). His 10:27 receipts show two Search taps six
+// seconds apart, a route auto-started from the list, an End tap two seconds later, a trip started
+// from the phone nine seconds after that — and then not one head-unit tap for twelve minutes.
+// CARPLAY.md rule 7 says a re-pushed template "renders, takes no touches", and nothing on iOS ever
+// recorded a push or a pop, so the next occurrence can only be guessed at. These rows say what WE
+// did to the stack: rare (a search opens or closes, a route ends), bounded by construction.
+let _iosStackRows = 0;
+function iosStack(what: string): void {
+  if (Platform.OS === 'android' || _iosStackRows >= 60) return;
+  _iosStackRows += 1;
+  try { logEventReliable(`ios-stack ${what} pushed=${_searchPushed ? 1 : 0} presented=${_searchPresented ? 1 : 0}`); } catch {}
+}
+
 // One dismiss for both car surfaces.
 function dismissCarSearch(): void {
   if (Platform.OS === 'android') { aaPop(); return; }
+  iosStack('op=root why=dismiss');
   try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
 }
 
@@ -740,6 +756,7 @@ let _movingTicks = 0;
 // the handler tears the template out from under that pending completion block —
 // deferring one macrotask lets the handshake land on a still-live template first.
 function popCarSearchDeferred(): void {
+  iosStack('op=root why=selected');
   _searchPushed = false;
   setTimeout(() => { try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {} }, 350);
 }
@@ -897,6 +914,7 @@ function pushSearchTemplateIOS(): void {
   const t = getSearchTemplate();
   if (!t) { _whereToToSearch = false; return; }
   armSearchAutoDismiss();                    // idempotent
+  iosStack('op=push id=search');
   _searchPushed = true;
   try { getLib()?.CarPlay?.pushTemplate?.(t, true); } catch { _searchPushed = false; _whereToToSearch = false; }
 }
@@ -962,6 +980,7 @@ function openWhereToIOS(): void {
   const t = getWhereToTemplate();
   if (!t || _whereToShown.length === 0) { pushSearchTemplateIOS(); return; }
   armSearchAutoDismiss();                    // idempotent
+  iosStack('op=push id=whereto');
   _searchPushed = true;
   try { getLib()?.CarPlay?.pushTemplate?.(t, true); } catch { _searchPushed = false; }
 }
@@ -1301,6 +1320,7 @@ export function handleCarBarButton(id: string, src = "?"): void {
       // template is NOT actually stacked, the pop below no-ops and nothing else
       // would ever clear the flag — every future tap would re-enter this branch
       // and Search would be dead for good, the exact bug class this fixes.
+      iosStack('op=recover');
       _searchPresented = false;
       dismissCarSearch();   // iOS: pop to root · Android: single pop to the nav screen
       return;

@@ -104,6 +104,13 @@ console.log("E. no evidence never starts a lift, and ends one only after the hol
   // Codex pass 6: completeness is idle at start AND idle at end AND no camera change in between (a generation).
   ok("E9 idle → camera moved → idle again inside one query is NOT complete", !queryComplete(true, 7, true, 8));
   ok("E9b idle throughout with the same generation IS complete; not idle at either end is not", queryComplete(true, 7, true, 7) && !queryComplete(false, 7, true, 7) && !queryComplete(true, 7, false, 7));
+  // The 20:57 sim crawl: a confirmed lift in a lot fell on the 6 s unknown hold (the moving map is never idle) and rose
+  // again. Something seen under the car by ANY query sustains a lift; it still cannot start one.
+  const up: LiftState = { targetM: 10, why: "offroad", offRoadSince: 0, positiveSince: 0, unknownSince: null };
+  ok("E10 a confirmed lift is SUSTAINED by an aisle seen under the car from a moving map (30 s)", run(Array(30).fill({ speedMs: 1.5, roadHit: false, lot: true, sustain: true }), 10, up, 100_000).every((s) => s.targetM === 10));
+  ok("E10b …but the same samples cannot START a lift from the ground", run(Array(30).fill({ speedMs: 1.5, roadHit: false, lot: true, sustain: true })).every((s) => s.targetM === 0));
+  ok("E10c a road hit still drops a sustained lift at once", liftDecide(up, ev({ speedMs: 1.5, roadHit: true, sustain: true }), 100_000, 10).targetM === 0);
+  ok("E10d with nothing under the car the 6 s hold still ends it", run(Array(8).fill({ speedMs: 1.5 }), 10, up, 100_000).at(-1)!.targetM === 0);
 }
 
 console.log("F. the road source: Streets v8 classes, the property rule, footprints");

@@ -181,6 +181,10 @@ export type LiftEvidence = {
    *  under the car is not missing the closer road of a tile still loading (Codex pass 5). Without it, an absence
    *  is unknown and a positive is not yet trusted. */
   complete?: boolean;
+  /** Something under the car (a driveway / aisle / roof) seen by ANY query, complete or not. It cannot START a
+   *  lift, but it SUSTAINS one already confirmed: creeping through a lot keeps the camera moving and the map
+   *  never idle, and the lift used to fall on the 6 s "unknown" hold and rise again (the 20:57 sim crawl). */
+  sustain?: boolean;
 };
 export type LiftState = {
   targetM: number;
@@ -217,6 +221,8 @@ export function liftDecide(st: LiftState, ev: LiftEvidence, now: number, offRoad
     }
     return { ...st, why: st.targetM > 0 ? st.why : "offroad-wait", offRoadSince: since, positiveSince: pSince, unknownSince: null };
   }
+  // A confirmed lift stays up while something is still seen under the car, idle or not.
+  if (st.targetM > 0 && ev.sustain) return { ...st, unknownSince: null };
   // No counted evidence either way (nothing, or an absence the map could not vouch for).
   const uSince = st.unknownSince ?? now;
   if (st.targetM > 0 && now - uSince >= LIFT_UNKNOWN_HOLD_MS) {

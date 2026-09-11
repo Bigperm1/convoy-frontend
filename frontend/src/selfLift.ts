@@ -49,12 +49,13 @@ export function noteSelfLiftNav(distM: number | null): void {
 export function setSelfOffRoadLiftM(m: number): void { if (Number.isFinite(m) && m >= 0) _offRoadLiftM = m; }
 
 function merged(now: number): LiftEvidence {
-  let speedMs: number | null = null, roadHit: boolean | null = null, buildingH: number | null = null, lot = false, complete = false;
+  let speedMs: number | null = null, roadHit: boolean | null = null, buildingH: number | null = null, lot = false, complete = false, sustain = false;
   for (const k of ["phone", "car"] as LiftSurface[]) {
     const e = _ev[k];
     if (!e || now - e.at > LIFT_EVIDENCE_FRESH_MS) continue;
     if (typeof e.speedMs === "number" && (speedMs == null || e.speedMs > speedMs)) speedMs = e.speedMs;
     if (e.roadHit === true) roadHit = true;
+    if (e.lot || typeof e.buildingH === "number") sustain = true;   // seen under the car by any query: keeps a lift, never starts one
     // Off-road evidence of EITHER kind counts only from a surface whose map was idle for the whole query: an
     // absence may be a tile still loading, and a driveway seen under the car may be missing the closer road of
     // a tile still loading (Codex pass 5). A road HIT is presence and counts from any surface.
@@ -64,7 +65,7 @@ function merged(now: number): LiftEvidence {
     if (e.lot) { lot = true; complete = true; }
   }
   const navDistM = now - _navAt <= LIFT_EVIDENCE_FRESH_MS ? _navDistM : null;
-  return { speedMs, navDistM, roadHit, buildingH, lot, complete };
+  return { speedMs, navDistM, roadHit, buildingH, lot, complete, sustain };
 }
 
 /** A surface's one-second look at the map (or just its speed when it was too fast to bother asking). */

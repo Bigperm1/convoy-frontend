@@ -1044,6 +1044,22 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   offer (#1) · replay (#3, nothing exists to revamp) · peer twin in presence (#4, heat budget) ·
   failed-scan surfacing (needs a readable job status) · RevenueCat/widgets/watch = ~~build 76~~ build 77 (76 consumed by the Android re-cut).
 
+## 4b · BUILD 77 → 78 — CUT 2026-09-11 00:16 PDT, BOTH PLATFORMS, runtime 1.27.0 → **1.28.0** (full story: `HANDOFF-2026-09-07.md` §0b; ledger: memory `build-77-cut`)
+- **78 on both** from `58b7142`: iOS `a6b63840-cd7f-43fb-b576-0f7f7b40134c` → TestFlight (Apple accepted the upload at 00:3x, shows as
+  3.10.0 (78) after processing) · Android `bdc6100e-6ae6-4c29-a3d8-c98bf6b0ad4e` → Play internal COMPLETED (77 `5df23053` underneath it).
+- **iOS 77 `aa691ab3` was refused by App Store Connect** — the watch app shipped with no icon (ITMS-90713 / ITMS-90391); fixed in
+  `5a02e68` (`icon` on `targets/watch/expo-target.config.js`, proven on a local watchOS build), then the same-number rule → 78 on both.
+- **Native content = the Apple Watch companion only** (`targets/watch`, `targets/watch-widget`, `modules/hairpin-watch`). Everything
+  else on the build-77 list (§6: widget family, iOS 27 full-page widget, standalone CarPlay, AA Kotlin guards, RevenueCat,
+  expo-location patch) → **build 79**.
+- **One-way door again:** every OTA from here targets 1.28.0. At 00:35 every active handle was still on 1.27.0 (Jeff, Ni GR,
+  SPL_GRC, Rodrigo, SMSGRC, Enablewhore, GRSIENNA, Ron, Victor 3d Dude) — they receive nothing until they install 78. Crew note
+  on Jeff's word; the next OTA's verify call is `verify-bundle-key.py <group> 1.28.0`.
+- **Traps met:** EAS CLI 24.1.2 cannot enable a capability on a new bundle id (Apple rejects the PATCH body) → App Groups / App IDs
+  by hand in the portal, whose App Group form pre-prefixes `group.`; the first build of a new target needs ONE interactive
+  `eas build` run (links the distribution certificate) — Jeff's terminal, keychain password + 2FA; `EXPO_DEBUG=1 eas build` prints
+  the stored ASC API key (P9NUHM3CL7 leaked into a transcript → **rotation OPEN**).
+
 ## 5 · The road to build 80 — GRC club launch
 
 Jeff's goal (2026-08-20): **build 80 launches Hairpin to the full ~170-member GRC club** with full

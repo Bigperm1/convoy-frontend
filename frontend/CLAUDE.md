@@ -212,12 +212,12 @@ Native deps are patched at install time via `patch-package` (postinstall hook): 
 
 ## Release Discipline
 
-- **Publish each OTA to the branch that matches the INSTALLED build's channel — verify, don't assume.** Run `eas build:list --platform ios` and read the `Channel` of the build testers are on, then `eas update --branch <that-channel>`. The `mapbox-migration` builds (current: **build 75, runtime 1.27.0**, both platforms, cut 2026-09-02 — but read the `Channel` field off `eas build:list` rather than trusting this number) listen to the **`mapbox-migration`** channel, so their OTAs go to `eas update --branch mapbox-migration` — publishing to `preview` does NOT reach them (this silently ate three updates on 2026-07-05). The historical `preview`/`production` channels both track the `preview` branch; only use `--branch preview` when the target build was actually built on one of those channels.
+- **Publish each OTA to the branch that matches the INSTALLED build's channel — verify, don't assume.** Run `eas build:list --platform ios` and read the `Channel` of the build testers are on, then `eas update --branch <that-channel>`. The `mapbox-migration` builds (current: **build 78, runtime 1.28.0**, both platforms, cut 2026-09-11 — but read the `Channel` field off `eas build:list` rather than trusting this number) listen to the **`mapbox-migration`** channel, so their OTAs go to `eas update --branch mapbox-migration` — publishing to `preview` does NOT reach them (this silently ate three updates on 2026-07-05). The historical `preview`/`production` channels both track the `preview` branch; only use `--branch preview` when the target build was actually built on one of those channels.
 - 🛑 **NEVER a bare `eas update`.** A bare publish inlines an EMPTY `EXPO_PUBLIC_OPENWEATHER_KEY`
   (`PROD_OPENWEATHER_KEY` is `""` in `src/api.ts`; the real key lives only in the EAS environment),
   which killed weather on every surface for ~20 h / 13 OTAs on 2026-08-30. Publish through
   `npx eas-cli env:exec preview "npx eas-cli update --branch mapbox-migration --clear-cache -m '…' --non-interactive"`
-  and then PROVE it: `python3 tools/ota/verify-bundle-key.py <group> 1.26.0` → `KEY_PRESENT=1` on BOTH platforms.
+  and then PROVE it: `python3 tools/ota/verify-bundle-key.py <group> <runtimeVersion from app.json — 1.28.0 since 2026-09-11>` → `KEY_PRESENT=1` on BOTH platforms.
 - **`python3 scripts/trap-check.py` must pass before every publish (2026-09-03).** It greps for the
   signatures of bugs already root-caused (zoom-curve `modelScale`, per-tick layer-style writes,
   `Constants.nativeBuildVersion`, a ribbon cut from a foreign polyline fraction, bare `eas update`).

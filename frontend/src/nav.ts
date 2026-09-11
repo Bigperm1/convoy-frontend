@@ -39,7 +39,7 @@ import { isOnCall, callSilence } from "./callState";
 import { headUnitAttachedRaw } from "./locationPrivacy";
 import { resolveArrivalZone, type ArrivalZone } from "./arrivalZone";
 import { composeArrivalLine, type ArrivalUtterance, type ArrivalWeather, type ArrivalPlaceKind, type ArrivalPlaceInfo } from "./arrivalEndings";
-import { isSpokenManeuver, arriveSpeakLeadM, arrivalAlreadySpokenFor } from "./maneuverSpeech";
+import { isSpokenManeuver, arriveSpeakLeadM, arrivalAlreadySpokenFor, speakRateSkips } from "./maneuverSpeech";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -1274,7 +1274,11 @@ export function useTurnByTurn(
           const verb = maneuverVerb(nextStep.maneuver);
           const inst = spokenStreet(verb, nextStep.html);
           if (dManeuver <= imminentM && !announcedRef.current.has(immKey)) {
-            speak(roundabout ? `${roundabout}.` : `${verb}.`);
+            // PRIORITY: the turn you are AT. It skips the 1.5 s rate gate only — it still queues
+            // behind whatever is playing, and same-text dedupe still applies. Jeff, 2026-09-11:
+            // a reroute's prepare cue landed 1 s earlier and this exact line was dropped
+            // (`tts-skip why=rate len=11`) as he reached the turn. See maneuverSpeech.speakRateSkips.
+            speak(roundabout ? `${roundabout}.` : `${verb}.`, { priority: true });
             announcedRef.current.add(immKey);
             announcedRef.current.add(prepKey); // a "prepare" this late would be noise
           } else if (dManeuver <= prepareM && !announcedRef.current.has(prepKey)) {
@@ -1996,7 +2000,7 @@ function speak(text: string, opts?: { priority?: boolean }) {
   // The 1.5 s rate gate protects against callout spam; the ARRIVAL line is the one
   // sentence that must never lose to it (2026-09-03: it did, 1.013 s after the prepare
   // line). `priority` skips only this gate.
-  if (!opts?.priority && now - _lastSpoke < 1500) { try { logEvent(`tts-skip why=rate len=${text.length}`); } catch {} return; }
+  if (speakRateSkips(now, _lastSpoke, !!opts?.priority)) { try { logEvent(`tts-skip why=rate len=${text.length}`); } catch {} return; }
   // Same-phrase dedupe: kills the "Turn left, turn left" double that happens when
   // the Routes API splits one maneuver into two adjacent same-direction steps and
   // each fires the identical bare verb a couple seconds apart. Only EXACT repeats

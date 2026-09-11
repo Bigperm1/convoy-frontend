@@ -1542,6 +1542,20 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             dbg += ' root=THREW:' + String(e).slice(0, 28);
           }
           setCarState({ carDbg: dbg });
+          // …AND TO TELEMETRY (2026-09-11). `dbg` has existed since 07-19 but goes ONLY to the
+          // on-screen pill, so it needs a photo to read. On Jeff's 09-11 drive End and Search did
+          // nothing and the session logged only connect/chrome/paint — no `carplay-tap:*`, no
+          // `ios-stack` — which proves the presses never reached JS, but NOT whether this root was
+          // ever set, because the one call that decides it was invisible in crash_reports. The COLD
+          // path has carried `idleroot-set` / `idleroot-threw` since build 75
+          // (src/carplay/carPlayBootstrap.ts); the WARM path — the one that runs whenever the phone
+          // app is open, i.e. every drive Jeff takes — never got them. One row per connect.
+          try {
+            logEventReliable(
+              `carplay-root ${dbg} bars=${CAR_BAR_BUTTON_CONFIG.leadingNavigationBarButtons.length}+${CAR_BAR_BUTTON_CONFIG.trailingNavigationBarButtons.length}` +
+              ` mapBtns=${carMapButtonConfig().mapButtons.length}`,
+            );
+          } catch {}
           // Template-layer probe REMOVED 2026-07-19 — it did its job (chrome is
           // confirmed rendering on the head unit) and it had become a liability:
           // carAlert() builds a CPAlertTemplate, which goes through Template.ts's

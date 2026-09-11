@@ -18,6 +18,7 @@
 import {
   isSpokenManeuver, arriveSpeakLeadM, arrivalAlreadySpokenFor,
   ARRIVE_SPEAK_LEAD_S, ARRIVE_SPEAK_LEAD_MAX_M,
+  speakRateSkips, SPEAK_RATE_GATE_MS,
 } from "../../src/maneuverSpeech.ts";
 
 const ARRIVE_M = 20;   // src/nav.ts
@@ -101,6 +102,34 @@ ok("E4 an empty id never suppresses", !arrivalAlreadySpokenFor({ dest: "" }, "")
 // must fail E2, or this gate cannot see the regression it was written for.
 const oldBooleanDedupe = (prev: unknown) => !!prev;
 ok("E5 the old boolean dedupe FAILS the new-destination case", oldBooleanDedupe({ dest: D1 }) === true && !arrivalAlreadySpokenFor({ dest: D1 }, D2));
+
+
+// ── F. THE RATE GATE MUST NEVER EAT THE TURN YOU ARE AT (Jeff, 2026-09-11) ─────────────────
+// "SCOUT CUT OFF THE TURN LEFT ONTO HIGHWAY TOWARDS VANCOUVER." Replayed from his rows (UTC):
+//   21:16:55.416 route-swap · 21:16:56.341 tts-play len=43 (the new route's prepare cue, 6.7 s)
+//   21:16:57.385 tts-skip why=rate len=11  <- "Turn left." dropped 1.044 s into the 1.5 s gate
+//   21:17:04.336 watch-tap kind=now d=33   <- he was AT the turn
+{
+  const T = (ms: number) => 1_700_000_000_000 + ms;
+  const lastSpoke = T(56_341);            // the prepare cue started here
+  const turnNowAt = T(57_385);            // when "Turn left." was requested
+  ok("F1 the FIELD case: a non-priority turn callout 1.04 s after a prepare cue is DROPPED (the defect)",
+     speakRateSkips(turnNowAt, lastSpoke, false) === true, `${turnNowAt - lastSpoke} ms < ${SPEAK_RATE_GATE_MS}`);
+  ok("F2 …and as PRIORITY it survives — this is the fix",
+     speakRateSkips(turnNowAt, lastSpoke, true) === false);
+  // The gate must still do its job for everything else.
+  ok("F3 a prepare cue inside the window is still dropped (no callout spam)",
+     speakRateSkips(T(56_900), lastSpoke, false) === true);
+  ok("F4 a prepare cue past the window speaks", speakRateSkips(T(58_000), lastSpoke, false) === false);
+  ok("F5 exactly at the window boundary the gate is open",
+     speakRateSkips(lastSpoke + SPEAK_RATE_GATE_MS, lastSpoke, false) === false);
+  ok("F6 one millisecond inside it is closed",
+     speakRateSkips(lastSpoke + SPEAK_RATE_GATE_MS - 1, lastSpoke, false) === true);
+  // A priority line is never rate-limited, however close it lands — the arrival line relies on
+  // this too (the 2026-09-03 defect in this file's header).
+  ok("F7 priority is exempt even back-to-back", speakRateSkips(lastSpoke + 1, lastSpoke, true) === false);
+  ok("F8 the gate window is the documented 1.5 s", SPEAK_RATE_GATE_MS === 1500, `${SPEAK_RATE_GATE_MS} ms`);
+}
 
 console.log(fails === 0 ? "\nPASS arrival_speech" : `\nFAIL arrival_speech (${fails})`);
 if (fails) process.exit(1);

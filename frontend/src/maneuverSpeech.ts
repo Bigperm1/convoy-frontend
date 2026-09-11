@@ -59,6 +59,32 @@ export function arriveSpeakLeadM(speedMs: number | null | undefined): number {
   return Math.min(ARRIVE_SPEAK_LEAD_MAX_M, v * ARRIVE_SPEAK_LEAD_S);
 }
 
+// ── THE RATE GATE, AND THE ONE LINE THAT MUST OUTRANK IT (Jeff, 2026-09-11) ─────────────
+// A 1.5 s gate stops callout spam. It is right for prepare cues and wrong for exactly one clip:
+// the IMMINENT turn callout, the "Turn left." you hear as you reach the intersection.
+//
+// FIELD RECEIPT, his 2026-09-11 drive to the highway ("Scout cut off the turn left onto highway
+// towards Vancouver"), crash_reports, UTC:
+//   21:16:55.416  route-swap steps=3          (a reroute landed)
+//   21:16:56.341  tts-say len=38 / tts-play len=43   (the NEW route's prepare cue starts, 6.7 s long)
+//   21:16:57.385  tts-skip why=rate len=11    <- "Turn left." DROPPED, 1.04 s inside the gate
+//   21:17:03.014  tts-done len=43
+//   21:17:04.336  watch-tap step=1 kind=now d=33     (he was AT the turn)
+// The reroute's own prepare cue ate its own first turn. This is the same family as the arrival
+// line losing to a prepare cue on 2026-09-03 (tools/sim-qc/arrival_speech_test.mts header), and
+// the same remedy: the clip a driver cannot afford to miss does not queue behind courtesy.
+//
+// PRIORITY DOES NOT INTERRUPT. It skips this gate only; the clip still queues behind whatever is
+// playing and the same-text dedupe still applies. On the trace above that puts "Turn left." at
+// ~21:17:03 — a second before the turn instead of never.
+export const SPEAK_RATE_GATE_MS = 1500;
+/** True when the rate gate would DROP this line. `priority` is the imminent turn callout and the
+ *  arrival line; everything else (prepare cues, reroute chatter) is droppable by design. */
+export function speakRateSkips(nowMs: number, lastSpokeAtMs: number, priority: boolean): boolean {
+  if (priority) return false;
+  return nowMs - lastSpokeAtMs < SPEAK_RATE_GATE_MS;
+}
+
 /** The arrival line is spoken at most once per DESTINATION — not per step, not per route.
  *  (Codex adversarial review, 2026-09-09, [high].) The first version cleared its flag alongside
  *  `announcedRef`, which is cleared on every STEP ADVANCE and on every route key change. Crossing

@@ -20,6 +20,10 @@ type HairpinSystemModule = {
   // absent on older binaries — guard with typeof before calling.
   getSharedDefaults?(suite: string, key: string): string | null;
   removeSharedDefaults?(suite: string, key: string): void;
+  // Build 79+: copy a produced file into the shared App Group container so the widget
+  // extension can read it (the extension cannot see the app sandbox and must not
+  // network). Absent on older binaries — guard with typeof before calling.
+  writeSharedFile?(suite: string, name: string, fromPath: string): boolean;
   // CarPlay-screen frame pump (build 70). Returns false when no CarPlay scene is
   // connected yet, so the caller can retry on connect. See the Swift comment for why
   // this cannot be done in JS: RN's timer pump is bound to the phone's built-in

@@ -176,6 +176,39 @@ public class HairpinSystemModule: Module {
     Function("removeSharedDefaults") { (suite: String, key: String) in
       UserDefaults(suiteName: suite)?.removeObject(forKey: key)
     }
+
+    // Copy a file the app produced (today: the crew map snapshot from
+    // @rnmapbox snapshotManager.takeSnap) INTO the shared App Group container, which is
+    // the only place a widget extension can read it from — the extension has no access
+    // to the app's own sandbox, and a widget must never hit the network. Returns false
+    // rather than throwing so JS can no-op on any failure.
+    //
+    // The write is atomic (temp sibling + replaceItem) because WidgetKit may be reading
+    // the previous snapshot on another process while we overwrite it; a torn PNG would
+    // render as a blank panel until the next refresh.
+    Function("writeSharedFile") { (suite: String, name: String, fromPath: String) -> Bool in
+      guard !name.contains("/"), !name.contains(".."),          // keep it a leaf name
+            let dir = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: suite)
+      else { return false }
+      var src = fromPath
+      if src.hasPrefix("file://") { src = URL(string: src)?.path ?? src }
+      let dst = dir.appendingPathComponent(name)
+      let tmp = dir.appendingPathComponent(".\(name).tmp")
+      do {
+        if FileManager.default.fileExists(atPath: tmp.path) { try FileManager.default.removeItem(at: tmp) }
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: src), to: tmp)
+        if FileManager.default.fileExists(atPath: dst.path) {
+          _ = try FileManager.default.replaceItemAt(dst, withItemAt: tmp)
+        } else {
+          try FileManager.default.moveItem(at: tmp, to: dst)
+        }
+        if #available(iOS 14.0, *) { WidgetCenter.shared.reloadAllTimelines() }
+        return true
+      } catch {
+        try? FileManager.default.removeItem(at: tmp)
+        return false
+      }
+    }
   }
 }
 

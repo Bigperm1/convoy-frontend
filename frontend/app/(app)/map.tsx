@@ -31,6 +31,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { ensureLocationPermission as askLocationPermission, askPermission } from "../../src/permissionGate";
 import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, getMapModeChoice, getAvatarMode, setAvatarMode, getSelfMarkerType, getClassPaint, getVehicleClass, unitForCountry, getSpeedAlertMode, getRouteColor } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
+import { updateCrewWidget, refreshCrewMapSnapshot, type CrewPeer } from "../../src/crewWidgetFeed";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
 import { BearingTracker } from "../../src/bearing";
 import PeerModal from "../../src/PeerModal";
@@ -4532,6 +4533,26 @@ export default function MapScreen() {
     const merged = Object.values(byId);
     const tier = getProximityTier(coords.lat, coords.lng, merged);
     setLatestTier(tier, merged.length);
+  }, [peers, presence.peers, coords?.lat, coords?.lng]);
+
+  // Feed the iOS 27 FULL-PAGE widget's crew half (build 79+). Both calls throttle and
+  // de-dupe internally (30 s for the JSON, 5 min for the map snapshot, and the snapshot
+  // is skipped entirely while nav is running and while the app is backgrounded), so
+  // firing them on every presence delta is cheap. No-ops on Android, on web, and on any
+  // binary cut before `writeSharedFile` existed. The small/medium widget is fed
+  // separately by widgetFeed.ts and is untouched by this. See src/crewWidgetFeed.ts.
+  useEffect(() => {
+    if (!coords) return;
+    const byId: Record<string, CrewPeer & { user_id: string }> = {};
+    Object.values(peers).forEach((p: any) => {
+      if (typeof p?.lat !== "number" || typeof p?.lng !== "number") return;
+      byId[p.user_id] = { user_id: p.user_id, handle: p.handle, status: p.status, lat: p.lat, lng: p.lng };
+    });
+    presence.peers.forEach((p: any) => {
+      byId[p.user_id] = { user_id: p.user_id, handle: p.handle, status: p.status, lat: p.lat, lng: p.lng };
+    });
+    updateCrewWidget(Object.values(byId), coords);
+    void refreshCrewMapSnapshot(coords, navActiveRef.current);
   }, [peers, presence.peers, coords?.lat, coords?.lng]);
 
   // Load a community route into the active navigation flow

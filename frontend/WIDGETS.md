@@ -94,7 +94,20 @@ Nothing below this line exists yet except the three deep links (routed in JS sin
   Corner radius measured ~35-39 pt on iOS 26/27 (was ~29 on iOS 18) — use `ContainerRelativeShape`, never a constant.
   `#Preview(as: .systemExtraLargePortrait)` and `WidgetPreviewContext(family:)` both compile, but need the iOS 27 SDK
   and an iOS 27 preview destination.
-- **MOCKUPS RENDERED 2026-09-11 — awaiting Jeff's pick.** Three concepts, real SwiftUI rendered at 349x565 pt @3x over a
+- ✅ **BUILT 2026-09-11 — Jeff picked concept A + the leave-by swap ("perfect").** `targets/widget/index.swift` carries
+  the full-page view behind the compile gate; small/medium are byte-identical to build 78. App half:
+  `src/crewWidgetRule.ts` (pure) + `src/crewWidgetFeed.ts` (IO) + a `writeSharedFile` function on
+  `modules/hairpin-system`, called from the peers effect in `app/(app)/map.tsx`. Gated by
+  `tools/sim-qc/crew_widget_test.mts` (38 assertions). Widget target BUILD SUCCEEDED on Xcode 26.6.
+  **Payload contract** — `nextEvent` is UNCHANGED (build 78 compatibility); two optional keys are added:
+  `crew` = `{at, live, members:[{h,s,km,tier}], map}` (stale after 30 min) and `leaveBy` = `{at, dest, driveMin}`
+  (shown until 15 min past). The map is a PNG the app snapshots into the App Group container — a widget cannot draw a
+  live Mapbox view and must not network. Tap targets are `Link` deep links (`comms/transmit`, `crew`, `go?to=`), so
+  there is no AppIntent target to add.
+  🛑 **STILL FIELD-UNVERIFIED and unverifiable until an Xcode 27 EAS image exists:** nothing has rendered the SHIPPED
+  SwiftUI at full-page size on a real iOS 27 home screen — only the approved mockups were rendered. The ONE check that
+  settles it is an iOS 27 build with the family enabled, widget placed, screenshotted.
+- **MOCKUPS RENDERED 2026-09-11 — Jeff picked A.** Three concepts, real SwiftUI rendered at 349x565 pt @3x over a
   real Mapbox dark static map of Abbotsford, plus an in-context iPhone 17 Pro home screen at measured geometry
   (renderer + PNGs in the session scratchpad, `mock/Render.swift` + `mock/Compose.swift` — throwaway, not in the repo):
   **A · CREW PAGE** map + crew ring row + next-cruise card + Comms — the spec below, most information per glance.

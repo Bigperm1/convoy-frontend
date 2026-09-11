@@ -19,11 +19,36 @@
 
 # Hairpin Widgets + Watch — BUILD 75 roadmap (Jeff's call, 2026-08-16)
 
-**Status: SPECCED 2026-08-16, SLOTTED FOR BUILD 75 (Jeff: "lets do for build 75 roadmap.
-lets dial in the current issues and resolve them first"). Build 74 remains the already-
-staged native items (dep removals, etc.). NATIVE work — none of this is OTA-able. Ships as its own target in
-the next paid build, runtime bump, BOTH platforms cut per the parity rule (the
+**Status: SPECCED 2026-08-16, slotted for 75 then; NOT built for 75. 2026-09-10 (Jeff, 21:5x: "include it and
+also add the new ios 27 phone full screen widget as well") → IN SCOPE FOR BUILD 77: the whole family below PLUS
+the iOS 27 extra-large portrait widget (§ "iOS 27 full-page widget"). NATIVE work — none of this is OTA-able.
+Ships as its own target in the next paid build, runtime bump, BOTH platforms cut per the parity rule (the
 widget is iOS-first but Android must be rebuilt at the same runtime or it orphans).**
+
+**What ALREADY ships (build 66 → 75, VERIFIED 09-10 in the repo):** ONE home-screen widget, `targets/widget`
+"HairpinWidget" — "Next up": the next attending event / cruise with a live countdown, tap opens the Hub, small +
+medium only (`.supportedFamilies([.systemSmall, .systemMedium])`), fed by `src/widgetFeed.ts` → the App Group
+`group.com.sw0rdfisch.convoy` key `nextEvent` (written by the Hub on every events load and on app open). The
+watch-face complication (crew-live count, `targets/watch-widget`) is built with the watch companion (77, unshipped).
+Nothing below this line exists yet except the three deep links (routed in JS since build 75).
+
+## iOS 27 full-page widget — `WidgetFamily.systemExtraLargePortrait` (VERIFIED 09-10 from Apple's docs)
+- Apple: "An extra-large widget that uses a portrait orientation. … can appear on the Home Screen on iOS, on the
+  Today View on iOS and iPadOS, on the Desktop on macOS, and on visionOS. This extra-large widget appears in a portrait
+  orientation, similar to the widget of a visionOS app." Introduced iOS 27.0 / iPadOS 27.0 / macOS 27.0 (visionOS 26.0).
+  It is the page-height portrait size on the iPhone Home Screen — the "full screen widget".
+- Content (mockup first, Jeff's OK, then Swift — [[preview-ux-before-shipping]]): the crew snapshot map at full height
+  (static image, same privacy rules as the medium), the crew avatar row with live / driving / parked, the next cruise
+  or the Departure IQ "leave by" window, and the Comms launcher button (App Intent, `openAppWhenRun`) across the bottom.
+- Build constraints, all VERIFIED 09-10: the case only compiles against the iOS 27 SDK → Xcode 27 (this Mac has Xcode 27.0
+  beta 27A5252f with the iOS 27.0 SDK beside Xcode 26.6; Xcode 27 GM expected with iOS 27 in September 2026). EAS Build's
+  image list has NO Xcode 27 image yet (`latest` = `macos-tahoe-26.5-xcode-26.6`; our `eas.json` says `"image": "auto"`
+  = the SDK 54 default, Xcode 26.0) — the 77 cut needs an Xcode 27 image or a local archive. The target's
+  `deploymentTarget` stays 17.0: add the family under `if #available(iOS 27, *)` so iOS 17–26 phones keep the small /
+  medium / large / lock-screen widgets and iOS 27 phones also get the portrait page. `@bacons/apple-targets` 4.0.7 is
+  the plugin already wired in `app.json`.
+- Check before the cut: Expo SDK 54 on Xcode 27 beta (an expo issue reported SDK 56 source builds failing on Xcode 27
+  beta in June; SDK 54 is untested here) — one local `expo prebuild --clean` + archive with `DEVELOPER_DIR` = Xcode-beta.
 
 ## The family, by size
 

@@ -42,6 +42,7 @@
 import {
   newOffRouteGateState, resetOffRouteGate, offRouteTick, ROUTE_FETCH_TIMEOUT_MS,
   SWAP_ARM_TRAVEL_M, SWAP_FASTPATH_ARM_M, ONROUTE_M, REROUTE_DISTANCE_M, type OffRouteGateState,
+  HDG_FAST_MIN_M, HDG_FAST_TICKS, HDG_FAST_MIN_SPEED_MS, HDG_FAST_MANEUVER_CLEAR_M,
 } from "../../src/offRouteGate.ts";
 // The REAL one-in-flight slot nav.ts wraps (review 2026-09-05: the first version of this
 // gate kept its own `outstanding[]` and would have passed with the registry deleted).
@@ -60,6 +61,11 @@ type Tick = {
   pos: number; d: number; speedMs?: number | null; headingOff?: boolean; missed?: boolean;
   /** Horizontal accuracy for THIS fix, as map.tsx's `coords.acc` supplies it. */
   accM?: number | null;
+  /** 2026-09-11 heading fast path: the heading behind `headingOff` is real (nav.ts `headingKnown`),
+   *  and the distance to the current maneuver. Both default to the legacy shape (unknown), so every
+   *  scenario above S is replayed with the fast path INERT — that is the regression assertion. */
+  headingKnown?: boolean;
+  dManeuverM?: number | null;
 };
 
 /** `swapD` maps the car's position at a swap to its offset from the NEW line. */
@@ -131,6 +137,7 @@ function run(
     const d = k.d + offset;
     const dec = offRouteTick(st, {
       now: t, dRoute: d, headingOff: k.headingOff ?? true, missedManeuver: k.missed ?? false,
+      headingKnown: k.headingKnown, dManeuverM: k.dManeuverM,
       lat: LAT0 - k.pos / M_PER_DEG_LAT, lng: LNG0, speedMs: k.speedMs, accM: k.accM,
       timersStarvedMs: opts?.starvedMs,
       rerouteInFlightMs: inFlightMs,
@@ -528,6 +535,63 @@ check(C.trips.length === 0,
   `R changed C: the parked lot scatter now trips ${C.trips.length} times (want 0)`);
 
 const fmt = (r: { trips: number[] }) => r.trips.map((x) => (x / 1000).toFixed(0) + "s").join(",") || "none";
+// ── S: JEFF'S EXIT RAMP (2026-09-11 09:29 PDT, build 78) ─────────────────────────
+// Receipts (UTC 16:29): braking from 100 km/h at :27 (`cam-probe spd=83`); the ribbon's first
+// lateral divergence at :33 (`anchorOff=8 proj=17`); `spd=25` at :42; the estimator RELEASED the
+// road at :46 (`pose-fix rel=1`, `snap-mode gate=hdg hd=79` — course 11° vs route bearing 292°);
+// `distM=43.3` at :52; `off-route tripped d=56m streak=0 why=diverging` at :54.313, and
+// `reroute-result … applied` 134 ms later. The route's next maneuver read `turn=844m` at :12
+// (nav-eta), so ≈275 m ahead at :46 — a legitimate turn was NOT about to happen.
+// dRoute samples are the measured ones (draw-cmp/corner-trace `distM`); the ticks between
+// measured samples are linear — the assertion is about ORDER, not a metre.
+const rampTicks: Tick[] = [];
+for (let i = 0; i < 60; i++) rampTicks.push({ pos: 27 * i, d: 5, speedMs: 27, headingOff: false, headingKnown: true, dManeuverM: 3000 - 27 * i });
+const ramp: Array<[number, number, boolean]> = [   // [dRoute, speedMs, headingOff] per second from :22
+  [10, 25.5, false], [11, 25, false], [12, 25, false], [13, 24, false], [14, 24, false], [15, 23, false],   // :22–:27 highway, braking starts
+  [16, 22, false], [16, 21, false], [17, 20, false], [17, 18, false], [17, 16, false], [17, 14, false],   // :28–:33 ramp, d ≈ proj 17
+  [17, 12, false], [17, 11, false], [17, 10, false], [17, 9, false], [17, 8, false], [17, 7.5, false],    // :34–:39 down the ramp
+  [17, 7, false], [17, 7, false], [17, 7, false], [18, 6, false], [11, 5.8, false], [7, 6.4, false],      // :40–:45 (:43 17.7, :44 10.7, :45 6.5; course 39–46° off, under the 55° gate)
+  [2, 7.2, true], [4, 8, true], [12, 7.5, true], [20, 7.2, true], [28, 7, true], [36, 7, true],          // :46–:51 released, hd 79° — d interpolated :48–:51
+  [43, 7, true], [50, 7.5, true], [56, 8, true], [62, 8.5, true], [68, 9, true], [75, 9.5, true],        // :52–:57 (:52 43.3 measured, :54 56 measured)
+];
+let pos = 27 * 60;
+ramp.forEach(([d, v, off], i) => { pos += v; rampTicks.push({ pos, d, speedMs: v, headingOff: off, headingKnown: true, dManeuverM: 900 - 20 * i }); });
+const Sbase = run(rampTicks.map((k) => ({ ...k, headingKnown: undefined, dManeuverM: undefined })));   // yesterday's decision
+const S = run(rampTicks);
+const sBaseT = Sbase.trips[0], sT = S.trips[0];
+check(Sbase.trips.length === 1 && Math.abs(sBaseT - (60 + 32) * 1000) <= 1000, `S baseline model is wrong: today's logic tripped at ${sBaseT / 1000}s, the field tripped 32 s after :22 (want ${60 + 32}s ± one tick: the d samples between measurements are interpolated)`);
+check(S.trips.length === 1, `S ramp produced ${S.trips.length} reroutes (want exactly 1)`);
+check(sT <= sBaseT - 3000, `S fast path tripped at ${sT / 1000}s, baseline ${sBaseT / 1000}s (want ≥ 3 s sooner)`);
+check(sT >= (60 + 24 + HDG_FAST_TICKS - 1) * 1000, `S fast path tripped at ${sT / 1000}s — BEFORE the release could have been seen ${HDG_FAST_TICKS} times (want ≥ ${60 + 24 + HDG_FAST_TICKS - 1}s)`);
+
+// ── T: A LEGITIMATE ROUTE CORNER (the fast path must stay quiet) ──────────────────
+// A 90° right at a maneuver: the course is 45–90° off the CURRENT segment's bearing for the
+// 2–3 s before the projection crosses the vertex, while the car sits 3–8 m off a one-vertex line.
+const cornerTicks: Tick[] = [];
+for (let i = 0; i < 60; i++) cornerTicks.push({ pos: 8 * i, d: 4, speedMs: 8, headingOff: false, headingKnown: true, dManeuverM: 600 - 8 * i });
+[[5, 7, true, 30], [7, 6, true, 22], [8, 6, true, 15], [6, 6.5, true, 9], [4, 7, false, 400], [4, 8, false, 392]].forEach(([d, v, off, dm], i) =>
+  cornerTicks.push({ pos: 480 + 7 * (i + 1), d: d as number, speedMs: v as number, headingOff: off as boolean, headingKnown: true, dManeuverM: dm as number }));
+for (let i = 0; i < 30; i++) cornerTicks.push({ pos: 530 + 8 * i, d: 4, speedMs: 8, headingOff: false, headingKnown: true, dManeuverM: 380 - 8 * i });
+const T = run(cornerTicks);
+check(T.trips.length === 0, `T legitimate corner produced ${T.trips.length} reroutes (want 0)`);
+// …and the same corner with a COARSE line that leaves the car 14 m off through the apex, with
+// the maneuver 30 m away: the maneuver guard alone must hold it.
+const coarseTicks: Tick[] = cornerTicks.map((k) => (k.headingOff ? { ...k, d: 14 } : k));
+const Tc = run(coarseTicks);
+check(Tc.trips.length === 0, `T coarse-line corner produced ${Tc.trips.length} reroutes (want 0: maneuver ${HDG_FAST_MANEUVER_CLEAR_M} m guard)`);
+
+// ── U: A DIVIDED HIGHWAY, 35 M OFF THE LINE, HEADING ALIGNED ─────────────────────
+// The parallel-carriageway case the heading gate was born for: far off the drawn line for
+// minutes, heading aligned. Nothing here may trip through the heading path (headingOff=false).
+const dividedTicks: Tick[] = [];
+for (let i = 0; i < 180; i++) dividedTicks.push({ pos: 30 * i, d: i < 20 ? 5 : 35, speedMs: 30, headingOff: false, headingKnown: true, dManeuverM: 8000 - 30 * i });
+const U = run(dividedTicks);
+check(U.trips.length === 0, `U divided highway produced ${U.trips.length} reroutes (want 0)`);
+// The lot storm (A) is replayed above with headingKnown unset: the new path is inert there by
+// construction — and a variant that DOES know its heading still creeps below HDG_FAST_MIN_SPEED_MS.
+const Ah = run(stormTicks.map((k) => ({ ...k, headingKnown: true, dManeuverM: 500 })), { swapD: swapToRoad });
+check(Ah.trips.length <= 1, `A lot storm WITH a known heading produced ${Ah.trips.length} reroutes (want ≤1: creep ${HDG_FAST_MIN_SPEED_MS} m/s floor)`);
+
 console.log(
   `A lot storm: today=${Atoday.trips.length} [${fmt(Atoday)}] → gated=${A.trips.length} [${fmt(A)}] ` +
   `holds=${[...new Set(A.holds)].join("/") || "-"} (want ≤1) | ` +
@@ -545,6 +609,7 @@ console.log(
   `holds=${[...new Set(L.holds)].join("/") || "-"} (want ≤20, 1) | ` +
   `M wrong turn + timers frozen ${fmt(M)} vs B ${fmt(B)} (want equal) | ` +
   `N hung request + missed turn=${N.trips.length} [${fmt(N)}] gaps=${[...new Set(nGaps)].join("/") || "-"}ms aborts=${N.aborts.length} (want ${nWantTrips}, +${N_RETRY_MS}ms) | ` +
+  `S Jeff's ramp: baseline ${sBaseT / 1000}s → fast path ${sT / 1000}s (${(sBaseT - sT) / 1000} s sooner; min ${HDG_FAST_MIN_M}m ${HDG_FAST_TICKS} ticks) | T legit corner=${T.trips.length}/${Tc.trips.length} (want 0/0) | U divided hwy=${U.trips.length} (want 0) | A+heading=${Ah.trips.length} | ` +
   `R jam 200m off: re-trip ${R.trips.length ? R.trips[0] / 1000 + "s" : "never"} | O slot contract 9/9 | Q never-joined reroute: re-trip +${Number.isFinite(qSlowDelay) ? qSlowDelay / 1000 : "never"}s @15km/h, +${Number.isFinite(qFastDelay) ? qFastDelay / 1000 : "never"}s @108km/h (want ≤40, ≤8) | arm=${SWAP_ARM_TRAVEL_M}m onRoute=${ONROUTE_M}m fetchTimeout=${ROUTE_FETCH_TIMEOUT_MS}ms`,
 );
 if (fails.length) { console.error("FAIL:\n  " + fails.join("\n  ")); process.exit(1); }

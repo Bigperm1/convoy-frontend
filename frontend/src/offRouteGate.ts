@@ -142,6 +142,31 @@ export const CREEP_WINDOW_MS = 10000;
 // `offroute_storm_test.mts` scenario I can assert its trace stays BELOW it — i.e. that no
 // streak path could have fired and the retry it measures can only be the trend.
 export const REROUTE_DISTANCE_M = 80;
+// ── HEADING FAST PATH (2026-09-11, Jeff's exit ramp) ───────────────────────────
+// Receipts (build 78, PDT 09:29): braking from 100 km/h on the ramp from :27; the road-follow
+// RELEASED at :46 (`pose-fix … rel=1`, `snap-mode gate=hdg hd=79` — the course 79° off the
+// route bearing, which the estimator treats as "the line is wrong here"); dRoute 43 m at :52;
+// the divergence TREND tripped at :54 (`off-route tripped d=56m streak=0 why=diverging`),
+// and the reroute landed 134 ms later. So the reroute was instant and the DECISION was
+// 8 s behind the strongest evidence we had. `headingOff` already exists as an input, but it
+// only lowered the streak threshold, and the streak never arms below REROUTE_DISTANCE_M —
+// a ramp runs beside its highway, so d grows late and the heading was inert at 43–56 m.
+//
+// This path trips on HEADING alone, guarded four ways so it can never be the lot storm:
+//   • the heading must be KNOWN (nav.ts passes headingOff=true when it has none — that
+//     default must never count here);
+//   • the car must be physically off the line (> HDG_FAST_MIN_M: a lane plus the fix noise)
+//     and MOVING (≥ HDG_FAST_MIN_SPEED_MS — the lot storm crept at 2.6 m/s);
+//   • no route maneuver within HDG_FAST_MANEUVER_CLEAR_M ahead: a legitimate turn AT a
+//     maneuver has the course 45–90° off the segment bearing for a second or two before
+//     the projection crosses the vertex;
+//   • HDG_FAST_TICKS consecutive qualifying ticks (fix-driven — timer starvation cannot
+//     stretch them), and every existing hold still applies (post-swap arm, creep, in-flight,
+//     the 8 s gap). Replay: tools/sim-qc/offroute_storm_test.mts scenarios S/T/U.
+export const HDG_FAST_MIN_M = 12;
+export const HDG_FAST_TICKS = 3;
+export const HDG_FAST_MIN_SPEED_MS = 4;
+export const HDG_FAST_MANEUVER_CLEAR_M = 100;
 // ── DIVERGENCE TREND (2026-07-31) ──────────────────────────────────────────
 // Jeff: "I took a different route and it took a while for the route to change, at
 // least 1 min."
@@ -255,12 +280,19 @@ export type OffRouteGateState = {
   lastFastAt: number;                               // last fix at or above CREEP_SPEED_MS
   lastTripAt: number;
   onThisRoute: boolean;                             // has been within ONROUTE_M since the swap
+  hdgOffTicks: number;                              // consecutive ticks qualifying for the heading fast path
 };
 
 export type OffRouteTickInput = {
   now: number;
   dRoute: number;          // perpendicular metres from the raw fix to the route line
   headingOff: boolean;     // course diverges from the route's local bearing (nav.ts)
+  /** The heading behind `headingOff` is REAL (nav.ts reports headingOff=true with no heading at all,
+   *  as a distance-only fallback — that default must never feed the heading fast path). */
+  headingKnown?: boolean;
+  /** Distance to the current step's maneuver (nav.ts `dManeuver`); a turn that is about to happen
+   *  legitimately points the car off the segment. null/undefined = unknown = treated as clear. */
+  dManeuverM?: number | null;
   missedManeuver: boolean; // the missed-maneuver fast path (nav.ts)
   lat: number;
   lng: number;
@@ -298,7 +330,7 @@ export type OffRouteDecision = {
 
 export const newOffRouteGateState = (now = 0): OffRouteGateState => ({
   streak: 0, hist: [], swapAt: now, travelSinceSwapM: 0, lastFix: null, lastFastAt: 0,
-  lastTripAt: 0, onThisRoute: false,
+  lastTripAt: 0, onThisRoute: false, hdgOffTicks: 0,
 });
 
 /**
@@ -331,6 +363,7 @@ export function resetOffRouteGate(st: OffRouteGateState, now: number): void {
   st.travelSinceSwapM = 0;
   st.lastFix = null;
   st.onThisRoute = false;   // re-earned against the NEW line, on the next fix
+  st.hdgOffTicks = 0;
 }
 
 const haversineM = (aLat: number, aLng: number, bLat: number, bLng: number): number => {
@@ -427,6 +460,15 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   const conclusivelyOff = t.dRoute > REROUTE_DISTANCE_M * 2;   // >160 m: GPS multipath can't explain this
   if (t.dRoute > REROUTE_DISTANCE_M) st.streak += 1;
   else st.streak = 0;
+  // Heading fast path: consecutive ticks with a KNOWN heading off the line, the car off the
+  // line and moving, and no maneuver about to explain it. See HDG_FAST_* above.
+  const maneuverClear = !(typeof t.dManeuverM === "number" && Number.isFinite(t.dManeuverM)) || t.dManeuverM > HDG_FAST_MANEUVER_CLEAR_M;
+  const hdgFastTick =
+    t.headingKnown === true && t.headingOff &&
+    t.dRoute > HDG_FAST_MIN_M &&
+    spd !== null && spd >= HDG_FAST_MIN_SPEED_MS &&
+    maneuverClear;
+  st.hdgOffTicks = hdgFastTick ? st.hdgOffTicks + 1 : 0;
 
   // ── divergence trend — catches the slow parallel-street departure long before the
   // 80 m threshold does. See the DIVERGE_* block for why a trend beats a distance.
@@ -451,6 +493,7 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   const strongWhy: OffRouteWhy | null =
     t.missedManeuver ? "missed" :
     conclusivelyOff ? (st.streak >= 2 ? "far" : null) :
+    st.hdgOffTicks >= HDG_FAST_TICKS ? "heading" :                 // the 09-11 fast path
     t.headingOff ? (st.streak >= 3 ? "heading" : null) :
                    (st.streak >= 6 ? "sustained" : null);
   const why: OffRouteWhy | null =

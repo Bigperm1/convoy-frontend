@@ -705,5 +705,34 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
     ok("R7 an unmoved refused chord (180° off, no course) is never admitted by elapsed time: no road for 20 s, routeW → 0, nose holds", adoptedAt == null && st.roadHdg == null && st.routeW < 0.02 && Math.abs(wrap180(st.hdg - trueHdg)) <= 3, `adoptedAt=${adoptedAt} roadHdg=${st.roadHdg} routeW=${st.routeW.toFixed(3)}`); }
 }
 
+// ── Y. 2026-09-11: the road keeps its weight through a corner the car is ON ──────────────────
+// Jeff's drive (build 78): the nose trailed the GPS course by ~30° at every sharp corner (`pose-fix
+// … course=295 estHdg=326`, `course=244 estHdg=274`, 37–50°/s). Two changes, both receipts here:
+//  (1) the road is JUDGED against the course at its full inferred rate (steering unchanged), so a
+//      sustained corner no longer fades the road for trailing the half-gain target; (2) the
+//      sharpness fade is gated on distance to the line. Bars = the seeded p90 measured with the
+//      change plus ~5 %; the X-suite above is the regression contract and must stay green.
+{
+  const corner25 = makeCorner(6.94, 12, 80), exit25 = Math.floor((80 + (Math.PI / 2) * 12) / 6.94 * 20) + 40;
+  const sc = makeSCurve(8, 12, 60, 20);
+  const p = (xs: number[], q: number) => { const a = [...xs].sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(q * (a.length - 1)))]; };
+  const xs: number[] = [], ss: number[] = [];
+  for (let sd = 1; sd <= 24; sd++) {
+    xs.push(run(corner25, { gyro: false, noiseM: 3, route: true, speedMs: 6.94, fixHz: 1, from: 100, exitFrom: exit25, seed: sd * 7919 }).maxHdgErr);
+    ss.push(run(sc, { gyro: false, noiseM: 3, route: true, speedMs: 8, fixHz: 1, from: 20, seed: sd * 7919 }).maxHdgErr);
+  }
+  ok("Y1 residential one-vertex corner (25 km/h, r=12, 3 m): nose p90 ≤ 43° (was 43.3 before 09-11; now ~40.6)", p(xs, 0.9) <= 43, `${p(xs, 0.9).toFixed(1)}°`);
+  ok("Y2 S-curve second corner (29 km/h, r=12): nose median ≤ 46° (was ~47; now ~43)", p(ss, 0.5) <= 46, `${p(ss, 0.5).toFixed(1)}°`);
+  // NOT fixed, on purpose: the sharp low-speed corner (27 km/h, r=8–10, 43–54°/s) still peaks near 50–65°.
+  // Every knob that halves it (dropping the AGREEMENT fade on the line, a higher slew cap, a lead) fails a
+  // refuter-set bar above — X1n (6 m noise) by 1–4°, or the 70°/s swing rule, or the exit-leg 3° rule.
+  // Relaxing X1n is a design decision (memory field-2026-09-11-exit-stall-and-corners); this gate records
+  // today's number so a future change is measured against it, not against a feeling.
+  const sharp: number[] = [];
+  const c27 = makeTurn(7.5, 10, 80, 90, 20);
+  for (let sd = 1; sd <= 24; sd++) sharp.push(run(c27, { gyro: false, noiseM: 3, route: true, speedMs: 7.5, fixHz: 1, from: 20, seed: sd * 7919 }).maxHdgErr);
+  ok("Y3 RECORD (no bar): sharp one-vertex corner 27 km/h r=10 — nose median printed for the next attempt", true, `median ${p(sharp, 0.5).toFixed(1)}° p90 ${p(sharp, 0.9).toFixed(1)}°`);
+}
+
 console.log(fails === 0 ? "\nPASS pose_estimator" : `\nFAIL pose_estimator (${fails})`);
 if (fails) process.exit(1);

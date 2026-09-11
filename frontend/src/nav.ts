@@ -1313,7 +1313,8 @@ export function useTurnByTurn(
       // departure, so we fall back to distance-only (headingOff = true).
       const hdg = user.heading;
       let headingOff = true;
-      if (typeof hdg === "number" && hdg >= 0 && !Number.isNaN(info.bearingDeg)) {
+      const headingKnown = typeof hdg === "number" && hdg >= 0 && !Number.isNaN(info.bearingDeg);
+      if (headingKnown) {
         let dHdg = Math.abs(hdg - info.bearingDeg) % 360;
         if (dHdg > 180) dHdg = 360 - dHdg;
         headingOff = dHdg > OFFROUTE_HEADING_TOL_DEG;
@@ -1345,6 +1346,9 @@ export function useTurnByTurn(
       const inFlightMs = rerouteInFlightAgeMs(nowT);
       const decision = offRouteTick(offRouteGateRef.current, {
         now: nowT, dRoute, headingOff, missedManeuver,
+        // The 09-11 heading fast path (offRouteGate HDG_FAST_*): a KNOWN heading, and how far the
+        // current maneuver is (a turn about to happen explains an off-segment course).
+        headingKnown, dManeuverM: dManeuver,
         lat: user.lat, lng: user.lng, speedMs: user.speed, accM: user.acc,
         // Receipt only — never a blocker. See offRouteGate.ts's GATE 4.
         timersStarvedMs: starvedMs,

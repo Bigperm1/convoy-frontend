@@ -89,7 +89,8 @@ export type PoseState = {
   yawCumPrevAt: number;            // …and the SENSOR time it was measured at (the clamp's clock)
   yawDpsLast: number;              // sensor-frame rate of the last consumed delta (receipts, route weight)
   roadHdg: number | null;          // the road's windowed direction at the held projection (null = none / released)
-  roadHdgAhead: number | null;     // …and speed × 1 s further along the line (where the car will be at the next fix)
+  roadHdgAhead: number | null;
+  roadDistM: number;               // the ADOPTED projection's distance from the raw fix (the on-line test for the sharpness fade)     // …and speed × 1 s further along the line (where the car will be at the next fix)
   roadK: number;                   // 0..1 how much the road owns the nose this frame (distance weight; 0 when released)
   roadAt: number;                  // predict-clock time the road was last handed in
   roadSetAt: number;               // predict-clock time the PROJECTION last moved (the road direction's age)
@@ -177,6 +178,15 @@ export const POSE_ROAD_AGREE_DEG = 15;
  *  snapping at sharp maneuvers for the same reason). A roundabout on a dense line turns ~20°/s: unaffected. */
 export const POSE_ROAD_SHARP_DEG = 20;
 export const POSE_ROAD_SHARP_FULL_DEG = 60;
+/** …but a car ON the line is on the line (2026-09-11, Jeff's corners). The sharpness fade exists for a raw-fix
+ *  projection that can flip legs at a vertex; a fix within POSE_ROAD_ONLINE_M of the line is not flipping anywhere,
+ *  and there the road keeps its weight through the vertex. The fade returns in full by POSE_ROAD_OFFLINE_M.
+ *  Gate section Y: X4 (residential one-vertex corner, 3 m) 43.3° → 40.6° p90, S-curve 47° → 43° median, every
+ *  X bar green. The stronger form — dropping the AGREEMENT fade on the line too — halves the sharp-corner lag
+ *  (49° → 28° median at 27 km/h, hairpin 52° → 38°) but costs 1–4° at X1n (6 m-noise fixes): a refuter-set bar,
+ *  so that is a design decision, not a knob. See memory field-2026-09-11-exit-stall-and-corners. */
+export const POSE_ROAD_ONLINE_M = 4;
+export const POSE_ROAD_OFFLINE_M = 12;
 /** A course qualifies to release the road only from a fix at least this sharp (Mapbox RouteSnappingMinimumHorizontalAccuracy = 20)
  *  and while moving ≥ POSE_COURSE_MIN_MS (Mapbox RouteSnappingMinimumSpeed = 3). */
 export const POSE_ROAD_RELEASE_ACC_M = 20;
@@ -252,7 +262,7 @@ export function poseStart(): PoseState {
     lat: NaN, lng: NaN, hdg: 0, spd: 0, tAt: 0, fixAt: 0, hasFix: false, hdgKnown: false, drM: 0,
     yawBias: 0, yawSign: 0, yawAgree: 0, lastCourse: null, lastCourseAt: 0, gpsTurnDps: 0,
     routeW: 0, errPrev: null, errPrevAt: 0, pendLat: 0, pendLng: 0, rawLat: NaN, rawLng: NaN, rawAt: 0, yawCumAtCourse: null, yawCumPrev: null, yawCumPrevAt: 0, yawDpsLast: 0,
-    roadHdg: null, roadHdgAhead: null, roadK: 0, roadAt: 0, roadSetAt: 0, projLat: NaN, projLng: NaN, projMovedAt: 0, accLast: null, roadReleased: false, roadHeld: 0, roadSuspect: false,
+    roadHdg: null, roadHdgAhead: null, roadDistM: 99, roadK: 0, roadAt: 0, roadSetAt: 0, projLat: NaN, projLng: NaN, projMovedAt: 0, accLast: null, roadReleased: false, roadHeld: 0, roadSuspect: false,
     src: "none", fixes: 0, rejected: 0, maxStepM: 0,
   };
 }
@@ -337,10 +347,16 @@ export function posePredict(st: PoseState, nowMs: number, yaw: PoseYaw | null | 
       // rate-only roadK gave the predict and the fix different equilibria, a once-a-second sawtooth).
       const courseLive = st.lastCourse != null && nowMs - st.lastCourseAt <= POSE_GPS_TURN_HOLD_MS;
       const turnDps = courseLive && st.gpsTurnDps !== 0 ? st.gpsTurnDps * POSE_GPS_TURN_GAIN : 0;
-      let courseTarget: number | null = null;
+      let courseTarget: number | null = null, courseNow: number | null = null;
       if (st.lastCourse != null && nowMs - st.lastCourseAt <= POSE_COURSE_TARGET_HOLD_MS) {
         const ageC = Math.max(0, Math.min(POSE_GPS_TURN_HOLD_MS / 1000, (nowMs - st.lastCourseAt) / 1000));
         courseTarget = norm360(st.lastCourse + turnDps * ageC);
+        // Where the course most likely IS now — the FULL inferred rate, not the half-gain steering target
+        // (2026-09-11). Used only to JUDGE the road below, never to steer: inside a sustained corner the
+        // half-gain target trails the car by design, and judging the road against that trailing figure
+        // faded the road exactly where it was right. A leg-flip at a vertex still fades — the course is
+        // not turning there, so both figures agree and the 90° chord is the odd one out.
+        courseNow = norm360(st.lastCourse + (courseLive ? st.gpsTurnDps : 0) * ageC);
       }
       const roadFresh = st.roadHdg != null && st.roadK > 0 && nowMs - st.roadAt <= POSE_ROAD_HOLD_MS;
       let roadK = roadFresh ? st.roadK : 0;
@@ -352,10 +368,11 @@ export function posePredict(st: PoseState, nowMs: number, yaw: PoseYaw | null | 
         // Agreement and sharpness (see POSE_ROAD_AGREE_DEG / POSE_ROAD_SHARP_DEG): both judged only while the
         // NEWEST fix carries a course — with none, the road is the only evidence and keeps full weight.
         if (courseTarget != null && st.lastCourseAt === st.fixAt) {
-          const dis = Math.abs(wrap180(roadTarget - courseTarget));
+          const dis = Math.abs(wrap180(roadTarget - (courseNow ?? courseTarget)));
           roadK *= Math.max(0, Math.min(1, 1 - (dis - POSE_ROAD_AGREE_DEG) / (POSE_ROAD_RELEASE_DEG - POSE_ROAD_AGREE_DEG)));
           const sharp = Math.abs(wrap180(ahead - st.roadHdg!));
-          roadK *= Math.max(0, Math.min(1, 1 - (sharp - POSE_ROAD_SHARP_DEG) / (POSE_ROAD_SHARP_FULL_DEG - POSE_ROAD_SHARP_DEG)));
+          const offLine = Math.max(0, Math.min(1, (st.roadDistM - POSE_ROAD_ONLINE_M) / (POSE_ROAD_OFFLINE_M - POSE_ROAD_ONLINE_M)));
+          roadK *= 1 - offLine * (1 - Math.max(0, Math.min(1, 1 - (sharp - POSE_ROAD_SHARP_DEG) / (POSE_ROAD_SHARP_FULL_DEG - POSE_ROAD_SHARP_DEG))));
         }
       }
       const target = roadTarget != null && courseTarget != null
@@ -590,7 +607,7 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
   const ease = 1 - Math.exp(-dt / POSE_ROUTE_TAU_S);
   const routeW = st.routeW + (target - st.routeW) * ease;
   const next: PoseState = {
-    ...st, routeW, roadHdg, roadHdgAhead, roadK, roadReleased: !!proj && released, roadHeld, roadSuspect: !!proj && suspect,
+    ...st, routeW, roadHdg, roadHdgAhead, roadK, roadDistM: proj && Number.isFinite(proj.distM) ? proj.distM : 99, roadReleased: !!proj && released, roadHeld, roadSuspect: !!proj && suspect,
     roadAt: roadHdg != null ? st.tAt : st.roadAt,
     roadSetAt,
     projLat: proj ? proj.lat : NaN, projLng: proj ? proj.lng : NaN,

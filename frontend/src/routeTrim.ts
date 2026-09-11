@@ -162,8 +162,10 @@ export function routeTrimLeadDp(pitchDeg = 0): number {
 //     ground_screen(s) = d*s*cos p / (d + s*sin p)   and   lift_screen(h) = d*h*sin p / (d - h*cos p)
 // are equal when   s = h*d*sin p / (d*cos p - h).
 // Gate: tools/sim-qc/self_lift_lead_test.mts.
-export const SELF_MODEL_LIFT_M = 10;   // the 3D car / scan twin (ConvoyMapbox modelTranslation)
-export const SELF_ARROW_LIFT_M = 16;   // the flat arrow is lifted higher to clear the ribbon
+// 2026-09-10: these are the OFF-ROAD lifts now. On a road the car is drawn at 0 (src/selfLiftRule.ts);
+// the trim reads the DRAWN lift (selfLiftDrawnM) per surface, so on a road it compensates nothing.
+export const SELF_MODEL_LIFT_M = 10;   // the 3D car / scan twin, off the road (a lot, a driveway, a footprint)
+export const SELF_ARROW_LIFT_M = 16;   // the flat arrow, off the road (higher: it lost the ribbon's depth test at 10)
 // The crew's 3D twins share the car's lift. No route cut is measured from a PEER, so the trim
 // defect above does not apply to them — but the same parallax does: at an exit-ramp zoom a peer
 // is drawn ~55 pt further up the road than they actually are. Cosmetic today, and it moves with

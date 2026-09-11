@@ -48,6 +48,11 @@ import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, A
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
 import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, clampCutToRoute, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M, PEER_MODEL_LIFT_M } from "./routeTrim";
+// The self car is lifted ONLY off the road (Jeff, 2026-09-10) — the rule is src/selfLiftRule.ts, the
+// live state src/selfLift.ts; SelfCarModel asks the map once a second while slow and eases the lift
+// it draws, riding the source feature (`trn`) like the size and the heading.
+import { noteSelfLiftNav, reportSelfLiftEvidence, noteSelfLiftQueryFail, selfLiftTargetM, selfLiftDrawnM, setSelfLiftDrawnM, setSelfOffRoadLiftM, selfLiftSkipQuery, clearSelfLiftSurface, subscribeSelfLiftDrawn, logSelfLiftQuery } from "./selfLift";
+import { easeLift, roadEvidence, isDrivableRoad, isPropertyRoad, buildingUnder, LIFT_ROAD_NEAR_M, LIFT_PROPERTY_NEAR_M, LIFT_COVERAGE_M, LIFT_QUERY_MS, type RoadEvidence } from "./selfLiftRule";
 import { buildRibbonPartition, buildRibbonFeatures, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind } from "./driveBcEvents";
@@ -366,6 +371,11 @@ export function modelScaleForPoints(targetPt: number, modelLenUnits: number, zoo
 // Stable reference: a fresh array literal per render would be a "content change" to the
 // layer style in RN's prop diff — the exact main-thread RMW the per-tick rule forbids.
 const SELF_SCALE_EXPR: any = ["get", "scl"];
+// The lift (metres of altitude) rides the same feature — see src/selfLiftRule.ts.
+const SELF_TRN_EXPR: any = ["get", "trn"];
+/** The lift's evidence cache (see SelfCarModel): re-served while the car stays within this, for this long. */
+const LIFT_CACHE_M = 3;
+const LIFT_CACHE_MS = 20000;
 
 const CAR_MODEL_SCALE_BY_ZOOM: any = [
   "interpolate", ["linear"], ["zoom"],
@@ -1373,6 +1383,111 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     refreshRef.current = () => { noteTick(); setTick((n) => (n + 1) & 0xffff); };
     return () => { refreshRef.current = null; };
   }, [refreshRef]);
+  // ── THE LIFT RIDES THE FEATURE, AND ONLY OFF THE ROAD (2026-09-10) ───────────────────
+  // See src/selfLiftRule.ts for the rule and the why. Once a second, while the car is slow enough
+  // that the map is worth asking, the surface reads the rendered features around the car (a road
+  // within LIFT_ROAD_NEAR_M?) and under it (a building footprint?) and reports them; the shared
+  // decision picks ONE target for the one car; this instance eases what it DRAWS toward it on a
+  // short private ticker (the marker's own ticks stop when the car is still — exactly when a lift
+  // rises) and writes the drawn value back so its ribbon can be cut from where the car is drawn.
+  const liftRef = useRef(0);
+  const liftTickAt = useRef(0);
+  const liftQueryBusy = useRef(false);
+  // The last answer and where it was taken: a car that has not moved LIFT_CACHE_M since is re-served the
+  // same evidence for LIFT_CACHE_MS (Codex pass 2: a parked car was pulling two full-source queries a
+  // second forever) — the confirm timer still runs on the re-reports, only the native work is skipped.
+  const liftCache = useRef<{ lat: number; lng: number; at: number; ev: RoadEvidence } | null>(null);
+  const liftAnimTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const liftGen = useRef(0);   // bumped on every (re)start and on cleanup: an in-flight query from an old life is dropped
+  const offRoadLiftM = modelId.startsWith(ARROW_MODEL_ID) ? SELF_ARROW_LIFT_M : SELF_MODEL_LIFT_M;
+  useEffect(() => { setSelfOffRoadLiftM(offRoadLiftM); }, [offRoadLiftM]);
+  useEffect(() => {
+    const surface: "phone" | "car" = probeRole === "car" ? "car" : "phone";
+    const gen = ++liftGen.current;
+    const stopEase = () => { if (liftAnimTimer.current != null) { clearInterval(liftAnimTimer.current); liftAnimTimer.current = null; } };
+    if (sprite) {
+      // The flat sprite is a symbol: never lifted, never occluded. Whatever this surface drew before
+      // (a lifted model, or a stale value from a previous life) is zero now, and its ribbon is told.
+      stopEase(); liftRef.current = 0; clearSelfLiftSurface(surface);
+      return;
+    }
+    const armEase = () => {
+      if (gen !== liftGen.current) return;
+      if (Math.abs(liftRef.current - selfLiftTargetM()) <= 0.02 || liftAnimTimer.current != null) return;
+      liftTickAt.current = Date.now();
+      liftAnimTimer.current = setInterval(() => {
+        if (gen !== liftGen.current) { stopEase(); return; }
+        const now = Date.now();
+        const dt = Math.min(0.2, (now - liftTickAt.current) / 1000); liftTickAt.current = now;
+        liftRef.current = easeLift(liftRef.current, selfLiftTargetM(), dt);
+        const settled = liftRef.current === selfLiftTargetM();
+        setSelfLiftDrawnM(surface, liftRef.current, settled);
+        noteTick(); setTick((n) => (n + 1) & 0xffff);
+        if (settled) stopEase();
+      }, 33);
+    };
+    const ask = async () => {
+      if (liftQueryBusy.current || gen !== liftGen.current) return;
+      const spd = speedRef.current ?? null;
+      const map = mapRef?.current;
+      if (selfLiftSkipQuery(spd) || !map || typeof map.querySourceFeatures !== "function") {
+        reportSelfLiftEvidence(surface, { speedMs: spd, roadHit: null, buildingH: null });
+        armEase();
+        return;
+      }
+      const r0 = render.current;
+      const c = liftCache.current;
+      if (c && Date.now() - c.at < LIFT_CACHE_MS && poseHaversineM(c.lat, c.lng, r0.lat, r0.lng) < LIFT_CACHE_M) {
+        reportSelfLiftEvidence(surface, { speedMs: spd, roadHit: c.ev.roadHit, buildingH: c.ev.buildingH, lot: c.ev.lot });
+        armEase();
+        return;
+      }
+      liftQueryBusy.current = true;
+      const qStart = Date.now();
+      try {
+        const r = render.current;
+        // OUR OWN road source (the road-snap's invisible mapbox-streets-v8 copy, both surfaces): Standard
+        // hides its layers from every query, so this is the only road data the app can ask. Tile-clipped
+        // LineStrings with Streets v8 `class` / `type`; the same call the road-snap makes every 1.4 s.
+        const fc = await map.querySourceFeatures(ROAD_SRC_ID, [], ["road"]);
+        if (gen !== liftGen.current) return;
+        const roads: any[] = Array.isArray(fc?.features) ? fc.features : [];
+        // Coverage HERE, not somewhere in the viewport: a road of any kind within LIFT_COVERAGE_M says the
+        // car's own tile is loaded; otherwise the verdict is unknown (a panned-away map, a missing tile).
+        const local = nearestRoadLine(r.lat, r.lng, roads, LIFT_COVERAGE_M);
+        const drivable = roads.filter((f: any) => isDrivableRoad(f?.properties));
+        const property = roads.filter((f: any) => isPropertyRoad(f?.properties));
+        const nd = nearestRoadLine(r.lat, r.lng, drivable, LIFT_ROAD_NEAR_M);
+        const np = nearestRoadLine(r.lat, r.lng, property, LIFT_PROPERTY_NEAR_M);
+        let ev = roadEvidence(!!local, nd ? nd.distM : null, np ? np.distM : null, null);
+        let buildings = 0;
+        if (ev.roadHit === false) {
+          // Off the road by either rule: the `building` footprints of the same tiles decide the height.
+          const bf = await map.querySourceFeatures(ROAD_SRC_ID, [], ["building"]);
+          if (gen !== liftGen.current) return;
+          const bfs: any[] = Array.isArray(bf?.features) ? bf.features : [];
+          buildings = bfs.length;
+          ev = { ...ev, buildingH: buildingUnder(r.lat, r.lng, bfs) };
+        }
+        liftCache.current = { lat: r.lat, lng: r.lng, at: Date.now(), ev };
+        logSelfLiftQuery(surface, { roads: roads.length, drivable: drivable.length, drivableM: nd ? nd.distM : null, propertyM: np ? np.distM : null, buildings, ms: Date.now() - qStart }, ev);
+        reportSelfLiftEvidence(surface, { speedMs: spd, roadHit: ev.roadHit, buildingH: ev.buildingH, lot: ev.lot });
+      } catch (e) {
+        if (gen !== liftGen.current) return;
+        noteSelfLiftQueryFail(surface, e);
+        reportSelfLiftEvidence(surface, { speedMs: speedRef.current ?? null, roadHit: null, buildingH: null });
+      } finally { liftQueryBusy.current = false; }
+      armEase();
+    };
+    const id = setInterval(() => { void ask(); }, LIFT_QUERY_MS);
+    return () => {
+      liftGen.current++;          // any query still in flight lands on a dead generation
+      clearInterval(id);
+      stopEase();
+      liftRef.current = 0;
+      clearSelfLiftSurface(surface);
+    };
+  }, [sprite, probeRole, mapRef]);
   // Last pose actually DRAWN (see the sub-pixel skip in the rAF step).
   const lastDrawnRef = useRef<{ lat: number; lng: number; heading: number } | null>(null);
   const lastFrameRef = useRef(0); // wall-clock of the last RENDERED ease frame (eco fps cap)
@@ -2000,6 +2115,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     : (typeof camZoom.current === 'number') ? camZoom.current
     : (getCam ? getCam().zoomLevel : 17);
   const perTickScale = perTick ? Math.round(modelScaleForPoints(sizePt!, lenUnits!, perTickZoom, r.lat) * 1000) / 1000 : 0;
+  const perTickLift = Math.round(liftRef.current * 100) / 100;
   return (
     <>
     {/* Feed the SMOOTH interpolated position to Mapbox's native user-location so
@@ -2030,6 +2146,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           rot: [pitchTilt, 0, (r.heading ?? 0) + headingOffset],
           // PER-TICK SIZE (2026-09-03) — see modelScaleForPoints.
           ...(perTick ? { scl: [perTickScale, perTickScale, perTickScale] } : {}),
+          // THE LIFT (2026-09-10): 0 on a road, the off-road lift in a lot / driveway / footprint.
+          trn: [0, 0, perTickLift],
         },
         geometry: { type: "Point", coordinates: [r.lng, r.lat] },
       }}
@@ -2071,29 +2189,19 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           // strictly worse. Reverted; the building-occlusion fix is tracked separately.)
           modelType: "common-3d",
           modelOpacity: opacity,
-          // Lift the car ~10m so it clears typical (residential) building heights and
-          // isn't eaten by the 3D extrusions' depth test. Mapbox shares one depth buffer
-          // between models + Standard buildings, and `slot`/location-indicator can't
-          // override it (rnmapbox #13049/#13428) — this vertical lift is the only OTA
-          // lever. [lng_m, lat_m, altitude_m]. Tradeoff: mild float at high camera tilt;
-          // OTA-tunable (raise if taller buildings still occlude, lower if it floats).
-          // The flat arrow loses the shared model/line depth buffer to the slot="top"
-          // route ribbon (the tall car wins at +10m; the low arrow doesn't), so the ribbon
-          // drew OVER it. Lift the arrow higher than the car so it clears the ground-level
-          // route line. OTA-tunable (raise if the ribbon still covers it, lower if it floats).
-          // ⚠ THE SINGLE SOURCE OF TRUTH FOR THESE TWO NUMBERS IS src/routeTrim.ts — the route
-          // trim has to add the SAME lift back to the cut, or the drawn car sits past the line
-          // start at deep zoom (Jeff, 2026-09-07 exit ramp). Never edit one without the other.
-          // ⚠ startsWith, NOT === : a PAINTED arrow's id is ARROW_MODEL_ID + "_" + <paint> (see
-          // selfModelId below), so an equality test drew every painted arrow at the CAR's 10 m
-          // instead of the arrow's 16 m. Two consequences, one old and one new. Old: the 16 m
-          // exists precisely so the flat arrow clears the ground-level route ribbon ("the low
-          // arrow doesn't win the depth buffer"), so a painted arrow has been drawn UNDER the
-          // line. New (2026-09-09): the route trim now feeds this same lift back in to place the
-          // cut, and it asks `selfIsArrow`, which IS true for a painted arrow — so the trim
-          // compensated for 16 m against a marker drawn at 10 and the line started far too far
-          // ahead. Found by the pre-ship review fleet. One predicate now answers both.
-          modelTranslation: [0, 0, modelId.startsWith(ARROW_MODEL_ID) ? SELF_ARROW_LIFT_M : SELF_MODEL_LIFT_M],
+          // THE LIFT — only off the road (2026-09-10, src/selfLiftRule.ts). The car used to be drawn
+          // 10 m in the air ALWAYS (16 for the arrow) so the Standard buildings' shared depth buffer
+          // could not eat it; on a pitched camera that projected it up the road by a distance that
+          // doubled per zoom level (3 pt highway, 56 pt on Jeff's exit ramp). In the chase view the
+          // sight line to the car runs over the road behind it, so the lift is only needed where
+          // buildings stand behind and around the car: a lot, a driveway, a parkade, a footprint.
+          // The altitude therefore rides the SOURCE feature (`trn`, eased per tick like `scl` and
+          // `rot`; a layer-style write per tick is the watchdog-kill mechanism): 0 while a road is
+          // under the car, the marker's off-road lift otherwise, a footprint's roof + 2 m inside one.
+          // The off-road lift is the old constant (SELF_MODEL_LIFT_M / SELF_ARROW_LIFT_M, startsWith
+          // because a PAINTED arrow's id is ARROW_MODEL_ID + "_" + <paint>) and the route trim reads
+          // the DRAWN lift back (selfLiftDrawnM) to cut the ribbon from where the car is drawn.
+          modelTranslation: SELF_TRN_EXPR,
           modelEmissiveStrength: emissive,
           modelScale: perTick ? SELF_SCALE_EXPR : (scale ?? CAR_MODEL_SCALE_SIZED),
           modelRotation: ["get", "rot"] as any,
@@ -2173,7 +2281,8 @@ export function PeerScanModels({ peers, zoom, sizePt, onPress }: {
       return {
         type: "Feature" as const,
         id: p.id,
-        properties: { uid: p.id, mid: "scan_" + p.scanId, rot: [0, 0, hdg + CAR_MODEL_HEADING_OFFSET], scl: [scl, scl, scl], op: p.parked ? 0.55 : 1 },
+        // A parked twin sits in a lot or a driveway (buildings behind it): keep the lift. A live one is on a road: none.
+        properties: { uid: p.id, mid: "scan_" + p.scanId, rot: [0, 0, hdg + CAR_MODEL_HEADING_OFFSET], scl: [scl, scl, scl], op: p.parked ? 0.55 : 1, trn: [0, 0, p.parked ? PEER_MODEL_LIFT_M : 0] },
         geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
       };
     }),
@@ -2193,7 +2302,7 @@ export function PeerScanModels({ peers, zoom, sizePt, onPress }: {
             modelId: ["get", "mid"] as any,
             modelType: "common-3d",
             modelOpacity: ["get", "op"] as any,
-            modelTranslation: [0, 0, PEER_MODEL_LIFT_M],
+            modelTranslation: PEER_TRN_EXPR,
             modelEmissiveStrength: 0.6,
             modelScale: PEER_SCALE_EXPR,
             modelRotation: PEER_ROT_EXPR,
@@ -2207,6 +2316,7 @@ export function PeerScanModels({ peers, zoom, sizePt, onPress }: {
 }
 const PEER_SCALE_EXPR: any = ["get", "scl"];
 const PEER_ROT_EXPR: any = ["get", "rot"];
+const PEER_TRN_EXPR: any = ["get", "trn"];
 
 function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading?: number; onPress?: () => void }) {
   const src = getVehiclePngOrDefault(car.color);
@@ -3480,6 +3590,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Ride the camera's ACTUAL zoom instead, so the gap is computed at the zoom the
   // driver is actually looking through. Falls back to the target before the first
   // frame seeds it (and on surfaces with no lockstep camera).
+  // The lift rule's strongest slow-speed signal: the projection onto the active route (null = not navigating).
+  useEffect(() => { noteSelfLiftNav(routeProj ? routeProj.distM : null); }, [routeProj]);
+  // The cut below is measured from the DRAWN car; when the lift slides while the car stands still nothing
+  // else re-renders this owner, so the marker tells it (throttled to 10/s, always on settle).
+  const [, bumpSelfLift] = useState(0);
+  useEffect(() => subscribeSelfLiftDrawn("phone", () => bumpSelfLift((n) => (n + 1) & 0xffff)), []);
   const _trimZoom = camZoomRef.current ?? chaseZoomRaw;
   // Same fallback pattern as _trimZoom: ride the camera's ACTUAL pitch, falling back
   // to the speed-derived TARGET before the first frame seeds camPitchRef (2026-09-04,
@@ -3489,7 +3605,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // The lift the self MODEL is drawn at, fed back in so the cut is measured from where the car
   // is DRAWN rather than where it is (src/routeTrim.ts leadShiftedByLift). mapH is the map's own
   // layout height, which is what Mapbox derives cameraToCenterDistance from.
-  const _selfLiftM = selfIsArrow ? SELF_ARROW_LIFT_M : SELF_MODEL_LIFT_M;
+  const _selfLiftM = selfLiftDrawnM("phone");   // what THIS surface draws right now (0 on a road)
   const _trimLeadM = routeTrimLeadM(_trimZoom, selfCar?.lat ?? 0, _trimPitch, _selfLiftM, mapH);
   // ── AND WHICH POSITION (2026-07-30) ────────────────────────────────────────
   // Second, independent source of the same complaint, and the bigger one. The trim
@@ -4045,6 +4161,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               streets-v8 tiles to load so the auto-boat poll can
               querySourceFeatures them. Zero visual footprint. */}
           <Mapbox.FillLayer id="convoy-water-query" sourceLayerID="water" style={{ fillOpacity: 0 } as any} />
+          {/* Invisible BUILDING layer (2026-09-10): loads the building footprints of the same tiles so the
+              self-lift rule can querySourceFeatures them — a parkade's roof height lifts the car above it. */}
+          <Mapbox.FillLayer id="convoy-bld-query" sourceLayerID="building" style={{ fillOpacity: 0 } as any} />
           {/* Invisible POI layer: loads the poi_label points of the SAME shared
               streets-v8 tiles so tap-to-route can querySourceFeatures them —
               identical pattern to the road/water query layers above. Standard's own

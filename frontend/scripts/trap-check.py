@@ -19,6 +19,14 @@ ROOT = Path(__file__).resolve().parent.parent
 # (id, glob, regex, why) — regex is searched per FILE (multiline).
 RULES = [
     (
+        "constant-self-lift-in-style",
+        ["src/**/*.tsx"],
+        r"modelTranslation:\s*\[\s*0\s*,\s*0\s*,\s*(?:SELF_MODEL_LIFT_M|SELF_ARROW_LIFT_M|PEER_MODEL_LIFT_M|\d)",
+        "2026-09-10: the self car was drawn 10 m in the air EVERYWHERE (16 for the arrow) to beat the 3D buildings' "
+        "depth test — 3 pt up the road on the highway, 56 pt on Jeff's exit ramp. The lift is 0 on a road and rises only "
+        "off it (src/selfLiftRule.ts); it rides the SOURCE feature (`trn`) like the size and the heading.",
+    ),
+    (
         "model-scale-zoom-curve",
         ["src/**/*.tsx", "src/**/*.ts"],
         r"modelScale:\s*(?:scale\s*\?\?\s*)?(?:CAR_MODEL_SCALE_SIZED|ARROW_MODEL_SCALE|CARPLAY_ARROW_SCALE|carModelScale\(|scaleCurveForPoints\(|\[\s*['\"]interpolate['\"][^\]]*\[\s*['\"]zoom['\"]\s*\])",

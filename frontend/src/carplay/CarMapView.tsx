@@ -33,6 +33,7 @@ import Mapbox, {
   SymbolLayer,
   CircleLayer,
   VectorSource,
+  FillLayer,
   Models,
 } from '@rnmapbox/maps';
 import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
@@ -79,7 +80,8 @@ import {
   ROAD_SNAP_CROSS_DEG, noseBearing, CAR_LEN_UNITS, ARROW_LEN_UNITS, PeerScanModels
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
-import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, leadShiftedByLift, selfLiftScreenPt, clampCutToRoute, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M } from '../routeTrim';
+import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, leadShiftedByLift, selfLiftScreenPt, clampCutToRoute } from '../routeTrim';
+import { selfLiftDrawnM, noteSelfLiftNav, subscribeSelfLiftDrawn } from '../selfLift';
 import { buildRibbonPartition, buildRibbonFeatures, anchorCutM, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat, type CutAnchorHint } from '../routeRibbon';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
@@ -1727,6 +1729,12 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     () => ((s.navigating && hasFix && hasRoute) ? projectOntoRoute(lat, lng, routeLL, null, null, null, s.speedMs || 0) : null),
     [s.navigating, hasFix, hasRoute, lat, lng, routeLL, s.speedMs],
   );
+  // The lift rule's strongest slow-speed signal: the projection onto the active route (null = not navigating).
+  useEffect(() => { noteSelfLiftNav(routeProj ? routeProj.distM : null); }, [routeProj]);
+  // The ribbon cut is measured from the DRAWN car; the marker tells this owner when the lift slides
+  // while the car stands still (throttled to 10/s, always on settle).
+  const [, bumpSelfLift] = useState(0);
+  useEffect(() => subscribeSelfLiftDrawn('car', () => bumpSelfLift((n) => (n + 1) & 0xffff)), []);
   // ONE trim for all three surfaces (2026-07-29, src/routeTrim.ts). This used to be
   // its OWN formula — clamp(10 + speed*1.1, 10, 55) — against the phone's
   // clamp(12 + speed*1.6, 30, 100): 10 m vs 30 m of clearance at a standstill. The
@@ -1758,12 +1766,15 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // scaled) car's length on the head unit: the ribbon visibly ended a car-length
   // behind the marker. Scaling the lead by the same factor keeps the on-screen gap
   // the same fraction of the car everywhere. mapScale is 1 on CarPlay — no change.
-  // The self model is drawn SELF_MODEL_LIFT_M metres in the air (16 for the arrow), which on a
-  // pitched camera moves it FORWARD up the road by a screen distance that doubles with every
-  // zoom level — 3 pt at highway zoom, 62 pt on an exit ramp. Feed it back so the cut is
-  // measured from the DRAWN car. See the long note in src/routeTrim.ts; gate
-  // tools/sim-qc/self_lift_lead_test.mts. mapH is this map's layout height.
-  const selfLiftM = isArrow ? SELF_ARROW_LIFT_M : SELF_MODEL_LIFT_M;
+  // The self model is drawn at whatever lift SelfCarModel is easing right now — 0 on a road since
+  // 2026-09-10, the off-road lift (10 m, 16 for the arrow) in a lot / driveway / footprint — and on a
+  // pitched camera a lifted point moves FORWARD up the road by a screen distance that doubles with
+  // every zoom level (3 pt at highway zoom, 62 pt on an exit ramp at the old constant lift). Feed
+  // the DRAWN value back so the cut is measured from where the car is drawn. See the long note in
+  // src/routeTrim.ts; gates tools/sim-qc/self_lift_lead_test.mts + self_lift_rule_test.mts.
+  // 2026-09-10: the lift is 0 on a road and only rises off it (src/selfLiftRule.ts); read what THIS
+  // surface's SelfCarModel is drawing right now so the cut is measured from the drawn car.
+  const selfLiftM = selfLiftDrawnM('car');
   // ⚠ ORDER MATTERS ON ANDROID AUTO (Codex adversarial review, 2026-09-09). `* mapScale` is the
   // AA correction for a map laid out at surfaceW/mapScale and transformed down — it belongs to
   // the DESIGN lead only. The lift correction cancels a shift the marker makes in this map's OWN
@@ -2172,6 +2183,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           road-snap interval above. Zero visual footprint (opacity 0), same as the phone. */}
       <VectorSource id={ROAD_SRC_ID} url="mapbox://mapbox.mapbox-streets-v8">
         <LineLayer id="car-road-query" sourceLayerID="road" style={{ lineOpacity: 0, lineWidth: 1 } as any} />
+        {/* Invisible BUILDING layer (2026-09-10): the self-lift rule reads the footprints (a parkade's roof). */}
+        <FillLayer id="car-bld-query" sourceLayerID="building" style={{ fillOpacity: 0 } as any} />
       </VectorSource>
 
       {/* LOCKSTEP camera — NO followUserLocation. SelfCarModel drives this camera

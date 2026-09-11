@@ -37,13 +37,33 @@ NATIVE work — none of this is OTA-able; BOTH platforms cut at the same number 
 > doc source for Xcode 27: zero hits, no beta image, no announced timeline. (GitHub Actions and Azure DevOps both
 > already ship Xcode 27 preview runners; Expo shipped an Xcode 26 beta image ~3 weeks before Apple's GA last cycle,
 > and has NOT repeated that this cycle.) iOS 27 GA = 2026-09-14.
-> **Paths, none of them free:** (a) wait for Expo's Xcode 27 image, then build 79 normally — pin `image: "latest"`
-> and it picks it up with no eas.json edit on the day; (b) `eas build --local` on Jeff's Mac, which HAS Xcode-beta
-> 27.0 installed — but local builds get NO EAS secret env vars, which breaks the `EXPO_PUBLIC_OPENWEATHER_KEY`
-> discipline ([[ota-bare-update-empties-openweather-key]]) and kills weather on that binary; (c) compile-gate the
-> family so it builds on Xcode 26 and lights up when an Xcode 27 image lands — **HYPOTHESIS, mechanism unproven**;
-> the ONE check that settles it is a local compile of the target against `/Applications/Xcode-beta.app` (27.0) and
-> then against Xcode 26.6, confirming the gate compiles under both.
+> **✅ RESOLVED 2026-09-11 — the compile gate is BUILT and MEASURED (option c).** `targets/widget/index.swift` now
+> declares the family behind `#if compiler(>=6.4) && canImport(WidgetKit, _version: 749)`, so the target compiles on
+> today's Xcode 26 image with the family simply absent, and offers it the moment a build runs on an iOS 27 SDK.
+> Measured matrix (`swiftc -target arm64-apple-ios17.0 -emit-sil`, local Xcode 26.6 = Swift 6.3.3 / iOS 26.5 SDK and
+> Xcode 27.0b = Swift 6.4 / iOS 27.0 SDK; the third column is the dangerous mismatched toolchain):
+>
+> | gate | 6.3.3 + iOS26 | 6.4 + iOS27 | 6.4 + iOS26 |
+> |---|---|---|---|
+> | `compiler(>=6.4)` alone | closed | OPEN | **COMPILE ERROR** |
+> | `canImport(WidgetKit, _version: 749)` | closed | OPEN | closed |
+> | **BOTH — what ships** | **closed** | **OPEN** | **closed** |
+>
+> Negative controls, both measured: the ungated reference FAILS on Xcode 26 (`'systemExtraLargePortrait' is
+> unavailable in iOS`), and a runtime `if #available(iOS 27.0, *)` ALONE also fails there — availability checking is
+> not sufficient, because the iOS 26 SDK declares the case `@available(iOS, unavailable)` rather than omitting it.
+> The real `HairpinWidget` target **BUILD SUCCEEDED** under Xcode 26.6 (the EAS-equivalent toolchain) with 0 SIL
+> references to the symbol, and emits 2 under Xcode 27. Guarded by `scripts/trap-check.py` rule
+> `bare-compiler-gate-in-target-swift` (proven to bite, exit 1, on a bare `compiler()` gate).
+> ⚠ Module version, NOT OS version: WidgetKit is `664.5.28.100` in the iOS 26.5 SDK and `749.0.2` in iOS 27.0. An
+> earlier pass tested `_version: 27`, saw both branches taken, and wrongly discarded the mechanism.
+>
+> **What is still needed to actually ship it:** (1) an EAS image with Xcode 27 — none exists yet, and note
+> `image: "auto"` selects by Expo SDK version rather than by newest, so turning this on is a deliberate one-line
+> pin in `eas.json`, not something that happens by itself; (2) **the full-page CONTENT design, which is Jeff's call**
+> ([[preview-ux-before-shipping]]) — the gate currently scales the existing "Next up" layout, and the crew-snapshot
+> design sketched below has never been previewed. (`eas build --local` remains a bad path: local builds get no EAS
+> secret env vars, which kills the weather key on that binary.)
 
 **What ALREADY ships (build 66 → 75, VERIFIED 09-10 in the repo):** ONE home-screen widget, `targets/widget`
 "HairpinWidget" — "Next up": the next attending event / cruise with a live countdown, tap opens the Hub, small +

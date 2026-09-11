@@ -19,6 +19,20 @@ ROOT = Path(__file__).resolve().parent.parent
 # (id, glob, regex, why) — regex is searched per FILE (multiline).
 RULES = [
     (
+        "bare-compiler-gate-in-target-swift",
+        ["targets/**/*.swift"],
+        r"(?m)^\s*#if\s+compiler\(>=[0-9.]+\)\s*(?:(?://|/\*).*)?$",
+        "2026-09-11: a `#if compiler(>=X)` gate alone is NOT an SDK check. It was used to hide "
+        "WidgetFamily.systemExtraLargePortrait (iOS 27 only) from the Xcode 26 SDK, where that case is "
+        "@available(iOS, unavailable) and merely naming it fails to compile. Apple ships Swift MINOR bumps "
+        "inside Xcode POINT releases (13.3->5.6, 14.3->5.8, 15.3->5.10, 16.3->6.1, 26.4->6.3) with the SDK "
+        "major unchanged, so a 'new Swift + old SDK' toolchain opens a bare compiler gate and BREAKS THE "
+        "BUILD — measured: swiftc 6.4 against the iOS 26.5 SDK errors, while compiler(>=6.4) && "
+        "canImport(WidgetKit, _version: 749) stays correctly closed. Pair every compiler() gate with a "
+        "canImport(<Module>, _version: <MODULE version, not the OS version>) on the same line. "
+        "See the comment block in targets/widget/index.swift for the full measured matrix.",
+    ),
+    (
         "constant-self-lift-in-style",
         ["src/**/*.tsx"],
         r"modelTranslation:\s*\[\s*0\s*,\s*0\s*,\s*(?:SELF_MODEL_LIFT_M|SELF_ARROW_LIFT_M|PEER_MODEL_LIFT_M|\d)",

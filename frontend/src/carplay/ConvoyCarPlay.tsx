@@ -45,6 +45,7 @@ import { setCarState, setCarSelfPosition, setCarPeers, setCarHazards, claimCarNa
 import CarMapView, { CAR_LEFT_PAD_FRAC, hudScaleFor, aaMapScaleFor } from './CarMapView';
 import { GlassFill, hudTint } from '../Glass';
 import { setCarPlayHookOwnsRoot, CAR_LIVE_MAP_ENABLED, CAR_DIAG_MODE } from './carPlayShared';
+import { requestCarPlayIdleRoot } from './carPlayBootstrap';
 import { CAR_BAR_BUTTON_CONFIG, carMapButtonConfig, AA_ACTION_STRIP, aaMapButtons, handleCarBarButton, handleCarMapButton, handleAaButton, carTap, isDupCarPress } from './carActions';
 import { formatSpeed, getSettings, getMapMode, getRouteColor, getSelfMarkerType } from '../settings';
 import { speedLimitVisible } from '../speedLimit';
@@ -1407,7 +1408,34 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
     if (!lib) return;
     const { CarPlay, MapTemplate, ListTemplate, NowPlayingTemplate, TabBarTemplate } = lib;
 
+    // ── ROOT FAILOVER (2026-09-11) ────────────────────────────────────────────
+    // Hand the CarPlay screen back to the cold bootstrap's idle root. Called whenever
+    // the warm root did NOT end up installed — a throw while building the template, a
+    // throw out of setRootTemplate, or the outer catch below, which until today was a
+    // bare console.warn.
+    //
+    // Why this matters more than it looks: the phone map screen claims ownership on
+    // mount (carPlayHookOwnsRoot), so by the time this runs the cold root has ALREADY
+    // skipped for this connect and will never retry on its own. The head unit is then
+    // left with no root template of ours: every nav-bar button is dead, and since no JS
+    // handler was ever attached to one, NOTHING is logged when the driver presses them.
+    // A dead-buttons session was therefore indistinguishable from a healthy one that
+    // simply wasn't touched — which is the shape of Jeff's 09-11 CarPlay sessions.
+    // Ownership must be released BEFORE asking, or setIdleRoot just skips again.
+    const failoverToColdRoot = (why: string) => {
+      let handed = false;
+      try {
+        setCarPlayHookOwnsRoot(false);
+        handed = requestCarPlayIdleRoot();
+      } catch {}
+      try { logEventReliable(`carplay-root-failover why=${why} cold=${handed ? 1 : 0}`); } catch {}
+      setCarState({ carDbg: `root:FAILOVER(${why}) cold=${handed ? 1 : 0}` });
+    };
+
     const setRoot = () => {
+      // Did the warm root actually get installed? Read by the failover below; a false
+      // here is the state that leaves the car with no template at all.
+      let rootOk = false;
       try {
         if (isIOS) {
           const mapTemplate = new MapTemplate({
@@ -1538,18 +1566,22 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
           try {
             CarPlay.setRootTemplate(mapTemplate);
             dbg += ' root=CALLED';
+            rootOk = true;
           } catch (e) {
             dbg += ' root=THREW:' + String(e).slice(0, 28);
           }
           setCarState({ carDbg: dbg });
           // …AND TO TELEMETRY (2026-09-11). `dbg` has existed since 07-19 but goes ONLY to the
-          // on-screen pill, so it needs a photo to read. On Jeff's 09-11 drive End and Search did
-          // nothing and the session logged only connect/chrome/paint — no `carplay-tap:*`, no
-          // `ios-stack` — which proves the presses never reached JS, but NOT whether this root was
-          // ever set, because the one call that decides it was invisible in crash_reports. The COLD
-          // path has carried `idleroot-set` / `idleroot-threw` since build 75
-          // (src/carplay/carPlayBootstrap.ts); the WARM path — the one that runs whenever the phone
-          // app is open, i.e. every drive Jeff takes — never got them. One row per connect.
+          // on-screen pill, so it needs a photo to read. MEASURED that day, in crash_reports:
+          // nav-bar taps DO reach JS on this exact JS bundle — `carplay-tap:car-end` and
+          // `carplay-tap:car-search` land for three other testers on runtime 1.28.0 — while
+          // Jeff's two connects (09:07 and 14:02) logged connect + chrome + paint and not one
+          // tap row, on both of which the COLD root stood down (`carplay-idleroot-skip
+          // hookOwns=1`). So the warm root was the only thing that could have set a template
+          // that day, and whether it did was the one link in the chain with no instrument.
+          // The COLD path has carried `idleroot-set` / `idleroot-threw` since build 75
+          // (src/carplay/carPlayBootstrap.ts); this is the warm path's equivalent, one row
+          // per connect.
           try {
             logEventReliable(
               `carplay-root ${dbg} bars=${CAR_BAR_BUTTON_CONFIG.leadingNavigationBarButtons.length}+${CAR_BAR_BUTTON_CONFIG.trailingNavigationBarButtons.length}` +
@@ -1573,7 +1605,11 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
         // carStore (the mirror effect above).
       } catch (e) {
         console.warn('[CarPlay] setRoot failed', e);
+        // Was a silent dead end until 2026-09-11 — see failoverToColdRoot.
+        try { logEventReliable(`carplay-root-threw ${String((e as any)?.message || e).slice(0, 120)}`); } catch {}
       }
+      // iOS only: Android Auto owns its own root and has no cold bootstrap to fall back to.
+      if (isIOS && !rootOk) failoverToColdRoot('no-root');
     };
 
     const onConnect = () => {

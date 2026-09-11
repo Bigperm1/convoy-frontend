@@ -36,6 +36,23 @@ RULES = [
         "a prepare cue 2026-09-03.",
     ),
     (
+        "carplay-warm-root-failure-without-failover",
+        ["src/carplay/ConvoyCarPlay.tsx"],
+        r"console\.warn\('\[CarPlay\] setRoot failed'(?![\s\S]{0,400}failoverToColdRoot)",
+        "2026-09-11 (Jeff: 'CARPLAY END AND SEARCH BUTTONS DID NOT WORK', and 'do not guess be precise'): the warm "
+        "root's setRoot() must NEVER fail silently. The phone map screen claims carPlayHookOwnsRoot on mount, so the "
+        "COLD bootstrap has already logged `carplay-idleroot-skip hookOwns=1` and will not retry this connect. If the "
+        "warm setRoot then throws, the head unit is left with NO root template of ours: every nav-bar button is dead, "
+        "and because no JS handler was ever attached, pressing one logs NOTHING — a dead session is byte-identical to "
+        "an untouched one. That is exactly the shape of Jeff's two 09-11 connects (09:07 and 14:02): carplay-onconnect "
+        "+ car-chrome + carplay-live-paint + idleroot-skip, and zero carplay-tap rows, while `carplay-tap:car-end` and "
+        "`carplay-tap:car-search` landed the same day for three other testers on the same runtime 1.28.0. The catch "
+        "here was a bare console.warn for two months. It must hand the screen back to the cold root "
+        "(failoverToColdRoot -> setCarPlayHookOwnsRoot(false) + requestCarPlayIdleRoot) — the path the fleet's "
+        "`src=cold` taps prove still works — and log carplay-root / carplay-root-failover so the next connect names "
+        "the cause instead of leaving absence to be argued about.",
+    ),
+    (
         "bare-compiler-gate-in-target-swift",
         ["targets/**/*.swift"],
         r"(?m)^\s*#if\s+compiler\(>=[0-9.]+\)\s*(?:(?://|/\*).*)?$",

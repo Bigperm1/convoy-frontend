@@ -20,6 +20,30 @@ import { logEventReliable } from '../crashBreadcrumb';
 
 let booted = false;
 
+// ── COLD-ROOT FAILOVER HANDLE (2026-09-11) ───────────────────────────────────
+// setIdleRoot lives inside initCarPlayBootstrap's closure, so nothing outside this
+// module could ever ask for the cold root back. That made ONE state unrecoverable:
+// the phone map screen claims ownership (carPlayHookOwnsRoot = true), the cold root
+// therefore SKIPS, and then the warm setRoot in ConvoyCarPlay.tsx fails — its only
+// error path was a console.warn. The head unit is then left with no root template of
+// ours at all: every nav-bar button is dead, and because no JS handler was ever
+// attached there is no `carplay-tap:*` row either. That reads EXACTLY like "the press
+// died native-side" and is how this investigation kept ending up at the native layer.
+// This handle lets the warm root hand the screen back to the cold root, which is the
+// path the fleet's `src=cold` taps prove still works.
+let _setIdleRoot: (() => void) | null = null;
+
+/**
+ * Ask the cold bootstrap to (re)claim the CarPlay root with its idle MapTemplate.
+ * Returns false when the bootstrap never ran (non-iOS, or no native module), so the
+ * caller can record WHY the failover did nothing instead of assuming it worked.
+ * The caller must clear carPlayHookOwnsRoot FIRST or setIdleRoot will just skip again.
+ */
+export function requestCarPlayIdleRoot(): boolean {
+  if (!_setIdleRoot) return false;
+  try { _setIdleRoot(); return true; } catch { return false; }
+}
+
 export function initCarPlayBootstrap(): void {
   if (Platform.OS !== 'ios' || booted) return;
   // ⚠ EVERY BAIL BELOW USED TO BE SILENT, and that cost a drive (2026-08-15). This
@@ -138,6 +162,8 @@ export function initCarPlayBootstrap(): void {
       receipt('idleroot-threw', String(e?.message || e).slice(0, 120));
     }
   };
+  // Publish the closure so the warm root can fail over to it (see requestCarPlayIdleRoot).
+  _setIdleRoot = setIdleRoot;
 
   // Liveness ground truth for the dead-man sweep: the 'carplay' GPS hold is only
   // legitimate while the head unit is actually attached. A lost didDisconnect (or a

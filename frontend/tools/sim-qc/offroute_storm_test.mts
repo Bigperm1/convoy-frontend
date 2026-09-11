@@ -539,33 +539,67 @@ check(C.trips.length === 0,
 
 const fmt = (r: { trips: number[] }) => r.trips.map((x) => (x / 1000).toFixed(0) + "s").join(",") || "none";
 // ── S: JEFF'S EXIT RAMP (2026-09-11 09:29 PDT, build 78) ─────────────────────────
-// Receipts (UTC 16:29): braking from 100 km/h at :27 (`cam-probe spd=83`); the ribbon's first
-// lateral divergence at :33 (`anchorOff=8 proj=17`); `spd=25` at :42; the estimator RELEASED the
-// road at :46 (`pose-fix rel=1`, `snap-mode gate=hdg hd=79` — course 11° vs route bearing 292°);
-// `distM=43.3` at :52; `off-route tripped d=56m streak=0 why=diverging` at :54.313, and
-// `reroute-result … applied` 134 ms later. The route's next maneuver read `turn=844m` at :12
-// (nav-eta), so ≈275 m ahead at :46 — a legitimate turn was NOT about to happen.
-// dRoute samples are the measured ones (draw-cmp/corner-trace `distM`); the ticks between
-// measured samples are linear — the assertion is about ORDER, not a metre.
-const rampTicks: Tick[] = [];
-for (let i = 0; i < 60; i++) rampTicks.push({ pos: 27 * i, d: 5, speedMs: 27, headingOff: false, headingKnown: true, dManeuverM: 3000 - 27 * i });
-const ramp: Array<[number, number, boolean]> = [   // [dRoute, speedMs, headingOff] per second from :22
-  [10, 25.5, false], [11, 25, false], [12, 25, false], [13, 24, false], [14, 24, false], [15, 23, false],   // :22–:27 highway, braking starts
-  [16, 22, false], [16, 21, false], [17, 20, false], [17, 18, false], [17, 16, false], [17, 14, false],   // :28–:33 ramp, d ≈ proj 17
-  [17, 12, false], [17, 11, false], [17, 10, false], [17, 9, false], [17, 8, false], [17, 7.5, false],    // :34–:39 down the ramp
-  [17, 7, false], [17, 7, false], [17, 7, false], [18, 6, false], [11, 5.8, false], [7, 6.4, false],      // :40–:45 (:43 17.7, :44 10.7, :45 6.5; course 39–46° off, under the 55° gate)
-  [2, 7.2, true], [4, 8, true], [12, 7.5, true], [20, 7.2, true], [28, 7, true], [36, 7, true],          // :46–:51 released, hd 79° — d interpolated :48–:51
-  [43, 7, true], [50, 7.5, true], [56, 8, true], [62, 8.5, true], [68, 9, true], [75, 9.5, true],        // :52–:57 (:52 43.3 measured, :54 56 measured)
+// MEASURED rows (UTC 16:29, crash_reports; memory field-2026-09-11-exit-stall-and-corners):
+//   :27 cam-probe spd=83 (braking from 100)          :42 cam-probe spd=25
+//   :43 pose-fix distM=17.7 spd=20 course=307        :44 pose-fix distM=10.7 spd=21 course=331
+//   :46 pose-fix distM=2.2  spd=26 course=11  rel=1 · snap-mode hd=79 (course 79° off route bearing 292)
+//   :52 draw-cmp distM=43.3 spd=25                   :54.313 off-route tripped d=56m why=diverging
+//   :12 nav-eta turn=844m step=4/8 — the ONLY maneuver receipt (cadence 60 s; none between :12 and :54)
+//
+// ⚠ TWO THINGS THE FIRST VERSION OF THIS FIXTURE GOT WRONG (refuters, 2026-09-11), both recorded here
+// because they are the difference between a gate and a story:
+//  1. d for :47–:51 was invented and grew 8 m/s — FASTER THAN THE CAR'S GROUND SPEED, impossible on a
+//     fixed line — and one sample sat exactly on the HDG_FAST_MIN_M threshold. The fill below is the
+//     straight line between the MEASURED 2.2 (:46) and 43.3 (:52) at the logged speeds: 6.8 m/s of
+//     lateral rate against an available 25 × sin(79°) = 24.5 m/s. Admissible, and not tuned.
+//  2. `dManeuverM` was invented as 420 m at the release, which is what produced the original
+//     "3 s sooner" headline. IT IS NOT KNOWN. The one receipt is 844 m at :12; the car then LEFT the
+//     route, so the straight-line distance to the old step's end does not simply fall by its speed and
+//     cannot be derived from the rows. Naively decrementing it gives ~140 m at the release and < 100 m
+//     two ticks later, at which point the maneuver guard holds the fast path and the gain is ZERO.
+//
+// SO THE HONEST CLAIM IS CONDITIONAL, and that is what is asserted: WHEN the route's maneuver is
+// genuinely clear, the release is evidence the distance trend cannot see for another 8 s, and the fast
+// path fires first. Whether it would have helped Jeff on THIS drive is UNPROVEN — it depends on a
+// number no row carries. The sweep below prints the whole curve so the next reader sees the shape
+// instead of a headline, and `S*` asserts only what survives every admissible fill.
+const RAMP_T0_SPEED = 27;
+// [dRoute, speedMs, courseOff] per second from :22; d at :43/:44/:46/:52/:54 are the measured rows.
+const ramp: Array<[number, number, boolean]> = [
+  [10, 25.5, false], [11, 25, false], [12, 25, false], [13, 24, false], [14, 24, false], [15, 23, false],   // :22–:27
+  [16, 22, false], [16, 21, false], [17, 20, false], [17, 18, false], [17, 16, false], [17, 14, false],     // :28–:33
+  [17, 12, false], [17, 11, false], [17, 10, false], [17, 9, false], [17, 8, false], [17, 7.5, false],      // :34–:39
+  [17, 7, false], [17, 7, false], [17.7, 7, false], [17.7, 20, false], [10.7, 21, false], [6.5, 23, false], // :40–:45 (:43, :44 measured)
+  [2.2, 26, true],                                                                                          // :46 MEASURED, release (hd=79)
+  [9, 26, true], [16, 25, true], [23, 25, true], [30, 25, true], [37, 25, true],                            // :47–:51 linear 2.2 → 43.3
+  [43.3, 25, true], [50, 25, true], [56, 25, true],                                                         // :52, :54 MEASURED
 ];
-let pos = 27 * 60;
-ramp.forEach(([d, v, off], i) => { pos += v; rampTicks.push({ pos, d, speedMs: v, headingOff: off, headingKnown: true, dManeuverM: 900 - 20 * i }); });
-const Sbase = run(rampTicks.map((k) => ({ ...k, headingKnown: undefined, dManeuverM: undefined })));   // yesterday's decision
-const S = run(rampTicks);
-const sBaseT = Sbase.trips[0], sT = S.trips[0];
-check(Sbase.trips.length === 1 && Math.abs(sBaseT - (60 + 32) * 1000) <= 1000, `S baseline model is wrong: today's logic tripped at ${sBaseT / 1000}s, the field tripped 32 s after :22 (want ${60 + 32}s ± one tick: the d samples between measurements are interpolated)`);
-check(S.trips.length === 1, `S ramp produced ${S.trips.length} reroutes (want exactly 1)`);
-check(sT <= sBaseT - 3000, `S fast path tripped at ${sT / 1000}s, baseline ${sBaseT / 1000}s (want ≥ 3 s sooner)`);
-check(sT >= (60 + 24 + HDG_FAST_TICKS - 1) * 1000, `S fast path tripped at ${sT / 1000}s — BEFORE the release could have been seen ${HDG_FAST_TICKS} times (want ≥ ${60 + 24 + HDG_FAST_TICKS - 1}s)`);
+/** Build the ramp trace with the route maneuver held at `manM` from the release onward (the unknown). */
+const rampWith = (manM: number): Tick[] => {
+  const t: Tick[] = [];
+  for (let i = 0; i < 60; i++) t.push({ pos: RAMP_T0_SPEED * i, d: 5, speedMs: RAMP_T0_SPEED, headingOff: false, headingKnown: true, courseOff: false, dManeuverM: 3000 - RAMP_T0_SPEED * i });
+  let pos = RAMP_T0_SPEED * 60;
+  ramp.forEach(([d, v, off], i) => { pos += v; t.push({ pos, d, speedMs: v, headingOff: off, headingKnown: true, courseOff: off, dManeuverM: i >= 24 ? manM : 600 - v * i }); });
+  return t;
+};
+const sBaseRun = run(rampWith(400).map((k) => ({ ...k, headingKnown: undefined, courseOff: undefined, dManeuverM: undefined })));   // yesterday's decision
+const sBaseT = sBaseRun.trips[0];
+check(sBaseRun.trips.length === 1 && Math.abs(sBaseT - (60 + 32) * 1000) <= 1000,
+  `S baseline model is wrong: today's logic tripped at ${sBaseT / 1000}s, the field tripped 32 s after :22 (want ${60 + 32}s ± one tick)`);
+// The sweep: the gain as a function of the one number the receipts do not carry.
+const sSweep = [60, 90, 100, 120, 150, 200, 300, 500].map((m) => {
+  const r = run(rampWith(m));
+  return { m, trips: r.trips.length, gainS: r.trips.length === 1 ? (sBaseT - r.trips[0]) / 1000 : 0 };
+});
+const sClear = sSweep.find((x) => x.m === 300)!;
+check(sClear.trips === 1 && sClear.gainS >= 2,
+  `S with the maneuver clear (300 m) the fast path gained ${sClear.gainS}s (want ≥ 2 s, and exactly one reroute)`);
+check(sSweep.every((x) => x.trips === 1), `S every maneuver distance must still produce exactly one reroute: ${sSweep.map((x) => `${x.m}m:${x.trips}`).join(" ")}`);
+check(sSweep.filter((x) => x.m <= 100).every((x) => x.gainS === 0),
+  `S with a maneuver within ${HDG_FAST_MANEUVER_CLEAR_M} m the fast path MUST stay out of the way (guard): ${sSweep.filter((x) => x.m <= 100).map((x) => `${x.m}m:+${x.gainS}s`).join(" ")}`);
+const sFast = run(rampWith(300));
+check(sFast.trips[0] >= (60 + 24 + HDG_FAST_TICKS - 1) * 1000,
+  `S fast path tripped at ${sFast.trips[0] / 1000}s — BEFORE the release could have been seen ${HDG_FAST_TICKS} times`);
 
 // ── T: A LEGITIMATE ROUTE CORNER (the fast path must stay quiet) ──────────────────
 // A 90° right at a maneuver: the course is 45–90° off the CURRENT segment's bearing for the
@@ -642,7 +676,7 @@ console.log(
   `holds=${[...new Set(L.holds)].join("/") || "-"} (want ≤20, 1) | ` +
   `M wrong turn + timers frozen ${fmt(M)} vs B ${fmt(B)} (want equal) | ` +
   `N hung request + missed turn=${N.trips.length} [${fmt(N)}] gaps=${[...new Set(nGaps)].join("/") || "-"}ms aborts=${N.aborts.length} (want ${nWantTrips}, +${N_RETRY_MS}ms) | ` +
-  `S Jeff's ramp: baseline ${sBaseT / 1000}s → fast path ${sT / 1000}s (${(sBaseT - sT) / 1000} s sooner; min ${HDG_FAST_MIN_M}m ${HDG_FAST_TICKS} ticks) | T legit corner=${T.trips.length}/${Tc.trips.length} (want 0/0; step advance modelled) | V stale heading=${V.trips.length} real=${Vreal.trips.length} (want 0/1) | W stop+offset=${W.trips.length} (want 0) | Tc no-guard control=${TcNoBehind.trips.length} (want 1) | U divided hwy=${U.trips.length} (want 0) | A+heading=${Ah.trips.length} | ` +
+  `S Jeff's ramp (trend ${sBaseT / 1000}s): gain by maneuver distance ${sSweep.map((x) => `${x.m}m:+${x.gainS}s`).join(" ")} — the field's value is UNKNOWN | T legit corner=${T.trips.length}/${Tc.trips.length} (want 0/0; step advance modelled) | V stale heading=${V.trips.length} real=${Vreal.trips.length} (want 0/1) | W stop+offset=${W.trips.length} (want 0) | Tc no-guard control=${TcNoBehind.trips.length} (want 1) | U divided hwy=${U.trips.length} (want 0) | A+heading=${Ah.trips.length} | ` +
   `R jam 200m off: re-trip ${R.trips.length ? R.trips[0] / 1000 + "s" : "never"} | O slot contract 9/9 | Q never-joined reroute: re-trip +${Number.isFinite(qSlowDelay) ? qSlowDelay / 1000 : "never"}s @15km/h, +${Number.isFinite(qFastDelay) ? qFastDelay / 1000 : "never"}s @108km/h (want ≤40, ≤8) | arm=${SWAP_ARM_TRAVEL_M}m onRoute=${ONROUTE_M}m fetchTimeout=${ROUTE_FETCH_TIMEOUT_MS}ms`,
 );
 if (fails.length) { console.error("FAIL:\n  " + fails.join("\n  ")); process.exit(1); }

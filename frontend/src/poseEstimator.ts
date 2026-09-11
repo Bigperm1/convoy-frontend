@@ -89,8 +89,7 @@ export type PoseState = {
   yawCumPrevAt: number;            // …and the SENSOR time it was measured at (the clamp's clock)
   yawDpsLast: number;              // sensor-frame rate of the last consumed delta (receipts, route weight)
   roadHdg: number | null;          // the road's windowed direction at the held projection (null = none / released)
-  roadHdgAhead: number | null;
-  roadDistM: number;               // the ADOPTED projection's distance from the raw fix (the on-line test for the sharpness fade)     // …and speed × 1 s further along the line (where the car will be at the next fix)
+  roadHdgAhead: number | null;     // …and speed × 1 s further along the line (where the car will be at the next fix)
   roadK: number;                   // 0..1 how much the road owns the nose this frame (distance weight; 0 when released)
   roadAt: number;                  // predict-clock time the road was last handed in
   roadSetAt: number;               // predict-clock time the PROJECTION last moved (the road direction's age)
@@ -178,15 +177,17 @@ export const POSE_ROAD_AGREE_DEG = 15;
  *  snapping at sharp maneuvers for the same reason). A roundabout on a dense line turns ~20°/s: unaffected. */
 export const POSE_ROAD_SHARP_DEG = 20;
 export const POSE_ROAD_SHARP_FULL_DEG = 60;
-/** …but a car ON the line is on the line (2026-09-11, Jeff's corners). The sharpness fade exists for a raw-fix
- *  projection that can flip legs at a vertex; a fix within POSE_ROAD_ONLINE_M of the line is not flipping anywhere,
- *  and there the road keeps its weight through the vertex. The fade returns in full by POSE_ROAD_OFFLINE_M.
- *  Gate section Y: X4 (residential one-vertex corner, 3 m) 43.3° → 40.6° p90, S-curve 47° → 43° median, every
- *  X bar green. The stronger form — dropping the AGREEMENT fade on the line too — halves the sharp-corner lag
- *  (49° → 28° median at 27 km/h, hairpin 52° → 38°) but costs 1–4° at X1n (6 m-noise fixes): a refuter-set bar,
- *  so that is a design decision, not a knob. See memory field-2026-09-11-exit-stall-and-corners. */
-export const POSE_ROAD_ONLINE_M = 4;
-export const POSE_ROAD_OFFLINE_M = 12;
+/** ⛔ TRIED AND REVERTED 2026-09-11 — do not re-add: suspending the sharpness fade while the raw fix is
+ *  within a few metres of the line. It reads well ("a car ON the line is on the line") and it moved the
+ *  clean-fix corner 43.3° → 40.6° p90, which is why it shipped for an afternoon. Decomposed against the
+ *  60-seed suite it turned out to (a) contribute ~nothing once the change it shipped beside is present,
+ *  (b) be 1.5–2.0° p90 WORSE at 6–8 m of fix scatter, and (c) cost 4.7° on the one shape that matters
+ *  most here — A MISSED TURN. A car about to miss a turn is ON the route's entry leg (roadDistM 0.1–0.2 m),
+ *  so the fade was fully off through the whole approach and the drawn nose leaned up to 18° into a corner
+ *  the driver was not taking, during exactly the window before the off-route gate trips. Measured
+ *  (missed-turn lean, median): base 10.4°, with this gate 15.1°, without it 10.4°. The vendor release never
+ *  fires there (the course stays < 45° off the chord until the chord has already swung the nose), so the
+ *  sharpness fade was the ONLY protection. Gate Y4 holds the line. */
 /** A course qualifies to release the road only from a fix at least this sharp (Mapbox RouteSnappingMinimumHorizontalAccuracy = 20)
  *  and while moving ≥ POSE_COURSE_MIN_MS (Mapbox RouteSnappingMinimumSpeed = 3). */
 export const POSE_ROAD_RELEASE_ACC_M = 20;
@@ -262,7 +263,7 @@ export function poseStart(): PoseState {
     lat: NaN, lng: NaN, hdg: 0, spd: 0, tAt: 0, fixAt: 0, hasFix: false, hdgKnown: false, drM: 0,
     yawBias: 0, yawSign: 0, yawAgree: 0, lastCourse: null, lastCourseAt: 0, gpsTurnDps: 0,
     routeW: 0, errPrev: null, errPrevAt: 0, pendLat: 0, pendLng: 0, rawLat: NaN, rawLng: NaN, rawAt: 0, yawCumAtCourse: null, yawCumPrev: null, yawCumPrevAt: 0, yawDpsLast: 0,
-    roadHdg: null, roadHdgAhead: null, roadDistM: 99, roadK: 0, roadAt: 0, roadSetAt: 0, projLat: NaN, projLng: NaN, projMovedAt: 0, accLast: null, roadReleased: false, roadHeld: 0, roadSuspect: false,
+    roadHdg: null, roadHdgAhead: null, roadK: 0, roadAt: 0, roadSetAt: 0, projLat: NaN, projLng: NaN, projMovedAt: 0, accLast: null, roadReleased: false, roadHeld: 0, roadSuspect: false,
     src: "none", fixes: 0, rejected: 0, maxStepM: 0,
   };
 }
@@ -371,8 +372,7 @@ export function posePredict(st: PoseState, nowMs: number, yaw: PoseYaw | null | 
           const dis = Math.abs(wrap180(roadTarget - (courseNow ?? courseTarget)));
           roadK *= Math.max(0, Math.min(1, 1 - (dis - POSE_ROAD_AGREE_DEG) / (POSE_ROAD_RELEASE_DEG - POSE_ROAD_AGREE_DEG)));
           const sharp = Math.abs(wrap180(ahead - st.roadHdg!));
-          const offLine = Math.max(0, Math.min(1, (st.roadDistM - POSE_ROAD_ONLINE_M) / (POSE_ROAD_OFFLINE_M - POSE_ROAD_ONLINE_M)));
-          roadK *= 1 - offLine * (1 - Math.max(0, Math.min(1, 1 - (sharp - POSE_ROAD_SHARP_DEG) / (POSE_ROAD_SHARP_FULL_DEG - POSE_ROAD_SHARP_DEG))));
+          roadK *= Math.max(0, Math.min(1, 1 - (sharp - POSE_ROAD_SHARP_DEG) / (POSE_ROAD_SHARP_FULL_DEG - POSE_ROAD_SHARP_DEG)));
         }
       }
       const target = roadTarget != null && courseTarget != null
@@ -607,7 +607,7 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
   const ease = 1 - Math.exp(-dt / POSE_ROUTE_TAU_S);
   const routeW = st.routeW + (target - st.routeW) * ease;
   const next: PoseState = {
-    ...st, routeW, roadHdg, roadHdgAhead, roadK, roadDistM: proj && Number.isFinite(proj.distM) ? proj.distM : 99, roadReleased: !!proj && released, roadHeld, roadSuspect: !!proj && suspect,
+    ...st, routeW, roadHdg, roadHdgAhead, roadK, roadReleased: !!proj && released, roadHeld, roadSuspect: !!proj && suspect,
     roadAt: roadHdg != null ? st.tAt : st.roadAt,
     roadSetAt,
     projLat: proj ? proj.lat : NaN, projLng: proj ? proj.lng : NaN,

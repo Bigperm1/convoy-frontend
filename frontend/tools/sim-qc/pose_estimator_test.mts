@@ -107,7 +107,7 @@ function run(truth: Truth[], opts: { gyro: boolean; noiseM: number; route: boole
       // first version of this gate projected the ESTIMATE and so could not see the backward drag.
       // roadHdg window = the vendors' max(speed/2, 7.5 m), exactly as the surfaces pass it. `noRoad`
       // strips it — the pre-2026-09-10 behaviour (course-driven nose) as the baseline for section X.
-      if (lastFixIdx === i || heldProj == null) heldProj = projectOnLegs(lastRawLat, lastRawLng, truth, opts.speedMs ?? 4.17, opts.arcVertexM);
+      if (lastFixIdx === i || heldProj == null) heldProj = projectOnLegs(lastRawLat, lastRawLng, opts.routeTruth ?? truth, opts.speedMs ?? 4.17, opts.arcVertexM);
       st = poseRoute(st, heldProj && opts.noRoad ? { ...heldProj, roadHdg: null, roadHdgAhead: null } : heldProj, yaw, i > 0 ? tr.t - truth[i - 1].t : 0.05);
     }
     const o = poseOut(st);
@@ -705,48 +705,53 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
     ok("R7 an unmoved refused chord (180° off, no course) is never admitted by elapsed time: no road for 20 s, routeW → 0, nose holds", adoptedAt == null && st.roadHdg == null && st.routeW < 0.02 && Math.abs(wrap180(st.hdg - trueHdg)) <= 3, `adoptedAt=${adoptedAt} roadHdg=${st.roadHdg} routeW=${st.routeW.toFixed(3)}`); }
 }
 
-// ── Y. 2026-09-11: the road keeps its weight through a corner the car is ON ──────────────────
+// ── Y. 2026-09-11: the road is judged against the course at its FULL inferred rate ───────────
 // Jeff's drive (build 78): the nose trailed the GPS course by ~30° at every sharp corner (`pose-fix
-// … course=295 estHdg=326`, `course=244 estHdg=274`, 37–50°/s). Two changes: (1) the road is JUDGED
-// against the course at its full inferred rate (steering unchanged), so a sustained corner no longer
-// fades the road for trailing the half-gain target; (2) the sharpness fade is gated on distance to
-// the line (POSE_ROAD_ONLINE_M → POSE_ROAD_OFFLINE_M).
+// … course=295 estHdg=326`, `course=244 estHdg=274`, 37–50°/s). Through a sustained corner the
+// AGREEMENT fade was measuring the road against the half-gain STEERING target, which trails the car
+// by design — so the road was faded for being right. It is now judged against the course at its full
+// inferred rate; steering is untouched. A leg-flip at a vertex still fades, because the course is not
+// turning there and the two figures agree.
 //
-// ⚠ EVERY BAR HERE IS SET BETWEEN THE TWO MEASURED NUMBERS, so a revert FAILS. The first version of
-// this section did not (refuter, 2026-09-11): it ran 24 seeds with bars quoting 60-seed figures, and
-// the PRE-change estimator passed all of them — a gate that cannot fail is decoration. 60 seeds, the
-// X-suite's own lesson ("24 passed and 60 did not"). Base = 6f80744, head = 58dcf12.
-//
-//   shape (60 seeds, 3 m noise, 1 Hz, no gyro)          base    head    bar
-//   residential corner 25 km/h r=12, ONE vertex, p90    43.3    40.6    ≤ 42
-//   S-curve SECOND corner 29 km/h r=12, median          45.4    38.3    ≤ 42
-//   sharp corner 27 km/h r=10 (NOT fixed), median       49.1    45.6    ≤ 47
+// ⚠ THIS SECTION HAS BEEN WRONG TWICE. Both are why every bar below sits BETWEEN two measured numbers
+// and several run at more than one noise level:
+//   • v1 ran 24 seeds with bars quoting 60-seed figures — the PRE-change estimator passed all of them.
+//   • v2 shipped beside an on-line sharpness gate and set every bar at noiseM=3, where that gate is
+//     always fully on. It flattered a change that was 1.5–2.0° WORSE at 6–8 m of scatter and cost
+//     4.7° on a missed turn. The gate is reverted (see poseEstimator.ts) and Y4 now guards it.
+// Base = 6f80744, head = this tree. 60 seeds throughout (the X-suite's own lesson).
 {
   const YSEEDS = 60;
   const p = (xs: number[], q: number) => { const a = [...xs].sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(q * (a.length - 1)))]; };
   const c25 = makeCorner(6.94, 12, 80), e25 = Math.floor((80 + (Math.PI / 2) * 12) / 6.94 * 20) + 40;
-  // makeSCurve(8, 12, 60) at 20 Hz: leg, arc, leg, arc, leg. The SECOND corner is the second arc —
-  // the first version measured `from: 20`, which spans both and reports the FIRST corner's max
-  // (refuter, 2026-09-11: base scored 47.6 there but 45.4 on the corner the label names).
-  const sc = makeSCurve(8, 12, 60, 20);
-  const arcM = (Math.PI / 2) * 12, legM = 60;
-  const sec2 = Math.floor((2 * legM + arcM) / 8 * 20), sec2End = Math.floor((3 * legM + 2 * arcM) / 8 * 20);
   const c27 = makeTurn(7.5, 10, 80, 90, 20);
-  const A: number[] = [], B: number[] = [], C: number[] = [];
-  for (let sd = 1; sd <= YSEEDS; sd++) {
-    A.push(run(c25, { gyro: false, noiseM: 3, route: true, speedMs: 6.94, fixHz: 1, from: 100, exitFrom: e25, seed: sd * 7919 }).maxHdgErr);
-    B.push(run(sc, { gyro: false, noiseM: 3, route: true, speedMs: 8, fixHz: 1, from: sec2, exitFrom: sec2End, seed: sd * 7919 }).maxHdgErr);
-    C.push(run(c27, { gyro: false, noiseM: 3, route: true, speedMs: 7.5, fixHz: 1, from: 20, seed: sd * 7919 }).maxHdgErr);
-  }
-  ok("Y1 residential one-vertex corner (25 km/h, r=12): nose p90 ≤ 42° — base 43.3, head 40.6", p(A, 0.9) <= 42, `${p(A, 0.9).toFixed(1)}°`);
-  ok("Y2 S-curve SECOND corner (29 km/h, r=12): nose median ≤ 42° — base 45.4, head 38.3", p(B, 0.5) <= 42, `${p(B, 0.5).toFixed(1)}°`);
+  const sweep = (nm: number) => {
+    const A: number[] = [], C: number[] = [];
+    for (let sd = 1; sd <= YSEEDS; sd++) {
+      A.push(run(c25, { gyro: false, noiseM: nm, route: true, speedMs: 6.94, fixHz: 1, from: 100, exitFrom: e25, seed: sd * 7919 }).maxHdgErr);
+      C.push(run(c27, { gyro: false, noiseM: nm, route: true, speedMs: 7.5, fixHz: 1, from: 20, seed: sd * 7919 }).maxHdgErr);
+    }
+    return { corner: p(A, 0.9), sharp: p(C, 0.5) };
+  };
+  const n3 = sweep(3), n5 = sweep(5);
+  ok("Y1 residential one-vertex corner (25 km/h, r=12) @3 m: nose p90 ≤ 42.5° — base 43.3, head 41.7", n3.corner <= 42.5, `${n3.corner.toFixed(1)}°`);
+  // The SAME shape at 5 m of scatter — the regime v2's bars never touched, and where its extra gate
+  // was actively worse. The win must survive the noise the field actually has (Jeff's fixes: acc=10).
+  ok("Y1n the same corner @5 m: nose p90 ≤ 47° — base 48.4, head 46.3", n5.corner <= 47, `${n5.corner.toFixed(1)}°`);
   // The sharp low-speed corner is NOT fixed — it is BOUNDED. Every mechanism that halves it fails a
-  // refuter-set X bar (X1n's 6 m-noise cap, the 70°/s swing rule, the exit-leg 3° rule): raising the
-  // slew cap, the course gain, the sharpness fade, a constant lead, and a per-frame road-direction
-  // table indexed by dead-reckoned distance were all measured and rejected (memory
-  // field-2026-09-11-exit-stall-and-corners). This bar holds today's number so the next attempt is
-  // measured, and a REGRESSION here fails even though the defect is open.
-  ok("Y3 sharp one-vertex corner (27 km/h, r=10) — OPEN DEFECT, bounded: median ≤ 47° — base 49.1, head 45.6", p(C, 0.5) <= 47, `${p(C, 0.5).toFixed(1)}° (p90 ${p(C, 0.9).toFixed(1)}°)`);
+  // refuter-set X bar (X1n's 6 m cap, the 70°/s swing rule, the exit-leg 3° rule): the slew cap, the
+  // course gain, the sharpness fade, a constant lead, and a per-frame road-direction table were all
+  // measured and rejected (memory field-2026-09-11-exit-stall-and-corners). These hold today's number.
+  ok("Y3 sharp one-vertex corner (27 km/h, r=10) — OPEN DEFECT, bounded @3 m: median ≤ 48.5° — base 49.1, head 48.0", n3.sharp <= 48.5, `${n3.sharp.toFixed(1)}°`);
+  ok("Y3n …and @5 m: median ≤ 50° — base 50.6, head 49.7", n5.sharp <= 50, `${n5.sharp.toFixed(1)}°`);
+  // ── Y4: A MISSED TURN. The route corners; the car goes straight on. This is the shape Jeff was in
+  // when he merged off the highway, and the one an "on-line" road rule silently ruins: a car about to
+  // miss a turn IS on the route's entry leg, so any rule keyed on closeness to the line is fully armed
+  // exactly when the line is about to be wrong. The drawn nose must NOT lean into the corner.
+  const straightOn = makeStraight(6.94, 260), routeCorners = makeCorner(6.94, 12, 80);
+  const lean: number[] = [];
+  for (let sd = 1; sd <= YSEEDS; sd++) lean.push(run(straightOn, { gyro: false, noiseM: 2, route: true, speedMs: 6.94, fixHz: 1, from: 60, seed: sd * 7919, routeTruth: routeCorners }).maxHdgErr);
+  ok("Y4 MISSED TURN: the nose must not lean into a corner the driver is not taking — median ≤ 11° (base 10.4, the reverted on-line gate 15.1)", p(lean, 0.5) <= 11, `${p(lean, 0.5).toFixed(1)}° (p90 ${p(lean, 0.9).toFixed(1)}°)`);
 }
 
 console.log(fails === 0 ? "\nPASS pose_estimator" : `\nFAIL pose_estimator (${fails})`);

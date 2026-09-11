@@ -94,6 +94,14 @@ export type GreetingContext = {
 let _preparedKey: string | null = null;
 let _preparedAudio: { b64: string; mime: string } | null = null;
 let _preparing: Promise<void> | null = null;
+/** Generation token. A prepare is two awaits deep (/nova/greeting then /tts — ≥ 3.7 s in the field on
+ *  2026-09-11), and a destination change or an added stop starts another one while the first is still
+ *  in flight. Without this the superseded prepare still wrote `_preparedAudio` and cleared `_preparing`
+ *  when it finished, so Start could play the OLD destination's line — the single-destination greeting
+ *  on a multi-stop run, which is the exact 08-31 bug shape — or a late failure of the stale prepare
+ *  could wipe a good greeting. Reproduced 2026-09-11 across five interleavings. Every write below is
+ *  guarded by `gen === _gen`. */
+let _gen = 0;
 
 // Pre-fetch the LLM line AND pre-synthesize its audio while the route preview is
 // on screen, so playPreparedGreeting() can speak instantly at Start. Best-effort
@@ -103,6 +111,7 @@ export function prepareRouteGreeting(ctx: GreetingContext, key: string): void {
   if (_preparedKey === key && (_preparedAudio || _preparing)) return;
   _preparedKey = key;
   _preparedAudio = null;
+  const gen = ++_gen;
   _preparing = (async () => {
     try {
       const s = getSettings();
@@ -134,18 +143,21 @@ export function prepareRouteGreeting(ctx: GreetingContext, key: string): void {
       // Receipt (2026-09-10, Jeff: "can you tell me what it said to me this morning" — nothing had recorded
       // it): the line, its source (claude | template — the template is several clipped sentences), once
       // per prepared destination. Bounded by construction (one per route preview).
+      if (gen !== _gen) return;                       // superseded while /nova/greeting was in flight
       try { logEvent(`greet-prep src=${data?.source ?? "?"} len=${text.length} text="${text.slice(0, 200).replace(/"/g, "'")}"`); } catch {}
       if (!text) return;
 
       // Pre-synthesize so Start -> instant playback (no /tts round-trip then).
       const tts = await api.post("/tts", { text, voice: getNovaVoice(s) }, { timeout: TTS_FETCH_TIMEOUT_LONG_MS });
       const b64 = tts?.data?.audio_b64;
+      if (gen !== _gen) return;                       // superseded while /tts was in flight
       if (b64) _preparedAudio = { b64, mime: tts?.data?.mime || "audio/mp3" };
     } catch (e) {
+      if (gen !== _gen) return;                       // a STALE prepare's failure must not wipe a good one
       _preparedAudio = null;
       try { logEvent(`greet-prep-fail err=${String((e as any)?.message ?? e).slice(0, 80)}`); } catch {}
     } finally {
-      _preparing = null;
+      if (gen === _gen) _preparing = null;
     }
   })();
 }
@@ -173,4 +185,5 @@ export function clearPreparedGreeting(): void {
   _preparedAudio = null;
   _preparing = null;
   _preparedKey = null;
+  _gen += 1;   // orphan any prepare still in flight: it must not land after a clear
 }

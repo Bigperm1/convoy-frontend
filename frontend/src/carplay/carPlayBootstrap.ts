@@ -31,17 +31,21 @@ let booted = false;
 // died native-side" and is how this investigation kept ending up at the native layer.
 // This handle lets the warm root hand the screen back to the cold root, which is the
 // path the fleet's `src=cold` taps prove still works.
-let _setIdleRoot: (() => void) | null = null;
+let _setIdleRoot: ((force?: boolean) => void) | null = null;
 
 /**
- * Ask the cold bootstrap to (re)claim the CarPlay root with its idle MapTemplate.
+ * Ask the cold bootstrap to install its idle MapTemplate as the CarPlay root, even
+ * though the phone map screen still owns the root (`force`). The caller must NOT clear
+ * carPlayHookOwnsRoot to be heard — that flag is only ever set true by a mount-only
+ * effect, so clearing it here would strand ownership false for the rest of the screen's
+ * life and make every later reconnect install two competing roots.
+ *
  * Returns false when the bootstrap never ran (non-iOS, or no native module), so the
  * caller can record WHY the failover did nothing instead of assuming it worked.
- * The caller must clear carPlayHookOwnsRoot FIRST or setIdleRoot will just skip again.
  */
 export function requestCarPlayIdleRoot(): boolean {
   if (!_setIdleRoot) return false;
-  try { _setIdleRoot(); return true; } catch { return false; }
+  try { _setIdleRoot(true); return true; } catch { return false; }
 }
 
 export function initCarPlayBootstrap(): void {
@@ -89,6 +93,8 @@ export function initCarPlayBootstrap(): void {
   //   carplay-bootstrap-ok → carplay-onconnect → carplay-idleroot-set (or -skip) → carplay-tap:*
   // The first link missing that a later link present would contradict localizes the
   // fault; all links present + no taps on a pressed button = the press dies native-side.
+  // The idle MapTemplate for THIS connect (see setIdleRoot). Null between connects.
+  let idleTpl: any = null;
   const receiptOnce: Record<string, boolean> = {};
   const receipt = (key: string, detail: string) => {
     if (receiptOnce[key]) return;
@@ -96,8 +102,15 @@ export function initCarPlayBootstrap(): void {
     try { logEventReliable(`carplay-${key} ${detail}`); } catch {}
   };
 
-  const setIdleRoot = () => {
-    if (carPlayHookOwnsRoot) {
+  // `force` is the FAILOVER entry (requestCarPlayIdleRoot). The warm root calls it when
+  // it could not install itself, and it must NOT have to clear carPlayHookOwnsRoot to be
+  // heard: releasing that flag would leave the phone map screen mounted with ownership
+  // false — its only true assignment is a mount-only effect — so every LATER reconnect
+  // would run BOTH this cold root and the warm one, racing over the root and stacking a
+  // fresh permanent barButtonPressed listener each time (Template.ts never removes one).
+  // Codex review, 2026-09-11, reproduced from the code. Ownership now never changes.
+  const setIdleRoot = (force = false) => {
+    if (carPlayHookOwnsRoot && !force) {
       setCarState({ cpDbg: 'idle:SKIP(hookOwns)' });
       // Not a failure — the warm root owns the template. Recorded because a session
       // where NOTHING set a root (no -set, no -skip) is the invisible case that has
@@ -106,7 +119,13 @@ export function initCarPlayBootstrap(): void {
       return;
     }
     try {
-      const t = new MapTemplate({
+      // REUSE within a single connect. Every `new MapTemplate` registers another
+      // barButtonPressed listener keyed to this same id and Template.ts never removes
+      // one, so each construction adds a duplicate dispatch of every press (the
+      // `carplay-tap-deduped` rows are that duplication, already visible in the field).
+      // Cleared on disconnect, because the native store's templates do not outlive the
+      // scene and a stale JS handle would set a root that no longer exists.
+      const t = idleTpl || (idleTpl = new MapTemplate({
         id: 'convoy-carplay-idle',
         tabTitle: 'Map',
         tabSystemImageName: 'map',
@@ -144,7 +163,7 @@ export function initCarPlayBootstrap(): void {
           emitCarGesture({ kind: 'zoom', scale: e?.scale ?? 1, velocity: e?.velocity ?? 0 }),
         onDidEndZoomGesture: (e: { velocity: number }) =>
           emitCarGesture({ kind: 'zoomEnd', velocity: e?.velocity ?? 0 }),
-      });
+      }));
       CarPlay.setRootTemplate(t);
       setCarState({ cpDbg: 'idle:SET conn=' + (CarPlay.connected ? '1' : '0') });
       // setRootTemplate RETURNED — the template with our handlers is the root as far
@@ -221,6 +240,10 @@ export function initCarPlayBootstrap(): void {
   };
 
   const onDisconnect = () => {
+    // The scene is gone, so the native template store's entry for the idle root is too.
+    // Drop the JS handle or the next connect would setRootTemplate an id native can no
+    // longer find — which NSLogs and installs nothing, silently (RNCarPlay.m:545-560).
+    idleTpl = null;
     void releaseBgLocation('carplay');
     stopCarDataService();
   };

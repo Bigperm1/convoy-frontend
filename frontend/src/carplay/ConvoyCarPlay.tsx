@@ -1425,7 +1425,10 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
     const failoverToColdRoot = (why: string) => {
       let handed = false;
       try {
-        setCarPlayHookOwnsRoot(false);
+        // Ownership is deliberately NOT released. requestCarPlayIdleRoot forces past the
+        // hookOwns check instead. Clearing the flag here would strand it false — its only
+        // true assignment is the mount-only effect above — so every later reconnect would
+        // install BOTH roots and stack another permanent barButtonPressed listener.
         handed = requestCarPlayIdleRoot();
       } catch {}
       try { logEventReliable(`carplay-root-failover why=${why} cold=${handed ? 1 : 0}`); } catch {}
@@ -1433,9 +1436,18 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
     };
 
     const setRoot = () => {
-      // Did the warm root actually get installed? Read by the failover below; a false
-      // here is the state that leaves the car with no template at all.
-      let rootOk = false;
+      // Did setRootTemplate get DISPATCHED? Not "installed" — Codex review 2026-09-11,
+      // confirmed against the source on disk: CarPlay.setRootTemplate returns
+      // this.bridge.setRootTemplate(id, animated), a void RCT_EXPORT_METHOD, and
+      // RNCarPlay.m:545-560 only NSLogs on a template-store miss and ignores the
+      // interfaceController completion's NSError. So a native install failure never
+      // throws back here and this flag stays true. It catches the JS-side failures —
+      // the template constructor throwing, the outer catch — which is strictly more
+      // than the bare console.warn it replaces, and strictly less than proof. Confirming
+      // a real install would need the template's didAppear, and failing over on a
+      // didAppear TIMEOUT would clobber a working warm root on any head unit that
+      // delivers it late or not at all, so that is deliberately not done here.
+      let rootDispatched = false;
       try {
         if (isIOS) {
           const mapTemplate = new MapTemplate({
@@ -1565,8 +1577,8 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             + ' tpl=' + (mapTemplate ? ('ok:' + String((mapTemplate as any)?.id ?? '?').slice(0, 10)) : 'NULL');
           try {
             CarPlay.setRootTemplate(mapTemplate);
-            dbg += ' root=CALLED';
-            rootOk = true;
+            dbg += ' root=DISPATCHED';
+            rootDispatched = true;
           } catch (e) {
             dbg += ' root=THREW:' + String(e).slice(0, 28);
           }
@@ -1609,7 +1621,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
         try { logEventReliable(`carplay-root-threw ${String((e as any)?.message || e).slice(0, 120)}`); } catch {}
       }
       // iOS only: Android Auto owns its own root and has no cold bootstrap to fall back to.
-      if (isIOS && !rootOk) failoverToColdRoot('no-root');
+      if (isIOS && !rootDispatched) failoverToColdRoot('no-dispatch');
     };
 
     const onConnect = () => {

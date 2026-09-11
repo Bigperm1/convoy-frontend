@@ -7,7 +7,7 @@
 // F what "no evidence" may and may not do; G the feature classifier; H the ease.
 import {
   liftDecide, LIFT_STATE0, easeLift, isDrivableRoad, isPropertyRoad, buildingHeightOf, buildingUnder, roadEvidence, queryComplete,
-  LIFT_OFFROAD_CONFIRM_MS, LIFT_ABSENCE_CONFIRM_MS, LIFT_UNKNOWN_HOLD_MS, LIFT_MAX_M, LIFT_BUILDING_MARGIN_M, LIFT_ONROAD_SPEED_MS,
+  LIFT_OFFROAD_CONFIRM_MS, LIFT_ABSENCE_CONFIRM_MS, LIFT_UNKNOWN_HOLD_MS, LIFT_SUSTAIN_MAX_MS, LIFT_MAX_M, LIFT_BUILDING_MARGIN_M, LIFT_ONROAD_SPEED_MS,
   type LiftState, type LiftEvidence,
 } from "../../src/selfLiftRule.ts";
 
@@ -78,7 +78,7 @@ console.log("E. no evidence never starts a lift, and ends one only after the hol
 {
   const nothing = run(Array(30).fill({ speedMs: 0 }));
   ok("E1 30 s of nothing from the ground: still 0", nothing.every((s) => s.targetM === 0));
-  const lifted: LiftState = { targetM: 10, why: "offroad", offRoadSince: 0, unknownSince: null };
+  const lifted: LiftState = { targetM: 10, why: "offroad", offRoadSince: 0, positiveSince: 0, unknownSince: null, completeAt: 100_000 };
   const hold = run(Array(10).fill({ speedMs: 0 }), 10, lifted, 100_000);
   const holdSteps = Math.ceil(LIFT_UNKNOWN_HOLD_MS / 1000);
   ok(`E2 a lift already up survives ${LIFT_UNKNOWN_HOLD_MS} ms of nothing…`, hold[holdSteps - 1].targetM === 10, `${hold[holdSteps - 1].targetM}`);
@@ -106,8 +106,15 @@ console.log("E. no evidence never starts a lift, and ends one only after the hol
   ok("E9b idle throughout with the same generation IS complete; not idle at either end is not", queryComplete(true, 7, true, 7) && !queryComplete(false, 7, true, 7) && !queryComplete(true, 7, false, 7));
   // The 20:57 sim crawl: a confirmed lift in a lot fell on the 6 s unknown hold (the moving map is never idle) and rose
   // again. Something seen under the car by ANY query sustains a lift; it still cannot start one.
-  const up: LiftState = { targetM: 10, why: "offroad", offRoadSince: 0, positiveSince: 0, unknownSince: null };
+  const up: LiftState = { targetM: 10, why: "offroad", offRoadSince: 0, positiveSince: 0, unknownSince: null, completeAt: 100_000 };
   ok("E10 a confirmed lift is SUSTAINED by an aisle seen under the car from a moving map (30 s)", run(Array(30).fill({ speedMs: 1.5, roadHit: false, lot: true, sustain: true }), 10, up, 100_000).every((s) => s.targetM === 10));
+  // Codex pass 8: incomplete sustain is bounded from the last COMPLETE proof, and incomplete samples never renew it.
+  const long = run(Array(60).fill({ speedMs: 1.5, roadHit: false, lot: true, sustain: true }), 10, up, 100_000);
+  const holdSteps2 = Math.ceil(LIFT_SUSTAIN_MAX_MS / 1000), endSteps = holdSteps2 + 1 + Math.ceil(LIFT_UNKNOWN_HOLD_MS / 1000);   // the unknown clock starts at the first sample PAST the deadline
+  ok(`E11 …but only for ${LIFT_SUSTAIN_MAX_MS} ms past the last complete proof (still up at ${holdSteps2} s)`, long[holdSteps2].targetM === 10, `${long[holdSteps2].targetM}`);
+  ok(`E11b …and down within the unknown hold after that (0 by ${endSteps} s)`, long[endSteps].targetM === 0 && long[endSteps].why === "unknown", `${long[endSteps].targetM} ${long[endSteps].why}`);
+  const renewed = run([...Array(40).fill({ speedMs: 1.5, roadHit: false, lot: true, sustain: true }), { speedMs: 0, roadHit: false, lot: true, complete: true, sustain: true }, ...Array(40).fill({ speedMs: 1.5, roadHit: false, lot: true, sustain: true })], 10, up, 100_000);
+  ok("E11c one COMPLETE positive sample (a pause, the map idle) renews the sustain deadline", renewed.every((s) => s.targetM === 10));
   ok("E10b …but the same samples cannot START a lift from the ground", run(Array(30).fill({ speedMs: 1.5, roadHit: false, lot: true, sustain: true })).every((s) => s.targetM === 0));
   ok("E10c a road hit still drops a sustained lift at once", liftDecide(up, ev({ speedMs: 1.5, roadHit: true, sustain: true }), 100_000, 10).targetM === 0);
   ok("E10d with nothing under the car the 6 s hold still ends it", run(Array(8).fill({ speedMs: 1.5 }), 10, up, 100_000).at(-1)!.targetM === 0);

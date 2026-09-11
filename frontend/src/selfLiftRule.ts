@@ -42,6 +42,7 @@ export const LIFT_COVERAGE_M = 300;         // road data counts as loaded HERE o
 export const LIFT_OFFROAD_CONFIRM_MS = 2500;   // POSITIVE off-road evidence (a driveway / aisle under the car, a footprint) must hold this long
 export const LIFT_ABSENCE_CONFIRM_MS = 8000;   // "no drivable road within reach" alone is weaker (a tile still loading, a wide lot) and must hold this long
 export const LIFT_UNKNOWN_HOLD_MS = 6000;
+export const LIFT_SUSTAIN_MAX_MS = 45000;      // an incomplete "something under the car" keeps a lift at most this long past the last COMPLETE proof
 export const LIFT_EVIDENCE_FRESH_MS = 3500; // a surface's evidence older than this no longer counts
 export const LIFT_BUILDING_MARGIN_M = 2;
 export const LIFT_MAX_M = 40;
@@ -194,15 +195,17 @@ export type LiftState = {
   /** since when POSITIVE evidence (something under the car) has been continuous (LIFT_OFFROAD_CONFIRM_MS) */
   positiveSince: number | null;
   unknownSince: number | null;
+  /** the last time COMPLETE (idle-map) off-road evidence confirmed or renewed the lift — incomplete sustain is bounded from here */
+  completeAt: number | null;
 };
-export const LIFT_STATE0: LiftState = { targetM: 0, why: "init", offRoadSince: null, positiveSince: null, unknownSince: null };
+export const LIFT_STATE0: LiftState = { targetM: 0, why: "init", offRoadSince: null, positiveSince: null, unknownSince: null, completeAt: null };
 
 /** One decision. `offRoadLiftM` is the marker's own off-road lift (car 10, arrow 16). */
 export function liftDecide(st: LiftState, ev: LiftEvidence, now: number, offRoadLiftM: number): LiftState {
   const fastEnough = typeof ev.speedMs === "number" && Number.isFinite(ev.speedMs) && ev.speedMs >= LIFT_ONROAD_SPEED_MS;
   const onRoute = typeof ev.navDistM === "number" && Number.isFinite(ev.navDistM) && ev.navDistM <= LIFT_NAV_ONROAD_M;
   if (fastEnough || onRoute || ev.roadHit === true) {
-    return { targetM: 0, why: fastEnough ? "speed" : onRoute ? "nav" : "road", offRoadSince: null, positiveSince: null, unknownSince: null };
+    return { targetM: 0, why: fastEnough ? "speed" : onRoute ? "nav" : "road", offRoadSince: null, positiveSince: null, unknownSince: null, completeAt: null };
   }
   // Something UNDER the car (a driveway, an aisle, a roof) is positive evidence. "No road within reach" is only an
   // absence: it counts solely when the map was idle (every tile loaded) — a tile still loading looks the same
@@ -217,16 +220,21 @@ export function liftDecide(st: LiftState, ev: LiftEvidence, now: number, offRoad
     if (ready) {
       const bld = typeof ev.buildingH === "number" ? ev.buildingH + LIFT_BUILDING_MARGIN_M : 0;
       const target = Math.min(LIFT_MAX_M, Math.max(offRoadLiftM, bld));
-      return { targetM: target, why: bld > 0 ? `bld:${Math.round(ev.buildingH as number)}` : "offroad", offRoadSince: since, positiveSince: pSince, unknownSince: null };
+      return { targetM: target, why: bld > 0 ? `bld:${Math.round(ev.buildingH as number)}` : "offroad", offRoadSince: since, positiveSince: pSince, unknownSince: null, completeAt: now };
     }
-    return { ...st, why: st.targetM > 0 ? st.why : "offroad-wait", offRoadSince: since, positiveSince: pSince, unknownSince: null };
+    return { ...st, why: st.targetM > 0 ? st.why : "offroad-wait", offRoadSince: since, positiveSince: pSince, unknownSince: null, completeAt: st.targetM > 0 ? now : st.completeAt };
   }
-  // A confirmed lift stays up while something is still seen under the car, idle or not.
-  if (st.targetM > 0 && ev.sustain) return { ...st, unknownSince: null };
+  // A confirmed lift stays up while something is still seen under the car by a map that is not idle — for at
+  // most LIFT_SUSTAIN_MAX_MS past the last COMPLETE proof (Codex pass 8: a driveway seen beside a missing street
+  // tile could otherwise hold the lift forever). Incomplete samples never renew that deadline, and the
+  // confirmation clocks restart so a later height change needs fresh continuous complete evidence.
+  if (st.targetM > 0 && ev.sustain && st.completeAt != null && now - st.completeAt <= LIFT_SUSTAIN_MAX_MS) {
+    return { ...st, offRoadSince: null, positiveSince: null, unknownSince: null };
+  }
   // No counted evidence either way (nothing, or an absence the map could not vouch for).
   const uSince = st.unknownSince ?? now;
   if (st.targetM > 0 && now - uSince >= LIFT_UNKNOWN_HOLD_MS) {
-    return { targetM: 0, why: "unknown", offRoadSince: null, positiveSince: null, unknownSince: uSince };
+    return { targetM: 0, why: "unknown", offRoadSince: null, positiveSince: null, unknownSince: uSince, completeAt: null };
   }
   return { ...st, offRoadSince: null, positiveSince: null, unknownSince: uSince };
 }

@@ -44,6 +44,8 @@ import { wxCalloutUri, WX_CALLOUT_KINDS, WX_CALLOUT_TEXT_X, WX_CALLOUT_TEXT_CY, 
 import { calloutTextOffsetExpr, CALLOUT_TEXT_PT, CALLOUT_TEXT_SM_PT, CALLOUT_TEXT_LEN_MAX } from '../calloutTextOffset';
 // End-pin weather images on the car surface — iOS CarPlay only until Android Auto is verified
 // (see allMapImages below). JS-only, so an OTA can flip it.
+/** Head-unit pin scale: the 26 pt neon pin at 0.8 (was 0.72 for the 44 pt teardrops). */
+const CAR_PIN_SCALE = 0.8;
 const WX_PIN_ON_CAR = Platform.OS === 'ios';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, getVehiclePngOrDefault, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
@@ -2589,17 +2591,19 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         </ShapeSource>
       )}
 
+      {/* The neon pin family at 0.8 on the head unit (Jeff 2026-09-10, off the mockup) — the
+          same component the phone snapshots, so the four surfaces cannot disagree. */}
       {(s.roadEvents || []).map((e) => (
-        <IncidentMarker key={'inc_' + e.id} event={e} scale={0.72} />
+        <IncidentMarker key={'inc_' + e.id} event={e} scale={CAR_PIN_SCALE} />
       ))}
       {(s.hazards || []).map((h) => (
-        <HazardMarker key={'hz_' + h.id} hazard={h as any} />
+        <HazardMarker key={'hz_' + h.id} hazard={h as any} scale={CAR_PIN_SCALE} />
       ))}
       {(s.speedCameras || []).map((c) => (
-        <CameraMarker key={'cam_' + c.id} lat={c.lat} lng={c.lng} />
+        <CameraMarker key={'cam_' + c.id} lat={c.lat} lng={c.lng} scale={CAR_PIN_SCALE} />
       ))}
       {(s.places || []).map((p, i) => (
-        <PlaceMarker key={'pl_' + p.id} place={p as any} index={i} scale={0.72} />
+        <PlaceMarker key={'pl_' + p.id} place={p as any} index={i} scale={CAR_PIN_SCALE} />
       ))}
     </MapView>
   );

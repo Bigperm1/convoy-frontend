@@ -50,7 +50,8 @@ import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLat
 import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, clampCutToRoute, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M, PEER_MODEL_LIFT_M } from "./routeTrim";
 import { buildRibbonPartition, buildRibbonFeatures, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import type { RoadEvent, RoadEventKind, RoadEventSeverity } from "./driveBcEvents";
+import type { RoadEvent, RoadEventKind } from "./driveBcEvents";
+import { NeonPin, hazardPin, hazardPinImage, HAZARD_PIN_KINDS, HAZARD_PIN_DEFAULT, CAMERA_PIN, INCIDENT_PIN, INCIDENT_PIN_KINDS, PLACE_TONE, NEON_TONE, NEON_PIN_H, NEON_PIN_HOLE_ABOVE_TIP } from "./components/NeonPin";
 import { getVehiclePngOrDefault, getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
 import { ClassSprite } from "./classLayers";
 import { scanMapUrl } from "./carScan";
@@ -563,12 +564,10 @@ export const CAR_EMISSIVE_BY_MODE: Record<string, number> = {
   night: 0.55,
 };
 
-// ----- Marker icon assets (shared with the Google engine) -----
-const HAZARD_ICONS: Record<string, any> = {
-  police: require("../assets/images/police.png"),
-};
-const HAZARD_ICON_DEFAULT = require("../assets/images/hazard.png");
-const CAMERA_ICON = require("../assets/images/speed_camera.png");
+// ----- Marker artwork -----
+// Hazards, cameras, DriveBC events and place pins are ONE family now: src/components/NeonPin.tsx
+// (Jeff, 2026-09-10, off the "F · Neon rings" mockup). The stock hazard triangle, the police badge
+// and the glass camera square PNGs are no longer drawn anywhere.
 
 // (The destination's arrival weather is drawn by DestinationWeatherCallout — see wxCalloutImages.ts.)
 
@@ -889,6 +888,8 @@ export function decodePolyline(encoded?: string | null): { latitude: number; lon
 // so they don't clutter the rest of the map — keeps the ones on the road you're
 // routed along, drops ones on unrelated nearby streets.
 const ROUTE_CAMERA_CORRIDOR_M = 150;
+/** The next camera / event ahead within this much travel stands up at 32 pt (the neon pins). */
+const NEXT_AHEAD_M = 500;
 
 // Min distance (metres) from a point to a segment A→B, via a local
 // equirectangular projection centred on the point (accurate at street scale).
@@ -2251,12 +2252,12 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
 // ===== HazardMarker =====
 // Community hazard / police pin — a flat icon image (police.png for police,
 // hazard.png otherwise). Tap → details; long-press → the standard hazard menu.
-export function HazardMarker({ hazard, onPress, onLongPress }: { hazard: Hazard; onPress?: () => void; onLongPress?: () => void }) {
-  const src = HAZARD_ICONS[hazard.kind] || HAZARD_ICON_DEFAULT;
+export function HazardMarker({ hazard, onPress, onLongPress, scale = 1 }: { hazard: Hazard; onPress?: () => void; onLongPress?: () => void; scale?: number }) {
+  const pin = hazardPin(hazard.kind);
   return (
-    <MarkerView coordinate={[hazard.lng, hazard.lat]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+    <MarkerView coordinate={[hazard.lng, hazard.lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
       <Pressable onPress={onPress} onLongPress={onLongPress} hitSlop={6}>
-        <Image source={src} style={styles.hazardIcon} resizeMode="contain" fadeDuration={0} />
+        <NeonPin tone={pin.tone} glyph={pin.glyph} size={NEON_PIN_H * scale} />
       </Pressable>
     </MarkerView>
   );
@@ -2264,19 +2265,13 @@ export function HazardMarker({ hazard, onPress, onLongPress }: { hazard: Hazard;
 
 // ===== CameraMarker =====
 // Fixed speed-camera pin (OpenStreetMap). Pins only — the proximity voice alert
-// is handled in map.tsx. No press handler.
-export function CameraMarker({ lat, lng }: { lat: number; lng: number }) {
-  // The Image is wrapped in a sized View: MarkerView positions a child view at
-  // the coordinate and reads its measured size — a BARE <Image> child can
-  // measure 0×0 (before the bitmap loads) and render invisibly, which is why
-  // cameras alone didn't show. The explicit-size wrapper gives MarkerView a
-  // stable box to place immediately. (Every other marker already wraps its
-  // image in a View/Pressable, so only cameras were affected.)
+// is handled in map.tsx. No press handler. (NeonPin renders a sized View, so
+// MarkerView always has a stable box to measure — the old bare <Image> child
+// could measure 0×0 before its bitmap loaded and vanish.)
+export function CameraMarker({ lat, lng, scale = 1 }: { lat: number; lng: number; scale?: number }) {
   return (
-    <MarkerView coordinate={[lng, lat]} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
-      <View style={styles.cameraIconWrap}>
-        <Image source={CAMERA_ICON} style={styles.cameraIcon} resizeMode="contain" fadeDuration={0} />
-      </View>
+    <MarkerView coordinate={[lng, lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
+      <NeonPin tone={CAMERA_PIN.tone} glyph={CAMERA_PIN.glyph} size={NEON_PIN_H * scale} />
     </MarkerView>
   );
 }
@@ -2290,12 +2285,10 @@ const INCIDENT_TITLE: Record<RoadEventKind, string> = {
   weather: "Weather hazard", event: "Road event",
 };
 export function IncidentMarker({ event, scale = 1 }: { event: RoadEvent; scale?: number }) {
-  // Severity-tinted Hairpin teardrop (red = major/moderate in the SPEEDO red,
-  // grey = minor) with the black wrench/hammer in the head — matches the
-  // phone's GL pins (this MarkerView version renders on the CarPlay map;
-  // parity rule). `scale` shrinks the pin (CarPlay passes ~0.72).
-  const red = event.severity === "MAJOR" || event.severity === "MODERATE";
-  const W = 34 * scale, H = 44 * scale;
+  // The neon pin in the event's tone (red incident / closure, amber roadwork, pale-blue weather);
+  // a minor event is smaller and dimmer, matching the phone's GL pins (parity rule).
+  const pin = INCIDENT_PIN[event.kind] || INCIDENT_PIN.event;
+  const minor = !(event.severity === "MAJOR" || event.severity === "MODERATE");
   // Official event — tap shows the headline. Deliberately NOT the crew-hazard sheet
   // (no report/delete actions on a government feed item).
   const showDetail = () => {
@@ -2305,51 +2298,21 @@ export function IncidentMarker({ event, scale = 1 }: { event: RoadEvent; scale?:
   return (
     <MarkerView coordinate={[event.lng, event.lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
       <Pressable onPress={showDetail} hitSlop={8}>
-        <View style={{ width: W, height: H, alignItems: "center" }}>
-          <Image
-            source={red ? require("../assets/images/brand-pin-red.png") : require("../assets/images/brand-pin-grey.png")}
-            style={{ width: W, height: H }}
-            resizeMode="contain"
-          />
-          {/* Glyph sits INSIDE the pin's head circle — no badge circle behind it.
-              Box centre = the hole's alpha-centroid (x 0.5w, y 0.38h); the small
-              margins counter the MCI glyph's font bearing (draws ~1.8pt left /
-              2.35pt high of its box — measured from the tester screenshot). */}
-          <View style={[styles.brandPinBadgeDyn, { backgroundColor: "transparent", top: H * 0.38 - 10 * scale, left: W / 2 - 10 * scale, width: 20 * scale, height: 20 * scale }]}>
-            <MaterialCommunityIcons name="hammer-wrench" size={12 * scale} color="#0B0B0C" style={{ marginLeft: 3.6 * scale, marginTop: 4.7 * scale }} />
-          </View>
-        </View>
+        <NeonPin tone={pin.tone} glyph={pin.glyph} size={NEON_PIN_H * scale * (minor ? 0.7 : 1)} opacity={minor ? 0.6 : 1} />
       </Pressable>
     </MarkerView>
   );
 }
 
 // ===== PlaceMarker =====
-// Category quick-search result pin: gas price chip / fuel badge / named place.
-// The "Place pins" setting (showPins) hides the pure pin GLYPHS (teardrop under
-// a name, gas-pump badge) while ALWAYS keeping price chips and name labels. A
-// no-price gas station with pins off has nothing to draw → no marker at all.
 export function PlaceMarker({ place, index, onPress, scale = 1 }: { place: PlacePoint; index: number; onPress?: (p: PlacePoint) => void; scale?: number }) {
-  // Same metal as the phone's GL pin — CarPlay must match the phone.
-  const skin = PLACE_PIN_SKIN[useAppSkin()] ?? PLACE_PIN_SKIN.brand;
-  // Unified numbered result pin — green background, thin grey border, Convoy
-  // font. The number matches the row order in the Results dropdown so the list
-  // and the map line up (1, 2, 3 …). Gas premium price + ratings live in the
-  // dropdown now, keeping the map itself clean. `scale` shrinks the whole pin
-  // proportionally (CarPlay passes ~0.72 — full-size pins crowd the head unit).
-  const W = 34 * scale, H = 44 * scale;
+  // Same metal as the phone's GL pin — CarPlay must match the phone. The result number sits in
+  // the ring so the map pins and the Results list line up (1, 2, 3 …).
+  const tone = PLACE_TONE[useAppSkin()] ?? "brand";
   return (
     <MarkerView coordinate={[place.lng, place.lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
       <Pressable onPress={() => onPress?.(place)} hitSlop={6}>
-        {/* Hairpin brand pin + the result number badged on its head, so the map
-            pins, the results list, and the logo all speak the same language. */}
-        <View style={{ width: W, height: H, alignItems: "center" }}>
-          <Image source={PIN_IMAGE_MAP[skin.image]} style={{ width: W, height: H }} resizeMode="contain" />
-          {/* Badge centre = the pin-head hole centre (alpha-centroid: x 0.5w, y 0.38h). */}
-          <View style={[styles.brandPinBadgeDyn, { backgroundColor: skin.badge, top: H * 0.38 - 10 * scale, left: W / 2 - 10 * scale, width: 20 * scale, height: 20 * scale, borderRadius: 10 * scale }]}>
-            <Text style={[styles.placeNumText, { color: skin.num, fontSize: 14 * scale }]}>{index + 1}</Text>
-          </View>
-        </View>
+        <NeonPin tone={tone} number={index + 1} size={NEON_PIN_H * scale} />
       </Pressable>
     </MarkerView>
   );
@@ -2417,161 +2380,176 @@ type PinFC = { type: "FeatureCollection"; features: any[] };
 const fcPoint = (id: string, lng: number, lat: number, props: any): any => ({
   type: "Feature", id, geometry: { type: "Point", coordinates: [lng, lat] }, properties: { id, ...props },
 });
-const hazardImgName = (kind: string) => (HAZARD_ICONS[kind] ? `hz_${kind}` : "hz_default");
-// PNG symbol images shared by every hazard/camera feature (registered once).
+// The brand teardrop PNGs stay registered: the destination / stop pins and the tier-skinned
+// category pins elsewhere still name them.
 const PIN_IMAGE_MAP: Record<string, any> = {
-  hz_police: HAZARD_ICONS.police,
-  hz_default: HAZARD_ICON_DEFAULT,
-  cam: CAMERA_ICON,
-  // Hairpin teardrop (73×95 px) — the system-wide brand pin, now ALSO the GL
-  // category-place pin (gas/food/coffee…) so phone results match the dropped
-  // pin + destination pin + CarPlay's PlaceMarker.
   brand_pin: require("../assets/images/brand-pin.png"),
-  // Severity-tinted teardrops for DriveBC incidents (pngjs luminance re-tints of
-  // the green pin, shading preserved): red = major/moderate, grey = minor/info.
   brand_pin_red: require("../assets/images/brand-pin-red.png"),
   brand_pin_grey: require("../assets/images/brand-pin-grey.png"),
-  // Tier metals for the CATEGORY pins (Jeff, 2026-08-27: "in gold, silver skin,
-  // the pins are still green"). Baked the same way as red/grey, but ramped in HSV
-  // so hue and saturation hold and only VALUE shades — an RGB ramp toward white
-  // desaturated gold to 47% against its accent's 72%. Calibrated to the
-  // relationship the GREEN pin already has to brand green (saturation x1.17,
-  // value x0.97), not to the accent itself.
   brand_pin_gold: require("../assets/images/brand-pin-gold.png"),
   brand_pin_silver: require("../assets/images/brand-pin-silver.png"),
 };
 
-/** Category-pin dressing per app skin. ⚠ ONLY the category/search pins take the
- *  metal. The DESTINATION and STOP pins stay brand green because they belong to
- *  the ROUTE, and DESIGN.md's map carve-out keeps the route line green (gold sits
- *  between the "slowing" and "congested" congestion colours — a gold route reads
- *  as traffic ahead). Hazards and speed cameras keep their own semantic colours
- *  for the same reason. */
-const PLACE_PIN_SKIN: Record<VisualTier, { image: string; num: string; badge: string }> = {
-  brand:   { image: "brand_pin",        num: "#2DEC86", badge: "#0A1A10" },
-  premium: { image: "brand_pin_silver", num: "#C9D2D8", badge: "#111517" },
-  ultra:   { image: "brand_pin_gold",   num: "#E0A93E", badge: "#1B1409" },
-};
-// DriveBC severity → the red (major/moderate, system red #FF453A) or grey
-// (minor/unknown) pin. The wrench glyph draws straight into the pin's head
-// circle — no badge circle behind it (the old circleTranslate badge was
-// map-anchored, so it drifted off the head whenever the map rotated).
-function incidentPin(sev: RoadEventSeverity): { icon: string } {
-  return sev === "MAJOR" || sev === "MODERATE"
-    ? { icon: "brand_pin_red" }
-    : { icon: "brand_pin_grey" };
-}
+// ── NEON PIN SIZING (2026-09-10) ─────────────────────────────────────────────────────────
+// Every snapshot is the 26 pt design pin at iconSize 1. The size expression is zoom × relevance:
+// past zoom 13 the pins shrink to 18 pt, past 10 they hide (the route line carries it); the next one
+// ahead on the route (`near`) stands up at 32 pt; a minor DriveBC event sits at 18 pt and 60 %.
+// ⚠ ["zoom"] may only feed the OUTERMOST interpolate/step (style spec); the relevance factor rides
+// INSIDE each stop as a data-driven output — "zoom-and-property" form (Codex 2026-09-10: a multiply
+// around the interpolate is rejected outright, and every pin layer would have fallen back to size 1).
+const NEON_RELEVANCE = ["case", ["==", ["get", "near"], 1], 32 / NEON_PIN_H, ["==", ["get", "minor"], 1], 18 / NEON_PIN_H, 1] as any;
+const NEON_ICON_SIZE = ["interpolate", ["linear"], ["zoom"], 10, ["*", 0.55, NEON_RELEVANCE], 13, ["*", 0.7, NEON_RELEVANCE], 14, NEON_RELEVANCE] as any;
+// Cluster rings carry no relevance: plain zoom scaling, and the count text scales WITH the ring so the
+// em offset keeps the number in the hole at every zoom.
+const NEON_CLUSTER_ICON_SIZE = ["interpolate", ["linear"], ["zoom"], 10, 0.55, 13, 0.7, 14, 1] as any;
+const NEON_CLUSTER_TEXT_SIZE = ["interpolate", ["linear"], ["zoom"], 10, 11 * 0.55, 13, 11 * 0.7, 14, 11] as any;
+const NEON_ICON_OPACITY = ["case", ["==", ["get", "minor"], 1], 0.6, 1] as any;
+const NEON_MIN_ZOOM = 10;
+/** Pins within this many screen points collapse to one ring with a count — only while zoomed OUT
+ *  (≤ NEON_CLUSTER_MAX_ZOOM); at driving zooms every pin is its own, so its tap sheet is one tap away. */
+const NEON_CLUSTER_PT = 28;
+const NEON_CLUSTER_MAX_ZOOM = 13;
+const neonSym = (extra: any = {}) => ({
+  iconSize: NEON_ICON_SIZE, iconOpacity: NEON_ICON_OPACITY, iconAnchor: "bottom",
+  iconRotationAlignment: "viewport", iconPitchAlignment: "viewport",
+  iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true, ...extra,
+}) as any;
+const NOT_CLUSTER = ["!", ["has", "point_count"]] as any;
+const IS_CLUSTER = ["has", "point_count"] as any;
+// The count in a cluster ring: 21 pt above the tip at iconSize 1, in em of the text size.
+const NEON_COUNT_TEXT = (color: string) => ({
+  iconSize: NEON_CLUSTER_ICON_SIZE, iconOpacity: 1,
+  textField: ["get", "point_count_abbreviated"] as any, textSize: NEON_CLUSTER_TEXT_SIZE, textColor: color, textHaloColor: color, textHaloWidth: 0.3, textHaloBlur: 1,
+  textOffset: [0, -NEON_PIN_HOLE_ABOVE_TIP / 11] as any, textRotationAlignment: "viewport", textPitchAlignment: "viewport",
+  textEmissiveStrength: 1, textAllowOverlap: true, textIgnorePlacement: true,
+}) as any;
 
 function GLPinLayers({
-  hazards, cameras, incidents, places, onHazardPress, onPlacePress,
+  hazards, cameras, incidents, places, nearIds, onHazardPress, onPlacePress, onClusterPress,
 }: {
   hazards: Hazard[];
   cameras: { id: string; lat: number; lng: number }[];
   incidents: RoadEvent[];
   places: PlacePoint[];
+  /** ids of the next camera / event ahead on the route (drawn at 32 pt). */
+  nearIds: Set<string>;
   onHazardPress?: (h: Hazard) => void;
   onPlacePress?: (p: PlacePoint) => void;
+  /** A tapped cluster zooms the map to where it splits apart (its expansion zoom). */
+  onClusterPress?: (lng: number, lat: number, zoom: number) => void;
 }) {
-  const hazardFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: hazards.map((h) => fcPoint(h.id, h.lng, h.lat, { icon: hazardImgName(h.kind) })) }), [hazards]);
-  const cameraFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: cameras.map((c) => fcPoint(c.id, c.lng, c.lat, {})) }), [cameras]);
-  const incidentFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: incidents.map((e) => fcPoint(e.id, e.lng, e.lat, { icon: incidentPin(e.severity).icon, kind: e.kind, road: e.road || "", headline: e.headline })) }), [incidents]);
+  const camSrcRef = useRef<any>(null);
+  const incSrcRef = useRef<any>(null);
+  // SNAPSHOT READINESS (Codex 2026-09-10). RNMBXImage captures once at mount on iOS (layer.render) and
+  // on bounds changes / refresh on Android; the glyph is a vector-icon FONT that loads asynchronously on
+  // a cold start, and NeonPin's box never changes size when it arrives — an early capture would leave
+  // every ring empty for good. So: wait for the font, mount the snapshots, and remount them twice more
+  // (0.4 s, 1.5 s) so a slow first paint of the SVG cannot be the one that stuck — the same belt
+  // ClassSprite wears (`classImgGen`).
+  const [glyphsReady, setGlyphsReady] = useState(false);
+  const [imgGen, setImgGen] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try { await (MaterialCommunityIcons as any).loadFont?.(); } catch {}
+      if (alive) setGlyphsReady(true);
+    })();
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => {
+    if (!glyphsReady) return;
+    const t1 = setTimeout(() => setImgGen(1), 400);
+    const t2 = setTimeout(() => setImgGen(2), 1500);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [glyphsReady]);
+  // A cluster tap: ask the source where the cluster splits and hand the camera there.
+  const zoomToCluster = useCallback(async (srcRef: React.MutableRefObject<any>, feature: any) => {
+    try {
+      const z = await srcRef.current?.getClusterExpansionZoom?.(feature);
+      const c = feature?.geometry?.coordinates;
+      if (typeof z === "number" && Array.isArray(c)) onClusterPress?.(c[0], c[1], Math.max(z, 14));
+    } catch {}
+  }, [onClusterPress]);
+  const hazardFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: hazards.map((h) => fcPoint(h.id, h.lng, h.lat, { icon: hazardPinImage(h.kind), near: 0, minor: 0 })) }), [hazards]);
+  const cameraFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: cameras.map((c) => fcPoint(c.id, c.lng, c.lat, { near: nearIds.has(c.id) ? 1 : 0, minor: 0 })) }), [cameras, nearIds]);
+  const incidentFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: incidents.map((e) => fcPoint(e.id, e.lng, e.lat, {
+    icon: `neon_inc_${INCIDENT_PIN[e.kind] ? e.kind : "event"}`, kind: e.kind, road: e.road || "", headline: e.headline,
+    minor: e.severity === "MAJOR" || e.severity === "MODERATE" ? 0 : 1, near: nearIds.has(e.id) ? 1 : 0,
+  })) }), [incidents, nearIds]);
   const placeFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: places.map((p, i) => fcPoint(p.id, p.lng, p.lat, { num: String(i + 1) })) }), [places]);
-  const placeSkin = PLACE_PIN_SKIN[useAppSkin()] ?? PLACE_PIN_SKIN.brand;
+  const tier = useAppSkin();
+  const placeTone = PLACE_TONE[tier] ?? "brand";
 
   const tapHazard = useCallback((e: any) => { const id = e?.features?.[0]?.properties?.id; const h = hazards.find((x) => x.id === id); if (h) onHazardPress?.(h); }, [hazards, onHazardPress]);
   const tapPlace = useCallback((e: any) => { const id = e?.features?.[0]?.properties?.id; const p = places.find((x) => x.id === id); if (p) onPlacePress?.(p); }, [places, onPlacePress]);
+  const tapCamera = useCallback((e: any) => { const f = e?.features?.[0]; if (f?.properties?.point_count) void zoomToCluster(camSrcRef, f); }, [zoomToCluster]);
   const tapIncident = useCallback((e: any) => {
-    const pr = e?.features?.[0]?.properties; if (!pr) return;
+    const f = e?.features?.[0]; const pr = f?.properties; if (!pr) return;
+    if (pr.point_count) { void zoomToCluster(incSrcRef, f); return; }   // a cluster: zoom to where it splits
     const title = `${INCIDENT_TITLE[pr.kind as RoadEventKind] || "Road event"}${pr.road ? ` · ${pr.road}` : ""}`;
     Alert.alert(title, pr.headline || "", [{ text: "OK" }]);
-  }, []);
+  }, [zoomToCluster]);
 
   return (
     <>
-      {/* Symbol-image registry: hazard/camera PNGs + one snapshotted ionicon glyph per
-          incident kind (the RN badge glyph, rendered once into a native image). */}
-      <Images images={PIN_IMAGE_MAP}>
-        {/* DriveBC glyph: ONE black wrench/hammer on every incident pin (the
-            red/grey pin colour carries the severity; the tap sheet carries the
-            kind). Snapshotted once into a native symbol image. */}
-        <MBXImage name="incg_wrench">
-          <View style={styles.incidentGlyphSnap}>
-            <MaterialCommunityIcons name="hammer-wrench" size={13} color="#0B0B0C" />
-          </View>
-        </MBXImage>
-        {/* Speed camera: glassy rounded-square badge (dark translucent floor,
-            brand-green hairline + camera glyph, top highlight strip for the
-            glass read) — the squared/rounded design family, not a teardrop. */}
-        <MBXImage name="cam_glass">
-          <View style={styles.camGlassSnap}>
-            <View style={styles.camGlassHighlight} />
-            <Ionicons name="camera" size={15} color="#2DEC86" />
-          </View>
-        </MBXImage>
-      </Images>
+      {/* Symbol-image registry: every pin is the SAME NeonPin component the car surfaces render
+          live, snapshotted once per kind into a native symbol image (the way the old camera badge
+          was). Hazard kinds get one image each plus the default; DriveBC kinds one each; a plain
+          ring per tone for cluster counts; the place ring in the page's metal. */}
+      {glyphsReady && <Images key={`neon-imgs-${imgGen}`} images={PIN_IMAGE_MAP}>
+        {HAZARD_PIN_KINDS.map((k) => (
+          <MBXImage key={k} name={`neon_hz_${k}`}><NeonPin tone={hazardPin(k).tone} glyph={hazardPin(k).glyph} /></MBXImage>
+        ))}
+        <MBXImage name="neon_hz_default"><NeonPin tone={HAZARD_PIN_DEFAULT.tone} glyph={HAZARD_PIN_DEFAULT.glyph} /></MBXImage>
+        <MBXImage name="neon_cam"><NeonPin tone={CAMERA_PIN.tone} glyph={CAMERA_PIN.glyph} /></MBXImage>
+        <MBXImage name="neon_base_camera"><NeonPin tone="camera" /></MBXImage>
+        {INCIDENT_PIN_KINDS.map((k) => (
+          <MBXImage key={k} name={`neon_inc_${k}`}><NeonPin tone={INCIDENT_PIN[k].tone} glyph={INCIDENT_PIN[k].glyph} /></MBXImage>
+        ))}
+        <MBXImage name="neon_base_incident"><NeonPin tone="incident" /></MBXImage>
+        {/* All three tier rings under STABLE names: a live tier change re-points the place layer at a
+            snapshot that already exists (Android's RNMBXImage only captures on a layout change or an
+            explicit refresh — renaming one snapshot in place left floating numbers; Codex 2026-09-10). */}
+        <MBXImage name="neon_place_brand"><NeonPin tone="brand" /></MBXImage>
+        <MBXImage name="neon_place_premium"><NeonPin tone="premium" /></MBXImage>
+        <MBXImage name="neon_place_ultra"><NeonPin tone="ultra" /></MBXImage>
+      </Images>}
 
-      {/* All pins are slot="top" so they draw ABOVE the selected-route ribbon (also
-          slot="top", but mounted BEFORE this block) — the old MarkerViews composited
-          over the route, so this preserves that. The self 3D model (SelfCarModel) is
-          slot="top" too but mounted AFTER this block, so it still draws over the pins
-          (later-in-slot = on top; 2D symbol/circle pins don't share the model's depth
-          quirk). Mount order within this block = pin-vs-pin stacking (last = on top):
-          hazards → cameras → incidents → places (numbered pins on top), matching the old
-          MarkerView order. iconSize is per-asset: hazard/police PNGs are 512px (→0.078 for
-          ~40pt), the speed_camera PNG is 44px (→0.64 for ~28pt). */}
-
-      {/* Community hazard / police pins — tap → detail sheet (which carries the dispute action).
-          emissiveStrength 1 keeps the icons full-brightness under the Standard style's 3D scene
-          lighting — WITHOUT it, dusk/night light presets dim these pins to muddy/near-black (the
-          route line + self model already self-light for exactly this reason; see line ~386). */}
+      {/* All pins are slot="top" so they draw ABOVE the selected-route ribbon (also slot="top", but
+          mounted BEFORE this block). The self 3D model (SelfCarModel) is slot="top" too but mounted
+          AFTER this block, so it still draws over the pins. Mount order within this block = pin-vs-pin
+          stacking (last = on top): hazards → cameras → incidents → places. Every layer is
+          viewport-locked (never rotates or foreshortens under the chase pitch), bottom-anchored (the
+          tip on the coordinate) and self-lit (the dusk/night light presets would dim it otherwise). */}
       {hazards.length > 0 && (
         <ShapeSource id="gl-hazards" shape={hazardFC} onPress={tapHazard}>
-          <SymbolLayer id="gl-hazards-sym" slot="top" style={{ iconImage: ["get", "icon"] as any, iconSize: 0.078, iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+          <SymbolLayer id="gl-hazards-sym" slot="top" minZoomLevel={NEON_MIN_ZOOM} style={neonSym({ iconImage: ["get", "icon"] })} />
         </ShapeSource>
       )}
 
-      {/* Speed cameras — the glassy rounded-square badge (snapshotted above). */}
+      {/* Speed cameras — clustered: within 28 pt they collapse to one blue ring with a count. */}
       {cameras.length > 0 && (
-        <ShapeSource id="gl-cameras" shape={cameraFC}>
-          <SymbolLayer id="gl-cameras-sym" slot="top" style={{ iconImage: "cam_glass", iconSize: 1, iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+        <ShapeSource id="gl-cameras" ref={camSrcRef} shape={cameraFC} onPress={tapCamera} cluster clusterRadius={NEON_CLUSTER_PT} clusterMaxZoomLevel={NEON_CLUSTER_MAX_ZOOM}>
+          <SymbolLayer id="gl-cameras-sym" slot="top" minZoomLevel={NEON_MIN_ZOOM} filter={NOT_CLUSTER} style={neonSym({ iconImage: "neon_cam" })} />
+          <SymbolLayer id="gl-cameras-cluster" slot="top" minZoomLevel={NEON_MIN_ZOOM} filter={IS_CLUSTER} style={neonSym({ iconImage: "neon_base_camera", ...NEON_COUNT_TEXT(NEON_TONE.camera.rim) })} />
         </ShapeSource>
       )}
 
-      {/* DriveBC incidents — severity-tinted Hairpin teardrops (red = major/
-          moderate in the system red, grey = minor) with the black wrench/hammer
-          drawn INSIDE the pin's head circle. No badge circle (its map-anchored
-          circleTranslate drifted off the head as the map rotated — the tester
-          screenshot). Pin + glyph are BOTH viewport-locked symbols with
-          screen-space offsets, so they stay glued at any rotation/pitch.
-          Head-circle centre sits ~28 pt above the tip at iconSize 0.466. */}
+      {/* DriveBC incidents — one tone per kind, minor events smaller and dimmer, clustered like the cameras. */}
       {incidents.length > 0 && (
-        <ShapeSource id="gl-incidents" shape={incidentFC} onPress={tapIncident}>
-          <SymbolLayer id="gl-incidents-pin" slot="top" style={{ iconImage: ["get", "icon"] as any, iconSize: 0.466, iconAnchor: "bottom", iconRotationAlignment: "viewport", iconPitchAlignment: "viewport", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
-          {/* Offset MEASURED, not eyeballed (tester screenshot 2026-07-16): the
-              hole centre sits [-0.15, -27.4] pt from the pin anchor (alpha-
-              centroid of the asset), and the MCI hammer-wrench glyph draws
-              1.8 pt left / 2.35 pt high of its layout box (font bearing) —
-              so the corrected offset is [+1.7, -25.6]. */}
-          <SymbolLayer id="gl-incidents-glyph" slot="top" style={{ iconImage: "incg_wrench", iconSize: 1, iconOffset: [1.7, -25.6] as any, iconRotationAlignment: "viewport", iconPitchAlignment: "viewport", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
+        <ShapeSource id="gl-incidents" ref={incSrcRef} shape={incidentFC} onPress={tapIncident} cluster clusterRadius={NEON_CLUSTER_PT} clusterMaxZoomLevel={NEON_CLUSTER_MAX_ZOOM}>
+          <SymbolLayer id="gl-incidents-pin" slot="top" minZoomLevel={NEON_MIN_ZOOM} filter={NOT_CLUSTER} style={neonSym({ iconImage: ["get", "icon"] })} />
+          <SymbolLayer id="gl-incidents-cluster" slot="top" minZoomLevel={NEON_MIN_ZOOM} filter={IS_CLUSTER} style={neonSym({ iconImage: "neon_base_incident", ...NEON_COUNT_TEXT(NEON_TONE.incident.rim) })} />
         </ShapeSource>
       )}
 
-      {/* Category place pins — the Hairpin brand teardrop with the result number
-          badged on its head (same design as the dropped pin / destination pin /
-          CarPlay PlaceMarker, so every pin on the map speaks the brand language).
-          Geometry mirrors the RN PlaceMarker: 73×95 asset → iconSize 0.466 ≈
-          34×44 pt, tip on the coordinate (iconAnchor bottom); the badge circle +
-          number sit at the pin head, ~29 pt above the tip (circleTranslate is pt;
-          textOffset is em of textSize 13 → −29/13 ≈ −2.23). All self-lit so the
-          pin stays bright under the dusk/night light presets. */}
+      {/* Place pins — the ring in the page's metal with the result number in the hole (the list and
+          the map line up: 1, 2, 3 …). Not zoom-scaled: the number's offset is in em and must stay
+          on the hole. */}
       {places.length > 0 && (
         <ShapeSource id="gl-places" shape={placeFC} onPress={tapPlace}>
-          <SymbolLayer id="gl-places-pin" slot="top" style={{ iconImage: placeSkin.image, iconSize: 0.466, iconAnchor: "bottom", iconRotationAlignment: "viewport", iconPitchAlignment: "viewport", iconEmissiveStrength: 1, iconAllowOverlap: true, iconIgnorePlacement: true }} />
-          {/* Badge circle behind the number: translate anchored to the VIEWPORT
-              (default is "map", which drifted the circle off the pin head as the
-              map rotated — the same bug that hit the DriveBC badge). */}
-          <CircleLayer id="gl-places-bg" slot="top" style={{ circleColor: placeSkin.badge, circleRadius: 10, circleTranslate: [0, -28] as any, circleTranslateAnchor: "viewport", circlePitchAlignment: "viewport", circleEmissiveStrength: 1 }} />
-          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: 13, textColor: placeSkin.num, textOffset: [0, -28 / 13] as any, textRotationAlignment: "viewport", textPitchAlignment: "viewport", textEmissiveStrength: 1, textAllowOverlap: true, textIgnorePlacement: true }} />
+          <SymbolLayer id="gl-places-pin" slot="top" style={neonSym({ iconImage: `neon_place_${tier}`, iconSize: 1, iconOpacity: 1 })} />
+          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: 11, textColor: NEON_TONE[placeTone].rim, textHaloColor: NEON_TONE[placeTone].glow, textHaloWidth: 0.3, textHaloBlur: 1, textOffset: [0, -NEON_PIN_HOLE_ABOVE_TIP / 11] as any, textRotationAlignment: "viewport", textPitchAlignment: "viewport", textEmissiveStrength: 1, textAllowOverlap: true, textIgnorePlacement: true }} />
         </ShapeSource>
       )}
     </>
@@ -3860,6 +3838,31 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     });
   }, [speedCameras, routes, selectedRouteIndex]);
 
+  // ── THE NEXT ONE AHEAD (2026-09-10, the neon pins) ────────────────────────────────────
+  // The next camera and the next road event ahead of the car on the route, within 500 m of
+  // travel, stand up at 32 pt. "Ahead" is along the line: a pin's arc position vs the car's
+  // projection (routeProj), so a camera on the other carriageway or one just passed never counts.
+  const nextAheadIds = useMemo(() => {
+    const out = new Set<string>();
+    if (!routeProj) return out;
+    const line = decodePolyline(routes?.[selectedRouteIndex]?.polyline);
+    if (line.length < 2) return out;
+    const carArc = routeProj.frac * routeProj.totalM;
+    const pick = (pts: { id: string; lat: number; lng: number }[]) => {
+      let best: { id: string; arc: number } | null = null;
+      for (const p of pts) {
+        const pr = projectOntoRoute(p.lat, p.lng, line);
+        if (!pr || pr.distM > ROUTE_CAMERA_CORRIDOR_M) continue;
+        const arc = pr.frac * pr.totalM;
+        if (arc > carArc && arc - carArc <= NEXT_AHEAD_M && (!best || arc < best.arc)) best = { id: p.id, arc };
+      }
+      if (best) out.add(best.id);
+    };
+    pick(onRouteCameras);
+    pick(roadEvents || []);
+    return out;
+  }, [routeProj, routes, selectedRouteIndex, onRouteCameras, roadEvents]);
+
   // ===== Preview congestion — the SELECTED route's OWN data comes FIRST =====
   //
   // WHY (Jeff, 2026-07-25: "the CarPlay does not show the same as the phone for the
@@ -4343,8 +4346,16 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           cameras={onRouteCameras}
           incidents={roadEvents || []}
           places={places || []}
+          nearIds={nextAheadIds}
           onHazardPress={onHazardPress}
           onPlacePress={onPlacePress}
+          onClusterPress={(lng, lat, zoom) => {
+            // Release follow the way a pan does (map.tsx flips isFollowing off), THEN move: with follow
+            // on, SelfCarModel.pushCam re-centres every frame and a bare setCamera snaps straight back
+            // (Codex 2026-09-10). One frame later the chase gate is closed and the move sticks.
+            try { onUserPan?.(); } catch {}
+            setTimeout(() => { try { cameraRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: zoom, animationDuration: 500 }); } catch {} }, 120);
+          }}
         />
 
         {/* The arrival weather IS the destination marker now (DestinationWeatherCallout). */}
@@ -4475,26 +4486,11 @@ const styles = StyleSheet.create({
   offerSub: { color: "#C9C9CE", fontWeight: "600", fontSize: 11 },
   offerClose: { marginLeft: 2, padding: 2 },
   // Hazard / camera icons.
-  hazardIcon: { width: 40, height: 40 },
-  cameraIconWrap: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
-  cameraIcon: { width: 28, height: 28 },
   // Transparent wrapper for the incident glyph snapshotted into a GL symbol image
   // (drawn over the severity CircleLayer). Sized to the ionicon so the snapshot is tight.
-  incidentGlyphSnap: { width: 18, height: 18, alignItems: "center", justifyContent: "center", backgroundColor: "transparent" },
   // Speed-camera glass badge (snapshotted into a native symbol image): dark
   // translucent floor + brand-green hairline + a top highlight strip — reads as
   // frosted glass on the map without needing a live blur view.
-  camGlassSnap: {
-    width: 30, height: 30, borderRadius: 10,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(12,17,14,0.82)",
-    borderWidth: 1, borderColor: "rgba(45,236,134,0.55)",
-    overflow: "hidden",
-  },
-  camGlassHighlight: {
-    position: "absolute", top: 1, left: 3, right: 3, height: 9,
-    borderRadius: 7, backgroundColor: "rgba(255,255,255,0.12)",
-  },
   // Brand green, NOT near-black: the number sits on the badge's dark #0A1A10
   // circle — dark-on-dark made the CarPlay PlaceMarker numbers invisible.
   placeNumText: { color: "#2DEC86", fontSize: 14, fontWeight: "800" },

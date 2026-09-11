@@ -19,11 +19,31 @@
 
 # Hairpin Widgets + Watch — BUILD 75 roadmap (Jeff's call, 2026-08-16)
 
-**Status: SPECCED 2026-08-16, slotted for 75 then; NOT built for 75. 2026-09-10 (Jeff, 21:5x: "include it and
-also add the new ios 27 phone full screen widget as well") → IN SCOPE FOR BUILD 77: the whole family below PLUS
-the iOS 27 extra-large portrait widget (§ "iOS 27 full-page widget"). NATIVE work — none of this is OTA-able.
-Ships as its own target in the next paid build, runtime bump, BOTH platforms cut per the parity rule (the
-widget is iOS-first but Android must be rebuilt at the same runtime or it orphans).**
+**Status: SPECCED 2026-08-16, slotted for 75 then; NOT built for 75. Jeff 2026-09-10 21:5x ("include it and also
+add the new ios 27 phone full screen widget as well") put the whole family + the iOS 27 extra-large portrait widget
+in scope for 77 — but ⛔ NONE OF IT WAS BUILT. Build 77/78 (cut 09-11) carries the Apple Watch companion and nothing
+else widget-side; commit `14dcd19` touched only this file and the HANDOFF, zero Swift. `targets/widget/index.swift`
+still declares `.supportedFamilies([.systemSmall, .systemMedium])` and has not been edited since the build-75 cut.
+→ **THE FAMILY MOVES TO BUILD 79.** Split it, because the two halves have different blockers:
+• the large + lock-screen families compile on TODAY's EAS image (Xcode 26) — buildable in 79 whenever Jeff says go;
+• ⛔ the iOS 27 `systemExtraLargePortrait` widget CANNOT be built on EAS at all right now — see the blocker box below.
+NATIVE work — none of this is OTA-able; BOTH platforms cut at the same number per the parity rule.**
+
+> ### ⛔ BLOCKER — `systemExtraLargePortrait` needs an Xcode 27 EAS image that does not exist (VERIFIED 2026-09-11)
+> The symbol is an SDK enum case, so it needs the **iOS 27 SDK = Xcode 27** at COMPILE time; no `@available` check
+> helps, because the case is absent from the Xcode 26 SDK entirely. EAS's iOS image table
+> (https://docs.expo.dev/build-reference/infrastructure/) tops out at **`macos-tahoe-26.5-xcode-26.6`** (= `latest`),
+> and our `image: "auto"` on SDK 54 resolves to **`macos-sequoia-15.6-xcode-26.0`** — Xcode 26.0. A literal grep of the
+> doc source for Xcode 27: zero hits, no beta image, no announced timeline. (GitHub Actions and Azure DevOps both
+> already ship Xcode 27 preview runners; Expo shipped an Xcode 26 beta image ~3 weeks before Apple's GA last cycle,
+> and has NOT repeated that this cycle.) iOS 27 GA = 2026-09-14.
+> **Paths, none of them free:** (a) wait for Expo's Xcode 27 image, then build 79 normally — pin `image: "latest"`
+> and it picks it up with no eas.json edit on the day; (b) `eas build --local` on Jeff's Mac, which HAS Xcode-beta
+> 27.0 installed — but local builds get NO EAS secret env vars, which breaks the `EXPO_PUBLIC_OPENWEATHER_KEY`
+> discipline ([[ota-bare-update-empties-openweather-key]]) and kills weather on that binary; (c) compile-gate the
+> family so it builds on Xcode 26 and lights up when an Xcode 27 image lands — **HYPOTHESIS, mechanism unproven**;
+> the ONE check that settles it is a local compile of the target against `/Applications/Xcode-beta.app` (27.0) and
+> then against Xcode 26.6, confirming the gate compiles under both.
 
 **What ALREADY ships (build 66 → 75, VERIFIED 09-10 in the repo):** ONE home-screen widget, `targets/widget`
 "HairpinWidget" — "Next up": the next attending event / cruise with a live countdown, tap opens the Hub, small +

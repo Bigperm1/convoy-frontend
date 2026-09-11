@@ -51,8 +51,8 @@ import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, clam
 // The self car is lifted ONLY off the road (Jeff, 2026-09-10) — the rule is src/selfLiftRule.ts, the
 // live state src/selfLift.ts; SelfCarModel asks the map once a second while slow and eases the lift
 // it draws, riding the source feature (`trn`) like the size and the heading.
-import { noteSelfLiftNav, reportSelfLiftEvidence, noteSelfLiftQueryFail, selfLiftTargetM, selfLiftDrawnM, setSelfLiftDrawnM, setSelfOffRoadLiftM, selfLiftSkipQuery, clearSelfLiftSurface, subscribeSelfLiftDrawn, logSelfLiftQuery, noteMapIdle, isMapIdle } from "./selfLift";
-import { easeLift, roadEvidence, isDrivableRoad, isPropertyRoad, buildingUnder, LIFT_ROAD_NEAR_M, LIFT_PROPERTY_NEAR_M, LIFT_COVERAGE_M, LIFT_QUERY_MS, type RoadEvidence } from "./selfLiftRule";
+import { noteSelfLiftNav, reportSelfLiftEvidence, noteSelfLiftQueryFail, selfLiftTargetM, selfLiftDrawnM, setSelfLiftDrawnM, setSelfOffRoadLiftM, selfLiftSkipQuery, clearSelfLiftSurface, subscribeSelfLiftDrawn, logSelfLiftQuery, noteMapIdle, isMapIdle, mapCameraGen } from "./selfLift";
+import { easeLift, roadEvidence, isDrivableRoad, isPropertyRoad, buildingUnder, queryComplete, LIFT_ROAD_NEAR_M, LIFT_PROPERTY_NEAR_M, LIFT_COVERAGE_M, LIFT_QUERY_MS, type RoadEvidence } from "./selfLiftRule";
 import { buildRibbonPartition, buildRibbonFeatures, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind } from "./driveBcEvents";
@@ -1445,9 +1445,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       }
       liftQueryBusy.current = true;
       const qStart = Date.now();
-      // Completeness is bound to THIS query: idle when it started AND still idle when it finished (no camera
-      // change in between), so every tile the answer is built on was loaded before the question was asked.
-      const idleAtStart = isMapIdle(surface);
+      // Completeness is bound to THIS query: idle when it started, idle when it finished, and NO camera change in
+      // between (a generation counter — two boolean reads would miss an idle → moving → idle interleave, Codex
+      // pass 6), so every tile the answer is built on was loaded before the question was asked.
+      const idleAtStart = isMapIdle(surface), genAtStart = mapCameraGen(surface);
       try {
         const r = render.current;
         // OUR OWN road source (the road-snap's invisible mapbox-streets-v8 copy, both surfaces): Standard
@@ -1473,7 +1474,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           buildings = bfs.length;
           ev = { ...ev, buildingH: buildingUnder(r.lat, r.lng, bfs) };
         }
-        const complete = idleAtStart && isMapIdle(surface);
+        const complete = queryComplete(idleAtStart, genAtStart, isMapIdle(surface), mapCameraGen(surface));
         // Cache a road HIT (presence, any time) or a COMPLETE off-road verdict; an absence, or anything asked of a
         // map that was still loading, is re-asked every second so a tile that loads a moment later is seen.
         liftCache.current = (ev.roadHit === true || (complete && (ev.lot || ev.buildingH != null))) ? { lat: r.lat, lng: r.lng, at: Date.now(), ev, complete } : null;

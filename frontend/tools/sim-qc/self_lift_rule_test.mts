@@ -6,7 +6,7 @@
 // Section A is the red light; B–D the ways a road is known; E the lot, the driveway, the parkade;
 // F what "no evidence" may and may not do; G the feature classifier; H the ease.
 import {
-  liftDecide, LIFT_STATE0, easeLift, isDrivableRoad, isPropertyRoad, buildingHeightOf, buildingUnder, roadEvidence,
+  liftDecide, LIFT_STATE0, easeLift, isDrivableRoad, isPropertyRoad, buildingHeightOf, buildingUnder, roadEvidence, queryComplete,
   LIFT_OFFROAD_CONFIRM_MS, LIFT_ABSENCE_CONFIRM_MS, LIFT_UNKNOWN_HOLD_MS, LIFT_MAX_M, LIFT_BUILDING_MARGIN_M, LIFT_ONROAD_SPEED_MS,
   type LiftState, type LiftEvidence,
 } from "../../src/selfLiftRule.ts";
@@ -101,6 +101,9 @@ console.log("E. no evidence never starts a lift, and ends one only after the hol
   // tile not yet in — a positive without the idle proof is not trusted either.
   ok("E8 a driveway under the car while the map is NOT idle never lifts (30 s)", run(Array(30).fill({ speedMs: 0, roadHit: false, lot: true })).every((s) => s.targetM === 0));
   ok("E8b the same driveway once the map is idle lifts on the positive clock", run([{ speedMs: 0, roadHit: false, lot: true }, { speedMs: 0, roadHit: false, lot: true }, P, P, P, P]).at(-1)!.targetM === 10);
+  // Codex pass 6: completeness is idle at start AND idle at end AND no camera change in between (a generation).
+  ok("E9 idle → camera moved → idle again inside one query is NOT complete", !queryComplete(true, 7, true, 8));
+  ok("E9b idle throughout with the same generation IS complete; not idle at either end is not", queryComplete(true, 7, true, 7) && !queryComplete(false, 7, true, 7) && !queryComplete(true, 7, false, 7));
 }
 
 console.log("F. the road source: Streets v8 classes, the property rule, footprints");

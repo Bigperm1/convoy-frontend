@@ -20,8 +20,14 @@ const _drawn: Record<LiftSurface, number> = { phone: 0, car: 0 };
 /** Mapbox's own completeness signal per surface: onMapIdle → true (every tile loaded and rendered, no camera
  *  transition); onCameraChanged → false. An absence of roads reported while not idle is unknown, never off-road. */
 const _idle: Record<LiftSurface, boolean> = { phone: false, car: false };
-export function noteMapIdle(surface: LiftSurface, idle: boolean): void { _idle[surface] = idle; }
+/** Monotonic count of camera changes per surface: a query is complete only if this did not move while it ran. */
+const _camGen: Record<LiftSurface, number> = { phone: 0, car: 0 };
+export function noteMapIdle(surface: LiftSurface, idle: boolean): void {
+  _idle[surface] = idle;
+  if (!idle) _camGen[surface] = (_camGen[surface] + 1) | 0;
+}
 export function isMapIdle(surface: LiftSurface): boolean { return _idle[surface]; }
+export function mapCameraGen(surface: LiftSurface): number { return _camGen[surface]; }
 const _drawnSubs: Record<LiftSurface, Set<() => void>> = { phone: new Set(), car: new Set() };
 const _drawnNotifiedAt: Record<LiftSurface, number> = { phone: 0, car: 0 };
 const DRAWN_NOTIFY_MIN_MS = 500;   // the ribbon owner (the whole map component) re-renders at most twice a second while a

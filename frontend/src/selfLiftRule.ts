@@ -63,6 +63,13 @@ export const OFFROAD_SERVICE_TYPES: ReadonlySet<string> = new Set([
   "driveway", "parking_aisle", "drive_through", "drive-through", "parking", "emergency_access",
 ]);
 
+/** A query's completeness (Codex pass 6): the map was idle when it started, is idle when it finished, and the camera
+ *  did not change in between — an idle → moving → idle interleave inside the query would pass two boolean reads while
+ *  the tiles the answer was built on changed under it. The generation counts camera changes. */
+export function queryComplete(idleAtStart: boolean, genAtStart: number, idleAtEnd: boolean, genAtEnd: number): boolean {
+  return idleAtStart && idleAtEnd && genAtStart === genAtEnd;
+}
+
 export type RoadEvidence = {
   /** true = a drivable road within reach; false = roads are loaded here and none is (or a property is under the car); null = no road data */
   roadHit: boolean | null;

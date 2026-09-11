@@ -129,6 +129,13 @@ ok("E5 the old boolean dedupe FAILS the new-destination case", oldBooleanDedupe(
   // this too (the 2026-09-03 defect in this file's header).
   ok("F7 priority is exempt even back-to-back", speakRateSkips(lastSpoke + 1, lastSpoke, true) === false);
   ok("F8 the gate window is the documented 1.5 s", SPEAK_RATE_GATE_MS === 1500, `${SPEAK_RATE_GATE_MS} ms`);
+  // ⚠ WHAT THIS SECTION CANNOT SEE (Codex, 2026-09-11, reproduced): it exercises the RULE, never
+  // src/nav.ts. F2 stayed green when the `{ priority: true }` was deleted from the imminent call
+  // site, because nothing here loads nav.ts (React deps). The CALL SITE is guarded by
+  // scripts/trap-check.py rule `imminent-turn-callout-not-priority` instead — proven to bite.
+  // STILL UNCOVERED, and honestly so: a production speech-QUEUE replay (tight alternating turns,
+  // a same-step reroute, the arrival line landing behind pending cues). Those outcomes are
+  // UNCERTAIN under today's gates.
 }
 
 console.log(fails === 0 ? "\nPASS arrival_speech" : `\nFAIL arrival_speech (${fails})`);

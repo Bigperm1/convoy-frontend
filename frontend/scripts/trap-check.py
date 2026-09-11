@@ -19,6 +19,23 @@ ROOT = Path(__file__).resolve().parent.parent
 # (id, glob, regex, why) — regex is searched per FILE (multiline).
 RULES = [
     (
+        "imminent-turn-callout-not-priority",
+        ["src/nav.ts"],
+        r"speak\(roundabout[^;\n]*`\$\{verb\}\.`\s*\)",
+        "2026-09-11 (Jeff: 'SCOUT CUT OFF THE TURN LEFT ONTO HIGHWAY TOWARDS VANCOUVER'): the IMMINENT turn callout "
+        "— the 'Turn left.' you hear as you reach the intersection — must pass { priority: true } so the 1.5 s rate "
+        "gate cannot drop it. His receipts: 21:16:55.416 route-swap, 21:16:56.341 tts-play len=43 (the new route's "
+        "prepare cue, 6.7 s long), 21:16:57.385 tts-skip why=rate len=11 (the turn callout DROPPED 1.044 s into the "
+        "gate), 21:17:04.336 watch-tap kind=now d=33 — he was AT the turn. The reroute's own prepare cue ate its own "
+        "first turn. tools/sim-qc/arrival_speech_test.mts section F gates the RULE (speakRateSkips); this rule gates "
+        "the CALL SITE, because a Codex review proved F2 stays green when the priority option is removed here "
+        "(the gate tests the helper, never nav.ts). The pattern is anchored to speak( AND the bare-verb IMMINENT form `${verb}.`) — the "
+        "PREPARE cue two lines below is `In <dist>, <verb> onto <street>.` and is correctly droppable, so a "
+        "broader pattern flags it too (it did, attempt 1), and the prefetchTts() pre-synthesis of the same string "
+        "two lines below is not a speak at all (attempt 2). Same family as the arrival line losing to "
+        "a prepare cue 2026-09-03.",
+    ),
+    (
         "bare-compiler-gate-in-target-swift",
         ["targets/**/*.swift"],
         r"(?m)^\s*#if\s+compiler\(>=[0-9.]+\)\s*(?:(?://|/\*).*)?$",

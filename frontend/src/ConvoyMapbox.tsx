@@ -1469,7 +1469,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           buildings = bfs.length;
           ev = { ...ev, buildingH: buildingUnder(r.lat, r.lng, bfs) };
         }
-        liftCache.current = { lat: r.lat, lng: r.lng, at: Date.now(), ev };
+        // Cache only what is POSITIVELY known — a road under the car, or a property / roof under it. An absence
+        // ("no road within reach") is re-asked every second: a tile that loads a moment later must be seen.
+        liftCache.current = (ev.roadHit === true || ev.lot || ev.buildingH != null) ? { lat: r.lat, lng: r.lng, at: Date.now(), ev } : null;
         logSelfLiftQuery(surface, { roads: roads.length, drivable: drivable.length, drivableM: nd ? nd.distM : null, propertyM: np ? np.distM : null, buildings, ms: Date.now() - qStart }, ev);
         reportSelfLiftEvidence(surface, { speedMs: spd, roadHit: ev.roadHit, buildingH: ev.buildingH, lot: ev.lot });
       } catch (e) {

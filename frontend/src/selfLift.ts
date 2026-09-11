@@ -38,7 +38,7 @@ export function noteSelfLiftNav(distM: number | null): void {
 export function setSelfOffRoadLiftM(m: number): void { if (Number.isFinite(m) && m >= 0) _offRoadLiftM = m; }
 
 function merged(now: number): LiftEvidence {
-  let speedMs: number | null = null, roadHit: boolean | null = null, buildingH: number | null = null;
+  let speedMs: number | null = null, roadHit: boolean | null = null, buildingH: number | null = null, lot = false;
   for (const k of ["phone", "car"] as LiftSurface[]) {
     const e = _ev[k];
     if (!e || now - e.at > LIFT_EVIDENCE_FRESH_MS) continue;
@@ -46,9 +46,10 @@ function merged(now: number): LiftEvidence {
     if (e.roadHit === true) roadHit = true;
     else if (e.roadHit === false && roadHit == null) roadHit = false;
     if (typeof e.buildingH === "number" && (buildingH == null || e.buildingH > buildingH)) buildingH = e.buildingH;
+    if (e.lot) lot = true;
   }
   const navDistM = now - _navAt <= LIFT_EVIDENCE_FRESH_MS ? _navDistM : null;
-  return { speedMs, navDistM, roadHit, buildingH };
+  return { speedMs, navDistM, roadHit, buildingH, lot };
 }
 
 /** A surface's one-second look at the map (or just its speed when it was too fast to bother asking). */

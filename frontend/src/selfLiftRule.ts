@@ -39,7 +39,8 @@ export const LIFT_PROPERTY_NEAR_M = 8;      // a driveway / parking aisle THIS c
 export const LIFT_LANE_M = 9;               // …unless a road's centreline is within a lane's reach: a driveway MOUTH meets the
                                             // centreline, so a car in the lane over it is still on the road (Codex pass 2)
 export const LIFT_COVERAGE_M = 300;         // road data counts as loaded HERE only if some road is within this of the car
-export const LIFT_OFFROAD_CONFIRM_MS = 2500;
+export const LIFT_OFFROAD_CONFIRM_MS = 2500;   // POSITIVE off-road evidence (a driveway / aisle under the car, a footprint) must hold this long
+export const LIFT_ABSENCE_CONFIRM_MS = 8000;   // "no drivable road within reach" alone is weaker (a tile still loading, a wide lot) and must hold this long
 export const LIFT_UNKNOWN_HOLD_MS = 6000;
 export const LIFT_EVIDENCE_FRESH_MS = 3500; // a surface's evidence older than this no longer counts
 export const LIFT_BUILDING_MARGIN_M = 2;
@@ -166,6 +167,8 @@ export type LiftEvidence = {
   navDistM: number | null;
   roadHit: boolean | null;
   buildingH: number | null;
+  /** POSITIVE off-road evidence: a driveway / parking aisle under the car (roadEvidence's `lot`). */
+  lot?: boolean;
 };
 export type LiftState = {
   targetM: number;
@@ -185,7 +188,10 @@ export function liftDecide(st: LiftState, ev: LiftEvidence, now: number, offRoad
   const offRoadEvidence = ev.roadHit === false || (typeof ev.buildingH === "number" && ev.buildingH >= 0);
   if (offRoadEvidence) {
     const since = st.offRoadSince ?? now;
-    if (now - since >= LIFT_OFFROAD_CONFIRM_MS) {
+    // Something UNDER the car (a driveway, an aisle, a roof) is positive evidence; "no road within reach" is only an
+    // absence — a tile still loading looks the same (Codex pass 3) — so it must hold longer before the car rises.
+    const positive = !!ev.lot || (typeof ev.buildingH === "number" && ev.buildingH >= 0);
+    if (now - since >= (positive ? LIFT_OFFROAD_CONFIRM_MS : LIFT_ABSENCE_CONFIRM_MS)) {
       const bld = typeof ev.buildingH === "number" ? ev.buildingH + LIFT_BUILDING_MARGIN_M : 0;
       const target = Math.min(LIFT_MAX_M, Math.max(offRoadLiftM, bld));
       return { targetM: target, why: bld > 0 ? `bld:${Math.round(ev.buildingH as number)}` : "offroad", offRoadSince: since, unknownSince: null };

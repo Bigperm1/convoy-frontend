@@ -7,7 +7,7 @@
 // F what "no evidence" may and may not do; G the feature classifier; H the ease.
 import {
   liftDecide, LIFT_STATE0, easeLift, isDrivableRoad, isPropertyRoad, buildingHeightOf, buildingUnder, roadEvidence,
-  LIFT_OFFROAD_CONFIRM_MS, LIFT_UNKNOWN_HOLD_MS, LIFT_MAX_M, LIFT_BUILDING_MARGIN_M, LIFT_ONROAD_SPEED_MS,
+  LIFT_OFFROAD_CONFIRM_MS, LIFT_ABSENCE_CONFIRM_MS, LIFT_UNKNOWN_HOLD_MS, LIFT_MAX_M, LIFT_BUILDING_MARGIN_M, LIFT_ONROAD_SPEED_MS,
   type LiftState, type LiftEvidence,
 } from "../../src/selfLiftRule.ts";
 
@@ -22,7 +22,8 @@ const run = (seq: Partial<LiftEvidence>[], lift = 10, st: LiftState = LIFT_STATE
   seq.forEach((e, i) => { s = liftDecide(s, ev(e), t0 + i * 1000, lift); out.push(s); });
   return out;
 };
-const CONFIRM_STEPS = Math.ceil(LIFT_OFFROAD_CONFIRM_MS / 1000);   // 3 one-second reports at 2500 ms
+const CONFIRM_STEPS = Math.ceil(LIFT_OFFROAD_CONFIRM_MS / 1000);   // 3 one-second reports at 2500 ms (positive evidence)
+const ABSENCE_STEPS = Math.ceil(LIFT_ABSENCE_CONFIRM_MS / 1000);   // 8 for an absence alone
 
 console.log("A. a red light on a road — the map sees the road every second; one blank second and one bad second change nothing");
 {
@@ -40,12 +41,14 @@ console.log("B. the three signals that mean 'road', each alone, at 0 km/h");
   ok("B2 on the route (6 m) while the map says no road → 0 (guidance wins)", run([{ speedMs: 0, navDistM: 6, roadHit: false }])[0].targetM === 0);
   ok("B3 at 30 km/h with no road in the box and no route → 0 (speed wins)", run([{ speedMs: 30 / 3.6, roadHit: false }])[0].targetM === 0);
   ok("B4 speed exactly at the floor counts as moving", run([{ speedMs: LIFT_ONROAD_SPEED_MS, roadHit: false }])[0].why === "speed");
-  ok("B5 off the route by 40 m at 5 km/h in a lot (no road) → lifts after the confirm", run(Array(CONFIRM_STEPS + 1).fill({ speedMs: 5 / 3.6, navDistM: 40, roadHit: false })).at(-1)!.targetM === 10);
+  ok("B5 off the route by 40 m at 5 km/h on a lot's aisle (positive) → lifts after the short confirm", run(Array(CONFIRM_STEPS + 1).fill({ speedMs: 5 / 3.6, navDistM: 40, roadHit: false, lot: true })).at(-1)!.targetM === 10);
+  ok("B6 off the route by 40 m with only an ABSENCE of roads → not yet after the short confirm…", run(Array(CONFIRM_STEPS + 1).fill({ speedMs: 5 / 3.6, navDistM: 40, roadHit: false })).at(-1)!.targetM === 0);
+  ok(`B7 …but after ${LIFT_ABSENCE_CONFIRM_MS} ms of it`, run(Array(ABSENCE_STEPS + 1).fill({ speedMs: 5 / 3.6, navDistM: 40, roadHit: false })).at(-1)!.targetM === 10);
 }
 
 console.log("C. crawling into a parking lot at 7 km/h: aisles are not roads");
 {
-  const out = run(Array(6).fill({ speedMs: 7 / 3.6, roadHit: false }));
+  const out = run(Array(6).fill({ speedMs: 7 / 3.6, roadHit: false, lot: true }));
   ok("C1 the first two seconds only WAIT (no pop on a glitch)", out[0].targetM === 0 && out[1].targetM === 0 && out[1].why === "offroad-wait", out[1].why);
   ok(`C2 lifted to 10 m once off-road has held ${LIFT_OFFROAD_CONFIRM_MS} ms`, out[CONFIRM_STEPS].targetM === 10 && out[CONFIRM_STEPS].why === "offroad", `${out[CONFIRM_STEPS].targetM} ${out[CONFIRM_STEPS].why}`);
   const back = liftDecide(out.at(-1)!, ev({ speedMs: 3, roadHit: true }), 99_000, 10);
@@ -54,8 +57,10 @@ console.log("C. crawling into a parking lot at 7 km/h: aisles are not roads");
 
 console.log("D. a driveway, a parkade, a tower");
 {
-  const drive = run(Array(CONFIRM_STEPS + 1).fill({ speedMs: 0, roadHit: false })).at(-1)!;
-  ok("D1 parked in a driveway (no road, no footprint) → the off-road lift", drive.targetM === 10);
+  const drive = run(Array(CONFIRM_STEPS + 1).fill({ speedMs: 0, roadHit: false, lot: true })).at(-1)!;
+  ok("D1 parked in a driveway (the driveway under the car) → the off-road lift after the short confirm", drive.targetM === 10);
+  const field = run(Array(ABSENCE_STEPS + 1).fill({ speedMs: 0, roadHit: false })).at(-1)!;
+  ok(`D1b parked in an unmapped lot (no road within reach, nothing under the car) → the lift only after ${LIFT_ABSENCE_CONFIRM_MS} ms`, field.targetM === 10 && run(Array(ABSENCE_STEPS - 1).fill({ speedMs: 0, roadHit: false })).at(-1)!.targetM === 0);
   const parkade = run(Array(CONFIRM_STEPS + 1).fill({ speedMs: 0, roadHit: false, buildingH: 12 })).at(-1)!;
   ok(`D2 inside a 12 m footprint → roof + ${LIFT_BUILDING_MARGIN_M} m`, parkade.targetM === 14 && parkade.why === "bld:12", `${parkade.targetM} ${parkade.why}`);
   const low = run(Array(CONFIRM_STEPS + 1).fill({ speedMs: 0, roadHit: false, buildingH: 3 })).at(-1)!;
@@ -77,8 +82,13 @@ console.log("E. no evidence never starts a lift, and ends one only after the hol
   const holdSteps = Math.ceil(LIFT_UNKNOWN_HOLD_MS / 1000);
   ok(`E2 a lift already up survives ${LIFT_UNKNOWN_HOLD_MS} ms of nothing…`, hold[holdSteps - 1].targetM === 10, `${hold[holdSteps - 1].targetM}`);
   ok("E3 …then comes down", hold[holdSteps].targetM === 0 && hold[holdSteps].why === "unknown", `${hold[holdSteps].targetM} ${hold[holdSteps].why}`);
-  const gap = run([{ speedMs: 0, roadHit: false }, { speedMs: 0, roadHit: false }, { speedMs: 0 }, { speedMs: 0, roadHit: false }, { speedMs: 0, roadHit: false }, { speedMs: 0, roadHit: false }, { speedMs: 0, roadHit: false }]);
+  const L = { speedMs: 0, roadHit: false, lot: true };
+  const gap = run([L, L, { speedMs: 0 }, L, L, L, L]);
   ok("E4 a blank second in the middle restarts the confirm (never lift on a broken run of evidence)", gap[4].targetM === 0 && gap[5].targetM === 0 && gap[6].targetM === 10, gap.map((s) => s.targetM).join(","));
+  // Codex pass 3: the car's own tile loads a moment after a neighbour's — the first queries see only a far path (absence),
+  // then the road under the car appears. An absence needs 8 s, so the road arriving at second 3 keeps the car on the ground.
+  const late = run([{ speedMs: 0, roadHit: false }, { speedMs: 0, roadHit: false }, { speedMs: 0, roadHit: false }, { speedMs: 0, roadHit: true }, { speedMs: 0, roadHit: true }]);
+  ok("E5 a road tile that loads 3 s late never lifts a car stopped on that road", late.every((s) => s.targetM === 0) && late.at(-1)!.why === "road", late.map((s) => s.targetM).join(","));
 }
 
 console.log("F. the road source: Streets v8 classes, the property rule, footprints");

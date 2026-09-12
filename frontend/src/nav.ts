@@ -904,7 +904,12 @@ let _manualArrive: ((late: boolean) => void) | null = null;
  * COVERED, so declaring arrival early records a shorter drive rather than a false one.
  */
 export function arriveNow(): boolean {
-  if (!_manualArrive) return false;
+  if (!_manualArrive) {
+    // Not a dead tap — map.tsx falls back to endNav — but the caller cannot tell "no drive"
+    // from "disarmed for one fix by a route swap", and only one of those is a defect. Measure it.
+    try { logEvent("arrive-manual skip=unarmed"); } catch {}
+    return false;
+  }
   try { logEvent("arrive-manual src=button"); } catch {}
   _manualArrive(false);
   return true;
@@ -1148,6 +1153,16 @@ export function useTurnByTurn(
       // times; a timer armed against the old line's last 40 m would otherwise mature
       // against a brand-new route with kilometres left and tear it down.
       if (silentTimerRef.current) { clearTimeout(silentTimerRef.current); silentTimerRef.current = null; }
+      // ...and NEITHER MAY THE ARRIVED BUTTON'S HANDLE (2026-09-12, adversarial review).
+      // `_manualArrive` is assigned only from the location effect, whose deps are
+      // [active, user?.lat, user?.lng] — a route or DESTINATION change is not among them, and
+      // this file's own measurement (see the identical-fix receipt below) shows a parked car
+      // can repeat the same coordinates indefinitely and never tick. So a driver who retargets
+      // while stopped could tap Arrived and fire the PREVIOUS destination's closure: the old
+      // label spoken, the old route banked. `announcedRef.current.clear()` above even resets
+      // that closure's own fire-once guard, so it would go through. Disarm it with the other
+      // three vectors; the next fix re-arms it against the new line.
+      _manualArrive = null;
       swapSuppressUntilRef.current = Date.now() + 8000;
       // ANCHOR BY POSITION ALONG THE NEW LINE, NOT 0 (2026-08-21). A swapped-in route
       // is not always computed from where the car is now — rkoji7's was computed from
@@ -1630,8 +1645,9 @@ export function useTurnByTurn(
       if (willSpeak && !spokeEarly) speakArrival(utt);
       options?.onArrive?.();
     };
-    // Keep the manual trigger pointed at THIS drive's arrival closure. Reassigned every time the
-    // closure is rebuilt so the button can never fire a stale destination's arrival.
+    // Keep the manual trigger pointed at THIS drive's arrival closure. This effect re-runs on
+    // [active, user?.lat, user?.lng] only, so a route/destination swap does NOT rebuild it —
+    // the swap handler above disarms it instead, and this line re-arms on the next fix.
     _manualArrive = fireArriveRef.current;
 
     // Crow-fly gap to the destination — the last step's end IS the destination

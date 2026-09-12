@@ -1091,7 +1091,9 @@ export default function MapScreen() {
     // (entry + first tier-2 crossing) and never more than one per tier per 5 minutes.
     const muted = mode === "nova" && navMuted;
     try { logEvent(`speed-alert tier=${tier} mode=${mode} over=${Math.round(overKmh)} limit=${Math.round(lim)} episode=${r.state.episode}${muted ? " muted=1" : ""}`); } catch {}
-    if (mode === "ding") { void playSpeedDing(tier === 2); return; }
+    // ONE chime, whatever the tier (Jeff, 2026-09-12: "only have the single ding").
+    // `tier` still matters below: the Scout voice mode speaks a firmer line at tier 2.
+    if (mode === "ding") { void playSpeedDing(); return; }
     // mode === "nova": spoken nudge (announce() also honors the Nova master switch).
     if (muted) return;
     const mph = settings.speedUnit === "mph";

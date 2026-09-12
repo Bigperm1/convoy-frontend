@@ -36,6 +36,20 @@ RULES = [
         "a prepare cue 2026-09-03.",
     ),
     (
+        "speed-ding-takes-an-argument",
+        ["src/speedDing.ts", "app/(app)/map.tsx", "app/(app)/settings/audio.tsx", "app/(app)/settings/scout-voice.tsx"],
+        r"playSpeedDing\(\s*[A-Za-z0-9_!.\"']",
+        "2026-09-12 (Jeff, verbatim: 'remove the double ding from the system and only have the single ding. also "
+        "remove the double ding play sample from the setting menu'): the speed chime is ONE ding, always. "
+        "playSpeedDing takes NO argument — it used to take `double`, play the clip twice with a 190 ms gap, and be "
+        "called as playSpeedDing(tier === 2) from map.tsx plus playSpeedDing(true) from a 'Double' sample button in "
+        "Settings. All three are gone. src/speedEpisode.ts still returns fire=2 for the tier-2 crossing and that is "
+        "CORRECT — the Scout VOICE mode uses it for its firmer spoken line — so do not delete the tier; only the "
+        "chime stopped varying. This rule fires on any call or definition that passes something, which is the exact "
+        "shape of the regression. There is no tools/sim-qc gate here: speedDing.ts imports react-native, expo-av and "
+        "./nav, so the node harness cannot load it, and this rule is the only guard.",
+    ),
+    (
         "chase-pitch-reads-speed",
         ["src/chasePitch.ts", "src/ConvoyMapbox.tsx", "src/carplay/CarMapView.tsx"],
         r"(?m)^\s*export function chasePitch\([^)]*\)[^{]*\{(?![\s\S]{0,300}?return CHASE_PITCH_FIXED;)",

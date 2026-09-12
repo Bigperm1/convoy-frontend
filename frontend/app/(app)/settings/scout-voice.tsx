@@ -73,17 +73,13 @@ export default function ScoutVoicePage() {
       <SettingsCard>
         <RadioRow icon="speedometer" iconColor="#FF453A" title="Scout" subtitle="Scout speaks up once when you're well over the limit (~21 over), once more if you push past ~41 — then stays quiet until you've been back near the limit for a bit" selected={getSpeedAlertMode(settings) === "nova"} onSelect={() => setSettings({ speedAlertMode: "nova", novaSpeeding: true })} />
         <Divider />
-        <RadioRow icon="notifications" iconColor="#FF9F0A" title="Ding" subtitle="A chime instead of a voice: one ding when you go ~21 over, a double if you push past ~41 — once per speeding stretch, not on every wobble" selected={getSpeedAlertMode(settings) === "ding"} onSelect={() => setSettings({ speedAlertMode: "ding", novaSpeeding: false })} />
-        {/* Preview the ding without having to go speed — single tap, plus the double
-            (the +41-over warning) so both patterns can be heard here. */}
+        <RadioRow icon="notifications" iconColor="#FF9F0A" title="Ding" subtitle="A chime instead of a voice: one ding when you go ~21 over, and again if you push past ~41 — once per speeding stretch, not on every wobble" selected={getSpeedAlertMode(settings) === "ding"} onSelect={() => setSettings({ speedAlertMode: "ding", novaSpeeding: false })} />
+        {/* Preview the ding without having to go speed. ONE button — the Double sample was
+            removed with the double ding itself (Jeff, 2026-09-12). */}
         <View style={styles.sampleRow}>
-          <TouchableOpacity style={styles.sampleBtn} activeOpacity={0.8} testID="ding-sample" onPress={() => { Haptics.selectionAsync().catch(() => {}); void playSpeedDing(false); }}>
+          <TouchableOpacity style={styles.sampleBtn} activeOpacity={0.8} testID="ding-sample" onPress={() => { Haptics.selectionAsync().catch(() => {}); void playSpeedDing(); }}>
             <Ionicons name="play-circle" size={18} color="#FF9F0A" />
             <Text style={styles.sampleBtnText}>Play sample</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.sampleBtn} activeOpacity={0.8} testID="ding-sample-double" onPress={() => { Haptics.selectionAsync().catch(() => {}); void playSpeedDing(true); }}>
-            <Ionicons name="play-circle" size={18} color="#FF9F0A" />
-            <Text style={styles.sampleBtnText}>Double</Text>
           </TouchableOpacity>
         </View>
         <Divider />

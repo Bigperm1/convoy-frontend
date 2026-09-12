@@ -1,9 +1,13 @@
 // Speed-alert ding — a short, self-contained notification chime for the "Ding"
-// speed-alert mode: a single ding on entering a speeding episode (~21 km/h over the
-// limit), a double ding at most once per episode on first pushing past ~41 over. WHEN
-// it sounds is decided upstream in src/speedEpisode.ts (one alert per episode, gated by
-// tools/sim-qc/speed_episode_test.mts); this module only owns HOW — and it plays ONE
-// chime at a time (see playSpeedDing).
+// speed-alert mode. ONE chime, always. WHEN it sounds is decided upstream in
+// src/speedEpisode.ts (gated by tools/sim-qc/speed_episode_test.mts); this module only
+// owns HOW.
+//
+// ⛔ THE DOUBLE DING IS GONE (Jeff, 2026-09-12: "remove the double ding from the system
+// and only have the single ding. also remove the double ding play sample from the setting
+// menu"). speedEpisode still returns fire=2 for the tier-2 crossing because the SCOUT
+// voice mode uses it for its firmer spoken line — the ding mode just no longer varies.
+// Do not re-add a `double` argument; scripts/trap-check.py rule 32 fails the build.
 //
 // There is no bundled sound asset in the repo and no way to add a binary one
 // through the text tooling, so the chime is embedded as a base64 WAV (a tiny
@@ -21,6 +25,7 @@ import { setIdleAudioMode } from "./audioMode";
 import { isAudioBusy } from "./nav";
 import { getSettings, getAudioVol } from "./settings";
 import { callSilence } from "./callState";
+import { logEvent } from "./crashBreadcrumb";
 
 // 16 kHz mono 16-bit WAV, ~480 ms — SOFT, mellow LOW descending two-note
 // "doo-dun": a warm E4 (330 Hz) dropping a perfect fourth to B3 (247 Hz), near-
@@ -33,7 +38,6 @@ const DING_WAV_B64 =
 const DING_MIME = "audio/wav";
 let _nativeUri: string | null = null;       // cache-dir path, written once
 const CLIP_MS = 480;                         // the WAV's length (16 kHz mono 16-bit, 15,360 data bytes)
-const GAP_MS = 190;                          // silence between the END of the first ding and the second (double)
 
 async function ensureNativeFile(): Promise<string | null> {
   try {
@@ -46,11 +50,11 @@ async function ensureNativeFile(): Promise<string | null> {
   } catch { return null; }
 }
 
-async function playOnceNative(): Promise<void> {
+async function playOnceNative(): Promise<boolean> {
   try {
     const { Audio }: any = await import("expo-av");
     const uri = await ensureNativeFile();
-    if (!uri) return;
+    if (!uri) return false;
     const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true, volume: getAudioVol(getSettings(), "volDings") });
     // Resolve when the clip has FINISHED (didJustFinish), with a timer as the floor: createAsync resolves on
     // LOAD, and the double used to schedule its second chime GAP_MS after that — 190 ms into a 480 ms clip,
@@ -67,63 +71,83 @@ async function playOnceNative(): Promise<void> {
         }
       });
     });
-  } catch { /* no sound on failure */ }
+    return true;
+  } catch { return false; /* no sound on failure */ }
 }
 
-function playOnceWeb(): Promise<void> {
+function playOnceWeb(): Promise<boolean> {
   return new Promise((resolve) => {
     try {
       const a = new Audio(`data:${DING_MIME};base64,${DING_WAV_B64}`);
       a.volume = getAudioVol(getSettings(), "volDings");
-      a.onended = () => resolve();
-      a.onerror = () => resolve();
-      a.play().catch(() => resolve());
-    } catch { resolve(); }
+      a.onended = () => resolve(true);
+      a.onerror = () => resolve(false);
+      a.play().catch(() => resolve(false));
+    } catch { resolve(false); }
   });
 }
 
-// ONE chime at a time (2026-09-05). The WHEN is decided upstream (src/speedEpisode.ts:
-// one single per speeding episode, one double on the first tier-2 crossing), but two
-// requests can still arrive back-to-back — a hard launch that crosses both tiers a second
-// apart — and the yield-to-Nova wait below would otherwise let both play on top of each
-// other. A request that lands while one is still pending is MERGED into it (a double
-// upgrades a pending single; never a second chime), and a request inside MIN_SPACING_MS
-// of the last chime is dropped — the driver has just been told.
-const MIN_SPACING_MS = 1200;                 // ≈ one full double (480 + 190 + 480 ms), measured from the first chime's start
-let _pending: { double: boolean } | null = null;
+// ONE chime at a time. Two requests can still arrive back-to-back — a hard launch that
+// crosses both tiers a second apart — and the yield-to-Nova wait below would otherwise let
+// both play on top of each other. A request that lands while one is still pending is
+// DROPPED, and so is one inside MIN_SPACING_MS of the last chime: the driver has just
+// been told.
+const MIN_SPACING_MS = 1200;
+let _pending = false;
 let _lastPlayMs = 0;
 
-// Play the speed-alert chime. `double` plays it twice (the tier-2 / +41-over warning);
-// otherwise once (the tier-1 nudge). Always resolves; never throws.
-export async function playSpeedDing(double: boolean): Promise<void> {
-  if (callSilence()) return; // no dings over a phone call (Settings → Mute During Calls)
-  if (_pending) { if (double) _pending.double = true; return; }   // merge, never stack
-  if (Date.now() - _lastPlayMs < MIN_SPACING_MS) return;           // just chimed
-  const req = { double };
-  _pending = req;
+/**
+ * Play the speed-alert chime. ONE chime, always. Resolves when it has finished; never throws.
+ *
+ * ⛔ TAKES NO ARGUMENT, BY REQUEST. It used to accept `double` for the +41-over tier and
+ * play the clip twice. Jeff, 2026-09-12: "remove the double ding from the system and only
+ * have the single ding". Do not re-add it — scripts/trap-check.py rule 32 fails the build.
+ * (There is no tools/sim-qc gate for this module: it imports react-native, expo-av and
+ * ./nav, so the node harness cannot load it. The trap rule is the guard.)
+ *
+ * EMITS A RECEIPT (2026-09-12). Jeff, same message: "check the speed dings cause they did
+ * not work." His 09-12 drive logged three `speed-alert tier=1 mode=ding` DECISIONS at
+ * 08:21:37, 08:27:33 and 08:33:50 and he heard nothing — and there was no way to tell a
+ * decision that never reached the speaker from one that played inaudibly, because this
+ * function logged nothing at all. `speed-ding` now says which: why= names the branch that
+ * swallowed it, vol= is the level it tried, waited= is how long it yielded to Nova.
+ */
+export async function playSpeedDing(): Promise<void> {
+  const vol = getAudioVol(getSettings(), "volDings");
+  const say = (why: string, waited = 0) => {
+    try { logEvent(`speed-ding why=${why} vol=${vol.toFixed(2)} waited=${waited}`); } catch {}
+  };
+  if (callSilence()) { say("call-silence"); return; }   // Settings → Mute During Calls
+  if (_pending) { say("pending"); return; }
+  if (Date.now() - _lastPlayMs < MIN_SPACING_MS) { say("spacing"); return; }
+  _pending = true;
+  const t0 = Date.now();
   try {
-    // Yield to Nova: never sound a ding ON TOP of a greeting / turn callout (the
-    // confirmed "two sounds at once" overlap — the ding bypasses the speech queue).
-    // Briefly wait for the voice to clear, then ding; give up after ~3s so a long
-    // callout can't swallow a real speed alert entirely.
+    // Yield to Nova: never sound a ding ON TOP of a greeting / turn callout (the confirmed
+    // "two sounds at once" overlap — the ding bypasses the speech queue). Briefly wait for
+    // the voice to clear, then ding; give up after ~3 s so a long callout cannot swallow a
+    // real speed alert entirely.
     for (let i = 0; i < 8 && isAudioBusy(); i++) {
       await new Promise((r) => setTimeout(r, 400));
     }
+    const waited = Date.now() - t0;
     _lastPlayMs = Date.now();
     if (Platform.OS === "web") {
-      try { await playOnceWeb(); } catch {}
-      if (req.double) { await new Promise((r) => setTimeout(r, GAP_MS)); try { await playOnceWeb(); } catch {} }
+      let ok = false;
+      try { ok = await playOnceWeb(); } catch {}
+      say(ok ? "played" : "web-failed", waited);
       return;
     }
-    // Make sure the iOS session plays on the loudspeaker, in silent mode, and
-    // MIXES with the driver's music rather than pausing/ducking it. The app's idle
-    // audio mode is exactly that (allowsRecordingIOS:false + playsInSilentModeIOS
-    // + MixWithOthers), so the chime is audible even with the ring switch on and
-    // never interrupts music. Non-disruptive by construction.
-    try { await setIdleAudioMode(); } catch {}
-    try { await playOnceNative(); } catch {}                       // resolves when the chime has ENDED
-    if (req.double) { await new Promise((r) => setTimeout(r, GAP_MS)); try { await playOnceNative(); } catch {} }   // doo-dun … doo-dun, never on top of each other
+    // Make sure the iOS session plays on the loudspeaker, in silent mode, and MIXES with
+    // the driver's music rather than pausing/ducking it. The app's idle audio mode is
+    // exactly that (allowsRecordingIOS:false + playsInSilentModeIOS + MixWithOthers), so
+    // the chime is audible even with the ring switch on and never interrupts music.
+    let modeOk = true;
+    try { await setIdleAudioMode(); } catch { modeOk = false; }
+    let ok = false;
+    try { ok = await playOnceNative(); } catch {}
+    say(ok ? (modeOk ? "played" : "played-nomode") : "play-failed", waited);
   } finally {
-    _pending = null;
+    _pending = false;
   }
 }

@@ -80,7 +80,7 @@ export default function AudioPage() {
         <AudioRow
           icon="notifications" color="#FF9F0A" title="Alerts & Dings" subtitle="Speed alert & alert chimes"
           value={dings} onChange={setDings} onComplete={persist("volDings")}
-          onPreview={() => playSpeedDing(false)}
+          onPreview={() => playSpeedDing()}
         />
         <Divider />
         <AudioRow

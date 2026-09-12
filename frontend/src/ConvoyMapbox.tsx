@@ -33,7 +33,7 @@
 
 import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "./drawTelemetry";
-import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted } from "./heatProbe";
+import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted, noteEaseIdle } from "./heatProbe";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, poseRoadWindowM } from "./poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "./yawRate";
 import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "./poseSeed";
@@ -1847,7 +1847,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // clock are measured independently.
     noteRafFrame();
     const a = anim.current;
-    if (!a) { raf.current = null; return; }
+    if (!a) { raf.current = null; noteEaseIdle(Date.now()); return; }   // parked: nothing to ease
     a.stepped = true; // this ease has rendered ≥1 frame → the loop is alive for it
     const now = Date.now();
     const t = Math.min(1, (now - a.start) / a.dur);
@@ -1895,6 +1895,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     } else {
       anim.current = null;
       raf.current = null;
+      noteEaseIdle(now);   // measurement only — tells a `main-gap` apart from an idle loop
     }
   };
 
@@ -1963,6 +1964,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       scatterRejects.current = 0;
       anim.current = null;
       cancelNextFrame();
+      noteEaseIdle(Date.now());   // measurement only — see noteEaseIdle in src/heatProbe.ts
       // NOTE: do NOT stop the bg watchdog here — for the lockstep (CarPlay)
       // instance it's the always-on freeze net, and killing it on a snap/recenter
       // would disarm it for the rest of the drive. anim=null + the heartbeat

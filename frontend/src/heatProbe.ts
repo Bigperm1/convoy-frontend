@@ -177,6 +177,20 @@ function armAppWatch(): void {
 let _lastFixAt = 0;
 export function noteFixAccepted(now: number): void { if (now > _lastFixAt) _lastFixAt = now; }
 
+// ── ARMED vs IDLE (2026-09-12) ───────────────────────────────────────────────────────────
+// `fixGap` says fixes kept arriving through the gap; it still could NOT say whether the ease
+// loop was ARMED and late (a real drawing stall — the marker sits still, then catches up) or
+// simply PARKED because it had nothing left to animate. Those are the only two shapes a gap
+// can have, and they call for opposite fixes. SelfCarModel's step() ends with
+// `anim.current = null; raf.current = null;` when the ease completes (t>=1) and the snap paths
+// cancel the pending frame — those are the only ways the loop stops itself, and each now
+// stamps here. The row prints `easeIdle=` — ms since the loop last parked.
+//   easeIdle <= dt  → the loop parked INSIDE the gap. IDLE. Nothing was owed a frame.
+//   easeIdle >  dt  → the loop was armed across the whole gap. STALLED. This is the defect.
+//   easeIdle == -1  → it has never parked this session; same reading as the line above.
+let _easeIdleAt = 0;
+export function noteEaseIdle(now: number): void { if (now > _easeIdleAt) _easeIdleAt = now; }
+
 export function noteFrame(now: number, inst?: string): void {
   if (!_on) return;
   _raf++;
@@ -201,11 +215,12 @@ export function noteFrame(now: number, inst?: string): void {
       _gapAlertAt = now;
       // The WHOLE sequence, not its last char (2026-09-02): 'aba' proves a suspension,
       // 'a' with sinceApp far larger than dt proves the app never left the foreground.
-      // A gap can still be the step loop idling under the dead-band (noteFrame's only
-      // caller is the SelfCarModel ease) — read it with the speed on the draw-cmp rows.
+      // A gap can still be the step loop idling (noteFrame's only caller is the SelfCarModel
+      // ease) — `easeIdle` below separates that from a real stall; see noteEaseIdle above.
       const sinceApp = _appChangedAt ? now - _appChangedAt : -1;
       const fixGap = _lastFixAt ? now - _lastFixAt : -1;
-      try { logEventReliable(`main-gap dt=${Math.round(dt)} ${_ctx} app=${_appSeen || '?'} sinceApp=${Math.round(sinceApp)} fixGap=${Math.round(fixGap)}`); } catch {}
+      const easeIdle = _easeIdleAt ? now - _easeIdleAt : -1;
+      try { logEventReliable(`main-gap dt=${Math.round(dt)} ${_ctx} app=${_appSeen || '?'} sinceApp=${Math.round(sinceApp)} fixGap=${Math.round(fixGap)} easeIdle=${Math.round(easeIdle)}`); } catch {}
     }
     // Thin to every 4th once warm, and STOP at DTS_MAX (see above).
     if (_dts.length < 900 || ((_raf & 3) === 0 && _dts.length < DTS_MAX)) _dts.push(dt);

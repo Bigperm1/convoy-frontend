@@ -329,8 +329,8 @@ const styles = StyleSheet.create({
   // Same footprint as barExit / barTurns — the three tiles must read as one family.
   barArrived: {
     width: 50, height: 50, borderRadius: 14,
-    // Color comes from the candy-red LinearGradient child; keep the container
-    // transparent + clip so the gradient + glass render as a clean red circle.
+    // Color comes from the candy-ORANGE LinearGradient child; keep the container
+    // transparent + clip so the gradient + glass render as one clean tile.
     backgroundColor: "transparent",
     overflow: "hidden",
     borderWidth: 1, borderColor: "rgba(255,190,110,0.95)",

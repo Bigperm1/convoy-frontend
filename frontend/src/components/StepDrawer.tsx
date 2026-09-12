@@ -58,6 +58,7 @@ type Props = {
   distanceRemaining?: string;   // e.g. "8.4 km"
   arrival?: string;             // arrival clock, e.g. "10:42 AM"
   onEnd?: () => void;           // red Exit button
+  onArrived?: () => void;       // candy-orange Arrived button — declares arrival by hand
   // Phone + head unit only: the written-directions face (CarDriveList) has a
   // "Show map" button, but once the driver was on the map there was no way back
   // (Jeff, 8/21 drive to work). When provided, a "Directions" button sits left
@@ -71,7 +72,7 @@ type Props = {
 };
 
 const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
-  { route, maneuverIcon, eta, distanceRemaining, arrival, onEnd, onShowList, progress, onVisibilityChange },
+  { route, maneuverIcon, eta, distanceRemaining, arrival, onEnd, onArrived, onShowList, progress, onVisibilityChange },
   ref
 ) {
   // 0 = step list hidden (tucked behind the bar), 1 = fully open.
@@ -193,7 +194,7 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
             {!!distanceRemaining && <Text style={styles.barMeta}>{compact(distanceRemaining)}</Text>}
             {!!arrival && <Text style={styles.barMeta}>{compact(arrival).toLowerCase()}</Text>}
           </View>
-          {(onShowList || onEnd) && (
+          {(onShowList || onEnd || onArrived) && (
             /* THE PAIR, SIDE BY SIDE (Jeff, 2026-08-31): "place the show map green
                button to the same square and place it right beside the end button."
                Both are now mapLogoBacking's exact footprint — 50x50, r14 — so the
@@ -222,6 +223,30 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
                   {/* 26 in a 50pt tile keeps the glyph's optical weight from the 32-in-60
                       circle it replaced (0.52 vs 0.53 of the box). */}
                   <MaterialCommunityIcons name="directions" size={26} color="#04150B" />
+                </TouchableOpacity>
+              )}
+              {onArrived && (
+                /* ARRIVED (Jeff, 2026-09-12) — candy ORANGE, between the green directions tile
+                   and red End, exactly as he placed it. Same 50x50 r14 candy construction as its
+                   two neighbours: bright->deep gradient with a tinted GlassFill refracting it.
+                   It exists because arrival DETECTION can miss — on his 09-12 commute the engine
+                   never saw him stop, so a 33 km drive ended in silence and he worked around it
+                   by parking 60 m short and walking in. This declares it. */
+                <TouchableOpacity
+                  onPress={onArrived}
+                  style={styles.barArrived}
+                  activeOpacity={0.85}
+                  testID="arrived-nav"
+                  hitSlop={6}
+                  accessibilityLabel="I have arrived"
+                >
+                  <LinearGradient
+                    colors={["#FFB03B", "#FF8A00", "#C25E00"]}
+                    locations={[0, 0.5, 1]}
+                    style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
+                  />
+                  <GlassFill tintColor="#FF8A00" style={{ borderRadius: 14, overflow: "hidden" }} />
+                  <MaterialCommunityIcons name="flag-checkered" size={26} color="#2A1200" />
                 </TouchableOpacity>
               )}
               {onEnd && (
@@ -299,6 +324,16 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     overflow: "hidden",
     borderWidth: 1, borderColor: "rgba(255,90,120,0.9)",
+    alignItems: "center", justifyContent: "center",
+  },
+  // Same footprint as barExit / barTurns — the three tiles must read as one family.
+  barArrived: {
+    width: 50, height: 50, borderRadius: 14,
+    // Color comes from the candy-red LinearGradient child; keep the container
+    // transparent + clip so the gradient + glass render as a clean red circle.
+    backgroundColor: "transparent",
+    overflow: "hidden",
+    borderWidth: 1, borderColor: "rgba(255,190,110,0.95)",
     alignItems: "center", justifyContent: "center",
   },
   barExitText: { color: "#F4F4F4", fontSize: 15, fontWeight: "800", letterSpacing: 0.2 },

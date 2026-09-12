@@ -880,6 +880,36 @@ function findRouteSegment(
   return { seg: bestSeg, t: bestT, distM: Math.sqrt(bestD2) };
 }
 
+// ── MANUAL ARRIVAL (Jeff, 2026-09-12: "we need to add a ARRIVED button ... and this would
+// trigger the ARRIVED mechanism") ────────────────────────────────────────────────────────────
+// The engine decides arrival from a settle (stopped near the destination). That can miss: on
+// his 09-12 commute the last fix the engine saw had him at 12 km/h — above
+// ARRIVE_SETTLE_SPEED_MS — and then fixes stopped, so `stopped` never became true, the arrival
+// never fired and a 33 km drive ended in silence. He worked around it by parking 60 m short and
+// walking in. The button is the escape hatch.
+//
+// It runs the SAME path as a detected arrival — fireArriveRef — so the arrival line is spoken,
+// the once-per-destination guard holds, the settle/silent timers are cleared and the drive is
+// banked as an ARRIVAL rather than an End. Anything less would be a differently-shaped bug.
+//
+// A module-level handle rather than a new return field: useTurnByTurn returns bare TbtState and
+// every consumer destructures it, so widening the return would ripple through four surfaces for
+// one function. Same pattern as stopSpeech / resetSpeakGate above.
+let _manualArrive: ((late: boolean) => void) | null = null;
+
+/**
+ * Fire the arrival the driver just declared. Returns false when no drive is active (nothing
+ * armed), so the caller can leave the button inert rather than pretend.
+ * NOT gated on distance, deliberately: trip-record banks `src=odo`, the distance actually
+ * COVERED, so declaring arrival early records a shorter drive rather than a false one.
+ */
+export function arriveNow(): boolean {
+  if (!_manualArrive) return false;
+  try { logEvent("arrive-manual src=button"); } catch {}
+  _manualArrive(false);
+  return true;
+}
+
 export function useTurnByTurn(
   route: NavRoute | null,
   // `speed` (m/s, from GPS) rides along on the position the caller already
@@ -1036,6 +1066,9 @@ export function useTurnByTurn(
   useEffect(() => {
     if (!active) {
       _tbtEngineActive = false; // cold CarPlay guidance may take over (Wave 2)
+      // Disarm the Arrived button with the drive — a stale closure here would fire the PREVIOUS
+      // destination's arrival on the next tap.
+      _manualArrive = null;
       resetSpeakGate();
       announcedRef.current.clear();
       arriveSpokenRef.current = null;
@@ -1597,6 +1630,9 @@ export function useTurnByTurn(
       if (willSpeak && !spokeEarly) speakArrival(utt);
       options?.onArrive?.();
     };
+    // Keep the manual trigger pointed at THIS drive's arrival closure. Reassigned every time the
+    // closure is rebuilt so the button can never fire a stale destination's arrival.
+    _manualArrive = fireArriveRef.current;
 
     // Crow-fly gap to the destination — the last step's end IS the destination
     // (mapboxToNavRoute keeps end = its own maneuver point for the final step).

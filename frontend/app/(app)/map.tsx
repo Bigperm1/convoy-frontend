@@ -40,7 +40,7 @@ import ShareSheet from "../../src/ShareSheet";
 import {
   fetchRoutes, fetchAiRoute, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
-  useRouteTrafficRefresh, fetchRouteViaStops,
+  useRouteTrafficRefresh, fetchRouteViaStops, arriveNow,
 } from "../../src/nav";
 import { getDepartureBearing, noteCourse, orderRoutesForward, routeInitialBearing, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
 import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw, carSpot } from "../../src/locationPrivacy";
@@ -2768,6 +2768,13 @@ export default function MapScreen() {
     } catch {}
   };
 
+  // ARRIVED, by hand (Jeff, 2026-09-12). Runs the engine's own arrival — the line is spoken, the
+  // once-per-destination guard holds and the drive banks as an ARRIVAL, not an End. Falls back to
+  // endNav only if nothing is armed, so the button is never a dead tap.
+  const arrivedNow = () => {
+    try { if (arriveNow()) return; } catch {}
+    endNav();
+  };
   const endNav = () => {
     // Bank the drive BEFORE the teardown drops activeRoute — an End is a finished drive,
     // not a discarded one.
@@ -4967,6 +4974,7 @@ export default function MapScreen() {
           // nothing on record said when (or whether) he had tapped Show map.
           onShowMap={() => { setCarListMapOverride(true); try { logEvent("phone-tap:show-map"); } catch {} }}
           onEnd={endNav}
+          onArrived={arrivedNow}
         />
       )}
 
@@ -6024,6 +6032,7 @@ export default function MapScreen() {
           distanceRemaining={fmtDistanceM(tbt.distanceRemainingM)}
           arrival={fmtClock(new Date(Date.now() + tbt.etaSeconds * 1000))}
           onEnd={endNav}
+          onArrived={arrivedNow}
           onShowList={carListHidden ? () => setCarListMapOverride(false) : undefined}
           onVisibilityChange={setStepsExpanded}
         />

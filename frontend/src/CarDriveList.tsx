@@ -64,6 +64,7 @@ export default function CarDriveList(props: {
   onOfferDismiss?: () => void;
   onShowMap: () => void;
   onEnd: () => void;
+  onArrived?: () => void;   // candy-orange Arrived — declares arrival by hand
 }) {
   const { steps, stepIndex } = props;
   // The tab bar is position:'absolute' (app/(app)/_layout.tsx ~:285, 86pt iOS / 84pt
@@ -249,6 +250,22 @@ export default function CarDriveList(props: {
           exact footprint (mapLogoBacking: 50×50 r14 at right 12, top 52/28 — the
           logo is zIndex 100 so it paints above this screen, which is deliberate).
           Named "End" to match CarPlay/AA. */}
+      {/* ARRIVED (Jeff, 2026-09-12: "beside the red END") — candy ORANGE, the same 50x50 r14
+          square, sitting immediately to End's left on the same row. Runs the real arrival
+          path, so the line is spoken and the drive banks as an arrival rather than an End. */}
+      {props.onArrived && (
+        <Pressable onPress={props.onArrived} style={styles.arrivedSquare} hitSlop={8} accessibilityLabel="I have arrived">
+          <LinearGradient
+            colors={["#FFB03B", "#FF8A00", "#C25E00"]}
+            locations={[0, 0.5, 1]}
+            style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
+          />
+          {Platform.OS === "ios" && (
+            <GlassFill tintColor="#FF8A00" style={{ borderRadius: 14, overflow: "hidden" }} />
+          )}
+          <Text style={styles.arrivedSquareText}>Arrived</Text>
+        </Pressable>
+      )}
       <Pressable onPress={props.onEnd} style={styles.endSquare} hitSlop={8}>
         {/* The CANDY-APPLE construction, copied exactly from StepDrawer's End circle
             (Jeff, 2026-08-16: "way more premium looking" — the premium is not the hex,
@@ -323,6 +340,16 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center", zIndex: 60,
   },
   endSquareText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
+  // Immediately LEFT of End on the same row: right 12 + 50 + 8 = 70. Same 50x50 r14 footprint
+  // so End, Arrived and the logo above them read as one family.
+  arrivedSquare: {
+    position: "absolute", right: 70, top: (Platform.OS === "ios" ? 52 : 28) + 50 + 8,
+    width: 50, height: 50, borderRadius: 14, backgroundColor: "transparent",
+    overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,190,110,0.95)",
+    alignItems: "center", justifyContent: "center", zIndex: 60,
+  },
+  // "Arrived" needs to fit 50pt: 11pt against End's 15.
+  arrivedSquareText: { color: "#2A1200", fontSize: 11, fontWeight: "800" },
   offer: {
     flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 16, marginTop: 10,
     padding: 12, borderRadius: 12, borderWidth: 1, borderColor: COLORS.brandDim,

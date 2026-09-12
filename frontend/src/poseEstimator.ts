@@ -159,6 +159,19 @@ export const POSE_ACC_DT_MIN_S = 0.2;
 export const POSE_ACC_DT_MAX_S = 3;
 
 export const POSE_DR_MAX_M = 40;
+/**
+ * Stop dead reckoning once the last ACCEPTED fix is older than this, however healthy the render
+ * loop is. Jeff, 2026-09-12 14:55:46, stopped at a light with CarPlay rendering:
+ *   draw-cmp surf=car d=41.1m spd=16 fixAge=22412 src=road dOld=40.8
+ * He had moved 7 m in 87 s; the marker was 41 m up the road. The existing guard at :351 tests
+ * `rawDt`, the time since the last posePredict — i.e. since the last RENDER — so a live 12 Hz
+ * CarPlay loop sails straight through a fix hole and integrates the last known speed to the
+ * POSE_DR_MAX_M cap. There was no bound on FIX age at all.
+ * (`distanceFilter = 2 m` means a stationary car generates no callbacks, so the hole is normal.)
+ * 2.5 s is POSE_FIX_STALE_MS: past that poseFix ALREADY treats a fix as stale, so posePredict has
+ * no business integrating that same fix's speed either. Keep the two in step.
+ */
+export const POSE_DR_MAX_FIX_AGE_S = 2.5;   // matches POSE_FIX_STALE_MS below, deliberately
 /** A predict step longer than this is a gap (suspension, stall): advance the clock, not the car. */
 export const POSE_MAX_DT_S = 1.5;
 /** Fix weight by horizontal accuracy: sharp fixes move the estimate hard, vague ones nudge it. */
@@ -439,8 +452,11 @@ export function posePredict(st: PoseState, nowMs: number, yaw: PoseYaw | null | 
     ? tSince
     : Math.max(0, POSE_ACC_HOLD_S * (1 - (tSince - POSE_ACC_HOLD_S) / POSE_ACC_DECAY_S));
   const spdDR = st.spdAcc !== 0 && accW > 0 ? Math.max(0, spd + st.spdAcc * accW) : spd;
+  // Past POSE_DR_MAX_FIX_AGE_S the car may have stopped, turned or reversed and the last speed is
+  // no longer evidence — hold position and wait for a fix, exactly as the render-gap branch does.
+  const fixFresh = st.fixAt > 0 && (nowMs - st.fixAt) / 1000 <= POSE_DR_MAX_FIX_AGE_S;
   let lat = st.lat, lng = st.lng, drM = st.drM;
-  if (spd >= POSE_MOVING_MS && drM < POSE_DR_MAX_M) {
+  if (fixFresh && spd >= POSE_MOVING_MS && drM < POSE_DR_MAX_M) {
     const step = Math.min(spdDR * dt, POSE_DR_MAX_M - drM);
     const p = stepLatLng(lat, lng, hdg, step);
     lat = p.lat; lng = p.lng; drM += step;

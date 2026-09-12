@@ -39,7 +39,7 @@
 // EXITS NON-ZERO ON FAILURE — this is a gate, not a printout.
 import {
   poseStart, posePredict, poseFix, poseOut, haversineM, stepLatLng, bearingDeg,
-  POSE_ACC_HOLD_S, POSE_ACC_DECAY_S,
+  POSE_ACC_HOLD_S, POSE_ACC_DECAY_S, POSE_DR_MAX_FIX_AGE_S, POSE_DR_MAX_M,
 } from "../../src/poseEstimator.ts";
 
 const T0 = 1_700_000_000_000;
@@ -223,6 +223,35 @@ ok("A5 it never runs AHEAD of the car by more than 2 m", mostAhead > -2.0, `${mo
      vEnd <= 6.5, `${vEnd.toFixed(1)} m/s at the end vs 6.0 measured (was 10.5)`);
   ok("B2b and it never ran away past the acceleration cap while trusted",
      maxStepMs < 12, `peak ${maxStepMs.toFixed(1)} m/s`);
+}
+
+
+// ── C · a stale fix must stop the dead reckoning (2026-09-12) ─────────────────────────────
+{
+  // Jeff stopped at a light with CarPlay rendering: fixAge 22.4 s, render loop alive at 12 Hz,
+  // marker 41 m up the road at the POSE_DR_MAX_M cap. The old guard tested time since the last
+  // RENDER, so it never fired. Here: one fix at 30 km/h, then keep RENDERING with no further
+  // fixes and check how far the marker runs.
+  const T = 1_700_000_000_000;
+  let st = poseStart();
+  st = poseFix(st, { lat: 49.0330, lng: -122.2930, at: T, accM: 5, speedMs: 8.33, courseDeg: 180 }, null);
+  st = poseFix(st, { lat: 49.03293, lng: -122.2930, at: T + 1000, accM: 5, speedMs: 8.33, courseDeg: 180 }, null);
+  // Measure the part that matters: movement AFTER the guard should have engaged. Before that the
+  // marker legitimately dead-reckons and eases out the last fix's pending correction.
+  for (let t = T + 1050; t <= T + 6000; t += 83) st = posePredict(st, t, null);
+  const settled = poseOut(st)!;
+  for (let t = T + 6083; t <= T + 26_000; t += 83) st = posePredict(st, t, null);   // 12 Hz for 20 more s
+  const end = poseOut(st)!;
+  const ranAfter = haversineM(settled.lat, settled.lng, end.lat, end.lng);
+  ok("C1 once the fix is stale the marker STOPS — 20 further seconds move it under a metre",
+     ranAfter < 1.0, `${ranAfter.toFixed(2)} m after the guard engages (was ~28 m more, to the ${POSE_DR_MAX_M} m cap)`);
+  ok("C2 and it never reached the dead-reckoning cap at all",
+     st.drM < POSE_DR_MAX_M - 5, `drM=${st.drM.toFixed(1)} m of ${POSE_DR_MAX_M}`);
+}
+{
+  // …and a HEALTHY 1 Hz stream must still dead-reckon normally between fixes.
+  const lag = steady(drive(accelStraight(8.33, 0, 8)), 4, 8);
+  ok("C3 a normal 1 Hz stream is unaffected", Math.abs(lag) < 3, `${lag.toFixed(1)} m at steady 30 km/h`);
 }
 
 console.log(fails === 0 ? "\nPASS pose_accel" : `\nFAIL pose_accel (${fails})`);

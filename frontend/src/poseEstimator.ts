@@ -68,6 +68,17 @@ export type PoseState = {
   lat: number; lng: number;
   hdg: number;                 // degrees, 0 = north, clockwise
   spd: number;                 // m/s, from the last fix
+  /** m/s², derived between the last two fixes that CARRIED A SPEED. 0 until two are in hand. */
+  spdAcc: number;
+  /**
+   * Fix clock of the last fix that actually carried a usable speed. NOT the same as fixAt:
+   * a STALE fix, or one with no speedMs, still advances fixAt while KEEPING the old spd, so
+   * differencing speed against fixAt pairs a new speed with an old timestamp and invents
+   * acceleration out of a gap. Codex, 2026-09-12, reproduced: accept 3 m/s at t=0, a stale fix
+   * at t=3, then 9 m/s at t=6 — fixAt makes that look like a 3 s interval and yields 2 m/s²
+   * from samples six seconds apart.
+   */
+  spdAt: number;
   tAt: number;                 // last posePredict clock (epoch ms)
   fixAt: number;               // last ACCEPTED fix time (fix clock)
   hasFix: boolean;
@@ -117,6 +128,36 @@ export type PoseYaw = { cumDeg: number; atMs: number };
 /** GPS course is trustworthy enough to correct heading above this (≈11 km/h). */
 export const POSE_COURSE_MIN_MS = 3.0;
 /** Dead reckoning without a fix stops here; beyond it the estimate waits for GPS. */
+// ── DEAD-RECKONING WITH ACCELERATION (Jeff, 2026-09-12: "go after it") ──────────────────────
+// Between fixes the estimator used to travel at the speed of the LAST fix, full stop. iOS
+// delivers about 1 Hz, so a car that is ACCELERATING is under-integrated for the whole second
+// and the drawn marker falls behind — and because it falls behind ALONG the road, in a corner
+// it reads as still being on the leg before the turn, which is exactly what Jeff called
+// "off the line".
+// MEASURED on the shipped estimator with tools/sim-qc/pose_accel_probe.mts, straight run, clean
+// 1 Hz fixes: +1.9 m behind at 0.30 m/s², +2.7 m at 1.46, +4.7 m at 3.12. His 09-12 lot exit was
+// 11 -> 18 -> 30 km/h in two seconds, 3.31 m/s², the hardest of six drives, with three corners in
+// the next 60 s. NO GATE HAD EVER EXERCISED THIS: every scenario in pose_estimator_test.mts runs
+// at a constant `speedMs`, which is why it sat here unmeasured.
+// ⚠ This closes at most HALF the field gap (12.8/10.0/11.2 m measured at that corner) and does
+// NOT reproduce the field's "ahead under braking". The render stall is the other candidate and
+// is unproven — see the probe's own output.
+/** Cap on the derived acceleration. Beyond this it is fix noise, not the car. */
+export const POSE_ACC_MAX = 4;
+/** Full acceleration effect up to here past the last speed sample. */
+export const POSE_ACC_HOLD_S = 1.5;
+/**
+ * …then the contribution TAPERS linearly to zero by POSE_ACC_HOLD_S + POSE_ACC_DECAY_S, so the
+ * marker falls back to the last MEASURED speed rather than running on an assumed one.
+ * Codex, 2026-09-12: clamping only the DURATION preserved the inflated speed indefinitely — with
+ * accepted speeds 3→6 m/s a second apart, three seconds after the last fix the marker was still
+ * travelling at 10.5 m/s, and a negative spdAcc could freeze it outright.
+ */
+export const POSE_ACC_DECAY_S = 1.5;
+/** Fix intervals outside this band cannot give a trustworthy acceleration. */
+export const POSE_ACC_DT_MIN_S = 0.2;
+export const POSE_ACC_DT_MAX_S = 3;
+
 export const POSE_DR_MAX_M = 40;
 /** A predict step longer than this is a gap (suspension, stall): advance the clock, not the car. */
 export const POSE_MAX_DT_S = 1.5;
@@ -260,7 +301,7 @@ export function poseSeedYawSign(st: PoseState, sign: 1 | -1 | 0): PoseState {
 
 export function poseStart(): PoseState {
   return {
-    lat: NaN, lng: NaN, hdg: 0, spd: 0, tAt: 0, fixAt: 0, hasFix: false, hdgKnown: false, drM: 0,
+    lat: NaN, lng: NaN, hdg: 0, spd: 0, spdAcc: 0, spdAt: 0, tAt: 0, fixAt: 0, hasFix: false, hdgKnown: false, drM: 0,
     yawBias: 0, yawSign: 0, yawAgree: 0, lastCourse: null, lastCourseAt: 0, gpsTurnDps: 0,
     routeW: 0, errPrev: null, errPrevAt: 0, pendLat: 0, pendLng: 0, rawLat: NaN, rawLng: NaN, rawAt: 0, yawCumAtCourse: null, yawCumPrev: null, yawCumPrevAt: 0, yawDpsLast: 0,
     roadHdg: null, roadHdgAhead: null, roadK: 0, roadAt: 0, roadSetAt: 0, projLat: NaN, projLng: NaN, projMovedAt: 0, accLast: null, roadReleased: false, roadHeld: 0, roadSuspect: false,
@@ -388,9 +429,19 @@ export function posePredict(st: PoseState, nowMs: number, yaw: PoseYaw | null | 
     }
   }
   // Dead reckoning along the heading, capped since the last accepted fix.
+  // Speed is extrapolated with the acceleration derived between the last two fixes, bounded in
+  // both magnitude and time. Without it the marker under-integrates for the whole 1 s fix
+  // interval whenever the car is accelerating. Falls back to the plain last-fix speed whenever
+  // no acceleration is in hand (spdAcc === 0), so a steady cruise is bit-identical to before.
+  // w(t) = t while the extrapolation is trusted, then tapers to 0 — continuous at both knees.
+  const tSince = st.spdAt > 0 ? Math.max(0, (nowMs - st.spdAt) / 1000) : 0;
+  const accW = tSince <= POSE_ACC_HOLD_S
+    ? tSince
+    : Math.max(0, POSE_ACC_HOLD_S * (1 - (tSince - POSE_ACC_HOLD_S) / POSE_ACC_DECAY_S));
+  const spdDR = st.spdAcc !== 0 && accW > 0 ? Math.max(0, spd + st.spdAcc * accW) : spd;
   let lat = st.lat, lng = st.lng, drM = st.drM;
   if (spd >= POSE_MOVING_MS && drM < POSE_DR_MAX_M) {
-    const step = Math.min(spd * dt, POSE_DR_MAX_M - drM);
+    const step = Math.min(spdDR * dt, POSE_DR_MAX_M - drM);
     const p = stepLatLng(lat, lng, hdg, step);
     lat = p.lat; lng = p.lng; drM += step;
   }
@@ -431,6 +482,12 @@ export function poseFix(st: PoseState, f: PoseFix, yawCumDeg?: number | null): P
     const useCourse = !stale && course != null && (spdF ?? 0) >= POSE_MOVING_MS;
     return {
       ...st, lat: f.lat, lng: f.lng, hdg: useCourse ? course! : st.hdg, spd: stale ? 0 : (spdF ?? 0),
+      // spdAt must start HERE or the baseline never opens: this branch returns before the
+      // derivation below, so without it the 2nd fix has nothing to difference against and
+      // acceleration only begins at the 3rd — losing exactly the launch interval, which is the
+      // case this whole change exists for (Codex, 2026-09-12, reproduced 3→6→9 m/s).
+      spdAt: !stale && spdF != null ? f.at : 0,
+      spdAcc: 0,
       fixAt: f.at, tAt: st.tAt || f.at,
       hasFix: true, hdgKnown: useCourse, drM: 0,
       lastCourse: useCourse ? course : null, lastCourseAt: useCourse ? f.at : 0,
@@ -526,9 +583,25 @@ export function poseFix(st: PoseState, f: PoseFix, yawCumDeg?: number | null): P
     // No usable course: the heading holds and the inferred turn rate is no longer evidence.
     if (f.at - lastCourseAt > POSE_GPS_TURN_HOLD_MS) gpsTurnDps = 0;
   }
+  // Acceleration between the last two ACCEPTED fixes. A stale fix does not move the fix clock, so
+  // it must not produce one either; nor may an interval too short (noise) or too long (a gap).
+  // Both ends must be REAL speed samples: not stale, speedMs present, and spdAt (not fixAt) as
+  // the baseline clock. Anything else resets the acceleration to 0 rather than guessing.
+  const spdSampleOk = !stale && spdF != null;
+  let nextSpdAcc = 0;
+  let nextSpdAt = st.spdAt;
+  if (spdSampleOk) {
+    nextSpdAt = f.at;
+    if (st.spdAt > 0) {
+      const dtSpd = (f.at - st.spdAt) / 1000;
+      if (dtSpd >= POSE_ACC_DT_MIN_S && dtSpd <= POSE_ACC_DT_MAX_S) {
+        nextSpdAcc = Math.max(-POSE_ACC_MAX, Math.min(POSE_ACC_MAX, (spd - st.spd) / dtSpd));
+      }
+    }
+  }
   const stepM = haversineM(curLat, curLng, curLat + (pendLat - st.pendLat), curLng + (pendLng - st.pendLng));
   return {
-    ...st, lat, lng, hdg, spd, fixAt: f.at, drM: stale ? st.drM : 0, yawBias, yawSign, yawAgree,
+    ...st, lat, lng, hdg, spd, spdAcc: nextSpdAcc, spdAt: nextSpdAt, fixAt: f.at, drM: stale ? st.drM : 0, yawBias, yawSign, yawAgree,
     hdgKnown: st.hdgKnown || adopted,
     yawCumAtCourse,
     lastCourse, lastCourseAt, gpsTurnDps, errPrev, errPrevAt, pendLat, pendLng,

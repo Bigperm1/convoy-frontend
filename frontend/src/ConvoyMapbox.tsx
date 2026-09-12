@@ -44,6 +44,8 @@ import { logEvent } from "./crashBreadcrumb";
 // directly and CarMapView's self car via the same SelfCarModel).
 import { noteRafFrame, timersStarvedMs, maybeLogTimerStarve } from "./timerLiveness";
 import { anchorCutM, type CutAnchorHint } from "./routeRibbon";
+import { chasePitch, CHASE_PITCH_FIXED } from "./chasePitch";
+export { chasePitch, CHASE_PITCH_FIXED } from "./chasePitch";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert, Animated } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
@@ -863,13 +865,16 @@ export function chaseZoom(kmh: number, distToManeuverM?: number, curStepLenM?: n
   const t = (CORNER_FAR_M - distToManeuverM) / (CORNER_FAR_M - CORNER_NEAR_M);
   return Math.max(base, lerp(base, CORNER_ZOOM, t));
 }
-// Speed-aware chase tilt: CITY pitch when slow, ramping to HIGHWAY pitch at speed
-// (same band as the zoom ramp). Mirrors chaseZoomForSpeed.
-export function chasePitch(kmh: number) {
-  if (kmh <= CHASE_KMH_CITY) return CHASE_PITCH_CITY;
-  if (kmh >= CHASE_KMH_HIGHWAY) return CHASE_PITCH_HIGHWAY;
-  return lerp(CHASE_PITCH_CITY, CHASE_PITCH_HIGHWAY, (kmh - CHASE_KMH_CITY) / (CHASE_KMH_HIGHWAY - CHASE_KMH_CITY));
-}
+// ── FIXED CHASE TILT — moved to src/chasePitch.ts (Jeff, 2026-09-11: "i agree with the
+// pitch change. go"). The tilt no longer moves with speed: one constant, every surface.
+// It lives in its own module so tools/sim-qc/chase_pitch_test.mts can import it, the same
+// split as cornerBlend.ts / offRouteGate.ts. The full measurement and the prior art are in
+// that file's header — read it before changing anything here.
+// ⛔ CHASE_PITCH_HIGHWAY and CHASE_KMH_CITY/HIGHWAY above are now UNUSED and kept only as
+// the thing that note points at. Do not wire them back in; trap-check rule 31 fails the
+// build if chasePitch reads its argument again.
+// NOT TOUCHED, deliberately: FOLLOW_LOWER_PAD_FRAC here and CAR_LOWER_PAD_FRAC in
+// CarMapView. Jeff, same message: "do nto touch the car position".
 
 // Decode a Google encoded polyline → [{latitude, longitude}]. Engine-agnostic;
 // copied from ConvoyMap so this file stays self-contained during the migration.

@@ -36,6 +36,22 @@ RULES = [
         "a prepare cue 2026-09-03.",
     ),
     (
+        "chase-pitch-reads-speed",
+        ["src/chasePitch.ts", "src/ConvoyMapbox.tsx", "src/carplay/CarMapView.tsx"],
+        r"(?m)^\s*export function chasePitch\([^)]*\)[^{]*\{(?![\s\S]{0,300}?return CHASE_PITCH_FIXED;)",
+        "2026-09-11 (Jeff: 'seems like everybody is at a fixed pitch ... i agree with the pitch change. go'): the "
+        "follow camera's TILT must not move with speed. It used to ramp CHASE_PITCH_CITY 48 -> CHASE_PITCH_HIGHWAY 60 "
+        "between 45 and 95 km/h, and MEASURED on his 09-11 drive home (ogb3m4-967731, 88 cam-probe rows, 31.4 min) "
+        "that cost 168 DEGREES of tilt travel with 20 direction reversals, the horizon rising and falling with every "
+        "gap in traffic: 17:33-17:36 alone ran 54.5 -> 48.3 -> 48 -> 48.4 -> 52.5 -> 48.3 -> 48 -> 48.1 -> 52.2 -> "
+        "54.7. CAM_PITCH_SLEW_PER_S and the tau-1400 low-pass were ALREADY in place and did not stop it — they smooth "
+        "the path while the TARGET churns, so filtering harder only adds lag to the churn. Prior art, fetched and "
+        "citation-checked the same day: Mapbox Navigation SDK defaultPitch = 45.0, Google Navigation SDK 45, MapLibre "
+        "Navigation iOS 45 — not one drives pitch from speed, and the two that vary it LOWER it as a maneuver nears. "
+        "chasePitch must return CHASE_PITCH_FIXED and nothing else; change the CONSTANT if the angle is wrong. The "
+        "gate tools/sim-qc/chase_pitch_test.mts asserts invariance at runtime; this rule guards the source text.",
+    ),
+    (
         "carplay-warm-root-failure-without-failover",
         ["src/carplay/ConvoyCarPlay.tsx"],
         r"console\.warn\('\[CarPlay\] setRoot failed'(?![\s\S]{0,400}failoverToColdRoot)",

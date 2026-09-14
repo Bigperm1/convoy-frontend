@@ -446,6 +446,21 @@ RULES = [
         "modules/hairpin-system/ios/HairpinTimerPump.mm instead. A react-native patch needs a from-source build flipped "
         "deliberately (slower paid builds) — decide that explicitly, then exempt it here.",
     ),
+    (
+        "pod-deployment-target-floor-unregistered",
+        ["app.json"],
+        r"(?s)\A(?!.*\"\./plugins/withPodDeploymentTargetFloor\.js\")",
+        "2026-09-14 (build 79, the first iOS build cut locally with Xcode 27.0 RC 27A266a): Xcode 27 turns a low pod "
+        "deployment target into an ERROR. The full Hairpin scheme (Release, iOS Simulator) failed with 13 of "
+        "\"The iOS Simulator deployment target 'IPHONEOS_DEPLOYMENT_TARGET' is set to 10.0, but the range of supported "
+        "deployment target versions is 15.0 to 27.0.x\" — CocoaPods resource-bundle targets at 9.0-14.0 "
+        "(GTMSessionFetcher_Core/Full_Privacy, GoogleSignIn, SDWebImage, MapboxMapsResources, RNSVGFilters, "
+        "RNCAsyncStorage_resources, ...) that RN's updateOSDeploymentTarget never visits; Xcode 26.6 only warns. "
+        "plugins/withPodDeploymentTargetFloor.js raises every explicit pods_project IPHONEOS_DEPLOYMENT_TARGET below "
+        "15.1 to 15.1 from the generated Podfile's post_install, and throws at prebuild if the anchor moves. ios/ is "
+        "gitignored and EAS prebuilds fresh, so a hand-edited Podfile never ships: app.json expo.plugins must list "
+        "the plugin, or the next Xcode 27 build gets all 13 errors back.",
+    ),
 ]
 
 def blank_comments(text: str) -> str:

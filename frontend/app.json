@@ -141,6 +141,7 @@
       "./plugins/withConvoyAndroidAuto.js",
       "./plugins/withConvoyCarPlay.js",
       "./plugins/withScoutSiri.js",
+      "./plugins/withPodDeploymentTargetFloor.js",
       "@bacons/apple-targets"
     ],
     "experiments": {

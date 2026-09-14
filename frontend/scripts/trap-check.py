@@ -365,6 +365,43 @@ RULES = [
         "'when it's safe' (car app quality VI-1) — that is gated by tools/sim-qc/car_status_test.mts, not here. "
         "Comments are blanked, so history may quote the old strings.",
     ),
+    (
+        "stall-teardown-without-inuse-guard",
+        ["src/navNotification.ts"],
+        r"(?s)_stallTimer = setInterval\(\(\) => \{(?:(?!stallRebuildAllowed).)*?tryStartBgUpdates\(true\)",
+        "2026-09-14 (build 79, location without Always): the GPS stall watchdog stopped and restarted BOTH drive feeds "
+        "after any 25 s without a fix — a car held at a red light included — whatever the app state. With the app not "
+        "in use the OS will not let that start come back: iOS When In Use ('a background start fails', Apple "
+        "requestWhenInUseAuthorization) and Android with no foregrounded Activity (no location FGS from the "
+        "background, and ACCESS_BACKGROUND_LOCATION is not a background-start exemption — developer.android.com "
+        "fgs/restrictions-bg-start; expo LocationModule.kt:258). So the teardown killed a working feed. Every force "
+        "rebuild in the watchdog is gated on driveFeed.stallRebuildAllowed() (tools/sim-qc/drive_feed_test.mts E1-E11).",
+    ),
+    (
+        "fgwatch-callback-without-sweep",
+        ["src/navNotification.ts"],
+        r"(?s)_fgCarWatch = await Location\.watchPositionAsync\(.{0,3000}?\(loc\)\s*=>\s*\{\s*_lastFixAt = Date\.now\(\);(?!\s*void _sweepBgConsumers\()",
+        "2026-09-14 (build 79, review of the location-without-Always plan, P3): the car fgwatch now asks iOS for "
+        "continuous background delivery (allowsBackgroundLocationUpdates, patches/expo-location) — Apple: with that "
+        "flag 'Core Location configures the system to keep the app running'. The dead-man sweep used to run ONLY from "
+        "the NAV_TASK callback and stopped the fgwatch only when NAV_TASK was running, so a failed bgstart or a leaked "
+        "tag would leave GPS + the blue pill up with nothing auditing it (the 2026-08-26 11-hour leak shape). The "
+        "fgwatch callback must call _sweepBgConsumers (self-throttled) right after it feeds the stall watchdog.",
+    ),
+    (
+        "expo-location-android-patch-built-from-prebuilt-aar",
+        ["package.json"],
+        r"(?s)\A(?!.*\"buildFromSource\"\s*:\s*\[[^\]]*\"expo-location\")",
+        "2026-09-14 (build 79): Expo SDK 54 links every expo module that declares an Android `publication` "
+        "(node_modules/expo-location/expo-module.config.json) from its PREBUILT AAR in local-maven-repo, not from "
+        "android/src (expo-modules-autolinking SettingsManager.configurePublication: shouldUsePublication unless "
+        "buildFromSource matches). `./gradlew projects` listed '[📦] expo-location (19.0.8)' and "
+        "`:expo-location:compileReleaseKotlin` did not exist — so every Android hunk of "
+        "patches/expo-location+19.0.8.patch would have been SILENTLY DROPPED from the build (the car-session FGS gate, "
+        "the crash-safe startForeground, the receipts). package.json expo.autolinking.android.buildFromSource must "
+        "list expo-location while that patch touches android/. The same trap applies to ANY future Android patch of an "
+        "expo-* package: add it to that list and confirm `./gradlew projects` shows `Project ':<name>'`.",
+    ),
 ]
 
 def blank_comments(text: str) -> str:

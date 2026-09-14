@@ -1,0 +1,454 @@
+diff --git a/node_modules/expo-location/android/src/main/java/expo/modules/location/LocationHelpers.kt b/node_modules/expo-location/android/src/main/java/expo/modules/location/LocationHelpers.kt
+index 62caaba..e5d6310 100644
+--- a/node_modules/expo-location/android/src/main/java/expo/modules/location/LocationHelpers.kt
++++ b/node_modules/expo-location/android/src/main/java/expo/modules/location/LocationHelpers.kt
+@@ -198,4 +198,33 @@ class LocationHelpers {
+  */
+ object AppForegroundedSingleton {
+   var isForegrounded = false
++
++  // HAIRPIN PATCH (build 79, 2026-09-14): true while the JS side holds the 'androidauto' location lock
++  // (src/navNotification.ts re-derives it before every task start). A car-started Android Auto session never
++  // foregrounds an Activity, and expo-modules-core AppContext.onHostResume drops the ACTIVITY_ENTERS_FOREGROUND post
++  // when currentActivity is null, so the stock gate refused EVERY location FGS start there, whatever the grant.
++  // While set, expo stops refusing and the OS decides (and its refusal is caught + receipted in
++  // LocationTaskConsumer). No permission is bypassed. Process memory only: a task restored in a fresh process by
++  // a location broadcast keeps the stock gate.
++  @Volatile var carSessionLive = false
++}
++
++// HAIRPIN PATCH (build 79, 2026-09-14): outcome of the last location foreground-service start, read by JS through
++// getForegroundServiceStatusAsync (`loc-fgs` rows). On SDK 31-33 a background start does NOT throw — AOSP only logs
++// "Foreground service started from background can not have location/camera/microphone access" — so `running`
++// there does not prove location; the JS row carries sdk= / bgPerm= / fixAge= for that reason.
++object LocationFgsReceipt {
++  @Volatile var state: String = "none" // none | running | skipped | start-refused | fg-refused
++  @Volatile var error: String? = null
++  @Volatile var at: Long = 0L
++  @Volatile var foregrounded: Boolean = false
++  @Volatile var car: Boolean = false
++
++  fun set(newState: String, t: Throwable?) {
++    state = newState
++    error = t?.let { (it.javaClass.simpleName + ": " + (it.message ?: "")).take(200) }
++    at = System.currentTimeMillis()
++    foregrounded = AppForegroundedSingleton.isForegrounded
++    car = AppForegroundedSingleton.carSessionLive
++  }
+ }
+diff --git a/node_modules/expo-location/android/src/main/java/expo/modules/location/LocationModule.kt b/node_modules/expo-location/android/src/main/java/expo/modules/location/LocationModule.kt
+index 46e2ec5..149337c 100644
+--- a/node_modules/expo-location/android/src/main/java/expo/modules/location/LocationModule.kt
++++ b/node_modules/expo-location/android/src/main/java/expo/modules/location/LocationModule.kt
+@@ -255,7 +255,10 @@ class LocationModule : Module(), LifecycleEventListener, SensorEventListener, Ac
+       if (!shouldUseForegroundService && isMissingBackgroundPermissions()) {
+         throw LocationBackgroundUnauthorizedException()
+       }
+-      if (!AppForegroundedSingleton.isForegrounded && options.foregroundService != null) {
++      // HAIRPIN PATCH (build 79, 2026-09-14): while a car session holds the lock, let the OS decide — it throws its
++      // own ForegroundServiceStartNotAllowedException / SecurityException, caught in LocationTaskConsumer.
++      if (!AppForegroundedSingleton.isForegrounded && !AppForegroundedSingleton.carSessionLive && options.foregroundService != null) {
++        LocationFgsReceipt.set("skipped", null)
+         throw ForegroundServiceStartNotAllowedException()
+       }
+ 
+@@ -276,6 +279,28 @@ class LocationModule : Module(), LifecycleEventListener, SensorEventListener, Ac
+       return@AsyncFunction mTaskManager.taskHasConsumerOfClass(taskName, LocationTaskConsumer::class.java)
+     }
+ 
++    // HAIRPIN PATCH (build 79, 2026-09-14): synchronous, so it lands before the same JS tick's startLocationUpdatesAsync.
++    Function("setCarSessionLive") { live: Boolean ->
++      AppForegroundedSingleton.carSessionLive = live
++    }
++
++    // HAIRPIN PATCH (build 79, 2026-09-14): the last FGS outcome + the live Activity truth (fgNow). AppState is a
++    // synthetic 'active' in a car-started session (react-native-carplay patch resumes the ReactContext with no
++    // Activity), so JS reads fgNow before tearing a feed down.
++    AsyncFunction("getForegroundServiceStatusAsync") {
++      return@AsyncFunction mapOf<String, Any?>(
++        "state" to LocationFgsReceipt.state,
++        "error" to LocationFgsReceipt.error,
++        "at" to LocationFgsReceipt.at.toDouble(),
++        "fg" to LocationFgsReceipt.foregrounded,
++        "car" to LocationFgsReceipt.car,
++        "fgNow" to AppForegroundedSingleton.isForegrounded,
++        "carNow" to AppForegroundedSingleton.carSessionLive,
++        "bgPerm" to !isMissingBackgroundPermissions(),
++        "sdk" to Build.VERSION.SDK_INT
++      )
++    }
++
+     AsyncFunction("startGeofencingAsync") { taskName: String, options: GeofencingOptions ->
+       if (isMissingBackgroundPermissions()) {
+         throw LocationBackgroundUnauthorizedException()
+diff --git a/node_modules/expo-location/android/src/main/java/expo/modules/location/records/LocationArguments.kt b/node_modules/expo-location/android/src/main/java/expo/modules/location/records/LocationArguments.kt
+index 707840a..0e39e64 100644
+--- a/node_modules/expo-location/android/src/main/java/expo/modules/location/records/LocationArguments.kt
++++ b/node_modules/expo-location/android/src/main/java/expo/modules/location/records/LocationArguments.kt
+@@ -24,11 +24,15 @@ internal open class LocationOptions(
+   @Field var mayShowUserSettingsDialog: Boolean = true,
+   @Field var timeInterval: Long? = null
+ ) : Record, Serializable {
++  // HAIRPIN PATCH (build 79, 2026-09-14): options restored from the task store may come back as Integer or Double,
++  // and `as? Long` / `as? Int` read those as null — the HANDOFF-2026-09-07 question about timeInterval after a
++  // restore. Reading any Number is correct either way. (A restored task honouring 500 ms also costs more if it
++  // leaked; the dead-man sweep in src/navNotification.ts is what bounds that.)
+   constructor(map: Map<String, Any?>) : this(
+-    accuracy = map["accuracy"] as? Int ?: ACCURACY_BALANCED,
+-    distanceInterval = map["distanceInterval"] as? Int?,
++    accuracy = (map["accuracy"] as? Number)?.toInt() ?: ACCURACY_BALANCED,
++    distanceInterval = (map["distanceInterval"] as? Number)?.toInt(),
+     mayShowUserSettingsDialog = map["mayShowUserSettingsDialog"] as? Boolean? ?: true,
+-    timeInterval = map["timeInterval"] as? Long
++    timeInterval = (map["timeInterval"] as? Number)?.toLong()
+   )
+ }
+ 
+diff --git a/node_modules/expo-location/android/src/main/java/expo/modules/location/records/LocationResults.kt b/node_modules/expo-location/android/src/main/java/expo/modules/location/records/LocationResults.kt
+index d99fc4c..eb6c6da 100644
+--- a/node_modules/expo-location/android/src/main/java/expo/modules/location/records/LocationResults.kt
++++ b/node_modules/expo-location/android/src/main/java/expo/modules/location/records/LocationResults.kt
+@@ -110,7 +110,13 @@ internal class LocationObjectCoords(
+   @Field var accuracy: Double? = null,
+   @Field var altitudeAccuracy: Double? = null,
+   @Field var heading: Double? = null,
+-  @Field var speed: Double? = null
++  @Field var speed: Double? = null,
++  // HAIRPIN PATCH (build 79, 2026-09-14): android.location.Location returns 0 for a MISSING bearing/speed, which JS
++  // could not tell from a real 0 (north / stopped). Forward whether they exist + their accuracy.
++  @Field var hasHeading: Boolean? = null,
++  @Field var hasSpeed: Boolean? = null,
++  @Field var courseAccuracy: Double? = null,
++  @Field var speedAccuracy: Double? = null
+ ) : Record, Serializable {
+   constructor(location: Location) : this(
+     latitude = location.latitude,
+@@ -123,7 +129,11 @@ internal class LocationObjectCoords(
+       null
+     },
+     heading = location.bearing.toDouble(),
+-    speed = location.speed.toDouble()
++    speed = location.speed.toDouble(),
++    hasHeading = location.hasBearing(),
++    hasSpeed = location.hasSpeed(),
++    courseAccuracy = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && location.hasBearingAccuracy()) location.bearingAccuracyDegrees.toDouble() else null,
++    speedAccuracy = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && location.hasSpeedAccuracy()) location.speedAccuracyMetersPerSecond.toDouble() else null
+   )
+ 
+   internal fun <BundleType : BaseBundle> toBundle(bundleTypeClass: Class<BundleType>): BundleType {
+@@ -141,6 +151,10 @@ internal class LocationObjectCoords(
+       altitudeAccuracy?.let { putDouble("altitudeAccuracy", it) }
+       heading?.let { putDouble("heading", it) }
+       speed?.let { putDouble("speed", it) }
++      hasHeading?.let { putBoolean("hasHeading", it) }
++      hasSpeed?.let { putBoolean("hasSpeed", it) }
++      courseAccuracy?.let { putDouble("courseAccuracy", it) }
++      speedAccuracy?.let { putDouble("speedAccuracy", it) }
+     }
+     return bundle
+   }
+diff --git a/node_modules/expo-location/android/src/main/java/expo/modules/location/taskConsumers/LocationTaskConsumer.kt b/node_modules/expo-location/android/src/main/java/expo/modules/location/taskConsumers/LocationTaskConsumer.kt
+index e659285..d66194d 100644
+--- a/node_modules/expo-location/android/src/main/java/expo/modules/location/taskConsumers/LocationTaskConsumer.kt
++++ b/node_modules/expo-location/android/src/main/java/expo/modules/location/taskConsumers/LocationTaskConsumer.kt
+@@ -28,6 +28,7 @@ import expo.modules.interfaces.taskManager.TaskExecutionCallback
+ import expo.modules.interfaces.taskManager.TaskInterface
+ import expo.modules.interfaces.taskManager.TaskManagerUtilsInterface
+ import expo.modules.location.AppForegroundedSingleton
++import expo.modules.location.LocationFgsReceipt
+ import expo.modules.location.LocationHelpers
+ import expo.modules.location.records.LocationOptions
+ import expo.modules.location.records.LocationResponse
+@@ -165,8 +166,12 @@ class LocationTaskConsumer(context: Context, taskManagerUtils: TaskManagerUtilsI
+     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+       return
+     }
+-    if (!AppForegroundedSingleton.isForegrounded) {
++    // HAIRPIN PATCH (build 79, 2026-09-14): see AppForegroundedSingleton.carSessionLive.
++    if (!AppForegroundedSingleton.isForegrounded && !AppForegroundedSingleton.carSessionLive) {
+       Log.w(TAG, "Foreground location task cannot be started while the app is in the background!")
++      if (mTask?.let { shouldUseForegroundService(it.options) } == true) {
++        LocationFgsReceipt.set("skipped", null)
++      }
+       return
+     }
+     val task = mTask ?: run {
+@@ -198,15 +203,45 @@ class LocationTaskConsumer(context: Context, taskManagerUtils: TaskManagerUtilsI
+       extras.putString("taskName", task.name)
+       extras.putBoolean("killService", serviceOptions.getBoolean("killServiceOnDestroy", false))
+       serviceIntent.putExtras(extras)
+-      context.startForegroundService(serviceIntent)
++      // HAIRPIN PATCH (build 79, 2026-09-14): Android 12+ refuses a start from the background here
++      // (ForegroundServiceStartNotAllowedException; ACCESS_BACKGROUND_LOCATION is NOT a background-start exemption —
++      // developer.android.com/develop/background-work/services/fgs/restrictions-bg-start). Nothing was started, so do
++      // not bind: a bound-only service would try startForeground later.
++      try {
++        context.startForegroundService(serviceIntent)
++      } catch (e: Exception) {
++        Log.w(TAG, "startForegroundService was refused", e)
++        LocationFgsReceipt.set("start-refused", e)
++        return
++      }
+       context.bindService(
+         serviceIntent,
+         object : ServiceConnection {
+           override fun onServiceConnected(name: ComponentName, service: IBinder) {
+-            mService = (service as? ServiceBinder)?.service
+-            mService?.let {
+-              it.setParentContext(context)
+-              it.startForeground(serviceOptions)
++            val svc = (service as? ServiceBinder)?.service ?: return
++            mService = svc
++            svc.setParentContext(context)
++            // HAIRPIN PATCH (build 79, 2026-09-14): Android 14+ throws SecurityException ("Starting FGS with type
++            // location") for a location FGS started without while-in-use permission (ForegroundServiceTypePolicy,
++            // android14-release :1171-1174). AOSP clears fgRequired BEFORE that throw
++            // (ActiveServices.setServiceForegroundInnerLocked, android14-release :2074 before :2297/:2335), so
++            // stopping here cannot trip "startForegroundService() did not then call startForeground()".
++            // OEM forks are unverified.
++            try {
++              svc.startForeground(serviceOptions)
++              LocationFgsReceipt.set("running", null)
++            } catch (e: Exception) {
++              Log.w(TAG, "startForeground was refused", e)
++              LocationFgsReceipt.set("fg-refused", e)
++              try {
++                svc.stop()
++              } catch (ignored: Exception) {
++              }
++              try {
++                context.unbindService(this)
++              } catch (ignored: Exception) {
++              }
++              mService = null
+             }
+           }
+ 
+@@ -219,7 +254,14 @@ class LocationTaskConsumer(context: Context, taskManagerUtils: TaskManagerUtilsI
+       )
+     } else {
+       // Restart the service with new service options.
+-      mService?.startForeground(options.getArguments(FOREGROUND_SERVICE_KEY).toBundle())
++      // HAIRPIN PATCH (build 79, 2026-09-14): the same OS refusal can land on a restart; never crash the task.
++      try {
++        mService?.startForeground(options.getArguments(FOREGROUND_SERVICE_KEY).toBundle())
++        LocationFgsReceipt.set("running", null)
++      } catch (e: Exception) {
++        Log.w(TAG, "startForeground (restart) was refused", e)
++        LocationFgsReceipt.set("fg-refused", e)
++      }
+     }
+   }
+ 
+diff --git a/node_modules/expo-location/ios/EXLocation.m b/node_modules/expo-location/ios/EXLocation.m
+index 548b20c..3a342ed 100644
+--- a/node_modules/expo-location/ios/EXLocation.m
++++ b/node_modules/expo-location/ios/EXLocation.m
+@@ -17,6 +17,9 @@ + (NSDictionary *)exportLocation:(CLLocation *)location
+         @"altitudeAccuracy": @(location.verticalAccuracy),
+         @"heading": @(location.course),
+         @"speed": @(location.speed),
++        // HAIRPIN PATCH (build 79, 2026-09-14): the task path forwards the same quality fields (negative = invalid).
++        @"courseAccuracy": @(location.courseAccuracy),
++        @"speedAccuracy": @(location.speedAccuracy),
+         },
+     @"timestamp": @([location.timestamp timeIntervalSince1970] * 1000),
+     };
+diff --git a/node_modules/expo-location/ios/LocationModule.swift b/node_modules/expo-location/ios/LocationModule.swift
+index fe49dd8..1c00e1c 100644
+--- a/node_modules/expo-location/ios/LocationModule.swift
++++ b/node_modules/expo-location/ios/LocationModule.swift
+@@ -2,13 +2,20 @@
+ 
+ import CoreLocation
+ import ExpoModulesCore
++import UIKit
+ 
+ private let EVENT_LOCATION_CHANGED = "Expo.locationChanged"
+ private let EVENT_HEADING_CHANGED = "Expo.headingChanged"
+ private let EVENT_LOCATION_ERROR = "Expo.locationError"
++// HAIRPIN PATCH (build 79, 2026-09-14): CLBackgroundActivitySession diagnostics (iOS 18+) → src/locationRuntime.ts.
++private let EVENT_BG_SESSION_DIAGNOSTIC = "Expo.backgroundActivitySessionDiagnostic"
+ 
+ public final class LocationModule: Module {
+   private lazy var locationStreamers = [Int: BaseStreamer]()
++  // HAIRPIN PATCH (build 79, 2026-09-14): CLBackgroundActivitySession is iOS 17+ and this pod's platform is 15.1
++  // (ExpoLocation.podspec), so it is held as AnyObject and every use sits behind #available. Main queue only.
++  private var backgroundActivitySession: AnyObject?
++  private var backgroundSessionDiagnosticsTask: Task<Void, Never>?
+ 
+   private var taskManager: EXTaskManagerInterface {
+     get throws {
+@@ -22,7 +29,7 @@ public final class LocationModule: Module {
+   public func definition() -> ModuleDefinition {
+     Name("ExpoLocation")
+ 
+-    Events(EVENT_LOCATION_CHANGED, EVENT_HEADING_CHANGED, EVENT_LOCATION_ERROR)
++    Events(EVENT_LOCATION_CHANGED, EVENT_HEADING_CHANGED, EVENT_LOCATION_ERROR, EVENT_BG_SESSION_DIAGNOSTIC)
+ 
+     OnCreate {
+       let permissionsManager = self.appContext?.permissions
+@@ -160,6 +167,73 @@ public final class LocationModule: Module {
+       return CLLocationManager.locationServicesEnabled()
+     }
+ 
++    // HAIRPIN PATCH (build 79, 2026-09-14): a background activity session lets a When-In-Use app keep receiving
++    // location in the background (Apple, CLBackgroundActivitySession). SDK header (iOS 26.5,
++    // CLBackgroundActivitySession.h): "A new session may only become active while the app is foregrounded and in
++    // direct use"; "When a session is active, the app remains in-use". Whether a CarPlay-only launch counts as
++    // "in direct use" is UNPROVEN — the iOS 18 diagnostic `insufficientlyInUse` is the receipt that settles it
++    // (`loc-bgsess diag inUse=` rows). Idempotent: a second start while one is held creates nothing.
++    AsyncFunction("startBackgroundActivitySessionAsync") { () -> [String: Any] in
++      var state = self.hairpinSceneState()
++      state["appState"] = UIApplication.shared.applicationState.rawValue
++      guard #available(iOS 17.0, *) else {
++        state["available"] = false; state["held"] = false; state["created"] = false
++        return state
++      }
++      if self.backgroundActivitySession != nil {
++        state["available"] = true; state["held"] = true; state["created"] = false
++        return state
++      }
++      let session = CLBackgroundActivitySession()
++      self.backgroundActivitySession = session
++      if #available(iOS 18.0, *) {
++        // Weak captures (review C9): an invalidated session cannot reactivate (header), so a Task that outlives
++        // stop must not be what keeps the object alive.
++        self.backgroundSessionDiagnosticsTask = Task { [weak self, weak session] in
++          guard let session else { return }
++          do {
++            for try await d in session.diagnostics {
++              if Task.isCancelled { break }
++              self?.sendEvent(EVENT_BG_SESSION_DIAGNOSTIC, [
++                "insufficientlyInUse": d.insufficientlyInUse,
++                "serviceSessionRequired": d.serviceSessionRequired,
++                "authorizationDenied": d.authorizationDenied,
++                "authorizationDeniedGlobally": d.authorizationDeniedGlobally,
++                "authorizationRestricted": d.authorizationRestricted,
++                "authorizationRequestInProgress": d.authorizationRequestInProgress
++              ])
++            }
++          } catch {}
++        }
++      }
++      state["available"] = true; state["held"] = true; state["created"] = true
++      return state
++    }.runOnQueue(.main)
++
++    AsyncFunction("stopBackgroundActivitySessionAsync") {
++      self.backgroundSessionDiagnosticsTask?.cancel()
++      self.backgroundSessionDiagnosticsTask = nil
++      if #available(iOS 17.0, *), let session = self.backgroundActivitySession as? CLBackgroundActivitySession {
++        session.invalidate()
++      }
++      self.backgroundActivitySession = nil
++    }.runOnQueue(.main)
++
++    // HAIRPIN PATCH (build 79, 2026-09-14): receipts only (`loc-auth`). phoneScene/carScene (review C7): RN AppState
++    // reads UIApplication.applicationState, which in this multi-scene app includes the CarPlay scene — 550
++    // `timer-starve surf=car` rows (dt>60 s, iOS, 10 days) had last `aa-appstate state=active`. The scene
++    // activation states are the only fields that can separate "phone in use" from "car in use".
++    AsyncFunction("getLocationRuntimeStateAsync") { () -> [String: Any] in
++      let m = CLLocationManager()
++      var state = self.hairpinSceneState()
++      state["authorizationStatus"] = Int(m.authorizationStatus.rawValue)      // 0 notDetermined 1 restricted 2 denied 3 always 4 whenInUse
++      state["accuracyAuthorization"] = m.accuracyAuthorization.rawValue        // 0 full 1 reduced
++      state["applicationState"] = UIApplication.shared.applicationState.rawValue // 0 active 1 inactive 2 background
++      state["backgroundSession"] = self.backgroundActivitySession != nil
++      state["backgroundModeLocation"] = BaseLocationProvider.hasLocationBackgroundMode
++      return state
++    }.runOnQueue(.main)
++
+     // Background location
+ 
+     AsyncFunction("startLocationUpdatesAsync") { (taskName: String, options: [String: Any]) in
+@@ -220,4 +294,20 @@ public final class LocationModule: Module {
+       return try taskManager.task(withName: taskName, hasConsumerOf: EXGeofencingTaskConsumer.self)
+     }
+   }
++
++  // HAIRPIN PATCH (build 79, 2026-09-14): scene activation states without importing CarPlay. -2 = no such scene;
++  // otherwise UIScene.ActivationState raw values: -1 unattached, 0 foregroundActive, 1 foregroundInactive, 2 background.
++  // Call on the main queue.
++  private func hairpinSceneState() -> [String: Any] {
++    var phoneScene = -2
++    var carScene = -2
++    for s in UIApplication.shared.connectedScenes {
++      if s.session.role == .windowApplication {
++        phoneScene = s.activationState.rawValue
++      } else if NSStringFromClass(type(of: s)).contains("CPTemplateApplicationScene") {
++        carScene = s.activationState.rawValue
++      }
++    }
++    return ["phoneScene": phoneScene, "carScene": carScene]
++  }
+ }
+diff --git a/node_modules/expo-location/ios/LocationOptions.swift b/node_modules/expo-location/ios/LocationOptions.swift
+index 59700e7..5238b40 100644
+--- a/node_modules/expo-location/ios/LocationOptions.swift
++++ b/node_modules/expo-location/ios/LocationOptions.swift
+@@ -5,4 +5,11 @@ import ExpoModulesCore
+ internal struct LocationOptions: Record {
+   @Field var accuracy: LocationAccuracy = .balanced
+   @Field var distanceInterval: Double = 0.0
++  // HAIRPIN PATCH (build 79, 2026-09-14): watcher background opt-in, read only by BaseLocationProvider. Same key names
++  // as the task options; the JS LocationActivityType values are the CLActivityType raw values (1 other … 5 airborne).
++  // Defaults = stock behaviour, so every other watcher and getCurrentPositionAsync are unchanged.
++  @Field var allowsBackgroundLocationUpdates: Bool = false
++  @Field var showsBackgroundLocationIndicator: Bool = false
++  @Field var pausesUpdatesAutomatically: Bool = true
++  @Field var activityType: Int = 1
+ }
+diff --git a/node_modules/expo-location/ios/LocationUtils.swift b/node_modules/expo-location/ios/LocationUtils.swift
+index be16d30..d1f2e41 100644
+--- a/node_modules/expo-location/ios/LocationUtils.swift
++++ b/node_modules/expo-location/ios/LocationUtils.swift
+@@ -28,7 +28,11 @@ internal func exportLocation(_ location: CLLocation) -> [String: Any] {
+       "accuracy": location.horizontalAccuracy,
+       "altitudeAccuracy": location.verticalAccuracy,
+       "heading": location.course,
+-      "speed": location.speed
++      "speed": location.speed,
++      // HAIRPIN PATCH (build 79, 2026-09-14): CoreLocation's own quality for course and speed (negative = invalid),
++      // so the pose estimator can stop guessing whether a fix's course is trustworthy.
++      "courseAccuracy": location.courseAccuracy,
++      "speedAccuracy": location.speedAccuracy
+     ],
+     "timestamp": location.timestamp.timeIntervalSince1970 * 1000
+   ]
+diff --git a/node_modules/expo-location/ios/Providers/BaseLocationProvider.swift b/node_modules/expo-location/ios/Providers/BaseLocationProvider.swift
+index ae9135a..a411a63 100644
+--- a/node_modules/expo-location/ios/Providers/BaseLocationProvider.swift
++++ b/node_modules/expo-location/ios/Providers/BaseLocationProvider.swift
+@@ -5,11 +5,30 @@ import CoreLocation
+ internal class BaseLocationProvider: NSObject, CLLocationManagerDelegate {
+   internal let manager = CLLocationManager()
+ 
++  // HAIRPIN PATCH (build 79, 2026-09-14): allowsBackgroundLocationUpdates = true without
++  // UIBackgroundModes=location terminates the app (Apple, CLLocationManager.allowsBackgroundLocationUpdates).
++  // Read the plist once; app.json lists "location", but a watcher must never be the thing that crashes.
++  internal static let hasLocationBackgroundMode: Bool = {
++    (Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String])?.contains("location") ?? false
++  }()
++
+   // CLLocationManager must be created on the main thread.
+   @MainActor
+   init(options: LocationOptions) {
+     super.init()
+-    manager.allowsBackgroundLocationUpdates = false
++    // HAIRPIN PATCH (build 79, 2026-09-14): OPT-IN continuous background delivery for a watcher (default off =
++    // stock). Stock expo built EVERY watcher with this false, so the Hairpin car feed (src/navNotification.ts
++    // startForegroundCarFeed) stopped with the app's foreground. Apple: when true and updates start in use, the
++    // system keeps the app running and updates continue in the background. pausesLocationUpdatesAutomatically
++    // defaults to true and, for in-use authorization, a pause ends location access until relaunch — so an
++    // opted-in watcher takes pauses/indicator/activityType from JS (Hairpin passes false/true/AutomotiveNavigation).
++    let background = options.allowsBackgroundLocationUpdates && BaseLocationProvider.hasLocationBackgroundMode
++    manager.allowsBackgroundLocationUpdates = background
++    if background {
++      manager.pausesLocationUpdatesAutomatically = options.pausesUpdatesAutomatically
++      manager.showsBackgroundLocationIndicator = options.showsBackgroundLocationIndicator
++      manager.activityType = CLActivityType(rawValue: options.activityType) ?? .other
++    }
+     manager.distanceFilter = options.distanceInterval
+     manager.desiredAccuracy = options.accuracy.toCLLocationAccuracy()
+     manager.delegate = self

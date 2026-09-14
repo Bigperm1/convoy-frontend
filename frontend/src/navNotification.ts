@@ -27,7 +27,12 @@ import { rawCourseHere } from "./fixCourseHere";
 import { CAR_DIAG_MODE } from "./carplay/carPlayShared";
 import { resetMapView2D, setMapView2D } from "./mapViewMode";
 import { getSettings, getMapMode, subscribeSettings } from "./settings";
-import { driveFeedOptions, driveFeedNeedsRelite, reliteDriveFeeds } from "./driveFeed";
+import { driveFeedOptions, driveFeedNeedsRelite, reliteDriveFeeds, stallRebuildAllowed } from "./driveFeed";
+import {
+  holdBgActivitySession, releaseBgActivitySession, dropBgActivitySession, renewBgActivitySessionIfStale, bgSessionInUse,
+  noteBgSessionRelaunchMissing, hasLocationRuntimeNative, readFgsStatus, fgsFailed, setCarLocationSessionLive,
+  resetLocReceiptBudget, logLocRuntime, logFgsStatusSoon, logStallDecision, logLocStartError,
+} from "./locationRuntime";
 import { updateSpeedLimit } from "./speedLimit";
 import { recordTrip } from "./trips";
 import { feedOdo, odoNowM } from "./driveOdometer";
@@ -792,6 +797,12 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
 // feed used FOREGROUND location, which iOS starves when the app is backgrounded
 // behind the head unit). Needs "Always" location permission.
 const _locConsumers = new Set<string>();
+// build 79 (2026-09-14): background location ("Always" / "Allow all the time") as read at the last acquire — iOS
+// only uses it to decide whether the stall watchdog may tear a feed down (driveFeed.stallRebuildAllowed).
+let _bgGranted = false;
+// build 79 (review C6): the last time a background-task start THREW. The watchdog's keep branch retries a missing
+// task at most every 5 min — each attempt writes a `nav-loc src=bg` row and, on Android with no Activity, throws.
+let _lastBgStartErrAt = 0;
 
 // ── DEAD-MAN SWITCH FOR THE SHARED GPS (2026-08-26, Rodrigo's 5-hour battery day) ──
 // The refcount above is JS-MODULE MEMORY, but the task itself is OS-PERSISTED:
@@ -854,6 +865,8 @@ async function _sweepBgConsumers(source: string): Promise<void> {
       }
       if (!alive) {
         _locConsumers.delete(tag);
+        void releaseBgActivitySession(tag);                                        // build 79: iOS session refcount
+        if (!_locConsumers.has("androidauto")) setCarLocationSessionLive(false);    // build 79: Android car FGS gate
         try { logEventReliable(`bgloc-reaped tag=${tag} src=${source}`); } catch {}
       }
     }
@@ -878,7 +891,16 @@ async function _sweepBgConsumers(source: string): Promise<void> {
         const raw = await AsyncStorage.getItem(ROUTE_KEY);
         if (raw) {
           const startedAt = (JSON.parse(raw) as SlimRoute | null)?.startedAt;
-          if (startedAt && Date.now() - startedAt <= MAX_PERSISTED_ROUTE_AGE_MS) return;
+          if (startedAt && Date.now() - startedAt <= MAX_PERSISTED_ROUTE_AGE_MS) {
+            // build 79 (review C2, receipt only — the native resume is OUT OF SCOPE): THIS is the relaunch shape — the
+            // task delivers for a live persisted drive with NO lock holder, so no CLBackgroundActivitySession exists,
+            // and Apple requires one re-created "immediately upon launch in the background". The review placed this
+            // on `isNavSessionLive()`, but a relaunched context never sets `_route` (only startNavBanner/swapNavRoute
+            // do; updateNavBanner reads the persisted route into a local), so that condition could not fire here.
+            // Once per runtime; inert off iOS and on build 78.
+            noteBgSessionRelaunchMissing();
+            return;
+          }
         }
       } catch {
         try { logEventReliable(`bgloc-sweep-readfail src=${source}`); } catch {}
@@ -887,6 +909,15 @@ async function _sweepBgConsumers(source: string): Promise<void> {
       // A car surface can legitimately acquire during the awaits above — re-check
       // before pulling the trigger (review, 2026-08-26).
       if (_locConsumers.size > 0) return;
+      // build 79 (review C3): the car fgwatch now keeps delivering in the background (iOS allowsBackgroundLocationUpdates,
+      // patches/expo-location) and this sweep also runs from its callback — so stop the fgwatch, the watchdog and the
+      // CLBackgroundActivitySession here EVEN WHEN NAV_TASK is not running (a failed bgstart, or a task stopped while a
+      // reapable tag leaked). Before, only `if (started)` stopped the fgwatch, and a watcher with no keep-alive let the
+      // app suspend; one with it would hold GPS + the blue pill with nothing auditing it.
+      _stopStallWatchdog();
+      stopForegroundCarFeed();
+      void dropBgActivitySession(source);
+      setCarLocationSessionLive(false);
       const started = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
       if (started) {
         _stopStallWatchdog();
@@ -923,9 +954,35 @@ function _startStallWatchdog(): void {
     if (Date.now() - _lastFixAt <= STALL_MS) return;
     _lastFixAt = Date.now(); // re-arm so a dead-GPS zone doesn't heal-loop every tick
     setCarState({ carDbg: "stallheal#" + (++_stallHeals) });
-    stopForegroundCarFeed();
-    void startForegroundCarFeed();
-    void tryStartBgUpdates(true); // force: rebuild even a session that claims "started"
+    void (async () => {
+      // ── NO TEARDOWN THE OS WILL NOT LET US UNDO (build 79, 2026-09-14) ──
+      // A 25 s gap is also a car held at a light (distanceInterval 2 m). With the app not in use, a stop + start
+      // cannot come back on iOS When In Use (Apple: a background start fails) nor on Android without a foregrounded
+      // Activity (no location FGS from the background, whatever the grant — review C1) — it killed a feed that was
+      // fine. Rules + gate: driveFeed.stallRebuildAllowed, tools/sim-qc/drive_feed_test.mts section E.
+      // Inert on build 78 (hasLocationRuntimeNative() false → the old behaviour).
+      let nativeFgNow: boolean | null = null;
+      if (Platform.OS === "android") { const f = await readFgsStatus(); nativeFgNow = f ? f.fgNow === true : null; }
+      const sessionInUse = bgSessionInUse();
+      const allowed = !hasLocationRuntimeNative() || stallRebuildAllowed({
+        platform: Platform.OS === "ios" ? "ios" : "android",
+        appActive: AppState.currentState === "active",
+        bgGranted: _bgGranted,
+        nativeFgNow,
+        sessionInUse,
+      });
+      logStallDecision(allowed, _bgGranted, nativeFgNow, sessionInUse);
+      if (_locConsumers.size === 0) return;
+      if (!allowed) {
+        void startForegroundCarFeed();    // no-op while the watch exists; starts only a MISSING feed
+        // no-op while the task is registered; a MISSING task is retried at most every 5 min after a throw (review C6)
+        if (Date.now() - _lastBgStartErrAt > 300_000) void tryStartBgUpdates(false);
+        return;
+      }
+      stopForegroundCarFeed();
+      void startForegroundCarFeed();
+      void tryStartBgUpdates(true); // force: rebuild even a session that claims "started"
+    })();
   }, STALL_CHECK_MS);
 }
 function _stopStallWatchdog(): void {
@@ -954,9 +1011,20 @@ export async function startForegroundCarFeed(): Promise<void> {
     _fgCarWatch = await Location.watchPositionAsync(
       // 0.5s/2m navigation-grade fused fixes (was High = NearestTenMeters at 1s/5m — see
       // driveLocationOptions): the head unit's only continuous feed in several states.
-      { accuracy: _carLoc.accuracy, timeInterval: _carLoc.timeInterval, distanceInterval: _carLoc.distanceInterval },
+      // iOS build 79 (patches/expo-location, 2026-09-14): opt THIS watcher into continuous background delivery. Stock
+      // expo built every watcher with allowsBackgroundLocationUpdates=false (BaseLocationProvider.swift:12) and left
+      // pausesLocationUpdatesAutomatically at CoreLocation's default (true) — and for in-use authorization a pause
+      // ends access until relaunch (Apple). Expo Records read declared fields only (Record.swift:48-58,
+      // RecordTypeConverter.kt:72-81), so these keys are ignored on build 78 and on Android.
+      // The keep-alive is audited: the callback below runs the dead-man sweep (review C3).
+      {
+        accuracy: _carLoc.accuracy, timeInterval: _carLoc.timeInterval, distanceInterval: _carLoc.distanceInterval,
+        allowsBackgroundLocationUpdates: true, showsBackgroundLocationIndicator: true, pausesUpdatesAutomatically: false,
+        activityType: Location.LocationActivityType.AutomotiveNavigation,
+      } as Location.LocationOptions,
       (loc) => {
         _lastFixAt = Date.now(); // feed the GPS stall watchdog
+        void _sweepBgConsumers("fgwatch"); // build 79: this watcher can keep the app running — audit it (throttled 60 s)
         const h = loc.coords.heading;
         const sp = loc.coords.speed;
         // Position AND SPEED through the source-priority gate ('fgwatch' — beats the bg
@@ -1110,6 +1178,10 @@ async function tryStartBgUpdates(force = false): Promise<boolean> {
     if (already) { try { await Location.stopLocationUpdatesAsync(NAV_TASK); } catch {} }
     const _bgLoc = driveLocationOptions();
     try { logEventReliable(`nav-loc src=bg mode=${_bgLoc.lite ? "high" : "bfn"} t=${_bgLoc.timeInterval} d=${_bgLoc.distanceInterval} inherit=${inherited ? 1 : 0}`); } catch {}
+    // build 79 (review C5): ONE source of truth for expo-location's car-session FGS gate, re-derived from the lock on
+    // every start — never from AndroidAutoRoot mount/disconnect writes, which a late didDisconnect from a previous
+    // session could flip back to false for the whole new one. Synchronous native call; inert off Android / build 78.
+    setCarLocationSessionLive(_locConsumers.has("androidauto"));
     await Location.startLocationUpdatesAsync(NAV_TASK, {
       // Navigation-grade FUSED fixes (was High = NearestTenMeters at 1s/5m — see
       // driveLocationOptions): with the phone locked this is the ONLY feed moving the car marker.
@@ -1144,11 +1216,16 @@ async function tryStartBgUpdates(force = false): Promise<boolean> {
     }
     _bgLite = _bgLoc.lite;                  // committed only now — the native start succeeded, with an owner
     _reconcileLite(false); // the setting may have hydrated/flipped while the task was being started
+    // Android build 79: did the OS accept the foreground service? (3 s + 30 s rows with the fix age; review C4)
+    void logFgsStatusSoon(inherited ? "inherit" : force ? "force" : "start", () => Date.now() - _lastFixAt);
     return true;
   } catch (e) {
-    // Background updates couldn't start (likely needs "Always"). Surface the reason
-    // on the car overlay instead of swallowing it.
+    // Background updates couldn't start. Surface the reason on the car overlay AND in telemetry —
+    // carDbg alone never reached crash_reports (build 79, 2026-09-14: the car-fix row that carries carDbg had 0 rows
+    // in 60 days).
     setCarState({ carDbg: "bgstart:err:" + String(e).slice(0, 40) });
+    _lastBgStartErrAt = Date.now();
+    logLocStartError(e);
     return false;
   }
 }
@@ -1165,18 +1242,38 @@ if (Platform.OS !== "web") {
   AppState.addEventListener("change", (st) => {
     if (st !== "active" || _locConsumers.size === 0) return;
     void (async () => {
-      const ok = await tryStartBgUpdates();
+      // iOS build 79 (review C2): a CLBackgroundActivitySession created while the phone was not in direct use (a cold
+      // CarPlay connect) may never activate — renew it once the PHONE scene is foregroundActive. No-op elsewhere.
+      await renewBgActivitySessionIfStale();
+      // Android build 79: a foreground service the OS refused while no Activity was visible leaves the TASK
+      // registered, so the plain retry returns early. Force ONE rebuild, only when an Activity really is foregrounded
+      // (native truth; AppState is a synthetic 'active' in a car-started session). The JS 'active' event and expo's
+      // Activity flag come from separate host-resume listeners of unestablished order (review C8), so a refused
+      // service with fgNow still false is re-read once after 1.5 s.
+      let f = await readFgsStatus();
+      if (fgsFailed(f) && f?.fgNow !== true) {
+        await new Promise((r) => setTimeout(r, 1500));
+        f = await readFgsStatus();
+      }
+      const ok = await tryStartBgUpdates(fgsFailed(f) && f?.fgNow === true);
       if (ok) setCarState({ carDbg: "bgstart:healed" });
     })();
   });
 }
 
 export async function acquireBgLocation(tag: string): Promise<boolean> {
+  if (_locConsumers.size === 0) resetLocReceiptBudget(); // build 79: loc-* receipts are bounded per lock session (review C6)
   _locConsumers.add(tag);
+  void holdBgActivitySession(tag); // iOS build 79: CLBackgroundActivitySession while any surface holds the lock (inert elsewhere)
   _startStallWatchdog(); // self-heal a feed that dies while the lock is held
   try {
     const already = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
-    if (already) { void startForegroundCarFeed(); void tryStartBgUpdates(); return true; } // tryStart: the inherited-task rule
+    if (already) {
+      void Location.getBackgroundPermissionsAsync().then((p) => { _bgGranted = !!p?.granted; }).catch(() => {});
+      void startForegroundCarFeed(); void tryStartBgUpdates(); // tryStart: the inherited-task rule
+      void logLocRuntime(tag, true);
+      return true;
+    }
     // Try for "Always" (keeps the car map fed while the phone is FULLY
     // backgrounded behind the head unit). Note: when this runs from a cold CarPlay
     // connect the app is backgrounded, so iOS CANNOT show the upgrade prompt here —
@@ -1197,6 +1294,7 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
         : (await Location.getBackgroundPermissionsAsync()).granted;
     } catch {}
     if (!canBg) setCarState({ carDbg: "bg:no-always" }); // head-unit-visible breadcrumb
+    _bgGranted = canBg;
     // ALWAYS start the foreground feed (self-guards via _fgCarWatch; released with the
     // shared lock). It is the only CONTINUOUS main-context writer that lands selfLat in
     // the carStore the CarPlay surface reads. Previously this ran only `if (!canBg)`, so
@@ -1223,6 +1321,7 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
       } catch {}
       return false;
     }
+    void logLocRuntime(tag, started);
     return started || canBg;
   } catch {
     return false;
@@ -1231,6 +1330,8 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
 
 export async function releaseBgLocation(tag: string): Promise<void> {
   _locConsumers.delete(tag);
+  void releaseBgActivitySession(tag);   // iOS build 79: refcounted by tag inside; invalidates only when no tag holds it
+  if (!_locConsumers.has("androidauto")) setCarLocationSessionLive(false);   // Android build 79 (review C5)
   if (_locConsumers.size > 0) return; // another consumer still needs it
   _stopStallWatchdog();
   stopForegroundCarFeed();

@@ -8,7 +8,7 @@
 // Section D drives the real async function with deferred "native" promises, through a model of the
 // navNotification glue (start reads the setting, commits after success, reconciles after start).
 import {
-  driveFeedOptions, driveFeedRebuildPlan, driveFeedNeedsRelite, reliteDriveFeeds, type DriveFeedState,
+  driveFeedOptions, driveFeedRebuildPlan, driveFeedNeedsRelite, reliteDriveFeeds, stallRebuildAllowed, type DriveFeedState,
 } from "../../src/driveFeed.ts";
 
 let pass = 0, fail = 0;
@@ -198,6 +198,26 @@ await (async () => {
   m.resolveBg(); await settle();
   check("D6 inherited-task rebuild raced by the last release: the started task is torn down, nothing runs ownerless", !m.st.bgUp && m.st.bgLite == null && m.st.teardowns >= 1, `bgUp=${m.st.bgUp} teardowns=${m.st.teardowns}`);
 })();
+
+console.log("E. the stall watchdog tears a feed down only when the OS will let it come back (build 79)");
+{
+  // Review C1 (2026-09-14): Android's background-FGS-start exemptions do not include ACCESS_BACKGROUND_LOCATION, and
+  // expo refuses a start with no Activity (LocationModule.kt:258) — so on Android ONLY a foregrounded Activity may
+  // tear down, whatever the grant. iOS Always, or an ACTIVE CLBackgroundActivitySession, may.
+  type SA = { platform: "ios" | "android"; appActive: boolean; bgGranted: boolean; nativeFgNow: boolean | null; sessionInUse: boolean | null };
+  const S = (o: Partial<SA>) => stallRebuildAllowed({ platform: "ios", appActive: false, bgGranted: false, nativeFgNow: null, sessionInUse: null, ...o });
+  check("E1 iOS When In Use, not active → keep", S({}) === false);
+  check("E2 iOS When In Use, active → rebuild", S({ appActive: true }) === true);
+  check("E3 iOS Always, background → rebuild", S({ bgGranted: true }) === true);
+  check("E4 Android while-using, car session (synthetic active, no Activity) → keep", S({ platform: "android", appActive: true, nativeFgNow: false }) === false);
+  check("E5 Android while-using, Activity foregrounded → rebuild", S({ platform: "android", appActive: true, nativeFgNow: true }) === true);
+  check("E6 Android native unknown (build 78) → AppState", S({ platform: "android", appActive: true }) === true && S({ platform: "android" }) === false);
+  check("E7 Android all-the-time, no Activity → keep (the grant is not a background-start exemption)", S({ platform: "android", bgGranted: true, nativeFgNow: false }) === false);
+  check("E8 Android all-the-time, Activity foregrounded → rebuild", S({ platform: "android", bgGranted: true, nativeFgNow: true }) === true);
+  check("E9 iOS When In Use, background, session in use → rebuild", S({ sessionInUse: true }) === true);
+  check("E10 iOS When In Use, background, session NOT in use / unknown → keep", S({ sessionInUse: false }) === false && S({ sessionInUse: null }) === false);
+  check("E11 Android ignores the iOS session", S({ platform: "android", nativeFgNow: false, sessionInUse: true }) === false);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

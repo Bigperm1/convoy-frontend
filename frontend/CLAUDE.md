@@ -205,7 +205,16 @@ edit means the tree was not fully patched: `git checkout -- patches/` and stop.
 `node_modules`, then `yarn install --check-files` (a plain `yarn install` will NOT re-fetch a
 deleted package — it considers the lockfile satisfied), and re-verify with the command above.
 
-Native deps are patched at install time via `patch-package` (postinstall hook): `react-native-carplay` (RN 0.81 / New Arch null-safety fixes — see recent commits) and `@lomray/react-native-apple-music`. If you change a patched package, regenerate with `npx patch-package <name>`.
+**⚠ An ANDROID patch of an `expo-*` package is SILENTLY IGNORED unless it is built from source (2026-09-14).**
+Expo SDK 54 links every expo module whose `expo-module.config.json` declares an Android `publication` from its
+PREBUILT AAR in `node_modules/<pkg>/local-maven-repo`, not from `android/src` — `./gradlew projects` shows it as
+`[📦] expo-location (19.0.8)` and `:expo-location:compileReleaseKotlin` does not exist. List the package in
+`package.json` → `expo.autolinking.android.buildFromSource` (regexes on the package name; `expo-location` is there
+for `patches/expo-location+19.0.8.patch`), then confirm `./gradlew projects` prints `Project ':<name>'` and compile
+that task. iOS pods compile from source, so an iOS-only patch (`expo-av`) never hit this.
+`scripts/trap-check.py` rule `expo-location-android-patch-built-from-prebuilt-aar` guards the expo-location entry.
+
+Native deps are patched at install time via `patch-package` (postinstall hook): `react-native-carplay` (RN 0.81 / New Arch null-safety fixes — see recent commits), `@lomray/react-native-apple-music`, and `expo-location` (build 79: CLBackgroundActivitySession, car-watcher background delivery, the Android car-session FGS gate + receipts — owner `src/locationRuntime.ts`). If you change a patched package, regenerate with `npx patch-package <name>` and the exclude that covers build output.
 
 ## Conventions
 

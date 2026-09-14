@@ -127,3 +127,28 @@ export async function reliteDriveFeeds(d: ReliteDeps): Promise<ReliteResult> {
   }
   return "done";
 }
+
+/**
+ * May the GPS stall watchdog TEAR DOWN and rebuild the drive feeds right now? (build 79, 2026-09-14)
+ * A 25 s gap without a fix is also a car held at a red light (distanceInterval 2 m), so a teardown the OS will not
+ * let us undo kills a feed that was fine.
+ * Android: a location foreground service cannot be started from the background without an exemption, and
+ *   ACCESS_BACKGROUND_LOCATION is NOT one (developer.android.com/develop/background-work/services/fgs/restrictions-bg-start);
+ *   expo-location refuses it too (LocationModule.kt:258). So only a real foregrounded Activity may tear down,
+ *   whatever the grant. AppState is a synthetic 'active' in a car-started Android Auto session (build 79 forced
+ *   context resume), so the native Activity truth decides; null = unknown (build 78) → AppState.
+ * iOS: a location start while the app runs in the background fails under When In Use (Apple,
+ *   requestWhenInUseAuthorization). "Always" permits a background start (iOS only); so does an ACTIVE
+ *   CLBackgroundActivitySession, which keeps the app in use (CLBackgroundActivitySession.h: "When a session is
+ *   active, the app remains in-use").
+ */
+export function stallRebuildAllowed(a: {
+  platform: "ios" | "android"; appActive: boolean; bgGranted: boolean; nativeFgNow: boolean | null; sessionInUse?: boolean | null;
+}): boolean {
+  if (a.platform === "android") {
+    return a.nativeFgNow == null ? a.appActive : a.nativeFgNow;
+  }
+  if (a.bgGranted) return true;              // iOS Always
+  if (a.sessionInUse === true) return true;  // an ACTIVE CLBackgroundActivitySession keeps the app in use
+  return a.appActive;
+}

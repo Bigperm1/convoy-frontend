@@ -1,8 +1,15 @@
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
-index ef6aa04..f05f517 100644
+index ef6aa04..48a3b92 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
-@@ -70,18 +70,71 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -1,5 +1,6 @@
+ package org.birkir.carplay
+ 
++import android.content.Context
+ import android.content.Intent
+ import android.os.Handler
+ import android.os.Looper
+@@ -70,18 +71,75 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
      return NAME
    }
  
@@ -29,9 +36,13 @@ index ef6aa04..f05f517 100644
 +  //
 +  // So: context, screen, screenManager and the root screen are assigned before anything that can
 +  // throw, and the global emitter is created lazily instead of asserted. No `eventEmitter!!` here.
++  // Since 2026-09-14 the lazy path is the NORMAL one on a car-started cold boot: CarJsKeepAlive keeps
++  // the car session's JS alive without resuming the ReactContext, so the onHostResume listener above
++  // does not run until a phone Activity resumes.
 +  //
 +  // `life` / `forced` come from CarPlaySession.invokeStartTask (the host lifecycle state it saw, and
-+  // whether it forced onHostResume) so ONE `aa-native op=ctx` row carries the whole connect story.
++  // whether the OTA-flagged LEGACY ReactContext resume ran — default OFF since 2026-09-14, see
++  // setAaKeepAliveOptions) so ONE `aa-native op=ctx` row carries the whole connect story.
 +  fun setCarContext(
 +    carContext: CarContext,
 +    currentCarScreen: CarScreen,
@@ -78,7 +89,31 @@ index ef6aa04..f05f517 100644
    }
  
    private fun parseTemplate(
-@@ -108,7 +161,13 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -92,6 +150,23 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+     return factory.parse(config)
+   }
+ 
++  // CONVOY (build 79, 2026-09-14): the OTA switch for CarPlaySession's legacy synthetic ReactContext
++  // resume (the first build-79 cut's car-started cold-boot fix, now superseded by CarJsKeepAlive). JS
++  // (src/carplay/registerAndroidAuto.ts, AA_SYNTHETIC_RESUME) calls this at every bundle evaluation;
++  // CarPlaySession reads the stored value at the NEXT car connect, so `true` takes effect on the first
++  // car-started cold boot after a bundle carrying it has run once. Kept so a car-first regression on a
++  // head unit costs an OTA, not a paid build 80. Default false. Never throws.
++  @ReactMethod
++  fun setAaKeepAliveOptions(syntheticResume: Boolean) {
++    try {
++      reactContext.getSharedPreferences(AA_PREFS, Context.MODE_PRIVATE)
++        .edit()
++        .putBoolean(AA_PREF_SYNTHETIC_RESUME, syntheticResume)
++        .apply()
++    } catch (ignored: Throwable) {
++    }
++  }
++
+   @ReactMethod
+   fun checkForConnection() {
+     eventEmitter?.didConnect()
+@@ -108,7 +183,13 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
        try {
          createScreen(templateId);
          callback?.invoke()
@@ -93,7 +128,7 @@ index ef6aa04..f05f517 100644
          val args = Arguments.createMap()
          args.putString("error", "Failed to parse template '$templateId': ${err.message}")
          callback?.invoke(args)
-@@ -120,13 +179,33 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -120,13 +201,33 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    fun updateTemplate(templateId: String, config: ReadableMap) {
      handler.post {
        carTemplates[templateId] = config;
@@ -131,7 +166,7 @@ index ef6aa04..f05f517 100644
          }
        }
      }
-@@ -136,11 +215,39 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -136,11 +237,39 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    fun setRootTemplate(templateId: String, animated: Boolean?) {
      Log.d(TAG, "set Root Template for $templateId")
      handler.post {
@@ -176,7 +211,7 @@ index ef6aa04..f05f517 100644
        }
      }
    }
-@@ -148,10 +255,16 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -148,10 +277,16 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    @ReactMethod
    fun pushTemplate(templateId: String, animated: Boolean?) {
      handler.post {
@@ -197,7 +232,7 @@ index ef6aa04..f05f517 100644
        }
      }
    }
-@@ -166,9 +279,13 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -166,9 +301,13 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    @ReactMethod
    fun popTemplate(animated: Boolean?) {
      handler.post {
@@ -213,7 +248,7 @@ index ef6aa04..f05f517 100644
        currentCarScreen?.invalidate()
      }
    }
-@@ -271,6 +388,31 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -271,6 +410,31 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    }
  
    private fun createScreen(templateId: String): CarScreen? {
@@ -245,6 +280,17 @@ index ef6aa04..f05f517 100644
      val config = carTemplates[templateId];
      if (config != null) {
        val screen = CarScreen(carContext)
+@@ -303,5 +467,10 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+   companion object {
+     const val NAME = "RNCarPlay"
+     const val TAG = "CarPlay"
++
++    // CONVOY (build 79, 2026-09-14): SharedPreferences file + key for setAaKeepAliveOptions, read by
++    // CarPlaySession.invokeStartTask.
++    const val AA_PREFS = "convoy_aa"
++    const val AA_PREF_SYNTHETIC_RESUME = "syntheticResume"
+   }
+ }
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt
 index 73aad53..4f187ab 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayService.kt
@@ -352,10 +398,10 @@ index 73aad53..4f187ab 100644
  }
 +
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
-index 2235853..0d3d4e1 100644
+index 2235853..faefc1a 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
-@@ -6,43 +6,92 @@ import android.content.Context
+@@ -6,43 +6,101 @@ import android.content.Context
  import android.content.Intent
  import android.content.IntentFilter
  import android.content.res.Configuration
@@ -381,6 +427,7 @@ index 2235853..0d3d4e1 100644
 -import com.facebook.react.modules.core.TimingModule
 -import com.facebook.react.modules.debug.DevSettingsModule
  import org.birkir.carplay.screens.CarScreen
++import org.birkir.carplay.utils.CarJsKeepAlive
 +import org.birkir.carplay.utils.EventEmitter
  
  
@@ -389,7 +436,8 @@ index 2235853..0d3d4e1 100644
 +// ReactHost instead of the (now non-existent) ReactInstanceManager.
 +class CarPlaySession(private val reactHost: ReactHost) : Session(), DefaultLifecycleObserver {
 +  // CONVOY FIX (build 79, 2026-09-13): true while THIS session holds a synthetic ReactContext resume it
-+  // must release on disconnect (see invokeStartTask). Main-thread confined.
++  // must release on disconnect (see invokeStartTask). Since 2026-09-14 that resume is an OTA-switched
++  // FALLBACK, default OFF. Main-thread confined.
 +  private var syntheticResume = false
    private lateinit var screen: CarScreen
  
@@ -455,10 +503,17 @@ index 2235853..0d3d4e1 100644
 +    } else {
 +      carContext.registerReceiver(reloadReceiver, reloadFilter)
 +    }
++
++    // CONVOY FIX (build 79, 2026-09-14): hold JS timers + Fabric mounting for this WHOLE car session,
++    // whatever the phone Activity does (utils/CarJsKeepAlive.kt). Taken BEFORE runJsApplication so on a
++    // car-started cold boot its ReactInstanceEventListener is registered ahead of runJsApplication's
++    // (ReactHostImpl iterates a CopyOnWriteArrayList in order) and "AndroidAuto" renders into a live host.
++    // Released in onDestroy. acquire() never throws.
++    CarJsKeepAlive.acquire(this, reactHost, carContext.applicationContext, lifecycle)
  
      // Run JS
      runJsApplication()
-@@ -50,52 +99,166 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
+@@ -50,52 +108,165 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
    }
  
    private fun runJsApplication() {
@@ -489,57 +544,46 @@ index 2235853..0d3d4e1 100644
    }
  
    private fun invokeStartTask(reactContext: ReactContext) {
-+    // Main-thread confined: ReactHost.onHostResume is @ThreadConfined(UI). All three callers are main
-+    // today (onCreateScreenInner, ReactHost's uiExecutor listener dispatch, the reload receiver).
++    // Main-thread confined: ReactContext.onHostResume is @ThreadConfined(UI) and setCarContext touches
++    // ScreenManager. All three callers are main today (onCreateScreenInner, ReactHost's uiExecutor
++    // listener dispatch, the reload receiver).
 +    if (Looper.myLooper() != Looper.getMainLooper()) {
 +      Handler(Looper.getMainLooper()).post { invokeStartTask(reactContext) }
 +      return
 +    }
 +
-+    // ── CONVOY FIX (build 79, 2026-09-13): RESUME THE REACT HOST WHEN THE CAR STARTED IT ──────────
-+    // When Android Auto cold-starts the process, no Activity has EVER resumed, so the bridgeless
-+    // host is still BEFORE_CREATE and ReactContext.onHostResume never runs. Everything that waits for
-+    // it stays dead for the whole car session:
-+    //   - JavaTimerManager starts with isPaused = true and only onHostResume clears it (a running
-+    //     headless JS task is the only other way timers fire), so every JS setTimeout / setInterval
-+    //     is frozen;
-+    //   - FabricUIManager resumes its mount-dispatch frame callback only in onHostResume, so views
-+    //     committed from JS never mount on the car surface (a black map);
-+    //   - CarPlayModule's own listener never creates its EventEmitter (the setCarContext NPE above).
-+    // Upstream CarPlaySession called `timingModule!!.onHostResume()` for exactly this case; the
-+    // bridgeless port deleted it (the `-      timingModule!!.onHostResume()` line in
-+    // patches/react-native-carplay+2.4.1-beta.0.patch), and patches/android-auto-bridgeless.RECIPE.md's
-+    // open risks already warned about the cold-boot path.
++    // ── CONVOY FIX (build 79, 2026-09-14): NO SYNTHETIC ReactContext RESUME BY DEFAULT ────────────
++    // WHY IT EXISTED (first build-79 cut, 2026-09-13): when Android Auto cold-starts the process no
++    // Activity has ever resumed, the bridgeless host is BEFORE_CREATE and ReactContext.onHostResume never
++    // runs, so JavaTimerManager (starts paused), FabricUIManager's mount dispatch and CarPlayModule's
++    // emitter all stayed dead. FIELD: c1k5p3-833078 (build 78, car-started) logged 88
++    // `timer-starve … surf=car raf=0` rows, dt 3,878 ms -> 1,010,879 ms. That cut resumed the ReactContext
++    // with a null Activity when the host was BEFORE_CREATE (the context, not the host: resuming the host
++    // made the phone Activity's first resume return early — Codex 09-13).
 +    //
-+    // FIELD RECEIPT (09-13 review, read-only SQL on crash_reports): c1k5p3-833078 (build 78, runtime
-+    // 1.28.0, car-started — root-render 3 ms after js-mark) logged 88 `timer-starve … surf=car raf=0`
-+    // rows with dt growing 3,878 ms -> 1,010,879 ms: the 1 s interval in src/timerLiveness.ts never
-+    // ran for ~17 minutes. w4lmcy-052401, also car-started but with the phone screen up, fired its
-+    // 2.5 s timer on time.
++    // WHY IT IS NOW OFF: CarJsKeepAlive (acquired in onCreateScreenInner) covers timers + Fabric mounting +
++    // native-driver Animated for the WHOLE session — also after the phone app is backgrounded or its
++    // Activity destroyed, which a one-shot BEFORE_CREATE resume never covered (09-13 query: 198 of 200
++    // `timer-starve surf=car` rows came after `aa-appstate background`, where the host is BEFORE_RESUME).
++    // Not resuming the context keeps AppState truthful ('background' in a car-only session, not 'active')
++    // and gives no third-party listener onHostResume with a null Activity. CarPlayModule creates its
++    // emitter lazily in setCarContext. The host stays BEFORE_CREATE, so the phone's first resume still
++    // attaches its Activity normally.
 +    //
-+    // GATED STRICTLY ON BEFORE_CREATE (never "!= RESUMED"): a phone-first-then-backgrounded host is
-+    // BEFORE_RESUME and behaves exactly as build 78. Forcing a resume there would null
-+    // ReactHostImpl.currentActivity (onHostResume(null) assigns it) under a real, paused Activity.
-+    // Called BEFORE runApplication so the AndroidAuto root renders into a resumed host.
-+    //
-+    // ── RESUME THE REACT CONTEXT, NOT THE HOST (Codex review, 2026-09-13) ─────────────────────────
-+    // The first cut called reactHost.onHostResume(null). That moves ReactLifecycleStateManager to
-+    // RESUMED, and moveToOnHostResume RETURNS EARLY when already RESUMED — so when the driver later
-+    // opened the phone app, MainActivity's resume never reached ReactContext.onHostResume(activity)
-+    // and getCurrentActivity() stayed null for the phone session (PermissionsModule and every other
-+    // Activity-needing module would reject). VERIFIED in RN 0.81 source:
-+    // runtime/ReactLifecycleStateManager.kt moveToOnHostResume `if (state == RESUMED) return`.
-+    // ReactContext.onHostResume(null) runs the SAME listeners — JavaTimerManager (registered via
-+    // addLifecycleEventListener, modules/core/JavaTimerManager.kt:67/:82), FabricUIManager's mount
-+    // dispatch, CarPlayModule's emitter — while the host's state manager stays BEFORE_CREATE. The
-+    // phone Activity's first resume then takes the normal path: context.onHostResume(activity)
-+    // attaches it, and the state becomes RESUMED. JavaTimerManager.onHostResume is idempotent
-+    // (frameCallbackPosted guard), so that second resume is safe. Balanced on disconnect in onDestroy.
-+    // ⚠ UNVERIFIED side effects (code read only, nothing run on a head unit):
-+    //   - AppState flips to 'active' (AppStateModule is a lifecycle listener too) in a car session;
-+    //   - whether @rnmapbox paints on the Presentation with no Activity at all — only the DHU answers.
++    // ⚠ HYPOTHESIS, nothing run on a head unit: that the hold alone is enough for a car-started cold boot.
++    // So the old resume survives as an OTA-SWITCHABLE FALLBACK: JS writes the flag through
++    // RNCarPlay.setAaKeepAliveOptions (src/carplay/registerAndroidAuto.ts, AA_SYNTHETIC_RESUME) into
++    // SharedPreferences, and it takes effect on the first car-started cold boot after a bundle carrying
++    // `true` has run once. Gated strictly on BEFORE_CREATE as before (never "!= RESUMED": a paused real
++    // Activity must not have its context resumed with a null Activity). `op=ctx forced=1` = it ran.
 +    val life = try { reactHost.lifecycleState } catch (t: Throwable) { null }
-+    val forced = life == LifecycleState.BEFORE_CREATE
++    val legacyResume = try {
++      carContext.getSharedPreferences(CarPlayModule.AA_PREFS, Context.MODE_PRIVATE)
++        .getBoolean(CarPlayModule.AA_PREF_SYNTHETIC_RESUME, false)
++    } catch (t: Throwable) {
++      false
++    }
++    val forced = legacyResume && life == LifecycleState.BEFORE_CREATE
 +    if (forced) {
 +      try {
 +        reactContext.onHostResume(null)
@@ -548,7 +592,7 @@ index 2235853..0d3d4e1 100644
 +        // Record and carry on: runApplication + setCarContext below must still run.
 +        AACrashLog.record(
 +          try { carContext.applicationContext } catch (e: Throwable) { null },
-+          "CarPlaySession.invokeStartTask forced onHostResume", t,
++          "CarPlaySession.invokeStartTask legacy resume", t,
 +        )
 +      }
 +    }
@@ -625,27 +669,37 @@ index 2235853..0d3d4e1 100644
 +    // it here lets AndroidAutoRoot release the consumer for real.
 +    try {
 +      reactHost.currentReactContext?.let { EventEmitter(it).didDisconnect() }
-+    } catch (e: Exception) {
++    } catch (e: Throwable) {
++      // CONVOY FIX (build 79, 2026-09-14): was `catch (e: Exception)`. An Error thrown by the emit skipped
++      // everything after it — and after it now sits the release of this session's JS hold, which would
++      // then leak for the life of the process (timers, Fabric mounting and NativeAnimated's per-frame
++      // callback running with no car). Hence Throwable + finally.
 +      e.printStackTrace()
-+    }
-+    // CONVOY FIX (build 79, 2026-09-13): release the synthetic resume taken in invokeStartTask — but
-+    // ONLY if no Activity took ownership meanwhile. If the phone app opened, its resume moved the host
-+    // to RESUMED (or later BEFORE_RESUME) and the phone's own lifecycle owns pausing from here. If it
-+    // never did, the host is still BEFORE_CREATE and nothing else will ever pause the context: JS timers
-+    // and the choreographer would keep running for the life of the process with no UI (the battery
-+    // class this onDestroy already fights — see above). Pausing returns to exactly the build-78 state.
-+    if (syntheticResume) {
-+      syntheticResume = false
-+      try {
-+        val stillUnowned = reactHost.lifecycleState == LifecycleState.BEFORE_CREATE
-+        if (stillUnowned) reactHost.currentReactContext?.onHostPause()
-+        Log.i(TAG, "aa-native op=release unowned=${if (stillUnowned) 1 else 0}")
-+      } catch (t: Throwable) {
-+        AACrashLog.record(
-+          try { carContext.applicationContext } catch (e: Throwable) { null },
-+          "CarPlaySession.onDestroy release synthetic resume", t,
-+        )
++    } finally {
++      // CONVOY FIX (build 79, 2026-09-13): release the OTA-flagged legacy resume taken in invokeStartTask —
++      // but ONLY if no Activity took ownership meanwhile. If the phone app opened, its resume moved the host
++      // to RESUMED (or later BEFORE_RESUME) and the phone's own lifecycle owns pausing from here. If it never
++      // did, the host is still BEFORE_CREATE and nothing else would ever pause the context.
++      if (syntheticResume) {
++        syntheticResume = false
++        try {
++          val stillUnowned = reactHost.lifecycleState == LifecycleState.BEFORE_CREATE
++          if (stillUnowned) reactHost.currentReactContext?.onHostPause()
++          Log.i(TAG, "aa-native op=release unowned=${if (stillUnowned) 1 else 0}")
++        } catch (t: Throwable) {
++          AACrashLog.record(
++            try { carContext.applicationContext } catch (e: Throwable) { null },
++            "CarPlaySession.onDestroy legacy release", t,
++          )
++        }
 +      }
++      // CONVOY FIX (build 79, 2026-09-14): end this session's JS hold. CarJsKeepAlive drops it only when the
++      // LAST live session releases, after a 5 s grace, and hands FabricUIManager / NativeAnimatedModule back
++      // to the ReactContext lifecycle in whatever state the phone Activity left it — with no phone app in
++      // the foreground, timers and mounting pause again (battery). androidx reaches ON_DESTROY on host unbind
++      // AND on CarAppService.onDestroy (javap, androidx.car.app:app:1.4.0-beta02: both reach
++      // CarAppBinder.onDestroyLifecycle). release() never throws.
++      CarJsKeepAlive.release(this, "session-destroy")
 +    }
    }
  
@@ -729,6 +783,461 @@ index 01dbabd..bacb6f0 100644
          }
        }
      }.build()
+diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/CarJsKeepAlive.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/CarJsKeepAlive.kt
+new file mode 100644
+index 0000000..e6beb15
+--- /dev/null
++++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/CarJsKeepAlive.kt
+@@ -0,0 +1,449 @@
++package org.birkir.carplay.utils
++
++import android.content.Context
++import android.os.Build
++import android.os.Handler
++import android.os.Looper
++import android.os.SystemClock
++import android.util.Log
++import android.view.Choreographer
++import androidx.lifecycle.Lifecycle
++import com.facebook.react.ReactHost
++import com.facebook.react.ReactInstanceEventListener
++import com.facebook.react.animated.NativeAnimatedModule
++import com.facebook.react.bridge.Arguments
++import com.facebook.react.bridge.ReactContext
++import com.facebook.react.bridge.UIManager
++import com.facebook.react.bridge.UIManagerListener
++import com.facebook.react.common.LifecycleState
++import com.facebook.react.common.annotations.UnstableReactNativeAPI
++import com.facebook.react.fabric.FabricUIManager
++import com.facebook.react.jstasks.HeadlessJsTaskConfig
++import com.facebook.react.jstasks.HeadlessJsTaskContext
++import com.facebook.react.jstasks.HeadlessJsTaskEventListener
++import com.facebook.react.uimanager.UIManagerHelper
++import com.facebook.react.uimanager.common.UIManagerType
++import org.birkir.carplay.AACrashLog
++import java.lang.ref.WeakReference
++import java.util.IdentityHashMap
++import java.util.concurrent.atomic.AtomicInteger
++
++/**
++ * CONVOY (build 79, 2026-09-14): keeps an Android Auto car session's JS ALIVE for the WHOLE session,
++ * whatever the phone Activity does (paused, stopped, destroyed, never created).
++ *
++ * WHY (RN 0.81.5 source): ReactActivityDelegate.onPause/onDestroy -> ReactDelegate -> ReactHostImpl ->
++ * ReactLifecycleStateManager.moveToOnHostPause/moveToOnHostDestroy -> ReactContext.onHostPause/Destroy:
++ *  - JavaTimerManager pauses every setTimeout/setInterval/rAF unless a headless JS task is active
++ *    (modules/core/JavaTimerManager.kt:71-75, :135-142, :275-278);
++ *  - FabricUIManager pauses the DISPATCH_UI callback that mounts committed views (FabricUIManager.java:1121);
++ *  - NativeAnimatedModule drops its frame callback (NativeAnimatedModule.kt:334).
++ * Field (09-13 read-only query on crash_reports): on 9 Android instances with both kinds of row, 198 of
++ * 200 `timer-starve surf=car` rows came after the last `aa-appstate` was 'background', 0 after 'active'.
++ * A Meta maintainer points at HeadlessJsTaskContext.startTask for timers (facebook/react-native#50327,
++ * issuecomment-3062801982); it does not keep Fabric mounting, so FabricUIManager is detached from the
++ * lifecycle the way Iternio's react-native-auto-play does (VirtualRenderer.kt:402-405 @ dbd33ff).
++ * ⚠ HYPOTHESIS that this pause is what the driver sees on AA — no head unit or DHU has run this code.
++ *
++ * WHAT, while >= 1 car session holds it: (1) a headless JS task (TASK_KEY, no timeout, allowed in
++ * foreground) — JS registers TASK_KEY with a never-settling task in src/carplay/registerAndroidAuto.ts and
++ * THIS class finishes it; no HeadlessJsTaskService, so no Service, no FGS and NO WAKE LOCK (Iternio's
++ * HeadlessJsTaskService does take a PARTIAL_WAKE_LOCK for the session — deliberately not copied; Android
++ * vitals flags >= 2 h of partial wake lock per 24 h, so `slp>0` means a design review, not an auto-add).
++ * (2) FabricUIManager and NativeAnimatedModule removed from the ReactContext lifecycle and resumed; on drop
++ * handed back and paused unless the context is RESUMED — a phone with no car pauses exactly like stock RN.
++ * (3) re-applied to a new ReactContext after a JS reload. It NEVER resumes the ReactContext itself, so
++ * AppState stays truthful and no third-party listener gets onHostResume with a null Activity.
++ *
++ * NOT COVERED: other modules' onHostDestroy when the phone app is swiped away (expo-av releases sounds,
++ * ImageLoader cancels requests), and ReactDelegate.onHostDestroy -> unloadApp stops the phone "main"
++ * surface (ReactDelegate.kt:154-156, :321-325) — map.tsx and everything it owns unmounts while the car
++ * stays up. Iternio ends the car app there instead (AndroidAutoSession.kt:223-230 @ dbd33ff).
++ *
++ * RECEIPTS (aaNativeTrace -> `aa-native …` rows, JS-capped per process):
++ *   op=hold on=1 via=acquire|init|regrab|join n= task= fab= anim= host= ctx= mfr= sdk=
++ *   op=hold on=0 why= dur= bg= stp= mntBg= chorStall= slp= lost= re= task= host=   (seconds)
++ *   op=hold-stall chor=0|1 sched= mnt= task= host= win= slp=   (<= 10 per process, 5 min apart)
++ *   op=hold-lost task= host=
++ * `chor=0` (the main Choreographer did not deliver one frame in 15 s) is the actionable stall.
++ * `chor=1 mnt=0` is INCONCLUSIVE: FabricUIManager fires didScheduleMountItems for empty batches too
++ * (FabricUIManager.java:894-896), and mnt counts every surface, phone included.
++ * Main-thread confined except the AtomicInteger counters.
++ */
++@OptIn(UnstableReactNativeAPI::class)
++object CarJsKeepAlive {
++  /** MUST equal CAR_SESSION_HOLD_TASK in src/carplay/registerAndroidAuto.ts. */
++  const val TASK_KEY = "HairpinCarSessionHold"
++
++  private const val TAG = "CarJsKeepAlive"
++  private const val BEAT_MS = 15_000L
++  private const val RELEASE_GRACE_MS = 5_000L
++  private const val STALL_MIN_SCHED = 5
++  private const val STALL_ROW_EVERY_MS = 5 * 60_000L
++  private const val STALL_ROWS_MAX = 10
++
++  private val main = Handler(Looper.getMainLooper())
++
++  // Keyed by IDENTITY (review 2026-09-14): identityHashCode strings can collide, and a collision would
++  // drop the hold while a session is still live. Value = that session's androidx lifecycle (for stp=).
++  private val owners = IdentityHashMap<Any, Lifecycle?>()
++  private var host: ReactHost? = null
++  private var appContext: Context? = null
++  private var releasePending = false
++
++  private var ctxRef: WeakReference<ReactContext>? = null
++  private var taskId = -1
++  private var fabricRef: WeakReference<FabricUIManager>? = null
++  private var animatedRef: WeakReference<NativeAnimatedModule>? = null
++
++  private var heldAtMs = 0L
++  private var beatElapsedMs = 0L
++  private var beatUptimeMs = 0L
++  private var notResumedMs = 0L
++  private var stoppedMs = 0L
++  private var sleptMs = 0L
++  private var reapplies = 0
++  private var tasksLost = 0
++  private var chorStalls = 0
++  private var chorProbePending = false
++  private var stallRows = 0 // per process, never reset
++  private var lastStallRowAtMs = 0L
++  private val schedInWindow = AtomicInteger(0)
++  private val mountsInWindow = AtomicInteger(0)
++  private val mountsNotResumed = AtomicInteger(0)
++
++  /** Car session start (CarPlaySession.onCreateScreenInner). Idempotent per owner. Never throws. */
++  fun acquire(owner: Any, reactHost: ReactHost, context: Context?, lifecycle: Lifecycle?) {
++    if (Looper.myLooper() != Looper.getMainLooper()) {
++      main.post { acquire(owner, reactHost, context, lifecycle) }
++      return
++    }
++    try {
++      if (owners.containsKey(owner)) return
++      owners[owner] = lifecycle
++      var via = if (owners.size == 1) "acquire" else "join"
++      if (owners.size == 1) {
++        if (releasePending) {
++          // A reconnect inside the grace window: the hold was never dropped, keep it.
++          main.removeCallbacks(dropHold)
++          releasePending = false
++          via = "regrab"
++        } else {
++          host = reactHost
++          reactHost.addReactInstanceEventListener(instanceListener)
++        }
++        if (appContext == null) appContext = context?.applicationContext
++        startReceipts()
++      }
++      val ctx = reactHost.currentReactContext
++      if (ctx != null && ctx.hasActiveReactInstance()) applyTo(ctx)
++      trace(holdRow(via))
++    } catch (t: Throwable) {
++      record("acquire", t)
++    }
++  }
++
++  /** Car session end (CarPlaySession.onDestroy). Drops RELEASE_GRACE_MS after the LAST owner. Never throws. */
++  fun release(owner: Any, why: String) {
++    if (Looper.myLooper() != Looper.getMainLooper()) {
++      main.post { release(owner, why) }
++      return
++    }
++    try {
++      if (!owners.containsKey(owner)) return
++      owners.remove(owner)
++      if (owners.isNotEmpty()) return
++      closeReceiptWindow()
++      // Before the task is finished, while JS timers are still guaranteed to run.
++      trace(
++        "op=hold on=0 why=$why dur=${(SystemClock.elapsedRealtime() - heldAtMs) / 1000} " +
++          "bg=${notResumedMs / 1000} stp=${stoppedMs / 1000} mntBg=${mountsNotResumed.get()} " +
++          "chorStall=$chorStalls slp=${sleptMs / 1000} lost=$tasksLost re=$reapplies " +
++          "task=${if (taskId >= 0) 1 else 0} host=${hostState()}"
++      )
++      main.removeCallbacks(beat)
++      releasePending = true
++      main.removeCallbacks(dropHold)
++      // The grace lets JS run its didDisconnect cleanup and deliver the row above with timers alive,
++      // and lets a reconnect inside it keep the hold ("regrab").
++      main.postDelayed(dropHold, RELEASE_GRACE_MS)
++    } catch (t: Throwable) {
++      record("release", t)
++    }
++  }
++
++  private val dropHold = Runnable {
++    if (releasePending && owners.isEmpty()) {
++      releasePending = false
++      try {
++        host?.removeReactInstanceEventListener(instanceListener)
++      } catch (t: Throwable) {
++        record("drop listener", t)
++      }
++      detach(ctxRef?.get())
++      try {
++        Choreographer.getInstance().removeFrameCallback(chorProbe)
++      } catch (ignored: Throwable) {
++      }
++      chorProbePending = false
++      host = null
++      Log.i(TAG, "hold dropped")
++    }
++  }
++
++  private val instanceListener = object : ReactInstanceEventListener {
++    // ReactHostImpl calls this on its uiExecutor for a new context: cold start or JS reload. Registered
++    // in acquire(), i.e. BEFORE CarPlaySession.runJsApplication's own listener, and ReactHostImpl iterates
++    // a CopyOnWriteArrayList in registration order (ReactHostImpl.kt:132-133, :992) — so on a car-started
++    // cold boot the hold is applied before "AndroidAuto" is run.
++    override fun onReactContextInitialized(context: ReactContext) {
++      if (Looper.myLooper() != Looper.getMainLooper()) {
++        main.post { onReactContextInitialized(context) }
++        return
++      }
++      try {
++        if (owners.isNotEmpty() && applyTo(context)) trace(holdRow("init"))
++      } catch (t: Throwable) {
++        record("onReactContextInitialized", t)
++      }
++    }
++  }
++
++  private val taskListener = object : HeadlessJsTaskEventListener {
++    override fun onHeadlessJsTaskStart(taskId: Int) {}
++
++    // UI thread (HeadlessJsTaskContext.finishTask posts it). Our own finish is never seen: detach()
++    // removes this listener before calling finishTask. Seen when JS finished the task itself — the
++    // running bundle has no TASK_KEY registration, or the task settled (AppRegistryImpl.js:256-268).
++    override fun onHeadlessJsTaskFinish(taskId: Int) {
++      if (owners.isEmpty() || taskId != this@CarJsKeepAlive.taskId) return
++      this@CarJsKeepAlive.taskId = -1
++      tasksLost++
++      trace("op=hold-lost task=$taskId host=${hostState()}")
++    }
++  }
++
++  private val mountListener = object : UIManagerListener {
++    override fun willDispatchViewUpdates(uiManager: UIManager) {}
++    override fun willMountItems(uiManager: UIManager) {}
++    override fun didMountItems(uiManager: UIManager) { // UI thread
++      mountsInWindow.incrementAndGet()
++      if (!hostResumed()) mountsNotResumed.incrementAndGet()
++    }
++    override fun didDispatchMountItems(uiManager: UIManager) {}
++    override fun didScheduleMountItems(uiManager: UIManager) { // usually the JS thread
++      schedInWindow.incrementAndGet()
++    }
++  }
++
++  private val chorProbe = Choreographer.FrameCallback { chorProbePending = false }
++
++  private val beat: Runnable = object : Runnable {
++    override fun run() {
++      if (owners.isEmpty()) return
++      try {
++        val win = closeReceiptWindow()
++        val chorDead = chorProbePending
++        if (chorDead) chorStalls++
++        val sched = schedInWindow.getAndSet(0)
++        val mounts = mountsInWindow.getAndSet(0)
++        val mountQuiet = sched >= STALL_MIN_SCHED && mounts == 0
++        val now = SystemClock.elapsedRealtime()
++        if ((chorDead || mountQuiet) && stallRows < STALL_ROWS_MAX &&
++          (lastStallRowAtMs == 0L || now - lastStallRowAtMs >= STALL_ROW_EVERY_MS)
++        ) {
++          stallRows++
++          lastStallRowAtMs = now
++          trace(
++            "op=hold-stall chor=${if (chorDead) 0 else 1} sched=$sched mnt=$mounts " +
++              "task=${if (taskId >= 0) 1 else 0} host=${hostState()} win=$win slp=${sleptMs / 1000}"
++          )
++        }
++        if (!chorProbePending) {
++          chorProbePending = true
++          Choreographer.getInstance().postFrameCallback(chorProbe)
++        }
++      } catch (t: Throwable) {
++        record("beat", t)
++      }
++      main.postDelayed(this, BEAT_MS)
++    }
++  }
++
++  private fun startReceipts() {
++    val now = SystemClock.elapsedRealtime()
++    heldAtMs = now
++    beatElapsedMs = now
++    beatUptimeMs = SystemClock.uptimeMillis()
++    notResumedMs = 0L
++    stoppedMs = 0L
++    sleptMs = 0L
++    reapplies = 0
++    tasksLost = 0
++    chorStalls = 0
++    try {
++      Choreographer.getInstance().removeFrameCallback(chorProbe)
++    } catch (ignored: Throwable) {
++    }
++    chorProbePending = false
++    schedInWindow.set(0)
++    mountsInWindow.set(0)
++    mountsNotResumed.set(0)
++    main.removeCallbacks(beat)
++    main.postDelayed(beat, BEAT_MS)
++  }
++
++  /** Accrues the window since the last beat (bg / stp / sleep granularity = one 15 s window). */
++  private fun closeReceiptWindow(): Long {
++    val nowElapsed = SystemClock.elapsedRealtime()
++    val nowUptime = SystemClock.uptimeMillis()
++    val win = nowElapsed - beatElapsedMs
++    // elapsedRealtime counts deep sleep, uptimeMillis does not: the difference is CPU sleep.
++    val slept = win - (nowUptime - beatUptimeMs)
++    if (slept > 0) sleptMs += slept
++    if (!hostResumed()) notResumedMs += win
++    if (allOwnersStopped()) stoppedMs += win
++    beatElapsedMs = nowElapsed
++    beatUptimeMs = nowUptime
++    return win
++  }
++
++  /** True when every holding session is known to be below STARTED (another app owns the car screen). */
++  private fun allOwnersStopped(): Boolean =
++    try {
++      owners.isNotEmpty() &&
++        owners.values.all { it != null && !it.currentState.isAtLeast(Lifecycle.State.STARTED) }
++    } catch (t: Throwable) {
++      false
++    }
++
++  /** Returns true if anything was newly applied to [ctx]. */
++  private fun applyTo(ctx: ReactContext): Boolean {
++    val prev = ctxRef?.get()
++    if (prev !== ctx) {
++      if (prev != null || taskId >= 0 || fabricRef != null || animatedRef != null) {
++        detach(prev) // a JS reload made a new BridgelessReactContext; the old one's managers died with it
++        reapplies++
++      }
++      ctxRef = WeakReference(ctx)
++    }
++    var changed = false
++    if (taskId < 0) {
++      try {
++        val tasks = HeadlessJsTaskContext.getInstance(ctx)
++        tasks.addTaskEventListener(taskListener)
++        // timeout 0 = no timeout is scheduled (HeadlessJsTaskContext.kt:92-94); allowedInForeground so a
++        // RESUMED phone does not trip the foreground check (:76-79).
++        taskId = tasks.startTask(HeadlessJsTaskConfig(TASK_KEY, Arguments.createMap(), 0L, true))
++        changed = true
++      } catch (t: Throwable) {
++        taskId = -1
++        record("startTask", t)
++      }
++    }
++    if (fabricRef?.get() == null) {
++      try {
++        val fabric = UIManagerHelper.getUIManager(ctx, UIManagerType.FABRIC) as? FabricUIManager
++        if (fabric != null) {
++          ctx.removeLifecycleEventListener(fabric)
++          fabric.onHostResume()
++          fabric.addUIManagerEventListener(mountListener)
++          fabricRef = WeakReference(fabric)
++          changed = true
++        }
++      } catch (t: Throwable) {
++        record("fabric", t)
++      }
++    }
++    if (animatedRef?.get() == null) {
++      try {
++        // getNativeModule creates + initialize()s the TurboModule synchronously, and initialize() is
++        // where it adds itself as a lifecycle listener (NativeAnimatedModule.kt:239-243), so removing
++        // it right after is safe.
++        val animated: NativeAnimatedModule? = ctx.getNativeModule(NativeAnimatedModule::class.java)
++        if (animated != null) {
++          ctx.removeLifecycleEventListener(animated)
++          animated.onHostResume()
++          animatedRef = WeakReference(animated)
++          changed = true
++        }
++      } catch (t: Throwable) {
++        record("animated", t)
++      }
++    }
++    return changed
++  }
++
++  private fun detach(ctx: ReactContext?) {
++    val h = host
++    val live = ctx != null && h != null && h.currentReactContext === ctx && ctx.hasActiveReactInstance()
++    // The CONTEXT's state, because that is what addLifecycleEventListener consults: when RESUMED it
++    // posts onHostResume to the re-added listener itself (ReactContext.java:204-231).
++    val resumed = ctx != null && ctx.lifecycleState == LifecycleState.RESUMED
++    fabricRef?.get()?.let { fabric ->
++      try {
++        fabric.removeUIManagerEventListener(mountListener)
++        if (live) {
++          ctx?.addLifecycleEventListener(fabric)
++          if (!resumed) fabric.onHostPause()
++        }
++      } catch (t: Throwable) {
++        record("detach fabric", t)
++      }
++    }
++    animatedRef?.get()?.let { animated ->
++      try {
++        if (live) {
++          ctx?.addLifecycleEventListener(animated)
++          if (!resumed) animated.onHostPause()
++        }
++      } catch (t: Throwable) {
++        record("detach animated", t)
++      }
++    }
++    if (ctx != null && taskId >= 0) {
++      try {
++        val tasks = HeadlessJsTaskContext.getInstance(ctx)
++        tasks.removeTaskEventListener(taskListener)
++        // Last: JavaTimerManager pauses on this finish unless the phone is resumed (JavaTimerManager.kt:97-104).
++        if (live) tasks.finishTask(taskId)
++      } catch (t: Throwable) {
++        record("detach task", t)
++      }
++    }
++    taskId = -1
++    fabricRef = null
++    animatedRef = null
++    ctxRef = null
++  }
++
++  private fun holdRow(via: String): String {
++    val ctx = ctxRef?.get()
++    return "op=hold on=1 via=$via n=${owners.size} task=$taskId fab=${bit(fabricRef)} anim=${bit(animatedRef)} " +
++      "host=${hostState()} ctx=${ctx?.lifecycleState?.name ?: "none"} " +
++      "mfr=${Build.MANUFACTURER.take(16).replace(' ', '_')} sdk=${Build.VERSION.SDK_INT}"
++  }
++
++  private fun bit(ref: WeakReference<*>?): Int = if (ref?.get() != null) 1 else 0
++
++  private fun hostResumed(): Boolean =
++    try { host?.lifecycleState == LifecycleState.RESUMED } catch (t: Throwable) { false }
++
++  private fun hostState(): String =
++    try { host?.lifecycleState?.name ?: "none" } catch (t: Throwable) { "?" }
++
++  private fun trace(msg: String) {
++    Log.i(TAG, "aa-native $msg")
++    try {
++      val ctx = ctxRef?.get() ?: host?.currentReactContext ?: return
++      if (!ctx.hasActiveReactInstance()) return
++      EventEmitter(ctx).nativeTrace(msg)
++    } catch (ignored: Throwable) {
++      // a receipt must never become the failure
++    }
++  }
++
++  private fun record(where: String, t: Throwable) {
++    AACrashLog.record(appContext, "CarJsKeepAlive.$where", t)
++  }
++}
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/EventEmitter.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/EventEmitter.kt
 index 586b354..a08537d 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/EventEmitter.kt

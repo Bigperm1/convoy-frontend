@@ -192,8 +192,15 @@ search vanished. Same catastrophe as the `android/build/` trap, different mechan
 
 **To check whether a patch is applied, never re-run patch-package — ask git:**
 ```bash
-git apply --check --reverse patches/<name>.patch   # exit 0 = fully applied. Writes nothing.
+git apply --check --reverse -v --directory=frontend patches/<name>.patch   # exit 0 AND every file "Checking patch", 0 "Skipped" = fully applied. Writes nothing.
 ```
+⚠ **`--directory=frontend` is REQUIRED (2026-09-14).** The git root is `/Users/jeffmorton/convoy-frontend`
+(`git rev-parse --show-prefix` prints `frontend/`) and patch paths are relative to it, so WITHOUT the
+flag git prints `Skipped patch '<file>'` for every file and still EXITS 0 — it checks nothing and passes
+on an unpatched tree (measured on the react-native-carplay patch: 20 × Skipped, exit 0). Always read
+the `-v` output: the `Checking patch` count must equal `grep -ac '^diff --git' patches/<name>.patch`.
+And after regenerating, `git diff -U0 patches/<name>.patch | grep '^@@'` — a hunk in a file you did not
+edit means the tree was not fully patched: `git checkout -- patches/` and stop.
 **To recover a patch you clobbered:** `git checkout -- patches/`, delete the package from
 `node_modules`, then `yarn install --check-files` (a plain `yarn install` will NOT re-fetch a
 deleted package — it considers the lockfile satisfied), and re-verify with the command above.

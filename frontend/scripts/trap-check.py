@@ -352,6 +352,19 @@ RULES = [
         "The wrist-tap decision lives ONLY in src/watchTaps.ts (node-gated). The watch plays what it is told. "
         "Note a local alias (`m >= 1000`) is not caught — reviewers read the wrist Swift for that.",
     ),
+    (
+        "car-copy-sends-driver-to-the-phone",
+        ["src/carplay/*.ts", "src/carplay/*.tsx", "plugins/scout-siri/*.swift"],
+        r"[\"'`][^\"'`\n]*(\b[Oo]n (your|the) i?[Pp]hone\b|\byour iPhone\b|\b[Oo]pen (Convoy|Hairpin)\b|\bpick (it|one) up\b|\bunlock your\b)[^\"'`\n]*[\"'`]",
+        "2026-09-14 (build-79 car launch): CarPlay Developer Guide p.4 guideline 2 — 'Never instruct people to pick up "
+        "their iPhone to perform a task … alerts or messages must not include wording that asks people to manipulate "
+        "their iPhone.' carComms.ts shipped 'No comms channel — pick one on the phone' and 'Allow the microphone on "
+        "your phone first' as car-screen toasts; ScoutIntents.swift (Siri, the car's only way to Scout) replied "
+        "'Open Convoy and sign in first' and 'Done — open Convoy to see it on the map.' The words for the car now "
+        "live in src/carplay/carStatusCopy.ts. Android Auto's permission-ask copy may name the phone ONLY with "
+        "'when it's safe' (car app quality VI-1) — that is gated by tools/sim-qc/car_status_test.mts, not here. "
+        "Comments are blanked, so history may quote the old strings.",
+    ),
 ]
 
 def blank_comments(text: str) -> str:

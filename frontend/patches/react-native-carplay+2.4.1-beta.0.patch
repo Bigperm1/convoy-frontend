@@ -1,15 +1,46 @@
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
-index ef6aa04..48a3b92 100644
+index ef6aa04..e8761bd 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
-@@ -1,5 +1,6 @@
+@@ -1,13 +1,21 @@
  package org.birkir.carplay
  
++import android.app.ActivityOptions
++import android.content.ComponentName
 +import android.content.Context
  import android.content.Intent
++import android.os.Build
++import android.os.Bundle
  import android.os.Handler
  import android.os.Looper
-@@ -70,18 +71,75 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
++import android.os.SystemClock
+ import android.util.Log
++import android.view.Display
+ import androidx.activity.OnBackPressedCallback
+ import androidx.car.app.AppManager
+ import androidx.car.app.CarContext
+ import androidx.car.app.CarToast
++import androidx.car.app.IOnRequestPermissionsListener
+ import androidx.car.app.ScreenManager
+ import androidx.car.app.SessionInfo
+ import androidx.car.app.model.Alert
+@@ -22,6 +30,7 @@ import com.facebook.react.bridge.Promise
+ import com.facebook.react.bridge.ReactApplicationContext
+ import com.facebook.react.bridge.ReactContextBaseJavaModule
+ import com.facebook.react.bridge.ReactMethod
++import com.facebook.react.bridge.ReadableArray
+ import com.facebook.react.bridge.ReadableMap
+ import com.facebook.react.bridge.WritableNativeMap
+ import com.facebook.react.module.annotations.ReactModule
+@@ -32,6 +41,7 @@ import org.birkir.carplay.screens.CarScreen
+ import org.birkir.carplay.screens.CarScreenContext
+ import org.birkir.carplay.utils.EventEmitter
+ import java.util.WeakHashMap
++import java.util.concurrent.atomic.AtomicBoolean
+ 
+ 
+ @ReactModule(name = CarPlayModule.NAME)
+@@ -70,18 +80,75 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
      return NAME
    }
  
@@ -89,7 +120,7 @@ index ef6aa04..48a3b92 100644
    }
  
    private fun parseTemplate(
-@@ -92,6 +150,23 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -92,6 +159,23 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
      return factory.parse(config)
    }
  
@@ -113,7 +144,7 @@ index ef6aa04..48a3b92 100644
    @ReactMethod
    fun checkForConnection() {
      eventEmitter?.didConnect()
-@@ -108,7 +183,13 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -108,7 +192,13 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
        try {
          createScreen(templateId);
          callback?.invoke()
@@ -128,7 +159,7 @@ index ef6aa04..48a3b92 100644
          val args = Arguments.createMap()
          args.putString("error", "Failed to parse template '$templateId': ${err.message}")
          callback?.invoke(args)
-@@ -120,13 +201,33 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -120,13 +210,33 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    fun updateTemplate(templateId: String, config: ReadableMap) {
      handler.post {
        carTemplates[templateId] = config;
@@ -166,7 +197,7 @@ index ef6aa04..48a3b92 100644
          }
        }
      }
-@@ -136,11 +237,39 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -136,11 +246,39 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    fun setRootTemplate(templateId: String, animated: Boolean?) {
      Log.d(TAG, "set Root Template for $templateId")
      handler.post {
@@ -211,7 +242,7 @@ index ef6aa04..48a3b92 100644
        }
      }
    }
-@@ -148,10 +277,16 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -148,10 +286,16 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    @ReactMethod
    fun pushTemplate(templateId: String, animated: Boolean?) {
      handler.post {
@@ -232,7 +263,7 @@ index ef6aa04..48a3b92 100644
        }
      }
    }
-@@ -166,9 +301,13 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -166,9 +310,13 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    @ReactMethod
    fun popTemplate(animated: Boolean?) {
      handler.post {
@@ -248,7 +279,103 @@ index ef6aa04..48a3b92 100644
        currentCarScreen?.invalidate()
      }
    }
-@@ -271,6 +410,31 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -253,6 +401,95 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+     });
+   }
+ 
++  // ── CONVOY (build 79, 2026-09-14): ASK FOR A RUNTIME PERMISSION FROM THE CAR ─────────────────────
++  // Android Auto car-screen messaging: with no location permission the car sat on the boot screen with
++  // no way forward, and a car-comms tap with no mic permission could only say so. Google's documented
++  // path is CarContext.requestPermissions — "On Android Auto, the permissions dialog for the user appears
++  // on the phone." — https://developer.android.com/training/cars/apps/library/request-permissions
++  // JS: src/carplay/carStatus.ts (the "Allow location" action and the comms mic ask). Absent on build 78,
++  // where JS feature-detects `typeof RNCarPlay.requestPermissions === 'function'` and never asks.
++  //
++  // WHY NOT carContext.requestPermissions(...) ITSELF: the androidx.car.app we pin (1.4.0-beta02, in this
++  // package's gradle file) builds the intent and then calls a bare startActivity(Intent) (javap, offset
++  // 114). Google: "Update to androidx.car.app:1.7.0-rc01 or higher to ensure permission dialogs appear on
++  // Android 14 and higher (phone)" (same URL). The car app library release notes tie that fix to launching
++  // the activity with ActivityOptions carrying the phone's display id (DEFAULT_DISPLAY) —
++  // https://developer.android.com/training/cars/platforms/releases (as fetched by the build-79 design pass;
++  // the androidx-main CarContext.Api26Impl source was re-read by its review). The build-79 design's
++  // crash_reports query found every Android device logging aa-* rows in the prior 30 days on API 36 or 37,
++  // so the stock 1.4.0-beta02 call is the documented failure case for the whole Android Auto fleet.
++  //
++  // WHAT THIS IS: the SAME intent 1.4.0-beta02's CarContext.requestPermissions builds (action, component,
++  // the two extras and FLAG_ACTIVITY_NEW_TASK, all copied from its bytecode — see the companion
++  // constants) plus androidx-main's CarContext.Api26Impl launch options,
++  // ActivityOptions.makeBasic().setLaunchDisplayId(Display.DEFAULT_DISPLAY). The activity is androidx's
++  // own CarAppPermissionActivity, declared by the androidx.car.app aar manifest (exported=false).
++  // ⚠ IOnRequestPermissionsListener.Stub is @RestrictTo(LIBRARY) — a lint annotation; it compiles.
++  // ⚠ IF androidx.car.app IS BUMPED (1.7.0+): delete this body and call
++  //   carContext.requestPermissions(list, ContextCompat.getMainExecutor(carContext), listener)
++  // — 1.7's AIDL is versioned (getInterfaceVersion) and this hand-built binder would drift from it.
++  //
++  // ⚠ THE PROMISE MAY NEVER SETTLE: the driver may never answer the phone dialog, or the host may never
++  // deliver the result. JS never waits on it with a timer (carStatus.ts uses a timestamp). Receipts:
++  // aa-native op=perm-req n= (launched) / op=perm-res ms= ok= no= (answered) / op=perm-miss ctx=0.
++  // HYPOTHESIS until a device run: that Android 15-16 background-activity-launch rules let a car session
++  // start this activity on the phone display. perm-req with no perm-res within 90 s = it did not show.
++  @ReactMethod
++  fun requestPermissions(permissions: ReadableArray, promise: Promise) {
++    handler.post {
++      val settled = AtomicBoolean(false)
++      try {
++        if (!::carContext.isInitialized) {
++          trace("op=perm-miss ctx=0")
++          settled.set(true)
++          promise.reject("E_NO_CAR_CONTEXT", "Android Auto car context not initialized")
++          return@post
++        }
++        val wanted = ArrayList<String>()
++        for (i in 0 until permissions.size()) {
++          val p = permissions.getString(i)
++          if (!p.isNullOrEmpty()) wanted.add(p)
++        }
++        if (wanted.isEmpty()) {
++          settled.set(true)
++          promise.reject("E_NO_PERMISSIONS", "no permissions requested")
++          return@post
++        }
++        val startedAt = SystemClock.elapsedRealtime()
++        val listener = object : IOnRequestPermissionsListener.Stub() {
++          override fun onRequestPermissionsResult(approvedPermissions: Array<String>?, rejectedPermissions: Array<String>?) {
++            // Binder thread. First answer wins; a duplicate delivery is ignored.
++            if (!settled.compareAndSet(false, true)) return
++            val ms = SystemClock.elapsedRealtime() - startedAt
++            val approved = Arguments.createArray().apply { approvedPermissions?.forEach { pushString(it) } }
++            val rejected = Arguments.createArray().apply { rejectedPermissions?.forEach { pushString(it) } }
++            handler.post { trace("op=perm-res ms=$ms ok=${approvedPermissions?.size ?: 0} no=${rejectedPermissions?.size ?: 0}") }
++            promise.resolve(Arguments.createMap().apply {
++              putArray("approved", approved)
++              putArray("rejected", rejected)
++            })
++          }
++        }
++        val extras = Bundle(2).apply {
++          putBinder(EXTRA_PERMISSIONS_LISTENER, listener.asBinder())
++          putStringArray(EXTRA_PERMISSIONS, wanted.toTypedArray())
++        }
++        val intent = Intent(ACTION_REQUEST_PERMISSIONS)
++          .setComponent(ComponentName(carContext, CAR_PERMISSION_ACTIVITY))
++          .putExtras(extras)
++          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
++        val options: Bundle? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++          ActivityOptions.makeBasic().setLaunchDisplayId(Display.DEFAULT_DISPLAY).toBundle()
++        } else null
++        carContext.startActivity(intent, options)
++        trace("op=perm-req n=${wanted.size}")
++      } catch (t: Throwable) {
++        AACrashLog.record(reactContext, "CarPlayModule.requestPermissions", t)
++        if (settled.compareAndSet(false, true)) promise.reject("E_PERMISSION_REQUEST", t.message ?: t.javaClass.simpleName, t)
++      }
++    }
++  }
++
+   // Others
+ 
+   @ReactMethod
+@@ -271,6 +508,31 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    }
  
    private fun createScreen(templateId: String): CarScreen? {
@@ -280,10 +407,18 @@ index ef6aa04..48a3b92 100644
      val config = carTemplates[templateId];
      if (config != null) {
        val screen = CarScreen(carContext)
-@@ -303,5 +467,10 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -303,5 +565,18 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    companion object {
      const val NAME = "RNCarPlay"
      const val TAG = "CarPlay"
++
++    // CONVOY (build 79, 2026-09-14): androidx.car.app 1.4.0-beta02's package-private CarContext constants
++    // (REQUEST_PERMISSIONS_ACTION / EXTRA_PERMISSIONS_KEY / EXTRA_ON_REQUEST_PERMISSIONS_RESULT_LISTENER_KEY,
++    // strings read with javap -constants) and the Activity its aar manifest declares. See requestPermissions.
++    private const val ACTION_REQUEST_PERMISSIONS = "androidx.car.app.action.REQUEST_PERMISSIONS"
++    private const val EXTRA_PERMISSIONS = "androidx.car.app.action.EXTRA_PERMISSIONS_KEY"
++    private const val EXTRA_PERMISSIONS_LISTENER = "androidx.car.app.action.EXTRA_ON_REQUEST_PERMISSIONS_RESULT_LISTENER_KEY"
++    private const val CAR_PERMISSION_ACTIVITY = "androidx.car.app.CarAppPermissionActivity"
 +
 +    // CONVOY (build 79, 2026-09-14): SharedPreferences file + key for setAaKeepAliveOptions, read by
 +    // CarPlaySession.invokeStartTask.

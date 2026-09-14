@@ -31,12 +31,25 @@
 // one of the two changes held iOS-only since the 2026-08-18 crash bisect (see the speed
 // pill in ConvoyCarPlay.tsx). A stretched PNG is a plain <Image>, which this surface has
 // always drawn on both head units.
+//
+// ── WHAT IS MISSING (build 79, 2026-09-14) ────────────────────────────────────
+// This screen is what the car shows whenever there is no fix, and a missing location permission
+// used to leave the driver looking at the wordmark with no explanation. `status` (words from
+// carStatusCopy.ts, decided by carStatus.ts) is drawn under the wordmark. It is our own surface,
+// never a presented or pushed template, so it can never cover a car button (CARPLAY.md rule 5).
+// SHORT canvases (h < COMPACT_H): the measured Android Auto canvas is 213x107 dp (memory
+// android-auto-canvas-measured) and this screen is NOT scaled by hudScale. Wordmark + title + two
+// detail lines lands at ~108 dp on a 107 dp canvas (review, 2026-09-14 — HYPOTHESIS on exact glyph
+// widths until a bench render), so there the words REPLACE the wordmark and are centred.
 import React, { useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
 const WORDMARK_ASPECT = 928 / 248;
 const SPLASH_W = 1080;
 const SPLASH_H = 1920;
+// Below this height the message replaces the wordmark instead of stacking under it (see header).
+// 160 sits between the 107 dp AA canvas and the shortest measured CarPlay canvas (240 pt).
+const COMPACT_H = 160;
 
 type Props = {
   navigating: boolean;
@@ -46,9 +59,11 @@ type Props = {
   nearby?: number;
   /** Self-diagnosing readout, shown only when Settings → CarPlay debug is on. */
   debugText?: string | null;
+  /** What is missing, in words the car may show (carStatusCopy.ts). null = nothing to say. */
+  status?: { title: string; detail?: string } | null;
 };
 
-export default function CarBootScreen({ navigating, distanceToTurn, instruction, metaLine, nearby, debugText }: Props) {
+export default function CarBootScreen({ navigating, distanceToTurn, instruction, metaLine, nearby, debugText, status }: Props) {
   const [box, setBox] = useState({ w: 0, h: 0 });
   const { w, h } = box;
   // PORTRAIT gets the launch splash itself, untouched: it IS a portrait image, and it is the
@@ -64,6 +79,7 @@ export default function CarBootScreen({ navigating, distanceToTurn, instruction,
   const wmH = wmW / WORDMARK_ASPECT;
   const headCenterY = h * 0.26;
   const coverSc = Math.max(w / SPLASH_W, h / SPLASH_H);
+  const compact = h < COMPACT_H;
 
   return (
     <View
@@ -87,6 +103,12 @@ export default function CarBootScreen({ navigating, distanceToTurn, instruction,
             resizeMode="stretch"
             style={{ position: 'absolute', width: SPLASH_W * coverSc, height: SPLASH_H * coverSc, left: (w - SPLASH_W * coverSc) / 2, top: (h - SPLASH_H * coverSc) / 2 }}
           />
+          {!!status && (
+            <View style={[styles.head, { top: h * 0.62, height: undefined }]}>
+              <Text style={styles.statusTitle} numberOfLines={2}>{status.title}</Text>
+              {!!status.detail && <Text style={styles.statusDetail} numberOfLines={2}>{status.detail}</Text>}
+            </View>
+          )}
           {!!debugText && <Text style={styles.dbg} numberOfLines={2}>{debugText}</Text>}
         </>
       ) : w > 0 && h > 0 ? (
@@ -107,6 +129,26 @@ export default function CarBootScreen({ navigating, distanceToTurn, instruction,
               <Text style={styles.dist}>{distanceToTurn || '—'}</Text>
               <Text style={styles.inst} numberOfLines={2}>{instruction || 'Continue'}</Text>
               {!!metaLine && <Text style={styles.meta}>{metaLine}</Text>}
+              {/* NOT on a short canvas: the 09-14 bench at 213x107 showed this branch ALREADY overflows
+                  (the 48 pt distance is clipped at the top), and a status line there was cut off at the
+                  bottom. Navigating on Android Auto with no fix is the rare case; the turn keeps the room. */}
+              {!!status && !compact && (
+                <Text style={styles.statusTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{status.title}</Text>
+              )}
+            </View>
+          ) : status && compact ? (
+            // Short canvas (Android Auto 213x107): the words replace the wordmark (review correction 4).
+            // The box stays clear of what ConvoyCarPlay.tsx documents Android Auto drawing over this
+            // surface: the crew pill and the host's top-right action strip (text starts below ~17 dp,
+            // where the AA status row sits at hudScale 0.446), the host's right-hand zoom rail
+            // (CAR_RIGHT_INSET 28 on AA) and the bottom-left speedo (21 dp tall at 6 dp). DERIVED, not
+            // photographed — and the titled "Allow location" action makes that top strip wider than the
+            // ~128 dp start measured with icons (unmeasured). A head-unit photo settles it.
+            <View style={[styles.head, styles.headCompact]}>
+              <Text style={[styles.statusTitle, styles.statusTitleCompact]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{status.title}</Text>
+              {!!status.detail && (
+                <Text style={styles.statusDetail} numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.7}>{status.detail}</Text>
+              )}
             </View>
           ) : (
             <View style={[styles.head, { top: headCenterY - wmH / 2, height: undefined }]}>
@@ -115,9 +157,16 @@ export default function CarBootScreen({ navigating, distanceToTurn, instruction,
                 resizeMode="contain"
                 style={{ width: wmW, height: wmH }}
               />
-              {!!nearby && nearby > 0 && (
+              {status ? (
+                <>
+                  <Text style={styles.statusTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{status.title}</Text>
+                  {!!status.detail && (
+                    <Text style={styles.statusDetail} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{status.detail}</Text>
+                  )}
+                </>
+              ) : !!nearby && nearby > 0 ? (
                 <Text style={styles.nearby}>{`${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby`}</Text>
-              )}
+              ) : null}
             </View>
           )}
           {!!debugText && <Text style={styles.dbg} numberOfLines={2}>{debugText}</Text>}
@@ -137,4 +186,10 @@ const styles = StyleSheet.create({
   inst: { color: '#F4F4F4', fontSize: 22, fontWeight: '600', marginTop: 4, textAlign: 'center' },
   meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },
   dbg: { position: 'absolute', left: 12, right: 12, bottom: 8, color: '#77FF88', fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  // Status lines sit over black above the road band (and over the art on portrait) — the shadow is
+  // for where the fade meets the road.
+  statusTitle: { color: '#F4F4F4', fontSize: 17, fontWeight: '700', marginTop: 10, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.9)', textShadowRadius: 4, textShadowOffset: { width: 0, height: 1 } },
+  statusTitleCompact: { marginTop: 0 },
+  headCompact: { top: 18, bottom: 24, height: undefined, paddingLeft: 12, paddingRight: 34 },
+  statusDetail: { color: '#C9D1CC', fontSize: 14, fontWeight: '600', marginTop: 2, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.9)', textShadowRadius: 4, textShadowOffset: { width: 0, height: 1 } },
 });

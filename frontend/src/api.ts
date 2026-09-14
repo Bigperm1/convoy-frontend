@@ -1,5 +1,6 @@
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { noteNetOk, noteNetFail, classifyAxiosError } from "./netHealth";
 
 // Hardcoded fallback for the production backend host. Used when
 // `EXPO_PUBLIC_BACKEND_URL` is missing at Metro bundle time — this is the
@@ -44,6 +45,20 @@ export async function saveToken(token: string) {
 export async function getToken() {
   try { return await AsyncStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
+// getToken folds two different conditions into one null: SIGNED OUT, and UNREADABLE. On iOS
+// AsyncStorage REJECTS when the manifest cannot be read ("perhaps data protection is enabled?",
+// RNCAsyncStorage.mm:530-545) — with no data-protection entitlement set, that is class C, i.e.
+// before the first unlock after a reboot. The car screen must not tell a signed-in driver "Not
+// signed in" (build 79 car-screen messaging, 2026-09-14 — src/carplay/carStatus.ts).
+export type TokenState = { token: string | null; state: "ok" | "missing" | "unreadable" };
+export async function readTokenState(): Promise<TokenState> {
+  try {
+    const token = await AsyncStorage.getItem(TOKEN_KEY);
+    return { token, state: token ? "ok" : "missing" };
+  } catch {
+    return { token: null, state: "unreadable" };
+  }
+}
 export async function clearToken() {
   try { await AsyncStorage.removeItem(TOKEN_KEY); } catch {}
 }
@@ -70,6 +85,22 @@ api.interceptors.request.use(async (config) => {
   if (t) config.headers.Authorization = `Bearer ${t}`;
   return config;
 });
+
+// Network health from requests that REALLY ran (build 79 car-screen "No connection", 2026-09-14 —
+// src/netHealth.ts). Observes only: the response and the error pass through untouched. A response
+// with any status proves the network works; only ERR_NETWORK counts as a failure (a timeout is the
+// Render backend waking up, never "offline").
+api.interceptors.response.use(
+  (res) => { noteNetOk(); return res; },
+  (err) => {
+    try {
+      const k = classifyAxiosError(err);
+      if (k === "reached") noteNetOk();
+      else if (k === "network") noteNetFail();
+    } catch {}
+    return Promise.reject(err);
+  },
+);
 
 export function wsUrl(token: string) {
   const base = BACKEND_URL.replace(/^http/, "ws");

@@ -13,6 +13,7 @@ import type { MapMode, Settings } from '../settings';
 // AsyncStorage and react (settings.ts:2-3).
 import { getSettings, getMapMode, getRouteColor, getSelfMarkerType, subscribeSettings } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
+import type { CarStatusCode } from './carStatusRule';
 // Timer-liveness receipt (2026-09-04/05) — see src/timerLiveness.ts. setCarSelfPosition
 // is the single choke point every car-surface GPS fix passes through (mirror/fgwatch/
 // bgtask), so it is the right place to log the bounded `timer-starve` receipt. The
@@ -243,6 +244,12 @@ export type CarState = {
   // template state before it could ever be read on the head unit. Written ONLY by
   // the CarPlay connect / setRootTemplate paths.
   cpDbg?: string;
+  // What the car screen says is missing — location, sign-in, network (src/carplay/carStatus.ts,
+  // build 79, 2026-09-14). undefined = not evaluated on this connect. Words: carStatusCopy.ts.
+  carStatus?: CarStatusCode;
+  // Epoch ms until an Android Auto "check your phone" ask counts as outstanding. Compared at
+  // RENDER, never waited on by a timer (CARPLAY.md rule 7b — JS timers pause on a locked phone).
+  carAskUntil?: number;
 };
 
 const initial: CarState = {

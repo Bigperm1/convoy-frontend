@@ -38,6 +38,9 @@ import { appSkinNow } from '../appSkin';
 import { toggleCarComms } from './carComms';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 import { ensureSavedPlacesLoaded, getSavedPlaces, type SavedPlace } from '../savedPlaces';
+import { requestLocationFromCar, refreshCarStatus, canRequestFromCar } from './carStatus';
+import { isAskableStatus } from './carStatusRule';
+import { CAR_ALLOW_LOCATION_TITLE } from './carStatusCopy';
 
 // ── lazy react-native-carplay access ────────────────────────────────────────
 // TWO accessors, deliberately.
@@ -1139,6 +1142,27 @@ export const AA_ACTION_STRIP = [
   { id: 'car-view', icon: CAR_ICON_VIEW_2D, visibility: AA_PERSISTENT },
   { id: 'car-comms', icon: CAR_ICON_MIC, visibility: AA_PERSISTENT },
 ];
+
+// ── "ALLOW LOCATION" FROM THE CAR (build 79, 2026-09-14) ─────────────────────────────────────
+// While the car has no location permission and can ask for it (CarContext.requestPermissions via
+// the patched CarPlayModule.requestPermissions — build 79), the 2D/3D slot becomes a TITLED
+// "Allow location" action. The driver taps it on the car, reads "When safe, check your phone" on
+// the car screen (car app quality VI-1), and the system dialog opens on the phone.
+//   - An ActionStrip SWAP through AndroidAutoRoot's existing updateTemplate path, never a push or
+//     pop (memory aa-poptotemplate-evicts-driver).
+//   - androidx ACTIONS_CONSTRAINTS_NAVIGATION allows 4 actions and 4 custom titles (javap of
+//     androidx.car.app 1.4.0-beta02, verified by the build-79 review) — End + Search + this = 3.
+//   - 'car-view' is the swapped slot because 2D/3D means nothing without a position to draw.
+//     A workstream that reorders or renames the strip must keep that id or update this.
+//   - INERT on build 78: RNCarPlay.requestPermissions does not exist there, so canRequestFromCar()
+//     is false and the stock strip is returned.
+export const AA_ALLOW_LOCATION_ID = 'car-allow-location';
+export function aaActionStrip(): (typeof AA_ACTION_STRIP)[number][] {
+  if (!isAskableStatus(getCarState().carStatus) || !canRequestFromCar()) return AA_ACTION_STRIP;
+  return AA_ACTION_STRIP.map((a) => (a.id === 'car-view'
+    ? { id: AA_ALLOW_LOCATION_ID, title: CAR_ALLOW_LOCATION_TITLE, visibility: AA_PERSISTENT }
+    : a));
+}
 // androidx ACTIONS_CONSTRAINTS_MAP: max 4, ICON ONLY (no titles accepted). Same order
 // rationale as CarPlay above. Note the key is `icon` here and `image` on iOS — they are
 // NOT interchangeable; parseAction reads map.getMap("icon").
@@ -1185,6 +1209,7 @@ const TAP_LABEL: Record<string, string> = {
   'car-crew': 'Crew', 'car-compass': 'Compass', 'car-comms': 'Comms', 'car-view': 'View',
   'car-mic': 'Scout', 'car-search': 'Search', 'car-end': 'End',
   'car-zoom-in': 'Zoom in', 'car-zoom-out': 'Zoom out',
+  [AA_ALLOW_LOCATION_ID]: CAR_ALLOW_LOCATION_TITLE,
 };
 export function carTap(id: string): void {
   if (!id) return;
@@ -1201,6 +1226,9 @@ export function carTap(id: string): void {
       carToastUntil: Date.now() + 1600,
     });
   } catch {}
+  // Any press is a moment the driver is looking at the car screen — re-check what it should say
+  // (build 79; throttled inside carStatus, and a no-op while no car session is live).
+  void refreshCarStatus('tap');
 }
 
 // ── DOUBLE-DISPATCH DEDUPE (2026-08-26, telemetry-proven) ──────────────────────
@@ -1291,6 +1319,7 @@ export function handleCarBarButton(id: string, src = "?"): void {
   if (isDupCarPress(id, src)) return;
   carTap(id);
   armPosRing(); // idempotent — make sure the 5s-ago buffer is running
+  if (id === AA_ALLOW_LOCATION_ID) { void requestLocationFromCar('tap'); return; }
   if (id === 'car-comms') {
     void toggleCarComms().then((msg) => { if (msg) toast(msg); });
     return;

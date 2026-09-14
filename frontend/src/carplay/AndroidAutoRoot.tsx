@@ -30,7 +30,9 @@ import { useCarStore } from './carStore';
 import { acquireBgLocation, releaseBgLocation, registerBgConsumerProbe, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
 import { noteCarConnected } from '../locationPrivacy';
-import { AA_ACTION_STRIP, aaMapButtons, handleAaButton, carTap } from './carActions';
+import { aaActionStrip, aaMapButtons, handleAaButton, carTap } from './carActions';
+import { startCarStatus, stopCarStatus } from './carStatus';
+import { isAskableStatus } from './carStatusRule';
 import { logEventReliable } from '../crashBreadcrumb';
 
 // ── COLD-CONNECT TRACER (2026-08-18 night) ──────────────────────────────────
@@ -89,6 +91,9 @@ export default function AndroidAutoRoot() {
   aaCrumb('root-render');
   const s = useCarStore();
   const templateRef = useRef<any>(null);
+  // Build 79 (2026-09-14): while location is askable from the car, the strip carries "Allow location"
+  // (carActions.aaActionStrip). A boolean, so the updateTemplate effect below re-runs only on the flip.
+  const askable = isAskableStatus(s.carStatus);
 
   // Build the single navigation template once and make it the car's root.
   useEffect(() => {
@@ -101,7 +106,7 @@ export default function AndroidAutoRoot() {
       const template = new NavigationTemplate({
         id: 'convoy-aa-nav',
         component: CarSurface,
-        actions: AA_ACTION_STRIP,
+        actions: aaActionStrip(),
         mapButtons: aaMapButtons(),
         onButtonPressed: (e: { buttonId: string }) => {
           const id = e?.buttonId;
@@ -194,6 +199,7 @@ export default function AndroidAutoRoot() {
         aaAliveRef.current = false;
         void releaseBgLocation('androidauto');
         stopCarDataService();
+        stopCarStatus();
         // RELEASE THE HEAD-UNIT FLAG TOO (2026-08-15). Without this the only thing
         // ending the 'attached' claim after a real disconnect is CAR_CONNECT_TTL_MS
         // expiring — a 90 s window in which the gate would still publish raw live
@@ -220,6 +226,7 @@ export default function AndroidAutoRoot() {
     registerBgConsumerProbe('androidauto', () => aaAliveRef.current);
     void acquireBgLocation('androidauto');   // shared bg task + fg car feed
     startCarDataService();                   // cold peers + hazards (WS/Supabase/REST)
+    startCarStatus('androidauto');           // car-screen "what is missing" + the Allow location action (build 79)
     void startForegroundCarFeed();           // continuous GPS writer for the car map
     void hydrateCarRouteFromDisk();          // persisted route ribbon on cold connect
     // THE head-unit signal for Android. This root's MOUNT is the only trustworthy proof
@@ -243,11 +250,12 @@ export default function AndroidAutoRoot() {
       aaAliveRef.current = false;
       void releaseBgLocation('androidauto');
       stopCarDataService();
+      stopCarStatus();
       noteCarConnected(false);
     };
   }, []);
 
-  // Re-assert the surface + buttons when the drive state flips. No nav payload is
+  // Re-assert the surface + buttons when the drive state (or, build 79, the askable state) flips. No nav payload is
   // sent (see the header) — CarSurface draws all of it — so this exists only to keep
   // the template alive across a route start/end.
   useEffect(() => {
@@ -258,13 +266,17 @@ export default function AndroidAutoRoot() {
       // travelEstimate (see the header) so androidx draws no chrome of its own.
       template.updateTemplate({
         component: CarSurface,
-        actions: AA_ACTION_STRIP,
+        actions: aaActionStrip(),
         mapButtons: aaMapButtons(),
       } as any);
     } catch (e) {
       console.warn('[AndroidAuto] updateTemplate failed', e);
     }
-  }, [s.navigating]);
+    // `askable` (build 79): swap 2D/3D <-> "Allow location" through this SAME updateTemplate path —
+    // never a push or pop, which has evicted the driver to the app drawer (memory
+    // aa-poptotemplate-evicts-driver). A native parse failure is caught in CarPlayModule.updateTemplate
+    // and leaves the old strip in place.
+  }, [s.navigating, askable]);
 
   return null;
 }

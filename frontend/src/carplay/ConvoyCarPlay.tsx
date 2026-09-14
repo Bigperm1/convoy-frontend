@@ -39,6 +39,8 @@ import { ManeuverArrow, maneuverDir, type ManeuverDir, ManeuverBox } from '../co
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { fmtPitstop } from '../pitstop';
 import CarBootScreen from './CarBootScreen';
+import { carStatusCopy } from './carStatusCopy';
+import { isSlotStatus, type CarStatusCode } from './carStatusRule';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -634,6 +636,32 @@ export function CarSurface() {
   // reported a zero-width box, so a cold first render is untouched.
   const showLive = CAR_LIVE_MAP_ENABLED && hasFix && !zeroWidth;
 
+  // ── WHAT IS MISSING (build 79, 2026-09-14 — src/carplay/carStatus.ts) ───────────────────────
+  // No fix: CarBootScreen draws it under the wordmark. Live map: the lowest-priority status pill.
+  // An Android Auto ask past its deadline reads as askable again — compared HERE at render, never
+  // by a timer (CARPLAY.md rule 7b: JS timers pause on a locked phone).
+  const statusCode: CarStatusCode | undefined =
+    s.carStatus === 'loc-perm-asking' && Date.now() >= (s.carAskUntil || 0) ? 'loc-perm-ask' : s.carStatus;
+  const statusCopy = carStatusCopy(statusCode, IS_AA ? 'android' : 'ios');
+  const statusPill = showLive && isSlotStatus(statusCode) ? statusCopy?.pill ?? null : null;
+  // DRAWN receipt (review correction 7b). `car-status` is logged when the DECISION is made; on a
+  // locked iPhone or a backgrounded AA session render and commits can starve, so that row alone
+  // does not show the surface ever rendered the message. This one is written from the render
+  // commit. Still not proof of pixels on the head unit. Read PRESENCE only; <= 8 per surface mount.
+  const statusDrawnRef = useRef('');
+  const statusDrawnCount = useRef(0);
+  const statusWhere = showLive ? (statusPill ? 'pill' : 'none') : 'boot';
+  useEffect(() => {
+    const k = `${statusCode ?? '-'}|${statusWhere}`;
+    if (!statusCode || statusCode === 'ok' || statusWhere === 'none') return;
+    if (statusDrawnRef.current === k || statusDrawnCount.current >= 8) return;
+    statusDrawnRef.current = k;
+    statusDrawnCount.current += 1;
+    try { logEventReliable(`car-status-drawn code=${statusCode} where=${statusWhere} surf=${Math.round(surfaceW)}x${Math.round(surfaceH)}`); } catch {}
+    // surf= is read, not a trigger: a re-measure must not re-log the same message.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusCode, statusWhere]);
+
   // GROUND-TRUTH RENDER TEST. If this paints, the CarPlay React surface is alive and
   // the bug is downstream (content/layout); if the head unit stays the bare logo, the
   // Fabric surface never commits a tree (native). Zero deps on map/GPS/store content.
@@ -659,6 +687,7 @@ export function CarSurface() {
       instruction={s.instruction}
       metaLine={metaLine}
       nearby={nearby}
+      status={statusCopy}
       // Self-diagnosing readout (no Mac/logs needed): whether the car surface has a GPS fix,
       // the lat/lng it reads, and which feed last wrote (fgfeed / navtask#N / seed:ok /
       // seed:err / seed:no-fg-perm / bgstart:err).
@@ -1039,6 +1068,18 @@ export function CarSurface() {
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
             <View style={[styles.scoutDot, { backgroundColor: s.scoutListening ? '#2DEC86' : '#8E8E93' }]} />
             <Text style={styles.scoutPillText}>{s.scoutListening ? 'Listening…' : 'Thinking…'}</Text>
+          </View>
+        </View>
+      ) : statusPill ? (
+        /* WHAT IS MISSING (build 79, 2026-09-14) — LOWEST priority in this slot: a persistent
+           condition must never hide a receipt, a pitstop, a transmission, a talker or Scout.
+           A non-tappable readout like every other row here (CarPlay routes touches through the
+           template layer). Only over the live map — with no fix, CarBootScreen says it. */
+        <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
+          <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
+            <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
+            <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#FF9F0A" />
+            <Text style={styles.scoutPillText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{statusPill}</Text>
           </View>
         </View>
       ) : null}

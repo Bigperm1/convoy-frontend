@@ -20,6 +20,9 @@ type HairpinSystemModule = {
   // absent on older binaries — guard with typeof before calling.
   getSharedDefaults?(suite: string, key: string): string | null;
   removeSharedDefaults?(suite: string, key: string): void;
+  // Build 79+: UIApplication.isProtectedDataAvailable (false = locked with a passcode; always true
+  // with no passcode). Absent on older binaries — src/lockHint.ts guards with typeof.
+  protectedDataAvailable?(): Promise<boolean>;
   // Build 79+: copy a produced file into the shared App Group container so the widget
   // extension can read it (the extension cannot see the app sandbox and must not
   // network). Absent on older binaries — guard with typeof before calling.

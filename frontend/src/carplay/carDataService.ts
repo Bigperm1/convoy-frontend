@@ -26,7 +26,9 @@
 // status 'live' — this service runs only while CarPlay is connected, so it
 // broadcasts 'live' with the same coords the car map draws.
 
-import { api, getToken, wsUrl } from '../api';
+import { api, readTokenState, wsUrl } from '../api';
+import { noteNetOk } from '../netHealth';
+import { refreshCarStatus } from './carStatus';
 import { supabase, SUPABASE_ENABLED } from '../supabase';
 import { getSettings, getAvatarMode, ensureSettingsLoaded } from '../settings';
 // THE gate (src/locationPrivacy). Every outbound position must ask it — this file was
@@ -167,12 +169,23 @@ async function connectWs(): Promise<void> {
   const now = Date.now();
   if (now - _wsLastTry < WS_RECONNECT_MS) return;
   _wsLastTry = now;
-  const token = await getToken();
-  if (!token || !_running || _ws) return;
+  const tok = await readTokenState();
+  const token = tok.token;
+  if (!token || !_running || _ws) {
+    // Was SILENT (build 79, 2026-09-14): a signed-out or unreadable token meant no crew and no
+    // hazards on the car with nothing to say why. carStatus decides what the car screen shows and
+    // throttles itself; this only nudges it.
+    if (!token && _running) void refreshCarStatus(`ws-token-${tok.state}`);
+    return;
+  }
   try {
     const ws = new WebSocket(wsUrl(token));
     _ws = ws;
+    // A socket that opens or delivers proves the network works (src/netHealth.ts) — the car
+    // surface can clear "No connection" without waiting for the next REST call.
+    ws.onopen = () => { noteNetOk(); };
     ws.onmessage = (ev: any) => {
+      noteNetOk();
       try {
         const m = JSON.parse(ev.data);
         if (m.type === 'location' && m.user_id && m.user_id !== _me?.id) {

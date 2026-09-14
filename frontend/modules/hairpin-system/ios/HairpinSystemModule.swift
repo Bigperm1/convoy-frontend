@@ -177,6 +177,15 @@ public class HairpinSystemModule: Module {
       UserDefaults(suiteName: suite)?.removeObject(forKey: key)
     }
 
+    // Build 79 (2026-09-14): a LOCK HINT for car receipts (src/lockHint.ts → car-status,
+    // car-comms-start, reroute-ask-skip rows). false = protected data unavailable, i.e. locked with a
+    // passcode. ALWAYS true on a phone with no passcode — UIKit: true "if the device is unlocked or if
+    // content protection is not enabled" — so true never proves the driver unlocked the phone.
+    // Main queue: a UIApplication property (same .runOnQueue(.main) as expo-constants' ConstantsModule).
+    AsyncFunction("protectedDataAvailable") { () -> Bool in
+      return UIApplication.shared.isProtectedDataAvailable
+    }.runOnQueue(.main)
+
     // Copy a file the app produced (today: the crew map snapshot from
     // @rnmapbox snapshotManager.takeSnap) INTO the shared App Group container, which is
     // the only place a widget extension can read it from — the extension has no access

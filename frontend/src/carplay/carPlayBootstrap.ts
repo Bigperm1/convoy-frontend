@@ -17,6 +17,7 @@ import { acquireBgLocation, releaseBgLocation, registerBgConsumerProbe, hydrateC
 import { startCarDataService, stopCarDataService } from './carDataService';
 import { CAR_BAR_BUTTON_CONFIG, carMapButtonConfig, handleCarBarButton, handleCarMapButton } from './carActions';
 import { logEventReliable } from '../crashBreadcrumb';
+import { startCarStatus, stopCarStatus, refreshCarStatus } from './carStatus';
 
 let booted = false;
 
@@ -200,6 +201,9 @@ export function initCarPlayBootstrap(): void {
     // shows the convoy and hazards even when map.tsx never mounted. Coexists with
     // the warm phone mirror via the carStore freshness gates.
     startCarDataService();
+    // The car screen says what is missing — location, sign-in, network (build 79, 2026-09-14).
+    // Event-driven, no timers; renders on our own surface only. See src/carplay/carStatus.ts.
+    startCarStatus('carplay');
     // ALSO start the continuous foreground feed directly on connect — independent of
     // map.tsx (which may be unmounted behind CarPlay) and of acquireBgLocation's
     // permission branch. It self-guards (idempotent) and is released with the shared
@@ -215,7 +219,9 @@ export function initCarPlayBootstrap(): void {
     // overlay) instead of being silently swallowed — so a failure self-reports on screen.
     void (async () => {
       const fg = await Location.getForegroundPermissionsAsync().catch(() => ({ granted: false }));
-      if (!fg.granted) { setCarState({ carDbg: 'seed:no-fg-perm' }); return; }
+      // Was the ONLY trace of this state, and carDbg is drawn only with CarPlay debug on — the car
+      // sat on the wordmark with no explanation. carStatus now puts it on the car screen.
+      if (!fg.granted) { setCarState({ carDbg: 'seed:no-fg-perm' }); void refreshCarStatus('seed-no-perm', true); return; }
       const acc = Location.Accuracy.Balanced; // read enum ONCE, outside the catch
       for (let i = 0; i < 8 && CarPlay.connected && getCarState().selfLat == null; i++) {
         try {
@@ -246,6 +252,7 @@ export function initCarPlayBootstrap(): void {
     idleTpl = null;
     void releaseBgLocation('carplay');
     stopCarDataService();
+    stopCarStatus();
   };
 
   // COLD-CONNECT BELT + CORRECTED ROOT-CAUSE NOTE (rewritten 2026-07-19).

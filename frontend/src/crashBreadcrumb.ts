@@ -530,7 +530,7 @@ export function installCrashBreadcrumb() {
   // Delivery + harvest happen well after boot so this never competes with
   // startup work (and never runs at module scope — a crash reporter must not
   // itself be able to crash the boot).
-  setTimeout(() => { void deliverAndHarvest(); reportCarPlayHostCeiling(); reportCarPlayPhoneHostWait(); }, DELIVER_DELAY_MS);
+  setTimeout(() => { void deliverAndHarvest(); reportCarPlayHostCeiling(); reportCarPlayPhoneHostWait(); reportSiriScout(); }, DELIVER_DELAY_MS);
 }
 
 // BUILD 75 — the CarPlay host plugin (plugins/withConvoyCarPlay.js) writes a marker to
@@ -577,6 +577,29 @@ function reportCarPlayPhoneHostWait(): void {
     const age = d?.ts ? Math.round((Date.now() - Number(d.ts)) / 1000) : -1;
     logEventReliable(`carplay-phone-hostwait waitMs=${d?.waitMs ?? "?"} root=${d?.root ?? "?"} waitRoot=${d?.waitRoot ?? "?"} phoneKey=${d?.phoneKey ?? "?"} bootKey=${d?.bootKey ?? "?"} carKey=${d?.carKey ?? "?"} ageS=${age}`);
     try { HairpinSystem.removeSharedDefaults?.(CARPLAY_DIAG_SUITE, CARPLAY_PHONE_HOSTWAIT_KEY); } catch {}
+  } catch {}
+}
+
+// BUILD 79 (2026-09-14) — "Hey Siri, ask Scout" runs with NO JS: the App Intent in
+// plugins/scout-siri/ScoutIntents.swift POSTs the question itself and Siri speaks the reply. It is
+// the only way to reach Scout from the car today (the car Scout button was removed 07-23), so it
+// leaves this marker (count, outcome, HTTP status, why, and prot = UIApplication
+// .isProtectedDataAvailable at the time — prot=0 means the phone was LOCKED with a passcode) and
+// the NEXT launch reports it. Same App Group and read-once-then-clear pattern as the two markers
+// above; absent before build 79. n counts runs since the last report, so one row can stand for several.
+const SIRI_SCOUT_KEY = "convoy.siri.scout.v1";
+function reportSiriScout(): void {
+  if (Platform.OS !== "ios") return;
+  try {
+    const { HairpinSystem } = require("../modules/hairpin-system");
+    if (!HairpinSystem || typeof HairpinSystem.getSharedDefaults !== "function") return;
+    const raw = HairpinSystem.getSharedDefaults(CARPLAY_DIAG_SUITE, SIRI_SCOUT_KEY);
+    if (!raw) return;
+    let d: any = null;
+    try { d = JSON.parse(String(raw)); } catch {}
+    const age = d?.ts ? Math.round((Date.now() - Number(d.ts)) / 1000) : -1;
+    logEventReliable(`siri-scout n=${d?.n ?? "?"} ok=${d?.ok ? 1 : 0} http=${d?.http ?? "?"} why=${String(d?.why ?? "?").slice(0, 20)} prot=${d?.prot ?? "?"} ageS=${age}`);
+    try { HairpinSystem.removeSharedDefaults?.(CARPLAY_DIAG_SUITE, SIRI_SCOUT_KEY); } catch {}
   } catch {}
 }
 

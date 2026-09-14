@@ -16,6 +16,7 @@
 // is capturing. expo-av allows ONE recorder process-wide and the loser's cleanup
 // PAUSES the winner (EXAV.m:275-279) — refusing beats colliding.
 import { Audio } from "expo-av";
+import { AppState, Platform } from "react-native";
 import { api } from "../api";
 import { getPttRecordingOptions, getLatestTier } from "../proximityAudio";
 import { setRecordingAudioMode, setIdleAudioMode } from "../audioMode";
@@ -23,6 +24,12 @@ import { acquireMic, micOwner, type MicLease } from "../micArbiter";
 import { duckMusicFor, unduckMusicFor } from "../applePlayer";
 import { getSettings } from "../settings";
 import { getCarState, setCarState } from "./carStore";
+import { logEventReliable } from "../crashBreadcrumb";
+import { lockHint } from "../lockHint";
+import { canRequestFromCar, requestMicFromCar } from "./carStatus";
+import { commsCopy } from "./carStatusCopy";
+
+const COPY_PLATFORM: "ios" | "android" = Platform.OS === "android" ? "android" : "ios";
 
 const MAX_TX_MS = 25000;
 const MIN_TX_MS = 300; // ignore accidental taps — nothing meaningful was said
@@ -68,6 +75,29 @@ export async function toggleCarComms(): Promise<string | null> {
   }
 }
 
+// ── FEASIBILITY RECEIPT, NOT A COMPLIANCE CHECK (build 79, 2026-09-14) ─────────────────────────
+// Can a recording opened from a car tap START while the phone app is not active / the phone is
+// locked? One row per tap: `car-comms-start ok= app= plat= lock= [err=]`. This is the one field
+// check that settles the open question behind "Scout on a locked phone" (Apple: cannotStartRecording
+// "usually occurs when an app starts a mixable recording from the background", and our recording
+// mode uses DuckOthers, which implies mixWithOthers — audioMode.ts).
+// ⚠ KNOWN GAP, NOT FIXED IN 79 (review correction 5): this push-to-talk records on CarPlay WITHOUT
+// CPVoiceControlTemplate. CarPlay Developer Guide, "Recording": "In general, recording is not
+// supported while in CarPlay … recording features may be used, but only in conjunction with the
+// voice control template." An ok=1 row measures feasibility; it says nothing about compliance.
+// That is Jeff's call.
+function commsStartRow(ok: boolean, e?: any): void {
+  const app = AppState.currentState;   // read at the moment of the attempt, not after the lock read
+  void lockHint().then((lock) => {
+    try {
+      logEventReliable(
+        `car-comms-start ok=${ok ? 1 : 0} app=${app} plat=${Platform.OS} lock=${lock}`
+        + (ok ? "" : ` err=${String(e?.code ?? e?.message ?? e).slice(0, 80)}`),
+      );
+    } catch {}
+  });
+}
+
 async function start(): Promise<string | null> {
   const s = getCarState();
   // Mic guard: Scout owns the mic right now — see header. (scoutThinking means
@@ -80,13 +110,34 @@ async function start(): Promise<string | null> {
   if (held) return held === "scout" ? "Scout is using the mic" : "Mic is busy";
   const st = getSettings();
   const channel = st.activeThreadId || st.activeCommunityId;
-  if (!channel) return "No comms channel — pick one on the phone";
+  // ── NO CAR STRING SENDS THE DRIVER TO THE PHONE (build 79, 2026-09-14) ─────────────────────
+  // Was "No comms channel — pick one on the phone" and "Allow the microphone on your phone first".
+  // CarPlay Developer Guide p.4, guideline 2: "Never instruct people to pick up their iPhone to
+  // perform a task … alerts or messages must not include wording that asks people to manipulate
+  // their iPhone." Android Auto (VI-1) allows the phone only for a permission ask, and only with
+  // "when it's safe". The words live in carStatusCopy.ts; scripts/trap-check.py rule
+  // car-copy-sends-driver-to-the-phone keeps the old ones out.
+  if (!channel) return commsCopy("no-channel", COPY_PLATFORM);
   const perm = await Audio.getPermissionsAsync();
   if (perm.status !== "granted") {
-    // Asking for mic permission needs the PHONE unlocked and in hand — a CarPlay
-    // alert can't host the OS prompt. Request so it's granted for next time.
-    if (perm.canAskAgain) { try { await Audio.requestPermissionsAsync(); } catch {} }
-    return "Allow the microphone on your phone first";
+    // The car tap used to call Audio.requestPermissionsAsync() here. REMOVED: permissionGate.ts is
+    // the ONLY place that raises an OS permission prompt (CLAUDE.md, "Permissions"), and a CarPlay
+    // tap has no business raising a phone sheet mid-drive. The phone asks on the Comms tab.
+    // Android Auto build 79+ asks FROM THE CAR instead (androidx CarContext.requestPermissions —
+    // https://developer.android.com/training/cars/apps/library/request-permissions), which opens the
+    // dialog on the phone and says so on the car. The promise can take as long as the driver does
+    // (or never settle), so the reply is returned NOW and corrected by a toast if the ask comes
+    // back without the grant (review correction 2c).
+    const fallback = commsCopy(perm.status === "undetermined" ? "mic-needed" : "mic-off", COPY_PLATFORM);
+    if (canRequestFromCar()) {
+      void requestMicFromCar("comms").then((r) => {
+        if (r === "granted") return;   // the next tap transmits
+        const msg = r === "unavailable" ? fallback : commsCopy("mic-off", COPY_PLATFORM);
+        try { setCarState({ carToast: msg, carToastUntil: Date.now() + 3000 }); } catch {}
+      });
+      return commsCopy("mic-asking", COPY_PLATFORM);
+    }
+    return fallback;
   }
   try {
     // 25s cap + the arbiter's own grace: a tap-and-forget cannot strand the mic.
@@ -99,13 +150,15 @@ async function start(): Promise<string | null> {
     _rec = rec;
     _startedAt = Date.now();
     setCarState({ commsTx: "recording" });
+    commsStartRow(true);
     // Same-app music would play over the transmission — pause it for the duration
     // (distinct duck reason, same as the phone's hold-to-talk).
     void duckMusicFor("ptt-tx");
     if (_capTimer) clearTimeout(_capTimer);
     _capTimer = setTimeout(() => { void toggleCarComms(); }, MAX_TX_MS);
     return null; // the on-screen "Transmitting…" indicator is the feedback
-  } catch {
+  } catch (e: any) {
+    commsStartRow(false, e);
     _rec = null;
     setCarState({ commsTx: "idle" });
     // prepare/start threw AFTER the ducked .playAndRecord session was armed —

@@ -22,6 +22,9 @@ import { callSilence } from "./callState";
 import { setPlaybackAudioMode, setRecordingAudioMode, setIdleAudioMode } from "./audioMode";
 import { acquireMic, micOwner, type MicLease } from "./micArbiter";
 import { getPttRecordingOptions } from "./proximityAudio";
+import { logEvent } from "./crashBreadcrumb";
+import { headUnitAttachedRaw } from "./locationPrivacy";
+import { lockHint } from "./lockHint";
 
 export type AskResult = {
   text: string;          // raw transcript
@@ -49,7 +52,27 @@ export async function askScout(prompt: string, opts?: { listenMs?: number }): Pr
   // or driving on CarPlay — Scout isn't a CarPlay feature) or after a force-quit.
   // Turn-by-turn nav directions are separate (nav.ts) and DO continue backgrounded;
   // this guard is only for Scout's interactive voice loop. ("active" = foreground.)
-  if (AppState.currentState !== "active") return null;
+  if (AppState.currentState !== "active") {
+    // ── RECEIPT ONLY — THE GATE STAYS (build 79 decision, 2026-09-14) ────────────────────────
+    // Relaxing this for a locked phone was REJECTED for build 79: the listen window and the speak
+    // safety timer below are setTimeouts, which starve on the car surface, so a starved timer would
+    // leave the mic hot in .playAndRecord (mono Bluetooth) for the drive; and CarPlay only allows
+    // recording "in conjunction with the voice control template" (CarPlay Developer Guide,
+    // "Recording"), which this loop does not use. iOS `aa-appstate` rows over 30 days while a car
+    // surface was mounted: inactive 158 / background 20 / active 89 — so this gate is closed for
+    // much of a car session.
+    // ⚠ SCOPE (review correction 6): askScout's ONLY caller is the hands-free REROUTE yes/no offer
+    // in app/(app)/map.tsx, so this row counts swallowed reroute offers — NOT Scout asks in general
+    // (tap-to-talk Scout is useVoice via toggleScoutMic, with no AppState gate). With scoutHandsFree
+    // on, a null here means that offer is spoken by nobody; whether to fall back to announce() is
+    // product work, flagged to Jeff, not changed here.
+    const app = AppState.currentState;
+    const hu = headUnitAttachedRaw() ? 1 : 0;
+    void lockHint().then((lock) => {
+      try { logEvent(`reroute-ask-skip why=appstate app=${app} hu=${hu} lock=${lock}`); } catch {}
+    });
+    return null;
+  }
   // Don't talk over an in-flight nav callout — wait briefly for the lane to clear.
   for (let i = 0; i < 6 && isAudioBusy(); i++) await new Promise((r) => setTimeout(r, 250));
   // Need the mic already granted; we never prompt for permission mid-drive.

@@ -1571,10 +1571,126 @@ index 5ef378d..26b7312 100644
          [mapButton setFocusedImage:[RCTConvert UIImage:json[@"focusedImage"]]];
      }
 diff --git a/node_modules/react-native-carplay/ios/RNCarPlay.m b/node_modules/react-native-carplay/ios/RNCarPlay.m
-index 153dbad..bf1eaf8 100644
+index 153dbad..beebeec 100644
 --- a/node_modules/react-native-carplay/ios/RNCarPlay.m
 +++ b/node_modules/react-native-carplay/ios/RNCarPlay.m
-@@ -103,6 +103,17 @@ + (id)allocWithZone:(NSZone *)zone {
+@@ -3,6 +3,72 @@
+ #import <React/RCTConvert.h>
+ #import <React/RCTRootView.h>
+ 
++// Convoy (build 79, 2026-09-14): NATIVE TAP RECEIPT. Recorded inside the CPBarButton / CPMapButton
++// handler BEFORE the hasListeners gate, so a dead press splits:
++//   no record                      = CarPlay never called our handler
++//   hl=0                           = dropped by an `if (hasListeners)` gate in this file
++//   hl=1 and no JS carplay-tap row = the JS side (or plain logEvent dropping that row)
++//   tpl != top                     = a press on a template that is not on top of the stack (ownership)
++// tpl != root on its own is NORMAL while the search template is pushed (review 2026-09-13).
++// Ring of the last 20 JSON records in the App Group. src/crashBreadcrumb.ts reportCarPlayTapTrace
++// reports the records newer than the last one it reported and never clears the ring, so a press
++// written while JS is reading is not lost.
++// ⚠ CPInterfaceController.h (iOS 26.5 SDK): reading topTemplate "may synchronously perform an IPC
++// call". One read per physical press, never on a timer.
++static NSString *const ConvoyTapTraceSuite = @"group.com.sw0rdfisch.convoy";
++static NSString *const ConvoyTapTraceKey = @"convoy.carplay.tapTrace.v1";
++
++static NSString *ConvoyTemplateId(CPTemplate *t) {
++    if (!t) return @"nil";
++    id info = t.userInfo;
++    id rid = [info isKindOfClass:[NSDictionary class]] ? [(NSDictionary *)info objectForKey:@"templateId"] : nil;
++    return [rid isKindOfClass:[NSString class]] ? (NSString *)rid : NSStringFromClass([t class]);
++}
++
++// RCTEventEmitter's private _listenerCount (RCTEventEmitter.m), read by KVC. -1 when refused.
++static NSNumber *ConvoyListenerCount(id cp) {
++    @try {
++        id v = [cp valueForKey:@"listenerCount"];
++        if ([v isKindOfClass:[NSNumber class]]) return (NSNumber *)v;
++    } @catch (NSException *e) {}
++    return @(-1);
++}
++
++static void ConvoyTapTrace(id cp, NSString *kind, id buttonId, NSString *templateId, BOOL hasListeners) {
++    @try {
++        RNCPStore *store = [RNCPStore sharedManager];
++        CPInterfaceController *ic = store.interfaceController;
++        NSString *rootId = ic ? ConvoyTemplateId(ic.rootTemplate) : @"noic";
++        NSString *topId = ic ? ConvoyTemplateId(ic.topTemplate) : @"noic";
++        NSNumber *lc = ConvoyListenerCount(cp);
++        NSDictionary *row = @{
++            @"ts": @((long long)([[NSDate date] timeIntervalSince1970] * 1000)),
++            @"k": kind ?: @"?",
++            @"id": buttonId ? [NSString stringWithFormat:@"%@", buttonId] : @"?",
++            @"tpl": templateId ? [NSString stringWithFormat:@"%@", templateId] : @"?",
++            @"hl": @(hasListeners ? 1 : 0),
++            @"lc": lc,
++            @"root": rootId,
++            @"top": topId,
++        };
++        NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:ConvoyTapTraceSuite];
++        NSMutableArray *ring = [NSMutableArray new];
++        NSString *prev = [d stringForKey:ConvoyTapTraceKey];
++        if (prev) {
++            NSData *pdata = [prev dataUsingEncoding:NSUTF8StringEncoding];
++            id parsed = pdata ? [NSJSONSerialization JSONObjectWithData:pdata options:0 error:nil] : nil;
++            if ([parsed isKindOfClass:[NSArray class]]) [ring addObjectsFromArray:(NSArray *)parsed];
++        }
++        [ring addObject:row];
++        while (ring.count > 20) [ring removeObjectAtIndex:0];
++        if ([NSJSONSerialization isValidJSONObject:ring]) {
++            NSData *out = [NSJSONSerialization dataWithJSONObject:ring options:0 error:nil];
++            if (out) [d setObject:[[NSString alloc] initWithData:out encoding:NSUTF8StringEncoding] forKey:ConvoyTapTraceKey];
++        }
++        NSLog(@"[Convoy] cp-native-tap k=%@ id=%@ tpl=%@ hl=%d lc=%@ root=%@ top=%@", kind, buttonId, templateId, hasListeners ? 1 : 0, lc, rootId, topId);
++    } @catch (NSException *e) {}
++}
++
+ @implementation RNCarPlay
+ {
+     bool hasListeners;
+@@ -22,6 +88,42 @@ -(void)stopObserving {
+     hasListeners = NO;
+ }
+ 
++// Convoy (build 79, 2026-09-14): RE-ARM THE LISTENER FLAG. RNCarPlay is a process-lifetime singleton
++// (allocWithZone:, below) but RCTEventEmitter never resets _listenerCount (RN 0.81.5
++// React/Modules/RCTEventEmitter.m). An in-process JS restart (the red pill's Updates.reloadAsync,
++// expo-updates error recovery; logged by expo-updates as "event = restart") invalidates the module
++// (invalidate -> stopObserving -> hasListeners = NO) and the new JS's first addListener lands at
++// N+1, not 1, so startObserving never runs again and every `if (hasListeners)` gate in this file
++// (checkForConnection, bar buttons, template events incl. mapButtonPressed) drops for the rest of the
++// process. Receipt that makes this worth a belt: 13 iOS instances that started 0.4-1.1 s after an
++// expo-updates restart event and later logged carplay-onconnect logged 0 carplay-tap rows, across 4
++// drivers (review query, 2026-09-13; Jeff's dead-tap session 5nymt1-194342 is one). Causation is a
++// HYPOTHESIS until the bench reload run or a post-restart field session with taps settles it.
++// Inert when hasListeners is already YES; not gated on the bench. RCTEventEmitter's own
++// sendEventWithName still gates on _listenerCount > 0.
++- (void)addListener:(NSString *)eventName {
++    [super addListener:eventName];
++    hasListeners = YES;
++}
++
++// Same singleton: one JS instance's teardown must not clear the process-wide flag, because the next
++// instance cannot restore it (above). The old instance's invalidate is dispatched to the main queue
++// from its own JS thread and can land AFTER the new instance's addListener (review 2026-09-13).
++// RCTEventEmitter's only invalidate work is stopObserving; super is still called (NS_REQUIRES_SUPER).
++- (void)invalidate {
++    bool keep = hasListeners;
++    [super invalidate];
++    hasListeners = keep;
++}
++
++// Convoy (build 79, 2026-09-14): read-only listener state for the CarSceneDelegate root receipt
++// (plugins/withConvoyCarPlay.js watchCarRoot reaches it by selector name, so RNCarPlay.h is unchanged
++// and an unpatched library just omits the fields). hl = the flag every event gate here reads.
+++ (NSDictionary *)convoyListenerState {
++    RNCarPlay *cp = [RNCarPlay allocWithZone:nil];
++    return @{ @"hl": @(cp->hasListeners ? 1 : 0), @"lc": ConvoyListenerCount(cp) };
++}
++
+ + (NSDictionary *) getConnectedWindowInformation: (CPWindow *) window {
+     return @{
+         @"width": @(window.bounds.size.width),
+@@ -103,6 +205,17 @@ + (id)allocWithZone:(NSZone *)zone {
          @"panEndedWithDirection",
          @"panWithDirection",
          @"didBeginPanGesture",
@@ -1592,7 +1708,23 @@ index 153dbad..bf1eaf8 100644
          @"didDismissPanningInterface",
          @"willDismissPanningInterface",
          @"didShowPanningInterface",
-@@ -978,9 +989,13 @@ - (void) applyConfigForMapTemplate:(CPMapTemplate*)mapTemplate templateId:(NSStr
+@@ -921,6 +1034,7 @@ - (void)updateListRowItemImageWithURL:(CPListImageRowItem *)item imgUrl:(NSStrin
+         for (NSDictionary *mapButton in mapButtons) {
+             NSString *_id = [mapButton objectForKey:@"id"];
+             [result addObject:[RCTConvert CPMapButton:mapButton withHandler:^(CPMapButton * _Nonnull mapButton) {
++                ConvoyTapTrace(self, @"map", _id, templateId, self->hasListeners);   // Convoy build 79: tap receipt, before any gate
+                 [self sendTemplateEventWithName:mapTemplate name:@"mapButtonPressed" json:@{ @"id": _id }];
+             }]];
+         }
+@@ -963,6 +1077,7 @@ - (void) applyConfigForMapTemplate:(CPMapTemplate*)mapTemplate templateId:(NSStr
+         for (NSDictionary *mapButton in mapButtons) {
+             NSString *_id = [mapButton objectForKey:@"id"];
+             [result addObject:[RCTConvert CPMapButton:mapButton withHandler:^(CPMapButton * _Nonnull mapButton) {
++                ConvoyTapTrace(self, @"map", _id, templateId, self->hasListeners);   // Convoy build 79: tap receipt, before any gate
+                 [self sendTemplateEventWithName:mapTemplate name:@"mapButtonPressed" json:@{ @"id": _id }];
+             }]];
+         }
+@@ -978,9 +1093,13 @@ - (void) applyConfigForMapTemplate:(CPMapTemplate*)mapTemplate templateId:(NSStr
      }
  
      if ([config objectForKey:@"render"]) {
@@ -1609,7 +1741,15 @@ index 153dbad..bf1eaf8 100644
      }
  }
  
-@@ -1048,6 +1063,23 @@ - (void) applyConfigForMapTemplate:(CPMapTemplate*)mapTemplate templateId:(NSStr
+@@ -1041,6 +1160,7 @@ - (void) applyConfigForMapTemplate:(CPMapTemplate*)mapTemplate templateId:(NSStr
+             _type = CPBarButtonTypeText;
+         }
+         CPBarButton *_barButton = [[CPBarButton alloc] initWithType:_type handler:^(CPBarButton * _Nonnull barButton) {
++            ConvoyTapTrace(self, @"bar", _id, templateId, self->hasListeners);   // Convoy build 79: tap receipt, before the gate
+             if (self->hasListeners) {
+                 [self sendEventWithName:@"barButtonPressed" body:@{@"id": _id, @"templateId":templateId}];
+             }
+@@ -1048,6 +1168,23 @@ - (void) applyConfigForMapTemplate:(CPMapTemplate*)mapTemplate templateId:(NSStr
          BOOL _disabled = [barButton objectForKey:@"disabled"];
          [_barButton setEnabled:!_disabled];
  
@@ -1633,7 +1773,7 @@ index 153dbad..bf1eaf8 100644
          if (_type == CPBarButtonTypeText) {
              NSString *_title = [barButton objectForKey:@"title"];
              [_barButton setTitle:_title];
-@@ -1460,6 +1492,43 @@ - (void)mapTemplate:(CPMapTemplate *)mapTemplate didUpdatePanGestureWithTranslat
+@@ -1460,6 +1597,43 @@ - (void)mapTemplate:(CPMapTemplate *)mapTemplate didUpdatePanGestureWithTranslat
      [self sendTemplateEventWithName:mapTemplate name:@"didUpdatePanGestureWithTranslation" json:@{ @"translation": @{ @"x": @(translation.x), @"y": @(translation.y) }, @"velocity": @{ @"x": @(velocity.x), @"y": @(velocity.y) }}];
  }
  

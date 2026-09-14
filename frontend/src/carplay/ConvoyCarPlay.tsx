@@ -1482,6 +1482,8 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       // didAppear TIMEOUT would clobber a working warm root on any head unit that
       // delivers it late or not at all, so that is deliberately not done here.
       let rootDispatched = false;
+      // One carplay-root-appear row per warm template (= per connect); didAppear repeats after a search pop.
+      let appearLogged = false;
       try {
         if (isIOS) {
           const mapTemplate = new MapTemplate({
@@ -1499,6 +1501,17 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
             // CPMapTemplate property.
             guidanceBackgroundColor: processColor('#0B0B0C'),
             tripEstimateStyle: 'dark',
+            // ROOT APPEAR RECEIPT (build 79, 2026-09-14) — the warm half of carPlayBootstrap.ts's idle
+            // receipt: didAppear passes the same RNCarPlay.m hasListeners gate as every press, so
+            // `carplay-root ... root=DISPATCHED` with no carplay-root-appear on a session = events were
+            // dropped (or the root never appeared). No new native listener (Template.ts registers didAppear
+            // for every template). ⚠ UNVERIFIED that CarPlay delivers templateDidAppear for a root set with
+            // setRootTemplate; never fail over on its absence (see the rootDispatched note above).
+            onDidAppear: (e: { animated?: boolean }) => {
+              if (appearLogged) return;
+              appearLogged = true;
+              try { logEventReliable(`carplay-root-appear tpl=map anim=${e?.animated ? 1 : 0}`); } catch {}
+            },
             // KEEP the map buttons (police + Scout mic) on screen. CPMapTemplate's
             // defaults auto-hide the navigation bar after a few idle seconds and
             // hide the map buttons WITH it — which is why the police button was

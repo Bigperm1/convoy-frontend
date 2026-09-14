@@ -389,6 +389,23 @@ RULES = [
         "fgwatch callback must call _sweepBgConsumers (self-throttled) right after it feeds the stall watchdog.",
     ),
     (
+        "carplay-native-template-push-or-bare-placeholder",
+        ["plugins/withConvoyCarPlay.js"],
+        r"\.(pushTemplate|presentTemplate)\s*\(|CPMapTemplate\(\)(?![^\n]*\n[^\n]*\.userInfo\s*=)"
+        r"|static func installColdCarPlaceholder\([^{]*\{(?!\s*guard UserDefaults\(suiteName: DIAG_SUITE\)\?\.string\(forKey: CAR_PLACEHOLDER_ENABLE_KEY\) == \"1\")",
+        "2026-09-14 (build 79, the CarPlay didConnect root placeholder): CarSceneDelegate installs a NATIVE root "
+        "template on a cold connect, and three things about it are load-bearing. (1) It never pushes or presents: "
+        "a template stack deeper than 1 at rest covers the map and every map button is dead (the 2026-07 dead-buttons "
+        "root cause — our own alert templates over the map; memory carplay-dead-buttons-root-cause). (2) Every native "
+        "CPMapTemplate sets userInfo templateId on the NEXT line: once JS's setRootTemplate makes RNCarPlay the "
+        "interface controller delegate, any template event for a template without one runs RNCarPlay.m "
+        "sendTemplateEventWithName, which inserts a nil templateId into an NSMutableDictionary and raises "
+        "NSInvalidArgumentException (source read of RNCarPlay.m, not a field crash). (3) installColdCarPlaceholder "
+        "stays DORMANT behind the App Group switch JS writes (crashBreadcrumb.ts syncCarPlayPlaceholderSwitch) — it is "
+        "compliance on the one car-first path the field says works, unbenched on iOS 26/27, and the switch is its "
+        "only OTA off-switch. Widen it from JS, never by deleting the native guard.",
+    ),
+    (
         "expo-location-android-patch-built-from-prebuilt-aar",
         ["package.json"],
         r"(?s)\A(?!.*\"buildFromSource\"\s*:\s*\[[^\]]*\"expo-location\")",

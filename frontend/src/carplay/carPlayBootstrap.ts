@@ -16,7 +16,7 @@ import { setCarState, getCarState, emitCarGesture } from './carStore';
 import { acquireBgLocation, releaseBgLocation, registerBgConsumerProbe, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
 import { startCarDataService, stopCarDataService } from './carDataService';
 import { CAR_BAR_BUTTON_CONFIG, carMapButtonConfig, handleCarBarButton, handleCarMapButton } from './carActions';
-import { logEventReliable } from '../crashBreadcrumb';
+import { logEventReliable, reportCarPlayTapTrace } from '../crashBreadcrumb';
 import { startCarStatus, stopCarStatus, refreshCarStatus } from './carStatus';
 
 let booted = false;
@@ -81,6 +81,38 @@ export function initCarPlayBootstrap(): void {
     return;
   }
 
+  // RE-ARM RNCarPlay's NATIVE LISTENER FLAG (build 79, 2026-09-14). A HYPOTHESIS fix, and the only one
+  // that can reach build 78 (the native belt is the RNCarPlay.m addListener override in the build-79
+  // patch). RNCarPlay is a process-lifetime singleton (RNCarPlay.m allocWithZone:). An in-process restart
+  // (the red pill -> Updates.reloadAsync, logged by expo-updates as "event = restart") invalidates the
+  // module: stopObserving sets hasListeners = NO, and RCTEventEmitter never resets _listenerCount
+  // (RN 0.81.5 React/Modules/RCTEventEmitter.m), so the new JS's addListener never reaches count == 1
+  // and startObserving never runs again. Every `if (hasListeners)` gate in RNCarPlay.m
+  // (checkForConnection, bar buttons, template events incl. mapButtonPressed) then drops for the rest of
+  // the process. Receipt: 13 iOS instances that started 0.4-1.1 s after an expo-updates restart and later
+  // logged carplay-onconnect logged 0 carplay-tap rows — Jeff 7 (incl. his dead-tap session
+  // 5nymt1-194342), Enablewhore 2, Rodrigo 2, Ni GR 2 (crash_reports, since 2026-08-14, re-run
+  // 2026-09-14). Whether those drivers pressed anything is unknown: correlation, not causation.
+  // removeListeners clamps the count at 0 and calls stopObserving; the addListener that follows takes it
+  // to exactly 1 and calls startObserving again. If the hypothesis is wrong this changes nothing
+  // observable: the flag ends YES either way, and RCTEventEmitter's own emit gate (count > 0) still passes.
+  // ⚠ It leaves the native count at 1 while JS holds many subscriptions. Nothing removes an RNCarPlay
+  // subscription today (Template.ts never does; grep of src/ and app/ finds none) — if anything ever
+  // does, a second removal takes the count to 0 and silences EVERY CarPlay event. Never add one.
+  // Every RNCarPlay method runs on the main queue in call order (methodQueue), so the poke() below
+  // reaches checkForConnection AFTER this. Release only: RCT_DEBUG logs an error for over-removal.
+  let rearm = __DEV__ ? 'dev' : '0';
+  if (!__DEV__) {
+    try {
+      const m: any = (NativeModules as any).RNCarPlay;
+      m.removeListeners(1000000);
+      m.addListener('didConnect');
+      rearm = '1';
+    } catch (e: any) {
+      try { logEventReliable(`carplay-listeners-rearm ok=0 err=${String(e?.message || e).slice(0, 80)}`); } catch {}
+    }
+  }
+
   setCarState({ cpDbg: 'boot' });
 
   // THE POSITIVE RECEIPT CHAIN (2026-08-16, HANDOFF-48H §2.2's "single most important
@@ -96,6 +128,9 @@ export function initCarPlayBootstrap(): void {
   // fault; all links present + no taps on a pressed button = the press dies native-side.
   // The idle MapTemplate for THIS connect (see setIdleRoot). Null between connects.
   let idleTpl: any = null;
+  // One carplay-root-appear row per idle template (= per connect): didAppear also fires again after a
+  // pushed search pops. Reset with idleTpl on disconnect.
+  let idleAppearLogged = false;
   const receiptOnce: Record<string, boolean> = {};
   const receipt = (key: string, detail: string) => {
     if (receiptOnce[key]) return;
@@ -139,6 +174,17 @@ export function initCarPlayBootstrap(): void {
         // NSNumber branch expects.
         guidanceBackgroundColor: processColor('#0B0B0C'),
         tripEstimateStyle: 'dark',
+        // ROOT APPEAR RECEIPT (build 79, 2026-09-14). didAppear reaches JS through the SAME
+        // `if (hasListeners)` gate as every button press (RNCarPlay.m sendTemplateEventWithName), and
+        // Template.ts already registers a didAppear listener for every template, so this adds no native
+        // listener. carplay-idleroot-set with no carplay-root-appear on a session = events were dropped
+        // (or the root never appeared). ⚠ UNVERIFIED that CarPlay calls templateDidAppear for a root set
+        // with setRootTemplate — one bench run settles it; until then absence alone proves nothing.
+        onDidAppear: (e: { animated?: boolean }) => {
+          if (idleAppearLogged) return;
+          idleAppearLogged = true;
+          try { logEventReliable(`carplay-root-appear tpl=idle anim=${e?.animated ? 1 : 0}`); } catch {}
+        },
         // Wave 3: Search / Police / End on the map template's NAV-BAR — the
         // chrome layer that actually renders + taps on the head unit (the round
         // CPMapButtons don't; see carActions.ts header). Cold-capable: these
@@ -250,9 +296,13 @@ export function initCarPlayBootstrap(): void {
     // Drop the JS handle or the next connect would setRootTemplate an id native can no
     // longer find — which NSLogs and installs nothing, silently (RNCarPlay.m:545-560).
     idleTpl = null;
+    idleAppearLogged = false;
     void releaseBgLocation('carplay');
     stopCarDataService();
     stopCarStatus();
+    // Same-session delivery of the native tap receipts (build 79, RNCarPlay.m ConvoyTapTrace); the next
+    // JS boot also reports. The root-watch record is next-boot only (crashBreadcrumb.reportCarPlayRootWatch).
+    void reportCarPlayTapTrace().catch(() => {});
   };
 
   // COLD-CONNECT BELT + CORRECTED ROOT-CAUSE NOTE (rewritten 2026-07-19).
@@ -327,7 +377,8 @@ export function initCarPlayBootstrap(): void {
     // THE POSITIVE BOOTSTRAP RECEIPT: both connect handlers registered without a
     // throw. From here, a dead button can no longer be blamed on "the bootstrap
     // never ran" — this row is the proof it did, on this exact launch.
-    receipt('bootstrap-ok', `conn=${CarPlay.connected ? 1 : 0} hookOwns=${carPlayHookOwnsRoot ? 1 : 0}`);
+    // rearm = the listener re-arm above (1 = both calls dispatched, 0 = threw — see carplay-listeners-rearm — dev = skipped).
+    receipt('bootstrap-ok', `conn=${CarPlay.connected ? 1 : 0} hookOwns=${carPlayHookOwnsRoot ? 1 : 0} rearm=${rearm}`);
     if (CarPlay.connected) onConnect(); else { poke(); ensurePolling(); }
     // A head unit connecting often brings the app active — re-poke then, and resume
     // polling in case it had stopped.

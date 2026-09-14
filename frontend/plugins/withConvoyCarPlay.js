@@ -224,6 +224,151 @@ enum ConvoyRNHost {
     bootWindowRef?.isHidden = true
   }
 
+  // ── BUILD 79 (2026-09-14): the didConnect root contract, DORMANT, plus a root receipt on EVERY connect ──
+  // Apple, templateApplicationScene(_:didConnect:to:) (doc JSON, verbatim): "You must set both the
+  // window's root view controller and the scene's root template before returning from this method."
+  // Our real root templates are built by JS (carPlayBootstrap.ts setIdleRoot = the COLD root,
+  // ConvoyCarPlay.tsx setRoot = the WARM root). On a COLD connect JS cannot run before expo-updates
+  // creates the host, so that path returned with neither. No documented consequence of a late root was
+  // found (Apple's page, the CarPlay Developer Guide, CPInterfaceController.h, forums 761528 / 764460 /
+  // 765602, firebase-ios-sdk#15895), and Iternio's react-native-auto-play defers its root to JS the same
+  // way. So this is COMPLIANCE, not a fix for any field symptom, and the cold car-first boot is the one
+  // path the field says already works (car chrome p90 0.55 s after js-mark).
+  //
+  // Hence DORMANT (review 2026-09-13): installColdCarPlaceholder does nothing unless JS has written "1"
+  // to CAR_PLACEHOLDER_ENABLE_KEY (src/crashBreadcrumb.ts syncCarPlayPlaceholderSwitch: Jeff's handle
+  // first, the fleet only after 10 or more "carplay-rootwatch kind=cold ph=1 ours=1" rows and none with
+  // ours=0). With the switch off the Apple deviation remains, by default. The key is read at connect,
+  // before JS, so a device enabled by one launch installs from the NEXT cold connect.
+  //
+  // When on: an EMPTY CPMapTemplate (no buttons, so nothing is tappable before JS can handle a tap) and
+  // a black root VC. Both are replaced by the existing paths: JS setRootTemplate ("If there is an
+  // existing template navigation hierarchy, the existing stack will be replaced by the new root
+  // template", CPInterfaceController.h) and mountCarSurface / showCarPlaceholder. With a root already in
+  // place the library default animated=true (react-native-carplay src/CarPlay.ts) is no longer ignored,
+  // so the first JS root becomes an ANIMATED replacement: expect "Setting root template ... animated 1".
+  // userInfo templateId is REQUIRED: once JS's setRootTemplate makes RNCarPlay the interface controller
+  // delegate, every template event for THIS template runs RNCarPlay.m sendTemplateEventWithName, which
+  // inserts userInfo["templateId"] into a mutable dictionary, and nil raises NSInvalidArgumentException.
+  // The id matches no JS template, so Template.ts ignores those events. Nothing here ever pushes or
+  // presents: a stack deeper than 1 at rest covers the map (the 2026-07 dead-buttons root cause;
+  // scripts/trap-check.py carplay-native-template-push-or-bare-placeholder). Warm connects (host already
+  // running) never install it: JS sets the real root about 8 ms after connect (849j00-188104), and two
+  // root requests that close together are an unbenched race.
+  static let CAR_PLACEHOLDER_ENABLE_KEY = "convoy.carplay.placeholder.enable.v1"   // "1" = install; written by JS
+  static let CAR_PLACEHOLDER_TEMPLATE_ID = "convoy-native-placeholder"
+  static let CAR_ROOTWATCH_KEY = "convoy.carplay.rootWatch.v1"
+  // 40 fast ticks (0.05 s, the first 2 s, so a warm root lands with a useful byMs) then 1 Hz: about 120 s.
+  static let CAR_ROOTWATCH_FAST_TICKS = 40
+  static let CAR_ROOTWATCH_MAX_TICKS = 158
+  // Bumped by a placeholder install, by every read-only watch start and by every disconnect, so a watch
+  // that outlives its connect ends as gone=1.
+  static var carRootWatchSeq = 0
+  // The placeholder's setRootTemplate completion, keyed by the watch seq it belongs to.
+  static var carPlaceholderResult: [String: Any] = [:]
+
+  // Returns true only when the placeholder was installed (and its watch started).
+  @discardableResult
+  static func installColdCarPlaceholder(_ ic: CPInterfaceController, window: UIWindow, appDelegate: AppDelegate, why: String) -> Bool {
+    guard UserDefaults(suiteName: DIAG_SUITE)?.string(forKey: CAR_PLACEHOLDER_ENABLE_KEY) == "1" else { return false }
+    guard let factory = appDelegate.reactNativeFactory, !isHostReady(factory) else { return false }
+    carRootWatchSeq += 1
+    let seq = carRootWatchSeq
+    let t0 = Date()
+    var diag: [String: Any] = ["why": why, "kind": "cold", "ph": 1, "vc": 0, "ts": t0.timeIntervalSince1970 * 1000]
+    if window.rootViewController == nil {
+      let vc = UIViewController()
+      vc.view.backgroundColor = .black
+      window.rootViewController = vc
+      diag["vc"] = 1
+    }
+    let tpl = CPMapTemplate()
+    tpl.userInfo = ["templateId": CAR_PLACEHOLDER_TEMPLATE_ID]
+    carPlaceholderResult = ["seq": seq]
+    // ALWAYS a completion. CPInterfaceController.h: "If the template presentation is not successful AND
+    // no completion block is specified, an exception will be thrown."
+    ic.setRootTemplate(tpl, animated: false) { ok, err in
+      DispatchQueue.main.async {
+        guard (carPlaceholderResult["seq"] as? Int) == seq else { return }
+        var r: [String: Any] = ["seq": seq, "setOk": ok ? 1 : 0, "setMs": Int(Date().timeIntervalSince(t0) * 1000)]
+        if let err = err { r["setErr"] = String(String(describing: err).prefix(120)) }
+        carPlaceholderResult = r
+      }
+    }
+    watchCarRoot(ic, seq: seq, t0: t0, diag: diag, tick: 0)
+    return true
+  }
+
+  // The read-only receipt for a connect that did NOT install a placeholder (switch off, or warm).
+  // kind = whether expo-updates' host existed at connect (cold / warm).
+  static func watchCarRootIfUnwatched(_ ic: CPInterfaceController, since seqBefore: Int, why: String, hostReady: Bool) {
+    guard carRootWatchSeq == seqBefore else { return }   // installColdCarPlaceholder already started one
+    carRootWatchSeq += 1
+    let t0 = Date()
+    let diag: [String: Any] = ["why": why, "kind": hostReady ? "warm" : "cold", "ph": 0, "ts": t0.timeIntervalSince1970 * 1000]
+    watchCarRoot(ic, seq: carRootWatchSeq, t0: t0, diag: diag, tick: 0)
+  }
+
+  static func carTemplateId(_ o: AnyObject?) -> String {
+    if let t = o as? CPTemplate, let info = t.userInfo as? [String: Any], let rid = info["templateId"] as? String { return rid }
+    return o.map { String(describing: type(of: $0)) } ?? "nil"
+  }
+
+  // RNCarPlay's listener flag + count, via the patched +convoyListenerState (RNCarPlay.m). Reached by
+  // selector so an unpatched library compiles and simply reports nothing.
+  static func carListenerState() -> [String: Any] {
+    let sel = NSSelectorFromString("convoyListenerState")
+    guard RNCarPlay.responds(to: sel),
+          let r = RNCarPlay.perform(sel)?.takeUnretainedValue() as? [String: Any] else { return [:] }
+    return r
+  }
+
+  // READ-ONLY, on every connect: did a JS root (convoy-carplay-idle / convoy-carplay-map) become the
+  // interface controller's root? That closes the "root=DISPATCHED is not an install" gap
+  // (ConvoyCarPlay.tsx setRoot: RNCarPlay.m setRootTemplate only NSLogs a store miss and ignores the
+  // completion error) on the WARM path too, which is Jeff's daily path. hl/lc = RNCarPlay's listener
+  // flag and count when the watch ended: ours=1 with hl=0 is the dropped-event signature. One App Group
+  // write at the end; src/crashBreadcrumb.ts reportCarPlayRootWatch reports it on the next JS boot.
+  // rootTemplate is a plain property read (KVC: nil-safe, the Swift type is non-optional). topTemplate
+  // "may synchronously perform an IPC call" (CPInterfaceController.h), so it is read ONCE, at the end.
+  static func watchCarRoot(_ ic: CPInterfaceController, seq: Int, t0: Date, diag: [String: Any], tick: Int) {
+    let rid = carTemplateId(ic.value(forKey: "rootTemplate") as AnyObject?)
+    let ours = rid.hasPrefix("convoy-carplay-")
+    let gone = carRootWatchSeq != seq
+    var d = diag
+    if (carPlaceholderResult["seq"] as? Int) == seq {
+      for (k, v) in carPlaceholderResult where k != "seq" { d[k] = v }
+    }
+    // A failed placeholder set does NOT end the watch: whether JS's root still lands is the question.
+    if !(ours || gone || tick >= CAR_ROOTWATCH_MAX_TICKS) {
+      let interval: TimeInterval = tick < CAR_ROOTWATCH_FAST_TICKS ? 0.05 : 1.0
+      DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
+        watchCarRoot(ic, seq: seq, t0: t0, diag: diag, tick: tick + 1)
+      }
+      return
+    }
+    d["ours"] = ours ? 1 : 0
+    d["gone"] = gone ? 1 : 0
+    d["byMs"] = Int(Date().timeIntervalSince(t0) * 1000)
+    d["root"] = rid
+    d["top"] = gone ? "-" : carTemplateId(ic.value(forKey: "topTemplate") as AnyObject?)
+    let ls = carListenerState()
+    d["hl"] = ls["hl"] ?? -1
+    d["lc"] = ls["lc"] ?? -1
+    guard JSONSerialization.isValidJSONObject(d),
+          let data = try? JSONSerialization.data(withJSONObject: d),
+          let json = String(data: data, encoding: .utf8),
+          let defaults = UserDefaults(suiteName: DIAG_SUITE) else { return }
+    NSLog("[Convoy] carplay rootwatch: %@", json)
+    // A later clean connect must never overwrite an unreported real failure (ours=0 and not gone).
+    if let prev = defaults.string(forKey: CAR_ROOTWATCH_KEY), let pd = prev.data(using: .utf8),
+       let po = (try? JSONSerialization.jsonObject(with: pd)) as? [String: Any],
+       (po["ours"] as? Int) == 0, (po["gone"] as? Int) == 0, ours || gone {
+      return
+    }
+    defaults.set(json, forKey: CAR_ROOTWATCH_KEY)
+  }
+
   // A car surface minted AFTER a host wait (the cold poll with hostWaitTicks > 0, or the
   // gated second-surface mint) has no commit window of its own: the 0.4 s commit tick was
   // armed at CONNECT (CarSceneDelegate -> armCarRepaints) and ages out 40 s after it, and
@@ -889,6 +1034,16 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     didConnect interfaceController: CPInterfaceController,
     to window: CPWindow
   ) {
+    // BUILD 79 (2026-09-14): Apple's root-VC + root-template contract on a COLD connect, DORMANT unless JS
+    // enabled it (ConvoyRNHost.installColdCarPlaceholder). First, so nothing JS does can precede it. The
+    // host check is taken here, before mount, to label the read-only root receipt at the end.
+    let rootWatchSeqBefore = ConvoyRNHost.carRootWatchSeq
+    var hostReadyAtConnect = false
+    if let appDelegate = UIApplication.shared.delegate as? AppDelegate {
+      if let factory = appDelegate.reactNativeFactory { hostReadyAtConnect = ConvoyRNHost.isHostReady(factory) }
+      ConvoyRNHost.installColdCarPlaceholder(interfaceController, window: window, appDelegate: appDelegate, why: "connect")
+    }
+
     // Let react-native-carplay set up its interface controller + templates.
     RNCarPlay.connect(with: interfaceController, window: window)
 
@@ -898,6 +1053,8 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
     ConvoyRNHost.mount(moduleName: "ConvoyCarSurface", in: window, appDelegate: appDelegate, makeVisible: false)
     ConvoyRNHost.armCarRepaints(in: window)
+    // BUILD 79: read-only root receipt for a connect that did not install the placeholder.
+    ConvoyRNHost.watchCarRootIfUnwatched(interfaceController, since: rootWatchSeqBefore, why: "connect", hostReady: hostReadyAtConnect)
   }
 
   func templateApplicationScene(
@@ -905,6 +1062,7 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     didDisconnectInterfaceController interfaceController: CPInterfaceController
   ) {
     RNCarPlay.disconnect()
+    ConvoyRNHost.carRootWatchSeq += 1   // BUILD 79: a pending root watch ends as gone=1
     ConvoyRNHost.carRepaintBudget = 0
     ConvoyRNHost.carWindowRef = nil
     ConvoyRNHost.carSceneState = "disc"
@@ -938,10 +1096,18 @@ class CarSceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     let ic = cpScene.interfaceController
     let win = cpScene.carWindow
     ConvoyRNHost.carSceneState = "recover"
+    // BUILD 79 (2026-09-14): same dormant placeholder + root receipt as didConnect (see there).
+    let rootWatchSeqBefore = ConvoyRNHost.carRootWatchSeq
+    var hostReadyAtConnect = false
+    if let appDelegate = UIApplication.shared.delegate as? AppDelegate {
+      if let factory = appDelegate.reactNativeFactory { hostReadyAtConnect = ConvoyRNHost.isHostReady(factory) }
+      ConvoyRNHost.installColdCarPlaceholder(ic, window: win, appDelegate: appDelegate, why: "recover")
+    }
     RNCarPlay.connect(with: ic, window: win)
     guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
     ConvoyRNHost.mount(moduleName: "ConvoyCarSurface", in: win, appDelegate: appDelegate, makeVisible: false)
     ConvoyRNHost.armCarRepaints(in: win)
+    ConvoyRNHost.watchCarRootIfUnwatched(ic, since: rootWatchSeqBefore, why: "recover", hostReady: hostReadyAtConnect)
   }
 
   func sceneDidBecomeActive(_ scene: UIScene) {

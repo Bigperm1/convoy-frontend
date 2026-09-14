@@ -50,6 +50,8 @@ let currentHandle: string | null = null;
 /** AuthProvider calls this whenever the user changes; every later row carries it. */
 export function setBreadcrumbHandle(h: string | null | undefined): void {
   currentHandle = h ? String(h).slice(0, 64) : null;
+  // Build 79: the CarPlay cold-connect placeholder is OTA-switched per handle (see syncCarPlayPlaceholderSwitch).
+  if (currentHandle) { try { syncCarPlayPlaceholderSwitch(currentHandle); } catch {} }
 }
 
 const INSTANCE_ID = (() => {
@@ -530,7 +532,7 @@ export function installCrashBreadcrumb() {
   // Delivery + harvest happen well after boot so this never competes with
   // startup work (and never runs at module scope — a crash reporter must not
   // itself be able to crash the boot).
-  setTimeout(() => { void deliverAndHarvest(); reportCarPlayHostCeiling(); reportCarPlayPhoneHostWait(); reportSiriScout(); }, DELIVER_DELAY_MS);
+  setTimeout(() => { void deliverAndHarvest(); reportCarPlayHostCeiling(); reportCarPlayPhoneHostWait(); reportSiriScout(); reportCarPlayRootWatch(); void reportCarPlayTapTrace(); }, DELIVER_DELAY_MS);
 }
 
 // BUILD 75 — the CarPlay host plugin (plugins/withConvoyCarPlay.js) writes a marker to
@@ -577,6 +579,101 @@ function reportCarPlayPhoneHostWait(): void {
     const age = d?.ts ? Math.round((Date.now() - Number(d.ts)) / 1000) : -1;
     logEventReliable(`carplay-phone-hostwait waitMs=${d?.waitMs ?? "?"} root=${d?.root ?? "?"} waitRoot=${d?.waitRoot ?? "?"} phoneKey=${d?.phoneKey ?? "?"} bootKey=${d?.bootKey ?? "?"} carKey=${d?.carKey ?? "?"} ageS=${age}`);
     try { HairpinSystem.removeSharedDefaults?.(CARPLAY_DIAG_SUITE, CARPLAY_PHONE_HOSTWAIT_KEY); } catch {}
+  } catch {}
+}
+
+// BUILD 79 (2026-09-14) — CarPlay ROOT + TAP receipts, written natively, reported here. Absent before
+// build 79: the App Group keys are never written, getSharedDefaults returns null, no rows (inert on 78).
+//
+// carplay-rootwatch — plugins/withConvoyCarPlay.js ConvoyRNHost.watchCarRoot, on EVERY connect: did a JS
+// root become the interface controller's root? ours=1 root=convoy-carplay-idle|convoy-carplay-map is
+// healthy; kind=warm ours=0 gone=0 is the "root=DISPATCHED but never installed" case the warm path had no
+// instrument for (ConvoyCarPlay.tsx setRoot). ph=1 = the dormant cold placeholder was installed (setOk /
+// setMs / err = its setRootTemplate completion). hl/lc = RNCarPlay's listener flag / count when the watch
+// ended: ours=1 hl=0 is the dropped-event signature (RNCarPlay.m addListener comment). One record per
+// key, read on the NEXT boot and then cleared — a session that is ending cannot report its own record
+// (its watch notices the disconnect a tick after JS onDisconnect has run).
+const CARPLAY_ROOTWATCH_KEY = "convoy.carplay.rootWatch.v1";
+function reportCarPlayRootWatch(): void {
+  if (Platform.OS !== "ios") return;
+  try {
+    const { HairpinSystem } = require("../modules/hairpin-system");
+    if (!HairpinSystem || typeof HairpinSystem.getSharedDefaults !== "function") return;
+    const raw = HairpinSystem.getSharedDefaults(CARPLAY_DIAG_SUITE, CARPLAY_ROOTWATCH_KEY);
+    if (!raw) return;
+    let d: any = null;
+    try { d = JSON.parse(String(raw)); } catch {}
+    const age = d?.ts ? Math.round((Date.now() - Number(d.ts)) / 1000) : -1;
+    logEventReliable(
+      `carplay-rootwatch kind=${d?.kind ?? "?"} ph=${d?.ph ?? "?"} why=${d?.why ?? "?"} vc=${d?.vc ?? "-"} setOk=${d?.setOk ?? "-"} setMs=${d?.setMs ?? "-"}` +
+      ` ours=${d?.ours ?? "?"} gone=${d?.gone ?? "?"} byMs=${d?.byMs ?? "?"} root=${String(d?.root ?? "?").slice(0, 40)} top=${String(d?.top ?? "?").slice(0, 40)}` +
+      ` hl=${d?.hl ?? "?"} lc=${d?.lc ?? "?"} err=${String(d?.setErr ?? "-").slice(0, 80)} ageS=${age}`,
+    );
+    try { HairpinSystem.removeSharedDefaults?.(CARPLAY_DIAG_SUITE, CARPLAY_ROOTWATCH_KEY); } catch {}
+  } catch {}
+}
+
+// carplay-native-tap — react-native-carplay RNCarPlay.m ConvoyTapTrace: every CPBarButton / CPMapButton
+// press as the native handler saw it, BEFORE the hasListeners gate. Read the next dead press as:
+//   no row = CarPlay never called our handler · hl=0 = RNCarPlay's listener gate dropped it ·
+//   hl=1 with no carplay-tap:<id> row = the JS side (carTap uses plain logEvent, which can drop) ·
+//   tpl != top = a press on a template that is not on top (ownership). tpl != root alone is normal while
+//   search is pushed.
+// Native keeps a 20-entry ring and JS NEVER clears it (review 2026-09-13: a read-then-remove could drop a
+// press written in between); instead the newest reported ts is remembered, so each press is logged once.
+// Called at boot and from the CarPlay disconnect (carPlayBootstrap.ts) for same-session delivery.
+const CARPLAY_TAPTRACE_KEY = "convoy.carplay.tapTrace.v1";
+const CARPLAY_TAPTRACE_LAST_TS_KEY = "convoy.carplay.tapTrace.lastTs";
+let _tapTraceInFlight = false;
+export async function reportCarPlayTapTrace(): Promise<void> {
+  if (Platform.OS !== "ios" || _tapTraceInFlight) return;
+  _tapTraceInFlight = true;
+  try {
+    const { HairpinSystem } = require("../modules/hairpin-system");
+    if (!HairpinSystem || typeof HairpinSystem.getSharedDefaults !== "function") return;
+    const raw = HairpinSystem.getSharedDefaults(CARPLAY_DIAG_SUITE, CARPLAY_TAPTRACE_KEY);
+    if (!raw) return;
+    let rows: any[] = [];
+    try { const p = JSON.parse(String(raw)); if (Array.isArray(p)) rows = p; } catch {}
+    const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+    const lastTs = Number((await AsyncStorage.getItem(CARPLAY_TAPTRACE_LAST_TS_KEY)) ?? 0) || 0;
+    const fresh = rows.filter((r) => Number(r?.ts) > lastTs).sort((a, b) => Number(a.ts) - Number(b.ts)).slice(-20);
+    if (!fresh.length) return;
+    for (const r of fresh) {
+      const age = Math.round((Date.now() - Number(r.ts)) / 1000);
+      logEventReliable(
+        `carplay-native-tap k=${r?.k ?? "?"} id=${String(r?.id ?? "?").slice(0, 32)} tpl=${String(r?.tpl ?? "?").slice(0, 40)} hl=${r?.hl ?? "?"} lc=${r?.lc ?? "?"}` +
+        ` root=${String(r?.root ?? "?").slice(0, 40)} top=${String(r?.top ?? "?").slice(0, 40)} ageS=${age}`,
+      );
+    }
+    await AsyncStorage.setItem(CARPLAY_TAPTRACE_LAST_TS_KEY, String(Math.max(...fresh.map((r) => Number(r.ts)))));
+  } catch {} finally {
+    _tapTraceInFlight = false;
+  }
+}
+
+// THE COLD-CONNECT PLACEHOLDER SWITCH (build 79, 2026-09-14). plugins/withConvoyCarPlay.js
+// installColdCarPlaceholder installs Apple's didConnect root (an empty CPMapTemplate + a black root VC)
+// ONLY when this App Group key reads "1". It is compliance, not a fix for a field symptom, on the one
+// car-first path the field says already works, benchable only on an iOS 18 sim — so it ships OFF and is
+// widened by OTA: Jeff's handle first ("Jeff", VERIFIED in crash_reports for his instances 5nymt1-194342
+// and g9k7rg-546800), the fleet only after 10 or more `carplay-rootwatch kind=cold ph=1 ours=1` rows and
+// none with ours=0. Native reads the key at connect, before JS, so it takes effect from the NEXT cold
+// connect. Written only when the value changes (setSharedDefaults also reloads widget timelines,
+// HairpinSystemModule.swift), and an absent key already means off, so other devices never write.
+const CARPLAY_PLACEHOLDER_ENABLE_KEY = "convoy.carplay.placeholder.enable.v1";
+const CARPLAY_PLACEHOLDER_FLEET = false;
+const CARPLAY_PLACEHOLDER_HANDLES: ReadonlySet<string> = new Set(["Jeff"]);
+function syncCarPlayPlaceholderSwitch(handle: string): void {
+  if (Platform.OS !== "ios") return;
+  try {
+    const { HairpinSystem } = require("../modules/hairpin-system");
+    if (!HairpinSystem || typeof HairpinSystem.getSharedDefaults !== "function" || typeof HairpinSystem.setSharedDefaults !== "function") return;
+    const want = CARPLAY_PLACEHOLDER_FLEET || CARPLAY_PLACEHOLDER_HANDLES.has(handle) ? "1" : "0";
+    const cur = HairpinSystem.getSharedDefaults(CARPLAY_DIAG_SUITE, CARPLAY_PLACEHOLDER_ENABLE_KEY) ?? "0";
+    if (cur === want) return;
+    HairpinSystem.setSharedDefaults(CARPLAY_DIAG_SUITE, CARPLAY_PLACEHOLDER_ENABLE_KEY, want);
+    logEventReliable(`carplay-placeholder-switch set=${want} was=${cur}`);
   } catch {}
 }
 

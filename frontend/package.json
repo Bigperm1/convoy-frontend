@@ -10,7 +10,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "eas-build-pre-install": "npm install -g patch-package",
+    "eas-build-pre-install": "npm install -g patch-package && bash scripts/eas-assert-xcode.sh",
     "postinstall": "patch-package"
   },
   "dependencies": {

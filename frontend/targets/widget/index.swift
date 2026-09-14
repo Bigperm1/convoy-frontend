@@ -444,10 +444,14 @@ struct NextEventWidget: Widget {
   ///
   /// The inner `if #available(iOS 27.0, *)` is still required even under Xcode 27, because this
   /// target deploys to iOS 17.
-  /// NOTE: this gate does NOT open by itself on EAS. `eas.json` uses `image: "auto"`, which selects
-  /// by Expo SDK version rather than by newest, so builds stay on an Xcode 26 image until either the
-  /// Expo SDK moves or the profile pins an Xcode 27 image. Pinning it is the deliberate one-line
-  /// step that turns this family on.
+  /// NOTE: this gate does NOT open on EAS cloud. `eas.json` uses `image: "auto"`, which selects by
+  /// Expo SDK version rather than by newest, and (checked 2026-09-13/14) EAS has NO Xcode 27 image —
+  /// its newest runs macOS 26.5.2, below Xcode 27 RC's "macOS Tahoe 26.6 or later" — so there is no
+  /// image to pin. Build 79 opens it by building iOS LOCALLY (Jeff, 2026-09-14):
+  /// `DEVELOPER_DIR=/Applications/Xcode-27.app/Contents/Developer npx eas-cli build --platform ios
+  /// --profile mapbox-ios-x27 --local`. scripts/eas-assert-xcode.sh fails that build early on the wrong
+  /// Xcode, and `python3 tools/build/verify-ipa.py` proves the case is IN the widget binary before upload
+  /// — the gate closes silently, so the IPA is the only receipt.
   static var families: [WidgetFamily] {
     var f: [WidgetFamily] = [.systemSmall, .systemMedium]
     #if compiler(>=6.4) && canImport(WidgetKit, _version: 749)

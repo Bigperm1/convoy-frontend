@@ -93,6 +93,12 @@
         "EXPO_PUBLIC_SPOTIFY_CLIENT_ID": "3be57d90d8bb4fd0b773b303eba47dbf"
       }
     },
+    "mapbox-ios-x27": {
+      "extends": "mapbox-ios",
+      "env": {
+        "HAIRPIN_REQUIRE_XCODE_BUILD": "27A266a"
+      }
+    },
     "mapbox-android-store": {
       "distribution": "store",
       "channel": "mapbox-migration",

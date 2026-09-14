@@ -27,6 +27,11 @@ type HairpinSystemModule = {
   // extension can read it (the extension cannot see the app sandbox and must not
   // network). Absent on older binaries — guard with typeof before calling.
   writeSharedFile?(suite: string, name: string, fromPath: string): boolean;
+  // Build 79+: the Xcode stamps (DTXcodeBuild / DTPlatformVersion / DTSDKName / BuildMachineOSBuild)
+  // of the RUNNING binary, and the widgets placed on this device. The iOS 27 full-page widget only
+  // exists in a binary built with the iOS 27 SDK. Absent on older binaries — guard with typeof.
+  buildStamps?(): Record<string, string>;
+  widgetConfigurations?(): Promise<{ kind: string; family: string; raw: number }[]>;
   // CarPlay-screen frame pump (build 70). Returns false when no CarPlay scene is
   // connected yet, so the caller can retry on connect. See the Swift comment for why
   // this cannot be done in JS: RN's timer pump is bound to the phone's built-in

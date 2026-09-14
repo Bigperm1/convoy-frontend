@@ -218,6 +218,49 @@ public class HairpinSystemModule: Module {
         return false
       }
     }
+
+    // BUILD 79 (2026-09-14) — FIELD RECEIPTS FOR THE iOS 27 FULL-PAGE WIDGET (src/crashBreadcrumb.ts
+    // reportIosToolchainAndWidgets → one `ios-toolchain` row). `systemExtraLargePortrait` exists only in a
+    // binary built against the iOS 27 SDK: targets/widget/index.swift gates it with
+    // `#if compiler(>=6.4) && canImport(WidgetKit, _version: 749)`, and that gate closes SILENTLY — an
+    // Xcode 26 build succeeds with the family simply absent (measured 2026-09-13: `swiftc -emit-sil` of
+    // that file references the case 0 times on Xcode 26.6 / iOS 26.5 SDK, 2 times on the Xcode 27 SDK).
+    // Nothing in the field could tell the two binaries apart. Xcode stamps these DT* keys into the app's
+    // Info.plist at build time, so they name the toolchain of the binary that is RUNNING, not the one we
+    // meant to ship.
+    Function("buildStamps") { () -> [String: String] in
+      let info = Bundle.main.infoDictionary ?? [:]
+      var out: [String: String] = [:]
+      for k in ["DTXcodeBuild", "DTPlatformVersion", "DTSDKName", "BuildMachineOSBuild"] {
+        if let v = info[k] as? String { out[k] = v }
+      }
+      return out
+    }
+
+    // The widgets the user has actually PLACED (WidgetCenter.getCurrentConfigurations, iOS 14+).
+    // family = WidgetFamily.description and raw = rawValue, so a family this SDK cannot NAME (the XL case
+    // on an Xcode 26 binary) still reports — no compile gate needed here. WidgetFamily is
+    // `Swift.Int … CustomStringConvertible` and WidgetInfo has kind/family in BOTH the iOS 26.5 and 27.0
+    // WidgetKit swiftinterfaces (read 2026-09-13). The completion form, not the async
+    // `currentConfigurations()` (iOS 18+). The completion is `@escaping @Sendable`, so it resumes a
+    // (Sendable) continuation with Sendable rows instead of capturing expo's non-Sendable Promise struct.
+    AsyncFunction("widgetConfigurations") { () async throws -> [[String: Any]] in
+      let rows: [[String: String]] = try await withCheckedThrowingContinuation { cont in
+        WidgetCenter.shared.getCurrentConfigurations { result in
+          switch result {
+          case .success(let infos):
+            cont.resume(returning: infos.map {
+              ["kind": $0.kind, "family": $0.family.description, "raw": String($0.family.rawValue)]
+            })
+          case .failure(let error):
+            cont.resume(throwing: error)
+          }
+        }
+      }
+      return rows.map { r -> [String: Any] in
+        ["kind": r["kind"] ?? "", "family": r["family"] ?? "", "raw": Int(r["raw"] ?? "") ?? -1]
+      }
+    }
   }
 }
 

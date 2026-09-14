@@ -532,7 +532,7 @@ export function installCrashBreadcrumb() {
   // Delivery + harvest happen well after boot so this never competes with
   // startup work (and never runs at module scope — a crash reporter must not
   // itself be able to crash the boot).
-  setTimeout(() => { void deliverAndHarvest(); reportCarPlayHostCeiling(); reportCarPlayPhoneHostWait(); reportSiriScout(); reportCarPlayRootWatch(); void reportCarPlayTapTrace(); }, DELIVER_DELAY_MS);
+  setTimeout(() => { void deliverAndHarvest(); reportCarPlayHostCeiling(); reportCarPlayPhoneHostWait(); reportSiriScout(); reportCarPlayRootWatch(); void reportCarPlayTapTrace(); void reportIosToolchainAndWidgets(); }, DELIVER_DELAY_MS);
 }
 
 // BUILD 75 — the CarPlay host plugin (plugins/withConvoyCarPlay.js) writes a marker to
@@ -697,6 +697,54 @@ function reportSiriScout(): void {
     const age = d?.ts ? Math.round((Date.now() - Number(d.ts)) / 1000) : -1;
     logEventReliable(`siri-scout n=${d?.n ?? "?"} ok=${d?.ok ? 1 : 0} http=${d?.http ?? "?"} why=${String(d?.why ?? "?").slice(0, 20)} prot=${d?.prot ?? "?"} ageS=${age}`);
     try { HairpinSystem.removeSharedDefaults?.(CARPLAY_DIAG_SUITE, SIRI_SCOUT_KEY); } catch {}
+  } catch {}
+}
+
+// BUILD 79 (2026-09-14) — WHICH XCODE BUILT THE RUNNING iOS BINARY, and which widget families are placed.
+// The iOS 27 full-page widget (`systemExtraLargePortrait`, targets/widget/index.swift) sits behind a compile
+// gate that closes SILENTLY on a pre-27 SDK, and build 79 iOS is built LOCALLY with Xcode 27 while every
+// earlier binary came off an EAS Xcode 26 image — so nothing else in the field says which toolchain a
+// crash, a CarPlay row or a missing widget came from. Read it as:
+//   ios-toolchain xcode=<DTXcodeBuild> sdk=<DTPlatformVersion> dtsdk=<DTSDKName> bmos=<BuildMachineOSBuild>
+//                 os=<Platform.Version> widgets=<kind>:<WidgetFamily.description>#<rawValue>,…
+// xcode=27… with dtsdk=iphoneos27… is the binary that CAN offer the XL page; a HairpinNextEvent entry whose
+// family/raw differs from the systemSmall/systemMedium ones is the XL page actually placed. widgets=none =
+// nothing placed · err = WidgetKit refused · timeout = no callback in 4 s · ? = the call is missing.
+// Inert on build 78 and older (buildStamps is absent there, so no row). One row per change of the whole
+// line, otherwise at most one per 24 h — every row is a Supabase INSERT. Sorted before the cap because
+// getCurrentConfigurations promises no order (review 2026-09-14), and an unsorted list would change the
+// signature and re-INSERT. Runs on every JS boot, background relaunches (CarPlay, CLVisit) included; the
+// dedupe keeps that to a cheap AsyncStorage read.
+const IOS_TOOLCHAIN_SIG_KEY = "convoy.iosToolchainSig.v1";
+async function reportIosToolchainAndWidgets(): Promise<void> {
+  if (Platform.OS !== "ios") return;
+  try {
+    const { HairpinSystem } = require("../modules/hairpin-system");
+    if (!HairpinSystem || typeof HairpinSystem.buildStamps !== "function") return;
+    const s: Record<string, string> = HairpinSystem.buildStamps() ?? {};
+    let widgets = "?";
+    if (typeof HairpinSystem.widgetConfigurations === "function") {
+      try {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const list = await Promise.race([
+          HairpinSystem.widgetConfigurations() as Promise<{ kind: string; family: string; raw: number }[]>,
+          new Promise<"timeout">((resolve) => { timer = setTimeout(() => resolve("timeout"), 4000); }),
+        ]);
+        if (timer) clearTimeout(timer);
+        widgets = list === "timeout"
+          ? "timeout"
+          : (list ?? []).map((w) => `${w.kind}:${w.family}#${w.raw}`).sort().slice(0, 8).join(",") || "none";
+      } catch { widgets = "err"; }
+    }
+    const msg = `ios-toolchain xcode=${s.DTXcodeBuild ?? "?"} sdk=${s.DTPlatformVersion ?? "?"} dtsdk=${s.DTSDKName ?? "?"} bmos=${s.BuildMachineOSBuild ?? "?"} os=${String(Platform.Version)} widgets=${widgets}`;
+    const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+    const prev = await AsyncStorage.getItem(IOS_TOOLCHAIN_SIG_KEY);
+    let p: any = null;
+    try { p = prev ? JSON.parse(prev) : null; } catch {}
+    const now = Date.now();
+    if (p && p.msg === msg && now - Number(p.at) < 24 * 3600 * 1000) return;
+    logEventReliable(msg);
+    await AsyncStorage.setItem(IOS_TOOLCHAIN_SIG_KEY, JSON.stringify({ msg, at: now }));
   } catch {}
 }
 

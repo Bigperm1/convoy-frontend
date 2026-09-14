@@ -30,7 +30,8 @@
 //  * With the phone scene foregroundActive the pump additionally waits a full 1 s of silence
 //    (review P4: a >100 ms JS stall must not double a frame). `drvFg` in the receipt counts any
 //    pass made anyway; it must stay ~0 in the field.
-//  * Never more than ONE queued pass (gDrivePending), never faster than the car screen's vsync.
+//  * Never more than ONE pass that ACTS (gDrivePending + gDriveGen: a re-queue after the 1 s escape supersedes the
+//    older block), never two within kMinSyntheticSpacingS, never faster than the car screen's vsync.
 //  * RN link paused (nothing scheduled, or RCTTiming in background mode — a backgrounded RCTTiming
 //    is always _paused, RCTTiming.mm:180-189 + :207-233, and RCTDisplayLink.m:127 skips paused
 //    observers): the pump is inert, so the background NSTimer rAF runaway path is untouched.
@@ -79,6 +80,10 @@ static std::atomic<bool> gInstalled{false};
 static std::atomic<bool> gMainPaused{true};
 static std::atomic<double> gLastMainTick{0};
 static std::atomic<bool> gDrivePending{false};
+static std::atomic<uint64_t> gDriveGen{0};         // bumped per queued pass; only the newest block acts (Codex 2026-09-14)
+static std::atomic<uint64_t> gDriveStale{0};       // superseded blocks that returned without driving (receipt)
+static std::atomic<double>   gLastSyntheticAt{0};  // CACurrentMediaTime of the last synthetic pass
+static const CFTimeInterval  kMinSyntheticSpacingS = 0.012;   // < one 60-120 Hz car frame
 static std::atomic<double> gDrivePendingAt{0};
 static std::atomic<bool> gDebugStarve{false};
 static std::atomic<bool> gDebugBindMain{false};
@@ -274,11 +279,24 @@ static void HPDrive(CFTimeInterval now) {   // main thread
   if (gJsRunLoop != NULL && gRctLinkPtr != NULL) rl = (CFRunLoopRef)CFRetain(gJsRunLoop);
   os_unfair_lock_unlock(&gLock);
   if (rl == NULL) return;
+  // GENERATION (2026-09-14, Codex review [medium]): the 1 s escape above re-queues while an earlier block may still be
+  // sitting on a live-but-busy JS run loop. Without a generation every queued block would run back-to-back when JS
+  // recovers — each passes the freshness check (synthetic passes never move gLastMainTick) and each drives RN's frame
+  // observers, i.e. a burst of timer + rAF passes exactly while recovering from a stall. Only the NEWEST block may act;
+  // older ones return without touching gDrivePending, which the newest clears.
+  const uint64_t gen = gDriveGen.fetch_add(1, std::memory_order_relaxed) + 1;
   gDrivePendingAt.store(now, std::memory_order_relaxed);
   gDrivePending.store(true, std::memory_order_relaxed);
   CFRunLoopPerformBlock(rl, kCFRunLoopCommonModes, ^{
     @autoreleasepool {
+      if (gen != gDriveGen.load(std::memory_order_relaxed)) {
+        gDriveStale.fetch_add(1, std::memory_order_relaxed);
+        return;                                  // superseded by a newer queued pass
+      }
       gDrivePending.store(false, std::memory_order_relaxed);
+      // SPACING: never two synthetic passes inside one car frame, whatever queued them.
+      CFTimeInterval t = CACurrentMediaTime();
+      if (t - gLastSyntheticAt.load(std::memory_order_relaxed) < kMinSyntheticSpacingS) return;
       id link = gRctLink;                        // weak LOAD, outside the lock
       if (link == nil) return;
       bool same;
@@ -290,6 +308,7 @@ static void HPDrive(CFTimeInterval now) {   // main thread
       if (CACurrentMediaTime() - gLastMainTick.load(std::memory_order_relaxed) < kStarveAfterS) return;
       gDrives.fetch_add(1, std::memory_order_relaxed);
       if (gPhoneScene.load(std::memory_order_relaxed) == 0) gDrivesPhoneFg.fetch_add(1, std::memory_order_relaxed);
+      gLastSyntheticAt.store(CACurrentMediaTime(), std::memory_order_relaxed);
       ((void (*)(id, SEL, id))objc_msgSend)(link, gJsThreadUpdateSel, nil);
     }
   });
@@ -484,7 +503,7 @@ static void HPObserveScenes(void) {
     @"starveEp" : @(gStarveEp.load()), @"starveMaxMs" : @(gStarveMaxMs.load()),
     @"starvingMs" : @(start > 0 ? (now - start) * 1000.0 : 0.0),
     @"sinceMainMs" : @((now - gLastMainTick.load()) * 1000.0),
-    @"mainPaused" : @(gMainPaused.load()), @"stuck" : @(gStuck.load()),
+    @"mainPaused" : @(gMainPaused.load()), @"stuck" : @(gStuck.load()), @"stale" : @(gDriveStale.load()),
     @"appState" : @(gAppState.load()), @"carScene" : @(gCarSceneState.load()),
     @"protectedData" : @(gProtectedData.load()),
     @"timingBg" : @(tbg), @"timingPaused" : @(tp), @"phoneScene" : @(gPhoneScene.load()),

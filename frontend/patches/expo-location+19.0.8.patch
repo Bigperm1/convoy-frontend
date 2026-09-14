@@ -255,7 +255,7 @@ index 548b20c..3a342ed 100644
      @"timestamp": @([location.timestamp timeIntervalSince1970] * 1000),
      };
 diff --git a/node_modules/expo-location/ios/LocationModule.swift b/node_modules/expo-location/ios/LocationModule.swift
-index fe49dd8..1c00e1c 100644
+index fe49dd8..eddb912 100644
 --- a/node_modules/expo-location/ios/LocationModule.swift
 +++ b/node_modules/expo-location/ios/LocationModule.swift
 @@ -2,13 +2,20 @@
@@ -279,16 +279,36 @@ index fe49dd8..1c00e1c 100644
  
    private var taskManager: EXTaskManagerInterface {
      get throws {
-@@ -22,7 +29,7 @@ public final class LocationModule: Module {
+@@ -22,7 +29,27 @@ public final class LocationModule: Module {
    public func definition() -> ModuleDefinition {
      Name("ExpoLocation")
  
 -    Events(EVENT_LOCATION_CHANGED, EVENT_HEADING_CHANGED, EVENT_LOCATION_ERROR)
 +    Events(EVENT_LOCATION_CHANGED, EVENT_HEADING_CHANGED, EVENT_LOCATION_ERROR, EVENT_BG_SESSION_DIAGNOSTIC)
++
++    // HAIRPIN PATCH (build 79, 2026-09-14, Codex review [high]): tear the background activity session down when THIS
++    // module is destroyed — an in-process JS reload (the red pill's reloadAsync, ErrorRecovery) destroys the module
++    // but nothing called stop, and the iOS 18 diagnostics Task's `guard let session` promotes its weak capture to a
++    // strong one for the life of the `for try await` loop, so the old session and Task outlived their JS owner with no
++    // way for the new module to stop them — a background-location activity leak that survives even a phone-only drive.
++    // Same teardown as stopBackgroundActivitySessionAsync, on the main queue where the session was created.
++    OnDestroy {
++      let task = self.backgroundSessionDiagnosticsTask
++      let held = self.backgroundActivitySession
++      self.backgroundSessionDiagnosticsTask = nil
++      self.backgroundActivitySession = nil
++      let teardown = {
++        task?.cancel()
++        if #available(iOS 17.0, *), let session = held as? CLBackgroundActivitySession {
++          session.invalidate()
++        }
++      }
++      if Thread.isMainThread { teardown() } else { DispatchQueue.main.async(execute: teardown) }
++    }
  
      OnCreate {
        let permissionsManager = self.appContext?.permissions
-@@ -160,6 +167,73 @@ public final class LocationModule: Module {
+@@ -160,6 +187,73 @@ public final class LocationModule: Module {
        return CLLocationManager.locationServicesEnabled()
      }
  
@@ -362,7 +382,7 @@ index fe49dd8..1c00e1c 100644
      // Background location
  
      AsyncFunction("startLocationUpdatesAsync") { (taskName: String, options: [String: Any]) in
-@@ -220,4 +294,20 @@ public final class LocationModule: Module {
+@@ -220,4 +314,20 @@ public final class LocationModule: Module {
        return try taskManager.task(withName: taskName, hasConsumerOf: EXGeofencingTaskConsumer.self)
      }
    }

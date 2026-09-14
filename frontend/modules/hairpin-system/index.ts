@@ -38,6 +38,11 @@ type HairpinSystemModule = {
   // display and stops when the screen powers off.
   startCarFrames(): boolean;
   stopCarFrames(): void;
+  // Build 79+: counters from the native RN timer pump (ios/HairpinTimerPump.mm) that keeps
+  // setTimeout/setInterval/requestAnimationFrame alive on the CarPlay screen while the phone
+  // display is off. Never null on a binary that has it (a missing pump class reports
+  // installed:false). Absent on older binaries — guard with typeof before calling.
+  timerPumpStats?(): Record<string, unknown> | null;
   // CPWindow.mapButtonSafeAreaLayoutGuide as insets — the region NOT covered by
   // CarPlay's own map buttons, per head unit. null when there is no car window, in
   // which case callers keep their measured fallbacks.

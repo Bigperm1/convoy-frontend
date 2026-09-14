@@ -419,6 +419,33 @@ RULES = [
         "list expo-location while that patch touches android/. The same trap applies to ANY future Android patch of an "
         "expo-* package: add it to that list and confirm `./gradlew projects` shows `Project ':<name>'`.",
     ),
+    (
+        "rn-timer-pump-hooks-need-rn-0-81-5",
+        ["package.json"],
+        r'"react-native":\s*"(?!0\.81\.5")',
+        "2026-09-14 build 79: modules/hairpin-system/ios/HairpinTimerPump.mm hooks RCTDisplayLink by NAME "
+        "(addToRunLoop:, _jsThreadUpdate:, updateJSDisplayLinkState, invalidate, ivars _jsDisplayLink + "
+        "_frameUpdateObservers) and reads RCTTiming's _inBackground/_paused ivars, all read from RN 0.81.5 "
+        "React/Base/RCTDisplayLink.m, React/CoreModules/RCTTiming.mm and the prebuilt React.xcframework symbols. A wrong "
+        "SHAPE refuses to install (timer-pump inst=0 why=shape-*), but a SEMANTIC change (timers no longer driven by "
+        "RCTDisplayLink) would pass silently and bring back the locked-CarPlay freeze (2,263 timer-starve surf=car rows, "
+        "all raf=0, 50 iOS instances in 21 days). Before bumping react-native: re-read RCTDisplayLink.m, RCTTiming.mm, "
+        "ObjCTimerRegistry.mm and RCTInstance.mm _start, re-run the -HairpinTimerPumpDebugStarve sim bench, then "
+        "move this pin.",
+    ),
+    (
+        "react-native-patch-ignored-by-prebuilt-core",
+        ["patches/react-native+*.patch"],
+        r"(?s)\A.",
+        "2026-09-14: react-native core is consumed PREBUILT on both platforms — iOS links React.xcframework "
+        "(ios/Podfile:17-18 sets RCT_USE_PREBUILT_RNCORE unless expo-build-properties ios.buildReactNativeFromSource is "
+        "'true'; ios/Pods/React-Core-prebuilt exists) and Android links react-android (android/settings.gradle "
+        "includeBuilds only the RN and expo gradle plugins, never ReactAndroid). A patch-package patch of node_modules/react-native "
+        "native sources is silently IGNORED by those binaries — Iternio's react-native-auto-play README warns exactly "
+        "this for its RCTTiming patch. The locked-CarPlay timer freeze is fixed at runtime by "
+        "modules/hairpin-system/ios/HairpinTimerPump.mm instead. A react-native patch needs a from-source build flipped "
+        "deliberately (slower paid builds) — decide that explicitly, then exempt it here.",
+    ),
 ]
 
 def blank_comments(text: str) -> str:

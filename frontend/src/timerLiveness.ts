@@ -183,6 +183,79 @@ export function maybeLogTimerStarve(surf: 'phone' | 'car', now: number = Date.no
   return dt;
 }
 
+// ── NATIVE TIMER PUMP RECEIPT (build 79, iOS, 2026-09-14) ────────────────────────────
+// modules/hairpin-system/ios/HairpinTimerPump.mm services RN's timer queue from the CarPlay
+// screen's display link while RN's own link (bound to the built-in display, RN 0.81.5
+// RCTDisplayLink.m:32) is silent — the mechanism behind every `timer-starve surf=car` row
+// (2,263 rows dt>60 s, 50 iOS instances, raf=0 on all, 21 d to 09-13).
+//   inst/why   hooks installed (why = the RN selector/ivar that did not match, or
+//              no-class-in-binary / no-stats; '-' when ok)
+//   car/fps    CarPlay-screen link live, at its max refresh; dbg = bench launch-arg bits
+//              (1 starve, 2 bind-main, 4 no-pump); onMain = the pump's link is on the PHONE
+//              screen (must be 0 unless dbg>0)
+//   main/drop  RN link ticks since last row (0 while the display is off) / bench-dropped ticks
+//   carT/drv   car ticks / JS timer passes the pump ran (drv≈carT display off, ≈0 display on)
+//   fresh      car ticks skipped because RN's link was live (the display-on heat check)
+//   paused     car ticks skipped because RN had nothing scheduled
+//   ep/maxMs/nowMs  takeover episodes / longest / current;  mp = RN link paused now
+//   stuck      a queued pass not run within 1 s (JS thread busy or its run loop gone) — informational
+//   as/cs/pd   UIApplication state (0 active 1 inactive 2 background) / car scene
+//              activationState / protected data (0 = locked WITH a passcode; a phone with no
+//              passcode never reads 0); -1 = unknown
+//   tbg/tp     RCTTiming _inBackground / _paused read from the ivars (-1 unreadable) — settles
+//              whether a silent minute was an armed link (tbg=0 tp=0) or RCTTiming's own state
+//   ps         most-foreground phone scene (0 foregroundActive 1 foregroundInactive 2 background)
+//   drvFg/skipFg  pump passes made while ps=0 (must stay ≈0) / car ticks held back by the 1 s
+//              phone-foreground rule
+// FIX path only (native location delivery is not a JS timer), ≤1 row/60 s, only while a car
+// link is live — plus one row per JS load if the hooks refused or the class is missing.
+type PumpNumKey = 'fps' | 'dbg' | 'mainTicks' | 'mainDropped' | 'carTicks' | 'drives' | 'skipFresh'
+  | 'skipPaused' | 'starveEp' | 'starveMaxMs' | 'starvingMs' | 'sinceMainMs' | 'stuck' | 'appState'
+  | 'carScene' | 'protectedData' | 'timingBg' | 'timingPaused' | 'phoneScene' | 'drivesPhoneFg' | 'skipPhoneFg';
+export type TimerPumpStats = Partial<Record<PumpNumKey, number>> & {
+  installed?: boolean; why?: string; bound?: boolean; car?: boolean; mainPaused?: boolean; onMain?: boolean;
+};
+
+function lazyHairpinSystem(): any {
+  try { return require('../modules/hairpin-system').HairpinSystem; } catch { return null; }
+}
+function lazyAppState(): string {
+  try { return String(require('react-native').AppState.currentState ?? '?'); } catch { return '?'; }
+}
+
+export const TIMER_PUMP_LOG_EVERY_MS = 60000;
+let lastPumpLogAt = 0;
+let lastPump: TimerPumpStats | null = null;
+
+export function buildTimerPumpLine(cur: TimerPumpStats, prev: TimerPumpStats | null, app: string): string {
+  const num = (x: unknown): number => (typeof x === 'number' && Number.isFinite(x) ? x : 0);
+  const d = (k: PumpNumKey): number => Math.max(0, Math.round(num(cur[k]) - num(prev ? prev[k] : 0)));
+  const v = (k: PumpNumKey): number => Math.round(num(cur[k]));
+  const s = (k: PumpNumKey): number => (typeof cur[k] === 'number' && Number.isFinite(cur[k]) ? Math.round(cur[k] as number) : -1);
+  return `timer-pump inst=${cur.installed ? 1 : 0} why=${cur.why ? cur.why : '-'} bound=${cur.bound ? 1 : 0} ` +
+    `car=${cur.car ? 1 : 0} fps=${v('fps')} dbg=${v('dbg')} ` +
+    `main=${d('mainTicks')} drop=${d('mainDropped')} carT=${d('carTicks')} drv=${d('drives')} ` +
+    `fresh=${d('skipFresh')} paused=${d('skipPaused')} ep=${d('starveEp')} maxMs=${v('starveMaxMs')} ` +
+    `nowMs=${v('starvingMs')} sinceMain=${v('sinceMainMs')} mp=${cur.mainPaused ? 1 : 0} stuck=${d('stuck')} ` +
+    `as=${s('appState')} cs=${s('carScene')} pd=${s('protectedData')} tbg=${s('timingBg')} tp=${s('timingPaused')} ` +
+    `ps=${s('phoneScene')} drvFg=${d('drivesPhoneFg')} skipFg=${d('skipPhoneFg')} onMain=${cur.onMain ? 1 : 0} app=${app} first=${prev ? 0 : 1}`;
+}
+
+/** FIX path only (src/carplay/carStore.ts setCarSelfPosition). No-op on Android, on web, under
+ * Node, and on any binary without the native pump Function (build ≤78). */
+export function maybeLogTimerPump(now: number = Date.now()): void {
+  if (now - lastPumpLogAt < TIMER_PUMP_LOG_EVERY_MS) return;
+  lastPumpLogAt = now;   // stamp first: a throwing native call is not retried on every fix
+  const HS = lazyHairpinSystem();
+  if (!HS || typeof HS.timerPumpStats !== 'function') return;
+  let st: TimerPumpStats | null = null;
+  try { st = HS.timerPumpStats() as TimerPumpStats | null; } catch { return; }
+  if (!st) return;
+  const refused = !st.installed && lastPump == null;
+  if (st.car || refused) lazyLogEventReliable(buildTimerPumpLine(st, lastPump, lazyAppState()));
+  lastPump = st;
+}
+
 // ── START THE CLOCK ──────────────────────────────────────────────────────────────────
 let _timer: ReturnType<typeof setInterval> | null = null;
 function start(): void {

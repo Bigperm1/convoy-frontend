@@ -19,7 +19,7 @@ import type { CarStatusCode } from './carStatusRule';
 // bgtask), so it is the right place to log the bounded `timer-starve` receipt. The
 // actual marker/camera bypass when timers are dead lives in SelfCarModel
 // (src/ConvoyMapbox.tsx), which reads timersStarvedMs() itself off the same fix.
-import { maybeLogTimerStarve } from '../timerLiveness';
+import { maybeLogTimerStarve, maybeLogTimerPump } from '../timerLiveness';
 
 // Peer entry for the car surface. `id`+`handle` feed the Comms list (the original
 // shape); the optional position/status fields (added for CarPlay-standalone Wave 1)
@@ -371,6 +371,9 @@ export function setCarSelfPosition(
   // which feed currently owns the marker. See src/timerLiveness.ts for why this is
   // keyed on a plain 1s setInterval, not on rAF.
   maybeLogTimerStarve('car', now);
+  // Build 79 native timer-pump receipt (2026-09-14; ≤1/60 s, only while a CarPlay-screen link is
+  // live). Same FIX path on purpose: it must still report if the pump failed and timers are frozen.
+  maybeLogTimerPump(now);
   const rank = SELF_SOURCE_RANK[source];
   const cur = lastSelfPos;
   // dt < 0 = the wall clock stepped backward (NTP / manual set); treat as stale so a clock

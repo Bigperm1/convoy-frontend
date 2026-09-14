@@ -108,6 +108,26 @@ public class HairpinSystemModule: Module {
       }
     }
 
+    // ── RN TIMER PUMP RECEIPT (build 79, 2026-09-14) ────────────────────────────
+    // The pump is ios/HairpinTimerPump.mm: it installs itself at +load and keeps RN's
+    // setTimeout/setInterval/requestAnimationFrame alive on the CarPlay screen while the phone
+    // display is off (RN's own link is bound to the built-in display — see the frame-pump note
+    // above). Nothing to start from JS; this only reads its counters, looked up by NAME so Swift
+    // needs no ObjC header in this pod.
+    // NEVER nil on a binary that has this Function (review P1): a build-79 binary whose pump was
+    // not linked or was dead-stripped must say so in crash_reports, not read exactly like build 78.
+    // src/timerLiveness.ts logs one refusal row per JS load when `installed` is false.
+    Function("timerPumpStats") { () -> [String: Any]? in
+      guard let cls = NSClassFromString("HairpinTimerPump") as? NSObject.Type else {
+        return ["installed": false, "why": "no-class-in-binary", "car": false]
+      }
+      let sel = NSSelectorFromString("stats")
+      guard cls.responds(to: sel), let d = cls.perform(sel)?.takeUnretainedValue() as? [String: Any] else {
+        return ["installed": false, "why": "no-stats", "car": false]
+      }
+      return d
+    }
+
     // ── REAL MAP-BUTTON SAFE AREA (build 70) ──────────────────────────────────
     // Every inset on the car HUD was hand-measured off ONE 800x480 head-unit photo.
     // iOS actually reports this: CPWindow.mapButtonSafeAreaLayoutGuide is the region

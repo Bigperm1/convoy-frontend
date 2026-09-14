@@ -43,6 +43,7 @@
 import {
   timersStarvedMs, noteTimerTick, noteRafFrame, rafFramesInLast5s, maybeLogTimerStarve,
   __setDebugForceForTest, effectiveDebugForce, buildStarveLogLine, FORCED_STARVE_DT_MS,
+  buildTimerPumpLine, maybeLogTimerPump, type TimerPumpStats,
 } from "../../src/timerLiveness.ts";
 import {
   holdReason, offRouteTick, rerouteInflightExpired, ROUTE_FETCH_TIMEOUT_MS,
@@ -233,6 +234,41 @@ check(b8y.trip === false && b8y.held === "inflight",
 const b8x = tickAt(armedState(T0), ROUTE_FETCH_TIMEOUT_MS + 1, 306_929);
 check(b8x.trip === true && b8x.held === null,
   `B8b: missed turn with an EXPIRED request in flight must trip (a stuck request never wedges the gate), got trip=${b8x.trip} held=${b8x.held}`);
+
+// ══════════════════════════════════════════════════════════════════════════════════
+// PART C — build 79 native timer-pump receipt (src/timerLiveness.ts buildTimerPumpLine).
+// The pump itself is native (modules/hairpin-system/ios/HairpinTimerPump.mm) and is benched on
+// the simulator, not here; this gates the ROW the field verification queries parse.
+// ══════════════════════════════════════════════════════════════════════════════════
+const pumpA: TimerPumpStats = { installed: true, why: '', bound: true, car: true, fps: 60, dbg: 0, mainTicks: 1000,
+  mainDropped: 0, carTicks: 500, drives: 0, skipFresh: 500, skipPaused: 0, starveEp: 0, starveMaxMs: 0, starvingMs: 0,
+  sinceMainMs: 8, mainPaused: false, stuck: 0, appState: 0, carScene: 0, protectedData: 1,
+  timingBg: 0, timingPaused: 0, phoneScene: 0, drivesPhoneFg: 0, skipPhoneFg: 0, onMain: false };
+const pumpB: TimerPumpStats = { ...pumpA, carTicks: 4100, drives: 3590, skipFresh: 510, starveEp: 1,
+  starvingMs: 59800, sinceMainMs: 59900, protectedData: 0, phoneScene: 2 };
+const c1 = buildTimerPumpLine(pumpB, pumpA, 'active');
+check(c1.includes(' main=0 ') && c1.includes(' carT=3600 ') && c1.includes(' drv=3590 ') && c1.includes(' fresh=10 '),
+  `C1: a locked minute reports deltas since the previous snapshot, got "${c1}"`);
+check(c1.includes(' pd=0 ') && c1.includes(' ep=1 ') && c1.endsWith(' first=0'), `C1b: lock/episode/first tags, got "${c1}"`);
+const c2 = buildTimerPumpLine(pumpA, null, '?');
+check(c2.includes(' main=1000 ') && c2.endsWith(' first=1'), `C2: the first row reports totals and says so, got "${c2}"`);
+const c3 = buildTimerPumpLine({ ...pumpA, drives: 5 }, { ...pumpA, drives: 9 }, 'active');
+check(c3.includes(' drv=0 '), `C3: a counter that went backwards clamps to 0, got "${c3}"`);
+const c4 = buildTimerPumpLine({ installed: false, why: 'shape-jsThreadUpdate' }, null, 'active');
+check(c4.startsWith('timer-pump inst=0 why=shape-jsThreadUpdate bound=0 ') && c4.includes(' as=-1 ') &&
+  !c4.includes('NaN') && !c4.includes('undefined'), `C4: a refusal row is well-formed, got "${c4}"`);
+let threwC5 = false;
+try { maybeLogTimerPump(T0 + 999_999); } catch { threwC5 = true; }
+check(!threwC5, `C5: maybeLogTimerPump must be a silent no-op without the native module (plain Node)`);
+check(c1.includes(' ps=') && c4.includes(' tbg=-1 ') && c4.includes(' onMain=0 '), `C6: new fields well-formed, got "${c4}"`);
+// C7 (review P1): the Swift Function's missing-class answer must produce a refusal row, never silence.
+const c7 = buildTimerPumpLine({ installed: false, why: 'no-class-in-binary', car: false }, null, 'active');
+check(c7.startsWith('timer-pump inst=0 why=no-class-in-binary ') && c7.includes(' car=0 ') && c7.endsWith(' first=1'),
+  `C7: a binary without the pump class reports it, got "${c7}"`);
+// C8: the locked minute carries the fields field verification Q1 keys on (C5 criteria in the review).
+check(c1.includes(' tbg=0 ') && c1.includes(' tp=0 ') && c1.includes(' ps=2 ') && c1.includes(' drvFg=0 ') &&
+  c1.includes(' onMain=0 ') && c1.includes(' mp=0 '), `C8: Q1 fields present on a locked minute, got "${c1}"`);
+console.log(`C timer-pump: locked="${c1}" | first="${c2}"`);
 
 console.log(
   `A liveness clock: fresh=0ms silent5s=${dtA2}ms debugForce=forced raf-in-window=${raf1} raf-after-silence=${rafAfterSilence} ` +

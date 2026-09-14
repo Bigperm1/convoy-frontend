@@ -38,6 +38,7 @@ import { type NavRoute, type LatLng, maneuverVerb, fmtDistanceM, fmtEtaSec } fro
 import { ManeuverArrow, maneuverDir, type ManeuverDir, ManeuverBox } from '../components/ManeuverArrow';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { fmtPitstop } from '../pitstop';
+import CarBootScreen from './CarBootScreen';
 import { MarqueeText } from '../components/MarqueeText';
 import { ListeningEdgeGlow } from '../components/ListeningEdgeGlow';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -649,31 +650,23 @@ export function CarSurface() {
   // Boot dashboard — shown ONLY until a GPS fix arrives (no fix = nothing to map).
   // There is deliberately no map-image branch here anymore: with a fix, the live 3D
   // CarMapView is the ONLY map surface (see liveAttempt retry above).
+  // The art lives in CarBootScreen — the new Hairpin wordmark over the splash's green road
+  // (Jeff, 2026-09-13: the old "C" pin logo that used to be drawn here is gone everywhere).
   const bootSurface = (
-    <View style={styles.center}>
-      {s.navigating ? (
-        <>
-          <Text style={styles.dist}>{s.distanceToTurn || '—'}</Text>
-          <Text style={styles.inst} numberOfLines={2}>{s.instruction || 'Continue'}</Text>
-          <Text style={styles.meta}>{metaLine}</Text>
-        </>
-      ) : (
-        <>
-          <Image source={require('../../assets/final_icon.png')} style={styles.carLogo} resizeMode="contain" />
-          <Text style={styles.brand}>HAIRPIN</Text>
-          <Text style={styles.sub}>{nearby ? `${nearby} ${nearby === 1 ? 'car' : 'cars'} nearby` : 'Drive together'}</Text>
-          {/* Self-diagnosing readout (no Mac/logs needed): shows whether the car surface
-              has a GPS fix, the actual lat/lng it reads, and which feed last wrote
-              (fgfeed / navtask#N / seed:ok / seed:err / seed:no-fg-perm / bgstart:err). */}
-          {getSettings().carplayDebug === true ? (
-            <Text style={styles.carDbgLine} numberOfLines={2}>
-              {`fix=${hasFix} lat=${typeof s.selfLat === 'number' ? s.selfLat.toFixed(4) : 'null'} `
-                + `lng=${typeof s.selfLng === 'number' ? s.selfLng.toFixed(4) : 'null'}\nfeed=${s.carDbg ?? '-'}`}
-            </Text>
-          ) : null}
-        </>
-      )}
-    </View>
+    <CarBootScreen
+      navigating={!!s.navigating}
+      distanceToTurn={s.distanceToTurn}
+      instruction={s.instruction}
+      metaLine={metaLine}
+      nearby={nearby}
+      // Self-diagnosing readout (no Mac/logs needed): whether the car surface has a GPS fix,
+      // the lat/lng it reads, and which feed last wrote (fgfeed / navtask#N / seed:ok /
+      // seed:err / seed:no-fg-perm / bgstart:err).
+      debugText={getSettings().carplayDebug === true
+        ? `fix=${hasFix} lat=${typeof s.selfLat === 'number' ? s.selfLat.toFixed(4) : 'null'} `
+          + `lng=${typeof s.selfLng === 'number' ? s.selfLng.toFixed(4) : 'null'}\nfeed=${s.carDbg ?? '-'}`
+        : null}
+    />
   );
 
   // Maneuver + meta overlays that float on top of the live CarMapView. No center
@@ -1986,17 +1979,9 @@ const styles = StyleSheet.create({
   // padding 0 → overlays sit at the true screen edges (the CarPlay side bar still
   // covers the far left, so left-side elements keep a ~68pt offset).
   surface: { flex: 1, backgroundColor: '#0B0B0C', alignItems: 'center', justifyContent: 'center', padding: 0 },
-  center: { alignItems: 'center', paddingHorizontal: 20 },
-  carLogo: { width: 104, height: 104, borderRadius: 22, marginBottom: 18 },
-  brand: { color: '#2DEC86', fontSize: 44, fontWeight: '900', letterSpacing: 4 },
-  sub: { color: '#9AA0A6', fontSize: 18, marginTop: 8 },
-  carDbgLine: { color: '#77FF88', fontSize: 11, fontWeight: '700', marginTop: 14, textAlign: 'center' },
   // TEMP: live-map feed indicator for the CarPlay background-location work (remove after verify).
   mapFeedDiag: { position: 'absolute', top: 6, right: 12, backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
   mapFeedDiagText: { color: '#77FF88', fontSize: 11, fontWeight: '700' },
-  dist: { color: '#F4F4F4', fontSize: 48, fontWeight: '800', letterSpacing: -1 },
-  inst: { color: '#F4F4F4', fontSize: 22, fontWeight: '600', marginTop: 4, textAlign: 'center' },
-  meta: { color: '#9AA0A6', fontSize: 18, marginTop: 10 },
   // Bottom-LEFT, tucked just right of the CarPlay side bar (~64pt). Smaller pill.
   speedDock: { position: 'absolute', left: CAR_DOCK_LEFT, bottom: SPEED_DOCK_BOTTOM, alignItems: 'flex-start' },
   // 58×48 — narrower (just fits "299") + the SAME height as the banner/weather/limit chips.

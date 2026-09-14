@@ -19,6 +19,18 @@ ROOT = Path(__file__).resolve().parent.parent
 # (id, glob, regex, why) — regex is searched per FILE (multiline).
 RULES = [
     (
+        "old-convoy-logo-is-back",
+        ["src/**/*.ts", "src/**/*.tsx", "app/**/*.ts", "app/**/*.tsx", "plugins/*.js"],
+        r"final_icon",
+        "2026-09-13 (Jeff, verbatim: 'why are we using that old screen alfred sent????? i specifically said to remove "
+        "everything in the files that used that old logo'): assets/final_icon.png — the pre-rebrand green 'C' pin with "
+        "the audio bars — survived in ONE place, the CarPlay/AA boot surface in src/carplay/ConvoyCarPlay.tsx, drawn "
+        "above the word HAIRPIN and 'Drive together'. Alfred photographed it on his PHONE on 09-13 when a CarPlay cold "
+        "boot laid the car surface out at 402x874. The file is DELETED and that screen is src/carplay/CarBootScreen.tsx "
+        "(the new wordmark over splash2.png's green road). Any code reference to final_icon means the old mark is "
+        "back. Comments are blanked before matching, so the history note in CarBootScreen.tsx does not trip it.",
+    ),
+    (
         "imminent-turn-callout-not-priority",
         ["src/nav.ts"],
         r"speak\(roundabout[^;\n]*`\$\{verb\}\.`\s*\)",

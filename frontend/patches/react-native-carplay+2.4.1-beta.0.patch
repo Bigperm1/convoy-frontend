@@ -1,8 +1,84 @@
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
-index ef6aa04..340ab79 100644
+index ef6aa04..f05f517 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlayModule.kt
-@@ -108,7 +108,13 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -70,18 +70,71 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+     return NAME
+   }
+ 
+-  fun setCarContext(carContext: CarContext, currentCarScreen: CarScreen) {
+-    parser = Parser(carContext, CarScreenContext("", eventEmitter!!, carScreens));
++  // ── CONVOY FIX (build 79, 2026-09-13): ASSIGN THE CAR CONTEXT FIRST ──────────────────────────
++  // Upstream's first line was `Parser(carContext, CarScreenContext("", eventEmitter!!, carScreens))`,
++  // evaluated BEFORE `this.carContext = carContext`. `eventEmitter` is created only in this module's
++  // LifecycleEventListener.onHostResume, and ReactContext only delivers onHostResume once the host
++  // is RESUMED — which never happens when Android Auto cold-starts JS with no phone Activity. So
++  // `eventEmitter!!` threw, CarPlaySession.invokeStartTask swallowed it with printStackTrace, and
++  // carContext stayed unset for the whole session: every createTemplate / setRootTemplate after that
++  // hit createScreen's "carContext not initialized" guard and the head unit sat on
++  // "RNCarPlay loading...".
++  //
++  // FIELD (09-13 audit, read-only SQL on crash_reports, Android, since 09-01): every AA instance
++  // whose `aa-crumb root-render` came <=5 ms after `js-mark` (Android Auto started JS itself) never
++  // reached `surface-render` — 14 of 14; every instance where the phone app was already up did —
++  // 30 of 30 (a JS render row, NOT proof of paint). Say Phin's five build-78 failures
++  // (09-11 16:45:50, 16:47:07; 09-12 15:40:33, 21:19:11, 21:20:17 PDT) each match an AACrashLog
++  // "before setCarContext" entry to the second, and all five were car-started.
++  // ⚠ The NPE at the old line 74 is HYPOTHESIS H1 — it has no logcat receipt yet. The `op=ctx` trace
++  // below is the receipt on 79: `ee=0` means upstream would have thrown right here.
++  //
++  // So: context, screen, screenManager and the root screen are assigned before anything that can
++  // throw, and the global emitter is created lazily instead of asserted. No `eventEmitter!!` here.
++  //
++  // `life` / `forced` come from CarPlaySession.invokeStartTask (the host lifecycle state it saw, and
++  // whether it forced onHostResume) so ONE `aa-native op=ctx` row carries the whole connect story.
++  fun setCarContext(
++    carContext: CarContext,
++    currentCarScreen: CarScreen,
++    life: String = "?",
++    forced: Boolean = false,
++  ) {
++    // Main-thread confined. Both call paths are main today (androidx's onCreateScreen and ReactHost's
++    // uiExecutor listener dispatch); re-post rather than touch ScreenManager off the main looper.
++    if (Looper.myLooper() != Looper.getMainLooper()) {
++      handler.post { setCarContext(carContext, currentCarScreen, life, forced) }
++      return
++    }
++    val hadEmitter = eventEmitter != null
+     this.carContext = carContext
+     this.currentCarScreen = currentCarScreen
+     screenManager = currentCarScreen.screenManager
+-    carScreens["root"] = this.currentCarScreen
++    carScreens["root"] = currentCarScreen
++    val emitter = eventEmitter ?: EventEmitter(reactContext).also { eventEmitter = it }
++    parser = Parser(carContext, CarScreenContext("", emitter, carScreens))
+     carContext.onBackPressedDispatcher.addCallback(object : OnBackPressedCallback(true) {
+       override fun handleOnBackPressed() {
+         eventEmitter?.backButtonPressed(screenManager?.top?.marker)
+       }
+     })
+-    eventEmitter?.didConnect()
++    trace("op=ctx life=$life forced=${if (forced) 1 else 0} ee=${if (hadEmitter) 1 else 0}")
++    emitter.didConnect()
++  }
++
++  // CONVOY (build 79, 2026-09-13): native receipts for the Android Auto connect path. Delivered to JS
++  // as the `aaNativeTrace` event and logged there as bounded `aa-native …` rows
++  // (src/carplay/registerAndroidAuto.ts). Deliberately NOT written to AACrashLog: that file is
++  // harvested as `android-auto-failure` rows and deleted whole past 64 KB, so success notes would
++  // both pollute the failure signal and could erase a real failure record. A trace emitted before the
++  // JS listener exists is dropped — a MISSING row means UNKNOWN, never "didn't happen".
++  private fun trace(msg: String) {
++    Log.i(TAG, "aa-native $msg")
++    try {
++      (eventEmitter ?: EventEmitter(reactContext)).nativeTrace(msg)
++    } catch (ignored: Throwable) {
++      // a receipt must never become the failure
++    }
+   }
+ 
+   private fun parseTemplate(
+@@ -108,7 +161,13 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
        try {
          createScreen(templateId);
          callback?.invoke()
@@ -17,7 +93,7 @@ index ef6aa04..340ab79 100644
          val args = Arguments.createMap()
          args.putString("error", "Failed to parse template '$templateId': ${err.message}")
          callback?.invoke(args)
-@@ -120,13 +126,33 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -120,13 +179,33 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    fun updateTemplate(templateId: String, config: ReadableMap) {
      handler.post {
        carTemplates[templateId] = config;
@@ -55,7 +131,7 @@ index ef6aa04..340ab79 100644
          }
        }
      }
-@@ -136,11 +162,23 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -136,11 +215,39 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    fun setRootTemplate(templateId: String, animated: Boolean?) {
      Log.d(TAG, "set Root Template for $templateId")
      handler.post {
@@ -71,12 +147,28 @@ index ef6aa04..340ab79 100644
 +      // to run, nothing reaches crash_reports. That is Say Phin's black screen.
 +      try {
 +        val screen = getScreen(templateId)
++        val sm = screenManager
 +        if (screen != null) {
 +          currentCarScreen = screen
-+          screenManager?.popToRoot()
-+          screenManager?.push(screen)
++          // CONVOY FIX (build 79, 2026-09-13): IDEMPOTENT when this screen is already on top.
++          // popToRoot()+push() of the live top screen is NOT a no-op in androidx: popToRoot hands
++          // the popped screens to popInternal -> stop(screen, true), which DESTROYS them (javap of
++          // androidx.car.app:app:1.4.0-beta02, 2026-09-13), and CarScreen drops its VirtualRenderer on
++          // ON_DESTROY — so a repeated setRoot for the map would re-push a destroyed screen. The
++          // `stackSize > 0` check is required: getTop() is requireNonNull(peek) and throws on an
++          // empty stack. Never popTo()/popToTemplate here — see aa-poptotemplate-evicts-driver.
++          if (sm != null && sm.stackSize > 0 && sm.top === screen) {
++            trace("op=root-noop id=$templateId depth=${sm.stackSize}")
++          } else {
++            sm?.popToRoot()
++            sm?.push(screen)
++            // The receipt JS cannot give: `aa-stack op=root` is logged when JS CALLS setRootTemplate,
++            // before this posted body runs, so it looked healthy on sessions that never installed.
++            trace("op=root id=$templateId depth=${sm?.stackSize ?: -1}")
++          }
 +        } else {
 +          Log.w(TAG, "setRootTemplate($templateId): no screen available yet")
++          trace("op=root-miss id=$templateId ctx=${if (::carContext.isInitialized) 1 else 0}")
 +        }
 +      } catch (t: Throwable) {
 +        AACrashLog.record(reactContext, "CarPlayModule.setRootTemplate($templateId)", t)
@@ -84,7 +176,7 @@ index ef6aa04..340ab79 100644
        }
      }
    }
-@@ -148,10 +186,16 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -148,10 +255,16 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    @ReactMethod
    fun pushTemplate(templateId: String, animated: Boolean?) {
      handler.post {
@@ -105,7 +197,23 @@ index ef6aa04..340ab79 100644
        }
      }
    }
-@@ -271,6 +315,31 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+@@ -166,9 +279,13 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
+   @ReactMethod
+   fun popTemplate(animated: Boolean?) {
+     handler.post {
+-      screenManager!!.pop()
++      // CONVOY FIX (build 79, 2026-09-13): was `screenManager!!.pop()` — an UNCAUGHT main-thread NPE
++      // (process kill) for any pop that lands before setCarContext has handed over a ScreenManager.
++      // With no car context there is no stack to pop, so there is nothing to do.
++      val sm = screenManager ?: return@post
++      sm.pop()
+       removeScreen(currentCarScreen)
+-      currentCarScreen = screenManager!!.top as CarScreen
++      currentCarScreen = sm.top as CarScreen
+       currentCarScreen?.invalidate()
+     }
+   }
+@@ -271,6 +388,31 @@ class CarPlayModule internal constructor(private val reactContext: ReactApplicat
    }
  
    private fun createScreen(templateId: String): CarScreen? {
@@ -244,16 +352,17 @@ index 73aad53..4f187ab 100644
  }
 +
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
-index 2235853..14154c5 100644
+index 2235853..0d3d4e1 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/CarPlaySession.kt
-@@ -6,43 +6,87 @@ import android.content.Context
+@@ -6,43 +6,92 @@ import android.content.Context
  import android.content.Intent
  import android.content.IntentFilter
  import android.content.res.Configuration
 +import android.os.Build
  import android.os.Bundle
 +import android.os.Handler
++import android.os.Looper
  import android.util.Log
 -import androidx.car.app.CarContext.SCREEN_SERVICE
  import androidx.car.app.Screen
@@ -267,6 +376,7 @@ index 2235853..14154c5 100644
  import com.facebook.react.bridge.Arguments
  import com.facebook.react.bridge.ReactContext
  import com.facebook.react.bridge.WritableNativeMap
++import com.facebook.react.common.LifecycleState
  import com.facebook.react.modules.appregistry.AppRegistry
 -import com.facebook.react.modules.core.TimingModule
 -import com.facebook.react.modules.debug.DevSettingsModule
@@ -278,6 +388,9 @@ index 2235853..14154c5 100644
 +// Bridgeless (RN 0.81 / New Architecture): the session is fed the app-wide bridgeless
 +// ReactHost instead of the (now non-existent) ReactInstanceManager.
 +class CarPlaySession(private val reactHost: ReactHost) : Session(), DefaultLifecycleObserver {
++  // CONVOY FIX (build 79, 2026-09-13): true while THIS session holds a synthetic ReactContext resume it
++  // must release on disconnect (see invokeStartTask). Main-thread confined.
++  private var syntheticResume = false
    private lateinit var screen: CarScreen
  
    @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -345,7 +458,7 @@ index 2235853..14154c5 100644
  
      // Run JS
      runJsApplication()
-@@ -50,16 +94,20 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
+@@ -50,52 +99,166 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
    }
  
    private fun runJsApplication() {
@@ -373,9 +486,73 @@ index 2235853..14154c5 100644
      } else {
        invokeStartTask(reactContext)
      }
-@@ -67,25 +115,21 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
+   }
  
    private fun invokeStartTask(reactContext: ReactContext) {
++    // Main-thread confined: ReactHost.onHostResume is @ThreadConfined(UI). All three callers are main
++    // today (onCreateScreenInner, ReactHost's uiExecutor listener dispatch, the reload receiver).
++    if (Looper.myLooper() != Looper.getMainLooper()) {
++      Handler(Looper.getMainLooper()).post { invokeStartTask(reactContext) }
++      return
++    }
++
++    // ── CONVOY FIX (build 79, 2026-09-13): RESUME THE REACT HOST WHEN THE CAR STARTED IT ──────────
++    // When Android Auto cold-starts the process, no Activity has EVER resumed, so the bridgeless
++    // host is still BEFORE_CREATE and ReactContext.onHostResume never runs. Everything that waits for
++    // it stays dead for the whole car session:
++    //   - JavaTimerManager starts with isPaused = true and only onHostResume clears it (a running
++    //     headless JS task is the only other way timers fire), so every JS setTimeout / setInterval
++    //     is frozen;
++    //   - FabricUIManager resumes its mount-dispatch frame callback only in onHostResume, so views
++    //     committed from JS never mount on the car surface (a black map);
++    //   - CarPlayModule's own listener never creates its EventEmitter (the setCarContext NPE above).
++    // Upstream CarPlaySession called `timingModule!!.onHostResume()` for exactly this case; the
++    // bridgeless port deleted it (the `-      timingModule!!.onHostResume()` line in
++    // patches/react-native-carplay+2.4.1-beta.0.patch), and patches/android-auto-bridgeless.RECIPE.md's
++    // open risks already warned about the cold-boot path.
++    //
++    // FIELD RECEIPT (09-13 review, read-only SQL on crash_reports): c1k5p3-833078 (build 78, runtime
++    // 1.28.0, car-started — root-render 3 ms after js-mark) logged 88 `timer-starve … surf=car raf=0`
++    // rows with dt growing 3,878 ms -> 1,010,879 ms: the 1 s interval in src/timerLiveness.ts never
++    // ran for ~17 minutes. w4lmcy-052401, also car-started but with the phone screen up, fired its
++    // 2.5 s timer on time.
++    //
++    // GATED STRICTLY ON BEFORE_CREATE (never "!= RESUMED"): a phone-first-then-backgrounded host is
++    // BEFORE_RESUME and behaves exactly as build 78. Forcing a resume there would null
++    // ReactHostImpl.currentActivity (onHostResume(null) assigns it) under a real, paused Activity.
++    // Called BEFORE runApplication so the AndroidAuto root renders into a resumed host.
++    //
++    // ── RESUME THE REACT CONTEXT, NOT THE HOST (Codex review, 2026-09-13) ─────────────────────────
++    // The first cut called reactHost.onHostResume(null). That moves ReactLifecycleStateManager to
++    // RESUMED, and moveToOnHostResume RETURNS EARLY when already RESUMED — so when the driver later
++    // opened the phone app, MainActivity's resume never reached ReactContext.onHostResume(activity)
++    // and getCurrentActivity() stayed null for the phone session (PermissionsModule and every other
++    // Activity-needing module would reject). VERIFIED in RN 0.81 source:
++    // runtime/ReactLifecycleStateManager.kt moveToOnHostResume `if (state == RESUMED) return`.
++    // ReactContext.onHostResume(null) runs the SAME listeners — JavaTimerManager (registered via
++    // addLifecycleEventListener, modules/core/JavaTimerManager.kt:67/:82), FabricUIManager's mount
++    // dispatch, CarPlayModule's emitter — while the host's state manager stays BEFORE_CREATE. The
++    // phone Activity's first resume then takes the normal path: context.onHostResume(activity)
++    // attaches it, and the state becomes RESUMED. JavaTimerManager.onHostResume is idempotent
++    // (frameCallbackPosted guard), so that second resume is safe. Balanced on disconnect in onDestroy.
++    // ⚠ UNVERIFIED side effects (code read only, nothing run on a head unit):
++    //   - AppState flips to 'active' (AppStateModule is a lifecycle listener too) in a car session;
++    //   - whether @rnmapbox paints on the Presentation with no Activity at all — only the DHU answers.
++    val life = try { reactHost.lifecycleState } catch (t: Throwable) { null }
++    val forced = life == LifecycleState.BEFORE_CREATE
++    if (forced) {
++      try {
++        reactContext.onHostResume(null)
++        syntheticResume = true
++      } catch (t: Throwable) {
++        // Record and carry on: runApplication + setCarContext below must still run.
++        AACrashLog.record(
++          try { carContext.applicationContext } catch (e: Throwable) { null },
++          "CarPlaySession.invokeStartTask forced onHostResume", t,
++        )
++      }
++    }
++
      try {
 -      val catalystInstance = reactContext.catalystInstance
 +      // Bridgeless: resolve AppRegistry directly off the ReactContext (getJSModule is
@@ -402,13 +579,26 @@ index 2235853..14154c5 100644
 -      )
 -      val carModule = reactInstanceManager
 -        .currentReactContext?.getNativeModule(CarPlayModule::class.java)
-+      val carModule = reactContext.getNativeModule(CarPlayModule::class.java)
-       carModule!!.setCarContext(carContext, screen)
+-      carModule!!.setCarContext(carContext, screen)
 -      timingModule!!.onHostResume()
++      val carModule = reactContext.getNativeModule(CarPlayModule::class.java)
++      carModule!!.setCarContext(carContext, screen, life?.name ?: "?", forced)
  
-     } catch (e: Exception) {
-       e.printStackTrace()
-@@ -94,8 +138,30 @@ class CarPlaySession(private val reactInstanceManager: ReactInstanceManager) : S
+-    } catch (e: Exception) {
+-      e.printStackTrace()
++    } catch (t: Throwable) {
++      // CONVOY FIX (build 79, 2026-09-13): was `catch (e: Exception) { e.printStackTrace() }` —
++      // logcat only, so a throw here (runApplication, getNativeModule()!!, setCarContext) left the
++      // module with no car context for the whole session and NOTHING reached crash_reports; the
++      // only trace was the later "createScreen before setCarContext" entries it caused. Record the
++      // real stack to the Android Auto black box instead. Throwable, not Exception: an Error here
++      // is just as fatal to the session.
++      AACrashLog.record(
++        try { carContext.applicationContext } catch (e: Throwable) { null },
++        "CarPlaySession.invokeStartTask", t,
++      )
+     }
+   }
  
    override fun onDestroy(owner: LifecycleOwner) {
      Log.i(TAG, "onDestroy")
@@ -437,6 +627,25 @@ index 2235853..14154c5 100644
 +      reactHost.currentReactContext?.let { EventEmitter(it).didDisconnect() }
 +    } catch (e: Exception) {
 +      e.printStackTrace()
++    }
++    // CONVOY FIX (build 79, 2026-09-13): release the synthetic resume taken in invokeStartTask — but
++    // ONLY if no Activity took ownership meanwhile. If the phone app opened, its resume moved the host
++    // to RESUMED (or later BEFORE_RESUME) and the phone's own lifecycle owns pausing from here. If it
++    // never did, the host is still BEFORE_CREATE and nothing else will ever pause the context: JS timers
++    // and the choreographer would keep running for the life of the process with no UI (the battery
++    // class this onDestroy already fights — see above). Pausing returns to exactly the build-78 state.
++    if (syntheticResume) {
++      syntheticResume = false
++      try {
++        val stillUnowned = reactHost.lifecycleState == LifecycleState.BEFORE_CREATE
++        if (stillUnowned) reactHost.currentReactContext?.onHostPause()
++        Log.i(TAG, "aa-native op=release unowned=${if (stillUnowned) 1 else 0}")
++      } catch (t: Throwable) {
++        AACrashLog.record(
++          try { carContext.applicationContext } catch (e: Throwable) { null },
++          "CarPlaySession.onDestroy release synthetic resume", t,
++        )
++      }
 +    }
    }
  
@@ -521,10 +730,10 @@ index 01dbabd..bacb6f0 100644
        }
      }.build()
 diff --git a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/EventEmitter.kt b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/EventEmitter.kt
-index 586b354..076bcbe 100644
+index 586b354..a08537d 100644
 --- a/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/EventEmitter.kt
 +++ b/node_modules/react-native-carplay/android/src/main/java/org/birkir/carplay/utils/EventEmitter.kt
-@@ -68,6 +68,36 @@ class EventEmitter(
+@@ -68,6 +68,50 @@ class EventEmitter(
      const val AlertActionPressed = "alertActionPressed"
      const val SelectedPreviewForTrip = "selectedPreviewForTrip"
      const val StartedTrip = "startedTrip"
@@ -538,6 +747,20 @@ index 586b354..076bcbe 100644
 +    // didUpdateZoomGestureWithCenter -> onDidUpdateZoomGesture; reusing it means the
 +    // two car surfaces share one handler instead of drifting apart.
 +    const val DidUpdateZoomGestureWithCenter = "didUpdateZoomGestureWithCenter"
++
++    // CONVOY (build 79, 2026-09-13): native receipts for the Android Auto connect path.
++    const val AaNativeTrace = "aaNativeTrace"
++  }
++
++  /**
++   * CONVOY (build 79, 2026-09-13): a one-line native receipt (`op=ctx …`, `op=root …`) for the
++   * Android Auto connect path. JS logs it as an `aa-native <msg>` row from a module-scope listener in
++   * src/carplay/registerAndroidAuto.ts. On build 78 nothing emits this, so that listener is inert.
++   */
++  fun nativeTrace(msg: String) {
++    emit(AaNativeTrace, Arguments.createMap().apply {
++      putString("msg", msg)
++    })
 +  }
 +
 +  /**

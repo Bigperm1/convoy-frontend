@@ -70,7 +70,20 @@ class PhoneSceneDelegate: UIResponder, UIWindowSceneDelegate {
     guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
     let window = UIWindow(windowScene: windowScene)
     self.window = window
-    appDelegate.window = window
+    // BUILD 79 (2026-09-13): appDelegate.window is NO LONGER assigned here. ConvoyRNHost.mount
+    // assigns it: at once on a phone cold boot (its !started branch, unchanged), and on a
+    // CarPlay-first boot only AFTER expo-updates has created the host. Until then it must
+    // stay the car boot's detached bootWindow. expo-updates' deferred didStartWithSuccess
+    // installs the BOOT module (ConvoyCarSurface on a car-first boot) into
+    // keyWindow ?? appDelegate.window (ExpoUpdatesReactDelegateHandler.swift getWindow), and
+    // pointing appDelegate.window at this phone window — which also released bootWindow, its
+    // only strong owner — let that install land HERE: the phone drew the CarPlay boot
+    // dashboard ("HAIRPIN / Drive together") at 402x874 and "main" never mounted. Receipts:
+    // Alfred (GRSIENNA) instances lgsedp-435639 (09-12) and u4r2fy-477626 (09-13), both
+    // launch_kind=unknown, car-chrome surf=402x874, zero cam-mode surf=phone rows.
+    // ⚠ The ORDERING (phone scene connecting between the car boot and didStartWithSuccess)
+    // is a code-trace + telemetry-consistent HYPOTHESIS; the convoy.phone.hostWait.v1
+    // marker written in ConvoyRNHost.mount is the native receipt that settles it.
     // Boot the RN host if this scene is first (normal cold phone launch), else
     // mint the phone root on the already-running host (e.g. the app was woken by
     // a cold CarPlay connect, which booted the host before the phone opened).
@@ -174,6 +187,60 @@ enum ConvoyRNHost {
   static var phoneLastPaintAt: Date?
   static var phonePainted = false
 
+  // ── BUILD 79 (2026-09-13): the host-ready gate for SECOND surfaces ─────────────
+  // The CarPlay cold boot's detached window. appDelegate.window is its only strong owner
+  // (weak here on purpose — retiring it must never extend its life).
+  static weak var bootWindowRef: UIWindow?
+  // App Group marker written when the PHONE had to wait for expo-updates' host (the
+  // Alfred ordering). Read + cleared by crashBreadcrumb.reportCarPlayPhoneHostWait.
+  static let PHONE_HOSTWAIT_KEY = "convoy.phone.hostWait.v1"
+
+  // The same read the cold car poll has used since 2026-08-13 (a KVC read of the root view
+  // factory's private reactHost). Reading it NEVER creates the host.
+  static func isHostReady(_ factory: RCTReactNativeFactory) -> Bool {
+    return (factory.rootViewFactory.value(forKey: "reactHost") as AnyObject?) != nil
+  }
+
+  // Runs block on the main queue once expo-updates' host exists. NEVER creates the host.
+  // Synchronous when it already exists, so every normal launch keeps today's timing.
+  // Same cadence as the cold car poll: 0.05 s up to HOST_WAIT_MAX_TICKS, then 0.5 s,
+  // unbounded — a late surface is recoverable, a process pinned to embedded JS is not.
+  // The escaping block is LAST and no parameter has a default, so the call site cannot
+  // be mis-matched (review nit 2026-09-13).
+  static func whenHostReady(_ factory: RCTReactNativeFactory, tick: Int, _ block: @escaping () -> Void) {
+    if isHostReady(factory) { block(); return }
+    let interval = tick < HOST_WAIT_MAX_TICKS ? HOST_WAIT_INTERVAL : HOST_WAIT_SLOW_INTERVAL
+    DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
+      whenHostReady(factory, tick: tick + 1, block)
+    }
+  }
+
+  // expo-updates' one deferred install calls makeKeyAndVisible() on whatever getWindow()
+  // returns (ExpoUpdatesReactDelegateHandler.swift), which on a car-first boot is meant to
+  // be bootWindow. Nothing ever needs bootWindow on screen, so hide it in the first
+  // main-queue turn after the host exists. A belt: whether a sceneless window can
+  // actually be shown or keyed is header inference (UIWindow.h), not measured.
+  static func retireBootWindow() {
+    bootWindowRef?.isHidden = true
+  }
+
+  // A car surface minted AFTER a host wait (the cold poll with hostWaitTicks > 0, or the
+  // gated second-surface mint) has no commit window of its own: the 0.4 s commit tick was
+  // armed at CONNECT (CarSceneDelegate -> armCarRepaints) and ages out 40 s after it, and
+  // before the mint repaintCarSurface had no ConvoyCarRootViewController to commit. Past
+  // 40 s that is the "logo until foreground" class. So: an alive chain is EXTENDED (the
+  // tick re-reads carConnectAt every pass, so it is not duplicated), a dead one is re-armed.
+  // Only for the window CarPlay still holds — a window disconnected during the wait must
+  // not be re-pinned into carWindowRef, which would disarm recoverCarPlayIfNeeded's guard.
+  static func keepCarCommitAlive(for window: UIWindow) {
+    guard carWindowRef === window else { return }
+    if let t0 = carConnectAt, Date().timeIntervalSince(t0) < 40.0 {
+      carConnectAt = Date(); carRepaintBudget = 120; beginCarBgTask()
+    } else {
+      armCarRepaints(in: window)
+    }
+  }
+
   static func armCarRepaints(in window: UIWindow) {
     carWindowRef = window
     carConnectAt = Date()
@@ -273,7 +340,16 @@ enum ConvoyRNHost {
       // Usually a no-op: the phone VC lays out on makeKeyAndVisible within the first
       // tick → phonePainted true → we never re-mint. Re-mint only fires for a
       // genuinely stuck second surface, and stops the moment it paints (or at 34s).
-      guard phoneWindowRef != nil, !phonePainted, let t0 = phoneConnectAt,
+      //
+      // BUILD 79 belt (2026-09-13): a root WE did not install must never strand the phone.
+      // phonePainted latches on the first non-zero layout of ConvoyPhoneRootViewController,
+      // so a later install over it (Alfred's 09-12 / 09-13 stuck launches: ConvoyCarSurface
+      // put into the phone window, the "main" VC released and its surface stopped on
+      // dealloc) used to end this loop for good. remintHostedSurface builds a fresh
+      // ConvoyPhoneRootViewController when the root is not a ConvoyHostedVC. Safe against
+      // stranding: armPhoneRepaints only runs after the host-ready-gated mint in mount.
+      let hijacked = !(phoneWindowRef?.rootViewController is ConvoyPhoneRootViewController)
+      guard phoneWindowRef != nil, (!phonePainted || hijacked), let t0 = phoneConnectAt,
             Date().timeIntervalSince(t0) < 34.0 else { return }
       repaintPhoneSurface()
       schedulePhoneRepaintTick()
@@ -354,6 +430,13 @@ enum ConvoyRNHost {
       let bootWindow = UIWindow(frame: UIScreen.main.bounds)
       appDelegate.window = bootWindow
       factory.startReactNative(withModuleName: moduleName, in: bootWindow, launchOptions: nil)
+      // BUILD 79 (2026-09-13): remember bootWindow (weakly) so retireBootWindow() can hide it
+      // once expo-updates has installed the boot module. The three lines above are left
+      // EXACTLY as they were: they are the boot moment the 70x264 fix (ebb371c) and the
+      // stranding fix were field-validated on, and dropping startReactNative's
+      // makeKeyAndVisible was reviewed and rejected (it changes what getWindow() can return
+      // on every CarPlay-first launch, for no traced benefit).
+      ConvoyRNHost.bootWindowRef = bootWindow
       // ── WAIT FOR EXPO-UPDATES TO OWN BUNDLE SELECTION (2026-08-13) ──────────
       // The comment here used to say "the freshly started host" and dispatch on the
       // very next runloop turn. That premise was FALSE and it was silently shipping
@@ -398,6 +481,11 @@ enum ConvoyRNHost {
         carVC.view.frame = window.bounds
         carVC.view.setNeedsLayout()
         carVC.view.layoutIfNeeded()
+        // BUILD 79 (2026-09-13): minted after a real wait, the connect-armed commit tick may
+        // be about to age out (or already has, past the 90 s ceiling) — keep it alive.
+        if hostWaitTicks > 0 {
+          ConvoyRNHost.keepCarCommitAlive(for: window)
+        }
       }
       // Poll the MAIN queue for the host expo-updates is creating. KVO on a private
       // property would be sharper but also brittle across Expo versions; this is a
@@ -443,6 +531,10 @@ enum ConvoyRNHost {
         let hostReady = (factory.rootViewFactory.value(forKey: "reactHost") as AnyObject?) != nil
         if hostReady {
           mountCarSurface()
+          // BUILD 79 (2026-09-13): expo-updates created the host and installed the boot
+          // module into getWindow() in ONE main-queue block, so this tick runs after that
+          // install. Hide bootWindow now; nothing ever needs it on screen.
+          ConvoyRNHost.retireBootWindow()
           return
         }
         hostWaitTicks += 1
@@ -465,47 +557,132 @@ enum ConvoyRNHost {
       return
     }
 
-    // Host already running: mint another surface WITHOUT re-running the one-time
-    // handlers (superView), then attach it to this window ourselves.
-    let rootView: UIView
-    if let expoFactory = factory.rootViewFactory as? ExpoReactRootViewFactory {
-      rootView = expoFactory.superView(withModuleName: moduleName, initialProperties: nil, launchOptions: [:])
-    } else {
-      rootView = factory.rootViewFactory.view(withModuleName: moduleName, initialProperties: nil, launchOptions: nil)
-    }
+    // ── BUILD 79 (2026-09-13): NEVER superView BEFORE THE HOST EXISTS ──────────────
+    // started == true only means the OTHER scene began the boot. expo-updates creates the
+    // host LATER, in didStartWithSuccess, and in that SAME main-queue turn installs the
+    // boot module into keyWindow ?? appDelegate.window. This branch used to superView at
+    // once. On a CarPlay-first boot with the phone opened early that superView CREATED the
+    // host on the EMBEDDED bundle (launch_kind=unknown — the design's crash_reports query of
+    // 2026-09-13 counted 12 of 78 iOS instances at runtime 1.28.0, each with carplay-onconnect
+    // within 10 ms of its first row), and didStartWithSuccess then put ConvoyCarSurface into
+    // the PHONE window, releasing the VC hosting "main" (RCTSurfaceHostingView stops its
+    // surface on dealloc) — Alfred 09-12 / 09-13, the "HAIRPIN / Drive together" photo. ⚠ That ordering is a code trace
+    // plus consistent telemetry, a HYPOTHESIS until the hostWait marker below reports it.
+    //
+    // So: mint synchronously when the host already exists (every normal launch, identical
+    // to before), otherwise from a LATER main-queue turn — which necessarily runs after
+    // expo-updates' install, and so replaces it. The same gate closes the car side: a warm
+    // car connect or recoverCarPlayIfNeeded landing during a PHONE-first boot went through
+    // this same ungated superView and could strand the process on embedded JS too.
+    let hostWaitStart = Date()
+    var waitVC: UIViewController?
+    let mintSecondSurface: (Bool) -> Void = { [weak window] deferred in
+      guard let window = window else { return }
+      // Native receipt (review 2026-09-13): snapshot what expo-updates left behind BEFORE
+      // we retire bootWindow or repoint appDelegate.window — both can change the key
+      // window and bootWindowRef. Written just before the root is replaced, below.
+      var hostWaitDiag: [String: Any]?
+      if makeVisible && deferred {
+        func tri(_ b: Bool?) -> Int { return b.map { $0 ? 1 : 0 } ?? -1 }   // -1 = no such window
+        hostWaitDiag = [
+          "waitMs": Int(Date().timeIntervalSince(hostWaitStart) * 1000),
+          // Type alone cannot tell the waitVC from expo-updates' own install (Expo's
+          // createRootViewController is also a plain UIViewController), so identity too.
+          "root": window.rootViewController.map { String(describing: type(of: $0)) } ?? "nil",
+          "waitRoot": (waitVC != nil && window.rootViewController === waitVC) ? 1 : 0,
+          "phoneKey": window.isKeyWindow ? 1 : 0,
+          "bootKey": tri(ConvoyRNHost.bootWindowRef?.isKeyWindow),
+          "carKey": tri(ConvoyRNHost.carWindowRef?.isKeyWindow),
+          "ts": Date().timeIntervalSince1970 * 1000,
+        ]
+      }
+      if makeVisible {
+        // Retire FIRST: appDelegate.window may be bootWindow's only strong owner, and
+        // repointing it first would deallocate bootWindow before the hide (review
+        // correction 2, 2026-09-13).
+        ConvoyRNHost.retireBootWindow()
+        appDelegate.window = window
+      }
+      waitVC = nil
+      // Host running: mint another surface WITHOUT re-running the one-time
+      // handlers (superView), then attach it to this window ourselves.
+      let rootView: UIView
+      if let expoFactory = factory.rootViewFactory as? ExpoReactRootViewFactory {
+        rootView = expoFactory.superView(withModuleName: moduleName, initialProperties: nil, launchOptions: [:])
+      } else {
+        rootView = factory.rootViewFactory.view(withModuleName: moduleName, initialProperties: nil, launchOptions: nil)
+      }
 
-    // The phone window must be made key + visible (startReactNative would have
-    // done this in the boot branch). The CarPlay window must NOT — CarPlay owns
-    // its presentation; making it key can fight the template layer.
-    if makeVisible {
-      // PHONE window: this branch is reached ONLY when the host is already running
-      // and the phone opens as the SECOND surface — i.e. the cold-CarPlay-first case
-      // (normal phone cold boot returns from the startReactNative path above). Host
-      // "main" in ConvoyPhoneRootViewController, which re-asserts the surface's frame
-      // + layout on every pass; Expo's superView second-surface mount can otherwise
-      // stall at 0x0 on the launch logo. armPhoneRepaints then forces it to commit a
-      // frame (no-op once it paints). Do NOT touch the normal-phone-boot path above.
-      let viewController = ConvoyPhoneRootViewController(hosted: rootView)
-      window.rootViewController = viewController
-      viewController.view.frame = window.bounds
-      viewController.view.setNeedsLayout()
-      viewController.view.layoutIfNeeded()
-      window.makeKeyAndVisible()
-      armPhoneRepaints(in: window)
-    } else {
-      // CARPLAY window: host the RN surface in a controller that re-asserts the
-      // surface's frame + layout on every layout pass. CarPlay can hand us the window
-      // before it has a real size and doesn't reliably trigger the layout the
-      // bridgeless Fabric surface needs, so a one-time layout at connect can mount the
-      // dashboard at 0x0 and leave it blank. viewDidLayoutSubviews fires whenever the
-      // window finally gets its size, so the surface can't stay stuck at 0x0. Do NOT
-      // make this window key — CarPlay owns its presentation.
-      let viewController = ConvoyCarRootViewController(hosted: rootView)
-      window.rootViewController = viewController
-      viewController.view.frame = window.bounds
-      viewController.view.setNeedsLayout()
-      viewController.view.layoutIfNeeded()
+      // The phone window must be made key + visible (startReactNative would have
+      // done this in the boot branch). The CarPlay window must NOT — CarPlay owns
+      // its presentation; making it key can fight the template layer.
+      if makeVisible {
+        // PHONE window: this branch is reached ONLY when the host is already running
+        // and the phone opens as the SECOND surface — i.e. the cold-CarPlay-first case
+        // (normal phone cold boot returns from the startReactNative path above). Host
+        // "main" in ConvoyPhoneRootViewController, which re-asserts the surface's frame
+        // + layout on every pass; Expo's superView second-surface mount can otherwise
+        // stall at 0x0 on the launch logo. armPhoneRepaints then forces it to commit a
+        // frame (no-op once it paints). Do NOT touch the normal-phone-boot path above.
+        if let diag = hostWaitDiag,
+           let data = try? JSONSerialization.data(withJSONObject: diag),
+           let json = String(data: data, encoding: .utf8) {
+          UserDefaults(suiteName: ConvoyRNHost.DIAG_SUITE)?.set(json, forKey: ConvoyRNHost.PHONE_HOSTWAIT_KEY)
+          NSLog("[Convoy] phone waited for the host before minting main: %@", json)
+        }
+        let viewController = ConvoyPhoneRootViewController(hosted: rootView)
+        window.rootViewController = viewController
+        viewController.view.frame = window.bounds
+        viewController.view.setNeedsLayout()
+        viewController.view.layoutIfNeeded()
+        window.makeKeyAndVisible()
+        armPhoneRepaints(in: window)
+      } else {
+        // CARPLAY window: host the RN surface in a controller that re-asserts the
+        // surface's frame + layout on every layout pass. CarPlay can hand us the window
+        // before it has a real size and doesn't reliably trigger the layout the
+        // bridgeless Fabric surface needs, so a one-time layout at connect can mount the
+        // dashboard at 0x0 and leave it blank. viewDidLayoutSubviews fires whenever the
+        // window finally gets its size, so the surface can't stay stuck at 0x0. Do NOT
+        // make this window key — CarPlay owns its presentation.
+        let viewController = ConvoyCarRootViewController(hosted: rootView)
+        window.rootViewController = viewController
+        viewController.view.frame = window.bounds
+        viewController.view.setNeedsLayout()
+        viewController.view.layoutIfNeeded()
+        // BUILD 79: minted after a host wait, the connect-armed commit tick needs extending
+        // (review correction 3, 2026-09-13). Synchronous mints are unchanged.
+        if deferred {
+          ConvoyRNHost.keepCarCommitAlive(for: window)
+        }
+      }
     }
+    if ConvoyRNHost.isHostReady(factory) {
+      mintSecondSurface(false)   // the common case: identical to the pre-79 behaviour
+      return
+    }
+    if makeVisible {
+      // Double-"main" edge (review correction 5, 2026-09-13): on a PHONE-first boot
+      // (no bootWindow — the boot module is already "main") a phone scene reconnecting
+      // before the launcher resolves would leave expo-updates' getWindow() fallback on the
+      // stale window, and the gated mint below would add a SECOND "main" (two app trees =
+      // the presence double-join crash class). Point appDelegate.window here so expo-updates
+      // installs into the live window; the mint then replaces it, leaving one "main".
+      // On a CarPlay-first boot appDelegate.window must stay bootWindow (see
+      // PhoneSceneDelegate), so this is skipped whenever bootWindowRef is set.
+      if ConvoyRNHost.bootWindowRef == nil {
+        appDelegate.window = window
+      }
+      // Phone opened before expo-updates finished: black meanwhile (the same wait a phone
+      // cold boot already has). Visible WITHOUT makeKey, so getWindow() has no reason to
+      // choose this window on a CarPlay-first boot.
+      let vc = UIViewController()
+      vc.view.backgroundColor = .black
+      window.rootViewController = vc
+      window.isHidden = false
+      waitVC = vc
+    }
+    ConvoyRNHost.whenHostReady(factory, tick: 0) { mintSecondSurface(true) }
   }
 }
 

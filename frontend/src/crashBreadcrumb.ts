@@ -530,7 +530,7 @@ export function installCrashBreadcrumb() {
   // Delivery + harvest happen well after boot so this never competes with
   // startup work (and never runs at module scope — a crash reporter must not
   // itself be able to crash the boot).
-  setTimeout(() => { void deliverAndHarvest(); reportCarPlayHostCeiling(); }, DELIVER_DELAY_MS);
+  setTimeout(() => { void deliverAndHarvest(); reportCarPlayHostCeiling(); reportCarPlayPhoneHostWait(); }, DELIVER_DELAY_MS);
 }
 
 // BUILD 75 — the CarPlay host plugin (plugins/withConvoyCarPlay.js) writes a marker to
@@ -551,6 +551,32 @@ function reportCarPlayHostCeiling(): void {
     const age = d?.ts ? Math.round((Date.now() - Number(d.ts)) / 1000) : -1;
     logEventReliable(`carplay-host-ceiling ticks=${d?.ticks ?? "?"} hostReady=${d?.hostReady ? 1 : 0} scene=${d?.sceneState ?? "?"} ageS=${age}`);
     try { HairpinSystem.removeSharedDefaults?.(CARPLAY_DIAG_SUITE, CARPLAY_DIAG_KEY); } catch {}
+  } catch {}
+}
+
+// BUILD 79 (2026-09-13) — the native receipt for Alfred's "phone shows the CarPlay boot
+// screen" launches. plugins/withConvoyCarPlay.js (ConvoyRNHost.mount) now refuses to mint
+// the phone's "main" surface before expo-updates has created the host, and when the phone
+// DID have to wait it writes this marker immediately before replacing the phone window's
+// root. waitMs = how long the phone waited; root/waitRoot = what sat in the phone window at
+// that moment (waitRoot=0 means something other than our black wait VC — expo-updates'
+// install — had landed there); phoneKey/bootKey/carKey = isKeyWindow of each window
+// (-1 = no such window). That turns the code-trace HYPOTHESIS (the phone scene connects
+// between the CarPlay boot and didStartWithSuccess) into a field row. Same App Group and
+// read-once-then-clear pattern as the host-ceiling marker above; absent before build 79.
+const CARPLAY_PHONE_HOSTWAIT_KEY = "convoy.phone.hostWait.v1";
+function reportCarPlayPhoneHostWait(): void {
+  if (Platform.OS !== "ios") return;
+  try {
+    const { HairpinSystem } = require("../modules/hairpin-system");
+    if (!HairpinSystem || typeof HairpinSystem.getSharedDefaults !== "function") return;
+    const raw = HairpinSystem.getSharedDefaults(CARPLAY_DIAG_SUITE, CARPLAY_PHONE_HOSTWAIT_KEY);
+    if (!raw) return;
+    let d: any = null;
+    try { d = JSON.parse(String(raw)); } catch {}
+    const age = d?.ts ? Math.round((Date.now() - Number(d.ts)) / 1000) : -1;
+    logEventReliable(`carplay-phone-hostwait waitMs=${d?.waitMs ?? "?"} root=${d?.root ?? "?"} waitRoot=${d?.waitRoot ?? "?"} phoneKey=${d?.phoneKey ?? "?"} bootKey=${d?.bootKey ?? "?"} carKey=${d?.carKey ?? "?"} ageS=${age}`);
+    try { HairpinSystem.removeSharedDefaults?.(CARPLAY_DIAG_SUITE, CARPLAY_PHONE_HOSTWAIT_KEY); } catch {}
   } catch {}
 }
 

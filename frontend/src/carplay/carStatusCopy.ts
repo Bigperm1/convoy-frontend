@@ -1,7 +1,7 @@
 // src/carplay/carStatusCopy.ts — THE EXACT WORDS the car screen may show, in ONE place.
 //
-// ⚠ PROVISIONAL PRODUCT COPY (2026-09-14, build 79). Every string below needs Jeff's OK on a
-// rendered bench before it ships (memory preview-ux-before-shipping). Change wording HERE only —
+// ✅ APPROVED PRODUCT COPY — Jeff, 2026-09-14: "wording is good". Any NEW or CHANGED string still needs
+// his OK before it ships (memory preview-ux-before-shipping). Change wording HERE only —
 // carStatus.ts, CarBootScreen.tsx, ConvoyCarPlay.tsx, carActions.ts and carComms.ts all read it
 // from this file, and tools/sim-qc/car_status_test.mts checks every string against the two rules
 // below. (The Siri replies are native Swift and cannot import this: plugins/scout-siri/ScoutIntents.swift.)

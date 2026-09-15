@@ -123,6 +123,21 @@ let _healGeomKey: string | null = null;
 let _healStepsRef: SlimStep[] | null = null;   // identity of the steps the key was computed for (skip re-keying per fix)
 let _healState = newColdHealState();
 let _healOdoBase: number | null = null;
+// LOCATION SOURCE RECEIPT (2026-09-15, research memory nav-puck-snapping-offroute-prior-art-2026-09-15): Apple says a CarPlay
+// car can hand the iPhone its own GNSS + wheel speed, and Core Location marks such a fix isProducedByAccessory. The build-79
+// expo-location patch forwards it as `fromAccessory` (and `simulated`). One row per feed per change, at most 20 per JS context.
+// On build 78 the field does not exist → a single `accessory=?` row per feed, which is itself the receipt of the old binary.
+const _locSrcLast: Record<string, string> = {};
+let _locSrcRows = 0;
+function noteLocSource(feed: "bg" | "fg", loc: any): void {
+  try {
+    const acc = loc?.fromAccessory;
+    const v = typeof acc === "boolean" ? `accessory=${acc ? 1 : 0}${loc?.simulated === true ? " sim=1" : ""}` : "accessory=?";
+    if (_locSrcLast[feed] === v || _locSrcRows >= 20) return;
+    _locSrcLast[feed] = v; _locSrcRows += 1;
+    logEvent(`loc-src feed=${feed} ${v}`);
+  } catch {}
+}
 function resetColdHeal(odoBase: number | null): void {
   _healGeom = null; _healGeomKey = null; _healStepsRef = null; _healState = newColdHealState(); _healOdoBase = odoBase;
 }
@@ -778,6 +793,7 @@ TaskManager.defineTask(NAV_TASK, async ({ data, error }: any) => {
   const loc = locs && locs.length ? locs[locs.length - 1] : null;
   if (!loc?.coords) return;
   _lastFixAt = Date.now(); // feed the GPS stall watchdog
+  noteLocSource("bg", loc);
   // Trip odometer for a COLD (car-started) drive. Gates live in src/tripOdometer.ts.
   feedOdo({
     lat: loc.coords.latitude,
@@ -1080,6 +1096,7 @@ export async function startForegroundCarFeed(): Promise<void> {
       (loc) => {
         _lastFixAt = Date.now(); // feed the GPS stall watchdog
         void _sweepBgConsumers("fgwatch"); // build 79: this watcher can keep the app running — audit it (throttled 60 s)
+        noteLocSource("fg", loc);
         // Trip odometer from THIS feed too (Codex review 2026-09-15): on a cold Android Auto drive with a While-using
         // grant this watcher can be the ONLY location source, and the cold step heal + cold trip distance both read
         // the shared odometer. A fix the bg task already fed is ignored by odoAdd (dt <= 0), so two feeds cannot

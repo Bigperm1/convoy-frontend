@@ -420,10 +420,19 @@ index 59700e7..5238b40 100644
 +  @Field var activityType: Int = 1
  }
 diff --git a/node_modules/expo-location/ios/LocationUtils.swift b/node_modules/expo-location/ios/LocationUtils.swift
-index be16d30..d1f2e41 100644
+index be16d30..9f19de3 100644
 --- a/node_modules/expo-location/ios/LocationUtils.swift
 +++ b/node_modules/expo-location/ios/LocationUtils.swift
-@@ -28,7 +28,11 @@ internal func exportLocation(_ location: CLLocation) -> [String: Any] {
+@@ -20,7 +20,7 @@ internal func normalizeAccuracy(_ accuracy: CLLocationDirection) -> Int {
+ }
+ 
+ internal func exportLocation(_ location: CLLocation) -> [String: Any] {
+-  return [
++  var out: [String: Any] = [
+     "coords": [
+       "latitude": location.coordinate.latitude,
+       "longitude": location.coordinate.longitude,
+@@ -28,10 +28,22 @@ internal func exportLocation(_ location: CLLocation) -> [String: Any] {
        "accuracy": location.horizontalAccuracy,
        "altitudeAccuracy": location.verticalAccuracy,
        "heading": location.course,
@@ -436,6 +445,17 @@ index be16d30..d1f2e41 100644
      ],
      "timestamp": location.timestamp.timeIntervalSince1970 * 1000
    ]
++  // HAIRPIN PATCH (2026-09-15): where the fix came from. isProducedByAccessory is true when Core Location took it from an
++  // external accessory "such as a Made for iPhone GPS dongle or CarPlay" (Apple docs) — the one check for whether a CarPlay
++  // car feeds its own GNSS/wheel speed to the iPhone. Absent before iOS 15 or when Core Location gives no source info.
++  if #available(iOS 15.0, *), let src = location.sourceInformation {
++    out["fromAccessory"] = src.isProducedByAccessory
++    out["simulated"] = src.isSimulatedBySoftware
++  }
++  return out
+ }
+ 
+ internal func handleCLError<ReturnType>(error: NSError, defaultValue: ReturnType) throws -> ReturnType {
 diff --git a/node_modules/expo-location/ios/Providers/BaseLocationProvider.swift b/node_modules/expo-location/ios/Providers/BaseLocationProvider.swift
 index ae9135a..a411a63 100644
 --- a/node_modules/expo-location/ios/Providers/BaseLocationProvider.swift

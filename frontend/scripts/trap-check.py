@@ -502,6 +502,17 @@ RULES = [
         "owed (Codex 2026-09-15: otherwise the parked branch never runs on the phone); this fires on the old shapes. "
         "Gate: tools/sim-qc/cam_glide_test.mts.",
     ),
+    (
+        "cold-strip-walk-without-heal",
+        ["src/navNotification.ts"],
+        r"(?s)\A(?:(?!coldHealStep\().)*while\s*\(\s*idx\s*<\s*steps\.length\s*-\s*1\s*&&\s*d\s*<\s*25\s*\)(?:(?!coldHealStep\().)*\Z",
+        "2026-09-15 (Jeff's drive, instance 1mdvgz-926948): after the 09:23:39 reroute the COLD car-strip engine sat "
+        "on step 0/3 for the rest of the drive (car-strip cold rem 1671 -> 2854 m, rem - turn = 1610 on every row) "
+        "because its only way forward is the car coming within 25 m of the current step's end, while the phone engine "
+        "healed (step-heal). Cold arrival keys off the same rem, so it could never fire either. updateNavBanner must "
+        "call coldHealStep (src/coldStepHeal.ts) after the 25 m walk. This fires when the walk exists and the call "
+        "does not. Gate: tools/sim-qc/cold_step_heal_test.mts.",
+    ),
 ]
 
 def blank_comments(text: str) -> str:

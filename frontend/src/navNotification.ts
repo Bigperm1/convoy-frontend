@@ -17,8 +17,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
+import { buildColdHealGeom, coldHealStep, newColdHealState, type ColdHealGeom } from "./coldStepHeal";
 import {
-  NavRoute, haversineMeters, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec, announce, isPhoneTbtSpeaking,
+  NavRoute, decodePolyline, haversineMeters, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec, announce, isPhoneTbtSpeaking,
   arrivalLine, ARRIVE_M, ARRIVE_SETTLE_M, ARRIVE_SETTLE_SPEED_MS, ARRIVE_SETTLE_MS, ARRIVE_SPEAK_MAX_LATE_MS,
 } from "./nav";
 import { maneuverDir } from "./components/ManeuverArrow";
@@ -114,6 +115,16 @@ let _route: SlimRoute | null = null;
 // nav.ts's useTurnByTurn keys its re-anchor on, so the two engines can never disagree
 // about whether a swap changed the route (review fix, 2026-08-18).
 let _routePolyline: string | null = null;
+// COLD STEP HEAL (2026-09-15, src/coldStepHeal.ts): the cached geometry for the live polyline, the heal counter,
+// and the odometer reading when THIS geometry began (start or new-geometry swap). Base null = heal off, which is
+// what a context that never started/swapped the route (a bg-task context hydrated from disk) gets.
+let _healGeom: ColdHealGeom | null = null;
+let _healGeomKey: string | null = null;
+let _healState = newColdHealState();
+let _healOdoBase: number | null = null;
+function resetColdHeal(odoBase: number | null): void {
+  _healGeom = null; _healGeomKey = null; _healState = newColdHealState(); _healOdoBase = odoBase;
+}
 // In-flight teardown, awaited by startNavBanner so a stop from the PREVIOUS stint can
 // never land its releases after the next stint's acquires (review fix, 2026-08-18).
 let _stopPromise: Promise<void> | null = null;
@@ -466,6 +477,39 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
     idx += 1;
     d = haversineMeters({ lat, lng }, { lat: steps[idx].endLat, lng: steps[idx].endLng });
   }
+  // COLD STEP HEAL (2026-09-15). The walk above only moves within 25 m of the current step's end; on 09-15 the
+  // cold engine never got that close after the reroute and sat on step 0/3 for the rest of the drive (rem 1671 →
+  // 2854 m) while the phone healed. coldStepHeal advances ONE step once the car is provably past it — see the
+  // rule in src/coldStepHeal.ts and tools/sim-qc/cold_step_heal_test.mts. Only for the route live in THIS context
+  // (the polyline and the per-geometry odometer base exist here); a disk-hydrated context never heals.
+  if (_route && route === _route && _routePolyline && _healOdoBase != null && idx < steps.length - 1) {
+    try {
+      if (_healGeomKey !== _routePolyline) {
+        _healGeom = buildColdHealGeom(
+          decodePolyline(_routePolyline).map((p) => [p.lng, p.lat] as [number, number]),
+          steps.map((s) => ({ lat: s.endLat, lng: s.endLng })),
+        );
+        _healGeomKey = _routePolyline;
+        _healState = newColdHealState();
+      }
+      if (_healGeom) {
+        const travelledM = Math.max(0, odoNowM() - _healOdoBase);
+        const res = coldHealStep(_healGeom, _healState, idx, steps.length, { lat, lng }, d, speedMs, travelledM);
+        if (res.healed) {
+          const from = idx;
+          idx = res.idx;
+          d = haversineMeters({ lat, lng }, { lat: steps[idx].endLat, lng: steps[idx].endLng });
+          while (idx < steps.length - 1 && d < 25) {
+            idx += 1;
+            d = haversineMeters({ lat, lng }, { lat: steps[idx].endLat, lng: steps[idx].endLng });
+          }
+          try {
+            logEvent(`cold-step-heal from=${from} to=${idx} carSeg=${res.carSeg ?? -1} endSeg=${res.endSeg ?? -1} odoM=${Math.round(travelledM)} alongM=${Math.round(res.alongM ?? -1)}`);
+          } catch {}
+        }
+      }
+    } catch {}
+  }
   // STALE-TICK FENCE (review fix, 2026-08-18): if a swap/stop replaced the live route
   // while this call was suspended at an await above, everything computed here belongs
   // to the OLD route — writing it back would clobber the swap's reset and pin the new
@@ -562,6 +606,12 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
       // not `{type,modifier}`) and would be wrong even if it did — the value is already
       // the key. Use it directly, same source as maneuverIcon, same owner.
       maneuverKey: (arriving ? steps[steps.length - 1]?.maneuver : upNext.maneuver) ?? "",
+      // The CURRENT step's own maneuver + its start (= the previous step's end) for chaseZoom's roundabout hold
+      // (2026-09-15, Codex review: the cold owner must publish these atomically with the strip, or a phone-owned
+      // value goes stale under it). Step 0 has no stored start → undefined = no hold.
+      stepManeuverKey: steps[idx]?.maneuver,
+      stepStartLat: idx > 0 ? steps[idx - 1]?.endLat : undefined,
+      stepStartLng: idx > 0 ? steps[idx - 1]?.endLng : undefined,
       // The step index `upNext` was taken from, so the wrist can tell a real new turn from an
       // owner handoff rewriting the same turn's text (src/watchLink.ts).
       navStepIdx: Math.min(idx + 1, steps.length - 1),
@@ -1418,6 +1468,7 @@ export async function swapNavRoute(route: NavRoute, destLabel?: string): Promise
   _stepIdx = keepIdx;
   _notifiedStep = keepNotified;
   if (!sameGeometry) {
+    resetColdHeal(odoNowM());    // a new geometry: fresh heal geometry, counter and odometer base
     resetColdArrival();          // a new geometry must be able to arrive again
     _progressWritten = "";       // first write of the new generation must not be suppressed
   }
@@ -1459,6 +1510,7 @@ export async function startNavBanner(route: NavRoute, destLabel?: string): Promi
     _notifiedStep = -1; // -1 so the FIRST turn still announces when it's incoming
     resetColdArrival();  // a new route must be able to arrive again (also clears _navEnding)
     resetColdDrive();    // ...and this is a NEW DRIVE, so its odometer baseline starts here
+    resetColdHeal(odoNowM());
     _routeLookAt = 0;
     _progressReadAt = 0;
     _progressWritten = "";
@@ -1527,6 +1579,7 @@ async function stopNavBannerInner(): Promise<void> {
   _navEnding = true;   // close the resurrect-from-storage window (see the flag's note)
   _route = null;
   _routePolyline = null;
+  resetColdHeal(null);
   _stepIdx = 0;
   _notifiedStep = -1;
   // Re-arm the progress cadence: after a teardown this context can still DISCOVER a
@@ -1572,7 +1625,7 @@ async function stopNavBannerInner(): Promise<void> {
   //    calls it, and so does the cold-arrival path where map.tsx is unmounted and its
   //    mirror effect cannot run at all. Without it, ending a drive from the head unit's
   //    own End button left pins floating with no route line under them.
-  setCarState({ routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0, routeProgress: 0, maneuverIcon: undefined, maneuverKey: "", navStepIdx: undefined, routeCoordinates: undefined, routeCongestion: undefined, waypoints: [] });
+  setCarState({ stepManeuverKey: undefined, stepStartLat: undefined, stepStartLng: undefined, routePolyline: "", navigating: false, instruction: "", distanceToTurn: "", distanceToTurnM: 0, eta: "", distanceRemaining: "", etaSeconds: 0, distanceRemainingM: 0, routeProgress: 0, maneuverIcon: undefined, maneuverKey: "", navStepIdx: undefined, routeCoordinates: undefined, routeCongestion: undefined, waypoints: [] });
   // Release our hold; the shared task keeps running if CarPlay still needs it.
   await releaseBgLocation("nav");
   try { await Notifications.dismissNotificationAsync(NAV_NOTIF_ID); } catch {}

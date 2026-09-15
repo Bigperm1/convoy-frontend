@@ -107,5 +107,34 @@ console.log("C · the pump stops (heat bound)");
   ok("C6 an unclosed nose lead-in is not settled", !glideSettled(tw, 17.0, 48, P, 3) && glideSettled(tw, 17.0, 48, P, 0.3));
 }
 
+console.log("D · the frame SCHEDULER (a model of SelfCarModel's loop, not the component itself)");
+{
+  // Frames happen only while armed. An ease runs 0-1.0 s; the pitch target changes at `targetChangeAt`.
+  // OLD: completion clears the handle, so no frame until the next pose (none arrives). NEW (Codex 2026-09-15):
+  // completion re-arms while the glide is owed, and a parked loop wakes when the target moves with no new pose.
+  function sched(reArmOnComplete: boolean, wakeOnTarget: boolean, targetChangeAt: number) {
+    let g: GlideState = { zoom: 17, pitch: 0, zoomGoal: 17, pitchGoal: 0 };
+    let armed = true, lastPush = 0, tp = 0;
+    for (let i = 1; i <= 25 * 60; i++) {   // 25 s: 48° at 5°/s is 9.6 s of goal slew plus the tau-1.4 s tail
+      const t = i / 60;
+      if (t >= targetChangeAt) tp = 48;
+      const easing = t <= 1.0;
+      if (!armed && wakeOnTarget && !glideSettled(g, 17, tp, P)) armed = true;   // render -> no-deps effect wakes it
+      if (!armed) continue;
+      const dt = Math.max(0, Math.min(200, (t - lastPush) * 1000)); lastPush = t;
+      g = glideStep(g, 17, tp, dt, P);
+      if (!easing) armed = reArmOnComplete ? !glideSettled(g, 17, tp, P) : false;
+    }
+    return g;
+  }
+  const oldG = sched(false, false, 0.5), newG = sched(true, true, 0.5);
+  ok("D1 old scheduler: the glide stops when the ease completes (pitch frozen short of 48)", oldG.pitch < 10, `p=${oldG.pitch.toFixed(1)}`);
+  ok("D2 new scheduler: completion re-arms and the glide finishes", Math.abs(newG.pitch - 48) <= 0.25, `p=${newG.pitch.toFixed(1)}`);
+  const lateG = sched(true, true, 3.0);   // target moves 2 s AFTER the ease finished and the loop parked
+  ok("D3 a parked loop wakes when the target moves with no new pose", Math.abs(lateG.pitch - 48) <= 0.25, `p=${lateG.pitch.toFixed(1)}`);
+  const noWake = sched(true, false, 3.0);
+  ok("D4 ...and without the wake it would not", noWake.pitch < 1, `p=${noWake.pitch.toFixed(1)}`);
+}
+
 console.log(fails === 0 ? "\nPASS cam_glide" : `\nFAIL cam_glide (${fails})`);
 if (fails) process.exit(1);

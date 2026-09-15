@@ -493,12 +493,13 @@ RULES = [
     (
         "cam-glide-freezes-when-ease-parks",
         ["src/ConvoyMapbox.tsx"],
-        r"if\s*\(\s*!a\s*\)\s*\{\s*raf\.current\s*=\s*null;\s*noteEaseIdle\(Date\.now\(\)\);\s*return;\s*\}|const\s+a\s*=\s*anim\.current;\s*if\s*\(\s*!a\s*\)\s*return;",
+        r"if\s*\(\s*!a\s*\)\s*\{\s*raf\.current\s*=\s*null;\s*noteEaseIdle\(Date\.now\(\)\);\s*return;\s*\}|const\s+a\s*=\s*anim\.current;\s*if\s*\(\s*!a\s*\)\s*return;|anim\.current\s*=\s*null;\s*raf\.current\s*=\s*null;\s*noteEaseIdle\(now\);",
         "2026-09-15 (Jeff: 'IT STUDDERED' at the start and the roundabouts): pushCam ran only from the pose ease "
         "loop, so whenever the ease parked (crawling, stopped) the camera's zoom/pitch glide froze mid-flight and "
         "jumped on the next pose. Receipt: 09:00:48.124 cam-probe p=37.0 pt=48.0, 13.1 s after guidance start, with "
         "09:00:48.139 main-gap dt=2072 easeIdle=2072. Both park branches (step and bgTick) must keep pushing the "
-        "camera at the same pose while camGlidePending(); this fires on the old bare park shapes. "
+        "camera at the same pose while camGlidePending(), and ease COMPLETION must re-arm the frame while the glide is "
+        "owed (Codex 2026-09-15: otherwise the parked branch never runs on the phone); this fires on the old shapes. "
         "Gate: tools/sim-qc/cam_glide_test.mts.",
     ),
 ]

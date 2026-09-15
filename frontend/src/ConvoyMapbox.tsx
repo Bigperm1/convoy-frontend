@@ -1873,8 +1873,11 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       armNextFrame();
     } else {
       anim.current = null;
-      raf.current = null;
       noteEaseIdle(now);   // measurement only — tells a `main-gap` apart from an idle loop
+      // Glide still owed → keep the loop alive; the parked branch above finishes it at this pose.
+      // (Codex review 2026-09-15: without this re-arm the parked branch never ran on the phone — nothing
+      // else schedules a frame after an ease completes there; only CarPlay's native frame pump did.)
+      if (camGlidePending()) armNextFrame(); else raf.current = null;
     }
   };
 
@@ -2064,6 +2067,14 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lat, lng, heading]);
+  // WAKE A PARKED LOOP when the camera TARGET moves with no new pose (2026-09-15, Codex review): a car held at
+  // a light whose zoom target changes (speed decaying to 0, a roundabout hold releasing) had nothing to
+  // schedule a frame, because the effect above only runs on a pose change. Runs after every render; the two
+  // cheap checks short-circuit while an ease or a frame is already in flight.
+  useEffect(() => {
+    if (raf.current != null || anim.current) return;
+    if (camGlidePending()) armNextFrame();
+  });
 
   // Stop the loop if the car unmounts mid-animation.
   useEffect(() => () => {

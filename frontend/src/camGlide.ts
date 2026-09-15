@@ -21,6 +21,11 @@
 // ~5 s, then the loop parks exactly as before.
 // Gate: tools/sim-qc/cam_glide_test.mts.
 
+// SHIP SWITCH (Jeff 2026-09-15): the parked-glide pump is held behind this until a controlled sim render proves it.
+// false → camGlidePending() is always false in SelfCarModel, so every parked branch, the completion re-arm and the wake
+// effect behave exactly as before this change (glideStep itself is the old arithmetic verbatim either way).
+export const CAM_GLIDE_PUMP_ENABLED = false;
+
 export type GlideParams = {
   zoomSlewPerS: number;   // CAM_ZOOM_SLEW_PER_S
   zoomDeadband: number;   // CAM_ZOOM_DEADBAND

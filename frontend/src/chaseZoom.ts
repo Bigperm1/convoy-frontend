@@ -195,6 +195,11 @@ export function chaseZoomForSpeed(kmh: number) {
 // "exit rotary" only appear with roundabout_exits=true, which src/mapboxDirections.ts does not send.
 // ⚠ NOT FIELD-VERIFIED. Next roundabout: cam-probe zt=18.50 (at <=45 km/h) while on the roundabout step.
 export const ROUNDABOUT_HOLD_M = 80;
+// SHIP SWITCH (Jeff 2026-09-15, "LETS DO WHAT YOU SUGGEST" → ship the tested fixes, hold the two camera changes).
+// The sim render of this change was inconclusive (memory field-2026-09-15-drive-roundabouts-offramp), so the call sites
+// pass no roundabout distance while this is false — behaviour identical to OTA-AV. Flip to true only after a controlled
+// render + Jeff's OK. The pose-fix roundabout logging window does NOT depend on this switch.
+export const ROUNDABOUT_HOLD_ENABLED = false;
 const ROUNDABOUT_TYPES = new Set(["roundabout", "rotary", "roundabout turn"]);
 
 /**

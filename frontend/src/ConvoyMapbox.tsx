@@ -45,8 +45,8 @@ import { logEvent } from "./crashBreadcrumb";
 import { noteRafFrame, timersStarvedMs, maybeLogTimerStarve } from "./timerLiveness";
 import { anchorCutM, type CutAnchorHint } from "./routeRibbon";
 import { chasePitch, CHASE_PITCH_FIXED } from "./chasePitch";
-import { chaseZoom, roundaboutHoldDistM, ROUNDABOUT_HOLD_M } from "./chaseZoom";
-import { glideStep, glideSettled, type GlideParams } from "./camGlide";
+import { chaseZoom, roundaboutHoldDistM, ROUNDABOUT_HOLD_M, ROUNDABOUT_HOLD_ENABLED } from "./chaseZoom";
+import { glideStep, glideSettled, CAM_GLIDE_PUMP_ENABLED, type GlideParams } from "./camGlide";
 export { chasePitch, CHASE_PITCH_FIXED } from "./chasePitch";
 export { chaseZoom } from "./chaseZoom";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert, Animated } from "react-native";
@@ -1459,6 +1459,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // has not reached what pushCam is gliding toward. The parked branches below keep pushing the camera
   // at the CURRENT drawn pose while this holds, so a parked pose ease no longer freezes the glide.
   const camGlidePending = (): boolean => {
+    if (!CAM_GLIDE_PUMP_ENABLED) return false;   // ship switch, src/camGlide.ts
     if (!cameraRef?.current || !getCam || !(readyRef?.current)) return false;
     if (camZoom.current == null || camPitch.current == null) return false;
     const c = getCam();
@@ -3156,7 +3157,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // which is precisely the band being reported. Turn-tightening stays nav-only.
   const chaseZoomRaw = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX,
     chaseZoom(kmhFromMs(userSpeedMs), navigationActive ? distanceToManeuverM : undefined, navigationActive ? currentStepLenM : undefined,
-      navigationActive ? roundaboutHoldDistM(currentStepManeuver, currentStepStart?.lat, currentStepStart?.lng, user?.lat, user?.lng) : undefined) + (zoomOffset || 0),
+      navigationActive && ROUNDABOUT_HOLD_ENABLED ? roundaboutHoldDistM(currentStepManeuver, currentStepStart?.lat, currentStepStart?.lng, user?.lat, user?.lng) : undefined) + (zoomOffset || 0),
   ));
   // Quantized to 0.1 for the NATIVE followZoomLevel (north-up) so the native follow
   // engine isn't re-nudged on every micro speed change.

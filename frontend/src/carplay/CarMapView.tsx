@@ -49,7 +49,7 @@ import { calloutTextOffsetExpr, CALLOUT_TEXT_PT, CALLOUT_TEXT_SM_PT, CALLOUT_TEX
 const CAR_PIN_SCALE = 0.8;
 const WX_PIN_ON_CAR = Platform.OS === 'ios';
 import { buildCongestionGradient } from '../mapboxDirections';
-import { roundaboutHoldDistM, ROUNDABOUT_HOLD_M } from '../chaseZoom';
+import { roundaboutHoldDistM, ROUNDABOUT_HOLD_M, ROUNDABOUT_HOLD_ENABLED } from '../chaseZoom';
 import { getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, getVehiclePngOrDefault, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
@@ -674,7 +674,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // to CarPlay's ground scale, so both car surfaces frame the same road ahead.
   const aaZoomOut = aaZoomOutFor(mapW);
   const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined, s.navigating ? s.stepLengthM : undefined,
-    s.navigating ? roundaboutHoldDistM(s.stepManeuverKey, s.stepStartLat, s.stepStartLng, s.selfLat, s.selfLng) : undefined) - CAR_ZOOM_OUT - aaZoomOut - (previewMulti ? PREVIEW_ZOOM_OUT : 0);
+    s.navigating && ROUNDABOUT_HOLD_ENABLED ? roundaboutHoldDistM(s.stepManeuverKey, s.stepStartLat, s.stepStartLng, s.selfLat, s.selfLng) : undefined) - CAR_ZOOM_OUT - aaZoomOut - (previewMulti ? PREVIEW_ZOOM_OUT : 0);
   // ── FLAT WHEN NOT ROUTING (2026-07-29, Jeff's call) ─────────────────────────
   // "I want to make the CarPlay flat when not routing, because it uses the high-res
   // PNG images instead of the 3D — the 3D should be for routing."

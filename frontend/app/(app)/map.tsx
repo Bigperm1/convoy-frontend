@@ -4880,6 +4880,9 @@ export default function MapScreen() {
         distanceToManeuverM={tbt.distanceToManeuverM}
         // Length of the current step: a short step after a maneuver (an exit ramp) holds the corner zoom.
         currentStepLenM={activeRoute?.steps?.[tbt.stepIndex]?.distance_m}
+        // The current step's own maneuver + point: holds the corner zoom through a roundabout (chaseZoom.ts).
+        currentStepManeuver={activeRoute?.steps?.[tbt.stepIndex]?.maneuver}
+        currentStepStart={activeRoute?.steps?.[tbt.stepIndex]?.start}
         // The corner the turn arrow locks onto (snaps to the next when completed).
         maneuverCoord={maneuverCoord}
         // DOUBLE-TAP → DROP A PIN (native double-tap-zoom is disabled in

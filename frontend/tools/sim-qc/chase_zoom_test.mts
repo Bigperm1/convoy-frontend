@@ -30,7 +30,7 @@
 // the source text.
 // EXITS NON-ZERO ON FAILURE.
 import {
-  chaseZoom, chaseZoomForSpeed, cornerZoomCeiling,
+  chaseZoom, chaseZoomForSpeed, cornerZoomCeiling, roundaboutHoldDistM, ROUNDABOUT_HOLD_M,
   CORNER_ZOOM, CORNER_FAR_M, CORNER_NEAR_M, CORNER_CHAIN_M,
 } from "../../src/chaseZoom.ts";
 
@@ -246,6 +246,42 @@ console.log("H · the middle band and the city band");
   ok("H2 52 km/h ramp: correction scale 1.2-1.4x smaller", ratio(52) >= 1.2 && ratio(52) <= 1.4, `${ratio(52).toFixed(2)}x`);
   ok("H3 67 km/h ramp: correction scale 2.1-2.5x smaller", ratio(67) >= 2.1 && ratio(67) <= 2.5, `${ratio(67).toFixed(2)}x`);
   ok("H4 >= 90 km/h ramp: 5.7x smaller", Math.abs(ratio(99) - 2 ** 2.5) < 1e-6, `${ratio(99).toFixed(2)}x`);
+}
+
+// ── I · roundabout hold (09-15 roundabout 2) ────────────────────────────────────────────
+console.log("I · roundabout hold (09-15 roundabout 2, instance 1mdvgz-926948)");
+{
+  // 09:01:19.509 cam-probe zt=16.95 @22 km/h on step 2 (turn=30380m): the step advanced 25 m before the
+  // ring entry, so the corner zoom was gone for the whole loop.
+  const STEP2_M = 30380;
+  const zWas = chaseZoom(22, STEP2_M, STEP2_M);
+  ok("I1 the defect reproduces without the hold: zt = the speed curve (16.95)", Math.abs(zWas - 16.95) < 0.005 && zWas === preFixChaseZoom(22, STEP2_M, STEP2_M), f2(zWas));
+  let lo = 99;
+  for (let d = 0; d <= ROUNDABOUT_HOLD_M; d += 2) lo = Math.min(lo, chaseZoom(22, STEP2_M, STEP2_M, d));
+  ok("I2 with the hold: 18.5 anywhere within ROUNDABOUT_HOLD_M of the ring entry at 22 km/h", Math.abs(lo - CORNER_ZOOM) < EPS, f2(lo));
+  ok("I3 43 km/h exiting, 70 m from the entry: still 18.5 (ceiling is 18.5 at <= 45 km/h)", Math.abs(chaseZoom(43, STEP2_M, STEP2_M, 70) - CORNER_ZOOM) < EPS, f2(chaseZoom(43, STEP2_M, STEP2_M, 70)));
+  ok("I4 past the hold (81 m): releases to the speed curve", chaseZoom(43, STEP2_M, STEP2_M, 81) === chaseZoomForSpeed(43), f2(chaseZoom(43, STEP2_M, STEP2_M, 81)));
+  ok("I5 a fast rotary still obeys the speed ceiling (100 km/h -> 16.0)", Math.abs(chaseZoom(100, STEP2_M, STEP2_M, 20) - 16) < EPS, f2(chaseZoom(100, STEP2_M, STEP2_M, 20)));
+  let diffs = 0;
+  for (let v = 0; v <= 220; v += 1) for (const d of [undefined, 10, 70, 300, 1000]) for (const L of [undefined, 200, 450, 2000]) {
+    if (chaseZoom(v, d, L) !== chaseZoom(v, d, L, undefined)) diffs++;
+  }
+  ok("I6 no roundabout distance = bit-identical to the 3-argument call", diffs === 0, `${diffs} differing`);
+  // roundaboutHoldDistM: types and bad input.
+  const S = { lat: 49.03478, lng: -122.29268 };
+  const car25 = { lat: S.lat - 25 / 111320, lng: S.lng };   // 25 m south of the entry
+  const dRb = roundaboutHoldDistM("roundabout|left", S.lat, S.lng, car25.lat, car25.lng);
+  ok("I7 roundabout|left 25 m out -> ~25 m", typeof dRb === "number" && Math.abs(dRb - 25) < 0.2, String(dRb?.toFixed(2)));
+  ok("I8 rotary and 'roundabout turn' count", roundaboutHoldDistM("rotary", S.lat, S.lng, car25.lat, car25.lng) !== undefined
+     && roundaboutHoldDistM("roundabout turn|right", S.lat, S.lng, car25.lat, car25.lng) !== undefined);
+  ok("I9 turn / exit roundabout / empty / junk do not count", [
+    roundaboutHoldDistM("turn|left", S.lat, S.lng, car25.lat, car25.lng),
+    roundaboutHoldDistM("exit roundabout|left", S.lat, S.lng, car25.lat, car25.lng),
+    roundaboutHoldDistM("", S.lat, S.lng, car25.lat, car25.lng),
+    roundaboutHoldDistM(undefined, S.lat, S.lng, car25.lat, car25.lng),
+    roundaboutHoldDistM("roundabout|left", 0, 0, car25.lat, car25.lng),
+    roundaboutHoldDistM("roundabout|left", S.lat, S.lng, NaN, car25.lng),
+  ].every((x) => x === undefined));
 }
 
 // ── The before/after table for Jeff ───────────────────────────────────────────────────────

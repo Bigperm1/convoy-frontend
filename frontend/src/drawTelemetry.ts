@@ -148,12 +148,20 @@ function hdgExtra(hdg: HdgReceipt | null | undefined): string {
 // window keeps the receipts where the corners are: ≤ 12 rows per minute, ≤ 400 per drive.
 const POSE_ROWS_PER_MIN = 12;
 const POSE_ROWS_MAX = 400;
+// ROUNDABOUT ALLOWANCE (2026-09-15). Jeff's 09-15 roundabout 2 — the one he said "STUDDERED AND WAS OFF THE
+// ROUTE LINE" — has NO pose-fix row: roundabout 1 plus the link road spent all 12 of the minute (last row
+// 09:01:16.096, next slot 09:01:55). A fix taken while the current step is a roundabout within
+// ROUNDABOUT_HOLD_M of its entry (src/chaseZoom.ts) uses its OWN window instead, so one roundabout is always
+// covered at 1 Hz. Still inside POSE_ROWS_MAX per drive; tagged `rab=1`. Supabase is IO-constrained
+// (memory supabase-disk-io-budget-free-nano-swap-2026-09-15): ~15-20 extra rows per roundabout, no more.
+const POSE_ROUNDABOUT_ROWS_PER_MIN = 30;
 let _poseRows = 0;
 let _poseRowTimes: number[] = [];
+let _poseRbRowTimes: number[] = [];
 /** Called by both surfaces when guidance STARTS, so every drive gets a fresh budget. (Codex review
  *  2026-09-09: the budget used to reset only on a navActive false->true seen by reportPoseFix itself,
  *  which the callers never delivered — after 40 rows no later drive in the session logged anything.) */
-export function resetPoseFixBudget(): void { _poseRows = 0; _poseRowTimes = []; }
+export function resetPoseFixBudget(): void { _poseRows = 0; _poseRowTimes = []; _poseRbRowTimes = []; }
 export function reportPoseFix(surface: "phone" | "car", navActive: boolean, f: {
   fixAge: number; acc: number | null; course: number | null; spd: number;
   estHdg: number; yaw: number | null; src: string; drawnVsFixM: number; distM: number | null; routeW: number; dOld?: number | null;
@@ -163,20 +171,24 @@ export function reportPoseFix(surface: "phone" | "car", navActive: boolean, f: {
   ys?: string | null; mdiff?: number | null; pitch?: number | null; lock?: boolean;
   // 2026-09-10 the road heading: road = the line's direction owning the nose (°), rk = how much (0..1), rel = released
   road?: number | null; rk?: number | null; rel?: boolean;
+  /** true while the current step is a roundabout within ROUNDABOUT_HOLD_M of its entry (2026-09-15). */
+  roundabout?: boolean;
 }): void {
   try {
     if (!navActive || _poseRows >= POSE_ROWS_MAX) return;
     const now = Date.now();
-    while (_poseRowTimes.length && now - _poseRowTimes[0] > 60_000) _poseRowTimes.shift();
-    if (_poseRowTimes.length >= POSE_ROWS_PER_MIN) return;
-    _poseRowTimes.push(now);
+    const win = f.roundabout ? _poseRbRowTimes : _poseRowTimes;
+    const cap = f.roundabout ? POSE_ROUNDABOUT_ROWS_PER_MIN : POSE_ROWS_PER_MIN;
+    while (win.length && now - win[0] > 60_000) win.shift();
+    if (win.length >= cap) return;
+    win.push(now);
     _poseRows += 1;
     logEvent(
       `pose-fix surf=${surface} fixAge=${Math.round(f.fixAge)} acc=${f.acc == null ? "?" : f.acc.toFixed(0)} course=${fmtDeg(f.course)} spd=${(f.spd * 3.6).toFixed(0)} ` +
       `estHdg=${fmtDeg(f.estHdg)} yaw=${f.yaw == null ? "?" : f.yaw.toFixed(1)} src=${f.src} dFix=${f.drawnVsFixM.toFixed(1)} ` +
       `distM=${f.distM == null ? "?" : f.distM.toFixed(1)} rw=${f.routeW.toFixed(2)}${typeof f.dOld === "number" && isFinite(f.dOld) ? ` dOld=${f.dOld.toFixed(1)}` : ""}` +
       ` ys=${f.ys ?? "?"}${typeof f.mdiff === "number" && isFinite(f.mdiff) ? ` mdiff=${f.mdiff.toFixed(1)}` : ""}${typeof f.pitch === "number" && isFinite(f.pitch) ? ` pitch=${f.pitch.toFixed(0)}` : ""}${f.lock ? " lock=1" : ""}` +
-      `${typeof f.road === "number" && isFinite(f.road) ? ` road=${f.road.toFixed(0)}` : ""}${typeof f.rk === "number" && isFinite(f.rk) ? ` rk=${f.rk.toFixed(2)}` : ""}${f.rel ? " rel=1" : ""}`,
+      `${typeof f.road === "number" && isFinite(f.road) ? ` road=${f.road.toFixed(0)}` : ""}${typeof f.rk === "number" && isFinite(f.rk) ? ` rk=${f.rk.toFixed(2)}` : ""}${f.rel ? " rel=1" : ""}${f.roundabout ? " rab=1" : ""}`,
     );
   } catch {}
 }

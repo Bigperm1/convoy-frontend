@@ -479,6 +479,28 @@ RULES = [
         "tools/sim-qc/chase_zoom_test.mts; this guards the source text. Tune the CEILING constants in "
         "src/chaseZoom.ts, never delete the call.",
     ),
+    (
+        "roundabout-zoom-hold-unwired",
+        ["src/ConvoyMapbox.tsx", "src/carplay/CarMapView.tsx"],
+        r"(?s)\bchaseZoom\((?:(?!roundaboutHoldDistM)[^;])*?(?:stepLengthM|currentStepLenM)\s*:\s*undefined\s*\)",
+        "2026-09-15 (Jeff's drive, instance 1mdvgz-926948, roundabout 2): the step machine advances 25 m before a "
+        "maneuver and a Mapbox roundabout step runs from the ring entry to the NEXT maneuver (30 km away that "
+        "morning), so the corner zoom fell to the speed curve for the whole loop: cam-probe 09:01:19.509 zt=16.95 "
+        "@22 km/h. chaseZoom's 4th argument (roundaboutHoldDistM of the CURRENT step's maneuver) holds the corner "
+        "zoom within ROUNDABOUT_HOLD_M of the entry. This fires on a chaseZoom call that ends right after the "
+        "step-length argument, i.e. the hold was dropped on a surface. Gate: tools/sim-qc/chase_zoom_test.mts I1-I9.",
+    ),
+    (
+        "cam-glide-freezes-when-ease-parks",
+        ["src/ConvoyMapbox.tsx"],
+        r"if\s*\(\s*!a\s*\)\s*\{\s*raf\.current\s*=\s*null;\s*noteEaseIdle\(Date\.now\(\)\);\s*return;\s*\}|const\s+a\s*=\s*anim\.current;\s*if\s*\(\s*!a\s*\)\s*return;",
+        "2026-09-15 (Jeff: 'IT STUDDERED' at the start and the roundabouts): pushCam ran only from the pose ease "
+        "loop, so whenever the ease parked (crawling, stopped) the camera's zoom/pitch glide froze mid-flight and "
+        "jumped on the next pose. Receipt: 09:00:48.124 cam-probe p=37.0 pt=48.0, 13.1 s after guidance start, with "
+        "09:00:48.139 main-gap dt=2072 easeIdle=2072. Both park branches (step and bgTick) must keep pushing the "
+        "camera at the same pose while camGlidePending(); this fires on the old bare park shapes. "
+        "Gate: tools/sim-qc/cam_glide_test.mts.",
+    ),
 ]
 
 def blank_comments(text: str) -> str:

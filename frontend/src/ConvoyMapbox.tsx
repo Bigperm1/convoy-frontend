@@ -45,7 +45,8 @@ import { logEvent } from "./crashBreadcrumb";
 import { noteRafFrame, timersStarvedMs, maybeLogTimerStarve } from "./timerLiveness";
 import { anchorCutM, type CutAnchorHint } from "./routeRibbon";
 import { chasePitch, CHASE_PITCH_FIXED } from "./chasePitch";
-import { chaseZoom } from "./chaseZoom";
+import { chaseZoom, roundaboutHoldDistM, ROUNDABOUT_HOLD_M } from "./chaseZoom";
+import { glideStep, glideSettled, type GlideParams } from "./camGlide";
 export { chasePitch, CHASE_PITCH_FIXED } from "./chasePitch";
 export { chaseZoom } from "./chaseZoom";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert, Animated } from "react-native";
@@ -223,6 +224,9 @@ interface ConvoyMapboxProps {
   distanceToManeuverM?: number;
   /** Length of the step the car is currently on (metres) — feeds the chained-maneuver hold in chaseZoom. */
   currentStepLenM?: number;
+  /** The CURRENT step's own maneuver key ("type|modifier") and point — feeds the roundabout hold in chaseZoom (2026-09-15). */
+  currentStepManeuver?: string;
+  currentStepStart?: { lat: number; lng: number } | null;
   maneuverCoord?: { lat: number; lng: number } | null;
   // Delivers the tapped coordinate AND the on-screen tap point (sx/sy, px) so the
   // caller can implement gestures like double-tap-to-drop-a-pin in SCREEN space
@@ -662,6 +666,7 @@ const CAM_SMOOTH_TAU_MS = 1400;
 const CAM_ZOOM_SLEW_PER_S = 0.5;   // zoom levels per second the goal may move
 const CAM_ZOOM_DEADBAND = 0.25;    // target twitches below this do not move the goal
 const CAM_PITCH_SLEW_PER_S = 5;    // degrees per second (48↔60 band = 2.4 s), same shape
+const CAM_GLIDE: GlideParams = { zoomSlewPerS: CAM_ZOOM_SLEW_PER_S, zoomDeadband: CAM_ZOOM_DEADBAND, pitchSlewPerS: CAM_PITCH_SLEW_PER_S, tauMs: CAM_SMOOTH_TAU_MS };
 
 // Route-trim ease: linear from prev→cur over the measured fix gap, clamped at both
 // ends. Deliberately the SAME shape and clock as SelfCarModel's position ease, so the
@@ -1450,6 +1455,20 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
 
   // Shortest signed angular delta a→b in degrees (−180…180].
   const angDelta = (a: number, b: number) => ((((b - a) % 360) + 540) % 360) - 180;
+  // GLIDE STILL OWED? (2026-09-15, src/camGlide.ts). True while the camera's zoom/pitch/nose lead-in
+  // has not reached what pushCam is gliding toward. The parked branches below keep pushing the camera
+  // at the CURRENT drawn pose while this holds, so a parked pose ease no longer freezes the glide.
+  const camGlidePending = (): boolean => {
+    if (!cameraRef?.current || !getCam || !(readyRef?.current)) return false;
+    if (camZoom.current == null || camPitch.current == null) return false;
+    const c = getCam();
+    const hdgLag = NOSE_LEAD_IN_ENABLED && camHdgLag.current != null && Number.isFinite(render.current.heading)
+      ? angDelta(camHdgLag.current, render.current.heading) : 0;
+    return !glideSettled({
+      zoom: camZoom.current, pitch: camPitch.current,
+      zoomGoal: camZoomGoal.current ?? camZoom.current, pitchGoal: camPitchGoal.current ?? camPitch.current,
+    }, c.zoomLevel, c.pitch, CAM_GLIDE, hdgLag);
+  };
 
   // Pin the camera to the eased pose with ZERO native easing. animationMode:'none' →
   // mapboxMap.setCamera(to:) (instant state-set, no second interpolator), so camera-
@@ -1485,17 +1504,13 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     } else {
       // 1) The GOAL walks toward the raw target at a bounded rate, ignoring twitches
       //    smaller than the dead-band. 2) The applied value low-passes toward the goal.
-      const zg = camZoomGoal.current ?? camZoom.current;
-      const zGap = c.zoomLevel - zg;
-      const zStep = (CAM_ZOOM_SLEW_PER_S * dt) / 1000;
-      camZoomGoal.current = Math.abs(zGap) < CAM_ZOOM_DEADBAND ? zg : zg + Math.max(-zStep, Math.min(zStep, zGap));
-      const pg = camPitchGoal.current ?? camPitch.current;
-      const pGap = c.pitch - pg;
-      const pStep = (CAM_PITCH_SLEW_PER_S * dt) / 1000;
-      camPitchGoal.current = pg + Math.max(-pStep, Math.min(pStep, pGap));
-      const a = 1 - Math.exp(-dt / CAM_SMOOTH_TAU_MS);
-      camZoom.current += (camZoomGoal.current - camZoom.current) * a;
-      camPitch.current += (camPitchGoal.current - camPitch.current) * a;
+      //    (Arithmetic moved verbatim to src/camGlide.ts glideStep, 2026-09-15, so sim-qc can gate it.)
+      const g = glideStep({
+        zoom: camZoom.current, pitch: camPitch.current,
+        zoomGoal: camZoomGoal.current ?? camZoom.current, pitchGoal: camPitchGoal.current ?? camPitch.current,
+      }, c.zoomLevel, c.pitch, dt, CAM_GLIDE);
+      camZoomGoal.current = g.zoomGoal; camPitchGoal.current = g.pitchGoal;
+      camZoom.current = g.zoom; camPitch.current = g.pitch;
     }
     // Publish the zoom the camera is ACTUALLY at. The route trim converts a fixed
     // screen distance to metres and must use this, not the speed-derived TARGET —
@@ -1614,7 +1629,11 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // kept flowing — the route line kept trimming while the car sat still.)
     if (now - lastStepAtRef.current < 150) return;
     const a = anim.current;
-    if (!a) return;
+    if (!a) {
+      // Parked pose, glide still owed (2026-09-15): finish the zoom/pitch at the same pose.
+      if (camGlidePending()) pushCam(render.current.lat, render.current.lng, render.current.heading);
+      return;
+    }
     const t = Math.min(1, (now - a.start) / a.dur);
     render.current = {
       lat: a.fromLat + (a.toLat - a.fromLat) * t,
@@ -1623,7 +1642,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     };
     pushCam(render.current.lat, render.current.lng, render.current.heading);
     noteTick(); setTick((n) => (n + 1) & 0xffff);
-    if (t >= 1) anim.current = null;
+    // Stamp the park here too (2026-09-15): without it a screen-off stretch, where bgTick is the only
+    // driver, left easeIdle frozen at the last rAF park and every main-gap row read STALLED
+    // (09-15: both display-off rows pointed back to the same 09:07:55.73 stamp, 14 min old).
+    if (t >= 1) { anim.current = null; noteEaseIdle(now); }
   };
   const startBgTimer = () => {
     if (bgTimer.current == null) bgTimer.current = setInterval(bgTick, 33); // ~30 fps (matches the eco frame cap)
@@ -1790,7 +1812,18 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // clock are measured independently.
     noteRafFrame();
     const a = anim.current;
-    if (!a) { raf.current = null; noteEaseIdle(Date.now()); return; }   // parked: nothing to ease
+    if (!a) {
+      // Parked: nothing to ease. But if the camera's zoom/pitch glide is still owed, keep the frame
+      // loop alive and push the camera at the SAME drawn pose until it settles (2026-09-15,
+      // src/camGlide.ts) — before this the glide froze whenever the car crawled or stopped.
+      if (camGlidePending()) {
+        noteEaseIdle(Date.now());
+        pushCam(render.current.lat, render.current.lng, render.current.heading);
+        armNextFrame();
+        return;
+      }
+      raf.current = null; noteEaseIdle(Date.now()); return;
+    }
     a.stepped = true; // this ease has rendered ≥1 frame → the loop is alive for it
     const now = Date.now();
     const t = Math.min(1, (now - a.start) / a.dur);
@@ -1823,6 +1856,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         const dE = (_nLng - _pr.lng) * 111320 * Math.cos((_nLat * Math.PI) / 180);
         const dH = Math.abs(((((_nHdg - _pr.heading) % 360) + 540) % 360) - 180);
         if (Math.hypot(dN, dE) < 0.06 && dH < 0.08) {
+          // The pose did not move a pixel, but the zoom/pitch glide may still be owed: push the
+          // camera at the LAST DRAWN pose (where the marker is), so camera and marker stay together.
+          if (camGlidePending()) pushCam(_pr.lat, _pr.lng, _pr.heading);
           armNextFrame();   // pump guard: this is the branch that spins doing no work
           return;
         }
@@ -2637,7 +2673,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     mapMode = "satellite", leaderUserId, show3dBuildings = true,
     followUser = false, onUserPan, navigationActive = false, userSpeedMs, flatView = false,
     routeColor = DEFAULT_ROUTE_COLOR,
-    distanceToManeuverM, currentStepLenM, onMapPress, onPoiPress, onMapLongPress, onPeerPress, onMapReady,
+    distanceToManeuverM, currentStepLenM, currentStepManeuver, currentStepStart, onMapPress, onPoiPress, onMapLongPress, onPeerPress, onMapReady,
     routes = [], selectedRouteIndex = 0, onSelectRoute, destination, stops,
     offerPill, onOfferAccept, onOfferDismiss,
     stopPill, onStopArrived, onStopDismiss,
@@ -3108,7 +3144,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // city framing are bit-identical to before; only above 45 km/h does this differ,
   // which is precisely the band being reported. Turn-tightening stays nav-only.
   const chaseZoomRaw = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX,
-    chaseZoom(kmhFromMs(userSpeedMs), navigationActive ? distanceToManeuverM : undefined, navigationActive ? currentStepLenM : undefined) + (zoomOffset || 0),
+    chaseZoom(kmhFromMs(userSpeedMs), navigationActive ? distanceToManeuverM : undefined, navigationActive ? currentStepLenM : undefined,
+      navigationActive ? roundaboutHoldDistM(currentStepManeuver, currentStepStart?.lat, currentStepStart?.lng, user?.lat, user?.lng) : undefined) + (zoomOffset || 0),
   ));
   // Quantized to 0.1 for the NATIVE followZoomLevel (north-up) so the native follow
   // engine isn't re-nudged on every micro speed change.
@@ -3862,6 +3899,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         estHdg: est.hdg, yaw: poseRef.current.yawDpsLast, src: est.src, ys: yawRateStats().src, mdiff: getYawSourceDiffDeg(), pitch: yawRateStats().pitchDeg, lock: yawRateStats().locked, road: poseRef.current.roadHdg, rk: poseRef.current.roadK, rel: poseRef.current.roadReleased,
         drawnVsFixM: typeof user.lat === "number" && typeof user.lng === "number" ? poseHaversineM(est.lat, est.lng, user.lat, user.lng) : 0,
         distM: routeProj ? routeProj.distM : null, routeW: est.routeW, dOld: _dOld,
+        roundabout: (roundaboutHoldDistM(currentStepManeuver, currentStepStart?.lat, currentStepStart?.lng, user.lat, user.lng) ?? Infinity) <= ROUNDABOUT_HOLD_M,
       });
     }
   }

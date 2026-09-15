@@ -177,8 +177,53 @@ export function chaseZoomForSpeed(kmh: number) {
   return st[st.length - 1][1];
 }
 
-export function chaseZoom(kmh: number, distToManeuverM?: number, curStepLenM?: number) {
+// ── ROUNDABOUT HOLD (2026-09-15) ─────────────────────────────────────────────────────────
+// Jeff's 09-15 drive, roundabout 2 (instance 1mdvgz-926948): the step machine advances 25 m
+// BEFORE a maneuver point (nav.ts ADVANCE_THRESHOLD_M), and a Mapbox roundabout step starts at
+// the ring's ENTRY and runs to the next maneuver — 30 km away that morning. So the moment the car
+// reached the entry, the distance to the "next maneuver" jumped to 30 km and the corner zoom fell
+// back to the speed curve: cam-probe 09:01:19.509 zt=16.95 @22 km/h (= chaseZoomForSpeed(22)),
+// the camera sliding ~1 level wider on the way in. Roundabout 1 kept 18.5 only because the step
+// after it was short (< CORNER_CHAIN_M).
+// THE RULE: while the CURRENT step's own maneuver is a roundabout/rotary and the car is within
+// ROUNDABOUT_HOLD_M (straight line) of that step's maneuver point, the corner target is
+// CORNER_ZOOM — still through cornerZoomCeiling, so a fast rotary cannot zoom in at speed.
+// 80 m covers the ring of an ordinary single- or two-lane roundabout (radius ~15-30 m) from the
+// 25 m advance point to past the exit; past it the target releases to the speed curve and the
+// camera slews out at CAM_ZOOM_SLEW_PER_S as after any maneuver.
+// Mapbox maneuver types (docs): "roundabout", "rotary", "roundabout turn". "exit roundabout" /
+// "exit rotary" only appear with roundabout_exits=true, which src/mapboxDirections.ts does not send.
+// ⚠ NOT FIELD-VERIFIED. Next roundabout: cam-probe zt=18.50 (at <=45 km/h) while on the roundabout step.
+export const ROUNDABOUT_HOLD_M = 80;
+const ROUNDABOUT_TYPES = new Set(["roundabout", "rotary", "roundabout turn"]);
+
+/**
+ * Straight-line metres from the car to the CURRENT step's maneuver point when that maneuver is a
+ * roundabout/rotary; undefined for any other maneuver or bad input. `maneuverKey` is nav.ts's
+ * mapboxManeuverKey ("type|modifier").
+ */
+export function roundaboutHoldDistM(
+  maneuverKey: string | null | undefined,
+  stepLat: number | null | undefined, stepLng: number | null | undefined,
+  carLat: number | null | undefined, carLng: number | null | undefined,
+): number | undefined {
+  if (typeof maneuverKey !== "string") return undefined;
+  const type = maneuverKey.split("|")[0].trim().toLowerCase();
+  if (!ROUNDABOUT_TYPES.has(type)) return undefined;
+  const nums = [stepLat, stepLng, carLat, carLng];
+  if (!nums.every((v) => typeof v === "number" && Number.isFinite(v))) return undefined;
+  if (stepLat === 0 && stepLng === 0) return undefined;   // nav.ts's missing-location placeholder
+  const R = 6371000, toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(carLat! - stepLat!), dLng = toRad(carLng! - stepLng!);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(stepLat!)) * Math.cos(toRad(carLat!)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+export function chaseZoom(kmh: number, distToManeuverM?: number, curStepLenM?: number, roundaboutDistM?: number) {
   const base = chaseZoomForSpeed(kmh);
+  const inRoundabout = typeof roundaboutDistM === "number" && Number.isFinite(roundaboutDistM)
+    && roundaboutDistM >= 0 && roundaboutDistM <= ROUNDABOUT_HOLD_M;
+  if (inRoundabout) return Math.max(base, Math.min(CORNER_ZOOM, cornerZoomCeiling(kmh)));
   if (typeof distToManeuverM !== "number" || !Number.isFinite(distToManeuverM) || distToManeuverM <= 0) return base;
   // Chained maneuvers (exit gore → short ramp): hold the corner zoom for the whole short step.
   // Otherwise tighten continuously over CORNER_FAR_M → CORNER_NEAR_M to the maneuver.

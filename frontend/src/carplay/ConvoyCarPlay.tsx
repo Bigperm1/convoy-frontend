@@ -1269,6 +1269,9 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       ...(ownStrip ? {
         distanceToTurnM: tbt.distanceToManeuverM,
         stepLengthM: route?.steps?.[tbt.stepIndex]?.distance_m,
+        stepManeuverKey: route?.steps?.[tbt.stepIndex]?.maneuver,
+        stepStartLat: route?.steps?.[tbt.stepIndex]?.start?.lat,
+        stepStartLng: route?.steps?.[tbt.stepIndex]?.start?.lng,
         distanceRemainingM: tbt.distanceRemainingM,
         etaSeconds: tbt.etaSeconds,
         routeProgress: route && route.distance_m > 0

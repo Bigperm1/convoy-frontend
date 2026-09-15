@@ -119,6 +119,11 @@ export type CarState = {
   // the pre-formatted phone-banner strings. Populated alongside the strings.
   distanceToTurnM: number; // meters to the next maneuver
   stepLengthM?: number;    // length of the step the car is on — chained-maneuver hold in chaseZoom (2026-09-03)
+  // The CURRENT step's own maneuver key + point — the roundabout hold in chaseZoom (2026-09-15).
+  // Written by the phone engine only (ConvoyCarPlay ownStrip); absent = no hold, exactly the old behaviour.
+  stepManeuverKey?: string;
+  stepStartLat?: number;
+  stepStartLng?: number;
   distanceRemainingM: number; // meters to the destination
   etaSeconds: number; // seconds remaining to the destination
   // 0..1 fraction of the route completed — drives the green progress divider in the

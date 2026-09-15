@@ -292,6 +292,14 @@ export function initCarPlayBootstrap(): void {
   };
 
   const onDisconnect = () => {
+    // DISCONNECT RECEIPT (2026-09-15). Jeff's 09-15 drive: CarPlay dropped 09:26:30 → 09:31:23 and the only
+    // evidence was a battery flip (charging → unplugged) and a missing heat-probe window — no row said
+    // "disconnected", so it took a question to learn it was a coffee stop with the car off. One row per
+    // drop, deliberately NOT the once-per-launch receipt() helper (a second drop would be silent).
+    try {
+      const cs = getCarState();
+      logEventReliable(`carplay-disconnect app=${AppState.currentState} nav=${cs.navigating ? 1 : 0} fix=${cs.selfLat != null ? 1 : 0}`);
+    } catch {}
     // The scene is gone, so the native template store's entry for the idle root is too.
     // Drop the JS handle or the next connect would setRootTemplate an id native can no
     // longer find — which NSLogs and installs nothing, silently (RNCarPlay.m:545-560).

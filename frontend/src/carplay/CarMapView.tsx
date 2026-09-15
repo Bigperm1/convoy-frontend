@@ -49,6 +49,7 @@ import { calloutTextOffsetExpr, CALLOUT_TEXT_PT, CALLOUT_TEXT_SM_PT, CALLOUT_TEX
 const CAR_PIN_SCALE = 0.8;
 const WX_PIN_ON_CAR = Platform.OS === 'ios';
 import { buildCongestionGradient } from '../mapboxDirections';
+import { roundaboutHoldDistM, ROUNDABOUT_HOLD_M } from '../chaseZoom';
 import { getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, getVehiclePngOrDefault, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
@@ -672,7 +673,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // byte-identical there. On Android Auto it converts the canvas's inflated dp back
   // to CarPlay's ground scale, so both car surfaces frame the same road ahead.
   const aaZoomOut = aaZoomOutFor(mapW);
-  const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined, s.navigating ? s.stepLengthM : undefined) - CAR_ZOOM_OUT - aaZoomOut - (previewMulti ? PREVIEW_ZOOM_OUT : 0);
+  const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined, s.navigating ? s.stepLengthM : undefined,
+    s.navigating ? roundaboutHoldDistM(s.stepManeuverKey, s.stepStartLat, s.stepStartLng, s.selfLat, s.selfLng) : undefined) - CAR_ZOOM_OUT - aaZoomOut - (previewMulti ? PREVIEW_ZOOM_OUT : 0);
   // ── FLAT WHEN NOT ROUTING (2026-07-29, Jeff's call) ─────────────────────────
   // "I want to make the CarPlay flat when not routing, because it uses the high-res
   // PNG images instead of the 3D — the 3D should be for routing."
@@ -1937,6 +1939,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         fixAge: _nowMs - _fixTs, acc: s.selfAccM ?? null, course: typeof s.selfCourse === 'number' ? s.selfCourse : null, spd: s.speedMs || 0,
         estHdg: est.hdg, yaw: poseRef.current.yawDpsLast, src: est.src, ys: yawRateStats().src, mdiff: getYawSourceDiffDeg(), pitch: yawRateStats().pitchDeg, lock: yawRateStats().locked, road: poseRef.current.roadHdg, rk: poseRef.current.roadK, rel: poseRef.current.roadReleased, drawnVsFixM: poseHaversineM(est.lat, est.lng, lat, lng),
         distM: routeProj ? routeProj.distM : null, routeW: est.routeW, dOld: _dOld,
+        roundabout: (roundaboutHoldDistM(s.stepManeuverKey, s.stepStartLat, s.stepStartLng, lat, lng) ?? Infinity) <= ROUNDABOUT_HOLD_M,
       });
     }
   }

@@ -80,6 +80,12 @@ export function buildColdHealGeom(coords: LngLat[], stepEnds: LL[]): ColdHealGeo
   return { coords, stepEndSeg, cumAlong };
 }
 
+/** Cache key for a heal geometry: the polyline AND every step end (Codex review 2026-09-15 — a same-polyline swap can
+ *  still move step boundaries, and a geometry keyed on the polyline alone would compare new steps to old ends). */
+export function coldHealStepsKey(polyline: string, stepEnds: LL[]): string {
+  return `${polyline.length}:${polyline.slice(0, 32)}:${polyline.slice(-32)}|${stepEnds.length}|${stepEnds.map((e) => `${e.lat.toFixed(6)},${e.lng.toFixed(6)}`).join(";")}`;
+}
+
 export type ColdHealResult = { idx: number; healed: boolean; carSeg?: number; endSeg?: number; alongM?: number };
 
 /**

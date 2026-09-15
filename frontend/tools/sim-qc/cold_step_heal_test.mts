@@ -10,7 +10,7 @@
 // The 25 m walk below is src/navNotification.ts updateNavBanner's loop, verbatim in shape.
 // ⚠ Synthetic geometry. NOT a field verification — the next reroute's `cold-step-heal` + `car-strip cold` rows are.
 // EXITS NON-ZERO ON FAILURE.
-import { buildColdHealGeom, coldHealStep, newColdHealState, COLD_HEAL_TICKS, type ColdHealState, type ColdHealGeom } from "../../src/coldStepHeal.ts";
+import { buildColdHealGeom, coldHealStep, coldHealStepsKey, newColdHealState, COLD_HEAL_TICKS, type ColdHealState, type ColdHealGeom } from "../../src/coldStepHeal.ts";
 import { odoStart, odoAdd, odoMeters } from "../../src/tripOdometer.ts";
 import type { LngLat } from "../../src/navAnchor.ts";
 
@@ -181,6 +181,15 @@ console.log("I · no odometer base (a fresh JS context) → no heal");
 {
   const post = run(A.r, A.ticks, true, { noOdo: true });
   ok("I1 zero heals without travelled distance", post.heals === 0 && post.idx === 0, `heals=${post.heals} idx=${post.idx}`);
+}
+
+console.log("J · the geometry cache key sees step boundaries, not just the polyline (Codex 2026-09-15)");
+{
+  const poly = "a~l~Fjk~uOwHJy@P";
+  const ends = [{ lat: 49.1, lng: -122.6 }, { lat: 49.2, lng: -122.7 }];
+  ok("J1 same polyline + same ends -> same key", coldHealStepsKey(poly, ends) === coldHealStepsKey(poly, ends.map((e) => ({ ...e }))));
+  ok("J2 same polyline + a moved step end -> different key", coldHealStepsKey(poly, ends) !== coldHealStepsKey(poly, [ends[0], { lat: 49.2001, lng: -122.7 }]));
+  ok("J3 same polyline + a different step count -> different key", coldHealStepsKey(poly, ends) !== coldHealStepsKey(poly, [ends[0]]));
 }
 
 console.log(fails === 0 ? "\nPASS cold_step_heal" : `\nFAIL cold_step_heal (${fails})`);

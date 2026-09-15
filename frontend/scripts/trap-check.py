@@ -513,6 +513,16 @@ RULES = [
         "call coldHealStep (src/coldStepHeal.ts) after the 25 m walk. This fires when the walk exists and the call "
         "does not. Gate: tools/sim-qc/cold_step_heal_test.mts.",
     ),
+    (
+        "cold-feed-without-odometer",
+        ["src/navNotification.ts"],
+        r"(?s)\A(?:(?!feedOdo\().)*(?:feedOdo\((?:(?!feedOdo\().)*)?\Z",
+        "2026-09-15 (Codex review): the cold step heal and the cold trip distance read the shared odometer, but only "
+        "the bg task fed it — the foreground car watcher, the ONLY location source on a cold Android Auto drive with a "
+        "While-using grant, did not, so a missed step more than 50 m along could never heal. Both feeds must call "
+        "feedOdo (odoAdd ignores a fix already fed, dt <= 0). This fires when navNotification.ts has fewer than two "
+        "feedOdo( calls.",
+    ),
 ]
 
 def blank_comments(text: str) -> str:

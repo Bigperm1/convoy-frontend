@@ -17,7 +17,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
-import { buildColdHealGeom, coldHealStep, newColdHealState, type ColdHealGeom } from "./coldStepHeal";
+import { buildColdHealGeom, coldHealStep, coldHealStepsKey, newColdHealState, type ColdHealGeom } from "./coldStepHeal";
 import {
   NavRoute, decodePolyline, haversineMeters, maneuverVerb, fmtDistanceM, fmtManeuverDist, fmtEtaSec, announce, isPhoneTbtSpeaking,
   arrivalLine, ARRIVE_M, ARRIVE_SETTLE_M, ARRIVE_SETTLE_SPEED_MS, ARRIVE_SETTLE_MS, ARRIVE_SPEAK_MAX_LATE_MS,
@@ -120,10 +120,11 @@ let _routePolyline: string | null = null;
 // what a context that never started/swapped the route (a bg-task context hydrated from disk) gets.
 let _healGeom: ColdHealGeom | null = null;
 let _healGeomKey: string | null = null;
+let _healStepsRef: SlimStep[] | null = null;   // identity of the steps the key was computed for (skip re-keying per fix)
 let _healState = newColdHealState();
 let _healOdoBase: number | null = null;
 function resetColdHeal(odoBase: number | null): void {
-  _healGeom = null; _healGeomKey = null; _healState = newColdHealState(); _healOdoBase = odoBase;
+  _healGeom = null; _healGeomKey = null; _healStepsRef = null; _healState = newColdHealState(); _healOdoBase = odoBase;
 }
 // In-flight teardown, awaited by startNavBanner so a stop from the PREVIOUS stint can
 // never land its releases after the next stint's acquires (review fix, 2026-08-18).
@@ -484,13 +485,17 @@ export async function updateNavBanner(lat: number, lng: number, speedMs?: number
   // (the polyline and the per-geometry odometer base exist here); a disk-hydrated context never heals.
   if (_route && route === _route && _routePolyline && _healOdoBase != null && idx < steps.length - 1) {
     try {
-      if (_healGeomKey !== _routePolyline) {
-        _healGeom = buildColdHealGeom(
-          decodePolyline(_routePolyline).map((p) => [p.lng, p.lat] as [number, number]),
-          steps.map((s) => ({ lat: s.endLat, lng: s.endLng })),
-        );
-        _healGeomKey = _routePolyline;
-        _healState = newColdHealState();
+      if (_healStepsRef !== steps) {
+        // Re-key only when the steps ARRAY changed (every swap rebuilds it); rebuild + reset the counter only when the
+        // polyline or any step end actually differs. The odometer base is owned by start/new-geometry swaps.
+        const ends = steps.map((s) => ({ lat: s.endLat, lng: s.endLng }));
+        const key = coldHealStepsKey(_routePolyline, ends);
+        if (key !== _healGeomKey) {
+          _healGeom = buildColdHealGeom(decodePolyline(_routePolyline).map((p) => [p.lng, p.lat] as [number, number]), ends);
+          _healGeomKey = key;
+          _healState = newColdHealState();
+        }
+        _healStepsRef = steps;
       }
       if (_healGeom) {
         const travelledM = Math.max(0, odoNowM() - _healOdoBase);
@@ -1075,6 +1080,17 @@ export async function startForegroundCarFeed(): Promise<void> {
       (loc) => {
         _lastFixAt = Date.now(); // feed the GPS stall watchdog
         void _sweepBgConsumers("fgwatch"); // build 79: this watcher can keep the app running — audit it (throttled 60 s)
+        // Trip odometer from THIS feed too (Codex review 2026-09-15): on a cold Android Auto drive with a While-using
+        // grant this watcher can be the ONLY location source, and the cold step heal + cold trip distance both read
+        // the shared odometer. A fix the bg task already fed is ignored by odoAdd (dt <= 0), so two feeds cannot
+        // double-count.
+        feedOdo({
+          lat: loc.coords.latitude,
+          lng: loc.coords.longitude,
+          at: typeof loc.timestamp === "number" ? loc.timestamp : Date.now(),
+          accM: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : undefined,
+          speedMs: typeof loc.coords.speed === "number" && loc.coords.speed >= 0 ? loc.coords.speed : undefined,
+        });
         const h = loc.coords.heading;
         const sp = loc.coords.speed;
         // Position AND SPEED through the source-priority gate ('fgwatch' — beats the bg

@@ -39,14 +39,15 @@
 // it is within 3 degrees of the entire corpus. It is one OTA dial: move this number alone.
 //
 // ── WHAT PAYS FOR THE LOST HORIZON AT SPEED ─────────────────────────────────────────────
-// Nothing new is needed. CHASE_ZOOM_STOPS in ConvoyMapbox.tsx already zooms OUT with speed
-// (14.0 at 95 km/h, 12.8 at 180), which is the same job the pitch ramp was doing a second
+// Nothing new is needed. CHASE_ZOOM_STOPS (in src/chaseZoom.ts since 2026-09-14) already zooms
+// OUT with speed (14.0 at 95 km/h, 12.8 at 180), which is the same job the pitch ramp was doing a second
 // time. That doubling-up is what made the highway view extreme.
 //
 // ⛔ DO NOT RE-ADD A SPEED TERM. scripts/trap-check.py rule 31 and
 // tools/sim-qc/chase_pitch_test.mts both fail if chasePitch starts reading its argument.
-// The ZOOM ceiling and the speed-debounce that were discussed alongside this are NOT done
-// and were NOT approved — do not smuggle them in here.
+// The ZOOM ceiling discussed alongside this was built separately on 2026-09-14, in src/chaseZoom.ts
+// (Jeff: "yes. off ramp build please"). The speed-debounce is still NOT done and NOT approved.
+// Neither belongs in this file.
 
 /** The one following-camera tilt, in degrees. OTA-tunable; the gate asserts invariance, not this value. */
 export const CHASE_PITCH_FIXED = 48;

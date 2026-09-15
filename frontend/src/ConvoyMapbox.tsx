@@ -45,7 +45,9 @@ import { logEvent } from "./crashBreadcrumb";
 import { noteRafFrame, timersStarvedMs, maybeLogTimerStarve } from "./timerLiveness";
 import { anchorCutM, type CutAnchorHint } from "./routeRibbon";
 import { chasePitch, CHASE_PITCH_FIXED } from "./chasePitch";
+import { chaseZoom } from "./chaseZoom";
 export { chasePitch, CHASE_PITCH_FIXED } from "./chasePitch";
+export { chaseZoom } from "./chaseZoom";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert, Animated } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
@@ -595,25 +597,15 @@ export const CAR_EMISSIVE_BY_MODE: Record<string, number> = {
 // CarMapView imports them, so phone + CarPlay stay in sync automatically.
 const CHASE_PITCH_CITY = 48;      // higher angle / more top-down when slow
 const CHASE_PITCH_HIGHWAY = 60;   // lower angle (horizon) at speed = more road ahead
-const CHASE_ZOOM_CITY = 17;       // closest, slow
-const CHASE_ZOOM_HIGHWAY = 14;    // ~100 km/h — wider than before (was 15)
-const CHASE_ZOOM_FAST = 12.8;     // ~180 km/h — widest, for 100-200 cruising
+// CHASE_ZOOM_CITY / _HIGHWAY / _FAST moved to src/chaseZoom.ts with CHASE_ZOOM_STOPS (2026-09-14).
 const CHASE_KMH_CITY = 45;        // ≤45 km/h = closest/highest angle
 const CHASE_KMH_HIGHWAY = 95;
 const CHASE_KMH_FAST = 180;
 const FREE_ZOOM = 15;
 export const FOLLOW_ZOOM = 17;
-const CORNER_ZOOM = 18.5;
-const CORNER_FAR_M = 280;
-const CORNER_NEAR_M = 70;
-// ── CHAINED MANEUVERS (Jeff, 2026-09-03: "the exit off the highway was glitching") ──
-// cam-probe on his drive home: zoom climbed to 18.1 for the exit-gore maneuver, the step
-// advanced at 18:02:34 with the NEXT maneuver 483 m away (car-strip `turn=483m`), so the
-// target dropped to the 76 km/h speed zoom (14.9) and the camera glided out for 15 s — then
-// at 280 m from the ramp's end-turn it climbed back to 18.5. In, out, in, through one exit.
-// A step shorter than this holds the corner zoom for its whole length: the next maneuver is
-// already close, and a highway exit is exactly a gore maneuver + a short ramp step.
-const CORNER_CHAIN_M = 550;
+// CORNER_ZOOM / CORNER_FAR_M / CORNER_NEAR_M / CORNER_CHAIN_M (and the 09-03 chained-maneuver
+// note) moved to src/chaseZoom.ts on 2026-09-14, where the corner zoom-in now has a speed-aware
+// ceiling (Jeff: "yes. off ramp build please"). Read that file's header before tuning any of them.
 // The user zoom-button offset is added to the computed follow zoom; clamp the
 // result so the minus button can widen the view well out (~10.5) without going
 // uselessly far, and the plus button can't over-zoom past ~20.
@@ -808,63 +800,14 @@ export function routeColorsFor(kind: RouteKind, routeColor: string): { color: st
 
 function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
 export function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
-// ── SPEED → CHASE ZOOM (finer steps, 2026-07-29) ─────────────────────────────
-// Jeff: "a couple of sessions ago we made the chase camera zooms better — can we
-// add more steps in the zoom based on speed."
-//
-// The old curve was three tiers: FLAT 17 all the way to 45 km/h, then a straight
-// 3-zoom-level plunge to 14 by 95, then a shallow drift to 12.8 by 180. Two
-// problems with that shape. Nothing at all happened between a crawl and 45 km/h,
-// so city driving never re-framed. Then one linear ramp did all the work at once,
-// which reads as a shove rather than the camera breathing with the car — each zoom
-// level is a 2x scale change, so 3 levels over 50 km/h is an 8x area change on a
-// single straight line.
-//
-// A denser table fixes both: the framing eases continuously from crawl to cruise
-// and every ~15 km/h has its own step. The three documented anchors are PRESERVED
-// exactly — 17 at rest (CHASE_ZOOM_CITY, and see the FOLLOW_ZOOM invariant at the
-// chaseZoomRaw call site), 14 at 95 (CHASE_ZOOM_HIGHWAY), 12.8 at 180
-// (CHASE_ZOOM_FAST) — so this reshapes the curve BETWEEN known-good points rather
-// than moving them.
-//
-// 0-20 km/h is deliberately held at exactly CHASE_ZOOM_CITY: parked and crawling
-// framing must stay bit-identical to the native follow zoom (FOLLOW_ZOOM === 17).
-// Monotonically decreasing, so the low-pass in pushCam never has to reverse.
-// Every row is a plain number — OTA-tunable.
-const CHASE_ZOOM_STOPS: [number, number][] = [
-  [0,   CHASE_ZOOM_CITY],    // 17.0  parked / crawl — pinned, see above
-  [20,  CHASE_ZOOM_CITY],    // 17.0  residential
-  [35,  16.6],               //       city street
-  [50,  16.1],               //       arterial
-  [65,  15.5],               //       fast arterial
-  [80,  14.7],               //       highway approach
-  [95,  CHASE_ZOOM_HIGHWAY], // 14.0  highway cruise — anchor
-  [110, 13.6],
-  [125, 13.3],
-  [140, 13.1],
-  [160, 12.9],
-  [180, CHASE_ZOOM_FAST],    // 12.8  widest — anchor
-];
-function chaseZoomForSpeed(kmh: number) {
-  const st = CHASE_ZOOM_STOPS;
-  const v = Number.isFinite(kmh) && kmh > 0 ? kmh : 0;
-  if (v <= st[0][0]) return st[0][1];
-  if (v >= st[st.length - 1][0]) return st[st.length - 1][1];
-  for (let i = 1; i < st.length; i++) {
-    if (v <= st[i][0]) {
-      return lerp(st[i - 1][1], st[i][1], (v - st[i - 1][0]) / (st[i][0] - st[i - 1][0]));
-    }
-  }
-  return st[st.length - 1][1];
-}
-export function chaseZoom(kmh: number, distToManeuverM?: number, curStepLenM?: number) {
-  const base = chaseZoomForSpeed(kmh);
-  if (typeof distToManeuverM !== "number" || !Number.isFinite(distToManeuverM) || distToManeuverM <= 0) return base;
-  // Chained maneuvers (exit gore → short ramp): hold the corner zoom for the whole short step.
-  if (typeof curStepLenM === "number" && Number.isFinite(curStepLenM) && curStepLenM > 0 && curStepLenM <= CORNER_CHAIN_M) return CORNER_ZOOM;
-  const t = (CORNER_FAR_M - distToManeuverM) / (CORNER_FAR_M - CORNER_NEAR_M);
-  return Math.max(base, lerp(base, CORNER_ZOOM, t));
-}
+// ── SPEED → CHASE ZOOM + CORNER ZOOM — moved to src/chaseZoom.ts (2026-09-14) ──────────────
+// CHASE_ZOOM_STOPS, chaseZoomForSpeed and chaseZoom live there now, so
+// tools/sim-qc/chase_zoom_test.mts can import them; chaseZoom is re-exported at the top of this
+// file, so CarMapView and the call site below are unchanged. The one behaviour change: the corner
+// zoom-in (the short-step hold AND the distance blend) is capped by cornerZoomCeiling(kmh),
+// 18.5 at <= 45 km/h falling to 16.0 at >= 90 km/h, because every highway ramp was being drawn
+// at 18.5 at highway speed (09-11 exit: zt=18.50 @104 km/h; 09-14 Abbotsford exit: zt=18.50
+// @99 km/h). Receipts, prior art and the reasoning for each number are in that file's header.
 // ── FIXED CHASE TILT — moved to src/chasePitch.ts (Jeff, 2026-09-11: "i agree with the
 // pitch change. go"). The tilt no longer moves with speed: one constant, every surface.
 // It lives in its own module so tools/sim-qc/chase_pitch_test.mts can import it, the same

@@ -461,6 +461,24 @@ RULES = [
         "gitignored and EAS prebuilds fresh, so a hand-edited Podfile never ships: app.json expo.plugins must list "
         "the plugin, or the next Xcode 27 build gets all 13 errors back.",
     ),
+    (
+        "corner-zoom-no-speed-ceiling",
+        ["src/chaseZoom.ts", "src/ConvoyMapbox.tsx", "src/carplay/CarMapView.tsx"],
+        r"(?ms)\breturn\s+CORNER_ZOOM\s*;|^(?:export\s+)?function\s+chaseZoom\b[^{]*\{(?:(?!^\}|cornerZoomCeiling\().)*^\}",
+        "2026-09-14 (Jeff, verbatim: 'the last 10 min the off ramp was terrible and the route line was stuttering "
+        "like crazy', then 'yes. off ramp build please'): chaseZoom returned a FLAT CORNER_ZOOM 18.5 for any step "
+        "<= CORNER_CHAIN_M 550 m, whatever the speed, and every highway ramp is such a step. cam-probe receipts on "
+        "the CarPlay surface: 09-11 exit (ogb3m4-967731) 17:59:42 zt=18.50 @104 km/h against a speed curve of 13.76, "
+        "~179 px/s of ground flow against ~8.5 at cruise; 09-14 Abbotsford exit (h6sjel-844376) 18:16:05 "
+        "zt=18.50 @99 km/h on a ~460 m ramp step against 13.89, 151-168 px/s against 7.1 px/s fifteen seconds "
+        "earlier, so every 1-3 m correction was drawn ~20x bigger. Prior art: Mapbox Navigation SDK maxZoom 16.35 "
+        "and it excludes on/off ramps from maneuver framing; MapLibre Navigation Android and Organic Maps cap the "
+        "follow camera at 16. The corner target must go through cornerZoomCeiling(kmh) (18.5 at <= 45 km/h, 16.0 "
+        "at >= 90). This rule fires on a bare `return CORNER_ZOOM;` (the exact shape of the old short-step "
+        "branch) or a function chaseZoom whose body never calls cornerZoomCeiling. The runtime gate is "
+        "tools/sim-qc/chase_zoom_test.mts; this guards the source text. Tune the CEILING constants in "
+        "src/chaseZoom.ts, never delete the call.",
+    ),
 ]
 
 def blank_comments(text: str) -> str:

@@ -498,6 +498,47 @@ const SELF_DEADBAND_HDG = 8;
 // instant the car is actually moving so real driving is never lagged.
 const SELF_DEADBAND_STOP_M = 9;
 const SELF_CREEP_MS = 1.4; // ~5 km/h — below this the car is treated as stopped
+// ── THE MOVING BAND IS A TIME, NOT A DISTANCE (2026-09-15, Jeff: "IT STUDDERED") ──────────────
+// SELF_DEADBAND_M is compared against the DRAWN pose, so while moving the marker holds until the
+// car has covered 2.5 m — 0.45 s at 20 km/h. MEASURED on the ported chain (tools/sim-qc/
+// draw_deadband_test.mts): at 20–25 km/h the drawn car is STILL for 41–42 % of display frames,
+// p50 pause 167–183 ms, p90 217–267 ms, worst 383 ms, and it moves in 2.5 m catch-ups. That is
+// the move-pause-move Jeff reported at the 09-15 roundabouts, and it is also what starves the
+// route-line hold (pose_hold_test CHAIN).
+// The band exists to absorb JITTER IN THE TARGET. During guidance the target is the pose
+// estimator's own smoothed output arriving at render cadence, not a raw fix, so 2.5 m is an order
+// of magnitude more than it needs. While the targets arrive faster than SELF_DEADBAND_FAST_TARGET_MS
+// (i.e. the estimator feed, never the 1 Hz raw-fix feed of free drive) the moving band becomes
+//   clamp(speed × SELF_DEADBAND_T_S, SELF_DEADBAND_MIN_M, SELF_DEADBAND_M)
+// — "one render of travel", floored at the size of one eased fix correction (a 3 m correction moves
+// ~0.6 m in the first 83 ms at POSE_CORR_TAU_S), capped at today's value so ≥ 112 km/h is unchanged.
+// MEASURED (60 seeds, hold OFF): pause p90 267 → 67 ms on the X9 ring, 217 → 0 ms on the 09-15 ring
+// line, 167 → 0 ms on the 180° ring; the drawn car ends up 0.5–0.75 m LESS behind the truth; parked
+// scatter, the 5 km/h crawl and 60/100 km/h cruise are byte-identical (the stopped band, the scatter
+// gate, the hard snap and the ease are all untouched); crawl lateral reversals fall (10 km/h 2.0 →
+// 1.3 per 10 s). COST, stated plainly: the marker re-renders more often below ~35 km/h — 60 fps
+// instead of 34.5 at 20 km/h (+74 %), 160 eases/min instead of 64 at 10 km/h — and its lateral
+// excess travel at 10 km/h rises 2.06 → 2.53 m/10 s because it is no longer frozen.
+const SELF_DEADBAND_SPEED_SCALED = true;
+const SELF_DEADBAND_T_S = 0.08;
+const SELF_DEADBAND_MIN_M = 1.0;
+// ⚠ THE CADENCE IS MEASURED ON ITS OWN CLOCK, NOT fixGap (Codex review, 2026-09-15 — [high]). `fixGap` is an
+// EASE-DURATION normaliser: it only assigns when the gap is over 80 ms and it quantises 80–150 → 150 and
+// 150–300 → 300. So a target stream at 150–250 ms — a loaded CarPlay surface, a dropped 83 ms tick, exactly when
+// the marker stutters worst — reads as 300 and would have restored the 2.5 m band. Reproduced: at ~200 ms
+// sampling all three stutter gates failed with the old numbers. `lastTargetAt` + `targetGaps` below time the
+// targets themselves.
+/** The MEDIAN of the last SELF_TARGET_GAP_SAMPLES target intervals must be this fast. The two feeds are 83 ms
+ *  (the estimator, at render cadence) and ~1000 ms (raw fixes in free drive), so the bar sits in the empty middle
+ *  with ~2.5x of margin each way: neither a loaded surface at 150-250 ms, nor four dropped ticks, nor the render
+ *  quantisation of the interval itself can flip it, and a 1 Hz feed is nowhere near. A first cut at 250 ms sat
+ *  exactly ON the slowest cadence it had to accept and flip-flopped there (caught by this gate, 2026-09-15). */
+const SELF_DEADBAND_FAST_TARGET_MS = 400;
+/** …and the NEWEST interval must be under this, so a feed that has just stopped (screen-off batching, a remount,
+ *  backgrounding, the 1 Hz free-drive feed resuming) falls back to the conservative band on its FIRST slow target
+ *  instead of riding a stale median. Below the 1 Hz feed, above every jitter the median tolerates. */
+const SELF_DEADBAND_FAST_SLACK_MS = 700;
+const SELF_TARGET_GAP_SAMPLES = 5;
 // Phase-2 road-snap tuning. The invisible mapbox-streets-v8 road source id (shared by both
 // surfaces); how close a road must be to snap (lock)/stay snapped (release, hysteresis); how
 // often to re-query the road tiles when NOT route-snapped; and the max cross-street angle
@@ -1304,6 +1345,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const scatterRejects = useRef(0);
   const lastFixAt = useRef(0);
   const fixGap = useRef(1000);
+  /** the TARGET clock (see SELF_DEADBAND_FAST_TARGET_MS): when this pose last arrived, and the last few intervals. */
+  const lastTargetAt = useRef(0);
+  const targetGaps = useRef<number[]>([]);
   const rafDead = useRef(false); // latched true while the rAF loop is paused (phone display asleep)
   const bgTimer = useRef<any>(null); // background-safe ease timer that keeps the car moving smoothly while rAF is paused (phone display off + CarPlay active)
   const lastStepAtRef = useRef(0); // wall-clock of the last REAL rAF tick — the watchdog's liveness heartbeat
@@ -1884,6 +1928,19 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
 
   useEffect(() => {
     const now = Date.now();
+    // ── TARGET CADENCE (2026-09-15) ─────────────────────────────────────────────
+    // Stamped FIRST, above every bail, so a hard snap / park / resume keeps the intervals continuous — and on its
+    // own clock, because fixGap (below) is quantised for the ease and cannot answer "how fast is this feed?".
+    // The MEDIAN of the last few intervals decides the feed (a single dropped tick or a same-millisecond burst
+    // cannot move it); the newest interval is a fuse for a feed that has just stopped. With no history yet the
+    // median is Infinity, i.e. the old band, which is the safe way round.
+    const tGap = lastTargetAt.current ? now - lastTargetAt.current : Infinity;
+    lastTargetAt.current = now;
+    targetGaps.current.push(tGap);
+    if (targetGaps.current.length > SELF_TARGET_GAP_SAMPLES) targetGaps.current.shift();
+    const gapsSorted = [...targetGaps.current].sort((a, b) => a - b);
+    const medianTargetGap = gapsSorted.length >= SELF_TARGET_GAP_SAMPLES ? gapsSorted[gapsSorted.length >> 1] : Infinity;
+    const fastTargets = medianTargetGap <= SELF_DEADBAND_FAST_TARGET_MS && tGap <= SELF_DEADBAND_FAST_SLACK_MS;
     if (lastFixAt.current) {
       const gap = now - lastFixAt.current;
       // 2026-09-09: targets now arrive every ~83 ms from the pose estimator during guidance, not
@@ -1973,7 +2030,14 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // real number (map.tsx clamps negatives to 0; CarMapView has the parity pass), so
     // driving never sees this arm.
     const stopped = (speedMs ?? 0) < SELF_CREEP_MS;
-    const band = stopped ? SELF_DEADBAND_STOP_M : SELF_DEADBAND_M;
+    // While the targets arrive at render cadence (the pose estimator during guidance — `fastTargets`, measured at
+    // the top of this effect on its own clock) the moving band is one render of travel, floored and capped;
+    // a 1 Hz raw-fix feed (free drive) and every stopped case keep the old bands exactly.
+    const band = stopped
+      ? SELF_DEADBAND_STOP_M
+      : SELF_DEADBAND_SPEED_SCALED && fastTargets
+        ? Math.max(SELF_DEADBAND_MIN_M, Math.min(SELF_DEADBAND_M, (speedMs ?? 0) * SELF_DEADBAND_T_S))
+        : SELF_DEADBAND_M;
     const moveM = Math.hypot(dLatM, dLngM);
     if (moveM < band && Math.abs(angDelta(prev.heading, heading)) < SELF_DEADBAND_HDG) {
       lastRawFix.current = { lat, lng };

@@ -135,6 +135,8 @@ type CaseDef = {
   /** the SPEED the fix reports (0 for a parked car) */ fixSpeedMs?: number;
   /** the platform reports no course (parked) */ noCourse?: boolean;
   /** free drive: the target is the RAW fix at 1 Hz, not the estimator at render cadence */ rawTargets?: boolean;
+  /** insert heading-only targets (same lat/lng as the previous one) every N ms — the phone's camera-smoothing renders */
+  headingOnlyMs?: number;
   /** thin the 12 Hz target stream to this cadence (ms between targets), as a function of time */ cadence?: (tS: number, n: number) => number;
   from: number; to: number; parkedAt?: Pt;
 };
@@ -160,7 +162,16 @@ function targets(c: CaseDef, sd: number): Tg[] {
       lastFixT = tr.t; held = projectGlobal(nLat, nLng, c.verts, c.speedMs); fixed = true; rawLat = nLat; rawLng = nLng;
     }
     st = poseRoute(st, held, null, dtS);
-    if (c.rawTargets) { if (fixed) out.push({ t: tr.t, lat: rawLat, lng: rawLng, hdg: tr.hdg, spd: spdFix }); continue; }
+    if (c.rawTargets) {
+      if (fixed) out.push({ t: tr.t, lat: rawLat, lng: rawLng, hdg: tr.hdg, spd: spdFix });
+      // HEADING-ONLY renders (Codex [medium]): the phone re-derives the marker heading on parent renders, so the
+      // effect fires with the SAME position. They must not make this 1 Hz feed look fast.
+      else if (c.headingOnlyMs && out.length) {
+        const prev = out[out.length - 1];
+        if (tr.t * 1000 - (prev.t * 1000) >= c.headingOnlyMs - 1e-6) out.push({ t: tr.t, lat: prev.lat, lng: prev.lng, hdg: tr.hdg, spd: spdFix });
+      }
+      continue;
+    }
     const o = poseOut(st);
     if (o) out.push({ t: tr.t, lat: o.lat, lng: o.lng, hdg: st.hdgKnown ? o.hdg : 0, spd: spdFix });
   }
@@ -175,18 +186,26 @@ function chain(tg: Tg[], rule: Rule, tFrom: number, tTo: number) {
   let eases = 0; const frames: { t: number; lat: number; lng: number; hdg: number }[] = [];
   let ti = 0; const tEnd = tg[tg.length - 1].t;
   // the TARGET clock, exactly as the effect keeps it (stamped above every bail)
-  let lastTargetAt = 0; const tGaps: number[] = [];
+  let lastTargetAt = 0; let lastTargetPos: { lat: number; lng: number } | null = null; let lastTargetGap = Infinity; const tGaps: number[] = [];
   let bandMin = Infinity, bandMax = -Infinity, scaledN = 0, bandN = 0;
   const accept = (nowS: number) => {
     const now = nowS * 1000;
     while (ti < tg.length && tg[ti].t <= nowS + 1e-9) {
       const g = tg[ti++]; const inWin = g.t >= tFrom && g.t <= tTo;
-      const tGap = lastTargetAt ? now - lastTargetAt : Infinity;
-      lastTargetAt = now;
-      tGaps.push(tGap); if (tGaps.length > GAP_SAMPLES) tGaps.shift();
+      // ONLY A POSITION STAMPS THE CLOCK (Codex [medium], 2026-09-15): the effect also runs for heading-only
+      // changes (the phone re-derives the marker heading on parent renders), and those must never make a 1 Hz
+      // raw feed look fast. Mirrors src/ConvoyMapbox.tsx.
+      const posMoved = !(lastTargetPos && g.lat === lastTargetPos.lat && g.lng === lastTargetPos.lng);
+      let tGapPos = lastTargetGap;
+      if (posMoved) {
+        tGapPos = lastTargetAt ? now - lastTargetAt : Infinity;
+        lastTargetAt = now; lastTargetPos = { lat: g.lat, lng: g.lng }; lastTargetGap = tGapPos;
+        tGaps.push(tGapPos); if (tGaps.length > GAP_SAMPLES) tGaps.shift();
+      }
       const sorted = [...tGaps].sort((a, b) => a - b);
       const medianGap = tGaps.length >= GAP_SAMPLES ? sorted[sorted.length >> 1] : Infinity;
-      const fastTargets = medianGap <= FAST_MS && tGap <= SLACK_MS;
+      const sinceTarget = posMoved ? tGapPos : Math.max(lastTargetGap, lastTargetAt ? now - lastTargetAt : Infinity);
+      const fastTargets = medianGap <= FAST_MS && sinceTarget <= SLACK_MS;
       if (lastFixAt) { const gap = now - lastFixAt; if (gap > GAP_MIN) fixGap = gap < GAP_FAST ? GAP_FAST_V : Math.max(GAP_LO, Math.min(GAP_HI, gap)); }
       lastFixAt = now;
       const prev = render;
@@ -293,12 +312,14 @@ const RING_X9: CaseDef = { nm: "ring 270° r15 @20 km/h (X9)", truth: RING270, v
 const RING_180: CaseDef = { nm: "ring 180° r13 @28 km/h, fixes 3 m outside", truth: RING180, verts: routeVerts(RING180, 5.5), speedMs: v180, noiseM: 2, biasRightM: 3, from: 80 / v180 + 1, to: (80 + arc180) / v180 };
 const LINE_0915: CaseDef = { nm: "09-15 ring line @25 km/h, white 3 m", truth: RB_TRUTH, verts: RB, speedMs: v0915, noiseM: 3, from: 3, to: RB_TRUTH[RB_TRUTH.length - 1].t - 3 };
 const FREE_DRIVE: CaseDef = { ...cruise(30), nm: "free drive 30 km/h (raw fix targets, 1 Hz)", rawTargets: true };
+/** Codex [medium] 2026-09-15: free drive, 1 Hz positions, with heading-only renders every ~83 ms in between. */
+const FREE_DRIVE_HDG: CaseDef = { ...cruise(30), nm: "free drive 30 km/h, 1 Hz positions + heading-only renders", rawTargets: true, headingOnlyMs: 83 };
 
 console.log(`SelfCarModel acceptance band, as committed: stopped ${STOP_M} m below ${CREEP_MS} m/s; moving ${SCALED_ON ? `clamp(speed × ${T_S}, ${MIN_M}, ${DEAD_M}) while targets arrive within ${FAST_MS} ms, else ${DEAD_M}` : `${DEAD_M} (speed scaling OFF)`}; heading ${DEAD_HDG}°`);
 ok("D0 SELF_DEADBAND_SPEED_SCALED is ON as committed (the stutter fix; flipping it off must be deliberate and re-measured)", SCALED_ON, "");
 
 console.log("\nD1. UNCHANGED cases — the stopped band, the scatter gate and the raw-fix feed are untouched (every metric identical)");
-for (const c of [parkedCase, crawl(5), cruise(60), cruise(100), FREE_DRIVE]) {
+for (const c of [parkedCase, crawl(5), cruise(60), cruise(100), FREE_DRIVE, FREE_DRIVE_HDG]) {
   const today = measure(c, "off"), now = measure(c, "target");
   console.log(`   ${c.nm}\n     today  ${row(today)}${c.parkedAt ? ` | drift p90 ${f2(today.drift90)} max ${f2(today.driftMax)} m` : ""}`);
   ok(`D1 ${c.nm}: identical to the old band`, same(today, now), c.parkedAt ? `drift p90 ${f2(now.drift90)} max ${f2(now.driftMax)} m` : `pause p90 ${now.p90.toFixed(0)} ms, ${now.easesMin.toFixed(0)} eases/min`);

@@ -1347,6 +1347,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const fixGap = useRef(1000);
   /** the TARGET clock (see SELF_DEADBAND_FAST_TARGET_MS): when this pose last arrived, and the last few intervals. */
   const lastTargetAt = useRef(0);
+  const lastTargetPos = useRef<{ lat: number; lng: number }>({ lat: NaN, lng: NaN });
+  const lastTargetGap = useRef(Infinity);
   const targetGaps = useRef<number[]>([]);
   const rafDead = useRef(false); // latched true while the rAF loop is paused (phone display asleep)
   const bgTimer = useRef<any>(null); // background-safe ease timer that keeps the car moving smoothly while rAF is paused (phone display off + CarPlay active)
@@ -1934,13 +1936,29 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // The MEDIAN of the last few intervals decides the feed (a single dropped tick or a same-millisecond burst
     // cannot move it); the newest interval is a fuse for a feed that has just stopped. With no history yet the
     // median is Infinity, i.e. the old band, which is the safe way round.
-    const tGap = lastTargetAt.current ? now - lastTargetAt.current : Infinity;
-    lastTargetAt.current = now;
-    targetGaps.current.push(tGap);
-    if (targetGaps.current.length > SELF_TARGET_GAP_SAMPLES) targetGaps.current.shift();
+    // ⚠ ONLY A POSITION COUNTS (Codex review 2026-09-15 — [medium]). This effect also runs for a HEADING-only
+    // change, and the phone's marker heading is re-derived on parent renders (camera smoothing, gesture and
+    // zoom callbacks), so heading churn during FREE DRIVE — where positions really do arrive at 1 Hz — could
+    // otherwise fill this clock with fast intervals and hand raw GPS the tight band. Reproduced: five 100 ms
+    // heading updates enabled the 1 m band and accepted a 1.5 m raw offset the old band rejects.
+    const posMoved = lat !== lastTargetPos.current.lat || lng !== lastTargetPos.current.lng;
+    let tGapPos = lastTargetGap.current;
+    if (posMoved) {
+      tGapPos = lastTargetAt.current ? now - lastTargetAt.current : Infinity;
+      lastTargetAt.current = now;
+      lastTargetPos.current = { lat, lng };
+      lastTargetGap.current = tGapPos;
+      targetGaps.current.push(tGapPos);
+      if (targetGaps.current.length > SELF_TARGET_GAP_SAMPLES) targetGaps.current.shift();
+    }
     const gapsSorted = [...targetGaps.current].sort((a, b) => a - b);
     const medianTargetGap = gapsSorted.length >= SELF_TARGET_GAP_SAMPLES ? gapsSorted[gapsSorted.length >> 1] : Infinity;
-    const fastTargets = medianTargetGap <= SELF_DEADBAND_FAST_TARGET_MS && tGap <= SELF_DEADBAND_FAST_SLACK_MS;
+    // The fuse is the age of the last POSITION target, so heading-only renders can only ever make the feed look
+    // slower (the conservative band), never faster.
+    // The fuse: on a position target it is the gap since the PREVIOUS position (so a feed that just slowed to 1 Hz
+    // falls back on its first slow target); on a heading-only render it is the age of the last position target.
+    const sinceTargetMs = posMoved ? tGapPos : Math.max(lastTargetGap.current, lastTargetAt.current ? now - lastTargetAt.current : Infinity);
+    const fastTargets = medianTargetGap <= SELF_DEADBAND_FAST_TARGET_MS && sinceTargetMs <= SELF_DEADBAND_FAST_SLACK_MS;
     if (lastFixAt.current) {
       const gap = now - lastFixAt.current;
       // 2026-09-09: targets now arrive every ~83 ms from the pose estimator during guidance, not

@@ -826,14 +826,22 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
     const geom: [number, number][] = [[lng0, lat0], [vtx.lng, vtx.lat], [east.lng, east.lat]];
     const fixes = [] as { t: number; lat: number; lng: number; crs: number | null; spd: number }[];
     for (let t = 0; t <= 20; t++) { const q = stepLatLng(lat0, lng0, 0, 7.5 * t + 25); fixes.push({ t, lat: q.lat, lng: q.lng, crs: 0, spd: 7.5 }); }
-    const r = fieldReplayCorner(geom, fixes).rows;
-    const lean = r.map((x) => Math.abs(wrap180(x.est - 0)));
-    const peakI = lean.indexOf(Math.max(...lean));
-    const twoLater = lean[Math.min(lean.length - 1, peakI + 2)];
-    const tail = lean.slice(Math.min(lean.length - 1, peakI + 3));
-    ok("Z5a missed turn: peak lean into the untaken corner ≤ 10° — base 5.8, head 8.4 (unbounded ratchet 12.4)", Math.max(...lean) <= 10, `${Math.max(...lean).toFixed(2)}° at t=${r[peakI].t}`);
-    ok("Z5b missed turn: two fixes after the peak the nose is within 1° of the course — base 0.28, head 0.48 (unbounded: still 12.4)", twoLater <= 1, `${twoLater.toFixed(2)}°`);
-    ok("Z5c missed turn: from three fixes after the peak on, the nose never leaves 1° of the course (the hold cannot persist)", tail.every((v) => v <= 1), `worst ${Math.max(...tail).toFixed(2)}° over ${tail.length} fixes`);
+    const judge = (label: string, accMOf: (f: { t: number }, i: number) => number) => {
+      const r = fieldReplayCorner(geom, fixes, 12, accMOf as any).rows;
+      const lean = r.map((x) => Math.abs(wrap180(x.est - 0)));
+      const peakI = lean.indexOf(Math.max(...lean));
+      const twoLater = lean[Math.min(lean.length - 1, peakI + 2)];
+      const tail = lean.slice(Math.min(lean.length - 1, peakI + 3));
+      ok(`Z5a${label} missed turn: peak lean into the untaken corner ≤ 10° — base 5.8, head 8.4 (unbounded ratchet 12.4)`, Math.max(...lean) <= 10, `${Math.max(...lean).toFixed(2)}° at t=${r[peakI].t}`);
+      ok(`Z5b${label} missed turn: two fixes after the peak the nose is within 1° of the course — base 0.28, head 0.48 (unbounded: still 12.4)`, twoLater <= 1, `${twoLater.toFixed(2)}°`);
+      ok(`Z5c${label} missed turn: from three fixes after the peak on, the nose never leaves 1° of the course (the hold cannot persist)`, tail.every((v) => v <= 1), `worst ${Math.max(...tail).toFixed(2)}° over ${tail.length} fixes`);
+    };
+    judge("", () => 10);
+    // Codex round 2: at accM ≥ 20 the courses are UNQUALIFIED (no release, no corroboration) but they still steer
+    // the fade — so they must still advance the ratchet's count. Also accuracy collapsing mid-hold.
+    judge(" @acc20", () => 20);
+    judge(" @acc25", () => 25);
+    judge(" @acc10→25", (f) => (f.t >= 10 ? 25 : 10));
   }
 }
 

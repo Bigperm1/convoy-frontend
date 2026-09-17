@@ -85,7 +85,7 @@ export function backfill(anchor: FieldFix, before: Before[]): FieldFix[] {
 export type ReplayRow = { t: number; crs: number | null; est: number; road: number | null; rk: number; src: string; dFix: number; distM: number; rw: number };
 export type ReplayResult = { rows: ReplayRow[]; maxSwingDps: number };
 
-export function replayCorner(geom: [number, number][], fixes: FieldFix[], hz = 12): ReplayResult {
+export function replayCorner(geom: [number, number][], fixes: FieldFix[], hz = 12, accMOf: (f: FieldFix, i: number) => number = () => 10): ReplayResult {
   const coords = geom.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
   const T0 = 1_700_000_000_000;
   let st = poseStart();
@@ -101,7 +101,7 @@ export function replayCorner(geom: [number, number][], fixes: FieldFix[], hz = 1
     let landed = false;
     while (fi < fixes.length && fixes[fi].t <= t + 1e-9) {
       const f = fixes[fi];
-      st = poseFix(st, { lat: f.lat, lng: f.lng, at: T0 + f.t * 1000, accM: 10, speedMs: f.spd, courseDeg: f.crs }, null);
+      st = poseFix(st, { lat: f.lat, lng: f.lng, at: T0 + f.t * 1000, accM: accMOf(f, fi), speedMs: f.spd, courseDeg: f.crs }, null);
       held = projectOntoRoute(f.lat, f.lng, coords, f.spd);
       landed = true; fi++;
     }

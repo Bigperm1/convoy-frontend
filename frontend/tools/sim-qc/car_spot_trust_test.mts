@@ -3,7 +3,7 @@
 // then the legitimate shapes (they must still be adopted). Run:
 //   node --experimental-strip-types tools/sim-qc/car_spot_trust_test.mts
 import assert from "node:assert/strict";
-import { spotAdoptVerdict, fixMayBecomeSpot, spotFacing, SPOT_FACING_MAX_M, SPOT_MAX_AGE_MS, SPOT_WRITE_MAX_SPEED_MS } from "../../src/carSpotTrust.ts";
+import { spotAdoptVerdict, fixMayBecomeSpot, spotFacing, spotHeadingFor, SPOT_FACING_MAX_M, SPOT_HDG_MAX_DIST_M, SPOT_MAX_AGE_MS, SPOT_WRITE_MAX_SPEED_MS } from "../../src/carSpotTrust.ts";
 
 const NOW = 1_800_000_000_000;
 const H = 3600_000;
@@ -100,6 +100,14 @@ out.push(`F 7km/h=no 3km/h=yes 0=yes unknown=yes cap=${SPOT_WRITE_MAX_SPEED_MS}m
   assert.equal(f7, 200); out.push(`F7 an in-memory spot with no timestamp → its hdg (age judged by hydrate already)`);
   assert.equal(spotFacing(null, { lat: 1, lng: 1 }, NOW), null); assert.equal(spotFacing(spot, null, NOW), null);
   out.push(`F8 no spot / no origin → null`);
+  // The heading's PROVENANCE (Codex 09-16): it belongs to the place it was observed.
+  const obs = { deg: 180, at: NOW - 60_000, lat: spot.lat, lng: spot.lng };
+  assert.equal(spotHeadingFor(obs, { lat: spot.lat + dLat(20), lng: spot.lng }), 180);
+  out.push(`F9 a spot 20 m from the heading's observation → 180`);
+  assert.equal(spotHeadingFor(obs, { lat: spot.lat + dLat(SPOT_HDG_MAX_DIST_M + 40), lng: spot.lng }), null);
+  out.push(`F10 a spot ${SPOT_HDG_MAX_DIST_M + 40} m away (the car moved while the app was gone) → null`);
+  assert.equal(spotHeadingFor(null, { lat: spot.lat, lng: spot.lng }), null); assert.equal(spotHeadingFor({ ...obs, deg: -1 }, { lat: spot.lat, lng: spot.lng }), null);
+  out.push(`F11 no observation / hdg -1 → null`);
 }
 
 console.log(out.join(" | "));

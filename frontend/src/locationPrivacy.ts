@@ -27,7 +27,7 @@
 // the parked branch fell back to live coordinates and drew a peer on their own home.
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { spotAdoptVerdict, SPOT_WRITE_MAX_SPEED_MS } from "./carSpotTrust";
+import { spotAdoptVerdict, spotHeadingFor, SPOT_WRITE_MAX_SPEED_MS, type SpotHeadingObs } from "./carSpotTrust";
 import { Platform } from "react-native";
 import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
 
@@ -134,9 +134,11 @@ let _carConnected = false;
 let _carConnectedAt = 0;
 let _lastDrivingAt = 0;
 let _carSpot: { lat: number; lng: number; hdg?: number } | null = null;
-// The GPS course of the last fix that was still MOVING (>= SPOT_WRITE_MAX_SPEED_MS): persisted with the spot as
-// `hdg` — the direction the car was facing when it stopped (src/carSpotTrust.ts spotFacing, 2026-09-16).
-let _spotHdg: number | null = null;
+// The GPS course of the last fix that was still MOVING (>= SPOT_WRITE_MAX_SPEED_MS) AND was allowed to write a car
+// spot — with where and when it was seen. Persisted with the spot as `hdg`: the direction the car was facing when it
+// stopped (src/carSpotTrust.ts spotFacing / spotHeadingFor, 2026-09-16). Codex 09-16: a jogging fix after the latch
+// dropped, or a heading restored from disk, must never become the facing of a spot somewhere else.
+let _spotHdg: SpotHeadingObs | null = null;
 // When _carSpot was RECORDED (not when it was last written to disk). Persisted with the
 // spot so hydrate can age it out — see SPOT_MAX_AGE_MS.
 let _carSpotAt = 0;
@@ -190,7 +192,9 @@ export async function hydrateLocationPrivacy(): Promise<void> {
         if (v.adopt) {
           const hdgOk = typeof p.hdg === "number" && Number.isFinite(p.hdg) && p.hdg >= 0 && p.hdg <= 360;
           _carSpot = hdgOk ? { lat: p.lat, lng: p.lng, hdg: p.hdg } : { lat: p.lat, lng: p.lng };
-          if (hdgOk) _spotHdg = p.hdg;   // a parked car keeps its facing across launches until it moves again
+          // The restored facing stays tied to THIS spot: a later spot written > SPOT_HDG_MAX_DIST_M away (the car
+          // moved while the app was gone) gets no heading until a moving course is seen again.
+          if (hdgOk) _spotHdg = { deg: p.hdg, at: p.t, lat: p.lat, lng: p.lng };
           _carSpotAt = p.t;
           // Same freshness rule as the spot itself: only adopt the persisted witnessed-park
           // flag when the persisted spot was adopted. `hu` on disk can only have survived
@@ -328,10 +332,6 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   if (typeof lat !== "number" || typeof lng !== "number") return;
   const spd = speedMs ?? 0;
   const now = Date.now();
-  // The facing rides the LAST MOVING fix's course: once the car is below SPOT_WRITE_MAX_SPEED_MS the course is
-  // GPS noise (iOS reports -1), so the value frozen here is the direction the car stopped in. Never a compass —
-  // see src/departureBearing.ts for why the course beats it.
-  if (spd >= SPOT_WRITE_MAX_SPEED_MS && typeof courseDeg === "number" && Number.isFinite(courseDeg) && courseDeg >= 0 && courseDeg <= 360) _spotHdg = courseDeg;
   // ── ARM AND RECORD MUST NOT HAPPEN IN THE SAME CALL (2026-08-29) ──────────────
   // Until today they did: line 1 armed the latch off this fix's own speed, and 25 lines
   // later the SAME fix was recorded as the car spot. The latch's whole job is to prove
@@ -403,7 +403,17 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   // speed for two hours and Say Phin's spot stayed at the meet while he drove home — see
   // src/carSpotTrust.ts). What guards against a fix the app never saw end is the persisted
   // `mv` (speed at the last write) and `att`, judged at hydrate.
-  _carSpot = _spotHdg != null ? { lat, lng, hdg: _spotHdg } : { lat, lng };
+  // THE PARKED HEADING rides the last MOVING fix's course — judged HERE, past the car-trust gate above, so only a
+  // fix that may write a spot may set the facing (a jogger's course never does): once the car is below
+  // SPOT_WRITE_MAX_SPEED_MS the course is GPS noise (iOS reports -1), so the value frozen is the direction the car
+  // stopped in. It is attached only while this spot is within SPOT_HDG_MAX_DIST_M of where it was observed, and
+  // dropped otherwise — a displaced spot has no facing until the car is seen moving again.
+  if (spd >= SPOT_WRITE_MAX_SPEED_MS && typeof courseDeg === "number" && Number.isFinite(courseDeg) && courseDeg >= 0 && courseDeg <= 360) {
+    _spotHdg = { deg: courseDeg, at: now, lat, lng };
+  }
+  const hdg = spotHeadingFor(_spotHdg, { lat, lng });
+  if (hdg == null) _spotHdg = null;
+  _carSpot = hdg != null ? { lat, lng, hdg } : { lat, lng };
   _carSpotAt = now;
   if (now - _spotSavedAt > SPOT_SAVE_THROTTLE_MS) {
     _spotSavedAt = now;

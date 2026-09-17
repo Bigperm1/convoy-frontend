@@ -4371,7 +4371,9 @@ export default function MapScreen() {
     // parkEndedByHeadUnit). This screen isn't entitled to ASSERT a head unit on
     // Android; it isn't entitled to RELEASE one either. AndroidAutoRoot owns both.
     if (Platform.OS !== "android") noteCarConnected(carAttachedHere);
-    if (coords) noteFix(coords.lat, coords.lng, coords.speed ?? 0, coords.heading);   // heading = this fix's course → the parked facing
+    // coords.course is THIS fix's course (null when the platform has none); coords.heading is the STICKY display
+    // heading and would freeze a stale direction into the parked facing (Codex 2026-09-16).
+    if (coords) noteFix(coords.lat, coords.lng, coords.speed ?? 0, coords.course ?? null);
   }, [carConnected, coords?.lat, coords?.lng]);
 
   // Position + status we actually broadcast. PARTIAL or FULL → LIVE while the head

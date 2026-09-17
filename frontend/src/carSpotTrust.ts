@@ -65,6 +65,17 @@ export function spotAdoptVerdict(p: unknown, now: number, lastDrivingAt: number 
  *  than SPOT_FACING_MAX_M from it (a parkade exit, a fix that never reached the lot) gets nothing from here and
  *  falls through to the course / compass, exactly as before. Gate: car_spot_trust_test.mts F1–F6. */
 export const SPOT_FACING_MAX_M = 25;
+/** A parked heading belongs to the place it was OBSERVED (the last moving fix before the stop). A spot written
+ *  further than this from that observation gets no heading — a car that moved while the app was away, or was
+ *  re-parked elsewhere with no moving course seen — instead of inheriting an old park's facing with a fresh 24 h
+ *  life (Codex 2026-09-16). 60 m: a stop lands within a car length or two of its last moving fix. */
+export const SPOT_HDG_MAX_DIST_M = 60;
+export type SpotHeadingObs = { deg: number; at: number; lat: number; lng: number };
+export function spotHeadingFor(obs: SpotHeadingObs | null | undefined, pos: { lat: number; lng: number }): number | null {
+  if (!obs || typeof obs.deg !== "number" || !isFinite(obs.deg) || obs.deg < 0 || obs.deg > 360) return null;
+  if (spotDistanceM(obs, pos) > SPOT_HDG_MAX_DIST_M) return null;
+  return obs.deg % 360;
+}
 export function spotFacing(
   spot: { lat: number; lng: number; hdg?: number; t?: number } | null | undefined,
   near: { lat: number; lng: number } | null | undefined,
@@ -78,7 +89,7 @@ export function spotFacing(
   if (spotDistanceM(spot, near) > SPOT_FACING_MAX_M) return null;
   return h % 360;
 }
-function spotDistanceM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+export function spotDistanceM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
   const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;

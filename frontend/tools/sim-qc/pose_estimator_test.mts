@@ -846,13 +846,42 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
     // Codex round 3: two NOISY courses (30° at t = 9 and 11, 0° otherwise) on the same missed turn. A one-frame
     // agreement must not hand the ratchet a fresh cap (POSE_ROAD_RATCHET_REST_MS): without the rest rule the nose
     // sat 36–50° wrong through t = 14 (25.3° at t = 14, 1.5° at t = 15); the pre-clamp estimator bounces 36.6 / 7.8 /
-    // 46.3 / 5.7 / 0.3 over t = 10–14; head 36.6 / 36.6 / 50.3 / 4.3 / 0.2 — one second longer wrong, then back.
+    // 46.3 / 5.7 / 0.3 over t = 10–14; with the rest rule alone head was 36.6 / 36.6 / 50.3 / 4.3 / 0.2; with the
+  // turn-evidence guard (Codex round 4) the ratchet stands down here and head equals base.
     { const fx = fixes.map((f) => ({ ...f, crs: f.t === 9 || f.t === 11 ? 30 : 0 }));
       const r = fieldReplayCorner(geom, fx, 12, () => 10).rows;
       const at = (t: number) => Math.abs(wrap180(r.find((x) => x.t === t)!.est));
-      ok("Z5d noisy missed turn (30° courses at t=9,11): nose ≤ 6° at t=13 — base 5.7, head 4.3 (no rest rule: 50.3)", at(13) <= 6, `${at(13).toFixed(2)}°`);
-      ok("Z5e noisy missed turn: nose ≤ 1° at t=14 and after — base 0.3, head 0.2 (no rest rule: 25.3)", r.filter((x) => x.t >= 14).every((x) => Math.abs(wrap180(x.est)) <= 1), `t14 ${at(14).toFixed(2)}°`);
+      ok("Z5d noisy missed turn (30° courses at t=9,11): nose ≤ 6° at t=13 — base 5.7, head 5.7 (no rest rule: 50.3; the turn-evidence guard stands the ratchet down here)", at(13) <= 6, `${at(13).toFixed(2)}°`);
+      ok("Z5e noisy missed turn: nose ≤ 1° at t=14 and after — base 0.3, head 0.3 (no rest rule: 25.3)", r.filter((x) => x.t >= 14).every((x) => Math.abs(wrap180(x.est)) <= 1), `t14 ${at(14).toFixed(2)}°`);
     }
+  }
+  // Z6 — A NOISY CHICANE MUST NOT GET WORSE (Codex round 4 [high]): left 90° r=4 m, a 2 m link, right 90° r=4 m at
+  // 3.1 m/s with 6 m of scatter and 1 Hz courses. The noisy projection can report the SECOND bend (right) while the
+  // courses say the car is still turning left at −40°/s; an unguarded ratchet held the nose there for a second and
+  // the error at the link went 26° → 59°. POSE_ROAD_RATCHET_TURN_DPS stands the ratchet down against live turn
+  // evidence the other way. Swept over 60 seeds; base = ac1cb9ab (pre-clamp).
+  {
+    const makeChicane = (speedMs: number, r: number, approachM: number, linkM: number, exitM: number, hz = 20): Truth[] => {
+      const out: Truth[] = []; let lat = 49.0330, lng = -122.2930, hdg = 180, t = 0; const dt = 1 / hz;
+      const arc = (Math.PI / 2) * r; const m = [approachM, approachM + arc, approachM + arc + linkM, approachM + 2 * arc + linkM, approachM + 2 * arc + linkM + exitM];
+      let s = 0;
+      while (s <= m[4]) {
+        out.push({ lat, lng, hdg, t }); const ds = speedMs * dt;
+        if (s > m[0] && s <= m[1]) hdg = (hdg - (ds / r) * 180 / Math.PI + 360) % 360;          // left
+        else if (s > m[2] && s <= m[3]) hdg = (hdg + (ds / r) * 180 / Math.PI) % 360;           // right
+        const p = stepLatLng(lat, lng, hdg, ds); lat = p.lat; lng = p.lng; s += ds; t += dt;
+      }
+      return out;
+    };
+    const ch = makeChicane(3.1, 4, 60, 2, 60);
+    const p = (xs: number[], q: number) => { const a = [...xs].sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(q * (a.length - 1)))]; };
+    const errs: number[] = []; let seed35 = 0;
+    for (let sd = 1; sd <= 60; sd++) {
+      const e = run(ch, { gyro: false, noiseM: 6, route: true, speedMs: 3.1, fixHz: 1, from: 20, seed: sd * 7919 }).maxHdgErr;
+      errs.push(e); if (sd === 35) seed35 = e;
+    }
+    ok("Z6a noisy chicane (3.1 m/s, r=4, 6 m scatter): worst nose error p90 over 60 seeds ≤ 64.5° — base 63.9, head 63.9", p(errs, 0.9) <= 64.5, `p90 ${p(errs, 0.9).toFixed(1)}° median ${p(errs, 0.5).toFixed(1)}° seed35 ${seed35.toFixed(1)}°`);
+    ok("Z6b noisy chicane: Codex's seed (35) ≤ 48° over the run — base 47.3, head 47.3 (the unguarded ratchet cost 59° vs 26° at the link)", seed35 <= 48, `${seed35.toFixed(1)}°`);
   }
 }
 

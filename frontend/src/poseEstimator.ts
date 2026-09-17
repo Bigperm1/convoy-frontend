@@ -257,6 +257,12 @@ export const POSE_ROAD_RATCHET_MAX_MS = 1500;
  *  pre-clamp estimator bounces the same shape (46° at t = 12) but is back within 6° a second later. Two seconds
  *  is longer than any 1 Hz alternation and shorter than the leg between two real corners. */
 export const POSE_ROAD_RATCHET_REST_MS = 2000;
+/** The ratchet never acts against LIVE turn evidence the other way: when the course-inferred turn rate is at least
+ *  this and its sign is opposite to the line's bend, the line is not the car's bend (Codex round 4: at a noisy
+ *  3 m/s chicane the projection reported a right-hand bend while the courses ran left at −40°/s, and the hold cost
+ *  59° against 26° for a second). 12°/s is the same floor the route pull uses for "turning" — below it a 1 Hz
+ *  course rate is noise on a straight, and on Jeff's corners it is exactly 0 in the second the ratchet is for. */
+export const POSE_ROAD_RATCHET_TURN_DPS = 12;
 export const POSE_ROAD_SHARP_FULL_DEG = 60;
 /** ⛔ TRIED AND REVERTED 2026-09-11 — do not re-add: suspending the sharpness fade while the raw fix is
  *  within a few metres of the line. It reads well ("a car ON the line is on the line") and it moved the
@@ -478,7 +484,9 @@ export function posePredict(st: PoseState, nowMs: number, yaw: PoseYaw | null | 
       if (target != null && roadTarget != null && roadFresh) {
         const bend = wrap180((st.roadHdgAhead != null ? st.roadHdgAhead : st.roadHdg!) - st.roadHdg!);
         const toRoad = wrap180(roadTarget - hdg), toTarget = wrap180(target - hdg);
-        wantsRatchet = Math.abs(bend) >= POSE_ROAD_RATCHET_BEND_DEG && Math.sign(bend) === Math.sign(toRoad)
+        const turningAgainst = courseLive && Math.abs(st.gpsTurnDps) >= POSE_ROAD_RATCHET_TURN_DPS
+          && Math.sign(st.gpsTurnDps) === -Math.sign(bend);
+        wantsRatchet = !turningAgainst && Math.abs(bend) >= POSE_ROAD_RATCHET_BEND_DEG && Math.sign(bend) === Math.sign(toRoad)
             && toRoad !== 0 && toTarget !== 0 && Math.sign(toTarget) !== Math.sign(toRoad);
       }
       // The cap runs on THIS clock from the first frame the ratchet acts — never from a fix judgement (see

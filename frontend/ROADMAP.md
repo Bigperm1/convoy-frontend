@@ -1044,6 +1044,20 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   offer (#1) · replay (#3, nothing exists to revamp) · peer twin in presence (#4, heat budget) ·
   failed-scan surfacing (needs a readable job status) · RevenueCat/widgets/watch = ~~build 76~~ build 77 (76 consumed by the Android re-cut).
 
+## 4c · BUILD 79 — CUT 2026-09-17 00:0x PDT, BOTH PLATFORMS, runtime 1.28.0 → **1.29.0** (ledger: memory `build-79-cut`)
+- Release SHA `f9a79ed2`. **iOS 79 built LOCALLY on Xcode 27 RC 27A266a** (`eas build --local --profile mapbox-ios-x27`
+  through `env:exec preview`, verified with `tools/build/verify-ipa.py` — XL widget present, carplay-maps, channel
+  mapbox-migration, KEY_PRESENT=1) and submitted to App Store Connect 23:58 PDT (TestFlight INTERNAL first).
+  **Android 79 on EAS** (`fb6a73de`, mapbox-android-store, app-bundle) submitted to the Play INTERNAL track 00:0x — no APK.
+- Native in 79: CarPlay-first host gate + AA cold-start resume, AA CarJsKeepAlive, car-screen status messages, location on
+  While-Using (expo-location patch built from source), CarPlay root/tap receipts, HairpinTimerPump, the iOS 27 full-page
+  widget, pod deployment-target floor, isProducedByAccessory forwarding, the Hairpin boot screen. JS riding it un-OTA'd:
+  the corner nose clamp, the ribbon at the nose, the parked heading (all 2026-09-16).
+- **One-way door again:** every OTA from here targets **1.29.0** — `verify-bundle-key.py <group> 1.29.0`. Every 1.28.0
+  install (all active testers at the cut) gets NOTHING until it installs 79 from TestFlight / Play internal.
+- Not done at the cut: Codex verdict at the release SHA (quota; run before external testers), `thermal=` (Jeff never
+  answered), ASC key rotation (still open).
+
 ## 4b · BUILD 77 → 78 — CUT 2026-09-11 00:16 PDT, BOTH PLATFORMS, runtime 1.27.0 → **1.28.0** (full story: `HANDOFF-2026-09-07.md` §0b; ledger: memory `build-77-cut`)
 - **78 on both** from `58b7142`: iOS `a6b63840-cd7f-43fb-b576-0f7f7b40134c` → TestFlight (Apple accepted the upload at 00:3x, shows as
   3.10.0 (78) after processing) · Android `bdc6100e-6ae6-4c29-a3d8-c98bf6b0ad4e` → Play internal COMPLETED (77 `5df23053` underneath it).

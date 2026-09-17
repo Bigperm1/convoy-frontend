@@ -102,6 +102,8 @@ export type PoseState = {
   roadHdg: number | null;          // the road's windowed direction at the held projection (null = none / released)
   roadHdgAhead: number | null;     // …and speed × 1 s further along the line (where the car will be at the next fix)
   roadK: number;                   // 0..1 how much the road owns the nose this frame (distance weight; 0 when released)
+  ratchetContra: number;           // consecutive fixes whose qualified course contradicted the bend the nose ratchet holds (Codex 09-16)
+  ratchetJudgedAt: number;         // the fix that last advanced ratchetContra (poseRoute runs every frame; the count is per FIX)
   roadAt: number;                  // predict-clock time the road was last handed in
   roadSetAt: number;               // predict-clock time the PROJECTION last moved (the road direction's age)
   projLat: number; projLng: number;   // the held projection, to notice when it moves
@@ -238,6 +240,14 @@ export const POSE_ROAD_SHARP_DEG = 20;
  *  sits on the SAME leg (bend ≈ 0), so it is never ratcheted — that is what keeps the X1n/Y1n scatter bars
  *  where they are (the ungated ratchet cost them 4–12°). Gate: pose_estimator_test.mts section Z. */
 export const POSE_ROAD_RATCHET_BEND_DEG = 8;
+/** The ratchet may hold the nose against at most this many CONSECUTIVE qualified courses that contradict the
+ *  bend (Codex adversarial review 2026-09-16 [high]). The corner it exists for has exactly ONE such fix: the
+ *  entry-leg course that lands a second before the turning course (18:27:04 → :05). A MISSED turn keeps
+ *  producing them — the car goes straight while the projection sits at the vertex with its chord 45° off and
+ *  `roadFresh` still true (poseRoute releases only ABOVE 45°) — and an unbounded ratchet held the nose 12.4°
+ *  wrong for six seconds there while the agreement fade had already zeroed the road's weight. Bounded, the
+ *  hold costs one second and the nose recovers on the second straight fix. Gate: section Z5. */
+export const POSE_ROAD_RATCHET_MAX_FIXES = 1;
 export const POSE_ROAD_SHARP_FULL_DEG = 60;
 /** ⛔ TRIED AND REVERTED 2026-09-11 — do not re-add: suspending the sharpness fade while the raw fix is
  *  within a few metres of the line. It reads well ("a car ON the line is on the line") and it moved the
@@ -326,6 +336,7 @@ export function poseStart(): PoseState {
     yawBias: 0, yawSign: 0, yawAgree: 0, lastCourse: null, lastCourseAt: 0, gpsTurnDps: 0,
     routeW: 0, errPrev: null, errPrevAt: 0, pendLat: 0, pendLng: 0, rawLat: NaN, rawLng: NaN, rawAt: 0, yawCumAtCourse: null, yawCumPrev: null, yawCumPrevAt: 0, yawDpsLast: 0,
     roadHdg: null, roadHdgAhead: null, roadK: 0, roadAt: 0, roadSetAt: 0, projLat: NaN, projLng: NaN, projMovedAt: 0, accLast: null, roadReleased: false, roadHeld: 0, roadSuspect: false,
+    ratchetContra: 0, ratchetJudgedAt: 0,
     src: "none", fixes: 0, rejected: 0, maxStepM: 0,
   };
 }
@@ -453,7 +464,7 @@ export function posePredict(st: PoseState, nowMs: number, yaw: PoseYaw | null | 
       // next second) and its target sits on the bend side of the nose, the blend may STOP the nose — it may
       // not turn it back the other way. Measured on the field replay: 18:27 first turning fix 46° → 38°,
       // 17:59 39° → 29°, roundabout rows bit-identical, Y4 (missed turn) +0.2°. Gate: section Z.
-      if (target != null && roadTarget != null && roadFresh) {
+      if (target != null && roadTarget != null && roadFresh && st.ratchetContra <= POSE_ROAD_RATCHET_MAX_FIXES) {
         const bend = wrap180((st.roadHdgAhead != null ? st.roadHdgAhead : st.roadHdg!) - st.roadHdg!);
         const toRoad = wrap180(roadTarget - hdg), toTarget = wrap180(target - hdg);
         if (Math.abs(bend) >= POSE_ROAD_RATCHET_BEND_DEG && Math.sign(bend) === Math.sign(toRoad)
@@ -664,6 +675,7 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
   let roadHdg: number | null = null, roadHdgAhead: number | null = null, roadK = 0;
   let released = false, roadHeld = 0, roadSetAt = st.roadSetAt;
   let suspect = false;
+  let ratchetContra = st.ratchetContra, ratchetJudgedAt = st.ratchetJudgedAt;
   const moved = !!proj && (proj.lat !== st.projLat || proj.lng !== st.projLng);
   if (proj && Number.isFinite(proj.distM) && proj.distM <= POSE_ROUTE_MAX_M) {
     const yaw = typeof yawDpsAbs === "number" && Number.isFinite(yawDpsAbs) ? Math.abs(yawDpsAbs) : Math.abs(st.gpsTurnDps);
@@ -716,6 +728,17 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
     }
     if (!released && !suspect) target = POSE_ROUTE_W_MAX * yawK * distK;   // a suspect projection pulls nothing
     if (roadHdg != null && !released) roadK = distK;
+    // RATCHET BOUND (Codex 2026-09-16 [high]): once per FIX, does the newest qualified course contradict the bend —
+    // the road ≥ POSE_ROAD_AGREE_DEG away from the course AND on the other side of the nose? One such fix is the
+    // corner (the stale entry-leg course before the turning one lands); a run of them is a missed turn, and
+    // posePredict's ratchet stands down past POSE_ROAD_RATCHET_MAX_FIXES so the nose can follow the car.
+    if (courseQualified && st.fixAt !== ratchetJudgedAt) {
+      ratchetJudgedAt = st.fixAt;
+      const toCourse = wrap180(courseNew! - st.hdg), toRoad = roadHdg != null ? wrap180(roadHdg - st.hdg) : 0;
+      const contra = roadHdg != null && !released && Math.abs(wrap180(courseNew! - roadHdg)) >= POSE_ROAD_AGREE_DEG
+        && toCourse !== 0 && toRoad !== 0 && Math.sign(toCourse) !== Math.sign(toRoad);
+      ratchetContra = contra ? st.ratchetContra + 1 : 0;
+    }
   } else {
     suspect = false;
   }
@@ -724,6 +747,7 @@ export function poseRoute(st: PoseState, proj: PoseRoute, yawDpsAbs: number | nu
   const routeW = st.routeW + (target - st.routeW) * ease;
   const next: PoseState = {
     ...st, routeW, roadHdg, roadHdgAhead, roadK, roadReleased: !!proj && released, roadHeld, roadSuspect: !!proj && suspect,
+    ratchetContra, ratchetJudgedAt,
     roadAt: roadHdg != null ? st.tAt : st.roadAt,
     roadSetAt,
     projLat: proj ? proj.lat : NaN, projLng: proj ? proj.lng : NaN,

@@ -8,7 +8,7 @@ import {
   poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, POSE_YAW_MAX_DPS, haversineM, bearingDeg, stepLatLng, wrap180, norm360,
   POSE_DR_MAX_M, POSE_ROUTE_MAX_M, poseRoadWindowM,
 } from "../../src/poseEstimator.ts";
-import { replayAll as fieldReplayAll, type ReplayRow } from "./pose_field_replay.mts";
+import { replayAll as fieldReplayAll, replayCorner as fieldReplayCorner, type ReplayRow } from "./pose_field_replay.mts";
 
 let fails = 0;
 const ok = (name: string, cond: boolean, detail = "") => {
@@ -813,6 +813,27 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
     ok("Z4a roundabout: nose within 8° of the course on every fix — base/head 0.0/3.5/1.5/2.9/5.6/5.6", r.length === 6 && worstOff <= 8, `worst ${worstOff.toFixed(2)}° over ${r.length} rows`);
     ok("Z4b roundabout: every row's nose within 0.1° of the pre-clamp estimator (the clamp is a no-op on an arc)", worstDrift <= 0.1, `worst drift ${worstDrift.toFixed(3)}°`);
     ok("Z4c roundabout: src=road on ≥ 5 of the 6 rows", r.filter((x) => x.src === "road").length >= 5, `${r.filter((x) => x.src === "road").length}/6`);
+  }
+  // Z5 — A MISSED TURN MUST RECOVER (Codex adversarial review 2026-09-16 [high]). Deterministic: a northbound
+  // car at 7.5 m/s with accurate 1 Hz straight-ahead courses, the route turning 90° east at a single vertex 100 m
+  // in. Past the vertex the projection sits AT it with a 45° chord and `roadFresh` still true (poseRoute releases
+  // only above 45°), so an UNBOUNDED ratchet held the nose 12.4° wrong for six seconds while the agreement fade had
+  // already zeroed the road's weight — Y4 measures peak lean and could not see the duration. POSE_ROAD_RATCHET_MAX_FIXES
+  // bounds the hold to one contradicting fix. Base (pre-clamp) peak 5.75° recovering to 0.28° two fixes later;
+  // head 8.42° recovering to 0.48°; unbounded ratchet 12.4° for 6 s (fails Z5b and Z5c).
+  { const lat0 = 49.0330, lng0 = -121.9230;
+    const vtx = stepLatLng(lat0, lng0, 0, 100), east = stepLatLng(vtx.lat, vtx.lng, 90, 100);
+    const geom: [number, number][] = [[lng0, lat0], [vtx.lng, vtx.lat], [east.lng, east.lat]];
+    const fixes = [] as { t: number; lat: number; lng: number; crs: number | null; spd: number }[];
+    for (let t = 0; t <= 20; t++) { const q = stepLatLng(lat0, lng0, 0, 7.5 * t + 25); fixes.push({ t, lat: q.lat, lng: q.lng, crs: 0, spd: 7.5 }); }
+    const r = fieldReplayCorner(geom, fixes).rows;
+    const lean = r.map((x) => Math.abs(wrap180(x.est - 0)));
+    const peakI = lean.indexOf(Math.max(...lean));
+    const twoLater = lean[Math.min(lean.length - 1, peakI + 2)];
+    const tail = lean.slice(Math.min(lean.length - 1, peakI + 3));
+    ok("Z5a missed turn: peak lean into the untaken corner ≤ 10° — base 5.8, head 8.4 (unbounded ratchet 12.4)", Math.max(...lean) <= 10, `${Math.max(...lean).toFixed(2)}° at t=${r[peakI].t}`);
+    ok("Z5b missed turn: two fixes after the peak the nose is within 1° of the course — base 0.28, head 0.48 (unbounded: still 12.4)", twoLater <= 1, `${twoLater.toFixed(2)}°`);
+    ok("Z5c missed turn: from three fixes after the peak on, the nose never leaves 1° of the course (the hold cannot persist)", tail.every((v) => v <= 1), `worst ${Math.max(...tail).toFixed(2)}° over ${tail.length} fixes`);
   }
 }
 

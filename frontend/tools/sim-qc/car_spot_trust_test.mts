@@ -3,7 +3,7 @@
 // then the legitimate shapes (they must still be adopted). Run:
 //   node --experimental-strip-types tools/sim-qc/car_spot_trust_test.mts
 import assert from "node:assert/strict";
-import { spotAdoptVerdict, fixMayBecomeSpot, spotFacing, spotHeadingFor, SPOT_FACING_MAX_M, SPOT_HDG_MAX_DIST_M, SPOT_HDG_CREEP_MAX_M, SPOT_MAX_AGE_MS, SPOT_WRITE_MAX_SPEED_MS } from "../../src/carSpotTrust.ts";
+import { spotAdoptVerdict, fixMayBecomeSpot, spotFacing, spotHeadingFor, headingTrackStep, HEADING_TRACK_EMPTY, SPOT_FACING_MAX_M, SPOT_HDG_MAX_DIST_M, SPOT_HDG_CREEP_MAX_M, SPOT_MAX_AGE_MS, SPOT_WRITE_MAX_SPEED_MS } from "../../src/carSpotTrust.ts";
 
 const NOW = 1_800_000_000_000;
 const H = 3600_000;
@@ -112,6 +112,31 @@ out.push(`F 7km/h=no 3km/h=yes 0=yes unknown=yes cap=${SPOT_WRITE_MAX_SPEED_MS}m
   out.push(`F12 a normal stop: 3 m of creep after the last moving fix → 180`);
   assert.equal(spotHeadingFor(obs, { lat: spot.lat + dLat(6), lng: spot.lng }, SPOT_HDG_CREEP_MAX_M + 4), null);
   out.push(`F13 a slow three-point turn: ${SPOT_HDG_CREEP_MAX_M + 4} m crept below 1.5 m/s → null (the direction changed unseen)`);
+}
+// ── G. THE TRACKER on the production sequence (Codex round 3: the phone-only path never reached the creep rule) ──
+{
+  const step = (m: number) => m / 111320;
+  const drive = (fixes: { m: number; spd: number; course: number | null; gate: boolean }[]) => {
+    let t = HEADING_TRACK_EMPTY; let at = NOW;
+    for (const f of fixes) { at += 1000; t = headingTrackStep(t, { lat: 49.2 + step(f.m), lng: -123.1, spd: f.spd, course: f.course, at }, f.gate); }
+    return t;
+  };
+  // G1 — phone-only three-point turn: approach at 4 m/s (course 0, gate open), then 12 m of creep at 1 m/s with the gate
+  //      CLOSED (below walking pace the phone-only path writes nothing), then a stop. The heading must be gone.
+  const g1 = drive([{ m: 0, spd: 4, course: 0, gate: true }, { m: 4, spd: 4, course: 0, gate: true },
+    ...Array.from({ length: 12 }, (_, i) => ({ m: 5 + i, spd: 1, course: null, gate: false })), { m: 17, spd: 0, course: null, gate: false }]);
+  assert.equal(g1.obs, null); out.push(`G1 phone-only: 12 m crept at 1 m/s past a closed gate → heading retired`);
+  // G2 — a normal parallel park: approach, 3 m of creep, stop — then the PHONE walks 30 m away at 1.2 m/s. Kept.
+  const g2 = drive([{ m: 0, spd: 4, course: 90, gate: true }, { m: 4, spd: 4, course: 90, gate: true }, { m: 6, spd: 1.2, course: null, gate: true },
+    { m: 7, spd: 0.8, course: null, gate: true }, { m: 7.5, spd: 0, course: null, gate: true },
+    ...Array.from({ length: 25 }, (_, i) => ({ m: 8 + i * 1.2, spd: 1.2, course: null, gate: false }))]);
+  assert.equal(g2.obs?.deg, 90); assert.equal(g2.frozen, true); out.push(`G2 parallel park then a 30 m walk → heading 90 kept (frozen at the stop)`);
+  // G3 — a jogger with the gate closed never creates an observation.
+  const g3 = drive(Array.from({ length: 10 }, (_, i) => ({ m: i * 3, spd: 3, course: 45, gate: false })));
+  assert.equal(g3.obs, null); out.push(`G3 a moving course past a CLOSED gate → no observation`);
+  // G4 — moving again after a park replaces the heading and re-arms the creep rule.
+  const g4 = drive([{ m: 0, spd: 4, course: 90, gate: true }, { m: 4, spd: 0, course: null, gate: true }, { m: 4, spd: 5, course: 270, gate: true }]);
+  assert.equal(g4.obs?.deg, 270); assert.equal(g4.frozen, false); out.push(`G4 driving off again → new heading 270, unfrozen`);
 }
 
 console.log(out.join(" | "));

@@ -27,7 +27,7 @@
 // the parked branch fell back to live coordinates and drew a peer on their own home.
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { spotAdoptVerdict, spotHeadingFor, spotDistanceM, SPOT_WRITE_MAX_SPEED_MS, SPOT_CREEP_MIN_MS, type SpotHeadingObs } from "./carSpotTrust";
+import { spotAdoptVerdict, spotHeadingFor, headingTrackStep, HEADING_TRACK_EMPTY, type HeadingTrack } from "./carSpotTrust";
 import { Platform } from "react-native";
 import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
 
@@ -138,11 +138,14 @@ let _carSpot: { lat: number; lng: number; hdg?: number } | null = null;
 // spot — with where and when it was seen. Persisted with the spot as `hdg`: the direction the car was facing when it
 // stopped (src/carSpotTrust.ts spotFacing / spotHeadingFor, 2026-09-16). Codex 09-16: a jogging fix after the latch
 // dropped, or a heading restored from disk, must never become the facing of a spot somewhere else.
-let _spotHdg: SpotHeadingObs | null = null;
-// Metres crept (SPOT_CREEP_MIN_MS ≤ speed < SPOT_WRITE_MAX_SPEED_MS) since the heading was observed, and the last
-// spot-eligible fix it was measured from — a slow final turn or a lot crawl retires the heading (carSpotTrust).
-let _spotCreepM = 0;
-let _creepFrom: { lat: number; lng: number } | null = null;
+// The tracker itself is pure (src/carSpotTrust.ts headingTrackStep, gate G1–G4): the observation, the metres crept
+// since it at walking pace (a slow final turn retires it), and `frozen` once the car came to rest (the phone walking
+// away afterwards must not). It runs on EVERY fix, before the car-trust gate below, so a phone-only driver's slow
+// fixes — which never pass that gate — can still retire a heading (Codex round 3).
+let _hdgTrack: HeadingTrack = HEADING_TRACK_EMPTY;
+// What the last persisted spot record carried besides the position, so a retired heading can be removed from
+// disk without inventing a fresh `t`/`att`/`mv`.
+let _lastSpotMeta: { t: number; att: 0 | 1; mv: number } | null = null;
 // When _carSpot was RECORDED (not when it was last written to disk). Persisted with the
 // spot so hydrate can age it out — see SPOT_MAX_AGE_MS.
 let _carSpotAt = 0;
@@ -198,7 +201,8 @@ export async function hydrateLocationPrivacy(): Promise<void> {
           _carSpot = hdgOk ? { lat: p.lat, lng: p.lng, hdg: p.hdg } : { lat: p.lat, lng: p.lng };
           // The restored facing stays tied to THIS spot: a later spot written > SPOT_HDG_MAX_DIST_M away (the car
           // moved while the app was gone) gets no heading until a moving course is seen again.
-          if (hdgOk) { _spotHdg = { deg: p.hdg, at: p.t, lat: p.lat, lng: p.lng }; _spotCreepM = 0; }
+          if (hdgOk) _hdgTrack = { obs: { deg: p.hdg, at: p.t, lat: p.lat, lng: p.lng }, creepM: 0, from: null, frozen: true };
+          _lastSpotMeta = { t: p.t, att: p.att === 1 ? 1 : 0, mv: typeof p.mv === "number" ? p.mv : 0 };
           _carSpotAt = p.t;
           // Same freshness rule as the spot itself: only adopt the persisted witnessed-park
           // flag when the persisted spot was adopted. `hu` on disk can only have survived
@@ -402,25 +406,27 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   //    strongly enough to write a durable car spot. Simulation caught the difference: a
   //    runner who drove 80 s ago and force-quit still recorded their FIRST jogging fix
   //    to disk. A real driver clears provisional within seconds of pulling away.
-  if (!carAttached() && !(driving && latchedBefore && !_latchProvisional)) return;
+  const mayWriteSpot = carAttached() || (driving && latchedBefore && !_latchProvisional);
+  // THE PARKED HEADING's tracker runs on every fix, before the gate (see _hdgTrack). If a slow turn just retired the
+  // heading of a spot that is already on disk, take it off the record now — a phone-only driver writes no further
+  // spot below walking pace, so nothing else would.
+  const hadObs = _hdgTrack.obs != null;
+  _hdgTrack = headingTrackStep(_hdgTrack, { lat, lng, spd, course: courseDeg, at: now }, mayWriteSpot);
+  if (hadObs && _hdgTrack.obs == null && _carSpot && _carSpot.hdg != null) {
+    _carSpot = { lat: _carSpot.lat, lng: _carSpot.lng };
+    if (_lastSpotMeta) void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, ..._lastSpotMeta })).catch(() => {});
+  }
+  if (!mayWriteSpot) return;
   // The spot FOLLOWS the car on every fix while attached/driving (OTA-AC gated this on
   // speed for two hours and Say Phin's spot stayed at the meet while he drove home — see
   // src/carSpotTrust.ts). What guards against a fix the app never saw end is the persisted
   // `mv` (speed at the last write) and `att`, judged at hydrate.
-  // THE PARKED HEADING rides the last MOVING fix's course — judged HERE, past the car-trust gate above, so only a
-  // fix that may write a spot may set the facing (a jogger's course never does): once the car is below
-  // SPOT_WRITE_MAX_SPEED_MS the course is GPS noise (iOS reports -1), so the value frozen is the direction the car
-  // stopped in. It is attached only while this spot is within SPOT_HDG_MAX_DIST_M of where it was observed, and
-  // dropped otherwise — a displaced spot has no facing until the car is seen moving again.
-  if (spd >= SPOT_WRITE_MAX_SPEED_MS && typeof courseDeg === "number" && Number.isFinite(courseDeg) && courseDeg >= 0 && courseDeg <= 360) {
-    _spotHdg = { deg: courseDeg, at: now, lat, lng };
-    _spotCreepM = 0;
-  } else if (spd >= SPOT_CREEP_MIN_MS && spd < SPOT_WRITE_MAX_SPEED_MS && _creepFrom) {
-    _spotCreepM += spotDistanceM(_creepFrom, { lat, lng });
-  }
-  _creepFrom = { lat, lng };
-  const hdg = spotHeadingFor(_spotHdg, { lat, lng }, _spotCreepM);
-  if (hdg == null) { _spotHdg = null; _spotCreepM = 0; }
+  // THE PARKED HEADING: the tracker above observed the last MOVING fix's course from a fix that may write a spot
+  // (a jogger's course never does); below SPOT_WRITE_MAX_SPEED_MS the course is GPS noise (iOS reports -1), so
+  // the value frozen is the direction the car stopped in. It is attached only while this spot is within
+  // SPOT_HDG_MAX_DIST_M of where it was observed and the car has not crept past SPOT_HDG_CREEP_MAX_M since.
+  const hdg = spotHeadingFor(_hdgTrack.obs, { lat, lng }, _hdgTrack.creepM);
+  if (hdg == null && _hdgTrack.obs) _hdgTrack = { ..._hdgTrack, obs: null, creepM: 0 };   // displaced: no facing here
   _carSpot = hdg != null ? { lat, lng, hdg } : { lat, lng };
   _carSpotAt = now;
   if (now - _spotSavedAt > SPOT_SAVE_THROTTLE_MS) {
@@ -429,7 +435,8 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
     // {lat,lng} here (as the deleted map.tsx writer did) puts an immortal spot on disk.
     // `att` records that a head unit was attached when this was written: without a later
     // witnessed disconnect (`hu`, written by noteCarConnected) hydrate refuses the spot.
-    void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, t: now, att: carAttached() ? 1 : 0, mv: Math.round(spd * 10) / 10 })).catch(() => {});
+    _lastSpotMeta = { t: now, att: carAttached() ? 1 : 0, mv: Math.round(spd * 10) / 10 };
+    void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, ..._lastSpotMeta })).catch(() => {});
   }
 }
 

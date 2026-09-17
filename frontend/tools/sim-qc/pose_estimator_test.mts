@@ -914,7 +914,7 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
     const b = fieldReplayCorner(geom, mk((t) => Math.max(0, 12 - 2 * Math.max(0, t - (75 / 3.1 - 4)))), 12, () => 10).frames;
     ok("Z8a clean straight-through, constant 0° courses: nose error at t=24.58 ≤ 10° — base 1.96, head 8.49 (hard 1.5 s hold: 16.02)", at(a, 24.58) <= 10, `${at(a, 24.58).toFixed(2)}°`);
     ok("Z8b straight-through with a −2°/s course drift: nose error at t=25 ≤ 12° — base 4.89, head 9.71 (hard hold: 21.74)", at(b, 25) <= 12, `${at(b, 25).toFixed(2)}°`);
-    ok("Z8c …and neither shape is ever more than 999° from the course after t=28 (the hold cannot outlive its cap)", [...a, ...b].filter((f) => f.t >= 28).every((f) => Math.abs(wrap180(f.est)) <= 1), `worst ${Math.max(...[...a, ...b].filter((f) => f.t >= 28).map((f) => Math.abs(wrap180(f.est)))).toFixed(2)}°`);
+    ok("Z8c …and neither shape is ever more than 1° from the course after t=28 (the hold cannot outlive its cap)", [...a, ...b].filter((f) => f.t >= 28).every((f) => Math.abs(wrap180(f.est)) <= 1), `worst ${Math.max(...[...a, ...b].filter((f) => f.t >= 28).map((f) => Math.abs(wrap180(f.est)))).toFixed(2)}°`);
   }
 }
 

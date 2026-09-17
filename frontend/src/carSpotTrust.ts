@@ -78,6 +78,31 @@ export const SPOT_HDG_CREEP_MAX_M = 8;
 /** Below this a fix is stationary jitter, not creeping — its displacement is not counted. */
 export const SPOT_CREEP_MIN_MS = 0.4;
 export type SpotHeadingObs = { deg: number; at: number; lat: number; lng: number };
+/** The parked-heading TRACKER, a pure reducer so a Node gate can run the production sequence (Codex round 3: the
+ *  creep rule lived past the car-trust gate, which a phone-only driver's slow fixes never reach). Runs on EVERY
+ *  fix, before that gate: only a fix that may write a spot may CREATE an observation (`mayWriteSpot`), but any fix
+ *  may retire one by creeping. `frozen` is set by the first at-rest fix after the observation — the car has stopped,
+ *  and whatever moves at walking pace after that is the PHONE leaving the car, which must not retire the facing. */
+export type HeadingTrack = { obs: SpotHeadingObs | null; creepM: number; from: { lat: number; lng: number } | null; frozen: boolean };
+export const HEADING_TRACK_EMPTY: HeadingTrack = { obs: null, creepM: 0, from: null, frozen: false };
+export function headingTrackStep(
+  t: HeadingTrack,
+  fix: { lat: number; lng: number; spd: number; course: number | null | undefined; at: number },
+  mayWriteSpot: boolean,
+): HeadingTrack {
+  const courseOk = typeof fix.course === "number" && isFinite(fix.course) && fix.course >= 0 && fix.course <= 360;
+  const here = { lat: fix.lat, lng: fix.lng };
+  if (mayWriteSpot && fix.spd >= SPOT_WRITE_MAX_SPEED_MS && courseOk) {
+    return { obs: { deg: fix.course as number, at: fix.at, lat: fix.lat, lng: fix.lng }, creepM: 0, from: here, frozen: false };
+  }
+  if (!t.obs || t.frozen) return { ...t, from: here };
+  if (fix.spd < SPOT_CREEP_MIN_MS) return { ...t, from: here, frozen: true };              // came to rest: the facing is decided
+  if (fix.spd < SPOT_WRITE_MAX_SPEED_MS && t.from) {                                       // creeping: a slow turn, a lot crawl
+    const creepM = t.creepM + spotDistanceM(t.from, here);
+    return creepM > SPOT_HDG_CREEP_MAX_M ? { obs: null, creepM: 0, from: here, frozen: false } : { ...t, creepM, from: here };
+  }
+  return { ...t, from: here };   // a moving fix without a course: nothing to learn, nothing to retire
+}
 export function spotHeadingFor(obs: SpotHeadingObs | null | undefined, pos: { lat: number; lng: number }, creepM = 0): number | null {
   if (!obs || typeof obs.deg !== "number" || !isFinite(obs.deg) || obs.deg < 0 || obs.deg > 360) return null;
   if (spotDistanceM(obs, pos) > SPOT_HDG_MAX_DIST_M) return null;

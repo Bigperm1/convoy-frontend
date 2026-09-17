@@ -11,11 +11,11 @@
     ],
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "runtimeVersion": "1.28.0",
+    "runtimeVersion": "1.29.0",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sw0rdfisch.convoy",
-      "buildNumber": "78",
+      "buildNumber": "79",
       "entitlements": {
         "com.apple.security.application-groups": [
           "group.com.sw0rdfisch.convoy"
@@ -40,7 +40,7 @@
     },
     "android": {
       "package": "com.sw0rdfisch.convoy",
-      "versionCode": 78,
+      "versionCode": 79,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/hairpin-adaptive.png",

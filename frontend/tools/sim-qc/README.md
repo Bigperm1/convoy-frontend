@@ -268,8 +268,15 @@ intersection for arcs under 35 m (a residential 90° at 25 km/h is ONE vertex on
 - `node --experimental-strip-types tools/sim-qc/nav_lock_test.mts` — 🔒 **THE NAVIGATION LOCK** (Jeff, 2026-09-17: "i dont want
   anything to change without my say so"). Manifest `data/nav-lock.json`: pure drive-engine modules are CODE-locked by a content hash
   (comments/whitespace ignored), tunable literals in the mixed files are VALUE-locked, and a new module-scope constant in a watched
-  file fails. `--list <file>` shows what the extractor sees; `--relock "Jeff, <date>: <his words>"` re-pins from the tree and appends
-  the quote to `approvals` — the only legitimate way past a failure. Runs in every OTA / cut ritual (RULES.md §4).
+  file fails; inline drive logic in those mixed files is REGION-locked between `// 🔒 NAV-LOCK begin <id>` / `end <id>` comments
+  (same code hash; a removed or unknown marker fails). `--list <file>` shows what the extractor sees (constants + regions);
+  `--relock "Jeff, <date>: <his words>"` re-pins from the tree and appends the quote to `approvals` — the only legitimate way past
+  a failure. Runs in every OTA / cut ritual (RULES.md §4).
+- `node --experimental-strip-types tools/sim-qc/nav_lock_regions.mts --check|--apply plan.json` / `--verify` — places the 🔒 region
+  markers and PROVES each is a comment: the file is parsed by the TypeScript compiler with and without them and printed with
+  comments removed — the two programs must be identical (inside JSX children or a template literal a `//` line is TEXT; between a
+  `// @ts-expect-error` and its target it un-suppresses). Gate: `nav_lock_regions_test.mts`. Placing markers needs no approval;
+  PINNING them (`nav_lock_test.mts --relock`) does.
 - `node --experimental-strip-types tools/sim-qc/fix_course_test.mts` — a fix's own course per platform: iOS keeps 0° (due north), Android drops 0 (`Location.getBearing()` = 0.0 with no bearing). Every feed site goes through `src/fixCourseHere.ts`.
 - `node --experimental-strip-types tools/sim-qc/yaw_feed_test.mts` — the DeviceMotion → cumulative-yaw reducer (`src/yawFeed.ts`): fused attitude deltas on the SENSOR clock, cached re-dispatches are not new samples, freshness expires, the fallback rate path integrates at the sensor interval. Added 2026-09-10 with the wag fix.
 - `node --experimental-strip-types tools/sim-qc/watch_taps_test.mts` — the wrist-tap rule (side from the maneuver key; prepare at a 12 s lead clamped 120–400 m; now at 40 m; one per kind per step; 1.5 s apart).

@@ -112,9 +112,12 @@ grep -ac '^diff --git' patches/<name>.patch
 **🔒 THE NAVIGATION LOCK (Jeff, 2026-09-17): nothing in the drive engine changes without his say-so.**
 Jeff, verbatim: *"lets lock in/gate the navigation settings i think we have finally got 95% there is dont want anything
 to change without my say so."* The lock is `tools/sim-qc/nav_lock_test.mts` + `tools/sim-qc/data/nav-lock.json`: the pure
-drive-engine modules are CODE-locked (a content hash, comments/whitespace ignored — a refactor trips it), and every
-tunable literal in the mixed files (ConvoyMapbox.tsx, CarMapView.tsx, nav.ts, settings defaults, …) is VALUE-locked,
-with any NEW module-scope constant in those files failing too. It runs with every sim-qc gate before an OTA or a cut.
+drive-engine modules are CODE-locked (a content hash, comments/whitespace ignored — a refactor trips it), every
+tunable constant in the mixed files (map.tsx, ConvoyMapbox.tsx, CarMapView.tsx, settings defaults, …) is VALUE-locked
+with any NEW module-scope constant in those files failing too, and the inline drive logic inside those mixed files is
+REGION-locked between `// 🔒 NAV-LOCK begin <id>` / `end <id>` comments (placed only by
+`tools/sim-qc/nav_lock_regions.mts`, which proves each marker is a comment and not JSX text). **If you are about to edit
+between two 🔒 markers, or in a hash-locked module, stop and ask first.** It runs with every sim-qc gate before an OTA or a cut.
 A failure is not a bug to fix in the manifest: it is a question for Jeff. With his words in hand:
 `node --experimental-strip-types tools/sim-qc/nav_lock_test.mts --relock "Jeff, <date>: <what he said>"` — never edit
 the JSON by hand, never relock without the quote. Field reports still get investigated and DESIGNED; the change waits.

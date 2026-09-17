@@ -104,6 +104,46 @@
       "hash": "sha256:5c829dde68763b25db9c184ee1c5cf263a2f25814685e2b079ca202b3a82163c",
       "why": "pure drive-engine module: code-locked"
     },
+    "src/nav.ts": {
+      "hash": "sha256:b5f88bd619a504697727f3b2f14aadb6e78e806193deda9c0b76f4efff441ade",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/navNotification.ts": {
+      "hash": "sha256:d241b275f37919dfe4f91694040325ff73b4ed012597fbd6ffba60f2dd2fddb9",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/speedLimit.ts": {
+      "hash": "sha256:990694b1094ebf7b7ecad802546e7ad92303bf05f9059bb9d1794f746b6ea9a0",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/pitstop.ts": {
+      "hash": "sha256:2bf74812eb6a26f4277042b89b36c4e99dfd21707ba5964bbd72ad4c93f3c41c",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/fixCourse.ts": {
+      "hash": "sha256:e742a64f6f95aebe6d14d0ffc5e4045bcb93c828b4afc97d6d87049d4b4cc6cf",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/rerouteSlot.ts": {
+      "hash": "sha256:661e8e5d4a2ae87b45aa103d3e9859e26c1418ed6c626e30bb66c80b0ddcb504",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/maneuverSpeech.ts": {
+      "hash": "sha256:217da7fe0e9b9af1acc9a2bf7ab14e14426f750cc2f58b43dffdb3aed45fbda0",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/chasePitch.ts": {
+      "hash": "sha256:7486ae8c709022d5ba9d4de50bfe92ceb1ab668583088ea809304cebb239ae85",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/roadSnap.ts": {
+      "hash": "sha256:5ee39522f0b50720ebd6323265d5634dc9a5e405f9a3b8d92aef49b7a3350c8f",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/mapboxDirections.ts": {
+      "hash": "sha256:c485b777673bef8ddd02196fe34d194657f0af89f605d0a7490c9fb924c52176",
+      "why": "pure drive-engine module: code-locked"
+    },
     "src/ConvoyMapbox.tsx": {
       "locked": {
         "SELF_ID": "\"self\"",
@@ -118,10 +158,13 @@
         "SELF_TRN_EXPR": "[\"get\", \"trn\"]",
         "LIFT_CACHE_M": "3",
         "LIFT_CACHE_MS": "20000",
+        "CAR_MODEL_SCALE_SIZED": "scaleCurveForPoints(SELF_MARKER_PT, CAR_LEN_UNITS)",
         "CAR_MODEL_HEADING_OFFSET": "90",
         "ARROW_MODEL_ID": "\"convoyArrow11\"",
         "ARROW_MODEL_HEADING_OFFSET": "0",
         "ARROW_MODEL_PITCH": "90",
+        "ARROW_MODEL_SCALE": "scaleCurveForPoints(SELF_MARKER_PT, ARROW_LEN_UNITS)",
+        "CARPLAY_ARROW_SCALE": "carModelScale(1.0)",
         "SELF_DEADBAND_M": "2.5",
         "SELF_DEADBAND_HDG": "8",
         "SELF_DEADBAND_STOP_M": "9",
@@ -151,16 +194,20 @@
         "FOLLOW_ZOOM": "17",
         "CHASE_ZOOM_CLAMP_MIN": "10.5",
         "CHASE_ZOOM_CLAMP_MAX": "20",
+        "ZOOM_MIN": "CHASE_ZOOM_CLAMP_MIN",
+        "ZOOM_MAX": "CHASE_ZOOM_CLAMP_MAX",
         "CAM_SMOOTH_TAU_MS": "1400",
         "CAM_ZOOM_SLEW_PER_S": "0.5",
         "CAM_ZOOM_DEADBAND": "0.25",
         "CAM_PITCH_SLEW_PER_S": "5",
+        "CAM_GLIDE": "{ zoomSlewPerS: CAM_ZOOM_SLEW_PER_S, zoomDeadband: CAM_ZOOM_DEADBAND, pitchSlewPerS: CAM_PITCH_SLEW_PER_S, tauMs: CAM_SMOOTH_TAU_MS }",
         "TRIM_TICK_MS_PREMIUM": "83",
         "COURSE_OFF_KMH": "3",
         "HEADING_SMOOTH_ALPHA": "0.72",
         "FOLLOW_LOWER_PAD_FRAC": "0.4",
         "ROUTE_GREEN_CORE": "\"#2DEC86\"",
         "ROUTE_GREEN_GLOW": "\"#00E070\"",
+        "DEFAULT_ROUTE_COLOR": "ROUTE_GREEN_CORE",
         "ROUTE_AI_CORE": "\"#000000\"",
         "ROUTE_OFFER_CORE": "\"#5B8DEF\"",
         "ROUTE_CAMERA_CORRIDOR_M": "150",
@@ -173,21 +220,30 @@
         "CAM_HEADING_LAG_MS": "700",
         "CAM_HEADING_MAX_LEAD_DEG": "25",
         "ROUTE_START_BEARING_M": "30",
+        "SELF_MARKER_SLOT": "undefined",
         "PEER_SCALE_EXPR": "[\"get\", \"scl\"]",
         "PEER_ROT_EXPR": "[\"get\", \"rot\"]",
         "PEER_TRN_EXPR": "[\"get\", \"trn\"]",
         "INCIDENT_TITLE": "{ incident: \"Incident\", construction: \"Roadwork\", road: \"Road closure\", weather: \"Weather hazard\", event: \"Road event\", }",
+        "NEON_RELEVANCE": "[\"case\", [\"==\", [\"get\", \"near\"], 1], 32 / NEON_PIN_H, [\"==\", [\"get\", \"minor\"], 1], 18 / NEON_PIN_H, 1] as any",
+        "NEON_ICON_SIZE": "[\"interpolate\", [\"linear\"], [\"zoom\"], 10, [\"*\", 0.55, NEON_RELEVANCE], 13, [\"*\", 0.7, NEON_RELEVANCE], 14, NEON_RELEVANCE] as any",
+        "NEON_CLUSTER_ICON_SIZE": "[\"interpolate\", [\"linear\"], [\"zoom\"], 10, 0.55, 13, 0.7, 14, 1] as any",
+        "NEON_CLUSTER_TEXT_SIZE": "[\"interpolate\", [\"linear\"], [\"zoom\"], 10, 11 * 0.55, 13, 11 * 0.7, 14, 11] as any",
+        "NEON_ICON_OPACITY": "[\"case\", [\"==\", [\"get\", \"minor\"], 1], 0.6, 1] as any",
         "NEON_MIN_ZOOM": "10",
         "NEON_CLUSTER_PT": "28",
-        "NEON_CLUSTER_MAX_ZOOM": "13"
+        "NEON_CLUSTER_MAX_ZOOM": "13",
+        "NOT_CLUSTER": "[\"!\", [\"has\", \"point_count\"]] as any",
+        "IS_CLUSTER": "[\"has\", \"point_count\"] as any"
       },
       "ignored": [],
       "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+      "why": "mixed file: tunable literals value-locked, inline drive logic region-locked, new constants forbidden"
     },
     "src/carplay/CarMapView.tsx": {
       "locked": {
         "CAR_PIN_SCALE": "0.8",
+        "WX_PIN_ON_CAR": "Platform.OS === 'ios'",
         "SELECTED_INDEX": "0",
         "CRUISE_PITCH": "45",
         "CAR_PITCH_BONUS": "0",
@@ -195,9 +251,13 @@
         "CAR_ZOOM_OUT": "0",
         "PREVIEW_ZOOM_OUT": "2.2",
         "CAR_USER_ZOOM_BIAS_LIMIT": "4",
+        "CAR_ZOOM_MIN": "CHASE_ZOOM_CLAMP_MIN",
+        "CAR_ZOOM_MAX": "CHASE_ZOOM_CLAMP_MAX",
         "CAR_PREVIEW_ZOOM_MIN": "3",
         "CAR_ZOOM_HOLD_MS": "15000",
         "CAR_LOWER_PAD_FRAC": "0.52",
+        "CAR_BANNER_STACK_BOTTOM": "Platform.OS === 'android' ? 4 : 8",
+        "CAR_BANNER_GAP_SCALABLE": "42 + 4",
         "CAR_LEFT_PAD_FRAC": "0.13",
         "CAR_REF_W": "400",
         "CAR_REF_H": "240",
@@ -218,102 +278,61 @@
       },
       "ignored": [],
       "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+      "why": "mixed file: tunable literals value-locked, inline drive logic region-locked, new constants forbidden"
     },
     "src/carplay/ConvoyCarPlay.tsx": {
       "locked": {
+        "IS_AA": "isAndroid",
         "CAR_NATIVE_GUIDANCE": "false",
         "MAX_LIVE_ATTEMPTS": "6",
         "ANDROID_SPURIOUS_CONNECT_GUARD_MS": "5000",
+        "CAR_RIGHT_INSET": "IS_AA ? 28 : 48",
         "CAR_REF_CARPLAY_W": "470",
+        "CAR_RIGHT_INSET_MAX": "CAR_RIGHT_INSET * 2",
+        "NAV_STACK_BOTTOM": "IS_AA ? 4 : 8",
         "NAV_GAP": "8",
         "CREW_PILL_H": "22",
         "CAR_PILL_TOP": "4",
+        "CAR_BAR_LEADING_W": "IS_AA ? 8 : 158",
+        "CAR_BAR_TRAILING_W": "IS_AA ? 92 : 126",
         "NAV_PILL_H": "24",
+        "ETA_ROW_H": "NAV_PILL_H",
         "TURN_ROW_H": "42",
+        "CAR_DOCK_LEFT": "IS_AA ? 6 : 56",
+        "CAR_LEFT_INSET": "CAR_DOCK_LEFT + 62 + 58 + 8",
+        "SPEED_DOCK_BOTTOM": "IS_AA ? 6 : 10",
         "SPEED_PILL_H": "48",
         "NAV_STACK_MAX_W": "260",
         "AA_NAV_STACK_MAX_FRAC": "0.70",
         "CAR_MODEL_HALF_W": "20",
-        "NAV_STACK_ABS_MIN_W": "120"
+        "NAV_STACK_ABS_MIN_W": "120",
+        "NAV_STACK_FALLBACK_W": "NAV_STACK_ABS_MIN_W"
       },
       "ignored": [],
       "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+      "why": "mixed file: tunable literals value-locked, inline drive logic region-locked, new constants forbidden"
     },
-    "src/nav.ts": {
+    "app/(app)/map.tsx": {
       "locked": {
-        "PLOT_VIA_FETCH_TIMEOUT_MS": "45000",
-        "CURB_MAX_EXTRA_S": "20",
-        "CURB_MAX_EXTRA_FRAC": "0.10",
-        "CURB_MAX_EXTRA_M": "250",
-        "CURB_MAX_EXTRA_DIST_FRAC": "0.15",
-        "IMMINENT_LEAD_S": "10",
-        "IMMINENT_MIN_M": "60",
-        "IMMINENT_MAX_M": "250",
-        "PREPARE_LEAD_S": "30",
-        "PREPARE_MIN_M": "150",
-        "PREPARE_MAX_M": "1200",
-        "ADVANCE_THRESHOLD_M": "25",
-        "ARRIVE_M": "20",
-        "ARRIVE_SETTLE_M": "50",
-        "ARRIVE_SETTLE_SPEED_MS": "1.4",
-        "ARRIVE_SETTLE_MS": "25000",
-        "ARRIVE_SILENT_MAX_SPD_MS": "4.0",
-        "ARRIVE_SILENT_MAX_SKEW_MS": "10000",
-        "ARRIVE_SPEAK_MAX_LATE_MS": "90000",
-        "ARRIVE_NEAR_CROW_M": "80",
-        "ARRIVE_NEAR_ROUTE_M": "400",
-        "ARRIVE_NEAR_MS": "90000",
-        "OFFROUTE_HEADING_TOL_DEG": "55",
-        "OFFROUTE_HELD_LOG_MS": "10000",
-        "ARRIVAL_DRAIN_MAX_MS": "15000",
-        "SEG_WINDOW_AHEAD": "400",
-        "SEG_WINDOW_BACK": "40",
-        "SEG_MAX_SNAP_M": "250",
-        "NAV_TTS_RATE": "1.0",
-        "SAME_TEXT_DEDUPE_MS": "12000",
-        "DUCK_MAX_MS": "12000",
-        "PAUSE_TOKEN": "\"\\u0000pause:\"",
-        "GREETING_DONE_TOKEN": "\"\\u0000greetdone\"",
-        "GREETING_PAUSE_MS": "1200",
-        "IDLE_RELEASE_GRACE_MS": "350",
-        "TTS_CACHE_MAX": "12",
-        "TRAFFIC_REFRESH_MAX_FAILS": "3"
+        "SHOW_EXTRA_ROUTE_PILLS": "false",
+        "TAB_BAR_H": "Platform.OS === 'ios' ? 86 : 84",
+        "DIVERGE_TOL_M": "35",
+        "DIVERGE_SEARCH_M": "14000",
+        "PAN_RECENTER_MS": "20000",
+        "REROUTE_MAX_AGE_MS": "30000",
+        "REROUTE_MAX_MOVE_M": "500",
+        "REROUTE_ORIGIN_BEARING": "true",
+        "BG_FIX_TAKEOVER_MS": "3000"
       },
-      "ignored": [],
+      "ignored": [
+        "LAST_LOC_KEY",
+        "REROUTE_ACCEPT_LINES",
+        "SPEED_CAMERA_LINES",
+        "HAZARD_AHEAD_LINES",
+        "HAZARD_AHEAD_FALLBACK"
+      ],
       "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
-    },
-    "src/navNotification.ts": {
-      "locked": {
-        "NAV_TASK": "\"convoy-nav-location\"",
-        "NAV_NOTIF_ID": "\"convoy-nav-banner\"",
-        "NAV_CHANNEL": "\"navigation\"",
-        "ROUTE_KEY": "\"convoy:navRoute\"",
-        "PROGRESS_KEY": "\"convoy:navProgress\"",
-        "NAV_POLY_KEY": "\"convoy:navPolyline\"",
-        "CAR_NAV_KEY": "\"convoy:carNav\"",
-        "ANNOUNCE_DISTANCE_M": "500",
-        "USER_CACHE_KEY": "\"convoy_user\"",
-        "STALL_MS": "25000",
-        "STALL_CHECK_MS": "10000",
-        "ASKED_ALWAYS_KEY": "\"convoy.askedAlways.v1\""
-      },
-      "ignored": [],
-      "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
-    },
-    "src/locationPrivacy.ts": {
-      "locked": {
-        "CAR_SPOT_KEY": "\"convoy.lastCarSpot.v1\"",
-        "LAST_DRIVING_KEY": "\"convoy.lastDrivingAt.v1\"",
-        "DRIVING_SPEED_MS": "2.5",
-        "DRIVING_ENTER_SPEED_MS": "4.17"
-      },
-      "ignored": [],
-      "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+      "why": "mixed file: tunable literals value-locked, inline drive logic region-locked, new constants forbidden"
     },
     "src/carplay/carActions.ts": {
       "locked": {
@@ -323,12 +342,32 @@
         "AA_NAV_ID": "'convoy-aa-nav'",
         "AA_SEARCH_MAX_ROWS": "6",
         "WHERE_TO_MAX": "30",
+        "CAR_MAP_BUTTON_CONFIG": "{ mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, { id: 'car-compass', image: CAR_ICON_COMPASS, focusedImage: CAR_ICON_COMPASS }, ], }",
+        "AA_PERSISTENT": "'persistent' as const",
+        "AA_ACTION_STRIP": "[ { id: 'car-end', title: 'End', visibility: AA_PERSISTENT }, { id: 'car-search', title: 'Search', visibility: AA_PERSISTENT }, { id: 'car-view', icon: CAR_ICON_VIEW_2D, visibility: AA_PERSISTENT }, { id: 'car-comms', icon: CAR_ICON_MIC, visibility: AA_PERSISTENT }, ]",
         "AA_ALLOW_LOCATION_ID": "'car-allow-location'",
+        "AA_MAP_BUTTONS": "[ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, { id: 'car-compass', icon: CAR_ICON_COMPASS, visibility: AA_PERSISTENT }, ]",
+        "TAP_LABEL": "{ 'car-crew': 'Crew', 'car-compass': 'Compass', 'car-comms': 'Comms', 'car-view': 'View', 'car-mic': 'Scout', 'car-search': 'Search', 'car-end': 'End', 'car-zoom-in': 'Zoom in', 'car-zoom-out': 'Zoom out', [AA_ALLOW_LOCATION_ID]: CAR_ALLOW_LOCATION_TITLE, }",
         "TAP_DEDUPE_MS": "50"
       },
       "ignored": [],
       "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+      "why": "mixed file: tunable literals value-locked, inline drive logic region-locked, new constants forbidden"
+    },
+    "src/locationPrivacy.ts": {
+      "locked": {
+        "CAR_SPOT_KEY": "\"convoy.lastCarSpot.v1\"",
+        "LAST_DRIVING_KEY": "\"convoy.lastDrivingAt.v1\"",
+        "DRIVING_SPEED_MS": "2.5",
+        "DRIVING_ENTER_SPEED_MS": "4.17",
+        "DRIVING_HYSTERESIS_MS": "90_000",
+        "CAR_CONNECT_TTL_MS": "DRIVING_HYSTERESIS_MS",
+        "SPOT_SAVE_THROTTLE_MS": "15_000",
+        "DRIVING_SAVE_THROTTLE_MS": "15_000"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, inline drive logic region-locked, new constants forbidden"
     },
     "src/settings.ts": {
       "locked": {
@@ -347,69 +386,60 @@
         "DEFAULT_SETTINGS.mapMode": "\"auto\"",
         "DEFAULT_SETTINGS.show3dBuildings": "true",
         "DEFAULT_SETTINGS.pitstop": "true",
-        "DEFAULT_SETTINGS.roadIncidents": "false"
+        "DEFAULT_SETTINGS.roadIncidents": "false",
+        "DEFAULT_SETTINGS.novaSpeeding": "false",
+        "DEFAULT_SETTINGS.convoyAlerts": "true",
+        "DEFAULT_SETTINGS.scoutHandsFree": "true"
       },
       "ignored": [],
       "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
-    },
-    "src/mapboxDirections.ts": {
-      "locked": {
-        "CONGESTION_COLOR": "{ unknown: \"#2DEC86\", low: \"#2DEC86\", moderate: \"#FFD60A\", heavy: \"#FF9500\", severe: \"#FF3B30\", }"
-      },
-      "ignored": [],
-      "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
-    },
-    "src/speedLimit.ts": {
-      "locked": {
-        "OVERPASS_URLS": "[ \"https://overpass-api.de/api/interpreter\", \"https://overpass.kumi.systems/api/interpreter\", \"https://overpass.private.coffee/api/interpreter\", ]",
-        "FETCH_RADIUS_M": "1500",
-        "REFETCH_MOVE_M": "1000",
-        "MIN_REFETCH_MS": "30000",
-        "RESOLVE_MOVE_M": "10",
-        "FETCH_TIMEOUT_MS": "10000",
-        "RECEIPTS_MAX": "80",
-        "SPEED_LIMIT_SHOW_KMH": "2"
-      },
-      "ignored": [],
-      "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
-    },
-    "src/pitstop.ts": {
-      "locked": {
-        "PITSTOP_IDLE": "{ active: false, elapsedS: 0, totalS: 0, kind: \"rest\", label: \"\", }",
-        "STOPPED_MS": "1.4",
-        "MOVING_MS": "3.0",
-        "NEAR_M": "140",
-        "STOP_RADIUS_M": "30"
-      },
-      "ignored": [],
-      "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
-    },
-    "src/timerLiveness.ts": {
-      "locked": {
-        "FORCED_STARVE_DT_MS": "999999",
-        "RAF_WINDOW_MS": "5000",
-        "STARVE_LOG_THRESHOLD_MS": "3000",
-        "STARVE_LOG_EVERY_MS": "10000",
-        "TIMER_PUMP_LOG_EVERY_MS": "60000"
-      },
-      "ignored": [],
-      "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+      "why": "mixed file: tunable literals value-locked, inline drive logic region-locked, new constants forbidden"
     },
     "src/carplay/carStatus.ts": {
       "locked": {
-        "STATUS_ROWS_MAX": "24",
-        "PERM_ROWS_MAX": "16",
-        "LOCATION_PERMS": "['android.permission.ACCESS_FINE_LOCATION', 'android.permission.ACCESS_COARSE_LOCATION']",
-        "MIC_PERMS": "['android.permission.RECORD_AUDIO']"
+        "REFRESH_MIN_MS": "2_000",
+        "TICK_REFRESH_MS": "15_000",
+        "ASK_PENDING_MS": "90_000",
+        "ASK_AUTO_DENY_MS": "1_500"
+      },
+      "ignored": [
+        "LOCATION_PERMS",
+        "MIC_PERMS",
+        "PERM_ROWS_MAX",
+        "STATUS_ROWS_MAX"
+      ],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, inline drive logic region-locked, new constants forbidden"
+    },
+    "src/timerLiveness.ts": {
+      "locked": {},
+      "regions": {
+        "timer-debug-force": "sha256:76c5db8b7a222c398b4b6524db807bbc4b90e52de16f3b4d2a79944f9a8efdef",
+        "timer-starved-signal": "sha256:b4847bf89b30ccc21c4cbba46a78c399a0da7fdfe20bc97920f86a9785bfacf2",
+        "timer-heartbeat": "sha256:5563a2e09ca878e97285a99fa6b270677013e42d60cff43178f7a535ba9f610a"
+      },
+      "ignored": [
+        "FORCED_STARVE_DT_MS",
+        "RAF_WINDOW_MS",
+        "STARVE_LOG_EVERY_MS",
+        "STARVE_LOG_THRESHOLD_MS",
+        "TIMER_PUMP_LOG_EVERY_MS"
+      ],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, inline drive logic region-locked, new constants forbidden"
+    },
+    "src/carplay/carStore.ts": {
+      "locked": {
+        "SELF_SOURCE_RANK": "{ mirror: 3, fgwatch: 2, bgtask: 1 }",
+        "SELF_STALE_MS": "2600",
+        "FEED_RANK": "{ phone: 2, service: 1 }",
+        "FEED_STALE_MS": "12_000",
+        "STRIP_RANK": "{ phone: 2, cold: 1 }",
+        "STRIP_STALE_MS": "6000"
       },
       "ignored": [],
       "watchNew": true,
-      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+      "why": "mixed file: tunable literals value-locked, inline drive logic region-locked, new constants forbidden"
     }
   }
 }

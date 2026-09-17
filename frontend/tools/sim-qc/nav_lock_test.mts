@@ -1,12 +1,21 @@
 // nav_lock_test — THE NAVIGATION LOCK (Jeff, 2026-09-17: "lets lock in/gate the navigation settings, i think we have
 // finally got 95% there, i dont want anything to change without my say so").
 //
-// Two locks, one manifest (tools/sim-qc/data/nav-lock.json):
+// Three locks, one manifest (tools/sim-qc/data/nav-lock.json):
 //   • CODE-LOCKED files ("hash"): the pure drive-engine modules. Any change to their CODE (comments and whitespace
 //     ignored) fails this gate — not just constants: a new branch, a reordered rule, a "harmless" refactor.
 //   • VALUE-LOCKED constants ("locked"): in the big mixed files (ConvoyMapbox.tsx, CarMapView.tsx, nav.ts, …) every
 //     tunable literal is pinned by value, and any NEW module-scope literal constant that is neither locked nor listed
 //     in "ignored" fails too (a knob cannot be smuggled in beside a locked one).
+//   • REGION-LOCKED code ("regions"): the inline drive logic inside those mixed files — an effect, a closure, a
+//     threshold written as a bare number — sits between two marker comments and is pinned by the same code hash:
+//         // 🔒 NAV-LOCK begin <id> — Jeff's say-so required (tools/sim-qc/nav_lock_test.mts)
+//         …code…
+//         // 🔒 NAV-LOCK end <id>
+//     Removing or renaming a marker fails; so does a marker pair the manifest does not know. ⚠ Markers go at
+//     STATEMENT level only — inside JSX children or a template literal a `//` line is TEXT, not a comment.
+//     tools/sim-qc/nav_lock_regions.mts places them and proves (TypeScript printer, comments removed) that the
+//     program is byte-identical with and without them.
 //
 // The ONLY way through a failure is Jeff's say-so, recorded in the manifest:
 //   node --experimental-strip-types tools/sim-qc/nav_lock_test.mts --relock "Jeff, 2026-09-2x: <his words>"
@@ -23,7 +32,7 @@ import { createHash } from "node:crypto";
 const ROOT = new URL("../../", import.meta.url);
 const MANIFEST_URL = new URL("./data/nav-lock.json", import.meta.url);
 
-type FileSpec = { hash?: string; locked?: Record<string, string>; ignored?: string[]; watchNew?: boolean; why?: string };
+type FileSpec = { hash?: string; locked?: Record<string, string>; regions?: Record<string, string>; ignored?: string[]; watchNew?: boolean; why?: string };
 type Manifest = { approvedBy: string; approvedAt: string; note: string; approvals: { at: string; quote: string; changes: string[] }[]; files: Record<string, FileSpec> };
 
 export function stripComments(src: string): string {
@@ -61,11 +70,13 @@ export function extractLiterals(src: string): Map<string, { value: string; line:
     let text = body;
     while ((depth(stripComments(text)) > 0 || !/;\s*(\/\/.*)?$/.test(text.trimEnd())) && j + 1 < lines.length && j - i < 60) { j++; text += "\n" + lines[j]; }
     let lit = stripComments(text).replace(/;\s*$/, "").trim();
-    // only LITERALS are value-locked: numbers, booleans, quoted strings, arrays/objects of them; anything with an
-    // identifier or a call is computed and belongs to a hash lock instead
-    if (!/^(-?\d+(\.\d+)?(e-?\d+)?|true|false|'[^']*'|"[^"]*"|\[[^\]]*\]|\{[^}]*\})$/.test(lit)) continue;
-    if (/[A-Za-z_$][A-Za-z0-9_$]*\s*\(/.test(lit)) continue;
-    if (/[\[{]/.test(lit) && /[A-Za-z_$][A-Za-z0-9_$]*(?![^'"]*['"])/.test(lit.replace(/'[^']*'|"[^"]*"/g, "").replace(/\b(true|false|null)\b/g, "").replace(/[A-Za-z_$][A-Za-z0-9_$]*\s*:/g, ""))) continue;
+    // The initializer's TEXT is what gets pinned (comments stripped, whitespace normalised): numbers incl. 90_000,
+    // arithmetic (6 * 3600_000), booleans, strings, `undefined`, arrays/objects, a Platform ternary, a reference to
+    // another constant. Skipped: anything that is code rather than a setting — functions, requires, JSX, style sheets —
+    // and initializers too long to be a knob. A constant built from another is pinned as written; the other's own pin
+    // catches a change to it.
+    if (lit.length === 0 || lit.length > 400) continue;
+    if (/=>|\bfunction\b|\brequire\(|\bimport\(|StyleSheet\.create|\bnew\s+[A-Z]|<[A-Z][A-Za-z]*[\s/>]|\bawait\b|\buse[A-Z]\w*\(/.test(lit)) continue;
     out.set(m[1], { value: lit, line: i + 1 });
   }
   return out;
@@ -82,6 +93,20 @@ export function extractObjField(src: string, obj: string, field: string): { valu
   }
   return null;
 }
+// Marker-delimited regions: `// … NAV-LOCK begin <id>` … `// … NAV-LOCK end <id>` (the marker lines themselves are
+// not part of the pinned text). A begin without its end is simply absent, so the gate reports the region MISSING.
+export const REGION_MARK = /^\s*\/\/.*\bNAV-LOCK (begin|end) ([A-Za-z0-9_.:-]+)/;
+export function extractRegions(src: string): Map<string, { text: string; line: number; endLine: number }> {
+  const out = new Map<string, { text: string; line: number; endLine: number }>();
+  const lines = src.split("\n"); const open = new Map<string, number>();
+  for (let i = 0; i < lines.length; i++) {
+    const m = REGION_MARK.exec(lines[i]);
+    if (!m) continue;
+    if (m[1] === "begin") open.set(m[2], i);
+    else if (open.has(m[2])) { const b = open.get(m[2])!; out.set(m[2], { text: lines.slice(b + 1, i).join("\n"), line: b + 1, endLine: i + 1 }); open.delete(m[2]); }
+  }
+  return out;
+}
 const norm = (v: string) => v.replace(/\s+/g, " ").trim();
 const read = (rel: string) => readFileSync(new URL(rel, ROOT), "utf8");
 
@@ -89,6 +114,7 @@ const args = process.argv.slice(2);
 if (args[0] === "--list") {
   const src = read(args[1]);
   for (const [k, v] of extractLiterals(src)) console.log(`${args[1]}:${v.line}  ${k} = ${v.value}`);
+  for (const [k, v] of extractRegions(src)) console.log(`${args[1]}:${v.line}-${v.endLine}  REGION ${k}  ${codeHash(v.text).slice(7, 19)}`);
   process.exit(0);
 }
 if (args[0] === "--init") {
@@ -102,12 +128,14 @@ if (args[0] === "--init") {
     const src = read(f); const lits = extractLiterals(src); const locked: Record<string, string> = {};
     for (const [k, v] of lits) if (!(spec.ignored?.[f] ?? []).includes(k)) locked[k] = v.value;
     for (const fld of spec.fields?.[f] ?? []) { const [o, ff] = fld.split("."); const cur = extractObjField(src, o, ff); if (cur) locked[fld] = cur.value; }
-    files[f] = { locked, ignored: spec.ignored?.[f] ?? [], watchNew: true, why: "mixed file: tunable literals value-locked, new constants forbidden" };
+    const regions: Record<string, string> = {};
+    for (const [id, r] of extractRegions(src)) regions[id] = codeHash(r.text);
+    files[f] = { locked, ...(Object.keys(regions).length ? { regions } : {}), ignored: spec.ignored?.[f] ?? [], watchNew: true, why: "mixed file: tunable literals value-locked, inline drive logic region-locked, new constants forbidden" };
   }
   const today = quote.match(/20\d\d-\d\d-\d\d/)?.[0] ?? "(date in quote)";
   const m: Manifest = { approvedBy: "Jeff", approvedAt: today, note: "THE NAVIGATION LOCK — see tools/sim-qc/nav_lock_test.mts and RULES.md §4. Edit only via --relock with Jeff's words.", approvals: [{ at: today, quote, changes: ["initial lock"] }], files };
   writeFileSync(MANIFEST_URL, JSON.stringify(m, null, 2) + "\n");
-  console.log(`initialised: ${Object.keys(files).length} files, ${Object.values(files).reduce((a, f) => a + (f.hash ? 1 : Object.keys(f.locked ?? {}).length), 0)} locks`);
+  console.log(`initialised: ${Object.keys(files).length} files, ${Object.values(files).reduce((a, f) => a + (f.hash ? 1 : Object.keys(f.locked ?? {}).length + Object.keys(f.regions ?? {}).length), 0)} locks`);
   process.exit(0);
 }
 const manifest: Manifest = JSON.parse(readFileSync(MANIFEST_URL, "utf8"));
@@ -130,6 +158,16 @@ if (args[0] === "--relock") {
       if (norm(cur.value) !== norm(spec.locked[name])) { changes.push(`${file}:${name} ${spec.locked[name]} → ${cur.value}`); spec.locked[name] = cur.value; }
     }
     if (spec.watchNew && spec.locked) for (const [name, v] of lits) if (!(name in spec.locked) && !(spec.ignored ?? []).includes(name)) { changes.push(`${file}:${name} NEW = ${v.value} (locked)`); spec.locked[name] = v.value; }
+    if (spec.hash === undefined) {
+      const found = extractRegions(src); const pinned = spec.regions ?? {};
+      for (const id of Object.keys(pinned)) {
+        const r = found.get(id);
+        if (!r) { changes.push(`${file}#${id} REGION REMOVED`); delete pinned[id]; continue; }
+        const h = codeHash(r.text); if (h !== pinned[id]) { changes.push(`${file}#${id} region ${pinned[id].slice(7, 19)} → ${h.slice(7, 19)}`); pinned[id] = h; }
+      }
+      for (const [id, r] of found) if (!(id in pinned)) { changes.push(`${file}#${id} NEW REGION (locked)`); pinned[id] = codeHash(r.text); }
+      if (Object.keys(pinned).length) spec.regions = pinned; else delete spec.regions;
+    }
   }
   const today = quote.match(/20\d\d-\d\d-\d\d/)?.[0] ?? "(date in quote)";
   manifest.approvals.push({ at: today, quote, changes });
@@ -153,6 +191,16 @@ for (const [file, spec] of Object.entries(manifest.files)) {
     else if (norm(cur.value) !== norm(want)) say(`${file}:${name} changed ${want} → ${cur.value} (line ${cur.line}) without Jeff's say-so`);
   }
   if (spec.watchNew) for (const [name, v] of lits) if (!(spec.locked && name in spec.locked) && !(spec.ignored ?? []).includes(name)) say(`${file}:${name} = ${v.value} (line ${v.line}) is a NEW module-scope constant — lock it or list it under "ignored", with Jeff's say-so`);
+  if (spec.hash === undefined) {
+    const found = extractRegions(src);
+    for (const [id, want] of Object.entries(spec.regions ?? {})) {
+      checked++;
+      const r = found.get(id);
+      if (!r) say(`${file}#${id}: REGION MISSING — its NAV-LOCK begin/end markers were removed or renamed`);
+      else if (codeHash(r.text) !== want) say(`${file}#${id} (lines ${r.line}-${r.endLine}): LOCKED DRIVE LOGIC CHANGED (${codeHash(r.text).slice(7, 19)} ≠ locked ${want.slice(7, 19)}) without Jeff's say-so`);
+    }
+    for (const [id, r] of found) if (!(spec.regions && id in spec.regions)) say(`${file}#${id} (line ${r.line}): a NAV-LOCK region the manifest does not know — pin it via --relock with Jeff's say-so`);
+  }
 }
 console.log(`nav-lock: ${Object.keys(manifest.files).length} files, ${checked} locks checked, approved by ${manifest.approvedBy} ${manifest.approvedAt} (${manifest.approvals.length} approval(s) on record)`);
 console.log(fails === 0 ? "PASS nav_lock" : `FAIL nav_lock (${fails}) — see tools/sim-qc/nav_lock_test.mts header for the --relock ritual`);

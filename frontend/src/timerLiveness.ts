@@ -85,9 +85,11 @@ export function noteTimerTick(now: number = Date.now()): void {
 // is this pure helper: the override is honoured ONLY while BOTH flags read true, and
 // it is re-derived from both fields on every settings emission (never latched), so
 // flipping either one off in the same tick turns it off immediately.
+// 🔒 NAV-LOCK begin timer-debug-force — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function effectiveDebugForce(debugOverlays: unknown, debugForceTimerStarve: unknown): boolean {
   return debugOverlays === true && debugForceTimerStarve === true;
 }
+// 🔒 NAV-LOCK end timer-debug-force
 
 let _debugForce = false;
 {
@@ -115,10 +117,12 @@ export const FORCED_STARVE_DT_MS = 999999;
 /** ms since the 1 s heartbeat last ticked — the ONLY signal this returns. Forced to
  * FORCED_STARVE_DT_MS while the sim-only debug switch above is on (both `debugOverlays`
  * AND `debugForceTimerStarve` must be true — see effectiveDebugForce). */
+// 🔒 NAV-LOCK begin timer-starved-signal — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function timersStarvedMs(now: number = Date.now()): number {
   if (_debugForce) return FORCED_STARVE_DT_MS;
   return Math.max(0, now - lastTickAt);
 }
+// 🔒 NAV-LOCK end timer-starved-signal
 
 // ── rAF SIDE CHANNEL (diagnostic only — never feeds a decision) ─────────────────────
 // Tumbling (not sliding) 5 s windows: O(1) per frame with bounded memory even under the
@@ -257,6 +261,7 @@ export function maybeLogTimerPump(now: number = Date.now()): void {
 }
 
 // ── START THE CLOCK ──────────────────────────────────────────────────────────────────
+// 🔒 NAV-LOCK begin timer-heartbeat — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 let _timer: ReturnType<typeof setInterval> | null = null;
 function start(): void {
   if (_timer != null) return;
@@ -264,3 +269,4 @@ function start(): void {
   _timer = setInterval(() => noteTimerTick(), 1000);
 }
 start();
+// 🔒 NAV-LOCK end timer-heartbeat

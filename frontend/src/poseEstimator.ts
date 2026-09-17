@@ -251,6 +251,11 @@ export const POSE_ROAD_RATCHET_BEND_DEG = 8;
  *  bound is the clamp's own activity: 1.5 s, then it stands down until the blend agrees with the nose again.
  *  Gate: section Z5 (accM 10/20/25, mid-hold degradation, two noisy courses). */
 export const POSE_ROAD_RATCHET_MAX_MS = 1500;
+/** The hold is FULL for this long, then releases linearly to nothing at POSE_ROAD_RATCHET_MAX_MS (Codex round 6:
+ *  on a clean straight past an untaken corner — constant courses, no noise — a hard 1.5 s hold delayed the recovery
+ *  1.33 s behind the pre-clamp estimator; the corner it exists for needs 0.75–0.97 s, so the hold is whole for
+ *  0.8 s and the missed turn starts recovering from there). */
+export const POSE_ROAD_RATCHET_FULL_MS = 800;
 /** A run does not end the moment the blend agrees with the nose for a frame — it ends after this much CONTINUOUS
  *  rest. Without it a noisy course every other second (Codex round 3: courses 30° at t = 9 and 11 on the missed
  *  turn, 0° otherwise) re-armed a fresh 1.5 s hold each time and the nose sat 36–50° wrong for four seconds; the
@@ -497,7 +502,12 @@ export function posePredict(st: PoseState, nowMs: number, yaw: PoseYaw | null | 
       if (wantsRatchet) {
         ratchetSince = st.ratchetSince > 0 ? st.ratchetSince : nowMs;
         ratchetRestAt = 0;
-        if (nowMs - ratchetSince <= POSE_ROAD_RATCHET_MAX_MS) target = hdg;
+        const age = nowMs - ratchetSince;
+        if (age <= POSE_ROAD_RATCHET_MAX_MS) {
+          // k = 0 holds the nose; k → 1 hands it back to the blend by the cap (a straight-through recovers early).
+          const k = age <= POSE_ROAD_RATCHET_FULL_MS ? 0 : (age - POSE_ROAD_RATCHET_FULL_MS) / (POSE_ROAD_RATCHET_MAX_MS - POSE_ROAD_RATCHET_FULL_MS);
+          target = norm360(hdg + wrap180(target! - hdg) * k);
+        }
       } else if (st.ratchetSince > 0) {
         ratchetRestAt = st.ratchetRestAt > 0 ? st.ratchetRestAt : nowMs;
         ratchetSince = nowMs - ratchetRestAt >= POSE_ROAD_RATCHET_REST_MS ? 0 : st.ratchetSince;

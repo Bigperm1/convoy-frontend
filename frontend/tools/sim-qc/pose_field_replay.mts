@@ -83,7 +83,7 @@ export function backfill(anchor: FieldFix, before: Before[]): FieldFix[] {
 }
 
 export type ReplayRow = { t: number; crs: number | null; est: number; road: number | null; rk: number; src: string; dFix: number; distM: number; rw: number };
-export type ReplayResult = { rows: ReplayRow[]; maxSwingDps: number };
+export type ReplayResult = { rows: ReplayRow[]; maxSwingDps: number; frames: { t: number; est: number }[] };
 
 export function replayCorner(geom: [number, number][], fixes: FieldFix[], hz = 12, accMOf: (f: FieldFix, i: number) => number = () => 10): ReplayResult {
   const coords = geom.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
@@ -92,7 +92,7 @@ export function replayCorner(geom: [number, number][], fixes: FieldFix[], hz = 1
   let held: ReturnType<typeof projectOntoRoute> | null = null;
   const t0 = fixes[0].t, tEnd = fixes[fixes.length - 1].t;
   let fi = 0, lastT = t0 - 1 / hz, prevHdg: number | null = null, maxSwingDps = 0;
-  const rows: ReplayRow[] = [];
+  const rows: ReplayRow[] = []; const frames: { t: number; est: number }[] = [];
   // One frame PAST the last fix so it lands (a fix at tEnd would otherwise never be folded in).
   for (let t = t0; t <= tEnd + 1 / hz + 1e-9; t += 1 / hz) {
     const now = T0 + t * 1000;
@@ -109,14 +109,14 @@ export function replayCorner(geom: [number, number][], fixes: FieldFix[], hz = 1
     const o = poseOut(st);
     if (o && st.hdgKnown) {
       if (prevHdg != null) maxSwingDps = Math.max(maxSwingDps, Math.abs(wrap180(o.hdg - prevHdg)) / dtS);
-      prevHdg = o.hdg;
+      prevHdg = o.hdg; frames.push({ t, est: o.hdg });
     }
     if (landed && o) {
       const f = fixes[fi - 1];
       rows.push({ t: f.t, crs: f.crs, est: o.hdg, road: st.roadHdg, rk: st.roadK, src: o.src, dFix: haversineM(o.lat, o.lng, f.lat, f.lng), distM: held!.distM, rw: o.routeW });
     }
   }
-  return { rows, maxSwingDps };
+  return { rows, maxSwingDps, frames };
 }
 
 export function replayAll(data = loadFieldData()): Record<string, ReplayResult & { name: string }> {

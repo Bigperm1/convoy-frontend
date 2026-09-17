@@ -783,16 +783,16 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
   };
   // Z1 — 18:27, the sharp one-vertex 90° (S→E), −92.0° at a single vertex, 24–31 km/h.
   { const r = Z.c1827.rows;
-    ok("Z1a 18:27 first turning fix (t=5.21): nose ≤ 42° off the course — base 46.4, head 37.9", off(at(r, 5.214)) <= 42, `${off(at(r, 5.214)).toFixed(2)}°`);
-    ok("Z1b 18:27 second turning fix (t=6.24) ≤ 27.5° — base 29.2, head 26.0", off(at(r, 6.235)) <= 27.5, `${off(at(r, 6.235)).toFixed(2)}°`);
+    ok("Z1a 18:27 first turning fix (t=5.21): nose ≤ 42° off the course — base 46.4, head 38.4 (37.9 before the hold decayed)", off(at(r, 5.214)) <= 42, `${off(at(r, 5.214)).toFixed(2)}°`);
+    ok("Z1b 18:27 second turning fix (t=6.24) ≤ 27.5° — base 29.2, head 26.1", off(at(r, 6.235)) <= 27.5, `${off(at(r, 6.235)).toFixed(2)}°`);
     ok("Z1c 18:27 the nose never un-turns in the second before the corner: Δest against the turn ≥ −2° — base −8.5, head 0.0", unturn(r, 4.205, 5.214) >= -2, `${unturn(r, 4.205, 5.214).toFixed(2)}°`);
     ok("Z1d 18:27 drawn-vs-fix at t=6.24 ≤ 13.5 m — base 13.85, head 12.89 (along-track; the fix itself moved 20.1 m that second)", at(r, 6.235).dFix <= 13.5, `${at(r, 6.235).dFix.toFixed(2)} m`);
     ok("Z1e 18:27 worst per-frame swing ≤ 70°/s (the eased heading never pops)", Z.c1827.maxSwingDps <= 70, `${Z.c1827.maxSwingDps.toFixed(1)}°/s`);
   }
   // Z2 — 17:59, the same intersection E→N, 26–28 km/h.
   { const r = Z.c1759.rows;
-    ok("Z2a 17:59 first turning fix (t=47.24) ≤ 34° — base 38.9, head 29.3", off(at(r, 47.235)) <= 34, `${off(at(r, 47.235)).toFixed(2)}°`);
-    ok("Z2b 17:59 second turning fix (t=48.21) ≤ 27° — base 28.3, head 25.7", off(at(r, 48.209)) <= 27, `${off(at(r, 48.209)).toFixed(2)}°`);
+    ok("Z2a 17:59 first turning fix (t=47.24) ≤ 34° — base 38.9, head 29.7 (29.3 before the hold decayed)", off(at(r, 47.235)) <= 34, `${off(at(r, 47.235)).toFixed(2)}°`);
+    ok("Z2b 17:59 second turning fix (t=48.21) ≤ 27° — base 28.3, head 25.8", off(at(r, 48.209)) <= 27, `${off(at(r, 48.209)).toFixed(2)}°`);
     ok("Z2c 17:59 no un-turn before the corner ≥ −2° — base −9.6, head 0.0", unturn(r, 46.255, 47.235) >= -2, `${unturn(r, 46.255, 47.235).toFixed(2)}°`);
     ok("Z2d 17:59 drawn-vs-fix at t=48.21 ≤ 6.0 m — base 6.55, head 5.31", at(r, 48.209).dFix <= 6.0, `${at(r, 48.209).dFix.toFixed(2)} m`);
     ok("Z2e 17:59 worst per-frame swing ≤ 70°/s", Z.c1759.maxSwingDps <= 70, `${Z.c1759.maxSwingDps.toFixed(1)}°/s`);
@@ -835,7 +835,7 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
       const twoLater = lean[Math.min(lean.length - 1, peakI + 2)];
       const tail = lean.slice(Math.min(lean.length - 1, peakI + 3));
       ok(`Z5a${label} missed turn: peak lean into the untaken corner ≤ 10° — base 5.8, head 8.4 (unbounded ratchet 12.4)`, Math.max(...lean) <= 10, `${Math.max(...lean).toFixed(2)}° at t=${r[peakI].t}`);
-      ok(`Z5b${label} missed turn: two fixes after the peak the nose is within 1° of the course — base 0.28, head 0.48 (unbounded: still 12.4)`, twoLater <= 1, `${twoLater.toFixed(2)}°`);
+      ok(`Z5b${label} missed turn: two fixes after the peak the nose is within 1° of the course — base 0.28, head 0.26 (unbounded: still 12.4)`, twoLater <= 1, `${twoLater.toFixed(2)}°`);
       ok(`Z5c${label} missed turn: from three fixes after the peak on, the nose never leaves 1° of the course (the hold cannot persist)`, tail.every((v) => v <= 1), `worst ${Math.max(...tail).toFixed(2)}° over ${tail.length} fixes`);
     };
     judge("", () => 10);
@@ -898,6 +898,23 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
     const meanWin = win.reduce((a, b) => a + b, 0) / win.length;
     ok("Z7a drifting-course missed turn (Codex seed 29): nose error at t=21.55 ≤ 10° — base 6.78, head 6.78 (12°/s guard: 36.61)", errAt(21.55) <= 10, `${errAt(21.55).toFixed(2)}°`);
     ok("Z7b …and the mean nose error over t=20–22.5 ≤ 16° — base 13.47, head 13.47 (12°/s guard: 28.12)", meanWin <= 16, `${meanWin.toFixed(2)}°`);
+  }
+  // Z8 — CLEAN STRAIGHT-THROUGH past an untaken corner (Codex round 6 [medium]): the Z5 geometry, no noise, 1 Hz,
+  // accM 10, and (a) courses exactly 0° every second, (b) courses drifting 12° → 0° at −2°/s from t≈20 — motion the
+  // 3°/s guard cannot see. A hard 1.5 s hold delayed the recovery 1.33 s behind the pre-clamp estimator (16.0° vs
+  // 2.0° at t=24.58; 21.7° vs 4.9° at t=25). The hold is now FULL for 0.8 s and releases to nothing by 1.5 s.
+  {
+    const lat0 = 49.0330, lng0 = -121.9230;
+    const vtx = stepLatLng(lat0, lng0, 0, 100), east = stepLatLng(vtx.lat, vtx.lng, 90, 100);
+    const geom: [number, number][] = [[lng0, lat0], [vtx.lng, vtx.lat], [east.lng, east.lat]];
+    // 3.1 m/s from 25 m along the approach: the vertex is passed at t ≈ 24.2 s, the instants Codex named.
+    const mk = (crsOf: (t: number) => number) => { const fx = [] as { t: number; lat: number; lng: number; crs: number | null; spd: number }[]; for (let t = 0; t <= 34; t++) { const q = stepLatLng(lat0, lng0, 0, 3.1 * t + 25); fx.push({ t, lat: q.lat, lng: q.lng, crs: crsOf(t), spd: 3.1 }); } return fx; };
+    const at = (fr: { t: number; est: number }[], t: number) => { let bi = 0; for (let i = 0; i < fr.length; i++) if (Math.abs(fr[i].t - t) < Math.abs(fr[bi].t - t)) bi = i; return Math.abs(wrap180(fr[bi].est)); };
+    const a = fieldReplayCorner(geom, mk(() => 0), 12, () => 10).frames;
+    const b = fieldReplayCorner(geom, mk((t) => Math.max(0, 12 - 2 * Math.max(0, t - (75 / 3.1 - 4)))), 12, () => 10).frames;
+    ok("Z8a clean straight-through, constant 0° courses: nose error at t=24.58 ≤ 10° — base 1.96, head 8.49 (hard 1.5 s hold: 16.02)", at(a, 24.58) <= 10, `${at(a, 24.58).toFixed(2)}°`);
+    ok("Z8b straight-through with a −2°/s course drift: nose error at t=25 ≤ 12° — base 4.89, head 9.71 (hard hold: 21.74)", at(b, 25) <= 12, `${at(b, 25).toFixed(2)}°`);
+    ok("Z8c …and neither shape is ever more than 999° from the course after t=28 (the hold cannot outlive its cap)", [...a, ...b].filter((f) => f.t >= 28).every((f) => Math.abs(wrap180(f.est)) <= 1), `worst ${Math.max(...[...a, ...b].filter((f) => f.t >= 28).map((f) => Math.abs(wrap180(f.est)))).toFixed(2)}°`);
   }
 }
 

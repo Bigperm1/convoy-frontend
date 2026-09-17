@@ -234,6 +234,10 @@ Native deps are patched at install time via `patch-package` (postinstall hook): 
   which killed weather on every surface for ~20 h / 13 OTAs on 2026-08-30. Publish through
   `npx eas-cli env:exec preview "npx eas-cli update --branch mapbox-migration --clear-cache -m '…' --non-interactive"`
   and then PROVE it: `python3 tools/ota/verify-bundle-key.py <group> <runtimeVersion from app.json — 1.29.0 since build 79, 2026-09-17>` → `KEY_PRESENT=1` on BOTH platforms.
+- **🔒 `tools/sim-qc/nav_lock_test.mts` must pass before every publish and every cut (2026-09-17).** The drive engine is
+  LOCKED at Jeff's word ("i dont want anything to change without my say so"): pure nav modules by content hash, tunable
+  constants in the mixed files by value, new constants forbidden. A failure means a nav change is being shipped without
+  his approval — get his words, then `--relock "Jeff, <date>: …"`. Rule and ritual: `RULES.md` §4.
 - **`python3 scripts/trap-check.py` must pass before every publish (2026-09-03).** It greps for the
   signatures of bugs already root-caused (zoom-curve `modelScale`, per-tick layer-style writes,
   `Constants.nativeBuildVersion`, a ribbon cut from a foreign polyline fraction, bare `eas update`).

@@ -1,0 +1,415 @@
+{
+  "approvedBy": "Jeff",
+  "approvedAt": "2026-09-17",
+  "note": "THE NAVIGATION LOCK — see tools/sim-qc/nav_lock_test.mts and RULES.md §4. Edit only via --relock with Jeff's words.",
+  "approvals": [
+    {
+      "at": "2026-09-17",
+      "quote": "Jeff, 2026-09-17: lets lock in/gate the navigation settings i think we have finally got 95% there is dont want anything to change without my say so.",
+      "changes": [
+        "initial lock"
+      ]
+    }
+  ],
+  "files": {
+    "src/poseEstimator.ts": {
+      "hash": "sha256:d1818c4212003ff33abd5fca31278d61d5d3b6780c967e52c40f4adba312b734",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/chaseZoom.ts": {
+      "hash": "sha256:7c043db61f3cf506f960afa30d10e8058f61618ba893105ba5b630e0b948f887",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/camGlide.ts": {
+      "hash": "sha256:88ec5368241e5f45d41da17ec05cf5cc23822c2464317e41550db7585b0a8b77",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/routeTrim.ts": {
+      "hash": "sha256:c081820dae1dd37e6788165e60c8805adbfac9f5a3441545ef8b09f1a2d5a6e9",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/routeRibbon.ts": {
+      "hash": "sha256:e1f44c8276ec497f4d9e5e21dbdbbe8c7a09c668527ccc9587b9c6072e2d5455",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/ribbonAnchor.ts": {
+      "hash": "sha256:20500d1e2f0d7a6efa61846783ffafeafad5214c151384233537c3520e84ddc1",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/coldStepHeal.ts": {
+      "hash": "sha256:9ed368169e04ffeb0b2b1b44998723810fb8a3dc269e388c64c5b27e1bb63f5d",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/offRouteGate.ts": {
+      "hash": "sha256:4e28787d6e8ee0deae8d23dcd8b6a77ca1916e70c3a1ae9d22a43855b56ca2e5",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/cornerBlend.ts": {
+      "hash": "sha256:4052ca946f0da96558f04bfbb0a28ebe08ab11b46649192ac0902b76e2277915",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/selfLiftRule.ts": {
+      "hash": "sha256:0fa62704c7b51fc0bb999b052ca81d9345db8b6d7078fbd2a5b032fc1befc17a",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/navAnchor.ts": {
+      "hash": "sha256:5020f276d4ffb86c7807dcce824358cbb95e21517259b5843d9436b881d85418",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/departureBearing.ts": {
+      "hash": "sha256:88f98e91cfa3fd8becabd3a6b61960bdbfe7ce9ca3bb3605e394891580ffc099",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/carSpotTrust.ts": {
+      "hash": "sha256:86207d571ada28cd6abcefccf9e88dae8281055482e45be20cdba129759d3fd7",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/driveFeed.ts": {
+      "hash": "sha256:ea54fa66e3e6d6ced6abc8da0a146a765238650499156d1f87349afb973a87f0",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/speedProfile.ts": {
+      "hash": "sha256:a3483119687dc92747bd87e3fab9993342799e9fd28fabae2e4d4374e464decb",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/speedLimitSnap.ts": {
+      "hash": "sha256:8b4d9947975f75d072e1cc9cde1dd40f19cac21c1a7f98209e32b955e302bb3d",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/speedEpisode.ts": {
+      "hash": "sha256:8b459f41b94f551637bb1cf261f95835b129bb4f7f8d0810a4bc03e2dd6fd679",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/arrivalEndings.ts": {
+      "hash": "sha256:e5d3135cfe45c06672eeb6b76ac45f2c46bf024d13f15687fa96865bdfb9c517",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/tripOdometer.ts": {
+      "hash": "sha256:bb316cb62ab01237cf31caca6353bb64cc458a88a091d9170d18338a8cf6d209",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/yawRate.ts": {
+      "hash": "sha256:35f7c1f760f8d6be57fbe3de35c6b5ddcfbc5eedcd6485477406d36de4cb1578",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/yawFeed.ts": {
+      "hash": "sha256:cb5f4c3553dbd39d680bd16846d756d33f72e72299cf0b14e0d6e946b9a4c9bb",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/fixCourseHere.ts": {
+      "hash": "sha256:475eb05fcdeca5589e094670dbfa193808137bb67dca1637dc89886a9ede4686",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/speedDing.ts": {
+      "hash": "sha256:5c829dde68763b25db9c184ee1c5cf263a2f25814685e2b079ca202b3a82163c",
+      "why": "pure drive-engine module: code-locked"
+    },
+    "src/ConvoyMapbox.tsx": {
+      "locked": {
+        "SELF_ID": "\"self\"",
+        "CAL_LAT": "49.25",
+        "CAR_LEN_UNITS": "1.910",
+        "ARROW_LEN_UNITS": "1.289",
+        "SELF_MARKER_PT": "50",
+        "SELF_CLASS_PHOTO_PT": "66",
+        "SELF_CLASS_SILHOUETTE_PT": "62",
+        "Z_FLOOR": "2",
+        "SELF_SCALE_EXPR": "[\"get\", \"scl\"]",
+        "SELF_TRN_EXPR": "[\"get\", \"trn\"]",
+        "LIFT_CACHE_M": "3",
+        "LIFT_CACHE_MS": "20000",
+        "CAR_MODEL_HEADING_OFFSET": "90",
+        "ARROW_MODEL_ID": "\"convoyArrow11\"",
+        "ARROW_MODEL_HEADING_OFFSET": "0",
+        "ARROW_MODEL_PITCH": "90",
+        "SELF_DEADBAND_M": "2.5",
+        "SELF_DEADBAND_HDG": "8",
+        "SELF_DEADBAND_STOP_M": "9",
+        "SELF_CREEP_MS": "1.4",
+        "SELF_DEADBAND_SPEED_SCALED": "true",
+        "SELF_DEADBAND_T_S": "0.08",
+        "SELF_DEADBAND_MIN_M": "1.0",
+        "SELF_DEADBAND_FAST_TARGET_MS": "400",
+        "SELF_DEADBAND_FAST_SLACK_MS": "700",
+        "SELF_TARGET_GAP_SAMPLES": "5",
+        "ROAD_SRC_ID": "\"convoy-roads\"",
+        "ROAD_SNAP_LOCK_M": "22",
+        "ROAD_SNAP_RELEASE_M": "34",
+        "ROAD_SNAP_QUERY_MS": "1400",
+        "ROAD_SNAP_MOVING_MS": "1.5",
+        "ROAD_SNAP_CROSS_DEG": "55",
+        "WATER_QUERY_MS": "2500",
+        "WATER_ON_POLLS": "3",
+        "WATER_OFF_POLLS": "6",
+        "CAR_EMISSIVE_BY_MODE": "{ satellite: 0.22, day: 0.22, dawn: 0.38, dusk: 0.42, night: 0.55, }",
+        "CHASE_PITCH_CITY": "48",
+        "CHASE_PITCH_HIGHWAY": "60",
+        "CHASE_KMH_CITY": "45",
+        "CHASE_KMH_HIGHWAY": "95",
+        "CHASE_KMH_FAST": "180",
+        "FREE_ZOOM": "15",
+        "FOLLOW_ZOOM": "17",
+        "CHASE_ZOOM_CLAMP_MIN": "10.5",
+        "CHASE_ZOOM_CLAMP_MAX": "20",
+        "CAM_SMOOTH_TAU_MS": "1400",
+        "CAM_ZOOM_SLEW_PER_S": "0.5",
+        "CAM_ZOOM_DEADBAND": "0.25",
+        "CAM_PITCH_SLEW_PER_S": "5",
+        "TRIM_TICK_MS_PREMIUM": "83",
+        "COURSE_OFF_KMH": "3",
+        "HEADING_SMOOTH_ALPHA": "0.72",
+        "FOLLOW_LOWER_PAD_FRAC": "0.4",
+        "ROUTE_GREEN_CORE": "\"#2DEC86\"",
+        "ROUTE_GREEN_GLOW": "\"#00E070\"",
+        "ROUTE_AI_CORE": "\"#000000\"",
+        "ROUTE_OFFER_CORE": "\"#5B8DEF\"",
+        "ROUTE_CAMERA_CORRIDOR_M": "150",
+        "NEXT_AHEAD_M": "500",
+        "PROJ_WINDOW_MIN_M": "10",
+        "PROJ_WINDOW_TRAVEL_MULT": "1.5",
+        "PROJ_CLAMP_TRUST_M": "60",
+        "PROJ_WINDOW_ABANDON_M": "120",
+        "NOSE_LEAD_IN_ENABLED": "true",
+        "CAM_HEADING_LAG_MS": "700",
+        "CAM_HEADING_MAX_LEAD_DEG": "25",
+        "ROUTE_START_BEARING_M": "30",
+        "PEER_SCALE_EXPR": "[\"get\", \"scl\"]",
+        "PEER_ROT_EXPR": "[\"get\", \"rot\"]",
+        "PEER_TRN_EXPR": "[\"get\", \"trn\"]",
+        "INCIDENT_TITLE": "{ incident: \"Incident\", construction: \"Roadwork\", road: \"Road closure\", weather: \"Weather hazard\", event: \"Road event\", }",
+        "NEON_MIN_ZOOM": "10",
+        "NEON_CLUSTER_PT": "28",
+        "NEON_CLUSTER_MAX_ZOOM": "13"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    },
+    "src/carplay/CarMapView.tsx": {
+      "locked": {
+        "CAR_PIN_SCALE": "0.8",
+        "SELECTED_INDEX": "0",
+        "CRUISE_PITCH": "45",
+        "CAR_PITCH_BONUS": "0",
+        "CAR_PITCH_MAX": "60",
+        "CAR_ZOOM_OUT": "0",
+        "PREVIEW_ZOOM_OUT": "2.2",
+        "CAR_USER_ZOOM_BIAS_LIMIT": "4",
+        "CAR_PREVIEW_ZOOM_MIN": "3",
+        "CAR_ZOOM_HOLD_MS": "15000",
+        "CAR_LOWER_PAD_FRAC": "0.52",
+        "CAR_LEFT_PAD_FRAC": "0.13",
+        "CAR_REF_W": "400",
+        "CAR_REF_H": "240",
+        "HUD_SCALE_FLOOR": "0.4",
+        "AA_ZOOM_OUT_MAX": "1.5",
+        "MAP_SCALE_FLOOR": "0.5",
+        "DEFAULT_MODE": "'dusk'",
+        "TILE_ERR_LOG_MAX": "3",
+        "PAINT_WATCHDOG_MS": "6000",
+        "RETRY_WATCHDOG_MS": "9000",
+        "CREW_FIT_MAX_KM": "100",
+        "CAR_SNAP_HDG_LOCK": "45",
+        "CAR_SNAP_HDG_UNLOCK": "60",
+        "CAR_SNAP_MOVING_MS": "1.5",
+        "CARPLAY_CAR_PT": "45",
+        "CARPLAY_ARROW_PT": "33.5",
+        "CARPLAY_ARROW_2D_PT": "26"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    },
+    "src/carplay/ConvoyCarPlay.tsx": {
+      "locked": {
+        "CAR_NATIVE_GUIDANCE": "false",
+        "MAX_LIVE_ATTEMPTS": "6",
+        "ANDROID_SPURIOUS_CONNECT_GUARD_MS": "5000",
+        "CAR_REF_CARPLAY_W": "470",
+        "NAV_GAP": "8",
+        "CREW_PILL_H": "22",
+        "CAR_PILL_TOP": "4",
+        "NAV_PILL_H": "24",
+        "TURN_ROW_H": "42",
+        "SPEED_PILL_H": "48",
+        "NAV_STACK_MAX_W": "260",
+        "AA_NAV_STACK_MAX_FRAC": "0.70",
+        "CAR_MODEL_HALF_W": "20",
+        "NAV_STACK_ABS_MIN_W": "120"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    },
+    "src/nav.ts": {
+      "locked": {
+        "PLOT_VIA_FETCH_TIMEOUT_MS": "45000",
+        "CURB_MAX_EXTRA_S": "20",
+        "CURB_MAX_EXTRA_FRAC": "0.10",
+        "CURB_MAX_EXTRA_M": "250",
+        "CURB_MAX_EXTRA_DIST_FRAC": "0.15",
+        "IMMINENT_LEAD_S": "10",
+        "IMMINENT_MIN_M": "60",
+        "IMMINENT_MAX_M": "250",
+        "PREPARE_LEAD_S": "30",
+        "PREPARE_MIN_M": "150",
+        "PREPARE_MAX_M": "1200",
+        "ADVANCE_THRESHOLD_M": "25",
+        "ARRIVE_M": "20",
+        "ARRIVE_SETTLE_M": "50",
+        "ARRIVE_SETTLE_SPEED_MS": "1.4",
+        "ARRIVE_SETTLE_MS": "25000",
+        "ARRIVE_SILENT_MAX_SPD_MS": "4.0",
+        "ARRIVE_SILENT_MAX_SKEW_MS": "10000",
+        "ARRIVE_SPEAK_MAX_LATE_MS": "90000",
+        "ARRIVE_NEAR_CROW_M": "80",
+        "ARRIVE_NEAR_ROUTE_M": "400",
+        "ARRIVE_NEAR_MS": "90000",
+        "OFFROUTE_HEADING_TOL_DEG": "55",
+        "OFFROUTE_HELD_LOG_MS": "10000",
+        "ARRIVAL_DRAIN_MAX_MS": "15000",
+        "SEG_WINDOW_AHEAD": "400",
+        "SEG_WINDOW_BACK": "40",
+        "SEG_MAX_SNAP_M": "250",
+        "NAV_TTS_RATE": "1.0",
+        "SAME_TEXT_DEDUPE_MS": "12000",
+        "DUCK_MAX_MS": "12000",
+        "PAUSE_TOKEN": "\"\\u0000pause:\"",
+        "GREETING_DONE_TOKEN": "\"\\u0000greetdone\"",
+        "GREETING_PAUSE_MS": "1200",
+        "IDLE_RELEASE_GRACE_MS": "350",
+        "TTS_CACHE_MAX": "12",
+        "TRAFFIC_REFRESH_MAX_FAILS": "3"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    },
+    "src/navNotification.ts": {
+      "locked": {
+        "NAV_TASK": "\"convoy-nav-location\"",
+        "NAV_NOTIF_ID": "\"convoy-nav-banner\"",
+        "NAV_CHANNEL": "\"navigation\"",
+        "ROUTE_KEY": "\"convoy:navRoute\"",
+        "PROGRESS_KEY": "\"convoy:navProgress\"",
+        "NAV_POLY_KEY": "\"convoy:navPolyline\"",
+        "CAR_NAV_KEY": "\"convoy:carNav\"",
+        "ANNOUNCE_DISTANCE_M": "500",
+        "USER_CACHE_KEY": "\"convoy_user\"",
+        "STALL_MS": "25000",
+        "STALL_CHECK_MS": "10000",
+        "ASKED_ALWAYS_KEY": "\"convoy.askedAlways.v1\""
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    },
+    "src/locationPrivacy.ts": {
+      "locked": {
+        "CAR_SPOT_KEY": "\"convoy.lastCarSpot.v1\"",
+        "LAST_DRIVING_KEY": "\"convoy.lastDrivingAt.v1\"",
+        "DRIVING_SPEED_MS": "2.5",
+        "DRIVING_ENTER_SPEED_MS": "4.17"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    },
+    "src/carplay/carActions.ts": {
+      "locked": {
+        "TOAST_MS": "3000",
+        "POS_RING_MAX": "12",
+        "AA_SEARCH_ID": "'convoy-aa-search'",
+        "AA_NAV_ID": "'convoy-aa-nav'",
+        "AA_SEARCH_MAX_ROWS": "6",
+        "WHERE_TO_MAX": "30",
+        "AA_ALLOW_LOCATION_ID": "'car-allow-location'",
+        "TAP_DEDUPE_MS": "50"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    },
+    "src/settings.ts": {
+      "locked": {
+        "KEY": "\"convoy.settings.v3\"",
+        "LAST_LOC_KEY": "\"convoy.lastlocation.v1\"",
+        "LEGACY_CLASS": "{ coupe: 'muscle', sports: 'supercar' }",
+        "STOCK_AUDIO_VOL": "0.6",
+        "STOCK_BY_KEY": "{ volVoice: 0.8, volDings: 0.6, volComms: 0.8, volTransmission: 0.8, }",
+        "DEFAULT_SETTINGS.speedAlertMode": "'ding'",
+        "DEFAULT_SETTINGS.speedCameras": "true",
+        "DEFAULT_SETTINGS.novaGreeting": "true",
+        "DEFAULT_SETTINGS.departureIQ": "false",
+        "DEFAULT_SETTINGS.adaptiveSpeedAlerts": "true",
+        "DEFAULT_SETTINGS.novaMidDrive": "true",
+        "DEFAULT_SETTINGS.mapView": "\"heading_up\"",
+        "DEFAULT_SETTINGS.mapMode": "\"auto\"",
+        "DEFAULT_SETTINGS.show3dBuildings": "true",
+        "DEFAULT_SETTINGS.pitstop": "true",
+        "DEFAULT_SETTINGS.roadIncidents": "false"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    },
+    "src/mapboxDirections.ts": {
+      "locked": {
+        "CONGESTION_COLOR": "{ unknown: \"#2DEC86\", low: \"#2DEC86\", moderate: \"#FFD60A\", heavy: \"#FF9500\", severe: \"#FF3B30\", }"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    },
+    "src/speedLimit.ts": {
+      "locked": {
+        "OVERPASS_URLS": "[ \"https://overpass-api.de/api/interpreter\", \"https://overpass.kumi.systems/api/interpreter\", \"https://overpass.private.coffee/api/interpreter\", ]",
+        "FETCH_RADIUS_M": "1500",
+        "REFETCH_MOVE_M": "1000",
+        "MIN_REFETCH_MS": "30000",
+        "RESOLVE_MOVE_M": "10",
+        "FETCH_TIMEOUT_MS": "10000",
+        "RECEIPTS_MAX": "80",
+        "SPEED_LIMIT_SHOW_KMH": "2"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    },
+    "src/pitstop.ts": {
+      "locked": {
+        "PITSTOP_IDLE": "{ active: false, elapsedS: 0, totalS: 0, kind: \"rest\", label: \"\", }",
+        "STOPPED_MS": "1.4",
+        "MOVING_MS": "3.0",
+        "NEAR_M": "140",
+        "STOP_RADIUS_M": "30"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    },
+    "src/timerLiveness.ts": {
+      "locked": {
+        "FORCED_STARVE_DT_MS": "999999",
+        "RAF_WINDOW_MS": "5000",
+        "STARVE_LOG_THRESHOLD_MS": "3000",
+        "STARVE_LOG_EVERY_MS": "10000",
+        "TIMER_PUMP_LOG_EVERY_MS": "60000"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    },
+    "src/carplay/carStatus.ts": {
+      "locked": {
+        "STATUS_ROWS_MAX": "24",
+        "PERM_ROWS_MAX": "16",
+        "LOCATION_PERMS": "['android.permission.ACCESS_FINE_LOCATION', 'android.permission.ACCESS_COARSE_LOCATION']",
+        "MIC_PERMS": "['android.permission.RECORD_AUDIO']"
+      },
+      "ignored": [],
+      "watchNew": true,
+      "why": "mixed file: tunable literals value-locked, new constants forbidden"
+    }
+  }
+}

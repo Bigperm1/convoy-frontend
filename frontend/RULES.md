@@ -109,6 +109,16 @@ grep -ac '^diff --git' patches/<name>.patch
 
 ## 4 · Shipping
 
+**🔒 THE NAVIGATION LOCK (Jeff, 2026-09-17): nothing in the drive engine changes without his say-so.**
+Jeff, verbatim: *"lets lock in/gate the navigation settings i think we have finally got 95% there is dont want anything
+to change without my say so."* The lock is `tools/sim-qc/nav_lock_test.mts` + `tools/sim-qc/data/nav-lock.json`: the pure
+drive-engine modules are CODE-locked (a content hash, comments/whitespace ignored — a refactor trips it), and every
+tunable literal in the mixed files (ConvoyMapbox.tsx, CarMapView.tsx, nav.ts, settings defaults, …) is VALUE-locked,
+with any NEW module-scope constant in those files failing too. It runs with every sim-qc gate before an OTA or a cut.
+A failure is not a bug to fix in the manifest: it is a question for Jeff. With his words in hand:
+`node --experimental-strip-types tools/sim-qc/nav_lock_test.mts --relock "Jeff, <date>: <what he said>"` — never edit
+the JSON by hand, never relock without the quote. Field reports still get investigated and DESIGNED; the change waits.
+
 **ONE nav change per real drive.** After 2026-07-31, eleven OTAs in a single day made the app
 *worse*. Every symptom gets its **own** verdict; do not bundle nav behaviour changes.
 

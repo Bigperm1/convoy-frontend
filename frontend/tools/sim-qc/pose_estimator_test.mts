@@ -8,6 +8,7 @@ import {
   poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, POSE_YAW_MAX_DPS, haversineM, bearingDeg, stepLatLng, wrap180, norm360,
   POSE_DR_MAX_M, POSE_ROUTE_MAX_M, poseRoadWindowM,
 } from "../../src/poseEstimator.ts";
+import { replayAll as fieldReplayAll, type ReplayRow } from "./pose_field_replay.mts";
 
 let fails = 0;
 const ok = (name: string, cond: boolean, detail = "") => {
@@ -752,6 +753,67 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
   const lean: number[] = [];
   for (let sd = 1; sd <= YSEEDS; sd++) lean.push(run(straightOn, { gyro: false, noiseM: 2, route: true, speedMs: 6.94, fixHz: 1, from: 60, seed: sd * 7919, routeTruth: routeCorners }).maxHdgErr);
   ok("Y4 MISSED TURN: the nose must not lean into a corner the driver is not taking — median ≤ 11° (base 10.4, the reverted on-line gate 15.1)", p(lean, 0.5) <= 11, `${p(lean, 0.5).toFixed(1)}° (p90 ${p(lean, 0.9).toFixed(1)}°)`);
+}
+
+// ── Z. 2026-09-16: THE 90° TRAFFIC-LIGHT CORNER — the nose does not un-turn into a bend ───────
+// Jeff, after two drives on OTA-AX: "roundabouts looked good, on/off ramps looked good … we can still make
+// the 90d traffic light corners tighter." His own 1 Hz rows replayed through the estimator on the app's
+// own Mapbox polylines of his own intersections (tools/sim-qc/pose_field_replay.mts + data/0916_corner90.json,
+// longitudes shifted). The drawn nose lagged the course 30–47° for ~1 s at every single-vertex 90° corner
+// because the AGREEMENT fade zeroed the road's weight in the second BEFORE the turn — `courseNow` is frozen
+// on the entry leg until the 1 Hz course sees the steering — and dragged the nose BACK onto the entry leg
+// (18:27:04→05: est 169 → 177 while the road under the car went 163 → 131); the 60°/s slew then needed the
+// whole next second to pay the 46° debt (18:27:05→06 ran at 59.7°/s, saturated). Roundabouts never showed
+// it: a Mapbox roundabout is a vertex every 2.5–8 m, so neither fade arms. Fix: POSE_ROAD_RATCHET_BEND_DEG
+// in posePredict — while the line itself bends, the blend may stop the nose, never un-turn it.
+// Base = ac1cb9ab (OTA-AX, pre-clamp), head = this tree; every bar sits between the two measured numbers.
+// NOT achievable, on purpose not encoded: "nose within 15° by the second fix" (needs ~75°/s of nose against
+// the 60°/s cap while the car yaws 45–50°/s) and "dFix ≤ 5 m mid-corner" (the 18:27:05→06 fix pair moved
+// 20.1 m in 1.02 s on a 31 km/h car — no estimator sits within 5 m of both).
+{
+  const Z = fieldReplayAll();
+  const at = (rows: ReplayRow[], t: number) => { const r = rows.find((x) => Math.abs(x.t - t) < 0.02); if (!r) throw new Error(`no replay row at t=${t}`); return r; };
+  const off = (r: ReplayRow) => Math.abs(wrap180(r.est - r.crs!));
+  // Over the second before the first turning course the nose may not move AGAINST the turn: signed Δest
+  // projected onto the turn's direction (sign of the course change at the first turning fix).
+  const unturn = (rows: ReplayRow[], tBefore: number, tTurn: number) => {
+    const b = at(rows, tBefore), a = at(rows, tTurn);
+    return wrap180(a.est - b.est) * Math.sign(wrap180(a.crs! - b.crs!));
+  };
+  // Z1 — 18:27, the sharp one-vertex 90° (S→E), −92.0° at a single vertex, 24–31 km/h.
+  { const r = Z.c1827.rows;
+    ok("Z1a 18:27 first turning fix (t=5.21): nose ≤ 42° off the course — base 46.4, head 37.9", off(at(r, 5.214)) <= 42, `${off(at(r, 5.214)).toFixed(2)}°`);
+    ok("Z1b 18:27 second turning fix (t=6.24) ≤ 27.5° — base 29.2, head 26.0", off(at(r, 6.235)) <= 27.5, `${off(at(r, 6.235)).toFixed(2)}°`);
+    ok("Z1c 18:27 the nose never un-turns in the second before the corner: Δest against the turn ≥ −2° — base −8.5, head 0.0", unturn(r, 4.205, 5.214) >= -2, `${unturn(r, 4.205, 5.214).toFixed(2)}°`);
+    ok("Z1d 18:27 drawn-vs-fix at t=6.24 ≤ 13.5 m — base 13.85, head 12.89 (along-track; the fix itself moved 20.1 m that second)", at(r, 6.235).dFix <= 13.5, `${at(r, 6.235).dFix.toFixed(2)} m`);
+    ok("Z1e 18:27 worst per-frame swing ≤ 70°/s (the eased heading never pops)", Z.c1827.maxSwingDps <= 70, `${Z.c1827.maxSwingDps.toFixed(1)}°/s`);
+  }
+  // Z2 — 17:59, the same intersection E→N, 26–28 km/h.
+  { const r = Z.c1759.rows;
+    ok("Z2a 17:59 first turning fix (t=47.24) ≤ 34° — base 38.9, head 29.3", off(at(r, 47.235)) <= 34, `${off(at(r, 47.235)).toFixed(2)}°`);
+    ok("Z2b 17:59 second turning fix (t=48.21) ≤ 27° — base 28.3, head 25.7", off(at(r, 48.209)) <= 27, `${off(at(r, 48.209)).toFixed(2)}°`);
+    ok("Z2c 17:59 no un-turn before the corner ≥ −2° — base −9.6, head 0.0", unturn(r, 46.255, 47.235) >= -2, `${unturn(r, 46.255, 47.235).toFixed(2)}°`);
+    ok("Z2d 17:59 drawn-vs-fix at t=48.21 ≤ 6.0 m — base 6.55, head 5.31", at(r, 48.209).dFix <= 6.0, `${at(r, 48.209).dFix.toFixed(2)} m`);
+    ok("Z2e 17:59 worst per-frame swing ≤ 70°/s", Z.c1759.maxSwingDps <= 70, `${Z.c1759.maxSwingDps.toFixed(1)}°/s`);
+  }
+  // Z3 — 18:30 King Rd (the corner that named the bug on 09-04/05/09): a different shape — the raw fix sits
+  // 14 m off the line, the projection pins to the vertex and the agreement fade is doing its job. Held as a
+  // non-regression, plus a geometry-integrity check that the baked line is the one the drive was on.
+  { const r = Z.c1830.rows;
+    ok("Z3a King Rd geometry integrity: the 18:30:15 fix projects 14.1 ± 0.5 m off the baked polyline (the drive logged distM=14.1)", Math.abs(at(r, 15.201).distM - 14.1) <= 0.5, `${at(r, 15.201).distM.toFixed(2)} m`);
+    ok("Z3b King Rd second turning fix (t=16.22) ≤ 13° — base 11.3, head 11.3 (non-regression)", off(at(r, 16.215)) <= 13, `${off(at(r, 16.215)).toFixed(2)}°`);
+    ok("Z3c King Rd third fix (t=17.22) ≤ 39.5° — base 39.2, head 37.7", off(at(r, 17.216)) <= 39.5, `${off(at(r, 17.216)).toFixed(2)}°`);
+  }
+  // Z4 — ROUNDABOUT NON-REGRESSION, 09:02:14–19 (rab=1, the shape Jeff said looked good): the clamp must be
+  // a no-op here — every row's nose equals the pre-clamp estimator's to 0.1°.
+  { const r = Z.rab0902.rows;
+    const baseEst = [356.00, 1.45, 14.50, 28.10, 34.45, 45.64];
+    const worstOff = Math.max(...r.map(off));
+    const worstDrift = Math.max(...r.map((x, i) => Math.abs(wrap180(x.est - baseEst[i]))));
+    ok("Z4a roundabout: nose within 8° of the course on every fix — base/head 0.0/3.5/1.5/2.9/5.6/5.6", r.length === 6 && worstOff <= 8, `worst ${worstOff.toFixed(2)}° over ${r.length} rows`);
+    ok("Z4b roundabout: every row's nose within 0.1° of the pre-clamp estimator (the clamp is a no-op on an arc)", worstDrift <= 0.1, `worst drift ${worstDrift.toFixed(3)}°`);
+    ok("Z4c roundabout: src=road on ≥ 5 of the 6 rows", r.filter((x) => x.src === "road").length >= 5, `${r.filter((x) => x.src === "road").length}/6`);
+  }
 }
 
 console.log(fails === 0 ? "\nPASS pose_estimator" : `\nFAIL pose_estimator (${fails})`);

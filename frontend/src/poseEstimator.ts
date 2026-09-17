@@ -230,6 +230,14 @@ export const POSE_ROAD_AGREE_DEG = 15;
  *  to none at POSE_ROAD_SHARP_FULL_DEG, only while the newest fix carries a course (Mapbox restricts
  *  snapping at sharp maneuvers for the same reason). A roundabout on a dense line turns ~20°/s: unaffected. */
 export const POSE_ROAD_SHARP_DEG = 20;
+/** THE NOSE DOES NOT UN-TURN INTO A BEND (2026-09-16). The line must be bending by at least this much
+ *  within the next second of travel (|roadHdgAhead − roadHdg|) before the nose may refuse to be pulled
+ *  back against it. 8° is below POSE_ROAD_SHARP_DEG (20) on purpose — a gentle bend is still a bend — and
+ *  above the ±1–3° a straight Mapbox polyline wobbles by (measured on Jeff's 18:27 approach: 0.1–1.4° up to
+ *  20 m before the vertex, 32.7° at 10 m). A noisy leg-flip at a vertex hands in a chord whose look-ahead
+ *  sits on the SAME leg (bend ≈ 0), so it is never ratcheted — that is what keeps the X1n/Y1n scatter bars
+ *  where they are (the ungated ratchet cost them 4–12°). Gate: pose_estimator_test.mts section Z. */
+export const POSE_ROAD_RATCHET_BEND_DEG = 8;
 export const POSE_ROAD_SHARP_FULL_DEG = 60;
 /** ⛔ TRIED AND REVERTED 2026-09-11 — do not re-add: suspending the sharpness fade while the raw fix is
  *  within a few metres of the line. It reads well ("a car ON the line is on the line") and it moved the
@@ -429,9 +437,28 @@ export function posePredict(st: PoseState, nowMs: number, yaw: PoseYaw | null | 
           roadK *= Math.max(0, Math.min(1, 1 - (sharp - POSE_ROAD_SHARP_DEG) / (POSE_ROAD_SHARP_FULL_DEG - POSE_ROAD_SHARP_DEG)));
         }
       }
-      const target = roadTarget != null && courseTarget != null
+      let target = roadTarget != null && courseTarget != null
         ? norm360(courseTarget + wrap180(roadTarget - courseTarget) * roadK)
         : (roadTarget ?? courseTarget);
+      // ── THE NOSE DOES NOT UN-TURN INTO A BEND (2026-09-16, Jeff: "make the 90° traffic-light corners
+      // tighter"). The agreement fade above judges the road against `courseNow`, and one second before a
+      // traffic-light corner `courseNow` is FROZEN on the entry leg (gpsTurnDps = 0: the 1 Hz course has not
+      // seen the steering input yet) while roadTarget is already 45° round the bend. So roadK collapsed
+      // 0.96 → 0.00 across 0.75 s and the nose was pulled BACK onto the entry leg — Jeff's 18:27:04→05 rows:
+      // est 169 → 177 while the road under the car went 163 → 131. It then owed 46° and the POSE_ROAD_MAX_DPS
+      // slew needed the whole next second to pay it (18:27:05→06 ran at 59.7°/s, saturated). Four of the five
+      // 90° corners that evening carried the same +10–34° un-turn; the roundabouts never did (a Mapbox
+      // roundabout is a vertex every 2.5–8 m, so neither fade arms).
+      // The clamp says only this: while the LINE ITSELF is bending (POSE_ROAD_RATCHET_BEND_DEG within the
+      // next second) and its target sits on the bend side of the nose, the blend may STOP the nose — it may
+      // not turn it back the other way. Measured on the field replay: 18:27 first turning fix 46° → 38°,
+      // 17:59 39° → 29°, roundabout rows bit-identical, Y4 (missed turn) +0.2°. Gate: section Z.
+      if (target != null && roadTarget != null && roadFresh) {
+        const bend = wrap180((st.roadHdgAhead != null ? st.roadHdgAhead : st.roadHdg!) - st.roadHdg!);
+        const toRoad = wrap180(roadTarget - hdg), toTarget = wrap180(target - hdg);
+        if (Math.abs(bend) >= POSE_ROAD_RATCHET_BEND_DEG && Math.sign(bend) === Math.sign(toRoad)
+            && toRoad !== 0 && toTarget !== 0 && Math.sign(toTarget) !== Math.sign(toRoad)) target = hdg;
+      }
       if (target != null) {
         const pull = wrap180(target - hdg) * (1 - Math.exp(-dt / POSE_ROAD_TAU_S));
         hdg = norm360(hdg + Math.max(-POSE_ROAD_MAX_DPS * dt, Math.min(POSE_ROAD_MAX_DPS * dt, pull)));

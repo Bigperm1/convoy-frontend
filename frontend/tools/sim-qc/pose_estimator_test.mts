@@ -826,8 +826,9 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
     const geom: [number, number][] = [[lng0, lat0], [vtx.lng, vtx.lat], [east.lng, east.lat]];
     const fixes = [] as { t: number; lat: number; lng: number; crs: number | null; spd: number }[];
     for (let t = 0; t <= 20; t++) { const q = stepLatLng(lat0, lng0, 0, 7.5 * t + 25); fixes.push({ t, lat: q.lat, lng: q.lng, crs: 0, spd: 7.5 }); }
-    const judge = (label: string, accMOf: (f: { t: number }, i: number) => number) => {
-      const r = fieldReplayCorner(geom, fixes, 12, accMOf as any).rows;
+    const judge = (label: string, accMOf: (f: { t: number }, i: number) => number, crsOf: (t: number) => number = () => 0) => {
+      const fx = fixes.map((f) => ({ ...f, crs: crsOf(f.t) }));
+      const r = fieldReplayCorner(geom, fx, 12, accMOf as any).rows;
       const lean = r.map((x) => Math.abs(wrap180(x.est - 0)));
       const peakI = lean.indexOf(Math.max(...lean));
       const twoLater = lean[Math.min(lean.length - 1, peakI + 2)];
@@ -842,6 +843,16 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
     judge(" @acc20", () => 20);
     judge(" @acc25", () => 25);
     judge(" @acc10→25", (f) => (f.t >= 10 ? 25 : 10));
+    // Codex round 3: two NOISY courses (30° at t = 9 and 11, 0° otherwise) on the same missed turn. A one-frame
+    // agreement must not hand the ratchet a fresh cap (POSE_ROAD_RATCHET_REST_MS): without the rest rule the nose
+    // sat 36–50° wrong through t = 14 (25.3° at t = 14, 1.5° at t = 15); the pre-clamp estimator bounces 36.6 / 7.8 /
+    // 46.3 / 5.7 / 0.3 over t = 10–14; head 36.6 / 36.6 / 50.3 / 4.3 / 0.2 — one second longer wrong, then back.
+    { const fx = fixes.map((f) => ({ ...f, crs: f.t === 9 || f.t === 11 ? 30 : 0 }));
+      const r = fieldReplayCorner(geom, fx, 12, () => 10).rows;
+      const at = (t: number) => Math.abs(wrap180(r.find((x) => x.t === t)!.est));
+      ok("Z5d noisy missed turn (30° courses at t=9,11): nose ≤ 6° at t=13 — base 5.7, head 4.3 (no rest rule: 50.3)", at(13) <= 6, `${at(13).toFixed(2)}°`);
+      ok("Z5e noisy missed turn: nose ≤ 1° at t=14 and after — base 0.3, head 0.2 (no rest rule: 25.3)", r.filter((x) => x.t >= 14).every((x) => Math.abs(wrap180(x.est)) <= 1), `t14 ${at(14).toFixed(2)}°`);
+    }
   }
 }
 

@@ -493,12 +493,13 @@ RULES = [
     (
         "pose-nose-ratchet-without-bend-gate",
         ["src/poseEstimator.ts"],
-        r"if\s*\((?:(?!POSE_ROAD_RATCHET_BEND_DEG)[^;{])*\)\s*target\s*=\s*hdg\s*;",
+        r"wantsRatchet\s*=(?!\s*false\b)\s*(?:(?!POSE_ROAD_RATCHET_BEND_DEG)[^;])*;|if\s*\((?:(?!POSE_ROAD_RATCHET|wantsRatchet)[^;{])*\)\s*target\s*=\s*hdg\s*;",
         "2026-09-16 (Jeff's two drives on OTA-AX: the 90° traffic-light corners): posePredict's nose ratchet — "
         "'the nose may stop turning into a bend, it may not un-turn' — is gated on the LINE ITSELF bending "
         "(POSE_ROAD_RATCHET_BEND_DEG within the next second). Ungated, a noisy leg-flip at a vertex is ratcheted "
         "too and the X1n/Y1n scatter bars lose 4–12° (measured, cand (f) in the 09-16 root-cause). This fires on a "
-        "`target = hdg` ratchet whose condition no longer names the bend constant. Gate: pose_estimator_test.mts Z.",
+        "`wantsRatchet =` decision that no longer names the bend constant, or a `target = hdg` ratchet guarded by "
+        "neither the decision nor its clock. Gate: pose_estimator_test.mts Z.",
     ),
     (
         "cam-glide-freezes-when-ease-parks",

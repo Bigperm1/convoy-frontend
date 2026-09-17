@@ -70,10 +70,18 @@ export const SPOT_FACING_MAX_M = 25;
  *  re-parked elsewhere with no moving course seen — instead of inheriting an old park's facing with a fresh 24 h
  *  life (Codex 2026-09-16). 60 m: a stop lands within a car length or two of its last moving fix. */
 export const SPOT_HDG_MAX_DIST_M = 60;
+/** Metres the car may CREEP (below SPOT_WRITE_MAX_SPEED_MS, above SPOT_CREEP_MIN_MS) after the heading was observed
+ *  before the heading is no longer believed (Codex 2026-09-16: a three-point turn whose final leg stayed under
+ *  1.5 m/s kept the approach heading — the car ended facing the other way). A normal stop creeps a car length or
+ *  two past its last moving fix; a slow turn or a lot crawl covers more, and its direction is unknown. */
+export const SPOT_HDG_CREEP_MAX_M = 8;
+/** Below this a fix is stationary jitter, not creeping — its displacement is not counted. */
+export const SPOT_CREEP_MIN_MS = 0.4;
 export type SpotHeadingObs = { deg: number; at: number; lat: number; lng: number };
-export function spotHeadingFor(obs: SpotHeadingObs | null | undefined, pos: { lat: number; lng: number }): number | null {
+export function spotHeadingFor(obs: SpotHeadingObs | null | undefined, pos: { lat: number; lng: number }, creepM = 0): number | null {
   if (!obs || typeof obs.deg !== "number" || !isFinite(obs.deg) || obs.deg < 0 || obs.deg > 360) return null;
   if (spotDistanceM(obs, pos) > SPOT_HDG_MAX_DIST_M) return null;
+  if (creepM > SPOT_HDG_CREEP_MAX_M) return null;
   return obs.deg % 360;
 }
 export function spotFacing(

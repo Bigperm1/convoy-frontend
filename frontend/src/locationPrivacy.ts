@@ -27,7 +27,7 @@
 // the parked branch fell back to live coordinates and drew a peer on their own home.
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { spotAdoptVerdict, spotHeadingFor, SPOT_WRITE_MAX_SPEED_MS, type SpotHeadingObs } from "./carSpotTrust";
+import { spotAdoptVerdict, spotHeadingFor, spotDistanceM, SPOT_WRITE_MAX_SPEED_MS, SPOT_CREEP_MIN_MS, type SpotHeadingObs } from "./carSpotTrust";
 import { Platform } from "react-native";
 import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
 
@@ -139,6 +139,10 @@ let _carSpot: { lat: number; lng: number; hdg?: number } | null = null;
 // stopped (src/carSpotTrust.ts spotFacing / spotHeadingFor, 2026-09-16). Codex 09-16: a jogging fix after the latch
 // dropped, or a heading restored from disk, must never become the facing of a spot somewhere else.
 let _spotHdg: SpotHeadingObs | null = null;
+// Metres crept (SPOT_CREEP_MIN_MS ≤ speed < SPOT_WRITE_MAX_SPEED_MS) since the heading was observed, and the last
+// spot-eligible fix it was measured from — a slow final turn or a lot crawl retires the heading (carSpotTrust).
+let _spotCreepM = 0;
+let _creepFrom: { lat: number; lng: number } | null = null;
 // When _carSpot was RECORDED (not when it was last written to disk). Persisted with the
 // spot so hydrate can age it out — see SPOT_MAX_AGE_MS.
 let _carSpotAt = 0;
@@ -194,7 +198,7 @@ export async function hydrateLocationPrivacy(): Promise<void> {
           _carSpot = hdgOk ? { lat: p.lat, lng: p.lng, hdg: p.hdg } : { lat: p.lat, lng: p.lng };
           // The restored facing stays tied to THIS spot: a later spot written > SPOT_HDG_MAX_DIST_M away (the car
           // moved while the app was gone) gets no heading until a moving course is seen again.
-          if (hdgOk) _spotHdg = { deg: p.hdg, at: p.t, lat: p.lat, lng: p.lng };
+          if (hdgOk) { _spotHdg = { deg: p.hdg, at: p.t, lat: p.lat, lng: p.lng }; _spotCreepM = 0; }
           _carSpotAt = p.t;
           // Same freshness rule as the spot itself: only adopt the persisted witnessed-park
           // flag when the persisted spot was adopted. `hu` on disk can only have survived
@@ -410,9 +414,13 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   // dropped otherwise — a displaced spot has no facing until the car is seen moving again.
   if (spd >= SPOT_WRITE_MAX_SPEED_MS && typeof courseDeg === "number" && Number.isFinite(courseDeg) && courseDeg >= 0 && courseDeg <= 360) {
     _spotHdg = { deg: courseDeg, at: now, lat, lng };
+    _spotCreepM = 0;
+  } else if (spd >= SPOT_CREEP_MIN_MS && spd < SPOT_WRITE_MAX_SPEED_MS && _creepFrom) {
+    _spotCreepM += spotDistanceM(_creepFrom, { lat, lng });
   }
-  const hdg = spotHeadingFor(_spotHdg, { lat, lng });
-  if (hdg == null) _spotHdg = null;
+  _creepFrom = { lat, lng };
+  const hdg = spotHeadingFor(_spotHdg, { lat, lng }, _spotCreepM);
+  if (hdg == null) { _spotHdg = null; _spotCreepM = 0; }
   _carSpot = hdg != null ? { lat, lng, hdg } : { lat, lng };
   _carSpotAt = now;
   if (now - _spotSavedAt > SPOT_SAVE_THROTTLE_MS) {

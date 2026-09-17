@@ -86,21 +86,22 @@ export function noteCourse(headingDeg: number | null | undefined): void {
 // tell. Never throws. `near` is where the route is being started FROM (the plot's origin);
 // without it the parked heading cannot be applied (it is only valid AT the spot).
 export async function getDepartureBearing(near?: { lat: number; lng: number } | null): Promise<number | null> {
-  // 0) THE PARKED HEADING (2026-09-16, Jeff: "if I'm parked on the right side of the road I should keep going
-  //    that direction when I launch the route again"). The car spot carries the course of the last MOVING fix
-  //    before the stop (src/locationPrivacy.ts noteFix → src/carSpotTrust.ts spotFacing): valid only within
-  //    SPOT_FACING_MAX_M of that spot and inside the spot's own 24 h life. It beats the compass because it does not
-  //    care how the phone sits in the mount or what the car's steel does to a magnetometer, and it beats the 90 s
-  //    course memory because it survives a workday. Field 09-16: leaving work at 17:32 the compass DID read the
-  //    facing right (141°) and the morning parkade had nothing (facing=null) — this source answers the on-street
-  //    park where neither is reliable. A reversed-in park faces the other way; that costs one early reroute.
-  const parked = spotFacing(carSpot(), near ?? null, Date.now());
-  if (parked != null) { _lastSource = "spot"; return parked; }
   // 1) A fresh travel course beats the compass: it needs no calibration, is immune
   //    to magnetic interference (a car is a large steel box full of magnets) and is
   //    unaffected by how the phone is oriented in its mount.
   const c = lastCourse;
   if (c && Date.now() - c.at <= COURSE_FRESH_MS) { _lastSource = "course"; return c.deg; }
+  // 1b) THE PARKED HEADING (2026-09-16, Jeff: "if I'm parked on the right side of the road I should keep going
+  //     that direction when I launch the route again"). The car spot carries the course of the last MOVING fix
+  //     before the stop (src/locationPrivacy.ts noteFix → src/carSpotTrust.ts spotFacing): valid only within
+  //     SPOT_FACING_MAX_M of that spot, inside the spot's own 24 h life, and retired by a slow final turn. It
+  //     comes AFTER a fresh course (Codex: a car still rolling has better evidence than where it once stopped)
+  //     and BEFORE the compass, because it does not care how the phone sits in the mount or what the car's steel
+  //     does to a magnetometer, and it survives a workday. Field 09-16: leaving work at 17:32 the compass DID read
+  //     the facing right (141°) and the morning parkade had nothing (facing=null) — this answers the on-street
+  //     park where neither is reliable. A reversed-in park faces the other way; that costs one early reroute.
+  const parked = spotFacing(carSpot(), near ?? null, Date.now());
+  if (parked != null) { _lastSource = "spot"; return parked; }
   _lastSource = "none";
 
   // 2) Standing still, or long parked → ask the magnetometer where we point.

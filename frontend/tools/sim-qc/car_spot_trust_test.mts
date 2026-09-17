@@ -3,7 +3,7 @@
 // then the legitimate shapes (they must still be adopted). Run:
 //   node --experimental-strip-types tools/sim-qc/car_spot_trust_test.mts
 import assert from "node:assert/strict";
-import { spotAdoptVerdict, fixMayBecomeSpot, spotFacing, spotHeadingFor, SPOT_FACING_MAX_M, SPOT_HDG_MAX_DIST_M, SPOT_MAX_AGE_MS, SPOT_WRITE_MAX_SPEED_MS } from "../../src/carSpotTrust.ts";
+import { spotAdoptVerdict, fixMayBecomeSpot, spotFacing, spotHeadingFor, SPOT_FACING_MAX_M, SPOT_HDG_MAX_DIST_M, SPOT_HDG_CREEP_MAX_M, SPOT_MAX_AGE_MS, SPOT_WRITE_MAX_SPEED_MS } from "../../src/carSpotTrust.ts";
 
 const NOW = 1_800_000_000_000;
 const H = 3600_000;
@@ -108,6 +108,10 @@ out.push(`F 7km/h=no 3km/h=yes 0=yes unknown=yes cap=${SPOT_WRITE_MAX_SPEED_MS}m
   out.push(`F10 a spot ${SPOT_HDG_MAX_DIST_M + 40} m away (the car moved while the app was gone) → null`);
   assert.equal(spotHeadingFor(null, { lat: spot.lat, lng: spot.lng }), null); assert.equal(spotHeadingFor({ ...obs, deg: -1 }, { lat: spot.lat, lng: spot.lng }), null);
   out.push(`F11 no observation / hdg -1 → null`);
+  assert.equal(spotHeadingFor(obs, { lat: spot.lat + dLat(6), lng: spot.lng }, 3), 180);
+  out.push(`F12 a normal stop: 3 m of creep after the last moving fix → 180`);
+  assert.equal(spotHeadingFor(obs, { lat: spot.lat + dLat(6), lng: spot.lng }, SPOT_HDG_CREEP_MAX_M + 4), null);
+  out.push(`F13 a slow three-point turn: ${SPOT_HDG_CREEP_MAX_M + 4} m crept below 1.5 m/s → null (the direction changed unseen)`);
 }
 
 console.log(out.join(" | "));

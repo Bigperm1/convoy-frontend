@@ -51,6 +51,8 @@
 // i.e. exactly today's behaviour.
 import * as Location from "expo-location";
 import { haversineMeters } from "./nav";
+import { carSpot } from "./locationPrivacy";
+import { spotFacing } from "./carSpotTrust";
 
 // How long a GPS course stays trustworthy as a proxy for "facing". A car that was
 // moving 90 s ago is almost certainly still pointing the way it was travelling —
@@ -67,6 +69,10 @@ const MIN_COMPASS_ACCURACY = 2;
 const COMPASS_TIMEOUT_MS = 1200;
 
 let lastCourse: { deg: number; at: number } | null = null;
+// Which source answered the last getDepartureBearing() — printed on the depart-rank rows as fsrc=.
+export type DepartureBearingSource = "spot" | "course" | "compass" | "none";
+let _lastSource: DepartureBearingSource = "none";
+export function departureBearingSource(): DepartureBearingSource { return _lastSource; }
 
 // Feed every GPS fix that carries a real course. Cheap, called from the position
 // pipeline. Negative / non-finite values are iOS's "no course" and are ignored.
@@ -77,13 +83,25 @@ export function noteCourse(headingDeg: number | null | undefined): void {
 }
 
 // Best estimate of the direction the car is FACING, or null if we genuinely cannot
-// tell. Never throws.
-export async function getDepartureBearing(): Promise<number | null> {
+// tell. Never throws. `near` is where the route is being started FROM (the plot's origin);
+// without it the parked heading cannot be applied (it is only valid AT the spot).
+export async function getDepartureBearing(near?: { lat: number; lng: number } | null): Promise<number | null> {
+  // 0) THE PARKED HEADING (2026-09-16, Jeff: "if I'm parked on the right side of the road I should keep going
+  //    that direction when I launch the route again"). The car spot carries the course of the last MOVING fix
+  //    before the stop (src/locationPrivacy.ts noteFix → src/carSpotTrust.ts spotFacing): valid only within
+  //    SPOT_FACING_MAX_M of that spot and inside the spot's own 24 h life. It beats the compass because it does not
+  //    care how the phone sits in the mount or what the car's steel does to a magnetometer, and it beats the 90 s
+  //    course memory because it survives a workday. Field 09-16: leaving work at 17:32 the compass DID read the
+  //    facing right (141°) and the morning parkade had nothing (facing=null) — this source answers the on-street
+  //    park where neither is reliable. A reversed-in park faces the other way; that costs one early reroute.
+  const parked = spotFacing(carSpot(), near ?? null, Date.now());
+  if (parked != null) { _lastSource = "spot"; return parked; }
   // 1) A fresh travel course beats the compass: it needs no calibration, is immune
   //    to magnetic interference (a car is a large steel box full of magnets) and is
   //    unaffected by how the phone is oriented in its mount.
   const c = lastCourse;
-  if (c && Date.now() - c.at <= COURSE_FRESH_MS) return c.deg;
+  if (c && Date.now() - c.at <= COURSE_FRESH_MS) { _lastSource = "course"; return c.deg; }
+  _lastSource = "none";
 
   // 2) Standing still, or long parked → ask the magnetometer where we point.
   //
@@ -106,6 +124,7 @@ export async function getDepartureBearing(): Promise<number | null> {
       ? h.trueHeading
       : h?.magHeading;
     if (typeof deg !== "number" || !Number.isFinite(deg) || deg < 0) return null;
+    _lastSource = "compass";
     return deg;
   } catch {
     return null;

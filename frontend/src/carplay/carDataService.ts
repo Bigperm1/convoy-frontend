@@ -462,7 +462,7 @@ function onStoreTick(): void {
   // (map.tsx:2118 `user: coords` -> ConvoyCarPlay.tsx:1250), RAW GPS — the same value
   // map.tsx feeds noteFix at map.tsx:3410 — and the fg/bg feeds write raw GPS too. Both
   // writers agree; nothing snapped ever reaches the car spot.
-  noteFix(st.selfLat, st.selfLng, st.speedMs ?? 0);
+  noteFix(st.selfLat, st.selfLng, st.speedMs ?? 0, st.selfCourse);   // + the fix's course → the parked facing (four surfaces)
   void ensureMe();
   void connectWs();       // reconnect (throttled) if the socket dropped
   void refreshNearby();   // ≤ every 10s

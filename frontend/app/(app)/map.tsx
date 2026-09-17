@@ -42,7 +42,7 @@ import {
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
   useRouteTrafficRefresh, fetchRouteViaStops, arriveNow,
 } from "../../src/nav";
-import { getDepartureBearing, noteCourse, orderRoutesForward, routeInitialBearing, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
+import { getDepartureBearing, departureBearingSource, noteCourse, orderRoutesForward, routeInitialBearing, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
 import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw, carSpot } from "../../src/locationPrivacy";
 import CarDriveList from "../../src/CarDriveList";
 import { subscribeBgFix } from "../../src/navNotification";
@@ -1360,7 +1360,7 @@ export default function MapScreen() {
       // through to plain fastest-first — i.e. today's behaviour.
       const [raw0, facing] = await Promise.all([
         fetchRoutes(origin, destination, avoid),
-        getDepartureBearing(),
+        getDepartureBearing(origin),   // the parked heading applies only AT the spot the route starts from
       ]);
       if (cancelled) return;
       // ── DEPART THE WAY THE CAR IS POINTING, FOR REAL (2026-09-06, Jeff: "bearing on") ──
@@ -1411,7 +1411,7 @@ export default function MapScreen() {
           const d = r?.duration_in_traffic_s ?? r?.duration_s;
           return `${b != null ? Math.round(b) : '?'}/${typeof d === 'number' ? Math.round(d) : '?'}s`;
         }).join(',');
-        logEvent(`depart-rank constrained=${constrained} n=${raw.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} cands=${_cands}`);
+        logEvent(`depart-rank constrained=${constrained} fsrc=${departureBearingSource()} n=${raw.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} cands=${_cands}`);
       } catch {}
       // Color-rank: green (fastest) → orange (mid) → red (slowest). Cast to
       // any so we can attach an extra `color` field without modifying the
@@ -4371,7 +4371,7 @@ export default function MapScreen() {
     // parkEndedByHeadUnit). This screen isn't entitled to ASSERT a head unit on
     // Android; it isn't entitled to RELEASE one either. AndroidAutoRoot owns both.
     if (Platform.OS !== "android") noteCarConnected(carAttachedHere);
-    if (coords) noteFix(coords.lat, coords.lng, coords.speed ?? 0);
+    if (coords) noteFix(coords.lat, coords.lng, coords.speed ?? 0, coords.heading);   // heading = this fix's course → the parked facing
   }, [carConnected, coords?.lat, coords?.lng]);
 
   // Position + status we actually broadcast. PARTIAL or FULL → LIVE while the head

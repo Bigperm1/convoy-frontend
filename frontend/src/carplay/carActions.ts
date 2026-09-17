@@ -32,7 +32,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
 import { toggleMapView2D, setMapView2D } from '../mapViewMode';
-import { getDepartureBearing, orderRoutesForward, routeInitialBearing } from '../departureBearing';
+import { getDepartureBearing, departureBearingSource, orderRoutesForward, routeInitialBearing } from '../departureBearing';
 import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_BLANK, CAR_ICON_VIEW_2D, carIcon } from './carButtonIcons';
 import { appSkinNow } from '../appSkin';
 import { toggleCarComms } from './carComms';
@@ -263,12 +263,28 @@ export async function startCarNav(dest: { lat: number; lng: number; label?: stri
   _navStartInFlight = true;
   try {
     const st = getSettings();
-    const routes = await fetchRoutes(
-      { lat: s.selfLat, lng: s.selfLng },
-      { lat: dest.lat, lng: dest.lng },
-      { tolls: st.avoidTolls, highways: st.avoidHighways, ferries: st.avoidFerries },
-    );
-    if (!routes.length) { toast('No route found'); return false; }
+    const near = { lat: s.selfLat, lng: s.selfLng };
+    const avoid = { tolls: st.avoidTolls, highways: st.avoidHighways, ferries: st.avoidFerries };
+    // The facing is read CONCURRENTLY with the fetch (no added latency) and passed the origin so the parked
+    // heading can apply (src/departureBearing.ts step 0).
+    const [routes0, facing] = await Promise.all([
+      fetchRoutes(near, { lat: dest.lat, lng: dest.lng }, avoid),
+      getDepartureBearing(near),
+    ]);
+    if (!routes0.length) { toast('No route found'); return false; }
+    // DEPART THE WAY THE CAR IS POINTING, FOR REAL — the same constrained re-ask map.tsx does (2026-09-06), which
+    // this path never had (2026-09-16): when the fastest unconstrained route turns us around (> 75° off the facing)
+    // ask once more with `bearings=facing,45` and take that answer if there is one. Four surfaces, one behaviour.
+    let routes = routes0;
+    let constrained = 0;
+    if (typeof facing === 'number') {
+      const _b00 = routeInitialBearing(routes0[0] as any);
+      const _off0 = _b00 != null ? Math.abs(((_b00 - facing + 540) % 360) - 180) : null;
+      if (_off0 != null && _off0 > 75) {
+        const withBearing = await fetchRoutes(near, { lat: dest.lat, lng: dest.lng }, avoid, { bearing: facing });
+        if (withBearing.length) { routes = withBearing; constrained = 1; }
+      }
+    }
     // FOUR-SURFACE PARITY (2026-07-30). This is the route start for a search made on
     // CarPlay AND on Android Auto, and it used to sort on ETA alone while the phone
     // had already learned to prefer a route that departs the way the car is pointing.
@@ -276,7 +292,6 @@ export async function startCarNav(dest: { lat: number; lng: number; label?: stri
     // phone. One shared ranker now, so they cannot drift apart again — see
     // src/departureBearing.ts for why the Directions `bearings` parameter is NOT the
     // fix. Falls back to plain fastest-first when the facing is unknown.
-    const facing = await getDepartureBearing();
     const ordered = orderRoutesForward(routes, facing ?? undefined);
     // Same depart-rank crumb as the phone (map.tsx) — src=car marks the CarPlay path.
     try {
@@ -288,7 +303,7 @@ export async function startCarNav(dest: { lat: number; lng: number; label?: stri
         const d = r?.duration_in_traffic_s ?? r?.duration_s;
         return `${b != null ? Math.round(b) : '?'}/${typeof d === 'number' ? Math.round(d) : '?'}s`;
       }).join(',');
-      logEvent(`depart-rank src=car n=${routes.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} cands=${_cands}`);
+      logEvent(`depart-rank src=car constrained=${constrained} fsrc=${departureBearingSource()} n=${routes.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} cands=${_cands}`);
     } catch {}
     const best: NavRoute = ordered[0];
     // Persist the hand-off BEFORE starting the banner so a crash between the two

@@ -317,7 +317,7 @@ export async function fetchRoutes(
     // answers whether iOS honoured the abort at all.
     if (ctl.signal.aborted) return [];
     if (!mbRoutes.length) return [];
-    mbRoutes = await preferCurbArrival(origin, destination, avoid, mbRoutes, ctl.signal);
+    mbRoutes = await preferCurbArrival(origin, destination, avoid, mbRoutes, ctl.signal, opts?.bearing);
     // The curb pass is a second await; an abort landing during it must not let the original
     // routes through either (Codex rescue 2026-09-06 — preferCurbArrival swallows its failure
     // and returns the input routes).
@@ -386,6 +386,10 @@ async function preferCurbArrival(
   avoid: AvoidPrefs | undefined,
   routes: MapboxRoute[],
   signal?: AbortSignal,
+  // The SAME departure constraint as the request being improved (2026-09-16): a curb route asked for without the
+  // bearing may depart backwards, and it REPLACES the primary line — the driver would be sent into a U-turn by the
+  // pass that exists to save them a road crossing. Trap rule curb-pass-drops-departure-bearing.
+  bearing?: number,
 ): Promise<MapboxRoute[]> {
   try {
     const best = routes[0];
@@ -394,7 +398,7 @@ async function preferCurbArrival(
       origin,
       destination,
       { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
-      { curbApproach: true, signal },
+      { curbApproach: true, signal, bearing },
     );
     const alt = curb[0];
     if (!alt || !alt.polyline || arrivesOnFarSide(alt)) return routes;  // no better

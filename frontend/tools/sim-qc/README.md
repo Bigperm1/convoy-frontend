@@ -264,8 +264,7 @@ second early; Jeff's car-surface rows report 2–5 m); every exit leg within 0.4
 R-tests: the release, the snap, the hysteresis edge, the wrong-leg refusal, a stale course cannot release, a
 one-fix chord flip is held. The harness polyline is built like a real Mapbox line: one vertex at the tangent
 intersection for arcs under 35 m (a residential 90° at 25 km/h is ONE vertex on the real line), a vertex every
-5 m on roundabouts/hairpins, 20 m otherwise. Three refuter lenses + a 60-seed refuter shaped this section.
-
+5 m on roundabouts/hairpins, 20 m otherwise. Three refuter lenses + a 60-seed refuter shaped this section. Since 2026-09-16 also `spotFacing` (F1–F8): the course the car STOPPED in rides the spot record as `hdg` and is the first departure-bearing source within 25 m of the spot (`depart-rank … fsrc=spot`).
 - `node --experimental-strip-types tools/sim-qc/fix_course_test.mts` — a fix's own course per platform: iOS keeps 0° (due north), Android drops 0 (`Location.getBearing()` = 0.0 with no bearing). Every feed site goes through `src/fixCourseHere.ts`.
 - `node --experimental-strip-types tools/sim-qc/yaw_feed_test.mts` — the DeviceMotion → cumulative-yaw reducer (`src/yawFeed.ts`): fused attitude deltas on the SENSOR clock, cached re-dispatches are not new samples, freshness expires, the fallback rate path integrates at the sensor interval. Added 2026-09-10 with the wag fix.
 - `node --experimental-strip-types tools/sim-qc/watch_taps_test.mts` — the wrist-tap rule (side from the maneuver key; prepare at a 12 s lead clamped 120–400 m; now at 40 m; one per kind per step; 1.5 s apart).

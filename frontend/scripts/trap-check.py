@@ -502,6 +502,22 @@ RULES = [
         "neither the decision nor its clock. Gate: pose_estimator_test.mts Z.",
     ),
     (
+        "curb-pass-drops-departure-bearing",
+        ["src/nav.ts"],
+        r"curbApproach:\s*true\s*,\s*signal\s*\}",
+        "2026-09-16: preferCurbArrival's second request carried no `bearing`, so a curb route asked for after a "
+        "bearing-constrained plot could depart backwards and REPLACE the primary line (the pass that saves a road "
+        "crossing would order a U-turn). The options object must carry the same `bearing` as the request it improves.",
+    ),
+    (
+        "departure-bearing-without-position",
+        ["app/(app)/map.tsx", "src/carplay/carActions.ts"],
+        r"getDepartureBearing\(\s*\)",
+        "2026-09-16 (Jeff: 'start the route in the direction I'm facing'): the parked heading (spotFacing) is valid only "
+        "AT the car spot, so getDepartureBearing needs the origin the route starts from. A call without it silently "
+        "never applies the parked heading on that surface — the four-surfaces rule. Pass `origin` / `near`.",
+    ),
+    (
         "cam-glide-freezes-when-ease-parks",
         ["src/ConvoyMapbox.tsx"],
         r"if\s*\(\s*!a\s*\)\s*\{\s*raf\.current\s*=\s*null;\s*noteEaseIdle\(Date\.now\(\)\);\s*return;\s*\}|const\s+a\s*=\s*anim\.current;\s*if\s*\(\s*!a\s*\)\s*return;|anim\.current\s*=\s*null;\s*raf\.current\s*=\s*null;\s*noteEaseIdle\(now\);",

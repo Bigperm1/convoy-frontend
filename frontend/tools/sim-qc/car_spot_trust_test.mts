@@ -3,7 +3,7 @@
 // then the legitimate shapes (they must still be adopted). Run:
 //   node --experimental-strip-types tools/sim-qc/car_spot_trust_test.mts
 import assert from "node:assert/strict";
-import { spotAdoptVerdict, fixMayBecomeSpot, SPOT_MAX_AGE_MS, SPOT_WRITE_MAX_SPEED_MS } from "../../src/carSpotTrust.ts";
+import { spotAdoptVerdict, fixMayBecomeSpot, spotFacing, SPOT_FACING_MAX_M, SPOT_MAX_AGE_MS, SPOT_WRITE_MAX_SPEED_MS } from "../../src/carSpotTrust.ts";
 
 const NOW = 1_800_000_000_000;
 const H = 3600_000;
@@ -79,6 +79,28 @@ assert.equal(fixMayBecomeSpot(0), true);
 assert.equal(fixMayBecomeSpot(undefined), true);
 assert.equal(fixMayBecomeSpot(SPOT_WRITE_MAX_SPEED_MS), false);
 out.push(`F 7km/h=no 3km/h=yes 0=yes unknown=yes cap=${SPOT_WRITE_MAX_SPEED_MS}m/s`);
+
+// ── F. THE PARKED HEADING (2026-09-16): spotFacing — the course the car stopped in, applied only AT the spot ──
+{
+  const spot = { lat: 49.2000, lng: -123.1000, hdg: 141, t: NOW - 9 * H };
+  const dLat = (m: number) => m / 111320;
+  const f1 = spotFacing(spot, { lat: spot.lat + dLat(10), lng: spot.lng }, NOW);
+  assert.equal(f1, 141); out.push(`F1 10 m from the spot, 9 h old → ${f1}`);
+  const f2 = spotFacing(spot, { lat: spot.lat + dLat(SPOT_FACING_MAX_M + 15), lng: spot.lng }, NOW);
+  assert.equal(f2, null); out.push(`F2 ${SPOT_FACING_MAX_M + 15} m from the spot → null (the parkade exit, a lot)`);
+  const f3 = spotFacing({ lat: spot.lat, lng: spot.lng, t: spot.t }, { lat: spot.lat, lng: spot.lng }, NOW);
+  assert.equal(f3, null); out.push(`F3 a spot written before hdg existed → null`);
+  const f4 = spotFacing({ ...spot, t: NOW - SPOT_MAX_AGE_MS - 60_000 }, { lat: spot.lat, lng: spot.lng }, NOW);
+  assert.equal(f4, null); out.push(`F4 a spot older than its 24 h life → null`);
+  const f5 = spotFacing({ ...spot, hdg: 360 }, { lat: spot.lat, lng: spot.lng }, NOW);
+  assert.equal(f5, 0); out.push(`F5 hdg 360 → 0`);
+  const f6 = spotFacing({ ...spot, hdg: -1 }, { lat: spot.lat, lng: spot.lng }, NOW);
+  assert.equal(f6, null); out.push(`F6 hdg -1 (iOS "no course") → null`);
+  const f7 = spotFacing({ lat: spot.lat, lng: spot.lng, hdg: 200 }, { lat: spot.lat, lng: spot.lng }, NOW);
+  assert.equal(f7, 200); out.push(`F7 an in-memory spot with no timestamp → its hdg (age judged by hydrate already)`);
+  assert.equal(spotFacing(null, { lat: 1, lng: 1 }, NOW), null); assert.equal(spotFacing(spot, null, NOW), null);
+  out.push(`F8 no spot / no origin → null`);
+}
 
 console.log(out.join(" | "));
 console.log("PASS");

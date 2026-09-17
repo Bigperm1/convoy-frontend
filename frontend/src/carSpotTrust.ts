@@ -24,7 +24,7 @@
 // instead of a car parked kilometres from the truth for the rest of the day. Records written
 // before these fields existed are adopted as before.
 
-export type PersistedSpot = { lat: number; lng: number; t?: number; hu?: 0 | 1; att?: 0 | 1; mv?: number };
+export type PersistedSpot = { lat: number; lng: number; t?: number; hu?: 0 | 1; att?: 0 | 1; mv?: number; hdg?: number };
 
 export const SPOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 /** Above this a fix is motion, not a parking place (5.4 km/h; Say Phin's frozen fix was 7). */
@@ -54,6 +54,35 @@ export function spotAdoptVerdict(p: unknown, now: number, lastDrivingAt: number 
   if (r.att === 1 && r.hu !== 1) return { adopt: false, why: "unwitnessed-attached" };
   if (Number.isFinite(lastDrivingAt) && lastDrivingAt - at > DROVE_AFTER_GRACE_MS) return { adopt: false, why: "drove-after" };
   return { adopt: true, why: "ok" };
+}
+
+/** THE PARKED HEADING (2026-09-16, Jeff: "is there a way for the app to know what direction my parked car is facing
+ *  and start the route in the direction I'm facing?"). The spot record carries `hdg`: the GPS course of the last
+ *  fix that was still MOVING before the car stopped — immune to how the phone sits in its mount and to the car's
+ *  own magnetism, and it survives overnight, which neither the 90 s course memory nor the compass does. It is wrong
+ *  in exactly one case: a car REVERSED into its spot faces the other way, and that costs one early reroute, the
+ *  same price today's U-turn start pays. It applies only while the car is still AT the spot: a route started more
+ *  than SPOT_FACING_MAX_M from it (a parkade exit, a fix that never reached the lot) gets nothing from here and
+ *  falls through to the course / compass, exactly as before. Gate: car_spot_trust_test.mts F1–F6. */
+export const SPOT_FACING_MAX_M = 25;
+export function spotFacing(
+  spot: { lat: number; lng: number; hdg?: number; t?: number } | null | undefined,
+  near: { lat: number; lng: number } | null | undefined,
+  now: number,
+): number | null {
+  if (!spot || !near) return null;
+  const h = spot.hdg;
+  if (typeof h !== "number" || !isFinite(h) || h < 0 || h > 360) return null;
+  const at = typeof spot.t === "number" && isFinite(spot.t) ? spot.t : 0;
+  if (at > 0 && now - at > SPOT_MAX_AGE_MS) return null;
+  if (spotDistanceM(spot, near) > SPOT_FACING_MAX_M) return null;
+  return h % 360;
+}
+function spotDistanceM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(Math.min(1, s)));
 }
 
 /** Was a fix at this speed a STOP? (m/s; unknown speed counts as stopped). Used for the

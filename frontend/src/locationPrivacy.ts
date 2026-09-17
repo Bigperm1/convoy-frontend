@@ -27,7 +27,7 @@
 // the parked branch fell back to live coordinates and drew a peer on their own home.
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { spotAdoptVerdict } from "./carSpotTrust";
+import { spotAdoptVerdict, SPOT_WRITE_MAX_SPEED_MS } from "./carSpotTrust";
 import { Platform } from "react-native";
 import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
 
@@ -133,7 +133,10 @@ let _carConnected = false;
 // claim that expires, not a latch — see CAR_CONNECT_TTL_MS.
 let _carConnectedAt = 0;
 let _lastDrivingAt = 0;
-let _carSpot: { lat: number; lng: number } | null = null;
+let _carSpot: { lat: number; lng: number; hdg?: number } | null = null;
+// The GPS course of the last fix that was still MOVING (>= SPOT_WRITE_MAX_SPEED_MS): persisted with the spot as
+// `hdg` — the direction the car was facing when it stopped (src/carSpotTrust.ts spotFacing, 2026-09-16).
+let _spotHdg: number | null = null;
 // When _carSpot was RECORDED (not when it was last written to disk). Persisted with the
 // spot so hydrate can age it out — see SPOT_MAX_AGE_MS.
 let _carSpotAt = 0;
@@ -185,7 +188,9 @@ export async function hydrateLocationPrivacy(): Promise<void> {
         const drivingT = drivingRaw ? Number(drivingRaw) : 0;
         const v = spotAdoptVerdict(p, Date.now(), Number.isFinite(drivingT) ? drivingT : 0);
         if (v.adopt) {
-          _carSpot = { lat: p.lat, lng: p.lng };
+          const hdgOk = typeof p.hdg === "number" && Number.isFinite(p.hdg) && p.hdg >= 0 && p.hdg <= 360;
+          _carSpot = hdgOk ? { lat: p.lat, lng: p.lng, hdg: p.hdg } : { lat: p.lat, lng: p.lng };
+          if (hdgOk) _spotHdg = p.hdg;   // a parked car keeps its facing across launches until it moves again
           _carSpotAt = p.t;
           // Same freshness rule as the spot itself: only adopt the persisted witnessed-park
           // flag when the persisted spot was adopted. `hu` on disk can only have survived
@@ -319,10 +324,14 @@ function carAttached(): boolean {
  * in a moving car — head unit connected, or plainly driving. That is what makes the
  * parked pin a point on the road rather than wherever the driver happens to be standing.
  */
-export function noteFix(lat: number, lng: number, speedMs?: number): void {
+export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: number | null): void {
   if (typeof lat !== "number" || typeof lng !== "number") return;
   const spd = speedMs ?? 0;
   const now = Date.now();
+  // The facing rides the LAST MOVING fix's course: once the car is below SPOT_WRITE_MAX_SPEED_MS the course is
+  // GPS noise (iOS reports -1), so the value frozen here is the direction the car stopped in. Never a compass —
+  // see src/departureBearing.ts for why the course beats it.
+  if (spd >= SPOT_WRITE_MAX_SPEED_MS && typeof courseDeg === "number" && Number.isFinite(courseDeg) && courseDeg >= 0 && courseDeg <= 360) _spotHdg = courseDeg;
   // ── ARM AND RECORD MUST NOT HAPPEN IN THE SAME CALL (2026-08-29) ──────────────
   // Until today they did: line 1 armed the latch off this fix's own speed, and 25 lines
   // later the SAME fix was recorded as the car spot. The latch's whole job is to prove
@@ -394,7 +403,7 @@ export function noteFix(lat: number, lng: number, speedMs?: number): void {
   // speed for two hours and Say Phin's spot stayed at the meet while he drove home — see
   // src/carSpotTrust.ts). What guards against a fix the app never saw end is the persisted
   // `mv` (speed at the last write) and `att`, judged at hydrate.
-  _carSpot = { lat, lng };
+  _carSpot = _spotHdg != null ? { lat, lng, hdg: _spotHdg } : { lat, lng };
   _carSpotAt = now;
   if (now - _spotSavedAt > SPOT_SAVE_THROTTLE_MS) {
     _spotSavedAt = now;
@@ -406,8 +415,8 @@ export function noteFix(lat: number, lng: number, speedMs?: number): void {
   }
 }
 
-export function carSpot(): { lat: number; lng: number } | null {
-  return _carSpot;
+export function carSpot(): { lat: number; lng: number; hdg?: number; t?: number } | null {
+  return _carSpot ? { ..._carSpot, t: _carSpotAt || undefined } : null;
 }
 
 /**

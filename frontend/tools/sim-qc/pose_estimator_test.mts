@@ -68,7 +68,7 @@ function makeStraight(speedMs: number, lengthM: number, hz = 20): Truth[] {
 let seed = 7;
 const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff - 0.5; };
 
-function run(truth: Truth[], opts: { gyro: boolean; noiseM: number; route: boolean; yawSign?: 1 | -1; fixHz?: number; biasDps?: number; from?: number; exitFrom?: number; seedSign?: 1 | -1; speedMs?: number; courseDrop?: (i: number, tr: Truth) => boolean; noRoad?: boolean; seed?: number; arcVertexM?: number }) {
+function run(truth: Truth[], opts: { gyro: boolean; noiseM: number; route: boolean; yawSign?: 1 | -1; fixHz?: number; biasDps?: number; from?: number; exitFrom?: number; seedSign?: 1 | -1; speedMs?: number; courseDrop?: (i: number, tr: Truth) => boolean; noRoad?: boolean; seed?: number; arcVertexM?: number; courseOf?: (i: number, tr: Truth, course: number | null) => number | null }) {
   if (opts.seed != null) seed = opts.seed;
   let st = poseStart();
   if (opts.seedSign) st = poseSeedYawSign(st, opts.seedSign);
@@ -98,7 +98,7 @@ function run(truth: Truth[], opts: { gyro: boolean; noiseM: number; route: boole
       const j = Math.max(0, i - 20);
       const course = i > 0 ? (bearingDeg(truth[j].lat, truth[j].lng, tr.lat, tr.lng) + rnd() * 8 + 360) % 360 : null;
       // courseDrop: the platform reports NO course on these fixes (what iOS does in a slow corner)
-      const courseOut = opts.courseDrop && opts.courseDrop(i, tr) ? null : course;
+      const courseOut = opts.courseDrop && opts.courseDrop(i, tr) ? null : (opts.courseOf ? opts.courseOf(i, tr, course) : course);
       st = poseFix(st, { lat: noisyLat, lng: noisyLng, at: now, accM: 8, speedMs: opts.speedMs ?? 4.17, courseDeg: courseOut }, opts.gyro ? yawSince : null);
       lastFixT = tr.t; lastFixIdx = i; lastRawLat = noisyLat; lastRawLng = noisyLng;
     }
@@ -125,6 +125,7 @@ function run(truth: Truth[], opts: { gyro: boolean; noiseM: number; route: boole
     maxHdgErr: Math.max(...hdgErrs.slice(from)), maxStep: Math.max(...steps.slice(from)), st,
     lateHdgErr: Math.max(...hdgErrs.slice(exitFrom)),
     maxHdgStep: Math.max(...hsteps.slice(from)), nBigHdgSteps: hsteps.slice(from).filter((x) => x > 10).length,
+    hdgErrs, ts: truth.map((tr) => tr.t),
   };
 }
 // The route "polyline", built the way a real Mapbox line is: straight legs are single segments; a
@@ -882,6 +883,21 @@ console.log("X. GPS-only with the ROAD HEADING (vendor snapping): 1 Hz, no gyro,
     }
     ok("Z6a noisy chicane (3.1 m/s, r=4, 6 m scatter): worst nose error p90 over 60 seeds ≤ 64.5° — base 63.9, head 63.9", p(errs, 0.9) <= 64.5, `p90 ${p(errs, 0.9).toFixed(1)}° median ${p(errs, 0.5).toFixed(1)}° seed35 ${seed35.toFixed(1)}°`);
     ok("Z6b noisy chicane: Codex's seed (35) ≤ 48° over the run — base 47.3, head 47.3 (the unguarded ratchet cost 59° vs 26° at the link)", seed35 <= 48, `${seed35.toFixed(1)}°`);
+  }
+  // Z7 — A MISSED TURN WITH A DRIFTING COURSE (Codex round 5 [high]): straight on at 3.1 m/s past a route that
+  // corners (r=4), 3 m scatter, and a course that wanders 180 ± 20° on a slow sinusoid — so the courses drift BACK
+  // toward straight at only 3–11°/s, under the old 12°/s guard, while the line still bends the other way. The
+  // ratchet held 143° for its whole 1.5 s (36.6° wrong against 6.8° pre-clamp). POSE_ROAD_RATCHET_TURN_DPS is now
+  // 3°/s: any course motion away from the bend stands the ratchet down. Bars sit between base and the failing head.
+  {
+    const straightOn = makeStraight(3.1, 140), routeCorners = makeCorner(3.1, 4, 60);
+    const r = run(straightOn, { gyro: false, noiseM: 3, route: true, speedMs: 3.1, fixHz: 1, from: 20, seed: 29 * 7919, routeTruth: routeCorners,
+      courseOf: (i, tr) => (180 + 20 * Math.sin(Math.floor(tr.t) * 0.7 + 29) + 360) % 360 });
+    const errAt = (t: number) => { let bi = 0; for (let i = 0; i < r.ts.length; i++) if (Math.abs(r.ts[i] - t) < Math.abs(r.ts[bi] - t)) bi = i; return r.hdgErrs[bi]; };
+    const win = r.hdgErrs.filter((_, i) => r.ts[i] >= 20 && r.ts[i] <= 22.5);
+    const meanWin = win.reduce((a, b) => a + b, 0) / win.length;
+    ok("Z7a drifting-course missed turn (Codex seed 29): nose error at t=21.55 ≤ 10° — base 6.78, head 6.78 (12°/s guard: 36.61)", errAt(21.55) <= 10, `${errAt(21.55).toFixed(2)}°`);
+    ok("Z7b …and the mean nose error over t=20–22.5 ≤ 16° — base 13.47, head 13.47 (12°/s guard: 28.12)", meanWin <= 16, `${meanWin.toFixed(2)}°`);
   }
 }
 

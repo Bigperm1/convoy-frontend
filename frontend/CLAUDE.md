@@ -21,8 +21,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**➜ Read `RULES.md` first** (how to work — Rule #1 and every standing rule), **then the newest
-`HANDOFF-<date>.md`** (current state — today `HANDOFF-2026-09-07.md`; `HANDOFF-2026-09-06.md` and `HANDOFF-2026-09-02.md` are the dated fix logs), **then `ROADMAP.md`**
+**➜ Read `RULES.md` first** (how to work — Rule #1, the 🔒 navigation lock, and every standing rule), **then the newest
+`HANDOFF-<date>.md`** (current state — today `HANDOFF-2026-09-17.md`; `HANDOFF-2026-09-07.md`, `HANDOFF-2026-09-06.md` and `HANDOFF-2026-09-02.md` are the dated fix logs), **then `ROADMAP.md`**
 (the OTA position, what ships next, open issues ranked).
 
 Then, as needed:

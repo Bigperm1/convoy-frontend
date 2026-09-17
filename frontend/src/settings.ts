@@ -61,9 +61,12 @@ novaSpeeding: boolean;
 // Speed-alert mode (settings selector): 'off' | 'nova' (Nova speaks the nudge)
 // | 'ding' (chime: single ~21 over, double ~41 over). Optional/undefined for
 // installs stored before it existed — getSpeedAlertMode() migrates them from the
-// legacy novaSpeeding boolean (true → 'nova', false → 'off'). Deliberately NOT in
-// DEFAULT_SETTINGS so the default-spread can't silently override a pre-existing
-// novaSpeeding choice on upgrade.
+// legacy novaSpeeding boolean (true → 'nova', false → 'off').
+// 2026-09-17: DEFAULT is 'ding' (Jeff: "make it so the speed dings … are default"). That is safe
+// against the default-spread ONLY because the alertDefaultsMigrated block in the loader writes an
+// explicit speedAlertMode into every stored record on its first load (a legacy novaSpeeding:true
+// becomes 'nova', everything else 'ding') — so no upgraded install ever reads the default over a
+// pre-existing choice.
 speedAlertMode?: 'off' | 'nova' | 'ding';
 novaMidDrive: boolean;
 // PITSTOP — when the car sits still at a gas station / food place, a live timer
@@ -93,7 +96,10 @@ convoyAlerts?: boolean;
 // nagging at speeds they always drive. undefined → on. See src/speedProfile.ts.
 adaptiveSpeedAlerts?: boolean;
 // Departure IQ — when parked at a predictable time, proactively offer a one-tap
-// drive to the predicted destination (e.g. "Heading to Work?"). undefined → on.
+// drive to the predicted destination (e.g. "Heading to Work?"). undefined → on;
+// OFF by default since 2026-09-17 (Jeff: "the departure alert is not [default]") — the
+// alertDefaultsMigrated block writes an explicit false once, so `undefined → on` only ever
+// applies to a record the loader has not seen yet.
 departureIQ?: boolean;
 // Whether Nova SPEAKS the Departure IQ offer (the pill always shows). undefined → on.
 departureIQVoice?: boolean;
@@ -108,6 +114,11 @@ speedUnit: 'kmh' | 'mph';
 showWeatherLayer: boolean;
 weatherOnMigrated: boolean;
 widebodyRetiredMigrated?: boolean;
+// One-time flag (2026-09-17, Jeff): when absent, push the new alert defaults onto an existing
+// install once — speed dings ON ('ding' unless the driver chose Nova's voice), speed cameras ON,
+// route greeting ON, Departure IQ OFF — then never repeat. Follows weatherOnMigrated's rule:
+// "on by default, off only if explicitly turned off" AFTER this flag is stored.
+alertDefaultsMigrated?: boolean;
 speedCameras: boolean;
 // Official BC road events (DriveBC Open511): accidents, construction, closures,
 // weather. Map pins + a Scout callout for major/moderate. BC-only; auto-gated by
@@ -276,7 +287,7 @@ mapMode: "auto",
 // Default route color — brand neon green.
 routeColor: "#2DEC86",
 show3dBuildings: true,
-novaGreeting: false,
+novaGreeting: true,   // route greeting ON at first launch (Jeff, 2026-09-17)
 novaSpeeding: false,
 novaMidDrive: true,   // mid-drive callouts ON at first launch (Jeff, 2026-07-25)
 pitstop: true,        // Pitstop timer ON at first launch (Jeff, 2026-07-26)
@@ -286,14 +297,16 @@ novaVoiceName: "nova",
 scoutHandsFree: true,
 convoyAlerts: true,
 adaptiveSpeedAlerts: true,
-departureIQ: true,
+departureIQ: false,   // Departure IQ OFF at first launch (Jeff, 2026-09-17)
 novaQuietMigrated: true,
 baselineMigrated: true,
 speedUnit: 'kmh',
 showWeatherLayer: true,
 weatherOnMigrated: true,
 widebodyRetiredMigrated: undefined,
-speedCameras: false,
+alertDefaultsMigrated: true,
+speedAlertMode: 'ding',   // speed dings ON at first launch (Jeff, 2026-09-17) — see the type comment
+speedCameras: true,   // speed cameras ON at first launch (Jeff, 2026-09-17)
 roadIncidents: false,  // OFF at first launch (Jeff, 2026-07-25)
 showPlacePins: true,
 showNearby: true,
@@ -516,6 +529,21 @@ try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
 if (parsed.widebodyRetiredMigrated === undefined) {
 if (cached.carColor === "Widebody") cached.carColor = undefined;
 cached.widebodyRetiredMigrated = true;
+try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
+}
+// One-time (2026-09-17, Jeff: "make it so the speed dings/speed cameras/route greeting are default
+// and the departure alert is not"): push the new alert defaults onto existing installs ONCE. The
+// stored speedAlertMode becomes EXPLICIT here — a legacy novaSpeeding:true (or an explicit 'nova')
+// keeps Nova's voice, everything else becomes the chime — which is what makes 'ding' safe as the
+// DEFAULT_SETTINGS value from now on (see the type comment). Anyone who later turns one of these
+// off stays off: the flag is stored and this never runs again.
+if (parsed.alertDefaultsMigrated === undefined) {
+const legacyMode = parsed.speedAlertMode ?? (parsed.novaSpeeding === true ? 'nova' : undefined);
+cached.speedAlertMode = legacyMode === 'nova' ? 'nova' : 'ding';
+cached.speedCameras = true;
+cached.novaGreeting = true;
+cached.departureIQ = false;
+cached.alertDefaultsMigrated = true;
 try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
 }
 // SESSION-SCOPED, every load (not a one-time migration flag — deliberately unlike

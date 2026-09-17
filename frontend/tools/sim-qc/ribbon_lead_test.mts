@@ -7,7 +7,7 @@
 //
 // Z/LAT below are the field report's own numbers (`ribbon-trim surf=car z=15.76 …`).
 import assert from "node:assert/strict";
-import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp } from "../../src/routeTrim.ts";
+import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, noseLeadDp } from "../../src/routeTrim.ts";
 
 const Z = 15.76, LAT = 49.24; // Olaf's field report
 
@@ -43,9 +43,23 @@ assert.ok(routeTrimLeadDp(57) >= 40 * 1.8, "routeTrimLeadDp(57) did not compensa
 
 // 3. THE RAILS STILL BIND with a pitch term in the mix.
 // Floor: at a high zoom (metersPerDp collapses toward 0), even a pitch-inflated dp value
-// must still floor at TRIM_MIN_M (12 m since 2026-09-05; 20 before) — not report some vanishing gap.
-assert.equal(routeTrimLeadM(20, 0, 0), 12, "TRIM_MIN_M floor did not bind at pitch=0");
-assert.equal(routeTrimLeadM(20, 0, 57), 12, "TRIM_MIN_M floor did not bind at pitch=57");
+// must still floor at TRIM_MIN_M (4 m since 2026-09-16; 12 from 09-05; 20 before) — not report some vanishing gap.
+assert.equal(routeTrimLeadM(20, 0, 0), 4, "TRIM_MIN_M floor did not bind at pitch=0");
+// (z21 for the pitched case: at z20 the pitch-57 lead is 5.5 m, legitimately above the 4 m floor.)
+assert.equal(routeTrimLeadM(21, 0, 57), 4, "TRIM_MIN_M floor did not bind at pitch=57");
+
+// 2b. THE LEAD IS THE NOSE (2026-09-16). Both surfaces pass noseLeadDp(<marker pt>): half the marker, because the
+// shipped GLB's origin is its centre. 50 pt phone → 25; 45 pt CarPlay → 22.5; and the pitch-48 phone camera
+// puts 25 screen pt at 25/cos48 = 37.4 dp of ground. The floor must NOT bind at the z18.5 maneuver zoom any
+// more (it did at 12 m: 5.2 m of nose lead would have been floored to 12 m = 58 screen pt).
+assert.equal(noseLeadDp(50), 25, "noseLeadDp(50) must be 25 (half the marker)");
+assert.equal(noseLeadDp(45), 22.5, "noseLeadDp(45) must be 22.5");
+assert.equal(noseLeadDp(0), 40, "a missing marker size falls back to TRIM_LEAD_DP");
+assert.equal(routeTrimLeadDp(0, 25), 25, "routeTrimLeadDp(0, 25) must be exactly 25");
+assert.ok(Math.abs(routeTrimLeadDp(48, 25) - 25 / Math.cos(48 * Math.PI / 180)) < 1e-9, "pitch 48 must compensate the nose lead by 1/cos48");
+const noseZ185 = routeTrimLeadM(18.5, 49.03, 48, 0, 0, 25);
+assert.ok(noseZ185 > 4 && noseZ185 < 6, `nose lead at z18.5 / pitch 48 should be ~5.2 m of ground, got ${noseZ185}`);
+assert.ok(Math.abs(routeTrimLeadM(18.5, 49.03, 48) - routeTrimLeadM(18.5, 49.03, 48, 0, 0, 40)) < 1e-9, "omitting leadDp must equal the 40 dp fallback");
 // Cap: pick a zoom where pitch=0 sits just under the 500 m cap, then confirm pitch=57
 // pushes it OVER and the rail clamps it back to exactly 500 (no runaway).
 const nearCapAtPitch0 = routeTrimLeadM(13.0, 0, 0);   // 40 dp × 9.55 m/dp = 382 m at pitch 0; ÷cos57 = 701 → cap

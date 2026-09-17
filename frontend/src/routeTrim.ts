@@ -107,6 +107,17 @@ export function metersPerDp(zoom: number, lat: number): number {
 // was the anchor drift fixed in routeRibbon.anchorCutM the same night; this is the optics on top.)
 // 40 → ~30 pt solid at 108 km/h and ~20 pt at 54 km/h on the sim, still clear of the halo (≥18).
 export const TRIM_LEAD_DP = 40;
+// ── THE FADE STARTS AT THE NOSE (2026-09-16, Jeff: "tighten up the route line closer to the car marker/arrow.
+// lets have the fade start at the nose"). The self marker is drawn at a constant screen size with its model
+// origin at the CENTRE (the shipped GRC2_map2.glb bbox is ±0.955 of a 1.910 long axis, centre −0.0001), so
+// its nose sits exactly half the marker's point size ahead of the anchor: 25 pt on the phone (SELF_MARKER_PT
+// 50), 22.5 pt on CarPlay (CARPLAY_CAR_PT 45 × uiScale). Both surfaces now pass noseLeadDp(<their marker pt>)
+// as the lead, so the transparent end of the fade lands on the nose instead of 15–18 pt past it. TRIM_LEAD_DP
+// stays as the fallback for a caller that passes nothing (identical to the pre-09-16 behaviour).
+export const NOSE_FRAC = 0.5;
+export function noseLeadDp(markerPt: number): number {
+  return Number.isFinite(markerPt) && markerPt > 0 ? markerPt * NOSE_FRAC : TRIM_LEAD_DP;
+}
 
 // Sanity rails on the METRE result. These exist only to stop a pathological camera
 // (a mid-pinch zoom spike, a bogus latitude) producing an absurd trim; in normal
@@ -114,7 +125,10 @@ export const TRIM_LEAD_DP = 40;
 //   z17 city → 30 m · z15 → 120 m · z14 highway → 252 m · z12.8 at 180 km/h → 500 m (capped)
 // 20 → 12 (2026-09-05): at z18.5 the 20 m floor was ~74 dp of ground — a line starting a car length
 // and a half ahead of a creeping car (Jeff's phone rows at z18.50: lead=20 on every sample).
-const TRIM_MIN_M = 12;
+// 12 → 4 (2026-09-16): with the lead at the NOSE (25 pt → 37 dp of ground at pitch 48) the metre value at
+// the z18.5 maneuver zoom is 5.2 m, so a 12 m floor would have put the cut 58 screen pt out — past the old
+// 40 — exactly where Jeff sees it most. 4 m still guards a bogus zoom spike (z20+), which is all it is for.
+const TRIM_MIN_M = 4;
 const TRIM_MAX_M = 500;
 
 // Pitch compensation shared by lead and fade (2026-09-04, see the REVISED note above):
@@ -131,8 +145,8 @@ function pitchCompensatedDp(baseDp: number, pitchDeg: number): number {
 
 // The lead in SCREEN POINTS after pitch compensation — exported so a caller can log the
 // exact value routeTrimLeadM used (see the `leadDp=` field in the ribbon-trim receipt).
-export function routeTrimLeadDp(pitchDeg = 0): number {
-  return pitchCompensatedDp(TRIM_LEAD_DP, pitchDeg);
+export function routeTrimLeadDp(pitchDeg = 0, leadDp = TRIM_LEAD_DP): number {
+  return pitchCompensatedDp(leadDp, pitchDeg);
 }
 
 // ── THE SELF MARKER IS DRAWN 10 m IN THE AIR, AND THAT MOVES IT UP THE ROAD ─────────────
@@ -252,9 +266,9 @@ export function leadShiftedByLift(
 // the car's latitude. `pitchDeg` (optional, default 0) is the camera's ACTUAL pitch —
 // see routeTrimLeadDp / the REVISED note above.
 export function routeTrimLeadM(
-  zoom: number, lat: number, pitchDeg = 0, selfLiftM = 0, viewportHDp = 0,
+  zoom: number, lat: number, pitchDeg = 0, selfLiftM = 0, viewportHDp = 0, leadDp = TRIM_LEAD_DP,
 ): number {
-  const m = routeTrimLeadDp(pitchDeg) * metersPerDp(zoom, lat);
+  const m = routeTrimLeadDp(pitchDeg, leadDp) * metersPerDp(zoom, lat);
   if (!Number.isFinite(m)) return 30;
   const railed = Math.max(TRIM_MIN_M, Math.min(TRIM_MAX_M, m));
   // The rails stay on the DESIGN lead; the lift correction is a rendering fact, not a tuning
@@ -275,7 +289,9 @@ const TRIM_FADE_DP = 34;   // scaled with the lead (60→40) on 2026-09-05
 export function routeTrimFadeM(zoom: number, lat: number, pitchDeg = 0): number {
   const m = pitchCompensatedDp(TRIM_FADE_DP, pitchDeg) * metersPerDp(zoom, lat);
   if (!Number.isFinite(m)) return 20;
-  return Math.max(10, Math.min(340, m));
+  // Floor 10 → 4 (2026-09-16): at z18.5 the 34 dp fade is 7 m of ground, and the 10 m floor stretched it to
+  // 48 screen pt at the exact zoom where the line now starts at the nose. Same reason as TRIM_MIN_M.
+  return Math.max(4, Math.min(340, m));
 }
 
 // ── THE TRIM MUST NEVER TRIM THE WHOLE LINE AWAY ────────────────────────────────────────────

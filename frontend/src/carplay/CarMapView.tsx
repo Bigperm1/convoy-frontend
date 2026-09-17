@@ -81,7 +81,7 @@ import {
   ROAD_SNAP_CROSS_DEG, noseBearing, CAR_LEN_UNITS, ARROW_LEN_UNITS, PeerScanModels
 } from '../ConvoyMapbox';
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
-import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, leadShiftedByLift, selfLiftScreenPt, clampCutToRoute } from '../routeTrim';
+import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, leadShiftedByLift, selfLiftScreenPt, clampCutToRoute, noseLeadDp } from '../routeTrim';
 import { selfLiftDrawnM, noteSelfLiftNav, subscribeSelfLiftDrawn, noteMapIdle } from '../selfLift';
 import { buildRibbonPartition, buildRibbonFeatures, anchorCutM, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat, type CutAnchorHint } from '../routeRibbon';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
@@ -1783,7 +1783,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // layout points, so scaling it too would under-apply it by the same factor (at mapScale 0.53
   // barely half the shift would be cancelled and the overlap would survive on AA). Scale first,
   // then correct at full strength. mapScale is 1 on CarPlay, so nothing changes there.
-  const designLeadM = routeTrimLeadM(trimZoom, lat, trimPitch) * mapScale;
+  // The lead is the marker's NOSE (2026-09-16, src/routeTrim.ts noseLeadDp): half of selfSizePt, which already
+  // carries uiScale — so the cut lands on the nose at every canvas size, car and arrow skins alike.
+  const designLeadM = routeTrimLeadM(trimZoom, lat, trimPitch, 0, 0, noseLeadDp(selfSizePt)) * mapScale;
   const trimLeadM = leadShiftedByLift(designLeadM, selfLiftM, trimZoom, lat, trimPitch, mapH);
   // TRIM RIDES THE MARKER'S EASE — see the matching block in ConvoyMapbox.tsx for the
   // full reasoning. The trim was anchored to the NEWEST fix while the marker eases
@@ -1857,7 +1859,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     if (_tn - carTrimLogAt.current >= 30000) {   // 15 s → 30 s (2026-09-06)
       carTrimLogAt.current = _tn;
       try {
-        logEvent(`ribbon-trim surf=car snap=${carSnapped ? 1 : 0} z=${trimZoom.toFixed(2)} lead=${Math.round(trimLeadM)} cutAhead=${Math.round(ribbonCutM - _carCutBaseM)} lag=${_carAlongAnchor ? Math.round(fracDrawn * ribbonPartition.totalM - _carAlongAnchor.m) : '-'} anchorOff=${_carAlongAnchor && Number.isFinite(_carAlongAnchor.distM) ? Math.round(_carAlongAnchor.distM) : '-'} hint=${_carAlongAnchor ? _carAlongAnchor.src : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} scale=${mapScale.toFixed(2)} pitch=${Math.round(trimPitch)} leadDp=${Math.round(routeTrimLeadDp(trimPitch))} lift=${Math.round(selfLiftScreenPt(selfLiftM, trimZoom, lat, trimPitch, mapH))}`);
+        logEvent(`ribbon-trim surf=car snap=${carSnapped ? 1 : 0} z=${trimZoom.toFixed(2)} lead=${Math.round(trimLeadM)} cutAhead=${Math.round(ribbonCutM - _carCutBaseM)} lag=${_carAlongAnchor ? Math.round(fracDrawn * ribbonPartition.totalM - _carAlongAnchor.m) : '-'} anchorOff=${_carAlongAnchor && Number.isFinite(_carAlongAnchor.distM) ? Math.round(_carAlongAnchor.distM) : '-'} hint=${_carAlongAnchor ? _carAlongAnchor.src : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} scale=${mapScale.toFixed(2)} pitch=${Math.round(trimPitch)} leadDp=${Math.round(routeTrimLeadDp(trimPitch, noseLeadDp(selfSizePt)))} lift=${Math.round(selfLiftScreenPt(selfLiftM, trimZoom, lat, trimPitch, mapH))}`);
       } catch {}
     }
   }
@@ -2359,7 +2361,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             id="car-route-sel-casing"
             slot="top"
             filter={['==', ['get', 'kind'], RIBBON_CASING] as any}
-            style={{ lineColor: carRouteColor, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
+            // 24/8 → 20/7 and the core 12 → 10 (2026-09-16, Jeff: "just a tad skinnier") — the same three numbers as
+            // ConvoyMapbox.tsx route-sel-casing / route-sel-core (CarPlay must match the phone).
+            style={{ lineColor: carRouteColor, lineWidth: 20, lineBlur: 7, lineOpacity: 0.55, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
           />
           <LineLayer
             id="car-route-sel-core"
@@ -2367,9 +2371,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             filter={['==', ['get', 'kind'], RIBBON_CORE] as any}
             // lineCap 'butt': the core is a CHAIN of pieces sharing exact end points, so a
             // flat cap meets flush; round caps would overlap at every seam and, on the
-            // translucent fade pieces, composite as beads. The 24 dp round-capped casing
+            // translucent fade pieces, composite as beads. The 20 dp round-capped casing
             // still gives the ribbon its rounded ends.
-            style={{ lineColor: ['get', 'color'] as any, lineOpacity: ['get', 'alpha'] as any, lineWidth: 12, lineCap: 'butt', lineJoin: 'round', lineEmissiveStrength: 1 }}
+            style={{ lineColor: ['get', 'color'] as any, lineOpacity: ['get', 'alpha'] as any, lineWidth: 10, lineCap: 'butt', lineJoin: 'round', lineEmissiveStrength: 1 }}
           />
         </ShapeSource>
       ) : null}
@@ -2384,7 +2388,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           <LineLayer
             id="car-cong-preview"
             slot="top"
-            style={{ lineGradient: carCongGradient, lineWidth: 12, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
+            style={{ lineGradient: carCongGradient, lineWidth: 10, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
           />
         </ShapeSource>
       )}

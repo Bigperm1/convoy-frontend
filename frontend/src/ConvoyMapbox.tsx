@@ -52,7 +52,7 @@ export { chaseZoom } from "./chaseZoom";
 import { View, Text, Image, StyleSheet, Pressable, TouchableOpacity, Platform, AppState, Alert, Animated } from "react-native";
 import Mapbox, { MapView, Camera, MarkerView, ShapeSource, LineLayer, SymbolLayer, CircleLayer, Images, Image as MBXImage, UserTrackingMode, LocationPuck, Models, ModelLayer, CustomLocationProvider } from "@rnmapbox/maps";
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from "./roadSnap";
-import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, clampCutToRoute, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M, PEER_MODEL_LIFT_M } from "./routeTrim";
+import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, clampCutToRoute, SELF_MODEL_LIFT_M, SELF_ARROW_LIFT_M, PEER_MODEL_LIFT_M, noseLeadDp } from "./routeTrim";
 // The self car is lifted ONLY off the road (Jeff, 2026-09-10) — the rule is src/selfLiftRule.ts, the
 // live state src/selfLift.ts; SelfCarModel asks the map once a second while slow and eases the lift
 // it draws, riding the source feature (`trn`) like the size and the heading.
@@ -3702,7 +3702,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // is DRAWN rather than where it is (src/routeTrim.ts leadShiftedByLift). mapH is the map's own
   // layout height, which is what Mapbox derives cameraToCenterDistance from.
   const _selfLiftM = selfLiftDrawnM("phone");   // what THIS surface draws right now (0 on a road)
-  const _trimLeadM = routeTrimLeadM(_trimZoom, selfCar?.lat ?? 0, _trimPitch, _selfLiftM, mapH);
+  // The lead is the marker's NOSE (2026-09-16, src/routeTrim.ts noseLeadDp): half of SELF_MARKER_PT.
+  const _trimLeadM = routeTrimLeadM(_trimZoom, selfCar?.lat ?? 0, _trimPitch, _selfLiftM, mapH, noseLeadDp(SELF_MARKER_PT));
   // ── AND WHICH POSITION (2026-07-30) ────────────────────────────────────────
   // Second, independent source of the same complaint, and the bigger one. The trim
   // was anchored to routeProj.frac — the NEWEST fix — while the MARKER eases toward
@@ -3904,7 +3905,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     if (_tn - trimLogAt.current >= 30000) {   // 15 s → 30 s (2026-09-06)
       trimLogAt.current = _tn;
       try {
-        logEvent(`ribbon-trim surf=phone snap=${selfSnapped ? 1 : 0} z=${Number(_trimZoom).toFixed(2)} lead=${Math.round(_trimLeadM)} cutAhead=${Math.round(ribbonCutM - _cutBaseM)} lag=${_alongAnchor ? Math.round(_fracDrawn * ribbonPartition.totalM - _alongAnchor.m) : '-'} anchorOff=${_alongAnchor && Number.isFinite(_alongAnchor.distM) ? Math.round(_alongAnchor.distM) : '-'} hint=${_alongAnchor ? _alongAnchor.src : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} pitch=${Math.round(_trimPitch)} leadDp=${Math.round(routeTrimLeadDp(_trimPitch))} lift=${Math.round(selfLiftScreenPt(_selfLiftM, _trimZoom, selfCar?.lat ?? 0, _trimPitch, mapH))}`);
+        logEvent(`ribbon-trim surf=phone snap=${selfSnapped ? 1 : 0} z=${Number(_trimZoom).toFixed(2)} lead=${Math.round(_trimLeadM)} cutAhead=${Math.round(ribbonCutM - _cutBaseM)} lag=${_alongAnchor ? Math.round(_fracDrawn * ribbonPartition.totalM - _alongAnchor.m) : '-'} anchorOff=${_alongAnchor && Number.isFinite(_alongAnchor.distM) ? Math.round(_alongAnchor.distM) : '-'} hint=${_alongAnchor ? _alongAnchor.src : '-'} proj=${Math.round(routeProj.distM)} fade=${ribbonFadeQ} pitch=${Math.round(_trimPitch)} leadDp=${Math.round(routeTrimLeadDp(_trimPitch, noseLeadDp(SELF_MARKER_PT)))} lift=${Math.round(selfLiftScreenPt(_selfLiftM, _trimZoom, selfCar?.lat ?? 0, _trimPitch, mapH))}`);
       } catch {}
     }
   }
@@ -4428,7 +4429,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               id="route-sel-casing"
               slot="top"
               filter={(showCongestion ? ["==", ["get", "kind"], "__none__"] : ["==", ["get", "kind"], RIBBON_CASING]) as any}
-              style={{ lineColor: selEdge, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
+              // 24/8 → 20/7 and the core 12 → 10 (2026-09-16, Jeff: "make the route line just a tad skinnier");
+              // CarMapView carries the same three numbers (CarPlay must match the phone).
+              style={{ lineColor: selEdge, lineWidth: 20, lineBlur: 7, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
             <LineLayer
               id="route-sel-core"
@@ -4438,7 +4441,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               // flat cap meets flush; round caps would overlap at every seam and, on the
               // translucent fade pieces, composite as beads. The round-capped casing still
               // gives the ribbon its rounded ends.
-              style={{ lineColor: ["get", "color"] as any, lineOpacity: ["get", "alpha"] as any, lineWidth: 12, lineCap: "butt", lineJoin: "round", lineEmissiveStrength: 1 }}
+              style={{ lineColor: ["get", "color"] as any, lineOpacity: ["get", "alpha"] as any, lineWidth: 10, lineCap: "butt", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
           </ShapeSource>
         )}
@@ -4453,12 +4456,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             <LineLayer
               id="cong-casing"
               slot="top"
-              style={{ lineColor: selEdge, lineWidth: 24, lineBlur: 8, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
+              style={{ lineColor: selEdge, lineWidth: 20, lineBlur: 7, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
             <LineLayer
               id="cong-core"
               slot="top"
-              style={{ lineGradient: previewCong!.gradient, lineWidth: 12, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
+              style={{ lineGradient: previewCong!.gradient, lineWidth: 10, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
           </ShapeSource>
         )}

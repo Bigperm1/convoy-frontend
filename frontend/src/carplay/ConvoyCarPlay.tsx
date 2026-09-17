@@ -289,21 +289,27 @@ export function CarSurface() {
   const nearby = s.peers.length;
   // Posted speed limit (PART 5), shown in the driver's unit. carStore.speedLimitKmh
   // is km/h; convert to mph if that's their setting. null → no badge.
+  // 🔒 NAV-LOCK begin cp-limit-display-unit — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const limitVal = s.speedLimitKmh
     ? ((s.speedUnit ?? getSettings().speedUnit) === 'mph' ? Math.round(s.speedLimitKmh / 1.609344) : Math.round(s.speedLimitKmh))
     : null;
+  // 🔒 NAV-LOCK end cp-limit-display-unit
   // Arrival CLOCK, computed the SAME way the phone banner does (now + remaining
   // ETA). This is the number the driver compares to their phone — driving it from
   // carStore here means the car dashboard matches the phone instead of relying on
   // CarPlay's native estimate panel.
+  // 🔒 NAV-LOCK begin cp-arrival-clock — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const arrival = (s.navigating && (s.etaSeconds || 0) > 0)
     ? fmtClock(new Date(Date.now() + (s.etaSeconds || 0) * 1000))
     : '';
+  // 🔒 NAV-LOCK end cp-arrival-clock
   // Tight separators (was three spaces each side): the same three fields in ~15%
   // less width, so 'eta · time · distance' fits the bottom-band banner un-cut.
   const metaLine = [arrival, s.eta, s.distanceRemaining].filter(Boolean).join(' · ');
 
+  // 🔒 NAV-LOCK begin cp-surface-hasfix — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const hasFix = typeof s.selfLat === 'number' && typeof s.selfLng === 'number';
+  // 🔒 NAV-LOCK end cp-surface-hasfix
 
   // Live-map RETRY (the "3D 100% of the time" fix). The old `glFailed` was a
   // ONE-WAY latch: a single slow first paint (the 6s watchdog on the secondary
@@ -319,6 +325,7 @@ export function CarSurface() {
   const liveAttemptRef = useRef(0);
   const gaveUpRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 🔒 NAV-LOCK begin cp-live-map-retry — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const scheduleLiveRetry = (why?: string) => {
     if (retryTimerRef.current) return; // one pending retry at a time
     // ── CEILING (2026-08-13) ────────────────────────────────────────────────────
@@ -367,6 +374,7 @@ export function CarSurface() {
       setLiveAttempt(next);
     }, delay);
   };
+  // 🔒 NAV-LOCK end cp-live-map-retry
   useEffect(() => () => { if (retryTimerRef.current) clearTimeout(retryTimerRef.current); }, []);
 
   // DIAGNOSTIC tick (CAR_DIAG_MODE). Independent of the store/GPS so it proves the
@@ -387,8 +395,10 @@ export function CarSurface() {
   // km/h off the raw carStore values so the display unit can't shift the threshold. Was
   // +21 km/h (13 mph) — far more lenient than the phone, so the two flashed red at
   // completely different times ("not synced"). Speed-limit sign shares s.speedLimitKmh.
+  // 🔒 NAV-LOCK begin cp-speedo-over-limit — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const speedoOver = typeof s.speedLimitKmh === 'number' && s.speedLimitKmh > 0
     && (s.speedMs || 0) * 3.6 > s.speedLimitKmh + 2;
+  // 🔒 NAV-LOCK end cp-speedo-over-limit
   // Dark HUD panels a little transparent (0.8) so the map reads through them; the
   // over-limit RED stays solid as an alert. OTA-tunable.
   // Transparent — the pill's look comes from the GlassFill (real UIGlassEffect,
@@ -570,6 +580,7 @@ export function CarSurface() {
           ))
     : NAV_STACK_FALLBACK_W;
   const speedPulse = useRef(new Animated.Value(1)).current;
+  // 🔒 NAV-LOCK begin cp-speedo-over-pulse — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (!speedoOver) { speedPulse.setValue(1); return; }
     const loop = Animated.loop(Animated.sequence([
@@ -579,6 +590,7 @@ export function CarSurface() {
     loop.start();
     return () => { loop.stop(); speedPulse.setValue(1); };
   }, [speedoOver]);
+  // 🔒 NAV-LOCK end cp-speedo-over-pulse
 
   // Posted speed-limit sign slides out to the RIGHT from behind the speedo once moving
   // with a known limit — exactly like the phone. Tucked back behind the pill at a stop.
@@ -586,11 +598,15 @@ export function CarSurface() {
   // km/h speed and the km/h limit, NOT the display values: speedNum/limitVal are
   // already converted+rounded into the driver's unit, which is what made the two
   // surfaces disagree at low speed.
+  // 🔒 NAV-LOCK begin cp-speed-limit-sign-visible — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const showLimit = speedLimitVisible((s.speedMs ?? 0) * 3.6, s.speedLimitKmh);
+  // 🔒 NAV-LOCK end cp-speed-limit-sign-visible
   const limitSlide = useRef(new Animated.Value(0)).current;
+  // 🔒 NAV-LOCK begin cp-limit-sign-slide — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     Animated.spring(limitSlide, { toValue: showLimit ? 1 : 0, useNativeDriver: true, tension: 80, friction: 12 }).start();
   }, [showLimit]);
+  // 🔒 NAV-LOCK end cp-limit-sign-slide
   // Slide the posted-limit SIGN just clear of the 68pt-wide speedo pill plus a SMALL
   // gap so the two tiles sit close together (68 pill + 8 gap = 76). Tightened from 100
   // — the sign was drifting too far to the right of the speedo.
@@ -616,7 +632,9 @@ export function CarSurface() {
   // car canvas has — so the gate keys on that: h > 2w kills the ghost with margin
   // and spares any plausible real portrait unit. Still fully derived: surfaceH
   // re-measures in both directions, so nothing latches.
+  // 🔒 NAV-LOCK begin cp-surface-ghost-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const zeroWidth = measured && (!(surfaceW > 0) || surfaceH > surfaceW * 2);
+  // 🔒 NAV-LOCK end cp-surface-ghost-gate
 
   useEffect(() => {
     // Per TRANSITION into the suppressed state, not once per process: a surface that
@@ -634,7 +652,9 @@ export function CarSurface() {
   // because the phone is plugged in and therefore 'premium'. This does NOT delay the
   // real surface: zeroWidth starts false and only flips once a layout pass has actually
   // reported a zero-width box, so a cold first render is untouched.
+  // 🔒 NAV-LOCK begin cp-surface-showlive — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const showLive = CAR_LIVE_MAP_ENABLED && hasFix && !zeroWidth;
+  // 🔒 NAV-LOCK end cp-surface-showlive
 
   // ── WHAT IS MISSING (build 79, 2026-09-14 — src/carplay/carStatus.ts) ───────────────────────
   // No fix: CarBootScreen draws it under the wordmark. Live map: the lowest-priority status pill.
@@ -826,6 +846,7 @@ export function CarSurface() {
         // `surf=470x265` (the real head unit) and `surf=0x932` at zoom 1.50 spanning
         // latitude -86..+36, i.e. a world view on a zero-width canvas. Two full map
         // bootstraps, on a plugged-in phone, in a hot car, for zero visible pixels.
+        // 🔒 NAV-LOCK begin cp-surface-measure — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         if (typeof w === 'number' && typeof h === 'number' && (w > 0 || h > 0) && !measured) {
           setMeasured(true);
         }
@@ -841,6 +862,7 @@ export function CarSurface() {
           } catch {}
         }
         if (typeof h === 'number' && h > 0 && Math.abs(h - surfaceH) > 1) setSurfaceH(h);
+        // 🔒 NAV-LOCK end cp-surface-measure
         // Android Auto only, once per process — see logAaCanvas.
         if (typeof w === 'number' && typeof h === 'number') logAaCanvas(w, h);
       }}
@@ -1094,6 +1116,7 @@ export function CarSurface() {
 
 // The maneuver we're approaching is the END of the *next* step (verb + road),
 // matching the phone banner. Reuses the same maneuverVerb() map.
+// 🔒 NAV-LOCK begin cp-upcoming-instruction — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 function upcomingInstruction(route: NavRoute | null, stepIndex: number): string {
   const steps = route?.steps ?? [];
   if (!steps.length) return 'Continue';
@@ -1101,15 +1124,18 @@ function upcomingInstruction(route: NavRoute | null, stepIndex: number): string 
   const step = steps[idx] ?? steps[steps.length - 1];
   return stripTags(step.html) || maneuverVerb(step.maneuver);
 }
+// 🔒 NAV-LOCK end cp-upcoming-instruction
 
 // The Mapbox "type|modifier" key for the SAME upcoming step — carries the roundabout
 // exit direction so the arrow can leave the circle at the real angle.
+// 🔒 NAV-LOCK begin cp-upcoming-maneuver-key — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 function upcomingManeuverKey(route: NavRoute | null, stepIndex: number): string | undefined {
   const steps = route?.steps ?? [];
   if (!steps.length) return undefined;
   const idx = Math.min(stepIndex + 1, steps.length - 1);
   return (steps[idx] ?? steps[steps.length - 1])?.maneuver;
 }
+// 🔒 NAV-LOCK end cp-upcoming-maneuver-key
 
 function toCarPeers(peers?: Record<string, any> | null): CarPeer[] {
   if (!peers) return [];
@@ -1220,6 +1246,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
     // over its numbers is what blanked the ETA row on Jeff's 7/23 drive. Not claiming
     // also leaves ownership untouched, so a car-started drive keeps the strip exactly
     // as it does today.
+    // 🔒 NAV-LOCK begin cp-mirror-strip-route-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     const ownStrip = tbt.active && claimCarNavStrip('phone');
     // When the phone's OWN tbt is idle, OMIT the nav fields entirely instead of
     // writing '' — a route started FROM CARPLAY SEARCH is driven by the COLD
@@ -1350,6 +1377,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       //  above, with the instruction text it belongs to. Written here it landed on every
       //  tick regardless of ownership and erased the cold engine's arrow.)
     });
+    // 🔒 NAV-LOCK end cp-mirror-strip-route-gate
   }, [
     tbt.active,
     tbt.stepIndex,
@@ -1557,8 +1585,10 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
               // to the shared handler so cold behaviour is identical.
               // isDupCarPress: these intercepts return BEFORE the deduped funnels, and END was
               // one of the field-doubled ids — share the same stamp (review, 2026-08-26).
+              // 🔒 NAV-LOCK begin cp-warm-end-ends-phone-nav — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
               if (e?.id === 'car-end') { if (isDupCarPress('car-end', 'warm')) return; carTap('car-end'); onEndRef.current?.(); return; }
               handleCarBarButton(e?.id, 'warm');
+              // 🔒 NAV-LOCK end cp-warm-end-ends-phone-nav
             },
             onDidCancelNavigation: () => onEndRef.current?.(),
             // Round CPMapButtons — POLICE + SCOUT MIC in OUR OWN artwork, from the
@@ -1718,6 +1748,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
   }, [connected, peers]);
 
   // ---- iOS: open / close a navigation session as a route goes active ----
+  // 🔒 NAV-LOCK begin cp-native-nav-session — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     const lib = getLib();
     if (!lib || !isIOS || !connected) return;
@@ -1747,8 +1778,10 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
       tripRef.current = null;
     }
   }, [connected, tbt.active, route, user?.lat, user?.lng, destination?.lat, destination?.lng]);
+  // 🔒 NAV-LOCK end cp-native-nav-session
 
   // ---- push live maneuver + ETA on each tick ----
+  // 🔒 NAV-LOCK begin cp-native-maneuver-eta-push — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (!getLib() || !connected || !tbt.active || !route) return;
     const label = upcomingInstruction(route, tbt.stepIndex);
@@ -1818,6 +1851,7 @@ export function useConvoyCarPlay({ route, routes, selectedRouteIndex = 0, tbt, u
     tbt.etaSeconds,
     route,
   ]);
+  // 🔒 NAV-LOCK end cp-native-maneuver-eta-push
 
   // Expose the live CarPlay / Android-Auto connection state so the phone screen
   // can gate Avatar Live presence (Partial/Full) on whether the car is connected.

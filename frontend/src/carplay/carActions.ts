@@ -257,11 +257,14 @@ export function onCarNavStarted(fn: CarNavListener): () => void {
 
 let _navStartInFlight = false;
 export async function startCarNav(dest: { lat: number; lng: number; label?: string }): Promise<boolean> {
+  // 🔒 NAV-LOCK begin act-carnav-start-guard — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   if (_navStartInFlight) return false;
   const s = getCarState();
   if (typeof s.selfLat !== 'number' || typeof s.selfLng !== 'number') { toast('No GPS fix yet'); return false; }
   _navStartInFlight = true;
+  // 🔒 NAV-LOCK end act-carnav-start-guard
   try {
+    // 🔒 NAV-LOCK begin act-carnav-route-choice — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     const st = getSettings();
     const near = { lat: s.selfLat, lng: s.selfLng };
     const avoid = { tolls: st.avoidTolls, highways: st.avoidHighways, ferries: st.avoidFerries };
@@ -293,6 +296,7 @@ export async function startCarNav(dest: { lat: number; lng: number; label?: stri
     // src/departureBearing.ts for why the Directions `bearings` parameter is NOT the
     // fix. Falls back to plain fastest-first when the facing is unknown.
     const ordered = orderRoutesForward(routes, facing ?? undefined);
+    // 🔒 NAV-LOCK end act-carnav-route-choice
     // Same depart-rank crumb as the phone (map.tsx) — src=car marks the CarPlay path.
     try {
       const _b0 = routeInitialBearing(ordered[0] as any);
@@ -305,6 +309,7 @@ export async function startCarNav(dest: { lat: number; lng: number; label?: stri
       }).join(',');
       logEvent(`depart-rank src=car constrained=${constrained} fsrc=${departureBearingSource()} n=${routes.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} cands=${_cands}`);
     } catch {}
+    // 🔒 NAV-LOCK begin act-carnav-commit — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     const best: NavRoute = ordered[0];
     // Persist the hand-off BEFORE starting the banner so a crash between the two
     // can't leave guidance running with no adoptable session.
@@ -321,17 +326,21 @@ export async function startCarNav(dest: { lat: number; lng: number; label?: stri
       routes: [],
     });
     _navListeners.forEach((l) => { try { l({ dest }); } catch {} });
+    // 🔒 NAV-LOCK end act-carnav-commit
     toast(dest.label ? `Routing to ${dest.label}` : 'Route started');
     return true;
   } catch {
     toast('Routing failed');
     return false;
   } finally {
+    // 🔒 NAV-LOCK begin act-carnav-inflight-release — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     _navStartInFlight = false;
+    // 🔒 NAV-LOCK end act-carnav-inflight-release
   }
 }
 
 export async function endCarNav(): Promise<void> {
+  // 🔒 NAV-LOCK begin act-endnav-bank-stop — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   if (!getCarState().navigating) { toast('No active route'); return; }
   // BANK THE DRIVE FIRST (Codex review 2026-09-09). On a STANDALONE head-unit drive the phone
   // map is not mounted, so the map's own End recorder never runs and this teardown simply
@@ -343,6 +352,7 @@ export async function endCarNav(): Promise<void> {
     await require('../navNotification').recordColdDriveOnEnd();
   } catch {}
   try { await stopNavBanner(); } catch {} // also clears CAR_NAV_KEY (owner: navNotification)
+  // 🔒 NAV-LOCK end act-endnav-bank-stop
   // Ending a route must also clean the template stack: Jeff's 8/19 drive ended with
   // the stranded search keyboard STILL covering the map because nothing here popped
   // it. iOS-only — Android's dismiss path pops to the AA nav template by id, and on
@@ -352,6 +362,7 @@ export async function endCarNav(): Promise<void> {
     _searchPushed = false;
     try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
   }
+  // 🔒 NAV-LOCK begin act-endnav-clear-state — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   setCarState({
     navigating: false,
     routePolyline: '',
@@ -368,6 +379,7 @@ export async function endCarNav(): Promise<void> {
     routeCongestion: undefined,
     routes: [],
   });
+  // 🔒 NAV-LOCK end act-endnav-clear-state
   toast('Route ended');
 }
 
@@ -791,6 +803,7 @@ function armSearchAutoDismiss(): void {
       _movingTicks = 0;
     });
   } catch {}
+  // 🔒 NAV-LOCK begin act-search-motion-dismiss — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   subscribeCarState((st) => {
     // OWNERSHIP or VISIBILITY — either says the template is (or may be) on the stack.
     // Ownership alone was the 8/19 trap: a wrong release left _searchPushed=false while
@@ -813,6 +826,7 @@ function armSearchAutoDismiss(): void {
       _movingTicks = 0;
     }
   });
+  // 🔒 NAV-LOCK end act-search-motion-dismiss
 }
 // Which list the search template is currently showing. onItemSelect gets only an
 // INDEX, so without this the driver tapping "Home" would open whatever Places result
@@ -899,6 +913,7 @@ function getSearchTemplate(): any | null {
       // ordering ends correct within one stop/go cycle.
       onDidAppear: () => { _searchPresented = true; _searchPushed = true; _movingTicks = 0; },
       onDidDisappear: () => {
+        // 🔒 NAV-LOCK begin act-search-hide-release — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         _searchPresented = false;
         _movingTicks = 0;
         // Best-guess release for a genuine stationary back-out — safe to be wrong
@@ -906,6 +921,7 @@ function getSearchTemplate(): any | null {
         try {
           if ((getCarState().speedMs || 0) <= _SEARCH_POP_SPEED_MS) _searchPushed = false;
         } catch { _searchPushed = false; }
+        // 🔒 NAV-LOCK end act-search-hide-release
       },
     });
   } catch {
@@ -1289,6 +1305,7 @@ export function handleCarMapButton(id: string, src = "?"): void {
     void toggleCarComms().then((msg) => { if (msg) toast(msg); });
     return;
   }
+  // 🔒 NAV-LOCK begin act-view-2d-when-idle — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   if (id === 'car-view') {
     // Pure VIEW toggle — routing, the route line and guidance are all untouched.
     // 8/18 rule: 3D exists only while ROUTING. Idle press pins 2D instead of
@@ -1302,6 +1319,7 @@ export function handleCarMapButton(id: string, src = "?"): void {
     toast(twoD ? '2D view' : '3D view');
     return;
   }
+  // 🔒 NAV-LOCK end act-view-2d-when-idle
   if (id === 'car-crew') { emitCarGesture({ kind: 'crewFit' }); return; }
   if (id === 'car-compass') { emitCarGesture({ kind: 'compass' }); return; }
   // One zoom level per tap — CarMapView applies it through the same applyZoomNow the
@@ -1314,8 +1332,10 @@ export function handleCarMapButton(id: string, src = "?"): void {
   // CAR_USER_ZOOM_BIAS_LIMIT (4 levels) is unchanged, so the range is the same — there
   // are simply more steps inside it, and each one now LANDS immediately (zoomSnapRef)
   // instead of crawling behind the slow automatic-framing filter.
+  // 🔒 NAV-LOCK begin act-zoom-step — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   if (id === 'car-zoom-in') { emitCarGesture({ kind: 'zoomStep', delta: 0.5 }); return; }
   if (id === 'car-zoom-out') { emitCarGesture({ kind: 'zoomStep', delta: -0.5 }); return; }
+  // 🔒 NAV-LOCK end act-zoom-step
   // Stale-template tolerance: an older cached template can still deliver these.
   if (id === 'car-police') { armPosRing(); void reportPoliceFromCar(); return; }
   if (id === 'car-mic') { emitCarGesture({ kind: 'scoutMic' }); return; }

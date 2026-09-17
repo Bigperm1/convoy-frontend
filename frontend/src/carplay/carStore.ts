@@ -309,6 +309,7 @@ const listeners = new Set<(s: CarState) => void>();
 // NOT replace the content-signature gates upstream, it composes with them. And
 // `state` is still reassigned on a real change, so useCarStore's snapshot semantics
 // are untouched.
+// 🔒 NAV-LOCK begin store-setcarstate-equality-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function setCarState(patch: Partial<CarState>) {
   let changed = false;
   for (const k in patch) {
@@ -318,6 +319,7 @@ export function setCarState(patch: Partial<CarState>) {
   state = { ...state, ...patch };
   listeners.forEach((l) => l(state));
 }
+// 🔒 NAV-LOCK end store-setcarstate-equality-gate
 
 // ── Self-position write GATE (fixes the "marker roams after CarPlay connects") ──
 // Once CarPlay connects, selfLat/selfLng is fed by THREE concurrent GPS streams: the
@@ -379,6 +381,7 @@ export function setCarSelfPosition(
   // Build 79 native timer-pump receipt (2026-09-14; ≤1/60 s, only while a CarPlay-screen link is
   // live). Same FIX path on purpose: it must still report if the pump failed and timers are frozen.
   maybeLogTimerPump(now);
+  // 🔒 NAV-LOCK begin store-selfpos-source-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const rank = SELF_SOURCE_RANK[source];
   const cur = lastSelfPos;
   // dt < 0 = the wall clock stepped backward (NTP / manual set); treat as stale so a clock
@@ -398,6 +401,7 @@ export function setCarSelfPosition(
   const ts = typeof fixTs === "number" && Number.isFinite(fixTs) ? fixTs : now;
   if (cur && !stale && typeof cur.fixTs === "number" && ts < cur.fixTs) return;
   lastSelfPos = { ts: now, rank, fixTs: ts };
+  // 🔒 NAV-LOCK end store-selfpos-source-gate
   // STICKY HEADING (2026-07-30). iOS reports course = -1 whenever it cannot determine
   // one — at low speed, at a standstill, and on the first fixes after a restart — and
   // both the fg and bg feeds translate that to `null` (navNotification.ts:306, :389).
@@ -407,6 +411,7 @@ export function setCarSelfPosition(
   // a stationary map, and it is worst exactly where course is unavailable: crawling and
   // stopped. The phone's own mirror has always been sticky (`heading ?? cur?.heading`,
   // map.tsx) — this brings the store in line, so every consumer inherits it.
+  // 🔒 NAV-LOCK begin store-selfpos-sticky-heading-write — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const prevHeading = getCarState().heading;
   const nextHeading = (typeof heading === 'number' && Number.isFinite(heading))
     ? heading
@@ -418,6 +423,7 @@ export function setCarSelfPosition(
     selfCourse: typeof course === 'number' && Number.isFinite(course) ? course : null,
     ...(typeof speedMs === 'number' && Number.isFinite(speedMs) && speedMs >= 0 ? { speedMs } : {}),
   });
+  // 🔒 NAV-LOCK end store-selfpos-sticky-heading-write
 }
 
 // ── Peers/hazards write GATE (CarPlay-standalone Wave 1) ────────────────────
@@ -529,6 +535,7 @@ let lastStripWrite: { ts: number; rank: number } | null = null;
  * reintroducing the flicker beside it is not a fix. Callers spread the strip fields into
  * their existing single write when this returns true.
  */
+// 🔒 NAV-LOCK begin store-navstrip-claim — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function claimCarNavStrip(source: NavStripSource): boolean {
   const rank = STRIP_RANK[source];
   const cur = lastStripWrite;
@@ -542,13 +549,16 @@ export function claimCarNavStrip(source: NavStripSource): boolean {
   lastStripWrite = { ts: Date.now(), rank };
   return true;
 }
+// 🔒 NAV-LOCK end store-navstrip-claim
 
 /**
  * Drop strip ownership so the next writer of ANY rank is accepted immediately. Called on
  * nav teardown: without it, the phone's last write would keep the cold engine locked out
  * of the FOLLOWING drive for STRIP_STALE_MS.
  */
+// 🔒 NAV-LOCK begin store-navstrip-release — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function releaseCarNavStrip() { lastStripWrite = null; }
+// 🔒 NAV-LOCK end store-navstrip-release
 
 export function getCarState(): CarState {
   return state;

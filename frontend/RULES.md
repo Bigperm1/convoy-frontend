@@ -115,8 +115,9 @@ to change without my say so."* The lock is `tools/sim-qc/nav_lock_test.mts` + `t
 drive-engine modules are CODE-locked (a content hash, comments/whitespace ignored — a refactor trips it), every
 tunable constant in the mixed files (map.tsx, ConvoyMapbox.tsx, CarMapView.tsx, settings defaults, …) is VALUE-locked
 with any NEW module-scope constant in those files failing too, and the inline drive logic inside those mixed files is
-REGION-locked between `// 🔒 NAV-LOCK begin <id>` / `end <id>` comments (placed only by
-`tools/sim-qc/nav_lock_regions.mts`, which proves each marker is a comment and not JSX text). **If you are about to edit
+REGION-locked between `// 🔒 NAV-LOCK begin <id>` / `end <id>` comments — 221 regions across map.tsx, ConvoyMapbox.tsx,
+CarMapView.tsx, ConvoyCarPlay.tsx, carActions.ts, carStore.ts, locationPrivacy.ts, timerLiveness.ts (placed only by
+`tools/sim-qc/nav_lock_regions.mts`, which proves with two parsers that each marker is a comment and not JSX text). **If you are about to edit
 between two 🔒 markers, or in a hash-locked module, stop and ask first.** It runs with every sim-qc gate before an OTA or a cut.
 A failure is not a bug to fix in the manifest: it is a question for Jeff. With his words in hand:
 `node --experimental-strip-types tools/sim-qc/nav_lock_test.mts --relock "Jeff, <date>: <what he said>"` — never edit

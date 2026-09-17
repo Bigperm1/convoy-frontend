@@ -213,10 +213,12 @@ export const CAR_REF_H = 240;
 // was protecting against nothing here; it is kept only to catch an absurd report.
 export const HUD_SCALE_FLOOR = 0.4;
 // ANDROID AUTO ONLY — CarPlay is the reference surface and always returns 1.
+// 🔒 NAV-LOCK begin car-hud-scale-for — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function hudScaleFor(w: number, h: number): number {
   if (Platform.OS !== 'android' || !(w > 0) || !(h > 0)) return 1;
   return Math.min(1, Math.max(HUD_SCALE_FLOOR, Math.min(w / CAR_REF_W, h / CAR_REF_H)));
 }
+// 🔒 NAV-LOCK end car-hud-scale-for
 
 // ── THE MAP ITSELF NEEDS THE SAME CORRECTION AS THE HUD (2026-07-31) ────────────
 // Say Phin's 07:22 drive, photographed: the map is so tight that a single road label
@@ -253,10 +255,12 @@ export function hudScaleFor(w: number, h: number): number {
 // is by construction (the `w >= CAR_REF_W` guard below), not a flag anyone has to
 // remember to flip. (2026-08-15)
 export const AA_ZOOM_OUT_MAX = 1.5;
+// 🔒 NAV-LOCK begin car-aa-zoom-out-for — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function aaZoomOutFor(w: number): number {
   if (Platform.OS !== 'android' || !(w > 0) || w >= CAR_REF_W) return 0;
   return Math.min(AA_ZOOM_OUT_MAX, Math.log2(CAR_REF_W / w));
 }
+// 🔒 NAV-LOCK end car-aa-zoom-out-for
 
 // ── THE MAP GETS CARPLAY'S CANVAS, NOT THE HEAD UNIT'S (2026-08-15) ────────────
 // ⚠ FIRST, TWO THINGS THAT WERE WRITTEN DOWN WRONG AND ARE NOW VERIFIED IN SOURCE:
@@ -315,6 +319,7 @@ export function aaZoomOutFor(w: number): number {
 // deliberately NOT shipped up front, because it buys insurance we may not need at the
 // price of an extra GPU copy every frame on a surface that runs hot.
 export const MAP_SCALE_FLOOR = 0.5;
+// 🔒 NAV-LOCK begin car-aa-map-scale-for — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function aaMapScaleFor(surfaceWidthDp: number): number {
   if (Platform.OS !== 'android' || !(surfaceWidthDp > 0)) return 1;
   // Never ABOVE 1: a head unit already at/above the reference would otherwise be asked
@@ -323,6 +328,7 @@ export function aaMapScaleFor(surfaceWidthDp: number): number {
   // the residual by itself, which is the right partial answer instead of a cliff.
   return Math.min(1, Math.max(MAP_SCALE_FLOOR, surfaceWidthDp / CAR_REF_W));
 }
+// 🔒 NAV-LOCK end car-aa-map-scale-for
 // Cache miss on a cold bg JS context can leave mapMode undefined, so the car needs SOME
 // fallback rather than a bare default style.
 //
@@ -439,6 +445,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // to 0 on its own. That transition is why the applyZoomNow effect keyed on mapW is NOT
   // dead weight and must stay: a head unit that connects while the car is PARKED arms no
   // ease, so without it the corrected framing would wait for the driver to pull away.
+  // 🔒 NAV-LOCK begin car-aa-map-scale-layout — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const mapScale = aaMapScaleFor(surfaceW);
   const mapStyle: any = useMemo(
     () => (mapScale >= 1 || !(surfaceW > 0) || !(surfaceH > 0)
@@ -454,6 +461,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         }),
     [mapScale, surfaceW, surfaceH],
   );
+  // 🔒 NAV-LOCK end car-aa-map-scale-layout
 
   // Frame watchdog state. paintedRef flips on the first real rendered frame;
   // firedRef ensures onGLError fires at most once. The map can never get stuck
@@ -472,6 +480,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // re-render — the cold-start snap effect below + lockReadyRef both re-derive.
   const [painted, setPainted] = useState(false);
 
+  // 🔒 NAV-LOCK begin car-gl-fail-paint-latch — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const fail = (why: string) => {
     if (firedRef.current || paintedRef.current) return;
     firedRef.current = true;
@@ -507,6 +516,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     try { logEventReliable(`carplay-live-paint attempt=${attempt}`); } catch {}
     void measureViewportOnce();
   };
+  // 🔒 NAV-LOCK end car-gl-fail-paint-latch
 
   // ── DOES THE MAP ACTUALLY SEE WHAT WE THINK IT SEES? (2026-08-15) ────────────────
   // Jeff, today: he cannot rely on a tester driving on cue — Say Phin has a family and
@@ -571,6 +581,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     }
   };
 
+  // 🔒 NAV-LOCK begin car-gl-paint-watchdog — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     // Start the watchdog from MOUNT (after the CarPlay handshake), not connect.
     const ms = attempt > 0 ? RETRY_WATCHDOG_MS : PAINT_WATCHDOG_MS;
@@ -590,6 +601,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 🔒 NAV-LOCK end car-gl-paint-watchdog
 
   // Style-load re-assert (the "live map paints but looks FLAT" race): the
   // <StyleImport existing config> below patches the Standard basemap import, but on
@@ -601,7 +613,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // so the very first visible frame is guaranteed pitched at the driver.
   const [styleGen, setStyleGen] = useState(0);
 
+  // 🔒 NAV-LOCK begin car-hasfix — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const hasFix = typeof s.selfLat === 'number' && typeof s.selfLng === 'number';
+  // 🔒 NAV-LOCK end car-hasfix
   // ── FIX-STATE PROBE (2026-07-30) ────────────────────────────────────────────
   // Say Phin: "when I turned off my phone screen the avatar disappeared on the car
   // screen... I wondered if the avatar is there but off the screen." Jeff also sees
@@ -624,6 +638,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       logEvent(`car-fix ${hasFix ? 'GAINED' : 'LOST'} nav=${s.navigating ? 1 : 0} src=${s.carDbg ?? '-'}`);
     } catch {}
   }, [hasFix, s.navigating, s.carDbg]);
+  // 🔒 NAV-LOCK begin car-fix-fallback-preview-multi — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const lat = s.selfLat ?? 0;
   const lng = s.selfLng ?? 0;
   const hdg = s.heading ?? 0;
@@ -633,6 +648,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // the single selected ribbon below (with its trim), exactly as before.
   const previewMulti = !s.navigating && Array.isArray(s.routes) && s.routes.length >= 2;
   const selIdx = s.selectedRouteIndex ?? SELECTED_INDEX;
+  // 🔒 NAV-LOCK end car-fix-fallback-preview-multi
 
   // Base-map style — mirror the phone's useStandard logic so the car matches the
   // driver's chosen look. satellite → SatelliteStreet imagery; everything else →
@@ -668,6 +684,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // Speed-aware zoom for BOTH nav AND cruise — chaseZoom with no turn distance is a pure
   // speed→zoom curve (city tighter, highway wider), so cruise now dynamically zooms in/out
   // with speed too. Pulled back by CAR_ZOOM_OUT so more road reads on the wide screen.
+  // 🔒 NAV-LOCK begin car-follow-zoom-target — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const kmh = kmhFromMs(s.speedMs);
   // aaZoomOut is 0 on CarPlay by construction (see aaZoomOutFor) — this line is
   // byte-identical there. On Android Auto it converts the canvas's inflated dp back
@@ -675,6 +692,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const aaZoomOut = aaZoomOutFor(mapW);
   const followZoom = chaseZoom(kmh, s.navigating ? s.distanceToTurnM : undefined, s.navigating ? s.stepLengthM : undefined,
     s.navigating && ROUNDABOUT_HOLD_ENABLED ? roundaboutHoldDistM(s.stepManeuverKey, s.stepStartLat, s.stepStartLng, s.selfLat, s.selfLng) : undefined) - CAR_ZOOM_OUT - aaZoomOut - (previewMulti ? PREVIEW_ZOOM_OUT : 0);
+  // 🔒 NAV-LOCK end car-follow-zoom-target
   // ── FLAT WHEN NOT ROUTING (2026-07-29, Jeff's call) ─────────────────────────
   // "I want to make the CarPlay flat when not routing, because it uses the high-res
   // PNG images instead of the 3D — the 3D should be for routing."
@@ -703,6 +721,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // the AUTHORED GR Corolla, so a driver whose 3D model is a scan of their own car saw
   // somebody else's car whenever the view was 2D. CLASS keeps the flat sprite; the Ultra
   // car now draws its GLB in both views, matching the phone (ConvoyMapbox.tsx).
+  // 🔒 NAV-LOCK begin car-follow-pitch-target — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const carFlat = view2D && s.selfMarkerType === 'class';
   // 2D forces top-down even while routing — that is the whole point of the view. The
   // speed-driven ZOOM curve above is deliberately left alone: Jeff asked for "speed zoom
@@ -712,6 +731,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     : (s.navigating
         ? Math.min(CAR_PITCH_MAX, chasePitch(kmh) + CAR_PITCH_BONUS)
         : (carFlat ? 0 : CRUISE_PITCH));
+  // 🔒 NAV-LOCK end car-follow-pitch-target
   // Sprite id for the flat car. Registered as a Mapbox image below — the car map had
   // no <Images> at all before this, so the sprite path could not have worked.
   const carFlatImg = 'self_car_flat_' + getVehicleModelKey(s.selfCarColor);
@@ -913,6 +933,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // Multiplying by the SAME hudScale (not a hand-picked number) is what makes the two
   // surfaces the same design: car-to-HUD proportion becomes identical on both.
   // CarPlay is untouched — hudScaleFor returns 1 off Android.
+  // 🔒 NAV-LOCK begin car-selfcar-size-pt — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const uiScale = hudScaleFor(mapW, mapH);
   // Memoised: carModelScale builds a fresh zoom-expression ARRAY, and handing Mapbox a
   // new array every render re-uploads the layer's paint properties each frame.
@@ -941,10 +962,12 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // 09:22 video: the car swelled up to 2× between integers and popped at each crossing.
   // Same sizes the curve gave at z=17, now held at every zoom. OTA-tunable.
   const selfSizePt = (isArrow ? (view2D ? CARPLAY_ARROW_2D_PT : CARPLAY_ARROW_PT) : CARPLAY_CAR_PT) * uiScale;
+  // 🔒 NAV-LOCK end car-selfcar-size-pt
 
   // MANDATORY heading-up — mirror the phone: plain Follow + a HELD heading, NOT
   // FollowWithCourse (which wobbles on raw GPS course and spins when stopped). Holding
   // the last good heading keeps the map heading-up even at a standstill.
+  // 🔒 NAV-LOCK begin car-held-heading-pose-yaw — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const camHdgRef = useRef(hdg);
   if (typeof s.heading === 'number') camHdgRef.current = s.heading;
   const followHeadingDeg = camHdgRef.current;
@@ -964,6 +987,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     startYawRate();
     return () => stopYawRate();
   }, [s.navigating]);
+  // 🔒 NAV-LOCK end car-held-heading-pose-yaw
   // Derived arrival time of the raw pose — the nose clamp's hold counts FIXES, and carStore's
   // real `fixTs` never reaches this surface (see cornerBlend.ts DERIVED FIX CLOCK).
   const carFixClockRef = useRef(newFixClock());
@@ -976,10 +1000,12 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // valid at first render and this seed is set once — it never toggles undefined→set,
   // so there's nothing for @rnmapbox to animate. The lockstep + cold-start snap own
   // every frame after this initial seed.
+  // 🔒 NAV-LOCK begin car-cam-initial-seed — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const initialCamRef = useRef<{ centerCoordinate: [number, number]; zoomLevel: number; pitch: number; heading: number } | null>(null);
   if (initialCamRef.current == null && hasFix) {
     initialCamRef.current = { centerCoordinate: [lng, lat], zoomLevel: followZoom, pitch: followPitch, heading: hdg };
   }
+  // 🔒 NAV-LOCK end car-cam-initial-seed
 
   // LOCKSTEP camera (see SelfCarModel): a cameraRef on THIS car-window map + a per-frame
   // getCam closure. The car is pinned to a fixed screen spot (near bottom-middle) and the
@@ -1016,6 +1042,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const camHdgOverrideRef = useRef<number | undefined>(undefined);
   // Last heading actually drawn, kept live for the compass's direct camera push below.
   const drawHdgRef = useRef(0);
+  // 🔒 NAV-LOCK begin car-cam-northup-lockready — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => { if (s.navigating) setCarNorthUp(false); }, [s.navigating]);
   // getCam() re-derives the override every FRAME (see the comment there); this ref is
   // how the frozen getCam closure reads the live compass-toggle state.
@@ -1023,6 +1050,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   carNorthUpRef.current = carNorthUp;
   camHdgOverrideRef.current = carNorthUp ? 0 : undefined;
   lockReadyRef.current = paintedRef.current && hasFix && Date.now() >= camHoldUntilRef.current;
+  // 🔒 NAV-LOCK end car-cam-northup-lockready
   // ── Phase-2 road-snap (mirror of the phone) ── query the invisible mapbox-streets-v8 road
   // source near the car when NOT route-snapped, snap the DRAWN pose to the nearest road.
   const carMapRef = useRef<any>(null);
@@ -1032,6 +1060,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const carRoadInputsRef = useRef<{ lat: number; lng: number; hdg: number | null; speed: number; active: boolean }>(
     { lat: 0, lng: 0, hdg: null, speed: 0, active: false },
   );
+  // 🔒 NAV-LOCK begin car-roadsnap-query-loop — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     let mounted = true;
     const id = setInterval(async () => {
@@ -1062,6 +1091,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     return () => { mounted = false; clearInterval(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 🔒 NAV-LOCK end car-roadsnap-query-loop
   // Driver pinch-zoom bias (in Mapbox zoom levels), applied ON TOP of the auto
   // follow-zoom. A ref (not state) so the ~60fps lockstep reads the live value
   // each frame with no re-render; zoomBaseRef snapshots it at gesture start
@@ -1095,6 +1125,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const pinchActiveRef = useRef(false);
   // One tap = one zoom level. Mapbox zoom is log2, so 1.0 is exactly 2x — the same step
   // Apple Maps and Google Maps take per double-tap.
+  // 🔒 NAV-LOCK begin car-zoom-bias-clamp — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const ZOOM_TAP_STEP = 1.0;
   // Clamp the BIAS so that followZoom + bias stays inside the visible range. Clamping the
   // bias alone lets it saturate past CAR_ZOOM_MAX, and then the first tap back the other
@@ -1109,6 +1140,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       Math.min(Math.min(CAR_USER_ZOOM_BIAS_LIMIT, CAR_ZOOM_MAX - fz), want),
     );
   };
+  // 🔒 NAV-LOCK end car-zoom-bias-clamp
   // The camera's ACTUAL low-passed zoom, written every frame by SelfCarModel's
   // pushCam. A ref → no renders. The route trim reads it; see trimZoom.
   const camZoomRef = useRef<number | null>(null);
@@ -1141,6 +1173,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // a mount — that is fine here BY CONSTRUCTION, because easedFrac clamps at t<=1,
   // so a starved ticker degrades to the old hold-until-next-fix behaviour and can
   // never run the line past the car.
+  // 🔒 NAV-LOCK begin car-trim-ease-ticker — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (!s.navigating) return;
     const period = TRIM_TICK_MS_PREMIUM;   // always premium (2026-08-14)
@@ -1154,6 +1187,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     }, period);
     return () => clearInterval(id);
   }, [s.navigating]);
+  // 🔒 NAV-LOCK end car-trim-ease-ticker
   // FROZEN-CLOSURE FIX (2026-07-20) — the CarPlay half of the phone's chase-cam bug
   // (see ConvoyMapbox.tsx:1844). SelfCarModel's rAF step() loop captures ONE closure
   // at mount, so it kept calling render-#1's getCam forever. userZoomRef/camHdgRef
@@ -1168,6 +1202,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // is frozen at mount (see the block above), and mapScale changes one render AFTER the
   // first when surfaceW arrives. Reading it off the ref is what keeps the camera anchor
   // correct on that transition instead of stuck on the pre-layout value. (2026-08-15)
+  // 🔒 NAV-LOCK begin car-getcam — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const camInputsRef = useRef({ followZoom, followPitch, mapH, mapW, previewMulti, uiScale, mapScale });
   camInputsRef.current = { followZoom, followPitch, mapH, mapW, previewMulti, uiScale, mapScale };
   const getCam = useRef(() => {
@@ -1277,6 +1312,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       },
     };
   }).current;
+  // 🔒 NAV-LOCK end car-getcam
 
   // COLD-START SNAP (fixes the "map opens on Europe" case). SelfCarModel's own
   // first-fix hard-snap is gated on paint AND fix; if those land in either order
@@ -1285,6 +1321,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // instant snap here the moment BOTH paint and fix are ready (whichever lands
   // second re-runs this). animationMode 'none' = no fly-in; idempotent with
   // SelfCarModel's snap (same pose). Does NOT touch the native commit path.
+  // 🔒 NAV-LOCK begin car-cam-coldstart-snap — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (!painted || !hasFix || !cameraRef.current) return;
     try {
@@ -1300,6 +1337,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [painted, hasFix]);
+  // 🔒 NAV-LOCK end car-cam-coldstart-snap
 
   // Driver pinch-zoom from the CarPlay map (iOS 26). ConvoyCarPlay forwards the
   // CPMapTemplate zoom gesture onto the gesture bus; we translate the pinch scale
@@ -1327,6 +1365,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const zoomSnapRef = useRef(false);
   // Was the crew-overview hold active on the previous frame? (expiry-edge detector)
   const camHoldWasActiveRef = useRef(false);
+  // 🔒 NAV-LOCK begin car-zoom-apply-now — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const applyZoomNow = () => {
     zoomSnapRef.current = true;
     try {
@@ -1355,10 +1394,12 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     if (!painted || mapW <= 0) return;
     applyZoomNow();
   }, [painted, mapW]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // 🔒 NAV-LOCK end car-zoom-apply-now
 
   useEffect(() => {
     return subscribeCarGesture((g: CarGesture) => {
       switch (g.kind) {
+        // 🔒 NAV-LOCK begin car-gesture-zoom-compass — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         case 'zoomBegin':
           pinchActiveRef.current = true;
           zoomBaseRef.current = userZoomRef.current;
@@ -1448,6 +1489,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           setCarNorthUp(nextNorthUp);
           break;
         }
+        // 🔒 NAV-LOCK end car-gesture-zoom-compass
+        // 🔒 NAV-LOCK begin car-gesture-crewfit — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         case 'crewFit': {
           // Frame self + every peer, north-up, and hold the chase cam off for 8s
           // (the lockstep re-grabs automatically when the hold expires — same
@@ -1537,6 +1580,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           } catch {}
           break;
         }
+        // 🔒 NAV-LOCK end car-gesture-crewfit
         // 'zoomEnd': no fling/momentum for now — the pinched zoom simply holds.
       }
     });
@@ -1607,6 +1651,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // synchronously off the AppState event itself, and the actual camera hold
   // releases it already relies on (zoomHoldUntilRef, camHoldUntilRef) are
   // per-frame TIMESTAMP comparisons in getCam(), never timers.
+  // 🔒 NAV-LOCK begin car-aa-follow-reassert — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const reassertAaFollow = (why: string) => {
     userZoomRef.current = 0;
     zoomBaseRef.current = 0;
@@ -1684,6 +1729,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [painted, hasFix]);
+  // 🔒 NAV-LOCK end car-aa-follow-reassert
 
   // Active route → GeoJSON. Only drawn when the polyline decodes to a real line.
   //
@@ -1697,6 +1743,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // thread saturates and the 60 fps marker lockstep starves: the marker stutters and
   // the HUD janks, which is exactly what was reported. The trim fix was right; doing
   // it on top of an unmemoised decode was not.
+  // 🔒 NAV-LOCK begin car-ribbon-partition — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const routeLL = useMemo(() => decodePolyline(s.routePolyline), [s.routePolyline]);
   const routeCoords = useMemo(() => routeLL.map((p) => [p.longitude, p.latitude]), [routeLL]);
   const hasRoute = routeCoords.length >= 2;
@@ -1717,6 +1764,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     const coords = (Array.isArray(rc) && rc.length >= 2) ? (rc as LngLat[]) : (routeCoords as LngLat[]);
     return buildRibbonPartition(coords, s.routeCongestion as any, carRouteColor);
   }, [s.routeCoordinates, s.routeCongestion, routeCoords, carRouteColor]);
+  // 🔒 NAV-LOCK end car-ribbon-partition
 
   // BUFFER the green line off the car (mirror the phone): project the car onto the
   // route and TRIM the line so it starts a speed-aware lead AHEAD of the nose, with a
@@ -1727,6 +1775,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // route does — never on a trim tick.
   // Speed feeds roadHdg's window (the vendors' max(speed/2, 10 m)) and roadHdgAhead (speed × 1 s
   // along the line) — see projectOntoRoute. It changes with the fix, so no extra recomputes.
+  // 🔒 NAV-LOCK begin car-route-proj-trim-lead — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const routeProj = useMemo(
     () => ((s.navigating && hasFix && hasRoute) ? projectOntoRoute(lat, lng, routeLL, null, null, null, s.speedMs || 0) : null),
     [s.navigating, hasFix, hasRoute, lat, lng, routeLL, s.speedMs],
@@ -1787,12 +1836,14 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // carries uiScale — so the cut lands on the nose at every canvas size, car and arrow skins alike.
   const designLeadM = routeTrimLeadM(trimZoom, lat, trimPitch, 0, 0, noseLeadDp(selfSizePt)) * mapScale;
   const trimLeadM = leadShiftedByLift(designLeadM, selfLiftM, trimZoom, lat, trimPitch, mapH);
+  // 🔒 NAV-LOCK end car-route-proj-trim-lead
   // TRIM RIDES THE MARKER'S EASE — see the matching block in ConvoyMapbox.tsx for the
   // full reasoning. The trim was anchored to the NEWEST fix while the marker eases
   // toward it, so the gap sawtoothed by one whole step per fix (~15dp of 76.6 at
   // 60 km/h). An anchor offset cannot fix that — only interpolating between fixes can
   // — so the line start now runs the same linear ease, over the same measured gap, on
   // the same clock as the car.
+  // 🔒 NAV-LOCK begin car-ribbon-cut-ease-anchor — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const routeKey = s.routePolyline ?? null;
   const fm = fixEaseRef.current;
   if (routeProj && (!fm || fm.key !== routeKey || fm.cur !== routeProj.frac)) {
@@ -1834,6 +1885,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     : (_carCutBaseM != null ? _carCutBaseM + trimLeadM : null);
   const ribbonCutQ = quantiseM(ribbonCutM, ribbonStepM(trimZoom, lat, mapScale));
   const ribbonFadeQ = Math.round((routeTrimFadeM(trimZoom, lat, trimPitch) * mapScale) / 2) * 2;
+  // 🔒 NAV-LOCK end car-ribbon-cut-ease-anchor
   // Snap the car to the line + lock its heading to the route bearing when on-route (≤60 m),
   // matching the phone — stops the low-speed position drift + heading spin. Steer the
   // camera by the SAME bearing (getCam reads camHdgRef live) so the map doesn't rotate
@@ -1841,6 +1893,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // Distance snap + heading gate (mirror the phone). Uses RAW s.heading for the gate (NOT
   // camHdgRef, which is set to the route bearing when snapped → would be circular). Reroute
   // detection lives on the phone off raw GPS, so this display-only un-snap can't affect it.
+  // 🔒 NAV-LOCK begin car-selfcar-route-snap-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const _carDistSnap = routeProj != null && routeProj.distM <= 60;
   const _carTravelHdg = typeof s.heading === 'number' ? s.heading : null;
   let _carHdgOk = true;
@@ -1852,6 +1905,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   }
   carSnapHdgOkRef.current = _carDistSnap ? _carHdgOk : true;
   const carSnapped = _carDistSnap && _carHdgOk;
+  // 🔒 NAV-LOCK end car-selfcar-route-snap-gate
   const _gateWhy = !routeProj ? "noproj" : !_carDistSnap ? "dist" : _hd == null ? "slow" : _carHdgOk ? "ok" : "hdg";
   // RIBBON-TRIM RECEIPT (car surface) — same fields as the phone's, every 15 s in nav.
   if (s.navigating && routeProj && ribbonPartition && ribbonCutM != null && _carCutBaseM != null) {
@@ -1867,6 +1921,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // NAV-ONLY, mirroring the phone exactly — in free drive the car marker draws RAW GPS.
   // See the long note at ConvoyMapbox's _roadActive: off-route snapping froze and jumped
   // the marker at every tile-clipped road-fragment boundary, on BOTH surfaces.
+  // 🔒 NAV-LOCK begin car-selfcar-road-snap-draw — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const _carRoadActive = !!s.navigating && !carSnapped && hasFix;
   carRoadInputsRef.current = { lat, lng, hdg: _carTravelHdg, speed: s.speedMs || 0, active: _carRoadActive };
   let carRoadDraw: { lat: number; lng: number } | null = null;
@@ -1881,11 +1936,13 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const carCornerK = cornerBlend(carCornerStRef.current, _carTravelHdg, routeProj?.distM ?? null, s.speedMs || 0, carSnapped);
   const oldDrawLat = carSnapped ? (carCornerK > 0 ? routeProj!.lat + (lat - routeProj!.lat) * carCornerK : routeProj!.lat) : (carRoadDraw ? carRoadDraw.lat : lat);
   const oldDrawLng = carSnapped ? (carCornerK > 0 ? routeProj!.lng + (lng - routeProj!.lng) * carCornerK : routeProj!.lng) : (carRoadDraw ? carRoadDraw.lng : lng);
+  // 🔒 NAV-LOCK end car-selfcar-road-snap-draw
   // ── POSE ESTIMATOR STEP ─────────────────────────────────────────────────────────────────
   // One continuous pose, integrated every render (the 12 Hz trim ticker keeps this component
   // rendering during guidance): the gyro yaw rate about gravity between fixes, each fix folded in
   // by its accuracy and age, the route as a lateral WEIGHT that fades as the car turns. Only during
   // guidance — free drive keeps drawing the raw fix, exactly as before.
+  // 🔒 NAV-LOCK begin car-selfcar-pose-step — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const _nowMs = Date.now();
   // The sensor's CUMULATIVE yaw (fused attitude); the estimator differences it per tick — never a rate sample (2026-09-10 wag).
   const _yawNow = s.navigating ? getYawIntegral() : null;
@@ -1929,6 +1986,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     : hdg;
   // The nose is the INTEGRATED heading, never the polyline tangent (the 124° bisector on King Rd).
   const drawHdg = est && poseRef.current.hdgKnown ? est.hdg : oldDrawHdg;
+  // 🔒 NAV-LOCK end car-selfcar-pose-step
   const _dOld = est ? poseHaversineM(oldDrawLat, oldDrawLng, est.lat, est.lng) : null;
   if (_poseFixLanded && est) {
     // …or the LINE turns ahead while the road owns the nose: below 3 m/s no course is adopted and gpsTurnDps
@@ -1968,11 +2026,13 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     },
   );
   // Live copy for the compass's IMMEDIATE camera push (the gesture closure is frozen).
+  // 🔒 NAV-LOCK begin car-cam-heading-source — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   drawHdgRef.current = drawHdg;
   // The camera follows the ESTIMATED heading during guidance — it is already continuous, so the
   // map no longer rotates in steps at each polyline vertex; outside guidance the old rule holds.
   if (est && poseRef.current.hdgKnown) camHdgRef.current = est.hdg;
   else if (carSnapped) camHdgRef.current = routeProj!.bearing;
+  // 🔒 NAV-LOCK end car-cam-heading-source
   // MEMOISED (2026-08-16). This was a bare object literal, so every render minted a new
   // FeatureCollection; ShapeSource is a PureComponent, so it missed its shallow-compare
   // every time and re-ran toJSONString — a full JSON.stringify of the route. The 12 Hz
@@ -1984,12 +2044,14 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // cut at the car (src/routeRibbon.ts). Rebuilt only when the quantised cut, the
   // fade or the partition changes; every other tick hits this memo and native sees
   // the same object, so ShapeSource's PureComponent compare short-circuits it.
+  // 🔒 NAV-LOCK begin car-ribbon-features-rebuild — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const routeFC: any = useMemo(() => ({
     type: 'FeatureCollection',
     features: hasRoute
       ? buildRibbonFeatures(ribbonPartition, { cutM: ribbonCutQ, fadeM: ribbonFadeQ, index: SELECTED_INDEX })
       : [],
   }), [hasRoute, ribbonPartition, ribbonCutQ, ribbonFadeQ]);
+  // 🔒 NAV-LOCK end car-ribbon-features-rebuild
 
   // ===== Live congestion gradient (mirror of the phone) =====
   // The selected route's per-segment congestion + geometry are mirrored from the phone
@@ -2028,6 +2090,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     } catch {}
   }, [s.navigating, s.routeCongestion, s.routeCoordinates, s.routePolyline]);
 
+  // 🔒 NAV-LOCK begin car-preview-cong-gradient — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const carCongGradient = useMemo(() => {
     const coords = s.routeCoordinates;
     const cong = s.routeCongestion as any;
@@ -2046,10 +2109,12 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       ? [{ type: 'Feature', properties: { index: SELECTED_INDEX }, geometry: { type: 'LineString', coordinates: s.routeCoordinates } }]
       : [],
   }), [carCongGradient, s.routeCoordinates]);
+  // 🔒 NAV-LOCK end car-preview-cong-gradient
 
   // Multi-route PREVIEW geometry → one feature per display route, carrying its precomputed
   // per-kind core `color` + casing `edge` (AI = black core, user-color edge) so a single
   // data-driven layer pair paints all three. lineSortKey floats the SELECTED route on top.
+  // 🔒 NAV-LOCK begin car-preview-routes-fc — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const previewFC: any = {
     type: 'FeatureCollection',
     features: previewMulti
@@ -2063,6 +2128,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           .filter(Boolean)
       : [],
   };
+  // 🔒 NAV-LOCK end car-preview-routes-fc
 
   return (
     <MapView
@@ -2085,6 +2151,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       logoEnabled={false}
       attributionEnabled={false}
       onCameraChanged={(state: any) => {
+        // 🔒 NAV-LOCK begin car-selfcar-scale-refresh — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         noteMapIdle('car', false);   // tiles may be loading again; an absence of roads is unknown until idle
         const z = state?.properties?.zoom;
         if (typeof z !== 'number' || !Number.isFinite(z)) return;
@@ -2098,6 +2165,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         selfRefreshAt.current = nowC;
         lastRefreshZoomRef.current = z;
         selfRefreshRef.current?.();
+        // 🔒 NAV-LOCK end car-selfcar-scale-refresh
         // Bounded receipt (≤1 per 30 s, only on a ≥0.5 zoom move): proves the refresh fired
         // at a route start in the field — Rodrigo's next drive is the verdict.
         if (prev != null && Math.abs(z - prev) >= 0.5 && nowC - scaleRefreshLogAt.current > 30000) {
@@ -2148,6 +2216,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         fail('maploaderr');
       }) as unknown as () => void)}
       onDidFinishLoadingStyle={() => {
+        // 🔒 NAV-LOCK begin car-cam-style-load-seed — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         markPainted();
         // Re-apply the StyleImport config now that the style (and its basemap
         // import) actually exists — kills the flat/unlit first paint (see the
@@ -2166,6 +2235,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             } as any);
           } catch {}
         }
+        // 🔒 NAV-LOCK end car-cam-style-load-seed
       }}
     >
       {/* Standard basemap with the phone's light preset (3D buildings on). Only
@@ -2187,11 +2257,13 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
 
       {/* Road-snap source (Phase 2) — invisible mapbox-streets-v8 roads, queried by the
           road-snap interval above. Zero visual footprint (opacity 0), same as the phone. */}
+      {/* 🔒 NAV-LOCK begin car-jsx-road-query-layers — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts) */}
       <VectorSource id={ROAD_SRC_ID} url="mapbox://mapbox.mapbox-streets-v8">
         <LineLayer id="car-road-query" sourceLayerID="road" style={{ lineOpacity: 0, lineWidth: 1 } as any} />
         {/* Invisible BUILDING layer (2026-09-10): the self-lift rule reads the footprints (a parkade's roof). */}
         <FillLayer id="car-bld-query" sourceLayerID="building" style={{ fillOpacity: 0 } as any} />
       </VectorSource>
+      {/* 🔒 NAV-LOCK end car-jsx-road-query-layers */}
 
       {/* LOCKSTEP camera — NO followUserLocation. SelfCarModel drives this camera
           imperatively (cameraRef.setCamera) on the SAME rAF tick that moves the 3D car,
@@ -2206,6 +2278,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           seed is a valid location from frame 1 and never toggles undefined→set — @rnmapbox
           has nothing to fly in. followUserLocation stays off; the lockstep + cold-start snap
           own every frame after this seed (animationMode 'none' = instant, no interpolation). */}
+      {/* 🔒 NAV-LOCK begin car-jsx-camera — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts) */}
       <Camera
         ref={cameraRef}
         defaultSettings={initialCamRef.current ?? undefined}
@@ -2213,6 +2286,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         animationMode="none"
         animationDuration={0}
       />
+      {/* 🔒 NAV-LOCK end car-jsx-camera */}
 
       {/* Register the self 3D model for the chosen marker: the arrow GLB, or the
           per-color car. key={carModelId} remounts <Models> when the id flips. */}
@@ -2231,6 +2305,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           the eased point to its own <CustomLocationProvider> AND the car ModelLayer,
           so the follow camera and the 3D car glide in lockstep instead of teleporting
           per tick. Requires <Models/> above (model registration) — keep it. */}
+      {/* 🔒 NAV-LOCK begin car-jsx-selfcar-model — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts) */}
       {hasFix && (
         <SelfCarModel
           // Tags this mount's frames as the CAR surface in the heat probe's per-instance
@@ -2276,6 +2351,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           spriteSize={carFlat ? vehiclePngScale(s.selfCarColor) : 1}
         />
       )}
+      {/* 🔒 NAV-LOCK end car-jsx-selfcar-model */}
 
       {/* Routes. PREVIEW (not navigating, 2+ options): all display routes (Best/Scenic/AI)
           drawn together per-kind via ONE data-driven casing+core pair — the SELECTED route
@@ -2285,6 +2361,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       {previewMulti ? (
         // key=: see the note on the nav branch below. The two branches must NEVER be
         // reconciled into one another — a distinct key forces a clean unmount/mount.
+        // 🔒 NAV-LOCK begin car-jsx-preview-route-layers — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         <ShapeSource key="car-routes-preview" id="car-routes-preview" shape={previewFC}>
           <LineLayer
             id="car-preview-casing"
@@ -2309,6 +2386,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             }}
           />
         </ShapeSource>
+        // 🔒 NAV-LOCK end car-jsx-preview-route-layers
       ) : hasRoute ? (
         // ── key= IS LOAD-BEARING — IT IS WHAT KEEPS THE CONGESTION CORE ON TOP ────
         // d888154 made car-cong-core the LAST child of this source (phone parity) so
@@ -2339,6 +2417,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         // showRoutes never flips at 'Go' — so its five layers are only ever added
         // together, in order). The phone needs no key because it has no branch; the car
         // needs one because it does.
+        // 🔒 NAV-LOCK begin car-jsx-nav-ribbon-layers — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         <ShapeSource key="car-route" id="car-route" shape={routeFC}>
           <LineLayer
             id="car-route-alts"
@@ -2376,6 +2455,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             style={{ lineColor: ['get', 'color'] as any, lineOpacity: ['get', 'alpha'] as any, lineWidth: 10, lineCap: 'butt', lineJoin: 'round', lineEmissiveStrength: 1 }}
           />
         </ShapeSource>
+        // 🔒 NAV-LOCK end car-jsx-nav-ribbon-layers
       ) : null}
 
       {/* PREVIEW-only congestion source. The NAV congestion core now lives inside the
@@ -2383,6 +2463,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           source remains solely for the multi-route PREVIEW branch, which has no
           per-route congestion layer of its own. Gated off during nav so the two can
           never both paint. */}
+      {/* 🔒 NAV-LOCK begin car-jsx-preview-congestion — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts) */}
       {carCongGradient && previewMulti && (
         <ShapeSource id="car-congestion" shape={carCongFC} lineMetrics>
           <LineLayer
@@ -2392,6 +2473,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           />
         </ShapeSource>
       )}
+      {/* 🔒 NAV-LOCK end car-jsx-preview-congestion */}
 
       {/* Waypoint pins: every stop, numbered, plus the destination — the same list the
           phone draws, per the "CarPlay matches the phone" rule.

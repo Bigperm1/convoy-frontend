@@ -372,10 +372,12 @@ function scaleCurveForPoints(targetPt: number, modelLenUnits: number): any {
 // camera zoom with this function) — the same per-tick path the nose heading rides (`rot`).
 // Data-driven values re-evaluate on every source update, so the size is exact at any zoom
 // and no layer `style` is ever rewritten (the 0x8BADF00D rule). Real latitude, not CAL_LAT.
+// 🔒 NAV-LOCK begin mbx-selfcar-scale-per-tick — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function modelScaleForPoints(targetPt: number, modelLenUnits: number, zoom: number, latDeg: number): number {
   const mpp = (78271.517 * Math.cos((latDeg * Math.PI) / 180)) / Math.pow(2, zoom);
   return (targetPt * mpp) / modelLenUnits;
 }
+// 🔒 NAV-LOCK end mbx-selfcar-scale-per-tick
 // Stable reference: a fresh array literal per render would be a "content change" to the
 // layer style in RN's prop diff — the exact main-thread RMW the per-tick rule forbids.
 const SELF_SCALE_EXPR: any = ["get", "scl"];
@@ -714,10 +716,12 @@ const CAM_GLIDE: GlideParams = { zoomSlewPerS: CAM_ZOOM_SLEW_PER_S, zoomDeadband
 // line start and the drawn car advance in step and the gap between them is constant.
 // Overshoot is clamped (t<=1) rather than extrapolated: a late fix should hold the
 // line still, never run it past the car.
+// 🔒 NAV-LOCK begin mbx-ribbon-trim-ease — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function easedFrac(f: { prev: number; cur: number; at: number; gap: number }, now: number): number {
   const t = Math.max(0, Math.min(1, (now - f.at) / Math.max(1, f.gap)));
   return f.prev + (f.cur - f.prev) * t;
 }
+// 🔒 NAV-LOCK end mbx-ribbon-trim-ease
 // How often the trim ease is resampled. 12Hz premium / 8Hz eco leaves a residual
 // sawtooth of one tick's travel — at 60 km/h that is ~1.4m (1.3dp) premium against
 // the ~15dp it replaces, i.e. below the perceptual floor — while costing a fraction
@@ -831,6 +835,7 @@ export function contrastingRouteColor(hex: string): string {
 export type RouteKind = "best" | "scenic" | "ai" | "alt" | "offer";
 // Which slot a route occupies. An explicit `kind` (set by the AI-memory subsystem, P3)
 // wins; otherwise positional — fastest=Best(0), first alternate=Scenic(1), the rest=alt.
+// 🔒 NAV-LOCK begin mbx-route-kind-colours — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function routeKindFor(i: number, r: any): RouteKind {
   return (r?.kind as RouteKind) || (i === 0 ? "best" : i === 1 ? "scenic" : "alt");
 }
@@ -843,9 +848,12 @@ export function routeColorsFor(kind: RouteKind, routeColor: string): { color: st
   const edge = kind === "ai" ? routeColor : color;
   return { color, edge };
 }
+// 🔒 NAV-LOCK end mbx-route-kind-colours
 
 function lerp(a: number, b: number, t: number) { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; }
+// 🔒 NAV-LOCK begin mbx-speed-kmh-input — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function kmhFromMs(s: number | undefined | null) { return typeof s === "number" && Number.isFinite(s) && s >= 0 ? s * 3.6 : 0; }
+// 🔒 NAV-LOCK end mbx-speed-kmh-input
 // ── SPEED → CHASE ZOOM + CORNER ZOOM — moved to src/chaseZoom.ts (2026-09-14) ──────────────
 // CHASE_ZOOM_STOPS, chaseZoomForSpeed and chaseZoom live there now, so
 // tools/sim-qc/chase_zoom_test.mts can import them; chaseZoom is re-exported at the top of this
@@ -985,6 +993,7 @@ export function projectOntoRoute(
   travelHdg?: number | null,
   roadSpeedMs?: number | null,
 ): { frac: number; lat: number; lng: number; distM: number; totalM: number; bearing: number; bearingSmooth: number; roadHdg: number; roadHdgAhead: number } | null {
+  // 🔒 NAV-LOCK begin mbx-route-project-a — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   if (!coords || coords.length < 2) return null;
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -1074,8 +1083,10 @@ export function projectOntoRoute(
   }
   if (total <= 0) return null;
   acc = total;
+  // 🔒 NAV-LOCK end mbx-route-project-a
   // bearing of the route AT the projected point (compass degrees, 0..360). Lets the car
   // point ALONG the line instead of spinning with jittery low-speed GPS heading.
+  // 🔒 NAV-LOCK begin mbx-route-project-b — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const bearing = (Math.atan2(bestDx, bestDy) * 180 / Math.PI + 360) % 360;
   // ── bearingSmooth (2026-09-03, Jeff: "the nose of the car does not follow the corner") ──
   // `bearing` is the direction of ONE polyline segment, so the nose turns in a step at every
@@ -1138,6 +1149,7 @@ export function projectOntoRoute(
   const roadHdg = chordAt(bestArc);
   const roadHdgAhead = v > 0 ? chordAt(Math.min(total, bestArc + v * 1.0)) : roadHdg;
   return { frac: bestArc / acc, lat: invLat(bestY), lng: invLng(bestX), distM: Math.sqrt(bestD2), totalM: acc, bearing, bearingSmooth, roadHdg, roadHdgAhead };
+  // 🔒 NAV-LOCK end mbx-route-project-b
 }
 
 // ── NOSE LEAD-IN (2026-09-03, Jeff: "both A and B, mostly A") — STAGED OFF ─────────────
@@ -1154,16 +1166,19 @@ export const NOSE_LEAD_IN_ENABLED = true;   // ON 2026-09-03 (drive 2) — Jeff:
 export const CAM_HEADING_LAG_MS = 700;
 export const CAM_HEADING_MAX_LEAD_DEG = 25;
 /** The heading the drawn nose should use for a snapped car. */
+// 🔒 NAV-LOCK begin mbx-nose-bearing-pick — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function noseBearing(p: { bearing: number; bearingSmooth?: number } | null | undefined): number {
   if (!p) return 0;
   return NOSE_LEAD_IN_ENABLED && typeof p.bearingSmooth === "number" ? p.bearingSmooth : p.bearing;
 }
+// 🔒 NAV-LOCK end mbx-nose-bearing-pick
 
 // Initial compass bearing (0..360) of a decoded route polyline — from its start toward the
 // first point ~ROUTE_START_BEARING_M ahead, so a tiny/noisy first segment doesn't skew it.
 // Used to orient the heading-up camera "route-ahead" when guidance starts from a standstill
 // (no GPS course at 0 mph). Equirectangular meters are plenty accurate over this short span.
 const ROUTE_START_BEARING_M = 30;
+// 🔒 NAV-LOCK begin mbx-route-start-bearing — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function routeInitialBearing(line: { latitude: number; longitude: number }[]): number | null {
   if (!line || line.length < 2) return null;
   const a = line[0];
@@ -1181,6 +1196,7 @@ export function routeInitialBearing(line: { latitude: number; longitude: number 
   if (east === 0 && north === 0) return null;
   return ((Math.atan2(east, north) * 180) / Math.PI + 360) % 360;
 }
+// 🔒 NAV-LOCK end mbx-route-start-bearing
 
 type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer; status?: "live" | "parked"; cls?: string; clsPri?: string; clsSec?: string; arrow?: boolean; arrPri?: string; arrSec?: string; scanId?: string };
 type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
@@ -1343,6 +1359,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // the cap, accept the newest fix. Real parked scatter rarely sustains 3 straight
   // mutually-disagreeing fixes, and a wrongly-held marker unfreezes within ~3s.
   const scatterRejects = useRef(0);
+  // 🔒 NAV-LOCK begin mbx-selfcar-clock-seeds — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const lastFixAt = useRef(0);
   const fixGap = useRef(1000);
   /** the TARGET clock (see SELF_DEADBAND_FAST_TARGET_MS): when this pose last arrived, and the last few intervals. */
@@ -1356,6 +1373,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const lastBgTickAt = useRef(0);  // wall-clock of the last bgTick that ACTUALLY advanced (setInterval liveness)
   const resumeSnapUntil = useRef(0); // snap-track (don't ease) until this wall-clock after foreground
   const wasBackgrounded = useRef(false); // true once the app actually hit 'background' since last 'active'
+  // 🔒 NAV-LOCK end mbx-selfcar-clock-seeds
   // Low-passed chase zoom/pitch — glide toward the live speed target instead of
   // snapping (see CAM_SMOOTH_TAU_MS). null until the first frame seeds them.
   const camZoom = useRef<number | null>(null);
@@ -1377,11 +1395,13 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const camProbeZoom = useRef(-99);
   const camProbePitch = useRef(-99);
   const [, setTick] = useState(0);
+  // 🔒 NAV-LOCK begin mbx-selfcar-refresh-hook — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (!refreshRef) return;
     refreshRef.current = () => { noteTick(); setTick((n) => (n + 1) & 0xffff); };
     return () => { refreshRef.current = null; };
   }, [refreshRef]);
+  // 🔒 NAV-LOCK end mbx-selfcar-refresh-hook
   // ── THE LIFT RIDES THE FEATURE, AND ONLY OFF THE ROAD (2026-09-10) ───────────────────
   // See src/selfLiftRule.ts for the rule and the why. Once a second, while the car is slow enough
   // that the map is worth asking, the surface reads the rendered features around the car (a road
@@ -1398,6 +1418,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const liftCache = useRef<{ lat: number; lng: number; at: number; ev: RoadEvidence; complete: boolean } | null>(null);
   const liftAnimTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const liftGen = useRef(0);   // bumped on every (re)start and on cleanup: an in-flight query from an old life is dropped
+  // 🔒 NAV-LOCK begin mbx-selfcar-lift-query — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const offRoadLiftM = modelId.startsWith(ARROW_MODEL_ID) ? SELF_ARROW_LIFT_M : SELF_MODEL_LIFT_M;
   useEffect(() => { setSelfOffRoadLiftM(offRoadLiftM); }, [offRoadLiftM]);
   useEffect(() => {
@@ -1495,15 +1516,19 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       clearSelfLiftSurface(surface);
     };
   }, [sprite, probeRole, mapRef]);
+  // 🔒 NAV-LOCK end mbx-selfcar-lift-query
   // Last pose actually DRAWN (see the sub-pixel skip in the rAF step).
   const lastDrawnRef = useRef<{ lat: number; lng: number; heading: number } | null>(null);
   const lastFrameRef = useRef(0); // wall-clock of the last RENDERED ease frame (eco fps cap)
 
   // Shortest signed angular delta a→b in degrees (−180…180].
+  // 🔒 NAV-LOCK begin mbx-selfcar-angdelta — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const angDelta = (a: number, b: number) => ((((b - a) % 360) + 540) % 360) - 180;
+  // 🔒 NAV-LOCK end mbx-selfcar-angdelta
   // GLIDE STILL OWED? (2026-09-15, src/camGlide.ts). True while the camera's zoom/pitch/nose lead-in
   // has not reached what pushCam is gliding toward. The parked branches below keep pushing the camera
   // at the CURRENT drawn pose while this holds, so a parked pose ease no longer freezes the glide.
+  // 🔒 NAV-LOCK begin mbx-cam-glide-pending — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const camGlidePending = (): boolean => {
     if (!CAM_GLIDE_PUMP_ENABLED) return false;   // ship switch, src/camGlide.ts
     if (!cameraRef?.current || !getCam || !(readyRef?.current)) return false;
@@ -1516,6 +1541,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       zoomGoal: camZoomGoal.current ?? camZoom.current, pitchGoal: camPitchGoal.current ?? camPitch.current,
     }, c.zoomLevel, c.pitch, CAM_GLIDE, hdgLag);
   };
+  // 🔒 NAV-LOCK end mbx-cam-glide-pending
 
   // Pin the camera to the eased pose with ZERO native easing. animationMode:'none' →
   // mapboxMap.setCamera(to:) (instant state-set, no second interpolator), so camera-
@@ -1524,6 +1550,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // ready surface (the CarPlay blank-with-bounds hazard). No-op unless wired.
   const pushCam = (la: number, ln: number, hdg?: number, snap = false) => {
     // Drawn pose out-param FIRST — the cut needs it even when the camera is not ours to push.
+    // 🔒 NAV-LOCK begin mbx-pushcam-glide-noselead — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     if (drawPosOutRef) drawPosOutRef.current = { lat: la, lng: ln };
     if (!cameraRef?.current || !getCam || !(readyRef?.current)) return;
     // Counted AFTER the bail, so this measures camera pushes that actually cross the
@@ -1582,6 +1609,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       }
       camHeading = camHdgLag.current;
     }
+    // 🔒 NAV-LOCK end mbx-pushcam-glide-noselead
     // CAM-PROBE (2026-09-02, Olaf: "the avatar is resizing itself from small to big and
     // flashing between those"). Written believing the car's on-screen size was a pure
     // function of the camera; 2026-09-03 showed it was not — a zoom-curve modelScale is
@@ -1597,6 +1625,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         logEvent(`cam-probe surf=${probeRole} z=${camZoom.current.toFixed(2)} zg=${Number(camZoomGoal.current ?? camZoom.current).toFixed(2)} zt=${Number(c.zoomLevel).toFixed(2)} p=${camPitch.current.toFixed(1)} pt=${Number(c.pitch).toFixed(1)} spd=${Math.round((speedRef.current ?? 0) * 3.6)} hdg=${typeof carHdg === 'number' ? Math.round(carHdg) : '?'} ch=${typeof camHeading === 'number' ? Math.round(camHeading) : '?'} snap=${snap || userZoomed ? 1 : 0}`);
       } catch {}
     }
+    // 🔒 NAV-LOCK begin mbx-pushcam-setcamera — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     try {
       cameraRef.current.setCamera({
         centerCoordinate: [ln, la],
@@ -1610,6 +1639,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         animationMode: 'none',
       });
     } catch {}
+    // 🔒 NAV-LOCK end mbx-pushcam-setcamera
     // CAM-APPLY RECEIPT (2026-09-03): ask the map where it ACTUALLY is, ≤1 poll / 2 s, async.
     // Jeff's 09:22 roundabout: pushes were issued the whole time (heat-probe cam == tick) yet
     // the map sat still ~12 s while the car walked across it. This row tells a native
@@ -1640,6 +1670,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // to each ~1 Hz GPS fix. Deliberately does NOT set `a.stepped` or clear rafDead —
   // those are how the fix handler / step() detect the display waking (only a real
   // rAF tick flips them), so the timer path stays latched until the screen returns.
+  // 🔒 NAV-LOCK begin mbx-selfcar-bgtick — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const bgTick = () => {
     // ── THE SCREEN-OFF JITTER BUG LIVED HERE (fixed 2026-07-30) ────────────────
     // This stamp says ONE thing: "the background timer is alive". It therefore has to
@@ -1700,6 +1731,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const stopBgTimer = () => {
     if (bgTimer.current != null) { clearInterval(bgTimer.current); bgTimer.current = null; }
   };
+  // 🔒 NAV-LOCK end mbx-selfcar-bgtick
 
   // ALWAYS-ON watchdog for the CAR instances: the ticker runs for the whole life of
   // the surface and no-ops behind the 150 ms heartbeat while rAF is alive.
@@ -1719,6 +1751,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // this ticker — their display can sleep while the head unit keeps drawing, which is
   // the whole hand-off. A phone's display and its marker sleep together, so there has
   // never been anything to hand off to.
+  // 🔒 NAV-LOCK begin mbx-car-frame-pump — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (!carFramePump) return;
     startBgTimer();
@@ -1782,6 +1815,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 🔒 NAV-LOCK end mbx-car-frame-pump
 
   // ── PUMP GUARD (2026-08-29) ──────────────────────────────────────────────────
   // Schedules the next frame, falling back to a TIMER when the callbacks are arriving
@@ -1817,6 +1851,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // healthy display this branch is unreachable and the ease math, the draw gate, the
   // pushCam call and their ordering are byte-identical. It only changes WHAT SCHEDULES
   // the next callback, and only once the pump is already impossible.
+  // 🔒 NAV-LOCK begin mbx-selfcar-pump-guard — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const FAST_PUMP_MS = 4;
   const FAST_PUMP_RUN = 8;   // consecutive impossible gaps before falling back
   const armNextFrame = () => {
@@ -1846,7 +1881,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     raf.current = null;
     rafIsTimer.current = false;
   };
+  // 🔒 NAV-LOCK end mbx-selfcar-pump-guard
 
+  // 🔒 NAV-LOCK begin mbx-selfcar-ease-step — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const step = () => {
     rafDead.current = false; // the loop ticked → the display is awake; smooth easing is live
     lastStepAtRef.current = Date.now(); // heartbeat for the always-on car watchdog below
@@ -1927,8 +1964,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       if (camGlidePending()) armNextFrame(); else raf.current = null;
     }
   };
+  // 🔒 NAV-LOCK end mbx-selfcar-ease-step
 
   useEffect(() => {
+    // 🔒 NAV-LOCK begin mbx-selfcar-target-cadence — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     const now = Date.now();
     // ── TARGET CADENCE (2026-09-15) ─────────────────────────────────────────────
     // Stamped FIRST, above every bail, so a hard snap / park / resume keeps the intervals continuous — and on its
@@ -1968,7 +2007,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       if (gap > 80) fixGap.current = gap < 150 ? 150 : Math.max(300, Math.min(1600, gap));
     }
     lastFixAt.current = now;
+    // 🔒 NAV-LOCK end mbx-selfcar-target-cadence
 
+    // 🔒 NAV-LOCK begin mbx-selfcar-hardsnap — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     const prev = render.current;
     // First fix, or a > ~1km jump (initial fix / recenter / GPS glitch) → snap.
     const jumpDeg = Math.abs(lat - prev.lat) + Math.abs(lng - prev.lng);
@@ -2034,10 +2075,12 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       if (rafStale) raf.current = requestAnimationFrame(step);
       return;
     }
+    // 🔒 NAV-LOCK end mbx-selfcar-hardsnap
     // Jitter dead-band — hold the current pose for a sub-threshold move so stationary GPS
     // noise doesn't ease the marker toward each jittery fix (the idle "roam"). Compared to
     // the HELD pose (prev = render.current), so real movement accumulates past the band and
     // still animates; a pending ease keeps running to its target. Meters via equirectangular.
+    // 🔒 NAV-LOCK begin mbx-selfcar-deadband-scatter — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     const dLatM = (lat - prev.lat) * 111320;
     const dLngM = (lng - prev.lng) * 111320 * Math.cos(prev.lat * Math.PI / 180);
     // Speed-scaled dead-band: a wide band when stopped (absorb parked jitter →
@@ -2085,8 +2128,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       lastRawFix.current = { lat, lng };
       scatterRejects.current = 0;
     }
+    // 🔒 NAV-LOCK end mbx-selfcar-deadband-scatter
     // Ease from the current drawn pose to the new fix over ~the fix interval
     // (compressed a touch so the car keeps pace instead of trailing the camera).
+    // 🔒 NAV-LOCK begin mbx-selfcar-ease-arm — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     anim.current = {
       fromLat: prev.lat, fromLng: prev.lng, fromHdg: prev.heading,
       toLat: lat, toLng: lng, toHdg: prev.heading + angDelta(prev.heading, heading),
@@ -2148,12 +2193,14 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     } else if (raf.current == null) {
       raf.current = requestAnimationFrame(step);
     }
+    // 🔒 NAV-LOCK end mbx-selfcar-ease-arm
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lat, lng, heading]);
   // WAKE A PARKED LOOP when the camera TARGET moves with no new pose (2026-09-15, Codex review): a car held at
   // a light whose zoom target changes (speed decaying to 0, a roundabout hold releasing) had nothing to
   // schedule a frame, because the effect above only runs on a pose change. Runs after every render; the two
   // cheap checks short-circuit while an ease or a frame is already in flight.
+  // 🔒 NAV-LOCK begin mbx-selfcar-wake-resume-snap — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (raf.current != null || anim.current) return;
     if (camGlidePending()) armNextFrame();
@@ -2187,7 +2234,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     });
     return () => sub.remove();
   }, []);
+  // 🔒 NAV-LOCK end mbx-selfcar-wake-resume-snap
 
+  // 🔒 NAV-LOCK begin mbx-selfcar-pertick-size — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const r = render.current;
   // PER-TICK SIZE — see modelScaleForPoints. Applied camera zoom when the lockstep camera
   // runs (camZoom), else the caller's target zoom, else the nav default. Rounded to 1e-3 so a
@@ -2204,6 +2253,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     : (getCam ? getCam().zoomLevel : 17);
   const perTickScale = perTick ? Math.round(modelScaleForPoints(sizePt!, lenUnits!, perTickZoom, r.lat) * 1000) / 1000 : 0;
   const perTickLift = Math.round(liftRef.current * 100) / 100;
+  // 🔒 NAV-LOCK end mbx-selfcar-pertick-size
+  // 🔒 NAV-LOCK begin mbx-selfcar-source-layers — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   return (
     <>
     {/* Feed the SMOOTH interpolated position to Mapbox's native user-location so
@@ -2308,6 +2359,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     </ShapeSource>
     </>
   );
+  // 🔒 NAV-LOCK end mbx-selfcar-source-layers
 }
 
 // ===== Top-down "Class" sprite (placeholder art) =====
@@ -2800,6 +2852,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const poseRef = useRef<PoseState>(poseStart());
   const poseFixTsRef = useRef(0);
   const poseSeededRef = useRef(false);
+  // 🔒 NAV-LOCK begin mbx-pose-yaw-session — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => { void ensureYawSignLoaded(); }, []);
   useEffect(() => {
     if (!navigationActive) return;
@@ -2807,6 +2860,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     startYawRate();
     return () => stopYawRate();
   }, [navigationActive]);
+  // 🔒 NAV-LOCK end mbx-pose-yaw-session
   // Derived arrival time of the raw pose — cornerNose's hold counts FIXES, and neither
   // UserLocation nor CarPoint carries a fix timestamp (see cornerBlend.ts DERIVED FIX CLOCK).
   const fixClockRef = useRef(newFixClock());
@@ -2832,6 +2886,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const roadInputsRef = useRef<{ lat: number; lng: number; hdg: number | null; speed: number; active: boolean }>(
     { lat: 0, lng: 0, hdg: null, speed: 0, active: false },
   );
+  // 🔒 NAV-LOCK begin mbx-idle-roadsnap-poll — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     let mounted = true;
     const id = setInterval(async () => {
@@ -2876,6 +2931,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     return () => { mounted = false; clearInterval(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 🔒 NAV-LOCK end mbx-idle-roadsnap-poll
   // ── Auto-boat-on-water (Garage toggle, default ON) ──
   // Poll the streets-v8 WATER polygons (same shared VectorSource as the road
   // snap, via an invisible FillLayer that forces the layer to load) and flip the
@@ -2976,6 +3032,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // native follow fly-in, which heading-up does not use), and (2) an opaque cover sits over the
   // map until the FIRST lockstep push has landed, then fades out — so the wrong pose is never
   // seen. Safety: the cover lifts on its own after 1 s no matter what.
+  // 🔒 NAV-LOCK begin mbx-warm-mount-cover — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const warmMountRef = useRef(!!navigationActive && mapView === "heading_up");
   const warmingRef = useRef(warmMountRef.current);
   const [warming, setWarming] = useState(warmMountRef.current);
@@ -2990,6 +3047,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     const t = setTimeout(endWarm, 1000);
     return () => clearTimeout(t);
   }, [endWarm]);
+  // 🔒 NAV-LOCK end mbx-warm-mount-cover
   const [dbgCamHdg, setDbgCamHdg] = useState(0);
   // Live camera zoom, surfaced in the debug strip so the car-size curve can be
   // tuned against actual zoom values (read "too small at zoom X" instead of guessing).
@@ -3004,6 +3062,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // True the moment we have ANY GPS fix. Kept as a STABLE boolean so the arm
   // effect below runs EXACTLY ONCE (on the first fix) and is not re-run on every
   // subsequent GPS tick.
+  // 🔒 NAV-LOCK begin mbx-cold-lock-timer — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const hasFirstFix = !!(user && typeof user.lat === "number" && typeof user.lng === "number");
   useEffect(() => {
     if (coldLockArmedRef.current || !hasFirstFix) return;
@@ -3017,12 +3076,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     const t = setTimeout(() => setColdLockDone(true), warmMountRef.current ? 250 : 1200);
     return () => clearTimeout(t);
   }, [hasFirstFix]);
+  // 🔒 NAV-LOCK end mbx-cold-lock-timer
   // Throttle clock for persisting the live location (see the effect below).
   const lastLocPersistRef = useRef(0);
 
   // North-reset: when the parent bumps resetNorthSignal (Compass FAB tap),
   // animate the camera back to north-up. Skip the initial mount so we don't
   // fight the follow/chase camera at startup.
+  // 🔒 NAV-LOCK begin mbx-compass-north-reset — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const didMountNorthRef = useRef(false);
   useEffect(() => {
     if (!didMountNorthRef.current) { didMountNorthRef.current = true; return; }
@@ -3031,6 +3092,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetNorthSignal]);
+  // 🔒 NAV-LOCK end mbx-compass-north-reset
 
   // Fit-all-crew: frame self + every peer in a north-up overview. The parent drops
   // follow BEFORE bumping the signal (so the chase cam doesn't re-grab), which also
@@ -3110,8 +3172,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Map bearing the camera is using right now (heading-up while following /
   // navigating, else north). CarMarker subtracts this so every car rides
   // nose-forward up the rotated road.
+  // 🔒 NAV-LOCK begin mbx-self-map-heading-derive — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const selfHeadingDeg = typeof user?.heading === "number" && Number.isFinite(user.heading) ? user.heading : 0;
   const mapHeadingDeg = mapView === "heading_up" && (navigationActive || followUser) ? selfHeadingDeg : 0;
+  // 🔒 NAV-LOCK end mbx-self-map-heading-derive
 
   // Initial camera target for first paint. Falls back to the last-known location
   // (persisted) so a cold start opens framed on the driver instead of flying in
@@ -3124,6 +3188,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // alternate → an auto-contrasting hue. AI = a learned habitual route (tagged
   // kind:"ai" by map.tsx in P3) → BLACK core with the user color on the EDGES. Extra
   // alternates (index >= 2) are NOT drawn — we only ever show these three.
+  // 🔒 NAV-LOCK begin mbx-route-draw-set-colors — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const routeKindOf = routeKindFor;
   const coreColorOf = (k: RouteKind): string => routeColorsFor(k, routeColor).color;
   const edgeColorOf = (k: RouteKind): string => routeColorsFor(k, routeColor).edge;
@@ -3149,6 +3214,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       .filter(Boolean),
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [routes, routeColor]);
+  // 🔒 NAV-LOCK end mbx-route-draw-set-colors
 
   // Tap an alternate route line → select it (same as tapping its ETA pill).
   // useCallback is load-bearing, not tidiness (2026-08-16): this is handed to the
@@ -3185,6 +3251,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // immediately faces the way you're about to drive; once the car is moving, the smoothed-GPS
   // path below takes over. Skipped when we already have a reliable moving course (auto-start at
   // ≥5 km/h keeps real GPS). User pick 2026-07-11: orient to direction-of-travel.
+  // 🔒 NAV-LOCK begin mbx-nav-start-orient — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const navOrientedRef = useRef(false);
   useEffect(() => {
     if (!navigationActive) { navOrientedRef.current = false; return; }
@@ -3195,6 +3262,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     const b = routeInitialBearing(decodePolyline(routes?.[selectedRouteIndex]?.polyline));
     if (b != null) { camHeadingRef.current = b; navOrientedRef.current = true; }
   }, [navigationActive, userSpeedMs, routes, selectedRouteIndex]);
+  // 🔒 NAV-LOCK end mbx-nav-start-orient
 
   // Heading-up bearing — driven by US, not Mapbox's native FollowWithCourse.
   // FollowWithCourse rotates to raw GPS course every frame, so its noise made the
@@ -3204,6 +3272,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // parent's BearingTracker), low-pass smoothed at the GPS rate. Below
   // COURSE_OFF_KMH we FREEZE it (stop updating) so a stopped car holds its last
   // heading instead of spinning on junk course. North-up feeds no bearing → north.
+  // 🔒 NAV-LOCK begin mbx-cam-heading-smooth — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   {
     const spd = userSpeedMs;
     const spdKnown = typeof spd === "number" && Number.isFinite(spd) && spd >= 0;
@@ -3223,6 +3292,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // gesture-rotated bearing and silently override the imperative heading:0 reset — the
   // "compass recenters but never flips north" bug. Heading-up keeps the smoothed bearing.
   const followHeadingDeg = headingUp ? (camHeadingRef.current ?? undefined) : 0;
+  // 🔒 NAV-LOCK end mbx-cam-heading-smooth
 
   // RAW (unrounded) chase zoom target for the imperative lockstep — SelfCarModel's
   // pushCam low-passes toward it, so a continuous float reads smoothest.
@@ -3237,6 +3307,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // returns CHASE_ZOOM_CITY for anything <= CHASE_KMH_CITY (45 km/h). So parked and
   // city framing are bit-identical to before; only above 45 km/h does this differ,
   // which is precisely the band being reported. Turn-tightening stays nav-only.
+  // 🔒 NAV-LOCK begin mbx-chase-zoom-pitch — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const chaseZoomRaw = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX,
     chaseZoom(kmhFromMs(userSpeedMs), navigationActive ? distanceToManeuverM : undefined, navigationActive ? currentStepLenM : undefined,
       navigationActive && ROUNDABOUT_HOLD_ENABLED ? roundaboutHoldDistM(currentStepManeuver, currentStepStart?.lat, currentStepStart?.lng, user?.lat, user?.lng) : undefined) + (zoomOffset || 0),
@@ -3248,6 +3319,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // ZOOM above is deliberately untouched: Jeff asked for "speed zoom features (like 3d
   // zoom) but just zoom in and out not tilt".
   const followPitchDeg = (!flatView && navigationActive && headingUp) ? chasePitch(kmhFromMs(userSpeedMs)) : 0;
+  // 🔒 NAV-LOCK end mbx-chase-zoom-pitch
 
   // Lower-third chase framing — top padding pushes the followed car DOWN the
   // screen so the driver sees more road ahead. Applies ONLY during active
@@ -3262,6 +3334,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Reproduced deterministically with a local probe (nav → teardown) and pinned to
   // this exact prop by the RedBox stack; zero-padding object = same visual result,
   // no native throw.
+  // 🔒 NAV-LOCK begin mbx-follow-pad-lockstep-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const followPadding = navigationActive && headingUp && mapH > 0
     ? { paddingTop: Math.round(mapH * FOLLOW_LOWER_PAD_FRAC), paddingBottom: 0, paddingLeft: 0, paddingRight: 0 }
     : { paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 };
@@ -3282,6 +3355,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // keep their EXISTING camera paths (the imperative fits + native follow) untouched.
   const lockReadyRef = useRef(false);
   lockReadyRef.current = readyRef.current && coldLockDone && followUser && !placesShown && headingUp;
+  // 🔒 NAV-LOCK end mbx-follow-pad-lockstep-gate
 
   // `cam-mode` receipt (2026-09-03). Rodrigo: "my phone compass was changing directions
   // randomly, CarPlay was fine" on a 15-minute drive with CarPlay connected. heat-probe's
@@ -3316,6 +3390,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // (the "stuck zoomed-in, car bounces at speed" report). Updating this ref every
   // render + reading it through getCam() makes the frozen closure see the CURRENT
   // speed's zoom/pitch; pushCam then glides to it. Heading rides the eased pose.
+  // 🔒 NAV-LOCK begin mbx-cam-target-feed — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const camTargetRef = useRef({ zoomLevel: FOLLOW_ZOOM, pitch: 0, heading: 0, padding: { paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 } as any });
   camTargetRef.current = {
     zoomLevel: chaseZoomRaw,
@@ -3324,6 +3399,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     padding: followPadding ?? { paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0 },
   };
   const getCam = () => camTargetRef.current;
+  // 🔒 NAV-LOCK end mbx-cam-target-feed
   // The camera's ACTUAL low-passed zoom, written every frame by SelfCarModel's
   // pushCam. A ref, so it costs no renders — the route trim reads it at render time
   // and gets the zoom the driver is really looking through rather than the noisy
@@ -3345,6 +3421,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // 12Hz re-render loop: navigating only, and inside the interval it self-suppresses
   // both when no ease is in flight (t has reached 1 — parked, or waiting on a late
   // fix) and when the step is too small to move the line a visible amount.
+  // 🔒 NAV-LOCK begin mbx-trim-ticker — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (!navigationActive) return;
     // Always the premium period (Jeff, 2026-08-14 — no eco/premium split).
@@ -3359,6 +3436,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     }, period);
     return () => clearInterval(id);
   }, [navigationActive]);
+  // 🔒 NAV-LOCK end mbx-trim-ticker
 
   // ===== User zoom buttons (+/-) =====
   // While FOLLOWING, the offset rides on followZoomLevel above — Mapbox ignores
@@ -3366,6 +3444,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // there. While NOT following (the driver panned away), apply the same offset
   // imperatively. This effect fires only when the offset CHANGES (a button tap),
   // so it never fights a pinch gesture (a pinch doesn't change zoomOffset).
+  // 🔒 NAV-LOCK begin mbx-zoom-buttons-free — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const zoomOffsetRef = useRef(zoomOffset);
   useEffect(() => {
     const prev = zoomOffsetRef.current;
@@ -3377,10 +3456,12 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, FREE_ZOOM + (zoomOffset || 0)));
     try { cam.setCamera({ zoomLevel: z, animationDuration: 200, animationMode: "easeTo" }); } catch {}
   }, [zoomOffset, followUser, placesShown]);
+  // 🔒 NAV-LOCK end mbx-zoom-buttons-free
 
   // When nav ends while NOT following (the driver had panned away), flatten the
   // tilt / heading back to a calm north-up overview. While following, the native
   // follow props already drop the pitch — no imperative move needed.
+  // 🔒 NAV-LOCK begin mbx-nav-end-flatten — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (navigationActive) return;
     const cam = cameraRef.current;
@@ -3388,12 +3469,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     try { cam.setCamera({ pitch: 0, heading: 0, zoomLevel: FREE_ZOOM, animationDuration: 350, animationMode: "easeTo" }); } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigationActive]);
+  // 🔒 NAV-LOCK end mbx-nav-end-flatten
 
   // ===== Preview: fit the camera to ALL route options =====
   // When routes are computed and we're NOT navigating, frame the whole set of
   // options (Google's route-overview behavior). Fires ONCE per destination
   // (fittedDestRef), and only matters when not actively following — the native
   // follow owns the camera during follow/nav, so this won't fight the chase cam.
+  // 🔒 NAV-LOCK begin mbx-preview-fit-routes — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     const cam = cameraRef.current;
     if (!destination) { fittedDestRef.current = null; return; }
@@ -3423,6 +3506,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routes, destination, navigationActive, followUser]);
+  // 🔒 NAV-LOCK end mbx-preview-fit-routes
 
   // ===== Preview: fit the camera to ALL category-search result pins =====
   // When pins drop (a pill's results), frame every pin (plus the driver) and
@@ -3460,6 +3544,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // at fetch time. Cleared when there's no destination or once navigation starts
   // (during active guidance the chase cam + Google geometry own the screen —
   // unifying that is the later, drive-tested routing swap). Fails soft to null.
+  // 🔒 NAV-LOCK begin mbx-preview-congestion-fetch — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (navigationActive || !destination) { setCongestionRoute(null); return; }
     const oLat = center?.lat ?? user?.lat;
@@ -3481,6 +3566,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     return () => { cancelled = true; ctrl.abort(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [destination?.lat, destination?.lng, navigationActive]);
+  // 🔒 NAV-LOCK end mbx-preview-congestion-fetch
 
   // ===== Build the car list (self + peers) =====
   const cars: CarPoint[] = [];
@@ -3488,6 +3574,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // the presence payload carries, so what you see is what the crew sees. No known spot ->
   // fall back to live: nothing is being broadcast in that case anyway (locationPrivacy
   // returns share:false), so this is a purely local "where am I" and leaks nothing.
+  // 🔒 NAV-LOCK begin mbx-self-pos-parked-live — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const selfPinned = !!selfParked && !!selfParkedAt;
   const selfPos = selfPinned
     ? { lat: selfParkedAt!.lat, lng: selfParkedAt!.lng }
@@ -3500,6 +3587,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       status: selfPinned ? "parked" : "live",
     });
   }
+  // 🔒 NAV-LOCK end mbx-self-pos-parked-live
   const peerList: Peer[] = Array.isArray(peers) ? peers : peers ? Object.values(peers) : [];
   peerList.forEach((p) => {
     if (p && typeof p.lat === "number" && typeof p.lng === "number") {
@@ -3533,6 +3621,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // active it goes 3D: car→3D car GLB, class→3D arrow, arrow→3D arrow. The
   // presence BROADCAST is built from settings (map.tsx), NOT from this, so peers
   // always see the driver's chosen class/car regardless of this local swap.
+  // 🔒 NAV-LOCK begin mbx-self-marker-kind-nav — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const navActive = !!navigationActive;
   // Auto-boat override: while onWater (see the poll above), the marker renders as
   // the BOAT class sprite regardless of the saved appearance (car/arrow/class),
@@ -3549,6 +3638,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   //  • no photo yet           → the tinted silhouette placeholder
   // Image name carries class+paint so changing either re-registers live.
   const selfIsClass = waterBoat || (selfMarkerType === "class" && !navActive);
+  // 🔒 NAV-LOCK end mbx-self-marker-kind-nav
   // ── ULTRA PREMIUM HAS NO SPRITE (Jeff, 2026-08-24) ──────────────────────────
   // "the sprite is only for the classes section the ultra premium will not have a sprite"
   // The 3D tier is the driver's OWN car — from build 74 that is a Tripo scan of it. The
@@ -3631,6 +3721,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const projAtRef = useRef<number | null>(null);
   const projRouteKeyRef = useRef<string>('');
   const projPrevFixRef = useRef<{ lat: number; lng: number } | null>(null);
+  // 🔒 NAV-LOCK begin mbx-route-projection — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const routeProj = useMemo(() => {
     if (!navigationActive || !selfCar) {
       // Clear the window when guidance stops, so a nav restart on the SAME route
@@ -3664,6 +3755,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     projAtRef.current = p ? p.frac * p.totalM : null;
     return p;
   }, [navigationActive, selfCar?.lat, selfCar?.lng, selfCar?.heading, routes, selectedRouteIndex, userSpeedMs]);
+  // 🔒 NAV-LOCK end mbx-route-projection
 
   // Trim end: where the line starts, ahead of the car's nose.
   //
@@ -3687,6 +3779,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // driver is actually looking through. Falls back to the target before the first
   // frame seeds it (and on surfaces with no lockstep camera).
   // The lift rule's strongest slow-speed signal: the projection onto the active route (null = not navigating).
+  // 🔒 NAV-LOCK begin mbx-ribbon-trim-lead-inputs — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => { noteSelfLiftNav(routeProj ? routeProj.distM : null); }, [routeProj]);
   // The cut below is measured from the DRAWN car; when the lift slides while the car stands still nothing
   // else re-renders this owner, so the marker tells it (throttled to 10/s, always on settle).
@@ -3704,6 +3797,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const _selfLiftM = selfLiftDrawnM("phone");   // what THIS surface draws right now (0 on a road)
   // The lead is the marker's NOSE (2026-09-16, src/routeTrim.ts noseLeadDp): half of SELF_MARKER_PT.
   const _trimLeadM = routeTrimLeadM(_trimZoom, selfCar?.lat ?? 0, _trimPitch, _selfLiftM, mapH, noseLeadDp(SELF_MARKER_PT));
+  // 🔒 NAV-LOCK end mbx-ribbon-trim-lead-inputs
   // ── AND WHICH POSITION (2026-07-30) ────────────────────────────────────────
   // Second, independent source of the same complaint, and the bigger one. The trim
   // was anchored to routeProj.frac — the NEWEST fix — while the MARKER eases toward
@@ -3719,6 +3813,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // measured fix gap, driven by a low-rate ticker. Same interpolation, same clock, so
   // the line start and the car advance together and the gap is constant by
   // construction rather than by tuning.
+  // 🔒 NAV-LOCK begin mbx-ribbon-fix-ease — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const _routeKey = routes?.[selectedRouteIndex]?.polyline ?? null;
   const _fm = fixEaseRef.current;
   if (routeProj && (!_fm || _fm.key !== _routeKey || _fm.cur !== routeProj.frac)) {
@@ -3743,6 +3838,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const _fracDrawn = (routeProj && fixEaseRef.current)
     ? easedFrac(fixEaseRef.current, Date.now())
     : (routeProj ? routeProj.frac : 0);
+  // 🔒 NAV-LOCK end mbx-ribbon-fix-ease
   // ── THE CUT (2026-09-01) — geometry, not paint; see src/routeRibbon.ts ─────
   // Until today the behind-car vanish + nose fade were LAYER PROPERTIES (lineTrimOffset,
   // and a congestion gradient re-baked with the gap in its alpha) handed to @rnmapbox
@@ -3756,6 +3852,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Congestion applies only while navigating — preview traffic is the separate
   // convoy-congestion source below, unchanged. Geometry is the congestion-bearing
   // coordinates when present (one level per segment), else the decoded polyline.
+  // 🔒 NAV-LOCK begin mbx-ribbon-partition — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const ribbonPartition = useMemo(() => {
     const sel: any = (routes as any)?.[selectedRouteIndex];
     if (!sel) return null;
@@ -3767,6 +3864,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     return buildRibbonPartition(coords, cong, selColor);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routes, selectedRouteIndex, navigationActive, selColor]);
+  // 🔒 NAV-LOCK end mbx-ribbon-partition
   // Metres along the partition where the line starts: eased car position + the
   // speed-aware lead. Quantised to one screen pixel at this camera so the source is
   // rebuilt only when the start would visibly move; fade rounded to 2 m so a settling
@@ -3781,6 +3879,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // first frames and when the anchor is >80 m off the ribbon (not on this line at all).
   // 2026-09-05: the hint is the LAST anchor on this partition, never the foreign fraction —
   // see anchorCutM in src/routeRibbon.ts for Jeff's 417 m receipts and why.
+  // 🔒 NAV-LOCK begin mbx-ribbon-cut-anchor — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const _anchorPos = drawPosRef.current ?? (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null);
   const _alongAnchor = (routeProj && ribbonPartition && _anchorPos)
     ? anchorCutM(ribbonPartition, _anchorPos.lat, _anchorPos.lng, cutAnchorHintRef.current, ribbonPartition, _fracDrawn * ribbonPartition.totalM)
@@ -3805,11 +3904,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
       ...buildRibbonFeatures(ribbonPartition, { cutM: ribbonCutQ, fadeM: ribbonFadeQ, index: selectedRouteIndex }),
     ],
   }), [routeFC, ribbonPartition, ribbonCutQ, ribbonFadeQ, selectedRouteIndex]);
+  // 🔒 NAV-LOCK end mbx-ribbon-cut-anchor
 
   // Snapped draw POSITION + heading: glue the car to the line within ~60 m of it —
   // further off (wrong turn / pre-reroute) we show the real GPS so you can see you're
   // off-route. SelfCarModel interpolates, so the snap eases in smoothly. (Widened
   // 45 → 60 m so a car a couple lanes off a parallel street still locks to the line.)
+  // 🔒 NAV-LOCK begin mbx-selfcar-route-snap-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const SELF_SNAP_M = 60;
   // Heading gate (Phase 1 road-snap): in ADDITION to the ≤60 m distance test, require the
   // route's local bearing to be within tolerance of the driver's travel heading — so turning
@@ -3866,6 +3967,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   }
   snapHdgOkRef.current = _distSnap ? _hdgOk : true; // reset the latch when not distance-snapped
   const selfSnapped = _distSnap && _hdgOk;
+  // 🔒 NAV-LOCK end mbx-selfcar-route-snap-gate
   const _gateWhy = !navigationActive ? "nonav" : !routeProj ? "noproj" : !_distSnap ? "dist" : _hd == null ? "slow" : _hdgOk ? "ok" : "hdg";
   // Feed the throttled road-snap query with the latest raw pose — only while NOT route-snapped
   // (idle / off-route), so it never runs during normal on-route nav.
@@ -3875,6 +3977,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // whatever fragment was locked — up to the release band away from the real fix — and
   // froze/jumped at every fragment boundary. Jeff: "why cant it just pin point where I
   // am and stick to me? its like its lost." In free drive we now draw RAW GPS.
+  // 🔒 NAV-LOCK begin mbx-selfcar-road-snap-draw — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const _roadActive = navigationActive && !selfSnapped && selfCar != null;
   roadInputsRef.current = {
     lat: selfCar?.lat ?? 0, lng: selfCar?.lng ?? 0,
@@ -3895,6 +3998,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     const _p = projectOntoRoute(selfCar.lat, selfCar.lng, roadSnap.line);
     if (_p && roadProjUsable(_p) && _p.distM <= ROAD_SNAP_RELEASE_M) roadDraw = { lat: _p.lat, lng: _p.lng };
   }
+  // 🔒 NAV-LOCK end mbx-selfcar-road-snap-draw
   // DISPLAY-ONLY draw position: route line (snapped) → nearest road (idle/off-route) → raw GPS.
   // Reroute + /location + presence stay on RAW GPS (see nav.ts); NEVER lift this into `coords`.
   // RIBBON-TRIM RECEIPT (2026-09-03): the numbers behind "the route line is over the car",
@@ -3912,6 +4016,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // CORNER RELEASE (2026-09-03, "the turn into the parking lot was wide"): while the course is
   // actually swinging and the line's corner geometry sits >6 m from the car, draw toward the
   // raw fix (fully raw at 16 m) — see src/cornerBlend.ts. Straights stay glued to the line.
+  // 🔒 NAV-LOCK begin mbx-pose-estimator-step — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const cornerK = cornerBlend(cornerStRef.current, _travelHdg, routeProj?.distM ?? null, userSpeedMs ?? 0, selfSnapped);
   // ── POSE ESTIMATOR STEP (phone) — see CarMapView for the same block on the car surface ────
   const _nowMs = Date.now();
@@ -3942,6 +4047,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     poseFixTsRef.current = 0;
   }
   const est = navigationActive && !selfPinned ? poseOut(poseRef.current) : null;
+  // 🔒 NAV-LOCK end mbx-pose-estimator-step
+  // 🔒 NAV-LOCK begin mbx-selfcar-draw-position — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const oldSelfDraw = selfPinned
     // The parked spot was RECORDED while driving, so it is already on the road. Snapping
     // it again would drag the pin to whatever fragment is nearest the phone's own idea of
@@ -3955,6 +4062,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     ? roadDraw
     : (selfCar ? { lat: selfCar.lat, lng: selfCar.lng } : null);
   const selfDraw = est ? { lat: est.lat, lng: est.lng } : oldSelfDraw;
+  // 🔒 NAV-LOCK end mbx-selfcar-draw-position
   // Heading LOCK — the "car drifting/spinning around" fix. The camera heading is already
   // smoothed + held when stopped (camHeadingRef); the car model was still riding RAW GPS
   // heading, which spins at low speed. When snapped, point the car along the route's
@@ -3974,6 +4082,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // not frames. Feeding it a per-render clock would let one bad fix rotate the nose (the exact
   // [high] finding of the 2026-09-04 Codex pass). UserLocation carries no fix time — see the
   // DERIVED FIX CLOCK note in src/cornerBlend.ts.
+  // 🔒 NAV-LOCK begin mbx-selfcar-heading-lock — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const _selfFixAt = noteFix(fixClockRef.current, selfCar?.lat, selfCar?.lng, selfCar?.heading);
   const oldSelfHeading = selfSnapped
     ? (cornerK >= 0.5 && typeof selfCar?.heading === "number"
@@ -3981,6 +4090,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         : cornerNose(cornerStRef.current, noseBearing(routeProj), selfCar?.heading ?? null, _selfFixAt, userSpeedMs ?? 0, true))
     : (camHeadingRef.current != null ? camHeadingRef.current : (selfCar?.heading ?? 0));
   const selfHeadingLocked = est && poseRef.current.hdgKnown ? est.hdg : oldSelfHeading;
+  // 🔒 NAV-LOCK end mbx-selfcar-heading-lock
   const _dOld = est && oldSelfDraw ? poseHaversineM(oldSelfDraw.lat, oldSelfDraw.lng, est.lat, est.lng) : null;
   if (_poseFixLanded && est && user) {
     // …or the LINE turns ahead while the road owns the nose: below 3 m/s no course is adopted and gpsTurnDps
@@ -4029,13 +4139,16 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     () => (hazards || []).filter((h) => h && Number.isFinite(h.lat) && Number.isFinite(h.lng)),
     [hazards],
   );
+  // 🔒 NAV-LOCK begin mbx-show-routes-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const showRoutes = !!destination && routeFC.features.length > 0;
+  // 🔒 NAV-LOCK end mbx-show-routes-gate
 
   // Speed cameras render ONLY along the SELECTED route (within the corridor), so
   // they don't clutter the rest of the map. No selected route → no camera pins.
   // The OSM fetch is unchanged; this just picks the on-route subset to draw, and
   // the proximity VOICE alert in map.tsx still uses the full set — so no camera
   // warnings are lost, this is purely about decluttering the visual pins.
+  // 🔒 NAV-LOCK begin mbx-route-camera-pins — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const onRouteCameras = useMemo(() => {
     const cams = speedCameras || [];
     if (cams.length === 0) return [];
@@ -4076,6 +4189,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     pick(roadEvents || []);
     return out;
   }, [routeProj, routes, selectedRouteIndex, onRouteCameras, roadEvents]);
+  // 🔒 NAV-LOCK end mbx-route-camera-pins
 
   // ===== Preview congestion — the SELECTED route's OWN data comes FIRST =====
   //
@@ -4100,6 +4214,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   //
   // The fetched route stays as a FALLBACK for the case where the selected route came
   // back with no usable congestion, so preview never silently loses its gradient.
+  // 🔒 NAV-LOCK begin mbx-preview-congestion-source — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const selPreviewCong = useMemo(() => {
     if (navigationActive) return null;
     const sel: any = routes?.[selectedRouteIndex];
@@ -4113,6 +4228,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // Shown whenever we have a congestion route, a destination, and we're not
   // navigating. When on, it REPLACES the solid selected ribbon (one line per route).
   const showCongestion = !!previewCong && !navigationActive && !!destination;
+  // 🔒 NAV-LOCK end mbx-preview-congestion-source
   const congestionFeature: any = useMemo(
     () => previewCong
       ? { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: previewCong.coordinates } }
@@ -4201,6 +4317,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
           if (Array.isArray(c) && typeof c[0] === "number") onMapLongPress?.({ lat: c[1], lng: c[0] });
         }}
         onCameraChanged={(state: any) => {
+          // 🔒 NAV-LOCK begin mbx-camera-changed-gesture-zoom — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
           noteMapIdle("phone", false);   // tiles may be loading again; an absence of roads is unknown until idle
           // gestures.isGestureActive cleanly separates a real finger-pan from our
           // own setCamera moves — no self-moving guard flag needed (unlike the
@@ -4230,6 +4347,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             const nowB = Date.now();
             if (nowB - selfRefreshAt.current >= 100) { selfRefreshAt.current = nowB; selfRefreshRef.current?.(); }
           }
+          // 🔒 NAV-LOCK end mbx-camera-changed-gesture-zoom
         }}
         onMapIdle={() => { selfRefreshRef.current?.(); noteMapIdle("phone", true); }}
       >
@@ -4329,6 +4447,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             the custom images, not the default native dot — which is why scale={0}
             alone never hid it. The GR Corolla MarkerView stays the self-car on top. */}
         <Mapbox.Images images={{ convoyEmptyPuck: EMPTY_PUCK_IMG }} />
+        {/* 🔒 NAV-LOCK begin mbx-jsx-puck-camera — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts) */}
         <LocationPuck
           visible
           topImage="convoyEmptyPuck"
@@ -4375,6 +4494,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               : undefined
           }
         />
+        {/* 🔒 NAV-LOCK end mbx-jsx-puck-camera */}
 
         {/* ===== Routes ===== gray alternates first, then the SELECTED glowing
             green ribbon (green glow under, bright green core on top). All in the
@@ -4385,6 +4505,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             selected casing/core are hidden by filtering them to a non-existent
             index rather than unmounting, since ShapeSource children must always
             be elements (never a boolean). */}
+        {/* 🔒 NAV-LOCK begin mbx-jsx-route-layers — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts) */}
         {showRoutes && (
           <ShapeSource id="convoy-routes" shape={routeDrawFC} onPress={handleRoutePress}>
             {/* Non-selected preview routes (Best / Scenic / AI), dimmed. Each route carries
@@ -4445,12 +4566,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             />
           </ShapeSource>
         )}
+        {/* 🔒 NAV-LOCK end mbx-jsx-route-layers */}
 
         {/* ===== Live traffic-congestion gradient (preview) ===== Mapbox
             Directions driving-traffic, painted as a cased ribbon whose CORE is a
             congestion gradient — blue when clear, warming to yellow / orange /
             red where traffic slows. Replaces the solid blue selected ribbon
             while previewing. `lineMetrics` enables the line-progress gradient. */}
+        {/* 🔒 NAV-LOCK begin mbx-jsx-congestion-layers — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts) */}
         {showCongestion && congestionFeature && (
           <ShapeSource id="convoy-congestion" shape={congestionFeature} lineMetrics>
             <LineLayer
@@ -4465,6 +4588,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             />
           </ShapeSource>
         )}
+        {/* 🔒 NAV-LOCK end mbx-jsx-congestion-layers */}
 
         {/* Destination pin — the Hairpin brand pin (cropped straight from the
             wordmark, so map pins and the logo are literally the same art).
@@ -4584,6 +4708,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             (rotates/tilts with the world), unlike the screen-space PNG MarkerView.
             modelRotation z = world heading + offset. Renders only if ModelLayer is
             present in the running native build — this OTA is the test for that. */}
+        {/* 🔒 NAV-LOCK begin mbx-jsx-selfcar-model — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts) */}
         {selfCar && (
           <SelfCarModel
             lat={(selfDraw ?? selfCar).lat}
@@ -4621,6 +4746,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             readyRef={lockReadyRef}
           />
         )}
+        {/* 🔒 NAV-LOCK end mbx-jsx-selfcar-model */}
 
         {/* Car markers — PEERS only (self is the 3D model above). MarkerViews
             always render above the route LineLayers, and we declare the cars LAST

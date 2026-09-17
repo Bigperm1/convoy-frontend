@@ -12,8 +12,9 @@
 //         // 🔒 NAV-LOCK begin <id> — Jeff's say-so required (tools/sim-qc/nav_lock_test.mts)
 //         …code…
 //         // 🔒 NAV-LOCK end <id>
-//     Removing or renaming a marker fails; so does a marker pair the manifest does not know. ⚠ Markers go at
-//     STATEMENT level only — inside JSX children or a template literal a `//` line is TEXT, not a comment.
+//     (between JSX children the marker is `{/* 🔒 NAV-LOCK begin <id> … */}`). Removing or renaming a marker fails; so
+//     does a marker pair the manifest does not know. ⚠ NEVER type a marker by hand — inside JSX children or a template
+//     literal a `//` line is TEXT, not a comment.
 //     tools/sim-qc/nav_lock_regions.mts places them and proves (TypeScript printer, comments removed) that the
 //     program is byte-identical with and without them.
 //
@@ -95,7 +96,7 @@ export function extractObjField(src: string, obj: string, field: string): { valu
 }
 // Marker-delimited regions: `// … NAV-LOCK begin <id>` … `// … NAV-LOCK end <id>` (the marker lines themselves are
 // not part of the pinned text). A begin without its end is simply absent, so the gate reports the region MISSING.
-export const REGION_MARK = /^\s*\/\/.*\bNAV-LOCK (begin|end) ([A-Za-z0-9_.:-]+)/;
+export const REGION_MARK = /^\s*(?:\/\/|\{\/\*).*\bNAV-LOCK (begin|end) ([A-Za-z0-9_.:-]+)/;
 export function extractRegions(src: string): Map<string, { text: string; line: number; endLine: number }> {
   const out = new Map<string, { text: string; line: number; endLine: number }>();
   const lines = src.split("\n"); const open = new Map<string, number>();

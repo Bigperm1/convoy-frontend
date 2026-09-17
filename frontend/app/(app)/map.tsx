@@ -116,6 +116,7 @@ type RouteInfo = {
   steps: { html: string; distance_text: string; maneuver?: string }[];
 };
 
+// 🔒 NAV-LOCK begin map-maneuver-icon-pick — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 const maneuverIcon = (m?: string, html?: string): any => {
   // Routes API v2 maneuvers are UPPER_SNAKE ("TURN_LEFT", "RAMP_RIGHT", …);
   // legacy/cached data is lower-kebab ("turn-left"). Lowercase so ONE set of
@@ -150,6 +151,7 @@ const maneuverIcon = (m?: string, html?: string): any => {
   if (/\bright\b/.test(h)) return "arrow-forward";
   return "arrow-up";
 };
+// 🔒 NAV-LOCK end map-maneuver-icon-pick
 
 // ---- Foreground-location permission, resolved AT MOST once per launch ----
 // Reads the saved status first and only fires the OS prompt when it's still
@@ -214,7 +216,9 @@ function fmtClock(d: Date): string {
 // ===== Proactive-reroute hazard helpers =====
 // Only these hazard kinds justify suggesting a detour — a police pin doesn't
 // slow you down, so it never triggers a reroute prompt.
+// 🔒 NAV-LOCK begin map-reroute-hazard-kinds — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 const REROUTE_HAZARD_KINDS = new Set(["accident", "road", "traffic"]);
+// 🔒 NAV-LOCK end map-reroute-hazard-kinds
 
 // Spoken phrase fragment: "there's <X> ahead".
 function hazardReason(kind: string): string {
@@ -237,6 +241,7 @@ function hazardTitle(kind: string): string {
 // Nearest reroute-worthy hazard that lies AHEAD on the way to the destination
 // (closer to the destination than we currently are) and within ~3 km. Returns
 // its kind + distance rounded to whole km (min 1), or null if none qualifies.
+// 🔒 NAV-LOCK begin map-reroute-hazard-ahead — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 function nearestHazardAhead(
   origin: { lat: number; lng: number },
   dest: { lat: number; lng: number },
@@ -255,12 +260,14 @@ function nearestHazardAhead(
   if (!best) return null;
   return { kind: best.kind, distKm: Math.max(1, Math.round(best.distM / 1000)) };
 }
+// 🔒 NAV-LOCK end map-reroute-hazard-ahead
 
 // Sample a handful of [lng,lat] waypoints along the part of `coords` (a route's full
 // decoded geometry) that lies AHEAD of `origin`. Feeding these to fetchAiRoute pins a
 // fresh Directions request to YOUR current route, so it returns your route's LIVE
 // traffic-aware remaining time — the thing tbt.etaSeconds (a static proportional
 // estimate) can't tell us. Returns [] when there isn't enough road left to sample.
+// 🔒 NAV-LOCK begin map-route-ahead-via-sample — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 function routeAheadViaPoints(
   coords: [number, number][] | undefined,
   origin: { lat: number; lng: number },
@@ -281,10 +288,12 @@ function routeAheadViaPoints(
   for (let i = 0; i < maxVia; i++) out.push(interior[Math.floor(i * step + step / 2)]);
   return out;
 }
+// 🔒 NAV-LOCK end map-route-ahead-via-sample
 
 // Meters from point p to segment a–b, all [lng,lat]. Local equirectangular projection
 // (accurate at the short distances used here). Used to tell if an alt point still lies
 // ON the current route.
+// 🔒 NAV-LOCK begin map-alt-divergence — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 function distPointToSegM(p: [number, number], a: [number, number], b: [number, number]): number {
   const latRef = ((p[1] + a[1] + b[1]) / 3) * Math.PI / 180;
   const mLat = 111320, mLng = 111320 * Math.cos(latRef);
@@ -346,6 +355,7 @@ function maneuverNear(route: NavRoute | null, lat: number, lng: number): string 
   }
   return bestD <= 250 ? best : null;
 }
+// 🔒 NAV-LOCK end map-alt-divergence
 
 
 // How long the map stays where the driver put it before the chase cam takes back
@@ -562,6 +572,7 @@ export default function MapScreen() {
   // city marks stop 3 as you drive past it on the way to stop 1 — pruning a stop
   // the driver still wants. 60 m: via points snap onto the road, so actually passing
   // one goes through ~0-30 m; urban GPS noise stays under 60.
+  // 🔒 NAV-LOCK begin map-stops-visited-radii — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const visitedStopsRef = useRef<Set<string>>(new Set());
   const stopKey = (st: { lat: number; lng: number }) => `${st.lat.toFixed(5)},${st.lng.toFixed(5)}`;
   const pendingStops = (list: { lat: number; lng: number; label: string }[]) =>
@@ -601,6 +612,7 @@ export default function MapScreen() {
   // the pending stop inside STOP_PILL_M and lets him say "I went, carry on".
   // Same shell as the switch-route offer, by Jeff's call.
   const STOP_PILL_M = 400;
+  // 🔒 NAV-LOCK end map-stops-visited-radii
   const [stopPill, setStopPill] = useState<{ lat: number; lng: number; label: string } | null>(null);
   const stopPillKeyRef = useRef<string | null>(null);
   const dismissedStopPillRef = useRef<string | null>(null);
@@ -615,6 +627,7 @@ export default function MapScreen() {
   // Marking mutates a REF, which cannot re-run the route effect — without this the
   // driver would tap "Arrived" and watch nothing happen until the next off-route trip.
   const [stopsVersion, setStopsVersion] = useState(0);
+  // 🔒 NAV-LOCK begin map-stops-via-snap-record — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const noteViaSnapped = (
     fed: { lat: number; lng: number }[],
     snapped?: ({ lat: number; lng: number } | null)[],
@@ -630,6 +643,7 @@ export default function MapScreen() {
       }
     }
   };
+  // 🔒 NAV-LOCK end map-stops-via-snap-record
   const [stopPickerOpen, setStopPickerOpen] = useState(false);
   // PIN-FIRST ADD STOP (Jeff, 2026-09-03: "I would like the drop a pin first with the option to
   // search"). Tapping Add stop no longer opens the search; it arms this mode — the Drive card
@@ -746,6 +760,7 @@ export default function MapScreen() {
     if (navMode === "turn-by-turn") setSearchVisible(false);
   }, [navMode]);
 
+  // 🔒 NAV-LOCK begin map-nav-autostart — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const navAutoStartedRef = useRef(false);
   // Auto-start arms ONLY after we've seen the car essentially stopped (<=2 km/h)
   // since the destination was set, so picking a recent/saved/search WHILE MOVING
@@ -776,6 +791,7 @@ export default function MapScreen() {
     if (kmh <= 2) autoStartArmedRef.current = true;
     if (autoStartArmedRef.current && kmh >= 5) startNav();
   }, [coords?.speed, destination, route, navMode, sharedRouteMeta]);
+  // 🔒 NAV-LOCK end map-nav-autostart
 
   // ---- Full-screen search wiring ----
   // A picked place behaves exactly like the inline bar's onSelect.
@@ -793,6 +809,7 @@ export default function MapScreen() {
   // Tapping a live friend routes to their current position and, once the route
   // computes, rolls straight into turn-by-turn (Google-Maps "directions to a
   // contact" feel). pendingFriendStartRef bridges the async route fetch.
+  // 🔒 NAV-LOCK begin map-nav-friend-autostart — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const pendingFriendStartRef = useRef(false);
   const onSearchSelectFriend = (m: CarouselMember) => {
     if (typeof m.lat !== "number" || typeof m.lng !== "number") return;
@@ -808,6 +825,7 @@ export default function MapScreen() {
       startNav();
     }
   }, [activeRoute, navMode]);
+  // 🔒 NAV-LOCK end map-nav-friend-autostart
   // The driver's own club, fetched once, so a drive that finishes with no ACTIVE club is
   // still credited to somebody. clubs[0] matches what talk.tsx already auto-activates on
   // the Comms screen, so the two cannot disagree about which club "yours" means.
@@ -863,6 +881,7 @@ export default function MapScreen() {
   // consume it once — on the ping if this screen is already mounted, else on
   // next focus — and set it as our destination. The destination→routes effect
   // then computes OUR own route from OUR location and the Drive preview shows.
+  // 🔒 NAV-LOCK begin map-shared-route-apply — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const applyPendingRoute = useCallback(() => {
     const r = shareInbox.takeRoute();
     if (!r) return;
@@ -874,6 +893,7 @@ export default function MapScreen() {
     setShowSteps(true);
     setSearchVisible(false);
   }, []);
+  // 🔒 NAV-LOCK end map-shared-route-apply
   useEffect(() => shareInbox.subscribe(applyPendingRoute), [applyPendingRoute]);
   useFocusEffect(applyPendingRoute);
 
@@ -1034,7 +1054,9 @@ export default function MapScreen() {
   // ONLY the fix's own course: `coords.heading` is the STICKY display heading (held from earlier fixes) and
   // would reject the real road after a turn whose fix carried no course (Codex 2026-09-10). No course = no
   // direction evidence = the old nearest-way rule, on every feed alike.
+  // 🔒 NAV-LOCK begin map-speed-limit-feed — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const speedLimitKmh = useSpeedLimit(coords?.lat ?? null, coords?.lng ?? null, true, coords?.course ?? null, coords?.speed ?? null);
+  // 🔒 NAV-LOCK end map-speed-limit-feed
 
   // ===== Speed alerts (Nova / Ding / Off) =====
   // Mode from settings: 'nova' speaks a nudge, 'ding' plays a chime, 'off' is silent.
@@ -1051,6 +1073,7 @@ export default function MapScreen() {
   // the ding is a non-voice alert the driver explicitly opted into, so it keeps playing
   // even when Nova's voice is muted. A stopped car (< 5 km/h) is a no-op tick: an
   // episode ends by DRIVING under limit + 5 for 20 s, not by sitting at a light.
+  // 🔒 NAV-LOCK begin map-speed-alert-episode — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const speedEpisodeRef = useRef<SpeedEpisodeState>(newSpeedEpisodeState());
   // A limit that changed less than this ago is not yet evidence for an ALERT (the sign may show it):
   // 2026-09-10 09:01:55, the double ding fired the instant the limit flipped to an overpass road's 50.
@@ -1104,6 +1127,7 @@ export default function MapScreen() {
   // the 20 s below-limit dwell could never complete and the next speeding never alerted
   // (Codex rescue 2026-09-06).
   }, [coords, speedLimitKmh, navMuted, settings.speedUnit, settings.speedAlertMode, settings.novaSpeeding]);
+  // 🔒 NAV-LOCK end map-speed-alert-episode
 
   // Optional Convoy alert sound — chime when a NEW community hazard appears
   const prevHazardIdsRef = useRef<Set<string>>(new Set());
@@ -1145,6 +1169,7 @@ export default function MapScreen() {
   // Mark the NEXT stop visited when the car passes it. Only during turn-by-turn — a
   // preview pan or parking next to tomorrow's first stop must not consume it. Cheap:
   // one haversine per fix against a single stop.
+  // 🔒 NAV-LOCK begin map-stops-visited-mark — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (navMode !== "turn-by-turn" || !coords) { setStopPillIf(null); return; }
     const pending = stops.filter((st) => !visitedStopsRef.current.has(stopKey(st)));
@@ -1228,11 +1253,13 @@ export default function MapScreen() {
       }
     }
   }, [coords, navMode, stops]);
+  // 🔒 NAV-LOCK end map-stops-visited-mark
 
   // Driver says they got there. Same end state as an automatic mark, so the router
   // drops it and continues to the next stop or the destination — plus the replot the
   // ref mutation cannot trigger on its own. `why=manual` keeps it separable in the
   // telemetry from an automatic `why=reached`.
+  // 🔒 NAV-LOCK begin map-stops-manual-arrive — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const lastStopMarkAtRef = useRef(0);
   const markStopArrived = () => {
     // The pill unmounts on the state write, but React batches — two taps in one frame
@@ -1256,6 +1283,7 @@ export default function MapScreen() {
     stopPillKeyRef.current = null;
     setStopPill(null);
   };
+  // 🔒 NAV-LOCK end map-stops-manual-arrive
 
   // ── ROUND TRIP — "kinda like how the airplanes do it" (Jeff, 2026-08-31) ─────
   // "can we have the add stop route sequence kinda like how the airplanes do it… a
@@ -1281,6 +1309,7 @@ export default function MapScreen() {
   // already understands, so every downstream part — via routing, the optimizer's
   // reordering, visited-marking, the car-surface pins, the property arrival — works with
   // no special case for "this is a round trip". Undo is ordinary stop/destination editing.
+  // 🔒 NAV-LOCK begin map-route-round-trip — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const homePlace = useMemo(() => savedPlaces.find((p) => p.kind === "home"), [savedPlaces]);
   const destIsHome = !!(destination && homePlace
     && Math.abs(destination.lat - homePlace.lat) < 1e-4
@@ -1295,6 +1324,7 @@ export default function MapScreen() {
     try { logEvent(`round-trip stops=${stops.length + 1} dest="${wasDest.label}" -> home`); } catch {}
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   };
+  // 🔒 NAV-LOCK end map-route-round-trip
 
   // Dedupe key so Nova announces the route options at most once per destination.
   const announcedRoutesForRef = useRef<string>("");
@@ -1304,11 +1334,13 @@ export default function MapScreen() {
   // can see at-a-glance which polyline is the best pick.
   // Honors avoid-tolls/highways/ferries route preferences from settings.
   useEffect(() => {
+    // 🔒 NAV-LOCK begin map-plot-clear-no-dest — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     const origin = coordsRef.current;
     if (!destination || !origin) {
       setRoutes([]); setSelectedRouteIndex(0); setRoute(null);
       return;
     }
+    // 🔒 NAV-LOCK end map-plot-clear-no-dest
     let cancelled = false;
     (async () => {
       const avoid = {
@@ -1323,6 +1355,7 @@ export default function MapScreen() {
       // uuid) so the accurate ETA and live traffic keep working through stops.
       // Router sees PENDING stops only (see visitedStopsRef). All visited → plain
       // origin→destination, exactly as if the list were empty.
+      // 🔒 NAV-LOCK begin map-plot-via-stops — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
       const routable = pendingStops(stops);
       if (routable.length) {
         const viaRoute = await fetchRouteViaStops(origin, routable, destination, avoid);
@@ -1347,6 +1380,7 @@ export default function MapScreen() {
         // the change completely" feels like from the driver's seat, whatever caused it.
         showInfoToast("Couldn't route through that stop — showing the direct route.");
       }
+      // 🔒 NAV-LOCK end map-plot-via-stops
       // ── DEPART THE WAY THE CAR IS POINTING (2026-07-30) ───────────────────
       // Jeff: "parked at work I start a route and it makes me do a U-turn when I
       // can easily go forward." We were sorting purely by ETA, blind to which way
@@ -1358,6 +1392,7 @@ export default function MapScreen() {
       // never got the same treatment. Compass sample runs CONCURRENTLY with the
       // route fetch so it costs no added latency, and a null facing falls straight
       // through to plain fastest-first — i.e. today's behaviour.
+      // 🔒 NAV-LOCK begin map-plot-depart-facing-pick — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
       const [raw0, facing] = await Promise.all([
         fetchRoutes(origin, destination, avoid),
         getDepartureBearing(origin),   // the parked heading applies only AT the spot the route starts from
@@ -1433,6 +1468,7 @@ export default function MapScreen() {
       if (!results.length && navActiveRef.current) return;
       setRoutes(results);
       setSelectedRouteIndex(0);
+      // 🔒 NAV-LOCK end map-plot-depart-facing-pick
       // ── A REAL SCENIC ROUTE (2026-07-29) ──────────────────────────────────
       // Jeff: "make the scenic on the maps the same as cruise."
       // Until now "Scenic" was only a LABEL: routeKindFor calls index 0 "best" and
@@ -1449,6 +1485,7 @@ export default function MapScreen() {
       // motorway on this trip anyway), or absurdly longer. Motorway-free across a
       // mountain range can mean hours of logging road, which is not a scenic route,
       // it is a mistake — 2.5x the fastest time is the cut-off.
+      // 🔒 NAV-LOCK begin map-plot-scenic-alternate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
       try {
         const scenicRaw = await fetchRoutes(origin, destination, { ...avoid, highways: true });
         if (!cancelled && !navActiveRef.current && scenicRaw.length) {
@@ -1471,6 +1508,7 @@ export default function MapScreen() {
           }
         }
       } catch {}
+      // 🔒 NAV-LOCK end map-plot-scenic-alternate
       const r0 = results[0];
       setRoute(r0 ? {
         distance_text: r0.distance_text,
@@ -1483,6 +1521,7 @@ export default function MapScreen() {
       // stopped/slow so it doesn't talk over the Start greeting on auto-start.
       // …and never mid-drive: this is a PLOT-TIME announcement, and a manual stop mark
       // can now re-run this effect while the driver is already navigating.
+      // 🔒 NAV-LOCK begin map-plot-announce-options — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
       if (results.length >= 2 && !getSettings().novaMuted && !navActiveRef.current) {
         const destKey = `${destination.lat.toFixed(5)},${destination.lng.toFixed(5)}`;
         const slowEnough = ((coordsRef.current?.speed ?? 0) * 3.6) < 5;
@@ -1499,6 +1538,7 @@ export default function MapScreen() {
           try { announce(line); } catch {}
         }
       }
+      // 🔒 NAV-LOCK end map-plot-announce-options
 
       // ===== Pre-designed CRUISE route (Hub P3) =====
       // A consumed cruisePlot pin (below) stashed the via points and set this
@@ -1506,6 +1546,7 @@ export default function MapScreen() {
       // same via-waypoint path the learned-routes feature uses) and append it as
       // the AI slot, auto-selected — so the pre-designed line is what's highlighted
       // and Best/Scenic stay one tap away.
+      // 🔒 NAV-LOCK begin map-plot-cruise-autoselect — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
       try {
         const cv = pendingCruiseViaRef.current;
         if (cv && Math.abs(cv.destLat - destination.lat) < 1e-6 && Math.abs(cv.destLng - destination.lng) < 1e-6) {
@@ -1540,6 +1581,7 @@ export default function MapScreen() {
           }
         }
       } catch {}
+      // 🔒 NAV-LOCK end map-plot-cruise-autoselect
 
       // ===== AI route (P3) — the habitual path to a saved place. =====
       // If this destination is a saved place we've driven to before AND we're starting
@@ -1547,6 +1589,7 @@ export default function MapScreen() {
       // it comes back as a real traffic-aware route, then append it as the AI slot. Async
       // + best-effort: Best/Scenic already showed above; this just adds a 3rd option. Only
       // appended while still previewing (never clobbers an active-nav / rerouted set).
+      // 🔒 NAV-LOCK begin map-plot-ai-route-append — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
       try {
         await ensureSavedPlacesLoaded();
         await ensureAiRoutesLoaded();
@@ -1572,6 +1615,7 @@ export default function MapScreen() {
           }
         }
       } catch {}
+      // 🔒 NAV-LOCK end map-plot-ai-route-append
     })();
     return () => { cancelled = true; };
     // pendingStops deliberately not a dep: it is a stable-by-construction helper over
@@ -1582,9 +1626,11 @@ export default function MapScreen() {
   // When a destination is picked, drop follow-mode so the camera can zoom out to
   // frame all route options (ConvoyMap fits to the polylines). The Recenter FAB
   // re-enables follow when the driver wants to track their car again.
+  // 🔒 NAV-LOCK begin map-dest-drops-follow — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (destination) { setIsFollowing(false); setPlacePins([]); }
   }, [destination]);
+  // 🔒 NAV-LOCK end map-dest-drops-follow
 
   // Mirror RouteInfo whenever the user picks a different alternate
   useEffect(() => {
@@ -1602,6 +1648,7 @@ export default function MapScreen() {
   // greeting in the background so it can play INSTANTLY when the driver taps
   // Start. Once per destination, quiet while muted. Actual playback + parking of
   // the first turn callout happens in startNav -> playPreparedGreeting.
+  // 🔒 NAV-LOCK begin map-greeting-prepare-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (!destination || !activeRoute) return;
     if (navMuted) return;
@@ -1673,6 +1720,7 @@ export default function MapScreen() {
     // `navMode` is a dep so the preview-only gate is honoured on the flip BACK: end a
     // drive, plot a new route, and this must re-run.
   }, [destination, activeRoute, destWeather, navMuted, stops, stopsVersion, navMode]);
+  // 🔒 NAV-LOCK end map-greeting-prepare-gate
 
   // LIVE TRAFFIC while driving. The route's per-segment durations are a snapshot from
   // when it was fetched; on a multi-hour trip that snapshot is stale long before you
@@ -1728,6 +1776,7 @@ export default function MapScreen() {
   }, [navMode, activeRoute?.polyline]);
 
 
+  // 🔒 NAV-LOCK begin map-traffic-refresh-writeback — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useRouteTrafficRefresh(activeRoute, navMode === "turn-by-turn", useCallback((patch) => {
     probeCongestion(patch.congestion, "refresh");
     setRoutes((prev) => {
@@ -1742,11 +1791,13 @@ export default function MapScreen() {
     // cbRef inside the hook always holds the latest callback, so depending on the
     // selected index here is safe and keeps the write pointed at the right route.
   }, [selectedRouteIndex, probeCongestion]));
+  // 🔒 NAV-LOCK end map-traffic-refresh-writeback
 
   // "TAKE IT AGAIN" — the Drives screen hands a recorded trip over and we rebuild it as a
   // live route: same destination, same stops, same order. Read-once (consume) so coming
   // back to the map later can never silently restart an old drive. Runs on focus rather
   // than mount because the map is a TAB and stays mounted the whole session.
+  // 🔒 NAV-LOCK begin map-take-again-replot — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useFocusEffect(useCallback(() => {
     const t = consumeTakeAgain();
     if (!t) return;
@@ -1758,6 +1809,7 @@ export default function MapScreen() {
       setShowSteps(true);
     }
   }, []));
+  // 🔒 NAV-LOCK end map-take-again-replot
 
   // ── SCOUT REORDERS THE STOPS (2026-07-29) ───────────────────────────────────
   // Jeff: "if I plot a stop near the end of the route and then add another that's
@@ -1780,6 +1832,7 @@ export default function MapScreen() {
   // same set therefore does NOT re-trigger this — otherwise setStops would feed itself
   // forever. A genuinely new or removed stop changes the set and earns a fresh pass.
   const optimizedSetRef = useRef<string>("");
+  // 🔒 NAV-LOCK begin map-stops-reorder — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     // Optimize the stops still AHEAD (see visitedStopsRef): adding stop #4 after
     // passing stop #1 must not let the optimizer route back through #1 — the same
@@ -1837,6 +1890,7 @@ export default function MapScreen() {
     return () => { cancelled = true; try { ctrl.abort(); } catch {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stops, destination?.lat, destination?.lng, settings.avoidTolls, settings.avoidHighways, settings.avoidFerries]);
+  // 🔒 NAV-LOCK end map-stops-reorder
 
   // PITSTOP — a stopwatch when the car parks at a gas/food place.
   //
@@ -1892,6 +1946,7 @@ export default function MapScreen() {
   // still says "already written". Same failure on a remount, where the ref is fresh but
   // the module-level store is not. Deriving the key from getCarState() makes the guard
   // true by construction: it compares what is actually on the car surface.
+  // 🔒 NAV-LOCK begin map-car-waypoint-mirror — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const waypointKey = (ws: NonNullable<CarState['waypoints']>) =>
     ws.map((w) => `${w.kind}${w.n ?? ''}:${w.lat.toFixed(5)},${w.lng.toFixed(5)}:${w.wx ?? ''}:${w.temp ?? ''}`).join("|");
   useEffect(() => {
@@ -1919,6 +1974,7 @@ export default function MapScreen() {
     // No navMode / stopsVersion: neither changes what is drawn any more, and both only
     // bought redundant runs that the key gate above threw away.
   }, [stops, destination?.lat, destination?.lng, destWeather]);
+  // 🔒 NAV-LOCK end map-car-waypoint-mirror
 
   // Turn-by-turn engine — speaks instructions, advances steps, computes ETA / distance remaining
   // What Scout SAYS on arrival. Saved name wins, so a destination you searched by address
@@ -1956,6 +2012,7 @@ export default function MapScreen() {
       // (drop destination, route line, step drawer) so reaching the destination
       // ends the route on its own, with no Exit tap. navMode→preview clears the
       // TTS queue but leaves the in-flight arrival clip playing to the end.
+      // 🔒 NAV-LOCK begin map-arrive-autofinish — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
       navAutoStartedRef.current = true;  // stay stopped until a new destination is set
       // Learn the habitual path to this place BEFORE we drop the destination.
       maybeLearnDrive(destination);
@@ -1988,8 +2045,10 @@ export default function MapScreen() {
       setShowSteps(false);
       setNavMode("preview");
       slideStepDrawerDown();
+      // 🔒 NAV-LOCK end map-arrive-autofinish
     },
     onOffRoute: () => {
+      // 🔒 NAV-LOCK begin map-offroute-reroute — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
       if (!coords || !destination) return;
       // The driver deliberately went a different way — recompute silently and let the
       // turn engine re-anchor to the new line (nav.ts) so guidance picks it up at once.
@@ -2049,6 +2108,7 @@ export default function MapScreen() {
           tripBaselineRef.current = { startedAt: Date.now(), plannedSec: ordered[0]?.duration_in_traffic_s ?? ordered[0]?.duration_s ?? (tbtEtaRef.current || 0) };
         }
       });
+      // 🔒 NAV-LOCK end map-offroute-reroute
     },
   });
 
@@ -2073,6 +2133,7 @@ export default function MapScreen() {
   // background fix when the foreground watch has gone quiet. While the phone is awake
   // both are live and the fg watch is the fresher, higher-accuracy source, so it must
   // win; the moment it stops, this takes over seamlessly.
+  // 🔒 NAV-LOCK begin map-bgfix-takeover — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (navMode !== "turn-by-turn") return;
     return subscribeBgFix((f) => {
@@ -2091,6 +2152,7 @@ export default function MapScreen() {
       }));
     });
   }, [navMode]);
+  // 🔒 NAV-LOCK end map-bgfix-takeover
 
   // ===== Lane guidance (Mapbox) — REMOVED 2026-08-13 =====
   // Jeff: "lets completely remove the turn arrow banner from phone and carplay/aa."
@@ -2170,10 +2232,12 @@ export default function MapScreen() {
   // drifted to :4158. A stale pointer here is worse than none — it sends the next
   // reader to unrelated code and they add the hook anyway.
   // Pure identity fix: the array CONTENTS are byte-for-byte what they were.
+  // 🔒 NAV-LOCK begin map-display-routes-offer — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const displayRoutes = useMemo(
     () => (rerouteOffer ? [...routes, { ...(rerouteOffer.route as any), kind: "offer" }] : routes),
     [rerouteOffer, routes],
   );
+  // 🔒 NAV-LOCK end map-display-routes-offer
   // Mirror of the on-screen offer in a ref, so the hands-free voice callback (which
   // resolves seconds later from a stale render closure) reads the CURRENT offer, not a
   // captured one. Kept in sync by showOffer()/clearOffer().
@@ -2181,6 +2245,7 @@ export default function MapScreen() {
   const showOffer = (o: RerouteOffer) => { rerouteOfferRef.current = o; setRerouteOffer(o); };
   const clearOffer = () => { rerouteOfferRef.current = null; setRerouteOffer(null); };
 
+  // 🔒 NAV-LOCK begin map-faster-route-check — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const checkForFasterRoute = useCallback(async () => {
     if (!getSettings().novaMidDrive) return;
     if (rerouteBusyRef.current || rerouteShowingRef.current) return;
@@ -2271,10 +2336,12 @@ export default function MapScreen() {
       rerouteBusyRef.current = false;
     }
   }, []);
+  // 🔒 NAV-LOCK end map-faster-route-check
 
   // Reroute card accept / decline. Mirror the old Alert button handlers exactly:
   // same hush windows + the setRoutes([best]) swap. Plain functions (recreated
   // each render) so they always read the current offer, never a stale one.
+  // 🔒 NAV-LOCK begin map-reroute-answer-hush-cadence — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const acceptReroute = () => {
     const offer = rerouteOfferRef.current; // ref, so the voice path reads the live offer
     rerouteShowingRef.current = false;
@@ -2306,11 +2373,13 @@ export default function MapScreen() {
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navMode]);
+  // 🔒 NAV-LOCK end map-reroute-answer-hush-cadence
 
   // Pop the ARMED reroute the instant the driver is within lane-change notice of the split
   // (the exit/turn where the alt leaves the current route). Speed-aware so the lead time is
   // roughly constant — a fixed distance would warn too early in town / too late on the
   // highway. Runs on every GPS tick (the 60s check only re-arms the candidate).
+  // 🔒 NAV-LOCK begin map-reroute-offer-pop — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (navMode !== "turn-by-turn") return;
     // A live INLINE offer auto-expires once the driver reaches/passes the split
@@ -2370,6 +2439,7 @@ export default function MapScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coords, navMode]);
+  // 🔒 NAV-LOCK end map-reroute-offer-pop
 
   // ===== Convoy health monitor (Scout) =====
   // Two crew-proximity callouts, both read-only over community-scoped presence (so
@@ -2579,6 +2649,7 @@ export default function MapScreen() {
   // turn-by-turn stint? Start happens on the first (mode, route) pairing regardless of
   // which arrives first; stop happens ONLY when navMode leaves turn-by-turn.
   const bannerSessionRef = useRef(false);
+  // 🔒 NAV-LOCK begin map-nav-session-lifecycle — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (navMode !== "turn-by-turn") return;
     // CLEANUP-ONLY BY DESIGN — do not merge this into the route effect below. Its one
@@ -2618,11 +2689,14 @@ export default function MapScreen() {
       }
     }
   }, [navMode, activeRoute, destination?.label]);
+  // 🔒 NAV-LOCK end map-nav-session-lifecycle
+  // 🔒 NAV-LOCK begin map-nav-banner-fg-feed — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (navMode === "turn-by-turn" && coords && !navBgActiveRef.current) {
       updateNavBanner(coords.lat, coords.lng);
     }
   }, [coords, navMode]);
+  // 🔒 NAV-LOCK end map-nav-banner-fg-feed
 
   // ---- Map follow / manual-pan + auto-recenter ----
   // The driver can pan the map freely even while moving or under guidance; after
@@ -2656,6 +2730,7 @@ export default function MapScreen() {
   // keeps arriving with the screen off because background location does. The timer is
   // kept only as a fast path for the ordinary unlocked case; whichever fires first
   // wins, and both are idempotent.
+  // 🔒 NAV-LOCK begin map-pan-hold-recenter — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const panHoldUntilRef = useRef(0);
   const handleUserPan = () => {
     setIsFollowing(false);            // driver took control — stop chasing
@@ -2674,11 +2749,13 @@ export default function MapScreen() {
     clearRecenterTimer();
     setIsFollowing(true);
   };
+  // 🔒 NAV-LOCK end map-pan-hold-recenter
   useEffect(() => () => clearRecenterTimer(), []); // tidy on unmount
   // User map-zoom offset, driven by the +/- buttons on the left. Rides on the
   // follow zoom inside ConvoyMapbox (clamped there too). Negative = wider, positive = closer.
   const [zoomOffset, setZoomOffset] = useState(0);
 
+  // 🔒 NAV-LOCK begin map-start-nav — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const startNav = () => {
     if (!activeRoute) return;
     navAutoStartedRef.current = true;
@@ -2708,10 +2785,12 @@ export default function MapScreen() {
     setShowSteps(false);
     setNavMode("turn-by-turn");
   };
+  // 🔒 NAV-LOCK end map-start-nav
   // AI-route LEARNING: when a trip finishes, if the destination is a saved place AND we
   // actually drove to it (the trace ends near the destination), persist the decimated
   // driven path as the habitual route to that place. Consumes the trace either way so a
   // new trip starts clean. Pass the destination explicitly (onArrive clears it first).
+  // 🔒 NAV-LOCK begin map-learn-drive-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const maybeLearnDrive = (dest?: { lat: number; lng: number } | null) => {
     const d = dest ?? destination;
     const trace = driveTraceRef.current;
@@ -2724,6 +2803,7 @@ export default function MapScreen() {
     if (haversineMeters({ lat: last.lat, lng: last.lng }, { lat: d.lat, lng: d.lng }) > 250) return;
     void recordDrive({ placeId: place.id, trace });
   };
+  // 🔒 NAV-LOCK end map-learn-drive-gate
 
   // ── THE ONE PLACE A DRIVE IS BANKED (2026-09-09) ──────────────────────────────────────
   // It used to be banked ONLY from onArrive. If a drive ended any other way — End on the
@@ -2771,6 +2851,7 @@ export default function MapScreen() {
   // ARRIVED, by hand (Jeff, 2026-09-12). Runs the engine's own arrival — the line is spoken, the
   // once-per-destination guard holds and the drive banks as an ARRIVAL, not an End. Falls back to
   // endNav only if nothing is armed, so the button is never a dead tap.
+  // 🔒 NAV-LOCK begin map-arrived-end-nav — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const arrivedNow = () => {
     try { if (arriveNow()) return; } catch {}
     endNav();
@@ -2794,6 +2875,7 @@ export default function MapScreen() {
     navAutoStartedRef.current = true;  // stay stopped until a new destination is set
     setNavMode("preview");
   };
+  // 🔒 NAV-LOCK end map-arrived-end-nav
 
   // END pressed on the HEAD UNIT — a FULL stop, not the phone's "drop to preview".
   //
@@ -2814,6 +2896,7 @@ export default function MapScreen() {
   // the FIRST render, when activeRoute is null. So End on the head unit reached a recorder
   // that could only ever see a null route and returned without saving. It has to call the
   // CURRENT one through a ref. (Codex review 2026-09-09.)
+  // 🔒 NAV-LOCK begin map-end-nav-from-car — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const endNavRef = useRef(endNav);
   endNavRef.current = endNav;
   const endNavFromCar = useCallback(() => {
@@ -2826,6 +2909,7 @@ export default function MapScreen() {
     setRoute(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 🔒 NAV-LOCK end map-end-nav-from-car
 
   // ---- CarPlay / Android Auto mirror (Phase 1) ----
   // Mirrors the active route + live turn-by-turn state onto the car display.
@@ -2869,6 +2953,7 @@ export default function MapScreen() {
   });
   // Driver tapped "Show map" on the car-list face (see carListMode below). Resets on
   // head-unit detach and on nav end, so every car drive STARTS in list mode.
+  // 🔒 NAV-LOCK begin map-carlist-showmap-reset — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const [carListMapOverride, setCarListMapOverride] = useState(false);
   useEffect(() => {
     if (!carConnected || navMode !== "turn-by-turn") setCarListMapOverride(false);
@@ -2902,6 +2987,7 @@ export default function MapScreen() {
     });
     return () => sub.remove();
   }, [carListMapOverride]);
+  // 🔒 NAV-LOCK end map-carlist-showmap-reset
 
   // HEAT PROBE — one row per 60 s of guidance. Jeff's 2-hour drive on build 73 ended
   // with the phone too hot to charge, and the analysis that followed is arithmetic, not
@@ -2983,6 +3069,7 @@ export default function MapScreen() {
   // it must never re-render the map between the two taps. (Up here with the other
   // hooks — the render body below the no-coords early return can't declare refs.)
   const lastMapTapRef = useRef<{ t: number; lat: number; lng: number; sx?: number; sy?: number } | null>(null);
+  // 🔒 NAV-LOCK begin map-cruise-plot-consume — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     const consume = () => {
       const c = cruisePlot.take();
@@ -2997,6 +3084,7 @@ export default function MapScreen() {
     consume(); // cold start: the push was tapped before this screen mounted
     return un;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // 🔒 NAV-LOCK end map-cruise-plot-consume
 
   // ---- Adopt a car-started navigation session (CarPlay-standalone Wave 3) ----
   // A route can now be STARTED from the head unit (Search on the car's nav bar →
@@ -3008,6 +3096,7 @@ export default function MapScreen() {
   // the nav-banner + turn engines fire off navMode — no startNav(), so the Nova
   // greeting (already played in the car) never replays. stopNavBanner clears the
   // key on any nav end, so a finished/ended drive can't re-adopt.
+  // 🔒 NAV-LOCK begin map-car-nav-adopt — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     const adopt = (dest: { lat: number; lng: number; label?: string }, startedAt?: number) => {
       if (navActiveRef.current) return; // already navigating — never clobber
@@ -3056,6 +3145,7 @@ export default function MapScreen() {
       plannedSec: activeRoute.duration_in_traffic_s ?? activeRoute.duration_s ?? 0,
     };
   }, [navMode, activeRoute]);
+  // 🔒 NAV-LOCK end map-car-nav-adopt
 
   // CarPlay ⇄ "Always" location CTA (CarPlay-standalone). Drive-tested ground truth
   // (2026-07-14): with only "While Using", iOS freezes GPS the moment the screen
@@ -3138,6 +3228,7 @@ export default function MapScreen() {
       ]
     );
   };
+  // 🔒 NAV-LOCK begin map-clear-route — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const clearRoute = () => {
     stopSpeech();
     tripBaselineRef.current = null;
@@ -3162,6 +3253,7 @@ export default function MapScreen() {
     // Also retract the step drawer so it doesn't dangle on a destination-less map.
     slideStepDrawerDown();
   };
+  // 🔒 NAV-LOCK end map-clear-route
 
   // ----- Saved places: long-press the map to save Home / Work -----
   // Long-press anywhere on the map. Home / Work / Custom save the spot; "Add stop"
@@ -3182,6 +3274,7 @@ export default function MapScreen() {
   // NOT gated on turn-by-turn — mid-drive is when you actually need fuel or food.
   const handleMapLongPress = (c: { lat: number; lng: number }) => {
     const buttons: any[] = [];
+    // 🔒 NAV-LOCK begin map-longpress-add-stop — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     if (destination) {
       buttons.push({
         text: "Add stop here",
@@ -3191,6 +3284,7 @@ export default function MapScreen() {
         },
       });
     }
+    // 🔒 NAV-LOCK end map-longpress-add-stop
     buttons.push(
       {
         text: "Home",
@@ -3281,6 +3375,7 @@ export default function MapScreen() {
   // The driver then taps Start to begin turn-by-turn. (Previously this
   // collapsed to the tapped route and jumped straight into navigation, which
   // is why tapping a line never simply "turned it yellow".)
+  // 🔒 NAV-LOCK begin map-select-route-tap — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const handleSelectRoute = (index: number) => {
     // Google-style inline reroute: the offer line is appended AFTER `routes` for
     // display only, so a tap landing past the real list means the driver tapped
@@ -3289,6 +3384,7 @@ export default function MapScreen() {
     if (index < 0 || index >= routes.length) return;
     setSelectedRouteIndex(index);
   };
+  // 🔒 NAV-LOCK end map-select-route-tap
   // Clear the auto-hide timer on unmount so we don't leak.
   useEffect(() => () => {
     if (stepDrawerAutoHideTimer.current) clearTimeout(stepDrawerAutoHideTimer.current);
@@ -3338,6 +3434,7 @@ export default function MapScreen() {
       // 1) Seed INSTANTLY from the location cached on a previous run so the map
       //    mounts near the driver instead of a default (San Francisco) and then
       //    visibly jumping. The intro overlay hides this until a real fix lands.
+      // 🔒 NAV-LOCK begin map-initial-fix-seed — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
       try {
         const raw = await AsyncStorage.getItem(LAST_LOC_KEY);
         if (raw) {
@@ -3376,6 +3473,7 @@ export default function MapScreen() {
       // Last resort: only if we STILL have nothing to show seed San Francisco
       // so the map isn't blank (first launch / denied / no cache / GPS failed).
       setCoords((cur) => cur ?? { lat: 37.7749, lng: -122.4194 });
+      // 🔒 NAV-LOCK end map-initial-fix-seed
       loadPeers();
       // One-time "Always" location upgrade ask (CarPlay-standalone). Delayed a few
       // seconds past mount so it never stacks on the foreground prompt / first paint;
@@ -3394,6 +3492,7 @@ export default function MapScreen() {
   // below (3D buildings, GPS accuracy). Always "premium" on a build without expo-battery
   // (build 62), so this is a no-op until build 63 — the premium path never changes.
   const wasActiveRef = useRef(true);
+  // 🔒 NAV-LOCK begin map-foreground-refix — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     const s = AppState.addEventListener("change", (st) => {
       const active = st === "active";
@@ -3434,6 +3533,7 @@ export default function MapScreen() {
     });
     return () => s.remove();
   }, []);
+  // 🔒 NAV-LOCK end map-foreground-refix
   // Live nav flag the watcher can read WITHOUT re-subscribing on every nav
   // start/stop (re-subscribing mid-drive would blip GPS). Only appActive flips
   // the watcher; nav state is consulted via this ref.
@@ -3486,6 +3586,7 @@ export default function MapScreen() {
         // has its own bg-location task in navNotification.ts. CarPlay-with-screen-off
         // is fed independently by carPlayBootstrap's acquireBgLocation +
         // startForegroundCarFeed → carStore, so the car map tracks without this watcher.)
+        // 🔒 NAV-LOCK begin map-fgwatch-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         if (!appActive && !navActiveRef.current) return;
         // ── THE ONE LOCATION FEED, AND ITS ONE SWITCH ─────────────────────────────
         // Default (liteGps off): BestForNavigation @ 500 ms / 2 m. Measured p50
@@ -3521,11 +3622,13 @@ export default function MapScreen() {
         // nothing like the old `powerMode` dep that re-subscribed on every plug and
         // unplug of the charger.
         const liteGps = settings.liteGps === true;
+        // 🔒 NAV-LOCK end map-fgwatch-gate
         sub = await Location.watchPositionAsync(
           liteGps
             ? { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 8 }
             : { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 2 },
           (pos) => {
+            // 🔒 NAV-LOCK begin map-fgwatch-fix-ingest — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
             const h = pos.coords.heading;
             const heading = typeof h === "number" && h > 0 ? h : undefined;
             // The fix's OWN course, nullable, 0° kept: the pose estimator reads THIS, never the
@@ -3587,6 +3690,7 @@ export default function MapScreen() {
               ts: typeof pos.timestamp === "number" ? pos.timestamp : Date.now(),
               course: rawCourse,
             }));
+            // 🔒 NAV-LOCK end map-fgwatch-fix-ingest
             // Live-avatar publish â push our position to the backend on a ~4s
             // throttle so every other driver's /users/nearby (polled by
             // loadPeers) shows us live. Pure REST â no Supabase Realtime needed.
@@ -3657,6 +3761,7 @@ export default function MapScreen() {
             // useSpeedLimit() hook (Google Roads Speed Limits is a gated, paid
             // endpoint that was disabled on this project). `now` is still used
             // by the border-aware unit auto-detect just below.
+            // 🔒 NAV-LOCK begin map-speed-unit-border-detect — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
             const now = Date.now();
             // Border-aware speed-unit auto-detect.
             //   * Runs ONCE immediately (lastUnitCheckRef===0), then every
@@ -3693,6 +3798,7 @@ export default function MapScreen() {
                   .catch(() => {});
               }
             }
+            // 🔒 NAV-LOCK end map-speed-unit-border-detect
           }
         );
       } catch {}
@@ -3964,6 +4070,7 @@ export default function MapScreen() {
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
       ]);
       if (pos && (pos as any).coords) {
+        // 🔒 NAV-LOCK begin map-refresh-fix-into-coords — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         const lat = (pos as any).coords.latitude;
         const lng = (pos as any).coords.longitude;
         const heading = (pos as any).coords.heading;
@@ -3978,6 +4085,7 @@ export default function MapScreen() {
           ts: typeof (pos as any).timestamp === "number" ? (pos as any).timestamp : Date.now(),
           course: rawCourseHere(heading),   // the fix's OWN course; per-platform 0° rule
         });
+        // 🔒 NAV-LOCK end map-refresh-fix-into-coords
         // 2. Push the new fix to the backend so /users/nearby returns us live — but only
         //    what the avatarMode contract allows. This was ungated too, so a manual
         //    refresh while parked published wherever the driver was standing.
@@ -4152,6 +4260,7 @@ export default function MapScreen() {
   // ~600 m radius so a return trip past it can alert again. Respects the nav
   // mute toggle and the Speed Cameras setting.
   const announcedCamsRef = useRef<Set<string>>(new Set());
+  // 🔒 NAV-LOCK begin map-speedcam-voice-alert — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (!coords || !speedCamerasEnabled || speedCameras.length === 0) return;
     const kmh = (coords.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
@@ -4165,6 +4274,7 @@ export default function MapScreen() {
       }
     }
   }, [coords?.lat, coords?.lng, speedCameras, speedCamerasEnabled, navMuted]);
+  // 🔒 NAV-LOCK end map-speedcam-voice-alert
 
   // ----- Hazard / police proximity voice alert (Nova) -----
   // Mirror of the speed-camera alert, but for community hazards: announce ONCE
@@ -4289,7 +4399,9 @@ export default function MapScreen() {
   // driver is standing next to (or crawling past) the recorded spot, and replacing their
   // live position with it is a lie about where they are. 75 m is well beyond GPS scatter
   // and stop-and-go creep, and well inside "I walked into that building".
+  // 🔒 NAV-LOCK begin map-selfcar-pin-separation — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const SELF_PIN_MIN_SEPARATION_M = 75;
+  // 🔒 NAV-LOCK end map-selfcar-pin-separation
   // (convoy.lastCarSpot.v1 is no longer named here — locationPrivacy owns it end to end,
   // reads included. 2026-08-29.)
   const [privacyHydrated, setPrivacyHydrated] = useState(false);
@@ -4311,6 +4423,7 @@ export default function MapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const lastDrivingAtRef = useRef(0);
+  // 🔒 NAV-LOCK begin map-carspot-driving-feed — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     const driving = (coords?.speed ?? 0) >= 2.5;
     if (driving) lastDrivingAtRef.current = Date.now();
@@ -4375,6 +4488,7 @@ export default function MapScreen() {
     // heading and would freeze a stale direction into the parked facing (Codex 2026-09-16).
     if (coords) noteFix(coords.lat, coords.lng, coords.speed ?? 0, coords.course ?? null);
   }, [carConnected, coords?.lat, coords?.lng]);
+  // 🔒 NAV-LOCK end map-carspot-driving-feed
 
   // Position + status we actually broadcast. PARTIAL or FULL → LIVE while the head
   // unit is connected OR while plainly driving (phone-only drivers used to render as
@@ -4390,12 +4504,14 @@ export default function MapScreen() {
   // unit attached, or moving above walking pace right now), which closes the 90-second
   // window in which walking away from a just-parked car was still published live.
   const drivingRecently = Date.now() - lastDrivingAtRef.current < 90000;
+  // 🔒 NAV-LOCK begin map-selfcar-share-decision — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const shareNow = shareablePosition(
     coords ? { lat: coords.lat, lng: coords.lng, heading: coords.heading || 0, speed: coords.speed || 0 } : null,
   );
   const presencePos = shareNow.share ? { lat: shareNow.lat, lng: shareNow.lng, heading: shareNow.heading } : null;
   const presenceStatus: "live" | "parked" = shareNow.share ? shareNow.status : "parked";
   const presenceParked = presenceStatus === "parked";
+  // 🔒 NAV-LOCK end map-selfcar-share-decision
 
   // ----- Throttled top_speed_record sync -----
   // Run whenever sessionMaxSpeed advances. If the new max beats the persisted
@@ -4698,12 +4814,14 @@ export default function MapScreen() {
   const navBarUp = navMode === "turn-by-turn" && tbt.active;
   // Coordinate of the upcoming corner (current step's end) for the locked turn
   // arrow. null on the final/arrival leg so no arrow sits on the destination.
+  // 🔒 NAV-LOCK begin map-maneuver-arrow-coord — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const maneuverCoord = (() => {
     const steps = activeRoute?.steps;
     if (!tbt.active || !steps || tbt.stepIndex >= steps.length - 1) return null;
     const end = steps[tbt.stepIndex]?.end;
     return end ? { lat: end.lat, lng: end.lng } : null;
   })();
+  // 🔒 NAV-LOCK end map-maneuver-arrow-coord
   const STEP_BAR_H = 84;
   // When the step drawer is expanded, also clear the slide-up list (DRAWER_HEIGHT)
   // so the FABs/speedo/weather sit ABOVE it instead of behind it.
@@ -4737,6 +4855,7 @@ export default function MapScreen() {
   // safe — a killed process resets the latch to false and the phone shows the map.
   // `carListMapOverride` is the driver's "Show map" escape hatch; it resets when
   // the head unit detaches or nav ends, so the next car drive starts in list mode.
+  // 🔒 NAV-LOCK begin map-carlist-mode — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const headUnitHere = Platform.OS === "android" ? headUnitAttachedRaw() : !!carConnected;
   const carListMode = headUnitHere && navMode === "turn-by-turn" && tbt.active
     && !carListMapOverride && (activeRoute?.steps?.length ?? 0) > 0;
@@ -4745,6 +4864,7 @@ export default function MapScreen() {
   // turn by turn on the phone".
   const carListHidden = headUnitHere && navMode === "turn-by-turn" && tbt.active
     && carListMapOverride && (activeRoute?.steps?.length ?? 0) > 0;
+  // 🔒 NAV-LOCK end map-carlist-mode
 
   return (
     <View style={styles.c}>
@@ -4791,6 +4911,7 @@ export default function MapScreen() {
         // >75 m case; close parks never pinned until this. A crawl can't regress: no
         // disconnect happens mid-drive, and noteFix clears the flag on any driving fix
         // (the unplugged-mid-drive case).
+        // 🔒 NAV-LOCK begin map-selfcar-parked-pin — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         selfParked={
           presenceParked && navMode !== "turn-by-turn" && privacyHydrated &&
           !!presencePos && !!coords &&
@@ -4798,6 +4919,8 @@ export default function MapScreen() {
             haversineMeters(coords, presencePos) > SELF_PIN_MIN_SEPARATION_M)
         }
         selfParkedAt={presencePos}
+        // 🔒 NAV-LOCK end map-selfcar-parked-pin
+        // 🔒 NAV-LOCK begin map-selfcar-user-feed — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         user={{
           ...coords,
           // Resolve a stable heading: GPS heading when moving, inferred travel
@@ -4810,6 +4933,7 @@ export default function MapScreen() {
           // immediately; fall back to the backend value, then undefined.
           carColor: settings.carColor || user?.car_color || undefined,
         }}
+        // 🔒 NAV-LOCK end map-selfcar-user-feed
         // Privacy: when Avatar Live is OFF we suppress the local "you" marker.
         // Presence channel is also nulled out above so peers don't see us at all.
         hideSelfMarker={getAvatarMode(settings) === "ghost"}
@@ -4829,7 +4953,9 @@ export default function MapScreen() {
         // Map view mode (radio choice from Settings → MAP VIEW). Drives the
         // chase-cam tilt + bearing. Defaults to "heading_up" so nav feels like
         // Waze/Google out of the box.
+        // 🔒 NAV-LOCK begin map-camera-bearing-mode — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         mapView={northUpHold ? 'north_up' : settings.mapView}
+        // 🔒 NAV-LOCK end map-camera-bearing-mode
         // Live bearing readout + north-reset signal for the Compass FAB.
         onHeading={setMapHeading}
         resetNorthSignal={northSignal}
@@ -4870,6 +4996,7 @@ export default function MapScreen() {
         // ConvoyMap fires `onUserPan`; we drop follow so the camera stops chasing
         // and let them roam, then auto-recenter after 10s idle (or a Recenter
         // tap). startNav re-enables follow so guidance always begins centred.
+        // 🔒 NAV-LOCK begin map-followcam-prop-feed — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         followUser={isFollowing}
         zoomOffset={zoomOffset}
         onUserPan={handleUserPan}
@@ -4887,6 +5014,7 @@ export default function MapScreen() {
         currentStepStart={activeRoute?.steps?.[tbt.stepIndex]?.start}
         // The corner the turn arrow locks onto (snaps to the next when completed).
         maneuverCoord={maneuverCoord}
+        // 🔒 NAV-LOCK end map-followcam-prop-feed
         // DOUBLE-TAP → DROP A PIN (native double-tap-zoom is disabled in
         // ConvoyMapbox; pinch still zooms). The "same spot" test is in SCREEN
         // pixels (sx/sy), NOT world metres — so it works identically zoomed in or
@@ -4896,6 +5024,7 @@ export default function MapScreen() {
         // the pin at the second tap and run the FULL destination pipeline (routes
         // fetch + Drive drawer with Start). Ignored mid-guidance.
         onMapPress={(c?: { lat: number; lng: number; sx?: number; sy?: number }) => {
+          // 🔒 NAV-LOCK begin map-doubletap-pin-or-stop — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
           if (!c) return;
           // Pin-first Add stop: one tap places the stop and leaves the mode.
           if (stopPinMode) {
@@ -4933,15 +5062,18 @@ export default function MapScreen() {
           }
           if (navMode === "turn-by-turn") return;
           setDestination({ lat: c.lat, lng: c.lng, label: "Dropped pin" });
+          // 🔒 NAV-LOCK end map-doubletap-pin-or-stop
         }}
         // TAP A BASEMAP POI (restaurant, gas, park…) → the full destination
         // pipeline with the place's real name — same flow as search and pin-drop
         // (routes fetch + Drive drawer with Start; nothing auto-starts). Ignored
         // mid-guidance, same rule as pin-drop.
         onPoiPress={(poi) => {
+          // 🔒 NAV-LOCK begin map-poi-tap-destination — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
           if (navMode === "turn-by-turn") return;
           try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
           setDestination({ lat: poi.lat, lng: poi.lng, label: poi.name });
+          // 🔒 NAV-LOCK end map-poi-tap-destination
         }}
         onMapLongPress={handleMapLongPress}
         onHazardPress={(h: any) => setSelected(h)}
@@ -5016,7 +5148,9 @@ export default function MapScreen() {
               <DestinationSearch
                 origin={coords}
                 onSelect={(loc) => { setDestination(loc); setShowSteps(true); setSearchVisible(false); }}
+                // 🔒 NAV-LOCK begin map-search-clear-trip-reset — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
                 onClear={() => { visitedStopsRef.current = new Set(); snappedStopsRef.current = new Map(); stopNearRef.current = new Map(); dismissedStopPillRef.current = null; setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
+                // 🔒 NAV-LOCK end map-search-clear-trip-reset
                 onProfilePress={() => router.push("/(app)/hub" as any)}
                 onPressField={() => setNavSearchOpen(true)}
                 // Departure IQ now lives IN the bar: an "AI" pre-fill + green "Let's go".
@@ -5247,6 +5381,7 @@ export default function MapScreen() {
         // "Learning…" stub. Tapping a chip selects that route; the summary above updates.
         const userColor = getRouteColor(settings);
         const scenicColor = contrastingRouteColor(userColor);
+        // 🔒 NAV-LOCK begin map-route-chip-index-map — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         const aiIdx = routes.findIndex((r: any) => r?.kind === "ai");
         // Per-route ETA — use the route's pre-formatted duration (formatDuration →
         // hours/min, e.g. "1h 23m" / "45 min"), not a raw minute count, so long trips
@@ -5262,6 +5397,7 @@ export default function MapScreen() {
         // Convoy will learn this trip), hidden for one-off destinations.
         if (aiIdx >= 0) routeChips.push({ key: "ai", label: (routes[aiIdx] as any)?.cruise ? "Cruise" : "AI", idx: aiIdx, color: userColor, sub: fmtChipDur(routes[aiIdx]) });
         else if (savedMatch) routeChips.push({ key: "ai", label: "AI", idx: -1, color: "#9AA0A6", sub: "Learning…", disabled: true });
+        // 🔒 NAV-LOCK end map-route-chip-index-map
         // Green summary label — NAME the selected route by its kind ("Best route" /
         // "Scenic route" / "AI route") so it mirrors the chip you picked, falling back to
         // the via-street summary for any unnamed alternate.
@@ -5340,11 +5476,13 @@ export default function MapScreen() {
                         Haptics.selectionAsync().catch(() => {});
                         // Drop the visited key too — deleting and re-adding the same
                         // spot must start it fresh, not pre-visited.
+                        // 🔒 NAV-LOCK begin map-stop-remove-visited-reset — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
                         setStops((p) => {
                           const gone = p[i];
                           if (gone) visitedStopsRef.current.delete(stopKey(gone));
                           return p.filter((_, k) => k !== i);
                         });
+                        // 🔒 NAV-LOCK end map-stop-remove-visited-reset
                       }}
                       hitSlop={10}
                       testID={`stop-remove-${i}`}
@@ -5477,10 +5615,12 @@ export default function MapScreen() {
           is already the highlighted row, so the banner is pure duplication there.
           Jeff: "nothing should change when the phone map is active." */}
       {!carListMode && navMode === "turn-by-turn" && activeRoute && tbt.active && (() => {
+        // 🔒 NAV-LOCK begin map-banner-upcoming-step — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         const stepIdx = Math.min(tbt.stepIndex + 1, activeRoute.steps.length - 1);
         const upcoming = activeRoute.steps[stepIdx];
         const verb = maneuverVerb(upcoming?.maneuver);
         const instruction = upcoming?.html ? upcoming.html : verb;
+        // 🔒 NAV-LOCK end map-banner-upcoming-step
         return (
           <TurnByTurnNav
             maneuverIcon={maneuverIcon(upcoming?.maneuver, upcoming?.html)}
@@ -5774,8 +5914,10 @@ export default function MapScreen() {
             try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
             // Drop follow like a finger pan (arms the 20s auto-recenter) so the
             // overview holds instead of the chase cam snapping straight back.
+            // 🔒 NAV-LOCK begin map-crew-fit-drops-follow — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
             handleUserPan();
             setCrewSignal((n) => n + 1);
+            // 🔒 NAV-LOCK end map-crew-fit-drops-follow
           }}
           activeOpacity={0.8}
         >
@@ -5799,10 +5941,12 @@ export default function MapScreen() {
             // the rest of the drive, needle pinned north while the car turned (Rodrigo,
             // 2026-09-03: "compass shows north but it's going right/left"; CarPlay, which
             // toggles, "was fine"). Receipt: phone-tap:compass hold=0|1.
+            // 🔒 NAV-LOCK begin map-compass-northup-toggle — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
             const hold = !northUpHold;
             setNorthUpHold(hold);
             if (hold) setNorthSignal((n) => n + 1);
             recenterNow();
+            // 🔒 NAV-LOCK end map-compass-northup-toggle
             try { logEvent(`phone-tap:compass hold=${hold ? 1 : 0}`); } catch {}
           }}
           activeOpacity={0.85}

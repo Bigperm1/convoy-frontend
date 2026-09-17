@@ -170,6 +170,7 @@ export async function hydrateLocationPrivacy(): Promise<void> {
       AsyncStorage.getItem(LAST_DRIVING_KEY),
     ]);
     // Never clobber a fresher in-memory value written while this was in flight.
+    // 🔒 NAV-LOCK begin priv-hydrate-spot-adopt — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     if (spotRaw && !_carSpot) {
       const p = JSON.parse(spotRaw);
       if (typeof p?.lat === "number" && typeof p?.lng === "number") {
@@ -213,6 +214,8 @@ export async function hydrateLocationPrivacy(): Promise<void> {
         }
       }
     }
+    // 🔒 NAV-LOCK end priv-hydrate-spot-adopt
+    // 🔒 NAV-LOCK begin priv-hydrate-latch-restore — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     const t = drivingRaw ? Number(drivingRaw) : 0;
     if (Number.isFinite(t) && t > _lastDrivingAt) _lastDrivingAt = t;
     // ── RESTORE THE LATCH, DON'T JUST THE STAMP (2026-08-29) ────────────────────
@@ -235,12 +238,14 @@ export async function hydrateLocationPrivacy(): Promise<void> {
       _drivingLatched = true;
       _latchProvisional = true;
     }
+    // 🔒 NAV-LOCK end priv-hydrate-latch-restore
   } catch {}
 }
 
 /** Head unit attached/detached. Owned by map.tsx (iOS) / AndroidAutoRoot (Android) —
  * the only writers entitled to assert a head unit on their platform. */
 export function noteCarConnected(connected: boolean): void {
+  // 🔒 NAV-LOCK begin priv-car-connected-transition — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const next = !!connected;
   // A true→false TRANSITION is a WITNESSED park: the head unit released, so the drive
   // ended at the current car spot. GPS alone cannot tell a walk-away from a >90 s crawl
@@ -267,6 +272,7 @@ export function noteCarConnected(connected: boolean): void {
   // Stamp on every assertion, clear outright on release. The stamp is what makes
   // this a claim that expires rather than a latch — see CAR_CONNECT_TTL_MS.
   _carConnectedAt = next ? Date.now() : 0;
+  // 🔒 NAV-LOCK end priv-car-connected-transition
 }
 
 /**
@@ -286,9 +292,11 @@ export function parkEndedByHeadUnit(): boolean {
  * broadcast path must keep using carAttached(), whose Android TTL is the backstop
  * for a writer that dies without releasing.
  */
+// 🔒 NAV-LOCK begin priv-head-unit-raw — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function headUnitAttachedRaw(): boolean {
   return _carConnected;
 }
+// 🔒 NAV-LOCK end priv-head-unit-raw
 
 /**
  * The ONLY read of the head-unit signal. True means "someone asserted a car is
@@ -302,6 +310,7 @@ export function headUnitAttachedRaw(): boolean {
  * spurious-connect source is cut at the writer (app/(app)/map.tsx) as well.
  */
 function carAttached(): boolean {
+  // 🔒 NAV-LOCK begin priv-car-attached-ttl — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   if (!_carConnected) return false;
   // ── THE TTL IS ANDROID-ONLY (2026-08-15, same day it was introduced) ────────────
   // REGRESSION THIS FIXES, reported from a real drive: Jeff's phone published a
@@ -334,6 +343,7 @@ function carAttached(): boolean {
   // tidiness — is what decides it.
   if (Platform.OS !== 'android') return true;
   return Date.now() - _carConnectedAt < CAR_CONNECT_TTL_MS;
+  // 🔒 NAV-LOCK end priv-car-attached-ttl
 }
 
 /**
@@ -342,6 +352,7 @@ function carAttached(): boolean {
  * parked pin a point on the road rather than wherever the driver happens to be standing.
  */
 export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: number | null): void {
+  // 🔒 NAV-LOCK begin priv-notefix-driving-latch — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   if (typeof lat !== "number" || typeof lng !== "number") return;
   const spd = speedMs ?? 0;
   const now = Date.now();
@@ -392,6 +403,7 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
       void AsyncStorage.setItem(LAST_DRIVING_KEY, String(now)).catch(() => {});
     }
   }
+  // 🔒 NAV-LOCK end priv-notefix-driving-latch
   // RECORD on head-unit, or on above-walking WHILE LATCHED. Gating on the LATCH rather
   // than on the 30 km/h entry speed is what makes both cases work at once: a driver who
   // has crossed 30 keeps recording right down to a crawl, so the pin lands where the car
@@ -411,6 +423,7 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   //    strongly enough to write a durable car spot. Simulation caught the difference: a
   //    runner who drove 80 s ago and force-quit still recorded their FIRST jogging fix
   //    to disk. A real driver clears provisional within seconds of pulling away.
+  // 🔒 NAV-LOCK begin priv-notefix-spot-write — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const mayWriteSpot = carAttached() || (driving && latchedBefore && !_latchProvisional);
   // THE PARKED HEADING's tracker runs on every fix, before the gate (see _hdgTrack). If a slow turn just retired the
   // heading of a spot that is already on disk, take it off the record now — a phone-only driver writes no further
@@ -443,11 +456,14 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
     _lastSpotMeta = { t: now, att: carAttached() ? 1 : 0, mv: Math.round(spd * 10) / 10 };
     void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, ..._lastSpotMeta })).catch(() => {});
   }
+  // 🔒 NAV-LOCK end priv-notefix-spot-write
 }
 
+// 🔒 NAV-LOCK begin priv-car-spot-getter — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function carSpot(): { lat: number; lng: number; hdg?: number; t?: number } | null {
   return _carSpot ? { ..._carSpot, t: _carSpotAt || undefined } : null;
 }
+// 🔒 NAV-LOCK end priv-car-spot-getter
 
 /**
  * READ-ONLY state dump for telemetry. Nothing here changes behaviour.
@@ -470,9 +486,11 @@ export function privacyDebug(): { latch: boolean; parked: boolean; hu: boolean; 
 }
 
 /** Parked = not attached to a head unit and not driving recently. */
+// 🔒 NAV-LOCK begin priv-is-parked — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function isParked(): boolean {
   return !carAttached() && Date.now() - _lastDrivingAt >= DRIVING_HYSTERESIS_MS;
 }
+// 🔒 NAV-LOCK end priv-is-parked
 
 export type ShareResult =
   | { share: false; reason: "ghost" | "no-car-spot" }
@@ -488,6 +506,7 @@ export type ShareResult =
 export function shareablePosition(
   live?: { lat: number; lng: number; heading?: number; speed?: number } | null,
 ): ShareResult {
+  // 🔒 NAV-LOCK begin priv-shareable-position — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   if (getAvatarMode(getSettings()) === "ghost") return { share: false, reason: "ghost" };
 
   // ── THE 90-SECOND HOLE, AND WHY POSITION AND STATUS SPLIT HERE ──────────────
@@ -518,6 +537,7 @@ export function shareablePosition(
   const spot = _carSpot;
   if (!spot) return { share: false, reason: "no-car-spot" };   // absent beats exposed
   return { share: true, status, lat: spot.lat, lng: spot.lng, heading: 0, speed: 0 };
+  // 🔒 NAV-LOCK end priv-shareable-position
 }
 
 /**

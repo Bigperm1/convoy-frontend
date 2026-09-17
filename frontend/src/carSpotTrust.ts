@@ -89,6 +89,7 @@ export function headingTrackStep(
   t: HeadingTrack,
   fix: { lat: number; lng: number; spd: number; course: number | null | undefined; at: number },
   mayWriteSpot: boolean,
+  attached = false,
 ): HeadingTrack {
   const courseOk = typeof fix.course === "number" && isFinite(fix.course) && fix.course >= 0 && fix.course <= 360;
   const here = { lat: fix.lat, lng: fix.lng };
@@ -96,7 +97,11 @@ export function headingTrackStep(
     return { obs: { deg: fix.course as number, at: fix.at, lat: fix.lat, lng: fix.lng }, creepM: 0, from: here, frozen: false };
   }
   if (!t.obs || t.frozen) return { ...t, from: here };
-  if (fix.spd < SPOT_CREEP_MIN_MS) return { ...t, from: here, frozen: true };              // came to rest: the facing is decided
+  // Came to rest: the facing is decided — UNLESS the head unit is still attached (a yield at the lot entrance, a gear
+  // change before backing in): the car is not parked yet, so the creep rule must keep running through the slow turn
+  // that follows. The witnessed disconnect freezes it instead (locationPrivacy), which is what keeps the walk-away
+  // protection. A phone-only driver has no such signal, so a stop still decides it for them (Codex r5b, 2026-09-17).
+  if (fix.spd < SPOT_CREEP_MIN_MS) return { ...t, from: here, frozen: !attached };
   if (fix.spd < SPOT_WRITE_MAX_SPEED_MS && t.from) {                                       // creeping: a slow turn, a lot crawl
     const creepM = t.creepM + spotDistanceM(t.from, here);
     return creepM > SPOT_HDG_CREEP_MAX_M ? { obs: null, creepM: 0, from: here, frozen: false } : { ...t, creepM, from: here };

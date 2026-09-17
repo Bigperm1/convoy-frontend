@@ -416,7 +416,7 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   // heading of a spot that is already on disk, take it off the record now — a phone-only driver writes no further
   // spot below walking pace, so nothing else would.
   const hadObs = _hdgTrack.obs != null;
-  _hdgTrack = headingTrackStep(_hdgTrack, { lat, lng, spd, course: courseDeg, at: now }, mayWriteSpot);
+  _hdgTrack = headingTrackStep(_hdgTrack, { lat, lng, spd, course: courseDeg, at: now }, mayWriteSpot, carAttached());
   if (hadObs && _hdgTrack.obs == null && _carSpot && _carSpot.hdg != null) {
     _carSpot = { lat: _carSpot.lat, lng: _carSpot.lng };
     if (_lastSpotMeta) void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, ..._lastSpotMeta })).catch(() => {});

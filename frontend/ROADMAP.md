@@ -1055,8 +1055,23 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   the corner nose clamp, the ribbon at the nose, the parked heading (all 2026-09-16).
 - **One-way door again:** every OTA from here targets **1.29.0** — `verify-bundle-key.py <group> 1.29.0`. Every 1.28.0
   install (all active testers at the cut) gets NOTHING until it installs 79 from TestFlight / Play internal.
-- Not done at the cut: Codex verdict at the release SHA (quota; run before external testers), `thermal=` (Jeff never
-  answered), ASC key rotation (still open).
+- Not done at the cut: `thermal=` (Jeff never answered), ASC key rotation (still open). **Codex verdict at the release SHA:
+  APPROVE** (2026-09-17 07:50 PDT — no release-blocking finding; source-only review).
+
+## 4d · 🔒 THE NAVIGATION LOCK + what comes next (2026-09-17) — full state: `HANDOFF-2026-09-17.md`
+- Jeff, 2026-09-17: *"lets lock in/gate the navigation settings i think we have finally got 95% there is dont want anything
+  to change without my say so."* → `tools/sim-qc/nav_lock_test.mts` + `data/nav-lock.json`: drive-engine modules code-locked
+  by hash, every tunable constant in the mixed files value-locked (new constants forbidden), inline drive logic region-locked
+  between `// 🔒 NAV-LOCK begin/end` comments. A failing gate is a question for Jeff; `--relock` only with his quoted words
+  (`RULES.md` §4). It runs in every OTA and cut ritual.
+- **HELD behind the lock:** the parked-heading fix from Codex r5b (branch `fix/parked-heading-r5b`, `d62ee832`) — a stop with
+  CarPlay/AA still attached froze the approach heading so a slow turn after it was never retired. Needs Jeff's yes → merge →
+  `--relock` → OTA.
+- **Next session (Jeff's agenda, HANDOFF §4):** (a) debug + optimization — telemetry volume first (~15k rows/day at ~10 testers
+  on a swapping Nano), then heat/rAF, startup; (b) strip what is unused — `npx knip` / `npx ts-prune`, nothing inside a locked
+  module without his say-so; (c) build-80 prep — RevenueCat, Resend hardening, Supabase Pro + Small + cap off and
+  Presence → Broadcast, TestFlight public link + a Play CLOSED track (which needs in-app account deletion + report/block).
+  Citation-checked research: HANDOFF §6 / memory `build-80-scaling-research-2026-09-17`.
 
 ## 4b · BUILD 77 → 78 — CUT 2026-09-11 00:16 PDT, BOTH PLATFORMS, runtime 1.27.0 → **1.28.0** (full story: `HANDOFF-2026-09-07.md` §0b; ledger: memory `build-77-cut`)
 - **78 on both** from `58b7142`: iOS `a6b63840-cd7f-43fb-b576-0f7f7b40134c` → TestFlight (Apple accepted the upload at 00:3x, shows as

@@ -145,7 +145,7 @@ let _carSpot: { lat: number; lng: number; hdg?: number } | null = null;
 let _hdgTrack: HeadingTrack = HEADING_TRACK_EMPTY;
 // What the last persisted spot record carried besides the position, so a retired heading can be removed from
 // disk without inventing a fresh `t`/`att`/`mv`.
-let _lastSpotMeta: { t: number; att: 0 | 1; mv: number } | null = null;
+let _lastSpotMeta: { t: number; att: 0 | 1; mv: number; hu?: 1 } | null = null;
 // When _carSpot was RECORDED (not when it was last written to disk). Persisted with the
 // spot so hydrate can age it out — see SPOT_MAX_AGE_MS.
 let _carSpotAt = 0;
@@ -256,6 +256,11 @@ export function noteCarConnected(connected: boolean): void {
     // Every plain {lat,lng} writer of this key (noteFix, map.tsx's 15 s mirror) drops
     // the flag on the next drive — which is exactly when it should expire.
     if (_carSpot) void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, t: _carSpotAt || Date.now(), hu: 1 })).catch(() => {});
+    // The record on disk now carries hu=1 — a later retire-on-disk rewrite (noteFix) must keep it, or hydrate
+    // refuses the spot as unwitnessed-attached (Codex round 4). And the car has stopped: the parked heading is
+    // decided here, whatever the phone does on foot afterwards.
+    _lastSpotMeta = { t: _carSpotAt || Date.now(), att: 0, mv: 0, hu: 1 };
+    if (_hdgTrack.obs) _hdgTrack = { ..._hdgTrack, frozen: true };
   }
   if (next) _parkWitnessed = false;
   _carConnected = next;

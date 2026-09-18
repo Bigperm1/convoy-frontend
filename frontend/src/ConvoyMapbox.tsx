@@ -59,7 +59,7 @@ import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, clam
 import { noteSelfLiftNav, reportSelfLiftEvidence, noteSelfLiftQueryFail, selfLiftTargetM, selfLiftDrawnM, setSelfLiftDrawnM, setSelfOffRoadLiftM, selfLiftSkipQuery, clearSelfLiftSurface, subscribeSelfLiftDrawn, logSelfLiftQuery, noteMapIdle, isMapIdle, mapCameraGen } from "./selfLift";
 import { easeLift, roadEvidence, isDrivableRoad, isPropertyRoad, buildingUnder, queryComplete, LIFT_ROAD_NEAR_M, LIFT_PROPERTY_NEAR_M, LIFT_COVERAGE_M, LIFT_QUERY_MS, type RoadEvidence } from "./selfLiftRule";
 import RibbonNear, { type DrawSinkRef } from "./RibbonNear";
-import { buildRibbonPartition, buildRibbonFeatures, buildRibbonFarFeatures, ribbonSeamM, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
+import { buildRibbonPartition, buildRibbonFeatures, buildRibbonFarFeatures, nextRibbonSeam, type RibbonSeamState, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind } from "./driveBcEvents";
 import { NeonPin, hazardPin, hazardPinImage, HAZARD_PIN_KINDS, HAZARD_PIN_DEFAULT, CAMERA_PIN, INCIDENT_PIN, INCIDENT_PIN_KINDS, PLACE_TONE, NEON_TONE, NEON_PIN_H, NEON_PIN_HOLE_ABOVE_TIP } from "./components/NeonPin";
@@ -3326,6 +3326,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const drawPosRef = useRef<{ lat: number; lng: number } | null>(null);
   // Per-frame drawn pose → <RibbonNear> (2026-09-18): the near route-line piece moves in the car's frame.
   const ribbonNearSinkRef: DrawSinkRef = useRef(null);
+  const ribbonSeamStateRef = useRef<RibbonSeamState>(null);
   const trimLogAt = useRef(0);
   // Along-route ease state for the route trim: where the line start is coming FROM,
   // where it is going TO, when that leg started and how long it should take. Keyed by
@@ -3813,7 +3814,15 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // src/routeRibbon.ts). While a cut is live this source draws only [seam, destination] and is
   // rebuilt only when the SEAM moves (every ribbonSeamStepM metres, not every 8 m quantum); the
   // fade-in and the stretch up to the seam are <RibbonNear>, re-drawn every frame from the drawn car.
-  const ribbonSeamQ = ribbonCutQ != null ? ribbonSeamM(ribbonCutQ, ribbonFadeQ) : null;
+  // The seam walks — never backward, never past the near core on screen now (nextRibbonSeam, Codex r2).
+  let ribbonSeamQ: number | null = null;
+  if (ribbonCutQ != null && ribbonPartition) {
+    const _ns = nextRibbonSeam(ribbonSeamStateRef.current, ribbonPartition, ribbonCutQ, ribbonFadeQ);
+    ribbonSeamStateRef.current = _ns.state;
+    ribbonSeamQ = _ns.seam;
+  } else {
+    ribbonSeamStateRef.current = null;
+  }
   const _farCutKey = ribbonSeamQ == null ? ribbonCutQ : null;
   const _farFadeKey = ribbonSeamQ == null ? ribbonFadeQ : null;
   const routeDrawFC: any = useMemo(() => ({

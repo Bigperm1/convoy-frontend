@@ -57,6 +57,15 @@
       "changes": [
         "src/routeRibbon.ts: code 311225c8db35 → 8f912bf50dff"
       ]
+    },
+    {
+      "at": "2026-09-18",
+      "quote": "Jeff, 2026-09-18: \"can you fix the route line jitters when near the car? the car is smooth but the route line when its dissappearing in front of the car is notchy any way to smooth it out?\" (Codex review r2 fix)",
+      "changes": [
+        "src/routeRibbon.ts: code 8f912bf50dff → 38691827a3e8",
+        "src/ConvoyMapbox.tsx#mbx-ribbon-cut-anchor region d229d7a1eea7 → 0b75472bba76",
+        "src/carplay/CarMapView.tsx#car-ribbon-features-rebuild region 62cad29f4a72 → 1b0ef9e9e2fd"
+      ]
     }
   ],
   "files": {
@@ -77,7 +86,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/routeRibbon.ts": {
-      "hash": "sha256:8f912bf50dff9e64f062bc08018567740e99c4aaa810bfab8a16352ff491729a",
+      "hash": "sha256:38691827a3e8a898ae23cb63a0891fb5eab339cf0a0a3fbde4f1ba47094ac943",
       "why": "pure drive-engine module: code-locked"
     },
     "src/ribbonAnchor.ts": {
@@ -331,7 +340,7 @@
         "mbx-ribbon-trim-lead-inputs": "sha256:757d5820b3bd57c31358c1edbb4d4de60e53c63b925df6415cc06fc968a69291",
         "mbx-ribbon-fix-ease": "sha256:f65a67b4d7a2ba03aa5c1491bac0e7ed4f3d124ac21e670e6565d45e490b9be0",
         "mbx-ribbon-partition": "sha256:2a53998aaae7193eceb80c070fd3609cbd7016e142d9f9a737130d6bb88ac4ed",
-        "mbx-ribbon-cut-anchor": "sha256:d229d7a1eea70125c9d99215eed5bc95dead05843b529236e26fe24a40dcbdaa",
+        "mbx-ribbon-cut-anchor": "sha256:0b75472bba76dd81aca065cf884883b00d95e854f434ad880ba1c7912b6fdb1e",
         "mbx-selfcar-route-snap-gate": "sha256:440c3fa16919457fe89191d5e9501b8adae25868bf79e80fe1869d33a0caa330",
         "mbx-selfcar-road-snap-draw": "sha256:9e57ed4603c8fe5b891535777970d7604c54e089f853225f1023d7c15448f4e1",
         "mbx-pose-estimator-step": "sha256:c3d8053ebad01bce81374cb5de58c125aa22a4734b500dd23cd54bb96101e3bf",
@@ -417,7 +426,7 @@
         "car-selfcar-road-snap-draw": "sha256:e8184ddff66525d8fe6f2be3e266e5a74079901de0b5110ad7c9ab9309712aa5",
         "car-selfcar-pose-step": "sha256:f1c8c7e4f95ab8e04d1403f7e0028c374def994061a5b3f231eabce29db7338e",
         "car-cam-heading-source": "sha256:cd5fdc1705b88b98933e6b60e2bf301debb3ebc721e27a5a994f5c8cee5caf69",
-        "car-ribbon-features-rebuild": "sha256:62cad29f4a72a9a58073231686af24ad4700d51969d1ff9651b00269276f213a",
+        "car-ribbon-features-rebuild": "sha256:1b0ef9e9e2fdf9a64a1f0cb61728ca88df6f19429109befdfda3f808c03dbf59",
         "car-preview-cong-gradient": "sha256:e9b26b8f5901519f9045d0b917bb4f334f24ab291405bbc8b02dd51fb610bb8b",
         "car-preview-routes-fc": "sha256:ff4d6ada7dc6fa3a139f70a880bee7982fa3c8bd87bd0833f4f5ad480bab0a57",
         "car-selfcar-scale-refresh": "sha256:6548b3839dfdeda040362c36e38f7ab8d5a826c64758246dfdc965482aa64ac1",

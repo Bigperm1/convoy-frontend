@@ -297,6 +297,25 @@ export function ribbonSeamM(cutM: number, fadeM: number): number {
 }
 
 /**
+ * The seam to draw THIS render, per surface (Codex review r2, 2026-09-18). The two pieces are separate
+ * native sources, so either can land on screen a frame before the other. The near piece's opaque core
+ * runs `overlapM` (one seam step) past its seam, so the far piece may start anywhere up to there without a
+ * gap if it lands first; and a near piece that lands first reaches back over the old seam as long as the
+ * seam never moves BACKWARD. A zoom change moves lead + fade together and can ask for a jump of more than a
+ * step (z16 → z15 at pitch 60: seam 1188 → 1378 m while the near core ended at 1242) — so the seam walks:
+ * never backward, never past the near core that is on screen now; it catches up over the next ticks. The
+ * cost of a lagging seam is only a longer near piece, or for a tick a fade cut short at the seam.
+ */
+export type RibbonSeamState = { key: unknown; seam: number; overlapM: number } | null;
+export function nextRibbonSeam(prev: RibbonSeamState, key: unknown, cutQ: number, fadeM: number): { seam: number; state: RibbonSeamState } {
+  const target = ribbonSeamM(cutQ, fadeM);
+  const overlapM = ribbonSeamStepM(fadeM);
+  if (!prev || prev.key !== key) return { seam: target, state: { key, seam: target, overlapM } };
+  const seam = Math.max(prev.seam, Math.min(target, prev.seam + prev.overlapM));
+  return { seam, state: { key, seam, overlapM } };
+}
+
+/**
  * The NEAR piece: the fade-in and the solid line from `cutM` up to `endM` (the seam), glow
  * included. Every feature carries `alpha` (the casing layer multiplies its own opacity by it).
  */

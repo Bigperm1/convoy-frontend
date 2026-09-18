@@ -84,7 +84,7 @@ import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLat
 import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, leadShiftedByLift, selfLiftScreenPt, clampCutToRoute, noseLeadDp } from '../routeTrim';
 import { selfLiftDrawnM, noteSelfLiftNav, subscribeSelfLiftDrawn, noteMapIdle } from '../selfLift';
 import RibbonNear, { type DrawSinkRef } from '../RibbonNear';
-import { buildRibbonPartition, buildRibbonFeatures, buildRibbonFarFeatures, ribbonSeamM, anchorCutM, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat, type CutAnchorHint } from '../routeRibbon';
+import { buildRibbonPartition, buildRibbonFeatures, buildRibbonFarFeatures, nextRibbonSeam, type RibbonSeamState, anchorCutM, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat, type CutAnchorHint } from '../routeRibbon';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
@@ -1166,6 +1166,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const carDrawPosRef = useRef<{ lat: number; lng: number } | null>(null);
   // Per-frame drawn pose → <RibbonNear> (2026-09-18), the phone's ribbonNearSinkRef twin.
   const carRibbonNearSinkRef: DrawSinkRef = useRef(null);
+  const carRibbonSeamStateRef = useRef<RibbonSeamState>(null);
   const carTrimLogAt = useRef(0);
   // Along-route ease state for the route trim (see routeTrimEndFrac below).
   const fixEaseRef = useRef<{ key: string | null; prev: number; cur: number; at: number; gap: number } | null>(null);
@@ -2051,7 +2052,15 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // NEAR / FAR SPLIT (2026-09-18) — the phone's twin (ConvoyMapbox.tsx, src/routeRibbon.ts): with a live
   // cut this source is [seam, destination], rebuilt only when the seam moves; <RibbonNear> below draws
   // the fade-in up to the seam every frame from the drawn car.
-  const carRibbonSeamQ = ribbonCutQ != null ? ribbonSeamM(ribbonCutQ, ribbonFadeQ) : null;
+  // The seam walks — never backward, never past the near core on screen now (nextRibbonSeam, Codex r2).
+  let carRibbonSeamQ: number | null = null;
+  if (ribbonCutQ != null && ribbonPartition) {
+    const _ns = nextRibbonSeam(carRibbonSeamStateRef.current, ribbonPartition, ribbonCutQ, ribbonFadeQ);
+    carRibbonSeamStateRef.current = _ns.state;
+    carRibbonSeamQ = _ns.seam;
+  } else {
+    carRibbonSeamStateRef.current = null;
+  }
   const _carFarCutKey = carRibbonSeamQ == null ? ribbonCutQ : null;
   const _carFarFadeKey = carRibbonSeamQ == null ? ribbonFadeQ : null;
   const routeFC: any = useMemo(() => ({

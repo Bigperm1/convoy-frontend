@@ -14,6 +14,8 @@
 //   N4  the per-frame near piece stays small (coordinates per build);
 //   N5  every piece carries alpha; the glow fades in (0.33, 0.66, then 1) instead of a round cap;
 //   N6  at the destination both pieces end cleanly (no feature past the end, nothing negative);
+//   N8  zoom snaps (lead + fade change at once): the seam WALKS (never backward, never past the near core on
+//       screen), so neither native landing order gaps the bright line — Codex r2's z16→z15 case included;
 //   N7  the seam handoff guard: if the far piece lands a whole step early (the two native sources are not
 //       synchronised — Codex review), the near piece's core still reaches it: no gap in the bright line.
 // A negative control re-runs N2 with the seam margin removed and must FAIL.
@@ -134,6 +136,46 @@ for (const [label, fade, lead, stepM] of [["z14 highway", 150, 100, 8], ["z16.5 
   const far = buildRibbonFarFeatures(P, { startM: total + 400, index: 0 });
   const hi = Math.max(...near.map((f: any) => along(f.geometry.coordinates[f.geometry.coordinates.length - 1])));
   ok("N6 clean at the destination", far.length === 0 && hi <= total + 0.01, `far features ${far.length}, near ends at ${hi.toFixed(1)} of ${total.toFixed(1)} m`);
+}
+
+// N8 — ZOOM CHANGES (Codex review r2): lead and fade move together (CarPlay snaps zoom), so a naive seam can jump more
+// than the near core covers. Every 12 Hz tick, check BOTH native landing orders against the previous tick's pieces:
+//   far lands first  → the new far start must not be past the OLD near core end;
+//   near lands first → the NEW near core end must reach the OLD far start.
+{
+  const { routeTrimLeadM, routeTrimFadeM } = await import("../../src/routeTrim.ts");
+  const { nextRibbonSeam, ribbonStepM } = rr;
+  const inputs = (z: number, base: number) => {
+    const lead = routeTrimLeadM(z, 49, 60, 0, 0, 22.5), fade = Math.round(routeTrimFadeM(z, 49, 60) / 2) * 2;
+    return { lead, fade, cutQ: quantiseM(base + lead, ribbonStepM(z, 49))! };
+  };
+  // Codex's exact case: base 1000 m, z16 → z15. Naive rule vs the walking seam.
+  const a = inputs(16, 1000), b = inputs(15, 1000);
+  const naive16 = ribbonSeamM(a.cutQ, a.fade), core16 = naive16 + ribbonSeamStepM(a.fade), naive15 = ribbonSeamM(b.cutQ, b.fade);
+  ok("N8 NEG control (naive seam gaps on z16→z15)", naive15 - core16 > 0.5, `naive far start ${naive15.toFixed(0)} m vs near core end ${core16.toFixed(0)} m → ${(naive15 - core16).toFixed(0)} m gap if far lands first`);
+  const s16 = nextRibbonSeam(null, P, a.cutQ, a.fade), s15 = nextRibbonSeam(s16.state, P, b.cutQ, b.fade);
+  ok("N8 walking seam on z16→z15", s15.seam <= s16.seam + ribbonSeamStepM(a.fade) + 0.01 && s15.seam >= s16.seam,
+    `seam ${s16.seam.toFixed(0)} → ${s15.seam.toFixed(0)} m (near core on screen ends ${(s16.seam + ribbonSeamStepM(a.fade)).toFixed(0)} m)`);
+  // A drive across zoom snaps, both orders, every tick.
+  const zs = [16, 15, 14, 16, 15.5, 13, 16.5, 15, 14.2, 16, 13.5, 17];
+  let st: any = null, prevSeam: number | null = null, prevCoreEnd: number | null = null;
+  let farFirst = 0, nearFirst = 0, worst = 0, trunc = 0, maxTruncRun = 0, run = 0, base = 800;
+  for (let k = 0; k < 600; k++) {
+    const z = zs[Math.floor(k / 20) % zs.length];
+    const { lead, fade, cutQ } = inputs(z, base);
+    const ns = nextRibbonSeam(st, P, cutQ, fade); st = ns.state;
+    const seam = ns.seam, coreEnd = Math.min(total, seam + ribbonSeamStepM(fade));
+    if (prevSeam != null && prevCoreEnd != null) {
+      if (seam - prevCoreEnd > 0.5) { farFirst++; worst = Math.max(worst, seam - prevCoreEnd); }
+      if (prevSeam - coreEnd > 0.5) { nearFirst++; worst = Math.max(worst, prevSeam - coreEnd); }
+    }
+    if (base + lead + fade > seam + 0.5 && seam < total) { trunc++; run++; maxTruncRun = Math.max(maxTruncRun, run); } else run = 0;
+    prevSeam = seam; prevCoreEnd = coreEnd;
+    base += 27.8 / 12;
+    if (base + lead > total - 50) break;
+  }
+  ok("N8 zoom snaps: no core gap in either landing order", farFirst === 0 && nearFirst === 0, `far-first ${farFirst}, near-first ${nearFirst} ticks with a gap (worst ${worst.toFixed(0)} m)`);
+  ok("N8 zoom snaps: a cut-short fade lasts at most a few ticks", maxTruncRun <= 4, `${trunc} ticks with the fade cut short at the seam, longest run ${maxTruncRun} ticks (12 Hz)`);
 }
 
 // Negative control: without the one-step margin the per-frame cut overtakes the seam → N2 must fail.

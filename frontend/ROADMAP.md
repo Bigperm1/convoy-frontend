@@ -1115,13 +1115,51 @@ Top Speed hidden · Drives available · day map only · green route only · spee
 locked · Gas Jockey free · Nova-only voice · spoken extras locked · speed alert locked · comms
 hands-free locked. Everything locked wears a premium badge → one shared component → paywall.
 
+### ✅ Tier ladder DECIDED — Jeff, 2026-09-17 (prices + costs live in the maintainer's notes, not this public repo)
+
+Four rungs, each includes everything below it. **Free** — 2D arrow on a 2D map · **Silver** (monthly) — 2D class car, 2D map ·
+**Gold** (monthly) — class car or arrow in 3D, on a 3D map · **Ultra** — ONE-TIME purchase, your own car scanned in 3D (2 scans),
+**needs an active Gold** · **Garage** — one-time per additional car, so a member with five cars picks the one they're driving
+today (the multi-car garage is NOT built; one car per account today).
+- **Gold lapses →** the member KEEPS the scanned car and any unused scan (stores forbid purchases that expire: Apple 3.2.1(iii),
+  ADPLA Att.2 §2.3, credits may not expire 3.1.1). On the 2D map their own car shows as a flat top-down picture made from the
+  scan's photo. (Jeff: "i agree")
+- **Viewers see the chooser's car.** A Free/Silver member sees a Gold/Ultra member's car as that member chose it — the upgrade
+  advertises itself. (Jeff: "i agree")
+- **Where the other paid features sit — the website decides** (hairpin-site `index.html`, live == local, read 2026-09-17): its
+  "Premium" list = **Silver**: class or painted arrow, dusk/night/satellite/Auto maps, route colours, speed cameras + speed
+  alerts + road-incident feed, every Scout voice, hands-free replies, unlimited convoy, creating clubs/events/cruises, Top Cruise
+  Speed, silver skin. Free keeps: live map + crew, convoy of 3, push-to-talk, turn-by-turn on phone/CarPlay/AA, Scout stock
+  voice, community hazards, green arrow/route/Day map, browsing clubs.
+- **The website is behind the ladder:** three tiers, no prices, Free advertised with "the live 3D map", 3D library car + Garage
+  Scan both under "Ultra Premium", gold skin = Ultra Premium. Update it to four tiers — deploy only on Jeff's OK.
+- **Still open:** Ultra's look (Gold is Gold now; `DESIGN.md` / `src/tierTheme.ts` still say Gold = Ultra Premium) · auto-boat
+  (on water every tier becomes the boat; its Garage toggle was removed 2026-08-24).
+
+### 💳 Before any money comes in — Jeff, 2026-09-17: *"lets build these soon not right now put them on the list"*
+
+- **A payments module** (RevenueCat or StoreKit + Play Billing Library 8+). Native → runtime bump + **build 80 on BOTH platforms**.
+- **Restore Purchases** on the paywall and in Settings (Apple 3.1.1; the subscription sign-up screen must offer it).
+- **Paywall disclosure:** the full renewal price shown clearly, Terms of Use + Privacy Policy links (also in the store metadata).
+  `src/PaywallSheet.tsx` today: placeholder prices, a stub `buy()`, no Restore, no links.
+- **Android cancel link** — a way to cancel from account settings (deep link to the Play Subscription Center). 0 hits today.
+- **Receipt checking on the server** — App Store Server Notifications / Play Real-time Developer Notifications set the tier,
+  the Ultra purchase and garage slots (today: the owner-only admin route). Verify before delivering (ADPLA Att.2 §3.1); Play
+  refunds any purchase not acknowledged within 3 days.
+- **Unlock codes:** "Have a code?" posts to `/entitlement/redeem`, which does not exist in `server.py`, and Apple 3.1.1 bans an
+  app's own unlock codes in store builds → decide the club/beta grant path (Apple offer codes are time-limited).
+- **Donate link → in-app purchase.** Settings opens `hairpin.app/donate`; store builds need an IAP tip instead
+  (the code's own comment says so; outside the US an app may not link to non-IAP payment).
+- Also needed for the ladder (verified map in memory `jeff-tier-plan-and-garage-autoswitch-2026-09-17`): a Free 2D arrow sprite
+  (none exists — the arrow is a flat-laid 3D model), Silver's class car kept while navigating + on CarPlay/AA, 3D class models
+  for 8 of 12 classes, per-account scan credits (three global caps of 2 today), the multi-car garage, a 4-rung entitlement model
+  with Ultra as an owned purchase. Several touch 🔒 NAV-LOCK regions → Jeff's say-so per change.
+
 ### ⏳ Still needs Jeff's decision — blocking
 
-- **Pricing.** Suggested 2026-08-20, never signed off: **$4.99/mo · $39.99/yr · 7-day trial**,
-  plus a **$99 Founders Lifetime** limited to the launch window.
 - **The free-tier tweaks I proposed**, still pending: PTT stays free (VOX premium); free users
-  **see** convoy hazards (cameras + reporting premium); convoy size capped ≤3 on free.
-- **The donate URL.** The stub currently points at `hairpin.app/donate`.
+  **see** convoy hazards (cameras + reporting premium); convoy size capped ≤3 on free. (The website already says convoy of 3
+  and community hazards see + report on Free.)
 
 ### Must harden before 170 people arrive
 

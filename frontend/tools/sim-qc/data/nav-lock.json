@@ -25,6 +25,17 @@
         "src/carSpotTrust.ts: code 880b3478381d → 3a6274439eb8",
         "src/locationPrivacy.ts#priv-hydrate-spot-adopt region fa0e6a1addd3 → f3e64bbe68a5"
       ]
+    },
+    {
+      "at": "2026-09-17",
+      "quote": "Jeff, 2026-09-17 late: auto-boat (on water every tier becomes the boat) — \"delete\"; confirmed \"Remove auto-boat\"",
+      "changes": [
+        "src/ConvoyMapbox.tsx:WATER_QUERY_MS REMOVED",
+        "src/ConvoyMapbox.tsx:WATER_ON_POLLS REMOVED",
+        "src/ConvoyMapbox.tsx:WATER_OFF_POLLS REMOVED",
+        "src/ConvoyMapbox.tsx#mbx-self-marker-kind-nav region 64f2341e4a19 → c2bec087ae64",
+        "src/ConvoyMapbox.tsx#mbx-selfcar-road-snap-draw region 1de1aa2c73c4 → 9e57ed4603c8"
+      ]
     }
   ],
   "files": {
@@ -197,9 +208,6 @@
         "ROAD_SNAP_QUERY_MS": "1400",
         "ROAD_SNAP_MOVING_MS": "1.5",
         "ROAD_SNAP_CROSS_DEG": "55",
-        "WATER_QUERY_MS": "2500",
-        "WATER_ON_POLLS": "3",
-        "WATER_OFF_POLLS": "6",
         "CAR_EMISSIVE_BY_MODE": "{ satellite: 0.22, day: 0.22, dawn: 0.38, dusk: 0.42, night: 0.55, }",
         "CHASE_PITCH_CITY": "48",
         "CHASE_PITCH_HIGHWAY": "60",
@@ -297,14 +305,14 @@
         "mbx-preview-fit-routes": "sha256:24334e0d40416b6f226f04f37e1b8b66be759dfd9de0ea3ef3840cd84fb55b81",
         "mbx-preview-congestion-fetch": "sha256:338cfa828e18dda9716ed0f9c004026d25d9e2ce5c0f09f263e0cc6ec6da30f6",
         "mbx-self-pos-parked-live": "sha256:bf06a1afb75ed6c0643261cd7dd28e1e507d3d7ea2cd68423b087c3432621a15",
-        "mbx-self-marker-kind-nav": "sha256:64f2341e4a196d7933d5381fcabcf70c759633a554b9584dd68167df9f4f9089",
+        "mbx-self-marker-kind-nav": "sha256:c2bec087ae6423725464aa6feaac04562c7a87ebf4b709cdb713ee3f7f2d5590",
         "mbx-route-projection": "sha256:0e18dc664c8c3cc012ad814a463fd6906aa5d38e38ebb3d5e5dcf3e5502e8895",
         "mbx-ribbon-trim-lead-inputs": "sha256:757d5820b3bd57c31358c1edbb4d4de60e53c63b925df6415cc06fc968a69291",
         "mbx-ribbon-fix-ease": "sha256:f65a67b4d7a2ba03aa5c1491bac0e7ed4f3d124ac21e670e6565d45e490b9be0",
         "mbx-ribbon-partition": "sha256:2a53998aaae7193eceb80c070fd3609cbd7016e142d9f9a737130d6bb88ac4ed",
         "mbx-ribbon-cut-anchor": "sha256:bb47b16dd0391e98c23d3619ad0f4a9c56ad20c17d04d80020ee439204877107",
         "mbx-selfcar-route-snap-gate": "sha256:440c3fa16919457fe89191d5e9501b8adae25868bf79e80fe1869d33a0caa330",
-        "mbx-selfcar-road-snap-draw": "sha256:1de1aa2c73c439c72ba6fef67572cd0f4c75af8069eecedb812a5787e252b98e",
+        "mbx-selfcar-road-snap-draw": "sha256:9e57ed4603c8fe5b891535777970d7604c54e089f853225f1023d7c15448f4e1",
         "mbx-pose-estimator-step": "sha256:c3d8053ebad01bce81374cb5de58c125aa22a4734b500dd23cd54bb96101e3bf",
         "mbx-selfcar-draw-position": "sha256:f7bfa1fc0f0bc75c1185396344b3c4c14d68ecaccf0202a1bcd47bec3ee8f4ff",
         "mbx-selfcar-heading-lock": "sha256:34d5be939f3bfbb475b444a14aba4f00878cdecc3b7a7dbc79bc947da7e408a6",

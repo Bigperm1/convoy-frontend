@@ -23,9 +23,10 @@ change the values here only with his say-so, and change them *here* — never pe
 
 > ⚠ **2026-09-17 — the ladder changed; this doc is updated with the build-80 tier work.** Jeff's four rungs:
 > Free (green) · **Silver** (subscription) · **Gold** (subscription — no longer "Ultra Premium") · **Ultra** (one-time add-on
-> that needs Gold). Ultra's look is **DIAMOND** (Jeff: platinum or diamond → Diamond): an icy white-blue mark on the Ultra
-> member's car, garage and profile — the app skin stays **gold** for them, no fourth whole-app skin. Diamond art is not
-> designed yet (preview + Jeff's OK first). Measured why not platinum: ΔE76 5–9 from the silver mid `#C9D2D8`, diamond ~18.
+> that needs Gold). Ultra's look is **DIAMOND** (Jeff: platinum or diamond → Diamond), and after seeing it rendered Jeff
+> decided **"yes ultra unlocks diamond skin"** — Diamond is a fourth WHOLE-APP skin, unlocked by Ultra (trial on the local
+> branch `trial/diamond-skin`; build-80 work). He also asked for Diamond to look more reflective and for OBSIDIAN and
+> DAMASCUS skin previews (tier placement not decided). Measured why not platinum: ΔE76 5–9 from the silver mid `#C9D2D8`, diamond ~18.
 > The tables below still carry the 2026-08-23 names until that work lands.
 
 ---

@@ -1133,9 +1133,9 @@ today (the multi-car garage is NOT built; one car per account today).
   voice, community hazards, green arrow/route/Day map, browsing clubs.
 - **The website is behind the ladder:** three tiers, no prices, Free advertised with "the live 3D map", 3D library car + Garage
   Scan both under "Ultra Premium", gold skin = Ultra Premium. Update it to four tiers — deploy only on Jeff's OK.
-- **Ultra's look = DIAMOND** (Jeff, 2026-09-17): a diamond mark on the Ultra member's car, garage and profile; their app skin
-  stays gold (no fourth whole-app skin). Art not designed yet — preview first. `DESIGN.md` carries the note; `src/tierTheme.ts`
-  still maps Gold = Ultra Premium until the build-80 tier work.
+- **Ultra unlocks the DIAMOND app skin** (Jeff, 2026-09-17, after seeing it rendered: *"yes ultra unlocks diamond skin"*) — a
+  fourth whole-app skin. Trial on local branch `trial/diamond-skin`; making it more reflective + Obsidian and Damascus skin
+  previews requested. `src/tierTheme.ts` still maps Gold = Ultra Premium until the build-80 tier work.
 - **Auto-boat REMOVED** (Jeff: "delete" → "Remove auto-boat"), commit `6a168f64`, nav lock relocked with his words —
   **held for the next OTA** (not published).
 

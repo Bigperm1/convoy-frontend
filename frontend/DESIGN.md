@@ -25,8 +25,9 @@ change the values here only with his say-so, and change them *here* — never pe
 > Free (green) · **Silver** (subscription) · **Gold** (subscription — no longer "Ultra Premium") · **Ultra** (one-time add-on
 > that needs Gold). Ultra's look is **DIAMOND** (Jeff: platinum or diamond → Diamond), and after seeing it rendered Jeff
 > decided **"yes ultra unlocks diamond skin"** — Diamond is a fourth WHOLE-APP skin, unlocked by Ultra (trial on the local
-> branch `trial/diamond-skin`; build-80 work). He also asked for Diamond to look more reflective and for OBSIDIAN and
-> DAMASCUS skin previews (tier placement not decided). Measured why not platinum: ΔE76 5–9 from the silver mid `#C9D2D8`, diamond ~18.
+> branch `trial/diamond-skin`; build-80 work). Made reflective on his ask ("a little more reflective like a diamond"): a
+> 7-stop gradient with a hard horizon, a facets-and-glints texture over every fill (`SkinSheen`), faceted/prismatic images.
+> Obsidian and Damascus were previewed and **scrapped** (Jeff: "go with diamond scrap the other 2"). Measured why not platinum: ΔE76 5–9 from the silver mid `#C9D2D8`, diamond ~18.
 > The tables below still carry the 2026-08-23 names until that work lands.
 
 ---

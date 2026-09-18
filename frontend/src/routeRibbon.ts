@@ -49,6 +49,7 @@ import { metersPerDp } from "./routeTrim";
 // The cut ANCHOR lives in src/ribbonAnchor.ts (dependency-free, so tools/sim-qc/ribbon_anchor_test.mts
 // runs it under plain Node); re-exported here so every existing caller keeps its import.
 export { alongMOnPartition, anchorCutM, type CutAnchorHint, type CutAnchor, type AnchorPartition } from "./ribbonAnchor";
+import { alongMOnPartition } from "./ribbonAnchor";
 import { colorFor, type CongestionLevel } from "./mapboxDirections";
 
 /** [lng, lat] — GeoJSON order, the order the sources already use. */
@@ -305,14 +306,69 @@ export function ribbonSeamM(cutM: number, fadeM: number): number {
  * step (z16 → z15 at pitch 60: seam 1188 → 1378 m while the near core ended at 1242) — so the seam walks:
  * never backward, never past the near core that is on screen now; it catches up over the next ticks. The
  * cost of a lagging seam is only a longer near piece, or for a tick a fade cut short at the seam.
+ *
+ * A NEW PARTITION (Codex review r4): both surfaces rebuild the partition on every traffic refresh — same road,
+ * new colours — and on every reroute or route swap. Resetting the seam to its target there broke the guard: after
+ * a zoom-in the seam is held well ahead of its target (z13 → z17 at pitch 60: 2040 m vs 1104 m), a reset put the
+ * new near core's end at 1152 m while the OLD far piece, still on screen, started at 2040 m — 888 m of line gone
+ * until the far source landed. So the seam is carried: on the same road (identical vertices) it simply continues;
+ * on a different line it goes where `carrySeamM` says — the old seam, or the fork where the new line leaves the
+ * old one, whichever comes first — so the road both lines share stays drawn whichever source lands first.
  */
-export type RibbonSeamState = { key: unknown; seam: number; overlapM: number } | null;
-export function nextRibbonSeam(prev: RibbonSeamState, key: unknown, cutQ: number, fadeM: number): { seam: number; state: RibbonSeamState } {
+export type RibbonSeamState = { key: RibbonPartition; seam: number; overlapM: number } | null;
+export function nextRibbonSeam(prev: RibbonSeamState, p: RibbonPartition, cutQ: number, fadeM: number): { seam: number; state: RibbonSeamState } {
   const target = ribbonSeamM(cutQ, fadeM);
   const overlapM = ribbonSeamStepM(fadeM);
-  if (!prev || prev.key !== key) return { seam: target, state: { key, seam: target, overlapM } };
+  if (prev && prev.key !== p && !samePath(prev.key, p)) {
+    const carried = carrySeamM(prev.key, prev.seam, p, cutQ);
+    const seam = carried ?? target;
+    return { seam, state: { key: p, seam, overlapM } };
+  }
+  if (!prev) return { seam: target, state: { key: p, seam: target, overlapM } };
   const seam = Math.max(prev.seam, Math.min(target, prev.seam + prev.overlapM));
-  return { seam, state: { key, seam, overlapM } };
+  return { seam, state: { key: p, seam, overlapM } };
+}
+
+/** The same vertices in the same order — a traffic/colour rebuild of the line that is on screen. */
+function samePath(a: RibbonPartition, b: RibbonPartition): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.coords.length !== b.coords.length) return false;
+  for (let i = 0; i < a.coords.length; i++) {
+    if (a.coords[i][0] !== b.coords[i][0] || a.coords[i][1] !== b.coords[i][1]) return false;
+  }
+  return true;
+}
+
+/**
+ * Where the seam goes on a NEW line (Codex review r4). Walk the new line forward from its cut while it still runs
+ * along the old one, and stop at the first of: the point where the OLD far piece starts (the old seam), or the FORK
+ * where the new line leaves the old one. Holding the seam there keeps the shared road drawn in either landing
+ * order — the new near core runs past that point (it overlaps by a step) to meet the old far piece or reach the
+ * fork, and the new far piece starts at a point the old near piece still covers. The new line's own branch past a
+ * fork shows when its source lands; it is new either way. null = nothing is shared ahead of the cut (a different
+ * road, or a U-turn): the caller starts from the target.
+ */
+export function carrySeamM(prev: RibbonPartition, prevSeamM: number, p: RibbonPartition, fromM: number, tolM = 5): number | null {
+  const SAMPLE_M = 10, MAX_SAMPLES = 2000;
+  const start = Math.max(0, Math.min(p.totalM, fromM));
+  const a = pointAt(p, start);
+  const first = alongMOnPartition(prev, a[1], a[0], null);
+  if (!first || first.distM > tolM || first.m >= prevSeamM) return null;
+  let lastM = start, oldM = first.m;
+  for (let k = 1; k <= MAX_SAMPLES; k++) {
+    const m = Math.min(p.totalM, start + k * SAMPLE_M);
+    const pt = pointAt(p, m);
+    const q = alongMOnPartition(prev, pt[1], pt[0], oldM, 250);
+    // Off the old line, or back along it (a U-turn): the lines have parted.
+    if (!q || q.distM > tolM || q.m < oldM - 1) return lastM > start ? lastM : null;
+    if (q.m >= prevSeamM) {
+      const t = (prevSeamM - oldM) / Math.max(1e-6, q.m - oldM);
+      return lastM + Math.max(0, Math.min(1, t)) * (m - lastM);
+    }
+    lastM = m; oldM = q.m;
+    if (m >= p.totalM) return lastM;
+  }
+  return lastM;
 }
 
 /**

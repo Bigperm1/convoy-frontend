@@ -18,6 +18,9 @@
 //       screen), so neither native landing order gaps the bright line — Codex r2's z16→z15 case included;
 //   N9  render retries: the seam is derived from the COMMITTED state (layout effect), so a discarded render
 //       spends nothing — negative control reproduces Codex r3's gap with the render-mutating code;
+//   N10 a NEW partition (traffic refresh, reroute, route swap — Codex r4): the seam is carried by position — same road
+//       continues, a reroute holds it at the old seam or the fork — so the road both lines share stays drawn in either
+//       landing order (physical coverage on real geometry); the r3 reset is the negative control (888 m gap);
 //   N7  the seam handoff guard: if the far piece lands a whole step early (the two native sources are not
 //       synchronised — Codex review), the near piece's core still reaches it: no gap in the bright line.
 // A negative control re-runs N2 with the seam margin removed and must FAIL.
@@ -220,6 +223,134 @@ for (const [label, fade, lead, stepM] of [["z14 highway", 150, 100, 8], ["z16.5 
   const good = run(true), bad = run(false);
   ok("N9 render retries: commit-aware seam never gaps", good.gaps === 0, `${good.gaps} gaps (worst ${good.worst.toFixed(0)} m) with discarded renders before commits`);
   ok("N9 NEG control (mutating during render gaps)", bad.gaps > 0, `${bad.gaps} gaps (worst ${bad.worst.toFixed(0)} m) when a discarded render spends the overlap`);
+}
+
+// N10 — A NEW PARTITION (Codex review r4). Both surfaces rebuild the partition on every traffic refresh (same road, new
+// colours) and on every reroute / route swap; the old pieces stay on screen until each native source lands. Hold the
+// seam well ahead of its target first (z13 → z17 at base 1000 m — Codex's case), then swap the partition and check
+// PHYSICAL coverage of the road in both landing orders against real geometry:
+//   near lands first → new near piece + OLD far piece;  far lands first → OLD near piece + new far piece.
+// Negative control: the r3 rule (a new partition resets the seam to its target).
+{
+  const { routeTrimLeadM, routeTrimFadeM } = await import("../../src/routeTrim.ts");
+  const { nextRibbonSeam, ribbonStepM, alongMOnPartition, sliceCoords, carrySeamM } = rr;
+  const tick = (z: number, baseM: number) => {
+    const lead = routeTrimLeadM(z, 49, 60, 0, 0, 22.5), fade = Math.round(routeTrimFadeM(z, 49, 60) / 2) * 2;
+    return { lead, fade, cutQ: quantiseM(baseM + lead, ribbonStepM(z, 49))! };
+  };
+  const r3Seam = (prev: any, key: any, cutQ: number, fade: number) => {   // the r3 rule, for the negative controls
+    const target = ribbonSeamM(cutQ, fade), overlapM = ribbonSeamStepM(fade);
+    if (!prev || prev.key !== key) return { seam: target, state: { key, seam: target, overlapM } };
+    const seam = Math.max(prev.seam, Math.min(target, prev.seam + prev.overlapM));
+    return { seam, state: { key, seam, overlapM } };
+  };
+  const ptAt = (p: any, m: number) => {
+    const s = sliceCoords(p, Math.max(0, m - 0.05), Math.min(p.totalM, m + 0.05));
+    return s.length ? [(s[0][0] + s[s.length - 1][0]) / 2, (s[0][1] + s[s.length - 1][1]) / 2] : p.coords[p.coords.length - 1];
+  };
+  type Piece = { p: any; lo: number; hi: number };
+  const covered = (pt: number[], pieces: Piece[]) => pieces.some(({ p, lo, hi }) => {
+    if (hi - lo < 0.05) return false;
+    const q = alongMOnPartition(p, pt[1], pt[0], (lo + hi) / 2, (hi - lo) / 2 + 2);
+    return !!q && q.distM <= 1.5 && q.m >= lo - 1 && q.m <= hi + 1;
+  });
+  const longestGap = (p: any, from: number, to: number, pieces: Piece[]) => {   // metres of `p` no core piece draws
+    let run = 0, worst = 0;
+    for (let m = from; m <= to; m += 2) { if (covered(ptAt(p, m), pieces)) run = 0; else { run += 2; worst = Math.max(worst, run); } }
+    return worst;
+  };
+  const resample = (p: any, m0: number, m1: number, stepM: number) => {    // the same road, different vertices
+    const out: number[][] = [];
+    for (let m = m0; m < m1; m += stepM) out.push(ptAt(p, m));
+    out.push(ptAt(p, m1));
+    return out as [number, number][];
+  };
+  // The old line A = P, held ahead: three ticks at z13, then z17 (the seam never walks backward).
+  const carA = 1000;
+  let stA: any = null;
+  const t13 = tick(13, carA);
+  for (let k = 0; k < 3; k++) stA = nextRibbonSeam(stA, P, t13.cutQ, t13.fade).state;
+  const t17 = tick(17, carA);
+  stA = nextRibbonSeam(stA, P, t17.cutQ, t17.fade).state;
+  const ov = ribbonSeamStepM(t17.fade), seamA = stA.seam, target17 = ribbonSeamM(t17.cutQ, t17.fade);
+  const oldNear: Piece = { p: P, lo: t17.cutQ, hi: Math.min(total, seamA + ov) }, oldFar: Piece = { p: P, lo: seamA, hi: total };
+  ok("N10 setup: seam held ahead of its target", seamA - target17 > 500, `seam ${seamA.toFixed(0)} m vs target ${target17.toFixed(0)} m after z13 → z17 at ${carA} m`);
+
+  // S1 — traffic refresh: the SAME road, a new partition object with new colours (Codex's reproduction).
+  {
+    const cong2 = coords.slice(1).map((_, i) => (i % 90 < 30 ? "severe" : i % 90 < 50 ? "moderate" : "low"));
+    const P2 = buildRibbonPartition(coords.map((c) => [c[0], c[1]] as [number, number]), cong2 as any, "#2DEC86")!;
+    const judge = (seam: number) => ({ nearFirst: seamA - Math.min(total, seam + ov), farFirst: seam - (seamA + ov) });
+    const g = judge(nextRibbonSeam(stA, P2, t17.cutQ, t17.fade).seam), b = judge(r3Seam(stA, P2, t17.cutQ, t17.fade).seam);
+    ok("N10 traffic refresh keeps the seam: no core gap either order", g.nearFirst <= 0.5 && g.farFirst <= 0.5,
+      `near-first ${Math.max(0, g.nearFirst).toFixed(0)} m, far-first ${Math.max(0, g.farFirst).toFixed(0)} m uncovered`);
+    ok("N10 NEG control (r3 reset gaps on a traffic refresh)", b.nearFirst > 0.5,
+      `near-first: new near core ends ${(r3Seam(stA, P2, t17.cutQ, t17.fade).seam + ov).toFixed(0)} m, old far starts ${seamA.toFixed(0)} m → ${b.nearFirst.toFixed(0)} m of line gone`);
+    // And a drive: zoom snaps (N8's sequence) with a same-road rebuild every 37 ticks, both orders every tick.
+    const zs = [16, 15, 14, 16, 15.5, 13, 16.5, 15, 14.2, 16, 13.5, 17];
+    const drive2 = (rule: typeof nextRibbonSeam) => {
+      let st: any = null, key: any = P, lastSeam: number | null = null, lastCore: number | null = null, gaps = 0, worst = 0, base = 800;
+      for (let k = 0; k < 600; k++) {
+        if (k % 37 === 36) key = key === P ? P2 : P;
+        const { fade, cutQ } = tick(zs[Math.floor(k / 20) % zs.length], base);
+        const out = rule(st, key, cutQ, fade); st = out.state;
+        const core = Math.min(total, out.seam + ribbonSeamStepM(fade));
+        if (lastSeam != null && lastCore != null) {
+          if (out.seam - lastCore > 0.5) { gaps++; worst = Math.max(worst, out.seam - lastCore); }
+          if (lastSeam - core > 0.5) { gaps++; worst = Math.max(worst, lastSeam - core); }
+        }
+        lastSeam = out.seam; lastCore = core; base += 27.8 / 12;
+        if (base > total - 400) break;
+      }
+      return { gaps, worst };
+    };
+    const dg = drive2(nextRibbonSeam), db = drive2(r3Seam as any);
+    ok("N10 drive with traffic refreshes + zoom snaps: no core gap", dg.gaps === 0, `${dg.gaps} ticks with a gap (worst ${dg.worst.toFixed(0)} m)`);
+    ok("N10 NEG control (r3 reset in the same drive gaps)", db.gaps > 0, `${db.gaps} ticks with a gap (worst ${db.worst.toFixed(0)} m)`);
+  }
+
+  // S2 — reroute that stays on the same road past the old seam (new vertices, starts at the car).
+  {
+    const B = buildRibbonPartition(resample(P, carA, total, 3), null, "#2DEC86")!;   // 3 m: chords stay within 0.5 m of A's bends
+    const tB = tick(17, 0);
+    const good = nextRibbonSeam(stA, B, tB.cutQ, tB.fade).seam, bad = r3Seam(stA, B, tB.cutQ, tB.fade).seam;
+    const from = tB.cutQ + tB.fade + 10, to = B.totalM - 5;
+    const nf = (s: number) => longestGap(B, from, to, [{ p: B, lo: tB.cutQ, hi: Math.min(B.totalM, s + ov) }, oldFar]);
+    const ff = (s: number) => longestGap(B, from, to, [oldNear, { p: B, lo: s, hi: B.totalM }]);
+    const g = { nf: nf(good), ff: ff(good) }, b = { nf: nf(bad), ff: ff(bad) };
+    ok("N10 reroute on the same road: seam carried, no gap either order", g.nf === 0 && g.ff === 0,
+      `seam on the new line ${good.toFixed(0)} m (old seam ${(seamA - carA).toFixed(0)} m past the car); uncovered near-first ${g.nf} m, far-first ${g.ff} m`);
+    ok("N10 NEG control (r3 reset gaps on that reroute)", b.nf > 0, `near-first ${b.nf} m of road undrawn (seam reset to ${bad.toFixed(0)} m)`);
+  }
+
+  // S3 — reroute that FORKS off the old line 600 m ahead, before the old seam (held ~1 km ahead).
+  {
+    const forkA = carA + 600;
+    const shared = resample(P, carA, forkA, 4);
+    const f = shared[shared.length - 1];
+    const branch = Array.from({ length: 100 }, (_, i) => [f[0], f[1] - (i + 1) * 0.00018] as [number, number]);   // 20 m steps south
+    const B = buildRibbonPartition([...shared, ...branch], null, "#2DEC86")!;
+    const tB = tick(17, 0);
+    const good = nextRibbonSeam(stA, B, tB.cutQ, tB.fade).seam, bad = r3Seam(stA, B, tB.cutQ, tB.fade).seam;
+    const from = tB.cutQ + tB.fade + 10, forkB = 600;
+    const nf = (s: number) => longestGap(B, from, forkB - 6, [{ p: B, lo: tB.cutQ, hi: Math.min(B.totalM, s + ov) }, oldFar]);
+    const ff = (s: number) => longestGap(B, from, B.totalM - 5, [oldNear, { p: B, lo: s, hi: B.totalM }]);
+    const g = { nf: nf(good), ff: ff(good) }, b = { nf: nf(bad), ff: ff(bad) };
+    ok("N10 reroute that forks: seam at the fork, shared road drawn either order", g.nf === 0 && g.ff === 0 && Math.abs(good - forkB) < 15,
+      `seam ${good.toFixed(0)} m (fork at ${forkB} m); shared road uncovered near-first ${g.nf} m; whole new line uncovered far-first ${g.ff} m`);
+    ok("N10 NEG control (r3 reset gaps before the fork)", b.nf > 0, `near-first ${b.nf} m of the shared road undrawn (seam reset to ${bad.toFixed(0)} m)`);
+  }
+
+  // S4 — a different road, and S5 — a U-turn back along the old line: nothing shared ahead, start from the target.
+  {
+    const far = buildRibbonPartition(coords.map((c) => [c[0], c[1] + 0.01] as [number, number]), null, "#2DEC86")!;   // ~1.1 km north
+    const back = buildRibbonPartition(resample(P, 0, carA, 7).reverse(), null, "#2DEC86")!;                          // car → start
+    const tB = tick(17, 0);
+    const s4 = nextRibbonSeam(stA, far, tB.cutQ, tB.fade).seam, s5 = nextRibbonSeam(stA, back, tB.cutQ, tB.fade).seam;
+    const tgt = ribbonSeamM(tB.cutQ, tB.fade);
+    ok("N10 different road / U-turn: start from the target", s4 === tgt && s5 === tgt && carrySeamM(P, seamA, far, tB.cutQ) === null && carrySeamM(P, seamA, back, tB.cutQ) === null,
+      `different road ${s4.toFixed(0)} m, U-turn ${s5.toFixed(0)} m, target ${tgt.toFixed(0)} m`);
+  }
 }
 
 // Negative control: without the one-step margin the per-frame cut overtakes the seam → N2 must fail.

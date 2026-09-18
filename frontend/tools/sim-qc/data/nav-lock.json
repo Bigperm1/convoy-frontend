@@ -74,6 +74,13 @@
         "src/ConvoyMapbox.tsx#mbx-ribbon-cut-anchor region 0b75472bba76 → 08fbbd8dfef1",
         "src/carplay/CarMapView.tsx#car-ribbon-features-rebuild region 1b0ef9e9e2fd → ce50d0ba922c"
       ]
+    },
+    {
+      "at": "2026-09-18",
+      "quote": "Jeff, 2026-09-18: \"can you fix the route line jitters when near the car? the car is smooth but the route line when its dissappearing in front of the car is notchy any way to smooth it out?\" (Codex review r4 fix: the seam is carried across partition rebuilds and reroutes)",
+      "changes": [
+        "src/routeRibbon.ts: code 38691827a3e8 → adc31728128f"
+      ]
     }
   ],
   "files": {
@@ -94,7 +101,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/routeRibbon.ts": {
-      "hash": "sha256:38691827a3e8a898ae23cb63a0891fb5eab339cf0a0a3fbde4f1ba47094ac943",
+      "hash": "sha256:adc31728128fc90ce37075c4071a3c161e9dce820b76672ed01ac76010a7814d",
       "why": "pure drive-engine module: code-locked"
     },
     "src/ribbonAnchor.ts": {

@@ -83,8 +83,12 @@ export type SpotHeadingObs = { deg: number; at: number; lat: number; lng: number
  *  fix, before that gate: only a fix that may write a spot may CREATE an observation (`mayWriteSpot`), but any fix
  *  may retire one by creeping. `frozen` is set by the first at-rest fix after the observation — the car has stopped,
  *  and whatever moves at walking pace after that is the PHONE leaving the car, which must not retire the facing. */
-export type HeadingTrack = { obs: SpotHeadingObs | null; creepM: number; from: { lat: number; lng: number } | null; frozen: boolean };
-export const HEADING_TRACK_EMPTY: HeadingTrack = { obs: null, creepM: 0, from: null, frozen: false };
+// `heldAt`: where the car came to rest WITH the head unit still attached, and the metres already crept at that moment.
+export type HeadingTrack = {
+  obs: SpotHeadingObs | null; creepM: number; from: { lat: number; lng: number } | null; frozen: boolean;
+  heldAt?: { lat: number; lng: number; creepM: number } | null;
+};
+export const HEADING_TRACK_EMPTY: HeadingTrack = { obs: null, creepM: 0, from: null, frozen: false, heldAt: null };
 export function headingTrackStep(
   t: HeadingTrack,
   fix: { lat: number; lng: number; spd: number; course: number | null | undefined; at: number },
@@ -94,17 +98,29 @@ export function headingTrackStep(
   const courseOk = typeof fix.course === "number" && isFinite(fix.course) && fix.course >= 0 && fix.course <= 360;
   const here = { lat: fix.lat, lng: fix.lng };
   if (mayWriteSpot && fix.spd >= SPOT_WRITE_MAX_SPEED_MS && courseOk) {
-    return { obs: { deg: fix.course as number, at: fix.at, lat: fix.lat, lng: fix.lng }, creepM: 0, from: here, frozen: false };
+    return { obs: { deg: fix.course as number, at: fix.at, lat: fix.lat, lng: fix.lng }, creepM: 0, from: here, frozen: false, heldAt: null };
   }
   if (!t.obs || t.frozen) return { ...t, from: here };
   // Came to rest: the facing is decided — UNLESS the head unit is still attached (a yield at the lot entrance, a gear
-  // change before backing in): the car is not parked yet, so the creep rule must keep running through the slow turn
-  // that follows. The witnessed disconnect freezes it instead (locationPrivacy), which is what keeps the walk-away
-  // protection. A phone-only driver has no such signal, so a stop still decides it for them (Codex r5b, 2026-09-17).
-  if (fix.spd < SPOT_CREEP_MIN_MS) return { ...t, from: here, frozen: !attached };
+  // change before backing in): the car is not parked yet, so a slow turn after the stop may still retire it. The
+  // witnessed disconnect freezes it instead (locationPrivacy), which is what keeps the walk-away protection. A
+  // phone-only driver has no such signal, so a stop still decides it for them (Codex r5b, 2026-09-17).
+  // Two guards on that attached hold (Codex, 2026-09-17 evening — both reproduced on this reducer first):
+  //  • an attachment that LAPSES without a disconnect event (Android's TTL, a missed callback) is a park: freeze;
+  //  • after the hold, only NET distance from where the car stopped counts — GPS jitter around a parked car adds
+  //    up to metres of path (1 m swings at a reported 0.5 m/s retired a correct heading in 9 fixes) but goes nowhere.
+  if (t.heldAt && !attached) return { ...t, from: here, frozen: true };
+  if (fix.spd < SPOT_CREEP_MIN_MS) {
+    if (!attached) return { ...t, from: here, frozen: true };
+    return { ...t, from: here, heldAt: t.heldAt ?? { lat: fix.lat, lng: fix.lng, creepM: t.creepM } };
+  }
+  if (fix.spd < SPOT_WRITE_MAX_SPEED_MS && t.heldAt) {                                     // creeping after an attached stop
+    const creepM = t.heldAt.creepM + spotDistanceM(t.heldAt, here);
+    return creepM > SPOT_HDG_CREEP_MAX_M ? { obs: null, creepM: 0, from: here, frozen: false, heldAt: null } : { ...t, creepM, from: here };
+  }
   if (fix.spd < SPOT_WRITE_MAX_SPEED_MS && t.from) {                                       // creeping: a slow turn, a lot crawl
     const creepM = t.creepM + spotDistanceM(t.from, here);
-    return creepM > SPOT_HDG_CREEP_MAX_M ? { obs: null, creepM: 0, from: here, frozen: false } : { ...t, creepM, from: here };
+    return creepM > SPOT_HDG_CREEP_MAX_M ? { obs: null, creepM: 0, from: here, frozen: false, heldAt: null } : { ...t, creepM, from: here };
   }
   return { ...t, from: here };   // a moving fix without a course: nothing to learn, nothing to retire
 }

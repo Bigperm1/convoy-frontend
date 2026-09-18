@@ -17,6 +17,14 @@
         "src/carSpotTrust.ts: code 86207d571ada → 880b3478381d",
         "src/locationPrivacy.ts#priv-notefix-spot-write region 2cd9677662da → 20d9661d1981"
       ]
+    },
+    {
+      "at": "2026-09-17",
+      "quote": "Jeff, 2026-09-17 evening: deploy the heading fix (same approval — Codex ship-review guards added to that fix)",
+      "changes": [
+        "src/carSpotTrust.ts: code 880b3478381d → 3a6274439eb8",
+        "src/locationPrivacy.ts#priv-hydrate-spot-adopt region fa0e6a1addd3 → f3e64bbe68a5"
+      ]
     }
   ],
   "files": {
@@ -69,7 +77,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/carSpotTrust.ts": {
-      "hash": "sha256:880b3478381ddb74c1c03fd03dec90a69c53d0179d196c6441fcee27998b76b9",
+      "hash": "sha256:3a6274439eb868cbee5682e61ac84a41caaa1bfd5bd21e9cedeeffc0ab44ebe8",
       "why": "pure drive-engine module: code-locked"
     },
     "src/driveFeed.ts": {
@@ -587,7 +595,7 @@
         "DRIVING_SAVE_THROTTLE_MS": "15_000"
       },
       "regions": {
-        "priv-hydrate-spot-adopt": "sha256:fa0e6a1addd34069a370c444a2be02343099d6df049dd275a2a5b2c1f3f5d6ca",
+        "priv-hydrate-spot-adopt": "sha256:f3e64bbe68a5c69ba9765eb79e22564d0466c1175bfe49cb935d8a3d97bcd247",
         "priv-hydrate-latch-restore": "sha256:c7e11a4ee61029c062da3c56b295e06aebfd0659a255dfb0b859608edd9e5065",
         "priv-car-connected-transition": "sha256:4bba98d07a22ea602cb2f7dbfb0388213617beb9338f9354d819e0791de0250f",
         "priv-head-unit-raw": "sha256:887f2c2ddfd20d3740aba7d06b2027caab912bdeb4a4db27e1b3eac5271d8f6a",

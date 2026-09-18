@@ -202,7 +202,7 @@ export async function hydrateLocationPrivacy(): Promise<void> {
           _carSpot = hdgOk ? { lat: p.lat, lng: p.lng, hdg: p.hdg } : { lat: p.lat, lng: p.lng };
           // The restored facing stays tied to THIS spot: a later spot written > SPOT_HDG_MAX_DIST_M away (the car
           // moved while the app was gone) gets no heading until a moving course is seen again.
-          if (hdgOk) _hdgTrack = { obs: { deg: p.hdg, at: p.t, lat: p.lat, lng: p.lng }, creepM: 0, from: null, frozen: true };
+          if (hdgOk) _hdgTrack = { obs: { deg: p.hdg, at: p.t, lat: p.lat, lng: p.lng }, creepM: 0, from: null, frozen: true, heldAt: null };
           _lastSpotMeta = { t: p.t, att: p.att === 1 ? 1 : 0, mv: typeof p.mv === "number" ? p.mv : 0 };
           _carSpotAt = p.t;
           // Same freshness rule as the spot itself: only adopt the persisted witnessed-park

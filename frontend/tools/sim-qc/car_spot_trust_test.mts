@@ -145,6 +145,24 @@ out.push(`F 7km/h=no 3km/h=yes 0=yes unknown=yes cap=${SPOT_WRITE_MAX_SPEED_MS}m
   const driveAttached = (attached: boolean) => { let t = HEADING_TRACK_EMPTY; let at = NOW; for (const f of g5fixes) { at += 1000; t = headingTrackStep(t, { lat: 49.2 + step(f.m), lng: -123.1, spd: f.spd, course: f.course, at }, true, attached); } return t; };
   assert.equal(driveAttached(true).obs, null); assert.equal(driveAttached(false).obs?.deg, 0);
   out.push(`G5 attached: stop → 12 m slow turn → park retires the approach heading; phone-only keeps it (frozen at the stop)`);
+  // G6 — Codex (ship review, 2026-09-17 evening): parked facing 90°, head unit still attached, the GPS swings 1 m back
+  //      and forth at a reported 0.5 m/s for two minutes. The old summed-path creep retired the heading in 9 fixes;
+  //      net distance from the stop never leaves the jitter, so the heading must survive.
+  { let t = HEADING_TRACK_EMPTY; let at = NOW; const E = (m: number) => m / (111320 * Math.cos(49.2 * Math.PI / 180));
+    const f = (m: number, spd: number, course: number | null, gate: boolean, att: boolean) => { at += 1000; t = headingTrackStep(t, { lat: 49.2, lng: -123.1 + E(m), spd, course, at }, gate, att); };
+    for (let i = 0; i < 5; i++) f(i * 6, 6, 90, true, true);
+    f(24, 0, null, true, true);
+    for (let i = 0; i < 120; i++) f(24 + (i % 2 ? 1 : -1), 0.5, null, true, true);
+    assert.equal(t.obs?.deg, 90); out.push(`G6 attached + 2 min of 1 m GPS jitter at 0.5 m/s → heading 90 kept`);
+    // G7 — Codex: the SAME park, then the attachment LAPSES with no disconnect event (Android TTL) and the driver walks
+    //      12 m at 1.2 m/s with the write gate closed. A lapsed attached hold is a park → frozen → heading kept.
+    let t7 = HEADING_TRACK_EMPTY; at = NOW;
+    const g = (m: number, spd: number, course: number | null, gate: boolean, att: boolean) => { at += 1000; t7 = headingTrackStep(t7, { lat: 49.2 + step(m), lng: -123.1, spd, course, at }, gate, att); };
+    for (let i = 0; i < 5; i++) g(i * 6, 6, 0, true, true);
+    g(24, 0, null, true, true);
+    for (let i = 1; i <= 12; i++) g(24 + i, 1.2, null, false, false);
+    assert.equal(t7.obs?.deg, 0); assert.equal(t7.frozen, true); out.push(`G7 attached stop → attachment lapses (no disconnect event) → 12 m walk → heading 0 kept, frozen`);
+  }
 }
 
 console.log(out.join(" | "));

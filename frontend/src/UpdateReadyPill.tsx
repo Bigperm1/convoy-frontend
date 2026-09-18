@@ -33,7 +33,11 @@ const UPDATE_CHECK_EVERY_MS = 30 * 60_000;
 let lastCheckAt = 0;
 let checking = false;
 
-async function checkAndFetch(why: string): Promise<void> {
+// `mayFetch` is re-asked AFTER the server answers (Codex review 2026-09-18): a check that
+// starts while parked must not begin a download if a drive or a head unit started while
+// the request was in flight. A download already running is left to finish — the pill stays
+// hidden and nothing reloads until the driver taps it after the drive.
+async function checkAndFetch(why: string, mayFetch: () => boolean): Promise<void> {
   if (Platform.OS === "web" || __DEV__ || !Updates.isEnabled) return;
   const now = Date.now();
   if (checking || now - lastCheckAt < UPDATE_CHECK_EVERY_MS) return;
@@ -41,9 +45,16 @@ async function checkAndFetch(why: string): Promise<void> {
   checking = true;
   try {
     const res = await Updates.checkForUpdateAsync();
-    if (!res.isAvailable) return;
+    // A server ROLLBACK directive answers isAvailable=false + isRollBackToEmbedded=true;
+    // fetchUpdateAsync is what processes it, so it must be fetched too (Codex review).
+    if (!res.isAvailable && !res.isRollBackToEmbedded) return;
+    if (!mayFetch()) {
+      lastCheckAt = 0; // look again as soon as the drive ends
+      logEvent(`ota-check why=${why} avail=1 deferred=drive`);
+      return;
+    }
     const got = await Updates.fetchUpdateAsync();
-    logEvent(`ota-check why=${why} avail=1 fetched=${got.isNew ? 1 : 0}`);
+    logEvent(`ota-check why=${why} avail=1 rollback=${res.isRollBackToEmbedded ? 1 : 0} fetched=${got.isNew || got.isRollBackToEmbedded ? 1 : 0}`);
   } catch (e: any) {
     logEvent(`ota-check why=${why} err=${String(e?.message ?? e).slice(0, 80)}`);
   } finally {
@@ -58,14 +69,14 @@ export default function UpdateReadyPill({ hidden }: { hidden?: boolean }) {
   hiddenRef.current = hidden;
   useEffect(() => {
     if (Platform.OS === "web") return;
-    const run = (why: string) => { if (!hiddenRef.current) void checkAndFetch(why); };
+    const run = (why: string) => { if (!hiddenRef.current) void checkAndFetch(why, () => !hiddenRef.current); };
     run("mount");
     const sub = AppState.addEventListener("change", (s) => { if (s === "active") run("foreground"); });
     const id = setInterval(() => run("timer"), UPDATE_CHECK_EVERY_MS);
     return () => { sub.remove(); clearInterval(id); };
   }, []);
   // A drive that just ended (hidden → shown) is a natural moment to look.
-  useEffect(() => { if (!hidden) void checkAndFetch("unhidden"); }, [hidden]);
+  useEffect(() => { if (!hidden) void checkAndFetch("unhidden", () => !hiddenRef.current); }, [hidden]);
   if (Platform.OS === "web" || !isUpdatePending || hidden) return null;
   return (
     <TouchableOpacity

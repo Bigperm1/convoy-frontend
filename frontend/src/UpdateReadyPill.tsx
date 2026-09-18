@@ -57,15 +57,19 @@ async function checkAndFetch(why: string, mayFetch: () => boolean): Promise<void
     // A server ROLLBACK directive answers isAvailable=false + isRollBackToEmbedded=true;
     // fetchUpdateAsync is what processes it, so it must be fetched too (Codex review).
     if (!res.isAvailable && !res.isRollBackToEmbedded) return;
-    const target = res.isRollBackToEmbedded ? "rollback" : String((res.manifest as any)?.id ?? "?");
-    if (target === pendingTarget) return; // already downloaded — the pill is showing it
+    const checkedId = (res.manifest as any)?.id;
+    const target = res.isRollBackToEmbedded ? "rollback" : checkedId ? String(checkedId) : null;
+    if (target && target === pendingTarget) return; // already downloaded — the pill is showing it
     if (!mayFetch()) {
       lastCheckAt = 0; // look again as soon as the drive ends
       logEvent(`ota-check why=${why} avail=1 deferred=drive`);
       return;
     }
     const got = await Updates.fetchUpdateAsync();
-    if (got.isNew || got.isRollBackToEmbedded) pendingTarget = target;
+    // Record what was FETCHED, not what was checked — the fetch asks the server again and a
+    // release can change in between (Codex review r3). Never cache an unknown identity.
+    if (got.isRollBackToEmbedded) pendingTarget = "rollback";
+    else if (got.isNew) { const id = (got.manifest as any)?.id; pendingTarget = id ? String(id) : null; }
     logEvent(`ota-check why=${why} avail=1 rollback=${res.isRollBackToEmbedded ? 1 : 0} fetched=${got.isNew || got.isRollBackToEmbedded ? 1 : 0}`);
   } catch (e: any) {
     logEvent(`ota-check why=${why} err=${String(e?.message ?? e).slice(0, 80)}`);

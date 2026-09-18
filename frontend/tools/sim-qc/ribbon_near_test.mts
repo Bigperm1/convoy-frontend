@@ -13,7 +13,9 @@
 //   N3  the far piece is rebuilt far less often than the old single source (distinct far keys);
 //   N4  the per-frame near piece stays small (coordinates per build);
 //   N5  every piece carries alpha; the glow fades in (0.33, 0.66, then 1) instead of a round cap;
-//   N6  at the destination both pieces end cleanly (no feature past the end, nothing negative).
+//   N6  at the destination both pieces end cleanly (no feature past the end, nothing negative);
+//   N7  the seam handoff guard: if the far piece lands a whole step early (the two native sources are not
+//       synchronised — Codex review), the near piece's core still reaches it: no gap in the bright line.
 // A negative control re-runs N2 with the seam margin removed and must FAIL.
 import { registerHooks } from "node:module";
 // routeRibbon → mapboxDirections → initMapbox → @rnmapbox/maps (native). Stub the one call it makes.
@@ -70,7 +72,7 @@ const span = (feats: any[], kind: string) => {
 const drive = (fade: number, lead: number, stepM: number, marginOk: boolean) => {
   const perFrame = 27.8 / 60, framesPerTick = 5;
   let farKey: number | null = null, farKeys = 0, oldKeys = 0, lastOld: number | null = null;
-  let gapOrOverlap = 0, truncated = 0, maxCoords = 0, frames = 0, worstMargin = Infinity;
+  let gapOrOverlap = 0, farFirstGaps = 0, truncated = 0, maxCoords = 0, frames = 0, worstMargin = Infinity;
   let seam = 0, renderCut = 0;
   for (let car = 0; car + lead < total - 5; car += perFrame, frames++) {
     const cut = car + lead;
@@ -83,24 +85,33 @@ const drive = (fade: number, lead: number, stepM: number, marginOk: boolean) => 
     worstMargin = Math.min(worstMargin, seam - (cut + fade));
     if (seam < cut + fade - 0.01 && seam < total) truncated++;
     if (frames % 97 !== 0) continue;                    // geometry checks on a sample of frames
-    const near = buildRibbonNearFeatures(P, { cutM: cut, fadeM: fade, endM: seam, index: 0 });
+    const step = ribbonSeamStepM(fade);
+    const near = buildRibbonNearFeatures(P, { cutM: cut, fadeM: fade, endM: seam, index: 0, coreOverlapM: step });
     const far = buildRibbonFarFeatures(P, { startM: seam, index: 0 });
     maxCoords = Math.max(maxCoords, near.reduce((n: number, f: any) => n + f.geometry.coordinates.length, 0));
-    for (const kind of [RIBBON_CORE, RIBBON_CASING]) {
-      // The near piece's LAST point must be the far piece's FIRST point (butt caps meet flush there).
-      const nl = near.filter((f: any) => f.properties.kind === kind), fl = far.filter((f: any) => f.properties.kind === kind);
-      if (!nl.length || !fl.length) continue;
-      if (segM(nl[nl.length - 1].geometry.coordinates.at(-1), fl[0].geometry.coordinates[0]) > 0.01) gapOrOverlap++;
-      // …and nothing of the near piece may lie past the seam (an overlap would double the translucent glow).
-      const a = span(near, kind); if (a && a[1] > seam + 0.5) gapOrOverlap++;
+    // GLOW (translucent): the near piece's last point must be the far piece's first point, and never past the seam.
+    {
+      const nl = near.filter((f: any) => f.properties.kind === RIBBON_CASING), fl = far.filter((f: any) => f.properties.kind === RIBBON_CASING);
+      if (nl.length && fl.length && segM(nl[nl.length - 1].geometry.coordinates.at(-1), fl[0].geometry.coordinates[0]) > 0.01) gapOrOverlap++;
+      const a = span(near, RIBBON_CASING); if (a && a[1] > seam + 0.5) gapOrOverlap++;
+    }
+    // CORE (opaque): runs one full step past the seam (the handoff guard) — no more, no less.
+    {
+      const a = span(near, RIBBON_CORE);
+      if (a && Math.abs(a[1] - Math.min(total, seam + step)) > 0.5) gapOrOverlap++;
+      // N7: the far piece lands one step early (far-first native order) while the near piece is still on the old seam.
+      const farEarly = buildRibbonFarFeatures(P, { startM: Math.min(total, seam + step), index: 0 });
+      const b = span(farEarly, RIBBON_CORE);
+      if (a && b && b[0] - a[1] > 0.5) farFirstGaps++;
     }
   }
-  return { farKeys, oldKeys, gapOrOverlap, truncated, maxCoords, frames, worstMargin };
+  return { farKeys, oldKeys, gapOrOverlap, farFirstGaps, truncated, maxCoords, frames, worstMargin };
 };
 
 for (const [label, fade, lead, stepM] of [["z14 highway", 150, 100, 8], ["z16.5 town", 24, 20, 1]] as const) {
   const r = drive(fade, lead, stepM, true);
   ok(`N1 seam flush (${label})`, r.gapOrOverlap === 0, `${r.gapOrOverlap} sampled frames where the pieces do not meet within 1 cm or the near piece runs past the seam`);
+  ok(`N7 far-first seam step leaves no core gap (${label})`, r.farFirstGaps === 0, `${r.farFirstGaps} sampled frames with a core gap if the far piece lands a step early`);
   ok(`N2 fade never truncated (${label})`, r.truncated === 0, `${r.truncated}/${r.frames} frames; worst margin past the fade ${r.worstMargin.toFixed(1)} m`);
   ok(`N3 far rebuilds rare (${label})`, r.farKeys * 4 <= r.oldKeys, `far piece rebuilt ${r.farKeys}× vs the old single source ${r.oldKeys}× (quantised cut changes)`);
   ok(`N4 near piece small (${label})`, r.maxCoords <= 400, `max ${r.maxCoords} coordinates per per-frame build`);

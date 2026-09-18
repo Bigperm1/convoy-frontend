@@ -50,6 +50,13 @@
         "src/carplay/CarMapView.tsx#car-jsx-selfcar-model region dec6b5c6ab0c → 817f57360ceb",
         "src/carplay/CarMapView.tsx#car-jsx-nav-ribbon-layers region 6b7917b54db4 → db7ab9a97374"
       ]
+    },
+    {
+      "at": "2026-09-18",
+      "quote": "Jeff, 2026-09-18: \"can you fix the route line jitters when near the car? the car is smooth but the route line when its dissappearing in front of the car is notchy any way to smooth it out?\" (Codex review fixes)",
+      "changes": [
+        "src/routeRibbon.ts: code 311225c8db35 → 8f912bf50dff"
+      ]
     }
   ],
   "files": {
@@ -70,7 +77,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/routeRibbon.ts": {
-      "hash": "sha256:311225c8db3514863f63ce45b3b85f316507ee0b85a2694f3fca211baa6fd3a2",
+      "hash": "sha256:8f912bf50dff9e64f062bc08018567740e99c4aaa810bfab8a16352ff491729a",
       "why": "pure drive-engine module: code-locked"
     },
     "src/ribbonAnchor.ts": {

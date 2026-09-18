@@ -14,7 +14,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { LineLayer, ShapeSource } from "@rnmapbox/maps";
 import {
-  anchorCutM, buildRibbonNearFeatures, RIBBON_CASING, RIBBON_CORE,
+  anchorCutM, buildRibbonNearFeatures, ribbonSeamStepM, RIBBON_CASING, RIBBON_CORE,
   type CutAnchorHint, type RibbonPartition,
 } from "./routeRibbon";
 import { clampCutToRoute } from "./routeTrim";
@@ -50,32 +50,36 @@ export default function RibbonNear({
   glowOpacity?: number;
   coreWidth?: number;
 }) {
-  const [frameCut, setFrameCut] = useState<{ key: RibbonPartition; m: number } | null>(null);
+  // The car's anchored metre on this partition, from the last drawn frame. The LEAD is applied at render
+  // (Codex review 2026-09-18): the lead also changes without a camera push — the parked lift animates on
+  // SelfCarModel's own timer — so a cut frozen at the last push would sit at the wrong distance.
+  const [frameBase, setFrameBase] = useState<{ key: RibbonPartition; m: number } | null>(null);
   const hintRef = useRef<CutAnchorHint>(null);
-  const live = useRef({ partition, leadM, fallbackM, off: hidden || seamM == null });
-  live.current = { partition, leadM, fallbackM, off: hidden || seamM == null };
+  const live = useRef({ partition, fallbackM, off: hidden || seamM == null });
+  live.current = { partition, fallbackM, off: hidden || seamM == null };
 
   useEffect(() => {
     const sink = (lat: number, lng: number) => {
-      const { partition: p, leadM: lead, fallbackM: fb, off } = live.current;
+      const { partition: p, fallbackM: fb, off } = live.current;
       if (off || !p || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
       const a = anchorCutM(p, lat, lng, hintRef.current, p, fb);
       hintRef.current = a.hint;
-      const m = clampCutToRoute(a.m + lead, a.m, p.totalM);
-      setFrameCut((prev) => (prev && prev.key === p && Math.abs(prev.m - m) < NEAR_MIN_MOVE_M ? prev : { key: p, m }));
+      setFrameBase((prev) => (prev && prev.key === p && Math.abs(prev.m - a.m) < NEAR_MIN_MOVE_M ? prev : { key: p, m: a.m }));
     };
     sinkRef.current = sink;
     return () => { if (sinkRef.current === sink) sinkRef.current = null; };
   }, [sinkRef]);
 
-  // A new route (reroute / swap) invalidates the per-frame cut and the anchor hint until the next frame.
-  const cut = frameCut && frameCut.key === partition ? frameCut.m : cutM;
+  // A new route (reroute / swap) invalidates the per-frame base and the anchor hint until the next frame.
+  const cut = frameBase && frameBase.key === partition && partition
+    ? clampCutToRoute(frameBase.m + leadM, frameBase.m, partition.totalM)
+    : cutM;
   const shape: any = useMemo(() => ({
     type: "FeatureCollection",
     features: (!hidden && partition && cut != null && seamM != null)
-      ? buildRibbonNearFeatures(partition, { cutM: cut, fadeM, endM: seamM, index })
+      ? buildRibbonNearFeatures(partition, { cutM: cut, fadeM, endM: seamM, index, coreOverlapM: ribbonSeamStepM(fadeM) })
       : [],
-  }), [hidden, partition, cut, fadeM, seamM, index]);
+  }), [hidden, partition, cut, fadeM, seamM, index]);   // `cut` already folds in leadM
 
   // Styles and filters are MEMOISED: this component re-renders every frame, and although RN's prop
   // diff skips deep-equal objects, a per-frame style object is exactly the pattern trap-check hunts

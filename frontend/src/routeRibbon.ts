@@ -302,7 +302,7 @@ export function ribbonSeamM(cutM: number, fadeM: number): number {
  */
 export function buildRibbonNearFeatures(
   p: RibbonPartition | null,
-  opts: { cutM: number; fadeM: number; endM: number; index: number },
+  opts: { cutM: number; fadeM: number; endM: number; index: number; coreOverlapM?: number },
 ): any[] {
   if (!p) return [];
   const cut = Math.max(0, Math.min(p.totalM, opts.cutM));
@@ -332,10 +332,15 @@ export function buildRibbonNearFeatures(
       m = b;
     }
   }
+  // SEAM HANDOFF GUARD (Codex review 2026-09-18): the two pieces are separate native sources, so a seam
+  // step can land on screen far-first for a frame. The solid core therefore runs `coreOverlapM` PAST the
+  // seam (opaque on opaque of the same colour draws identically), so a far-first step can never open a
+  // gap in the bright line; only the soft glow — which must meet exactly, it is translucent — is exposed.
+  const coreEnd = Math.min(p.totalM, end + Math.max(0, opts.coreOverlapM ?? 0));
   for (const r of p.runs) {
     if (r.endM <= m) continue;
-    if (r.startM >= end) break;
-    push(RIBBON_CORE, sliceCoords(p, Math.max(r.startM, m), Math.min(r.endM, end)), { color: r.color, alpha: 1 });
+    if (r.startM >= coreEnd) break;
+    push(RIBBON_CORE, sliceCoords(p, Math.max(r.startM, m), Math.min(r.endM, coreEnd)), { color: r.color, alpha: 1 });
   }
   return feats;
 }

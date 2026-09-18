@@ -9,6 +9,14 @@
       "changes": [
         "initial lock"
       ]
+    },
+    {
+      "at": "2026-09-17",
+      "quote": "Jeff, 2026-09-17 evening: deploy the heading fix",
+      "changes": [
+        "src/carSpotTrust.ts: code 86207d571ada → 880b3478381d",
+        "src/locationPrivacy.ts#priv-notefix-spot-write region 2cd9677662da → 20d9661d1981"
+      ]
     }
   ],
   "files": {
@@ -61,7 +69,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/carSpotTrust.ts": {
-      "hash": "sha256:86207d571ada28cd6abcefccf9e88dae8281055482e45be20cdba129759d3fd7",
+      "hash": "sha256:880b3478381ddb74c1c03fd03dec90a69c53d0179d196c6441fcee27998b76b9",
       "why": "pure drive-engine module: code-locked"
     },
     "src/driveFeed.ts": {
@@ -585,7 +593,7 @@
         "priv-head-unit-raw": "sha256:887f2c2ddfd20d3740aba7d06b2027caab912bdeb4a4db27e1b3eac5271d8f6a",
         "priv-car-attached-ttl": "sha256:05d2f6d49161e54d77991fcd11810f791b7d4291c6b043efb3223911e15ab87f",
         "priv-notefix-driving-latch": "sha256:011d300a516b4f338c6460bb1ff767bd50ba9ea8b8e3c0091f6ca3d1b02bb890",
-        "priv-notefix-spot-write": "sha256:2cd9677662da3ad79a4c4e4c2eb495fea409c5fc8cbcd8bc12d40724aee52757",
+        "priv-notefix-spot-write": "sha256:20d9661d19816b9c0e54d5e54987d537c42d57c60fe4106baa3766fb6aa407b9",
         "priv-car-spot-getter": "sha256:43253936187ae12872384f1d3f8b2a95e9fa5e1446ff75eb67d57210d88231c9",
         "priv-is-parked": "sha256:770912e607a9e6c4461b498604013b94e255e8f62c2880b831ee026f8b3cd552",
         "priv-shareable-position": "sha256:135180f4bdde3ebc9f00508032f126a6eacc027e76771d4d8ade0d4001cd11ff"

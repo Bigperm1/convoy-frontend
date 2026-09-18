@@ -31,7 +31,7 @@
 // the OPPOSITE of react-native-maps' { latitude, longitude }. Every coordinate
 // handed to Mapbox below is [lng, lat].
 
-import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useCallback, useRef, useState } from "react";
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted, noteEaseIdle } from "./heatProbe";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, poseRoadWindowM } from "./poseEstimator";
@@ -3815,14 +3815,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // rebuilt only when the SEAM moves (every ribbonSeamStepM metres, not every 8 m quantum); the
   // fade-in and the stretch up to the seam are <RibbonNear>, re-drawn every frame from the drawn car.
   // The seam walks — never backward, never past the near core on screen now (nextRibbonSeam, Codex r2).
-  let ribbonSeamQ: number | null = null;
-  if (ribbonCutQ != null && ribbonPartition) {
-    const _ns = nextRibbonSeam(ribbonSeamStateRef.current, ribbonPartition, ribbonCutQ, ribbonFadeQ);
-    ribbonSeamStateRef.current = _ns.state;
-    ribbonSeamQ = _ns.seam;
-  } else {
-    ribbonSeamStateRef.current = null;
-  }
+  // COMMIT-AWARE (Codex r3): derived from the last COMMITTED seam and published only in a layout effect,
+  // so a render React discards or retries can never spend overlap that no near piece ever put on screen.
+  const _ribbonSeamNext = (ribbonCutQ != null && ribbonPartition)
+    ? nextRibbonSeam(ribbonSeamStateRef.current, ribbonPartition, ribbonCutQ, ribbonFadeQ)
+    : null;
+  const ribbonSeamQ: number | null = _ribbonSeamNext ? _ribbonSeamNext.seam : null;
+  useLayoutEffect(() => { ribbonSeamStateRef.current = _ribbonSeamNext ? _ribbonSeamNext.state : null; });
   const _farCutKey = ribbonSeamQ == null ? ribbonCutQ : null;
   const _farFadeKey = ribbonSeamQ == null ? ribbonFadeQ : null;
   const routeDrawFC: any = useMemo(() => ({

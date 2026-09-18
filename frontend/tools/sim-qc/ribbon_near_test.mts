@@ -16,6 +16,8 @@
 //   N6  at the destination both pieces end cleanly (no feature past the end, nothing negative);
 //   N8  zoom snaps (lead + fade change at once): the seam WALKS (never backward, never past the near core on
 //       screen), so neither native landing order gaps the bright line — Codex r2's z16→z15 case included;
+//   N9  render retries: the seam is derived from the COMMITTED state (layout effect), so a discarded render
+//       spends nothing — negative control reproduces Codex r3's gap with the render-mutating code;
 //   N7  the seam handoff guard: if the far piece lands a whole step early (the two native sources are not
 //       synchronised — Codex review), the near piece's core still reaches it: no gap in the bright line.
 // A negative control re-runs N2 with the seam margin removed and must FAIL.
@@ -176,6 +178,48 @@ for (const [label, fade, lead, stepM] of [["z14 highway", 150, 100, 8], ["z16.5 
   }
   ok("N8 zoom snaps: no core gap in either landing order", farFirst === 0 && nearFirst === 0, `far-first ${farFirst}, near-first ${nearFirst} ticks with a gap (worst ${worst.toFixed(0)} m)`);
   ok("N8 zoom snaps: a cut-short fade lasts at most a few ticks", maxTruncRun <= 4, `${trunc} ticks with the fade cut short at the seam, longest run ${maxTruncRun} ticks (12 Hz)`);
+}
+
+// N9 — RENDER RETRIES (Codex review r3): React may discard or repeat a render before it commits. The surfaces derive the
+// seam from the COMMITTED state and publish it in a layout effect; a discarded render must change nothing. Replay the
+// z16→z15 case with a discarded render in between, then a long drive with random discards, checking both landing
+// orders against the LAST COMMITTED near/far pieces. The negative control mutates state during render (the r2 code).
+{
+  const { routeTrimLeadM, routeTrimFadeM } = await import("../../src/routeTrim.ts");
+  const { nextRibbonSeam, ribbonStepM } = rr;
+  const inputs = (z: number, base: number) => {
+    const lead = routeTrimLeadM(z, 49, 60, 0, 0, 22.5), fade = Math.round(routeTrimFadeM(z, 49, 60) / 2) * 2;
+    return { fade, cutQ: quantiseM(base + lead, ribbonStepM(z, 49))! };
+  };
+  const run = (commitAware: boolean) => {
+    let committed: any = null, live: any = null, lastSeam: number | null = null, lastCore: number | null = null;
+    let gaps = 0, worst = 0, base = 800, seed = 7;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const zs = [16, 15, 14, 16, 15.5, 13, 16.5, 15, 14.2, 16, 13.5, 17];
+    for (let k = 0; k < 600; k++) {
+      const z = zs[Math.floor(k / 20) % zs.length];
+      const { fade, cutQ } = inputs(z, base);
+      const renders = 1 + (rnd() < 0.3 ? 1 + Math.floor(rnd() * 2) : 0);   // up to 2 discarded renders, then the committed one
+      let out: any = null;
+      for (let r = 0; r < renders; r++) {
+        out = nextRibbonSeam(commitAware ? committed : live, P, cutQ, fade);
+        if (!commitAware) live = out.state;                              // r2 code: mutates during every render
+      }
+      if (commitAware) committed = out.state;                            // layout effect: only the committed render
+      const seam = out.seam, core = Math.min(total, seam + ribbonSeamStepM(fade));
+      if (lastSeam != null && lastCore != null) {
+        if (seam - lastCore > 0.5) { gaps++; worst = Math.max(worst, seam - lastCore); }     // far lands first
+        if (lastSeam - core > 0.5) { gaps++; worst = Math.max(worst, lastSeam - core); }     // near lands first
+      }
+      lastSeam = seam; lastCore = core;
+      base += 27.8 / 12;
+      if (base > total - 400) break;
+    }
+    return { gaps, worst };
+  };
+  const good = run(true), bad = run(false);
+  ok("N9 render retries: commit-aware seam never gaps", good.gaps === 0, `${good.gaps} gaps (worst ${good.worst.toFixed(0)} m) with discarded renders before commits`);
+  ok("N9 NEG control (mutating during render gaps)", bad.gaps > 0, `${bad.gaps} gaps (worst ${bad.worst.toFixed(0)} m) when a discarded render spends the overlap`);
 }
 
 // Negative control: without the one-step margin the per-frame cut overtakes the seam → N2 must fail.

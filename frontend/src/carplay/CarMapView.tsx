@@ -18,7 +18,7 @@
 // GL safety: onDidFailLoadingMap -> onGLError(), which the CarPlay surface uses to
 // drop back to the static-image fallback (ConvoyCarPlay's showLive/glFailed).
 
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "../drawTelemetry";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState } from "../poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "../yawRate";
@@ -2053,14 +2053,13 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // cut this source is [seam, destination], rebuilt only when the seam moves; <RibbonNear> below draws
   // the fade-in up to the seam every frame from the drawn car.
   // The seam walks — never backward, never past the near core on screen now (nextRibbonSeam, Codex r2).
-  let carRibbonSeamQ: number | null = null;
-  if (ribbonCutQ != null && ribbonPartition) {
-    const _ns = nextRibbonSeam(carRibbonSeamStateRef.current, ribbonPartition, ribbonCutQ, ribbonFadeQ);
-    carRibbonSeamStateRef.current = _ns.state;
-    carRibbonSeamQ = _ns.seam;
-  } else {
-    carRibbonSeamStateRef.current = null;
-  }
+  // COMMIT-AWARE (Codex r3): derived from the last COMMITTED seam and published only in a layout effect,
+  // so a render React discards or retries can never spend overlap that no near piece ever put on screen.
+  const _carRibbonSeamNext = (ribbonCutQ != null && ribbonPartition)
+    ? nextRibbonSeam(carRibbonSeamStateRef.current, ribbonPartition, ribbonCutQ, ribbonFadeQ)
+    : null;
+  const carRibbonSeamQ: number | null = _carRibbonSeamNext ? _carRibbonSeamNext.seam : null;
+  useLayoutEffect(() => { carRibbonSeamStateRef.current = _carRibbonSeamNext ? _carRibbonSeamNext.state : null; });
   const _carFarCutKey = carRibbonSeamQ == null ? ribbonCutQ : null;
   const _carFarFadeKey = carRibbonSeamQ == null ? ribbonFadeQ : null;
   const routeFC: any = useMemo(() => ({

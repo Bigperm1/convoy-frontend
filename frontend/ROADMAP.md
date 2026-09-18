@@ -1086,7 +1086,7 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
 - **Traps met:** EAS CLI 24.1.2 cannot enable a capability on a new bundle id (Apple rejects the PATCH body) → App Groups / App IDs
   by hand in the portal, whose App Group form pre-prefixes `group.`; the first build of a new target needs ONE interactive
   `eas build` run (links the distribution certificate) — Jeff's terminal, keychain password + 2FA; `EXPO_DEBUG=1 eas build` prints
-  the stored ASC API key (P9NUHM3CL7 leaked into a transcript → **rotation OPEN**).
+  the stored ASC API key (P9NUHM3CL7 leaked into a transcript → ✅ **rotated 2026-09-17**: new key `3QCZ5YTA72`, App Manager; P9NUHM3CL7 revoked).
 
 ## 5 · The road to build 80 — GRC club launch
 
